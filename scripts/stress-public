@@ -49,12 +49,14 @@ done
 # 4. the gate's own pages: sign-in and sign-up load, nothing behind them does
 [ "$(code https://home.$B/_dd/login)" = 200 ] && pass "sign-in page" || fail "sign-in page"
 [ "$(code https://home.$B/_dd/join)" = 200 ] && pass "sign-up page" || fail "sign-up page"
-[ "$(code https://home.$B/_dd/home)" = 302 ] && pass "home without a session redirects to sign-in" || fail "home without a session: $(code https://home.$B/_dd/home)"
+c=$(code https://home.$B/_dd/home); [ "$c" = 302 ] || [ "$c" = 303 ] && pass "home without a session redirects to sign-in ($c)" || fail "home without a session: $c"
 c=$(code https://home.$B/_dd/directory/david); [ "$c" = 200 ] && pass "directory entries are public (by design: they hold public keys)" || echo "note  directory/david: $c"
 
 # 5. the ceremonies rate-limit: a burst past 10 gets 429s
 n429=0; for i in $(seq 1 25); do [ "$(code https://home.$B/_dd/login/start 5 -X POST -H 'content-type: application/json' -d '{"username":"nobody"}')" = 429 ] && n429=$((n429+1)); done
 [ $n429 -ge 5 ] && pass "sign-in ceremony rate-limited ($n429/25 refused)" || fail "sign-in ceremony not rate-limited ($n429/25 refused)"
+# and let it forgive us before the ceremonies below (a second per request)
+sleep 15
 
 # 6. a stranger cannot make themselves a member: sign-up gives an account
 #    with nothing, and no page takes a code
@@ -64,7 +66,9 @@ c=$(code https://home.$B/_dd/redeem/start 10 -X POST -H 'x-dd-grant: bm9wZQ==');
 
 # 7. bodies and slow clients
 c=$(code https://home.$B/_dd/join/start 20 -X POST -H 'content-type: application/json' --data-binary @<(head -c 2000000 /dev/zero)); [ "$c" = 413 ] && pass "2 MB body refused (413)" || fail "2 MB body: $c"
-if command -v timeout >/dev/null; then
+if curl -sI -m 10 $(at https://home.$B/) https://home.$B/ | grep -qi '^server: cloudflare'; then
+  echo "skip  slow body: Cloudflare's edge holds slow clients before nginx sees them"
+elif command -v timeout >/dev/null; then
   start=$(date +%s); (printf 'POST /_dd/join/start HTTP/1.1\r\nHost: home.%s\r\nContent-Length: 100\r\n\r\n' "$B"; sleep 40) | timeout 45 openssl s_client -quiet -servername home.$B -connect $ip:443 >/dev/null 2>&1; took=$(( $(date +%s) - start ))
   [ $took -lt 30 ] && pass "slow body cut off after ${took}s" || fail "slow body held for ${took}s"
 fi
