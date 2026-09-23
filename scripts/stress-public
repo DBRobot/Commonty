@@ -17,7 +17,7 @@ pass() { echo "PASS  $1"; }
 fail() { echo "FAIL  $1"; fails=$((fails + 1)); }
 # --resolve for the host in a url, so the name is sent but the address is ours
 at() { h=$(sed -E 's#^https?://([^/]+).*#\1#' <<<"$1"); echo "--resolve $h:443:$ip --resolve $h:80:$ip"; }
-code() { curl -s -o /dev/null -m "${3:-10}" -w '%{http_code}' $(at "$1") "${@:4}" "$1"; }
+code() { curl -s -o /dev/null -m "${2:-10}" -w '%{http_code}' $(at "$1") "${@:3}" "$1"; }
 
 echo "== $B is $ip"
 
