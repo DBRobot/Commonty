@@ -88,6 +88,16 @@ keys_after = json.loads(box.succeed(aws).strip() or "[]")
 assert any(k.startswith(f"{lib}/trash/") for k in keys_after), keys_after
 assert len(keys_after) == len(keys), (keys, keys_after)
 
+# and the trash lets go after 90 days: an item trashed 91 days ago goes
+# when the gate next empties it (at start, then daily), a fresh one stays
+s3 = aws.split(" s3api ")[0]
+old = f"{lib}/trash/{int(box.succeed('date +%s')) - 91 * 86400}/Files/old.bin"
+box.succeed(f"echo x > /tmp/old.bin && {s3} s3 cp /tmp/old.bin s3://libraries/{old}")
+box.succeed("systemctl restart dd-verify.service")
+box.wait_until_succeeds(f"! {aws} | grep -q '{old}'", timeout=60)
+kept = json.loads(box.succeed(aws).strip() or "[]")
+assert any(k.startswith(f"{lib}/trash/") for k in kept), kept
+
 # A browser has a cookie and no device token, and the gate takes it:
 # without this the Files and Movies pages could not read a single name.
 # The demo is the account that signs in without a passkey, so it is the

@@ -1,7 +1,8 @@
 //! A library as WebDAV: what rclone, a file manager and the app all speak.
 //! One prefix in the bucket per library, the device token as bearer, an
-//! owner may write and a reader may only read, and nothing is ever
-//! deleted: DELETE moves into `trash/` under the library. The bytes and
+//! owner may write and a reader may only read, and nothing is deleted at
+//! once: DELETE moves into `trash/` under the library, and the trash lets
+//! go of it after 90 days. The bytes and
 //! names through here are rclone's crypt format, made and read on the
 //! device; this box moves ciphertext.
 //!
@@ -21,6 +22,8 @@ use crate::library::{Gate, Role, allowed, gate, uri_encode};
 
 /// where a deleted thing goes, under the library
 const TRASH: &str = "trash";
+/// how long it stays there before it is gone for good
+pub const TRASH_SECS: u64 = 90 * 24 * 3600;
 
 /// one thing under a prefix, as the bucket lists it
 pub struct Entry {
@@ -79,6 +82,39 @@ impl Gate {
             }
         }
         Ok((files, dirs))
+    }
+
+    /// Everything trashed more than TRASH_SECS before `now`, deleted: the
+    /// one delete that is not a move. Each library's trash is a folder per
+    /// second things went into it, so the name says how old it is.
+    pub async fn purge_trash(&self, now: u64) -> Result<usize> {
+        let (_, libs) = self.list_level("").await?;
+        let mut n = 0;
+        for lib in libs {
+            let id = lib.trim_end_matches('/');
+            if !identity::valid_library_id(id) {
+                continue;
+            }
+            let (_, stamps) = self.list_level(&format!("{id}/{TRASH}/")).await?;
+            for s in stamps {
+                let Some(stamp) = s
+                    .trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .and_then(|t| t.parse::<u64>().ok())
+                else {
+                    continue;
+                };
+                if stamp + TRASH_SECS > now {
+                    continue;
+                }
+                for e in self.list_all(&s).await? {
+                    self.delete(&e.key).await?;
+                    n += 1;
+                }
+            }
+        }
+        Ok(n)
     }
 
     /// every object under a prefix, all levels

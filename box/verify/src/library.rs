@@ -5,7 +5,7 @@
 //! url for exactly one object under that library's prefix, good for
 //! minutes. The gate itself only ever lists, copies and deletes on the
 //! member's behalf, and the only delete it knows is `trash`: a record
-//! moved under trash/ where a later purge finds it, never a chunk gone at a
+//! moved under trash/, purged 90 days on, never a chunk gone at a
 //! client's word.
 //!
 //! One bucket for every library, a prefix per library id: the box's own key
