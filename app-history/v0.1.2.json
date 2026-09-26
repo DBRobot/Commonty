@@ -1,0 +1,38 @@
+{
+  "payload": {
+    "commit": "c9f99e23ab6233e6377f1ec3f3eed1e2e693b136",
+    "files": {
+      "Commonty_0.1.0_amd64.AppImage": {
+        "sha256": "320c035a1f591f879777bb96929c1d23525bf3726fc91b11f351f692a05fa567",
+        "size": 93358584,
+        "url": "https://github.com/DBRobot/Home-Server/releases/download/v0.1.2/Commonty_0.1.0_amd64.AppImage"
+      },
+      "Commonty_0.1.0_amd64.deb": {
+        "sha256": "da79be3b4585be413f98ff0c18495debece168e711456572291e98c315ed7462",
+        "size": 16126490,
+        "url": "https://github.com/DBRobot/Home-Server/releases/download/v0.1.2/Commonty_0.1.0_amd64.deb"
+      },
+      "commonty-setup.exe": {
+        "sha256": "17e4201f47f97da33bf3886f84944341faa82536f1d90f0baab580095569c94d",
+        "size": 3727939,
+        "url": "https://github.com/DBRobot/Home-Server/releases/download/v0.1.2/commonty-setup.exe"
+      },
+      "commonty.apk": {
+        "sha256": "72d40c741db246c477b64ca7349d8e036006784074ee894be97bf41e2d654cfa",
+        "size": 95280384,
+        "url": "https://github.com/DBRobot/Home-Server/releases/download/v0.1.2/commonty.apk"
+      },
+      "dd.exe": {
+        "sha256": "38ef8082f2ba8c7beb2e50a95c772b5293e838bb99e24adbe7e19df4bae82623",
+        "size": 16012800,
+        "url": "https://github.com/DBRobot/Home-Server/releases/download/v0.1.2/dd.exe"
+      }
+    },
+    "from": "DBRobot/Home-Server",
+    "issued": 1790448104,
+    "kind": "app",
+    "tag": "v0.1.2"
+  },
+  "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
+  "signature": "BxmMrlP1baWnUXpycDlxyqSmxzNm1F3NFHwnAtN+V1yVEJzSKTmJ6w+7lnOd4LoaABWIqFKJg6u/lDzntKnTCA=="
+}
