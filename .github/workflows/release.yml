@@ -169,10 +169,15 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { path: out }
       - name: one name per artifact, as the downloads page asks for them
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           mkdir -p rel
-          cp out/linux/deb/*.deb rel/ 2>/dev/null || cp out/linux/*.deb rel/
-          cp out/linux/appimage/*.AppImage rel/ 2>/dev/null || cp out/linux/*.AppImage rel/
+          # tauri names these after the product and the crate's version;
+          # the page asks for commonty_<tag>_amd64.*
+          v="${TAG#v}"
+          find out/linux -name '*.deb' | head -1 | xargs -I{} cp {} "rel/commonty_${v}_amd64.deb"
+          find out/linux -name '*.AppImage' | head -1 | xargs -I{} cp {} "rel/commonty_${v}_amd64.AppImage"
           find out/android -name '*.apk' | head -1 | xargs -I{} cp {} rel/commonty.apk
           find out/windows -path '*nsis*' -name '*.exe' | head -1 | xargs -I{} cp {} rel/commonty-setup.exe
           find out/windows -name 'dd.exe' | head -1 | xargs -I{} cp {} rel/dd.exe
