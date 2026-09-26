@@ -998,3 +998,94 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keygen(dir: &Path, name: &str) -> (PathBuf, String) {
+        let k = dir.join(name);
+        let ok = Command::new("ssh-keygen")
+            .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+            .arg(&k)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let public = std::fs::read_to_string(k.with_extension("pub")).unwrap();
+        (
+            k,
+            public
+                .split_whitespace()
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    }
+
+    fn sign(key: &Path, namespace: &str, statement: &str) -> String {
+        let mut c = Command::new("ssh-keygen")
+            .args(["-Y", "sign", "-q", "-f"])
+            .arg(key)
+            .args(["-n", namespace])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        std::io::Write::write_all(&mut c.stdin.take().unwrap(), statement.as_bytes()).unwrap();
+        String::from_utf8(c.wait_with_output().unwrap().stdout).unwrap()
+    }
+
+    /// what a box signs is taken only from that box's host key, in the
+    /// attest namespace, about this commit
+    #[test]
+    fn a_box_answer_counts_only_as_itself() {
+        let dir = std::env::temp_dir().join(format!("dd-vouch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (k1, pub1) = keygen(&dir, "node1");
+        let (_, pub2) = keygen(&dir, "node2");
+        let flake = "git+https://git.example/o/r";
+        let rev = "a".repeat(40);
+        let statement = serde_json::json!({
+            "v": 1, "attester": "node1", "flake": flake, "rev": rev,
+            "boxes": { "node1": { "path": "/nix/store/x-node1", "closure": "c1" } },
+        })
+        .to_string();
+        let answer = |st: &str, ns: &str| {
+            serde_json::json!({ "statement": st, "signature": sign(&k1, ns, st) }).to_string()
+        };
+
+        let said = vouched(
+            "node1",
+            &pub1,
+            &answer(&statement, ATTEST_NAMESPACE),
+            flake,
+            &rev,
+        )
+        .unwrap();
+        assert_eq!(said["node1"], ("/nix/store/x-node1".into(), "c1".into()));
+
+        // node2's key does not stand behind node1's signature
+        assert!(
+            vouched(
+                "node1",
+                &pub2,
+                &answer(&statement, ATTEST_NAMESPACE),
+                flake,
+                &rev
+            )
+            .is_err()
+        );
+        // a signature made for anything else is not an attestation
+        assert!(vouched("node1", &pub1, &answer(&statement, "file"), flake, &rev).is_err());
+        // the statement cannot be changed under its signature
+        let good = answer(&statement, ATTEST_NAMESPACE);
+        let forged = good.replace("c1", "c2");
+        assert!(vouched("node1", &pub1, &forged, flake, &rev).is_err());
+        // nor spent on another commit, or claimed by another box
+        assert!(vouched("node1", &pub1, &good, flake, &"b".repeat(40)).is_err());
+        assert!(vouched("node2", &pub1, &good, flake, &rev).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
