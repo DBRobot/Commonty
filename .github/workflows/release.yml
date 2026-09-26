@@ -87,7 +87,8 @@ jobs:
           cargo install tauri-cli --version '^2' --locked
           mkdir -p app/gen/android/app/src/main/jniLibs
           cp -r "$RUNNER_TEMP/jni/." app/gen/android/app/src/main/jniLibs/
-          cd app && cargo tauri android build --apk
+          # the two abis the engine is built for; tauri would build all four
+          cd app && cargo tauri android build --apk --target aarch64 --target x86_64
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android
