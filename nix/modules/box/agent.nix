@@ -61,6 +61,22 @@ in
   config = lib.mkIf cfg.enable {
     environment.etc."dd/release.pub" = lib.mkIf (cfg.publicKey != null) { text = cfg.publicKey + "\n"; };
 
+    # this box's word on a release before it is signed: `dd release
+    # publish` runs it over ssh with sudo (box/release/src/bin/dd-attest.rs)
+    environment.systemPackages = [
+      (pkgs.writeShellScriptBin "dd-attest" ''
+        export PATH=${
+          lib.makeBinPath [
+            config.nix.package
+            pkgs.git
+            pkgs.openssh
+            pkgs.coreutils
+          ]
+        }
+        exec ${agent}/bin/dd-attest "$@"
+      '')
+    ];
+
     systemd.services.dd-agent = {
       description = "Move this box to the signed release";
       after = [ "network-online.target" ];
