@@ -170,9 +170,10 @@ fn attest(drv: &str, path: &str, checked: &mut BTreeSet<String>) -> Result<Strin
         let list: Vec<&str> = drvs.iter().map(String::as_str).collect();
         // every output first (--check needs them all), then the rebuild
         sh("nix-store", &[&["--realise"][..], &list].concat())?;
+        // every mismatch named at once, not only the first
         sh(
             "nix-store",
-            &[&["--realise", "--check"][..], &list].concat(),
+            &[&["--realise", "--check", "--keep-going"][..], &list].concat(),
         )
         .context("a path did not rebuild the same: nothing is vouched for")?;
         let mut f = fs::OpenOptions::new()
