@@ -98,6 +98,21 @@ box.wait_until_succeeds(f"! {aws} | grep -q '{old}'", timeout=60)
 kept = json.loads(box.succeed(aws).strip() or "[]")
 assert any(k.startswith(f"{lib}/trash/") for k in kept), kept
 
+# A file too big for a browser tab goes in pieces: the gate hands each on
+# as one part of an S3 multipart upload and joins them at the end. What
+# lands is the pieces in order, byte for byte (the page seals each piece
+# before sending; the gate only ever moves bytes).
+at = f"http://127.0.0.1:4181/_dd/dav/{lib}/Files/pieces.bin"
+auth = f"-H 'authorization: Bearer {token}'"
+box.succeed("head -c 6000000 /dev/urandom > /root/p1 && head -c 1234567 /dev/urandom > /root/p2 && cat /root/p1 /root/p2 > /root/whole")
+up = json.loads(box.succeed(f"curl -sf -X POST {auth} -H 'x-dd-upload: start' {at}"))["upload"]
+e1 = json.loads(box.succeed(f"curl -sf -X PUT {auth} -H 'x-dd-upload: {up}' -H 'x-dd-part: 1' --data-binary @/root/p1 {at}"))["etag"]
+e2 = json.loads(box.succeed(f"curl -sf -X PUT {auth} -H 'x-dd-upload: {up}' -H 'x-dd-part: 2' --data-binary @/root/p2 {at}"))["etag"]
+box.succeed(f"curl -sf -X POST {auth} -H 'x-dd-upload: {up}' -H 'content-type: application/json' -d '{json.dumps({'parts': [e1, e2]})}' {at}")
+box.succeed(f"curl -sf {auth} {at} -o /root/joined && cmp /root/whole /root/joined")
+# an upload id is not a path into anything
+box.fail(f"curl -sf -X PUT {auth} -H 'x-dd-upload: ../x' -H 'x-dd-part: 1' --data-binary @/root/p2 {at}")
+
 # A browser has a cookie and no device token, and the gate takes it:
 # without this the Files and Movies pages could not read a single name.
 # The demo is the account that signs in without a passkey, so it is the

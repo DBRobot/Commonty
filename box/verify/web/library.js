@@ -3,7 +3,7 @@
 // turned over here. Files and Movies & TV are two corners of the same
 // library, so the opening, listing and carrying live here once.
 
-import init, { library_device_key, library_open, library_key_for_box, path_encrypt, path_decrypt, file_open, file_seal, plain_size } from '/_dd/web/dd_web.js';
+import init, { library_device_key, library_open, library_key_for_box, path_encrypt, path_decrypt, file_open, file_seal, plain_size, Sealer, Opener } from '/_dd/web/dd_web.js';
 import { b64u, u8b64 } from './webauthn.js';
 
 // the passkey's own secret, under a label of this page's own
@@ -98,7 +98,7 @@ export async function fetchPlain(lib, path) {
 }
 
 export function save(bytes, name) {
-  const url = URL.createObjectURL(new Blob([bytes]));
+  const url = URL.createObjectURL(bytes instanceof Blob ? bytes : new Blob([bytes]));
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
@@ -106,11 +106,98 @@ export function save(bytes, name) {
   URL.revokeObjectURL(url);
 }
 
-/// a file into the library, sealed here
-export async function put(lib, path, file) {
-  const sealed = file_seal(lib.key, lib.id, new Uint8Array(await file.arrayBuffer()));
-  const r = await fetch(dav(lib, path), { method: 'PUT', body: sealed });
-  if (!r.ok) throw new Error(`the gate said ${r.status}`);
+// A large file is never in the tab's memory whole: it is read, sealed and
+// sent a piece at a time (an S3 multipart upload through the gate), and
+// read back by ranges. A piece is 96 blocks: over S3's 5 MiB least part,
+// under nginx's 10 MB body.
+const BLOCK = 64 * 1024;
+const SEALED_BLOCK = BLOCK + 16;
+const HEADER = 32;
+const PIECE_BLOCKS = 96;
+
+/// a file into the library, sealed here; progress(done, total) if given
+export async function put(lib, path, file, progress) {
+  const url = dav(lib, path);
+  const piece = PIECE_BLOCKS * BLOCK;
+  if (file.size <= piece) {
+    const sealed = file_seal(lib.key, lib.id, new Uint8Array(await file.arrayBuffer()));
+    const r = await fetch(url, { method: 'PUT', body: sealed });
+    if (!r.ok) throw new Error(`the gate said ${r.status}`);
+    progress?.(file.size, file.size);
+    return;
+  }
+  const sealer = new Sealer(lib.key, lib.id);
+  const start = await fetch(url, { method: 'POST', headers: { 'x-dd-upload': 'start' } });
+  if (!start.ok) throw new Error(`the gate said ${start.status}`);
+  const { upload } = await start.json();
+  try {
+    const parts = [];
+    for (let off = 0, n = 1; off < file.size; off += piece, n++) {
+      const plain = new Uint8Array(await file.slice(off, off + piece).arrayBuffer());
+      let body = sealer.seal(off / BLOCK, plain);
+      if (n === 1) {
+        const h = sealer.header();
+        const first = new Uint8Array(h.length + body.length);
+        first.set(h);
+        first.set(body, h.length);
+        body = first;
+      }
+      const r = await fetch(url, { method: 'PUT', headers: { 'x-dd-upload': upload, 'x-dd-part': String(n) }, body });
+      if (!r.ok) throw new Error(`the gate said ${r.status}`);
+      parts.push((await r.json()).etag);
+      progress?.(off + plain.length, file.size);
+    }
+    const done = await fetch(url, {
+      method: 'POST',
+      headers: { 'x-dd-upload': upload, 'content-type': 'application/json' },
+      body: JSON.stringify({ parts }),
+    });
+    if (!done.ok) throw new Error(`the gate said ${done.status}`);
+  } catch (e) {
+    fetch(url, { method: 'DELETE', headers: { 'x-dd-upload': upload } }).catch(() => {});
+    throw e;
+  } finally {
+    sealer.free();
+  }
+}
+
+async function range(url, from, to) {
+  const r = await fetch(url, { headers: { range: `bytes=${from}-${to}` } });
+  if (r.status !== 206 && r.status !== 200) throw new Error(`the gate said ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
+
+/// A file out of the library by ranges, opened a piece at a time: straight
+/// to a file the person picks where the browser allows it, otherwise into
+/// a Blob of pieces, which a browser keeps on disk when it is large.
+export async function download(lib, item, progress) {
+  const url = dav(lib, item.path);
+  let sink = null;
+  if (window.showSaveFilePicker) {
+    try {
+      sink = await (await window.showSaveFilePicker({ suggestedName: item.name })).createWritable();
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+  const opener = new Opener(lib.key, lib.id, await range(url, 0, HEADER - 1));
+  try {
+    const step = PIECE_BLOCKS * SEALED_BLOCK;
+    const pieces = [];
+    for (let off = HEADER, block = 0; off < item.sealed; off += step, block += PIECE_BLOCKS) {
+      const plain = opener.open(block, await range(url, off, Math.min(off + step, item.sealed) - 1));
+      if (sink) await sink.write(plain);
+      else pieces.push(new Blob([plain]));
+      progress?.(Math.min((block + PIECE_BLOCKS) * BLOCK, item.size), item.size);
+    }
+    if (sink) await sink.close();
+    else save(new Blob(pieces), item.name);
+  } catch (e) {
+    if (sink) await sink.abort().catch(() => {});
+    throw e;
+  } finally {
+    opener.free();
+  }
 }
 
 export async function trash(lib, path) {

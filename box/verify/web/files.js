@@ -2,7 +2,7 @@
 // that opens the library and speaks to the gate is in library.js; this
 // page is the folders, the upload and the trash.
 
-import { unlock, list, fetchPlain, save, put, trash, human } from './library.js';
+import { unlock, list, download as fetchTo, put, trash, human } from './library.js';
 
 const $ = (id) => document.getElementById(id);
 const user = document.querySelector('[data-user]').dataset.user;
@@ -74,10 +74,12 @@ function addJob(text) {
   return li;
 }
 
+const pct = (done, total) => (total ? Math.floor((100 * done) / total) : 100);
+
 async function download(it) {
   const job = addJob(`${it.name} — fetching`);
   try {
-    save(await fetchPlain(lib, it.path), it.name);
+    await fetchTo(lib, it, (d, t) => { job.textContent = `${it.name} — fetching ${pct(d, t)}%`; });
     job.textContent = `${it.name} — saved`;
   } catch (e) {
     job.textContent = `${it.name} — ${e.message}`;
@@ -88,7 +90,9 @@ async function upload(files) {
   for (const f of files) {
     const job = addJob(`${f.name} — encrypting`);
     try {
-      await put(lib, `${under(here)}/${f.name}`, f);
+      await put(lib, `${under(here)}/${f.name}`, f, (d, t) => {
+        job.textContent = `${f.name} — encrypting and sending ${pct(d, t)}%`;
+      });
       job.textContent = `${f.name} — ${human(f.size)}`;
     } catch (e) {
       job.textContent = `${f.name} — ${e.message}`;

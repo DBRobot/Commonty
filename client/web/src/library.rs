@@ -119,6 +119,56 @@ fn seal_file(library_key_b64: &str, id: &str, plain: &[u8]) -> R<Vec<u8>> {
     Ok(out)
 }
 
+/// A file sealed a piece at a time, so a large one never sits in memory
+/// whole: the header, then runs of whole blocks from any block number.
+/// Every block has its own nonce (the file's plus its number), so pieces
+/// can be sealed in any order and the result is the same as seal_file.
+#[wasm_bindgen]
+pub struct Sealer(library::crypt::Encrypter);
+
+#[wasm_bindgen]
+impl Sealer {
+    #[wasm_bindgen(constructor)]
+    pub fn new(library_key_b64: &str, id: &str) -> Result<Sealer, JsValue> {
+        js(cipher(library_key_b64, id).map(|c| Sealer(c.encrypter())))
+    }
+    pub fn header(&self) -> Vec<u8> {
+        self.0.header()
+    }
+    /// plain bytes starting at block `first`; whole blocks except at the end
+    pub fn seal(&self, first: f64, plain: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(plain.len() + plain.len() / 4096 + 16);
+        for (n, block) in plain.chunks(library::crypt::BLOCK).enumerate() {
+            out.extend(self.0.block(first as u64 + n as u64, block));
+        }
+        out
+    }
+}
+
+/// The other way: the header once, then sealed runs of whole blocks.
+#[wasm_bindgen]
+pub struct Opener(library::crypt::Decrypter);
+
+#[wasm_bindgen]
+impl Opener {
+    #[wasm_bindgen(constructor)]
+    pub fn new(library_key_b64: &str, id: &str, header: &[u8]) -> Result<Opener, JsValue> {
+        js(cipher(library_key_b64, id)
+            .and_then(|c| c.decrypter(header).map_err(err))
+            .map(Opener))
+    }
+    pub fn open(&self, first: f64, sealed: &[u8]) -> Result<Vec<u8>, JsValue> {
+        let mut out = Vec::with_capacity(sealed.len());
+        for (n, block) in sealed.chunks(library::crypt::SEALED_BLOCK).enumerate() {
+            out.extend(js(self
+                .0
+                .block(first as u64 + n as u64, block)
+                .map_err(err))?);
+        }
+        Ok(out)
+    }
+}
+
 /// The library's data key, sealed to a box that is about to do one job
 /// on one file. The box can read this library while the session lasts,
 /// which is what transcoding is: plaintext in its memory for one film,
@@ -189,6 +239,29 @@ pub fn plain_size(sealed: f64) -> Result<f64, JsValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// sealed in pieces is sealed whole, and opens in pieces
+    #[test]
+    fn pieces_are_the_whole_file() {
+        use base64::Engine as _;
+        let key = base64::engine::general_purpose::STANDARD.encode([3u8; 32]);
+        let id = "a996a28ca51c9cf1d3f8e2038c8339c8";
+        let plain: Vec<u8> = (0..(3 * library::crypt::BLOCK + 777))
+            .map(|i| i as u8)
+            .collect();
+        let s = Sealer(cipher(&key, id).unwrap().encrypter());
+        let mut sealed = s.header();
+        sealed.extend(s.seal(0.0, &plain[..2 * library::crypt::BLOCK]));
+        sealed.extend(s.seal(2.0, &plain[2 * library::crypt::BLOCK..]));
+        assert_eq!(open_file(&key, id, &sealed).unwrap(), plain);
+
+        let hdr = &sealed[..library::crypt::HEADER];
+        let o = Opener(cipher(&key, id).unwrap().decrypter(hdr).unwrap());
+        let body = &sealed[library::crypt::HEADER..];
+        let mut back = o.open(0.0, &body[..library::crypt::SEALED_BLOCK]).unwrap();
+        back.extend(o.open(1.0, &body[library::crypt::SEALED_BLOCK..]).unwrap());
+        assert_eq!(back, plain);
+    }
 
     /// the key a passkey makes is the same every time and depends on the
     /// label, so the photos key and this one can never be the same key

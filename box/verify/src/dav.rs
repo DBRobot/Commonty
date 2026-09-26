@@ -358,10 +358,17 @@ async fn serve(app: Arc<App>, lib: String, raw: String, req: Request) -> Respons
     };
     let writes = matches!(
         method.as_str(),
-        "PUT" | "MKCOL" | "MOVE" | "COPY" | "DELETE" | "PROPPATCH"
+        "PUT" | "POST" | "MKCOL" | "MOVE" | "COPY" | "DELETE" | "PROPPATCH"
     );
     if writes && role != Role::Owner {
         return (StatusCode::FORBIDDEN, "a reader does not write").into_response();
+    }
+    if let Some(upload) = headers.get("x-dd-upload").and_then(|v| v.to_str().ok()) {
+        let out = in_pieces(g, &lib, &path, upload.to_string(), req).await;
+        return match out {
+            Ok(r) => r,
+            Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+        };
     }
     let out = match method.as_str() {
         "PROPFIND" => propfind(g, &lib, &path, &headers).await,
@@ -543,6 +550,114 @@ async fn mkcol(g: &Gate, lib: &str, path: &str) -> Result<Response> {
         return Err(anyhow!("s3 put {}", r.status()));
     }
     Ok(StatusCode::CREATED.into_response())
+}
+
+/// A file too large to hold in a browser's memory, sent in pieces: the
+/// page seals a piece at a time and the gate hands each on as one part of
+/// an S3 multipart upload. `x-dd-upload: start` (POST) opens one; the id
+/// it returns then goes with each part (PUT, `x-dd-part: n`, 1-based) and
+/// with the end (POST, body {"parts": [etag, ...]}) or the abandoning of
+/// it (DELETE, which drops the unfinished parts and nothing else).
+async fn in_pieces(
+    g: &Gate,
+    lib: &str,
+    path: &str,
+    upload: String,
+    req: Request,
+) -> Result<Response> {
+    if path.is_empty() {
+        return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
+    }
+    let object = key(lib, path);
+    let at = format!("/{}", uri_encode(&object, true));
+    let method = req.method().clone();
+    if method == Method::POST && upload == "start" {
+        let xml = g.call(reqwest::Method::POST, &at, "uploads=", &[]).await?;
+        let id = between(&xml, "<UploadId>", "</UploadId>").context("no upload id")?;
+        return Ok(axum::Json(serde_json::json!({ "upload": unxml(&id) })).into_response());
+    }
+    let ok_id = !upload.is_empty()
+        && upload.len() <= 200
+        && upload
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
+    if !ok_id {
+        return Ok((StatusCode::BAD_REQUEST, "not an upload id").into_response());
+    }
+    let id_q = format!("uploadId={}", uri_encode(&upload, false));
+    match method.as_str() {
+        "PUT" => {
+            let Some(n) = req
+                .headers()
+                .get("x-dd-part")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u32>().ok())
+                .filter(|n| (1..=10_000).contains(n))
+            else {
+                return Ok((StatusCode::BAD_REQUEST, "x-dd-part: 1 to 10000").into_response());
+            };
+            let len = req
+                .headers()
+                .get(header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok());
+            let n = n.to_string();
+            let url = g.presign_with(
+                "PUT",
+                &object,
+                600,
+                &[("partNumber", &n), ("uploadId", &upload)],
+            );
+            let mut r = reqwest::Client::new()
+                .put(url)
+                .body(reqwest::Body::wrap_stream(
+                    req.into_body().into_data_stream(),
+                ));
+            if let Some(l) = len {
+                r = r.header(header::CONTENT_LENGTH, l);
+            }
+            let r = r.send().await?;
+            if !r.status().is_success() {
+                return Err(anyhow!("s3 part {}", r.status()));
+            }
+            let etag = r
+                .headers()
+                .get(header::ETAG)
+                .and_then(|v| v.to_str().ok())
+                .context("no etag for the part")?
+                .to_string();
+            Ok(axum::Json(serde_json::json!({ "etag": etag })).into_response())
+        }
+        "POST" => {
+            let body = axum::body::to_bytes(req.into_body(), 1 << 20).await?;
+            let v: serde_json::Value = serde_json::from_slice(&body).context("the parts")?;
+            let parts = v["parts"].as_array().context("no parts")?;
+            let mut xml_body = String::from("<CompleteMultipartUpload>");
+            for (i, e) in parts.iter().enumerate() {
+                let e = e.as_str().context("an etag is a string")?;
+                xml_body.push_str(&format!(
+                    "<Part><PartNumber>{}</PartNumber><ETag>{}</ETag></Part>",
+                    i + 1,
+                    xml(e)
+                ));
+            }
+            xml_body.push_str("</CompleteMultipartUpload>");
+            g.call_with(
+                reqwest::Method::POST,
+                &at,
+                &id_q,
+                &[],
+                xml_body.into_bytes(),
+            )
+            .await?;
+            Ok(StatusCode::CREATED.into_response())
+        }
+        "DELETE" => {
+            g.call(reqwest::Method::DELETE, &at, &id_q, &[]).await?;
+            Ok(StatusCode::NO_CONTENT.into_response())
+        }
+        _ => Ok(StatusCode::METHOD_NOT_ALLOWED.into_response()),
+    }
 }
 
 /// gone from where it was, kept under trash with a stamp so nothing there

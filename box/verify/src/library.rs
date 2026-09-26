@@ -146,16 +146,28 @@ impl Gate {
     }
 
     pub fn presign_for(&self, method: &str, object: &str, secs: u64) -> String {
+        self.presign_with(method, object, secs, &[])
+    }
+
+    /// the same, with query parameters of its own under the signature
+    pub fn presign_with(
+        &self,
+        method: &str,
+        object: &str,
+        secs: u64,
+        extra: &[(&str, &str)],
+    ) -> String {
         let (stamp, date) = now_stamps();
         let path = format!("/{}/{}", self.bucket, uri_encode(object, true));
         let credential = format!("{}/{}/{}/s3/aws4_request", self.key_id, date, self.region);
-        let mut query = [
+        let mut query = vec![
             ("X-Amz-Algorithm", "AWS4-HMAC-SHA256".to_string()),
             ("X-Amz-Credential", credential),
             ("X-Amz-Date", stamp.clone()),
             ("X-Amz-Expires", secs.to_string()),
             ("X-Amz-SignedHeaders", "host".to_string()),
         ];
+        query.extend(extra.iter().map(|(k, v)| (*k, v.to_string())));
         query.sort();
         let qs = query
             .iter()
@@ -182,6 +194,18 @@ impl Gate {
         object_path: &str,
         query: &str,
         extra: &[(&str, &str)],
+    ) -> Result<String> {
+        self.call_with(method, object_path, query, extra, Vec::new())
+            .await
+    }
+
+    pub(crate) async fn call_with(
+        &self,
+        method: reqwest::Method,
+        object_path: &str,
+        query: &str,
+        extra: &[(&str, &str)],
+        body: Vec<u8>,
     ) -> Result<String> {
         let (stamp, date) = now_stamps();
         let path = format!("/{}{}", self.bucket, object_path);
@@ -235,6 +259,9 @@ impl Gate {
             .header("x-amz-date", stamp);
         for (k, v) in extra {
             req = req.header(*k, *v);
+        }
+        if !body.is_empty() {
+            req = req.body(body);
         }
         let r = req.send().await?;
         let status = r.status();
