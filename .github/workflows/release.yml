@@ -115,8 +115,11 @@ jobs:
           # loaded by name and settles the argument.
           cd app/net
           mkdir -p "$RUNNER_TEMP/netlib"
-          CGO_ENABLED=1 go build -buildmode=c-shared -o "$RUNNER_TEMP/netlib/commontynet.dll" .
-          # msvc links against the import library beside it
+          # msvc links against an import library beside it, which go does
+          # not write unless mingw's linker is asked to
+          CGO_ENABLED=1 go build -buildmode=c-shared \
+            -ldflags "-extldflags=-Wl,--out-implib,$RUNNER_TEMP/netlib/commontynet.lib" \
+            -o "$RUNNER_TEMP/netlib/commontynet.dll" .
           ls -la "$RUNNER_TEMP/netlib"
       - name: rclone, which the drive needs
         shell: bash
