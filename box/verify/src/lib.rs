@@ -1511,6 +1511,27 @@ pub async fn start(
             }
         });
     }
+    // what was trashed three months ago is gone for good; daily
+    if app.library.is_some() {
+        let a = app.clone();
+        tokio::spawn(async move {
+            loop {
+                // a bucket not up yet (at boot) is tried again within the hour
+                let mut next = 24 * 3600;
+                if let Some(g) = &a.library {
+                    match g.purge_trash(identity::now()).await {
+                        Ok(0) => {}
+                        Ok(n) => eprintln!("library: {n} object(s) out of the trash for good"),
+                        Err(e) => {
+                            eprintln!("library: emptying the trash: {e:#}");
+                            next = 3600;
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(next)).await;
+            }
+        });
+    }
     let router = Router::new()
         .route("/verify", get(verify))
         .route("/health", get(|| async { "ok" }))

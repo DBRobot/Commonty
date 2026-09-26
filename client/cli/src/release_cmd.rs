@@ -268,6 +268,17 @@ fn publish(
         );
     }
 
+    // Two boxes vouch for every box's closure before anything is signed:
+    // each evaluates the commit itself and accounts for every path, by
+    // upstream's signature or by building it (dd-attest). CI, the forge
+    // and the cache can each lie about a path; not past two rebuilds.
+    // DD_ATTEST=off is for the one release that first carries dd-attest.
+    if std::env::var("DD_ATTEST").as_deref() == Ok("off") {
+        eprintln!("== DD_ATTEST=off: no box was asked to vouch for this release");
+    } else {
+        attest(&boxes, url, &rev, &built)?;
+    }
+
     // The counter only ever goes up. A current release that cannot be
     // fetched is not "none yet" if the releases branch has history: the
     // forge was just unreachable, and a release 1 on top of a 37 would be
@@ -351,6 +362,167 @@ fn publish(
     )?;
     print(&signed);
     Ok(())
+}
+
+const ATTEST_NAMESPACE: &str = "commonty-attest-v1";
+/// boxes that must agree with CI on each box's closure
+const ATTEST_NEED: usize = 2;
+
+/// Ask every box, at once, to vouch for the release; each answer is
+/// checked against the box's ssh host key in boxes.json, and every box of
+/// the release needs ATTEST_NEED of them agreeing on its path and closure.
+fn attest(
+    boxes: &serde_json::Value,
+    url: &str,
+    rev: &str,
+    built: &BTreeMap<String, release::BoxRelease>,
+) -> Result<()> {
+    let boxes = boxes.as_object().context("boxes.json is not an object")?;
+    ensure!(
+        boxes.len() >= ATTEST_NEED,
+        "{} box(es) cannot make {ATTEST_NEED} that agree; DD_ATTEST=off to publish without",
+        boxes.len()
+    );
+    let base = url
+        .split("/raw/")
+        .next()
+        .filter(|b| b.starts_with("https://"))
+        .context("the release url is not a forge raw url")?;
+    let flake = format!("git+{base}");
+    let mut want: Vec<String> = Vec::new();
+    for (name, b) in built {
+        ensure!(
+            b.closure.is_some(),
+            "{name}: no closure digest to vouch for"
+        );
+        want.push(format!("{name}={}", b.path));
+    }
+    eprintln!("== asking {} box(es) to vouch", boxes.len());
+    let mut asks = Vec::new();
+    for (name, b) in boxes {
+        let tailnet = b["tailnet"].as_str().unwrap_or_default().to_string();
+        let mut c = Command::new("ssh");
+        c.args([
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "ServerAliveInterval=30",
+        ])
+        .arg(format!("admin@{tailnet}"))
+        .args([
+            "sudo",
+            "/run/current-system/sw/bin/dd-attest",
+            "--flake",
+            &flake,
+            "--rev",
+            rev,
+        ]);
+        for w in &want {
+            c.args(["--box", w]);
+        }
+        c.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped());
+        asks.push((name.clone(), c.spawn()));
+    }
+    let mut agree: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (attester, child) in asks {
+        let answer = child
+            .map_err(anyhow::Error::from)
+            .and_then(|c| Ok(c.wait_with_output()?))
+            .and_then(|o| {
+                ensure!(o.status.success(), "dd-attest failed");
+                Ok(String::from_utf8(o.stdout)?)
+            })
+            .and_then(|out| {
+                let host_key = boxes[&attester]["hostKey"]
+                    .as_str()
+                    .context("no hostKey in boxes.json")?;
+                vouched(&attester, host_key, out.trim(), &flake, rev)
+            });
+        match answer {
+            Ok(said) => {
+                for (name, b) in built {
+                    let same = said
+                        .get(name)
+                        .is_some_and(|(p, c)| *p == b.path && Some(c) == b.closure.as_ref());
+                    if same {
+                        agree
+                            .entry(name.clone())
+                            .or_default()
+                            .push(attester.clone());
+                    } else {
+                        eprintln!("   {attester} does not agree on {name}");
+                    }
+                }
+            }
+            Err(e) => eprintln!("   {attester}: {e:#}"),
+        }
+    }
+    for name in built.keys() {
+        let who = agree.get(name).cloned().unwrap_or_default();
+        ensure!(
+            who.len() >= ATTEST_NEED,
+            "{name}: {} box(es) vouched ({}), {ATTEST_NEED} needed. Nothing is signed.",
+            who.len(),
+            who.join(", ")
+        );
+        eprintln!("   {name}: vouched for by {}", who.join(", "));
+    }
+    Ok(())
+}
+
+/// one box's signed answer, checked: box name -> (path, closure)
+fn vouched(
+    attester: &str,
+    host_key: &str,
+    answer: &str,
+    flake: &str,
+    rev: &str,
+) -> Result<BTreeMap<String, (String, String)>> {
+    let v: serde_json::Value =
+        serde_json::from_str(answer.lines().last().unwrap_or_default()).context("the answer")?;
+    let statement = v["statement"].as_str().context("no statement")?;
+    let signature = v["signature"].as_str().context("no signature")?;
+    let dir = std::env::temp_dir().join(format!("dd-attest-{}-{attester}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let allowed = dir.join("allowed");
+    let sig = dir.join("sig");
+    std::fs::write(
+        &allowed,
+        format!("{attester} namespaces=\"{ATTEST_NAMESPACE}\" {host_key}\n"),
+    )?;
+    std::fs::write(&sig, signature)?;
+    let mut c = Command::new("ssh-keygen")
+        .args(["-Y", "verify", "-f"])
+        .arg(&allowed)
+        .args(["-I", attester, "-n", ATTEST_NAMESPACE, "-s"])
+        .arg(&sig)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    std::io::Write::write_all(&mut c.stdin.take().unwrap(), statement.as_bytes())?;
+    let ok = c.wait()?.success();
+    let _ = std::fs::remove_dir_all(&dir);
+    ensure!(ok, "the signature is not {attester}'s host key");
+    let st: serde_json::Value = serde_json::from_str(statement)?;
+    ensure!(
+        st["v"] == 1 && st["attester"] == attester && st["rev"] == rev && st["flake"] == flake,
+        "the statement is about something else"
+    );
+    let mut out = BTreeMap::new();
+    for (name, b) in st["boxes"].as_object().context("no boxes")? {
+        out.insert(
+            name.clone(),
+            (
+                b["path"].as_str().unwrap_or_default().to_string(),
+                b["closure"].as_str().unwrap_or_default().to_string(),
+            ),
+        );
+    }
+    Ok(out)
 }
 
 /// Each box answers for itself: its prometheus holds what its agent last
@@ -825,4 +997,95 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keygen(dir: &Path, name: &str) -> (PathBuf, String) {
+        let k = dir.join(name);
+        let ok = Command::new("ssh-keygen")
+            .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+            .arg(&k)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let public = std::fs::read_to_string(k.with_extension("pub")).unwrap();
+        (
+            k,
+            public
+                .split_whitespace()
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    }
+
+    fn sign(key: &Path, namespace: &str, statement: &str) -> String {
+        let mut c = Command::new("ssh-keygen")
+            .args(["-Y", "sign", "-q", "-f"])
+            .arg(key)
+            .args(["-n", namespace])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        std::io::Write::write_all(&mut c.stdin.take().unwrap(), statement.as_bytes()).unwrap();
+        String::from_utf8(c.wait_with_output().unwrap().stdout).unwrap()
+    }
+
+    /// what a box signs is taken only from that box's host key, in the
+    /// attest namespace, about this commit
+    #[test]
+    fn a_box_answer_counts_only_as_itself() {
+        let dir = std::env::temp_dir().join(format!("dd-vouch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (k1, pub1) = keygen(&dir, "node1");
+        let (_, pub2) = keygen(&dir, "node2");
+        let flake = "git+https://git.example/o/r";
+        let rev = "a".repeat(40);
+        let statement = serde_json::json!({
+            "v": 1, "attester": "node1", "flake": flake, "rev": rev,
+            "boxes": { "node1": { "path": "/nix/store/x-node1", "closure": "c1" } },
+        })
+        .to_string();
+        let answer = |st: &str, ns: &str| {
+            serde_json::json!({ "statement": st, "signature": sign(&k1, ns, st) }).to_string()
+        };
+
+        let said = vouched(
+            "node1",
+            &pub1,
+            &answer(&statement, ATTEST_NAMESPACE),
+            flake,
+            &rev,
+        )
+        .unwrap();
+        assert_eq!(said["node1"], ("/nix/store/x-node1".into(), "c1".into()));
+
+        // node2's key does not stand behind node1's signature
+        assert!(
+            vouched(
+                "node1",
+                &pub2,
+                &answer(&statement, ATTEST_NAMESPACE),
+                flake,
+                &rev
+            )
+            .is_err()
+        );
+        // a signature made for anything else is not an attestation
+        assert!(vouched("node1", &pub1, &answer(&statement, "file"), flake, &rev).is_err());
+        // the statement cannot be changed under its signature
+        let good = answer(&statement, ATTEST_NAMESPACE);
+        let forged = good.replace("c1", "c2");
+        assert!(vouched("node1", &pub1, &forged, flake, &rev).is_err());
+        // nor spent on another commit, or claimed by another box
+        assert!(vouched("node1", &pub1, &good, flake, &"b".repeat(40)).is_err());
+        assert!(vouched("node2", &pub1, &good, flake, &rev).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

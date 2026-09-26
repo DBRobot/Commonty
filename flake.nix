@@ -424,10 +424,12 @@
               pname = "dd";
               version = "0.1.0";
               # the e2e tests spawn verifiers on localhost and run git; the
-              # library's format is checked against rclone itself
+              # library's format is checked against rclone itself; a box's
+              # attestation is an ssh signature
               nativeBuildInputs = [
                 pkgs.pkg-config
                 pkgs.gitMinimal
+                pkgs.openssh
               ];
               RCLONE = "${pkgs.rclone}/bin/rclone";
             }

@@ -19,6 +19,7 @@ let
   # (and a test's, which is read-only, does not have to).
   guestPkgs = import pkgs.path {
     inherit (pkgs.stdenv.hostPlatform) system;
+    overlays = [ (import ../../overlays/fhsenv.nix) ];
     config.allowUnfreePredicate =
       pkg:
       builtins.elem (lib.getName pkg) [

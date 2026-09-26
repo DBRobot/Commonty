@@ -66,6 +66,13 @@ in
           # sign-up goes to the passkey page instead: the app is reached only
           # through it
           patches = (o.patches or [ ]) ++ [ ./ente-web-passkey.patch ];
+          # Next names each build at random, and every page carries the
+          # name: two builds of the same source never matched, and the
+          # boxes vouch for a release by rebuilding it (dd-attest)
+          postPatch = (o.postPatch or "") + ''
+            substituteInPlace packages/base/next.config.base.js \
+              --replace-fail 'output: "export",' "output: \"export\", generateBuildId: async () => \"commonty\","
+          '';
         });
       })
     ];
