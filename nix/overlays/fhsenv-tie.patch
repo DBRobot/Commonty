@@ -1,0 +1,16 @@
+--- a/rootfs-builder/src/main.rs	2026-09-26 11:44:09.617555410 -0400
++++ b/rootfs-builder/src/main.rs	2026-09-26 11:44:14.550725306 -0400
+@@ -246,7 +246,12 @@
+     for (path, candidates) in all_candidates {
+         let best = candidates
+             .into_iter()
+-            .min_by_key(|&CandidatePath { priority, .. }| priority)
++            .min_by(|x, y| {
++                x.priority
++                    .cmp(&y.priority)
++                    .then_with(|| x.root.cmp(&y.root))
++                    .then_with(|| x.relative.cmp(&y.relative))
++            })
+             .ok_or(anyhow!("candidate list empty"))?;
+         final_plan.insert(path, best.root.join(best.relative));
+     }
