@@ -21,8 +21,14 @@ fn err(e: impl std::fmt::Display) -> String {
 fn keypair(prf_secret_b64: &str) -> R<ed25519_dalek::SigningKey> {
     use base64::Engine as _;
     use sha2::Digest as _;
-    let secret = base64::engine::general_purpose::STANDARD
-        .decode(prf_secret_b64)
+    // the page sends base64url (webauthn.js); take either alphabet
+    let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(
+            prf_secret_b64
+                .replace('+', "-")
+                .replace('/', "_")
+                .trim_end_matches('='),
+        )
         .map_err(err)?;
     let mut h = sha2::Sha512::new();
     h.update(b"dd-library-device");
@@ -239,6 +245,20 @@ pub fn plain_size(sealed: f64) -> Result<f64, JsValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// the page hands the secret over as base64url; it is the same key
+    #[test]
+    fn a_secret_in_either_alphabet_is_the_same_key() {
+        use base64::Engine as _;
+        let raw = [0xfbu8; 32]; // encodes with '_' and '/' in it
+        let url = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
+        let std = base64::engine::general_purpose::STANDARD.encode(raw);
+        assert!(url.contains('_') && std.contains('/'));
+        assert_eq!(
+            keypair(&url).unwrap().verifying_key(),
+            keypair(&std).unwrap().verifying_key()
+        );
+    }
 
     /// sealed in pieces is sealed whole, and opens in pieces
     #[test]
