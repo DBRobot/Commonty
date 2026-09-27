@@ -17,9 +17,11 @@ unsafe extern "C" {
         control: *const c_char,
         key: *const c_char,
         hostname: *const c_char,
+        tunfd: i32,
     ) -> *mut c_char;
     fn commonty_net_status() -> *mut c_char;
     fn commonty_net_stop();
+    fn commonty_net_browser(domain: *const c_char) -> *mut c_char;
     fn commonty_net_free(p: *mut c_char);
 }
 
@@ -62,6 +64,62 @@ pub struct NetStatus {
     /// whether this device has joined before (state on disk)
     #[serde(default)]
     pub joined: bool,
+    /// what the browser here needs by hand, when it could not be set up
+    #[serde(default)]
+    pub browser: String,
+}
+
+/// the proxy rules' url while they are up, and what the person has to do
+/// by hand if the system could not be told
+static BROWSER: std::sync::Mutex<(String, Option<String>)> =
+    std::sync::Mutex::new((String::new(), None));
+
+#[derive(Deserialize)]
+struct Door {
+    #[serde(default)]
+    pac: String,
+    #[serde(default)]
+    error: String,
+}
+
+/// the browser on this machine, sent through the network for the fleet's
+/// names (browser.rs); a phone gets its VPN instead
+fn open_browser() {
+    #[cfg(not(target_os = "android"))]
+    {
+        let Ok(d) = CString::new(crate::account::domain()) else {
+            return;
+        };
+        let out = take(unsafe { commonty_net_browser(d.as_ptr()) });
+        let door: Door = match serde_json::from_str(&out) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("network: browser: {e}: {out}");
+                return;
+            }
+        };
+        if !door.error.is_empty() {
+            eprintln!("network: browser: {}", door.error);
+            return;
+        }
+        let by_hand = crate::browser::register(&door.pac);
+        if let Some(m) = &by_hand {
+            eprintln!("network: {m}");
+        }
+        if let Ok(mut b) = BROWSER.lock() {
+            *b = (door.pac, by_hand);
+        }
+    }
+}
+
+/// signing out on this device: the browser goes straight out again
+pub fn forget_browser() {
+    if let Ok(mut b) = BROWSER.lock()
+        && !b.0.is_empty()
+    {
+        crate::browser::unregister(&b.0);
+        *b = (String::new(), None);
+    }
 }
 
 fn state_dir() -> Result<PathBuf, String> {
@@ -85,7 +143,7 @@ fn hostname() -> String {
 
 /// bring the engine up, from the state on disk or with a fresh key, and
 /// point every client at its proxy
-fn start(control: &str, key: &str) -> Result<Started, String> {
+fn start(control: &str, key: &str, tunfd: i32) -> Result<Started, String> {
     let dir = state_dir()?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let marker = dir.join("joined");
@@ -97,7 +155,13 @@ fn start(control: &str, key: &str) -> Result<Started, String> {
         c(&hostname())?,
     );
     let out = take(unsafe {
-        commonty_net_start(dir.as_ptr(), control.as_ptr(), key.as_ptr(), host.as_ptr())
+        commonty_net_start(
+            dir.as_ptr(),
+            control.as_ptr(),
+            key.as_ptr(),
+            host.as_ptr(),
+            tunfd,
+        )
     });
     let st: Started = serde_json::from_str(&out).map_err(|e| format!("engine: {e}: {out}"))?;
     if !st.error.is_empty() {
@@ -114,6 +178,7 @@ fn start(control: &str, key: &str) -> Result<Started, String> {
         user: "tsnet".to_string(),
         password: st.credential.clone(),
     }));
+    open_browser();
     Ok(st)
 }
 
@@ -123,6 +188,9 @@ fn status_now() -> NetStatus {
     st.joined = state_dir()
         .map(|d| d.join("joined").exists())
         .unwrap_or(false);
+    if let Ok(b) = BROWSER.lock() {
+        st.browser = b.1.clone().unwrap_or_default();
+    }
     st
 }
 
@@ -134,7 +202,7 @@ pub async fn net_status() -> Result<NetStatus, String> {
 /// join: the gate vouches for this device and hands it a key; the engine
 /// takes it once, and from then on the state on disk is the membership
 #[tauri::command]
-pub async fn net_join(keys: State<'_, Keys>) -> Result<NetStatus, String> {
+pub async fn net_join(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<NetStatus, String> {
     let (_, user, token) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
     let dirs = crate::account::dirs();
     // the front door: this device is not on the network yet
@@ -159,24 +227,54 @@ pub async fn net_join(keys: State<'_, Keys>) -> Result<NetStatus, String> {
         .ok_or("no control url")?
         .to_string();
     let key = v["key"].as_str().ok_or("no key")?.to_string();
-    tauri::async_runtime::spawn_blocking(move || start(&control, &key))
-        .await
-        .map_err(|e| e.to_string())??;
+    tauri::async_runtime::spawn_blocking(move || {
+        let st = start(&control, &key, -1)?;
+        // joined; a phone now takes the network for the whole device
+        #[cfg(target_os = "android")]
+        {
+            stop();
+            let fd = crate::vpn::up(&app, &st.ip)?;
+            if let Err(e) = start(&control, "", fd) {
+                crate::vpn::down(&app);
+                return Err(e);
+            }
+        }
+        let _ = (&app, st);
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(status_now())
 }
 
 /// resume from the state on disk, at app start; nothing if never joined
-pub fn resume(control: &str) {
-    if let Ok(d) = state_dir()
-        && d.join("joined").exists()
-    {
-        let control = control.to_string();
-        std::thread::spawn(move || {
-            if let Err(e) = start(&control, "") {
+pub fn resume(app: &tauri::AppHandle, control: &str) {
+    let Ok(d) = state_dir() else { return };
+    // the marker holds this node's address, which the phone's VPN needs
+    let Ok(ip) = std::fs::read_to_string(d.join("joined")) else {
+        return;
+    };
+    let (app, control) = (app.clone(), control.to_string());
+    std::thread::spawn(move || {
+        #[cfg(target_os = "android")]
+        let fd = match crate::vpn::up(&app, ip.trim()) {
+            Ok(fd) => fd,
+            Err(e) => {
                 eprintln!("network: {e}");
+                return;
             }
-        });
-    }
+        };
+        #[cfg(not(target_os = "android"))]
+        let fd = {
+            let _ = (&app, &ip);
+            -1
+        };
+        if let Err(e) = start(&control, "", fd) {
+            eprintln!("network: {e}");
+            #[cfg(target_os = "android")]
+            crate::vpn::down(&app);
+        }
+    });
 }
 
 pub fn stop() {

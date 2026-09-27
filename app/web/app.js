@@ -104,6 +104,21 @@ $("net-join").addEventListener("click", async () => {
   b.disabled = false;
 });
 
+$("passkey-add").addEventListener("click", async () => {
+  const b = $("passkey-add");
+  const t = $("passkey-text");
+  b.disabled = true;
+  t.hidden = false;
+  t.textContent = "Finish in the browser that just opened…";
+  try {
+    render(await invoke("passkey_add"));
+    t.textContent = "Done: the browser can sign in now.";
+  } catch (e) {
+    t.textContent = String(e);
+  }
+  b.disabled = false;
+});
+
 // Movies & TV: the libraries as folders and jellyfin on them, on this
 // machine, in a window of its own
 async function media(st) {

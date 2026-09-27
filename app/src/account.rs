@@ -58,12 +58,23 @@ pub fn dirs() -> Vec<String> {
 
 /// the network's control server: on the gate's host
 pub fn control_url() -> String {
-    format!(
-        "https://headscale.{}",
-        gate_base()
-            .trim_start_matches("https://")
-            .trim_start_matches("files.")
-    )
+    format!("https://headscale.{}", domain())
+}
+
+/// the fleet's domain: the directory's host without its home. (or files.)
+pub fn domain() -> String {
+    let base = gate_base();
+    let host = base
+        .split("://")
+        .nth(1)
+        .unwrap_or(&base)
+        .split(['/', ':'])
+        .next()
+        .unwrap_or_default();
+    host.strip_prefix("home.")
+        .or_else(|| host.strip_prefix("files."))
+        .unwrap_or(host)
+        .to_string()
 }
 
 fn gate_base() -> String {
@@ -71,6 +82,11 @@ fn gate_base() -> String {
         .first()
         .map(|d| d.trim_end_matches("/_dd/directory").to_string())
         .unwrap_or_default()
+}
+
+/// the library gate, which answers only on the network (files.<domain>)
+fn files_base() -> String {
+    media::gate::files_base(&dirs()).unwrap_or_default()
 }
 
 #[tauri::command]
@@ -149,21 +165,19 @@ async fn check_gate(
     entry: &identity::Entry,
 ) -> anyhow::Result<String> {
     let token = auth::device::mint(kp, name, Duration::from_secs(300))?;
-    // the first library's record list is the cheapest gated thing there is;
+    // the first library's top folder is the cheapest gated thing there is;
     // without a library, a library that is nobody's: the gate answers 403
     // to a token it accepts and 401 to one it does not
     let (url, own) = match entry.libraries.first() {
-        Some(l) => (
-            format!("{}/_dd/library/{}/records", gate_base(), l.id),
-            true,
-        ),
+        Some(l) => (format!("{}/_dd/dav/{}/", files_base(), l.id), true),
         None => (
-            format!("{}/_dd/library/{}/records", gate_base(), "0".repeat(32)),
+            format!("{}/_dd/dav/{}/", files_base(), "0".repeat(32)),
             false,
         ),
     };
     let r = directory::http()?
-        .get(&url)
+        .request(reqwest::Method::from_bytes(b"PROPFIND")?, &url)
+        .header("depth", "0")
         .bearer_auth(token)
         .send()
         .await?;
@@ -234,6 +248,52 @@ pub async fn admit_device(keys: State<'_, Keys>, public_key: String) -> Result<S
     status(keys).await
 }
 
+/// A passkey for a browser, so the website signs this account in: the link
+/// `dd enrol` prints, signed by this device for ten minutes and opened in
+/// the device's own browser. The page makes the passkey; this waits for
+/// it and signs it into the entry with the root held here.
+#[tauri::command]
+pub async fn passkey_add(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<Status, String> {
+    use tauri_plugin_opener::OpenerExt as _;
+    let root = root_here(&keys)?;
+    let name = name_here(&keys)?;
+    let (kp, _) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
+    let tok = auth::device::mint_for(&kp, &name, Duration::from_secs(600), Some("enrol"))
+        .map_err(|e| e.to_string())?;
+    let enrol = format!("{gate}/_dd/enrol", gate = gate_base());
+    app.opener()
+        .open_url(format!("{enrol}?t={tok}"), None::<&str>)
+        .map_err(|e| format!("could not open the browser: {e}"))?;
+    let http = directory::http().map_err(|e| e.to_string())?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(600);
+    let cred = loop {
+        if std::time::Instant::now() > deadline {
+            return Err("no passkey arrived within ten minutes".into());
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let r = http
+            .get(format!("{enrol}/result"))
+            .bearer_auth(&tok)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        match r.status().as_u16() {
+            200 => {
+                break r
+                    .json::<identity::Passkey>()
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            204 => continue,
+            s => return Err(format!("{s} {}", r.text().await.unwrap_or_default())),
+        }
+    };
+    account::admit_passkey(&dirs(), &name, &root, cred)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    status(keys).await
+}
+
 /// Remove a device by its fingerprint; not this one
 #[tauri::command]
 pub async fn remove_device(keys: State<'_, Keys>, fingerprint: String) -> Result<Status, String> {
@@ -274,5 +334,6 @@ pub async fn recover(
 /// costly to re-admit)
 #[tauri::command]
 pub fn forget(keys: State<'_, Keys>) -> Result<(), String> {
+    crate::net::forget_browser();
     keys.0.clear(USER).map_err(|e| e.to_string())
 }

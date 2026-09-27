@@ -31,6 +31,17 @@
             </intent-filter>
         </activity>
 
+        <!-- the network for the whole phone: only its own addresses and
+             names go through it (CommontyVpn.kt) -->
+        <service
+            android:name=".CommontyVpn"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+
         <provider
           android:name="androidx.core.content.FileProvider"
           android:authorities="${applicationId}.fileprovider"
