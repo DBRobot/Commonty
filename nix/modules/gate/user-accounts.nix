@@ -16,7 +16,7 @@ let
   # The uid is a hash of the name. Every box computes the same one from the
   # same entry, so shared storage carries a number that means the same
   # everywhere and nobody maintains a map. No nss entry exists for it: the
-  # files are owned by a number, and every reader here (nginx, jellyfin) gets
+  # files are owned by a number, and every reader here (nginx) gets
   # in through an acl, never through the name.
   sync = pkgs.writeShellScript "user-accounts-sync" (
     ddScript ./user-accounts.sh {

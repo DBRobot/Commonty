@@ -25,17 +25,6 @@ async fn main() -> Result<()> {
         } else {
             None
         },
-        oidc: match std::env::var("VERIFY_OIDC_ISSUER") {
-            Ok(issuer) if full => Some(verify::OidcConfig {
-                issuer,
-                client_id: env("VERIFY_OIDC_CLIENT_ID")?,
-                client_secret: std::fs::read_to_string(env("VERIFY_OIDC_CLIENT_SECRET_FILE")?)?
-                    .trim()
-                    .to_string(),
-                redirect: env("VERIFY_OIDC_REDIRECT")?,
-            }),
-            _ => None,
-        },
         home: serde_json::from_str(&env_or("VERIFY_HOME", "[]")).context("VERIFY_HOME")?,
         // every box and where its prometheus answers, for the pages that
         // show the fleet; a box that is not told has none to show

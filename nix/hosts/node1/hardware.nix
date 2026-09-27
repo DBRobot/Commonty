@@ -65,8 +65,7 @@
     # Per-user archives of old computers - disk images or copied-out user
     # folders - uploaded already encrypted (rclone crypt, key on the client),
     # so this dataset only ever holds ciphertext. Separate from vault/users on
-    # purpose: jellyfin has an acl on every media dir and has no business
-    # traversing these, and NO snapshots - an archive is written once and never
+    # purpose, and NO snapshots - an archive is written once and never
     # changed, so a snapshot buys nothing and would keep a deleted 80 G image
     # on disk for a year.
     "vault/images" = {

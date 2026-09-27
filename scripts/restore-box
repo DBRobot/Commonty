@@ -41,14 +41,14 @@ garage repair -a --yes tables >/dev/null
 echo "== restic restore of the backed-up directories"
 # the units that own them are stopped first; a running service would
 # write over what comes back
-units="grafana jellyfin prometheus ente forgejo"
+units="grafana prometheus ente forgejo"
 systemctl stop $units 2>/dev/null || true
 # reads only, so no lock: a lock is a write, and the cluster takes none with
 # a box down - which is when a restore happens
 for i in $(seq 1 60); do restic-dd --no-lock snapshots >/dev/null 2>&1 && break; sleep 5; done
 restic-dd --no-lock snapshots | tail -3
 # only what lives on the boot disk: the pool paths are still there
-for p in /var/lib/grafana /var/lib/jellyfin /var/lib/prometheus2 /var/lib/garage/meta/snapshots; do
+for p in /var/lib/grafana /var/lib/prometheus2 /var/lib/garage/meta/snapshots; do
   if restic-dd --no-lock ls latest "$p" >/dev/null 2>&1; then
     echo "   $p"
     restic-dd --no-lock restore latest --include "$p" --target / >/dev/null

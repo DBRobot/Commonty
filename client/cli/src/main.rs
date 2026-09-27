@@ -90,14 +90,11 @@ enum Command {
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES, global = true)]
         directories: Vec<String>,
     },
-    /// Your libraries as folders on this machine, and a player on them.
+    /// Your libraries as folders on this machine, for any player.
     Media {
         /// where to mount (default ~/Commonty)
         #[arg(long)]
         at: Option<std::path::PathBuf>,
-        /// start this jellyfin binary against the mount, with its own data dir
-        #[arg(long)]
-        jellyfin: Option<std::path::PathBuf>,
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES)]
         directories: Vec<String>,
     },
@@ -592,11 +589,7 @@ async fn main() -> Result<()> {
         }
 
         Command::Library { cmd, directories } => librarycmd::run(cmd, &keys, &directories).await?,
-        Command::Media {
-            at,
-            jellyfin,
-            directories,
-        } => mediacmd::run(&keys, &directories, at, jellyfin).await?,
+        Command::Media { at, directories } => mediacmd::run(&keys, &directories, at).await?,
 
         Command::Passkey { cmd, directories } => match cmd {
             PasskeyCmd::List => {

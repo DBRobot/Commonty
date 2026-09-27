@@ -16,7 +16,6 @@
       ../modules/net/box.nix
     ];
     dd.verify.role = pkgs.lib.mkForce "full";
-    dd.verify.oidcSecretFile = "${pkgs.writeText "oidc-secret" "test"}";
     dd.headscale = {
       enable = true;
       url = "http://127.0.0.1:8085";

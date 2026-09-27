@@ -179,7 +179,7 @@ in
           # the ceremonies a stranger may start: sign-up, sign-in, enrol, a
           # code, a device joining the network. A person clicks these a few
           # times; a script gets told to wait. The rest of /_dd/ stays
-          # unlimited (jellyfin's sso polls it)
+          # unlimited: every endpoint there wants a credential first
           locations."~ ^/_dd/(join|login|enrol|redeem|network)/" = {
             proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";
             extraConfig = ''

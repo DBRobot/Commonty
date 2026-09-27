@@ -640,17 +640,17 @@ mod tests {
 
     #[test]
     fn a_service_can_send_the_demo_somewhere_else() {
-        let mut tv = svc("Movies & TV", "videos");
-        tv.url = "https://files.x/_dd/media".into();
-        tv.demo_url = Some("https://jellyfin.x/sso".into());
+        let mut tv = svc("Games", "games");
+        tv.url = "https://files.x/_dd/games".into();
+        tv.demo_url = Some("https://games.x/demo".into());
         tv.demo = Some("full".into());
         assert_eq!(
             me("tom", &[tv.clone()])["services"][0]["url"],
-            "https://files.x/_dd/media"
+            "https://files.x/_dd/games"
         );
         assert_eq!(
             me(DEMO_USER, &[tv])["services"][0]["url"],
-            "https://jellyfin.x/sso"
+            "https://games.x/demo"
         );
     }
 

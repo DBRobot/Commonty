@@ -5,8 +5,6 @@
 
 mod account;
 mod browser;
-#[cfg(not(target_os = "android"))]
-mod media;
 mod net;
 mod paths;
 mod photos;
@@ -24,9 +22,7 @@ use tauri::Manager as _;
 pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(not(target_os = "android"))]
-    let builder = builder
-        .manage(account::Keys(auth::open(SERVICE)))
-        .manage(media::Media::default());
+    let builder = builder.manage(account::Keys(auth::open(SERVICE)));
     builder
         .plugin(vpn::init())
         .plugin(tauri_plugin_opener::init())
@@ -41,9 +37,6 @@ pub fn run() {
             account::remove_device,
             account::recover,
             account::forget,
-            media_status,
-            media_open,
-            media_close,
             net::net_status,
             net::net_join
         ])
@@ -60,36 +53,12 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("the app window")
-        .run(|app, event| {
+        .run(|_, event| {
             if let tauri::RunEvent::Exit = event {
-                #[cfg(not(target_os = "android"))]
-                media::stop_all(app);
                 // the browser goes straight out while the app is closed; the
                 // next start points it here again
                 net::forget_browser();
                 net::stop();
             }
         });
-}
-
-#[cfg(not(target_os = "android"))]
-use media::{media_close, media_open, media_status};
-
-/// a phone has no mount and runs no jellyfin: the page hides the card
-#[cfg(target_os = "android")]
-#[tauri::command]
-async fn media_status() -> Result<serde_json::Value, String> {
-    Ok(
-        serde_json::json!({ "running": false, "jellyfin": null, "libraries": 0, "files": 0, "unavailable": "not on a phone" }),
-    )
-}
-#[cfg(target_os = "android")]
-#[tauri::command]
-async fn media_open() -> Result<serde_json::Value, String> {
-    Err("Movies & TV plays on a desktop for now".to_string())
-}
-#[cfg(target_os = "android")]
-#[tauri::command]
-async fn media_close() -> Result<(), String> {
-    Ok(())
 }

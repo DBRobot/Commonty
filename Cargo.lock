@@ -3996,28 +3996,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonwebtoken"
-version = "11.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "881733cbc631fc9e472e24447ce32a64bedf2da498d6d8570b08edc87de71f65"
-dependencies = [
- "base64 0.22.1",
- "ed25519-dalek",
- "getrandom 0.2.17",
- "hmac 0.12.1",
- "js-sys",
- "p256",
- "p384",
- "rand 0.8.8",
- "rsa",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "signature",
- "zeroize",
-]
-
-[[package]]
 name = "kbkdf"
 version = "0.1.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4258,7 +4236,6 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "identity",
- "libc",
  "library",
  "reqwest 0.12.28",
  "serde",
@@ -7910,9 +7887,7 @@ dependencies = [
  "ed25519-dalek",
  "hmac 0.12.1",
  "identity",
- "jsonwebtoken",
  "library-gate",
- "p256",
  "release",
  "reqwest 0.12.28",
  "serde",

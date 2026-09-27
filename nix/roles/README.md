@@ -10,7 +10,7 @@ that machine (disks, network, lid).
     gateway   nginx, certificates, the browser login: a box with a public name
     storage   a node of the garage cluster; the box's own backup key
     photos    ente
-    media     the demo's jellyfin, uploads, per-user directories
+    media     Movies & TV and Files tiles, uploads, per-user directories
     llm       llama-cpp and its gateway
     forge     forgejo, its runner, the github mirror
     observe   grafana, alerting, mail, database dumps
