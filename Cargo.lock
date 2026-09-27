@@ -1335,6 +1335,7 @@ dependencies = [
  "directory",
  "ed25519-dalek",
  "identity",
+ "library",
  "media",
  "reqwest 0.12.28",
  "serde",

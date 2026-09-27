@@ -22,6 +22,8 @@ identity = { path = "../client/identity" }
 directory = { path = "../client/directory" }
 account = { path = "../client/account" }
 media = { path = "../client/media" }
+# the one-time key a photo password comes to the app sealed to
+library = { path = "../client/library" }
 tauri = { version = "2", features = [] }
 # the system browser, for setting up a passkey there
 tauri-plugin-opener = "2"

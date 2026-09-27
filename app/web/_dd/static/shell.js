@@ -21,20 +21,32 @@ export function me() {
 /// Running inside the app rather than a browser tab: the app serves these
 /// same files under its own address (app/src/site.rs), and answers the
 /// library's key itself instead of a passkey.
-export const inApp = location.protocol === 'commonty:' || location.hostname === 'commonty.localhost';
+// Photos in the app is Ente's page, on the photos host, in the app's own
+// window. It knows it is there by what the app's page left in this tab
+// (photos.js), and its bar goes back to the app's pages, not the site's.
+const appOrigin = (() => {
+  try { return sessionStorage.getItem('dd-app-origin'); } catch { return null; }
+})();
+export const inApp = location.protocol === 'commonty:' || location.hostname === 'commonty.localhost' || !!appOrigin;
+// where the app's pages are, from wherever this page is
+const appPages = appOrigin || '';
 
 // the app's own screen for this device, where it signs out; ?stay keeps
 // it from coming straight back here
-const deviceScreen = (location.protocol === 'commonty:' ? 'tauri://localhost/' : 'http://tauri.localhost/') + '?stay';
+const deviceScreen = ((appOrigin || location.origin).startsWith('commonty:') ? 'tauri://localhost/' : 'http://tauri.localhost/') + '?stay';
 
 // pages the app carries: a service that is one of them opens the app's
-// copy; any other (photos, games, code) opens in the device's browser
-const carried = ['/_dd/files', '/_dd/media', '/_dd/boxes', '/_dd/backups', '/_dd/devices', '/_dd/network'];
+// copy, Photos opens in the app's window, and any other (games, code)
+// opens in the device's browser
+const carried = ['/_dd/home', '/_dd/files', '/_dd/media', '/_dd/boxes', '/_dd/backups', '/_dd/devices', '/_dd/network'];
 function here(url) {
   if (!inApp) return url;
   try {
     const u = new URL(url, location.href);
-    if (carried.includes(u.pathname)) return u.pathname;
+    if (carried.includes(u.pathname)) return appPages + u.pathname;
+    if (u.pathname === '/_dd/photos') return appPages + '/_dd/app/photos';
+    // in the app's window already (Photos): the window may go there itself
+    if (appOrigin) return url;
     if (u.origin !== location.origin) return '/_dd/app/open?url=' + encodeURIComponent(u.href);
     return url;
   } catch {
@@ -84,6 +96,9 @@ function bar(m, slot) {
     el('span', { class: 'avatar', 'aria-hidden': 'true', text: m.initial }),
     el('span', { text: m.user }),
     el('span', { class: 'chev', 'aria-hidden': 'true' }));
+  // the logo goes home: the app's home, when this page is in the app
+  const brand = document.querySelector('header.dd-bar .brand');
+  if (brand && appOrigin) brand.setAttribute('href', appOrigin + '/_dd/home');
   const menu = el('details', { class: 'menu' }, summary, nav);
   slot.replaceChildren(menu);
   // a menu closes when you are done with it: a click anywhere else, or Escape

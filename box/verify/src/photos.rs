@@ -5,10 +5,12 @@
 //! the browser. The page itself lives with Photos (box/photos).
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use askama::Template;
-use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::Form;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Json, Redirect, Response};
 use serde::Deserialize;
 
@@ -45,7 +47,16 @@ pub(crate) async fn page(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
             Html(sheet(&user, &app.home)).into_response()
         }
         Some(_) => Redirect::to("/_dd/home").into_response(),
-        None => Redirect::to("/_dd/login?rd=/_dd/photos").into_response(),
+        // back to exactly this after signing in: a handoff link keeps its
+        // slot and the app's key
+        None => {
+            let here = headers
+                .get("x-original-uri")
+                .and_then(|v| v.to_str().ok())
+                .filter(|u| u.starts_with("/_dd/photos"))
+                .unwrap_or("/_dd/photos");
+            Redirect::to(&format!("/_dd/login?rd={}", crate::urlencode(here))).into_response()
+        }
     }
 }
 
@@ -114,4 +125,141 @@ pub(crate) async fn forget(State(app): State<Arc<App>>, Query(q): Query<Forget>)
         format!("<!doctype html><meta http-equiv=\"refresh\" content=\"0;url={then}\"><title>Signed out</title>"),
     )
         .into_response()
+}
+
+// ---- Photos in the app
+//
+// The photo account's password is made by the person's passkey, which an
+// app's window cannot use. So the app asks the browser: it opens a slot
+// here, signing as the device it is, and the browser - signed in, with the
+// passkey - fills it with the password sealed to a key only the app holds.
+// The app takes it once. The gate holds what it cannot read, for minutes.
+
+/// how long a slot waits for the browser
+const HANDOFF: Duration = Duration::from_secs(600);
+/// slots at once, all people together: each is a few hundred bytes
+const HANDOFFS: usize = 256;
+
+pub(crate) struct Handoff {
+    user: String,
+    sealed: Option<String>,
+    until: Instant,
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// a slot for this device's person
+pub(crate) async fn handoff_open(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let Some(user) = app.identify(&headers, "access") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if !app.member(&user) || user == pages::DEMO_USER {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Ok(raw) = crate::session::random(16) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let id = hex(&raw);
+    let mut slots = app.handoffs.lock().unwrap();
+    slots.retain(|_, h| h.until > Instant::now());
+    if slots.len() >= HANDOFFS {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    slots.insert(
+        id.clone(),
+        Handoff {
+            user,
+            sealed: None,
+            until: Instant::now() + HANDOFF,
+        },
+    );
+    Json(serde_json::json!({ "id": id })).into_response()
+}
+
+/// the browser's part: the password, sealed to the app's key
+pub(crate) async fn handoff_fill(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    let Some(user) = app.sessions.user(cookie) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if body.is_empty() || body.len() > 1024 {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let mut slots = app.handoffs.lock().unwrap();
+    match slots.get_mut(&id) {
+        // someone else's slot is no slot at all, as far as anyone can tell
+        Some(h) if h.user == user && h.until > Instant::now() => {
+            if h.sealed.is_some() {
+                return StatusCode::CONFLICT.into_response();
+            }
+            h.sealed = Some(body);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// the app's part: what the browser left, once; nothing yet is 204
+pub(crate) async fn handoff_take(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(user) = app.identify(&headers, "access") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let mut slots = app.handoffs.lock().unwrap();
+    let ready = match slots.get(&id) {
+        Some(h) if h.user == user && h.until > Instant::now() => h.sealed.is_some(),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    if !ready {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    let sealed = slots.remove(&id).and_then(|h| h.sealed).unwrap_or_default();
+    ([("cache-control", "no-store")], sealed).into_response()
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AppSignin {
+    token: String,
+}
+
+/// The app's window signed in as the person the app's device signs for: its
+/// own page posts the device's token here, and the answer is the session a
+/// browser gets from a passkey. Only from the app's own page: the app's
+/// window runs no one else's form.
+pub(crate) async fn app_signin(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Form(f): Form<AppSignin>,
+) -> Response {
+    let origin = headers.get("origin").and_then(|v| v.to_str().ok());
+    if !matches!(
+        origin,
+        None | Some("null" | "commonty://localhost" | "http://commonty.localhost")
+    ) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let user = match app.verify_biscuit_for(&f.token, "access", &crate::asked_host(&headers)) {
+        Ok(u) => u,
+        Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+    if !app.member(&user) || user == pages::DEMO_USER {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    // on to the Photos step; the browser keeps the fragment the app's page
+    // put on this address, which is where the password rides, never here
+    let mut r = Redirect::to("/_dd/photos").into_response();
+    if let Ok(c) = HeaderValue::from_str(&app.sessions.issue(&user)) {
+        r.headers_mut().insert("set-cookie", c);
+    }
+    r
 }

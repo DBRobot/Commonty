@@ -335,5 +335,7 @@ pub async fn recover(
 #[tauri::command]
 pub fn forget(keys: State<'_, Keys>) -> Result<(), String> {
     crate::net::forget_browser();
+    // the photo password went with the name it was for
+    let _ = keys.0.clear(crate::photos::PASSWORD);
     keys.0.clear(USER).map_err(|e| e.to_string())
 }
