@@ -82,6 +82,7 @@ pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
         "devices.js" => (include_str!("../web/devices.js"), js),
         "network.js" => (include_str!("../web/network.js"), js),
         "panel.js" => (include_str!("../web/panel.js"), js),
+        "shell.js" => (include_str!("../web/shell.js"), js),
         _ => return None,
     })
     .map(|(s, ty)| (s.as_bytes(), ty))
@@ -106,6 +107,50 @@ fn initial(user: &str) -> String {
         .next()
         .map(|c| c.to_string())
         .unwrap_or_default()
+}
+
+/// A signed-in page: a static file that fills itself from /_dd/me
+/// (web/pages/). The app carries the same files.
+pub fn page(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "home" => include_str!("../web/pages/home.html"),
+        "files" => include_str!("../web/pages/files.html"),
+        "media" => include_str!("../web/pages/media.html"),
+        "boxes" => include_str!("../web/pages/boxes.html"),
+        "backups" => include_str!("../web/pages/backups.html"),
+        "devices" => include_str!("../web/pages/devices.html"),
+        "network" => include_str!("../web/pages/network.html"),
+        _ => return None,
+    })
+}
+
+/// Everything a signed-in page shows about who is looking: the name, the
+/// bar's menu, and the services, with the demo's shut doors marked. The
+/// pages are static files that fill themselves from this (web/shell.js),
+/// the same files in a browser and in the app.
+pub fn me_json(user: &str, services: &[Service]) -> serde_json::Value {
+    let demo = user == DEMO_USER;
+    let menu = Menu::of(user, services);
+    serde_json::json!({
+        "user": user,
+        "initial": initial(user),
+        "demo": demo,
+        "menu": menu.groups.iter().map(|g| g.iter().map(|i| serde_json::json!({
+            "label": i.label,
+            "url": i.url,
+        })).collect::<Vec<_>>()).collect::<Vec<_>>(),
+        "services": services.iter().filter(|s| !s.menu_only).map(|s| serde_json::json!({
+            "name": s.name,
+            "url": match (demo, &s.demo_url) {
+                (true, Some(u)) => u,
+                _ => &s.url,
+            },
+            "icon": icon(&s.icon),
+            "blurb": s.blurb,
+            "host": host_of(&s.url),
+            "shut": demo && s.demo.is_none(),
+        })).collect::<Vec<_>>(),
+    })
 }
 
 /// One line in the bar's menu.
@@ -177,22 +222,6 @@ struct Join<'a> {
 #[derive(Template)]
 #[template(path = "waiting.html")]
 struct Waiting<'a> {
-    user: &'a str,
-    initial: String,
-    menu: Menu,
-}
-
-#[derive(Template)]
-#[template(path = "files.html")]
-struct Files<'a> {
-    user: &'a str,
-    initial: String,
-    menu: Menu,
-}
-
-#[derive(Template)]
-#[template(path = "media.html")]
-struct Media<'a> {
     user: &'a str,
     initial: String,
     menu: Menu,
@@ -329,98 +358,6 @@ pub fn download(
     })
 }
 
-#[derive(Template)]
-#[template(path = "panel.html")]
-struct Panel<'a> {
-    user: &'a str,
-    initial: String,
-    menu: Menu,
-    title: &'static str,
-    waiting: &'static str,
-    note: &'static str,
-    script: &'static str,
-}
-
-fn panel(
-    user: &str,
-    services: &[Service],
-    title: &'static str,
-    waiting: &'static str,
-    note: &'static str,
-    script: &'static str,
-) -> String {
-    render(Panel {
-        user,
-        initial: initial(user),
-        menu: Menu::of(user, services),
-        title,
-        waiting,
-        note,
-        script,
-    })
-}
-
-/// What every box is running, and whether it answered at all.
-pub fn boxes(user: &str, services: &[Service]) -> String {
-    panel(
-        user,
-        services,
-        "Boxes",
-        "Asking every box…",
-        "Each box answers for itself, over the fleet's own network, and says when it last backed itself up. A box that says nothing is off or unreachable, not gone.",
-        "boxes.js",
-    )
-}
-
-/// The disks people have archived here: `dd image` writes an old
-/// computer into their own folder, in restic's format, with a password
-/// that never leaves the machine that made it. The box's own backups are
-/// fleet health and live on the Boxes page.
-pub fn backups(user: &str, services: &[Service]) -> String {
-    panel(
-        user,
-        services,
-        "Backups",
-        "Looking for your archives…",
-        "Disks you have put here with `dd image`. The box stores them and cannot read them: the password never left the machine that made the archive, so listing what is inside is `dd image list` there.",
-        "backups.js",
-    )
-}
-
-/// The keys that are you: the devices in your entry, and the passkeys.
-pub fn devices(user: &str, services: &[Service]) -> String {
-    panel(
-        user,
-        services,
-        "Devices",
-        "Reading your entry…",
-        "Your entry names these, and only a device holding your root key can add or remove one (`dd device`).",
-        "devices.js",
-    )
-}
-
-/// The machines on the fleet's own network, as the control server has them.
-pub fn network_page(user: &str, services: &[Service]) -> String {
-    panel(
-        user,
-        services,
-        "Network",
-        "Asking the control server…",
-        "The fleet's own network, so your devices reach the boxes wherever they are. `dd net join` puts a machine on it.",
-        "network.js",
-    )
-}
-
-struct Tile<'a> {
-    name: &'a str,
-    url: &'a str,
-    icon: &'static str,
-    blurb: &'a str,
-    /// where it lives, as the row says it: photos.<domain>
-    host: &'a str,
-    shut: bool,
-}
-
 /// a url's host: what a row shows as where the service lives
 fn host_of(url: &str) -> &str {
     url.split("://")
@@ -429,16 +366,6 @@ fn host_of(url: &str) -> &str {
         .split(['/', ':'])
         .next()
         .unwrap_or_default()
-}
-
-#[derive(Template)]
-#[template(path = "home.html")]
-struct Home<'a> {
-    user: &'a str,
-    initial: String,
-    demo: bool,
-    tiles: Vec<Tile<'a>>,
-    menu: Menu,
 }
 
 fn render<T: Template>(t: T) -> String {
@@ -471,56 +398,11 @@ pub fn waiting(user: &str, services: &[Service]) -> String {
     })
 }
 
-/// Files: a member's library, opened by their passkey.
-pub fn files(user: &str, services: &[Service]) -> String {
-    render(Files {
-        user,
-        initial: initial(user),
-        menu: Menu::of(user, services),
-    })
-}
-
-/// Movies & TV: the same library, the corners a player cares about.
-pub fn media(user: &str, services: &[Service]) -> String {
-    render(Media {
-        user,
-        initial: initial(user),
-        menu: Menu::of(user, services),
-    })
-}
-
 /// Photos: opened by the passkey, or by the demo's password.
 pub fn photos(user: &str, services: &[Service]) -> String {
     render(Photos {
         user,
         initial: initial(user),
-        menu: Menu::of(user, services),
-    })
-}
-
-/// The signed-in home page: the services this box offers, as tiles.
-pub fn home(user: &str, services: &[Service]) -> String {
-    let demo = user == DEMO_USER;
-    render(Home {
-        user,
-        initial: initial(user),
-        demo,
-        tiles: services
-            .iter()
-            .filter(|s| !s.menu_only)
-            .map(|s| Tile {
-                name: &s.name,
-                url: match (demo, &s.demo_url) {
-                    (true, Some(u)) => u,
-                    _ => &s.url,
-                },
-                icon: icon(&s.icon),
-                blurb: &s.blurb,
-                host: host_of(&s.url),
-                // a door this account has no key to: shown, shut, and why
-                shut: demo && s.demo.is_none(),
-            })
-            .collect(),
         menu: Menu::of(user, services),
     })
 }
@@ -646,41 +528,79 @@ mod tests {
         assert!(html.contains("Nothing signed yet"));
     }
 
-    #[test]
-    fn the_menu_offers_a_member_their_own_pages_and_the_demo_none_of_them() {
-        let svcs = [svc("Metrics", "metrics"), svc("Chat", "chat")];
-        let html = home("tom", &svcs);
-        for page in ["/_dd/backups", "/_dd/devices", "/_dd/network", "/_dd/boxes"] {
-            assert!(html.contains(page), "member's menu is missing {page}");
-        }
-        // and these are tiles, so the menu must not repeat them
-        for page in ["/_dd/files", "/_dd/media"] {
-            assert!(!html.contains(page), "the menu repeats the {page} tile");
-        }
-        assert!(html.contains("https://metrics.example/"));
-        assert!(html.contains("/_dd/logout"));
-        // the demo opens the library the box keeps for it, and nothing
-        // that belongs to an account with devices and boxes of its own
-        let html = home(DEMO_USER, &svcs);
-        for page in ["/_dd/backups", "/_dd/devices", "/_dd/network", "/_dd/boxes"] {
-            assert!(!html.contains(page), "the demo was offered {page}");
-        }
-        assert!(html.contains("https://metrics.example/") && html.contains("/_dd/logout"));
-        // no metrics on this box: no line for it, and nothing else moves
-        let html = home("tom", &[svc("Chat", "chat")]);
-        assert!(!html.contains("Metrics") && html.contains("/_dd/boxes"));
+    /// what a signed-in page fills itself from, as the page reads it
+    fn me(user: &str, svcs: &[Service]) -> serde_json::Value {
+        me_json(user, svcs)
+    }
+    fn menu_urls(m: &serde_json::Value) -> Vec<String> {
+        m["menu"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|g| g.as_array().unwrap().iter())
+            .map(|i| i["url"].as_str().unwrap().to_string())
+            .collect()
     }
 
     #[test]
-    fn the_library_pages_carry_the_member_and_their_script() {
-        let html = files("tom", &[]);
-        assert!(html.contains("data-user=\"tom\""));
-        assert!(html.contains("/_dd/static/files.js"));
-        let html = media("tom", &[svc("Metrics", "metrics")]);
-        assert!(html.contains("data-user=\"tom\""));
-        assert!(html.contains("/_dd/static/media.js"));
-        assert!(html.contains("Movies") && html.contains("Shows"));
-        // both pages open the library through the one module
+    fn the_menu_offers_a_member_their_own_pages_and_the_demo_none_of_them() {
+        let svcs = [svc("Metrics", "metrics"), svc("Chat", "chat")];
+        let menu = menu_urls(&me("tom", &svcs));
+        for page in ["/_dd/backups", "/_dd/devices", "/_dd/network", "/_dd/boxes"] {
+            assert!(
+                menu.iter().any(|u| u == page),
+                "member's menu is missing {page}"
+            );
+        }
+        // these are services on the home page, so the menu must not repeat them
+        for page in ["/_dd/files", "/_dd/media"] {
+            assert!(!menu.iter().any(|u| u == page), "the menu repeats {page}");
+        }
+        assert!(menu.iter().any(|u| u == "https://metrics.example/"));
+        assert!(menu.iter().any(|u| u == "/_dd/logout"));
+        // the demo opens the library the box keeps for it, and nothing
+        // that belongs to an account with devices and boxes of its own
+        let menu = menu_urls(&me(DEMO_USER, &svcs));
+        for page in ["/_dd/backups", "/_dd/devices", "/_dd/network", "/_dd/boxes"] {
+            assert!(
+                !menu.iter().any(|u| u == page),
+                "the demo was offered {page}"
+            );
+        }
+        assert!(menu.iter().any(|u| u == "https://metrics.example/"));
+        // no metrics on this box: no line for it, and nothing else moves
+        let menu = menu_urls(&me("tom", &[svc("Chat", "chat")]));
+        assert!(!menu.iter().any(|u| u.contains("metrics")));
+        assert!(menu.iter().any(|u| u == "/_dd/boxes"));
+    }
+
+    #[test]
+    fn the_signed_in_pages_are_files_that_fill_themselves() {
+        for (name, script) in [
+            ("home", "shell.js"),
+            ("files", "files.js"),
+            ("media", "media.js"),
+            ("boxes", "boxes.js"),
+            ("backups", "backups.js"),
+            ("devices", "devices.js"),
+            ("network", "network.js"),
+        ] {
+            let html = page(name).unwrap();
+            // nobody's name in the file: it comes from /_dd/me
+            assert!(!html.contains("{{") && !html.contains("{%"), "{name}");
+            assert!(html.contains("/_dd/static/shell.js"), "{name}");
+            assert!(html.contains(&format!("/_dd/static/{script}")), "{name}");
+            assert!(html.contains("/_dd/static/home.css"), "{name}");
+        }
+        assert!(
+            page("media").unwrap().contains("Movies") && page("media").unwrap().contains("Shows")
+        );
+        assert!(text("shell.js").contains("/_dd/me"));
+        // the scripts that need the name ask for it, rather than read the page
+        for f in ["files.js", "media.js", "devices.js"] {
+            assert!(text(f).contains("await me()"), "{f}");
+        }
+        // both library pages open the library through the one module
         for f in ["files.js", "media.js"] {
             assert!(text(f).contains("from './library.js'"));
         }
@@ -699,69 +619,70 @@ mod tests {
         assert!(html.contains("<span>tom</span>"));
         assert!(html.contains("data-user=\"tom\""));
         assert!(html.contains("/_dd/logout"));
-        assert!(!html.contains("class=\"tile\""));
+        assert!(!html.contains("class=\"service\""));
         assert!(html.contains("/_dd/static/redeem.js"));
     }
 
     #[test]
-    fn the_demo_sees_every_tile_and_the_shut_ones_greyed() {
+    fn the_demo_sees_every_service_and_the_shut_ones_marked() {
         let mut files = svc("Files", "files");
         files.url = "https://files.x/".into();
         files.demo = Some("read".into());
         let mut chat = svc("Chat", "chat");
         chat.url = "https://llm.x/".into();
-        let html = home(DEMO_USER, &[files.clone(), chat.clone()]);
-        assert!(html.contains("This is a demo"));
-        assert!(html.contains("href=\"https://files.x/\""));
-        assert!(html.contains("Chat") && html.contains("Not in the demo."));
-        assert!(!html.contains("href=\"https://llm.x/\""));
-        let html = home("tom", &[files, chat]);
-        assert!(!html.contains("This is a demo") && !html.contains("Not in the demo."));
-        assert!(html.contains("href=\"https://llm.x/\""));
+        let m = me(DEMO_USER, &[files.clone(), chat.clone()]);
+        assert_eq!(m["demo"], true);
+        assert_eq!(m["services"][0]["url"], "https://files.x/");
+        assert_eq!(m["services"][0]["shut"], false);
+        assert_eq!(m["services"][1]["shut"], true, "chat is not in the demo");
+        let m = me("tom", &[files, chat]);
+        assert_eq!(m["demo"], false);
+        assert_eq!(m["services"][1]["shut"], false);
+        // the banner is in the page, shown only when the answer says demo
+        assert!(page("home").unwrap().contains("id=\"demo\""));
+        assert!(text("shell.js").contains("m.demo"));
     }
 
     #[test]
-    fn a_tile_can_send_the_demo_somewhere_else() {
+    fn a_service_can_send_the_demo_somewhere_else() {
         let mut tv = svc("Movies & TV", "videos");
         tv.url = "https://files.x/_dd/media".into();
         tv.demo_url = Some("https://jellyfin.x/sso".into());
         tv.demo = Some("full".into());
-        let html = home("tom", &[tv.clone()]);
-        assert!(html.contains("href=\"https://files.x/_dd/media\""));
-        assert!(!html.contains("jellyfin"));
-        let html = home(DEMO_USER, &[tv]);
-        assert!(html.contains("href=\"https://jellyfin.x/sso\""));
-        assert!(!html.contains("files.x/_dd/media"));
+        assert_eq!(
+            me("tom", &[tv.clone()])["services"][0]["url"],
+            "https://files.x/_dd/media"
+        );
+        assert_eq!(
+            me(DEMO_USER, &[tv])["services"][0]["url"],
+            "https://jellyfin.x/sso"
+        );
     }
 
     #[test]
     fn the_name_is_what_opens_the_menu() {
-        let html = home("tom", &[svc("Chat", "chat")]);
-        // the name and the avatar are inside the control, not beside it
-        let s = html.split("<summary>").nth(1).unwrap_or_default();
-        let s = s.split("</summary>").next().unwrap_or_default();
-        assert!(
-            s.contains("<span>tom</span>"),
-            "the name is not the control: {s}"
-        );
-        assert!(s.contains("class=\"avatar\""));
-        // and nothing else in the bar competes with it
-        assert!(!html.contains("aria-label=\"Menu\""));
+        // the shell builds the control from the name and the initial, and
+        // puts nothing else in the bar beside it
+        let shell = text("shell.js");
+        assert!(shell.contains("el('summary'") && shell.contains("class: 'avatar'"));
+        assert!(!shell.contains("aria-label': 'Menu'"));
+        assert_eq!(me("tom", &[])["initial"], "t");
     }
 
     #[test]
-    fn a_menu_only_service_is_in_the_menu_and_not_a_tile() {
+    fn a_menu_only_service_is_in_the_menu_and_not_on_the_home_page() {
         let mut m = svc("Metrics", "metrics");
         m.menu_only = true;
-        let html = home("tom", &[svc("Photos", "photos"), m.clone()]);
+        let answer = me("tom", &[svc("Photos", "photos"), m.clone()]);
         assert_eq!(
-            html.matches("class=\"service\"").count(),
+            answer["services"].as_array().unwrap().len(),
             1,
             "metrics got a row"
         );
         assert!(
-            html.contains("https://metrics.example/"),
-            "metrics left the menu too"
+            menu_urls(&answer)
+                .iter()
+                .any(|u| u == "https://metrics.example/")
         );
         // the name it is given comes from the service, so the json the
         // module emits and the field here have to agree
@@ -772,18 +693,23 @@ mod tests {
     }
 
     #[test]
-    fn a_tile_per_service_with_its_mark() {
-        let html = home("tom", &[svc("Photos", "photos"), svc("Odd", "odd")]);
-        assert_eq!(html.matches("class=\"service\"").count(), 2);
-        assert!(html.contains("<span class=\"name\">Photos</span>"));
+    fn a_row_per_service_with_its_mark() {
+        let m = me("tom", &[svc("Photos", "photos"), svc("Odd", "odd")]);
+        let rows = m["services"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["name"], "Photos");
         // where it lives, from its url
-        assert!(html.contains("<span class=\"host\">photos.example</span>"));
-        assert!(html.contains("href=\"https://photos.example/\""));
-        assert!(html.contains("cx=\"7.5\""), "the photos mark");
-        assert!(html.contains("rx=\"3\""), "the plain mark");
-        assert!(html.contains("<span>tom</span>"));
-        assert!(html.contains("/_dd/logout"));
-        let html = home("tom", &[]);
-        assert!(html.contains("Nothing runs here yet"));
+        assert_eq!(rows[0]["host"], "photos.example");
+        assert_eq!(rows[0]["url"], "https://photos.example/");
+        assert!(
+            rows[0]["icon"].as_str().unwrap().contains("cx=\"7.5\""),
+            "the photos mark"
+        );
+        assert!(
+            rows[1]["icon"].as_str().unwrap().contains("rx=\"3\""),
+            "the plain mark"
+        );
+        assert_eq!(m["user"], "tom");
+        assert!(text("shell.js").contains("Nothing runs here yet"));
     }
 }

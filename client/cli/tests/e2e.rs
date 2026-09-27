@@ -587,6 +587,7 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     assert_eq!(st, 200);
     assert!(body.contains("Your account is made"), "{body}");
     assert_eq!(get_with_cookie(&a, "/verify", &cookie).await.0, 403);
+    assert_eq!(get_with_cookie(&a, "/_dd/me", &cookie).await.0, 403);
     // and none of a member's own pages open to an account that is not one
     for page in [
         "/_dd/files",
@@ -659,7 +660,9 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
         .to_string();
     assert_eq!(get_with_cookie(&b, "/verify", &cookie_b).await.0, 200);
     let (_, body) = get_with_cookie(&b, "/_dd/home", &cookie_b).await;
-    assert!(body.contains("Your services"), "{body}");
+    assert!(body.contains("id=\"services\""), "{body}");
+    let (st, me) = get_with_cookie(&b, "/_dd/me", &cookie_b).await;
+    assert_eq!(st, 200, "{me}");
 
     // dd member add, by name, finds the same id
     let repo = scratch("repo");
@@ -775,7 +778,8 @@ async fn an_invite_code_lets_one_person_in_once() {
     assert_eq!(st, 200);
     assert_eq!(get_with_cookie(&a, "/verify", &cookie).await.0, 200);
     let (_, body) = get_with_cookie(&a, "/_dd/home", &cookie).await;
-    assert!(body.contains("Your services"), "{body}");
+    assert!(body.contains("id=\"services\""), "{body}");
+    assert_eq!(get_with_cookie(&a, "/_dd/me", &cookie).await.0, 200);
     let e = entry(&a, "eve").await.unwrap();
     assert!(e["entry"]["grant"]["proof"].is_string());
 
@@ -898,6 +902,7 @@ async fn the_demo_is_an_account_with_a_small_permission_set() {
         url: format!("https://{name}.x/"),
         icon: "".into(),
         color: "#000".into(),
+        blurb: String::new(),
         demo: demo.map(String::from),
         demo_url: None,
         menu_only: false,
@@ -985,17 +990,27 @@ async fn the_demo_is_an_account_with_a_small_permission_set() {
     // no permission, no door; and a host that is no tile at all
     assert_eq!(gate("GET", "photos.x").await.0, 403);
     assert_eq!(gate("GET", "elsewhere.x").await.0, 403);
-    // every tile on the page, the shut one greyed
+    // every service on the page, the shut one marked; the page fills
+    // itself from /_dd/me, so that is where the demo's view is
     let (st, body) = get_with_cookie(&a, "/_dd/home", &cookie).await;
     assert_eq!(st, 200);
-    assert!(body.contains("This is a demo"), "{body}");
-    assert!(body.contains("href=\"https://files.x/\""), "{body}");
-    assert!(
-        body.contains("photos")
-            && body.contains("Not in the demo.")
-            && !body.contains("href=\"https://photos.x/\""),
-        "{body}"
-    );
+    assert!(body.contains("id=\"demo\""), "{body}");
+    let (st, me) = get_with_cookie(&a, "/_dd/me", &cookie).await;
+    assert_eq!(st, 200, "{me}");
+    let me: serde_json::Value = serde_json::from_str(&me).unwrap();
+    assert_eq!(me["demo"], true);
+    let svc = |n: &str| {
+        me["services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == n)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(svc("files")["url"], "https://files.x/");
+    assert_eq!(svc("files")["shut"], false);
+    assert_eq!(svc("photos")["shut"], true, "photos is not in the demo");
     // nobody takes the demo's name
     let mut key = SoftPasskey::new(true);
     let (st, why) = join_in_browser(&a, &mut key, "demo").await;

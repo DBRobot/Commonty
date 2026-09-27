@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Files</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a class="brand" href="/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="wide">
+    <div class="card" data-user="">
+      <div class="filesbar">
+        <h1>Files</h1>
+        <div class="grow"></div>
+        <button id="up" class="quiet" hidden>Upload</button>
+        <input id="picker" type="file" multiple hidden>
+      </div>
+      <p id="msg" class="lead">Unlocking with your passkey…</p>
+  
+      <div id="link" hidden>
+        <p class="lead">This browser has not been linked to your files yet. On a machine that holds your account's key, run this once:</p>
+        <pre class="cmd"><code id="linkcmd"></code></pre>
+        <p class="note">The key is made from this passkey and never leaves this tab. Linking seals your library keys to it.</p>
+      </div>
+  
+      <nav id="crumbs" class="crumbs" hidden></nav>
+      <ul id="list" class="rows" hidden></ul>
+      <p id="empty" class="note" hidden>Nothing here yet.</p>
+      <ul id="jobs" class="rows jobs" hidden></ul>
+      <p class="note">Names and contents are encrypted in this tab. The box stores what it cannot read.</p>
+    </div>
+  </main>
+  <script type="module" src="/_dd/static/files.js"></script>
+  <script type="module" src="/_dd/static/shell.js"></script>
+</body>
+</html>

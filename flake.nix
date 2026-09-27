@@ -557,13 +557,19 @@
           placement = import ./nix/tests/placement.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;
-          # the app carries the site's stylesheet and fonts at the site's
-          # paths, so it looks like the site; two copies, kept one here
-          stylesheet = pkgs.runCommand "one-stylesheet" { } ''
-            cmp ${./box/verify/web/home.css} ${./app/web/_dd/static/home.css}
-            for f in public-sans plex-mono-400 plex-mono-500; do
-              cmp ${./box/verify/web/fonts}/$f.woff2 ${./app/web/_dd/static}/$f.woff2
+          # the app carries the site's signed-in pages, their scripts, the
+          # stylesheet and the fonts at the site's paths (scripts/sync-app-web
+          # copies them); two copies, kept one here
+          stylesheet = pkgs.runCommand "one-set-of-pages" { } ''
+            site=${./box/verify/web}
+            app=${./app/web/_dd}
+            for f in home.css shell.js library.js files.js media.js panel.js devices.js backups.js boxes.js network.js webauthn.js; do
+              cmp $site/$f $app/static/$f
             done
+            for f in public-sans plex-mono-400 plex-mono-500; do
+              cmp $site/fonts/$f.woff2 $app/static/$f.woff2
+            done
+            diff -r $site/pages $app/pages
             touch $out
           '';
         };
