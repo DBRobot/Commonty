@@ -1,7 +1,7 @@
 # The games test: a member starts a server, a deploy and a reboot leave it, the world outlives it.
 
 sock = "--unix-socket /run/dd-games/dd-games.sock"
-m = "curl -s -o /dev/null -w '%{http_code}' " + sock + " -X POST -H 'x-dd-user: tom' http://games"
+m = "curl -s -o /dev/null -w '%{http_code}' " + sock + " -X POST -H 'x-dd-user: tom' -H 'x-dd-role: member' http://games"
 d = "/var/lib/dd-games/instances/probe1"
 up = "curl -sf -m 5 http://127.0.0.1:27015/ >/dev/null"
 world = d + "/server/world"
@@ -15,10 +15,10 @@ box.fail("curl -s -m 3 -o /dev/null http://127.0.0.1:4182/")
 
 # nobody: no page. A member: the catalogue.
 assert box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} http://games/").strip() == "401"
-assert "Probe" in box.succeed(f"curl -sf {sock} -H 'x-dd-user: tom' http://games/")
-assert "Server name" in box.succeed(f"curl -sf {sock} -H 'x-dd-user: tom' http://games/game/probe")
+assert "Probe" in box.succeed(f"curl -sf {sock} -H 'x-dd-user: tom' -H 'x-dd-role: member' http://games/")
+assert "Server name" in box.succeed(f"curl -sf {sock} -H 'x-dd-user: tom' -H 'x-dd-role: member' http://games/game/probe")
 # the demo sees the card without the button, and the page code is served
-demo = box.succeed(f"curl -sf {sock} -H 'x-dd-user: demo' http://games/game/probe")
+demo = box.succeed(f"curl -sf {sock} -H 'x-dd-user: demo' -H 'x-dd-role: demo' http://games/game/probe")
 assert "Start a server" not in demo and "can look" in demo
 box.succeed(f"curl -sf {sock} http://games/static/games.css | grep -q ribbon")
 box.succeed(f"curl -sf {sock} http://games/static/games.js | grep -q Escape")
@@ -27,7 +27,7 @@ box.succeed(f"curl -sf {sock} http://games/static/games.js | grep -q Escape")
 assert box.succeed(f"{m}/create/probe -d SERVER_NAME=toms").strip() == "303"
 box.wait_until_succeeds(up, timeout=1500)
 assert box.succeed(f"cat {d}/status").strip() == "running"
-page = box.succeed(f"curl -sf {sock} -H 'x-dd-user: tom' http://games/")
+page = box.succeed(f"curl -sf {sock} -H 'x-dd-user: tom' -H 'x-dd-role: member' http://games/")
 assert "100.64.0.9:27015" in page, page
 
 # one each: a second is refused
@@ -51,10 +51,29 @@ box.succeed(up)
 
 # and cannot read its log, which is where a game server writes passwords,
 # addresses and whatever a player types at it
-own = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -H 'x-dd-user: tom' http://games/server/probe1/state").strip()
+own = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -H 'x-dd-user: tom' -H 'x-dd-role: member' http://games/server/probe1/state").strip()
 assert own == "200", own
-theirs = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -H 'x-dd-user: ann' http://games/server/probe1/state").strip()
+theirs = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -H 'x-dd-user: ann' -H 'x-dd-role: member' http://games/server/probe1/state").strip()
 assert theirs == "404", theirs
+
+# someone else's server is not there for another member at all, and a
+# guest can neither start one nor see this one
+page = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -H 'x-dd-user: ann' -H 'x-dd-role: member' http://games/server/probe1").strip()
+assert page == "404", page
+assert "probe1" not in box.succeed(f"curl -sf {sock} -H 'x-dd-user: ann' -H 'x-dd-role: member' http://games/")
+guest = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -X POST -H 'x-dd-user: gus' -H 'x-dd-role: guest' http://games/create/probe").strip()
+assert guest == "403", guest
+# no role from the gate is a guest, not a member
+norole = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -X POST -H 'x-dd-user: gus' http://games/create/probe").strip()
+assert norole == "403", norole
+# with no gate on this box to vouch for anyone, an invite invites nobody
+box.succeed(f"curl -s {sock} -X POST -H 'x-dd-user: tom' -H 'x-dd-role: member' -d 'p:ann=on' http://games/players/probe1")
+assert box.succeed("cat /var/lib/dd-games/players/probe1.json").strip() == "[]"
+page = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -H 'x-dd-user: ann' -H 'x-dd-role: member' http://games/server/probe1").strip()
+assert page == "404", page
+# the firewall's list names the server, its owner, and nobody else
+access = box.succeed("cat /run/dd-games/access.json")
+assert '"owner":"tom"' in access and '"players":[]' in access, access
 
 # a reboot: nothing in the configuration names this server, and it is back
 box.shutdown()

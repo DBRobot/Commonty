@@ -20,7 +20,8 @@
     {% if !other_ports.is_empty() %}
     <p class="spec">Also open: {% for p in other_ports %}{{ p.port }} ({{ p.label }}){% if !loop.last %}, {% endif %}{% endfor %}</p>
     {% endif %}
-    {% if mine && !settings.is_empty() %}<p class="spec">{{ settings }}</p>{% endif %}
+    {% if mine && !settings.is_empty() %}<p class="spec">{{ settings }} · only you see this</p>{% endif %}
+    {% if !mine %}<p class="spec">You're invited. Turn on the network in the Commonty app, then connect from the game to the address above. Ask {{ owner }} for the password if it has one.</p>{% endif %}
     {% if mine && !demo %}
     <div class="row">
       {% if idle %}
@@ -48,8 +49,29 @@
 </section>
 {% endif %}
 
+{% if mine && !demo %}
+<section style="margin-top:28px" id="players">
+  <h2>Players</h2>
+  <p class="spec">Only you and the people here can reach this server; nobody else on Commonty sees it.{% if players.is_empty() %} Nobody is invited yet.{% endif %}</p>
+  {% if friends.is_empty() %}
+  <p class="spec">Invite comes from your friends: make a friend link on <a href="{{ home }}_dd/friends">Friends</a> and send it to whoever you want to play with.</p>
+  {% else %}
+  <form method="post" action="/players/{{ s.id }}" class="panel players">
+    <ul>
+      {% for (name, on) in friends %}
+      <li><label><input type="checkbox" name="p:{{ name }}"{% if *on %} checked{% endif %}><span>{{ name }}</span></label></li>
+      {% endfor %}
+    </ul>
+    <div class="row"><button>Save players</button><span class="spec">They can reach it until you untick them, or stop being friends.</span></div>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if mine %}
 <section style="margin-top:28px">
   <h2>Log</h2>
   <pre id="log" class="log">{% if log.is_empty() %}nothing yet{% else %}{{ log }}{% endif %}</pre>
 </section>
+{% endif %}
 {% endblock %}

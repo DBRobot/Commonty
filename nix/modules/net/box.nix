@@ -162,6 +162,10 @@ in
           sleep $wait
         done
         echo "on the network as $(tailscale --socket "$sock" ip -4)"
+        # where this box is on the network, for pages that tell people where
+        # to connect (the games manager); moved into place, never half written
+        tailscale --socket "$sock" ip -4 > /run/commonty-net-address.tmp
+        mv /run/commonty-net-address.tmp /run/commonty-net-address
         ${cfg.afterJoin}
       '';
     };

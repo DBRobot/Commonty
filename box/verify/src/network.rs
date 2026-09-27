@@ -256,7 +256,10 @@ pub(crate) async fn join(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
     // network carries boxes, and every box trusts the interface it arrives
     // on. Membership is the release's word, and the demo never leaves the
     // browser it was made in.
-    if !app.member(&user) || user == crate::pages::DEMO_USER {
+    // A guest joins too: their devices come under the same rule as a
+    // member's (the web port, which is public anyway, and the game ports,
+    // which the games box opens per server to the players invited).
+    if !(app.member(&user) || app.guest(&user)) || user == crate::pages::DEMO_USER {
         return (StatusCode::FORBIDDEN, "not a member of this fleet").into_response();
     }
     match door.join_key(&user).await {

@@ -46,7 +46,7 @@ impl<'a> ServerView<'a> {
             } else {
                 format!("{}'s", i.owner)
             },
-            address: port.map(|p| format!("{}:{}", m.cfg.address, p.port)),
+            address: port.map(|p| format!("{}:{}", m.address(), p.port)),
         }
     }
 }
@@ -67,6 +67,8 @@ pub struct Library<'a> {
     pub user: &'a str,
     /// the demo may look, not start
     pub demo: bool,
+    /// in through a friend link: plays where invited, hosts nothing
+    pub guest: bool,
     pub home: &'a str,
     pub q: &'a str,
     pub count: usize,
@@ -91,14 +93,19 @@ pub struct WorldView {
 pub fn library(
     m: &Manager,
     user: &str,
+    guest: bool,
     q: &str,
     open: Option<&str>,
     notice: Option<&str>,
 ) -> String {
     let all = m.instances();
     let ql = q.trim().to_lowercase();
-    let (mine, others): (Vec<&Instance>, Vec<&Instance>) =
-        all.iter().partition(|i| i.owner == user);
+    // yours, and the ones you are invited to; nobody else's is shown
+    let mine: Vec<&Instance> = all.iter().filter(|i| i.owner == user).collect();
+    let others: Vec<&Instance> = all
+        .iter()
+        .filter(|i| i.owner != user && m.may_see(user, i))
+        .collect();
     let open = open.and_then(|id| m.cfg.catalogue.get(id)).map(|g| {
         let (ours, more) = g.visible_settings().partition(|s| s.ours.is_some());
         OpenView {
@@ -117,6 +124,7 @@ pub fn library(
     Library {
         user,
         demo: user == "demo",
+        guest,
         home: &m.cfg.home,
         q,
         count: m.cfg.catalogue.len(),
@@ -178,7 +186,7 @@ pub struct Server<'a> {
     pub fields: Vec<Setting>,
     pub home: &'a str,
     pub s: ServerView<'a>,
-    pub address: &'a str,
+    pub address: String,
     /// the port a player types: SERVER_PORT, else the first
     pub main_port: Option<PortView>,
     pub other_ports: Vec<PortView>,
@@ -187,10 +195,17 @@ pub struct Server<'a> {
     pub idle: bool,
     pub busy: bool,
     pub log: String,
+    pub owner: &'a str,
+    /// who plays here besides the owner
+    pub players: Vec<String>,
+    /// the owner's friends, each ticked if invited: the invite form
+    pub friends: Vec<(String, bool)>,
 }
 
 /// One server: what it is, where it is, what it says, and its controls.
-pub fn server(m: &Manager, user: &str, i: &Instance) -> String {
+/// `friends` is the owner's, from the gate, when the owner is looking.
+pub fn server(m: &Manager, user: &str, i: &Instance, friends: &[String]) -> String {
+    let players = m.players(&i.id);
     let st = m.state(i);
     let g = m.cfg.catalogue.get(&i.game);
     let settings = g
@@ -221,7 +236,7 @@ pub fn server(m: &Manager, user: &str, i: &Instance) -> String {
         fields,
         home: &m.cfg.home,
         s: ServerView::new(m, i, user),
-        address: &m.cfg.address,
+        address: m.address(),
         main_port: i
             .ports
             .iter()
@@ -251,7 +266,18 @@ pub fn server(m: &Manager, user: &str, i: &Instance) -> String {
         mine: i.owner == user,
         idle: matches!(st, State::Stopped | State::Failed),
         busy: matches!(st, State::Starting | State::Updating),
-        log: m.log_tail(&i.id, 80),
+        // what a game server prints is the owner's to read
+        log: if i.owner == user {
+            m.log_tail(&i.id, 80)
+        } else {
+            String::new()
+        },
+        owner: &i.owner,
+        friends: friends
+            .iter()
+            .map(|f| (f.clone(), players.contains(f)))
+            .collect(),
+        players,
     }
     .render()
     .unwrap_or_default()

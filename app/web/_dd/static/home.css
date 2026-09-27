@@ -37,6 +37,10 @@
   --focus: #E0A21B;
   /* the bar's blue, for what is picked (a tab, a badge) */
   --pick: #1D4470;
+  --guest: #8A5A12;
+  --guest-bg: #F6ECD9;
+  --member: #1D4470;
+  --member-bg: #E3ECF5;
   --off: #8A918C;
   --radius: 4px;
   --font: "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
@@ -46,6 +50,10 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0F1318;
+    --guest: #E3B769;
+    --guest-bg: #2E2616;
+    --member: #9CC3EA;
+    --member-bg: #1B2838;
     --surface: #171C22;
     --ink: #E5E9EE;
     --ink-2: #A1A9B3;
@@ -62,6 +70,10 @@
 }
 :root[data-theme="dark"] {
   --bg: #0F1318;
+  --guest: #E3B769;
+  --guest-bg: #2E2616;
+  --member: #9CC3EA;
+  --member-bg: #1B2838;
   --surface: #171C22;
   --ink: #E5E9EE;
   --ink-2: #A1A9B3;
@@ -898,4 +910,62 @@ main.drive .note { margin: 0; padding: 12px 16px; font-size: 14px; color: var(--
   .wide-only { display: none; }
   .search { flex: 1 1 100%; order: 3; }
   .search input { width: 100%; }
+}
+
+/* Friends: yours, a link to make, and the page a link opens */
+main.friends { max-width: 980px; margin: 0 auto; padding: 48px 40px 72px; display: grid; gap: 20px; }
+main.friends .intro { margin-bottom: 4px; }
+main.friends .panel { padding: 22px 24px; }
+main.friends h2 { margin: 0 0 4px; font-size: 19px; }
+main.friends .small { margin: 0; font-size: 14px; color: var(--ink-2); }
+main.friends button { margin-top: 0; }
+main.friends .add-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; }
+main.friends .made { margin-top: 16px; display: grid; gap: 8px; }
+main.friends .linkbox { display: flex; gap: 8px; }
+main.friends .linkbox input { flex: 1; min-width: 0; margin: 0; height: 48px; font: 14px var(--mono); background: var(--bg); }
+main.friends .fine { margin: 0; font: 13px var(--mono); color: var(--ink-2); }
+main.friends .note { margin: 4px 0 0; padding: 12px 14px; border: 0; border-radius: var(--radius); background: var(--guest-bg); color: var(--ink); font-size: 14px; }
+main.friends .note b { color: var(--guest); }
+main.friends .error { margin: 12px 0 0; color: #B3261E; font-size: 15px; }
+main.friends .people { list-style: none; margin: 14px 0 0; padding: 0; }
+main.friends .people li { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 14px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line-2); }
+main.friends .people li.waiting { grid-template-columns: minmax(0, 1fr) auto; }
+main.friends .av, main.friends .invite-head .av {
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+  background: hsl(var(--h, 212) 45% 42%); color: #fff; font-weight: 800;
+}
+main.friends .who b { display: block; }
+main.friends .who span { font: 13px var(--mono); color: var(--ink-2); }
+main.friends .kind { font: 500 12px var(--mono); letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 3px; background: var(--bg); color: var(--ink-2); }
+main.friends .kind.member { background: var(--member-bg); color: var(--member); }
+main.friends .kind.guest { background: var(--guest-bg); color: var(--guest); }
+main.friends button.linkish, main.friends button.linkish:hover {
+  height: auto; padding: 4px 6px; background: none; color: var(--ink-2); font-size: 14px; font-weight: 500;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+main.friends button.linkish:hover { color: var(--ink); }
+main.friends.invite { max-width: 620px; padding-top: 72px; }
+main.friends .invite-head { display: flex; gap: 16px; align-items: center; margin-bottom: 14px; }
+main.friends .invite-head .av { width: 52px; height: 52px; font-size: 20px; flex: none; }
+main.friends .invite-head h1 { font-size: 26px; margin: 0; }
+main.friends .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+main.friends #card > button { margin-top: 18px; }
+a.button {
+  display: inline-flex; align-items: center; justify-content: center; height: 48px; margin-top: 18px; padding: 0 22px;
+  border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font-weight: 600; text-decoration: none;
+}
+a.button:hover { background: var(--accent-hover); color: var(--accent-ink); }
+a.button.quiet { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+a.button.quiet:hover { background: var(--bg); color: var(--ink); }
+main.friends .row a.button { margin-top: 0; }
+/* a guest's home: the one door, and a look at the rest */
+main.home .guest-more { margin-top: 40px; padding: 24px; border: 1px dashed var(--line); border-radius: var(--radius); }
+main.home .guest-more h2 { margin: 0 0 6px; font-size: 20px; }
+main.home .guest-more p { margin: 0; max-width: 62ch; color: var(--ink-2); }
+@media (max-width: 640px) {
+  main.friends { padding: 28px 16px 56px; }
+  main.friends .add-head { grid-template-columns: 1fr; }
+  main.friends .add-head button { width: 100%; }
+  main.friends .people li { grid-template-columns: 40px minmax(0, 1fr) auto; }
+  main.friends .people li .kind { grid-column: 2; justify-self: start; }
 }

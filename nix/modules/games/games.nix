@@ -1,5 +1,6 @@
 {
   config,
+  ddScript,
   pkgs,
   lib,
   self,
@@ -9,6 +10,7 @@ let
   cfg = config.dd.games;
   base = config.dd.domain;
   port = 4182; # only a test binds this; a box serves on the socket
+  range = "${toString cfg.portBase}:${toString (cfg.portBase + cfg.portCount - 1)}";
   # the manager takes the caller's name from a header nginx sets from the
   # verifier. A port would let anything else on this box set it too, and
   # this box runs CI jobs and game guests
@@ -50,7 +52,9 @@ let
     export DD_INSTANCE_DIR="$d"
     export NIX_DISK_IMAGE="$d"/disk.qcow2
     export QEMU_NET_OPTS="$fwd"
-    export QEMU_OPTS="-m $mem -smp $cores -qmp unix:$d/qmp,server,nowait ${lib.optionalString (!cfg.kvm) "-machine accel=tcg -cpu max"}"
+    export QEMU_OPTS="-m $mem -smp $cores -qmp unix:$d/qmp,server,nowait ${
+      lib.optionalString (!cfg.kvm) "-machine accel=tcg -cpu max"
+    }"
     cd "$d"
     exec ${vm}/bin/run-game-vm
   '';
@@ -125,26 +129,58 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # Players reach a server on its own port, from either tunnel: the range
-    # the manager hands out and nothing around it. Both protocols, because
-    # games use udp and tcp on the same number.
-    networking.firewall.interfaces =
-      let
-        range = [
-          {
-            from = cfg.portBase;
-            to = cfg.portBase + cfg.portCount - 1;
-          }
-        ];
-        open = {
-          allowedTCPPortRanges = range;
-          allowedUDPPortRanges = range;
-        };
-      in
-      {
-        tailscale0 = open;
-        commonty0 = open;
+    # A server's ports are open to the people invited to it and to no one
+    # else. Game traffic from the fleet's network goes through a chain of its
+    # own, one rule per invited device and port; empty, it lets nothing
+    # through and the packet goes on to the firewall's refusal. Nothing else
+    # opens these ports, on any interface. games-access fills the chain.
+    networking.firewall.extraCommands = ''
+      for ipt in iptables ip6tables; do
+        $ipt -N dd-games 2>/dev/null || true
+        $ipt -F dd-games
+        for proto in tcp udp; do
+          $ipt -D nixos-fw -i commonty0 -p $proto --dport ${range} -j dd-games 2>/dev/null || true
+          $ipt -I nixos-fw 1 -i commonty0 -p $proto --dport ${range} -j dd-games
+        done
+      done
+    '';
+    networking.firewall.extraStopCommands = ''
+      for ipt in iptables ip6tables; do
+        $ipt -F dd-games 2>/dev/null || true
+      done
+    '';
+
+    # Who may reach which server, asked again every fifteen seconds: the
+    # manager says which servers are up and whom their owners invited, the
+    # gate turns those names into devices - and only for players still the
+    # owner's friends - and the chain is rebuilt when the answer changes.
+    # When either cannot say, the chain is emptied.
+    systemd.services.games-access = {
+      description = "Open each game server's ports to its invited players' devices";
+      after = [ "firewall.service" ];
+      path = [
+        pkgs.jq
+        pkgs.curl
+        pkgs.iptables
+        pkgs.coreutils
+      ];
+      serviceConfig.Type = "oneshot";
+      script = ddScript ./games-access.sh {
+        ACCESS = "/run/dd-games/access.json";
+        GATE = "http://127.0.0.1:${toString config.dd.verify.port}";
+        STATE = "/run/games-access";
       };
+    };
+    systemd.timers.games-access = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "30s";
+        OnUnitActiveSec = "15s";
+        AccuracySec = "1s";
+      };
+    };
+    # a firewall reload empties the chain; fill it again straight after
+    systemd.services.firewall.postStart = lib.mkAfter "systemctl start --no-block games-access.service || true";
     dd.box.plaintext = [ "games (servers members start; their worlds)" ];
 
     # fixed ids: the guest's game user has the same, so a 9p share needs no
@@ -195,6 +231,11 @@ in
         DD_GAMES_PER_MEMBER = toString cfg.perMember;
         DD_GAMES_MEMORY_MIB = toString cfg.memoryMiB;
         DD_GAMES_ADDRESS = config.dd.box.tailnet;
+        # this box on the fleet's network, where the players it lets in are
+        DD_GAMES_ADDRESS_FILE = "/run/commonty-net-address";
+        # what games-access reads
+        DD_GAMES_ACCESS = "/run/dd-games/access.json";
+        DD_GAMES_GATE = "http://127.0.0.1:${toString config.dd.verify.port}";
         DD_GAMES_HOME = "https://home.${base}/";
       };
       serviceConfig = {
@@ -235,6 +276,10 @@ in
           auth_request /_dd/verify;
           auth_request_set $auth_user $upstream_http_x_auth_request_preferred_username;
           proxy_set_header X-DD-User $auth_user;
+          # member, guest or demo, from the same answer; whatever a client
+          # sent under this name is replaced
+          auth_request_set $auth_role $upstream_http_x_dd_role;
+          proxy_set_header X-DD-Role $auth_role;
           # likewise: the manager is told who, not handed the proof
           proxy_set_header Authorization "";
           proxy_set_header Cookie $dd_cookie_stripped;
