@@ -82,6 +82,11 @@ in
               --replace-fail 'output: "export",' "output: \"export\", generateBuildId: async () => \"commonty\","
             # the bar's stylesheet is the site's own file, not a copy of it
             cp ${../../../box/verify/web/bar.css} apps/photos/src/styles/commonty-bar.css
+            # The grid drew three rows past the screen, and a picture is only
+            # fetched once it is drawn: scrolling reached pictures still on
+            # their way. Twenty rows is a few screens of warning.
+            substituteInPlace apps/photos/src/components/FileList.tsx \
+              --replace-fail "overscanCount={3}" "overscanCount={20}"
           '';
         });
       })
