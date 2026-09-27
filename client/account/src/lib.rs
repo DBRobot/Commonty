@@ -380,6 +380,22 @@ pub async fn admit_passkey(
     if entry.passkeys.iter().any(|p| p.id == pk.id) {
         bail!("that passkey is already in the entry");
     }
+    // The passkey brought the key the Files and Movies pages open with: the
+    // libraries are sealed to it in the same signed step, so the browser
+    // opens them at once and nobody runs `dd passkey link` by hand.
+    if let Some(library_key) = &pk.library_key {
+        identity::decode_public(library_key).context("that is not an ed25519 public key")?;
+        let sealed_to = format!("passkey:{}", pk.id);
+        for lib in &mut entry.libraries {
+            let key = library::open_library(lib, None, Some(root))
+                .with_context(|| format!("library {}: the root does not open it", lib.id))?;
+            lib.keys.retain(|k| k.to != sealed_to);
+            lib.keys.push(library::SealedKey {
+                to: sealed_to.clone(),
+                sealed: library::seal_to(library_key, &key[..])?,
+            });
+        }
+    }
     entry.passkeys.push(pk);
     entry.version += 1;
     entry.updated = identity::now();
