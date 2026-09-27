@@ -12,6 +12,7 @@
   dd.home.services = [
     {
       name = "Metrics";
+      blurb = "How the boxes are doing.";
       url = "https://grafana.${config.dd.domain}/";
       # in the bar's menu beside Boxes and Backups, where looking at the
       # fleet belongs; it is not a service the way photos and films are

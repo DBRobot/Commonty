@@ -1,20 +1,38 @@
 {% extends "base.html" %}
 {% block title %}Sign in{% endblock %}
+{% block bar %}<a href="https://home.{{ domain }}/_dd/download">Get the app</a>{% endblock %}
 {% block main %}
 <main class="auth">
-  <div class="card">
-    <h1>Sign in</h1>
-    <p class="lead">With the passkey you set up for this network. Nothing leaves your device but a signature.</p>
-    <label for="u">Username</label>
-    <input id="u" autocomplete="username webauthn" autocapitalize="none" spellcheck="false">
-    <button id="go">Use passkey</button>
-    <div id="msg"></div>
-    <p class="note">
-      New here? <a href="/_dd/join">Create an account</a>, or <a href="/_dd/demo">look around first</a>.<br>
-      Have a device with <code>dd</code> on it? Run <code>dd enrol</code> there and open the link it prints.
-    </p>
-    <p class="note getapp">Signing in on a phone or a desktop?<br>
-      <a href="https://home.{{ domain }}/_dd/download">Get the app</a></p>
+  <div class="auth-grid">
+    <section>
+      <h1>Sign in</h1>
+      <p class="lead">Use the passkey you made for this network. Only a signature leaves your device.</p>
+      <label for="u">Username</label>
+      <input id="u" autocomplete="username webauthn" autocapitalize="none" spellcheck="false">
+      <button id="go">Sign in with passkey</button>
+      <div id="msg"></div>
+    </section>
+    <aside>
+      <div class="ways">
+        <h2>Other ways in</h2>
+        <div class="way">
+          <span class="what">Someone invited you</span>
+          <p>Make an account with the code they gave you. <a href="/_dd/join">Create an account</a></p>
+        </div>
+        <div class="way">
+          <span class="what">You want to look first</span>
+          <p>The demo shows what a member sees, without the keys. <a href="/_dd/demo">View the demo</a></p>
+        </div>
+        <div class="way">
+          <span class="what">You use dd on a computer</span>
+          <p>Run <code>dd enrol</code> there and open the link it prints.</p>
+        </div>
+      </div>
+      <div class="aside-note">
+        <h2>On a phone or a desktop</h2>
+        <p>The app reaches your files, photos and films, and keeps its key on the device it runs on. <a href="https://home.{{ domain }}/_dd/download">Get the app</a></p>
+      </div>
+    </aside>
   </div>
 </main>
 <script type="module" src="/_dd/static/login.js"></script>

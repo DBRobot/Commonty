@@ -9,6 +9,7 @@
   dd.home.services = [
     {
       name = "Chat";
+      blurb = "An AI model that runs on the box, not in someone else's cloud.";
       url = "https://llm.${config.dd.domain}/";
       # a prompt is real compute on one model: ten an hour for the demo
       demo = "rate:10";

@@ -10,6 +10,7 @@
   dd.home.services = [
     {
       name = "Code";
+      blurb = "Git repositories, with their history and reviews.";
       url = "https://git.${config.dd.domain}/";
       # the forge is told nobody is there (modules/forgejo.nix): public
       # repos, no account

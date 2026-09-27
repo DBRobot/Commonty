@@ -1053,7 +1053,13 @@ async fn demo(State(app): State<Arc<App>>) -> Response {
 async fn static_file(axum::extract::Path(file): axum::extract::Path<String>) -> Response {
     match pages::static_file(&file) {
         Some((body, ty)) => {
-            ([("content-type", ty), ("cache-control", "no-cache")], body).into_response()
+            // a font is the same bytes until a release changes its name
+            let cache = if ty.starts_with("font/") {
+                "public, max-age=604800"
+            } else {
+                "no-cache"
+            };
+            ([("content-type", ty), ("cache-control", cache)], body).into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }
@@ -1634,6 +1640,7 @@ mod tests {
                 url: url.into(),
                 icon: String::new(),
                 color: String::new(),
+                blurb: String::new(),
                 demo: demo.map(str::to_string),
                 demo_url: demo_url.map(str::to_string),
                 menu_only: false,

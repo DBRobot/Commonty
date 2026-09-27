@@ -36,6 +36,7 @@
   dd.home.services = [
     {
       name = "Photos";
+      blurb = "Your photo library, encrypted on your phone before it uploads.";
       # the passkey opens it: the page makes or opens the ente account in
       # the browser and hands ente's app the session
       url = "https://photos.${config.dd.domain}/_dd/photos";

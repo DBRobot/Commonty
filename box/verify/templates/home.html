@@ -4,29 +4,30 @@
 <main class="home">
   {% if demo %}
   <div class="banner"><strong>This is a demo.</strong> You are seeing what a member sees, without the keys: nothing here is yours, nothing you do is kept, and some doors stay shut. To join, someone who is in gives you a code.</div>
-  <h1>The services</h1>
-  {% else %}
-  <h1>Your services</h1>
   {% endif %}
+  <div class="intro">
+    <h1>Services</h1>
+    <p>Everything here runs on boxes the people in it own.</p>
+  </div>
 
   {% if tiles.is_empty() %}
   <p class="empty">Nothing runs here yet.</p>
   {% else %}
-  <ul class="grid">
+  <ul class="services">
     {% for t in tiles %}
     <li>
       {% if t.shut %}
-      <div class="tile off" aria-disabled="true">
+      <div class="service off" aria-disabled="true">
       {% else %}
-      <a class="tile" href="{{ t.url }}">
+      <a class="service" href="{{ t.url }}">
       {% endif %}
-        <span class="icon" style="background:{{ t.color }}" aria-hidden="true">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">{{ t.icon|safe }}</svg>
-        </span>
+        <svg viewBox="0 0 20 20" fill="none" stroke-width="1.5" aria-hidden="true">{{ t.icon|safe }}</svg>
         <span>
-          <h2>{{ t.name }}</h2>
-          {% if t.shut %}<p class="why">Not in the demo.</p>{% endif %}
+          <span class="name">{{ t.name }}</span>
+          <span class="blurb">{% if t.shut %}Not in the demo.{% else %}{{ t.blurb }}{% endif %}</span>
         </span>
+        <span class="host">{{ t.host }}</span>
+        <span class="open">{% if t.shut %}Shut{% else %}Open{% endif %}</span>
       {% if t.shut %}</div>{% else %}</a>{% endif %}
     </li>
     {% endfor %}

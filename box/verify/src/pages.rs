@@ -13,6 +13,9 @@ pub struct Service {
     pub icon: String,
     /// a css colour for the tile's icon
     pub color: String,
+    /// one line under the name on the home page: what it is for
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub blurb: String,
     /// What the demo account may do here, as the gate enforces it: `full`
     /// (the service's own permissions are the limit), `read` (no writing
     /// method), `rate:N` (reads free, N other requests an hour). None:
@@ -39,8 +42,29 @@ pub struct Service {
 pub const DEMO_USER: &str = "demo";
 
 /// the stylesheet and the scripts, by the name under /_dd/static/
-pub fn static_file(name: &str) -> Option<(&'static str, &'static str)> {
+pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
     let js = "text/javascript; charset=utf-8";
+    let woff2 = "font/woff2";
+    let text = |s: &'static str, ty| Some((s.as_bytes(), ty));
+    // the typefaces the stylesheet names, under the licence in web/fonts
+    match name {
+        "public-sans.woff2" => {
+            return Some((include_bytes!("../web/fonts/public-sans.woff2"), woff2));
+        }
+        "plex-mono-400.woff2" => {
+            return Some((include_bytes!("../web/fonts/plex-mono-400.woff2"), woff2));
+        }
+        "plex-mono-500.woff2" => {
+            return Some((include_bytes!("../web/fonts/plex-mono-500.woff2"), woff2));
+        }
+        "fonts-license.txt" => {
+            return text(
+                include_str!("../web/fonts/LICENSE"),
+                "text/plain; charset=utf-8",
+            );
+        }
+        _ => {}
+    }
     Some(match name {
         "home.css" => (include_str!("../web/home.css"), "text/css; charset=utf-8"),
         "webauthn.js" => (include_str!("../web/webauthn.js"), js),
@@ -60,6 +84,7 @@ pub fn static_file(name: &str) -> Option<(&'static str, &'static str)> {
         "panel.js" => (include_str!("../web/panel.js"), js),
         _ => return None,
     })
+    .map(|(s, ty)| (s.as_bytes(), ty))
 }
 
 /// the mark on a tile: an svg fragment from web/icons/, by the role's name
@@ -390,8 +415,20 @@ struct Tile<'a> {
     name: &'a str,
     url: &'a str,
     icon: &'static str,
-    color: &'a str,
+    blurb: &'a str,
+    /// where it lives, as the row says it: photos.<domain>
+    host: &'a str,
     shut: bool,
+}
+
+/// a url's host: what a row shows as where the service lives
+fn host_of(url: &str) -> &str {
+    url.split("://")
+        .nth(1)
+        .unwrap_or(url)
+        .split(['/', ':'])
+        .next()
+        .unwrap_or_default()
 }
 
 #[derive(Template)]
@@ -478,7 +515,8 @@ pub fn home(user: &str, services: &[Service]) -> String {
                     _ => &s.url,
                 },
                 icon: icon(&s.icon),
-                color: &s.color,
+                blurb: &s.blurb,
+                host: host_of(&s.url),
                 // a door this account has no key to: shown, shut, and why
                 shut: demo && s.demo.is_none(),
             })
@@ -491,12 +529,17 @@ pub fn home(user: &str, services: &[Service]) -> String {
 mod tests {
     use super::*;
 
+    fn text(name: &str) -> &'static str {
+        std::str::from_utf8(static_file(name).unwrap().0).unwrap()
+    }
+
     fn svc(name: &str, icon: &str) -> Service {
         Service {
             name: name.into(),
             url: format!("https://{}.example/", name.to_lowercase()),
             icon: icon.into(),
             color: "#123456".into(),
+            blurb: String::new(),
             demo: None,
             demo_url: None,
             menu_only: false,
@@ -528,25 +571,10 @@ mod tests {
         for f in ["login.js", "join.js", "enrol.js", "redeem.js", "photos.js"] {
             assert!(static_file(f).is_some(), "{f}");
         }
-        assert!(
-            static_file("login.js")
-                .unwrap()
-                .0
-                .contains("/_dd/login/start")
-        );
-        assert!(static_file("join.js").unwrap().0.contains("/_dd/join/sign"));
-        assert!(
-            static_file("enrol.js")
-                .unwrap()
-                .0
-                .contains("/_dd/enrol/start")
-        );
-        assert!(
-            static_file("redeem.js")
-                .unwrap()
-                .0
-                .contains("/_dd/redeem/start")
-        );
+        assert!(text("login.js").contains("/_dd/login/start"));
+        assert!(text("join.js").contains("/_dd/join/sign"));
+        assert!(text("enrol.js").contains("/_dd/enrol/start"));
+        assert!(text("redeem.js").contains("/_dd/redeem/start"));
         assert!(static_file("nope").is_none());
     }
 
@@ -590,16 +618,15 @@ mod tests {
         assert!(html.contains("commonty-setup.exe"));
         // what WinFsp's licence asks of us, in the interface
         assert!(html.contains("Bill Zissimopoulos") && html.contains("winfsp"));
-        // two formats collapse into one control, one format is a button
-        // the button takes the first format; the arrow offers every one
-        assert_eq!(html.matches("class=\"split\"").count(), 1);
+        // the button takes the first format; the others are links beside it
         assert!(
             html.contains("Download .deb"),
             "the default is not on the button"
         );
-        assert!(html.contains(">.deb<") && html.contains(">AppImage<"));
-        // one format is a plain button; only Linux has two
+        assert!(html.contains(">AppImage<"));
+        // one button per platform with files; only Linux has a second format
         assert_eq!(html.matches("class=\"get\"").count(), 3);
+        assert_eq!(html.matches("class=\"alt\"").count(), 1);
         // a stranger is who this is for: no name, no avatar, no menu
         assert!(!html.contains("class=\"me\"") && !html.contains("/_dd/logout"));
         assert!(html.contains("https://home.commonty.org/"));
@@ -655,11 +682,11 @@ mod tests {
         assert!(html.contains("Movies") && html.contains("Shows"));
         // both pages open the library through the one module
         for f in ["files.js", "media.js"] {
-            assert!(static_file(f).unwrap().0.contains("from './library.js'"));
+            assert!(text(f).contains("from './library.js'"));
         }
-        assert!(static_file("library.js").unwrap().0.contains("/_dd/dav/"));
+        assert!(text("library.js").contains("/_dd/dav/"));
         // a film goes through the box, with the key sealed to it
-        let lib = static_file("library.js").unwrap().0;
+        let lib = text("library.js");
         assert!(lib.contains("/_dd/transcode/start") && lib.contains("library_key_for_box"));
         // the player comes from this box, never from someone else's
         assert!(lib.contains("'/_dd/web/hls.js'"));
@@ -728,9 +755,9 @@ mod tests {
         m.menu_only = true;
         let html = home("tom", &[svc("Photos", "photos"), m.clone()]);
         assert_eq!(
-            html.matches("class=\"tile\"").count(),
+            html.matches("class=\"service\"").count(),
             1,
-            "metrics got a tile"
+            "metrics got a row"
         );
         assert!(
             html.contains("https://metrics.example/"),
@@ -747,8 +774,10 @@ mod tests {
     #[test]
     fn a_tile_per_service_with_its_mark() {
         let html = home("tom", &[svc("Photos", "photos"), svc("Odd", "odd")]);
-        assert_eq!(html.matches("class=\"tile\"").count(), 2);
-        assert!(html.contains("<h2>Photos</h2>"));
+        assert_eq!(html.matches("class=\"service\"").count(), 2);
+        assert!(html.contains("<span class=\"name\">Photos</span>"));
+        // where it lives, from its url
+        assert!(html.contains("<span class=\"host\">photos.example</span>"));
         assert!(html.contains("href=\"https://photos.example/\""));
         assert!(html.contains("cx=\"7.5\""), "the photos mark");
         assert!(html.contains("rx=\"3\""), "the plain mark");
