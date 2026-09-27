@@ -113,7 +113,7 @@ in
         # or a cookie, so the id is the credential: 128 bits from
         # /dev/urandom, minted only for a member who asked for this one
         # file, good only while the session lives. That is what a presigned
-        # url is, and the gate already hands those out (dav.rs). Starting a
+        # url is, and the gate already hands those out (box/library/src/dav.rs). Starting a
         # session is still behind the gate above; this is only watching one
         # that somebody already started.
         "/_dd/transcode/session/" = {

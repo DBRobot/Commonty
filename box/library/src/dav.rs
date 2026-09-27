@@ -687,8 +687,40 @@ async fn move_or_copy(
     let Some(to) = clean(&decoded) else {
         return Ok((StatusCode::BAD_REQUEST, "not a path").into_response());
     };
-    if path.is_empty() || to.is_empty() || to.starts_with("trash") || path.starts_with("trash") {
+    // out of the trash is a restore, and only that: a thing put there
+    // (trash/<stamp>/...) moved back into the library, never copied, and
+    // nothing moved into the trash but by DELETE
+    let mut under = path.split('/');
+    let restoring = mv
+        && under.next() == Some(TRASH)
+        && under
+            .next()
+            .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+        && under.next().is_some();
+    if path.is_empty()
+        || to.is_empty()
+        || to == TRASH
+        || to.starts_with("trash/")
+        || (path.starts_with("trash") && !restoring)
+    {
         return Ok(StatusCode::FORBIDDEN.into_response());
+    }
+    // Overwrite: F, as WebDAV has it - nothing already there is replaced.
+    // A rename onto a taken name would otherwise drop what was there, and
+    // not into the trash either.
+    let keep = headers
+        .get("overwrite")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("F"));
+    if keep
+        && (g.stat(&key(lib, &to)).await?.is_some()
+            || !g.list_all(&format!("{}/", key(lib, &to))).await?.is_empty())
+    {
+        return Ok((
+            StatusCode::PRECONDITION_FAILED,
+            "something is already there",
+        )
+            .into_response());
     }
     let from = key(lib, path);
     let mut any = false;
