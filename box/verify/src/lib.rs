@@ -1029,7 +1029,7 @@ async fn home_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response 
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.sessions.user(cookie) {
         Some(user) if !app.member(&user) => Html(pages::waiting(&user, &app.home)).into_response(),
-        Some(user) => Html(pages::home(&user, &app.home)).into_response(),
+        Some(_) => page("home"),
         None => Redirect::to("/_dd/login?rd=/").into_response(),
     }
 }
@@ -1053,7 +1053,13 @@ async fn demo(State(app): State<Arc<App>>) -> Response {
 async fn static_file(axum::extract::Path(file): axum::extract::Path<String>) -> Response {
     match pages::static_file(&file) {
         Some((body, ty)) => {
-            ([("content-type", ty), ("cache-control", "no-cache")], body).into_response()
+            // a font is the same bytes until a release changes its name
+            let cache = if ty.starts_with("font/") {
+                "public, max-age=604800"
+            } else {
+                "no-cache"
+            };
+            ([("content-type", ty), ("cache-control", cache)], body).into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }
@@ -1107,12 +1113,8 @@ async fn files_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
         // the demo comes here too when the box keeps a library for it: it
         // reads that one and nothing else, and the page hides every
         // control a reader has no use for
-        Some(user) if user == pages::DEMO_USER && app.demo_library.is_some() => {
-            Html(pages::files(&user, &app.home)).into_response()
-        }
-        Some(user) if app.member(&user) && user != pages::DEMO_USER => {
-            Html(pages::files(&user, &app.home)).into_response()
-        }
+        Some(user) if user == pages::DEMO_USER && app.demo_library.is_some() => page("files"),
+        Some(user) if app.member(&user) && user != pages::DEMO_USER => page("files"),
         Some(_) => Redirect::to("/_dd/home").into_response(),
         None => Redirect::to("/_dd/login?rd=/_dd/files").into_response(),
     }
@@ -1122,30 +1124,40 @@ async fn files_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
 async fn media_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.sessions.user(cookie) {
-        Some(user) if user == pages::DEMO_USER && app.demo_library.is_some() => {
-            Html(pages::media(&user, &app.home)).into_response()
-        }
-        Some(user) if app.member(&user) && user != pages::DEMO_USER => {
-            Html(pages::media(&user, &app.home)).into_response()
-        }
+        Some(user) if user == pages::DEMO_USER && app.demo_library.is_some() => page("media"),
+        Some(user) if app.member(&user) && user != pages::DEMO_USER => page("media"),
         Some(_) => Redirect::to("/_dd/home").into_response(),
         None => Redirect::to("/_dd/login?rd=/_dd/media").into_response(),
     }
 }
 
+/// A signed-in page, as the file it is (pages::page): it fills itself in
+/// from /_dd/me, in a browser and in the app alike.
+fn page(name: &str) -> Response {
+    match pages::page(name) {
+        Some(html) => ([("cache-control", "no-cache")], Html(html)).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Who is looking, their menu and their services: what every signed-in
+/// page fills itself from. A browser's session or a device's token.
+async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    match app.identify(&headers, "access") {
+        Some(user) if user == pages::DEMO_USER || app.member(&user) => {
+            Json(pages::me_json(&user, &app.home)).into_response()
+        }
+        Some(_) => StatusCode::FORBIDDEN.into_response(),
+        None => StatusCode::UNAUTHORIZED.into_response(),
+    }
+}
+
 /// Boxes, Backups, Devices, Network: the pages behind the bar's menu.
 /// Each is a member's own view of the fleet; the demo gets none of them.
-async fn member_page(
-    app: &App,
-    headers: &HeaderMap,
-    page: fn(&str, &[pages::Service]) -> String,
-    at: &str,
-) -> Response {
+async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.sessions.user(cookie) {
-        Some(user) if app.member(&user) && user != pages::DEMO_USER => {
-            Html(page(&user, &app.home)).into_response()
-        }
+        Some(user) if app.member(&user) && user != pages::DEMO_USER => page(name),
         Some(_) => Redirect::to("/_dd/home").into_response(),
         None => Redirect::to(&format!("/_dd/login?rd={at}")).into_response(),
     }
@@ -1154,8 +1166,7 @@ async fn member_page(
 /// What every box is running and how its last backup went. Read from each
 /// box's own prometheus when the page asks, never stored here.
 async fn fleet_json(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.identify(&headers, "access") {
         Some(user) if app.member(&user) && user != pages::DEMO_USER => {
             Json(fleet::look(&app.fleet).await).into_response()
         }
@@ -1185,8 +1196,7 @@ async fn download_page(State(app): State<Arc<App>>) -> Response {
 
 /// The member's own machines on the fleet's network.
 async fn network_mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let Some(user) = app.sessions.user(cookie) else {
+    let Some(user) = app.identify(&headers, "access") else {
         return StatusCode::FORBIDDEN.into_response();
     };
     if !app.member(&user) || user == pages::DEMO_USER {
@@ -1564,29 +1574,30 @@ pub async fn start(
         .route(
             "/_dd/boxes",
             get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
-                member_page(&a, &h, pages::boxes, "/_dd/boxes").await
+                member_page(&a, &h, "boxes", "/_dd/boxes").await
             }),
         )
         .route(
             "/_dd/backups",
             get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
-                member_page(&a, &h, pages::backups, "/_dd/backups").await
+                member_page(&a, &h, "backups", "/_dd/backups").await
             }),
         )
         .route(
             "/_dd/devices",
             get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
-                member_page(&a, &h, pages::devices, "/_dd/devices").await
+                member_page(&a, &h, "devices", "/_dd/devices").await
             }),
         )
         .route(
             "/_dd/network",
             get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
-                member_page(&a, &h, pages::network_page, "/_dd/network").await
+                member_page(&a, &h, "network", "/_dd/network").await
             }),
         )
         .route("/_dd/download", get(download_page))
         .route("/_dd/fleet.json", get(fleet_json))
+        .route("/_dd/me", get(me))
         .route("/_dd/network/mine", get(network_mine))
         .route("/_dd/photos", get(photos_page))
         .route("/_dd/photos/config", post(photos_config))
@@ -1634,6 +1645,7 @@ mod tests {
                 url: url.into(),
                 icon: String::new(),
                 color: String::new(),
+                blurb: String::new(),
                 demo: demo.map(str::to_string),
                 demo_url: demo_url.map(str::to_string),
                 menu_only: false,

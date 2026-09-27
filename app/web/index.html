@@ -4,121 +4,170 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Commonty</title>
+  <!-- the site's own stylesheet and fonts, at the site's paths (a check in
+       the flake keeps the copies one); app.css is only what the site has
+       no page for -->
+  <link rel="stylesheet" href="/_dd/static/home.css">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
-  <header class="top">
-    <span class="wordmark">Commonty</span>
-    <span id="who" class="who"></span>
+  <header>
+    <div class="bar">
+      <span class="brand">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </span>
+      <span id="who" class="me who" hidden></span>
+    </div>
   </header>
 
-  <main>
-    <section id="page-name" class="page" hidden>
-      <h1>Who are you?</h1>
-      <p class="lead">Already a member: your name, and this device asks to be added to your account.</p>
+  <main class="auth app">
+    <section id="page-name" class="page card" hidden>
+      <h1>Sign in</h1>
+      <p class="lead">Your name, and this device asks to be added to your account.</p>
       <form id="name-form">
-        <label>Name <input id="name" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="david"></label>
-        <button type="submit" class="primary">Continue</button>
+        <label for="name">Name</label>
+        <input id="name" autocomplete="username" autocapitalize="none" spellcheck="false">
+        <button type="submit">Continue</button>
       </form>
       <p id="name-error" class="error" hidden></p>
-      <button id="to-signup" class="quiet">New here? I have an invite code</button>
-      <button id="to-recover" class="quiet">Lost every device? Recover with your recovery key</button>
+      <div class="ways">
+        <div class="way">
+          <span class="what">Someone invited you</span>
+          <p><button id="to-signup" class="link">Create an account with their code</button></p>
+        </div>
+        <div class="way">
+          <span class="what">Every device is lost</span>
+          <p><button id="to-recover" class="link">Recover with your recovery key</button></p>
+        </div>
+      </div>
     </section>
 
-    <section id="page-recover" class="page" hidden>
+    <section id="page-recover" class="page card" hidden>
       <h1>Start over</h1>
       <p class="lead">Your recovery key installs a new key on this device and signs every old device out. You get a new recovery key.</p>
       <form id="recover-form">
-        <label>Name <input id="recover-name" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
-        <label>Recovery key <input id="recover-key" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
-        <button type="submit" class="primary">Recover</button>
+        <label for="recover-name">Name</label>
+        <input id="recover-name" autocomplete="username" autocapitalize="none" spellcheck="false">
+        <label for="recover-key">Recovery key</label>
+        <input id="recover-key" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <button type="submit">Recover</button>
       </form>
       <p id="recover-error" class="error" hidden></p>
       <button id="recover-back" class="quiet">Back</button>
     </section>
 
-    <section id="page-signup" class="page" hidden>
-      <h1>Welcome</h1>
+    <section id="page-signup" class="page card" hidden>
+      <h1>Create your account</h1>
       <p class="lead">Someone gave you a code. Pick a name; your account's keys are made on this device and nowhere else.</p>
       <form id="signup-form">
-        <label>Name <input id="signup-name" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="sarah"></label>
-        <label>Invite code <input id="signup-code" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="abcde-fghjk"></label>
-        <button type="submit" class="primary">Create my account</button>
+        <label for="signup-name">Name</label>
+        <input id="signup-name" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="lowercase letters, digits, - _ .">
+        <label for="signup-code">Invite code</label>
+        <input id="signup-code" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="xxxxx-xxxxx">
+        <button type="submit">Create my account</button>
       </form>
       <p id="signup-error" class="error" hidden></p>
       <button id="signup-back" class="quiet">I already have an account</button>
     </section>
 
-    <section id="page-recovery" class="page" hidden>
+    <section id="page-recovery" class="page card" hidden>
       <h1>Write this down</h1>
       <p class="lead">Your recovery key. It is the only way back in if every device is lost or stolen. It is not stored anywhere, and nobody can issue another.</p>
       <pre class="cmd"><code id="recovery-key"></code></pre>
-      <button id="recovery-done" class="primary">I wrote it down</button>
+      <button id="recovery-done">I wrote it down</button>
     </section>
 
-    <section id="page-admit" class="page" hidden>
+    <section id="page-admit" class="page card" hidden>
       <h1>Add this device</h1>
       <p class="lead">This device's key is not in your account yet. On a machine that is, run:</p>
       <pre class="cmd"><code id="admit-cmd"></code></pre>
-      <p class="small">Fingerprint <span id="admit-fp" class="mono"></span>. The key never leaves this device.</p>
+      <p class="small">Fingerprint <code id="admit-fp"></code>. The key never leaves this device.</p>
       <p id="admit-dirs" class="small"></p>
       <p class="small waiting">Checking again every few seconds…</p>
       <button id="admit-back" class="quiet">Different name</button>
     </section>
 
-    <section id="page-home" class="page" hidden>
-      <h1>Signed in</h1>
-      <dl class="facts">
-        <dt>Name</dt><dd id="home-name"></dd>
-        <dt>Entry</dt><dd id="home-entry"></dd>
-        <dt>Libraries</dt><dd id="home-libraries"></dd>
-        <dt>Passkeys</dt><dd id="home-passkeys"></dd>
-        <dt>Gate</dt><dd id="home-gate"></dd>
-      </dl>
-      <h2>Browser</h2>
-      <div class="card">
+    <section id="page-home" class="page wide-page" hidden>
+      <div class="intro">
+        <h1>This device</h1>
+        <p>Signed in as <strong id="home-name"></strong>. <a id="to-site" href="#">Your services</a></p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Network</h2>
+        </div>
+        <p id="net-text" class="small"></p>
+        <div class="row">
+          <button id="net-join">Join</button>
+        </div>
+        <ul id="net-peers" class="rows"></ul>
+        <p id="net-error" class="error small" hidden></p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Browser</h2>
+        </div>
         <p class="small">The website signs in with a passkey. Make one in this device's browser, and every page opens there too.</p>
         <div class="row">
-          <button id="passkey-add" class="primary">Set up a passkey</button>
+          <button id="passkey-add">Set up a passkey</button>
         </div>
         <p id="passkey-text" class="small" hidden></p>
       </div>
-      <h2>Network</h2>
-      <div class="card">
-        <p id="net-text" class="small"></p>
-        <div class="row">
-          <button id="net-join" class="primary">Join</button>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Movies &amp; TV</h2>
         </div>
-        <ul id="net-peers" class="devices"></ul>
-        <p id="net-error" class="error small" hidden></p>
-      </div>
-      <h2>Movies &amp; TV</h2>
-      <div class="card">
         <p id="media-text" class="small"></p>
         <div class="row">
-          <button id="media-open" class="primary">Open</button>
+          <button id="media-open">Open</button>
           <button id="media-close" class="quiet inline" hidden>Close</button>
         </div>
         <p id="media-error" class="error small" hidden></p>
       </div>
-      <h2>Devices</h2>
-      <ul id="home-devices" class="devices"></ul>
-      <div id="add-device" class="card" hidden>
-        <p class="small">A new device shows a key on its "Add this device" page. Paste it here and it is yours, with every library key sealed to it.</p>
-        <form id="admit-form" class="row">
-          <input id="admit-key" autocomplete="off" spellcheck="false" placeholder="the new device's key">
-          <button type="submit" class="primary">Add</button>
-        </form>
-        <p id="admit-error" class="error small" hidden></p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Devices</h2>
+        </div>
+        <ul id="home-devices" class="rows devices"></ul>
+        <div id="add-device" hidden>
+          <p class="small">A new device shows a key on its "Add this device" page. Paste it here and it is yours, with every library key sealed to it.</p>
+          <form id="admit-form" class="row">
+            <input id="admit-key" autocomplete="off" spellcheck="false" placeholder="the new device's key" aria-label="The new device's key">
+            <button type="submit">Add</button>
+          </form>
+          <p id="admit-error" class="error small" hidden></p>
+        </div>
+        <p id="no-root" class="small" hidden>Devices are added and removed from the device that made the account.</p>
       </div>
-      <p id="no-root" class="small" hidden>Devices are added and removed from the device that made the account.</p>
-      <button id="home-forget" class="quiet">Sign out on this device</button>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Account</h2>
+        </div>
+        <dl class="facts">
+          <dt>Entry</dt><dd id="home-entry"></dd>
+          <dt>Libraries</dt><dd id="home-libraries"></dd>
+          <dt>Passkeys</dt><dd id="home-passkeys"></dd>
+          <dt>Gate</dt><dd id="home-gate"></dd>
+        </dl>
+        <button id="home-forget" class="quiet">Sign out on this device</button>
+      </div>
     </section>
 
-    <section id="page-error" class="page" hidden>
+    <section id="page-error" class="page card" hidden>
       <h1>Something is off</h1>
       <p id="error-text" class="error"></p>
-      <button id="error-retry" class="primary">Try again</button>
+      <button id="error-retry">Try again</button>
     </section>
   </main>
 

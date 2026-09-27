@@ -9,7 +9,15 @@
 <body>
   <header>
     <div class="bar">
-      <a class="brand" href="{{ home }}">Commonty</a>
+      <a class="brand" href="{{ home }}">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
       <span class="me">{{ user }}</span>
     </div>
   </header>

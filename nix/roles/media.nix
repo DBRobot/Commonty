@@ -16,6 +16,7 @@
   dd.home.services = [
     {
       name = "Movies & TV";
+      blurb = "Films and shows from your own library.";
       # a member's films are their own library, opened by their passkey
       url = "https://files.${config.dd.domain}/_dd/media";
       # the demo has no library and no passkey: it gets the box's own
@@ -31,6 +32,7 @@
     }
     {
       name = "Files";
+      blurb = "Folders and documents, encrypted before they leave your device.";
       url = "https://files.${config.dd.domain}/_dd/files";
       # the demo has a library of its own (modules/library/libraries.nix),
       # so the tile opens: it reads that one, writes nothing anywhere, and

@@ -80,6 +80,11 @@ in
             description = "photos, videos, files, chat, code or metrics; anything else draws a plain mark";
           };
           color = lib.mkOption { type = lib.types.str; };
+          blurb = lib.mkOption {
+            type = lib.types.str;
+            default = "";
+            description = "one line under the name on the home page: what it is for";
+          };
           rank = lib.mkOption {
             type = lib.types.int;
             default = 50;
@@ -300,6 +305,7 @@ in
               url
               icon
               color
+              blurb
               demo
               demoUrl
               menuOnly

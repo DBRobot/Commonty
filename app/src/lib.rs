@@ -9,6 +9,7 @@ mod browser;
 mod media;
 mod net;
 mod paths;
+mod site;
 mod vpn;
 
 /// the keystore this app keeps its device key in: its own, so an app beside
@@ -28,6 +29,8 @@ pub fn run() {
     builder
         .plugin(vpn::init())
         .plugin(tauri_plugin_opener::init())
+        // the site's own pages, carried in the app and served to itself
+        .register_asynchronous_uri_scheme_protocol(site::SCHEME, site::handle)
         .invoke_handler(tauri::generate_handler![
             account::status,
             account::set_name,

@@ -13,6 +13,7 @@
   dd.home.services = [
     {
       name = "Games";
+      blurb = "Start a game server and play with the people you invite.";
       url = "https://games.${config.dd.domain}/";
       icon = "games";
       color = "#7a4fb5";

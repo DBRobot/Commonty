@@ -1331,6 +1331,7 @@ dependencies = [
  "account",
  "anyhow",
  "auth",
+ "base64 0.22.1",
  "directory",
  "ed25519-dalek",
  "identity",

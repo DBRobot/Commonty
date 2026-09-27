@@ -15,7 +15,15 @@ function when(t) {
 }
 
 function render(st) {
-  $("who").textContent = st.name ? `${st.name} · ${st.fingerprint}` : "";
+  // the corner says who only once this device is someone's
+  const who = $("who");
+  who.hidden = !(st.name && st.admitted);
+  if (!who.hidden) {
+    const a = document.createElement("span");
+    a.className = "avatar";
+    a.textContent = st.name[0];
+    who.replaceChildren(a, document.createTextNode(st.name));
+  }
   if (!st.name) return show("name");
   if (!st.admitted) {
     $("admit-cmd").textContent = `dd device admit ${st.public_key}`;
@@ -57,7 +65,18 @@ function render(st) {
   $("no-root").hidden = st.root;
   show("home");
   media();
-  net();
+  net().then(goToSite);
+}
+
+// the site's own pages, which the app carries and serves to itself
+// (src/site.rs): where a signed-in device on the network belongs
+const site = (/Windows|Android/.test(navigator.userAgent) ? "http://commonty.localhost" : "commonty://localhost") + "/_dd/home";
+$("to-site").href = site;
+let offered = new URLSearchParams(location.search).has("stay");
+function goToSite(st) {
+  if (offered || !st || !st.running) return;
+  offered = true;
+  location.replace(site);
 }
 
 // the fleet's own network: this device on it, the boxes it can see
@@ -88,6 +107,7 @@ async function net(st) {
     li.append(tag);
     return li;
   }));
+  return st;
 }
 
 $("net-join").addEventListener("click", async () => {

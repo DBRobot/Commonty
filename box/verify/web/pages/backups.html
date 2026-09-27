@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Backups</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a class="brand" href="/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="wide">
+    <div class="card" data-user="">
+      <div class="filesbar">
+        <h1>Backups</h1>
+        <div class="grow"></div>
+      </div>
+      <p id="msg" class="lead">Looking for your archives…</p>
+      <div id="body" hidden></div>
+      <p class="note">Disks you have put here with <code>dd image</code>. The box stores them and cannot read them: the password never left the machine that made the archive, so listing what is inside is <code>dd image list</code> there.</p>
+    </div>
+  </main>
+  <script type="module" src="/_dd/static/backups.js"></script>
+  <script type="module" src="/_dd/static/shell.js"></script>
+</body>
+</html>

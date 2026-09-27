@@ -3,68 +3,67 @@
    A platform with nothing to download is shown anyway, greyed, so the
    page says what is coming instead of pretending it does not exist. #}
 {% extends "base.html" %}
-{% block title %}Get Commonty{% endblock %}
+{% block title %}Get the app{% endblock %}
+{% block bar %}<a href="https://home.{{ domain }}/">Sign in</a>{% endblock %}
 {% block main %}
-<main class="wide">
-  <div class="card">
-    <h1>Get Commonty</h1>
-    <p class="lead">Your files, photos and films on a box someone you know
-    owns, encrypted on your own device before they leave it. The app is how
-    you reach them.</p>
-
-    {% for g in groups %}
-    <section class="shelf">
-      <h2>{{ g.title }}</h2>
-      <ul class="oses">
-        {% for p in g.platforms %}
-        <li class="os{% if p.files.is_empty() %} off{% endif %}">
-          <span class="oslogo" aria-hidden="true">
-            <svg viewBox="0 0 24 24">{{ p.icon|safe }}</svg>
-          </span>
-          <h3>{{ p.name }}</h3>
-          {% if p.files.is_empty() %}
-          <p class="note">{{ p.soon }}</p>
-          {% else if p.files.len() == 1 %}
-          <a class="get" href="{{ p.files[0].1 }}">Download</a>
-          <p class="hash" title="SHA-256 {{ p.files[0].2 }}">{{ p.files[0].2[..12] }}…</p>
-          {% else %}
-          {# a split button: the first format is what most people want and
-             the button gets it, the arrow is for everyone else #}
-          <div class="split">
-            <a class="get" href="{{ p.files[0].1 }}">Download {{ p.files[0].0 }}</a>
-            <details>
-              <summary aria-label="Other formats"><span class="chev" aria-hidden="true"></span></summary>
-              <div class="formats">
-                {% for f in p.files %}<a href="{{ f.1 }}" title="SHA-256 {{ f.2 }}">{{ f.0 }}</a>{% endfor %}
-              </div>
-            </details>
-          </div>
-          <p class="hash" title="SHA-256 {{ p.files[0].2 }}">{{ p.files[0].2[..12] }}…</p>
-          {% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-    </section>
-    {% endfor %}
-
-    <p class="note">The AppImage needs no install: make it executable and
-    run it. Android asks you to allow installing from outside its store,
-    once; there is no listing to install from, because this is not a
-    product.</p>
-    <p class="note">This is {{ tag }}, built from <a href="{{ source }}">the
-    source at that commit</a>, by the same commands you can run. Every file
-    offered here is named, with its SHA-256, in <a href="{{ manifest }}">a
-    manifest signed with the fleet's release key</a> - the key that signs
-    what the boxes themselves run - and a file that is not in it is not
-    offered. The short code under each button is the start of that hash.
-    Nothing in the app is a secret: it makes its own key on your device the
-    first time you open it, and that key never leaves.</p>
-    <p class="note">The Windows installer carries
-    <a href="https://github.com/winfsp/winfsp">WinFsp &mdash; Windows File
-    System Proxy, Copyright &copy; Bill Zissimopoulos</a>, which is what
-    lets your library appear as a drive there, and
-    <a href="https://rclone.org/">rclone</a>, which puts it there.</p>
-    <p class="note">Already have it? <a href="https://home.{{ domain }}/">Sign in</a>.</p>
+<main class="wide download">
+  <div class="intro">
+    <h1>Get the app</h1>
+    <p>Your files, photos and films live on a box someone you know owns,
+    encrypted on your own device before they leave it. The app is how you
+    reach them.</p>
+    <p class="version">Version {{ tag }}</p>
   </div>
+
+  {% for g in groups %}
+  <section class="shelf-group">
+    <h2>{{ g.title }}</h2>
+    <ul class="oses">
+      {% for p in g.platforms %}
+      <li class="os{% if p.files.is_empty() %} off{% endif %}">
+        <div class="os-head">
+          <span class="oslogo" aria-hidden="true"><svg viewBox="0 0 24 24">{{ p.icon|safe }}</svg></span>
+          <h3>{{ p.name }}</h3>
+        </div>
+        <div class="os-body">
+          {% if p.files.is_empty() %}
+          <p>{{ p.soon }}</p>
+          {% else %}
+          <div class="gets">
+            <a class="get" href="{{ p.files[0].1 }}">Download{% if p.files.len() > 1 %} {{ p.files[0].0 }}{% endif %}</a>
+            {% for f in p.files %}{% if !loop.first %}<a class="alt" href="{{ f.1 }}" title="SHA-256 {{ f.2 }}">{{ f.0 }}</a>{% endif %}{% endfor %}
+          </div>
+          <p class="hash" title="SHA-256 {{ p.files[0].2 }}">SHA-256 {{ p.files[0].2[..12] }}…</p>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endfor %}
+
+  <div class="fineprint">
+    <section>
+      <h2>Installing</h2>
+      <p>The AppImage needs no install: make it executable and run it.
+      Android asks you, once, to allow installing from outside its store.
+      There is no store listing, because this is not a product.</p>
+    </section>
+    <section>
+      <h2>Checking what you downloaded</h2>
+      <p>Every file here is named, with its SHA-256, in <a href="{{ manifest }}">a
+      manifest signed with the fleet's release key</a>, the same key that
+      signs what the boxes run. A file that is not in it is not offered. The
+      code under each download is the start of that hash.</p>
+      <p>Built from <a href="{{ source }}">the source at that commit</a>, by
+      commands you can run yourself.</p>
+    </section>
+  </div>
+
+  <p class="credits">The Windows installer includes
+  <a href="https://github.com/winfsp/winfsp">WinFsp, Windows File System
+  Proxy, copyright Bill Zissimopoulos</a>, which lets your library appear
+  as a drive, and <a href="https://rclone.org/">rclone</a>, which puts it
+  there.</p>
 </main>
 {% endblock %}
