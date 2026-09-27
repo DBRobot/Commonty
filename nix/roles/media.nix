@@ -17,15 +17,12 @@
     {
       name = "Movies & TV";
       blurb = "Films and shows from your own library.";
-      # a member's films are their own library, opened by their passkey
+      # a member's films are their own library, opened by their passkey;
+      # the demo's are the demo library (modules/library/libraries.nix),
+      # on the same page and the same player: it reads them and plays them,
+      # and the gate lets it do nothing else (verify's demo_allows)
       url = "https://files.${config.dd.domain}/_dd/media";
-      # the demo has no library and no passkey: it gets the box's own
-      # films, through jellyfin, straight into the sso plugin because
-      # jellyfin's own login page is for nobody here
-      demoUrl = "https://jellyfin.${config.dd.domain}/sso/OID/p/dd";
-      # a jellyfin user like any other, made on first visit, with
-      # jellyfin's defaults: watch, no admin. jellyfin is the limit
-      demo = "full";
+      demo = "read";
       icon = "videos";
       color = "#b4457a";
       rank = 20;
