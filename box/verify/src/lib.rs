@@ -57,6 +57,8 @@ struct App {
     photos: Option<Photos>,
     /// the demo's counted requests, per host and hour (`rate:N`)
     demo_rate: Mutex<HashMap<String, (u64, u32)>>,
+    /// photo passwords on their way from a browser to the app (photos.rs)
+    handoffs: Mutex<HashMap<String, photos::Handoff>>,
     /// the encrypted libraries' gate (library.rs), on a box with the bucket
     library: Option<library::Gate>,
     network: Option<network::Door>,
@@ -1456,6 +1458,7 @@ pub async fn start(
         web_dir: cfg.web_dir,
         photos: cfg.photos,
         demo_rate: Mutex::new(HashMap::new()),
+        handoffs: Mutex::new(HashMap::new()),
         library: cfg.library,
         network: cfg.network,
         demo_library: cfg.demo_library,
@@ -1586,6 +1589,12 @@ pub async fn start(
         .route("/_dd/photos", get(photos::page))
         .route("/_dd/photos/config", post(photos::config))
         .route("/_dd/photos/forget", get(photos::forget))
+        .route("/_dd/photos/handoff", post(photos::handoff_open))
+        .route(
+            "/_dd/photos/handoff/{id}",
+            axum::routing::put(photos::handoff_fill).get(photos::handoff_take),
+        )
+        .route("/_dd/app/signin", post(photos::app_signin))
         // the network's door: a join key for an admitted device
         .route("/_dd/network/join", post(network::join))
         // the encrypted libraries' gate: WebDAV over each library's prefix
