@@ -165,21 +165,19 @@ async fn check_gate(
     entry: &identity::Entry,
 ) -> anyhow::Result<String> {
     let token = auth::device::mint(kp, name, Duration::from_secs(300))?;
-    // the first library's record list is the cheapest gated thing there is;
+    // the first library's top folder is the cheapest gated thing there is;
     // without a library, a library that is nobody's: the gate answers 403
     // to a token it accepts and 401 to one it does not
     let (url, own) = match entry.libraries.first() {
-        Some(l) => (
-            format!("{}/_dd/library/{}/records", files_base(), l.id),
-            true,
-        ),
+        Some(l) => (format!("{}/_dd/dav/{}/", files_base(), l.id), true),
         None => (
-            format!("{}/_dd/library/{}/records", files_base(), "0".repeat(32)),
+            format!("{}/_dd/dav/{}/", files_base(), "0".repeat(32)),
             false,
         ),
     };
     let r = directory::http()?
-        .get(&url)
+        .request(reqwest::Method::from_bytes(b"PROPFIND")?, &url)
+        .header("depth", "0")
         .bearer_auth(token)
         .send()
         .await?;
@@ -245,6 +243,52 @@ pub async fn admit_device(keys: State<'_, Keys>, public_key: String) -> Result<S
     // a whole "dd device admit <key>" line pasted is fine too
     let pk = pk.rsplit(' ').next().unwrap_or(pk);
     account::admit(&dirs(), &name, &root, pk)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    status(keys).await
+}
+
+/// A passkey for a browser, so the website signs this account in: the link
+/// `dd enrol` prints, signed by this device for ten minutes and opened in
+/// the device's own browser. The page makes the passkey; this waits for
+/// it and signs it into the entry with the root held here.
+#[tauri::command]
+pub async fn passkey_add(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<Status, String> {
+    use tauri_plugin_opener::OpenerExt as _;
+    let root = root_here(&keys)?;
+    let name = name_here(&keys)?;
+    let (kp, _) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
+    let tok = auth::device::mint_for(&kp, &name, Duration::from_secs(600), Some("enrol"))
+        .map_err(|e| e.to_string())?;
+    let enrol = format!("{gate}/_dd/enrol", gate = gate_base());
+    app.opener()
+        .open_url(format!("{enrol}?t={tok}"), None::<&str>)
+        .map_err(|e| format!("could not open the browser: {e}"))?;
+    let http = directory::http().map_err(|e| e.to_string())?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(600);
+    let cred = loop {
+        if std::time::Instant::now() > deadline {
+            return Err("no passkey arrived within ten minutes".into());
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let r = http
+            .get(format!("{enrol}/result"))
+            .bearer_auth(&tok)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        match r.status().as_u16() {
+            200 => {
+                break r
+                    .json::<identity::Passkey>()
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            204 => continue,
+            s => return Err(format!("{s} {}", r.text().await.unwrap_or_default())),
+        }
+    };
+    account::admit_passkey(&dirs(), &name, &root, cred)
         .await
         .map_err(|e| format!("{e:#}"))?;
     status(keys).await

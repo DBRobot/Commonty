@@ -27,11 +27,13 @@ pub fn run() {
         .manage(media::Media::default());
     builder
         .plugin(vpn::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             account::status,
             account::set_name,
             account::sign_up,
             account::admit_device,
+            account::passkey_add,
             account::remove_device,
             account::recover,
             account::forget,

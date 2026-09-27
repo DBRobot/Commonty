@@ -41,6 +41,9 @@ class CommontyVpn : VpnService() {
       .addAddress(ip, 32)
       .addRoute("100.64.0.0", 10)
       .addDnsServer("100.100.100.100")
+      // the app itself goes straight out: the engine reaches its control
+      // server and relays, and looks names up, before it can answer them
+      .addDisallowedApplication(packageName)
       .establish()
     synchronized(lock) {
       // the engine owns it from here, and closes it when it stops

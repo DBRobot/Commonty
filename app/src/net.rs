@@ -234,7 +234,10 @@ pub async fn net_join(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<Ne
         {
             stop();
             let fd = crate::vpn::up(&app, &st.ip)?;
-            start(&control, "", fd)?;
+            if let Err(e) = start(&control, "", fd) {
+                crate::vpn::down(&app);
+                return Err(e);
+            }
         }
         let _ = (&app, st);
         Ok::<_, String>(())
@@ -268,6 +271,8 @@ pub fn resume(app: &tauri::AppHandle, control: &str) {
         };
         if let Err(e) = start(&control, "", fd) {
             eprintln!("network: {e}");
+            #[cfg(target_os = "android")]
+            crate::vpn::down(&app);
         }
     });
 }

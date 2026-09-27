@@ -37,3 +37,13 @@ pub fn up<R: Runtime>(app: &tauri::AppHandle<R>, ip: &str) -> Result<i32, String
         .map(|f| f.fd)
         .map_err(|e| e.to_string())
 }
+
+/// the VPN down: an interface nothing answers behind would take every name
+/// lookup on the phone with it
+#[cfg(target_os = "android")]
+pub fn down<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(v) = app.try_state::<Vpn<R>>() {
+        let _ =
+            v.0.run_mobile_plugin::<serde_json::Value>("stop", serde_json::json!({}));
+    }
+}
