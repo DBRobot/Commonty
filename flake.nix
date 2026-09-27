@@ -599,7 +599,7 @@
           stylesheet = pkgs.runCommand "one-set-of-pages" { } ''
             site=${./box/verify/web}
             app=${./app/web/_dd}
-            for f in home.css shell.js library.js files.js media.js panel.js devices.js backups.js boxes.js network.js webauthn.js; do
+            for f in home.css bar.css shell.js library.js files.js media.js panel.js devices.js backups.js boxes.js network.js webauthn.js; do
               cmp $site/$f $app/static/$f
             done
             for f in public-sans plex-mono-400 plex-mono-500; do

@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 from=box/verify/web
 to=app/web/_dd
 mkdir -p "$to/static" "$to/pages"
-for f in home.css shell.js library.js files.js media.js panel.js devices.js backups.js boxes.js network.js webauthn.js; do
+for f in home.css bar.css shell.js library.js files.js media.js panel.js devices.js backups.js boxes.js network.js webauthn.js; do
   cp "$from/$f" "$to/static/$f"
 done
 for f in public-sans plex-mono-400 plex-mono-500; do

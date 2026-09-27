@@ -2,13 +2,10 @@
    draw from it. A plain register: a toned ground, white panels with a
    hairline edge, one green, square-ish corners, and type doing the work. */
 
-@font-face {
-  font-family: "Public Sans";
-  src: url("/_dd/static/public-sans.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
+/* the bar across the top, and the Public Sans face, shared with pages that
+   are not ours */
+@import url("/_dd/static/bar.css");
+
 @font-face {
   font-family: "IBM Plex Mono";
   src: url("/_dd/static/plex-mono-400.woff2") format("woff2");
@@ -26,11 +23,6 @@
   color-scheme: light dark;
   --bg: #EEF1F5;
   --surface: #FFFFFF;
-  /* the bar across the top: the one block of colour on every page */
-  --bar: #1D4470;
-  --bar-ink: #FFFFFF;
-  --bar-mark: #9CC3EA;
-  --bar-line: rgba(255, 255, 255, .25);
   --ink: #1A1F1C;
   --ink-2: #525A55;
   --line: #D5D9D3;
@@ -43,10 +35,6 @@
   --link-hover: #123D2B;
   --code: #E8EBE6;
   --focus: #E0A21B;
-  /* the bar across the top, the one block of colour on every page */
-  --bar: #1D4470;
-  --bar-ink: #FFFFFF;
-  --bar-mark: #9CC3EA;
   --off: #8A918C;
   --radius: 4px;
   --font: "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
@@ -57,8 +45,6 @@
   :root:not([data-theme="light"]) {
     --bg: #0F1318;
     --surface: #171C22;
-    --bar: #16304F;
-    --bar-mark: #7FAEDD;
     --ink: #E5E9EE;
     --ink-2: #A1A9B3;
     --line: #2A313B;
@@ -75,8 +61,6 @@
 :root[data-theme="dark"] {
   --bg: #0F1318;
   --surface: #171C22;
-  --bar: #16304F;
-  --bar-mark: #7FAEDD;
   --ink: #E5E9EE;
   --ink-2: #A1A9B3;
   --line: #2A313B;
@@ -126,57 +110,6 @@ h2 {
   margin: 0;
   font-size: 20px;
   font-weight: 700;
-}
-
-/* the bar */
-header {
-  background: var(--bar);
-  color: var(--bar-ink);
-}
-.bar {
-  height: 64px;
-  padding: 0 40px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  color: var(--bar-ink);
-  text-decoration: none;
-  font-size: 19px;
-  font-weight: 800;
-  letter-spacing: -.01em;
-}
-.brand:hover { color: var(--bar-ink); }
-.brand svg { width: 22px; height: 22px; }
-.brand .mark-line { stroke: var(--bar-ink); }
-.brand .mark-fill { fill: var(--bar-mark); }
-.bar > a:not(.brand), .bar > a:not(.brand):hover {
-  color: var(--bar-ink);
-  font-size: 15px;
-  font-weight: 600;
-}
-.me {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 15px;
-}
-.avatar {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 3px;
-  background: var(--bar-mark);
-  color: var(--bar);
-  font-size: 14px;
-  font-weight: 700;
-  text-transform: uppercase;
 }
 
 /* the page's column */
@@ -314,7 +247,6 @@ main.auth > .card {
 .aside-note { display: flex; flex-direction: column; gap: 8px; }
 @media (max-width: 860px) {
   main.home, main.wide, main.auth { padding: 36px 16px 56px; }
-  .bar { padding: 0 16px; height: 56px; }
   .auth-grid { grid-template-columns: 1fr; row-gap: 32px; padding-top: 0; }
   .auth-grid > aside { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 12px; }
   h1 { font-size: 32px; }
@@ -514,55 +446,6 @@ button.inline { margin: 0; height: 32px; padding: 0 12px; font-size: 14px; }
   border-radius: var(--radius);
   background: #000;
 }
-
-/* the menu in the bar: everything that is not a service */
-.menu { position: relative; }
-.menu summary {
-  list-style: none;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 10px 0 6px;
-  border: 1px solid rgba(255, 255, 255, .25);
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, .08);
-  color: var(--bar-ink);
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.menu summary::-webkit-details-marker { display: none; }
-.menu summary:hover, .menu[open] summary { background: rgba(255, 255, 255, .16); }
-.chev {
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid var(--bar-ink);
-}
-.menu[open] summary .chev { transform: rotate(180deg); }
-.menu nav {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 20;
-  min-width: 200px;
-  padding: 6px 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
-}
-.menu nav a {
-  padding: 9px 16px;
-  color: var(--ink);
-  text-decoration: none;
-  font-size: 15px;
-}
-.menu nav a:hover { background: var(--bg); color: var(--ink); }
-.menu nav hr { border: none; border-top: 1px solid var(--line-2); margin: 6px 0; }
 
 /* the downloads page: a panel per platform, grouped by what you hold */
 .download .version { font-size: 15px; }

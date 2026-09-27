@@ -67,6 +67,7 @@ pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
     }
     Some(match name {
         "home.css" => (include_str!("../web/home.css"), "text/css; charset=utf-8"),
+        "bar.css" => (include_str!("../web/bar.css"), "text/css; charset=utf-8"),
         "webauthn.js" => (include_str!("../web/webauthn.js"), js),
         "invite.js" => (include_str!("../web/invite.js"), js),
         "login.js" => (include_str!("../web/login.js"), js),
