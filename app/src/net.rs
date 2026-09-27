@@ -20,6 +20,7 @@ unsafe extern "C" {
     ) -> *mut c_char;
     fn commonty_net_status() -> *mut c_char;
     fn commonty_net_stop();
+    fn commonty_net_browser(domain: *const c_char) -> *mut c_char;
     fn commonty_net_free(p: *mut c_char);
 }
 
@@ -62,6 +63,62 @@ pub struct NetStatus {
     /// whether this device has joined before (state on disk)
     #[serde(default)]
     pub joined: bool,
+    /// what the browser here needs by hand, when it could not be set up
+    #[serde(default)]
+    pub browser: String,
+}
+
+/// the proxy rules' url while they are up, and what the person has to do
+/// by hand if the system could not be told
+static BROWSER: std::sync::Mutex<(String, Option<String>)> =
+    std::sync::Mutex::new((String::new(), None));
+
+#[derive(Deserialize)]
+struct Door {
+    #[serde(default)]
+    pac: String,
+    #[serde(default)]
+    error: String,
+}
+
+/// the browser on this machine, sent through the network for the fleet's
+/// names (browser.rs); a phone gets its VPN instead
+fn open_browser() {
+    #[cfg(not(target_os = "android"))]
+    {
+        let Ok(d) = CString::new(crate::account::domain()) else {
+            return;
+        };
+        let out = take(unsafe { commonty_net_browser(d.as_ptr()) });
+        let door: Door = match serde_json::from_str(&out) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("network: browser: {e}: {out}");
+                return;
+            }
+        };
+        if !door.error.is_empty() {
+            eprintln!("network: browser: {}", door.error);
+            return;
+        }
+        let by_hand = crate::browser::register(&door.pac);
+        if let Some(m) = &by_hand {
+            eprintln!("network: {m}");
+        }
+        if let Ok(mut b) = BROWSER.lock() {
+            *b = (door.pac, by_hand);
+        }
+    }
+}
+
+/// signing out on this device: the browser goes straight out again
+pub fn forget_browser() {
+    if let Ok(mut b) = BROWSER.lock()
+        && !b.0.is_empty()
+    {
+        crate::browser::unregister(&b.0);
+        *b = (String::new(), None);
+    }
 }
 
 fn state_dir() -> Result<PathBuf, String> {
@@ -114,6 +171,7 @@ fn start(control: &str, key: &str) -> Result<Started, String> {
         user: "tsnet".to_string(),
         password: st.credential.clone(),
     }));
+    open_browser();
     Ok(st)
 }
 
@@ -123,6 +181,9 @@ fn status_now() -> NetStatus {
     st.joined = state_dir()
         .map(|d| d.join("joined").exists())
         .unwrap_or(false);
+    if let Ok(b) = BROWSER.lock() {
+        st.browser = b.1.clone().unwrap_or_default();
+    }
     st
 }
 

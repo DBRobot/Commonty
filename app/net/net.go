@@ -1,5 +1,5 @@
 // The fleet's network engine for the app: Tailscale's tsnet behind a C
-// interface of four calls. Nothing here knows what Commonty is; it takes
+// interface of a few calls. Nothing here knows what Commonty is; it takes
 // a control server, a key and a state directory, joins, and hands back a
 // loopback proxy that routes into the network and resolves its names.
 // The Rust side does everything else through that proxy.
@@ -27,10 +27,11 @@ import (
 )
 
 var (
-	mu    sync.Mutex
-	srv   *tsnet.Server
-	door  *bridge.Bridge
-	proxy *proxyServer
+	mu      sync.Mutex
+	srv     *tsnet.Server
+	door    *bridge.Bridge
+	proxy   *proxyServer
+	browser *browserDoor
 )
 
 type started struct {
@@ -162,6 +163,31 @@ func commonty_net_status() *C.char {
 	return reply(out)
 }
 
+// commonty_net_browser opens the browser's way in (browser.go) for the
+// fleet's names under domain and returns json: the proxy rules' url.
+// Idempotent while running.
+//
+//export commonty_net_browser
+func commonty_net_browser(domain *C.char) *C.char {
+	mu.Lock()
+	defer mu.Unlock()
+	type out struct {
+		Pac   string `json:"pac"`
+		Error string `json:"error,omitempty"`
+	}
+	if srv == nil {
+		return reply(out{Error: "not on the network"})
+	}
+	if browser == nil {
+		b, err := newBrowserDoor(srv, C.GoString(domain))
+		if err != nil {
+			return reply(out{Error: err.Error()})
+		}
+		browser = b
+	}
+	return reply(out{Pac: browser.url()})
+}
+
 // commonty_net_stop leaves the network for this run; the state stays for
 // the next start.
 //
@@ -169,6 +195,10 @@ func commonty_net_status() *C.char {
 func commonty_net_stop() {
 	mu.Lock()
 	defer mu.Unlock()
+	if browser != nil {
+		browser.close()
+		browser = nil
+	}
 	if proxy != nil {
 		proxy.close()
 		proxy = nil

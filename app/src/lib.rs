@@ -4,6 +4,7 @@
 //! call the commands below; nothing else reaches them.
 
 mod account;
+mod browser;
 #[cfg(not(target_os = "android"))]
 mod media;
 mod net;

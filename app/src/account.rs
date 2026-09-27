@@ -58,12 +58,23 @@ pub fn dirs() -> Vec<String> {
 
 /// the network's control server: on the gate's host
 pub fn control_url() -> String {
-    format!(
-        "https://headscale.{}",
-        gate_base()
-            .trim_start_matches("https://")
-            .trim_start_matches("files.")
-    )
+    format!("https://headscale.{}", domain())
+}
+
+/// the fleet's domain: the directory's host without its home. (or files.)
+pub fn domain() -> String {
+    let base = gate_base();
+    let host = base
+        .split("://")
+        .nth(1)
+        .unwrap_or(&base)
+        .split(['/', ':'])
+        .next()
+        .unwrap_or_default();
+    host.strip_prefix("home.")
+        .or_else(|| host.strip_prefix("files."))
+        .unwrap_or(host)
+        .to_string()
 }
 
 fn gate_base() -> String {
@@ -274,5 +285,6 @@ pub async fn recover(
 /// costly to re-admit)
 #[tauri::command]
 pub fn forget(keys: State<'_, Keys>) -> Result<(), String> {
+    crate::net::forget_browser();
     keys.0.clear(USER).map_err(|e| e.to_string())
 }
