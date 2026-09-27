@@ -54,57 +54,74 @@ in
             hash = "sha256-9MWmJ3QUgS7BToTnSZzTi4ywGW1RtwrCO+9yQJkvejM=";
           };
         });
-        ente-web = prev.ente-web.overrideAttrs (o: {
-          version = "1.3.36";
-          src = prev.fetchFromGitHub {
-            owner = "ente";
-            repo = "ente";
-            rev = "photos-v1.3.36";
-            hash = "sha256-o75r8LFgG3BT3IIPiD9x6gY3fRDoxJ3ZTBPAYr3hLWI=";
-          };
-          # every way out of the app that would show ente's own sign-in or
-          # sign-up goes to the passkey page instead: the app is reached only
-          # through it
-          # It also wears the site's look: its theme set to the site's colours,
-          # type and corners, and the site's own bar across the top
-          patches = (o.patches or [ ]) ++ [
-            ../../../box/photos/ente-web-passkey.patch
-            ../../../box/photos/ente-web-commonty.patch
-            # the menu: the site's, with a passkey where Ente asks for the
-            # password nobody here knows, and nothing that needs it (hiding)
-            ../../../box/photos/ente-web-commonty-menu.patch
-            # pictures on screen fetched first, those flung past not at all
-            ../../../box/photos/ente-web-commonty-thumbs.patch
-          ];
-          # Next names each build at random, and every page carries the
-          # name: two builds of the same source never matched, and the
-          # boxes vouch for a release by rebuilding it (dd-attest)
-          postPatch = (o.postPatch or "") + ''
-            substituteInPlace packages/base/next.config.base.js \
-              --replace-fail 'output: "export",' "output: \"export\", generateBuildId: async () => \"commonty\","
-            # the bar's stylesheet is the site's own file, not a copy of it
-            cp ${../../../box/web/bar.css} apps/photos/src/styles/commonty-bar.css
-            # The grid drew three rows past the screen, and a picture is only
-            # fetched once it is drawn: scrolling reached pictures still on
-            # their way. Twenty rows is a few screens of warning.
-            substituteInPlace apps/photos/src/components/FileList.tsx \
-              --replace-fail "overscanCount={3}" "overscanCount={20}"
-          '';
-          # Next writes its build manifest as minified code whose short
-          # names are handed out in whatever order its workers finished:
-          # the same manifest, different bytes, and the boxes' rebuilds of
-          # a release disagreed (dd-attest). Written back as the object it
-          # makes, it comes out the same every time.
-          postInstall = (o.postInstall or "") + ''
-            find $out -name _buildManifest.js | while read -r f; do
-              ${prev.nodejs}/bin/node -e '
-                const fs = require("fs"), f = process.argv[1], self = {};
-                new Function("self", fs.readFileSync(f, "utf8"))(self);
-                fs.writeFileSync(f, "self.__BUILD_MANIFEST=" + JSON.stringify(self.__BUILD_MANIFEST) + ";self.__BUILD_MANIFEST_CB&&self.__BUILD_MANIFEST_CB();");
-              ' "$f"
-            done
-          '';
-        });
+        ente-web = prev.ente-web.overrideAttrs (
+          o:
+          let
+            # Five apps are built from this one package (photos, accounts,
+            # albums, cast, locker), each compiling its wasm and its whole
+            # front end. What only Photos uses goes into Photos alone, so a
+            # change to it - or to the bar - rebuilds one app, not five.
+            photos = o.pname == "ente-web-photos";
+          in
+          {
+            version = "1.3.36";
+            src = prev.fetchFromGitHub {
+              owner = "ente";
+              repo = "ente";
+              rev = "photos-v1.3.36";
+              hash = "sha256-o75r8LFgG3BT3IIPiD9x6gY3fRDoxJ3ZTBPAYr3hLWI=";
+            };
+            # every app wears the site's colours, type and corners
+            patches =
+              (o.patches or [ ])
+              ++ [ ../../../box/photos/ente-web-theme.patch ]
+              ++ lib.optionals photos [
+                # every way out of the app that would show ente's own sign-in
+                # or sign-up goes to the passkey page instead: the app is
+                # reached only through it
+                ../../../box/photos/ente-web-passkey.patch
+                # the site's own bar across the top
+                ../../../box/photos/ente-web-commonty.patch
+                # the menu: the site's, with a passkey where Ente asks for the
+                # password nobody here knows, and nothing that needs it (hiding)
+                ../../../box/photos/ente-web-commonty-menu.patch
+                # pictures on screen fetched first, those flung past not at all
+                ../../../box/photos/ente-web-commonty-thumbs.patch
+              ];
+            # Next names each build at random, and every page carries the
+            # name: two builds of the same source never matched, and the
+            # boxes vouch for a release by rebuilding it (dd-attest)
+            postPatch =
+              (o.postPatch or "")
+              + ''
+                substituteInPlace packages/base/next.config.base.js \
+                  --replace-fail 'output: "export",' "output: \"export\", generateBuildId: async () => \"commonty\","
+              ''
+              + lib.optionalString photos ''
+                # the bar's stylesheet is the site's own file, not a copy of it
+                cp ${../../../box/web/bar.css} apps/photos/src/styles/commonty-bar.css
+                # The grid drew three rows past the screen, and a picture is only
+                # fetched once it is drawn: scrolling reached pictures still on
+                # their way. Twenty rows is a few screens of warning.
+                substituteInPlace apps/photos/src/components/FileList.tsx \
+                  --replace-fail "overscanCount={3}" "overscanCount={20}"
+              '';
+            # Next writes its build manifest as minified code whose short
+            # names are handed out in whatever order its workers finished:
+            # the same manifest, different bytes, and the boxes' rebuilds of
+            # a release disagreed (dd-attest). Written back as the object it
+            # makes, it comes out the same every time.
+            postInstall = (o.postInstall or "") + ''
+              find $out -name _buildManifest.js | while read -r f; do
+                ${prev.nodejs}/bin/node -e '
+                  const fs = require("fs"), f = process.argv[1], self = {};
+                  new Function("self", fs.readFileSync(f, "utf8"))(self);
+                  fs.writeFileSync(f, "self.__BUILD_MANIFEST=" + JSON.stringify(self.__BUILD_MANIFEST) + ";self.__BUILD_MANIFEST_CB&&self.__BUILD_MANIFEST_CB();");
+                ' "$f"
+              done
+            '';
+          }
+        );
       })
     ];
 
