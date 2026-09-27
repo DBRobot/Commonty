@@ -17,7 +17,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' https://api.themoviedb.org https://image.tmdb.org"
     },
     "withGlobalTauri": true
   },

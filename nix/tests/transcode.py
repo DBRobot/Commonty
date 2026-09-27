@@ -28,6 +28,9 @@ body = box.succeed("python3 %s /tmp/store/%s 'a library key' a996a28ca51c9cf1d3f
 box.succeed("printf '%s' '%s' > /tmp/body.json" % ("%s", body.replace("'", "'\\''")))
 started = json.loads(box.succeed("curl -sf -X POST -H 'content-type: application/json' -d @/tmp/body.json http://127.0.0.1:4190/session"))
 sid = started["id"]
+# the page learns how long the film is, for its "left" and its progress bar
+assert started["duration"] and abs(started["duration"] - 120) < 2, started
+assert started["from"] == 0, started
 # the playlist grows as ffmpeg works; a segment is playable bytes
 box.wait_until_succeeds("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep -q '\\.ts'" % sid, timeout=120)
 seg = box.succeed("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep '\\.ts' | head -1" % sid).strip()
@@ -45,6 +48,17 @@ for url in ["http://127.0.0.1:4191/plain/x", "http://169.254.169.254/latest", "h
     assert code == "400", (url, code)
 # a key sealed to some other box is refused
 box.fail("curl -sf -X POST -H 'content-type: application/json' -d '{\"url\":\"http://127.0.0.1:8000/x\",\"key\":\"AAAA\",\"size\":100}' http://127.0.0.1:4190/session")
+# Resuming: a session asked to begin partway starts ffmpeg there, and says
+# where it began so the page can add it back; past the end starts over
+box.succeed("python3 -c 'import json; b=json.load(open(\"/tmp/body.json\")); b[\"from\"]=60; json.dump(b, open(\"/tmp/resume.json\", \"w\"))'")
+resumed = json.loads(box.succeed("curl -sf -X POST -H 'content-type: application/json' -d @/tmp/resume.json http://127.0.0.1:4190/session"))
+assert resumed["from"] == 60, resumed
+box.succeed("ps -eo args | grep '[f]fmpeg' | grep %s | grep -q -- '-ss 60.000'" % resumed["id"])
+box.succeed("curl -sf -X DELETE http://127.0.0.1:4190/session/%s" % resumed["id"])
+box.succeed("python3 -c 'import json; b=json.load(open(\"/tmp/body.json\")); b[\"from\"]=500; json.dump(b, open(\"/tmp/past.json\", \"w\"))'")
+past = json.loads(box.succeed("curl -sf -X POST -H 'content-type: application/json' -d @/tmp/past.json http://127.0.0.1:4190/session"))
+assert past["from"] == 0, past
+box.succeed("curl -sf -X DELETE http://127.0.0.1:4190/session/%s" % past["id"])
 # the work is really happening, and ending the session really ends it:
 # a viewer who closes a film after a minute must not leave the box
 # transcoding the rest of it

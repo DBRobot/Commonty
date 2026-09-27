@@ -77,6 +77,7 @@ pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
         "photos.js" => (include_str!("../web/photos.js"), js),
         "files.js" => (include_str!("../web/files.js"), js),
         "media.js" => (include_str!("../web/media.js"), js),
+        "shelf.js" => (include_str!("../web/shelf.js"), js),
         "library.js" => (include_str!("../web/library.js"), js),
         "boxes.js" => (include_str!("../web/boxes.js"), js),
         "backups.js" => (include_str!("../web/backups.js"), js),
@@ -609,7 +610,7 @@ mod tests {
         assert!(text("library.js").contains("/_dd/dav/"));
         // a film goes through the box, with the key sealed to it
         let lib = text("library.js");
-        assert!(lib.contains("/_dd/transcode/start") && lib.contains("library_key_for_box"));
+        assert!(lib.contains("/_dd/transcode/session") && lib.contains("library_key_for_box"));
         // the player comes from this box, never from someone else's
         assert!(lib.contains("'/_dd/web/hls.js'"));
         assert!(!lib.contains("http://") && !lib.contains("https://"));
