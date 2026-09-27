@@ -453,6 +453,7 @@ button.crumb:hover { background: none; color: var(--link-hover); text-decoration
   font: inherit;
   font-weight: 600;
   text-align: left;
+  justify-content: flex-start;
 }
 button.rowname { cursor: pointer; }
 button.rowname:hover { background: none; color: var(--link-hover); text-decoration: underline; }
