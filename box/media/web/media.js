@@ -198,10 +198,12 @@ async function load() {
   }));
 }
 
-// Posters, once per title, a few at a time after the shelves are up. Only
-// the library's owner asks: a reader sees what the owner's devices kept.
+// Posters, once per title, a few at a time after the shelves are up. The
+// owner's are kept in the library; a viewer who only reads it (the demo,
+// a shared library) looks up what the owner has not, and keeps that in
+// this tab (shelf.js keep).
 async function fillIn() {
-  if (!tmdb || lib.reader) return;
+  if (!tmdb) return;
   // lookUp passes over what it asked recently, and asks again what is due
   for (const it of [...films, ...shows]) {
     try {
@@ -369,7 +371,7 @@ async function season(n) {
   };
   draw();
   // the season's names and stills, looked up once
-  if (!names && tmdb && !lib.reader && store.known(show.path)?.tmdb) {
+  if (!names && tmdb && store.known(show.path)?.tmdb) {
     try {
       names = await lookUpSeason(store, tmdb, show.path, n);
       if (names && show && eps[0]?.show === show.name) draw();

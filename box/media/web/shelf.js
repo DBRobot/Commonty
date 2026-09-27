@@ -107,7 +107,13 @@ export async function open(lib) {
 
     /// a picture into the library, named for what it shows
     async keep(key, kind, blob) {
-      if (lib.reader || !blob) return null;
+      if (!blob) return null;
+      // a library this viewer only reads: the picture stays in this tab
+      if (lib.reader) {
+        const path = `tab:${kind}:${key}`;
+        art.set(path, Promise.resolve(URL.createObjectURL(blob)));
+        return path;
+      }
       const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${kind}:${key}`)));
       const name = [...h.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
       const path = `${DIR}/art/${name}.jpg`;
