@@ -137,7 +137,8 @@ pub async fn net_status() -> Result<NetStatus, String> {
 pub async fn net_join(keys: State<'_, Keys>) -> Result<NetStatus, String> {
     let (_, user, token) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
     let dirs = crate::account::dirs();
-    let base = media::gate::files_base(&dirs).map_err(|e| e.to_string())?;
+    // the front door: this device is not on the network yet
+    let base = media::gate::door_base(&dirs).map_err(|e| e.to_string())?;
     let r = directory::http()
         .map_err(|e| e.to_string())?
         .post(format!("{base}/_dd/network/join"))

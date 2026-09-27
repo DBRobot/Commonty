@@ -44,10 +44,7 @@ pub struct Status {
     pub root: bool,
 }
 
-/// the directories this app asks: the gateway's, by name. A phone talks to
-/// one directory; asking several is `dd`'s job. (The default list also
-/// names a box by its address on the owner's tailnet, which means nothing
-/// from the fleet's own network.)
+/// the directories this app asks: the front door's, by name
 pub fn dirs() -> Vec<String> {
     match std::env::var("COMMONTY_DIRECTORY") {
         Ok(s) if !s.is_empty() => s.split_whitespace().map(str::to_string).collect(),

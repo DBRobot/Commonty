@@ -33,10 +33,7 @@ use auth::KeyStore;
 use serde::{Deserialize, Serialize};
 
 const SERVICE: &str = "commonty";
-const DEFAULT_DIRECTORIES: [&str; 2] = [
-    "https://files.commonty.org/_dd/directory",
-    "http://100.95.10.10:4181/_dd/directory",
-];
+const DEFAULT_DIRECTORIES: [&str; 1] = ["https://home.commonty.org/_dd/directory"];
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct Keys {
