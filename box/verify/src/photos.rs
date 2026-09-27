@@ -107,6 +107,9 @@ pub(crate) struct Forget {
 
 /// The photo app's storage in this browser, cleared by the browser itself
 /// (Clear-Site-Data), then on to the host the person signed out from.
+/// Storage, not the http cache: what the photo app decrypted lives in its
+/// storage, the cache holds the same public files for everyone and
+/// ciphertext, and Chrome held sign-out for seconds emptying it.
 pub(crate) async fn forget(State(app): State<Arc<App>>, Query(q): Query<Forget>) -> Response {
     let then = q
         .then
@@ -118,7 +121,7 @@ pub(crate) async fn forget(State(app): State<Arc<App>>, Query(q): Query<Forget>)
         .unwrap_or_else(|| "/".to_string());
     (
         [
-            ("clear-site-data", "\"cache\", \"storage\""),
+            ("clear-site-data", "\"storage\""),
             ("cache-control", "no-store"),
             ("content-type", "text/html; charset=utf-8"),
         ],

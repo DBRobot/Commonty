@@ -1155,7 +1155,9 @@ async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
             if let Some(k) = &app.tmdb {
                 v["tmdb"] = k.as_str().into();
             }
-            Json(v).into_response()
+            // who you are, never kept by the browser: sign-out leaves the
+            // http cache alone (photos::forget)
+            ([("cache-control", "no-store")], Json(v)).into_response()
         }
         Some(_) => StatusCode::FORBIDDEN.into_response(),
         None => StatusCode::UNAUTHORIZED.into_response(),
