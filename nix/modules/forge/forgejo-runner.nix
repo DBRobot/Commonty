@@ -41,9 +41,13 @@ in
         # only ever a box the release signer owns (roles/runner.nix). A
         # stranger's box, when there is one, gets a runner without the second
         # label, a read-only cache key, and jobs whose verdicts are advisory.
+        # and the box's own name, for a job that must run on this box and
+        # no other: each box building every box's system (nix_checks.yml),
+        # so that what it later vouches for it has built itself
         labels = [
           "nix:host"
           "gating:host"
+          "${name}:host"
         ];
         settings.runner.capacity = config.dd.runner.capacity;
         hostPackages = with pkgs; [
