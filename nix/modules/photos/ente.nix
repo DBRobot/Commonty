@@ -68,11 +68,11 @@ in
           # It also wears the site's look: its theme set to the site's colours,
           # type and corners, and the site's own bar across the top
           patches = (o.patches or [ ]) ++ [
-            ./ente-web-passkey.patch
-            ./ente-web-commonty.patch
+            ../../../box/photos/ente-web-passkey.patch
+            ../../../box/photos/ente-web-commonty.patch
             # the menu: the site's, with a passkey where Ente asks for the
             # password nobody here knows, and nothing that needs it (hiding)
-            ./ente-web-commonty-menu.patch
+            ../../../box/photos/ente-web-commonty-menu.patch
           ];
           # Next names each build at random, and every page carries the
           # name: two builds of the same source never matched, and the
@@ -81,7 +81,7 @@ in
             substituteInPlace packages/base/next.config.base.js \
               --replace-fail 'output: "export",' "output: \"export\", generateBuildId: async () => \"commonty\","
             # the bar's stylesheet is the site's own file, not a copy of it
-            cp ${../../../box/verify/web/bar.css} apps/photos/src/styles/commonty-bar.css
+            cp ${../../../box/web/bar.css} apps/photos/src/styles/commonty-bar.css
             # The grid drew three rows past the screen, and a picture is only
             # fetched once it is drawn: scrolling reached pictures still on
             # their way. Twenty rows is a few screens of warning.

@@ -24,6 +24,8 @@ identity = { path = "../../client/identity" }
 # the release key's signed documents: the app manifest the download page
 # offers from
 release = { path = "../release" }
+# the libraries bucket and WebDAV over it; this crate decides who may
+library-gate = { path = "../library" }
 base64 = "0.22"
 ed25519-dalek = "2"
 # the token format devices sign; the verifier only ever holds public keys

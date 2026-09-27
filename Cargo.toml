@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "box/release",
   "box/verify",
+  "box/library",
   "box/games",
   "box/transcode",
   "box/archive",

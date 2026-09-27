@@ -93,6 +93,8 @@
                       type == "directory"
                       || craneLib.filterCargoSources path type
                       || builtins.match ".*/(templates|web)/.*" rel != null
+                      # where askama looks for templates beyond the crate's own
+                      || builtins.match ".*/askama\\.toml" rel != null
                       || appFile
                     )
                   );
@@ -163,7 +165,18 @@
               "client/gitremote"
             ];
             agent = crateSrc "agent" [ "box/release" ];
-            verify = crateSrc "verify" [ "box/verify" ];
+            # the gate serves the services' pages, which live with each
+            # service (box/<service>/web, templates), not in a crate
+            verify = srcFor "verify" (
+              crateClosure [ "box/verify" ]
+              ++ [
+                "box/web"
+                "box/photos"
+                "box/media"
+                "box/files"
+                "box/fleet"
+              ]
+            );
             games = crateSrc "games" [ "box/games" ];
             transcode = crateSrc "transcode" [ "box/transcode" ];
             web = crateSrc "web" [ "client/web" ];
@@ -605,21 +618,26 @@
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;
           # the app carries the site's signed-in pages, their scripts, the
-          # stylesheet and the fonts at the site's paths (scripts/sync-app-web
-          # copies them); two copies, kept one here
-          stylesheet = pkgs.runCommand "one-set-of-pages" { } ''
-            site=${./box/verify/web}
-            app=${./app/web/_dd}
-            for f in home.css bar.css shell.js library.js files.js media.js shelf.js panel.js devices.js backups.js boxes.js network.js webauthn.js; do
-              cmp $site/$f $app/static/$f
-            done
-            for f in public-sans plex-mono-400 plex-mono-500; do
-              cmp $site/fonts/$f.woff2 $app/static/$f.woff2
-            done
-            cmp $site/icons/tmdb.svg $app/static/tmdb.svg
-            diff -r $site/pages $app/pages
-            touch $out
-          '';
+          # stylesheet and the fonts at the site's paths (app/carried
+          # lists them, scripts/sync-app-web copies them); two copies, kept
+          # one here
+          stylesheet =
+            let
+              lines = builtins.filter (l: l != "" && builtins.substring 0 1 l != "#") (
+                nixpkgs.lib.splitString "\n" (builtins.readFile ./app/carried)
+              );
+              pairs = map (l: builtins.filter (w: w != "") (nixpkgs.lib.splitString " " l)) lines;
+            in
+            pkgs.runCommand "one-set-of-pages" { } (
+              nixpkgs.lib.concatMapStrings (p: ''
+                cmp ${./. + "/${builtins.elemAt p 0}"} ${./app/web/_dd + "/${builtins.elemAt p 1}"}
+              '') pairs
+              + ''
+                # nothing carried that the list does not name
+                test "$(find ${./app/web/_dd} -type f | wc -l)" = "${toString (builtins.length pairs)}"
+                touch $out
+              ''
+            );
         };
 
       # One box per entry in fleet/boxes.json: its hardware file plus its

@@ -1,0 +1,17 @@
+[package]
+name = "library-gate"
+description = "The libraries bucket behind the gate: presigned urls, listing, the trash, and WebDAV"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# a library id is checked the one way the directory checks it
+identity = { path = "../../client/identity" }
+anyhow = "1"
+axum = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+hmac = "0.12"
+sha2 = "0.10"
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
