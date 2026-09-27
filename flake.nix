@@ -616,6 +616,7 @@
             for f in public-sans plex-mono-400 plex-mono-500; do
               cmp $site/fonts/$f.woff2 $app/static/$f.woff2
             done
+            cmp $site/icons/tmdb.svg $app/static/tmdb.svg
             diff -r $site/pages $app/pages
             touch $out
           '';

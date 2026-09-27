@@ -35,6 +35,10 @@
   # read by the verifier's per-box oidc issuer for jellyfin; the seed script
   # in modules/jellyfin.nix runs as root
   sops.secrets.jellyfin-oauth-secret.owner = "dd-verify";
+  # TMDB's read token, for posters on Movies & TV: handed to signed-in
+  # pages, which look titles up from the member's own device
+  sops.secrets.tmdb-token.owner = "dd-verify";
+  dd.verify.tmdbKeyFile = config.sops.secrets.tmdb-token.path;
   sops.templates."cloudflare.env".content = ''
     CF_DNS_API_TOKEN=${config.sops.placeholder.cloudflare-token}
   '';

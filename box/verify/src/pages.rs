@@ -79,6 +79,8 @@ pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
         "files.js" => (include_str!("../web/files.js"), js),
         "media.js" => (include_str!("../web/media.js"), js),
         "shelf.js" => (include_str!("../web/shelf.js"), js),
+        // TMDB's own logo, unaltered, for the credit their terms ask for
+        "tmdb.svg" => (include_str!("../web/icons/tmdb.svg"), "image/svg+xml"),
         "library.js" => (include_str!("../web/library.js"), js),
         "boxes.js" => (include_str!("../web/boxes.js"), js),
         "backups.js" => (include_str!("../web/backups.js"), js),
