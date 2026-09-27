@@ -646,7 +646,49 @@ main.movies .ep:hover { background: var(--bg); }
   background: rgba(255, 255, 255, .06); color: #fff; font-size: 15px;
 }
 .player button.ghost:hover { background: rgba(255, 255, 255, .14); }
-.player video { width: 100%; height: 100%; min-height: 0; background: #000; }
+.player video { width: 100%; height: 100%; min-height: 0; background: #000; cursor: pointer; outline-offset: -3px; }
+.player { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+.controls { display: flex; align-items: center; gap: 10px; padding: 10px 20px 0; }
+.controls .icon, .controls .icon:hover {
+  display: inline-grid; place-items: center; flex: none; width: 40px; height: 40px; margin: 0; padding: 0;
+  border: 0; border-radius: var(--radius); background: transparent; color: #fff;
+}
+.controls .icon:hover { background: rgba(255, 255, 255, .12); }
+.controls .icon svg { width: 22px; height: 22px; fill: currentColor; }
+.controls .skip { font: 500 13px var(--mono); }
+.controls [data-on="play"] .i-pause, .controls [data-on="pause"] .i-play,
+.controls [data-on="sound"] .i-muted, .controls [data-on="muted"] .i-sound { display: none; }
+.controls .time { flex: none; min-width: 5.5ch; font: 13px var(--mono); color: #AEB9C6; text-align: center; }
+/* the whole film end to end: what was watched, and what the box has
+   packed so far lighter behind it */
+.controls input[type="range"] {
+  --played: 0%; --from: 0%; --ready: 0%;
+  -webkit-appearance: none; appearance: none; height: 22px; margin: 0; padding: 0; border: 0;
+  background: transparent; cursor: pointer;
+}
+#c-seek { flex: 1; min-width: 80px; }
+#c-vol { flex: none; width: 90px; }
+.controls input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--track); }
+.controls input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--track); }
+#c-seek {
+  --track: linear-gradient(to right, #fff var(--played), transparent var(--played)),
+    linear-gradient(to right, transparent var(--from), rgba(255, 255, 255, .38) var(--from), rgba(255, 255, 255, .38) var(--ready), transparent var(--ready)),
+    rgba(255, 255, 255, .16);
+}
+#c-vol { --track: linear-gradient(to right, #fff var(--played), rgba(255, 255, 255, .22) var(--played)); }
+.controls input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: #fff;
+}
+.controls input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: #fff; }
+.controls input[type="range"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* on the whole screen the bars step aside while it plays and nothing moves */
+.player:fullscreen.idle { cursor: none; }
+.player:fullscreen.idle .player-top, .player:fullscreen.idle .controls, .player:fullscreen.idle .player-note { opacity: 0; }
+.player-top, .controls, .player-note { transition: opacity .3s; }
+@media (max-width: 560px) {
+  .controls { gap: 4px; padding: 8px 10px 0; }
+  .controls .skip, #c-vol { display: none; }
+}
 .player-note { margin: 0; padding: 10px 20px 18px; font: 13px var(--mono); color: #AEB9C6; min-height: 1.5em; }
 
 @media (max-width: 860px) {
