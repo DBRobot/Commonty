@@ -8,7 +8,10 @@ box.wait_for_open_port(4190)
 # running when the test ends the session: twenty seconds encodes faster
 # than the test can reach the DELETE, which would make "it was killed"
 # indistinguishable from "it had already finished".
-box.succeed("ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=120:size=640x360:rate=25 -f lavfi -i sine=frequency=440:duration=120 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest /tmp/clip.mp4")
+box.succeed("ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=120:size=640x360:rate=25 -f lavfi -i sine=frequency=440:duration=120 -c:v mpeg4 -q:v 5 -c:a aac -shortest /tmp/clip.mp4")
+# MPEG-4 part 2 is no browser's: this clip is encoded as it plays (H.264 in
+# 4:2:0 would only be repacked, done in a second, and the checks below on a
+# film still being worked on would have nothing to find)
 # the box's key for this run, then the clip in the format a library holds it
 # (rclone writes it; the data key is what a device would seal to the box)
 key = json.loads(box.succeed("curl -sf http://127.0.0.1:4190/key"))["key"]
@@ -41,6 +44,7 @@ box.succeed("curl -sf -o /tmp/seg.ts http://127.0.0.1:4190/session/%s/%s && test
 # opens nothing for them: the plain listener serves its own user alone, and
 # this test runs as root, which is someone else.
 assert sid in box.succeed("ps -eo args | grep '[f]fmpeg'"), "the id is visible, which is the point"
+assert "libx264" in box.succeed("ps -eo args | grep '[f]fmpeg' | grep %s" % sid), "a picture no browser plays is encoded"
 code = box.succeed("curl -s -o /dev/null -w '%%{http_code}' http://127.0.0.1:4191/plain/%s" % sid).strip()
 assert code == "403", code
 # and a session fetches from the libraries bucket and nowhere else: not a
