@@ -63,6 +63,9 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 #[cfg(not(target_os = "android"))]
                 media::stop_all(app);
+                // the browser goes straight out while the app is closed; the
+                // next start points it here again
+                net::forget_browser();
                 net::stop();
             }
         });

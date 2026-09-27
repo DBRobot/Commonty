@@ -177,7 +177,8 @@ func commonty_net_status() *C.char {
 }
 
 // commonty_net_browser opens the browser's way in (browser.go) for the
-// fleet's names under domain and returns json: the proxy rules' url.
+// fleet's names under domain and returns json: the proxy rules' url, and
+// the rules themselves for a system that should read them from a file.
 // Idempotent while running.
 //
 //export commonty_net_browser
@@ -186,6 +187,7 @@ func commonty_net_browser(domain *C.char) *C.char {
 	defer mu.Unlock()
 	type out struct {
 		Pac   string `json:"pac"`
+		Rules string `json:"rules"`
 		Error string `json:"error,omitempty"`
 	}
 	if srv == nil {
@@ -198,7 +200,7 @@ func commonty_net_browser(domain *C.char) *C.char {
 		}
 		browser = b
 	}
-	return reply(out{Pac: browser.url()})
+	return reply(out{Pac: browser.url(), Rules: pacFile(browser.domain)})
 }
 
 // commonty_net_stop leaves the network for this run; the state stays for

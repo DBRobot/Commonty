@@ -505,6 +505,17 @@
           # the webview finds its gio modules (tls) and, on nvidia, draws
           WEBKIT_DISABLE_DMABUF_RENDERER = "1";
           GIO_MODULE_DIR = "${pkgs.glib-networking}/lib/gio/modules";
+          # and plays video: webkit decodes through gstreamer's plugins
+          GST_PLUGIN_SYSTEM_PATH_1_0 = pkgs.lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
+            with pkgs.gst_all_1;
+            [
+              gstreamer
+              gst-plugins-base
+              gst-plugins-good
+              gst-plugins-bad
+              gst-libav
+            ]
+          );
         };
 
         # `nix develop .#android`: the Android toolchain for the app. From
