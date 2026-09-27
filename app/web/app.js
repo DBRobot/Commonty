@@ -15,7 +15,15 @@ function when(t) {
 }
 
 function render(st) {
-  $("who").textContent = st.name ? `${st.name} · ${st.fingerprint}` : "";
+  // the corner says who only once this device is someone's
+  const who = $("who");
+  who.hidden = !(st.name && st.admitted);
+  if (!who.hidden) {
+    const a = document.createElement("span");
+    a.className = "avatar";
+    a.textContent = st.name[0];
+    who.replaceChildren(a, document.createTextNode(st.name));
+  }
   if (!st.name) return show("name");
   if (!st.admitted) {
     $("admit-cmd").textContent = `dd device admit ${st.public_key}`;

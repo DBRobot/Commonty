@@ -1,128 +1,69 @@
-/* The app's pages: the same tokens as the verifier's pages, one column. */
+/* What the app has and the site does not: its own few screens, drawn in
+   the site's register (the tokens and pieces are the site's home.css). */
 
-:root {
-  color-scheme: light dark;
-  --brand: #124e63;
-  --brand-ink: #fff;
-  --bg: #eef3f5;
-  --card: #fff;
-  --ink: #142129;
-  --ink-2: #5b6b74;
-  --line: #d3dde2;
-  --ok: #1f7a4d;
-  --bad: #a83a2c;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
+main.app { padding-top: 48px; }
+main.app > .card { max-width: 440px; }
+main.app > .wide-page { max-width: 760px; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --brand: #0d3a4a;
-    --bg: #0b151b;
-    --card: #142430;
-    --ink: #e7eef2;
-    --ink-2: #93a5b0;
-    --line: #223442;
-    --ok: #5fc48f;
-    --bad: #e8826f;
-  }
-}
+.who { gap: 10px; font-weight: 600; }
 
-* { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; }
-body {
-  font: 15px/1.5 var(--font);
-  color: var(--ink);
-  background: var(--bg);
-  display: flex;
-  flex-direction: column;
-}
-[hidden] { display: none !important; }
-
-.top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  background: var(--brand);
-  color: var(--brand-ink);
-}
-.wordmark { font-weight: 600; letter-spacing: .02em; }
-.who { font-size: 13px; opacity: .85; }
-
-main { flex: 1; padding: 24px 20px; max-width: 520px; width: 100%; margin: 0 auto; }
-h1 { font-size: 22px; margin: 0 0 8px; }
-h2 { font-size: 15px; margin: 24px 0 8px; color: var(--ink-2); font-weight: 600; }
-.lead { color: var(--ink-2); margin: 0 0 20px; }
-.small { font-size: 13px; color: var(--ink-2); }
-.mono { font-family: var(--mono); }
-
-label { display: block; margin-bottom: 14px; font-size: 13px; color: var(--ink-2); }
-input {
-  display: block;
-  width: 100%;
-  margin-top: 4px;
-  padding: 10px 12px;
-  font: 16px var(--font);
-  color: var(--ink);
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-input:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
-
-button {
-  font: 600 15px var(--font);
-  padding: 10px 16px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  cursor: pointer;
-}
-button.primary { background: var(--brand); color: var(--brand-ink); }
-button.quiet { background: transparent; color: var(--ink-2); border-color: var(--line); margin-top: 24px; }
-
-.cmd {
-  margin: 0 0 12px;
-  padding: 12px 14px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font: 13px/1.5 var(--mono);
-  white-space: pre-wrap;
-  word-break: break-all;
-  user-select: all;
-}
+.small { margin: 0 0 12px; font-size: 15px; color: var(--ink-2); }
+.error { color: #B3401F; }
+.ok { color: var(--accent); }
+@media (prefers-color-scheme: dark) { .error { color: #E88A6A; } .ok { color: var(--link); } }
 .waiting::before { content: "· "; }
 
-.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+/* a button that reads as a link: the other ways in */
+button.link {
+  height: auto;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--link);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+button.link:hover { background: none; color: var(--link-hover); }
+#page-name .ways { margin-top: 36px; border-top: 1px solid var(--line); }
+
+/* the signed-in screen: one panel per thing this device does */
+.panel {
+  margin-bottom: 20px;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.panel-head { margin-bottom: 8px; }
+.panel .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.panel .row button { margin-top: 0; }
+.panel .rows { margin-top: 16px; }
+.panel form.row input { flex: 1; min-width: 200px; }
+.panel > button.quiet { margin-top: 20px; }
+
+.devices li { font-family: var(--mono); font-size: 14px; }
+.devices li .tag { font-family: var(--font); margin-left: auto; }
+.devices li.this { font-weight: 500; }
+.rows li .tag button { margin-left: 10px; }
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 20px;
+  margin: 0;
+  font-size: 15px;
+}
 .facts dt { color: var(--ink-2); }
 .facts dd { margin: 0; }
-.devices { list-style: none; padding: 0; margin: 0; }
-.devices li {
-  display: flex;
-  justify-content: space-between;
-  padding: 8px 12px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  margin-bottom: 6px;
-  font-family: var(--mono);
-  font-size: 13px;
-}
-.devices li.this { border-color: var(--brand); }
-.devices li .tag { font-family: var(--font); color: var(--ink-2); }
-.ok { color: var(--ok); }
-.error { color: var(--bad); }
 
-.card {
-  padding: 12px 14px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+@media (max-width: 860px) {
+  main.app { padding-top: 32px; }
+  .panel { padding: 18px; }
 }
-.card .small { margin: 0 0 10px; }
-.row { display: flex; gap: 8px; align-items: center; }
-button.inline { margin-top: 0; }
-button[disabled] { opacity: .6; cursor: default; }
-.row input { flex: 1; margin-top: 0; }
-.devices li button { font-size: 12px; padding: 4px 10px; margin-left: 8px; }
+
+main.app > .wide-page h1 { font-size: 34px; }
+.panel .rows li .tag { margin-left: auto; }
+#add-device { margin-top: 16px; }

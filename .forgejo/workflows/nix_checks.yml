@@ -41,7 +41,7 @@ jobs:
       # and forgotten in the matrix above went unnoticed until the forge
       # refused a merge for a required check that had never run.
       - name: placement, box list, and the ci matrix
-        run: nix build --no-link .#checks.x86_64-linux.placement .#checks.x86_64-linux.boxes .#checks.x86_64-linux.ci
+        run: nix build --no-link .#checks.x86_64-linux.placement .#checks.x86_64-linux.boxes .#checks.x86_64-linux.ci .#checks.x86_64-linux.stylesheet
       - uses: ./.forgejo/actions/stop-run
         if: failure()
         with:

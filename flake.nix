@@ -557,6 +557,15 @@
           placement = import ./nix/tests/placement.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;
+          # the app carries the site's stylesheet and fonts at the site's
+          # paths, so it looks like the site; two copies, kept one here
+          stylesheet = pkgs.runCommand "one-stylesheet" { } ''
+            cmp ${./box/verify/web/home.css} ${./app/web/_dd/static/home.css}
+            for f in public-sans plex-mono-400 plex-mono-500; do
+              cmp ${./box/verify/web/fonts}/$f.woff2 ${./app/web/_dd/static}/$f.woff2
+            done
+            touch $out
+          '';
         };
 
       # One box per entry in fleet/boxes.json: its hardware file plus its
