@@ -92,6 +92,7 @@ function services(m, list) {
     mark.setAttribute('aria-hidden', 'true');
     // the mark is the box's own svg, not anything a person wrote
     mark.innerHTML = s.icon;
+    if (s.color) row.style.setProperty('--c', s.color);
     row.append(
       mark,
       el('span', {},
