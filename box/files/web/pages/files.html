@@ -21,27 +21,93 @@
       <div class="me" id="me"></div>
     </div>
   </header>
-  <main class="wide">
-    <div class="card" data-user="">
-      <div class="filesbar">
+  <main class="drive">
+    <div class="drive-head">
+      <div>
         <h1>Files</h1>
-        <div class="grow"></div>
-        <button id="up" class="quiet" hidden>Upload</button>
+        <p class="lead" id="lead">Encrypted on this device before they leave it. The box only ever holds the locked copies.</p>
+      </div>
+      <div class="drive-actions" id="actions" hidden>
+        <button id="newfolder" class="quiet" type="button">New folder</button>
+        <button id="up" type="button">Upload</button>
         <input id="picker" type="file" multiple hidden>
       </div>
-      <p id="msg" class="lead">Unlocking with your passkey…</p>
-  
-      <div id="link" hidden>
-        <p class="lead">This passkey was made before it could open your files. On a device where you are signed in to the app, choose <strong>Set up a passkey</strong> and make a new one in this browser. After that it opens here straight away.</p>
-      </div>
-  
-      <nav id="crumbs" class="crumbs" hidden></nav>
-      <ul id="list" class="rows" hidden></ul>
-      <p id="empty" class="note" hidden>Nothing here yet.</p>
-      <ul id="jobs" class="rows jobs" hidden></ul>
-      <p class="note">Names and contents are encrypted in this tab. The box stores what it cannot read.</p>
+    </div>
+
+    <p id="msg" class="lead">Unlocking with your passkey…</p>
+    <div id="link" hidden>
+      <p class="lead">This passkey was made before it could open your files. On a device where you are signed in to the app, choose <strong>Set up a passkey</strong> and make a new one in this browser. After that it opens here straight away.</p>
+    </div>
+
+    <div class="drive-body" id="drive" hidden>
+      <nav class="rail" aria-label="Places">
+        <button type="button" data-place="files" aria-current="true">My files</button>
+        <button type="button" data-place="trash" id="trashplace">Trash</button>
+      </nav>
+
+      <section class="panel" aria-label="Files">
+        <div class="toolbar">
+          <nav class="crumbs" id="crumbs" aria-label="Folder"></nav>
+          <div class="grow"></div>
+          <label class="search"><input id="search" type="search" placeholder="Search this folder" aria-label="Search this folder"></label>
+          <div class="seg" role="group" aria-label="View">
+            <button type="button" data-view="list" aria-pressed="true" aria-label="List">☰</button>
+            <button type="button" data-view="grid" aria-pressed="false" aria-label="Grid">▦</button>
+          </div>
+        </div>
+        <div class="selbar" id="selbar" hidden>
+          <span id="selcount"></span>
+          <div class="grow"></div>
+          <button class="quiet" type="button" id="sel-down">Download</button>
+          <button class="quiet" type="button" id="sel-move">Move</button>
+          <button class="quiet" type="button" id="sel-trash">Trash</button>
+        </div>
+        <table class="files" id="table">
+          <thead><tr>
+            <th class="chk"><input type="checkbox" id="all" aria-label="Select all"></th>
+            <th><button type="button" data-sort="name">Name</button></th>
+            <th class="wide-only"><button type="button" data-sort="modified">Modified</button></th>
+            <th class="wide-only"><button type="button" data-sort="size">Size</button></th>
+            <th class="act"></th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="tiles" id="tiles" hidden></div>
+        <p class="note" id="empty" hidden>Nothing here yet. Drop files anywhere on the page, or use Upload.</p>
+        <p class="note" id="foot">Names and contents are encrypted in this tab. Drop files anywhere on the page to upload them here.</p>
+      </section>
     </div>
   </main>
+
+  <aside class="preview" id="preview" hidden aria-label="Preview">
+    <div class="pv-head"><b id="pv-name"></b><button class="ghost" type="button" id="pv-close" aria-label="Close">×</button></div>
+    <div class="pv-body">
+      <div id="pv-show"></div>
+      <dl id="pv-meta"></dl>
+      <div class="pv-actions" id="pv-actions"></div>
+    </div>
+  </aside>
+
+  <div class="uploads" id="uploads" hidden>
+    <div class="up-head"><span id="up-title"></span><button type="button" id="up-close" aria-label="Hide">×</button></div>
+    <div id="up-rows"></div>
+  </div>
+
+  <div class="drop" id="drop" hidden><div id="drop-to">Drop to upload</div></div>
+
+  <dialog id="ask">
+    <form method="dialog">
+      <h2 id="ask-title"></h2>
+      <p id="ask-text" class="note"></p>
+      <input id="ask-input" autocomplete="off">
+      <div id="ask-list" class="ask-list"></div>
+      <div class="ask-actions">
+        <button value="cancel" class="quiet" type="submit">Cancel</button>
+        <button value="ok" id="ask-ok" type="submit">OK</button>
+      </div>
+    </form>
+  </dialog>
+
   <script type="module" src="/_dd/static/files.js"></script>
   <script type="module" src="/_dd/static/shell.js"></script>
 </body>
