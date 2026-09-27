@@ -79,6 +79,8 @@ struct Door {
     #[serde(default)]
     pac: String,
     #[serde(default)]
+    rules: String,
+    #[serde(default)]
     error: String,
 }
 
@@ -102,14 +104,36 @@ fn open_browser() {
             eprintln!("network: browser: {}", door.error);
             return;
         }
-        let by_hand = crate::browser::register(&door.pac);
+        // Linux: the rules from a file beside the app's state, not from
+        // the app. A browser holding the setting always finds them, and
+        // they send it straight out when the app is not there, however
+        // the app stopped. Elsewhere the engine's own address.
+        let pac = match rules_file(&door.rules) {
+            Some(f) => f,
+            None => door.pac,
+        };
+        let by_hand = crate::browser::register(&pac);
         if let Some(m) = &by_hand {
             eprintln!("network: {m}");
         }
         if let Ok(mut b) = BROWSER.lock() {
-            *b = (door.pac, by_hand);
+            *b = (pac, by_hand);
         }
     }
+}
+
+/// the rules written where the system can read them without the app
+fn rules_file(rules: &str) -> Option<String> {
+    if !cfg!(target_os = "linux") || rules.is_empty() {
+        return None;
+    }
+    let dir = state_dir().ok()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    let at = dir.join("proxy.pac");
+    let tmp = dir.join("proxy.pac.new");
+    std::fs::write(&tmp, rules).ok()?;
+    std::fs::rename(&tmp, &at).ok()?;
+    Some(format!("file://{}", at.display()))
 }
 
 /// signing out on this device, or the app closing: the browser goes

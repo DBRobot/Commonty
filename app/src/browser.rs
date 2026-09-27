@@ -9,6 +9,15 @@
 //! Linux: GNOME's proxy setting, which Chrome and Firefox follow.
 //! Android has no such setting; the phone gets a VPN instead.
 
+/// the address earlier versions set: the engine's own, which is gone
+/// whenever the app is
+const EARLIER: &str = "http://127.0.0.1:41650/proxy.pac";
+
+/// a setting this app made, now or before
+fn ours(url: &str, pac: &str) -> bool {
+    url == pac || url == EARLIER
+}
+
 /// Some(message) when the browser could not be pointed here by itself
 pub fn register(pac: &str) -> Option<String> {
     let by_hand = || {
@@ -19,14 +28,14 @@ pub fn register(pac: &str) -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         match windows::current() {
-            Some(url) if url != pac => by_hand(),
+            Some(url) if !ours(&url, pac) => by_hand(),
             _ => windows::set(pac).err().and_then(|_| by_hand()),
         }
     }
     #[cfg(target_os = "linux")]
     {
         match gnome::current() {
-            Some((mode, url)) if mode == "none" || (mode == "auto" && url == pac) => {
+            Some((mode, url)) if mode == "none" || (mode == "auto" && ours(&url, pac)) => {
                 gnome::set(pac).err().and_then(|_| by_hand())
             }
             _ => by_hand(),
@@ -43,11 +52,11 @@ pub fn register(pac: &str) -> Option<String> {
 /// closing)
 pub fn unregister(pac: &str) {
     #[cfg(target_os = "windows")]
-    if windows::current().as_deref() == Some(pac) {
+    if windows::current().is_some_and(|u| ours(&u, pac)) {
         windows::clear();
     }
     #[cfg(target_os = "linux")]
-    if matches!(gnome::current(), Some((m, u)) if m == "auto" && u == pac) {
+    if matches!(gnome::current(), Some((m, u)) if m == "auto" && ours(&u, pac)) {
         gnome::clear();
     }
     let _ = pac;
