@@ -365,7 +365,12 @@ async function play(it, { resume }) {
       v.src = s.url;
     } else {
       const Hls = await playlistPlayer();
-      hls = new Hls();
+      // the playlist grows as the box works: a moment's 404 or a slow
+      // segment is waiting, not failing
+      hls = new Hls({ manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
+      hls.on(Hls.Events.ERROR, (_, d) => {
+        if (d.fatal) $('p-note').textContent = `The player stopped: ${d.details}. Close it and press play again.`;
+      });
       hls.loadSource(s.url);
       hls.attachMedia(v);
     }
@@ -373,11 +378,12 @@ async function play(it, { resume }) {
     v.play().catch(() => {});
     return;
   } catch (e) {
-    $('p-note').textContent = e.message;
+    playing.boxSaid = e.message;
     // and fall through: a small file still opens in the tab
   }
   if (it.size > INLINE) {
-    $('p-note').textContent = `${human(it.size)}: the box could not play this, and it is too big to open in the tab. Save it, or open it from the desktop app.`;
+    // what the box said, not only that it could not
+    $('p-note').textContent = `The box could not play this (${playing.boxSaid}), and at ${human(it.size)} it is too big to open in the tab. Save it, or open it from the desktop app.`;
     $('p-save').hidden = false;
     $('p-save').onclick = () => fetchPlain(lib, it.path).then((b) => save(b, it.name));
     return;

@@ -31,8 +31,10 @@ sid = started["id"]
 # the page learns how long the film is, for its "left" and its progress bar
 assert started["duration"] and abs(started["duration"] - 120) < 2, started
 assert started["from"] == 0, started
-# the playlist grows as ffmpeg works; a segment is playable bytes
-box.wait_until_succeeds("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep -q '\\.ts'" % sid, timeout=120)
+# the session is answered once there is something to play: the playlist
+# names a segment the moment the page has its answer, and a segment is
+# playable bytes
+box.succeed("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep -q '\\.ts'" % sid)
 seg = box.succeed("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep '\\.ts' | head -1" % sid).strip()
 box.succeed("curl -sf -o /tmp/seg.ts http://127.0.0.1:4190/session/%s/%s && test $(stat -c %%s /tmp/seg.ts) -gt 1000" % (sid, seg))
 # The session id is on ffmpeg's command line for every process to read. It

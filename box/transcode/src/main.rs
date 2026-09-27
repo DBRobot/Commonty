@@ -231,6 +231,13 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
         .args([
             "-i",
             &input,
+            // the picture and the sound: a film's subtitle tracks made a
+            // file of their own for every segment, and nothing reads them
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0?",
+            "-sn",
             "-c:v",
             "libx264",
             "-preset",
@@ -265,7 +272,42 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
             return (StatusCode::INTERNAL_SERVER_ERROR, format!("ffmpeg: {e}")).into_response();
         }
     };
+    // Answered once there is something to play: a page that asked for the
+    // playlist the moment the session began found none yet, and its player
+    // gave up on the 404. ffmpeg ending first is its error, not a session.
+    let mut child = child;
+    let playlist = dir.join("index.m3u8");
+    let mut ready = false;
+    for _ in 0..150 {
+        if std::fs::read_to_string(&playlist).is_ok_and(|p| p.contains(".ts")) {
+            ready = true;
+            break;
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            if let Some(s) = app.sessions.lock().await.remove(&id) {
+                wipe(s).await;
+            }
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "ffmpeg stopped before the first segment ({status}): not a film it can read"
+                ),
+            )
+                .into_response();
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
     *session.child.lock().await = Some(child);
+    if !ready {
+        if let Some(s) = app.sessions.lock().await.remove(&id) {
+            wipe(s).await;
+        }
+        return (
+            StatusCode::GATEWAY_TIMEOUT,
+            "no first segment in thirty seconds: the box is too busy, or the file is too slow to read",
+        )
+            .into_response();
+    }
     Json(serde_json::json!({
         "id": id,
         "playlist": format!("/session/{id}/index.m3u8"),

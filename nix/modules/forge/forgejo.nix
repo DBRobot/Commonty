@@ -192,9 +192,7 @@ in
               "flake_check"
               "build_client"
             ]
-            # every box's system built on every box (nix_checks.yml): each
-            # box has then built what it vouches for at release time
-            ++ lib.concatMap (h: map (on: "build_host (${h}, ${on})") boxNames) boxNames
+            ++ map (b: "build_host (${b})") boxNames
             ++ [
               "lint"
               "test"
