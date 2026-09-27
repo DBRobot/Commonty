@@ -218,6 +218,11 @@ enum Command {
         /// into with the same password and moved to --email, nothing made
         #[arg(long)]
         from: Option<String>,
+        /// Room to give it, in bytes. One byte (the default) fits no photo:
+        /// read-only. More, briefly, to put the demo's own photos in, then
+        /// run again without it.
+        #[arg(long, default_value_t = 1)]
+        quota: u64,
     },
     /// What is cached on this machine.
     Status,
@@ -1245,6 +1250,7 @@ async fn main() -> Result<()> {
             code,
             password,
             from,
+            quota,
         } => {
             let client = ente::client(&ente_origin)?;
             // the terminal's prompts, but the fleet's code answered for it
@@ -1345,7 +1351,7 @@ async fn main() -> Result<()> {
             };
             let body = serde_json::json!({
                 "userID": user_id,
-                "storage": 1,
+                "storage": quota,
                 "transactionID": "dd-demo",
                 "productID": "free",
                 "expiryTime": 4102444800000000i64,
@@ -1366,7 +1372,13 @@ async fn main() -> Result<()> {
                 r.status(),
                 r.text().await.unwrap_or_default()
             );
-            println!("demo photo account ready: {email}, quota 1 byte (read-only)");
+            if quota <= 1 {
+                println!("demo photo account ready: {email}, quota 1 byte (read-only)");
+            } else {
+                println!(
+                    "demo photo account: {email}, quota {quota} bytes; run again without --quota to make it read-only"
+                );
+            }
         }
 
         Command::Lock { forget_identity } => {
