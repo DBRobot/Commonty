@@ -1,0 +1,4 @@
+# The gate's own templates, and those of the services whose pages it serves
+# (Photos' sign-in step lives with Photos).
+[general]
+dirs = ["templates", "../photos/templates"]

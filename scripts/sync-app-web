@@ -1,19 +1,12 @@
 #!/usr/bin/env bash
 # The app carries the site's signed-in pages and what they load, at the
-# site's paths (app/src/site.rs serves them). Run after changing any of
-# them under box/verify/web; `nix build .#checks.x86_64-linux.stylesheet`
+# site's paths (app/src/site.rs serves them): the list is app/carried.
+# Run after changing any of them; `nix build .#checks.x86_64-linux.stylesheet`
 # fails while the copies differ.
 set -eu
 cd "$(dirname "$0")/.."
-from=box/verify/web
-to=app/web/_dd
-mkdir -p "$to/static" "$to/pages"
-for f in home.css bar.css shell.js library.js files.js media.js shelf.js panel.js devices.js backups.js boxes.js network.js webauthn.js; do
-  cp "$from/$f" "$to/static/$f"
+grep -v '^#' app/carried | while read -r from to; do
+  [ -n "$from" ] || continue
+  mkdir -p "app/web/_dd/$(dirname "$to")"
+  cp "$from" "app/web/_dd/$to"
 done
-for f in public-sans plex-mono-400 plex-mono-500; do
-  cp "$from/fonts/$f.woff2" "$to/static/$f.woff2"
-done
-cp "$from/fonts/LICENSE" "$to/static/fonts-license.txt"
-cp "$from/icons/tmdb.svg" "$to/static/tmdb.svg"
-cp "$from"/pages/*.html "$to/pages/"

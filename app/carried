@@ -1,0 +1,29 @@
+# What the app carries of the site, and where (app/src/site.rs serves it at
+# the site's own paths). scripts/sync-app-web copies these; the flake's
+# one-set-of-pages check fails while any copy differs. One line each:
+#   <the site's file>  <where the app keeps it, under app/web/_dd>
+box/web/home.css                  static/home.css
+box/web/bar.css                   static/bar.css
+box/web/shell.js                  static/shell.js
+box/web/library.js                static/library.js
+box/web/webauthn.js               static/webauthn.js
+box/web/fonts/public-sans.woff2   static/public-sans.woff2
+box/web/fonts/plex-mono-400.woff2 static/plex-mono-400.woff2
+box/web/fonts/plex-mono-500.woff2 static/plex-mono-500.woff2
+box/web/fonts/LICENSE             static/fonts-license.txt
+box/web/pages/home.html           pages/home.html
+box/files/web/files.js            static/files.js
+box/files/web/pages/files.html    pages/files.html
+box/media/web/media.js            static/media.js
+box/media/web/shelf.js            static/shelf.js
+box/media/web/icons/tmdb.svg      static/tmdb.svg
+box/media/web/pages/media.html    pages/media.html
+box/fleet/web/panel.js            static/panel.js
+box/fleet/web/boxes.js            static/boxes.js
+box/fleet/web/backups.js          static/backups.js
+box/fleet/web/devices.js          static/devices.js
+box/fleet/web/network.js          static/network.js
+box/fleet/web/pages/boxes.html    pages/boxes.html
+box/fleet/web/pages/backups.html  pages/backups.html
+box/fleet/web/pages/devices.html  pages/devices.html
+box/fleet/web/pages/network.html  pages/network.html

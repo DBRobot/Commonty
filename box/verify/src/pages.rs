@@ -49,45 +49,51 @@ pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
     // the typefaces the stylesheet names, under the licence in web/fonts
     match name {
         "public-sans.woff2" => {
-            return Some((include_bytes!("../web/fonts/public-sans.woff2"), woff2));
+            return Some((include_bytes!("../../web/fonts/public-sans.woff2"), woff2));
         }
         "plex-mono-400.woff2" => {
-            return Some((include_bytes!("../web/fonts/plex-mono-400.woff2"), woff2));
+            return Some((include_bytes!("../../web/fonts/plex-mono-400.woff2"), woff2));
         }
         "plex-mono-500.woff2" => {
-            return Some((include_bytes!("../web/fonts/plex-mono-500.woff2"), woff2));
+            return Some((include_bytes!("../../web/fonts/plex-mono-500.woff2"), woff2));
         }
         "fonts-license.txt" => {
             return text(
-                include_str!("../web/fonts/LICENSE"),
+                include_str!("../../web/fonts/LICENSE"),
                 "text/plain; charset=utf-8",
             );
         }
         _ => {}
     }
     Some(match name {
-        "home.css" => (include_str!("../web/home.css"), "text/css; charset=utf-8"),
-        "bar.css" => (include_str!("../web/bar.css"), "text/css; charset=utf-8"),
-        "webauthn.js" => (include_str!("../web/webauthn.js"), js),
+        "home.css" => (
+            include_str!("../../web/home.css"),
+            "text/css; charset=utf-8",
+        ),
+        "bar.css" => (include_str!("../../web/bar.css"), "text/css; charset=utf-8"),
+        "webauthn.js" => (include_str!("../../web/webauthn.js"), js),
         "invite.js" => (include_str!("../web/invite.js"), js),
         "login.js" => (include_str!("../web/login.js"), js),
         "join.js" => (include_str!("../web/join.js"), js),
         "enrol.js" => (include_str!("../web/enrol.js"), js),
         "redeem.js" => (include_str!("../web/redeem.js"), js),
-        "photos.js" => (include_str!("../web/photos.js"), js),
-        "photos-passkey.js" => (include_str!("../web/photos-passkey.js"), js),
-        "files.js" => (include_str!("../web/files.js"), js),
-        "media.js" => (include_str!("../web/media.js"), js),
-        "shelf.js" => (include_str!("../web/shelf.js"), js),
+        "photos.js" => (include_str!("../../photos/web/photos.js"), js),
+        "photos-passkey.js" => (include_str!("../../photos/web/photos-passkey.js"), js),
+        "files.js" => (include_str!("../../files/web/files.js"), js),
+        "media.js" => (include_str!("../../media/web/media.js"), js),
+        "shelf.js" => (include_str!("../../media/web/shelf.js"), js),
         // TMDB's own logo, unaltered, for the credit their terms ask for
-        "tmdb.svg" => (include_str!("../web/icons/tmdb.svg"), "image/svg+xml"),
-        "library.js" => (include_str!("../web/library.js"), js),
-        "boxes.js" => (include_str!("../web/boxes.js"), js),
-        "backups.js" => (include_str!("../web/backups.js"), js),
-        "devices.js" => (include_str!("../web/devices.js"), js),
-        "network.js" => (include_str!("../web/network.js"), js),
-        "panel.js" => (include_str!("../web/panel.js"), js),
-        "shell.js" => (include_str!("../web/shell.js"), js),
+        "tmdb.svg" => (
+            include_str!("../../media/web/icons/tmdb.svg"),
+            "image/svg+xml",
+        ),
+        "library.js" => (include_str!("../../web/library.js"), js),
+        "boxes.js" => (include_str!("../../fleet/web/boxes.js"), js),
+        "backups.js" => (include_str!("../../fleet/web/backups.js"), js),
+        "devices.js" => (include_str!("../../fleet/web/devices.js"), js),
+        "network.js" => (include_str!("../../fleet/web/network.js"), js),
+        "panel.js" => (include_str!("../../fleet/web/panel.js"), js),
+        "shell.js" => (include_str!("../../web/shell.js"), js),
         _ => return None,
     })
     .map(|(s, ty)| (s.as_bytes(), ty))
@@ -96,18 +102,18 @@ pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
 /// the mark on a tile: an svg fragment from web/icons/, by the role's name
 fn icon(key: &str) -> &'static str {
     match key {
-        "photos" => include_str!("../web/icons/photos.svg"),
-        "videos" => include_str!("../web/icons/videos.svg"),
-        "files" => include_str!("../web/icons/files.svg"),
-        "chat" => include_str!("../web/icons/chat.svg"),
-        "code" => include_str!("../web/icons/code.svg"),
-        "metrics" => include_str!("../web/icons/metrics.svg"),
-        "games" => include_str!("../web/icons/games.svg"),
-        _ => include_str!("../web/icons/plain.svg"),
+        "photos" => include_str!("../../web/icons/photos.svg"),
+        "videos" => include_str!("../../web/icons/videos.svg"),
+        "files" => include_str!("../../web/icons/files.svg"),
+        "chat" => include_str!("../../web/icons/chat.svg"),
+        "code" => include_str!("../../web/icons/code.svg"),
+        "metrics" => include_str!("../../web/icons/metrics.svg"),
+        "games" => include_str!("../../web/icons/games.svg"),
+        _ => include_str!("../../web/icons/plain.svg"),
     }
 }
 
-fn initial(user: &str) -> String {
+pub(crate) fn initial(user: &str) -> String {
     user.chars()
         .next()
         .map(|c| c.to_string())
@@ -118,13 +124,13 @@ fn initial(user: &str) -> String {
 /// (web/pages/). The app carries the same files.
 pub fn page(name: &str) -> Option<&'static str> {
     Some(match name {
-        "home" => include_str!("../web/pages/home.html"),
-        "files" => include_str!("../web/pages/files.html"),
-        "media" => include_str!("../web/pages/media.html"),
-        "boxes" => include_str!("../web/pages/boxes.html"),
-        "backups" => include_str!("../web/pages/backups.html"),
-        "devices" => include_str!("../web/pages/devices.html"),
-        "network" => include_str!("../web/pages/network.html"),
+        "home" => include_str!("../../web/pages/home.html"),
+        "files" => include_str!("../../files/web/pages/files.html"),
+        "media" => include_str!("../../media/web/pages/media.html"),
+        "boxes" => include_str!("../../fleet/web/pages/boxes.html"),
+        "backups" => include_str!("../../fleet/web/pages/backups.html"),
+        "devices" => include_str!("../../fleet/web/pages/devices.html"),
+        "network" => include_str!("../../fleet/web/pages/network.html"),
         _ => return None,
     })
 }
@@ -174,7 +180,7 @@ pub struct Menu {
 impl Menu {
     /// What this person may actually open. The demo has no library, no
     /// devices and no backups, so it is offered none of them.
-    fn of(user: &str, services: &[Service]) -> Menu {
+    pub(crate) fn of(user: &str, services: &[Service]) -> Menu {
         let item = |label, url: &str| MenuItem {
             label,
             url: url.to_string(),
@@ -228,14 +234,6 @@ struct Join<'a> {
 #[derive(Template)]
 #[template(path = "waiting.html")]
 struct Waiting<'a> {
-    user: &'a str,
-    initial: String,
-    menu: Menu,
-}
-
-#[derive(Template)]
-#[template(path = "photos.html")]
-struct Photos<'a> {
     user: &'a str,
     initial: String,
     menu: Menu,
@@ -374,7 +372,7 @@ fn host_of(url: &str) -> &str {
         .unwrap_or_default()
 }
 
-fn render<T: Template>(t: T) -> String {
+pub(crate) fn render<T: Template>(t: T) -> String {
     t.render().unwrap_or_default()
 }
 
@@ -398,15 +396,6 @@ pub fn join(domain: &str) -> String {
 /// open to it yet. A code from the owner opens it here.
 pub fn waiting(user: &str, services: &[Service]) -> String {
     render(Waiting {
-        user,
-        initial: initial(user),
-        menu: Menu::of(user, services),
-    })
-}
-
-/// Photos: opened by the passkey, or by the demo's password.
-pub fn photos(user: &str, services: &[Service]) -> String {
-    render(Photos {
         user,
         initial: initial(user),
         menu: Menu::of(user, services),

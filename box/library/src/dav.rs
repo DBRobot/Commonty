@@ -9,16 +9,13 @@
 //!   OPTIONS, PROPFIND (depth 0 or 1), HEAD, GET (ranges), PUT, MKCOL,
 //!   MOVE, COPY, DELETE, under /_dd/dav/{lib}/...
 
-use std::sync::Arc;
-
 use anyhow::{Context, Result, anyhow};
 use axum::body::Body;
-use axum::extract::{Path, Request, State};
+use axum::extract::Request;
 use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
-use crate::App;
-use crate::library::{Gate, Role, allowed, gate, uri_encode};
+use crate::{Gate, Role, uri_encode};
 
 /// where a deleted thing goes, under the library
 const TRASH: &str = "trash";
@@ -312,47 +309,26 @@ fn href(lib: &str, path: &str, dir: bool) -> String {
     h
 }
 
-/// every method, one handler: axum has no PROPFIND of its own
-pub(crate) async fn handle(
-    State(app): State<Arc<App>>,
-    Path((lib, path)): Path<(String, String)>,
-    req: Request,
-) -> Response {
-    serve(app, lib, path, req).await
+/// OPTIONS, which answers before anyone is asked who they are
+pub fn options() -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("DAV", "1"),
+            (
+                "Allow",
+                "OPTIONS, PROPFIND, HEAD, GET, PUT, MKCOL, MOVE, COPY, DELETE",
+            ),
+        ],
+    )
+        .into_response()
 }
 
-pub(crate) async fn handle_root(
-    State(app): State<Arc<App>>,
-    Path(lib): Path<String>,
-    req: Request,
-) -> Response {
-    serve(app, lib, String::new(), req).await
-}
-
-async fn serve(app: Arc<App>, lib: String, raw: String, req: Request) -> Response {
-    let g = match gate(&app) {
-        Ok(g) => g,
-        Err(r) => return r,
-    };
+/// A request the gate has let through, as `role` in library `lib`: every
+/// method, one function, since axum has no PROPFIND of its own.
+pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request) -> Response {
     let method = req.method().clone();
     let headers = req.headers().clone();
-    if method == Method::OPTIONS {
-        return (
-            StatusCode::OK,
-            [
-                ("DAV", "1"),
-                (
-                    "Allow",
-                    "OPTIONS, PROPFIND, HEAD, GET, PUT, MKCOL, MOVE, COPY, DELETE",
-                ),
-            ],
-        )
-            .into_response();
-    }
-    let (_, role) = match allowed(&app, &headers, &lib) {
-        Ok(r) => r,
-        Err(r) => return r,
-    };
     let Some(path) = clean(&raw) else {
         return (StatusCode::BAD_REQUEST, "not a path").into_response();
     };
@@ -472,7 +448,7 @@ async fn get(g: &Gate, lib: &str, path: &str, headers: &HeaderMap, head: bool) -
             return Ok(StatusCode::NOT_FOUND.into_response());
         }
         return Ok(axum::Json(serde_json::json!({
-            "url": g.presign_for("GET", &key(lib, path), crate::library::HANDOFF_SECS)
+            "url": g.presign_for("GET", &key(lib, path), crate::HANDOFF_SECS)
         }))
         .into_response());
     }
