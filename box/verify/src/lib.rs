@@ -1279,13 +1279,66 @@ async fn photos_config(State(app): State<Arc<App>>, headers: HeaderMap) -> Respo
     Json(cfg).into_response()
 }
 
-async fn logout(State(app): State<Arc<App>>) -> Response {
-    let mut r = Redirect::to("/").into_response();
+/// Signing out: the session goes, and so does what the photo app keeps in
+/// this browser - its list of the library and the pictures it unlocked. That
+/// belongs to the photos host, so the way out passes through there
+/// (photos_forget) and comes back to this host's front page.
+async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let back = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .filter(|h| fleet_host(&app.domain, h))
+        .map(|h| format!("https://{h}/"));
+    let to = match (photos_origin(&app.home), back) {
+        (Some(p), Some(b)) => format!("{p}/_dd/photos/forget?then={b}"),
+        _ => "/".to_string(),
+    };
+    let mut r = Redirect::to(&to).into_response();
     r.headers_mut().insert(
         "set-cookie",
         HeaderValue::from_str(&app.sessions.clear()).unwrap(),
     );
     r
+}
+
+/// the photos host, from its tile: https://photos.<domain>
+fn photos_origin(home: &[pages::Service]) -> Option<String> {
+    home.iter()
+        .find_map(|s| s.url.strip_suffix("/_dd/photos").map(str::to_string))
+}
+
+/// one of this fleet's own names, and nothing that could carry more
+fn fleet_host(domain: &str, host: &str) -> bool {
+    host.bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
+        && (host == domain || host.ends_with(&format!(".{domain}")))
+}
+
+#[derive(Deserialize)]
+struct Forget {
+    then: Option<String>,
+}
+
+/// The photo app's storage in this browser, cleared by the browser itself
+/// (Clear-Site-Data), then on to the host the person signed out from.
+async fn photos_forget(State(app): State<Arc<App>>, Query(q): Query<Forget>) -> Response {
+    let then = q
+        .then
+        .filter(|t| {
+            t.strip_prefix("https://")
+                .and_then(|r| r.strip_suffix('/'))
+                .is_some_and(|h| fleet_host(&app.domain, h))
+        })
+        .unwrap_or_else(|| "/".to_string());
+    (
+        [
+            ("clear-site-data", "\"cache\", \"storage\""),
+            ("cache-control", "no-store"),
+            ("content-type", "text/html; charset=utf-8"),
+        ],
+        format!("<!doctype html><meta http-equiv=\"refresh\" content=\"0;url={then}\"><title>Signed out</title>"),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -1612,6 +1665,7 @@ pub async fn start(
         .route("/_dd/network/mine", get(network_mine))
         .route("/_dd/photos", get(photos_page))
         .route("/_dd/photos/config", post(photos_config))
+        .route("/_dd/photos/forget", get(photos_forget))
         // the network's door: a join key for an admitted device
         .route("/_dd/network/join", post(network::join))
         // the encrypted libraries' gate: WebDAV over each library's prefix

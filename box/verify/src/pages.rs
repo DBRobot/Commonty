@@ -75,6 +75,7 @@ pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
         "enrol.js" => (include_str!("../web/enrol.js"), js),
         "redeem.js" => (include_str!("../web/redeem.js"), js),
         "photos.js" => (include_str!("../web/photos.js"), js),
+        "photos-passkey.js" => (include_str!("../web/photos-passkey.js"), js),
         "files.js" => (include_str!("../web/files.js"), js),
         "media.js" => (include_str!("../web/media.js"), js),
         "shelf.js" => (include_str!("../web/shelf.js"), js),

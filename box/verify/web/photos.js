@@ -5,29 +5,8 @@
 // its password comes with the config, for that session only.
 
 import init, { ente_login, ente_create, ente_adopt } from '/_dd/web/dd_web.js';
-import { b64u, u8b64, say } from './webauthn.js';
-
-async function passkeySecret(user, cfg) {
-  const e = await fetch('/_dd/directory/' + encodeURIComponent(user));
-  if (!e.ok) throw new Error('no entry');
-  const allow = ((await e.json()).entry.passkeys || []).map(p => ({ type: 'public-key', id: b64u(p.id) }));
-  if (!allow.length) throw new Error('this account has no passkey in a browser yet: dd enrol adds one');
-
-  const salt = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('dd-photos')));
-  const a = await navigator.credentials.get({
-    publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
-      rpId: cfg.rpId,
-      allowCredentials: allow,
-      userVerification: 'preferred',
-      extensions: { prf: { eval: { first: salt } } },
-    },
-  });
-  const prf = a.getClientExtensionResults().prf;
-  const secret = prf && prf.results && prf.results.first;
-  if (!secret) throw new Error('this passkey cannot make the photos key on this browser; try your phone');
-  return u8b64(secret);
-}
+import { say } from './webauthn.js';
+import { passkeySecret, photosConfig } from './photos-passkey.js';
 
 // no account under this passkey yet: link one made before, or start fresh
 function askToLink(cfg, password) {
@@ -70,13 +49,22 @@ async function seed(s) {
       tx.onerror = () => reject(tx.error);
     };
   });
-  location.replace('/');
+  // the gallery itself: the app's front page would draw its own sign-in
+  // on the way there
+  location.replace('/gallery');
 }
 
-// Whatever ente's app kept from whoever was here before: gone, before
-// anything else happens. The app trusts its own storage, so a session left
-// behind on a shared machine would open the previous person's library to
-// the next, and a failed sign-in below must land on nothing, not on it.
+// Whatever ente's app kept from someone else: gone, before anything else
+// happens. The app trusts its own storage, so a session left behind on a
+// shared machine would open the previous person's library to the next,
+// and a failed sign-in below must land on nothing, not on it. The same
+// person's own list and pictures stay: without them every visit fetched
+// and unlocked the whole library again. Signing out clears it all
+// (/_dd/photos/forget).
+function keptFor() {
+  try { return JSON.parse(localStorage.getItem('user') || 'null')?.email || null; } catch { return null; }
+}
+
 async function wipe() {
   localStorage.clear();
   sessionStorage.clear();
@@ -90,11 +78,15 @@ async function wipe() {
 
 async function go() {
   try {
-    await wipe();
     const user = document.querySelector('.card').dataset.user;
-    const c = await fetch('/_dd/photos/config', { method: 'POST' });
-    if (!c.ok) throw new Error('photos is not on this box');
-    const cfg = await c.json();
+    const cfg = await photosConfig();
+    if (keptFor() !== cfg.email) {
+      await wipe();
+    } else if (sessionStorage.getItem('encryptionKey')) {
+      // this window opened the library already: straight back in
+      location.replace('/gallery');
+      return;
+    }
 
     const password = cfg.password || await passkeySecret(user, cfg);
     await init();
