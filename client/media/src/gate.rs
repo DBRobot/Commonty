@@ -462,10 +462,21 @@ pub async fn openable(
     Ok(out)
 }
 
-pub fn files_base(dirs: &[String]) -> Result<String> {
-    // the gate is on the same host as the directory: https://files.<base>
+/// where the directory is: the front door, which answers from anywhere
+pub fn door_base(dirs: &[String]) -> Result<String> {
     let d = dirs.first().context("no directory")?;
     Ok(d.trim_end_matches("/_dd/directory").to_string())
+}
+
+/// The library gate: files.<base> beside the front door's home.<base>. It
+/// is not public; a device reaches it on the owner's tailnet or through
+/// the fleet's network. A directory anywhere else (a test's) is its own gate.
+pub fn files_base(dirs: &[String]) -> Result<String> {
+    let door = door_base(dirs)?;
+    Ok(match door.split_once("://home.") {
+        Some((scheme, rest)) => format!("{scheme}://files.{rest}"),
+        None => door,
+    })
 }
 
 /// Just the host out of a base url: what a token names as its audience.
@@ -495,5 +506,11 @@ mod audience_tests {
         // the gate's own base, as files_base builds it
         let dirs = ["https://files.commonty.org/_dd/directory".to_string()];
         assert_eq!(host_of(&files_base(&dirs).unwrap()), "files.commonty.org");
+        // the front door's directory, and the gate beside it
+        let dirs = ["https://home.commonty.org/_dd/directory".to_string()];
+        assert_eq!(files_base(&dirs).unwrap(), "https://files.commonty.org");
+        assert_eq!(door_base(&dirs).unwrap(), "https://home.commonty.org");
+        let dirs = ["http://127.0.0.1:4181/_dd/directory".to_string()];
+        assert_eq!(files_base(&dirs).unwrap(), "http://127.0.0.1:4181");
     }
 }

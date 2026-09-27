@@ -5,11 +5,12 @@
 use anyhow::{Context as _, Result, anyhow, bail};
 use identity::SignedEntry;
 
-/// the directories a client asks unless told otherwise
-pub const DEFAULT: [&str; 2] = [
-    "https://files.commonty.org/_dd/directory",
-    "http://100.95.10.10:4181/_dd/directory",
-];
+/// the directories a client asks unless told otherwise: the front door's,
+/// the one name that answers from anywhere. A device off the owner's
+/// tailnet and not yet on the fleet's network reaches nothing else, and
+/// signing up, signing in and joining the network all start here. The
+/// other boxes hold copies, pulled from this one.
+pub const DEFAULT: [&str; 1] = ["https://home.commonty.org/_dd/directory"];
 
 /// a proxy every client this process builds goes through: the app's way
 /// into the fleet's own network (app/src/net.rs), a SOCKS5 one that

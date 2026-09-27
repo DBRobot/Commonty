@@ -26,11 +26,11 @@ const ARCHIVE: &str = "archive";
 const DEFAULT_ENTE: &str = "https://api.commonty.org";
 const DEFAULT_IMAGES: &str = "https://files.commonty.org/images/";
 /// Any browser-facing host does; the session cookie covers the whole domain.
-const DEFAULT_ENROL: &str = "https://files.commonty.org/_dd/enrol";
+const DEFAULT_ENROL: &str = "https://home.commonty.org/_dd/enrol";
 /// Where a person's signed entry lives. Any box can hold one; a client that
 /// names several sees whether they agree. node2 has no public name yet, so
 /// its copy is reachable on the tailnet only.
-const DEFAULT_DIRECTORIES: [&str; 2] = directory::DEFAULT;
+const DEFAULT_DIRECTORIES: [&str; 1] = directory::DEFAULT;
 /// keyring account holding the name the device key signs for
 const USER: &str = "user";
 
