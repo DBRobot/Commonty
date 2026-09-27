@@ -1,0 +1,54 @@
+diff --git a/apps/photos/src/components/FileList.tsx b/apps/photos/src/components/FileList.tsx
+index aed27f3..0c4523c 100644
+--- a/apps/photos/src/components/FileList.tsx
++++ b/apps/photos/src/components/FileList.tsx
+@@ -1248,18 +1248,35 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
+         };
+     }, [selected, onSelect, isLongPressing]);
+ 
++    // Commonty: a picture in view is fetched at once. One in the rows drawn
++    // ahead waits a moment first, and is never fetched if it is scrolled
++    // out of the list in that moment: pictures flung past no longer hold
++    // up the ones on screen.
++    const tileRef = useRef<HTMLDivElement | null>(null);
++
+     useEffect(() => {
+         let didCancel = false;
+ 
+-        void downloadManager
+-            .renderableThumbnailURL(file, showPlaceholder)
+-            .then((url) => !didCancel && setImageURL(url))
+-            .catch((e: unknown) => {
+-                log.warn("Failed to fetch thumbnail", e);
+-            });
++        const load = () =>
++            void downloadManager
++                .renderableThumbnailURL(file, showPlaceholder)
++                .then((url) => !didCancel && setImageURL(url))
++                .catch((e: unknown) => {
++                    log.warn("Failed to fetch thumbnail", e);
++                });
++
++        const r = tileRef.current?.getBoundingClientRect();
++        const inView = !r || (r.bottom > 0 && r.top < window.innerHeight);
++        const timer = inView
++            ? undefined
++            : setTimeout(() => {
++                  if (!didCancel) load();
++              }, 250);
++        if (inView) load();
+ 
+         return () => {
+             didCancel = true;
++            if (timer) clearTimeout(timer);
+         };
+     }, [file, showPlaceholder]);
+ 
+@@ -1297,6 +1314,7 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
+     return (
+         <FileThumbnail_
+             key={`thumb-${file.id}}`}
++            ref={tileRef}
+             onClick={handleClick}
+             onContextMenu={onContextMenu}
+             onMouseEnter={handleHover}
