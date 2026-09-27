@@ -35,6 +35,8 @@
   --link-hover: #123D2B;
   --code: #E8EBE6;
   --focus: #E0A21B;
+  /* the bar's blue, for what is picked (a tab, a badge) */
+  --pick: #1D4470;
   --off: #8A918C;
   --radius: 4px;
   --font: "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
@@ -523,4 +525,141 @@ a.alt { font-size: 15px; font-weight: 600; }
   color: var(--ink-2);
   font-size: 14px;
   line-height: 1.6;
+}
+
+/* Movies & TV: a feature, shelves that scroll sideways, a show's seasons,
+   and a player over the page. The pictures are the titles' own; the
+   frame around them is the register's. */
+main.movies {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 40px 40px 72px;
+  display: grid;
+  gap: 36px;
+}
+main.movies .lead { margin: 4px 0 0; }
+main.movies #msg, main.movies #uploading { margin: 0; }
+main.movies button { margin-top: 0; }
+.movies-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.movies-actions, .show-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.movies-actions button.quiet, .show-actions button.quiet { height: 44px; padding: 0 16px; font-size: 15px; }
+.tabs { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.tabs button, .tabs button:hover {
+  height: 36px; padding: 0 14px; border-radius: 3px; background: transparent;
+  color: var(--ink-2); font-size: 15px; font-weight: 600;
+}
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-pressed="true"], .tabs button[aria-pressed="true"]:hover { background: var(--pick); color: #fff; }
+#home { display: grid; gap: 36px; min-width: 0; }
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  min-height: 340px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #0B1320;
+  color: #fff;
+}
+.hero-art { position: relative; min-height: 220px; }
+.hero-art::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, rgba(11, 19, 32, 0) 55%, #0B1320 100%);
+}
+.hero-copy { padding: 36px 40px; display: flex; flex-direction: column; justify-content: center; gap: 14px; }
+.eyebrow { font: 500 13px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: #9CC3EA; }
+.hero h2 { font-size: 40px; line-height: 1.05; font-weight: 800; letter-spacing: -.02em; text-wrap: balance; }
+.meta { display: flex; gap: 14px; flex-wrap: wrap; font: 14px var(--mono); color: var(--ink-2); }
+.hero .meta { color: #AEB9C6; }
+.hero-copy p { margin: 0; color: #CBD3DD; max-width: 46ch; }
+.hero-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.hero-actions button.quiet { background: rgba(255, 255, 255, .08); color: #fff; border-color: rgba(255, 255, 255, .25); }
+.hero-actions button.quiet:hover { background: rgba(255, 255, 255, .16); }
+.progress { height: 4px; border-radius: 2px; background: rgba(127, 127, 127, .3); overflow: hidden; max-width: 360px; }
+.progress i { display: block; height: 100%; background: #7CCBA2; }
+
+.shelf { display: grid; gap: 12px; min-width: 0; }
+.shelf-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.shelf-head h2 { font-size: 20px; }
+.shelf-head .count { font: 14px var(--mono); color: var(--ink-2); }
+.row { display: grid; grid-auto-flow: column; gap: 14px; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 8px; scrollbar-width: thin; }
+.row.posters { grid-auto-columns: 168px; }
+.row.wide { grid-auto-columns: 300px; }
+main.movies .card, main.movies .card:hover {
+  display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; justify-content: stretch; align-items: stretch;
+  gap: 6px; width: 100%; height: auto; padding: 0; margin: 0;
+  background: none; color: var(--ink); text-align: left; font-weight: 400; scroll-snap-align: start;
+}
+.card .pic { position: relative; border-radius: var(--radius); overflow: hidden; background: var(--line-2); outline: 1px solid var(--line); outline-offset: -1px; }
+.posters .pic { aspect-ratio: 2 / 3; }
+.wide .pic { aspect-ratio: 16 / 9; }
+.card:hover .pic { outline: 2px solid var(--accent); outline-offset: -2px; }
+.card .t { font-weight: 700; font-size: 15px; line-height: 1.25; }
+.card .s { font: 13px var(--mono); color: var(--ink-2); }
+.card .progress { position: absolute; left: 0; right: 0; bottom: 0; max-width: none; border-radius: 0; background: rgba(0, 0, 0, .35); }
+.badge { position: absolute; top: 8px; left: 8px; padding: 1px 7px; border-radius: 3px; background: var(--pick); color: #fff; font: 500 12px var(--mono); }
+.pic img, .hero-art img, .show-poster img, .still img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* a title with no picture yet: a card of its own colour and its name */
+.drawn {
+  position: absolute; inset: 0; display: flex; align-items: flex-end; padding: 12px;
+  background: radial-gradient(ellipse at 30% 25%, hsl(var(--h) 45% 38%) 0%, transparent 65%),
+    linear-gradient(160deg, hsl(var(--h) 40% 26%), hsl(var(--h) 45% 9%));
+  color: #fff;
+}
+.drawn b { font-size: 17px; line-height: 1.1; font-weight: 800; text-wrap: balance; overflow-wrap: anywhere; }
+.wide .drawn b { font-size: 14px; }
+/* where the title is written beside the picture, the card keeps quiet */
+.hero-art .drawn b, .still .drawn b { display: none; }
+
+.show { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 32px; align-items: start; }
+.show-poster { position: relative; aspect-ratio: 2 / 3; border-radius: var(--radius); overflow: hidden; background: var(--line-2); }
+.show-head { display: grid; gap: 10px; margin-bottom: 16px; }
+.show-head h2 { font-size: 32px; font-weight: 800; letter-spacing: -.015em; }
+.show-text { margin: 0; color: var(--ink-2); max-width: 65ch; }
+main.movies .back, main.movies .back:hover {
+  justify-self: start; height: auto; padding: 0; background: none; color: var(--link); font-weight: 600;
+}
+.back:hover { text-decoration: underline; }
+.eps { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.eps li + li { border-top: 1px solid var(--line-2); }
+main.movies .ep, main.movies .ep:hover {
+  width: 100%; height: auto; display: grid; grid-template-columns: 36px 160px minmax(0, 1fr) auto; gap: 16px;
+  align-items: center; justify-content: stretch; padding: 14px 18px; border-radius: 0;
+  background: none; color: var(--ink); text-align: left; font-weight: 400;
+}
+main.movies .ep:hover { background: var(--bg); }
+.ep .n { font: 500 15px var(--mono); color: var(--ink-2); }
+.ep .still { position: relative; aspect-ratio: 16 / 9; border-radius: 3px; overflow: hidden; background: var(--line-2); }
+.ep .t { display: block; font-weight: 700; }
+.ep .d { display: block; color: var(--ink-2); font-size: 14px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ep .len { font: 13px var(--mono); color: var(--ink-2); white-space: nowrap; }
+
+.player {
+  position: fixed; inset: 0; z-index: 50; display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+  background: #05080C; color: #fff;
+}
+.player-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 20px; }
+.player-top span { font: 13px var(--mono); color: #AEB9C6; }
+.player-buttons { display: flex; gap: 8px; }
+.player button.ghost, .player button.ghost:hover {
+  height: 40px; margin: 0; padding: 0 14px; border: 1px solid rgba(255, 255, 255, .25);
+  background: rgba(255, 255, 255, .06); color: #fff; font-size: 15px;
+}
+.player button.ghost:hover { background: rgba(255, 255, 255, .14); }
+.player video { width: 100%; height: 100%; min-height: 0; background: #000; }
+.player-note { margin: 0; padding: 10px 20px 18px; font: 13px var(--mono); color: #AEB9C6; min-height: 1.5em; }
+
+@media (max-width: 860px) {
+  main.movies { padding: 24px 16px 56px; gap: 28px; }
+  .hero { grid-template-columns: 1fr; }
+  .hero-art { aspect-ratio: 16 / 9; min-height: 0; }
+  .hero-art::after { background: linear-gradient(180deg, rgba(11, 19, 32, 0) 50%, #0B1320 100%); }
+  .hero-copy { padding: 20px; }
+  .hero h2 { font-size: 30px; }
+  .row.posters { grid-auto-columns: 128px; }
+  .row.wide { grid-auto-columns: 240px; }
+  .show { grid-template-columns: 1fr; }
+  .show-poster { max-width: 180px; }
+  main.movies .ep { grid-template-columns: 28px 96px minmax(0, 1fr); }
+  .ep .len { display: none; }
 }

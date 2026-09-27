@@ -217,22 +217,24 @@ export async function trash(lib, path) {
 /// given a url it can fetch ranges from while the film plays and the
 /// library's data key sealed to a key it made when it started, so the
 /// plaintext exists in its memory for this one file and nowhere else.
-/// What comes back is a playlist on the same host as this page.
-export async function transcode(lib, path, sealedSize) {
+/// What comes back is a playlist on the same host as this page, where in
+/// the film it begins (`from`, seconds: resuming), and the film's length
+/// when its container says.
+export async function transcode(lib, path, sealedSize, from = 0) {
   const pre = await fetch(dav(lib, path), { headers: { 'x-dd-presign': '1' } });
   if (!pre.ok) throw new Error(`the gate said ${pre.status}`);
   const { url } = await pre.json();
   const box = await fetch('/_dd/transcode/key');
   if (!box.ok) throw new Error('this box does not transcode');
   const { key } = await box.json();
-  const r = await fetch('/_dd/transcode/start', {
+  const r = await fetch('/_dd/transcode/session', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ url, key: library_key_for_box(lib.key, lib.id, key), size: sealedSize }),
+    body: JSON.stringify({ url, key: library_key_for_box(lib.key, lib.id, key), size: sealedSize, from }),
   });
   if (!r.ok) throw new Error(`the box said ${r.status}: ${await r.text()}`);
-  const { playlist } = await r.json();
-  return `/_dd/transcode${playlist}`;
+  const s = await r.json();
+  return { url: `/_dd/transcode${s.playlist}`, from: s.from || 0, duration: s.duration || null };
 }
 
 /// Tell the box it can stop. Without this the ffmpeg behind a film the

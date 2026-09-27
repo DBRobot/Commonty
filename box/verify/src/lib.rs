@@ -62,6 +62,7 @@ struct App {
     network: Option<network::Door>,
     demo_library: Option<(String, String)>,
     app_manifest: Option<String>,
+    tmdb: Option<String>,
     /// the app manifest as last read, and when: a good one for ten
     /// minutes, the lack of one for one
     app_seen: Mutex<Option<(Instant, Option<SignedApp>)>>,
@@ -137,6 +138,11 @@ pub struct Config {
     /// Every box in the fleet and the address its prometheus answers on,
     /// for the Boxes and Backups pages. Empty on a box that is not told.
     pub fleet: fleet::Fleet,
+    /// The fleet's TMDB key, handed to signed-in pages so a member's own
+    /// device can look up a film's poster by its title. The box never
+    /// sees the titles: they are sealed in the library. None: no posters,
+    /// the pages draw stills and title cards instead.
+    pub tmdb: Option<String>,
 }
 
 /// What the photos page needs to make or open an ente account for a person:
@@ -1145,7 +1151,11 @@ fn page(name: &str) -> Response {
 async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     match app.identify(&headers, "access") {
         Some(user) if user == pages::DEMO_USER || app.member(&user) => {
-            Json(pages::me_json(&user, &app.home)).into_response()
+            let mut v = pages::me_json(&user, &app.home);
+            if let Some(k) = &app.tmdb {
+                v["tmdb"] = k.as_str().into();
+            }
+            Json(v).into_response()
         }
         Some(_) => StatusCode::FORBIDDEN.into_response(),
         None => StatusCode::UNAUTHORIZED.into_response(),
@@ -1477,6 +1487,7 @@ pub async fn start(
         network: cfg.network,
         demo_library: cfg.demo_library,
         app_manifest: cfg.app_manifest,
+        tmdb: cfg.tmdb,
         app_seen: Mutex::new(None),
         fleet: cfg.fleet,
     });

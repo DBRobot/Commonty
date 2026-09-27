@@ -15,8 +15,9 @@
 //! and is zeroed with it.
 //!
 //!   GET  /key                    the box's current public key to seal to
-//!   POST /session                { url, key: sealed data key, size: sealed bytes }
-//!                                -> { id, playlist }
+//!   POST /session                { url, key: sealed data key, size: sealed bytes,
+//!                                  from: seconds in to start at (resuming) }
+//!                                -> { id, playlist, from, duration: seconds or null }
 //!   GET  /session/{id}/{file}    the playlist and its segments
 //!   DELETE /session/{id}         over, wiped
 //!
@@ -118,7 +119,14 @@ struct Start {
     key: String,
     /// the sealed file's size in bytes
     size: u64,
+    /// where in the film to begin, in seconds: a viewer picking up where
+    /// they stopped. The playlist starts there; the page adds it back.
+    #[serde(default)]
+    from: f64,
 }
+
+/// the containers ffmpeg and ffprobe may open, and nothing else
+const FORMATS: &str = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,ogg";
 
 async fn key(State(app): State<Arc<App>>) -> Json<serde_json::Value> {
     Json(serde_json::json!({ "key": app.public }))
@@ -173,6 +181,30 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
     if let Err(e) = std::fs::create_dir_all(&dir) {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
+    let session = Arc::new(Session {
+        dir: dir.clone(),
+        last: Mutex::new(Instant::now()),
+        child: Mutex::new(None),
+        url: s.url,
+        dec,
+        size: plain_size,
+        cache: Mutex::new(HashMap::new()),
+    });
+    app.sessions
+        .lock()
+        .await
+        .insert(id.clone(), session.clone());
+    let input = format!("http://{}/plain/{id}", app.plain);
+    // how long the film is, for the page's "left" and its progress: read
+    // from the container, which is quick; a file that will not say plays
+    // all the same
+    let duration = probe(&app.ffmpeg.with_file_name("ffprobe"), &input).await;
+    // resuming past the end would make nothing; start again instead
+    let from = if s.from.is_finite() && s.from > 0.0 && duration.is_none_or(|d| s.from < d - 5.0) {
+        s.from
+    } else {
+        0.0
+    };
     // ffmpeg reads the plain file from this process, seeking as it likes,
     // and writes HLS into the session directory; the first segments appear
     // within seconds, the playlist grows as it goes
@@ -189,9 +221,16 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
             "-protocol_whitelist",
             "http,tcp",
             "-format_whitelist",
-            "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mpeg,flv,asf,ogg",
+            FORMATS,
+        ])
+        .args(if from > 0.0 {
+            vec!["-ss".to_string(), format!("{from:.3}")]
+        } else {
+            vec![]
+        })
+        .args([
             "-i",
-            &format!("http://{}/plain/{id}", app.plain),
+            &input,
             "-c:v",
             "libx264",
             "-preset",
@@ -220,23 +259,49 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
     {
         Ok(c) => c,
         Err(e) => {
+            if let Some(s) = app.sessions.lock().await.remove(&id) {
+                wipe(s).await;
+            }
             return (StatusCode::INTERNAL_SERVER_ERROR, format!("ffmpeg: {e}")).into_response();
         }
     };
-    app.sessions.lock().await.insert(
-        id.clone(),
-        Arc::new(Session {
-            dir,
-            last: Mutex::new(Instant::now()),
-            child: Mutex::new(Some(child)),
-            url: s.url,
-            dec,
-            size: plain_size,
-            cache: Mutex::new(HashMap::new()),
-        }),
-    );
-    Json(serde_json::json!({ "id": id, "playlist": format!("/session/{id}/index.m3u8") }))
-        .into_response()
+    *session.child.lock().await = Some(child);
+    Json(serde_json::json!({
+        "id": id,
+        "playlist": format!("/session/{id}/index.m3u8"),
+        "from": from,
+        "duration": duration,
+    }))
+    .into_response()
+}
+
+/// the film's length in seconds, if its container says within a few seconds
+async fn probe(ffprobe: &std::path::Path, input: &str) -> Option<f64> {
+    let out = tokio::time::timeout(
+        Duration::from_secs(15),
+        tokio::process::Command::new(ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "http,tcp",
+                "-format_whitelist",
+                FORMATS,
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "csv=p=0",
+                input,
+            ])
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    let d: f64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+    (d.is_finite() && d > 0.0).then_some(d)
 }
 
 /// the plain bytes of a session's file for ffmpeg: whole, or a range

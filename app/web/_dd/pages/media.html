@@ -21,59 +21,99 @@
       <div class="me" id="me"></div>
     </div>
   </header>
-  <main class="wide">
-    <div class="card" data-user="">
-      <div class="filesbar">
+
+  <main class="movies" data-user="">
+    <div class="movies-head">
+      <div>
         <h1>Movies &amp; TV</h1>
-        <div class="grow"></div>
+        <p class="lead">Your library, unlocked on this device. The box only ever holds the locked copies.</p>
       </div>
-      <p id="msg" class="lead">Unlocking with your passkey…</p>
-  
-      <div id="link" hidden>
-        <p class="lead">This passkey was made before it could open your library. On a device where you are signed in to the app, choose <strong>Set up a passkey</strong> and make a new one in this browser. After that it opens here straight away.</p>
-      </div>
-  
-      <div id="playing" class="playing" hidden>
-        <div class="filesbar">
-          <h2 id="title"></h2>
-          <div class="grow"></div>
-          <button id="savefile" class="quiet" hidden>Save</button>
-          <button id="close" class="quiet">Close</button>
+      <div class="movies-actions" id="actions" hidden>
+        <div class="tabs" role="group" aria-label="Show">
+          <button type="button" aria-pressed="true" data-tab="all">All</button>
+          <button type="button" aria-pressed="false" data-tab="films">Films</button>
+          <button type="button" aria-pressed="false" data-tab="shows">Shows</button>
         </div>
-        <video id="video" controls playsinline hidden></video>
-        <p id="note" class="note"></p>
+        <button id="addfilm" class="quiet" type="button" hidden>Add films</button>
+        <button id="newshow" class="quiet" type="button" hidden>New show</button>
+        <input id="filmpicker" type="file" accept="video/*,.mkv" multiple hidden>
       </div>
-  
-      <div id="shelves" hidden>
-        <section class="shelf">
-          <div class="filesbar">
-            <h2>Movies</h2>
-            <div class="grow"></div>
-            <button id="addfilm" class="quiet">Add</button>
-            <input id="filmpicker" type="file" accept="video/*" multiple hidden>
+    </div>
+
+    <p id="msg" class="lead">Unlocking with your passkey…</p>
+    <p id="uploading" class="note" hidden></p>
+
+    <div id="link" hidden>
+      <p class="lead">This passkey was made before it could open your library. On a device where you are signed in to the app, choose <strong>Set up a passkey</strong> and make a new one in this browser. After that it opens here straight away.</p>
+    </div>
+
+    <div id="home" hidden>
+      <section class="hero" id="hero" hidden>
+        <div class="hero-art" id="hero-art"></div>
+        <div class="hero-copy">
+          <span class="eyebrow" id="hero-eyebrow"></span>
+          <h2 id="hero-title"></h2>
+          <div class="meta" id="hero-meta"></div>
+          <div class="progress" id="hero-progress" hidden><i></i></div>
+          <p id="hero-text"></p>
+          <div class="hero-actions">
+            <button id="hero-play" type="button"></button>
+            <button id="hero-over" class="quiet" type="button" hidden>Start over</button>
           </div>
-          <ul id="films" class="rows"></ul>
-          <p id="nofilms" class="note" hidden>No films yet.</p>
-        </section>
-  
-        <section class="shelf">
-          <div class="filesbar">
-            <h2>Shows</h2>
-            <h2 id="showname" class="quiet-head" hidden></h2>
-            <div class="grow"></div>
-            <button id="back" class="quiet" hidden>All shows</button>
-            <button id="newshow" class="quiet">New</button>
-            <button id="addep" class="quiet" hidden>Add</button>
-            <input id="eppicker" type="file" accept="video/*" multiple hidden>
+        </div>
+      </section>
+
+      <section class="shelf" data-kind="all" id="continue-shelf" hidden>
+        <div class="shelf-head"><h2>Continue watching</h2><span class="count" id="continue-count"></span></div>
+        <div class="row wide" id="continue"></div>
+      </section>
+      <section class="shelf" data-kind="films" id="recent-shelf" hidden>
+        <div class="shelf-head"><h2>Recently added</h2><span class="count" id="recent-count"></span></div>
+        <div class="row posters" id="recent"></div>
+      </section>
+      <section class="shelf" data-kind="shows" id="shows-shelf" hidden>
+        <div class="shelf-head"><h2>Shows</h2><span class="count" id="shows-count"></span></div>
+        <div class="row posters" id="shows"></div>
+      </section>
+      <section class="shelf" data-kind="films" id="films-shelf" hidden>
+        <div class="shelf-head"><h2>Films</h2><span class="count" id="films-count"></span></div>
+        <div class="row posters" id="films"></div>
+      </section>
+      <p id="empty" class="note" hidden>Nothing here yet. Add a film, or make a show and add its episodes.</p>
+    </div>
+
+    <div id="show-page" class="show" hidden>
+      <div class="show-poster" id="show-poster"></div>
+      <div>
+        <div class="show-head">
+          <button class="back" type="button" id="back">← Movies &amp; TV</button>
+          <h2 id="show-title"></h2>
+          <div class="meta" id="show-meta"></div>
+          <p id="show-text" class="show-text"></p>
+          <div class="show-actions">
+            <div class="tabs" role="group" aria-label="Season" id="seasons"></div>
+            <button id="addep" class="quiet" type="button" hidden>Add episodes</button>
+            <input id="eppicker" type="file" accept="video/*,.mkv" multiple hidden>
           </div>
-          <ul id="shows" class="rows"></ul>
-          <p id="noshows" class="note" hidden>No shows yet.</p>
-        </section>
+        </div>
+        <ul class="eps" id="eps"></ul>
       </div>
-  
-      <p class="note">Names and contents are encrypted in this tab. The box stores what it cannot read. A whole film is happier on the desktop: <code>dd media</code> mounts this library as folders.</p>
     </div>
   </main>
+
+  <div class="player" id="player" hidden role="dialog" aria-label="Player">
+    <div class="player-top">
+      <div><b id="p-title"></b><br><span id="p-sub"></span></div>
+      <div class="player-buttons">
+        <button id="p-save" class="ghost" type="button" hidden>Save</button>
+        <button id="p-remove" class="ghost" type="button" hidden>Remove</button>
+        <button id="p-close" class="ghost" type="button" aria-label="Close">Close</button>
+      </div>
+    </div>
+    <video id="video" controls playsinline></video>
+    <p id="p-note" class="player-note"></p>
+  </div>
+
   <script type="module" src="/_dd/static/media.js"></script>
   <script type="module" src="/_dd/static/shell.js"></script>
 </body>

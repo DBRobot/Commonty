@@ -161,6 +161,14 @@ in
     default = null;
     description = "url of the signed app manifest (releases branch, app.json); null: no downloads page";
   };
+  # Posters for Movies & TV: a member's device asks TMDB for a title's art
+  # with this key and keeps it, sealed, in the library. The key goes to
+  # signed-in pages (/_dd/me); the titles never come near the box.
+  options.dd.verify.tmdbKeyFile = lib.mkOption {
+    type = lib.types.nullOr lib.types.path;
+    default = null;
+    description = "file holding the fleet's TMDB api key or read token; null: stills and title cards, no posters";
+  };
   options.dd.verify.demoLibrary = lib.mkOption {
     type = lib.types.nullOr (
       lib.types.submodule {
@@ -260,6 +268,9 @@ in
       }
       // lib.optionalAttrs (full && cfg.appManifest != null) {
         VERIFY_APP_MANIFEST = cfg.appManifest;
+      }
+      // lib.optionalAttrs (full && cfg.tmdbKeyFile != null) {
+        VERIFY_TMDB_KEY_FILE = cfg.tmdbKeyFile;
       }
       // lib.optionalAttrs (full && cfg.demoLibrary != null) {
         VERIFY_DEMO_LIBRARY_ID = cfg.demoLibrary.id;
