@@ -162,7 +162,7 @@ export async function lookUp(store, key, path, { title, year }, kind) {
     it.title = hit.title || hit.name || title;
     it.year = Number((hit.release_date || hit.first_air_date || '').slice(0, 4)) || year || null;
     it.overview = hit.overview || '';
-    it.poster = await store.keep(path, 'poster', await image(hit.poster_path, 'w342'));
+    it.poster = await store.keep(path, 'poster', await image(hit.poster_path, 'w500'));
     it.backdrop = await store.keep(path, 'backdrop', await image(hit.backdrop_path, 'w780'));
   }
   store.changed();

@@ -87,31 +87,42 @@
       This product uses the TMDB API but is not endorsed or certified by TMDB.
     </p>
 
-    <div id="show-page" class="show" hidden>
-      <div class="show-poster" id="show-poster"></div>
-      <div>
-        <div class="show-head">
-          <button class="back" type="button" id="back">← Movies &amp; TV</button>
-          <h2 id="show-title"></h2>
-          <div class="meta" id="show-meta"></div>
-          <p id="show-text" class="show-text"></p>
-          <div class="show-actions">
-            <div class="tabs" role="group" aria-label="Season" id="seasons"></div>
-            <button id="addep" class="quiet" type="button" hidden>Add episodes</button>
-            <input id="eppicker" type="file" accept="video/*,.mkv" multiple hidden>
-          </div>
+  </main>
+
+  <!-- a title, opened over the shelves as Games opens a game -->
+  <div class="veil" id="veil" hidden></div>
+  <section class="ribbon" id="ribbon" role="dialog" aria-modal="true" aria-labelledby="r-title" hidden>
+    <button class="r-close" id="r-close" type="button" aria-label="Close">×</button>
+    <div class="r-open" id="r-open">
+      <div class="r-poster" id="r-poster"></div>
+      <div class="r-body">
+        <p class="eyebrow" id="r-eyebrow"></p>
+        <h2 id="r-title"></h2>
+        <div class="meta" id="r-meta"></div>
+        <p class="r-text" id="r-text"></p>
+        <div id="r-where" hidden>
+          <div class="progress"><i></i></div>
+          <p class="r-left" id="r-left"></p>
         </div>
+        <div class="r-seasons" role="group" aria-label="Season" id="seasons"></div>
         <ul class="eps" id="eps"></ul>
       </div>
+      <div class="r-actions">
+        <button id="r-play" type="button"></button>
+        <span class="r-spec" id="r-spec"></span>
+        <button id="r-over" class="quiet" type="button">Start over</button>
+        <button id="addep" class="quiet" type="button">Add episodes</button>
+        <input id="eppicker" type="file" accept="video/*,.mkv" multiple hidden>
+        <button id="r-remove" class="r-remove" type="button"></button>
+      </div>
     </div>
-  </main>
+  </section>
 
   <div class="player" id="player" hidden role="dialog" aria-label="Player">
     <div class="player-top">
       <div><b id="p-title"></b><br><span id="p-sub"></span></div>
       <div class="player-buttons">
         <button id="p-save" class="ghost" type="button" hidden>Save</button>
-        <button id="p-remove" class="ghost" type="button" hidden>Remove</button>
         <button id="p-close" class="ghost" type="button" aria-label="Close">Close</button>
       </div>
     </div>
