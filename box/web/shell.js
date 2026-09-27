@@ -42,6 +42,18 @@ function here(url) {
   }
 }
 
+// A link out of the app (Photos, Games, Code) is the app's to open in the
+// device's browser. Followed as a link, the window went to an answer with
+// nothing in it and stayed blank; asked for instead, the page stays put.
+if (inApp) {
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest?.('a[href^="/_dd/app/open"]');
+    if (!a) return;
+    e.preventDefault();
+    fetch(a.getAttribute('href')).catch(() => {});
+  });
+}
+
 function el(tag, props = {}, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
