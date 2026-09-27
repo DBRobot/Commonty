@@ -1,10 +1,10 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- The phone's own bars in the pages' colours: the header's white
-         above, the ground below, with dark icons on them. -->
+    <!-- The phone's own bars in the pages' colours: the header's blue
+         above with light icons, the ground below with dark ones. -->
     <style name="Theme.commonty" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="android:statusBarColor">#FFFFFF</item>
-        <item name="android:navigationBarColor">#F4F5F2</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#1D4470</item>
+        <item name="android:navigationBarColor">#EEF1F5</item>
+        <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
     </style>
 </resources>

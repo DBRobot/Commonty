@@ -147,6 +147,7 @@ pub fn me_json(user: &str, services: &[Service]) -> serde_json::Value {
             },
             "icon": icon(&s.icon),
             "blurb": s.blurb,
+            "color": s.color,
             "host": host_of(&s.url),
             "shut": demo && s.demo.is_none(),
         })).collect::<Vec<_>>(),
