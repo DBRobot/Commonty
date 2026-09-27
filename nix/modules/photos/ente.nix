@@ -90,6 +90,20 @@ in
             substituteInPlace apps/photos/src/components/FileList.tsx \
               --replace-fail "overscanCount={3}" "overscanCount={20}"
           '';
+          # Next writes its build manifest as minified code whose short
+          # names are handed out in whatever order its workers finished:
+          # the same manifest, different bytes, and the boxes' rebuilds of
+          # a release disagreed (dd-attest). Written back as the object it
+          # makes, it comes out the same every time.
+          postInstall = (o.postInstall or "") + ''
+            find $out -name _buildManifest.js | while read -r f; do
+              ${prev.nodejs}/bin/node -e '
+                const fs = require("fs"), f = process.argv[1], self = {};
+                new Function("self", fs.readFileSync(f, "utf8"))(self);
+                fs.writeFileSync(f, "self.__BUILD_MANIFEST=" + JSON.stringify(self.__BUILD_MANIFEST) + ";self.__BUILD_MANIFEST_CB&&self.__BUILD_MANIFEST_CB();");
+              ' "$f"
+            done
+          '';
         });
       })
     ];
