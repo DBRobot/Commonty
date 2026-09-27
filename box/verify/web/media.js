@@ -146,6 +146,7 @@ function render() {
   shelf('shows', shows, 'poster');
   shelf('films', [...films].sort((a, b) => titleOf(a).localeCompare(titleOf(b))), 'poster');
   $('empty').hidden = !!(films.length || shows.length);
+  $('tmdb').hidden = !store.fromTmdb();
   tab(current);
 }
 
@@ -201,8 +202,8 @@ async function load() {
 // the library's owner asks: a reader sees what the owner's devices kept.
 async function fillIn() {
   if (!tmdb || lib.reader) return;
-  const todo = [...films, ...shows].filter((it) => !store.known(it.path)?.looked);
-  for (const it of todo) {
+  // lookUp passes over what it asked recently, and asks again what is due
+  for (const it of [...films, ...shows]) {
     try {
       if (await lookUp(store, tmdb, it.path, it.parsed, it.kind) && !show) render();
     } catch (e) {

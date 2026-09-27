@@ -8,6 +8,13 @@
 import { fetchPlain, put, mkdir } from './library.js';
 
 const DIR = '.commonty';
+// TMDB's terms: nothing of theirs kept longer than six months. It is asked
+// again after five, and past six a title shows only what is ours (a still
+// from the film) until it has been.
+const DAY = 24 * 3600 * 1000;
+const REFRESH = 150 * DAY;
+const EXPIRE = 180 * DAY;
+const age = (it) => (it?.looked ? Date.now() - Date.parse(it.looked) : Infinity);
 const SHELF = `${DIR}/shelf.json`;
 const PROGRESS = `${DIR}/progress.json`;
 
@@ -77,7 +84,14 @@ export async function open(lib) {
   let dirs = null;
   return {
     item: (path) => (meta.items[path] ||= {}),
-    known: (path) => meta.items[path],
+    /// what may be shown: TMDB's part only while it is under six months old
+    known: (path) => {
+      const it = meta.items[path];
+      if (!it || !it.tmdb || age(it) < EXPIRE) return it;
+      return { still: it.still };
+    },
+    /// whether anything on the page came from TMDB (for its credit)
+    fromTmdb: () => Object.values(meta.items).some((it) => it.tmdb && age(it) < EXPIRE),
     changed: () => saveMeta(meta),
     progress,
     moved: () => saveProgress(progress),
@@ -133,7 +147,7 @@ async function image(path, size) {
 /// the next visit does not ask again.
 export async function lookUp(store, key, path, { title, year }, kind) {
   const it = store.item(path);
-  if (it.looked) return false;
+  if (age(it) < REFRESH) return false;
   const found = await tmdb(key, kind === 'show' ? '/search/tv' : '/search/movie', {
     query: title,
     [kind === 'show' ? 'first_air_date_year' : 'year']: year,
@@ -141,6 +155,8 @@ export async function lookUp(store, key, path, { title, year }, kind) {
   });
   const hit = found.results?.[0];
   it.looked = new Date().toISOString();
+  // asked again: whatever it said before goes, the seasons with it
+  for (const k of ['tmdb', 'title', 'year', 'overview', 'poster', 'backdrop', 'seasons']) delete it[k];
   if (hit) {
     it.tmdb = hit.id;
     it.title = hit.title || hit.name || title;

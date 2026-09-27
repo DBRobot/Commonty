@@ -15,4 +15,5 @@ for f in public-sans plex-mono-400 plex-mono-500; do
   cp "$from/fonts/$f.woff2" "$to/static/$f.woff2"
 done
 cp "$from/fonts/LICENSE" "$to/static/fonts-license.txt"
+cp "$from/icons/tmdb.svg" "$to/static/tmdb.svg"
 cp "$from"/pages/*.html "$to/pages/"

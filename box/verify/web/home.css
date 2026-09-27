@@ -663,3 +663,7 @@ main.movies .ep:hover { background: var(--bg); }
   main.movies .ep { grid-template-columns: 28px 96px minmax(0, 1fr); }
   .ep .len { display: none; }
 }
+
+/* TMDB's credit, as their terms ask: their logo, smaller than ours */
+.tmdb { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0; font-size: 13px; color: var(--ink-2); }
+.tmdb img { height: 12px; width: auto; }
