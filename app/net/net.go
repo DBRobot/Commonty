@@ -21,6 +21,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/tailscale/wireguard-go/tun"
 	"tailscale.com/tsnet"
 
 	"commonty.org/app/net/bridge"
@@ -63,10 +64,12 @@ func reply(v any) *C.char {
 
 // commonty_net_start joins the network (or resumes from the state in dir
 // when key is empty) and returns json: the SOCKS5 proxy's address and
-// password, this node's address. Idempotent while running.
+// password, this node's address. tunfd, when not -1, is the phone's VPN
+// interface: the whole device's traffic for the network comes through it.
+// Idempotent while running.
 //
 //export commonty_net_start
-func commonty_net_start(dir, control, key, hostname *C.char) *C.char {
+func commonty_net_start(dir, control, key, hostname *C.char, tunfd C.int) *C.char {
 	mu.Lock()
 	defer mu.Unlock()
 	if srv != nil {
@@ -93,7 +96,17 @@ func commonty_net_start(dir, control, key, hostname *C.char) *C.char {
 	if os.Getenv("COMMONTY_NET_DEBUG") != "" || runtime.GOOS == "android" {
 		logf = log.Printf
 	}
+	var dev tun.Device
+	if tunfd >= 0 {
+		d, err := tunFromFD(int(tunfd))
+		if err != nil {
+			b.Close()
+			return reply(started{Error: err.Error()})
+		}
+		dev = d
+	}
 	s := &tsnet.Server{
+		Tun:        dev,
 		Dir:        state,
 		ControlURL: b.URL(),
 		AuthKey:    C.GoString(key),

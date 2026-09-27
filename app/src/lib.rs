@@ -9,6 +9,7 @@ mod browser;
 mod media;
 mod net;
 mod paths;
+mod vpn;
 
 /// the keystore this app keeps its device key in: its own, so an app beside
 /// `dd` on one machine is a device of its own
@@ -25,6 +26,7 @@ pub fn run() {
         .manage(account::Keys(auth::open(SERVICE)))
         .manage(media::Media::default());
     builder
+        .plugin(vpn::init())
         .invoke_handler(tauri::generate_handler![
             account::status,
             account::set_name,
@@ -47,7 +49,7 @@ pub fn run() {
                 paths::data().join("keys.json"),
             )));
             // on the network from the start, if this device has joined before
-            net::resume(&crate::account::control_url());
+            net::resume(app.handle(), &crate::account::control_url());
             Ok(())
         })
         .build(tauri::generate_context!())

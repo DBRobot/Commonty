@@ -84,6 +84,11 @@ fn gate_base() -> String {
         .unwrap_or_default()
 }
 
+/// the library gate, which answers only on the network (files.<domain>)
+fn files_base() -> String {
+    media::gate::files_base(&dirs()).unwrap_or_default()
+}
+
 #[tauri::command]
 pub async fn status(keys: State<'_, Keys>) -> Result<Status, String> {
     let (kp, _fresh) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
@@ -165,11 +170,11 @@ async fn check_gate(
     // to a token it accepts and 401 to one it does not
     let (url, own) = match entry.libraries.first() {
         Some(l) => (
-            format!("{}/_dd/library/{}/records", gate_base(), l.id),
+            format!("{}/_dd/library/{}/records", files_base(), l.id),
             true,
         ),
         None => (
-            format!("{}/_dd/library/{}/records", gate_base(), "0".repeat(32)),
+            format!("{}/_dd/library/{}/records", files_base(), "0".repeat(32)),
             false,
         ),
     };

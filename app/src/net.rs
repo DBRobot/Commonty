@@ -17,6 +17,7 @@ unsafe extern "C" {
         control: *const c_char,
         key: *const c_char,
         hostname: *const c_char,
+        tunfd: i32,
     ) -> *mut c_char;
     fn commonty_net_status() -> *mut c_char;
     fn commonty_net_stop();
@@ -142,7 +143,7 @@ fn hostname() -> String {
 
 /// bring the engine up, from the state on disk or with a fresh key, and
 /// point every client at its proxy
-fn start(control: &str, key: &str) -> Result<Started, String> {
+fn start(control: &str, key: &str, tunfd: i32) -> Result<Started, String> {
     let dir = state_dir()?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let marker = dir.join("joined");
@@ -154,7 +155,13 @@ fn start(control: &str, key: &str) -> Result<Started, String> {
         c(&hostname())?,
     );
     let out = take(unsafe {
-        commonty_net_start(dir.as_ptr(), control.as_ptr(), key.as_ptr(), host.as_ptr())
+        commonty_net_start(
+            dir.as_ptr(),
+            control.as_ptr(),
+            key.as_ptr(),
+            host.as_ptr(),
+            tunfd,
+        )
     });
     let st: Started = serde_json::from_str(&out).map_err(|e| format!("engine: {e}: {out}"))?;
     if !st.error.is_empty() {
@@ -195,7 +202,7 @@ pub async fn net_status() -> Result<NetStatus, String> {
 /// join: the gate vouches for this device and hands it a key; the engine
 /// takes it once, and from then on the state on disk is the membership
 #[tauri::command]
-pub async fn net_join(keys: State<'_, Keys>) -> Result<NetStatus, String> {
+pub async fn net_join(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<NetStatus, String> {
     let (_, user, token) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
     let dirs = crate::account::dirs();
     // the front door: this device is not on the network yet
@@ -220,24 +227,49 @@ pub async fn net_join(keys: State<'_, Keys>) -> Result<NetStatus, String> {
         .ok_or("no control url")?
         .to_string();
     let key = v["key"].as_str().ok_or("no key")?.to_string();
-    tauri::async_runtime::spawn_blocking(move || start(&control, &key))
-        .await
-        .map_err(|e| e.to_string())??;
+    tauri::async_runtime::spawn_blocking(move || {
+        let st = start(&control, &key, -1)?;
+        // joined; a phone now takes the network for the whole device
+        #[cfg(target_os = "android")]
+        {
+            stop();
+            let fd = crate::vpn::up(&app, &st.ip)?;
+            start(&control, "", fd)?;
+        }
+        let _ = (&app, st);
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(status_now())
 }
 
 /// resume from the state on disk, at app start; nothing if never joined
-pub fn resume(control: &str) {
-    if let Ok(d) = state_dir()
-        && d.join("joined").exists()
-    {
-        let control = control.to_string();
-        std::thread::spawn(move || {
-            if let Err(e) = start(&control, "") {
+pub fn resume(app: &tauri::AppHandle, control: &str) {
+    let Ok(d) = state_dir() else { return };
+    // the marker holds this node's address, which the phone's VPN needs
+    let Ok(ip) = std::fs::read_to_string(d.join("joined")) else {
+        return;
+    };
+    let (app, control) = (app.clone(), control.to_string());
+    std::thread::spawn(move || {
+        #[cfg(target_os = "android")]
+        let fd = match crate::vpn::up(&app, ip.trim()) {
+            Ok(fd) => fd,
+            Err(e) => {
                 eprintln!("network: {e}");
+                return;
             }
-        });
-    }
+        };
+        #[cfg(not(target_os = "android"))]
+        let fd = {
+            let _ = (&app, &ip);
+            -1
+        };
+        if let Err(e) = start(&control, "", fd) {
+            eprintln!("network: {e}");
+        }
+    });
 }
 
 pub fn stop() {
