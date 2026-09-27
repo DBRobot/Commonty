@@ -80,36 +80,50 @@ in
 
     # reached through the gate's host, by a signed-in member only; the plain
     # listener (port + 1) is for ffmpeg and is proxied by nothing
-    services.nginx.virtualHosts."files.${base}".locations = {
-      "/_dd/transcode/" = {
-        proxyPass = "http://127.0.0.1:${toString port}/";
-        extraConfig = ''
-          auth_request /_dd/verify;
-          # the session it makes is its own credential; it never replays
-          # the caller's
-          proxy_set_header Authorization "";
-          proxy_set_header Cookie $dd_cookie_stripped;
-          client_max_body_size 8m;
-          proxy_read_timeout 120s;
-        '';
-      };
+    services.nginx.virtualHosts."files.${base}".locations =
+      let
+        # behind the gate: starting a session, and the box's key to seal to
+        gated = {
+          extraConfig = ''
+            auth_request /_dd/verify;
+            # the session it makes is its own credential; it never replays
+            # the caller's
+            proxy_set_header Authorization "";
+            proxy_set_header Cookie $dd_cookie_stripped;
+            client_max_body_size 8m;
+            proxy_read_timeout 120s;
+          '';
+        };
+      in
+      {
+        "/_dd/transcode/" = gated // {
+          proxyPass = "http://127.0.0.1:${toString port}/";
+        };
 
-      # The playlist and its segments, on the session id alone. A player
-      # element fetches these itself and cannot be made to carry a token
-      # or a cookie, so the id is the credential: 128 bits from
-      # /dev/urandom, minted only for a member who asked for this one
-      # file, good only while the session lives. That is what a presigned
-      # url is, and the gate already hands those out (dav.rs). Starting a
-      # session is still behind the gate above; this is only watching one
-      # that somebody already started.
-      "/_dd/transcode/session/" = {
-        proxyPass = "http://127.0.0.1:${toString port}/session/";
-        extraConfig = ''
-          proxy_read_timeout 120s;
-          # a segment is written as it is made: no buffering in the way
-          proxy_buffering off;
-        '';
+        # Starting a session, exactly. Without this, nginx answers a request
+        # for the path below minus its slash with a redirect to it, as it
+        # does for any location ending in a slash - a POST turned into a GET
+        # of an empty session, and no film ever started from a page.
+        "= /_dd/transcode/session" = gated // {
+          proxyPass = "http://127.0.0.1:${toString port}/session";
+        };
+
+        # The playlist and its segments, on the session id alone. A player
+        # element fetches these itself and cannot be made to carry a token
+        # or a cookie, so the id is the credential: 128 bits from
+        # /dev/urandom, minted only for a member who asked for this one
+        # file, good only while the session lives. That is what a presigned
+        # url is, and the gate already hands those out (dav.rs). Starting a
+        # session is still behind the gate above; this is only watching one
+        # that somebody already started.
+        "/_dd/transcode/session/" = {
+          proxyPass = "http://127.0.0.1:${toString port}/session/";
+          extraConfig = ''
+            proxy_read_timeout 120s;
+            # a segment is written as it is made: no buffering in the way
+            proxy_buffering off;
+          '';
+        };
       };
-    };
   };
 }
