@@ -285,6 +285,66 @@ export function human(n) {
   return `${n < 10 && i ? n.toFixed(1) : Math.round(n)} ${u[i]}`;
 }
 
+/// a file or folder to a new name or place: the gate renames what the
+/// bucket holds; nothing is read, and nothing is sealed again
+export async function move(lib, from, to) {
+  const r = await fetch(dav(lib, from), {
+    method: 'MOVE',
+    headers: { destination: location.origin + dav(lib, to), overwrite: 'F' },
+  });
+  if (!r.ok) throw new Error(`the gate said ${r.status}`);
+}
+
+// the trash keeps its own names in the clear (trash/<when>/...) and the
+// library's below them, as they were
+function trashUrl(lib, stamp, enc) {
+  return `/_dd/dav/${lib.id}/trash/${stamp}${enc ? '/' + enc.split('/').map(encodeURIComponent).join('/') : ''}`;
+}
+
+async function propfind(url) {
+  const r = await fetch(url + '/', { method: 'PROPFIND', headers: { depth: '1' } });
+  if (r.status === 404) return [];
+  if (r.status !== 207) throw new Error(`the gate said ${r.status}`);
+  const doc = new DOMParser().parseFromString(await r.text(), 'application/xml');
+  return [...doc.getElementsByTagNameNS('DAV:', 'response')].map((el) => ({
+    href: decodeURI(el.getElementsByTagNameNS('DAV:', 'href')[0]?.textContent || ''),
+    dir: !!el.getElementsByTagNameNS('DAV:', 'collection').length,
+    sealed: Number(el.getElementsByTagNameNS('DAV:', 'getcontentlength')[0]?.textContent || 0),
+  }));
+}
+
+/// What is in the trash: every file with where it was, when it went there,
+/// and its size. The box lets it go for good 90 days on.
+export async function trashed(lib) {
+  const base = `/_dd/dav/${lib.id}/trash/`;
+  const out = [];
+  const walk = async (stamp, enc) => {
+    for (const e of await propfind(trashUrl(lib, stamp, enc))) {
+      const rel = e.href.replace(/\/$/, '').slice((base + stamp + '/').length);
+      if (!rel || rel === enc) continue;
+      const encRel = rel.split('/').map(decodeURIComponent).join('/');
+      if (e.dir) { await walk(stamp, encRel); continue; }
+      let path;
+      try { path = path_decrypt(lib.key, lib.id, encRel); } catch { continue; }
+      out.push({ stamp, enc: encRel, path, name: path.split('/').pop(), size: plain_size(e.sealed), when: new Date(Number(stamp) * 1000) });
+    }
+  };
+  for (const e of await propfind(base.slice(0, -1))) {
+    const stamp = e.href.replace(/\/$/, '').split('/').pop();
+    if (e.dir && /^\d+$/.test(stamp)) await walk(stamp, '');
+  }
+  return out.sort((a, b) => b.when - a.when);
+}
+
+/// back where it was; beside it, under a new name, if that place is taken
+export async function restore(lib, item, to = item.path) {
+  const r = await fetch(trashUrl(lib, item.stamp, item.enc), {
+    method: 'MOVE',
+    headers: { destination: location.origin + dav(lib, to), overwrite: 'F' },
+  });
+  if (!r.ok) throw new Error(`the gate said ${r.status}`);
+}
+
 export async function mkdir(lib, path) {
   const r = await fetch(dav(lib, path), { method: 'MKCOL' });
   if (!r.ok && r.status !== 405) throw new Error(`the gate said ${r.status}`);
