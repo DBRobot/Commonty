@@ -51,11 +51,12 @@ pub fn random_id() -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// The system's randomness: the kernel's on a box or a laptop, the
+/// browser's crypto.getRandomValues in the page's wasm. Reading
+/// /dev/urandom as a file, as this did, has no file to read in a browser:
+/// sealing a library key to a box's transcoder aborted the page's wasm.
 fn fill(buf: &mut [u8]) {
-    use std::io::Read as _;
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(buf))
-        .expect("/dev/urandom");
+    getrandom::getrandom(buf).expect("randomness");
 }
 
 // ---------------------------------------------------------------- sealing
@@ -134,7 +135,7 @@ fn rand_core() -> Urandom {
     Urandom
 }
 
-/// /dev/urandom as a RngCore, for the sealing api that wants one
+/// the system's randomness (fill) as a RngCore, for the sealing api that wants one
 struct Urandom;
 impl crypto_box::aead::rand_core::RngCore for Urandom {
     fn next_u32(&mut self) -> u32 {
