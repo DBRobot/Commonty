@@ -45,11 +45,15 @@ func ours(host, domain string) bool {
 	return host == domain || strings.HasSuffix(host, "."+domain)
 }
 
+// The fleet's names through this device, and straight out when the app is
+// not there to take them (quit without clearing, or crashed): a browser
+// holding these rules then still opens the public pages, and only what is
+// on the network alone waits for the app.
 func pacFile(domain string) string {
 	return fmt.Sprintf(`function FindProxyForURL(url, host) {
   host = host.toLowerCase();
   if (host == %q || dnsDomainIs(host, %q))
-    return "SOCKS5 127.0.0.1:%d; SOCKS 127.0.0.1:%d";
+    return "SOCKS5 127.0.0.1:%d; SOCKS 127.0.0.1:%d; DIRECT";
   return "DIRECT";
 }
 `, domain, "."+domain, socksPort, socksPort)

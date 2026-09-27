@@ -39,6 +39,18 @@
       "deb",
       "appimage",
       "nsis"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "gstreamer1.0-plugins-base",
+          "gstreamer1.0-plugins-good",
+          "gstreamer1.0-libav"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    }
   }
 }

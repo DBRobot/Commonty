@@ -112,7 +112,8 @@ fn open_browser() {
     }
 }
 
-/// signing out on this device: the browser goes straight out again
+/// signing out on this device, or the app closing: the browser goes
+/// straight out again
 pub fn forget_browser() {
     if let Ok(mut b) = BROWSER.lock()
         && !b.0.is_empty()

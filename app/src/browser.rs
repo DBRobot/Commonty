@@ -39,7 +39,8 @@ pub fn register(pac: &str) -> Option<String> {
     }
 }
 
-/// undo it, if it is still ours (signing out on this device)
+/// undo it, if it is still ours (signing out on this device, or the app
+/// closing)
 pub fn unregister(pac: &str) {
     #[cfg(target_os = "windows")]
     if windows::current().as_deref() == Some(pac) {
