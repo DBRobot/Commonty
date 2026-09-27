@@ -73,6 +73,8 @@ in
             # the menu: the site's, with a passkey where Ente asks for the
             # password nobody here knows, and nothing that needs it (hiding)
             ../../../box/photos/ente-web-commonty-menu.patch
+            # pictures on screen fetched first, those flung past not at all
+            ../../../box/photos/ente-web-commonty-thumbs.patch
           ];
           # Next names each build at random, and every page carries the
           # name: two builds of the same source never matched, and the
