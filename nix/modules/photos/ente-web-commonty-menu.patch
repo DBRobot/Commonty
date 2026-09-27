@@ -1,0 +1,846 @@
+diff --git a/apps/photos/src/components/AuthenticateUser.tsx b/apps/photos/src/components/AuthenticateUser.tsx
+index bf3b3fb..faa8afd 100644
+--- a/apps/photos/src/components/AuthenticateUser.tsx
++++ b/apps/photos/src/components/AuthenticateUser.tsx
+@@ -1,4 +1,4 @@
+-import { VerifyMasterPasswordForm } from "ente-accounts/components/VerifyMasterPasswordForm";
++import { Stack, Typography } from "@mui/material";
+ import { checkSessionValidity } from "ente-accounts/services/session";
+ import {
+     ensureLocalUser,
+@@ -10,8 +10,10 @@ import {
+     TitledMiniDialog,
+     type MiniDialogAttributes,
+ } from "ente-base/components/MiniDialog";
++import { FocusVisibleButton } from "ente-base/components/mui/FocusVisibleButton";
+ import type { ModalVisibilityProps } from "ente-base/components/utils/modal";
+ import { useBaseContext } from "ente-base/context";
++import { decryptBox, deriveKey } from "ente-base/crypto";
+ import log from "ente-base/log";
+ import { t } from "i18next";
+ import { useCallback, useEffect, useState } from "react";
+@@ -38,7 +40,7 @@ export const AuthenticateUser: React.FC<AuthenticateUserProps> = ({
+         open={open}
+         onClose={onClose}
+         sx={{ position: "absolute" }}
+-        title={t("password")}
++        title="Confirm it's you"
+     >
+         <AuthenticateUserDialogContents {...{ open, onClose }} {...rest} />
+     </TitledMiniDialog>
+@@ -97,10 +99,8 @@ const AuthenticateUserDialogContents: React.FC<AuthenticateUserProps> = ({
+     if (!user || !keyAttributes) return <></>;
+ 
+     return (
+-        <VerifyMasterPasswordForm
+-            userEmail={user.email}
++        <ConfirmWithPasskey
+             keyAttributes={keyAttributes}
+-            submitButtonTitle={t("authenticate")}
+             onVerify={() => {
+                 onAuthenticate();
+                 onClose();
+@@ -109,6 +109,73 @@ const AuthenticateUserDialogContents: React.FC<AuthenticateUserProps> = ({
+     );
+ };
+ 
++/**
++ * Commonty: the account's password is made from the person's passkey (the
++ * site's /_dd/photos page), so nobody knows it to type. The passkey makes
++ * it again here, and it is checked exactly as a typed one would be: the key
++ * it derives must open the master key.
++ */
++const ConfirmWithPasskey: React.FC<{
++    keyAttributes: KeyAttributes;
++    onVerify: () => void;
++}> = ({ keyAttributes, onVerify }) => {
++    const [error, setError] = useState("");
++    const [busy, setBusy] = useState(false);
++
++    const confirm = async () => {
++        setBusy(true);
++        setError("");
++        try {
++            const url = "/_dd/static/photos-passkey.js";
++            const m = (await import(/* webpackIgnore: true */ url)) as {
++                photosPassword: () => Promise<string>;
++            };
++            const password = await m.photosPassword();
++            const kek = await deriveKey(
++                password,
++                keyAttributes.kekSalt,
++                keyAttributes.opsLimit,
++                keyAttributes.memLimit,
++            );
++            await decryptBox(
++                {
++                    encryptedData: keyAttributes.encryptedKey,
++                    nonce: keyAttributes.keyDecryptionNonce,
++                },
++                kek,
++            );
++            onVerify();
++        } catch (e) {
++            log.error("Passkey confirmation failed", e);
++            setError(
++                "That passkey did not confirm it. Try again, or use the device you set your passkey up on.",
++            );
++        } finally {
++            setBusy(false);
++        }
++    };
++
++    return (
++        <Stack sx={{ gap: 2 }}>
++            <Typography sx={{ color: "text.muted" }}>
++                Your passkey confirms it is you. Nothing to type.
++            </Typography>
++            {error && (
++                <Typography variant="small" sx={{ color: "critical.main" }}>
++                    {error}
++                </Typography>
++            )}
++            <FocusVisibleButton
++                color="accent"
++                disabled={busy}
++                onClick={() => void confirm()}
++            >
++                Confirm with your passkey
++            </FocusVisibleButton>
++        </Stack>
++    );
++};
++
+ /**
+  * Attributes for a dialog box that informs the user that their password was
+  * changed on a different device, and they the need to login again to be able to
+diff --git a/apps/photos/src/components/Collections/CollectionHeader.tsx b/apps/photos/src/components/Collections/CollectionHeader.tsx
+index 8b2de60..3c50595 100644
+--- a/apps/photos/src/components/Collections/CollectionHeader.tsx
++++ b/apps/photos/src/components/Collections/CollectionHeader.tsx
+@@ -20,7 +20,6 @@ import PushPinOutlinedIcon from "@mui/icons-material/PushPinOutlined";
+ import SortIcon from "@mui/icons-material/Sort";
+ import TvIcon from "@mui/icons-material/Tv";
+ import UnarchiveIcon from "@mui/icons-material/Unarchive";
+-import VisibilityOffOutlinedIcon from "@mui/icons-material/VisibilityOffOutlined";
+ import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
+ import { Box, IconButton, Menu, Stack, Tooltip } from "@mui/material";
+ import { SpacedRow } from "ente-base/components/containers";
+@@ -430,14 +429,6 @@ const CollectionHeaderOptions: React.FC<CollectionHeaderProps> = ({
+         );
+     });
+ 
+-    const hideAlbum = wrap(async () => {
+-        if (!activeCollection) return;
+-        await updateCollectionVisibility(
+-            activeCollection,
+-            ItemVisibility.hidden,
+-        );
+-        setActiveCollectionID(PseudoCollectionID.all);
+-    });
+ 
+     const unhideAlbum = wrap(async () => {
+         if (!activeCollection) return;
+@@ -570,15 +561,7 @@ const CollectionHeaderOptions: React.FC<CollectionHeaderProps> = ({
+                         >
+                             {t("unhide_collection")}
+                         </OverflowMenuOption>
+-                    ) : (
+-                        <OverflowMenuOption
+-                            key="hide"
+-                            onClick={hideAlbum}
+-                            startIcon={<VisibilityOffOutlinedIcon />}
+-                        >
+-                            {t("hide_collection")}
+-                        </OverflowMenuOption>
+-                    )
++                    ) : undefined
+                 ) : undefined,
+                 <OverflowMenuOption
+                     key="leave"
+@@ -718,15 +701,7 @@ const CollectionHeaderOptions: React.FC<CollectionHeaderProps> = ({
+                     >
+                         {t("unhide_collection")}
+                     </OverflowMenuOption>
+-                ) : (
+-                    <OverflowMenuOption
+-                        key="hide"
+-                        onClick={hideAlbum}
+-                        startIcon={<VisibilityOffOutlinedIcon />}
+-                    >
+-                        {t("hide_collection")}
+-                    </OverflowMenuOption>
+-                ),
++                ) : undefined,
+                 <OverflowMenuOption
+                     key="delete"
+                     startIcon={<DeleteOutlinedIcon />}
+diff --git a/apps/photos/src/components/Sidebar.tsx b/apps/photos/src/components/Sidebar.tsx
+index 123cadf..3d121b5 100644
+--- a/apps/photos/src/components/Sidebar.tsx
++++ b/apps/photos/src/components/Sidebar.tsx
+@@ -1,13 +1,11 @@
+ import {
+     Delete02Icon,
+     Download05Icon,
+-    ViewOffSlashIcon,
+ } from "@hugeicons/core-free-icons";
+ import { HugeiconsIcon } from "@hugeicons/react";
+ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+ import CloseIcon from "@mui/icons-material/Close";
+ import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+-import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
+ import NorthEastIcon from "@mui/icons-material/NorthEast";
+ import {
+     Box,
+@@ -28,8 +26,6 @@ import { WatchFolder } from "components/WatchFolder";
+ import { RecoveryKey } from "ente-accounts/components/RecoveryKey";
+ import { openAccountsManagePasskeysPage } from "ente-accounts/services/passkey";
+ import { isDesktop } from "ente-base/app";
+-import { EnteLogo, EnteLogoBox } from "ente-base/components/EnteLogo";
+-import { LinkButton } from "ente-base/components/LinkButton";
+ import {
+     RowButton,
+     RowButtonDivider,
+@@ -63,7 +59,6 @@ import {
+ } from "ente-base/i18n";
+ import log from "ente-base/log";
+ import { savedLogs } from "ente-base/log-web";
+-import { customAPIHost } from "ente-base/origins";
+ import { saveStringAsFile } from "ente-base/utils/web";
+ import {
+     isHLSGenerationSupported,
+@@ -108,25 +103,20 @@ import {
+ } from "ente-new/photos/services/settings";
+ import {
+     familyAdminEmail,
+-    hasExceededStorageQuota,
+     isFamilyAdmin,
+     isPartOfFamily,
+-    isSubscriptionActive,
+-    isSubscriptionActivePaid,
+-    isSubscriptionCancelled,
+-    isSubscriptionFree,
+     isSubscriptionPastDue,
+     isSubscriptionStripe,
+     leaveFamily,
++    planUsage,
+     pullUserDetails,
+     redirectToCustomerPortal,
+-    userDetailsAddOnBonuses,
+     userDetailsSnapshot,
+     type UserDetails,
+ } from "ente-new/photos/services/user-details";
++import { formattedStorageByteSize } from "ente-gallery/utils/units";
+ import { usePhotosAppContext } from "ente-new/photos/types/context";
+ import { initiateEmail, openURL } from "ente-new/photos/utils/web";
+-import { wait } from "ente-utils/promise";
+ import { useFormik } from "formik";
+ import { t } from "i18next";
+ import { useRouter } from "next/router";
+@@ -136,11 +126,9 @@ import React, {
+     useMemo,
+     useRef,
+     useState,
+-    type MouseEventHandler,
+ } from "react";
+ import { Trans } from "react-i18next";
+ import { testUpload } from "../../tests/upload.test";
+-import { SubscriptionCard } from "./SubscriptionCard";
+ 
+ type SidebarProps = ModalVisibilityProps & {
+     /**
+@@ -272,7 +260,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
+     const { show: showFreeUpSpace, props: freeUpSpaceVisibilityProps } =
+         useModalVisibility();
+     const { watchFolderView, setWatchFolderView } = usePhotosAppContext();
+-    const { showMiniDialog, logout } = useBaseContext();
++    const { showMiniDialog } = useBaseContext();
+ 
+     const [pendingAccountAction, setPendingAccountAction] =
+         useState<AccountAction>();
+@@ -282,20 +270,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
+     const [pendingFreeUpSpaceAction, setPendingFreeUpSpaceAction] =
+         useState<FreeUpSpaceAction>();
+ 
+-    const handleLogout = useCallback(
+-        () =>
+-            showMiniDialog({
+-                message: t("logout_message"),
+-                continue: {
+-                    text: t("logout"),
+-                    color: "critical",
+-                    action: logout,
+-                },
+-                buttonDirection: "row",
+-            }),
+-        [logout, showMiniDialog],
+-    );
+-
+     const handleOpenWatchFolder = useCallback(
+         () => setWatchFolderView(true),
+         [setWatchFolderView],
+@@ -333,7 +307,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
+                 showHelp,
+                 showFreeUpSpace,
+                 onShowExport: handleShowExport,
+-                onLogout: handleLogout,
++                // Commonty: signing out is the site's; this only closes
++                onLogout: onClose,
+                 onShowWatchFolder: handleOpenWatchFolder,
+                 pseudoIDs: {
+                     uncategorized: uncategorizedCollectionSummaryID,
+@@ -355,7 +330,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
+                     ),
+             } as SidebarActionContext),
+         [
+-            handleLogout,
+             handleOpenWatchFolder,
+             onClose,
+             onShowCollectionSummary,
+@@ -392,10 +366,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
+     return (
+         <RootSidebarDrawer open={open} onClose={onClose}>
+             <HeaderSection onCloseSidebar={onClose} />
+-            <UserDetailsSection
+-                sidebarOpen={open}
+-                {...{ onShowPlanSelector }}
+-            />
++            <UserDetailsSection sidebarOpen={open} />
+             <Stack sx={{ gap: 0.5, mb: 3 }}>
+                 <ShortcutSection
+                     onCloseSidebar={onClose}
+@@ -432,10 +403,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
+                         onFreeUpSpaceActionHandled: setPendingFreeUpSpaceAction,
+                     }}
+                 />
+-                <Divider sx={{ my: "2px" }} />
+-                <ExitSection onLogout={handleLogout} />
+-                <InfoSection />
+             </Stack>
++            {/* Commonty: signing out is the site's, not the photo app's */}
++            <Typography
++                variant="small"
++                sx={{ mt: "auto", px: 1, pt: 2, pb: 1, color: "text.muted" }}
++            >
++                Signing out is in the Commonty menu, at the top of every page.
++            </Typography>
+         </RootSidebarDrawer>
+     );
+ };
+@@ -477,176 +452,130 @@ const openManageSubscription = ({
+     }
+ };
+ 
++// Commonty: the site's blue bar across the top of the menu, with its mark
+ const HeaderSection: React.FC<SectionProps> = ({ onCloseSidebar }) => (
+-    <SpacedRow sx={{ mt: "6px", pl: "12px" }}>
+-        <EnteLogoBox>
+-            <EnteLogo height={16} />
+-        </EnteLogoBox>
++    <SpacedRow
++        sx={{
++            m: -1.5,
++            mb: 1,
++            px: 2.5,
++            height: "64px",
++            bgcolor: "#1D4470",
++            color: "#fff",
++        }}
++    >
++        <Stack direction="row" sx={{ alignItems: "center", gap: "11px" }}>
++            <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
++                <rect x="1" y="1" width="9" height="9" fill="none" stroke="#fff" strokeWidth="1.6" />
++                <rect x="12" y="1" width="9" height="9" fill="none" stroke="#fff" strokeWidth="1.6" />
++                <rect x="1" y="12" width="9" height="9" fill="none" stroke="#fff" strokeWidth="1.6" />
++                <rect x="12" y="12" width="9" height="9" fill="#9CC3EA" />
++            </svg>
++            <Typography sx={{ fontWeight: 800, fontSize: "17px" }}>
++                Photos
++            </Typography>
++        </Stack>
+         <IconButton
+             aria-label={t("close")}
+             onClick={onCloseSidebar}
+-            color="secondary"
++            sx={{
++                color: "#fff",
++                border: "1px solid rgba(255, 255, 255, .25)",
++                borderRadius: "4px",
++                p: "8px",
++            }}
+         >
+             <CloseIcon fontSize="small" />
+         </IconButton>
+     </SpacedRow>
+ );
+ 
+-type UserDetailsSectionProps = Pick<SidebarProps, "onShowPlanSelector"> & {
++interface UserDetailsSectionProps {
+     sidebarOpen: boolean;
+-};
++}
+ 
++// Commonty: the person's name (their photo account is name@users.<domain>)
++// and the space their photos take, with nothing to buy
+ const UserDetailsSection: React.FC<UserDetailsSectionProps> = ({
+     sidebarOpen,
+-    onShowPlanSelector,
+ }) => {
+     const userDetails = useUserDetailsSnapshot();
+-    const {
+-        show: showManageMemberSubscription,
+-        props: manageMemberSubscriptionVisibilityProps,
+-    } = useModalVisibility();
+ 
+     useEffect(() => {
+         if (sidebarOpen) void pullUserDetails();
+     }, [sidebarOpen]);
+ 
+-    const isNonAdminFamilyMember = useMemo(
+-        () =>
+-            userDetails &&
+-            isPartOfFamily(userDetails) &&
+-            !isFamilyAdmin(userDetails),
+-        [userDetails],
+-    );
+-
+-    const handleSubscriptionCardClick = () =>
+-        openManageSubscription({
+-            userDetails,
+-            showManageMemberSubscription,
+-            onShowPlanSelector,
+-        });
++    const name = userDetails?.email.split("@")[0];
++    const used = userDetails ? planUsage(userDetails) : 0;
++    const limit = userDetails
++        ? (isPartOfFamily(userDetails)
++              ? (userDetails.familyData?.storage ?? 0)
++              : userDetails.subscription.storage) + userDetails.storageBonus
++        : 0;
+ 
+     return (
+-        <>
+-            <Box sx={{ px: 0.5, mt: 1.5, pb: 1.5, mb: 1 }}>
+-                <Typography sx={{ px: 1, pb: 1, color: "text.muted" }}>
+-                    {userDetails ? (
+-                        userDetails.email
+-                    ) : (
+-                        <Skeleton animation="wave" />
+-                    )}
+-                </Typography>
+-
+-                <SubscriptionCard
+-                    userDetails={userDetails}
+-                    onClick={handleSubscriptionCardClick}
+-                />
+-                {userDetails && (
+-                    <SubscriptionStatus
+-                        {...{ userDetails, onShowPlanSelector }}
+-                    />
+-                )}
+-            </Box>
+-            {isNonAdminFamilyMember && userDetails && (
+-                <ManageMemberSubscription
+-                    {...manageMemberSubscriptionVisibilityProps}
+-                    {...{ userDetails }}
+-                />
+-            )}
+-        </>
+-    );
+-};
+-
+-type SubscriptionStatusProps = Pick<SidebarProps, "onShowPlanSelector"> & {
+-    userDetails: UserDetails;
+-};
+-
+-const SubscriptionStatus: React.FC<SubscriptionStatusProps> = ({
+-    userDetails,
+-    onShowPlanSelector,
+-}) => {
+-    const hasAMessage = useMemo(() => {
+-        if (isPartOfFamily(userDetails) && !isFamilyAdmin(userDetails)) {
+-            return false;
+-        }
+-        if (
+-            isSubscriptionActivePaid(userDetails.subscription) &&
+-            !isSubscriptionCancelled(userDetails.subscription)
+-        ) {
+-            return false;
+-        }
+-        return true;
+-    }, [userDetails]);
+-
+-    const handleClick: MouseEventHandler<HTMLSpanElement> = useCallback(
+-        (e) => {
+-            e.stopPropagation();
+-
+-            if (isSubscriptionActive(userDetails.subscription)) {
+-                if (hasExceededStorageQuota(userDetails)) {
+-                    onShowPlanSelector();
+-                }
+-            } else {
+-                if (
+-                    isSubscriptionStripe(userDetails.subscription) &&
+-                    isSubscriptionPastDue(userDetails.subscription)
+-                ) {
+-                    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+-                    redirectToCustomerPortal();
+-                } else {
+-                    onShowPlanSelector();
+-                }
+-            }
+-        },
+-        [onShowPlanSelector, userDetails],
+-    );
+-
+-    if (!hasAMessage) {
+-        return <></>;
+-    }
+-
+-    const hasAddOnBonus = userDetailsAddOnBonuses(userDetails).length > 0;
+-
+-    let message: React.ReactNode;
+-    if (!hasAddOnBonus) {
+-        if (isSubscriptionActive(userDetails.subscription)) {
+-            if (isSubscriptionFree(userDetails.subscription)) {
+-                message = t("subscription_info_free");
+-            } else if (isSubscriptionCancelled(userDetails.subscription)) {
+-                message = t("subscription_info_renewal_cancelled", {
+-                    date: userDetails.subscription.expiryTime,
+-                });
+-            }
+-        } else {
+-            message = (
+-                <Trans
+-                    i18nKey={"subscription_info_expired"}
+-                    components={{ a: <LinkButton onClick={handleClick} /> }}
+-                />
+-            );
+-        }
+-    }
+-
+-    if (!message && hasExceededStorageQuota(userDetails)) {
+-        message = (
+-            <Trans
+-                i18nKey={"subscription_info_storage_quota_exceeded"}
+-                components={{ a: <LinkButton onClick={handleClick} /> }}
+-            />
+-        );
+-    }
+-
+-    if (!message) return <></>;
+-
+-    return (
+-        <Box sx={{ px: 1, pt: 0.5 }}>
+-            <Typography
+-                variant="small"
+-                onClick={handleClick}
+-                sx={{ color: "text.muted" }}
++        <Stack sx={{ px: 0.5, pt: 1, pb: 2, gap: 2 }}>
++            <Stack direction="row" sx={{ alignItems: "center", gap: 1.5 }}>
++                <Box
++                    sx={{
++                        width: 40,
++                        height: 40,
++                        borderRadius: "3px",
++                        display: "grid",
++                        placeItems: "center",
++                        bgcolor: "#9CC3EA",
++                        color: "#1D4470",
++                        fontWeight: 700,
++                        fontSize: "17px",
++                        textTransform: "uppercase",
++                    }}
++                >
++                    {name?.[0] ?? ""}
++                </Box>
++                <Box>
++                    <Typography sx={{ fontWeight: 700 }}>
++                        {name ?? <Skeleton animation="wave" width={80} />}
++                    </Typography>
++                    <Typography variant="small" sx={{ color: "text.muted" }}>
++                        Encrypted on your devices
++                    </Typography>
++                </Box>
++            </Stack>
++            <Stack
++                sx={{
++                    gap: 1,
++                    p: "14px 16px",
++                    border: "1px solid",
++                    borderColor: "divider",
++                    borderRadius: "4px",
++                }}
+             >
+-                {message}
+-            </Typography>
+-        </Box>
++                <SpacedRow>
++                    <Typography sx={{ fontWeight: 700 }}>Storage</Typography>
++                    <Typography variant="small" sx={{ color: "text.muted" }}>
++                        {userDetails
++                            ? `${formattedStorageByteSize(used)} of ${formattedStorageByteSize(limit)}`
++                            : ""}
++                    </Typography>
++                </SpacedRow>
++                <Box
++                    sx={{
++                        height: 8,
++                        borderRadius: "2px",
++                        bgcolor: "fill.faint",
++                        overflow: "hidden",
++                    }}
++                >
++                    <Box
++                        sx={{
++                            height: "100%",
++                            width: `${limit ? Math.min(100, (used / limit) * 100) : 0}%`,
++                            bgcolor: "accent.main",
++                        }}
++                    />
++                </Box>
++            </Stack>
++        </Stack>
+     );
+ };
+ 
+@@ -744,12 +673,6 @@ const ShortcutSection: React.FC<ShortcutSectionProps> = ({
+             onCloseSidebar,
+         );
+ 
+-    const handleOpenHiddenSection = () =>
+-        void onShowCollectionSummary(PseudoCollectionID.hiddenItems, true)
+-            // See: [Note: Workarounds for unactionable ARIA warnings]
+-            .then(() => wait(10))
+-            .then(onCloseSidebar);
+-
+     const summaryCaption = (summaryID: number) =>
+         normalCollectionSummaries.get(summaryID)?.fileCount.toString();
+ 
+@@ -772,24 +695,6 @@ const ShortcutSection: React.FC<ShortcutSectionProps> = ({
+                 caption={summaryCaption(PseudoCollectionID.archiveItems)}
+                 onClick={handleOpenArchiveSection}
+             />
+-            <RowButton
+-                startIcon={
+-                    <HugeiconsIcon
+-                        icon={ViewOffSlashIcon}
+-                        size={shortcutIconSize}
+-                    />
+-                }
+-                label={t("section_hidden")}
+-                caption={
+-                    <LockOutlinedIcon
+-                        sx={{
+-                            verticalAlign: "middle",
+-                            fontSize: "19px !important",
+-                        }}
+-                    />
+-                }
+-                onClick={handleOpenHiddenSection}
+-            />
+             <RowButton
+                 startIcon={
+                     <HugeiconsIcon
+@@ -836,13 +741,10 @@ const UtilitySection: React.FC<UtilitySectionProps> = ({
+     onShowExport,
+     onAuthenticateUser,
+     onShowPlanSelector,
+-    showAccount,
+     accountVisibilityProps,
+     showPreferences,
+     preferencesVisibilityProps,
+-    showHelp,
+     helpVisibilityProps,
+-    showFreeUpSpace,
+     freeUpSpaceVisibilityProps,
+     watchFolderView,
+     onShowWatchFolder,
+@@ -856,13 +758,22 @@ const UtilitySection: React.FC<UtilitySectionProps> = ({
+     pendingFreeUpSpaceAction,
+     onFreeUpSpaceActionHandled,
+ }) => {
++    const { showMiniDialog } = useBaseContext();
++    const { show: showRecoveryKey, props: recoveryKeyVisibilityProps } =
++        useModalVisibility();
++
++    // the words, after the person confirms it is them (with their passkey:
++    // AuthenticateUser)
++    const handleRecoveryKey = useCallback(async () => {
++        await onAuthenticateUser();
++        showRecoveryKey();
++    }, [onAuthenticateUser, showRecoveryKey]);
++
++    // Commonty: preferences, export and the recovery key. The account's
++    // password, email and plans are the passkey's and the fleet's, not
++    // something to change here; help is Ente's.
+     return (
+         <>
+-            <RowButton
+-                variant="secondary"
+-                label={t("account")}
+-                onClick={showAccount}
+-            />
+             {isDesktop && (
+                 <RowButton
+                     variant="secondary"
+@@ -870,21 +781,11 @@ const UtilitySection: React.FC<UtilitySectionProps> = ({
+                     onClick={onShowWatchFolder}
+                 />
+             )}
+-            <RowButton
+-                variant="secondary"
+-                label={t("free_up_space")}
+-                onClick={showFreeUpSpace}
+-            />
+             <RowButton
+                 variant="secondary"
+                 label={t("preferences")}
+                 onClick={showPreferences}
+             />
+-            <RowButton
+-                variant="secondary"
+-                label={t("help")}
+-                onClick={showHelp}
+-            />
+             <RowButton
+                 variant="secondary"
+                 label={t("export_data")}
+@@ -895,6 +796,15 @@ const UtilitySection: React.FC<UtilitySectionProps> = ({
+                 }
+                 onClick={onShowExport}
+             />
++            <RowButton
++                variant="secondary"
++                label={t("recovery_key")}
++                onClick={() => void handleRecoveryKey()}
++            />
++            <RecoveryKey
++                {...recoveryKeyVisibilityProps}
++                {...{ showMiniDialog }}
++            />
+             <Help
+                 {...helpVisibilityProps}
+                 onRootClose={onCloseSidebar}
+@@ -931,44 +841,6 @@ const UtilitySection: React.FC<UtilitySectionProps> = ({
+     );
+ };
+ 
+-const ExitSection: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
+-    <>
+-        <RowButton
+-            variant="secondary"
+-            color="critical"
+-            label={t("logout")}
+-            onClick={onLogout}
+-        />
+-    </>
+-);
+-
+-const InfoSection: React.FC = () => {
+-    const [appVersion, setAppVersion] = useState("");
+-    const [host, setHost] = useState<string | undefined>("");
+-
+-    useEffect(() => {
+-        void globalThis.electron?.appVersion().then(setAppVersion);
+-        void customAPIHost().then(setHost);
+-    }, []);
+-
+-    return (
+-        <>
+-            <Stack
+-                sx={{
+-                    p: "24px 18px 16px 18px",
+-                    gap: "24px",
+-                    color: "text.muted",
+-                }}
+-            >
+-                {appVersion && (
+-                    <Typography variant="mini">{appVersion}</Typography>
+-                )}
+-                {host && <Typography variant="mini">{host}</Typography>}
+-            </Stack>
+-        </>
+-    );
+-};
+-
+ type AccountProps = NestedSidebarDrawerVisibilityProps &
+     Pick<SidebarProps, "onAuthenticateUser" | "onShowPlanSelector"> & {
+         pendingAction?: AccountAction;
+diff --git a/apps/photos/src/pages/index.tsx b/apps/photos/src/pages/index.tsx
+index 0c47138..f8a909d 100644
+--- a/apps/photos/src/pages/index.tsx
++++ b/apps/photos/src/pages/index.tsx
+@@ -108,7 +108,10 @@ const Page: React.FC = () => {
+ 
+             await updateSessionFromElectronSafeStorageIfNeeded();
+             if ((await masterKeyFromSession()) && (await savedAuthToken())) {
+-                await router.push("/gallery");
++                // Commonty: straight on, without drawing the sign-in page
++                // behind it while the gallery loads
++                await router.replace("/gallery");
++                return;
+             } else {
+                 window.location.replace("/_dd/photos");
+                 return;
+diff --git a/packages/new/photos/components/SelectedFileOptions.tsx b/packages/new/photos/components/SelectedFileOptions.tsx
+index b272fa5..72f84d8 100644
+--- a/packages/new/photos/components/SelectedFileOptions.tsx
++++ b/packages/new/photos/components/SelectedFileOptions.tsx
+@@ -12,7 +12,6 @@ import {
+     Unarchive03Icon,
+     UserAdd02Icon,
+     ViewIcon,
+-    ViewOffSlashIcon,
+ } from "@hugeicons/core-free-icons";
+ import { HugeiconsIcon } from "@hugeicons/react";
+ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+@@ -548,13 +547,8 @@ const UnarchiveButton: React.FC<ButtonishProps> = ({ onClick }) => (
+     </Tooltip>
+ );
+ 
+-const HideButton: React.FC<ButtonishProps> = ({ onClick }) => (
+-    <Tooltip title={t("hide")}>
+-        <IconButton {...{ onClick }}>
+-            <HugeiconsIcon icon={ViewOffSlashIcon} />
+-        </IconButton>
+-    </Tooltip>
+-);
++// Commonty: no hiding; what is hidden sits behind a password nobody knows
++const HideButton: React.FC<ButtonishProps> = () => null;
+ 
+ const UnhideButton: React.FC<ButtonishProps> = ({ onClick }) => (
+     <Tooltip title={t("unhide")}>
+diff --git a/packages/new/photos/utils/file-actions.ts b/packages/new/photos/utils/file-actions.ts
+index b070360..3a4da50 100644
+--- a/packages/new/photos/utils/file-actions.ts
++++ b/packages/new/photos/utils/file-actions.ts
+@@ -115,7 +115,9 @@ function getBaseActions(
+         if (showEditLocation) {
+             actions.push("editLocation");
+         }
+-        actions.push("download", "addToAlbum", "archive", "hide", "trash");
++        // Commonty: no "hide" - its section is behind a password nobody
++        // here knows
++        actions.push("download", "addToAlbum", "archive", "trash");
+         return actions;
+     }
+ 
+@@ -126,7 +128,6 @@ function getBaseActions(
+             "download",
+             "addToAlbum",
+             "archive",
+-            "hide",
+             "trash",
+         ];
+     }
+@@ -180,7 +181,7 @@ function getBaseActions(
+         actions.push("moveToAlbum", "removeFromAlbum");
+     }
+ 
+-    actions.push("hide", "trash");
++    actions.push("trash");
+ 
+     return actions;
+ }

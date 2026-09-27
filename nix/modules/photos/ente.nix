@@ -70,6 +70,9 @@ in
           patches = (o.patches or [ ]) ++ [
             ./ente-web-passkey.patch
             ./ente-web-commonty.patch
+            # the menu: the site's, with a passkey where Ente asks for the
+            # password nobody here knows, and nothing that needs it (hiding)
+            ./ente-web-commonty-menu.patch
           ];
           # Next names each build at random, and every page carries the
           # name: two builds of the same source never matched, and the
