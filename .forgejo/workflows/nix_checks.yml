@@ -64,17 +64,23 @@ jobs:
         with:
           secret: ${{ secrets.DD_CI }}
 
+  # Every box's system, built on every box. A box vouches for a release
+  # (dd-attest) only for what it built itself or rebuilt to compare, and it
+  # vouches for all the boxes' systems, not its own alone: built here in
+  # CI, the release finds it all already built by this box's own daemon
+  # and the check takes seconds instead of rebuilding after the merge.
   build_host:
     if: ${{ inputs.run }}
     needs: build_client
-    runs-on: nix
+    runs-on: ${{ matrix.on }}
     strategy:
       fail-fast: false
       matrix:
         host: [node1, node2]
+        on: [node1, node2]
     steps:
       - uses: https://github.com/actions/checkout@v4
-      - name: build ${{ matrix.host }}
+      - name: build ${{ matrix.host }} on ${{ matrix.on }}
         run: nix build --print-out-paths .#nixosConfigurations.${{ matrix.host }}.config.system.build.toplevel | tee "$RUNNER_TEMP/toplevel"
       # what was built, as a status on the commit: `dd release publish`
       # reads it and signs that path instead of building again
