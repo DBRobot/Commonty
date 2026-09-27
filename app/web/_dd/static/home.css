@@ -185,8 +185,11 @@ main.auth {
   font-size: 17px;
   max-width: 640px;
 }
-/* the pages a stranger lands on carry the larger title */
+/* the pages a stranger lands on carry the larger title; a phone, less */
 main.auth h1, main.download h1 { font-size: 40px; line-height: 1.1; }
+@media (max-width: 860px) {
+  main.auth h1, main.download h1 { font-size: 32px; }
+}
 .auth-grid > section h1, main.auth > .card h1 { margin-bottom: 12px; }
 .banner {
   margin: 0 0 24px;
