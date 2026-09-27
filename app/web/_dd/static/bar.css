@@ -1,0 +1,159 @@
+/* The bar across the top of every page, on its own so that a page that is
+   not one of ours (Ente's photos app) carries the same one: the logo going
+   home, and the menu shell.js fills from /_dd/me. home.css imports it. It
+   brings its own tokens and touches nothing outside header.dd-bar. */
+
+@font-face {
+  font-family: "Public Sans";
+  src: url("/_dd/static/public-sans.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+.dd-bar {
+  --bar: #1D4470;
+  --bar-ink: #FFFFFF;
+  --bar-mark: #9CC3EA;
+  --bar-edge: rgba(255, 255, 255, .25);
+  --bar-menu: #FFFFFF;
+  --bar-menu-ink: #1A1F1C;
+  --bar-menu-line: #D5D9D3;
+  --bar-menu-rule: #E3E6E1;
+  --bar-menu-hover: #EEF1F5;
+  --bar-focus: #E0A21B;
+}
+/* the scheme follows the device, or a choice the page stamps on the root:
+   ours as data-theme, Ente's as a class */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not(.light) .dd-bar {
+    --bar: #16304F;
+    --bar-mark: #7FAEDD;
+    --bar-menu: #171C22;
+    --bar-menu-ink: #E5E9EE;
+    --bar-menu-line: #2A313B;
+    --bar-menu-rule: #222831;
+    --bar-menu-hover: #0F1318;
+  }
+}
+:root[data-theme="dark"] .dd-bar, :root.dark .dd-bar {
+  --bar: #16304F;
+  --bar-mark: #7FAEDD;
+  --bar-menu: #171C22;
+  --bar-menu-ink: #E5E9EE;
+  --bar-menu-line: #2A313B;
+  --bar-menu-rule: #222831;
+  --bar-menu-hover: #0F1318;
+}
+
+.dd-bar {
+  flex-shrink: 0;
+  background: var(--bar);
+  color: var(--bar-ink);
+  font-family: "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  letter-spacing: normal;
+  -webkit-font-smoothing: antialiased;
+}
+.dd-bar *, .dd-bar *::before, .dd-bar *::after { box-sizing: border-box; }
+.dd-bar :focus-visible { outline: 3px solid var(--bar-focus); outline-offset: 2px; }
+.dd-bar .bar {
+  height: 64px;
+  padding: 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.dd-bar .brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--bar-ink);
+  text-decoration: none;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
+.dd-bar .brand:hover { color: var(--bar-ink); }
+.dd-bar .brand svg { width: 22px; height: 22px; }
+.dd-bar .brand .mark-line { stroke: var(--bar-ink); }
+.dd-bar .brand .mark-fill { fill: var(--bar-mark); }
+.dd-bar .bar > a:not(.brand), .dd-bar .bar > a:not(.brand):hover {
+  color: var(--bar-ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+.dd-bar .me {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 15px;
+}
+.dd-bar .avatar {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  background: var(--bar-mark);
+  color: var(--bar);
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* the menu: everything that is not a service */
+.dd-bar .menu { position: relative; }
+.dd-bar .menu summary {
+  list-style: none;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 6px;
+  border: 1px solid var(--bar-edge);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .08);
+  color: var(--bar-ink);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dd-bar .menu summary::-webkit-details-marker { display: none; }
+.dd-bar .menu summary:hover, .dd-bar .menu[open] summary { background: rgba(255, 255, 255, .16); }
+.dd-bar .chev {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--bar-ink);
+}
+.dd-bar .menu[open] summary .chev { transform: rotate(180deg); }
+.dd-bar .menu nav {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  /* above whatever the page under the bar puts on top of itself */
+  z-index: 1400;
+  min-width: 200px;
+  padding: 6px 0;
+  border: 1px solid var(--bar-menu-line);
+  border-radius: 4px;
+  background: var(--bar-menu);
+  display: flex;
+  flex-direction: column;
+}
+.dd-bar .menu nav a {
+  padding: 9px 16px;
+  color: var(--bar-menu-ink);
+  text-decoration: none;
+  font-size: 15px;
+}
+.dd-bar .menu nav a:hover { background: var(--bar-menu-hover); color: var(--bar-menu-ink); }
+.dd-bar .menu nav hr { border: none; border-top: 1px solid var(--bar-menu-rule); margin: 6px 0; }
+
+@media (max-width: 860px) {
+  .dd-bar .bar { padding: 0 16px; height: 56px; }
+}

@@ -65,13 +65,20 @@ in
           # every way out of the app that would show ente's own sign-in or
           # sign-up goes to the passkey page instead: the app is reached only
           # through it
-          patches = (o.patches or [ ]) ++ [ ./ente-web-passkey.patch ];
+          # It also wears the site's look: its theme set to the site's colours,
+          # type and corners, and the site's own bar across the top
+          patches = (o.patches or [ ]) ++ [
+            ./ente-web-passkey.patch
+            ./ente-web-commonty.patch
+          ];
           # Next names each build at random, and every page carries the
           # name: two builds of the same source never matched, and the
           # boxes vouch for a release by rebuilding it (dd-attest)
           postPatch = (o.postPatch or "") + ''
             substituteInPlace packages/base/next.config.base.js \
               --replace-fail 'output: "export",' "output: \"export\", generateBuildId: async () => \"commonty\","
+            # the bar's stylesheet is the site's own file, not a copy of it
+            cp ${../../../box/verify/web/bar.css} apps/photos/src/styles/commonty-bar.css
           '';
         });
       })
