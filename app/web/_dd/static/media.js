@@ -81,7 +81,7 @@ function progressBar(fraction) {
 
 function card(it, shape) {
   const k = store.known(it.path) || {};
-  const b = el('button', { type: 'button', class: 'card' });
+  const b = el('button', { type: 'button', class: 'card', 'data-path': it.path });
   const pic = el('div', { class: 'pic' });
   const art = shape === 'wide'
     ? [k.backdrop, k.still, k.poster]
@@ -249,7 +249,7 @@ async function season(n) {
     const still = el('span', { class: 'still' });
     paint(still, [info.still, store.known(e.path)?.still], e.parsed.episodeTitle || show.name);
     const state = p?.done ? 'Watched' : p?.of && p.at > 30 ? `Watching · ${minutes(p.of - p.at)} left` : '';
-    const b = el('button', { type: 'button', class: 'ep' },
+    const b = el('button', { type: 'button', class: 'ep', 'data-path': e.path },
       el('span', { class: 'n', text: e.parsed.episode ?? '·' }),
       still,
       el('span', {},
@@ -333,12 +333,30 @@ async function stillFrom(v) {
   }
 }
 
+// The player covers the page: while it is open the page behind is out of
+// reach of Tab and of a screen reader, and closing it puts you back on the
+// film you opened.
+let openedFrom = null;
+function showPlayer(path) {
+  openedFrom = path;
+  for (const e of document.querySelectorAll('main, header.dd-bar')) e.inert = true;
+  $('player').hidden = false;
+}
+function hidePlayer() {
+  $('player').hidden = true;
+  for (const e of document.querySelectorAll('main, header.dd-bar')) e.inert = false;
+}
+function backToFilm() {
+  const at = openedFrom && [...document.querySelectorAll('[data-path]')].find((e) => e.dataset.path === openedFrom);
+  at?.focus();
+}
+
 async function play(it, { resume }) {
   const v = $('video');
   await stop();
   const p = store.progress[it.path];
   const from = resume && p && !p.done ? p.at : 0;
-  $('player').hidden = false;
+  showPlayer(it.path);
   $('p-title').textContent = it.label ? `${it.label}${it.parsed.episodeTitle ? ` · ${it.parsed.episodeTitle}` : ''}` : titleOf(it);
   $('p-sub').textContent = from ? `Picking up at ${minutes(from)}` : 'Unlocked on this device';
   $('p-note').textContent = 'Asking the box to play it…';
@@ -348,10 +366,12 @@ async function play(it, { resume }) {
     if (!confirm(`Remove ${titleOf(it)} from the library?`)) return;
     await stop();
     await trash(lib, it.path);
-    $('player').hidden = true;
+    hidePlayer();
     await reload();
   };
-  $('p-close').focus();
+  // on the picture, so Space plays and pauses from the start
+  v.tabIndex = 0;
+  v.focus();
   playing = { it, offset: 0, duration: null, lastSave: Date.now(), stilled: false };
   // A film is bigger than a tab: the box decrypts it in its own memory for
   // this one viewing and sends a playlist. Safari plays a playlist itself;
@@ -410,9 +430,29 @@ async function play(it, { resume }) {
 
 async function closePlayer() {
   await stop();
-  $('player').hidden = true;
+  hidePlayer();
   if (show) await season(Number($('seasons').querySelector('[aria-pressed="true"]')?.textContent.replace('Season ', '')) || show.episodes[0]?.parsed.season || 1);
   else render();
+  backToFilm();
+}
+
+// The player's keys, as players have them: Space or K plays and pauses,
+// the arrows go back and on ten seconds, F is the whole screen. A button
+// with the focus keeps Space and Enter for itself.
+function playerKeys(e) {
+  if ($('player').hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+  const v = $('video');
+  const onButton = e.target.closest?.('button, input, select, textarea');
+  if ((e.key === ' ' || e.key === 'k') && !onButton) {
+    e.preventDefault();
+    v.paused ? v.play().catch(() => {}) : v.pause();
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    v.currentTime = Math.max(0, v.currentTime + (e.key === 'ArrowLeft' ? -10 : 10));
+  } else if (e.key === 'f' && !onButton) {
+    e.preventDefault();
+    document.fullscreenElement ? document.exitFullscreen().catch(() => {}) : v.requestFullscreen?.().catch(() => {});
+  }
 }
 
 // ---- adding
@@ -491,6 +531,7 @@ async function start() {
   v.addEventListener('pause', () => remember(true));
   v.addEventListener('ended', () => remember(true));
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('player').hidden) closePlayer(); });
+  addEventListener('keydown', playerKeys);
   // a tab closed mid-film keeps its place, and the box stops working on it
   addEventListener('pagehide', () => {
     remember(true);
