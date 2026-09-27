@@ -361,7 +361,45 @@ fn publish(
         &format!("release {counter}: {}", &rev[..12]),
     )?;
     print(&signed);
+    nudge(&boxes);
     Ok(())
+}
+
+/// Every box told to look now rather than on its next timer. The box does
+/// all the deciding itself - it fetches the release, checks the key, the
+/// counter and every hash - so this changes when it looks, not what it
+/// accepts. A box that cannot be reached finds it on its timer as before.
+fn nudge(boxes: &serde_json::Value) {
+    let Some(boxes) = boxes.as_object() else {
+        return;
+    };
+    let asks: Vec<_> = boxes
+        .iter()
+        .map(|(name, b)| {
+            let tailnet = b["tailnet"].as_str().unwrap_or_default().to_string();
+            let c = Command::new("ssh")
+                .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+                .arg(format!("admin@{tailnet}"))
+                .args([
+                    "sudo",
+                    "systemctl",
+                    "start",
+                    "--no-block",
+                    "dd-agent.service",
+                ])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            (name.clone(), c)
+        })
+        .collect();
+    for (name, r) in asks {
+        match r {
+            Ok(s) if s.success() => eprintln!("   {name}: told to look now"),
+            _ => eprintln!("   {name}: not reached; it looks on its own timer"),
+        }
+    }
 }
 
 const ATTEST_NAMESPACE: &str = "commonty-attest-v1";
