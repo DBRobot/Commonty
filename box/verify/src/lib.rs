@@ -332,7 +332,15 @@ impl App {
             .get("x-original-method")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("GET");
-        let reading = matches!(method, "GET" | "HEAD" | "OPTIONS" | "PROPFIND");
+        // Starting a film is a POST that writes nothing: the box's player
+        // decrypts it for this viewer and wipes it after, and holds only a
+        // few at once. A demo that may read the films may play them.
+        let playing = method == "POST"
+            && headers
+                .get("x-original-uri")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|u| u == "/_dd/transcode/session");
+        let reading = playing || matches!(method, "GET" | "HEAD" | "OPTIONS" | "PROPFIND");
         let host = headers
             .get("x-original-host")
             .or_else(|| headers.get("host"))
@@ -1229,13 +1237,11 @@ async fn network_mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Respon
 /// Signing out: the session goes, and so does what the photo app keeps in
 /// this browser - its list of the library and the pictures it unlocked. That
 /// belongs to the photos host, so the way out passes through there
-/// (photos_forget) and comes back to this host's front page.
-async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let back = headers
-        .get("host")
-        .and_then(|v| v.to_str().ok())
-        .filter(|h| fleet_host(&app.domain, h))
-        .map(|h| format!("https://{h}/"));
+/// (photos_forget), and on to the front door: signing in again lands on the
+/// home page, not on whichever service the person signed out from.
+async fn logout(State(app): State<Arc<App>>) -> Response {
+    let home = format!("home.{}", app.domain);
+    let back = fleet_host(&app.domain, &home).then(|| format!("https://{home}/"));
     let to = match (photos::origin(&app.home), back) {
         (Some(p), Some(b)) => format!("{p}/_dd/photos/forget?then={b}"),
         _ => "/".to_string(),

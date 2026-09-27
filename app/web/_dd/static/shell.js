@@ -72,7 +72,18 @@ function bar(m, slot) {
     el('span', { class: 'avatar', 'aria-hidden': 'true', text: m.initial }),
     el('span', { text: m.user }),
     el('span', { class: 'chev', 'aria-hidden': 'true' }));
-  slot.replaceChildren(el('details', { class: 'menu' }, summary, nav));
+  const menu = el('details', { class: 'menu' }, summary, nav);
+  slot.replaceChildren(menu);
+  // a menu closes when you are done with it: a click anywhere else, or Escape
+  document.addEventListener('click', (e) => {
+    if (menu.open && !menu.contains(e.target)) menu.open = false;
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && menu.open) {
+      menu.open = false;
+      summary.focus();
+    }
+  });
 }
 
 // the home page: one row per service
