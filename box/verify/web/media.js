@@ -367,7 +367,9 @@ async function play(it, { resume }) {
       const Hls = await playlistPlayer();
       // the playlist grows as the box works: a moment's 404 or a slow
       // segment is waiting, not failing
-      hls = new Hls({ manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
+      // and from its start: a playlist still growing looks like a live
+      // broadcast, which a player joins near the newest piece instead
+      hls = new Hls({ startPosition: 0, manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (d.fatal) $('p-note').textContent = `The player stopped: ${d.details}. Close it and press play again.`;
       });

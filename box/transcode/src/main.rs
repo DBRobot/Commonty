@@ -198,7 +198,8 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
     // how long the film is, for the page's "left" and its progress: read
     // from the container, which is quick; a file that will not say plays
     // all the same
-    let duration = probe(&app.ffmpeg.with_file_name("ffprobe"), &input).await;
+    let probed = probe(&app.ffmpeg.with_file_name("ffprobe"), &input).await;
+    let duration = probed.duration;
     // resuming past the end would make nothing; start again instead
     let from = if s.from.is_finite() && s.from > 0.0 && duration.is_none_or(|d| s.from < d - 5.0) {
         s.from
@@ -229,25 +230,35 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
             vec![]
         })
         .args([
-            "-i",
-            &input,
+            "-i", &input,
             // the picture and the sound: a film's subtitle tracks made a
             // file of their own for every segment, and nothing reads them
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a:0?",
-            "-sn",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "23",
-            "-c:a",
-            "aac",
-            "-ac",
-            "2",
+            "-map", "0:v:0", "-map", "0:a:0?", "-sn",
+        ])
+        // Encoding a film as it plays took every core the box had, and on a
+        // box busy with anything else fell behind the viewer: what browsers
+        // play already is only repacked. What is encoded gets a keyframe
+        // every four seconds, so the playlist's pieces are the size asked.
+        .args(if probed.picture_as_is() {
+            vec!["-c:v", "copy"]
+        } else {
+            vec![
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "23",
+                "-force_key_frames",
+                "expr:gte(t,n_forced*4)",
+            ]
+        })
+        .args(if probed.sound_as_is() {
+            vec!["-c:a", "copy"]
+        } else {
+            vec!["-c:a", "aac", "-ac", "2"]
+        })
+        .args([
             "-f",
             "hls",
             "-hls_time",
@@ -317,8 +328,31 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
     .into_response()
 }
 
-/// the film's length in seconds, if its container says within a few seconds
-async fn probe(ffprobe: &std::path::Path, input: &str) -> Option<f64> {
+/// What the container says: how long the film is, and what its picture and
+/// sound are, so the box does only the work a browser needs
+#[derive(Default)]
+struct Probe {
+    duration: Option<f64>,
+    video: String,
+    pixels: String,
+    audio: String,
+    channels: u64,
+}
+
+impl Probe {
+    /// H.264 in 4:2:0 is what every browser plays: packed into the playlist
+    /// as it is, no encoding - a second's work instead of all the cores
+    fn picture_as_is(&self) -> bool {
+        self.video == "h264" && matches!(self.pixels.as_str(), "yuv420p" | "yuvj420p")
+    }
+    /// stereo AAC plays everywhere; anything else (5.1, AC-3, DTS) is made so
+    fn sound_as_is(&self) -> bool {
+        self.audio == "aac" && self.channels <= 2
+    }
+}
+
+/// the film's length and streams, if its container says within a few seconds
+async fn probe(ffprobe: &std::path::Path, input: &str) -> Probe {
     let out = tokio::time::timeout(
         Duration::from_secs(15),
         tokio::process::Command::new(ffprobe)
@@ -330,20 +364,40 @@ async fn probe(ffprobe: &std::path::Path, input: &str) -> Option<f64> {
                 "-format_whitelist",
                 FORMATS,
                 "-show_entries",
-                "format=duration",
+                "format=duration:stream=codec_type,codec_name,pix_fmt,channels",
                 "-of",
-                "csv=p=0",
+                "json",
                 input,
             ])
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true)
             .output(),
     )
-    .await
-    .ok()?
-    .ok()?;
-    let d: f64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
-    (d.is_finite() && d > 0.0).then_some(d)
+    .await;
+    let Ok(Ok(out)) = out else {
+        return Probe::default();
+    };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
+        return Probe::default();
+    };
+    let first = |kind: &str| {
+        v["streams"]
+            .as_array()
+            .and_then(|s| s.iter().find(|s| s["codec_type"] == kind))
+            .cloned()
+            .unwrap_or_default()
+    };
+    let (video, audio) = (first("video"), first("audio"));
+    Probe {
+        duration: v["format"]["duration"]
+            .as_str()
+            .and_then(|d| d.parse::<f64>().ok())
+            .filter(|d| d.is_finite() && *d > 0.0),
+        video: video["codec_name"].as_str().unwrap_or_default().to_string(),
+        pixels: video["pix_fmt"].as_str().unwrap_or_default().to_string(),
+        audio: audio["codec_name"].as_str().unwrap_or_default().to_string(),
+        channels: audio["channels"].as_u64().unwrap_or(0),
+    }
 }
 
 /// the plain bytes of a session's file for ffmpeg: whole, or a range
