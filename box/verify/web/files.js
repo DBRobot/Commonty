@@ -109,8 +109,7 @@ async function start() {
     return;
   }
   if (r.link) {
-    $('msg').textContent = 'This browser is not linked to your files yet.';
-    $('linkcmd').textContent = r.link;
+    $('msg').hidden = true;
     $('link').hidden = false;
     return;
   }
