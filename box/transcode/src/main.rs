@@ -108,6 +108,8 @@ struct App {
     http: reqwest::Client,
     /// the only url prefix a session may fetch from
     source: String,
+    /// the GPU's render node, when the box has one ffmpeg can encode on
+    vaapi: Option<PathBuf>,
     sessions: Mutex<HashMap<String, Arc<Session>>>,
 }
 
@@ -209,7 +211,83 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
     // ffmpeg reads the plain file from this process, seeking as it likes,
     // and writes HLS into the session directory; the first segments appear
     // within seconds, the playlist grows as it goes
-    let child = match tokio::process::Command::new(&app.ffmpeg)
+    // the chip only when there is encoding to do; a copy needs none
+    let mut hw = app.vaapi.as_deref().filter(|_| !probed.picture_as_is());
+    let child = match ffmpeg(&app.ffmpeg, &input, from, &probed, &dir, hw) {
+        Ok(c) => c,
+        Err(e) => {
+            if let Some(s) = app.sessions.lock().await.remove(&id) {
+                wipe(s).await;
+            }
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("ffmpeg: {e}")).into_response();
+        }
+    };
+    // Answered once there is something to play: a page that asked for the
+    // playlist the moment the session began found none yet, and its player
+    // gave up on the 404. ffmpeg ending first is its error, not a session.
+    let mut child = child;
+    let playlist = dir.join("index.m3u8");
+    let mut ready = false;
+    for _ in 0..150 {
+        if std::fs::read_to_string(&playlist).is_ok_and(|p| p.contains(".ts")) {
+            ready = true;
+            break;
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            // a picture the chip would not take: the cores, as before
+            if hw.take().is_some() {
+                eprintln!("transcode: {id}: the GPU gave up ({status}), encoding on the cores");
+                let _ = std::fs::remove_file(&playlist);
+                if let Ok(c) = ffmpeg(&app.ffmpeg, &input, from, &probed, &dir, None) {
+                    child = c;
+                    continue;
+                }
+            }
+            if let Some(s) = app.sessions.lock().await.remove(&id) {
+                wipe(s).await;
+            }
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "ffmpeg stopped before the first segment ({status}): not a film it can read"
+                ),
+            )
+                .into_response();
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    *session.child.lock().await = Some(child);
+    if !ready {
+        if let Some(s) = app.sessions.lock().await.remove(&id) {
+            wipe(s).await;
+        }
+        return (
+            StatusCode::GATEWAY_TIMEOUT,
+            "no first segment in thirty seconds: the box is too busy, or the file is too slow to read",
+        )
+            .into_response();
+    }
+    Json(serde_json::json!({
+        "id": id,
+        "playlist": format!("/session/{id}/index.m3u8"),
+        "from": from,
+        "duration": duration,
+    }))
+    .into_response()
+}
+
+/// ffmpeg for one session: the plain file in, HLS into `dir`. With `hw`,
+/// what needs encoding is encoded on the box's GPU (VAAPI) instead of its
+/// cores.
+fn ffmpeg(
+    bin: &std::path::Path,
+    input: &str,
+    from: f64,
+    probed: &Probe,
+    dir: &std::path::Path,
+    hw: Option<&std::path::Path>,
+) -> std::io::Result<tokio::process::Child> {
+    tokio::process::Command::new(bin)
         .args([
             "-hide_banner",
             "-loglevel",
@@ -224,13 +302,27 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
             "-format_whitelist",
             FORMATS,
         ])
+        // the Quick Sync path decodes on the chip where it can, and where
+        // it cannot the frames go up to it; 10-bit comes down to 8 on the
+        // way, since browsers play 8-bit H.264
+        .args(match hw {
+            Some(dev) => vec![
+                "-hwaccel".to_string(),
+                "vaapi".into(),
+                "-hwaccel_output_format".into(),
+                "vaapi".into(),
+                "-vaapi_device".into(),
+                dev.to_string_lossy().into_owned(),
+            ],
+            None => vec![],
+        })
         .args(if from > 0.0 {
             vec!["-ss".to_string(), format!("{from:.3}")]
         } else {
             vec![]
         })
         .args([
-            "-i", &input,
+            "-i", input,
             // the picture and the sound: a film's subtitle tracks made a
             // file of their own for every segment, and nothing reads them
             "-map", "0:v:0", "-map", "0:a:0?", "-sn",
@@ -241,6 +333,17 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
         // every four seconds, so the playlist's pieces are the size asked.
         .args(if probed.picture_as_is() {
             vec!["-c:v", "copy"]
+        } else if hw.is_some() {
+            vec![
+                "-vf",
+                "format=nv12|vaapi,hwupload,scale_vaapi=format=nv12",
+                "-c:v",
+                "h264_vaapi",
+                "-qp",
+                "23",
+                "-force_key_frames",
+                "expr:gte(t,n_forced*4)",
+            ]
         } else {
             vec![
                 "-c:v",
@@ -274,58 +377,6 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            if let Some(s) = app.sessions.lock().await.remove(&id) {
-                wipe(s).await;
-            }
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("ffmpeg: {e}")).into_response();
-        }
-    };
-    // Answered once there is something to play: a page that asked for the
-    // playlist the moment the session began found none yet, and its player
-    // gave up on the 404. ffmpeg ending first is its error, not a session.
-    let mut child = child;
-    let playlist = dir.join("index.m3u8");
-    let mut ready = false;
-    for _ in 0..150 {
-        if std::fs::read_to_string(&playlist).is_ok_and(|p| p.contains(".ts")) {
-            ready = true;
-            break;
-        }
-        if let Ok(Some(status)) = child.try_wait() {
-            if let Some(s) = app.sessions.lock().await.remove(&id) {
-                wipe(s).await;
-            }
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                format!(
-                    "ffmpeg stopped before the first segment ({status}): not a film it can read"
-                ),
-            )
-                .into_response();
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    *session.child.lock().await = Some(child);
-    if !ready {
-        if let Some(s) = app.sessions.lock().await.remove(&id) {
-            wipe(s).await;
-        }
-        return (
-            StatusCode::GATEWAY_TIMEOUT,
-            "no first segment in thirty seconds: the box is too busy, or the file is too slow to read",
-        )
-            .into_response();
-    }
-    Json(serde_json::json!({
-        "id": id,
-        "playlist": format!("/session/{id}/index.m3u8"),
-        "from": from,
-        "duration": duration,
-    }))
-    .into_response()
 }
 
 /// What the container says: how long the film is, and what its picture and
@@ -592,6 +643,10 @@ async fn main() -> Result<()> {
             .timeout(Duration::from_secs(60))
             .build()?,
         source: std::env::var("TRANSCODE_SOURCE").unwrap_or_default(),
+        vaapi: std::env::var("TRANSCODE_VAAPI")
+            .ok()
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from),
         sessions: Mutex::new(HashMap::new()),
     });
     let sweeper = app.clone();
