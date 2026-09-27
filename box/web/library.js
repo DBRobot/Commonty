@@ -250,7 +250,8 @@ export async function stopTranscode(url, leaving) {
   } catch { /* it times out by itself; this is only sooner */ }
 }
 
-/// whether this browser plays a playlist by itself (Safari, every iPhone)
+/// whether this browser plays a playlist by itself (Safari, every iPhone;
+/// Chrome too, now): the page prefers its own player where it can run
 export function playsPlaylists() {
   const v = document.createElement('video');
   return !!(v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL'));

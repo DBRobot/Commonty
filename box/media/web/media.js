@@ -361,10 +361,16 @@ async function play(it, { resume }) {
     session = s.url;
     playing.offset = s.from;
     playing.duration = s.duration;
-    if (playsPlaylists()) {
+    // Our player wherever it runs (every desktop browser, Android), the
+    // browser's own only where it cannot (an iPhone). Chrome plays a
+    // playlist by itself now, and its own player took one still growing
+    // for a live broadcast: it chased the newest piece, then went back to
+    // the start once the box had packed the whole film.
+    const Hls = await playlistPlayer().catch(() => null);
+    if (!Hls && playsPlaylists()) {
       v.src = s.url;
     } else {
-      const Hls = await playlistPlayer();
+      if (!Hls) throw new Error('this browser cannot play a film');
       // the playlist grows as the box works: a moment's 404 or a slow
       // segment is waiting, not failing
       // and from its start: a playlist still growing looks like a live
