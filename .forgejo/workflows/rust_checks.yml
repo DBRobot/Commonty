@@ -13,6 +13,10 @@ on:
         description: "false: report every job as skipped"
         type: boolean
         default: true
+      app:
+        description: "the app or something it builds on changed"
+        type: boolean
+        default: false
 
 jobs:
   lint:
@@ -22,6 +26,21 @@ jobs:
       - uses: https://github.com/actions/checkout@v4
       - name: fmt and clippy
         run: nix build --no-link .#checks.x86_64-linux.fmt .#checks.x86_64-linux.clippy
+      - uses: ./.forgejo/actions/stop-run
+        if: failure()
+        with:
+          secret: ${{ secrets.DD_CI }}
+
+  # The app on its own: its dependency tree (tauri, webkit) is most of
+  # any compile, so the workspace checks above leave it out and this runs
+  # only when the app or what it builds on changed.
+  app_lint:
+    if: ${{ inputs.app }}
+    runs-on: nix
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+      - name: clippy on the app
+        run: nix build --no-link .#checks.x86_64-linux.clippy-app
       - uses: ./.forgejo/actions/stop-run
         if: failure()
         with:

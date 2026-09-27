@@ -277,33 +277,45 @@
               cargoArtifacts = wasmArtifacts;
             }
           );
+          # What every rust build shares. The app's window libraries and its
+          # network engine are the app's alone: in here they made every
+          # package's dependency build depend on them, so a change to the Go
+          # engine recompiled the boxes' dependencies from nothing.
           common = {
             inherit src;
             strictDeps = true;
             nativeBuildInputs = [ pkgs.pkg-config ];
-            # the cli's mount (dd media) links libfuse; the app its window
-            buildInputs = [ pkgs.fuse3 ] ++ appLibs;
-            # and its network engine (app/build.rs links it from here)
-            COMMONTY_NET_LIB_DIR = "${appNet}/lib";
+            # the cli's mount (dd media) links libfuse
+            buildInputs = [ pkgs.fuse3 ];
             doCheck = false;
           };
-          # the dependencies for the whole workspace: what the checks
-          # (fmt, clippy, tests) build on
+          # the app: its window, and its network engine (app/build.rs links
+          # it from here)
+          appCommon = common // {
+            buildInputs = [ pkgs.fuse3 ] ++ appLibs;
+            COMMONTY_NET_LIB_DIR = "${appNet}/lib";
+          };
+          # The workspace but the app, for the checks (clippy, tests): the
+          # app's dependency tree (tauri, webkit) is most of the compile,
+          # and nothing else in the workspace uses it. The app is checked
+          # on its own (checks.clippy-app), only when it changed.
+          workspaceArgs = "--locked --workspace --exclude commonty";
           cargoArtifacts = craneLib.buildDepsOnly (
             common
             // {
               pname = "dd-deps";
               version = "0.1.0";
+              cargoExtraArgs = workspaceArgs;
             }
           );
           # and one dependency build per binary, with that binary's own
           # `-p`: cargo unifies features per package set, so a cache built
           # for the whole workspace does not match `-p dd` and every run
           # recompiled rustic and its friends only to throw them away
-          crate =
-            pname: source: cargoExtraArgs:
+          crateWith =
+            base: pname: source: cargoExtraArgs:
             let
-              c = common // {
+              c = base // {
                 src = source;
               };
             in
@@ -322,6 +334,17 @@
                 );
               }
             );
+          crate = crateWith common;
+          # the app's own dependency build, shared by its package and its check
+          appArtifacts = craneLib.buildDepsOnly (
+            appCommon
+            // {
+              src = sources.app;
+              pname = "commonty-deps";
+              version = "0.1.0";
+              cargoExtraArgs = "-p commonty";
+            }
+          );
         in
         {
           # the cli, and `git remote add origin dd::...`, which dd repo calls too
@@ -353,7 +376,7 @@
           # so the webview finds its schemas and gio modules; the dmabuf
           # renderer is off because on nvidia it draws a blank window.
           # Jellyfin comes with it: Movies & TV starts it on the device.
-          app = (crate "commonty" sources.app "-p commonty").overrideAttrs (old: {
+          app = (crateWith appCommon "commonty" sources.app "-p commonty").overrideAttrs (old: {
             nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.wrapGAppsHook3 ];
             buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.glib-networking ];
             postFixup =
@@ -414,6 +437,18 @@
               inherit cargoArtifacts;
               pname = "dd";
               version = "0.1.0";
+              cargoExtraArgs = workspaceArgs;
+              cargoClippyExtraArgs = "--all-targets -- -D warnings";
+            }
+          );
+          clippy-app = craneLib.cargoClippy (
+            appCommon
+            // {
+              src = sources.app;
+              cargoArtifacts = appArtifacts;
+              pname = "commonty";
+              version = "0.1.0";
+              cargoExtraArgs = "-p commonty";
               cargoClippyExtraArgs = "--all-targets -- -D warnings";
             }
           );
@@ -423,6 +458,7 @@
               inherit cargoArtifacts;
               pname = "dd";
               version = "0.1.0";
+              cargoExtraArgs = workspaceArgs;
               # the e2e tests spawn verifiers on localhost and run git; the
               # library's format is checked against rclone itself; a box's
               # attestation is an ssh signature
@@ -553,7 +589,7 @@
         }
         // nixpkgs.lib.genAttrs vmTests vm
         // {
-          inherit (rust) fmt clippy tests;
+          inherit (rust) fmt clippy clippy-app tests;
           placement = import ./nix/tests/placement.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;

@@ -24,6 +24,7 @@ jobs:
       nix: ${{ steps.detect.outputs.nix }}
       rust: ${{ steps.detect.outputs.rust }}
       vm: ${{ steps.detect.outputs.vm }}
+      app: ${{ steps.detect.outputs.app }}
     steps:
       - uses: https://github.com/actions/checkout@v4
         with:
@@ -40,29 +41,34 @@ jobs:
             echo "nix=true" >> "$GITHUB_OUTPUT"
             echo "rust=true" >> "$GITHUB_OUTPUT"
             echo "vm=true" >> "$GITHUB_OUTPUT"
+            echo "app=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           changed=$(git diff --name-only ${{ github.event.pull_request.base.sha }} HEAD)
           echo "changed files:"; echo "$changed" | sed 's/^/  /'
-          nix=false; rust=false; vm=false
+          nix=false; rust=false; vm=false; app=false
           # the rust is built by the flake too, so a rust change is a nix change
           echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|secrets/|data/|box/|client/|Cargo\.(toml|lock)|\.forgejo/workflows/)' && nix=true
           echo "$changed" | grep -qE '^(box/|client/|Cargo\.(toml|lock)|\.forgejo/workflows/)' && rust=true
           # boxes booted as vms: only when what a box runs changed, not for
           # every client or host tweak. Minutes, so spent where it counts.
           echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|data/|box/|client/(identity|auth)/|Cargo\.(toml|lock)|\.forgejo/workflows/)' && vm=true
+          # the app, and the crates and toolchain it builds on
+          echo "$changed" | grep -qE '^(app/|client/|Cargo\.(toml|lock)|flake\.(nix|lock)|\.forgejo/workflows/)' && app=true
           echo "nix=$nix" >> "$GITHUB_OUTPUT"
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
           echo "vm=$vm" >> "$GITHUB_OUTPUT"
-          echo "nix: $nix  rust: $rust  vm: $vm"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "nix: $nix  rust: $rust  vm: $vm  app: $app"
 
   # Always called; each leaf skips itself when nothing relevant changed. A
   # skipped leaf still reports, which a required check needs - a skipped
   # caller would leave the leaves unreported and the merge blocked forever.
-  # the rust checks first: a formatting slip should cost a minute, not
-  # every box building and every vm booting
+  # The rust checks and the builds side by side: waiting on the checks
+  # first doubled every run, and a failure anywhere stops the whole run
+  # anyway (stop-run), so a formatting slip still costs little.
   nix_checks:
-    needs: [files_modified, rust_checks]
+    needs: [files_modified]
     uses: ./.forgejo/workflows/nix_checks.yml
     # the ci secret, for stop-run: a called workflow sees no secrets but
     # those its caller hands over
@@ -77,3 +83,4 @@ jobs:
     secrets: inherit
     with:
       run: ${{ needs.files_modified.outputs.rust == 'true' }}
+      app: ${{ needs.files_modified.outputs.app == 'true' }}
