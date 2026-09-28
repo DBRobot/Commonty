@@ -215,6 +215,16 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/css; charset=utf-8",
     ),
     (
+        "metrics.js",
+        "box/observe/web/metrics.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "metrics.css",
+        "box/observe/web/metrics.css",
+        "text/css; charset=utf-8",
+    ),
+    (
         "enrol.js",
         "box/verify/web/enrol.js",
         "text/javascript; charset=utf-8",
@@ -358,6 +368,7 @@ const PAGES: &[(&str, &str)] = &[
     ("friends", "box/web/pages/friends.html"),
     ("chat", "box/chat/web/pages/chat.html"),
     ("git", "box/forge/web/pages/git.html"),
+    ("metrics", "box/observe/web/pages/metrics.html"),
     ("friend", "box/web/pages/friend.html"),
 ];
 
@@ -880,6 +891,7 @@ mod tests {
             ("devices", "devices.js"),
             ("network", "network.js"),
             ("git", "git.js"),
+            ("metrics", "metrics.js"),
         ] {
             let html = page(name).unwrap();
             // nobody's name in the file: it comes from /_dd/me

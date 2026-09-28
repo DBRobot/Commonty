@@ -51,18 +51,37 @@ jobs:
   # cheap checks pass, and uploaded to the bucket; the jobs below then
   # download them instead of each compiling the same rust workspace again
   # on whichever box it lands.
-  build_client:
+  # The programs, in two halves the forge hands to whichever runners are
+  # free, so both boxes compile crates at once. Each half builds its own:
+  # no box takes another's build on trust.
+  build_part:
     if: ${{ inputs.run }}
     needs: flake_check
     runs-on: nix
+    strategy:
+      fail-fast: true
+      matrix:
+        part: [cli, boxes]
     steps:
       - uses: https://github.com/actions/checkout@v4
-      - name: build dd, verify, agent, games, web
-        run: nix build --no-link .#dd .#verify .#agent .#games .#web
+      - name: build ${{ matrix.part }}
+        run: |
+          case "${{ matrix.part }}" in
+            cli) nix build --no-link .#dd .#web ;;
+            boxes) nix build --no-link .#verify .#agent .#games .#transcode ;;
+          esac
       - uses: ./.forgejo/actions/stop-run
         if: failure()
         with:
           secret: ${{ secrets.DD_CI }}
+
+  # the name main's rule asks for, and what the later jobs wait on
+  build_client:
+    if: ${{ inputs.run }}
+    needs: build_part
+    runs-on: nix
+    steps:
+      - run: "true"
 
   # Every box's system, built on every box. A box vouches for a release
   # (dd-attest) only for what it built itself or rebuilt to compare, and it

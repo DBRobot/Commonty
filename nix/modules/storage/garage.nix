@@ -132,6 +132,9 @@ in
           api_bind_addr = "[::]:3900";
           root_domain = ".s3.${config.dd.domain}";
         };
+        # its figures, for this box's prometheus: on loopback, and without
+        # an admin token nothing else on this port answers
+        admin.api_bind_addr = "127.0.0.1:3903";
       };
     };
 

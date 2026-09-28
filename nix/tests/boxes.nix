@@ -45,11 +45,11 @@ let
           (
             builtins.length cfgs.${name}.config.dd.thanos.sidecars == builtins.length (builtins.attrNames boxes)
           )
-          # "on loopback" is not an identity on a box that runs CI jobs and
-          # game guests. grafana believes X-WEBAUTH-USER, so it must not be
-          # reachable by anything but nginx: a socket, never a port.
-          (cfgs.${name}.config.services.grafana.settings.server.protocol == "socket")
-          (builtins.elem "grafana" cfgs.${name}.config.users.users.nginx.extraGroups)
+          # Metrics is our page over Thanos now; grafana, which believed a
+          # header from whoever reached it, is gone. Thanos answers reads
+          # only, on loopback, and nginx passes it only the query calls.
+          (!cfgs.${name}.config.services.grafana.enable)
+          (lib.hasPrefix "127.0.0.1:" cfgs.${name}.config.services.thanos.query.http-address)
         ]
         ++ lib.optionals (builtins.elem "llm" box.roles) (
           let
