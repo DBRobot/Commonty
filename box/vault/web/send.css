@@ -1,0 +1,86 @@
+/* The page a Send link opens (send.html): one card, readable on a phone. */
+:root {
+  color-scheme: light;
+  --bg: #EEF1F5;
+  --surface: #FFFFFF;
+  --ink: #1A1F1C;
+  --ink-2: #525A55;
+  --line: #D5D9D3;
+  --accent: #1D5C42;
+  --accent-hover: #123D2B;
+  --accent-ink: #FFFFFF;
+  --code: #E8EBE6;
+  --bad: #9B2C2C;
+  --focus: #E0A21B;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0F1318;
+    --surface: #171C22;
+    --ink: #E5E9EE;
+    --ink-2: #A1A9B3;
+    --line: #2A313B;
+    --accent: #2F7D59;
+    --accent-hover: #3A9469;
+    --code: #222831;
+    --bad: #F08A8A;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.55 "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+}
+main.send { max-width: 640px; margin: 48px auto; padding: 0 16px; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 28px;
+}
+.eyebrow { margin: 0; color: var(--ink-2); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+h1 { margin: 6px 0 8px; font-size: 26px; line-height: 1.25; overflow-wrap: anywhere; }
+.why { margin: 0 0 20px; color: var(--ink-2); }
+label { display: block; font-weight: 600; margin-bottom: 6px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+input {
+  flex: 1 1 200px;
+  min-width: 0;
+  font: inherit;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+}
+button {
+  font: inherit;
+  font-weight: 600;
+  padding: 9px 18px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+button:hover { background: var(--accent-hover); }
+button.quiet { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+pre {
+  margin: 0 0 12px;
+  padding: 14px;
+  background: var(--code);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 14px/1.5 "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+pre.hidden { filter: blur(6px); user-select: none; }
+.file { margin: 0 0 12px; overflow-wrap: anywhere; }
+.file span { color: var(--ink-2); }
+.note { margin: 14px 0 0; color: var(--ink-2); min-height: 1.5em; }
+.note.bad { color: var(--bad); }
+.foot { color: var(--ink-2); font-size: 14px; text-align: center; margin-top: 18px; }

@@ -225,6 +225,26 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/css; charset=utf-8",
     ),
     (
+        "vault-bar.js",
+        "box/vault/web/vault-bar.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "vault-bar.css",
+        "box/vault/web/vault-bar.css",
+        "text/css; charset=utf-8",
+    ),
+    (
+        "send.js",
+        "box/vault/web/send.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "send.css",
+        "box/vault/web/send.css",
+        "text/css; charset=utf-8",
+    ),
+    (
         "enrol.js",
         "box/verify/web/enrol.js",
         "text/javascript; charset=utf-8",
@@ -335,6 +355,7 @@ const ICONS: &[(&str, &str)] = &[
     ("code", "box/web/icons/code.svg"),
     ("metrics", "box/web/icons/metrics.svg"),
     ("games", "box/web/icons/games.svg"),
+    ("passwords", "box/web/icons/passwords.svg"),
     ("plain", "box/web/icons/plain.svg"),
 ];
 
@@ -370,6 +391,8 @@ const PAGES: &[(&str, &str)] = &[
     ("git", "box/forge/web/pages/git.html"),
     ("metrics", "box/observe/web/pages/metrics.html"),
     ("friend", "box/web/pages/friend.html"),
+    // not signed in: whoever has a Send's link (modules/vault)
+    ("send", "box/vault/web/pages/send.html"),
 ];
 
 pub fn page(name: &str) -> Option<&'static str> {

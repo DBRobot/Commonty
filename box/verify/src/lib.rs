@@ -1815,6 +1815,16 @@ pub async fn start(
         .route("/_dd/chat", get(chat_page))
         .route("/_dd/git", get(git_page))
         .route("/_dd/metrics", get(metrics_page))
+        // anyone's: a Send decrypts in the browser with the key in its link
+        .route(
+            "/_dd/send",
+            get(|| async {
+                (
+                    [("cache-control", "no-cache")],
+                    Html(pages::page("send").unwrap_or_default()),
+                )
+            }),
+        )
         .route("/_dd/chat/search", get(chat_search))
         .route("/_dd/friends", get(friends::page))
         .route("/_dd/friends/list", get(friends::list))

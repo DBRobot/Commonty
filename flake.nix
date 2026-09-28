@@ -51,6 +51,7 @@
         "library"
         "pgrestore"
         "llm"
+        "vault"
       ];
       rust =
         let
