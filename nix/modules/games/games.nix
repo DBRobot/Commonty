@@ -314,7 +314,11 @@ in
         # the guest is the boundary; this keeps qemu itself in its lane
         NoNewPrivileges = true;
         ProtectSystem = "strict";
-        ReadWritePaths = [ "${dir}/instances" ];
+        # its directory, and its machine's control socket beside the others
+        ReadWritePaths = [
+          "${dir}/instances"
+          "${dir}/control"
+        ];
         ProtectHome = true;
         PrivateTmp = true;
         DeviceAllow = [ "/dev/kvm rw" ];
