@@ -58,51 +58,12 @@ let
     cp ${../../../box/vault/web/user.vaultwarden.scss.hbs} $out/scss/user.vaultwarden.scss.hbs
   '';
 
-  # Mail goes to a member's own address, which is only ever in sops: the
-  # vault knows them as <name>@<domain>, and this swaps in the real address
-  # from sops' copy in memory as each mail leaves. Nobody's address is
-  # stored on the box.
-  # the same relay as the rest of the box (modules/mail.nix); the password is
-  # read from the unit's credentials as each mail is sent
-  msmtprc = pkgs.writeText "dd-vault-msmtprc" ''
-    defaults
-    auth on
-    tls on
-    tls_starttls on
-    tls_trust_file /etc/ssl/certs/ca-certificates.crt
-
-    account default
-    host smtp.gmail.com
-    port 587
-    from distributed.datacenter@gmail.com
-    user distributed.datacenter@gmail.com
-    passwordeval cat "$CREDENTIALS_DIRECTORY/smtp"
-  '';
-  sendmail = pkgs.writeShellScript "dd-vault-sendmail" ''
-    set -u
-    map() {
-      local to="$1" name="''${1%@${base}}"
-      [ "$name" = "$to" ] && return 1
-      ${pkgs.gawk}/bin/awk -F': *' -v n="$name" '$1 == n { print $2; found = 1 } END { exit !found }' \
-        "$CREDENTIALS_DIRECTORY/emails" 2>/dev/null
-    }
-    rcpts=()
-    skip=
-    for a in "$@"; do
-      # -f <sender> is the envelope's from, not someone to write to
-      [ -n "$skip" ] && { skip=; continue; }
-      case "$a" in
-        -f) skip=1 ;;
-        -*) ;;
-        *@*) if r=$(map "$a"); then rcpts+=("$r"); else echo "no address in sops for $a; not sent" >&2; fi ;;
-      esac
-    done
-    [ ''${#rcpts[@]} -gt 0 ] || { cat >/dev/null; exit 0; }
-    exec ${pkgs.msmtp}/bin/msmtp -C ${msmtprc} -i -- "''${rcpts[@]}"
-  '';
 in
 {
-  imports = [ ./pwned.nix ];
+  imports = [
+    ./pwned.nix
+    ../member-mail.nix
+  ];
 
   options.dd.vault = {
     enable = lib.mkEnableOption "Passwords (Vaultwarden) on this box";
@@ -113,12 +74,6 @@ in
     oidcSecretFile = lib.mkOption {
       type = lib.types.path;
       description = "the sign-in secret the gate and Vaultwarden share, for the gate";
-    };
-    smtpPasswordFile = lib.mkOption { type = lib.types.path; };
-    memberEmails = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = "lines of `name: address`, each member's own address; null: no mail leaves";
     };
   };
 
@@ -188,7 +143,7 @@ in
             DISABLE_ICON_DOWNLOAD = true;
 
             USE_SENDMAIL = true;
-            SENDMAIL_COMMAND = "${sendmail}";
+            SENDMAIL_COMMAND = "${config.dd.memberMail.sendmail}";
             SMTP_FROM = "distributed.datacenter@gmail.com";
             SMTP_FROM_NAME = "Commonty Passwords";
 
@@ -201,10 +156,7 @@ in
           after = [ "garage-setup.service" ];
           wants = [ "garage-setup.service" ];
           environment.AWS_REGION = "us-east-1";
-          serviceConfig.LoadCredential = [
-            "smtp:${cfg.smtpPasswordFile}"
-          ]
-          ++ lib.optional (cfg.memberEmails != null) "emails:${cfg.memberEmails}";
+          serviceConfig.LoadCredential = config.dd.memberMail.credentials;
         };
 
         # the gate: the issuer this sign-in goes through (box/verify/src/oidc.rs)

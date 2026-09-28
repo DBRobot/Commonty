@@ -38,9 +38,11 @@ in
       enable = true;
       envFile = vaultEnv;
       oidcSecretFile = pkgs.writeText "oidc" "test-oidc-secret";
-      smtpPasswordFile = pkgs.writeText "smtp" "unused";
-      memberEmails = pkgs.writeText "emails" "sarah: sarah@example.net\n";
       pwnedDir = "/srv/pwned";
+    };
+    dd.memberMail = {
+      smtpPasswordFile = pkgs.writeText "smtp" "unused";
+      emailsFile = pkgs.writeText "emails" "sarah: sarah@example.net\n";
     };
     services.postgresqlBackup.enable = true;
     environment.systemPackages = [
