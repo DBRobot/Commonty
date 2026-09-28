@@ -42,17 +42,30 @@ let
         ++ lib.optionals (builtins.elem "observe" box.roles) [
           # the fleet view is thanos on this box; no box's prometheus is
           # reachable from another
-          (builtins.length cfgs.${name}.config.dd.thanos.sidecars == builtins.length (builtins.attrNames boxes))
+          (
+            builtins.length cfgs.${name}.config.dd.thanos.sidecars == builtins.length (builtins.attrNames boxes)
+          )
           # "on loopback" is not an identity on a box that runs CI jobs and
           # game guests. grafana believes X-WEBAUTH-USER, so it must not be
           # reachable by anything but nginx: a socket, never a port.
           (cfgs.${name}.config.services.grafana.settings.server.protocol == "socket")
           (builtins.elem "grafana" cfgs.${name}.config.users.users.nginx.extraGroups)
         ]
-        ++ lib.optional (builtins.elem "llm" box.roles) (
-          # llama-server answers whoever reaches it; the key nginx holds is
-          # what makes that nginx alone
-          cfgs.${name}.config.systemd.services.llama-cpp.serviceConfig ? EnvironmentFile
+        ++ lib.optionals (builtins.elem "llm" box.roles) (
+          let
+            c = cfgs.${name}.config;
+          in
+          [
+            # a model server answers whoever reaches it: llama-swap and the
+            # servers it starts have a network of their own, which nothing
+            # else on the box shares (modules/llm/llama-cpp.nix)
+            (c.systemd.services.llama-swap.serviceConfig.PrivateNetwork or false)
+            # and llama-swap still wants the key only nginx holds
+            (c.systemd.services.llama-swap.serviceConfig ? EnvironmentFile)
+            # nginx's way in is a socket its group alone may open
+            (c.systemd.sockets.llm-proxy.socketConfig.SocketGroup == "nginx")
+            (c.systemd.sockets.llm-proxy.socketConfig.SocketMode == "0660")
+          ]
         )
       ) boxes
     )

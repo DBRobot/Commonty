@@ -2,11 +2,12 @@
 let
   base = config.dd.domain;
   host = "llm.${base}";
-  # nginx asks the verifier who is calling; llama-server has no idea and
-  # would answer anyone who reached 127.0.0.1:8081. This box runs CI jobs
-  # and game guests, and both reach loopback, so "on this machine" is not
-  # an identity here. A secret made at boot, in a file each side reads,
-  # makes nginx the only caller llama-server will answer.
+  # nginx asks the verifier who is calling; the model servers have no idea.
+  # This box runs CI jobs and game guests, and both reach loopback, so "on
+  # this machine" is not an identity here. The model servers live in a
+  # network of their own (llama-cpp.nix) that nginx reaches through a socket
+  # only it may open, and llama-swap still wants a secret made at boot that
+  # nginx sends with every request.
   run = "/run/dd-llm";
 in
 {
@@ -19,8 +20,27 @@ in
     useACMEHost = base;
     forceSSL = true;
 
-    locations."/" = {
-      proxyPass = "http://127.0.0.1:8081";
+    # the page: the gate's (box/chat), which asks who is looking itself
+    locations."= /" = {
+      proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/chat";
+      extraConfig = "proxy_set_header X-Original-URI $request_uri;";
+    };
+    # which model is awake, for the picker: behind the same gate
+    locations."= /running" = {
+      proxyPass = "http://unix:${run}/llm.sock:/running";
+      extraConfig = ''
+        auth_request /_dd/verify;
+        include ${run}/proxy.conf;
+        proxy_set_header Cookie $dd_cookie_stripped;
+        error_page 401 = @login;
+        error_page 403 = @waiting;
+      '';
+    };
+    # The OpenAI-shaped API, for the page and for any client with a device
+    # token. Only this: llama-swap's own pages, logs and raw upstream access
+    # are not reachable from outside.
+    locations."/v1/" = {
+      proxyPass = "http://unix:${run}/llm.sock";
       extraConfig = ''
         auth_request /_dd/verify;
         # the caller's own bearer never reaches llama-server: it is replaced
@@ -39,7 +59,7 @@ in
     };
   };
 
-  # the secret, before either side that needs it. llama-cpp runs under a
+  # the secret, before either side that needs it. llama-swap runs under a
   # DynamicUser, so the key reaches it as an environment file systemd reads
   # as root rather than as a file it would have to be given a group for.
   systemd.services.dd-llm-key = {
@@ -47,7 +67,7 @@ in
     wantedBy = [ "multi-user.target" ];
     before = [
       "nginx.service"
-      "llama-cpp.service"
+      "llama-swap.service"
     ];
     serviceConfig = {
       Type = "oneshot";
@@ -61,11 +81,6 @@ in
       printf 'proxy_set_header Authorization "Bearer %s";\n' "$key" > ${run}/proxy.conf
       chgrp nginx ${run}/proxy.conf && chmod 0640 ${run}/proxy.conf
     '';
-  };
-  systemd.services.llama-cpp = {
-    after = [ "dd-llm-key.service" ];
-    requires = [ "dd-llm-key.service" ];
-    serviceConfig.EnvironmentFile = "${run}/env";
   };
   systemd.services.nginx.after = [ "dd-llm-key.service" ];
   # nginx refuses to start on an include it cannot open, and nginx is the
