@@ -203,11 +203,28 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
     let probed = probe(&app.ffmpeg.with_file_name("ffprobe"), &input).await;
     let duration = probed.duration;
     // resuming past the end would make nothing; start again instead
-    let from = if s.from.is_finite() && s.from > 0.0 && duration.is_none_or(|d| s.from < d - 5.0) {
-        s.from
-    } else {
-        0.0
-    };
+    let mut from =
+        if s.from.is_finite() && s.from > 0.0 && duration.is_none_or(|d| s.from < d - 5.0) {
+            s.from
+        } else {
+            0.0
+        };
+    // A copied picture can only start on a keyframe, while the sound is cut
+    // at the second asked for: every jump played seconds of picture with no
+    // sound, and the page's clock ran that far ahead. Both start at the
+    // keyframe instead, and the page is told that is where it began.
+    if from > 0.0
+        && probed.picture_as_is()
+        && let Some(k) = keyframe(
+            &app.ffmpeg.with_file_name("ffprobe"),
+            &input,
+            probed.start,
+            from,
+        )
+        .await
+    {
+        from = k;
+    }
     // ffmpeg reads the plain file from this process, seeking as it likes,
     // and writes HLS into the session directory; the first segments appear
     // within seconds, the playlist grows as it goes
@@ -383,6 +400,8 @@ fn ffmpeg(
 /// sound are, so the box does only the work a browser needs
 #[derive(Default)]
 struct Probe {
+    /// the container's first timestamp, which a keyframe's is counted from
+    start: f64,
     duration: Option<f64>,
     video: String,
     pixels: String,
@@ -402,6 +421,47 @@ impl Probe {
     }
 }
 
+/// The last keyframe at or before `from` seconds in, read from the index
+/// around it: a twentieth of a second, not a scan of the film.
+async fn keyframe(ffprobe: &std::path::Path, input: &str, start: f64, from: f64) -> Option<f64> {
+    let at = start + from;
+    let out = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::process::Command::new(ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "http,tcp",
+                "-format_whitelist",
+                FORMATS,
+                "-read_intervals",
+                &format!("{:.3}%{:.3}", (at - 20.0).max(start), at + 0.001),
+                "-select_streams",
+                "v:0",
+                "-skip_frame",
+                "nokey",
+                "-show_entries",
+                "frame=best_effort_timestamp_time",
+                "-of",
+                "csv=p=0",
+                input,
+            ])
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().trim_end_matches(',').parse::<f64>().ok())
+        .filter(|k| *k <= at + 0.001)
+        .reduce(f64::max)
+        .map(|k| (k - start).max(0.0))
+}
+
 /// the film's length and streams, if its container says within a few seconds
 async fn probe(ffprobe: &std::path::Path, input: &str) -> Probe {
     let out = tokio::time::timeout(
@@ -415,7 +475,7 @@ async fn probe(ffprobe: &std::path::Path, input: &str) -> Probe {
                 "-format_whitelist",
                 FORMATS,
                 "-show_entries",
-                "format=duration:stream=codec_type,codec_name,pix_fmt,channels",
+                "format=duration,start_time:stream=codec_type,codec_name,pix_fmt,channels",
                 "-of",
                 "json",
                 input,
@@ -440,6 +500,11 @@ async fn probe(ffprobe: &std::path::Path, input: &str) -> Probe {
     };
     let (video, audio) = (first("video"), first("audio"));
     Probe {
+        start: v["format"]["start_time"]
+            .as_str()
+            .and_then(|d| d.parse::<f64>().ok())
+            .filter(|d| d.is_finite())
+            .unwrap_or(0.0),
         duration: v["format"]["duration"]
             .as_str()
             .and_then(|d| d.parse::<f64>().ok())

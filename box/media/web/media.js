@@ -523,6 +523,9 @@ async function attach(it, from, current = () => true) {
   session = s.url;
   playing.offset = s.from;
   playing.duration = s.duration ?? playing.duration;
+  // the box starts on the keyframe before the second asked for, picture
+  // and sound together; playing starts on the second itself
+  const into = Math.max(0, (from || 0) - s.from);
   // Our player wherever it runs (every desktop browser, Android), the
   // browser's own only where it cannot (an iPhone). Chrome plays a
   // playlist by itself now, and its own player took one still growing
@@ -531,13 +534,14 @@ async function attach(it, from, current = () => true) {
   const Hls = await playlistPlayer().catch(() => null);
   if (!Hls && playsPlaylists()) {
     v.src = s.url;
+    if (into) v.addEventListener('loadedmetadata', () => { v.currentTime = into; }, { once: true });
   } else {
     if (!Hls) throw new Error('this browser cannot play a film');
     // the playlist grows as the box works: a moment's 404 or a slow
     // segment is waiting, not failing
     // and from its start: a playlist still growing looks like a live
     // broadcast, which a player joins near the newest piece instead
-    hls = new Hls({ startPosition: 0, manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
+    hls = new Hls({ startPosition: into, manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
     hls.on(Hls.Events.ERROR, (_, d) => {
       if (d.fatal) $('p-note').textContent = `The player stopped: ${d.details}. Close it and press play again.`;
     });
@@ -648,19 +652,25 @@ async function seekTo(t) {
   // playing before the first of quick jumps is playing after the last:
   // the video is stopped while the box starts, so later ones cannot tell
   const going = playing.starting ? playing.going : !v.paused;
-  playing.starting = true;
-  playing.going = going;
+  if (!playing.starting) {
+    playing.starting = true;
+    playing.going = going;
+    hls?.destroy();
+    hls = null;
+    const old = session;
+    session = null;
+    Promise.resolve(stopTranscode(old)).catch(() => {});
+    v.removeAttribute('src');
+    v.load();
+  }
   $('p-note').textContent = `Asking the box to start at ${clock(t)}…`;
-  hls?.destroy();
-  hls = null;
-  const old = session;
-  session = null;
-  Promise.resolve(stopTranscode(old)).catch(() => {});
-  v.removeAttribute('src');
-  v.load();
   // the bar stands at the new place while the box gets there
   playing.offset = t;
   paintBar();
+  // Presses in quick succession add up to one jump: the box is asked once
+  // they stop, not once for every press on the way
+  await new Promise((r) => setTimeout(r, 400));
+  if (mine !== jumps || playing?.it !== it) return;
   try {
     if (!(await attach(it, t, () => mine === jumps))) return; // a later jump took over
     playing.starting = false;
