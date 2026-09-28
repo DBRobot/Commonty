@@ -1334,6 +1334,7 @@ dependencies = [
  "base64 0.22.1",
  "directory",
  "ed25519-dalek",
+ "gtk",
  "identity",
  "library",
  "media",
