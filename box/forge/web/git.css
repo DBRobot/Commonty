@@ -262,3 +262,4 @@ mark { background: var(--busy-bg); color: inherit; border-radius: 2px; }
 .linenote { max-width: 860px; }
 .linenote > header { font-size: 13px; }
 .linenote .body { padding: 10px 14px; }
+.gitpage input.write, .gitpage textarea.write { width: 100%; }
