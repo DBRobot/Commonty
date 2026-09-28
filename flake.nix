@@ -583,6 +583,9 @@
             // {
               inherit cargoArtifacts;
               inherit (testProfile) CARGO_PROFILE CARGO_PROFILE_DEV_DEBUG;
+              # common turns checks off for the packages; from 2026-09-23
+              # until this line the tests check inherited that and ran none
+              doCheck = true;
               pname = "dd";
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;
