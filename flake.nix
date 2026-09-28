@@ -435,7 +435,8 @@
           );
         in
         {
-          inherit pages;
+          # a package must be a derivation (flake check), not a source path
+          pages = pkgs.runCommandLocal "dd-pages" { } "cp -r ${pages} $out";
           # the cli, and `git remote add origin dd::...`, which dd repo calls too
           # `dd media` mounts libraries with rclone; the binary knows where it is
           dd = (crate "dd" sources.dd "-p dd -p git-remote-dd").overrideAttrs (old: {
