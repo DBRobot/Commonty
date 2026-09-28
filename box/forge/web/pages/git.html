@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Git</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/git.css">
+</head>
+<body class="gitpage">
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <form class="git-search" id="git-search" role="search">
+        <input type="search" name="q" placeholder="Search repositories, pull requests, issues" aria-label="Search">
+      </form>
+      <a class="git-bell" id="git-bell" href="/notifications" aria-label="Notifications" hidden>
+        <svg class="i" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
+        <span class="git-bell-n" id="git-bell-n" hidden></span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+
+  <div id="rhead"></div>
+  <main id="app" class="git" aria-live="polite"><p class="muted">Loading…</p></main>
+
+  <script src="/_dd/web/purify.js"></script>
+  <script type="module" src="/_dd/static/git.js"></script>
+  <script type="module" src="/_dd/static/shell.js"></script>
+</body>
+</html>

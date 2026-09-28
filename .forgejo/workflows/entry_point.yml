@@ -48,13 +48,13 @@ jobs:
           echo "changed files:"; echo "$changed" | sed 's/^/  /'
           nix=false; rust=false; vm=false; app=false
           # the rust is built by the flake too, so a rust change is a nix change
-          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|secrets/|data/|box/|client/|Cargo\.(toml|lock)|\.forgejo/workflows/)' && nix=true
-          echo "$changed" | grep -qE '^(box/|client/|Cargo\.(toml|lock)|\.forgejo/workflows/)' && rust=true
+          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|secrets/|data/|box/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/workflows/)' && nix=true
+          echo "$changed" | grep -qE '^(box/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/workflows/)' && rust=true
           # boxes booted as vms: only when what a box runs changed, not for
           # every client or host tweak. Minutes, so spent where it counts.
-          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|data/|box/|client/(identity|auth)/|Cargo\.(toml|lock)|\.forgejo/workflows/)' && vm=true
+          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|data/|box/|client/(identity|auth)/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/workflows/)' && vm=true
           # the app, and the crates and toolchain it builds on
-          echo "$changed" | grep -qE '^(app/|client/|Cargo\.(toml|lock)|flake\.(nix|lock)|\.forgejo/workflows/)' && app=true
+          echo "$changed" | grep -qE '^(app/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|\.forgejo/workflows/)' && app=true
           echo "nix=$nix" >> "$GITHUB_OUTPUT"
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
           echo "vm=$vm" >> "$GITHUB_OUTPUT"

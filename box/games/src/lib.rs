@@ -299,11 +299,43 @@ fn now() -> u64 {
 impl Manager {
     pub fn new(cfg: Config, units: Box<dyn Units>) -> Result<Arc<Self>> {
         std::fs::create_dir_all(cfg.dir.join("instances"))?;
-        Ok(Arc::new(Self {
+        std::fs::create_dir_all(cfg.dir.join("records"))?;
+        let m = Arc::new(Self {
             cfg,
             units,
             lock: Mutex::new(()),
-        }))
+        });
+        m.take_records()?;
+        Ok(m)
+    }
+
+    /// Servers made before the records moved off the share: their record
+    /// is taken from the share once, as it stands, and kept here after.
+    fn take_records(&self) -> Result<()> {
+        let Ok(rd) = std::fs::read_dir(self.cfg.dir.join("instances")) else {
+            return Ok(());
+        };
+        for e in rd.flatten() {
+            let id = e.file_name().to_string_lossy().into_owned();
+            if !valid_id(&id) || self.record_file(&id).exists() {
+                continue;
+            }
+            if let Ok(b) = std::fs::read(e.path().join("instance.json"))
+                && let Ok(i) = serde_json::from_slice::<Instance>(&b)
+                && i.id == id
+            {
+                eprintln!("games: {id}'s record moves off the share");
+                self.save(&i)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The record the host goes by: whose server, its ports, its memory.
+    /// It lives outside the directory the guest shares, which only gets a
+    /// copy to read; what the guest writes there changes nothing here.
+    fn record_file(&self, id: &str) -> PathBuf {
+        self.cfg.dir.join("records").join(format!("{id}.json"))
     }
 
     fn instance_dir(&self, id: &str) -> PathBuf {
@@ -312,17 +344,13 @@ impl Manager {
 
     pub fn instances(&self) -> Vec<Instance> {
         let mut out = Vec::new();
-        let Ok(rd) = std::fs::read_dir(self.cfg.dir.join("instances")) else {
+        let Ok(rd) = std::fs::read_dir(self.cfg.dir.join("records")) else {
             return out;
         };
         for e in rd.flatten() {
-            let p = e.path().join("instance.json");
-            // likewise here: a record that names another instance would put
-            // one member's server in another's list
-            let dir_name = e.file_name().to_string_lossy().into_owned();
-            if let Ok(b) = std::fs::read(&p)
-                && let Ok(i) = serde_json::from_slice::<Instance>(&b)
-                && i.id == dir_name
+            let name = e.file_name().to_string_lossy().into_owned();
+            if let Some(id) = name.strip_suffix(".json")
+                && let Some(i) = self.instance(id)
             {
                 out.push(i);
             }
@@ -335,22 +363,35 @@ impl Manager {
         if !valid_id(id) {
             return None;
         }
-        let i: Instance = serde_json::from_slice(
-            &std::fs::read(self.instance_dir(id).join("instance.json")).ok()?,
-        )
-        .ok()?;
-        // The record lives on the 9p share, so the guest can write it. Every
-        // caller then builds host paths from `i.id` - systemctl, save,
-        // remove_dir_all - so the name inside the file has to be the name of
-        // the directory it was found in, or the guest gets to choose.
+        let i: Instance =
+            serde_json::from_slice(&std::fs::read(self.record_file(id)).ok()?).ok()?;
+        // every caller builds host paths from `i.id` - systemctl, save,
+        // remove_dir_all - so it has to be the name it was found under
         (i.id == id).then_some(i)
     }
 
     fn save(&self, i: &Instance) -> Result<()> {
+        let body = serde_json::to_vec_pretty(i)?;
+        let r = self.record_file(&i.id);
+        let tmp = r.with_extension("json.tmp");
+        std::fs::write(&tmp, &body)?;
+        std::fs::rename(tmp, &r)?;
+        // the guest's copy: what it needs to be this server
         let d = self.instance_dir(&i.id);
         std::fs::create_dir_all(&d)?;
+        // written into a directory the guest can write: a fresh file,
+        // never through a link it left there, renamed over the old copy
         let tmp = d.join(".instance.json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(i)?)?;
+        let _ = std::fs::remove_file(&tmp);
+        {
+            use std::io::Write as _;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .custom_flags(Self::nofollow())
+                .open(&tmp)?;
+            f.write_all(&body)?;
+        }
         std::fs::rename(tmp, d.join("instance.json"))?;
         Ok(())
     }
@@ -702,6 +743,7 @@ impl Manager {
             "stop it first; deleting removes the world with it"
         );
         std::fs::remove_dir_all(self.instance_dir(&i.id))?;
+        let _ = std::fs::remove_file(self.record_file(&i.id));
         let _ = std::fs::remove_file(self.players_file(&i.id));
         Ok(())
     }
@@ -859,6 +901,7 @@ impl Manager {
         };
         std::fs::write(dest.join("world.json"), serde_json::to_vec_pretty(&meta)?)?;
         std::fs::remove_dir_all(self.instance_dir(&i.id))?;
+        let _ = std::fs::remove_file(self.record_file(&i.id));
         Ok(name)
     }
 

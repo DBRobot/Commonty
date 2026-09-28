@@ -177,3 +177,13 @@ details.think .md { margin-top: 8px; padding-left: 14px; border-left: 2px solid 
   .settings nav { display: flex; overflow-x: auto; padding: 10px; }
   .settings nav h2 { display: none; }
 }
+
+/* web search: what the answer read, under it, and a word when it read nothing */
+.bot .note { margin: 0; color: var(--c-ink-3); font-size: 13.5px; }
+.bot details.sources { font-size: 13.5px; color: var(--c-ink-3); }
+.bot details.sources summary { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; list-style: none; }
+.bot details.sources summary::-webkit-details-marker { display: none; }
+.bot details.sources[open] summary .i { transform: rotate(180deg); }
+.bot details.sources ol { margin: 8px 0 0; padding-left: 22px; display: grid; gap: 6px; }
+.bot details.sources li a { color: var(--c-ink); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.bot details.sources li span { display: block; font-size: 12.5px; }

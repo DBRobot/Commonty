@@ -5,6 +5,7 @@
   imports = [
     ../modules/llm/llama-cpp.nix
     ../modules/llm/llm.nix
+    ../modules/llm/search.nix
   ];
   dd.home.services = [
     {

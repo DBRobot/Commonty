@@ -41,18 +41,22 @@ let
     set -eu
     id="$1"
     d=${dir}/instances/"$id"
-    rec="$d"/instance.json
+    # the host's record, not the guest's copy in the shared directory: the
+    # guest could write that one, and pick its own memory and ports
+    rec=${dir}/records/"$id".json
+    # the control socket, likewise outside what the guest can reach
+    qmp=${dir}/control/"$id".qmp
     [ -s "$rec" ] || { echo "no such instance: $id" >&2; exit 1; }
     mem=$(${pkgs.jq}/bin/jq -r '.memory' "$rec")
     cores=$(${pkgs.jq}/bin/jq -r '.cores' "$rec")
     # every port both ways: games use udp and tcp on the same number, and
     # the guest listens on the number the host hands it
     fwd=$(${pkgs.jq}/bin/jq -r '[.ports[] | "hostfwd=udp::\(.port)-:\(.port)", "hostfwd=tcp::\(.port)-:\(.port)"] | join(",")' "$rec")
-    rm -f "$d"/qmp "$d"/status
+    rm -f "$qmp" "$d"/qmp "$d"/status
     export DD_INSTANCE_DIR="$d"
     export NIX_DISK_IMAGE="$d"/disk.qcow2
     export QEMU_NET_OPTS="$fwd"
-    export QEMU_OPTS="-m $mem -smp $cores -qmp unix:$d/qmp,server,nowait ${
+    export QEMU_OPTS="-m $mem -smp $cores -qmp unix:$qmp,server,nowait ${
       lib.optionalString (!cfg.kvm) "-machine accel=tcg -cpu max"
     }"
     cd "$d"
@@ -62,15 +66,15 @@ let
   # its unit says; qemu exits when the guest has. systemd kills it past the
   # unit's stop timeout.
   stop = pkgs.writeShellScript "dd-game-stop" ''
-    d=${dir}/instances/"$1"
-    [ -S "$d"/qmp ] || exit 0
+    qmp=${dir}/control/"$1".qmp
+    [ -S "$qmp" ] || exit 0
     printf '%s\n' '{"execute":"qmp_capabilities"}' '{"execute":"system_powerdown"}' \
-      | ${pkgs.socat}/bin/socat - UNIX-CONNECT:"$d"/qmp >/dev/null 2>&1 || true
+      | ${pkgs.socat}/bin/socat - UNIX-CONNECT:"$qmp" >/dev/null 2>&1 || true
     # the guest gets a minute to shut the game down and power off; then
     # qemu is told to quit, which is the same as pulling the plug
     for i in $(seq 1 60); do kill -0 "$MAINPID" 2>/dev/null || exit 0; sleep 1; done
     printf '%s\n' '{"execute":"qmp_capabilities"}' '{"execute":"quit"}' \
-      | ${pkgs.socat}/bin/socat - UNIX-CONNECT:"$d"/qmp >/dev/null 2>&1 || true
+      | ${pkgs.socat}/bin/socat - UNIX-CONNECT:"$qmp" >/dev/null 2>&1 || true
     for i in $(seq 1 15); do kill -0 "$MAINPID" 2>/dev/null || exit 0; sleep 1; done
   '';
 in
@@ -201,6 +205,10 @@ in
     systemd.tmpfiles.rules = [
       "d ${dir} 0750 dd-games dd-games -"
       "d ${dir}/instances 0750 dd-games dd-games -"
+      # what the host goes by, out of every guest's reach: the records,
+      # and each machine's control socket
+      "d ${dir}/records 0750 dd-games dd-games -"
+      "d ${dir}/control 0750 dd-games dd-games -"
     ];
 
     # The manager: makes and removes the records, starts and stops the
@@ -306,7 +314,11 @@ in
         # the guest is the boundary; this keeps qemu itself in its lane
         NoNewPrivileges = true;
         ProtectSystem = "strict";
-        ReadWritePaths = [ "${dir}/instances" ];
+        # its directory, and its machine's control socket beside the others
+        ReadWritePaths = [
+          "${dir}/instances"
+          "${dir}/control"
+        ];
         ProtectHome = true;
         PrivateTmp = true;
         DeviceAllow = [ "/dev/kvm rw" ];

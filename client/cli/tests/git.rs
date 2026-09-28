@@ -46,6 +46,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         fleet: Default::default(),
         demo_library: None,
         tmdb: None,
+        search: None,
         app_manifest: None,
         bind: "127.0.0.1:0".parse().unwrap(),
         dir: scratch("box").join("keys"),

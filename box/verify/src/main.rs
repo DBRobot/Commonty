@@ -74,6 +74,9 @@ async fn main() -> Result<()> {
             Err(_) => None,
         }
         .filter(|k| !k.is_empty()),
+        search: std::env::var("VERIFY_SEARCH")
+            .ok()
+            .filter(|s| !s.is_empty()),
         release_pub: std::env::var("VERIFY_RELEASE_PUB")
             .ok()
             .map(|s| s.trim().to_string())
