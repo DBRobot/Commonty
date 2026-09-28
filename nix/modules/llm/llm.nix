@@ -25,6 +25,12 @@ in
       proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/chat";
       extraConfig = "proxy_set_header X-Original-URI $request_uri;";
     };
+    # web search, for members: the gate checks who is asking and asks
+    # SearXNG on this box (search.nix); the model never touches the network
+    locations."= /search" = {
+      proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/chat/search";
+      extraConfig = "proxy_set_header X-Original-URI $request_uri;";
+    };
     # which model is awake, for the picker: behind the same gate
     locations."= /running" = {
       proxyPass = "http://unix:${run}/llm.sock:/running";

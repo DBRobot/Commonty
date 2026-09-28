@@ -87,6 +87,7 @@ let current = null;               // the open chat
 let chosen = null;                // the model the next answer comes from
 let busy = null;                  // the answer being written: { ctrl }
 let demo = false;
+const searchOn = () => !demo && $('search-web').getAttribute('aria-pressed') === 'true';
 
 const modelName = (id) => models.find((m) => m.id === id)?.name || id || 'a model';
 
@@ -263,7 +264,9 @@ async function copyText(text, btn) {
 
 function botView(m, last) {
   const box = el('div', { class: 'bot' });
-  if (m.waking && !m.content && !m.think) {
+  if (m.searching) {
+    box.append(el('div', { class: 'waking' }, el('span', { class: 'dot' }), 'Searching the web…'));
+  } else if (m.waking && !m.content && !m.think) {
     box.append(el('div', { class: 'waking' }, el('span', { class: 'dot' }), `Waking ${modelName(m.model)}. The first answer takes longer.`));
   }
   if (m.think) {
@@ -274,7 +277,16 @@ function botView(m, last) {
     box.append(d);
   }
   if (m.content) box.append(md(m.content));
-  if (m.writing && !m.content && !m.waking && !m.think) box.append(el('span', { class: 'dot', 'aria-label': 'Writing' }));
+  if (m.writing && !m.content && !m.waking && !m.think && !m.searching) box.append(el('span', { class: 'dot', 'aria-label': 'Writing' }));
+  if (m.searchNote) box.append(el('p', { class: 'note', text: m.searchNote }));
+  // what the answer was given to read, numbered as it cites them
+  if (m.sources?.length && !m.writing) {
+    box.append(el('details', { class: 'sources' },
+      el('summary', {}, `${m.sources.length} source${m.sources.length === 1 ? '' : 's'}`, icon('down', 'i small')),
+      el('ol', {}, ...m.sources.map((r) => el('li', {},
+        el('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer nofollow', text: r.title || r.url }),
+        el('span', { text: hostOf(r.url) }))))));
+  }
   if (m.error) box.append(el('p', { class: 'err', text: m.error }));
   if (!m.writing) {
     const acts = el('div', { class: 'acts' });
@@ -323,6 +335,43 @@ function titleFrom(text) {
   return line.length > 60 ? `${line.slice(0, 57).trimEnd()}…` : line || 'New chat';
 }
 
+function hostOf(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '';
+  }
+}
+
+// What the web says about the question, for the model to read beside it.
+// The model itself has no network: the gate asks SearXNG on the box, and
+// titles, links and a line of each come back.
+async function webResults(q, m, signal) {
+  m.searching = true;
+  redrawSoon(true);
+  try {
+    const r = await fetch(`/search?q=${encodeURIComponent(q.slice(0, 300))}`, { signal });
+    if (!r.ok) throw new Error(r.status === 404 ? 'web search is not on this box' : `the search did not answer (${r.status})`);
+    const found = (await r.json()).results || [];
+    if (!found.length) {
+      m.searchNote = 'The web search found nothing; this answer is from the model alone.';
+      return [];
+    }
+    m.sources = found;
+    const list = found.map((x, i) => `[${i + 1}] ${x.title}\n${x.url}\n${x.content}`).join('\n\n');
+    return [{
+      role: 'system',
+      content: `Web search results for the user's latest message, fetched just now:\n\n${list}\n\nUse them where they help and cite them as [1], [2] and so on. If they do not answer the question, say so rather than guessing.`,
+    }];
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    m.searchNote = `No web search this time: ${e.message}. This answer is from the model alone.`;
+    return [];
+  } finally {
+    m.searching = false;
+  }
+}
+
 function system() {
   const bits = [];
   if (settings.name.trim()) bits.push(`The user's name is ${settings.name.trim()}.`);
@@ -364,6 +413,12 @@ async function answer() {
   const history = current.messages.slice(0, -1).map(({ role, content }) => ({ role, content }));
   let thinkStart = 0;
   try {
+    // the results go just before the question, so everything earlier in the
+    // chat is the same as last time and the model reuses what it read
+    if (searchOn()) {
+      const q = history[history.length - 1]?.content || '';
+      history.splice(history.length - 1, 0, ...(await webResults(q, m, ctrl.signal)));
+    }
     const r = await fetch('/v1/chat/completions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -514,6 +569,7 @@ function wire() {
     else if (busy) stop();
   });
   $('think').onclick = () => $('think').setAttribute('aria-pressed', String($('think').getAttribute('aria-pressed') !== 'true'));
+  $('search-web').onclick = () => $('search-web').setAttribute('aria-pressed', String(!searchOn()));
   $('model-btn').onclick = (e) => {
     e.stopPropagation();
     openMenu($('menu').hidden);
@@ -569,6 +625,8 @@ async function start() {
   newChat();
   const who = await me();
   demo = !!who.demo;
+  // members only: the demo would make the box a search proxy for anyone
+  $('search-web').hidden = demo;
   if (settings.name === '' && !demo) $('hello').textContent = 'What can I help with?';
   const models$ = loadModels().catch((e) => {
     $('hint').textContent = `The models could not be listed: ${e.message}`;
