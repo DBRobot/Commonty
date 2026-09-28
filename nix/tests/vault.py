@@ -27,11 +27,16 @@ box.succeed("sudo -u postgres psql -d vaultwarden -tAc 'select count(*) from use
 box.succeed("systemctl start postgresqlBackup-vaultwarden.service")
 
 # sign-in is Commonty's only: no password logins, the gate as issuer
-box.fail(
-    "curl -sf -X POST http://127.0.0.1:8222/identity/connect/token "
+# a password login, as a real client sends it, is turned away: sign-in is
+# Commonty's only
+out = box.succeed(
+    "curl -s -X POST http://127.0.0.1:8222/identity/connect/token "
+    "-H 'Bitwarden-Client-Version: 2026.6.0' -H 'Bitwarden-Client-Name: web' -H 'Device-Type: 9' "
     "-d grant_type=password -d username=sarah@test.invalid -d password=x "
-    "-d scope=api -d client_id=web -d deviceType=10 -d deviceIdentifier=t -d deviceName=t"
+    "-d scope='api offline_access' -d client_id=web -d deviceType=9 -d deviceIdentifier=t -d deviceName=t"
 )
+assert "access_token" not in out, out
+assert "sso" in out.lower() or "SSO" in out, out
 
 box.wait_for_open_port(4181)
 disc = json.loads(box.succeed("curl -sf http://127.0.0.1:4181/_dd/oidc/.well-known/openid-configuration"))
