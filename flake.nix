@@ -13,6 +13,9 @@
     # a toolchain with the wasm32 target, for the browser side
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    # the app drawn by the machine's own NVIDIA driver, off NixOS
+    nix-gl-host.url = "github:numtide/nix-gl-host";
+    nix-gl-host.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
@@ -23,6 +26,7 @@
       disko,
       crane,
       rust-overlay,
+      nix-gl-host,
       ...
     }:
     let
@@ -489,6 +493,19 @@
               + ''
                 wrapProgram $out/bin/commonty \
                   --set WEBKIT_DISABLE_DMABUF_RENDERER 1
+                # On NVIDIA's own driver off NixOS the webview found no GL it
+                # could load and drew in software: scrolling Photos lagged
+                # behind the browser. nixglhost hands it the machine's driver.
+                # Anywhere else it starts as it always did.
+                mv $out/bin/commonty $out/bin/.commonty-gpu
+                cat > $out/bin/commonty <<EOF
+                #!${pkgs.runtimeShell}
+                if [ -e /proc/driver/nvidia/version ] && [ ! -e /etc/NIXOS ]; then
+                  exec ${nix-gl-host.packages.${system}.default}/bin/nixglhost $out/bin/.commonty-gpu "\$@"
+                fi
+                exec $out/bin/.commonty-gpu "\$@"
+                EOF
+                chmod +x $out/bin/commonty
               '';
           });
           # the app's network engine (app/net): `nix build .#net` for the archive
