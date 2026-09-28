@@ -23,6 +23,9 @@ in
   node.specialArgs = { inherit self; };
   nodes = {
     box = {
+      # the gate plays no part here: without it, a change to the gate is
+      # not a reason to run this again
+      dd.verify.enable = false;
       imports = [
         ./box.nix
         ../modules/forge/members-runner.nix

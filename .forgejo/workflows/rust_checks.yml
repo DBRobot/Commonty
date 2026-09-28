@@ -51,7 +51,7 @@ jobs:
     runs-on: nix
     steps:
       - uses: https://github.com/actions/checkout@v4
-      - name: test
+      - name: cargo test (unit tests + e2e gates on localhost; app excluded)
         run: nix build --no-link -L .#checks.x86_64-linux.tests
       - uses: ./.forgejo/actions/stop-run
         if: failure()

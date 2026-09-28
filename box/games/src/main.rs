@@ -70,15 +70,24 @@ impl App {
 
 async fn index(State(a): State<Arc<App>>, h: HeaderMap, Query(q): Query<IndexQuery>) -> Response {
     match user(&h) {
+        // a guest hosts nothing and has no library: their servers are it
+        Some(_) if guest(&h) => Redirect::to("/servers").into_response(),
         Some(u) => Html(pages::library(
             &a.m,
             &u,
-            guest(&h),
             q.q.as_deref().unwrap_or(""),
             None,
             q.n.as_deref(),
         ))
         .into_response(),
+        None => StatusCode::UNAUTHORIZED.into_response(),
+    }
+}
+
+/// the servers you host and the ones you are invited to
+async fn servers(State(a): State<Arc<App>>, h: HeaderMap, Query(q): Query<IndexQuery>) -> Response {
+    match user(&h) {
+        Some(u) => Html(pages::servers(&a.m, &u, guest(&h), q.n.as_deref())).into_response(),
         None => StatusCode::UNAUTHORIZED.into_response(),
     }
 }
@@ -99,7 +108,6 @@ async fn game(
     Html(pages::library(
         &a.m,
         &u,
-        false,
         q.q.as_deref().unwrap_or(""),
         Some(&id),
         q.n.as_deref(),
@@ -269,7 +277,7 @@ async fn keep(State(a): State<Arc<App>>, h: HeaderMap, Path(id): Path<String>) -
         return StatusCode::UNAUTHORIZED.into_response();
     };
     match a.m.keep_world(&u, &id) {
-        Ok(_) => Redirect::to("/").into_response(),
+        Ok(_) => Redirect::to("/servers").into_response(),
         Err(e) => back(&format!("/server/{id}"), Err(e)),
     }
 }
@@ -287,7 +295,7 @@ async fn restore_world(
     }
     match a.m.restore_world(&u, &name) {
         Ok(i) => Redirect::to(&format!("/server/{}", i.id)).into_response(),
-        Err(e) => back("/", Err(e)),
+        Err(e) => back("/servers", Err(e)),
     }
 }
 
@@ -299,7 +307,7 @@ async fn delete_world(
     let Some(u) = user(&h) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    back("/", a.m.delete_world(&u, &name))
+    back("/servers", a.m.delete_world(&u, &name))
 }
 
 macro_rules! act {
@@ -319,7 +327,7 @@ macro_rules! act {
 }
 act!(start, start, |id: &str| format!("/server/{id}"));
 act!(stop, stop, |id: &str| format!("/server/{id}"));
-act!(delete, delete, |_id: &str| "/".to_string());
+act!(delete, delete, |_id: &str| "/servers".to_string());
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -367,6 +375,7 @@ async fn main() -> Result<()> {
     let router = Router::new()
         .route("/", get(index))
         .route("/health", get(|| async { "ok" }))
+        .route("/servers", get(servers))
         .route("/game/{id}", get(game))
         .route("/cover/{id}", get(cover))
         .route("/static/{name}", get(static_file))

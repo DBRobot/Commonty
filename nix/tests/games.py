@@ -27,8 +27,10 @@ box.succeed(f"curl -sf {sock} http://games/static/games.js | grep -q Escape")
 assert box.succeed(f"{m}/create/probe -d SERVER_NAME=toms").strip() == "303"
 box.wait_until_succeeds(up, timeout=1500)
 assert box.succeed(f"cat {d}/status").strip() == "running"
-page = box.succeed(f"curl -sf {sock} -H 'x-dd-user: tom' -H 'x-dd-role: member' http://games/")
+page = box.succeed(f"curl -sf {sock} -H 'x-dd-user: tom' -H 'x-dd-role: member' http://games/servers")
 assert "100.64.0.9:27015" in page, page
+# the library links there, with the count of servers open to you
+assert 'href="/servers"' in box.succeed(f"curl -sf {sock} -H 'x-dd-user: tom' -H 'x-dd-role: member' http://games/")
 
 # one each: a second is refused
 box.succeed(f"{m}/create/probe -d SERVER_NAME=again")
@@ -60,7 +62,10 @@ assert theirs == "404", theirs
 # guest can neither start one nor see this one
 page = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -H 'x-dd-user: ann' -H 'x-dd-role: member' http://games/server/probe1").strip()
 assert page == "404", page
-assert "probe1" not in box.succeed(f"curl -sf {sock} -H 'x-dd-user: ann' -H 'x-dd-role: member' http://games/")
+assert "probe1" not in box.succeed(f"curl -sf {sock} -H 'x-dd-user: ann' -H 'x-dd-role: member' http://games/servers")
+# a guest has no library: the front page is their servers
+to = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}} %{{redirect_url}}' {sock} -H 'x-dd-user: gus' -H 'x-dd-role: guest' http://games/").strip()
+assert to.startswith("303") and to.endswith("/servers"), to
 guest = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -X POST -d '' -H 'x-dd-user: gus' -H 'x-dd-role: guest' http://games/create/probe").strip()
 assert guest == "403", guest
 # no role from the gate is a guest, not a member

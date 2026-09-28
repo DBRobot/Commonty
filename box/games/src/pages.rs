@@ -24,6 +24,8 @@ pub struct ServerView<'a> {
     pub label: &'static str,
     pub who: String,
     pub address: Option<String>,
+    /// the address is worth copying only while it answers
+    pub running: bool,
 }
 
 impl<'a> ServerView<'a> {
@@ -44,9 +46,10 @@ impl<'a> ServerView<'a> {
             who: if i.owner == user {
                 "yours".into()
             } else {
-                format!("{}'s", i.owner)
+                format!("hosted by {}", i.owner)
             },
             address: port.map(|p| format!("{}:{}", m.address(), p.port)),
+            running: st == State::Running,
         }
     }
 }
@@ -67,16 +70,26 @@ pub struct Library<'a> {
     pub user: &'a str,
     /// the demo may look, not start
     pub demo: bool,
-    /// in through a friend link: plays where invited, hosts nothing
-    pub guest: bool,
     pub home: &'a str,
     pub q: &'a str,
     pub count: usize,
     pub notice: Option<&'a str>,
-    pub mine: Vec<ServerView<'a>>,
-    pub others: Vec<ServerView<'a>>,
+    /// how many servers are theirs or open to them, on the Your servers button
+    pub yours: usize,
     pub games: Vec<&'a Game>,
     pub open: Option<OpenView<'a>>,
+}
+
+#[derive(Template)]
+#[template(path = "servers.html")]
+pub struct Servers<'a> {
+    pub user: &'a str,
+    pub demo: bool,
+    pub guest: bool,
+    pub home: &'a str,
+    pub notice: Option<&'a str>,
+    pub mine: Vec<ServerView<'a>>,
+    pub others: Vec<ServerView<'a>>,
     /// this person's kept worlds, newest first
     pub worlds: Vec<WorldView>,
 }
@@ -93,19 +106,11 @@ pub struct WorldView {
 pub fn library(
     m: &Manager,
     user: &str,
-    guest: bool,
     q: &str,
     open: Option<&str>,
     notice: Option<&str>,
 ) -> String {
-    let all = m.instances();
     let ql = q.trim().to_lowercase();
-    // yours, and the ones you are invited to; nobody else's is shown
-    let mine: Vec<&Instance> = all.iter().filter(|i| i.owner == user).collect();
-    let others: Vec<&Instance> = all
-        .iter()
-        .filter(|i| i.owner != user && m.may_see(user, i))
-        .collect();
     let open = open.and_then(|id| m.cfg.catalogue.get(id)).map(|g| {
         let (ours, more) = g.visible_settings().partition(|s| s.ours.is_some());
         OpenView {
@@ -124,13 +129,11 @@ pub fn library(
     Library {
         user,
         demo: user == "demo",
-        guest,
         home: &m.cfg.home,
         q,
         count: m.cfg.catalogue.len(),
         notice,
-        mine: mine.iter().map(|i| ServerView::new(m, i, user)).collect(),
-        others: others.iter().map(|i| ServerView::new(m, i, user)).collect(),
+        yours: m.instances().iter().filter(|i| m.may_see(user, i)).count(),
         games: m
             .cfg
             .catalogue
@@ -138,6 +141,31 @@ pub fn library(
             .filter(|g| ql.is_empty() || g.name.to_lowercase().contains(&ql))
             .collect(),
         open,
+    }
+    .render()
+    .unwrap_or_default()
+}
+
+/// The servers someone hosts, the ones they are invited to, and their
+/// kept worlds. Nobody else's server is on it.
+pub fn servers(m: &Manager, user: &str, guest: bool, notice: Option<&str>) -> String {
+    let all = m.instances();
+    Servers {
+        user,
+        demo: user == "demo",
+        guest,
+        home: &m.cfg.home,
+        notice,
+        mine: all
+            .iter()
+            .filter(|i| i.owner == user)
+            .map(|i| ServerView::new(m, i, user))
+            .collect(),
+        others: all
+            .iter()
+            .filter(|i| i.owner != user && m.may_see(user, i))
+            .map(|i| ServerView::new(m, i, user))
+            .collect(),
         worlds: m
             .worlds(user)
             .into_iter()
@@ -186,9 +214,10 @@ pub struct Server<'a> {
     pub fields: Vec<Setting>,
     pub home: &'a str,
     pub s: ServerView<'a>,
-    pub address: String,
-    /// the port a player types: SERVER_PORT, else the first
-    pub main_port: Option<PortView>,
+    /// what a player pastes into the game: the address and its port
+    pub join: String,
+    /// where that goes, in this game's own menus
+    pub how: &'static str,
     pub other_ports: Vec<PortView>,
     pub settings: String,
     pub mine: bool,
@@ -236,16 +265,10 @@ pub fn server(m: &Manager, user: &str, i: &Instance, friends: &[String]) -> Stri
         fields,
         home: &m.cfg.home,
         s: ServerView::new(m, i, user),
-        address: m.address(),
-        main_port: i
-            .ports
-            .iter()
-            .find(|p| p.var == "SERVER_PORT")
-            .or(i.ports.first())
-            .map(|p| PortView {
-                port: p.port,
-                label: String::new(),
-            }),
+        join: ServerView::new(m, i, user)
+            .address
+            .unwrap_or_else(|| m.address()),
+        how: how_to_join(&i.game),
         other_ports: {
             let main = i
                 .ports
@@ -281,4 +304,21 @@ pub fn server(m: &Manager, user: &str, i: &Instance, friends: &[String]) -> Stri
     }
     .render()
     .unwrap_or_default()
+}
+
+/// Where the address goes, for the games whose menus are known; the rest
+/// get the general line in the template.
+fn how_to_join(game: &str) -> &'static str {
+    match game {
+        "satisfactory" => {
+            "in the game, open Server Manager, choose Add Server, and paste the address."
+        }
+        "valheim" | "valheim-bepinex" | "valheim-plus-mod" => {
+            "in the game, choose Join Game, then Add server, and paste the address."
+        }
+        "palworld" => {
+            "in the game, choose Join Multiplayer Game and paste the address in the box at the bottom."
+        }
+        _ => "",
+    }
 }

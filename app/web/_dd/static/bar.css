@@ -201,7 +201,6 @@
   text-decoration: none;
 }
 .dd-bar .svc-menu .s:hover { background: var(--bar-menu-hover); color: var(--bar-menu-ink); }
-.dd-bar .svc-menu .s[aria-current="page"] { background: var(--bar-menu-hover); box-shadow: inset 3px 0 0 var(--c, var(--bar)); }
 .dd-bar .svc-menu .s svg {
   width: 34px;
   height: 34px;
