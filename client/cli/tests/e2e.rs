@@ -1562,3 +1562,188 @@ async fn a_new_box_takes_no_side_when_its_peers_disagree_about_a_name() {
         "the new box took a side on a disputed name"
     );
 }
+
+/// A member's friend link brings someone in as their guest: the gate lets
+/// the guest through to the games page and to no other service, shows them
+/// the Games tile alone, and takes it all back when the friendship ends.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
+    let tile = |name: &str| verify::pages::Service {
+        name: name.into(),
+        url: format!("https://{name}.localhost/"),
+        icon: "".into(),
+        color: "#000".into(),
+        blurb: String::new(),
+        demo: None,
+        demo_url: None,
+        menu_only: false,
+    };
+    let home = vec![tile("files"), tile("photos"), tile("games")];
+    // david signs up, and the box is released with him on the member list
+    let a = Box_::start_members(true, vec![], 300, Some(vec![])).await;
+    let mut david = SoftPasskey::new(true);
+    assert_eq!(join_in_browser(&a, &mut david, "david").await.0, 200);
+    let held = a.dir.parent().unwrap().join("held").join("david.json");
+    let e: serde_json::Value = serde_json::from_slice(&std::fs::read(&held).unwrap()).unwrap();
+    let id = identity::member_id(e["entry"]["root"].as_str().unwrap());
+    let b = Box_::start_on(
+        a.dir.clone(),
+        true,
+        vec![],
+        1,
+        Some(verify::Members::list(vec![id])),
+        None,
+        home,
+    )
+    .await;
+    wait_for(|| async { entry(&b, "david").await.is_some() }).await;
+    let (st, david_c) = login_in_browser(&b, &mut david, "david").await;
+    assert_eq!(st, 200);
+
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let post = |path: &str, cookie: &str, json: bool| {
+        let r = http.post(b.url(path)).header("cookie", cookie.to_string());
+        let r = if json {
+            r.header("content-type", "application/json").body("{}")
+        } else {
+            r.header("content-type", "application/x-www-form-urlencoded")
+                .body("")
+        };
+        async move {
+            let r = r.send().await.unwrap();
+            (r.status().as_u16(), r.text().await.unwrap_or_default())
+        }
+    };
+    let gate = |cookie: &str, host: &str| {
+        let r = http
+            .get(b.url("/verify"))
+            .header("cookie", cookie.to_string())
+            .header("x-original-host", host.to_string());
+        async move {
+            let r = r.send().await.unwrap();
+            (
+                r.status().as_u16(),
+                r.headers()
+                    .get("x-dd-role")
+                    .map(|v| v.to_str().unwrap().to_string()),
+            )
+        }
+    };
+    assert_eq!(
+        gate(&david_c, "files.localhost").await,
+        (200, Some("member".into()))
+    );
+
+    // a member makes a link
+    let (st, made) = post("/_dd/friends/link", &david_c, true).await;
+    assert_eq!(st, 200, "{made}");
+    let made: serde_json::Value = serde_json::from_str(&made).unwrap();
+    let secret = made["url"]
+        .as_str()
+        .unwrap()
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .to_string();
+    let accept = format!("/_dd/friend/{secret}");
+
+    // tom signs up to open it: held, and let in nowhere, until he accepts
+    let mut tom = SoftPasskey::new(true);
+    let (st, tom_c) = join_in_browser(&b, &mut tom, "tom").await;
+    assert_eq!(st, 200);
+    assert_eq!(gate(&tom_c, "games.localhost").await.0, 403);
+    // a form from another site cannot accept it for him
+    assert_eq!(post(&accept, &tom_c, false).await.0, 415);
+    let (st, body) = post(&accept, &tom_c, true).await;
+    assert_eq!(st, 200, "{body}");
+    assert!(body.contains("\"guest\""), "{body}");
+    // his account is published now, not left to lapse with the held ones
+    assert!(entry(&b, "tom").await.is_some());
+
+    // the games page, and not one other door
+    assert_eq!(
+        gate(&tom_c, "games.localhost").await,
+        (200, Some("guest".into()))
+    );
+    for host in [
+        "files.localhost",
+        "photos.localhost",
+        "home.localhost",
+        "grafana.localhost",
+        "elsewhere.x",
+    ] {
+        assert_eq!(gate(&tom_c, host).await.0, 403, "{host} let a guest in");
+    }
+    let (st, me) = get_with_cookie(&b, "/_dd/me", &tom_c).await;
+    assert_eq!(st, 200, "{me}");
+    let me: serde_json::Value = serde_json::from_str(&me).unwrap();
+    assert_eq!(me["role"], "guest");
+    assert_eq!(me["guestOf"], "david");
+    let names: Vec<&str> = me["services"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["games"]);
+    assert!(me.get("tmdb").is_none());
+    for (page, want) in [
+        ("/_dd/files", 303),
+        ("/_dd/media", 303),
+        ("/_dd/boxes", 303),
+        ("/_dd/backups", 303),
+        ("/_dd/devices", 200),
+        ("/_dd/network", 200),
+        ("/_dd/friends", 200),
+    ] {
+        assert_eq!(get_with_cookie(&b, page, &tom_c).await.0, want, "{page}");
+    }
+    assert_eq!(get_with_cookie(&b, "/_dd/fleet.json", &tom_c).await.0, 403);
+    // a guest brings nobody in
+    assert_eq!(post("/_dd/friends/link", &tom_c, true).await.0, 403);
+    // and the link is spent
+    let mut sarah = SoftPasskey::new(true);
+    let (_, sarah_c) = join_in_browser(&b, &mut sarah, "sarah").await;
+    assert_eq!(post(&accept, &sarah_c, true).await.0, 404);
+    assert_eq!(gate(&sarah_c, "games.localhost").await.0, 403);
+
+    // friends, both ways
+    let (_, list) = get_with_cookie(&b, "/_dd/friends/list", &david_c).await;
+    assert!(
+        list.contains("\"tom\"") && list.contains("\"guest\""),
+        "{list}"
+    );
+
+    // the games box asks who may play: the owner and his friends, no one else
+    let r = http
+        .post(b.url("/internal/games/access"))
+        .json(&serde_json::json!([{ "owner": "david", "players": ["tom", "sarah", "david"] }]))
+        .send()
+        .await
+        .unwrap();
+    let who: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(who[0]["players"], serde_json::json!(["david", "tom"]));
+    // a guest owns no server
+    let r = http
+        .post(b.url("/internal/games/access"))
+        .json(&serde_json::json!([{ "owner": "tom", "players": ["david"] }]))
+        .send()
+        .await
+        .unwrap();
+    let who: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(who[0]["players"], serde_json::json!([]));
+
+    // david ends it: tom is a guest of no one, and let in nowhere
+    let r = http
+        .delete(b.url("/_dd/friends/remove/tom"))
+        .header("cookie", david_c.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 204);
+    assert_eq!(gate(&tom_c, "games.localhost").await.0, 403);
+    assert_eq!(get_with_cookie(&b, "/_dd/me", &tom_c).await.0, 403);
+}

@@ -42,6 +42,17 @@ pub fn run() {
         ])
         .setup(|app| {
             paths::init(app.handle());
+            // GTK draws the title bar itself on Wayland, with the buttons its
+            // settings name. Built with Nix, the app brings GNOME's own
+            // default - a close button alone - and never sees the one the
+            // desktop was set up with, so minimize and maximize were missing.
+            #[cfg(target_os = "linux")]
+            {
+                use gtk::prelude::*;
+                if let Some(s) = gtk::Settings::default() {
+                    s.set_gtk_decoration_layout(Some(":minimize,maximize,close"));
+                }
+            }
             // on Android the keys are a file in the app's private storage
             #[cfg(target_os = "android")]
             app.manage(account::Keys(auth::open_file(

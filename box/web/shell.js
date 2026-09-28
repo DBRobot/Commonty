@@ -113,6 +113,86 @@ function bar(m, slot) {
   });
 }
 
+// A service's mark: the box's own svg, not anything a person wrote
+function mark(s) {
+  const m = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  m.setAttribute('viewBox', '0 0 20 20');
+  m.setAttribute('fill', 'none');
+  m.setAttribute('stroke-width', '1.5');
+  m.setAttribute('aria-hidden', 'true');
+  m.innerHTML = s.icon;
+  return m;
+}
+
+// Left of the name: every service, to go from one to another without
+// going home first, in the home page's order; and Friends.
+function links(m) {
+  const row = document.querySelector('header.dd-bar .bar');
+  const brand = row?.querySelector('.brand');
+  if (!row || !brand || row.querySelector('.links')) return;
+  const nav = el('nav', { class: 'links', 'aria-label': 'Main' });
+  const open = m.services.filter((s) => !s.shut);
+  if (open.length) {
+    const chev = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    chev.setAttribute('viewBox', '0 0 12 12');
+    chev.setAttribute('aria-hidden', 'true');
+    chev.innerHTML = '<path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6"/>';
+    const btn = el('button', { type: 'button', class: 'svc-btn', 'aria-expanded': 'false', 'aria-controls': 'dd-services' }, el('span', { text: 'Services' }), chev);
+    const list = el('div', { class: 'svc-menu', id: 'dd-services' });
+    list.hidden = true;
+    for (const s of open) {
+      const a = el('a', { class: 's', href: here(s.url) },
+        mark(s),
+        el('span', {}, el('b', { text: s.name }), el('span', { text: s.blurb })));
+      if (s.color) a.style.setProperty('--c', s.color);
+      if (s.host === location.host) a.setAttribute('aria-current', 'page');
+      list.append(a);
+    }
+    list.append(el('a', { class: 'all', href: here(m.home + '/_dd/home'), text: 'All services on the home page' }));
+    const show = (on) => {
+      list.hidden = !on;
+      btn.setAttribute('aria-expanded', String(on));
+    };
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      show(list.hidden);
+    };
+    document.addEventListener('click', (e) => {
+      if (!list.hidden && !list.contains(e.target)) show(false);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !list.hidden) {
+        show(false);
+        btn.focus();
+      }
+    });
+    nav.append(el('div', { class: 'svc' }, btn, list));
+  }
+  if (!m.demo) {
+    const f = el('a', { class: 'link', href: here(m.home + '/_dd/friends'), text: 'Friends' });
+    if (location.pathname === '/_dd/friends') f.setAttribute('aria-current', 'page');
+    nav.append(f);
+  }
+  brand.after(nav);
+}
+
+// a guest's home: what they are, and a way to see the rest
+function guestHome(m) {
+  const intro = document.querySelector('.intro');
+  if (intro) {
+    intro.querySelector('h1').textContent = `Hello, ${m.user}`;
+    intro.querySelector('p').textContent = m.guestOf
+      ? `You're a guest of ${m.guestOf}'s. You can join the game servers your friends invite you to.`
+      : "You're a guest here. You can join the game servers your friends invite you to.";
+  }
+  const main = document.querySelector('main.home');
+  if (!main || main.querySelector('.guest-more')) return;
+  main.append(el('section', { class: 'guest-more' },
+    el('h2', { text: 'Want to see what else Commonty can do?' }),
+    el('p', { text: 'Files, photos, films and more, kept on boxes the people in it own. The demo shows a member\'s view. Opening it signs you out of your account here; sign back in after.' }),
+    el('a', { class: 'button', href: m.home + '/_dd/demo', text: 'Try the demo' })));
+}
+
 // the home page: one row per service
 function services(m, list) {
   if (!m.services.length) {
@@ -123,16 +203,9 @@ function services(m, list) {
     const row = s.shut
       ? el('div', { class: 'service off', 'aria-disabled': 'true' })
       : el('a', { class: 'service', href: here(s.url) });
-    const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    mark.setAttribute('viewBox', '0 0 20 20');
-    mark.setAttribute('fill', 'none');
-    mark.setAttribute('stroke-width', '1.5');
-    mark.setAttribute('aria-hidden', 'true');
-    // the mark is the box's own svg, not anything a person wrote
-    mark.innerHTML = s.icon;
     if (s.color) row.style.setProperty('--c', s.color);
     row.append(
-      mark,
+      mark(s),
       el('span', {},
         el('span', { class: 'name', text: s.name }),
         el('span', { class: 'blurb', text: s.shut ? 'Not in the demo.' : s.blurb })),
@@ -145,6 +218,8 @@ function services(m, list) {
 me().then((m) => {
   const slot = document.getElementById('me');
   if (slot) bar(m, slot);
+  links(m);
+  if (m.role === 'guest' && document.getElementById('services')) guestHome(m);
   const list = document.getElementById('services');
   if (list) services(m, list);
   const banner = document.getElementById('demo');

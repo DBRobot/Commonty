@@ -1,7 +1,7 @@
 // Create an account: a name and a new passkey, signed into a directory
 // entry by that same passkey. With an invite code, the grant rides along.
 
-import { creationOptions, requestOptions, attestation, assertion, post, say, u8b64 } from './webauthn.js';
+import { creationOptions, requestOptions, attestation, assertion, post, say, u8b64, safeRd } from './webauthn.js';
 import { checkInvite, claim } from './invite.js';
 
 async function go() {
@@ -29,7 +29,8 @@ async function go() {
     await post('/_dd/join/sign', assertion(a), { 'x-dd-ceremony': sign.ceremony });
 
     try { localStorage.setItem('dd_user', username); } catch (e) {}
-    location.href = '/_dd/home';
+    // back where they came from (a friend link), or home
+    location.href = safeRd(new URLSearchParams(location.search).get('rd') || '/_dd/home');
   } catch (e) {
     say('Could not create the account: ' + e.message);
   }

@@ -12,6 +12,7 @@
 
 mod directory;
 pub mod fleet;
+mod friends;
 pub mod library;
 pub mod network;
 pub mod pages;
@@ -67,6 +68,8 @@ struct App {
     /// minutes, the lack of one for one
     app_seen: Mutex<Option<(Instant, Option<SignedApp>)>>,
     fleet: fleet::Fleet,
+    /// who is friends with whom, and who came in as a guest (friends.rs)
+    friends: friends::Store,
 }
 
 /// The app, as the release key vouched for it.
@@ -387,6 +390,47 @@ impl App {
                 .is_some_and(|r| identity::verify_grant(&e.entry, r).is_ok())
     }
 
+    /// Someone who came in through a friend link and is not a member: let
+    /// in to the game servers they are invited to and nowhere else, and
+    /// only while a member is still their friend. A guest made a member
+    /// is a member.
+    fn guest(&self, user: &str) -> bool {
+        user != pages::DEMO_USER
+            && !self.member(user)
+            && self.friends.guest(user).is_some()
+            && self
+                .friends
+                .friends_of(user)
+                .iter()
+                .any(|(f, _)| f != pages::DEMO_USER && self.member(f))
+    }
+
+    fn role(&self, user: &str) -> Option<pages::Role> {
+        if user == pages::DEMO_USER {
+            self.demo().then_some(pages::Role::Demo)
+        } else if self.member(user) {
+            Some(pages::Role::Member)
+        } else if self.guest(user) {
+            Some(pages::Role::Guest)
+        } else {
+            None
+        }
+    }
+
+    /// The hosts a guest may reach through the gate: the game servers'
+    /// page and the gate's own (their friends, devices and the network).
+    /// Every other service answers them 403 here, whatever its own page
+    /// would have done.
+    fn guest_host(&self, headers: &HeaderMap) -> bool {
+        let host = headers
+            .get("x-original-host")
+            .or_else(|| headers.get("host"))
+            .and_then(|v| v.to_str().ok())
+            .map(|h| h.split(':').next().unwrap_or(h).to_lowercase())
+            .unwrap_or_default();
+        host == format!("games.{}", self.domain)
+    }
+
     /// The passkeys in the user's signed entry, as webauthn-rs credentials.
     /// A record that does not parse is skipped, never fatal: one odd entry
     /// must not lock the others out.
@@ -543,26 +587,39 @@ pub(crate) fn bearer(headers: &HeaderMap) -> Option<&str> {
 
 /// nginx auth_request lands here for every request to a protected service.
 async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    match app.identify(&headers, "access") {
-        // 403, not 401: nginx sends a 401 to the login page, and this person
-        // is logged in. They land on the home page, which says so.
-        Some(user) if !app.member(&user) => StatusCode::FORBIDDEN.into_response(),
+    let Some(user) = app.identify(&headers, "access") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let role = app.role(&user);
+    let allowed = match role {
+        Some(pages::Role::Member) => true,
         // the demo looks and does not touch: reads only, and only where a
         // tile sends it. Decided here, where the name is certain; an nginx
         // `if` runs before the gate has answered and cannot know it
-        Some(user) if user == pages::DEMO_USER && !app.demo_allows(&headers) => {
-            StatusCode::FORBIDDEN.into_response()
-        }
-        Some(user) => {
-            let mut r = StatusCode::OK.into_response();
-            let v = HeaderValue::from_str(&user).unwrap();
-            r.headers_mut()
-                .insert("X-Auth-Request-Preferred-Username", v.clone());
-            r.headers_mut().insert("X-Auth-Request-User", v);
-            r
-        }
-        None => StatusCode::UNAUTHORIZED.into_response(),
+        Some(pages::Role::Demo) => app.demo_allows(&headers),
+        // a guest reaches the games page and nothing else, whatever the
+        // service behind another door would have made of them
+        Some(pages::Role::Guest) => app.guest_host(&headers),
+        None => false,
+    };
+    if !allowed {
+        // 403, not 401: nginx sends a 401 to the login page, and this person
+        // is logged in. They land on the home page, which says so.
+        return StatusCode::FORBIDDEN.into_response();
     }
+    let Some(role) = role else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+    let mut r = StatusCode::OK.into_response();
+    let v = HeaderValue::from_str(&user).unwrap();
+    r.headers_mut()
+        .insert("X-Auth-Request-Preferred-Username", v.clone());
+    r.headers_mut().insert("X-Auth-Request-User", v);
+    // what kind of account, for a service that treats guests differently
+    // (the games manager); nginx passes it on, and strips any a client sent
+    r.headers_mut()
+        .insert("X-DD-Role", HeaderValue::from_static(role.as_str()));
+    r
 }
 
 fn with_challenge(v: impl Serialize, ceremony: String) -> Response {
@@ -1034,7 +1091,9 @@ async fn login_finish(
 async fn home_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.sessions.user(cookie) {
-        Some(user) if !app.member(&user) => Html(pages::waiting(&user, &app.home)).into_response(),
+        Some(user) if app.role(&user).is_none() => {
+            Html(pages::waiting(&user, &app.home)).into_response()
+        }
         Some(_) => page("home"),
         None => Redirect::to("/_dd/login?rd=/").into_response(),
     }
@@ -1139,7 +1198,7 @@ async fn media_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
 
 /// A signed-in page, as the file it is (pages::page): it fills itself in
 /// from /_dd/me, in a browser and in the app alike.
-fn page(name: &str) -> Response {
+pub(crate) fn page(name: &str) -> Response {
     match pages::page(name) {
         Some(html) => ([("cache-control", "no-cache")], Html(html)).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -1149,18 +1208,25 @@ fn page(name: &str) -> Response {
 /// Who is looking, their menu and their services: what every signed-in
 /// page fills itself from. A browser's session or a device's token.
 async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    match app.identify(&headers, "access") {
-        Some(user) if user == pages::DEMO_USER || app.member(&user) => {
-            let mut v = pages::me_json(&user, &app.home);
-            if let Some(k) = &app.tmdb {
+    let Some(user) = app.identify(&headers, "access") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    match app.role(&user) {
+        Some(role) => {
+            let mut v = pages::me_json(&user, &app.home, role, &app.domain);
+            if role == pages::Role::Guest {
+                v["guestOf"] = app.friends.guest(&user).map(|g| g.by).into();
+            }
+            if let Some(k) = &app.tmdb
+                && role != pages::Role::Guest
+            {
                 v["tmdb"] = k.as_str().into();
             }
             // who you are, never kept by the browser: sign-out leaves the
             // http cache alone (photos::forget)
             ([("cache-control", "no-store")], Json(v)).into_response()
         }
-        Some(_) => StatusCode::FORBIDDEN.into_response(),
-        None => StatusCode::UNAUTHORIZED.into_response(),
+        None => StatusCode::FORBIDDEN.into_response(),
     }
 }
 
@@ -1170,6 +1236,9 @@ async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Re
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.sessions.user(cookie) {
         Some(user) if app.member(&user) && user != pages::DEMO_USER => page(name),
+        // a guest has devices and joins the network like anyone, to reach
+        // the game servers they are invited to
+        Some(user) if matches!(name, "devices" | "network") && app.guest(&user) => page(name),
         Some(_) => Redirect::to("/_dd/home").into_response(),
         None => Redirect::to(&format!("/_dd/login?rd={at}")).into_response(),
     }
@@ -1211,7 +1280,7 @@ async fn network_mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Respon
     let Some(user) = app.identify(&headers, "access") else {
         return StatusCode::FORBIDDEN.into_response();
     };
-    if !app.member(&user) || user == pages::DEMO_USER {
+    if !(app.member(&user) || app.guest(&user)) || user == pages::DEMO_USER {
         return StatusCode::FORBIDDEN.into_response();
     }
     match &app.network {
@@ -1329,6 +1398,7 @@ pub async fn start(
         tmdb: cfg.tmdb,
         app_seen: Mutex::new(None),
         fleet: cfg.fleet,
+        friends: friends::Store::open(&state_dir)?,
     });
     // A held sign-up follows through when the member list names it: then it
     // is published like any entry, and the hold goes. (The other way, a code
@@ -1363,7 +1433,9 @@ pub async fn start(
             loop {
                 if let Some(door) = &a.network
                     && a.members.as_ref().is_some_and(|m| !m.members.is_empty())
-                    && let Err(e) = door.reap(|u| a.member(u) && u != pages::DEMO_USER).await
+                    && let Err(e) = door
+                        .reap(|u| (a.member(u) || a.guest(u)) && u != pages::DEMO_USER)
+                        .await
                 {
                     eprintln!("network: reaping: {e:#}");
                 }
@@ -1460,6 +1532,24 @@ pub async fn start(
         .route("/_dd/app/signin", post(photos::app_signin))
         // the network's door: a join key for an admitted device
         .route("/_dd/network/join", post(network::join))
+        .route("/_dd/friends", get(friends::page))
+        .route("/_dd/friends/list", get(friends::list))
+        .route("/_dd/friends/link", post(friends::make_link))
+        .route(
+            "/_dd/friends/link/{id}",
+            axum::routing::delete(friends::cancel_link),
+        )
+        .route(
+            "/_dd/friends/remove/{name}",
+            axum::routing::delete(friends::unfriend),
+        )
+        .route(
+            "/_dd/friend/{secret}",
+            get(friends::link_page).post(friends::accept),
+        )
+        .route("/_dd/friend/{secret}/about", get(friends::about))
+        .route("/internal/games/access", post(friends::game_access))
+        .route("/internal/games/friends/{user}", get(friends::game_friends))
         // the encrypted libraries' gate: WebDAV over each library's prefix
         .route("/_dd/dav/{lib}", axum::routing::any(library::handle_root))
         .route("/_dd/dav/{lib}/", axum::routing::any(library::handle_root))

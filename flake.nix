@@ -390,7 +390,18 @@
           # renderer is off because on nvidia it draws a blank window.
           app = (crateWith appCommon "commonty" sources.app "-p commonty").overrideAttrs (old: {
             nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.wrapGAppsHook3 ];
-            buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.glib-networking ];
+            # glib-networking for https; GStreamer is how WebKit plays media,
+            # and without its plugins nothing played in the app ("appsink not
+            # found"): base and good for the pipeline, bad for the streaming
+            # (MSE) that the players use, libav to decode H.264 and AAC
+            buildInputs = (old.buildInputs or [ ]) ++ [
+              pkgs.glib-networking
+              pkgs.gst_all_1.gstreamer
+              pkgs.gst_all_1.gst-plugins-base
+              pkgs.gst_all_1.gst-plugins-good
+              pkgs.gst_all_1.gst-plugins-bad
+              pkgs.gst_all_1.gst-libav
+            ];
             postFixup =
               (old.postFixup or "")
               + "\n"
@@ -445,7 +456,20 @@
           clippy = craneLib.cargoClippy (
             common
             // {
-              inherit cargoArtifacts;
+              # Its own dependencies, checked and never built: clippy needs
+              # only their metadata. Sharing the tests' cache made lint wait
+              # on - or, cold, repeat - a full release and test build of
+              # every dependency, three compiles where one check will do.
+              cargoArtifacts = craneLib.buildDepsOnly (
+                common
+                // {
+                  pname = "dd-clippy-deps";
+                  version = "0.1.0";
+                  cargoExtraArgs = workspaceArgs;
+                  cargoBuildCommand = "true";
+                  doCheck = false;
+                }
+              );
               pname = "dd";
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;

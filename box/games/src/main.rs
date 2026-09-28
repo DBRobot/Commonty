@@ -24,6 +24,15 @@ fn user(h: &HeaderMap) -> Option<String> {
     (!u.is_empty()).then_some(u)
 }
 
+/// A guest, as the gate says: plays where invited, hosts nothing. No word
+/// from the gate is taken as the least: a guest.
+fn guest(h: &HeaderMap) -> bool {
+    !matches!(
+        h.get("x-dd-role").and_then(|v| v.to_str().ok()),
+        Some("member" | "demo")
+    )
+}
+
 #[derive(serde::Deserialize)]
 struct IndexQuery {
     n: Option<String>,
@@ -33,6 +42,30 @@ struct IndexQuery {
 struct App {
     m: Arc<Manager>,
     covers: std::path::PathBuf,
+    /// the gate on this box, for the owner's friends (friends.rs there)
+    gate: String,
+    http: reqwest::Client,
+}
+
+impl App {
+    /// The owner's friends as the gate has them now: who may be invited.
+    /// Nothing, if the gate cannot say - an invite is never taken on trust.
+    async fn friends(&self, owner: &str) -> Vec<String> {
+        let url = format!("{}/internal/games/friends/{owner}", self.gate);
+        match self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+        {
+            Ok(r) => r.json().await.unwrap_or_default(),
+            Err(e) => {
+                eprintln!("games: the gate did not answer for {owner}'s friends: {e}");
+                Vec::new()
+            }
+        }
+    }
 }
 
 async fn index(State(a): State<Arc<App>>, h: HeaderMap, Query(q): Query<IndexQuery>) -> Response {
@@ -40,6 +73,7 @@ async fn index(State(a): State<Arc<App>>, h: HeaderMap, Query(q): Query<IndexQue
         Some(u) => Html(pages::library(
             &a.m,
             &u,
+            guest(&h),
             q.q.as_deref().unwrap_or(""),
             None,
             q.n.as_deref(),
@@ -59,12 +93,13 @@ async fn game(
     let Some(u) = user(&h) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if !a.m.cfg.catalogue.contains_key(&id) {
+    if !a.m.cfg.catalogue.contains_key(&id) || guest(&h) {
         return StatusCode::NOT_FOUND.into_response();
     }
     Html(pages::library(
         &a.m,
         &u,
+        false,
         q.q.as_deref().unwrap_or(""),
         Some(&id),
         q.n.as_deref(),
@@ -77,10 +112,44 @@ async fn server(State(a): State<Arc<App>>, h: HeaderMap, Path(id): Path<String>)
     let Some(u) = user(&h) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    match a.m.instance(&id) {
-        Some(i) => Html(pages::server(&a.m, &u, &i)).into_response(),
+    // yours or one you are invited to; anyone else's is not there at all
+    match a.m.instance(&id).filter(|i| a.m.may_see(&u, i)) {
+        Some(i) => {
+            let friends = if i.owner == u && !guest(&h) {
+                a.friends(&u).await
+            } else {
+                Vec::new()
+            };
+            Html(pages::server(&a.m, &u, &i, &friends)).into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+/// The owner ticks who plays. Each name is checked against the gate's
+/// list of the owner's friends, asked now; the form's word is not enough.
+async fn players(
+    State(a): State<Arc<App>>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Form(form): Form<BTreeMap<String, String>>,
+) -> Response {
+    let Some(u) = user(&h) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if guest(&h) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let want: Vec<String> = form
+        .keys()
+        .filter_map(|k| k.strip_prefix("p:"))
+        .map(str::to_string)
+        .collect();
+    let friends = a.friends(&u).await;
+    back(
+        &format!("/server/{id}#players"),
+        a.m.set_players(&u, &id, &want, &friends).map(|_| ()),
+    )
 }
 
 /// a server's state and log, for the page to refresh itself with
@@ -174,6 +243,9 @@ async fn create(
     let Some(u) = user(&h) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    if guest(&h) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     match a.m.create(&u, &game, &settings) {
         Ok(i) => Redirect::to(&format!("/server/{}", i.id)).into_response(),
         Err(e) => back(&format!("/game/{game}"), Err(e)),
@@ -210,6 +282,9 @@ async fn restore_world(
     let Some(u) = user(&h) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    if guest(&h) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     match a.m.restore_world(&u, &name) {
         Ok(i) => Redirect::to(&format!("/server/{}", i.id)).into_response(),
         Err(e) => back("/", Err(e)),
@@ -264,14 +339,30 @@ async fn main() -> Result<()> {
                 .unwrap_or(2),
             address: env("DD_GAMES_ADDRESS")?,
             home: env_or("DD_GAMES_HOME", "/"),
+            access: std::env::var("DD_GAMES_ACCESS").ok().map(Into::into),
+            address_file: std::env::var("DD_GAMES_ADDRESS_FILE").ok().map(Into::into),
         },
         Box::new(Systemd),
     )?;
     let back_up = m.restore();
     eprintln!("games: {back_up} server(s) brought back up");
+    // what the firewall reads: rewritten as servers start and stop, and
+    // every few seconds besides, so a missed change heals itself
+    let writer = m.clone();
+    tokio::spawn(async move {
+        loop {
+            writer.write_access();
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    });
     let app = Arc::new(App {
         m,
         covers: env_or("DD_GAMES_COVERS", "/var/lib/dd-games/covers").into(),
+        gate: env_or("DD_GAMES_GATE", "http://127.0.0.1:4181"),
+        http: reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?,
     });
     let router = Router::new()
         .route("/", get(index))
@@ -281,6 +372,7 @@ async fn main() -> Result<()> {
         .route("/static/{name}", get(static_file))
         .route("/server/{id}", get(server))
         .route("/server/{id}/state", get(server_state))
+        .route("/players/{id}", post(players))
         .route("/create/{game}", post(create))
         .route("/start/{id}", post(start))
         .route("/configure/{id}", post(configure))

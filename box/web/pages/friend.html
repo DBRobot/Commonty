@@ -2,15 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{% block title %}Games{% endblock %}</title>
-  <link rel="stylesheet" href="/_dd/static/bar.css">
-  <link rel="stylesheet" href="/static/games.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A friend link</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
 </head>
 <body>
   <header class="dd-bar">
     <div class="bar">
-      <a class="brand" href="{{ home }}">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
         <svg viewBox="0 0 22 22" aria-hidden="true">
           <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
           <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
@@ -19,14 +18,13 @@
         </svg>
         <span>Commonty</span>
       </a>
-      <div class="me" id="me">{{ user }}</div>
     </div>
   </header>
-  <main>
-    {% block main %}{% endblock %}
+  <main class="friends invite">
+    <section class="panel" id="card">
+      <p class="small" id="msg">Looking at the link…</p>
+    </section>
   </main>
-  <script src="/static/games.js" defer></script>
-  <!-- the site's bar: the services, Friends, and the menu under the name -->
-  <script type="module" src="/_dd/static/shell.js"></script>
+  <script type="module" src="/_dd/static/friends.js"></script>
 </body>
 </html>

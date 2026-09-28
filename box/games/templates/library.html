@@ -10,6 +10,12 @@
 
 {% if open.is_none() %}{% if let Some(n) = notice %}<p class="note">{{ n }}</p>{% endif %}{% endif %}
 
+{% if guest %}
+<section class="guest-note">
+  <p>You're a guest here: you join the servers your friends invite you to. They show up below once they do.</p>
+</section>
+{% endif %}
+
 {% if !mine.is_empty() %}
 <section>
   <h2>Your servers</h2>
@@ -42,11 +48,17 @@
 
 {% if !others.is_empty() %}
 <section>
-  <h2>Also up here</h2>
+  <h2>Invited to</h2>
   <ul class="servers">{% for s in others %}{% include "server_card.html" %}{% endfor %}</ul>
+</section>
+{% else if guest %}
+<section>
+  <h2>Invited to</h2>
+  <p class="spec">Nothing yet. When a friend invites you to a server, it appears here with the address to join.</p>
 </section>
 {% endif %}
 
+{% if !guest %}
 <section>
   <ul class="grid">
     {% for game in games %}
@@ -60,6 +72,7 @@
   </ul>
   <p id="none" class="empty" hidden>No game by that name here.</p>
 </section>
+{% endif %}
 
 {% if let Some(o) = open %}
 {# the game, opened over the library #}

@@ -75,6 +75,7 @@ pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
         "invite.js" => (include_str!("../web/invite.js"), js),
         "login.js" => (include_str!("../web/login.js"), js),
         "join.js" => (include_str!("../web/join.js"), js),
+        "friends.js" => (include_str!("../../web/friends.js"), js),
         "enrol.js" => (include_str!("../web/enrol.js"), js),
         "redeem.js" => (include_str!("../web/redeem.js"), js),
         "photos.js" => (include_str!("../../photos/web/photos.js"), js),
@@ -97,6 +98,26 @@ pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
         _ => return None,
     })
     .map(|(s, ty)| (s.as_bytes(), ty))
+}
+
+/// What kind of account is looking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Member,
+    /// the one account every visitor shares
+    Demo,
+    /// in through a friend link: invited game servers, and nothing else
+    Guest,
+}
+
+impl Role {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Member => "member",
+            Role::Demo => "demo",
+            Role::Guest => "guest",
+        }
+    }
 }
 
 /// the mark on a tile: an svg fragment from web/icons/, by the role's name
@@ -131,6 +152,8 @@ pub fn page(name: &str) -> Option<&'static str> {
         "backups" => include_str!("../../fleet/web/pages/backups.html"),
         "devices" => include_str!("../../fleet/web/pages/devices.html"),
         "network" => include_str!("../../fleet/web/pages/network.html"),
+        "friends" => include_str!("../../web/pages/friends.html"),
+        "friend" => include_str!("../../web/pages/friend.html"),
         _ => return None,
     })
 }
@@ -139,13 +162,27 @@ pub fn page(name: &str) -> Option<&'static str> {
 /// bar's menu, and the services, with the demo's shut doors marked. The
 /// pages are static files that fill themselves from this (web/shell.js),
 /// the same files in a browser and in the app.
-pub fn me_json(user: &str, services: &[Service]) -> serde_json::Value {
+pub fn me_json(user: &str, services: &[Service], role: Role, domain: &str) -> serde_json::Value {
     let demo = user == DEMO_USER;
-    let menu = Menu::of(user, services);
+    let guest = role == Role::Guest;
+    let menu = if guest {
+        Menu::guest()
+    } else {
+        Menu::of(user, services)
+    };
+    // a guest is shown the one door the gate opens for them
+    let games = format!("games.{domain}");
+    let services: Vec<&Service> = services
+        .iter()
+        .filter(|s| !guest || host_of(&s.url) == games)
+        .collect();
     serde_json::json!({
         "user": user,
         "initial": initial(user),
         "demo": demo,
+        "role": role.as_str(),
+        // the front door, for links that must land there wherever this page is
+        "home": format!("https://home.{domain}"),
         "menu": menu.groups.iter().map(|g| g.iter().map(|i| serde_json::json!({
             "label": i.label,
             "url": i.url,
@@ -178,6 +215,24 @@ pub struct Menu {
 }
 
 impl Menu {
+    /// A guest's: their own devices, the network their game servers are
+    /// on, and the way out.
+    pub(crate) fn guest() -> Menu {
+        let item = |label, url: &str| MenuItem {
+            label,
+            url: url.to_string(),
+        };
+        Menu {
+            groups: vec![
+                vec![
+                    item("Devices", "/_dd/devices"),
+                    item("Network", "/_dd/network"),
+                ],
+                vec![item("Sign out", "/_dd/logout")],
+            ],
+        }
+    }
+
     /// What this person may actually open. The demo has no library, no
     /// devices and no backups, so it is offered none of them.
     pub(crate) fn of(user: &str, services: &[Service]) -> Menu {
@@ -525,7 +580,34 @@ mod tests {
 
     /// what a signed-in page fills itself from, as the page reads it
     fn me(user: &str, svcs: &[Service]) -> serde_json::Value {
-        me_json(user, svcs)
+        let role = if user == DEMO_USER {
+            Role::Demo
+        } else {
+            Role::Member
+        };
+        me_json(user, svcs, role, "x")
+    }
+
+    #[test]
+    fn a_guest_is_shown_the_games_door_alone() {
+        let mut games = svc("Games", "games");
+        games.url = "https://games.x/".into();
+        let mut files = svc("Files", "files");
+        files.url = "https://files.x/_dd/files".into();
+        let m = me_json("tom", &[files, games], Role::Guest, "x");
+        let names: Vec<&str> = m["services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["Games"]);
+        assert_eq!(m["role"], "guest");
+        // their own devices and network, and the way out; none of the fleet's pages
+        assert_eq!(
+            menu_urls(&m),
+            ["/_dd/devices", "/_dd/network", "/_dd/logout"]
+        );
     }
     fn menu_urls(m: &serde_json::Value) -> Vec<String> {
         m["menu"]

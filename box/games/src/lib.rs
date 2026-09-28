@@ -268,6 +268,11 @@ pub struct Config {
     /// the address players type, shown with the port
     pub address: String,
     pub home: String,
+    /// where the firewall reads who may reach which ports (write_access)
+    pub access: Option<PathBuf>,
+    /// the box's address on the fleet's network, as the join keeper last
+    /// wrote it; `address` until it has
+    pub address_file: Option<PathBuf>,
 }
 
 pub struct Manager {
@@ -602,7 +607,9 @@ impl Manager {
         }
         i.desired = "running".into();
         self.save(&i)?;
-        self.units.start(&i.id)
+        let r = self.units.start(&i.id);
+        self.write_access();
+        r
     }
 
     /// The settings a person may set, changed; they take effect when the
@@ -682,7 +689,9 @@ impl Manager {
         let mut i = self.owned(owner, id)?;
         i.desired = "stopped".into();
         self.save(&i)?;
-        self.units.stop(&i.id)
+        let r = self.units.stop(&i.id);
+        self.write_access();
+        r
     }
 
     /// The server and its world, gone. Stopped first.
@@ -693,7 +702,104 @@ impl Manager {
             "stop it first; deleting removes the world with it"
         );
         std::fs::remove_dir_all(self.instance_dir(&i.id))?;
+        let _ = std::fs::remove_file(self.players_file(&i.id));
         Ok(())
+    }
+
+    // Who else plays on a server. Kept beside the instances, not in them:
+    // an instance's directory is shared with its guest, and a game server
+    // must not be able to invite people to itself.
+    fn players_file(&self, id: &str) -> PathBuf {
+        self.cfg.dir.join("players").join(format!("{id}.json"))
+    }
+
+    /// the people the owner has invited to this server
+    pub fn players(&self, id: &str) -> Vec<String> {
+        if !valid_id(id) {
+            return Vec::new();
+        }
+        std::fs::read(self.players_file(id))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    /// The owner says who plays. Only names the gate says are the owner's
+    /// friends are kept (`friends`, asked by the caller just before).
+    pub fn set_players(
+        &self,
+        owner: &str,
+        id: &str,
+        want: &[String],
+        friends: &[String],
+    ) -> Result<Vec<String>> {
+        let i = self.owned(owner, id)?;
+        let mut keep: Vec<String> = want
+            .iter()
+            .filter(|p| *p != owner && friends.contains(p))
+            .cloned()
+            .collect();
+        keep.sort();
+        keep.dedup();
+        let f = self.players_file(&i.id);
+        std::fs::create_dir_all(f.parent().context("players dir")?)?;
+        let tmp = f.with_extension("tmp");
+        std::fs::write(&tmp, serde_json::to_vec(&keep)?)?;
+        std::fs::rename(&tmp, &f)?;
+        self.write_access();
+        Ok(keep)
+    }
+
+    /// The address players type: this box on the fleet's network, where
+    /// the people invited reach it from their app.
+    pub fn address(&self) -> String {
+        self.cfg
+            .address_file
+            .as_ref()
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty() && a.parse::<std::net::IpAddr>().is_ok())
+            .unwrap_or_else(|| self.cfg.address.clone())
+    }
+
+    /// whose server it is, or one they are invited to
+    pub fn may_see(&self, user: &str, i: &Instance) -> bool {
+        i.owner == user || self.players(&i.id).iter().any(|p| p == user)
+    }
+
+    /// For the firewall: every server meant to be up, its ports, its owner
+    /// and players. Names only - the gate turns them into addresses, and
+    /// checks every one again, each time the firewall asks.
+    pub fn access(&self) -> serde_json::Value {
+        let servers: Vec<serde_json::Value> = self
+            .instances()
+            .into_iter()
+            .filter(|i| i.desired == "running")
+            .map(|i| {
+                serde_json::json!({
+                    "id": i.id,
+                    "owner": i.owner,
+                    "players": self.players(&i.id),
+                    "ports": i.ports.iter().map(|p| p.port).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        serde_json::json!({ "servers": servers })
+    }
+
+    /// Written aside and moved into place, so the firewall never reads half.
+    pub fn write_access(&self) {
+        let Some(path) = &self.cfg.access else {
+            return;
+        };
+        let tmp = path.with_extension("tmp");
+        let r = serde_json::to_vec(&self.access())
+            .map_err(anyhow::Error::from)
+            .and_then(|b| Ok(std::fs::write(&tmp, b)?))
+            .and_then(|()| Ok(std::fs::rename(&tmp, path)?));
+        if let Err(e) = r {
+            eprintln!("games: access file: {e:#}");
+        }
     }
 
     fn worlds_dir(&self) -> PathBuf {
@@ -932,11 +1038,54 @@ mod tests {
                 cores: 8,
                 address: "box.example".into(),
                 home: "https://home.example/".into(),
+                access: None,
+                address_file: None,
             },
             Box::new(fake.clone()),
         )
         .unwrap();
         (m, fake)
+    }
+
+    #[test]
+    fn only_the_owners_friends_are_invited_and_only_they_see_it() {
+        let (m, _fake) = manager(1, 16384);
+        let mut set = BTreeMap::new();
+        set.insert("SRCDS_APPID".to_string(), "1".to_string());
+        let i = m.create("tom", "valheim", &set).unwrap();
+        let friends = vec!["sarah".to_string(), "lingyun".to_string()];
+        // a name the gate did not vouch for, and the owner, are dropped
+        let kept = m
+            .set_players(
+                "tom",
+                &i.id,
+                &["sarah".into(), "mallory".into(), "tom".into()],
+                &friends,
+            )
+            .unwrap();
+        assert_eq!(kept, ["sarah"]);
+        assert!(m.may_see("tom", &i) && m.may_see("sarah", &i));
+        assert!(!m.may_see("lingyun", &i) && !m.may_see("mallory", &i));
+        // only the owner says who plays
+        assert!(
+            m.set_players("sarah", &i.id, &["lingyun".into()], &friends)
+                .is_err()
+        );
+        // the firewall hears of it only while it is meant to be up: a new
+        // server starts at once
+        let a = m.access();
+        assert_eq!(a["servers"][0]["owner"], "tom");
+        assert_eq!(a["servers"][0]["players"][0], "sarah");
+        assert_eq!(
+            a["servers"][0]["ports"].as_array().unwrap().len(),
+            i.ports.len()
+        );
+        // kept apart from the guest's share
+        assert!(!m.instance_dir(&i.id).join("players.json").exists());
+        m.stop("tom", &i.id).unwrap();
+        assert!(m.access()["servers"].as_array().unwrap().is_empty());
+        m.delete("tom", &i.id).unwrap();
+        assert!(m.players(&i.id).is_empty());
     }
 
     #[test]

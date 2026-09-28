@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Friends</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="friends">
+    <div class="intro">
+      <h1>Friends</h1>
+      <p>The people you play and share with. Nobody can look anyone up here: you make a link, send it however you like, and whoever opens it becomes your friend.</p>
+    </div>
+
+    <section class="panel" id="add" hidden>
+      <div class="add-head">
+        <div>
+          <h2>Add a friend</h2>
+          <p class="small">A link that works once, for a day. If they have no account yet, it signs them up first.</p>
+        </div>
+        <button id="make" type="button">Make a friend link</button>
+      </div>
+      <div class="made" id="made" hidden>
+        <div class="linkbox">
+          <input id="link" readonly aria-label="Friend link">
+          <button id="copy" class="quiet" type="button">Copy</button>
+        </div>
+        <p class="fine" id="made-note"></p>
+        <p class="note">Someone new joins as a <b>guest</b>: they can play the game servers you invite them to, and nothing else. A member of Commonty stays a member.</p>
+      </div>
+      <p class="error" id="add-error" hidden></p>
+    </section>
+
+    <section class="panel">
+      <h2>Your friends</h2>
+      <ul class="people" id="people"></ul>
+      <p class="small" id="none" hidden>No friends here yet.</p>
+    </section>
+
+    <section class="panel" id="waiting" hidden>
+      <h2>Waiting</h2>
+      <ul class="people" id="links"></ul>
+    </section>
+  </main>
+  <script type="module" src="/_dd/static/friends.js"></script>
+  <script type="module" src="/_dd/static/shell.js"></script>
+</body>
+</html>

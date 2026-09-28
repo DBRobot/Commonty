@@ -104,6 +104,10 @@ async fn serve<R: Runtime>(
     if path == "/_dd/app/photos" {
         return Ok(asset(app, "photos.html"));
     }
+    // its script: without this route the page never got past "Opening"
+    if path == "/_dd/app/photos.js" {
+        return Ok(asset(app, "photos.js"));
+    }
     if path == "/_dd/app/photos/state" {
         return crate::photos::state(app).await;
     }
