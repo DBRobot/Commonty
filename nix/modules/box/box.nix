@@ -25,6 +25,13 @@
     type = lib.types.str;
     default = "";
   };
+  # a hardware fact, set in the box's hardware file with the driver
+  options.dd.box.vaapi = lib.mkOption {
+    type = lib.types.nullOr lib.types.str;
+    default = null;
+    example = "/dev/dri/renderD128";
+    description = "The render node of a GPU that encodes H.264 through VAAPI, if the box has one. The transcoder encodes there instead of on the cores.";
+  };
 
   config.environment.etc."dd/plaintext".text =
     lib.concatStringsSep "\n" config.dd.box.plaintext + "\n";

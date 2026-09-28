@@ -21,7 +21,7 @@ for f in $DIRECTORY/*.json; do
   uid=$(( 1000000 + 0x$(printf 'dd-uid:%s' "$u" | sha256sum | cut -c1-8) % 1073741824 ))
 
   # 0750 rather than 0700 is load-bearing: on posix acls the group bits
-  # are the mask that caps named entries, so 0700 masks the jellyfin
+  # are the mask that caps named entries, so 0700 masks the nginx
   # entry down to nothing. The group holds only this user, so the bits
   # grant no one anything by themselves.
   install -d -m 0750 -o "$uid" -g "$uid" $ROOT/"$u"
@@ -32,15 +32,12 @@ for f in $DIRECTORY/*.json; do
     [ "$(stat -c %u "$d")" = "$uid" ] || chown -R "$uid:$uid" "$d"
   done
 
-  setfacl -m u:jellyfin:r-x $ROOT/"$u"
-  setfacl -d -m u:jellyfin:r-x $ROOT/"$u"
   setfacl -m u:nginx:rwx $ROOT/"$u"
   setfacl -d -m u:nginx:rwx $ROOT/"$u"
   setfacl -d -m "u:$uid:rwx" $ROOT/"$u"
 
-  # The archive dir: same owner and the same nginx entry, but deliberately
-  # NO jellyfin entry. Nothing in here is media and nothing in here is
-  # readable by anyone but the uploader anyway - it arrives encrypted.
+  # The archive dir: same owner and the same nginx entry. Nothing in here
+  # is readable by anyone but the uploader anyway - it arrives encrypted.
   setfacl -m u:nginx:rwx $IMAGES/"$u"
   setfacl -d -m u:nginx:rwx $IMAGES/"$u"
   setfacl -d -m "u:$uid:rwx" $IMAGES/"$u"

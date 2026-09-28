@@ -64,7 +64,6 @@ function render(st) {
   $("add-device").hidden = !st.root;
   $("no-root").hidden = st.root;
   show("home");
-  media();
   net().then(goToSite);
 }
 
@@ -137,52 +136,6 @@ $("passkey-add").addEventListener("click", async () => {
     t.textContent = String(e);
   }
   b.disabled = false;
-});
-
-// Movies & TV: the libraries as folders and jellyfin on them, on this
-// machine, in a window of its own
-async function media(st) {
-  try {
-    st = st || await invoke("media_status");
-  } catch (e) {
-    $("media-text").textContent = String(e);
-    return;
-  }
-  const text = $("media-text");
-  if (st.unavailable) {
-    text.textContent = "Movies & TV plays on a desktop for now; a phone is a place to watch, and that comes later.";
-    $("media-open").hidden = true;
-    return;
-  }
-  if (st.running) {
-    text.textContent = `Jellyfin is running on this machine with ${st.libraries} librar${st.libraries === 1 ? "y" : "ies"}, ${st.files} file(s), folders at ${st.at}.`;
-  } else if (st.jellyfin) {
-    text.textContent = "Your libraries as folders on this machine, and Jellyfin on them. Nothing is stored here in the clear except while it plays.";
-  } else {
-    text.textContent = "No Jellyfin on this machine: install it, or start the app with COMMONTY_JELLYFIN set.";
-  }
-  $("media-open").textContent = st.running ? "Show" : "Open";
-  $("media-open").disabled = !st.jellyfin;
-  $("media-close").hidden = !st.running;
-}
-
-$("media-open").addEventListener("click", async () => {
-  const b = $("media-open");
-  b.disabled = true;
-  b.textContent = "Starting…";
-  $("media-error").hidden = true;
-  try {
-    media(await invoke("media_open"));
-  } catch (e) {
-    $("media-error").textContent = String(e);
-    $("media-error").hidden = false;
-    b.disabled = false;
-    b.textContent = "Open";
-  }
-});
-$("media-close").addEventListener("click", async () => {
-  await invoke("media_close");
-  media();
 });
 
 async function refresh() {

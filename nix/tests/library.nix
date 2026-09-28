@@ -24,7 +24,6 @@ in
       ../modules/library/libraries.nix
     ];
     dd.verify.role = pkgs.lib.mkForce "full";
-    dd.verify.oidcSecretFile = "${pkgs.writeText "oidc-secret" "test"}";
     dd.garage = {
       zone = "r-test";
       capacity = "1G";

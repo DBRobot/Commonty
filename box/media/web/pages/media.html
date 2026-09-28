@@ -87,35 +87,65 @@
       This product uses the TMDB API but is not endorsed or certified by TMDB.
     </p>
 
-    <div id="show-page" class="show" hidden>
-      <div class="show-poster" id="show-poster"></div>
-      <div>
-        <div class="show-head">
-          <button class="back" type="button" id="back">← Movies &amp; TV</button>
-          <h2 id="show-title"></h2>
-          <div class="meta" id="show-meta"></div>
-          <p id="show-text" class="show-text"></p>
-          <div class="show-actions">
-            <div class="tabs" role="group" aria-label="Season" id="seasons"></div>
-            <button id="addep" class="quiet" type="button" hidden>Add episodes</button>
-            <input id="eppicker" type="file" accept="video/*,.mkv" multiple hidden>
-          </div>
+  </main>
+
+  <!-- a title, opened over the shelves as Games opens a game -->
+  <div class="veil" id="veil" hidden></div>
+  <section class="ribbon" id="ribbon" role="dialog" aria-modal="true" aria-labelledby="r-title" hidden>
+    <button class="r-close" id="r-close" type="button" aria-label="Close">×</button>
+    <div class="r-open" id="r-open">
+      <div class="r-poster" id="r-poster"></div>
+      <div class="r-body">
+        <p class="eyebrow" id="r-eyebrow"></p>
+        <h2 id="r-title"></h2>
+        <div class="meta" id="r-meta"></div>
+        <p class="r-text" id="r-text"></p>
+        <div id="r-where" hidden>
+          <div class="progress"><i></i></div>
+          <p class="r-left" id="r-left"></p>
         </div>
+        <div class="r-seasons" role="group" aria-label="Season" id="seasons"></div>
         <ul class="eps" id="eps"></ul>
       </div>
+      <div class="r-actions">
+        <button id="r-play" type="button"></button>
+        <span class="r-spec" id="r-spec"></span>
+        <button id="r-over" class="quiet" type="button">Start over</button>
+        <button id="addep" class="quiet" type="button">Add episodes</button>
+        <input id="eppicker" type="file" accept="video/*,.mkv" multiple hidden>
+        <button id="r-remove" class="r-remove" type="button"></button>
+      </div>
     </div>
-  </main>
+  </section>
 
   <div class="player" id="player" hidden role="dialog" aria-label="Player">
     <div class="player-top">
       <div><b id="p-title"></b><br><span id="p-sub"></span></div>
       <div class="player-buttons">
         <button id="p-save" class="ghost" type="button" hidden>Save</button>
-        <button id="p-remove" class="ghost" type="button" hidden>Remove</button>
         <button id="p-close" class="ghost" type="button" aria-label="Close">Close</button>
       </div>
     </div>
-    <video id="video" controls playsinline></video>
+    <video id="video" playsinline></video>
+    <div class="controls" id="controls">
+      <button id="c-play" class="icon" type="button" aria-label="Play" data-on="play">
+        <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>
+        <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h4.5v15H6zm7.5 0H18v15h-4.5z"/></svg>
+      </button>
+      <button id="c-back" class="icon skip" type="button" aria-label="Back 10 seconds">−10</button>
+      <button id="c-on" class="icon skip" type="button" aria-label="On 10 seconds">+10</button>
+      <span class="time" id="c-now">0:00</span>
+      <input id="c-seek" type="range" min="0" max="1" step="1" value="0" aria-label="Where in the film">
+      <span class="time" id="c-total">–:––</span>
+      <button id="c-mute" class="icon" type="button" aria-label="Mute" data-on="sound">
+        <svg class="i-sound" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4.5v15L8 15H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <svg class="i-muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4.5v15L8 15H4z"/><path d="m16.5 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <input id="c-vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+      <button id="c-full" class="icon" type="button" aria-label="Whole screen">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+      </button>
+    </div>
     <p id="p-note" class="player-note"></p>
   </div>
 

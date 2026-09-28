@@ -1,7 +1,7 @@
 { config, lib, ... }:
 {
-  # A box with a public name: certificates, nginx, the browser login and the
-  # per-box issuer for jellyfin. The verifier's full role lives here.
+  # A box with a public name: certificates, nginx and the browser login.
+  # The verifier's full role lives here.
   imports = [
     ./_sops.nix
     ../modules/gate/acme.nix
@@ -27,14 +27,10 @@
     tokenFile = config.sops.templates."cloudflare.env".path;
   };
   dd.verify.role = "full";
-  dd.verify.oidcSecretFile = config.sops.secrets.jellyfin-oauth-secret.path;
   services.tailscale.permitCertUid = "nginx"; # so nginx can fetch *.ts.net certs without root
 
   sops.secrets.cloudflare-token = { };
   sops.secrets.cloudflared-credentials = { }; # systemd hands it to cloudflared as a credential
-  # read by the verifier's per-box oidc issuer for jellyfin; the seed script
-  # in modules/jellyfin.nix runs as root
-  sops.secrets.jellyfin-oauth-secret.owner = "dd-verify";
   # TMDB's read token, for posters on Movies & TV: handed to signed-in
   # pages, which look titles up from the member's own device
   sops.secrets.tmdb-token.owner = "dd-verify";

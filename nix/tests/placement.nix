@@ -11,7 +11,8 @@ let
     (lib.nixosSystem {
       modules = [
         ./box.nix
-        ../modules/media/jellyfin.nix
+        ../modules/library/transcode.nix
+        { dd.transcode.enable = true; }
         { nixpkgs.hostPlatform = pkgs.stdenv.hostPlatform.system; }
       ];
       specialArgs = { inherit self; };
@@ -19,6 +20,6 @@ let
   labels = cfg.dd.box.plaintext;
   refusals = builtins.filter (a: !a.assertion && lib.hasInfix "plaintext" a.message) cfg.assertions;
 in
-assert builtins.any (l: lib.hasInfix "jellyfin" l) labels;
+assert builtins.any (l: lib.hasInfix "transcode" l) labels;
 assert refusals == [ ];
 pkgs.runCommand "plaintext-label" { } "echo ok > $out"

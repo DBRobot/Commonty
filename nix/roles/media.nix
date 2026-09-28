@@ -1,17 +1,13 @@
 { config, ... }:
 {
-  # The demo's media, people's files, the archive catalog. Members' media
-  # is not here any more: it lives encrypted in their libraries and plays
-  # on their devices (client/media, the app). Jellyfin stays for the demo,
-  # over a plain folder of films that are nobody's.
+  # People's files and the Movies & TV and Files tiles. Media lives
+  # encrypted in each person's library and plays on the page's own player
+  # (box/media, box/transcode); the demo's is the demo library.
   imports = [
     ./_sops.nix
-    ../modules/media/jellyfin.nix
-    ../modules/media/archive-catalog.nix
     ../modules/gate/user-accounts.nix
     ../modules/media/webdav-media.nix
   ];
-  users.users.admin.extraGroups = [ "media" ]; # copy demo films into /srv/media without sudo
 
   dd.home.services = [
     {
@@ -41,8 +37,6 @@
     }
   ];
 
-  # jellyfin's state is the demo's and is not backed up: nothing in it is
-  # anyone's
   dd.backup.paths = [
     "/srv/users" # people's uploads
     "/srv/images" # archives of old computers, already ciphertext

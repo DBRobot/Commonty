@@ -30,15 +30,10 @@ base64 = "0.22"
 ed25519-dalek = "2"
 # the token format devices sign; the verifier only ever holds public keys
 biscuit-auth = "6"
-# signs the per-box id token for jellyfin's oidc plugin (oidc.rs)
-jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
 # the box's own browser login: passkeys verified HERE, against keys enrolled
 # here, issuing a cookie only this box's services accept. kanidm's mint is not
 # in the path.
 webauthn-rs = "0.6.1-dev"
-# the per-box id-token key for jellyfin's oidc-only plugin; all in the tree
-# already through ente and kanidm's crates
-p256 = "0.13"
 hmac = "0.12"
 sha2 = "0.10"
 url = "2"

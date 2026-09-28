@@ -12,6 +12,10 @@
 }:
 let
   cfg = config.dd.transcode;
+  # the box's GPU, if its hardware file names one: encoding goes there, and
+  # the service gets that one device; a picture it will not take falls back
+  # to the cores
+  vaapi = config.dd.box.vaapi;
   base = config.dd.domain;
   port = 4190;
 in
@@ -38,6 +42,11 @@ in
         TRANSCODE_DIR = "/run/dd-transcode";
         TRANSCODE_FFMPEG = "${pkgs.ffmpeg-headless}/bin/ffmpeg";
         TRANSCODE_SOURCE = cfg.source;
+      }
+      // lib.optionalAttrs (vaapi != null) {
+        TRANSCODE_VAAPI = vaapi;
+        # the driver comes from hardware.graphics, in the box's hardware file
+        LIBVA_DRIVERS_PATH = "/run/opengl-driver/lib/dri";
       };
       serviceConfig = {
         Type = "simple";
@@ -75,6 +84,11 @@ in
         ProtectSystem = "strict";
         ProtectHome = true;
         MemoryMax = "4G";
+      }
+      // lib.optionalAttrs (vaapi != null) {
+        # the render node alone: no display, no other device
+        DeviceAllow = [ "${vaapi} rw" ];
+        SupplementaryGroups = [ "render" ];
       };
     };
 

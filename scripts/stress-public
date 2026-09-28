@@ -39,7 +39,7 @@ echo | openssl s_client -tls1_1 -servername home.$B -connect $ip:443 2>&1 | grep
 for h in home accounts; do
   c=$(code https://$h.$B/); [ "$c" = 200 ] || [ "$c" = 303 ] && pass "$h answers ($c)" || fail "$h: $c"
 done
-for h in photos files jellyfin llm git grafana games s3 api albums cast locker; do
+for h in photos files llm git grafana games s3 api albums cast locker; do
   c=$(code https://$h.$B/ 8)
   # closed by nginx, or a 403 from Cloudflare's edge for a name it has no
   # tunnel route for: either way the box was never reached

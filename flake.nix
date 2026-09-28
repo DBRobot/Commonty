@@ -388,7 +388,6 @@
           # The app: the same crates as dd behind a window (app/). Wrapped
           # so the webview finds its schemas and gio modules; the dmabuf
           # renderer is off because on nvidia it draws a blank window.
-          # Jellyfin comes with it: Movies & TV starts it on the device.
           app = (crateWith appCommon "commonty" sources.app "-p commonty").overrideAttrs (old: {
             nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.wrapGAppsHook3 ];
             buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.glib-networking ];
@@ -397,8 +396,7 @@
               + "\n"
               + ''
                 wrapProgram $out/bin/commonty \
-                  --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
-                  --set COMMONTY_JELLYFIN ${pkgs.jellyfin}/bin/jellyfin
+                  --set WEBKIT_DISABLE_DMABUF_RENDERER 1
               '';
           });
           # the app's network engine (app/net): `nix build .#net` for the archive
@@ -571,22 +569,23 @@
       # derivation, so a change to our code costs our code's compile, not
       # the three hundred crates under it. The tests ran already in ci's
       # rust job on this same source; no second run in here.
-      packages.${system} = builtins.removeAttrs rust [
-        "fmt"
-        "clippy"
-        "tests"
-        "android-sdk"
-      ]
-      // {
-        # `dd secret run` falls back to this when sops is not on PATH. The
-        # fleet's age key goes into that process's environment, so it is
-        # this repo's pinned nixpkgs and not whatever unstable is serving
-        # at the moment of use.
-        inherit (pkgs) sops;
-        # `dd release app` checks a build's provenance with this; the
-        # distribution's gh is often too old to have `attestation`
-        inherit (pkgs) gh;
-      };
+      packages.${system} =
+        builtins.removeAttrs rust [
+          "fmt"
+          "clippy"
+          "tests"
+          "android-sdk"
+        ]
+        // {
+          # `dd secret run` falls back to this when sops is not on PATH. The
+          # fleet's age key goes into that process's environment, so it is
+          # this repo's pinned nixpkgs and not whatever unstable is serving
+          # at the moment of use.
+          inherit (pkgs) sops;
+          # `dd release app` checks a build's provenance with this; the
+          # distribution's gh is often too old to have `attestation`
+          inherit (pkgs) gh;
+        };
 
       # Boxes booted as vms and driven through the failure cases, so the
       # modules the real hosts import are proven before a host sees them.
@@ -613,7 +612,12 @@
         }
         // nixpkgs.lib.genAttrs vmTests vm
         // {
-          inherit (rust) fmt clippy clippy-app tests;
+          inherit (rust)
+            fmt
+            clippy
+            clippy-app
+            tests
+            ;
           placement = import ./nix/tests/placement.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;

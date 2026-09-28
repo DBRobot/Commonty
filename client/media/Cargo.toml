@@ -3,7 +3,7 @@ name = "media"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "A member's libraries on a device: the gate, the folders, the player"
+description = "A member's libraries on a device: the gate and the folders"
 
 [dependencies]
 auth = { path = "../auth" }
@@ -20,7 +20,3 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "time", "sync"] }
 
-
-# jellyfin dies with its parent (prctl)
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"

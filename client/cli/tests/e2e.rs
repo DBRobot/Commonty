@@ -109,7 +109,6 @@ impl Box_ {
             peers,
             sync_secs,
             domain: full.then(|| "localhost".to_string()),
-            oidc: None,
         })
         .await
         .unwrap();
@@ -1370,7 +1369,6 @@ async fn start_at(
         peers,
         sync_secs,
         domain: full.then(|| "localhost".to_string()),
-        oidc: None,
     })
     .await?;
     Ok(Box_ { addr, dir })
@@ -1447,7 +1445,6 @@ async fn download_page_of(release_pub: String, manifest_url: String) -> (u16, St
         peers: vec![],
         sync_secs: 300,
         domain: Some("localhost".to_string()),
-        oidc: None,
     })
     .await
     .unwrap();

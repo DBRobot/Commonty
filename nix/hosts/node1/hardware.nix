@@ -1,4 +1,4 @@
-{ config, ... }:
+{ config, pkgs, ... }:
 {
   # What is true of this machine and no other. Everything it runs is a role
   # in fleet/boxes.json. hardware-configuration.nix is the output of
@@ -9,6 +9,14 @@
     ./disko.nix
     ../../modules/box/home-network.nix
   ];
+
+  # Iris Xe (i7-1165G7): Quick Sync decodes H.264/HEVC/VP9/AV1 and encodes
+  # H.264/HEVC, at a small part of what the cores take for the same film
+  hardware.graphics = {
+    enable = true;
+    extraPackages = [ pkgs.intel-media-driver ];
+  };
+  dd.box.vaapi = "/dev/dri/renderD128";
 
   # the house network: this box's links and its reserved address
   dd.home = {
@@ -65,8 +73,7 @@
     # Per-user archives of old computers - disk images or copied-out user
     # folders - uploaded already encrypted (rclone crypt, key on the client),
     # so this dataset only ever holds ciphertext. Separate from vault/users on
-    # purpose: jellyfin has an acl on every media dir and has no business
-    # traversing these, and NO snapshots - an archive is written once and never
+    # purpose, and NO snapshots - an archive is written once and never
     # changed, so a snapshot buys nothing and would keep a deleted 80 G image
     # on disk for a year.
     "vault/images" = {

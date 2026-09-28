@@ -21,15 +21,9 @@ Milestone 1: sign in. Type a name, the app shows `dd device admit <key>`,
 run that on a machine that is already yours, and the app is a device in
 your entry with every library key sealed to it.
 
-Milestone 2: Movies & TV. Open mounts every library you can open at
-`~/Commonty` (client/media, FUSE) and starts Jellyfin on this machine
-against it, with its data under the app's data directory (`jellyfin/`), then shows
-it in a window of its own, signed in. First start answers Jellyfin's setup:
-you as its one user (a random password kept in the keystore, account
-`jellyfin-password`) and the mount as one library. The packaged app brings
-its own Jellyfin (`COMMONTY_JELLYFIN`); a dev build takes the one on PATH.
-Jellyfin dies with the app; a mount left by a crash is cleared on the next
-open.
+Milestone 2: Movies & TV. The site's own page and player, carried in the
+app (`app/carried`); the box transcodes what the webview cannot play
+(box/transcode).
 
 Network: the fleet's own network (Headscale on the gateway box). Join asks
 the gate for a single-use key in your name and hands it to the engine,
@@ -61,8 +55,7 @@ The same app, from the same tree. What differs is at the bottom: the keys
 are a file in the app's private storage (`auth::open_file`; Android has no
 OS keyring), the engine is a shared library per abi (`nix build
 .#net-android`, since Go makes no archives there; it reads interfaces
-through `getifaddrs`, the call Android permits), no mount and no Jellyfin
-(the card says so), and the app's data directory is what Android gives it.
+through `getifaddrs`, the call Android permits), and the app's data directory is what Android gives it.
 
 Build, from `app/`, in the Android shell:
 

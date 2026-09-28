@@ -28,7 +28,6 @@ in
       "files"
       "llm"
       "grafana"
-      "jellyfin"
       "git"
       "home"
       "photos"
@@ -118,10 +117,6 @@ in
       members = [ ];
       revoked = [ ];
     };
-  };
-  options.dd.verify.oidcSecretFile = lib.mkOption {
-    type = lib.types.str;
-    description = "file holding the secret of the per-box oidc client for jellyfin (sops on a real box, a plain file in a test)";
   };
   options.dd.verify.network = lib.mkOption {
     type = lib.types.nullOr (
@@ -303,12 +298,6 @@ in
         VERIFY_MEMBERS = builtins.toJSON config.dd.members;
         # our Rust for the browser, next to the pages that use it
         VERIFY_WEB_DIR = "${self.packages.${pkgs.stdenv.hostPlatform.system}.web}";
-        # the per-box issuer for jellyfin, the one service that speaks nothing
-        # but oidc. its key is generated on first start and trusted by exactly
-        # this client on exactly this box.
-        VERIFY_OIDC_ISSUER = "https://jellyfin.${base}/_dd/oidc";
-        VERIFY_OIDC_CLIENT_ID = "jellyfin";
-        VERIFY_OIDC_CLIENT_SECRET_FILE = cfg.oidcSecretFile;
         VERIFY_HOME = builtins.toJSON (
           map (t: {
             inherit (t)
@@ -323,7 +312,6 @@ in
               ;
           }) (lib.sort (a: b: a.rank < b.rank) config.dd.home.services)
         );
-        VERIFY_OIDC_REDIRECT = "https://jellyfin.${base}/sso/OID/r/dd";
       };
       serviceConfig = {
         Type = "simple";
@@ -359,8 +347,8 @@ in
     # The session cookie says who you are to the *gate*. It is HttpOnly and
     # Secure, so no page can read it, and it is set for the whole domain so
     # that one sign-in covers every service here. That last part is what put
-    # it in every request nginx then forwarded to a backend - jellyfin,
-    # grafana, the games manager - none of which need it and any of which,
+    # it in every request nginx then forwarded to a backend - grafana,
+    # the games manager - none of which need it and any of which,
     # compromised, could have replayed it as that member anywhere.
     #
     # It comes out on the way in, and only it: a backend's own cookies are
@@ -377,8 +365,7 @@ in
     '';
 
     # The verifier's browser side on every vhost that has one: the passkey
-    # login and enrolment pages, the directory, and on jellyfin's the per-box
-    # issuer. /_dd/verify is the auth_request target and internal to nginx. A
+    # login and enrolment pages and the directory. /_dd/verify is the auth_request target and internal to nginx. A
     # 401 from auth_request lands a browser on the login page and back where
     # it was.
     services.nginx.virtualHosts = lib.mkIf full (
@@ -387,10 +374,8 @@ in
           map (h: {
             name = "${h}.${base}";
             value.locations = {
-              # No limit_req here. jellyfin fetches discovery and jwks from this
-              # very box in quick succession, and a per-ip limit that counted those
-              # answered its sso with 503 the moment anything else probed /_dd/.
-              # Every abusable endpoint there demands a credential first.
+              # No limit_req here: every abusable endpoint there demands a
+              # credential first.
               "/_dd/" = {
                 proxyPass = "http://127.0.0.1:${toString port}/_dd/";
                 extraConfig = ''

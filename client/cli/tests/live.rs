@@ -212,26 +212,13 @@ async fn a_guest_walks_every_tile() {
         format!("{st} as {login:?}  {}", hops.join(" -> ")),
     );
 
-    // Videos: jellyfin's sso plugin, through the box's issuer and back
-    let mut videos = None;
-    for start in ["/sso/OID/p/dd", "/sso/OID/start/dd"] {
-        let (hops, st, body) =
-            walk(&http, &cookie, &format!("https://jellyfin.{base}{start}")).await;
-        if st != 404 {
-            videos = Some((hops, st, body));
-            break;
-        }
-    }
-    // the plugin answers a failed callback with an error status; a 200 is
-    // its landing page, which stores the jellyfin session in the browser
-    match videos {
-        Some((hops, st, body)) => report(
-            "Videos",
-            st == 200 && body.contains("localStorage"),
-            format!("{st} ({} bytes)  {}", body.len(), hops.join(" -> ")),
-        ),
-        None => report("Videos", false, "no sso start url answered".into()),
-    }
+    // Movies & TV: our page and player, behind the same gate
+    let (hops, st, body) = walk(&http, &cookie, &format!("https://files.{base}/_dd/media")).await;
+    report(
+        "Videos",
+        st == 200 && body.contains("Movies"),
+        format!("{st} ({} bytes)  {}", body.len(), hops.join(" -> ")),
+    );
 
     // Photos: our page, which asks the passkey for the account's secret; a
     // software passkey has no PRF, so the walk stops at the page itself
