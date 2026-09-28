@@ -48,10 +48,12 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # public data: readable by anyone on the box, nginx included
     users.users.dd-pwned = {
       isSystemUser = true;
-      group = "nginx";
+      group = "dd-pwned";
     };
+    users.groups.dd-pwned = { };
     systemd.services.dd-pwned = {
       description = "Fetch the Pwned Passwords list";
       after = [ "network-online.target" ];
@@ -65,15 +67,15 @@ in
       serviceConfig = {
         Type = "oneshot";
         User = "dd-pwned";
-        Group = "nginx";
+        Group = "dd-pwned";
         ProtectSystem = "strict";
         ReadWritePaths = [ dir ];
         PrivateTmp = true;
         NoNewPrivileges = true;
-        UMask = "0027";
+        UMask = "0022";
         Nice = 19;
         IOSchedulingClass = "idle";
-        ExecStartPre = "+${pkgs.coreutils}/bin/install -d -m 0750 -o dd-pwned -g nginx ${dir}";
+        ExecStartPre = "+${pkgs.coreutils}/bin/install -d -m 0755 -o dd-pwned -g dd-pwned ${dir}";
       };
       script = "exec ${fetch}";
     };
