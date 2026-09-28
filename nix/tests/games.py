@@ -35,6 +35,12 @@ assert 'href="/servers"' in box.succeed(f"curl -sf {sock} -H 'x-dd-user: tom' -H
 # one each: a second is refused
 box.succeed(f"{m}/create/probe -d SERVER_NAME=again")
 box.fail("test -e /var/lib/dd-games/instances/probe2")
+# the host goes by its own record: what the guest writes into its shared
+# copy - another owner, more memory, other ports - changes nothing
+box.succeed("test -s /var/lib/dd-games/records/probe1.json")
+box.succeed(f"sed -i 's/\"owner\": \"tom\"/\"owner\": \"ann\"/' {d}/instance.json && grep -q '\"ann\"' {d}/instance.json")
+assert "probe1" not in box.succeed(f"curl -sf {sock} -H 'x-dd-user: ann' -H 'x-dd-role: member' http://games/servers")
+assert '"owner": "tom"' in box.succeed("cat /var/lib/dd-games/records/probe1.json")
 
 # its world is files on the box
 box.succeed(f"echo hello > {world}/world.txt")
