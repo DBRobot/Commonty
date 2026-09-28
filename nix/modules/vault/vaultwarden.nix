@@ -37,13 +37,19 @@ let
 
   # The web vault asks the breach list on this box (pwned.nix) instead of
   # api.pwnedpasswords.com: checking a password never leaves the box.
-  webvault = pkgs.vaultwarden.webvault.overrideAttrs (o: {
-    postInstall = (o.postInstall or "") + ''
-      grep -rl 'https://api.pwnedpasswords.com' $out/share/vaultwarden/vault | while read f; do
-        substituteInPlace "$f" --replace-quiet 'https://api.pwnedpasswords.com' '/pwned'
+  webvault =
+    pkgs.runCommand "vaultwarden-webvault-local-breach-list" { } ''
+      cp -r ${pkgs.vaultwarden.webvault} $out
+      chmod -R u+w $out
+      hits=$(grep -rl --include='*.js' 'https://api.pwnedpasswords.com/range/' $out/share/vaultwarden/vault)
+      [ -n "$hits" ] || { echo "the web vault no longer asks api.pwnedpasswords.com; check pwned.nix" >&2; exit 1; }
+      for f in $hits; do
+        sed -i 's|https://api.pwnedpasswords.com/range/|/pwned/range/|g' "$f"
       done
-    '';
-  });
+    ''
+    // {
+      inherit (pkgs.vaultwarden.webvault) version;
+    };
 
   # Commonty's look, through Vaultwarden's own hook for it: a stylesheet
   # template it serves with the web vault. Their pages, our colours and type.
