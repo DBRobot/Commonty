@@ -99,6 +99,17 @@ async fn serve<R: Runtime>(
     if path == "/_dd/app/library" {
         return library(app).await;
     }
+    // Photos in this window (photos.rs): the page that signs the window in,
+    // and what it asks
+    if path == "/_dd/app/photos" {
+        return Ok(asset(app, "photos.html"));
+    }
+    if path == "/_dd/app/photos/state" {
+        return crate::photos::state(app).await;
+    }
+    if path == "/_dd/app/photos/start" {
+        return crate::photos::start(app).await;
+    }
     // a service that is not one of these pages (photos, games, code):
     // the device's own browser, which reaches it through the app too
     if path == "/_dd/app/open" {
@@ -130,7 +141,7 @@ async fn serve<R: Runtime>(
 /// its hour: every request a page makes carries one.
 static TOKEN: Mutex<Option<(String, Instant)>> = Mutex::new(None);
 
-fn token<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> {
+pub(crate) fn token<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> {
     let mut t = TOKEN.lock().map_err(|e| e.to_string())?;
     if let Some((tok, made)) = t.as_ref()
         && made.elapsed() < Duration::from_secs(50 * 60)

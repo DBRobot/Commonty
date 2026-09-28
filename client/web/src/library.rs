@@ -185,6 +185,20 @@ fn key_for_box(library_key_b64: &str, id: &str, box_public_b64: &str) -> R<Strin
     library::seal_to_x25519(box_public_b64, &c.data_key()[..]).map_err(err)
 }
 
+/// A passkey's secret sealed to an app's one-time key: how the Photos
+/// password reaches the app (box/photos), which cannot use a passkey itself.
+/// The secret comes base64url, as the page has it; only that key opens it.
+fn secret_for_app(app_public_b64: &str, secret_b64u: &str) -> R<String> {
+    use base64::Engine as _;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(secret_b64u.trim_end_matches('='))
+        .map_err(err)?;
+    if raw.len() != 32 {
+        return Err("not a passkey's secret".into());
+    }
+    library::seal_to_x25519(app_public_b64, &raw).map_err(err)
+}
+
 /// how many plain bytes a file of this sealed size holds
 fn plain_of(sealed: f64) -> R<f64> {
     library::crypt::plain_size(sealed as u64)
@@ -235,6 +249,11 @@ pub fn library_key_for_box(
     box_public_b64: &str,
 ) -> Result<String, JsValue> {
     js(key_for_box(library_key_b64, id, box_public_b64))
+}
+
+#[wasm_bindgen]
+pub fn seal_for_app(app_public_b64: &str, secret_b64u: &str) -> Result<String, JsValue> {
+    js(secret_for_app(app_public_b64, secret_b64u))
 }
 
 #[wasm_bindgen]

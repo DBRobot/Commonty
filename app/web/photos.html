@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Photos</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+    </div>
+  </header>
+  <main class="auth">
+    <div class="card">
+      <h1>Photos</h1>
+      <p class="lead" id="msg">Opening your photos…</p>
+      <div id="first" hidden>
+        <p class="lead">The first time on this device, your passkey confirms it is you. Your browser opens for that, once; after it, Photos opens here straight away.</p>
+        <button id="go" type="button">Confirm in my browser</button>
+      </div>
+      <p class="note" id="wait" hidden>Waiting for your browser. Confirm with your passkey there, then come back.</p>
+    </div>
+  </main>
+  <!-- the window signs in as this device, and goes on to Photos -->
+  <form id="signin" method="post" hidden><input type="hidden" name="token" id="token"></form>
+  <script src="photos.js"></script>
+</body>
+</html>

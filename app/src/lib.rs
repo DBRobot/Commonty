@@ -9,6 +9,7 @@ mod browser;
 mod media;
 mod net;
 mod paths;
+mod photos;
 mod site;
 mod vpn;
 
