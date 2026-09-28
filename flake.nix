@@ -176,15 +176,10 @@
               let
                 rel = pkgs.lib.removePrefix (toString ./. + "/") (toString path);
               in
-              (
-                type == "directory"
-                && (
-                  rel == "box"
-                  || builtins.match "box/[^/]+" rel != null
-                  || builtins.match "box/[^/]+/web(/.*)?" rel != null
-                )
-              )
-              || builtins.match "box/[^/]+/web/.*" rel != null;
+              # box/web (the shared pages) and box/<service>/web, whole
+              rel == "box"
+              || (type == "directory" && builtins.match "box/[^/]+" rel != null)
+              || builtins.match "box/([^/]+/)?web(/.*)?" rel != null;
           };
           # What a dependency build sees: the lockfile and the manifests, with
           # crane's stand-in for every target, and nothing else. Each
