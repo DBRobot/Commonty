@@ -36,4 +36,7 @@ biscuit-auth = "6"
 webauthn-rs = "0.6.1-dev"
 hmac = "0.12"
 sha2 = "0.10"
+# signs the per-box id token Passwords' sign-in asks for (oidc.rs)
+jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
+p256 = "0.13"
 url = "2"

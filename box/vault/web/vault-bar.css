@@ -1,0 +1,5 @@
+/* Vaultwarden's pages under the bar: its layout fills the window, so it
+   gives the bar's height back. */
+html.dd-vault body { padding-top: 0; }
+html.dd-vault header.dd-bar { position: sticky; top: 0; z-index: 1100; }
+html.dd-vault app-root { display: block; min-height: calc(100vh - 64px); }

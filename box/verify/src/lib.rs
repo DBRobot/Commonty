@@ -15,6 +15,7 @@ pub mod fleet;
 mod friends;
 pub mod library;
 pub mod network;
+mod oidc;
 pub mod pages;
 mod photos;
 mod session;
@@ -26,8 +27,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use axum::{
-    Json, Router,
-    extract::State,
+    Form, Json, Router,
+    extract::{Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header::AUTHORIZATION},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -48,6 +49,7 @@ struct App {
     /// it and sign it into the entry. Keyed by the enrol token, so only the
     /// terminal that printed the link can pick it up. Never stored.
     pending: Mutex<HashMap<String, (Instant, identity::Passkey)>>,
+    oidc: Option<oidc::Issuer>,
     home: Vec<pages::Service>,
     members: Option<Members>,
     /// the passkeys' relying party: what a join asks the browser to sign for
@@ -112,6 +114,8 @@ pub struct Config {
     /// None: the directory alone. Some(domain): the full verifier, with the
     /// browser login scoped to that domain.
     pub domain: Option<String>,
+    /// the issuer Passwords signs people in through (oidc.rs)
+    pub oidc: Option<OidcConfig>,
     /// the tiles on the home page: what this box offers a signed-in person
     pub home: Vec<pages::Service>,
     /// Who may use the services: member ids (identity::member_id of each
@@ -221,6 +225,13 @@ impl Members {
             File::Full { members, revoked } => Self { members, revoked },
         })
     }
+}
+
+pub struct OidcConfig {
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: String,
+    pub redirect: String,
 }
 
 /// Usernames are also filenames here, so the whitelist is strict.
@@ -1454,6 +1465,132 @@ pub(crate) fn fleet_host(domain: &str, host: &str) -> bool {
         && (host == domain || host.ends_with(&format!(".{domain}")))
 }
 
+#[derive(Deserialize)]
+struct Authorize {
+    client_id: String,
+    redirect_uri: String,
+    state: Option<String>,
+    nonce: Option<String>,
+    response_type: Option<String>,
+    code_challenge: Option<String>,
+    code_challenge_method: Option<String>,
+}
+
+/// Passwords sends a person here to sign in: a member with a session gets
+/// a code for the one client this issuer knows; anyone else signs in with
+/// a passkey first, and anyone not a member gets nothing.
+async fn oidc_authorize(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Query(q): Query<Authorize>,
+) -> Response {
+    let Some(issuer) = app.oidc.as_ref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if q.client_id != issuer.client_id
+        || q.redirect_uri != issuer.redirect_uri
+        || q.response_type.as_deref() != Some("code")
+        || q.code_challenge.is_some() && q.code_challenge_method.as_deref() != Some("S256")
+    {
+        return (StatusCode::BAD_REQUEST, "unknown client or redirect").into_response();
+    }
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    let Some(user) = app.sessions.user(cookie) else {
+        // no session here yet: passkey first, then back to this exact url
+        let here = headers
+            .get("x-original-uri")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("/")
+            .to_string();
+        return Redirect::to(&format!("/_dd/login?rd={}", urlencode(&here))).into_response();
+    };
+    // members only: not the demo, not a guest
+    if !app.member(&user) || user == pages::DEMO_USER {
+        return Redirect::to("/_dd/home").into_response();
+    }
+    let code = issuer.code(&user, q.nonce, q.code_challenge);
+    let mut to = format!("{}?code={}", q.redirect_uri, urlencode(&code));
+    if let Some(st) = q.state {
+        to.push_str(&format!("&state={}", urlencode(&st)));
+    }
+    Redirect::to(&to).into_response()
+}
+
+#[derive(Deserialize)]
+struct TokenReq {
+    grant_type: String,
+    code: String,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+    code_verifier: Option<String>,
+}
+
+async fn oidc_token(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Form(f): Form<TokenReq>,
+) -> Response {
+    let Some(issuer) = app.oidc.as_ref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    // client_secret_basic or _post, whichever the client picks
+    let (id, secret) = match headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Basic "))
+        .and_then(|b| B64.decode(b).ok())
+        .and_then(|b| String::from_utf8(b).ok())
+        .and_then(|s| {
+            s.split_once(':')
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+        }) {
+        Some(p) => p,
+        None => (
+            f.client_id.unwrap_or_default(),
+            f.client_secret.unwrap_or_default(),
+        ),
+    };
+    if f.grant_type != "authorization_code" || !issuer.client_ok(&id, &secret) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "invalid_client"})),
+        )
+            .into_response();
+    }
+    match issuer.redeem(&f.code, f.code_verifier.as_deref()) {
+        Some(v) => Json(v).into_response(),
+        None => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "invalid_grant"})),
+        )
+            .into_response(),
+    }
+}
+
+async fn oidc_userinfo(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let Some(issuer) = app.oidc.as_ref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match bearer(&headers).and_then(|t| issuer.userinfo(t)) {
+        Some(v) => Json(v).into_response(),
+        None => StatusCode::UNAUTHORIZED.into_response(),
+    }
+}
+
+async fn oidc_discovery(State(app): State<Arc<App>>) -> Response {
+    match app.oidc.as_ref() {
+        Some(i) => Json(i.discovery()).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn oidc_jwks(State(app): State<Arc<App>>) -> Response {
+    match app.oidc.as_ref() {
+        Some(i) => Json(i.jwks()).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 fn urlencode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
@@ -1508,12 +1645,24 @@ pub async fn start(
         .rp_name("Commonty")
         .allow_subdomains(true)
         .build()?;
+    let oidc = match cfg.oidc {
+        Some(o) => Some(oidc::Issuer::open(
+            &state_dir,
+            o.issuer,
+            o.client_id,
+            o.client_secret,
+            o.redirect,
+            domain.clone(),
+        )?),
+        None => None,
+    };
     let app = Arc::new(App {
         directory: directory.clone(),
         sessions: session::Sessions::open(&state_dir, &domain)?,
         webauthn,
         ceremonies: Mutex::new(HashMap::new()),
         pending: Mutex::new(HashMap::new()),
+        oidc,
         home: cfg.home,
         members: cfg.members,
         domain: domain.clone(),
@@ -1666,6 +1815,16 @@ pub async fn start(
         .route("/_dd/chat", get(chat_page))
         .route("/_dd/git", get(git_page))
         .route("/_dd/metrics", get(metrics_page))
+        // anyone's: a Send decrypts in the browser with the key in its link
+        .route(
+            "/_dd/send",
+            get(|| async {
+                (
+                    [("cache-control", "no-cache")],
+                    Html(pages::page("send").unwrap_or_default()),
+                )
+            }),
+        )
         .route("/_dd/chat/search", get(chat_search))
         .route("/_dd/friends", get(friends::page))
         .route("/_dd/friends/list", get(friends::list))
@@ -1695,6 +1854,15 @@ pub async fn start(
         .route("/_dd/enrol/start", post(enrol_start))
         .route("/_dd/enrol/finish", post(enrol_finish))
         .route("/_dd/enrol/result", get(enrol_result))
+        // the per-box issuer Passwords signs people in through
+        .route(
+            "/_dd/oidc/.well-known/openid-configuration",
+            get(oidc_discovery),
+        )
+        .route("/_dd/oidc/authorize", get(oidc_authorize))
+        .route("/_dd/oidc/token", post(oidc_token))
+        .route("/_dd/oidc/userinfo", get(oidc_userinfo))
+        .route("/_dd/oidc/jwks", get(oidc_jwks))
         .with_state(app)
         .merge(directory::router(directory));
     eprintln!("verify listening on {addr}");

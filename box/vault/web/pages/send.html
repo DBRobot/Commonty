@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>A Send - Commonty</title>
+  <link rel="stylesheet" href="/_dd/static/bar.css">
+  <link rel="stylesheet" href="/_dd/static/send.css">
+  <script type="module" src="/_dd/static/send.js"></script>
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <span class="brand" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </span>
+    </div>
+  </header>
+  <main class="send">
+    <section class="card">
+      <p class="eyebrow">Someone sent you this</p>
+      <h1 id="name">Opening…</h1>
+      <p class="why" id="why">It is decrypted here, in your browser. The server that holds it cannot read it.</p>
+
+      <form id="pw" hidden>
+        <label for="password">This Send has a password</label>
+        <div class="row">
+          <input id="password" type="password" autocomplete="off" required>
+          <button type="submit">Open</button>
+        </div>
+      </form>
+
+      <div id="text" hidden>
+        <pre id="body"></pre>
+        <div class="row">
+          <button type="button" id="reveal" hidden>Show</button>
+          <button type="button" id="copy">Copy</button>
+        </div>
+      </div>
+
+      <div id="file" hidden>
+        <p class="file"><b id="filename"></b> <span id="filesize"></span></p>
+        <button type="button" id="download">Download</button>
+      </div>
+
+      <p class="note" id="note"></p>
+    </section>
+    <p class="foot">Sent with Passwords on Commonty. Sends expire, and some open only a set number of times.</p>
+  </main>
+</body>
+</html>

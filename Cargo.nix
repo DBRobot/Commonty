@@ -12966,6 +12966,112 @@ rec {
         };
         resolvedDefaultFeatures = [ "assign" "default" "delete" "json" "resolve" "serde" "std" ];
       };
+      "jsonwebtoken" = rec {
+        crateName = "jsonwebtoken";
+        version = "11.1.0";
+        edition = "2024";
+        sha256 = "1q85gr3cgqfvijqnmb5771ch95lbgnrpv69ryrd5y7nqh95f2pz7";
+        authors = [
+          "Vincent Prouillet <hello@vincentprouillet.com>"
+        ];
+        dependencies = [
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+            optional = true;
+            features = [ "pkcs8" ];
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.17";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "hmac";
+            packageId = "hmac 0.12.1";
+            optional = true;
+            features = [ "reset" ];
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "p256";
+            packageId = "p256";
+            optional = true;
+            features = [ "ecdsa" ];
+          }
+          {
+            name = "p384";
+            packageId = "p384";
+            optional = true;
+            features = [ "ecdsa" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.8";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "rsa";
+            packageId = "rsa";
+            optional = true;
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "sha2";
+            packageId = "sha2 0.10.9";
+            optional = true;
+            features = [ "oid" ];
+          }
+          {
+            name = "signature";
+            packageId = "signature";
+            features = [ "std" ];
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
+            features = [ "derive" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+            features = [ "pkcs8" "rand_core" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.8";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+        features = {
+          "aws_lc_rs" = [ "dep:aws-lc-rs" ];
+          "default" = [ "use_pem" ];
+          "rust_crypto" = [ "dep:ed25519-dalek" "dep:hmac" "dep:p256" "dep:p384" "dep:rand" "dep:rsa" "dep:sha2" ];
+          "use_pem" = [ "dep:pem" "dep:simple_asn1" ];
+        };
+        resolvedDefaultFeatures = [ "rust_crypto" ];
+      };
       "kbkdf" = rec {
         crateName = "kbkdf";
         version = "0.1.0-rc.1";
@@ -27351,8 +27457,18 @@ rec {
             packageId = "identity";
           }
           {
+            name = "jsonwebtoken";
+            packageId = "jsonwebtoken";
+            usesDefaultFeatures = false;
+            features = [ "rust_crypto" ];
+          }
+          {
             name = "library-gate";
             packageId = "library-gate";
+          }
+          {
+            name = "p256";
+            packageId = "p256";
           }
           {
             name = "release";

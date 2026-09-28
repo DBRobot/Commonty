@@ -1,0 +1,96 @@
+/* Commonty's look on Vaultwarden's own pages, through the hook it keeps for
+   this (TEMPLATES_FOLDER, modules/vault/vaultwarden.nix): the web vault is
+   themed by Tailwind colour variables, space-separated rgb, and these set
+   them to the Commonty palette (box/web/home.css). Only colours and type
+   change; every page and control is still Bitwarden's. */
+
+@font-face {
+  font-family: "Public Sans";
+  src: url("/_dd/static/public-sans.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root,
+.theme_light,
+.theme_dark {
+  /* the two palettes every colour in the web vault is drawn from: its
+     brand blue becomes Commonty green, its blue-grey our greys. Light and
+     dark pick different steps of the same scales, so both follow. */
+  --color-brand-050: #eef6f1;
+  --color-brand-100: #ddede4;
+  --color-brand-200: #bcdccb;
+  --color-brand-300: #8fc4a8;
+  --color-brand-400: #7ccba2;
+  --color-brand-500: #3a9469;
+  --color-brand-600: #2f7d59;
+  --color-brand-700: #1d5c42;
+  --color-brand-800: #123d2b;
+  --color-brand-900: #0e3022;
+  --color-brand-950: #0a2218;
+  --color-brand-950-rgb: 10, 34, 24;
+
+  --color-gray-050: #eef1f5;
+  --color-gray-100: #e3e6e1;
+  --color-gray-200: #d5d9d3;
+  --color-gray-300: #b7bdb8;
+  --color-gray-400: #858c87;
+  --color-gray-400-rgb: 133, 140, 135;
+  --color-gray-500: #6b746f;
+  --color-gray-600: #525a55;
+  --color-gray-700: #2a313b;
+  --color-gray-800: #171c22;
+  --color-gray-900: #0f1318;
+  --color-gray-950: #0a0d10;
+  --color-gray-950-rgb: 10, 13, 16;
+
+  --font-sans: "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+/* the older names some screens still use, space-separated rgb */
+:root,
+.theme_light {
+  --color-primary-100: 221 237 228;
+  --color-primary-300: 143 196 168;
+  --color-primary-600: 29 92 66;
+  --color-primary-700: 18 61 43;
+  --color-background: 255 255 255;
+  --color-background-alt: 238 241 245;
+  --color-text-main: 26 31 28;
+  --color-text-muted: 82 90 85;
+}
+.theme_dark {
+  --color-primary-100: 14 48 34;
+  --color-primary-300: 47 125 89;
+  --color-primary-600: 124 203 162;
+  --color-primary-700: 168 224 194;
+  --color-background: 23 28 34;
+  --color-background-alt: 15 19 24;
+  --color-background-alt2: 23 28 34;
+  --color-background-alt3: 15 19 24;
+  --color-background-alt4: 10 13 16;
+  --color-text-main: 229 233 238;
+  --color-text-muted: 161 169 179;
+}
+
+html,
+body,
+.tw-font-sans {
+  font-family: "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif !important;
+}
+
+/* squarer, like every other Commonty page */
+.tw-rounded-lg,
+.tw-rounded-xl,
+.tw-rounded-full[bitbutton],
+button[bitbutton],
+a[bitbutton] {
+  border-radius: 4px !important;
+}
+
+/* the logo on the sign-in and sign-up pages is Bitwarden's product mark:
+   Commonty's bar is above it already */
+bit-landing-layout bit-landing-header svg,
+auth-anon-layout .logo {
+  display: none !important;
+}
