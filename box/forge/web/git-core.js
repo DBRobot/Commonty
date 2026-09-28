@@ -84,7 +84,25 @@ export class ApiError extends Error {
 
 // One call, as the person looking. The answer and, for lists, how many
 // there are in all (the forge says so in a header).
-export async function api(path, opts = {}) {
+// Reads are kept for a minute, so going back to a page asks nothing again,
+// and two views asking the same thing share one request. Any change made
+// from these pages forgets them all; a view that must see now passes fresh.
+const kept = new Map();
+const KEEP_MS = 60000;
+export function api(path, opts = {}) {
+  const read = (opts.method || 'GET') === 'GET' && opts.body === undefined;
+  if (!read) kept.clear();
+  if (!read || opts.fresh) return request(path, opts);
+  const key = `${opts.withTotal ? 't' : ''}${path}`;
+  const hit = kept.get(key);
+  if (hit && performance.now() - hit.at < KEEP_MS) return hit.p;
+  const p = request(path, opts);
+  kept.set(key, { at: performance.now(), p });
+  p.catch(() => kept.delete(key));
+  return p;
+}
+
+async function request(path, opts = {}) {
   const init = { method: opts.method || 'GET', headers: { accept: 'application/json' }, credentials: 'same-origin' };
   if (opts.body !== undefined) {
     init.headers['content-type'] = 'application/json';
@@ -245,6 +263,10 @@ export function setTitle(...parts) {
   document.title = [...parts.filter(Boolean), 'Git'].join(' · ');
 }
 
+// what a tab needs, by the tab's name, asked for when the pointer reaches
+// it (git-repo.js header) so the click finds it already here
+export const warmers = {};
+
 // ---- where we are
 
 const routes = [];
@@ -264,6 +286,16 @@ export function go(href, replace = false) {
   render();
 }
 
+// What each address last looked like: going back to it shows that at once,
+// and the view then draws it again from what the forge says now.
+const seen = new Map();
+const here = () => location.pathname + location.search;
+function keep() {
+  seen.delete(here());
+  seen.set(here(), { main: [...app().childNodes], head: [...$('rhead').childNodes], title: document.title, y: scrollY });
+  if (seen.size > 40) seen.delete(seen.keys().next().value);
+}
+
 let drawing = 0;
 export async function render() {
   const mine = ++drawing;
@@ -273,13 +305,27 @@ export async function render() {
     const m = path.match(pattern);
     if (!m) continue;
     const main = app();
+    const t0 = performance.now();
+    const before = seen.get(here());
+    if (before) {
+      main.replaceChildren(...before.main);
+      $('rhead').replaceChildren(...before.head);
+      document.title = before.title;
+      dispatchEvent(new CustomEvent('git:shown', { detail: { path, ms: Math.round(performance.now() - t0) } }));
+    }
+    document.body.classList.add('loading');
     try {
       await view({ m, params, path, current: () => mine === drawing });
+      if (mine === drawing) {
+        keep();
+        dispatchEvent(new CustomEvent('git:drawn', { detail: { path, ms: Math.round(performance.now() - t0) } }));
+      }
     } catch (e) {
       if (mine !== drawing) return;
       console.error(e);
       main.replaceChildren(fail(e));
     }
+    if (mine === drawing) document.body.classList.remove('loading');
     if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
     return;
   }
@@ -287,8 +333,33 @@ export async function render() {
   app().replaceChildren(fail({ status: 404 }));
 }
 
-// links inside the page move between views without a reload
+// links inside the page move between views without a reload, starting as
+// the button goes down rather than when it comes up
+let pressed = null;
+document.addEventListener('pointerdown', (e) => {
+  pressed = null;
+  if (e.pointerType !== 'mouse' || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest('a[href]');
+  // a link with its own click handler decides for itself, on click
+  if (!a || a.onclick || a.target === '_blank' || a.hasAttribute('download') || a.closest('[contenteditable], .md')) return;
+  const u = new URL(a.href, location.href);
+  if (u.origin !== location.origin || u.pathname.startsWith('/_dd/') || FORGE.test(u.pathname)) return;
+  if (u.pathname === location.pathname && u.search === location.search) return;
+  pressed = a;
+  follow(a, u);
+});
+function follow(a, u) {
+  const bar = a.closest('.rtabs, .settings nav, .gseg');
+  if (bar) {
+    bar.querySelectorAll('[aria-current], [aria-pressed="true"]').forEach((x) => { x.removeAttribute('aria-current'); if (x.hasAttribute('aria-pressed')) x.setAttribute('aria-pressed', 'false'); });
+    a.setAttribute(a.hasAttribute('aria-pressed') ? 'aria-pressed' : 'aria-current', a.hasAttribute('aria-pressed') ? 'true' : 'page');
+  }
+  go(u.href);
+  window.scrollTo(0, 0);
+}
 document.addEventListener('click', (e) => {
+  // already followed when the button went down
+  if (pressed && e.target.closest('a[href]') === pressed) { e.preventDefault(); pressed = null; return; }
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = e.target.closest('a[href]');
   if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
@@ -296,8 +367,7 @@ document.addEventListener('click', (e) => {
   if (u.origin !== location.origin || u.pathname.startsWith('/_dd/') || FORGE.test(u.pathname)) return;
   if (u.pathname === location.pathname && u.search === location.search && u.hash) return;
   e.preventDefault();
-  go(u.href);
-  window.scrollTo(0, 0);
+  follow(a, u);
 });
 addEventListener('popstate', render);
 
@@ -310,7 +380,7 @@ $('git-search')?.addEventListener('submit', (e) => {
 // the bell: unread notifications, looked at now and every two minutes
 async function bell() {
   try {
-    const { new: n } = await api('/notifications/new');
+    const { new: n } = await api('/notifications/new', { fresh: true });
     $('git-bell').hidden = false;
     $('git-bell-n').hidden = !n;
     $('git-bell-n').textContent = n > 99 ? '99+' : String(n);

@@ -3,8 +3,7 @@
 
 import {
   put, $, app, el, ic, api, text, q, enc, ago, when, plural, bytes, avatar, route, go, statusDot,
-  markdown, toast, copy, setTitle, firstLine, short, pop, pager, whoami,
-} from './git-core.js';
+  markdown, toast, copy, setTitle, firstLine, short, pop, pager, whoami, warmers } from './git-core.js';
 import { heatmap, lineChart, languages, dayKey } from './git-charts.js';
 import * as diff from './git-diff.js';
 import { feedLine } from './git-home.js';
@@ -45,9 +44,15 @@ async function split(r, rest) {
 
 // ---- the header: name, then the sections as tabs
 
+// the tabs with the most to fetch start fetching when the pointer arrives
+const warm = (a, fetchIt) => { a.addEventListener('pointerenter', () => { fetchIt().catch(() => {}); }, { once: true }); return a; };
+
 export function header(r, tab) {
   const [owner, name] = r.full_name.split('/');
-  const t = (key, href, icon, label, n) => el('a', { href, 'aria-current': tab === key ? 'page' : null }, ic(icon), label, n ? el('span', { class: 'n', text: String(n) }) : null);
+  const t = (key, href, icon, label, n) => {
+    const a = el('a', { href, 'aria-current': tab === key ? 'page' : null }, ic(icon), label, n ? el('span', { class: 'n', text: String(n) }) : null);
+    return warmers[key] ? warm(a, () => warmers[key](r)) : a;
+  };
   $('rhead').replaceChildren(el('div', { class: 'rhead' }, el('div', { class: 'in' },
     el('div', { class: 'crumb' }, ic(r.private ? 'lock' : 'repo'), el('a', { href: `/${owner}`, text: owner }), el('span', { class: 'muted', text: '/' }), el('b', {}, el('a', { href: `/${r.full_name}`, text: name })),
       el('span', { class: 'pill', text: r.archived ? 'Archived' : r.private ? 'Private' : 'Public' }),
@@ -93,10 +98,14 @@ function cloneBox(r) {
 
 // the repository the boxes are built from: only its pages show what they run
 let fleetRepo = null;
+let fleetBoxes = null;
+let fleetAt = 0;
+export const fleetRepoName = () => (fleetRepo ??= fetch('/fleet-repo.json').then((x) => (x.ok ? x.json() : {})).then((x) => x.repo || '').catch(() => ''));
 const fleet = async (r) => {
-  fleetRepo ??= fetch('/fleet-repo.json').then((x) => (x.ok ? x.json() : {})).then((x) => x.repo || '').catch(() => '');
-  if ((await fleetRepo) !== r.full_name) return [];
-  const boxes = await fetch('/_dd/fleet.json').then((x) => (x.ok ? x.json() : [])).catch(() => []);
+  if ((await fleetRepoName()) !== r.full_name) return [];
+  if (!fleetBoxes || performance.now() - fleetAt > 60000) { fleetAt = performance.now(); fleetBoxes = null; }
+  fleetBoxes ??= fetch('/_dd/fleet.json').then((x) => (x.ok ? x.json() : [])).catch(() => []);
+  const boxes = await fleetBoxes;
   // nothing known of any box: say nothing rather than a row of question marks
   return boxes.some((b) => b.release !== null && b.release !== undefined) ? boxes : [];
 };
@@ -158,7 +167,17 @@ route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
     }).catch(() => {});
   }
 
-  const { branches, tags } = await refs(r);
+  // the branch and tag counts come when they come; the files do not wait
+  const nBranches = el('b', { text: '…' });
+  const nTags = el('b', { text: '…' });
+  const nBranchWord = el('span', { text: ' branches' });
+  const nTagWord = el('span', { text: ' tags' });
+  refs(r).then(({ branches, tags }) => {
+    nBranches.textContent = String(branches.length);
+    nBranchWord.textContent = ` branch${branches.length === 1 ? '' : 'es'}`;
+    nTags.textContent = String(tags.length);
+    nTagWord.textContent = ` tag${tags.length === 1 ? '' : 's'}`;
+  }).catch(() => {});
   const side = el('aside', { class: 'side' },
     el('section', {}, el('h3', { text: 'About' }), el('p', { text: r.description || 'No description.' }), r.website ? el('p', {}, el('a', { href: r.website, text: r.website })) : null,
       el('p', { class: 'small muted' }, ic(r.private ? 'lock' : 'repo', 'i s'), r.private ? ' Only the people it is shared with can see it' : ' Anyone can see it')),
@@ -176,7 +195,7 @@ route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
   put(main(), el('div', { class: 'two' },
     el('div', {},
       el('div', { class: 'hrow gap' }, refPicker(r, ref, (n) => `/${r.full_name}/tree/${n}${path ? `/${path}` : ''}`),
-        crumbs || el('span', { class: 'small' }, el('a', { href: `/${r.full_name}/branches` }, el('b', { text: String(branches.length) }), ` branch${branches.length === 1 ? '' : 'es'}`), ' · ', el('a', { href: `/${r.full_name}/releases` }, el('b', { text: String(tags.length) }), ` tag${tags.length === 1 ? '' : 's'}`)),
+        crumbs || el('span', { class: 'small' }, el('a', { href: `/${r.full_name}/branches` }, nBranches, nBranchWord), ' · ', el('a', { href: `/${r.full_name}/releases` }, nTags, nTagWord)),
         el('span', { class: 'spacer' }),
         r.permissions?.push ? el('a', { class: 'btn plain', href: `/${r.full_name}/compare` }, ic('pr'), 'Compare') : null),
       el('div', { class: 'box' }, last, el('div', { class: 'list files' }, ...(path ? [el('a', { href: path.includes('/') ? `/${r.full_name}/tree/${ref}/${path.split('/').slice(0, -1).join('/')}` : `/${r.full_name}/tree/${ref}` }, el('span', { class: 'name' }, ic('dir', 'i dir'), '..'))] : []), ...rows)),
@@ -399,14 +418,15 @@ route(/^\/([^/]+)\/([^/]+)\/releases(?:\/tag\/(.+))?$/, async ({ m, current }) =
   if (!current()) return;
   header(r, 'releases');
   setTitle('Releases', r.full_name);
-  const [rels, tags, boxes] = await Promise.all([
-    api(`/repos/${r.full_name}/releases${q({ limit: 50 })}`).catch(() => []),
-    api(`/repos/${r.full_name}/tags${q({ limit: 50 })}`).catch(() => []),
-    fleet(r),
-  ]);
+  const [rels, tags] = await releaseData(r);
   if (!current()) return;
-  const running = boxes.length ? el('div', { class: 'box gap' }, el('header', {}, el('b', { text: 'Running now' }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: 'a release is signed on your laptop and pulled by each box' })),
-    el('div', { class: 'hrow', style: 'padding:12px 14px' }, ...boxes.map((b) => el('span', { class: 'pill', style: 'font-size:13px;padding:4px 12px' }, el('span', { class: `dot ${b.up ? 'ok' : 'bad'}` }), ` ${b.name}: release ${b.release ?? '?'}${b.result && b.result !== 'ok' ? ` (${b.result})` : ''}`)))) : null;
+  // what the boxes run is asked of every box: it comes when it comes
+  const running = el('div');
+  fleet(r).then((boxes) => {
+    if (!boxes.length || !running.isConnected) return;
+    running.replaceWith(el('div', { class: 'box gap' }, el('header', {}, el('b', { text: 'Running now' }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: 'a release is signed on your laptop and pulled by each box' })),
+      el('div', { class: 'hrow', style: 'padding:12px 14px' }, ...boxes.map((b) => el('span', { class: 'pill', style: 'font-size:13px;padding:4px 12px' }, el('span', { class: `dot ${b.up ? 'ok' : 'bad'}` }), ` ${b.name}: release ${b.release ?? '?'}${b.result && b.result !== 'ok' ? ` (${b.result})` : ''}`)))));
+  }).catch(() => {});
   if (m[3]) {
     const one = rels.find((x) => x.tag_name === m[3]) || await api(`/repos/${r.full_name}/releases/tags/${encodeURIComponent(m[3])}`);
     if (!current()) return;
@@ -429,60 +449,125 @@ route(/^\/([^/]+)\/([^/]+)\/releases(?:\/tag\/(.+))?$/, async ({ m, current }) =
 
 // ---- activity: the week's lines, the year's squares, what happened
 
+warmers.releases = (r) => releaseData(r);
+warmers.activity = (r) => yearOf(r);
+const releaseData = (r) => Promise.all([
+  api(`/repos/${r.full_name}/releases${q({ limit: 50 })}`).catch(() => []),
+  api(`/repos/${r.full_name}/tags${q({ limit: 50 })}`).catch(() => []),
+]);
+
+// A year of commits on the default branch, by day: fetched eight pages at
+// a time, and kept in this browser until the branch moves.
+const years = new Map();
+function yearOf(r) {
+  if (years.has(r.full_name)) return years.get(r.full_name);
+  const p = (async () => {
+    const since = Date.now() - 365 * 86400e3;
+    const url = (page) => `/repos/${r.full_name}/commits${q({ sha: r.default_branch, page, limit: 50, stat: false, verification: false, files: false })}`;
+    const first = await api(url(1), { withTotal: true });
+    const key = `git-year:${r.full_name}`;
+    const head = first.data[0]?.sha;
+    try {
+      const c = JSON.parse(localStorage.getItem(key) || 'null');
+      if (c && c.head === head) return c.byDay;
+    } catch { /* counted again */ }
+    const byDay = {};
+    const add = (cs) => {
+      let older = false;
+      for (const c of cs) {
+        const t = new Date(c.commit.committer.date).getTime();
+        if (t >= since) byDay[dayKey(t)] = (byDay[dayKey(t)] || 0) + 1;
+        else older = true;
+      }
+      return older;
+    };
+    // the forge sends no total for commits: pages until one reaches back a year
+    let done = add(first.data) || first.data.length < 50;
+    for (let n = 2; n <= 40 && !done; n += 8) {
+      const batch = await Promise.all([...Array(Math.min(8, 41 - n))].map((_, i) => api(url(n + i)).catch(() => [])));
+      for (const cs of batch) if (add(cs) || cs.length < 50) done = true;
+    }
+    try { localStorage.setItem(key, JSON.stringify({ head, byDay })); } catch { /* kept for this visit only */ }
+    return byDay;
+  })();
+  years.set(r.full_name, p);
+  p.catch(() => years.delete(r.full_name));
+  return p;
+}
+
 route(/^\/([^/]+)\/([^/]+)\/activity$/, async ({ m, params, current }) => {
   const r = await repo(m[1], m[2]);
   if (!current()) return;
   header(r, 'activity');
   setTitle('Activity', r.full_name);
   const span = params.get('span') === 'month' ? 30 : 7;
-  const since = Date.now() - 365 * 86400e3;
-  const byDay = {};
-  // commits on the default branch, back a year, fifty at a time
-  for (let page = 1; page <= 40; page++) {
-    const cs = await api(`/repos/${r.full_name}/commits${q({ sha: r.default_branch, page, limit: 50, stat: false, verification: false, files: false })}`).catch(() => []);
-    for (const c of cs) {
-      const t = new Date(c.commit.committer.date).getTime();
-      if (t >= since) byDay[dayKey(t)] = (byDay[dayKey(t)] || 0) + 1;
-    }
-    if (cs.length < 50 || new Date(cs[cs.length - 1].commit.committer.date).getTime() < since) break;
-  }
-  if (!current()) return;
-  const [feed, pulls, runs, tags] = await Promise.all([
-    api(`/repos/${r.full_name}/activities/feeds${q({ limit: 40 })}`).catch(() => []),
-    Promise.all([1, 2, 3, 4].map((page) => api(`/repos/${r.full_name}/pulls${q({ state: 'closed', sort: 'recentupdate', page, limit: 50 })}`).catch(() => []))).then((x) => x.flat()),
-    r.has_actions ? api(`/repos/${r.full_name}/actions/runs${q({ limit: 50 })}`).then((x) => x.workflow_runs || []).catch(() => []) : [],
-    api(`/repos/${r.full_name}/tags${q({ limit: 50 })}`).catch(() => []),
-  ]);
   const start = new Date();
   start.setHours(0, 0, 0, 0);
   start.setDate(start.getDate() - (span - 1));
   const days = [...Array(span)].map((_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return d; });
   const inSpan = (t) => new Date(t) >= start;
-  const merged = pulls.filter((p) => p.merged && inSpan(p.merged_at));
-  const mergedBy = Object.fromEntries(days.map((d) => [dayKey(d), 0]));
-  for (const p of merged) mergedBy[dayKey(p.merged_at)] = (mergedBy[dayKey(p.merged_at)] || 0) + 1;
-  const done = runs.filter((x) => inSpan(x.created) && ['success', 'failure', 'cancelled'].includes(x.status));
-  const passed = done.length ? Math.round((done.filter((x) => x.status === 'success').length / done.length) * 100) : null;
-  const commits = days.reduce((t, d) => t + (byDay[dayKey(d)] || 0), 0);
   const label = (d) => (span === 7 ? d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }) : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }));
-  const yearTotal = Object.values(byDay).reduce((a, b) => a + b, 0);
-  if (!current()) return;
-  put(main(), 
+  const waiting = (t) => el('div', { class: 'empty muted', text: t });
+
+  // the page at once; each part fills in as its answer comes
+  const chart = el('div', {}, waiting('Counting commits…'));
+  const stat = (t) => { const b = el('b', { text: '…' }); return [b, el('div', {}, b, el('span', { class: 'small muted', text: t }))]; };
+  const [sCommits, sCommitsBox] = stat(`commits on ${r.default_branch}`);
+  const [sMerged, sMergedBox] = stat('pull requests merged');
+  const [sTags, sTagsBox] = stat('tags');
+  const [sRuns, sRunsBox] = stat('runs passed');
+  const yearHead = el('b', { text: 'The last year' });
+  const heat = el('div', {}, waiting('Counting commits…'));
+  const feedBox = el('div', { class: 'box list' }, waiting('Loading…'));
+  put(main(),
     el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Activity' }), el('span', { class: 'spacer' }),
       el('span', { class: 'gseg' }, el('a', { class: 'btn', href: `/${r.full_name}/activity`, 'aria-pressed': String(span === 7), text: 'This week' }), el('a', { class: 'btn', href: `/${r.full_name}/activity?span=month`, 'aria-pressed': String(span === 30), text: 'This month' }))),
-    el('div', { class: 'box gap' },
-      lineChart(days.map(label), [
-        { name: 'commits', color: 'var(--accent)', values: days.map((d) => byDay[dayKey(d)] || 0) },
-        { name: 'pull requests merged', color: 'var(--merged)', dashed: true, values: days.map((d) => mergedBy[dayKey(d)] || 0) },
-      ]),
-      el('div', { class: 'stats' },
-        el('div', {}, el('b', { text: commits.toLocaleString() }), el('span', { class: 'small muted', text: `commits on ${r.default_branch}` })),
-        el('div', {}, el('b', { text: String(merged.length) }), el('span', { class: 'small muted', text: 'pull requests merged' })),
-        el('div', {}, el('b', { text: String(tags.filter((t) => t.commit?.created && inSpan(t.commit.created)).length || '—') }), el('span', { class: 'small muted', text: 'tags' })),
-        el('div', {}, el('b', { text: passed === null ? '—' : `${passed}%` }), el('span', { class: 'small muted', text: `of ${done.length} runs passed` })))),
-    el('div', { class: 'box gap' }, el('header', {}, el('b', { text: `${plural(yearTotal, 'commit')} in the last year` }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: `every day with a commit on ${r.default_branch}` })), heatmap(byDay)),
+    el('div', { class: 'box gap' }, chart, el('div', { class: 'stats' }, sCommitsBox, sMergedBox, sTagsBox, sRunsBox)),
+    el('div', { class: 'box gap' }, el('header', {}, yearHead, el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: `every day with a commit on ${r.default_branch}` })), heat),
     el('div', { class: 'hrow', style: 'margin-bottom:10px' }, el('b', { text: 'Everything that happened' })),
-    el('div', { class: 'box list' }, ...(feed.length ? feed.map(feedLine) : [el('div', { class: 'empty', text: 'Nothing yet.' })])));
+    feedBox);
+  const live = () => current() && chart.isConnected;
+
+  // the issues list says when each pull request merged, and answers in a
+  // blink where the pull request list takes seconds
+  const pullsP = Promise.all([1, 2].map((page) => api(`/repos/${r.full_name}/issues${q({ type: 'pulls', state: 'closed', since: start.toISOString(), page, limit: 50 })}`).catch(() => []))).then((x) => x.flat());
+  const mergedByP = pullsP.then((pulls) => {
+    const merged = pulls.filter((p) => p.pull_request?.merged && inSpan(p.pull_request.merged_at)).map((p) => ({ merged_at: p.pull_request.merged_at }));
+    const by = Object.fromEntries(days.map((d) => [dayKey(d), 0]));
+    for (const p of merged) by[dayKey(p.merged_at)] = (by[dayKey(p.merged_at)] || 0) + 1;
+    if (live()) sMerged.textContent = String(merged.length);
+    return by;
+  });
+  let byDayNow = null;
+  let mergedNow = null;
+  const drawChart = () => {
+    if (!live() || !byDayNow) return;
+    chart.replaceChildren(lineChart(days.map(label), [
+      { name: 'commits', color: 'var(--accent)', values: days.map((d) => byDayNow[dayKey(d)] || 0) },
+      ...(mergedNow ? [{ name: 'pull requests merged', color: 'var(--merged)', dashed: true, values: days.map((d) => mergedNow[dayKey(d)] || 0) }] : []),
+    ]));
+  };
+  yearOf(r).then((byDay) => {
+    byDayNow = byDay;
+    if (!live()) return;
+    drawChart();
+    sCommits.textContent = days.reduce((t, d) => t + (byDay[dayKey(d)] || 0), 0).toLocaleString();
+    yearHead.textContent = `${plural(Object.values(byDay).reduce((a, b) => a + b, 0), 'commit')} in the last year`;
+    heat.replaceChildren(heatmap(byDay));
+  }).catch(() => { if (live()) { chart.replaceChildren(waiting('The commits could not be counted.')); heat.replaceChildren(); } });
+  mergedByP.then((by) => { mergedNow = by; drawChart(); });
+  api(`/repos/${r.full_name}/tags${q({ limit: 50 })}`).then((tags) => {
+    if (live()) sTags.textContent = String(tags.filter((t) => t.commit?.created && inSpan(t.commit.created)).length || '—');
+  }).catch(() => { sTags.textContent = '—'; });
+  (r.has_actions ? api(`/repos/${r.full_name}/actions/runs${q({ limit: 50 })}`).then((x) => x.workflow_runs || []) : Promise.resolve([])).then((runs) => {
+    if (!live()) return;
+    const done = runs.filter((x) => inSpan(x.created) && ['success', 'failure', 'cancelled'].includes(x.status));
+    sRuns.textContent = done.length ? `${Math.round((done.filter((x) => x.status === 'success').length / done.length) * 100)}%` : '—';
+    sRuns.nextSibling.textContent = `of ${done.length} runs passed`;
+  }).catch(() => { sRuns.textContent = '—'; });
+  api(`/repos/${r.full_name}/activities/feeds${q({ limit: 40 })}`).then((feed) => {
+    if (live()) feedBox.replaceChildren(...(feed.length ? feed.map(feedLine) : [waiting('Nothing yet.')]));
+  }).catch(() => feedBox.replaceChildren(waiting('Could not be loaded.')));
 });
 
 // the forge's own addresses, from before these pages, lead to the same place

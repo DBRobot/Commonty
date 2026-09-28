@@ -263,3 +263,21 @@ mark { background: var(--busy-bg); color: inherit; border-radius: 2px; }
 .linenote > header { font-size: 13px; }
 .linenote .body { padding: 10px 14px; }
 .gitpage input.write, .gitpage textarea.write { width: 100%; }
+
+/* something is being asked: a line along the top, only if it takes a moment */
+body.loading::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 50;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  opacity: 0;
+  animation: gload 1s linear 150ms infinite, gshow 0s linear 150ms forwards;
+}
+@keyframes gload { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@keyframes gshow { to { opacity: 1; } }

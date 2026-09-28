@@ -3,8 +3,7 @@
 
 import {
   put, app, el, ic, api, text, q, when, plural, avatar, route, go, statusDot, markdown, toast,
-  setTitle, firstLine, short, pop, pager, whoami, $,
-} from './git-core.js';
+  setTitle, firstLine, short, pop, pager, whoami, $, warmers } from './git-core.js';
 import { repo, header, refs } from './git-repo.js';
 import * as diff from './git-diff.js';
 
@@ -26,6 +25,14 @@ function labelChip(l) {
   return el('span', { class: 'chip', style: `background:${c}22;color:var(--ink);box-shadow:inset 0 0 0 1px ${c}88`, text: l.name, title: l.description || '' });
 }
 
+const listData = (r, pulls, state = 'open', page = 1, search = '') => Promise.all([
+  api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state, page, limit: 25, q: search })}`, { withTotal: true }),
+  api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state: 'open', limit: 1, q: search })}`, { withTotal: true }),
+  api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state: 'closed', limit: 1, q: search })}`, { withTotal: true }),
+]);
+warmers.pulls = (r) => listData(r, true);
+warmers.issues = (r) => listData(r, false);
+
 async function list({ m, params, current }, kind) {
   const r = await repo(m[1], m[2]);
   if (!current()) return;
@@ -35,11 +42,7 @@ async function list({ m, params, current }, kind) {
   const search = params.get('q') || '';
   const pulls = kind === 'pulls';
   setTitle(pulls ? 'Pull requests' : 'Issues', r.full_name);
-  const [{ data, total }, open, closed] = await Promise.all([
-    api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state, page, limit: 25, q: search })}`, { withTotal: true }),
-    api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state: 'open', limit: 1, q: search })}`, { withTotal: true }),
-    api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state: 'closed', limit: 1, q: search })}`, { withTotal: true }),
-  ]);
+  const [{ data, total }, open, closed] = await listData(r, pulls, state, page, search);
   if (!current()) return;
   const base = `/${r.full_name}/${pulls ? 'pulls' : 'issues'}`;
   const find = el('input', { class: 'btn plain', style: 'flex:1;min-width:200px', value: search, placeholder: `Find ${pulls ? 'a pull request' : 'an issue'}`, 'aria-label': 'Find' });

@@ -1,7 +1,7 @@
 // Actions: the runs, and one run as a graph of its jobs - read from the
 // workflow files' `needs:` - or as its jobs and their logs, both live.
 
-import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, setTitle, short, pager } from './git-core.js';
+import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, setTitle, short, pager, warmers } from './git-core.js';
 import { repo, header } from './git-repo.js';
 
 const main = () => app();
@@ -24,6 +24,9 @@ const ns = (d) => (d > 1e9 ? d / 1e6 : d); // the forge gives nanoseconds
 
 // ---- the runs
 
+const runsData = (r, page = 1) => api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 25 })}`);
+warmers.actions = (r) => runsData(r);
+
 route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
   const r = await repo(m[1], m[2]);
   if (!current()) return;
@@ -31,7 +34,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
   setTitle('Actions', r.full_name);
   const page = Number(params.get('page') || 1);
   const workflow = params.get('workflow') || '';
-  const { workflow_runs: runs = [], total_count: total = 0 } = await api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 25 })}`);
+  const { workflow_runs: runs = [], total_count: total = 0 } = await runsData(r, page);
   if (!current()) return;
   const flows = [...new Set(runs.map((x) => x.workflow_id))].sort();
   const shown = workflow ? runs.filter((x) => x.workflow_id === workflow) : runs;
@@ -72,10 +75,10 @@ async function runByIndex(r, index) {
 
 // the jobs of the run, from the statuses it posted on its commit: each
 // names its job and links to it by position
-async function jobsOf(r, run) {
+async function jobsOf(r, run, fresh = false) {
   const all = [];
   for (let page = 1; page <= 4; page++) {
-    const s = await api(`/repos/${r.full_name}/commits/${run.commit_sha}/statuses${q({ page, limit: 50 })}`).catch(() => []);
+    const s = await api(`/repos/${r.full_name}/commits/${run.commit_sha}/statuses${q({ page, limit: 50 })}`, { fresh }).catch(() => []);
     all.push(...s);
     if (s.length < 50) break;
   }
@@ -297,7 +300,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
     draw();
     const tick = async () => {
       if (!alive() || DONE.includes(run.status)) return;
-      [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`), jobsOf(r, run)]);
+      [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`, { fresh: true }), jobsOf(r, run, true)]);
       if (!alive()) return;
       drawSummary();
       draw();
@@ -331,7 +334,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
       shown = src.length;
       if (follow.checked) log.scrollTop = log.scrollHeight;
     }
-    jobs = await jobsOf(r, run);
+    jobs = await jobsOf(r, run, true);
     const me = jobs.find((j) => j.index === job);
     if (me && !DONE.includes(me.state)) timer = setTimeout(pull, 3000);
   };
