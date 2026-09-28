@@ -11,7 +11,7 @@ use serde::Serialize;
 
 /// One box, as its own prometheus describes it. Every field is optional:
 /// a box that is off answers nothing and is still a box.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct Status {
     pub name: String,
     /// false when its prometheus did not answer at all
@@ -28,7 +28,7 @@ pub struct Status {
     pub backup: Option<Backup>,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct Backup {
     pub last_success: Option<u64>,
     pub snapshots: Option<u64>,
@@ -98,19 +98,31 @@ async fn one(http: &reqwest::Client, name: &str, addr: &str) -> Status {
     if let Some((l, _)) = info.first() {
         b.result = l.get("result").cloned();
     }
-    b.release = num(&query(http, addr, "dd_agent_counter").await);
-    b.last_run = num(&query(http, addr, "dd_agent_last_run_seconds").await);
-    if let Some(s) = query(http, addr, "dd_box_info").await
+    // the rest all at once: one round trip to a box, not ten
+    let (counter, last_run, info, cores, memory, last, paths, snapshots, oldest, newest) = tokio::join!(
+        query(http, addr, "dd_agent_counter"),
+        query(http, addr, "dd_agent_last_run_seconds"),
+        query(http, addr, "dd_box_info"),
+        query(http, addr, "dd_box_cpu_cores"),
+        query(http, addr, "dd_box_memory_bytes"),
+        query(http, addr, "dd_backup_last_success_seconds"),
+        query(http, addr, "dd_backup_path"),
+        query(http, addr, "dd_backup_snapshots"),
+        query(http, addr, "dd_backup_oldest_seconds"),
+        query(http, addr, "dd_backup_newest_seconds"),
+    );
+    b.release = num(&counter);
+    b.last_run = num(&last_run);
+    if let Some(s) = info
         && let Some((l, _)) = s.first()
     {
         b.model = l.get("model").cloned();
         b.kernel = l.get("kernel").cloned();
     }
-    b.cores = num(&query(http, addr, "dd_box_cpu_cores").await);
-    b.memory = num(&query(http, addr, "dd_box_memory_bytes").await);
-    let last = num(&query(http, addr, "dd_backup_last_success_seconds").await);
-    let paths: Vec<String> = query(http, addr, "dd_backup_path")
-        .await
+    b.cores = num(&cores);
+    b.memory = num(&memory);
+    let last = num(&last);
+    let paths: Vec<String> = paths
         .map(|s| {
             s.iter()
                 .filter_map(|(l, _)| l.get("path").cloned())
@@ -120,17 +132,37 @@ async fn one(http: &reqwest::Client, name: &str, addr: &str) -> Status {
     if last.is_some() || !paths.is_empty() {
         b.backup = Some(Backup {
             last_success: last,
-            snapshots: num(&query(http, addr, "dd_backup_snapshots").await),
-            oldest: num(&query(http, addr, "dd_backup_oldest_seconds").await),
-            newest: num(&query(http, addr, "dd_backup_newest_seconds").await),
+            snapshots: num(&snapshots),
+            oldest: num(&oldest),
+            newest: num(&newest),
             paths,
         });
     }
     b
 }
 
-/// every box at once: one slow box does not hold up the page
+/// what the boxes said, for a few seconds: pages opened together (the
+/// Git page's "Running now", Boxes, Backups) share one round of questions
+static LAST: std::sync::Mutex<Option<(std::time::Instant, Vec<Status>)>> =
+    std::sync::Mutex::new(None);
+const KEEP: std::time::Duration = std::time::Duration::from_secs(15);
+
 pub async fn look(fleet: &Fleet) -> Vec<Status> {
+    if let Ok(g) = LAST.lock()
+        && let Some((at, v)) = g.as_ref()
+        && at.elapsed() < KEEP
+    {
+        return v.clone();
+    }
+    let out = ask(fleet).await;
+    if let Ok(mut g) = LAST.lock() {
+        *g = Some((std::time::Instant::now(), out.clone()));
+    }
+    out
+}
+
+/// every box at once: one slow box does not hold up the page
+async fn ask(fleet: &Fleet) -> Vec<Status> {
     let http = client();
     let mut set = tokio::task::JoinSet::new();
     for (name, addr) in fleet {
