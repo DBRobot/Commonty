@@ -160,6 +160,41 @@
             in
             go [ ] roots;
           crateSrc = name: roots: srcFor name (crateClosure roots);
+          # What a dependency build sees: the lockfile and the manifests, with
+          # crane's stand-in for every target, and nothing else. Each
+          # dependency cache is keyed on this, so a page, a template, a patch
+          # or our own code changing leaves every one of them as it is; only
+          # the lockfile or a manifest moving rebuilds them. Before, each was
+          # made from its binary's whole tree and a page edit recompiled
+          # every dependency (CI history: page-only runs as slow as
+          # lockfile ones).
+          depsSrc = craneLib.mkDummySrc {
+            src = pkgs.lib.cleanSourceWith {
+              src = ./.;
+              filter =
+                path: type:
+                let
+                  rel = pkgs.lib.removePrefix (toString ./. + "/") (toString path);
+                in
+                builtins.elem rel [
+                  "Cargo.toml"
+                  "Cargo.lock"
+                  "app/Cargo.toml"
+                ]
+                || (
+                  type == "directory"
+                  && (
+                    builtins.elem rel [
+                      "box"
+                      "client"
+                      "app"
+                    ]
+                    || builtins.match "(box|client)/[^/]+" rel != null
+                  )
+                )
+                || builtins.match "(box|client)/[^/]+/Cargo\\.toml" rel != null;
+            };
+          };
           sources = {
             dd = crateSrc "dd" [
               "client/cli"
@@ -281,6 +316,7 @@
             wasmCommon
             // {
               pname = "dd-web-deps";
+              dummySrc = depsSrc;
               version = "0.1.0";
             }
           );
@@ -319,6 +355,7 @@
             common
             // {
               pname = "dd-deps";
+              dummySrc = depsSrc;
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;
             }
@@ -344,6 +381,7 @@
                   // {
                     inherit cargoExtraArgs;
                     pname = "${pname}-deps";
+                    dummySrc = depsSrc;
                     version = "0.1.0";
                   }
                 );
@@ -356,6 +394,7 @@
             // {
               src = sources.app;
               pname = "commonty-deps";
+              dummySrc = depsSrc;
               version = "0.1.0";
               cargoExtraArgs = "-p commonty";
             }
@@ -480,6 +519,7 @@
                 common
                 // {
                   pname = "dd-clippy-deps";
+                  dummySrc = depsSrc;
                   version = "0.1.0";
                   cargoExtraArgs = workspaceArgs;
                   cargoBuildCommand = "true";
