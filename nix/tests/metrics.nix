@@ -9,6 +9,9 @@
   defaults.virtualisation.cores = 2; # services start in parallel instead of queueing on one thread
   defaults.virtualisation.diskSize = 2048;
   nodes.box = {
+    # the gate plays no part here: without it, a change to the gate
+    # is not a reason to run this again
+    dd.verify.enable = false;
     imports = [
       ./box.nix
       ../modules/box/locate.nix
@@ -19,7 +22,8 @@
   nodes.geo = {
     services.nginx = {
       enable = true;
-      virtualHosts.geo.locations."/json".return = ''200 '{"ip":"203.0.113.7","country":"US","region":"Massachusetts"}' '';
+      virtualHosts.geo.locations."/json".return =
+        ''200 '{"ip":"203.0.113.7","country":"US","region":"Massachusetts"}' '';
     };
     networking.firewall.enable = false;
   };
