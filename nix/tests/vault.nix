@@ -36,6 +36,8 @@ in
     };
     dd.vault = {
       enable = true;
+      # no tls in here: Vaultwarden asks the gate directly
+      issuer = "http://127.0.0.1:4181/_dd/oidc";
       envFile = vaultEnv;
       oidcSecretFile = pkgs.writeText "oidc" "test-oidc-secret";
       pwnedDir = "/srv/pwned";
@@ -53,5 +55,6 @@ in
   };
   scriptEnv = {
     inherit rpc;
+    dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
   };
 }

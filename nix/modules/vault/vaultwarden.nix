@@ -13,7 +13,7 @@ let
   # the front door is the gateway role's; a box without it is network-only
   hasPublic = options.dd ? public;
   public = hasPublic && config.dd.public.enable;
-  issuer = "https://home.${base}/_dd/oidc";
+  issuer = cfg.issuer;
 
   # Pinned: a nixpkgs bump that moves Vaultwarden stops here until someone
   # reads what changed and updates this line.
@@ -70,6 +70,11 @@ in
     envFile = lib.mkOption {
       type = lib.types.path;
       description = "env file with its garage key as VAULT_ID/VAULT_SECRET and again as AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, and SSO_CLIENT_SECRET";
+    };
+    issuer = lib.mkOption {
+      type = lib.types.str;
+      default = "https://home.${config.dd.domain}/_dd/oidc";
+      description = "the gate's sign-in issuer; a test points it at the gate itself";
     };
     oidcSecretFile = lib.mkOption {
       type = lib.types.path;
