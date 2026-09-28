@@ -1,8 +1,104 @@
 diff --git a/apps/photos/src/components/FileList.tsx b/apps/photos/src/components/FileList.tsx
-index aed27f3..c205af4 100644
+index aed27f3..7b2d655 100644
 --- a/apps/photos/src/components/FileList.tsx
 +++ b/apps/photos/src/components/FileList.tsx
-@@ -1215,7 +1215,6 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
+@@ -285,6 +285,11 @@ export interface FileListProps {
+ /**
+  * A virtualized list of files, each represented by their thumbnail.
+  */
++// Commonty: what the background warmer (in FileList) steps aside for -
++// pictures on screen still waiting for their own fetch, and scrolling.
++let onScreenLoads = 0;
++let lastScrollAt = 0;
++
+ export const FileList: React.FC<FileListProps> = ({
+     height,
+     width,
+@@ -943,6 +948,7 @@ export const FileList: React.FC<FileListProps> = ({
+ 
+     const handleScroll = useCallback(
+         ({ scrollOffset }: { scrollOffset: number }) => {
++            lastScrollAt = Date.now();
+             onScroll?.(scrollOffset);
+ 
+             // Show back-to-top button when scrolled past threshold
+@@ -978,6 +984,75 @@ export const FileList: React.FC<FileListProps> = ({
+         outerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+     }, []);
+ 
++    // Commonty: every thumbnail in the library, fetched into this device's
++    // cache in the background, nearest to where the person is first, so that
++    // scrolling anywhere at any speed finds them already here. Three at a
++    // time, and only while nothing on screen waits for its own and nobody is
++    // scrolling. Into the disk cache alone: an image made for each would hold
++    // the whole library in memory.
++    useEffect(() => {
++        let stopped = false;
++        const files = annotatedFiles.map((a) => a.file);
++        const done = new Uint8Array(files.length);
++        let left = files.length;
++        let centre = -1;
++        let lo = -1;
++        let hi = 0;
++
++        // the file at the middle of the screen, near enough to start from
++        const where = () => {
++            const el = outerRef.current;
++            if (!el || el.scrollHeight <= el.clientHeight) return 0;
++            const f = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight;
++            return Math.min(files.length - 1, Math.max(0, Math.floor(f * files.length)));
++        };
++        // outwards from there, a step down and a step up in turn
++        const next = (): number => {
++            const c = where();
++            if (centre < 0 || Math.abs(c - centre) > 60) {
++                centre = c;
++                lo = c - 1;
++                hi = c;
++            }
++            while (lo >= 0 || hi < files.length) {
++                if (hi < files.length && (lo < 0 || hi - centre <= centre - lo)) {
++                    const i = hi++;
++                    if (!done[i]) return i;
++                } else {
++                    const i = lo--;
++                    if (!done[i]) return i;
++                }
++            }
++            return done.indexOf(0);
++        };
++        const busy = () => document.hidden || onScreenLoads > 0 || Date.now() - lastScrollAt < 400;
++        const wait = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
++        const worker = async () => {
++            while (!stopped && left > 0) {
++                if (busy()) {
++                    await wait(300);
++                    continue;
++                }
++                const i = next();
++                if (i < 0) return;
++                done[i] = 1;
++                left--;
++                try {
++                    await downloadManager.thumbnailData(files[i]!);
++                } catch {
++                    // the next visit tries it again
++                }
++            }
++        };
++        const start = setTimeout(() => {
++            for (let k = 0; k < 3; k++) void worker();
++        }, 2000);
++        return () => {
++            stopped = true;
++            clearTimeout(start);
++        };
++    }, [annotatedFiles]);
++
+     if (!items.length) {
+         return <></>;
+     }
+@@ -1215,7 +1290,6 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
      isFav,
      emailByUserID,
      activeCollectionID,
@@ -10,7 +106,7 @@ index aed27f3..c205af4 100644
      onClick,
      onSelect,
      onHover,
-@@ -1248,20 +1247,45 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
+@@ -1248,20 +1322,49 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
          };
      }, [selected, onSelect, isLongPressing]);
  
@@ -45,11 +141,15 @@ index aed27f3..c205af4 100644
 +
 +        const timer = setTimeout(() => {
 +            if (didCancel) return;
++            onScreenLoads++;
 +            void downloadManager
 +                .renderableThumbnailURL(file)
 +                .then((url) => !didCancel && setImageURL(url))
 +                .catch((e: unknown) => {
 +                    log.warn("Failed to fetch thumbnail", e);
++                })
++                .finally(() => {
++                    onScreenLoads--;
 +                });
 +        }, wait);
  
@@ -62,7 +162,7 @@ index aed27f3..c205af4 100644
  
      const handleClick = () => {
          if (selectOnClick) {
-@@ -1297,6 +1321,7 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
+@@ -1297,6 +1400,7 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
      return (
          <FileThumbnail_
              key={`thumb-${file.id}}`}
