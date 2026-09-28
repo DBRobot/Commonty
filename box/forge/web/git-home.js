@@ -95,6 +95,7 @@ route(/^\/$/, async ({ current }) => {
     for (const row of list.children) row.hidden = !!s && !row.textContent.toLowerCase().includes(s);
   };
   const waiting = [...reviews, ...assigned.filter((i) => !reviews.some((r) => r.id === i.id))];
+  if (!current()) return;
   put(main(), el('div', { class: 'two' },
     el('div', {},
       el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Your repositories' }), el('span', { class: 'spacer' }), filter, el('a', { class: 'btn go', href: '/new' }, ic('plus'), 'New')),
@@ -113,7 +114,7 @@ route(/^\/$/, async ({ current }) => {
 
 // ---- a new repository
 
-route(/^\/new$/, async () => {
+route(/^\/new$/, async ({ current }) => {
   noHead();
   setTitle('A new repository');
   const w = await whoami();
@@ -158,13 +159,14 @@ route(/^\/new$/, async () => {
       out.append(el('p', { class: 'err', text: err.message }));
     }
   };
+  if (!current()) return;
   put(main(), form);
   name.focus();
 });
 
 // ---- notifications
 
-route(/^\/notifications$/, async ({ params }) => {
+route(/^\/notifications$/, async ({ params, current }) => {
   noHead();
   setTitle('Notifications');
   const all = params.get('all') === '1';
@@ -178,6 +180,7 @@ route(/^\/notifications$/, async ({ params }) => {
     return `/${n.repository.full_name}`;
   };
   const icon = (t) => ({ Pull: 'pr', Issue: 'issue', Commit: 'commit', Repository: 'repo' }[t] || 'bell');
+  if (!current()) return;
   put(main(), el('div', { style: 'max-width:980px' },
     el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Notifications' }), el('span', { class: 'spacer' }),
       el('span', { class: 'gseg' }, el('a', { class: 'btn', href: '/notifications', 'aria-pressed': String(!all), text: 'Unread' }), el('a', { class: 'btn', href: '/notifications?all=1', 'aria-pressed': String(all), text: 'All' })),
@@ -214,6 +217,7 @@ route(/^\/search$/, async ({ params, current }) => {
     ic(i.pull_request ? (i.pull_request.merged ? 'merged' : 'pr') : 'issue'),
     el('div', { style: 'flex:1' }, el('div', { class: 't', text: i.title }), el('div', { class: 'sub', text: `${i.repository.full_name} #${i.number} · ${i.state}` })));
   const body = kind === 'pulls' ? pulls.map(issueRow) : kind === 'issues' ? issues.map(issueRow) : await Promise.all(repos.map(repoRow));
+  if (!current()) return;
   put(main(), el('div', { class: 'two left' },
     el('aside', { class: 'jobs' }, tab('repositories', 'Repositories', repos.length), tab('pulls', 'Pull requests', pulls.length), tab('issues', 'Issues', issues.length)),
     el('div', {},
@@ -233,7 +237,7 @@ const SCOPES = [
   ['package', 'Packages', ['None', 'Read', 'Read and write']],
 ];
 
-route(/^\/settings(?:\/(tokens|keys|profile))?$/, async ({ m }) => {
+route(/^\/settings(?:\/(tokens|keys|profile))?$/, async ({ m, current }) => {
   noHead();
   const pane = m[1] || 'tokens';
   const w = await whoami();
@@ -241,6 +245,7 @@ route(/^\/settings(?:\/(tokens|keys|profile))?$/, async ({ m }) => {
   setTitle('Your settings');
   const nav = el('nav', {}, ...[['tokens', 'API tokens'], ['keys', 'SSH & signing keys'], ['profile', 'Profile']].map(([k, t]) => el('a', { href: `/settings/${k}`, 'aria-current': pane === k ? 'page' : null, text: t })));
   const body = el('div');
+  if (!current()) return;
   put(main(), 
     el('div', { class: 'hrow gap' }, avatar(w.forge, 'avatar l'), el('div', {}, el('h1', { class: 'h1', text: user }), el('span', { class: 'small muted', text: 'Your settings for Git. Your name, passkeys and devices are Commonty\'s, under your name in the bar.' }))),
     el('div', { class: 'settings' }, nav, body));
@@ -334,6 +339,7 @@ route(/^\/([^/]+)$/, async ({ m, current }) => {
   if (!current()) return;
   setTitle(u.login);
   repos.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+  if (!current()) return;
   put(main(), el('div', { class: 'two' },
     el('div', {},
       el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: `${u.login}'s repositories` })),

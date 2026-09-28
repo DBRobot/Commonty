@@ -22,13 +22,15 @@ const delBtn = (what, fn) => {
   return b;
 };
 
-route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m }) => {
+route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2], true);
+  if (!current()) return;
   header(r, 'settings');
   const pane = m[3] || 'general';
   setTitle('Settings', r.full_name);
   if (!r.permissions?.admin) { put(main(), el('div', { class: 'box empty', text: 'Only the people who run this repository see its settings.' })); return; }
   const body = el('div', { style: 'min-width:0' });
+  if (!current()) return;
   put(main(), el('div', { class: 'settings' },
     el('nav', {}, ...PANES.map(([k, t]) => el('a', { href: `/${r.full_name}/settings/${k}`, 'aria-current': pane === k ? 'page' : null, style: k === 'careful' ? 'color:var(--bad)' : null, text: t }))),
     body));

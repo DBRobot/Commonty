@@ -109,6 +109,7 @@ const RENDERED = /^readme(\.(md|markdown|txt))?$/i;
 
 route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'code');
   setTitle(r.full_name);
   if (r.empty) { put(main(), emptyRepo(r)); return; }
@@ -171,6 +172,7 @@ route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
   }).catch(() => rel.remove());
   side.append(rel, langs);
 
+  if (!current()) return;
   put(main(), el('div', { class: 'two' },
     el('div', {},
       el('div', { class: 'hrow gap' }, refPicker(r, ref, (n) => `/${r.full_name}/tree/${n}${path ? `/${path}` : ''}`),
@@ -242,6 +244,7 @@ const MARKDOWN = /\.(md|markdown)$/i;
 
 route(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'code');
   const { ref, path } = await split(r, m[3]);
   setTitle(path.split('/').pop(), r.full_name);
@@ -274,6 +277,7 @@ route(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/, async ({ m, current }) => {
   const cp = el('button', { class: 'btn plain', 'aria-label': 'Copy the file' }, ic('copy'));
   cp.onclick = () => copy(src, cp);
   const crumbs = el('span', {}, el('a', { href: `/${r.full_name}/tree/${ref}`, text: r.name }), ...path.split('/').flatMap((p, i, a) => [' / ', i === a.length - 1 ? el('b', { text: p }) : el('a', { href: `/${r.full_name}/tree/${ref}/${a.slice(0, i + 1).join('/')}`, text: p })]));
+  if (!current()) return;
   put(main(), el('div', { class: 'withtree' },
     await tree(r, ref, path),
     el('div', { style: 'min-width:0' },
@@ -287,6 +291,7 @@ route(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/, async ({ m, current }) => {
 
 route(/^\/([^/]+)\/([^/]+)\/commits(?:\/(.+))?$/, async ({ m, params, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'code');
   const { ref, path } = await split(r, m[3]);
   const page = Number(params.get('page') || 1);
@@ -309,6 +314,7 @@ route(/^\/([^/]+)\/([^/]+)\/commits(?:\/(.+))?$/, async ({ m, params, current })
         el('div', { class: 'sub hrow', style: 'gap:6px' }, avatar(c.author), el('b', { text: c.author?.login || c.commit.author.name }), 'committed ', when(c.commit.committer.date))),
       dot, el('a', { class: 'btn mono plain', href: `/${r.full_name}/commit/${c.sha}`, text: short(c.sha) }), cp, el('a', { class: 'btn plain', style: 'padding:4px 8px', href: `/${r.full_name}/tree/${c.sha}`, title: 'Browse the files at this commit' }, ic('code', 'i s')));
   };
+  if (!current()) return;
   put(main(), 
     el('div', { class: 'hrow gap' }, refPicker(r, ref, (n) => `/${r.full_name}/commits/${n}${path ? `/${path}` : ''}`), el('h1', { class: 'h1', style: 'font-size:18px', text: path ? `History of ${path}` : 'Commits' }), el('span', { class: 'small muted', text: plural(total, 'commit') })),
     ...[...days].flatMap(([d, cs]) => [el('h3', { class: 'small muted', style: 'margin:0 0 8px' }, ic('commit'), ` ${d}`), el('div', { class: 'box list gap' }, ...cs.map(row))]),
@@ -319,6 +325,7 @@ route(/^\/([^/]+)\/([^/]+)\/commits(?:\/(.+))?$/, async ({ m, params, current })
 
 route(/^\/([^/]+)\/([^/]+)\/commit\/([0-9a-f]{4,64})$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'code');
   const sha = m[3];
   const [c, patch] = await Promise.all([
@@ -334,6 +341,7 @@ route(/^\/([^/]+)\/([^/]+)\/commit\/([0-9a-f]{4,64})$/, async ({ m, current }) =
   holder.replaceChildren(...diff.render(files, { mode: mode() }));
   const status = el('span');
   api(`/repos/${r.full_name}/commits/${sha}/status`).then((s) => { if (s?.total_count) status.replaceWith(el('span', { class: 'hrow small', style: 'gap:6px' }, statusDot(s.state), `checks ${s.state}`)); }).catch(() => {});
+  if (!current()) return;
   put(main(), 
     el('div', { class: 'box gap' },
       el('div', { style: 'padding:14px 16px' }, el('h1', { class: 'h1', style: 'font-size:19px', text: title }), rest.join('\n').trim() ? el('pre', { class: 'muted', style: 'white-space:pre-wrap;font:inherit;margin:8px 0 0', text: rest.join('\n').trim() }) : null),
@@ -349,6 +357,7 @@ route(/^\/([^/]+)\/([^/]+)\/commit\/([0-9a-f]{4,64})$/, async ({ m, current }) =
 
 route(/^\/([^/]+)\/([^/]+)\/branches$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2], true);
+  if (!current()) return;
   header(r, 'code');
   setTitle('Branches', r.full_name);
   refsOf.delete(r.full_name);
@@ -379,6 +388,7 @@ route(/^\/([^/]+)\/([^/]+)\/branches$/, async ({ m, current }) => {
     };
     return row;
   });
+  if (!current()) return;
   put(main(), el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Branches' }), el('span', { class: 'small muted', text: plural(branches.length, 'branch', 'branches') })), el('div', { class: 'box list' }, ...rows));
 });
 
@@ -386,6 +396,7 @@ route(/^\/([^/]+)\/([^/]+)\/branches$/, async ({ m, current }) => {
 
 route(/^\/([^/]+)\/([^/]+)\/releases(?:\/tag\/(.+))?$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'releases');
   setTitle('Releases', r.full_name);
   const [rels, tags, boxes] = await Promise.all([
@@ -398,6 +409,7 @@ route(/^\/([^/]+)\/([^/]+)\/releases(?:\/tag\/(.+))?$/, async ({ m, current }) =
     el('div', { class: 'hrow', style: 'padding:12px 14px' }, ...boxes.map((b) => el('span', { class: 'pill', style: 'font-size:13px;padding:4px 12px' }, el('span', { class: `dot ${b.up ? 'ok' : 'bad'}` }), ` ${b.name}: release ${b.release ?? '?'}${b.result && b.result !== 'ok' ? ` (${b.result})` : ''}`)))) : null;
   if (m[3]) {
     const one = rels.find((x) => x.tag_name === m[3]) || await api(`/repos/${r.full_name}/releases/tags/${encodeURIComponent(m[3])}`);
+    if (!current()) return;
     put(main(), el('p', {}, el('a', { href: `/${r.full_name}/releases`, text: '← Releases' })),
       el('div', { class: 'two' },
         el('div', { class: 'box' }, el('div', { style: 'padding:18px 22px 6px' }, el('h1', { class: 'h1', style: 'font-size:24px', text: one.name || one.tag_name }), el('p', { class: 'muted', style: 'margin:6px 0 0' }, ic('tag'), ` ${one.tag_name} · `, when(one.published_at || one.created_at))), el('div', { class: 'md pad' }, await markdown(one.body || '_No notes._'))),
@@ -409,6 +421,7 @@ route(/^\/([^/]+)\/([^/]+)\/releases(?:\/tag\/(.+))?$/, async ({ m, current }) =
   }
   const relRows = rels.map((x, i) => el('a', { class: 'item', href: `/${r.full_name}/releases/tag/${x.tag_name}` }, ic('tag'), el('div', { style: 'flex:1;min-width:0' }, el('div', { class: 't' }, x.name || x.tag_name, i === 0 ? el('span', { class: 'chip ok', style: 'margin-left:8px', text: 'Latest' }) : null, x.prerelease ? el('span', { class: 'chip busy', style: 'margin-left:8px', text: 'pre-release' }) : null), el('div', { class: 'sub', text: firstLine(x.body) })), el('span', { class: 'small muted' }, when(x.published_at || x.created_at))));
   const tagRows = tags.map((t) => el('div', {}, ic('tag'), el('a', { href: `/${r.full_name}/tree/${t.name}`, class: 'mono', text: t.name }), el('span', { class: 'spacer' }), el('a', { class: 'mono small muted', href: `/${r.full_name}/commit/${t.commit.sha}`, text: short(t.commit.sha) }), el('a', { class: 'small', href: t.zipball_url, text: 'zip' })));
+  if (!current()) return;
   put(main(), el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Releases' })), running,
     rels.length ? el('div', { class: 'box list gap' }, ...relRows) : el('p', { class: 'muted', text: 'No releases published on the forge yet.' }),
     tags.length ? [el('h2', { class: 'ph', style: 'font-size:16px', text: 'Tags' }), el('div', { class: 'box list' }, ...tagRows)] : null);
@@ -418,6 +431,7 @@ route(/^\/([^/]+)\/([^/]+)\/releases(?:\/tag\/(.+))?$/, async ({ m, current }) =
 
 route(/^\/([^/]+)\/([^/]+)\/activity$/, async ({ m, params, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'activity');
   setTitle('Activity', r.full_name);
   const span = params.get('span') === 'month' ? 30 : 7;
@@ -452,6 +466,7 @@ route(/^\/([^/]+)\/([^/]+)\/activity$/, async ({ m, params, current }) => {
   const commits = days.reduce((t, d) => t + (byDay[dayKey(d)] || 0), 0);
   const label = (d) => (span === 7 ? d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }) : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }));
   const yearTotal = Object.values(byDay).reduce((a, b) => a + b, 0);
+  if (!current()) return;
   put(main(), 
     el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Activity' }), el('span', { class: 'spacer' }),
       el('span', { class: 'gseg' }, el('a', { class: 'btn', href: `/${r.full_name}/activity`, 'aria-pressed': String(span === 7), text: 'This week' }), el('a', { class: 'btn', href: `/${r.full_name}/activity?span=month`, 'aria-pressed': String(span === 30), text: 'This month' }))),
