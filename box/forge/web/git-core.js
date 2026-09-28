@@ -204,7 +204,8 @@ export async function whoami() {
 export function statusDot(state) {
   // cancelled is red: a run here is cancelled when one of its jobs failed
   const s = { success: 'ok', failure: 'bad', error: 'bad', cancelled: 'bad', pending: 'busy', running: 'busy', waiting: 'busy', warning: 'busy', blocked: 'busy', skipped: '' }[state] ?? '';
-  if (s === 'busy' && (state === 'running' || state === 'pending')) return el('span', { class: 'spin', title: state });
+  // only what a runner is working on spins; the rest is queued behind it
+  if (state === 'running') return el('span', { class: 'spin', title: state });
   return el('span', { class: `dot ${s}`, title: state || 'no checks' });
 }
 

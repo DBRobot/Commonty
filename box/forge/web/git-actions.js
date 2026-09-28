@@ -88,7 +88,12 @@ async function jobsOf(r, run) {
     // when it began and ended, from the statuses the forge posted as it went
     const started = /started running/i.test(s.description || '') ? s.created_at : prev?.started;
     const ended = s.status !== 'pending' ? s.created_at : null;
-    jobs.set(Number(m[2]), { index: Number(m[2]), name, leaf: name.split(' / ').pop(), state: s.status, description: s.description, started, ended });
+    // the forge says pending for waiting, blocked and running alike: its
+    // words tell them apart, and only a job a runner has picked up is running
+    const state = s.status !== 'pending' ? s.status
+      : /started running/i.test(s.description || '') ? 'running'
+      : /blocked/i.test(s.description || '') ? 'blocked' : 'waiting';
+    jobs.set(Number(m[2]), { index: Number(m[2]), name, leaf: name.split(' / ').pop(), state, description: s.description, started, ended });
   }
   return [...jobs.values()].sort((a, b) => a.index - b.index);
 }
@@ -183,7 +188,7 @@ function rollup(jobs) {
   const s = jobs.map((j) => j.state);
   if (s.some((x) => x === 'failure' || x === 'error')) return 'failure';
   if (s.some((x) => x === 'running')) return 'running';
-  if (s.some((x) => x === 'pending' || x === 'waiting' || x === 'blocked')) return 'pending';
+  if (s.some((x) => x === 'pending' || x === 'waiting' || x === 'blocked')) return 'waiting';
   if (s.length && s.every((x) => x === 'success' || x === 'skipped')) return 'success';
   return s[0] || 'waiting';
 }
