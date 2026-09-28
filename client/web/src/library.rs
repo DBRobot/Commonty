@@ -72,8 +72,28 @@ fn open(entry_json: &str, id: &str, prf_secret_b64: &str) -> R<String> {
     Err("no key in that library opens with this passkey: `dd passkey link` it once".into())
 }
 
-fn cipher(library_key_b64: &str, id: &str) -> R<library::crypt::Cipher> {
+// scrypt runs once per library per page: a listing decrypts every name in
+// it, and each fresh derivation cost the page a tenth of a second per name
+type Kept = (
+    Zeroizing<String>,
+    String,
+    std::rc::Rc<library::crypt::Cipher>,
+);
+thread_local! {
+    static CIPHERS: std::cell::RefCell<Vec<Kept>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn cipher(library_key_b64: &str, id: &str) -> R<std::rc::Rc<library::crypt::Cipher>> {
     use base64::Engine as _;
+    let hit = CIPHERS.with(|c| {
+        c.borrow()
+            .iter()
+            .find(|(k, i, _)| k.as_str() == library_key_b64 && i == id)
+            .map(|(_, _, c)| c.clone())
+    });
+    if let Some(c) = hit {
+        return Ok(c);
+    }
     let raw = base64::engine::general_purpose::STANDARD
         .decode(library_key_b64)
         .map_err(err)?;
@@ -82,7 +102,19 @@ fn cipher(library_key_b64: &str, id: &str) -> R<library::crypt::Cipher> {
     }
     let mut k = Zeroizing::new([0u8; 32]);
     k.copy_from_slice(&raw);
-    Ok(library::crypt::Cipher::for_library(&k, id))
+    let c = std::rc::Rc::new(library::crypt::Cipher::for_library(&k, id));
+    CIPHERS.with(|all| {
+        let mut all = all.borrow_mut();
+        if all.len() >= 4 {
+            all.remove(0);
+        }
+        all.push((
+            Zeroizing::new(library_key_b64.to_string()),
+            id.to_string(),
+            c.clone(),
+        ));
+    });
+    Ok(c)
 }
 
 /// a plain path to the encrypted one the gate knows
