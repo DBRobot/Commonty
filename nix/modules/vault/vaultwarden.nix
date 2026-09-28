@@ -62,6 +62,22 @@ let
   # vault knows them as <name>@<domain>, and this swaps in the real address
   # from sops' copy in memory as each mail leaves. Nobody's address is
   # stored on the box.
+  # the same relay as the rest of the box (modules/mail.nix); the password is
+  # read from the unit's credentials as each mail is sent
+  msmtprc = pkgs.writeText "dd-vault-msmtprc" ''
+    defaults
+    auth on
+    tls on
+    tls_starttls on
+    tls_trust_file /etc/ssl/certs/ca-certificates.crt
+
+    account default
+    host smtp.gmail.com
+    port 587
+    from distributed.datacenter@gmail.com
+    user distributed.datacenter@gmail.com
+    passwordeval cat "$CREDENTIALS_DIRECTORY/smtp"
+  '';
   sendmail = pkgs.writeShellScript "dd-vault-sendmail" ''
     set -u
     map() {
@@ -71,16 +87,18 @@ let
         "$CREDENTIALS_DIRECTORY/emails" 2>/dev/null
     }
     rcpts=()
+    skip=
     for a in "$@"; do
+      # -f <sender> is the envelope's from, not someone to write to
+      [ -n "$skip" ] && { skip=; continue; }
       case "$a" in
+        -f) skip=1 ;;
         -*) ;;
         *@*) if r=$(map "$a"); then rcpts+=("$r"); else echo "no address in sops for $a; not sent" >&2; fi ;;
       esac
     done
     [ ''${#rcpts[@]} -gt 0 ] || { cat >/dev/null; exit 0; }
-    exec ${pkgs.msmtp}/bin/msmtp --host=smtp.gmail.com --port=587 --tls=on --tls-starttls=on \
-      --auth=login --user=distributed.datacenter@gmail.com --from=distributed.datacenter@gmail.com \
-      --passwordeval="cat $CREDENTIALS_DIRECTORY/smtp" -i -- "''${rcpts[@]}"
+    exec ${pkgs.msmtp}/bin/msmtp -C ${msmtprc} -i -- "''${rcpts[@]}"
   '';
 in
 {
