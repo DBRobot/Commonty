@@ -1255,9 +1255,19 @@ async fn chat_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response 
 /// forge's API decides what each of them may see and do; the page is the
 /// same file for all.
 async fn git_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    signed_in_page(&app, &headers, "git")
+}
+
+/// Metrics (box/observe): the fleet's figures, for anyone signed in; the
+/// queries behind it pass the same gate.
+async fn metrics_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    signed_in_page(&app, &headers, "metrics")
+}
+
+fn signed_in_page(app: &App, headers: &HeaderMap, name: &str) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.sessions.user(cookie) {
-        Some(_) => page("git"),
+        Some(_) => page(name),
         None => {
             let at = headers
                 .get("x-original-uri")
@@ -1655,6 +1665,7 @@ pub async fn start(
         .route("/_dd/network/join", post(network::join))
         .route("/_dd/chat", get(chat_page))
         .route("/_dd/git", get(git_page))
+        .route("/_dd/metrics", get(metrics_page))
         .route("/_dd/chat/search", get(chat_search))
         .route("/_dd/friends", get(friends::page))
         .route("/_dd/friends/list", get(friends::list))

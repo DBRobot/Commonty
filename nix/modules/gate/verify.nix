@@ -27,7 +27,7 @@ in
     default = [
       "files"
       "llm"
-      "grafana"
+      "metrics"
       "git"
       "home"
       "photos"
