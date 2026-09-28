@@ -61,10 +61,10 @@ assert theirs == "404", theirs
 page = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -H 'x-dd-user: ann' -H 'x-dd-role: member' http://games/server/probe1").strip()
 assert page == "404", page
 assert "probe1" not in box.succeed(f"curl -sf {sock} -H 'x-dd-user: ann' -H 'x-dd-role: member' http://games/")
-guest = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -X POST -H 'x-dd-user: gus' -H 'x-dd-role: guest' http://games/create/probe").strip()
+guest = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -X POST -d '' -H 'x-dd-user: gus' -H 'x-dd-role: guest' http://games/create/probe").strip()
 assert guest == "403", guest
 # no role from the gate is a guest, not a member
-norole = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -X POST -H 'x-dd-user: gus' http://games/create/probe").strip()
+norole = box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {sock} -X POST -d '' -H 'x-dd-user: gus' http://games/create/probe").strip()
 assert norole == "403", norole
 # with no gate on this box to vouch for anyone, an invite invites nobody
 box.succeed(f"curl -s {sock} -X POST -H 'x-dd-user: tom' -H 'x-dd-role: member' -d 'p:ann=on' http://games/players/probe1")
