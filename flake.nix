@@ -377,6 +377,13 @@
           # and nothing else in the workspace uses it. The app is checked
           # on its own (checks.clippy-app), only when it changed.
           workspaceArgs = "--locked --workspace --exclude commonty";
+          # The tests build unoptimised and without debug info: a release
+          # build of every dependency cost most of the test job, only to run
+          # them once. Only the tests use this cache; binaries stay release.
+          testProfile = {
+            CARGO_PROFILE = "dev";
+            CARGO_PROFILE_DEV_DEBUG = "false";
+          };
           cargoArtifacts = craneLib.buildDepsOnly (
             common
             // {
@@ -384,6 +391,7 @@
               dummySrc = depsSrc;
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;
+              inherit (testProfile) CARGO_PROFILE CARGO_PROFILE_DEV_DEBUG;
             }
           );
           # and one dependency build per binary, with that binary's own
@@ -574,6 +582,7 @@
             common
             // {
               inherit cargoArtifacts;
+              inherit (testProfile) CARGO_PROFILE CARGO_PROFILE_DEV_DEBUG;
               pname = "dd";
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;
