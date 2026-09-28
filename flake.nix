@@ -46,6 +46,7 @@
         "network"
         "library"
         "pgrestore"
+        "llm"
       ];
       rust =
         let
@@ -175,6 +176,7 @@
                 "box/media"
                 "box/files"
                 "box/fleet"
+                "box/chat"
               ]
             );
             games = crateSrc "games" [ "box/games" ];
@@ -442,6 +444,20 @@
                 hash = "sha256-k36IEw6HrUntpsfxCOk+QsInVYxti01bU9205DB6Msw=";
               }
             } $out/hls.js
+            # Chat's answers are markdown: turned into html, then cleaned of
+            # anything that could run, before the page shows them
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdnjs.cloudflare.com/ajax/libs/marked/18.0.14/lib/marked.esm.min.js";
+                hash = "sha256-brZkvp2IUr5XYSw1XbTW18R/HjM/LClHqIFOEuOxLUY=";
+              }
+            } $out/marked.js
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.16/purify.min.js";
+                hash = "sha256-LJCptG1kY/JgOKKbaG6CvJHeAf2snVIp58/js2ATTqI=";
+              }
+            } $out/purify.js
           '';
 
           # the checks, on the same compiled artifacts as the binaries: fmt

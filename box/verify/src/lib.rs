@@ -1230,6 +1230,24 @@ async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     }
 }
 
+/// Chat (box/chat): a member's, or the demo's with its counted prompts.
+/// The page is the same for both; what differs is where it keeps chats.
+async fn chat_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    match app.sessions.user(cookie) {
+        Some(user)
+            if matches!(
+                app.role(&user),
+                Some(pages::Role::Member | pages::Role::Demo)
+            ) =>
+        {
+            page("chat")
+        }
+        Some(_) => Redirect::to("/_dd/home").into_response(),
+        None => Redirect::to("/_dd/login?rd=/").into_response(),
+    }
+}
+
 /// Boxes, Backups, Devices, Network: the pages behind the bar's menu.
 /// Each is a member's own view of the fleet; the demo gets none of them.
 async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Response {
@@ -1532,6 +1550,7 @@ pub async fn start(
         .route("/_dd/app/signin", post(photos::app_signin))
         // the network's door: a join key for an admitted device
         .route("/_dd/network/join", post(network::join))
+        .route("/_dd/chat", get(chat_page))
         .route("/_dd/friends", get(friends::page))
         .route("/_dd/friends/list", get(friends::list))
         .route("/_dd/friends/link", post(friends::make_link))
