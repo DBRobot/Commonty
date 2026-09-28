@@ -197,7 +197,7 @@ route(/^\/notifications$/, async ({ params }) => {
 route(/^\/search$/, async ({ params, current }) => {
   noHead();
   const text = params.get('q') || '';
-  const kind = params.get('type') || 'repositories';
+  let kind = params.get('type');
   setTitle(`Search: ${text}`);
   const input = document.querySelector('#git-search input');
   if (input) input.value = text;
@@ -207,6 +207,8 @@ route(/^\/search$/, async ({ params, current }) => {
     api(`/repos/issues/search${q({ q: text, type: 'issues', state: 'all', limit: 30 })}`).catch(() => []),
   ]);
   if (!current()) return;
+  // unasked, open on the first kind that found something
+  kind ||= repos.length ? 'repositories' : pulls.length ? 'pulls' : issues.length ? 'issues' : 'repositories';
   const tab = (k, label, n) => el('a', { href: `/search${q({ q: text, type: k })}`, 'aria-current': kind === k ? 'page' : null }, label, el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: String(n) }));
   const issueRow = (i) => el('a', { class: 'item', href: `/${i.repository.full_name}/${i.pull_request ? 'pull' : 'issues'}/${i.number}` },
     ic(i.pull_request ? (i.pull_request.merged ? 'merged' : 'pr') : 'issue'),
