@@ -283,7 +283,9 @@ async function openTitle(it, { at } = {}) {
     $('r-play').disabled = !next;
     $('r-play').onclick = () => next && play(next, { resume: true });
     $('r-spec').textContent = next ? [name(next), going && q.of ? `${minutes(q.of - q.at)} left` : ''].filter(Boolean).join(' · ') : '';
-    $('r-over').hidden = true;
+    // part-way into this episode: from its start too, as a film has
+    $('r-over').hidden = !going;
+    $('r-over').onclick = () => next && play(next, { resume: false });
     $('r-remove').textContent = 'Remove show';
     $('r-remove').onclick = () => remove(it, `${titleOf(it)} and its ${it.count} episode${it.count === 1 ? '' : 's'}`);
     const seasons = [...new Set(it.episodes.map((e) => e.parsed.season))];
@@ -386,6 +388,8 @@ let session = null;
 let playing = null;              // { it, offset, duration, lastSave, stilled }
 
 async function stop() {
+  // whatever the box is still starting for this player is no longer wanted
+  jumps++;
   const v = $('video');
   if (playing) remember(true);
   v.pause();
@@ -473,7 +477,8 @@ async function play(it, { resume }) {
   // this one viewing and sends a playlist. Safari plays a playlist itself;
   // everywhere else the page loads a player from the box.
   try {
-    await attach(it, from);
+    const mine = ++jumps;
+    if (!(await attach(it, from, () => mine === jumps))) return;
     $('p-note').textContent = '';
     v.play().catch(() => {});
     return;
@@ -493,6 +498,7 @@ async function play(it, { resume }) {
     const plain = await fetchPlain(lib, it.path);
     // the whole file in the tab: its own time is the film's
     playing.offset = 0;
+    playing.inline = true;
     v.src = URL.createObjectURL(new Blob([plain]));
     if (from) v.addEventListener('loadedmetadata', () => { v.currentTime = from; }, { once: true });
     $('p-note').textContent = '';
@@ -503,9 +509,17 @@ async function play(it, { resume }) {
 }
 
 // A session at the box from `from` on, and the player on its playlist
-async function attach(it, from) {
+// `current` says whether this is still the session wanted: a later jump,
+// or closing the player, may have taken over while the box was starting
+// it. One that is not is stopped at the box and never played, so two never
+// sound at once.
+async function attach(it, from, current = () => true) {
   const v = $('video');
   const s = await transcode(lib, it.path, it.sealed, from);
+  if (!current() || playing?.it !== it) {
+    Promise.resolve(stopTranscode(s.url)).catch(() => {});
+    return false;
+  }
   session = s.url;
   playing.offset = s.from;
   playing.duration = s.duration ?? playing.duration;
@@ -530,6 +544,7 @@ async function attach(it, from) {
     hls.loadSource(s.url);
     hls.attachMedia(v);
   }
+  return true;
 }
 
 async function closePlayer() {
@@ -621,13 +636,20 @@ async function seekTo(t) {
   const v = $('video');
   const len = filmLength();
   t = Math.max(0, len ? Math.min(t, len - 2) : t);
-  if (!session || (t >= playing.offset && t <= readyTo())) {
+  // a file opened whole in the tab seeks itself; one from the box seeks
+  // within what it has packed, and anywhere else - including while an
+  // earlier jump is still starting - asks the box to start there
+  if (playing.inline || (session && t >= playing.offset && t <= readyTo())) {
     v.currentTime = Math.max(0, t - playing.offset);
     return;
   }
   const mine = ++jumps;
   const it = playing.it;
-  const going = !v.paused;
+  // playing before the first of quick jumps is playing after the last:
+  // the video is stopped while the box starts, so later ones cannot tell
+  const going = playing.starting ? playing.going : !v.paused;
+  playing.starting = true;
+  playing.going = going;
   $('p-note').textContent = `Asking the box to start at ${clock(t)}…`;
   hls?.destroy();
   hls = null;
@@ -640,12 +662,15 @@ async function seekTo(t) {
   playing.offset = t;
   paintBar();
   try {
-    await attach(it, t);
-    if (mine !== jumps) return; // a later jump took over
+    if (!(await attach(it, t, () => mine === jumps))) return; // a later jump took over
+    playing.starting = false;
     $('p-note').textContent = '';
     if (going) v.play().catch(() => {});
   } catch (e) {
-    if (mine === jumps) $('p-note').textContent = `The box could not start there: ${e.message}`;
+    if (mine === jumps) {
+      playing.starting = false;
+      $('p-note').textContent = `The box could not start there: ${e.message}`;
+    }
   }
 }
 
