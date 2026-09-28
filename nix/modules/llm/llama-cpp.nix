@@ -15,7 +15,10 @@ let
   # without AVX-512 (GitHub runners are a mix). ALL_VARIANTS builds every
   # microarchitecture as a loadable backend and picks the best at runtime, so
   # the build is portable and node1 still gets the icelake path.
-  llamaCppTuned = pkgs.llama-cpp.overrideAttrs (o: {
+  # With Vulkan as well: on a box with an Intel GPU (dd.box.vaapi) the
+  # prompt is read there, several times faster than the CPU reads it; with
+  # none, the Vulkan backend finds no device and everything stays on the CPU.
+  llamaCppTuned = (pkgs.llama-cpp.override { vulkanSupport = true; }).overrideAttrs (o: {
     cmakeFlags = (o.cmakeFlags or [ ]) ++ [
       "-DGGML_NATIVE=OFF"
       "-DGGML_BACKEND_DL=ON"
@@ -23,6 +26,9 @@ let
     ];
   });
   server = lib.getExe' llamaCppTuned "llama-server";
+  # Where each part of the work runs when there is a GPU: the flags below
+  # are what measured fastest on node1's Iris Xe (see the note at `split`).
+  gpu = config.dd.box.vaapi != null;
 
   dir = "/tank/models";
   file = m: "${dir}/${m.localName}";
@@ -64,6 +70,11 @@ let
           default = [ ];
           description = "more llama-server flags for this model alone";
         };
+        split = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          description = "flags that place the work between the CPU and a GPU, used only on a box that has one (dd.box.vaapi)";
+        };
         idle = lib.mkOption {
           type = lib.types.int;
           default = 3600;
@@ -96,6 +107,18 @@ in
       # knew it by when llama-server named it after its file
       localName = "qwen3.6-35b-a3b-a483e9e6-UD-Q4_K_XL.gguf";
       aliases = [ "qwen3.6-35b-a3b-a483e9e6-UD-Q4_K_XL.gguf" ];
+      # Measured on node1 (llama-bench, 2026-09-28), prompt read / answer
+      # written, tokens a second: CPU alone 25.7 / 7.0; all layers on the
+      # Iris Xe 64.7 / 6.2, with flash attention 66.6 / 6.5, and batches of
+      # 1024 read a 2048-token prompt at 56.9 instead of 51.8. Splitting
+      # instead (experts on the CPU 33.9 / 3.1, big batches only 33.5 / 0.6)
+      # lost on both. A reply starts over twice as soon; it writes 7% slower.
+      split = [
+        "-ngl 99"
+        "-fa on"
+        "-ub 1024"
+        "-b 2048"
+      ];
     };
 
     # reads plaintext: prompts and answers, in memory while it answers
@@ -162,6 +185,10 @@ in
             MemoryHigh = "28G";
             MemoryMax = "32G";
             ReadOnlyPaths = [ dir ];
+            # the GPU's compiled shaders, kept between model loads: without
+            # it every load compiles them again
+            CacheDirectory = "llama-swap";
+            Environment = [ "MESA_SHADER_CACHE_DIR=%C/llama-swap" ];
           };
         };
         # nginx's way in: a socket only nginx may open, carried into the
@@ -252,6 +279,7 @@ in
               "--no-slots" # /slots would show one person's requests to another
               "--no-webui" # the chat page is ours (box/chat)
             ]
+            ++ lib.optionals gpu m.split
             ++ m.args
           );
         }) cfg.models;
