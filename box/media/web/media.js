@@ -167,14 +167,12 @@ function tab(t) {
 async function episodesOf(name) {
   const top = await list(lib, `Shows/${name}`);
   const files = top.filter((i) => !i.dir);
-  // season folders, one level down
-  for (const d of top.filter((i) => i.dir)) {
+  // season folders, one level down, all asked at once
+  const seasons = await Promise.all(top.filter((i) => i.dir).map(async (d) => {
     const n = Number((d.name.match(/(\d+)/) || [])[1]) || null;
-    for (const f of (await list(lib, d.path)).filter((i) => !i.dir)) {
-      f.seasonHint = n;
-      files.push(f);
-    }
-  }
+    return (await list(lib, d.path)).filter((i) => !i.dir).map((f) => ({ ...f, seasonHint: n }));
+  }));
+  files.push(...seasons.flat());
   return files.map((f) => {
     const parsed = parse(f.name);
     parsed.season ??= f.seasonHint ?? 1;
@@ -184,11 +182,13 @@ async function episodesOf(name) {
 
 async function load() {
   const week = Date.now() - 7 * 24 * 3600 * 1000;
-  films = (await list(lib, 'Movies')).filter((i) => !i.dir).map((f) => ({
+  // both shelves asked at once
+  const [movies, showDirs] = await Promise.all([list(lib, 'Movies'), list(lib, 'Shows')]);
+  films = movies.filter((i) => !i.dir).map((f) => ({
     ...f, kind: 'film', parsed: parse(f.name), added: Date.parse(f.modified) || 0,
   }));
   for (const f of films) f.fresh = f.added > week;
-  shows = await Promise.all((await list(lib, 'Shows')).filter((i) => i.dir).map(async (d) => {
+  shows = await Promise.all(showDirs.filter((i) => i.dir).map(async (d) => {
     const episodes = await episodesOf(d.name);
     const name = parse(d.name).title;
     for (const e of episodes) {
@@ -778,8 +778,8 @@ async function start() {
   }
   lib = r.ok;
   $('msg').textContent = 'Opening the library…';
-  store = await open(lib);
-  await load();
+  // the posters' store and the shelves' listings, side by side
+  [store] = await Promise.all([open(lib), load()]);
   $('msg').hidden = true;
   $('home').hidden = false;
   $('actions').hidden = false;

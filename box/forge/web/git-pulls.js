@@ -3,8 +3,7 @@
 
 import {
   put, app, el, ic, api, text, q, when, plural, avatar, route, go, statusDot, markdown, toast,
-  setTitle, firstLine, short, pop, pager, whoami, $,
-} from './git-core.js';
+  setTitle, firstLine, short, pop, pager, whoami, $, warmers } from './git-core.js';
 import { repo, header, refs } from './git-repo.js';
 import * as diff from './git-diff.js';
 
@@ -26,19 +25,24 @@ function labelChip(l) {
   return el('span', { class: 'chip', style: `background:${c}22;color:var(--ink);box-shadow:inset 0 0 0 1px ${c}88`, text: l.name, title: l.description || '' });
 }
 
+const listData = (r, pulls, state = 'open', page = 1, search = '') => Promise.all([
+  api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state, page, limit: 25, q: search })}`, { withTotal: true }),
+  api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state: 'open', limit: 1, q: search })}`, { withTotal: true }),
+  api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state: 'closed', limit: 1, q: search })}`, { withTotal: true }),
+]);
+warmers.pulls = (r) => listData(r, true);
+warmers.issues = (r) => listData(r, false);
+
 async function list({ m, params, current }, kind) {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, kind);
   const state = params.get('state') || 'open';
   const page = Number(params.get('page') || 1);
   const search = params.get('q') || '';
   const pulls = kind === 'pulls';
   setTitle(pulls ? 'Pull requests' : 'Issues', r.full_name);
-  const [{ data, total }, open, closed] = await Promise.all([
-    api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state, page, limit: 25, q: search })}`, { withTotal: true }),
-    api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state: 'open', limit: 1, q: search })}`, { withTotal: true }),
-    api(`/repos/${r.full_name}/issues${q({ type: pulls ? 'pulls' : 'issues', state: 'closed', limit: 1, q: search })}`, { withTotal: true }),
-  ]);
+  const [{ data, total }, open, closed] = await listData(r, pulls, state, page, search);
   if (!current()) return;
   const base = `/${r.full_name}/${pulls ? 'pulls' : 'issues'}`;
   const find = el('input', { class: 'btn plain', style: 'flex:1;min-width:200px', value: search, placeholder: `Find ${pulls ? 'a pull request' : 'an issue'}`, 'aria-label': 'Find' });
@@ -57,6 +61,7 @@ async function list({ m, params, current }, kind) {
       i.comments ? el('span', { class: 'small muted', title: 'comments' }, `💬 ${i.comments}`) : null,
       ...(i.assignees || []).slice(0, 3).map((u) => avatar(u)));
   });
+  if (!current()) return;
   put(main(), 
     el('div', { class: 'hrow gap' }, find,
       r.permissions?.pull ? el('a', { class: 'btn go', href: pulls ? `/${r.full_name}/compare` : `/${r.full_name}/issues/new` }, ic('plus'), pulls ? 'New pull request' : 'New issue') : null),
@@ -186,8 +191,9 @@ async function sidebar(r, n, issue, isPull) {
 
 // ---- an issue
 
-route(/^\/([^/]+)\/([^/]+)\/issues\/new$/, async ({ m }) => {
+route(/^\/([^/]+)\/([^/]+)\/issues\/new$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'issues');
   setTitle('New issue', r.full_name);
   const title = el('input', { class: 'write', placeholder: 'Title', 'aria-label': 'Title', required: true });
@@ -199,12 +205,14 @@ route(/^\/([^/]+)\/([^/]+)\/issues\/new$/, async ({ m }) => {
     catch (err) { toast(err.message); }
   };
   const w = await whoami();
+  if (!current()) return;
   put(main(), el('div', { style: 'max-width:980px' }, el('div', { class: 'comment' }, avatar(w.forge, 'avatar l'), el('div', { class: 'box' }, el('div', { class: 'body' }, form)))));
   title.focus();
 });
 
 route(/^\/([^/]+)\/([^/]+)\/issues\/(\d+)$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'issues');
   const n = m[3];
   const issue = await api(`/repos/${r.full_name}/issues/${n}`);
@@ -214,6 +222,7 @@ route(/^\/([^/]+)\/([^/]+)\/issues\/(\d+)$/, async ({ m, current }) => {
   const toggle = r.permissions?.push || issue.user.login === (await whoami()).forge?.login
     ? el('button', { class: 'btn', text: issue.state === 'open' ? 'Close issue' : 'Reopen issue', onclick: async () => { await api(`/repos/${r.full_name}/issues/${n}`, { method: 'PATCH', body: { state: issue.state === 'open' ? 'closed' : 'open' } }); go(location.pathname, true); } })
     : null;
+  if (!current()) return;
   put(main(), 
     el('h1', { class: 'h1', style: 'font-size:24px;font-weight:600' }, issue.title, el('span', { class: 'muted', style: 'font-weight:400', text: ` #${n}` })),
     el('div', { class: 'hrow', style: 'margin:8px 0 18px' }, el('span', { class: `state ${issue.state === 'open' ? 'open' : 'closed'}` }, ic('issue'), issue.state === 'open' ? 'Open' : 'Closed'), el('span', { class: 'muted' }, el('b', { style: 'color:var(--ink)', text: issue.user.login }), ' opened this ', when(issue.created_at), ` · ${plural(issue.comments, 'comment')}`)),
@@ -293,6 +302,7 @@ async function mergeBox(r, p, statuses) {
 route(/^\/([^/]+)\/([^/]+)\/pulls?\/(\d+)(?:\/(commits|checks|files))?$/, async ({ m, current }) => {
   if (m[0].includes('/pulls/')) { go(m[0].replace('/pulls/', '/pull/'), true); return; }
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'pulls');
   const n = m[3], tab = m[4] || '';
   const p = await api(`/repos/${r.full_name}/pulls/${n}`);
@@ -305,6 +315,7 @@ route(/^\/([^/]+)\/([^/]+)\/pulls?\/(\d+)(?:\/(commits|checks|files))?$/, async 
     const issue = await api(`/repos/${r.full_name}/issues/${n}`);
     const close = r.permissions?.push && p.state === 'open' && !p.merged ? el('button', { class: 'btn', text: 'Close pull request', onclick: async () => { await api(`/repos/${r.full_name}/pulls/${n}`, { method: 'PATCH', body: { state: 'closed' } }); go(location.pathname, true); } })
       : r.permissions?.push && p.state === 'closed' && !p.merged ? el('button', { class: 'btn', text: 'Reopen', onclick: async () => { await api(`/repos/${r.full_name}/pulls/${n}`, { method: 'PATCH', body: { state: 'open' } }); go(location.pathname, true); } }) : null;
+    if (!current()) return;
     put(main(), ...head, el('div', { class: 'two' },
       el('div', {}, ...await timeline(r, n, { ...issue, body: p.body }), await mergeBox(r, p, statuses), el('div', { style: 'height:20px' }), await commentBox(r, n, close ? [close] : [])),
       await sidebar(r, n, issue, p)));
@@ -312,6 +323,7 @@ route(/^\/([^/]+)\/([^/]+)\/pulls?\/(\d+)(?:\/(commits|checks|files))?$/, async 
   }
   if (tab === 'commits') {
     const cs = await api(`/repos/${r.full_name}/pulls/${n}/commits${q({ limit: 250, stat: false, verification: false, files: false })}`);
+    if (!current()) return;
     put(main(), ...head, el('div', { class: 'box list' }, ...cs.map((c) => el('div', { class: 'item' },
       el('div', { style: 'flex:1;min-width:0' }, el('a', { class: 't', href: `/${r.full_name}/commit/${c.sha}`, text: firstLine(c.commit.message) }), el('div', { class: 'sub hrow', style: 'gap:6px' }, avatar(c.author), c.author?.login || c.commit.author.name, ' ', when(c.commit.author.date))),
       el('a', { class: 'btn mono plain', href: `/${r.full_name}/commit/${c.sha}`, text: short(c.sha) })))));
@@ -322,6 +334,7 @@ route(/^\/([^/]+)\/([^/]+)\/pulls?\/(\d+)(?:\/(commits|checks|files))?$/, async 
     for (const s of statuses.statuses || []) byCtx.set(s.context, s);
     const rows = [...byCtx.values()].sort((a, b) => a.context.localeCompare(b.context));
     const runUrl = rows.map((s) => runLink(s.target_url)).find((u) => u?.includes('/actions/runs/'));
+    if (!current()) return;
     put(main(), ...head, el('div', { class: 'box' },
       el('header', {}, statusDot(statuses.state), el('b', { text: rows.length ? `Checks for ${short(p.head.sha)}` : 'No checks ran' }), el('span', { class: 'spacer' }), runUrl ? el('a', { class: 'btn', href: runUrl.split('?')[0], text: 'Open the run' }) : null),
       el('div', { class: 'list' }, ...rows.map((s) => el('a', { href: runLink(s.target_url) || '#' }, statusDot(s.status), el('span', { text: jobName(s.context) }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: s.description || '' }))))));
@@ -388,6 +401,7 @@ route(/^\/([^/]+)\/([^/]+)\/pulls?\/(\d+)(?:\/(commits|checks|files))?$/, async 
   holder.replaceChildren(...diff.render(files, { mode: mode(), viewed, talk }));
   const fileList = el('aside', { class: 'box tree', 'aria-label': 'Files' }, el('div', { class: 'small muted', style: 'padding:4px 8px', text: plural(files.length, 'file') }),
     ...files.map((f, i) => el('a', { href: `#diff-${i}`, title: f.to }, ic('file'), el('span', { style: 'overflow:hidden;text-overflow:ellipsis', text: (f.to || f.from).split('/').pop() }), el('span', { class: 'adds small', text: ` +${f.adds}` }), el('span', { class: 'dels small', text: ` −${f.dels}` }))));
+  if (!current()) return;
   put(main(), ...head,
     el('div', { class: 'hrow gap' }, diff.summary(files), el('span', { class: 'spacer' }), count, seg),
     el('div', { class: 'withtree' }, fileList, holder));
@@ -397,6 +411,7 @@ route(/^\/([^/]+)\/([^/]+)\/pulls?\/(\d+)(?:\/(commits|checks|files))?$/, async 
 
 route(/^\/([^/]+)\/([^/]+)\/compare(?:\/(.+?)\.\.\.(.+))?$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'pulls');
   setTitle('New pull request', r.full_name);
   const { branches } = await refs(r);
@@ -425,6 +440,7 @@ route(/^\/([^/]+)\/([^/]+)\/compare(?:\/(.+?)\.\.\.(.+))?$/, async ({ m, current
   };
   const w = await whoami();
   const files = cmp.files || [];
+  if (!current()) return;
   put(main(), 
     el('h1', { class: 'h1 gap', text: 'New pull request' }), top,
     existing ? el('div', { class: 'box gap', style: 'padding:12px 16px' }, 'There is already one for these branches: ', el('a', { href: `/${r.full_name}/pull/${existing.number}`, text: `#${existing.number} ${existing.title}` }))

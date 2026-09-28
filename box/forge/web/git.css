@@ -192,10 +192,11 @@ textarea.write { min-height: 110px; resize: vertical; }
 .jobs a[aria-current="page"] { background: var(--line-2); font-weight: 600; }
 .jobs a:hover { background: var(--sunk); text-decoration: none !important; }
 .dag { position: relative; padding: 24px; overflow-x: auto; background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 16px 16px; border-radius: 0 0 4px 4px; }
-.dag .cols { display: flex; gap: 56px; align-items: center; position: relative; z-index: 1; min-width: max-content; }
-.dag .col { display: grid; gap: 14px; }
+.dag .cols { display: flex; gap: 40px; align-items: center; position: relative; z-index: 1; }
+/* columns share the width and only scroll sideways once each is as narrow as it can be */
+.dag .col { display: grid; gap: 14px; flex: 1 1 0; min-width: 160px; max-width: 230px; }
 .dag .grp { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); margin-bottom: -6px; }
-.job { width: 230px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
+.job { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
 .job > a, .job > div { display: flex; gap: 8px; align-items: center; padding: 8px 10px; color: var(--ink) !important; }
 .job > * + * { border-top: 1px solid var(--line-2); }
 .job > a:hover { background: var(--sunk); text-decoration: none !important; }
@@ -263,3 +264,21 @@ mark { background: var(--busy-bg); color: inherit; border-radius: 2px; }
 .linenote > header { font-size: 13px; }
 .linenote .body { padding: 10px 14px; }
 .gitpage input.write, .gitpage textarea.write { width: 100%; }
+
+/* something is being asked: a line along the top, only if it takes a moment */
+body.loading::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 50;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  opacity: 0;
+  animation: gload 1s linear 150ms infinite, gshow 0s linear 150ms forwards;
+}
+@keyframes gload { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@keyframes gshow { to { opacity: 1; } }

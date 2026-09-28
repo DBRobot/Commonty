@@ -1,22 +1,40 @@
 // Actions: the runs, and one run as a graph of its jobs - read from the
 // workflow files' `needs:` - or as its jobs and their logs, both live.
 
-import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, setTitle, short, pager } from './git-core.js';
+import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, setTitle, short, pager, warmers } from './git-core.js';
 import { repo, header } from './git-repo.js';
 
 const main = () => app();
 const DONE = ['success', 'failure', 'cancelled', 'skipped'];
+
+// how long a job took, or has taken so far: the running ones count up
+function took(j) {
+  if (!j?.started) return el('span', { class: 'took' });
+  const t = el('span', { class: 'took', 'data-start': j.started });
+  if (j.ended) t.dataset.end = j.ended;
+  tickOne(t);
+  return t;
+}
+function tickOne(t) {
+  const end = t.dataset.end ? new Date(t.dataset.end) : Date.now();
+  t.textContent = duration(Math.max(0, end - new Date(t.dataset.start)));
+}
+setInterval(() => document.querySelectorAll('.took[data-start]:not([data-end])').forEach(tickOne), 1000);
 const ns = (d) => (d > 1e9 ? d / 1e6 : d); // the forge gives nanoseconds
 
 // ---- the runs
 
+const runsData = (r, page = 1) => api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 25 })}`);
+warmers.actions = (r) => runsData(r);
+
 route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'actions');
   setTitle('Actions', r.full_name);
   const page = Number(params.get('page') || 1);
   const workflow = params.get('workflow') || '';
-  const { workflow_runs: runs = [], total_count: total = 0 } = await api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 25 })}`);
+  const { workflow_runs: runs = [], total_count: total = 0 } = await runsData(r, page);
   if (!current()) return;
   const flows = [...new Set(runs.map((x) => x.workflow_id))].sort();
   const shown = workflow ? runs.filter((x) => x.workflow_id === workflow) : runs;
@@ -25,6 +43,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
     el('div', { style: 'flex:1;min-width:0' }, el('div', { class: 't', text: x.title }),
       el('div', { class: 'sub' }, `Run ${x.index_in_repo} · ${x.workflow_id} · ${x.prettyref || ''} · ${x.event} · `, x.trigger_user?.login || '', ' · ', el('span', { class: 'mono', text: short(x.commit_sha) }))),
     el('div', { class: 'small muted', style: 'text-align:right' }, when(x.created), el('br'), x.status === 'running' ? 'running' : x.duration ? duration(ns(x.duration)) : x.status));
+  if (!current()) return;
   put(main(), el('div', { class: 'two left' },
     el('aside', { class: 'jobs' },
       el('a', { href: `/${r.full_name}/actions`, 'aria-current': !workflow ? 'page' : null, text: 'All runs' }),
@@ -56,10 +75,10 @@ async function runByIndex(r, index) {
 
 // the jobs of the run, from the statuses it posted on its commit: each
 // names its job and links to it by position
-async function jobsOf(r, run) {
+async function jobsOf(r, run, fresh = false) {
   const all = [];
   for (let page = 1; page <= 4; page++) {
-    const s = await api(`/repos/${r.full_name}/commits/${run.commit_sha}/statuses${q({ page, limit: 50 })}`).catch(() => []);
+    const s = await api(`/repos/${r.full_name}/commits/${run.commit_sha}/statuses${q({ page, limit: 50 })}`, { fresh }).catch(() => []);
     all.push(...s);
     if (s.length < 50) break;
   }
@@ -68,7 +87,16 @@ async function jobsOf(r, run) {
     const m = (s.target_url || '').match(/\/actions\/runs\/(\d+)\/jobs\/(\d+)/);
     if (!m || Number(m[1]) !== run.index_in_repo) continue;
     const name = s.context.replace(/ \((pull_request|push|schedule|workflow_dispatch)\)$/, '');
-    jobs.set(Number(m[2]), { index: Number(m[2]), name, leaf: name.split(' / ').pop(), state: s.status, description: s.description });
+    const prev = jobs.get(Number(m[2]));
+    // when it began and ended, from the statuses the forge posted as it went
+    const started = /started running/i.test(s.description || '') ? s.created_at : prev?.started;
+    const ended = s.status !== 'pending' ? s.created_at : null;
+    // the forge says pending for waiting, blocked and running alike: its
+    // words tell them apart, and only a job a runner has picked up is running
+    const state = s.status !== 'pending' ? s.status
+      : /started running/i.test(s.description || '') ? 'running'
+      : /blocked/i.test(s.description || '') ? 'blocked' : 'waiting';
+    jobs.set(Number(m[2]), { index: Number(m[2]), name, leaf: name.split(' / ').pop(), state, description: s.description, started, ended });
   }
   return [...jobs.values()].sort((a, b) => a.index - b.index);
 }
@@ -163,7 +191,7 @@ function rollup(jobs) {
   const s = jobs.map((j) => j.state);
   if (s.some((x) => x === 'failure' || x === 'error')) return 'failure';
   if (s.some((x) => x === 'running')) return 'running';
-  if (s.some((x) => x === 'pending' || x === 'waiting' || x === 'blocked')) return 'pending';
+  if (s.some((x) => x === 'pending' || x === 'waiting' || x === 'blocked')) return 'waiting';
   if (s.length && s.every((x) => x === 'success' || x === 'skipped')) return 'success';
   return s[0] || 'waiting';
 }
@@ -186,9 +214,9 @@ function drawGraph(r, run, g, jobs) {
     const cls = `job${state === 'running' ? ' busy' : state === 'failure' ? ' bad' : ''}`;
     const one = js.length === 1 && js[0].leaf === n.id;
     const head = el(one ? 'a' : 'div', one ? { href: `/${r.full_name}/actions/runs/${run.index_in_repo}${q({ job: js[0].index })}` } : {},
-      statusDot(state), el('span', { class: 't', text: n.id }), el('small', { text: js.length > 1 ? `${js.filter((j) => DONE.includes(j.state)).length} of ${js.length}` : js[0]?.description?.replace(/^(Successful|Failure|Has been cancelled) in /i, '') || '' }));
+      statusDot(state), el('span', { class: 't', text: n.id }), js.length > 1 ? el('small', { text: `${js.filter((j) => DONE.includes(j.state)).length} of ${js.length}` }) : el('small', {}, js[0]?.started ? took(js[0]) : js[0] ? (js[0].state === 'blocked' ? 'blocked' : DONE.includes(js[0].state) ? '' : 'waiting') : ''));
     return el('div', { class: cls, 'data-id': n.id }, head,
-      ...(js.length > 1 || (js.length === 1 && !one) ? js.map((j) => el('a', { class: 'sub', href: `/${r.full_name}/actions/runs/${run.index_in_repo}${q({ job: j.index })}` }, statusDot(j.state), el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: j.leaf.replace(`${n.id} `, '') || j.leaf })) ) : []));
+      ...(js.length > 1 || (js.length === 1 && !one) ? js.map((j) => el('a', { class: 'sub', href: `/${r.full_name}/actions/runs/${run.index_in_repo}${q({ job: j.index })}` }, statusDot(j.state), el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: j.leaf.replace(`${n.id} `, '') || j.leaf }), el('small', {}, took(j))) ) : []));
   };
   const colEls = [...cols.keys()].sort((a, b) => a - b).map((k) => {
     const groups = [...new Set(cols.get(k).map((n) => n.group))];
@@ -209,7 +237,8 @@ function drawGraph(r, run, g, jobs) {
     }).join('');
   };
   requestAnimationFrame(drawEdges);
-  addEventListener('resize', drawEdges);
+  const onResize = () => (dag.isConnected ? drawEdges() : removeEventListener('resize', onResize));
+  addEventListener('resize', onResize);
   return dag;
 }
 
@@ -236,6 +265,7 @@ async function attemptOf(r, run, job) {
 
 route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m, params, current }) => {
   const r = await repo(m[1], m[2]);
+  if (!current()) return;
   header(r, 'actions');
   const index = Number(m[3]);
   const jobParam = params.get('job') ?? m[4];
@@ -256,6 +286,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
   const seg = el('span', { class: 'gseg', role: 'group', 'aria-label': 'View' },
     el('a', { class: 'btn', href: `/${r.full_name}/actions/runs/${index}`, 'aria-pressed': String(view === 'graph'), text: 'Graph' }),
     el('a', { class: 'btn', href: `/${r.full_name}/actions/runs/${index}${q({ job: jobs.find((j) => j.state === 'failure')?.index ?? jobs.find((j) => j.state === 'running')?.index ?? jobs[0]?.index ?? 0 })}`, 'aria-pressed': String(view === 'log'), text: 'Jobs and logs' }));
+  if (!current()) return;
   put(main(), 
     el('div', { class: 'hrow gap' }, el('a', { href: `/${r.full_name}/actions`, text: '← All runs' }), el('h1', { class: 'h1', style: 'font-size:19px', text: `Run ${index} · ${run.title}` }), el('span', { class: 'spacer' }), seg),
     summary, pane);
@@ -264,13 +295,20 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
   let timer = null;
   const alive = () => current() && pane.isConnected;
   if (view === 'graph') {
-    const draw = () => pane.replaceChildren(el('div', { class: 'box' },
+    // redrawn every few seconds while it runs: where it was scrolled to stays
+    const draw = () => {
+      const was = pane.querySelector('.dag');
+      const x = was?.scrollLeft || 0;
+      pane.replaceChildren(el('div', { class: 'box' },
       el('header', {}, el('b', { text: run.workflow_id }), el('span', { class: 'small muted', text: `on: ${run.event}` }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: 'a job starts when every job before it has passed' })),
       g ? drawGraph(r, run, g, jobs) : el('div', { class: 'empty', text: 'The workflow file could not be read; the jobs are under Jobs and logs.' })));
+      const now = pane.querySelector('.dag');
+      if (now) now.scrollLeft = x;
+    };
     draw();
     const tick = async () => {
       if (!alive() || DONE.includes(run.status)) return;
-      [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`), jobsOf(r, run)]);
+      [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`, { fresh: true }), jobsOf(r, run, true)]);
       if (!alive()) return;
       drawSummary();
       draw();
@@ -283,14 +321,14 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
   // jobs and a log
   const job = Number(jobParam);
   const current_ = jobs.find((j) => j.index === job);
-  const side = el('aside', { class: 'jobs box', style: 'padding:8px' }, ...jobs.map((j) => el('a', { href: `/${r.full_name}/actions/runs/${index}${q({ job: j.index })}`, 'aria-current': j.index === job ? 'page' : null }, statusDot(j.state), el('span', { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: j.leaf }))));
+  const side = el('aside', { class: 'jobs box', style: 'padding:8px' }, ...jobs.map((j) => el('a', { href: `/${r.full_name}/actions/runs/${index}${q({ job: j.index })}`, 'aria-current': j.index === job ? 'page' : null }, statusDot(j.state), el('span', { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: j.leaf }), el('small', { class: 'muted' }, took(j)))));
   const log = el('div', { class: 'log' }, el('div', { class: 't', text: 'Loading the log…' }));
   const follow = el('input', { type: 'checkbox', checked: true });
   const attempt = await attemptOf(r, run, job);
   const url = `/${r.full_name}/actions/runs/${index}/jobs/${job}/attempt/${attempt}/logs`;
   pane.replaceChildren(el('div', { class: 'two left', style: 'grid-template-columns:280px minmax(0,1fr)' }, side,
     el('div', { class: 'box', style: 'min-width:0' },
-      el('header', {}, statusDot(current_?.state), el('b', { text: current_?.leaf || `Job ${job}` }), el('span', { class: 'muted small', text: current_?.description || '' }), el('span', { class: 'spacer' }), el('label', { class: 'small hrow', style: 'gap:4px' }, follow, 'Follow'), el('a', { class: 'btn plain', href: url, target: '_blank', rel: 'noopener', text: 'Raw' })),
+      el('header', {}, statusDot(current_?.state), el('b', { text: current_?.leaf || `Job ${job}` }), el('span', { class: 'muted small' }, current_?.started ? took(current_) : current_?.description || ''), el('span', { class: 'spacer' }), el('label', { class: 'small hrow', style: 'gap:4px' }, follow, 'Follow'), el('a', { class: 'btn plain', href: url, target: '_blank', rel: 'noopener', text: 'Raw' })),
       log)));
   let shown = 0;
   const pull = async () => {
@@ -304,7 +342,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
       shown = src.length;
       if (follow.checked) log.scrollTop = log.scrollHeight;
     }
-    jobs = await jobsOf(r, run);
+    jobs = await jobsOf(r, run, true);
     const me = jobs.find((j) => j.index === job);
     if (me && !DONE.includes(me.state)) timer = setTimeout(pull, 3000);
   };

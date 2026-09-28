@@ -3,7 +3,7 @@
 // keys, labels and milestones, its mirror, and the careful things.
 
 import { put, app, el, ic, api, q, when, ago, plural, avatar, route, go, toast, setTitle, pop } from './git-core.js';
-import { repo, header, forget } from './git-repo.js';
+import { repo, header, forget, fleetRepoName } from './git-repo.js';
 
 const main = () => app();
 const PANES = [
@@ -22,13 +22,15 @@ const delBtn = (what, fn) => {
   return b;
 };
 
-route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m }) => {
+route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2], true);
+  if (!current()) return;
   header(r, 'settings');
   const pane = m[3] || 'general';
   setTitle('Settings', r.full_name);
   if (!r.permissions?.admin) { put(main(), el('div', { class: 'box empty', text: 'Only the people who run this repository see its settings.' })); return; }
   const body = el('div', { style: 'min-width:0' });
+  if (!current()) return;
   put(main(), el('div', { class: 'settings' },
     el('nav', {}, ...PANES.map(([k, t]) => el('a', { href: `/${r.full_name}/settings/${k}`, 'aria-current': pane === k ? 'page' : null, style: k === 'careful' ? 'color:var(--bad)' : null, text: t }))),
     body));
@@ -131,7 +133,7 @@ route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m }) => {
     const tagWho = el('input', { placeholder: 'who may make them: names, comma separated', 'aria-label': 'Who may make them' });
     const tagForm = el('form', { class: 'hrow', style: 'padding:12px 14px' }, tagName, tagWho, el('button', { class: 'btn', type: 'submit', text: 'Protect these tags' }));
     tagForm.onsubmit = async (e) => { e.preventDefault(); await api(`${A}/tag_protections`, { method: 'POST', body: { name_pattern: tagName.value, whitelist_usernames: tagWho.value.split(',').map((s) => s.trim()).filter(Boolean) } }); reload(); };
-    const fleetRepo = await fetch('/fleet-repo.json').then((x) => (x.ok ? x.json() : {})).then((x) => x.repo).catch(() => '');
+    const fleetRepo = await fleetRepoName();
     body.append(el('h2', { class: 'ph', text: 'Rulesets' }),
       el('p', { class: 'muted small', text: 'Rules for branches and tags: what a change needs before it lands, and who may skip that.' }),
       fleetRepo === r.full_name ? el('p', { class: 'box', style: 'padding:10px 14px;border-left:4px solid var(--busy)', text: 'The rule for main is also written in the fleet\'s Nix (nix/modules/forge/forgejo.nix), which sets it again on every release: change it there to keep a change.' }) : null,
