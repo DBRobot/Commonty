@@ -586,6 +586,10 @@
               # common turns checks off for the packages; from 2026-09-23
               # until this line the tests check inherited that and ran none
               doCheck = true;
+              # repo.rs runs git with git-remote-dd, another package's binary
+              # that cargo test never rebuilds: without this it found the
+              # dependency build's stand-in
+              preCheck = "cargoWithProfile build ${workspaceArgs}";
               pname = "dd";
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;
