@@ -445,7 +445,20 @@
           clippy = craneLib.cargoClippy (
             common
             // {
-              inherit cargoArtifacts;
+              # Its own dependencies, checked and never built: clippy needs
+              # only their metadata. Sharing the tests' cache made lint wait
+              # on - or, cold, repeat - a full release and test build of
+              # every dependency, three compiles where one check will do.
+              cargoArtifacts = craneLib.buildDepsOnly (
+                common
+                // {
+                  pname = "dd-clippy-deps";
+                  version = "0.1.0";
+                  cargoExtraArgs = workspaceArgs;
+                  cargoBuildCommand = "true";
+                  doCheck = false;
+                }
+              );
               pname = "dd";
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;
