@@ -10,6 +10,12 @@ fn env_or(k: &str, d: &str) -> String {
 #[tokio::main]
 async fn main() -> Result<()> {
     let full = env_or("VERIFY_ROLE", "full") != "directory";
+    // the pages the full gate serves, all read now: a release missing one
+    // does not come up at all (pages::load)
+    if full {
+        let dir = env("VERIFY_PAGES_DIR")?;
+        verify::pages::load(std::path::Path::new(&dir)).context("the pages")?;
+    }
     let cfg = verify::Config {
         bind: env_or("VERIFY_BIND", "127.0.0.1:4181").parse()?,
         dir: env("VERIFY_DIR")?.into(),

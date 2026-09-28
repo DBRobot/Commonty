@@ -16,8 +16,7 @@
         isNormalUser = true;
         extraGroups = [ "wheel" ];
         hashedPasswordFile = toString (
-          pkgs.writeText "console-hash"
-            "$6$cnsltest$TRJuIaBEltCG2Yexl/gXIHaRnqsn62Ednu1JMGl4GZTK46eSS6sCT93nmyVM6Pd.fT6DAbZ75y4YZXkeUReEb0\n"
+          pkgs.writeText "console-hash" "$6$cnsltest$TRJuIaBEltCG2Yexl/gXIHaRnqsn62Ednu1JMGl4GZTK46eSS6sCT93nmyVM6Pd.fT6DAbZ75y4YZXkeUReEb0\n"
         );
       };
       security.sudo.wheelNeedsPassword = false; # as roles/core.nix has it

@@ -93,7 +93,12 @@
                     && (
                       type == "directory"
                       || craneLib.filterCargoSources path type
-                      || builtins.match ".*/(templates|web)/.*" rel != null
+                      || builtins.match ".*/templates/.*" rel != null
+                      # the pages, scripts and styles: the gate reads its own
+                      # from the pages directory at start (pages below), so
+                      # they are not its source; other crates still compile
+                      # theirs in, and the tests read them from the tree
+                      || (name != "verify" && builtins.match ".*/web/.*" rel != null)
                       # where askama looks for templates beyond the crate's own
                       || builtins.match ".*/askama\\.toml" rel != null
                       || appFile
@@ -160,6 +165,62 @@
             in
             go [ ] roots;
           crateSrc = name: roots: srcFor name (crateClosure roots);
+          # What the gate serves as it is - pages, scripts, styles, fonts,
+          # icons - in a directory laid out like the tree, apart from the
+          # gate itself: a page changing rebuilds this and nothing else.
+          pages = pkgs.lib.cleanSourceWith {
+            name = "dd-pages";
+            src = ./.;
+            filter =
+              path: type:
+              let
+                rel = pkgs.lib.removePrefix (toString ./. + "/") (toString path);
+              in
+              (
+                type == "directory"
+                && (
+                  rel == "box"
+                  || builtins.match "box/[^/]+" rel != null
+                  || builtins.match "box/[^/]+/web(/.*)?" rel != null
+                )
+              )
+              || builtins.match "box/[^/]+/web/.*" rel != null;
+          };
+          # What a dependency build sees: the lockfile and the manifests, with
+          # crane's stand-in for every target, and nothing else. Each
+          # dependency cache is keyed on this, so a page, a template, a patch
+          # or our own code changing leaves every one of them as it is; only
+          # the lockfile or a manifest moving rebuilds them. Before, each was
+          # made from its binary's whole tree and a page edit recompiled
+          # every dependency (CI history: page-only runs as slow as
+          # lockfile ones).
+          depsSrc = craneLib.mkDummySrc {
+            src = pkgs.lib.cleanSourceWith {
+              src = ./.;
+              filter =
+                path: type:
+                let
+                  rel = pkgs.lib.removePrefix (toString ./. + "/") (toString path);
+                in
+                builtins.elem rel [
+                  "Cargo.toml"
+                  "Cargo.lock"
+                  "app/Cargo.toml"
+                ]
+                || (
+                  type == "directory"
+                  && (
+                    builtins.elem rel [
+                      "box"
+                      "client"
+                      "app"
+                    ]
+                    || builtins.match "(box|client)/[^/]+" rel != null
+                  )
+                )
+                || builtins.match "(box|client)/[^/]+/Cargo\\.toml" rel != null;
+            };
+          };
           sources = {
             dd = crateSrc "dd" [
               "client/cli"
@@ -281,6 +342,7 @@
             wasmCommon
             // {
               pname = "dd-web-deps";
+              dummySrc = depsSrc;
               version = "0.1.0";
             }
           );
@@ -315,12 +377,21 @@
           # and nothing else in the workspace uses it. The app is checked
           # on its own (checks.clippy-app), only when it changed.
           workspaceArgs = "--locked --workspace --exclude commonty";
+          # The tests build unoptimised and without debug info: a release
+          # build of every dependency cost most of the test job, only to run
+          # them once. Only the tests use this cache; binaries stay release.
+          testProfile = {
+            CARGO_PROFILE = "dev";
+            CARGO_PROFILE_DEV_DEBUG = "false";
+          };
           cargoArtifacts = craneLib.buildDepsOnly (
             common
             // {
               pname = "dd-deps";
+              dummySrc = depsSrc;
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;
+              inherit (testProfile) CARGO_PROFILE CARGO_PROFILE_DEV_DEBUG;
             }
           );
           # and one dependency build per binary, with that binary's own
@@ -344,6 +415,7 @@
                   // {
                     inherit cargoExtraArgs;
                     pname = "${pname}-deps";
+                    dummySrc = depsSrc;
                     version = "0.1.0";
                   }
                 );
@@ -356,12 +428,14 @@
             // {
               src = sources.app;
               pname = "commonty-deps";
+              dummySrc = depsSrc;
               version = "0.1.0";
               cargoExtraArgs = "-p commonty";
             }
           );
         in
         {
+          inherit pages;
           # the cli, and `git remote add origin dd::...`, which dd repo calls too
           # `dd media` mounts libraries with rclone; the binary knows where it is
           dd = (crate "dd" sources.dd "-p dd -p git-remote-dd").overrideAttrs (old: {
@@ -480,6 +554,7 @@
                 common
                 // {
                   pname = "dd-clippy-deps";
+                  dummySrc = depsSrc;
                   version = "0.1.0";
                   cargoExtraArgs = workspaceArgs;
                   cargoBuildCommand = "true";
@@ -507,6 +582,14 @@
             common
             // {
               inherit cargoArtifacts;
+              inherit (testProfile) CARGO_PROFILE CARGO_PROFILE_DEV_DEBUG;
+              # common turns checks off for the packages; from 2026-09-23
+              # until this line the tests check inherited that and ran none
+              doCheck = true;
+              # repo.rs runs git with git-remote-dd, another package's binary
+              # that cargo test never rebuilds: without this it found the
+              # dependency build's stand-in
+              preCheck = "cargoWithProfile build ${workspaceArgs}";
               pname = "dd";
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;

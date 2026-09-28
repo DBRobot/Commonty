@@ -35,7 +35,13 @@ in
     ];
     description = "the subdomains the gate stands in front of; every one gets the sign-in redirect and the auth subrequest";
   };
+  options.dd.verify.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = "Run the verifier. Every box does; a VM test of something the gate plays no part in turns it off, so a change to the gate does not rerun it.";
+  };
   options.dd.verify.role = lib.mkOption {
+
     type = lib.types.enum [
       "full"
       "directory"
@@ -231,7 +237,7 @@ in
     default = null;
   };
 
-  config = {
+  config = lib.mkIf cfg.enable {
     users.users.${user} = {
       isSystemUser = true;
       group = user;
@@ -298,6 +304,9 @@ in
         VERIFY_MEMBERS = builtins.toJSON config.dd.members;
         # our Rust for the browser, next to the pages that use it
         VERIFY_WEB_DIR = "${self.packages.${pkgs.stdenv.hostPlatform.system}.web}";
+        # the pages, scripts, styles and icons, apart from the gate program:
+        # a page edit is a new directory here, not a new gate
+        VERIFY_PAGES_DIR = "${self.packages.${pkgs.stdenv.hostPlatform.system}.pages}";
         VERIFY_HOME = builtins.toJSON (
           map (t: {
             inherit (t)

@@ -9,6 +9,9 @@
   name = "games";
   node.specialArgs = { inherit self; };
   nodes.box = {
+    # the gate plays no part here: without it, a change to the gate
+    # is not a reason to run this again
+    dd.verify.enable = false;
     imports = [
       ./box.nix
       ../modules/games/games.nix
@@ -53,7 +56,10 @@
     dd.box.tailnet = "100.64.0.9";
     # the test framework leaves the switch script out of a test box
     system.switch.enable = true;
-    environment.systemPackages = [ pkgs.curl pkgs.jq ];
+    environment.systemPackages = [
+      pkgs.curl
+      pkgs.jq
+    ];
     virtualisation.memorySize = 4096;
     dd.games.memoryMiB = 1536;
     virtualisation.cores = 2;
