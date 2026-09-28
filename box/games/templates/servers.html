@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Your servers{% endblock %}
+
+{% block main %}
+{% if !guest %}<p><a href="/">← Games</a></p>{% endif %}
+<div class="top"><h1>Your servers</h1></div>
+
+{% if let Some(n) = notice %}<p class="note">{{ n }}</p>{% endif %}
+
+{% if guest %}
+<section class="guest-note">
+  <p>You're a guest here: you join the servers your friends invite you to.</p>
+</section>
+{% else %}
+<section>
+  <h2>Hosting</h2>
+  {% if mine.is_empty() %}
+  <p class="spec">Nothing yet. <a href="/">Pick a game</a> to start a server.</p>
+  {% else %}
+  <ul class="servers">{% for s in mine %}{% include "server_card.html" %}{% endfor %}</ul>
+  {% endif %}
+</section>
+{% endif %}
+
+<section>
+  <h2>Invited to</h2>
+  {% if others.is_empty() %}
+  <p class="spec">Nothing yet. When a friend invites you to a server, it appears here with the address to join.</p>
+  {% else %}
+  <ul class="servers">{% for s in others %}{% include "server_card.html" %}{% endfor %}</ul>
+  {% endif %}
+</section>
+
+{% if !worlds.is_empty() %}
+<section>
+  <h2>Saved worlds</h2>
+  <ul class="servers">
+    {% for w in worlds %}
+    <li>
+      <div class="server">
+        {% if let Some(c) = w.cover %}<img src="/cover/{{ c }}" alt="" loading="lazy">{% else %}<div class="blank"></div>{% endif %}
+        <div>
+          <h3>{{ w.game_name }}</h3>
+          <p>kept {{ w.when }} · {{ w.files }} files</p>
+          <div class="row" style="margin-top:8px">
+            <form method="post" action="/worlds/{{ w.name }}/start"><button>Start a server with it</button></form>
+            <form method="post" action="/worlds/{{ w.name }}/delete" onsubmit="return confirm('Delete this saved world? There is no undo.')"><button class="quiet">Delete</button></form>
+          </div>
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if guest %}
+<section class="guest-more">
+  <h2>Want to see what else Commonty can do?</h2>
+  <p class="spec">Files, photos, films and more, kept on boxes the people in it own. The demo shows a member's view. Opening it signs you out of your account here; sign back in after.</p>
+  <p><a href="{{ home }}_dd/demo">Try the demo</a></p>
+</section>
+{% endif %}
+{% endblock %}

@@ -3,25 +3,23 @@
 {% block title %}{{ s.name }} server{% endblock %}
 
 {% block main %}
-<p><a href="/">← Games</a></p>
+<p><a href="/servers">← Your servers</a></p>
 
 <div class="panel"><div class="open">
   {% if let Some(game) = s.game %}{% include "cover.html" %}{% else %}<div class="blank"></div>{% endif %}
   <div class="body"{% if busy %} data-live="{{ s.state }}"{% endif %}>
     <h2>{{ s.name }}</h2>
     <p class="desc"><span id="st" class="state {{ s.state }}">{{ s.label }}</span> · {{ s.who }}</p>
-    {# what a player types into the game: the address, and the one port #}
+    {# what a player pastes into the game: the address and its port, as one #}
     <div class="join">
-      <label>Address<span class="copy"><input type="text" readonly value="{{ address }}"><button type="button" class="quiet" data-copy>Copy</button></span></label>
-      {% if let Some(p) = main_port %}
-      <label>Port<span class="copy"><input type="text" readonly value="{{ p.port }}"><button type="button" class="quiet" data-copy>Copy</button></span></label>
-      {% endif %}
+      <label>Address<span class="copy"><input type="text" readonly value="{{ join }}" size="{{ join.len() }}"><button type="button" class="quiet" data-copy>Copy</button></span></label>
     </div>
+    <p class="spec">To join: turn on the network in the Commonty app, then {% if how.is_empty() %}paste the address where the game asks for a server.{% else %}{{ how }}{% endif %}</p>
     {% if !other_ports.is_empty() %}
     <p class="spec">Also open: {% for p in other_ports %}{{ p.port }} ({{ p.label }}){% if !loop.last %}, {% endif %}{% endfor %}</p>
     {% endif %}
     {% if mine && !settings.is_empty() %}<p class="spec">{{ settings }} · only you see this</p>{% endif %}
-    {% if !mine %}<p class="spec">You're invited. Turn on the network in the Commonty app, then connect from the game to the address above. Ask {{ owner }} for the password if it has one.</p>{% endif %}
+    {% if !mine %}<p class="spec">You're invited. Ask {{ owner }} for the password if it has one.</p>{% endif %}
     {% if mine && !demo %}
     <div class="row">
       {% if idle %}

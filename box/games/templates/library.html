@@ -3,62 +3,16 @@
 {% block main %}
 <div class="top">
   <h1>Games</h1>
-  <form class="search" method="get" action="/">
-    <input id="q" name="q" type="search" placeholder="Search {{ count }} games" value="{{ q }}" autocomplete="off">
-  </form>
+  <div class="topright">
+    <a class="yours" href="/servers">Your servers{% if yours > 0 %}<span class="count">{{ yours }}</span>{% endif %}</a>
+    <form class="search" method="get" action="/">
+      <input id="q" name="q" type="search" placeholder="Search {{ count }} games" value="{{ q }}" autocomplete="off" aria-label="Search games">
+    </form>
+  </div>
 </div>
 
 {% if open.is_none() %}{% if let Some(n) = notice %}<p class="note">{{ n }}</p>{% endif %}{% endif %}
 
-{% if guest %}
-<section class="guest-note">
-  <p>You're a guest here: you join the servers your friends invite you to. They show up below once they do.</p>
-</section>
-{% endif %}
-
-{% if !mine.is_empty() %}
-<section>
-  <h2>Your servers</h2>
-  <ul class="servers">{% for s in mine %}{% include "server_card.html" %}{% endfor %}</ul>
-</section>
-{% endif %}
-
-{% if !worlds.is_empty() %}
-<section>
-  <h2>Your saved worlds</h2>
-  <ul class="servers">
-    {% for w in worlds %}
-    <li>
-      <div class="server">
-        {% if let Some(c) = w.cover %}<img src="/cover/{{ c }}" alt="" loading="lazy">{% else %}<div class="blank"></div>{% endif %}
-        <div>
-          <h3>{{ w.game_name }}</h3>
-          <p>kept {{ w.when }} · {{ w.files }} files</p>
-          <div class="row" style="margin-top:8px">
-            <form method="post" action="/worlds/{{ w.name }}/start"><button>Start a server with it</button></form>
-            <form method="post" action="/worlds/{{ w.name }}/delete" onsubmit="return confirm('Delete this saved world? There is no undo.')"><button class="quiet">Delete</button></form>
-          </div>
-        </div>
-      </div>
-    </li>
-    {% endfor %}
-  </ul>
-</section>
-{% endif %}
-
-{% if !others.is_empty() %}
-<section>
-  <h2>Invited to</h2>
-  <ul class="servers">{% for s in others %}{% include "server_card.html" %}{% endfor %}</ul>
-</section>
-{% else if guest %}
-<section>
-  <h2>Invited to</h2>
-  <p class="spec">Nothing yet. When a friend invites you to a server, it appears here with the address to join.</p>
-</section>
-{% endif %}
-
-{% if !guest %}
 <section>
   <ul class="grid">
     {% for game in games %}
@@ -72,7 +26,6 @@
   </ul>
   <p id="none" class="empty" hidden>No game by that name here.</p>
 </section>
-{% endif %}
 
 {% if let Some(o) = open %}
 {# the game, opened over the library #}

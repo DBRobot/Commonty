@@ -1,11 +1,13 @@
-{# one server in the rows above the library #}
+{# one server on Your servers: the card opens its page, the address copies from here #}
 <li>
-  <a class="server" href="/server/{{ s.id }}">
-    {% if let Some(game) = s.game %}{% include "cover.html" %}{% else %}<div class="blank"></div>{% endif %}
+  <div class="server srv">
+    <a class="cover" href="/server/{{ s.id }}" tabindex="-1" aria-hidden="true">{% if let Some(game) = s.game %}{% include "cover.html" %}{% else %}<div class="blank"></div>{% endif %}</a>
     <div>
-      <h3>{{ s.name }}</h3>
+      <h3><a href="/server/{{ s.id }}">{{ s.name }}</a></h3>
       <p><span class="state {{ s.state }}">{{ s.label }}</span> · {{ s.who }}</p>
-      {% if let Some(a) = s.address %}<span class="addr">{{ a }}</span>{% endif %}
+      {% if s.running %}{% if let Some(a) = s.address %}
+      <span class="copy"><input type="text" readonly value="{{ a }}" size="{{ a.len() }}" aria-label="Address"><button type="button" class="quiet" data-copy>Copy</button></span>
+      {% endif %}{% endif %}
     </div>
-  </a>
+  </div>
 </li>
