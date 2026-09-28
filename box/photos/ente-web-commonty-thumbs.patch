@@ -1,50 +1,68 @@
 diff --git a/apps/photos/src/components/FileList.tsx b/apps/photos/src/components/FileList.tsx
-index aed27f3..0c4523c 100644
+index aed27f3..c205af4 100644
 --- a/apps/photos/src/components/FileList.tsx
 +++ b/apps/photos/src/components/FileList.tsx
-@@ -1248,18 +1248,35 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
+@@ -1215,7 +1215,6 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
+     isFav,
+     emailByUserID,
+     activeCollectionID,
+-    showPlaceholder,
+     onClick,
+     onSelect,
+     onHover,
+@@ -1248,20 +1247,45 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
          };
      }, [selected, onSelect, isLongPressing]);
  
-+    // Commonty: a picture in view is fetched at once. One in the rows drawn
-+    // ahead waits a moment first, and is never fetched if it is scrolled
-+    // out of the list in that moment: pictures flung past no longer hold
-+    // up the ones on screen.
++    // Commonty: a picture is fetched once it has stayed put a moment - in
++    // view, a tenth of a second; in the rows drawn ahead, longer the further
++    // off it is - and never if it leaves the list first. A fetch that has
++    // begun cannot be taken back, so pictures flung past must not start
++    // one, or the ones where the scrolling stops wait behind them. This
++    // does not lean on the list's own "still scrolling" flag, which a
++    // webview may leave set: what is still in the list after the wait is
++    // what the person is looking at, or about to.
 +    const tileRef = useRef<HTMLDivElement | null>(null);
 +
      useEffect(() => {
          let didCancel = false;
  
--        void downloadManager
++        const r = tileRef.current?.getBoundingClientRect();
++        const h = window.innerHeight || 1;
++        const away = !r ? 0 : r.bottom < 0 ? -r.bottom / h : r.top > h ? (r.top - h) / h : 0;
++        const wait = away === 0 ? 120 : 250 + Math.min(away, 10) * 150;
++
++        // what is already on this device shows at once, whatever the wait
+         void downloadManager
 -            .renderableThumbnailURL(file, showPlaceholder)
 -            .then((url) => !didCancel && setImageURL(url))
 -            .catch((e: unknown) => {
 -                log.warn("Failed to fetch thumbnail", e);
 -            });
-+        const load = () =>
++            .renderableThumbnailURL(file, true)
++            .then((url) => !didCancel && url && setImageURL(url))
++            .catch(() => undefined);
++
++        const timer = setTimeout(() => {
++            if (didCancel) return;
 +            void downloadManager
-+                .renderableThumbnailURL(file, showPlaceholder)
++                .renderableThumbnailURL(file)
 +                .then((url) => !didCancel && setImageURL(url))
 +                .catch((e: unknown) => {
 +                    log.warn("Failed to fetch thumbnail", e);
 +                });
-+
-+        const r = tileRef.current?.getBoundingClientRect();
-+        const inView = !r || (r.bottom > 0 && r.top < window.innerHeight);
-+        const timer = inView
-+            ? undefined
-+            : setTimeout(() => {
-+                  if (!didCancel) load();
-+              }, 250);
-+        if (inView) load();
++        }, wait);
  
          return () => {
              didCancel = true;
-+            if (timer) clearTimeout(timer);
++            clearTimeout(timer);
          };
-     }, [file, showPlaceholder]);
+-    }, [file, showPlaceholder]);
++    }, [file]);
  
-@@ -1297,6 +1314,7 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
+     const handleClick = () => {
+         if (selectOnClick) {
+@@ -1297,6 +1321,7 @@ const FileThumbnail: React.FC<FileThumbnailProps> = ({
      return (
          <FileThumbnail_
              key={`thumb-${file.id}}`}
