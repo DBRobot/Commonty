@@ -22,8 +22,14 @@ let
     assert lib.assertMsg (pkgs.vaultwarden.version == version)
       "vaultwarden is ${pkgs.vaultwarden.version} in nixpkgs, pinned to ${version}: check the release notes, then update modules/vault/vaultwarden.nix";
     (pkgs.vaultwarden.override { dbBackend = "postgresql"; }).overrideAttrs (_: {
-      # files (attachments, sends) in garage, not on this laptop's disk
-      buildFeatures = [
+      # files (attachments, sends) in garage, not on this laptop's disk.
+      # buildRustPackage turns buildFeatures into these when the package is
+      # made, so an override has to set them directly
+      cargoBuildFeatures = [
+        "postgresql"
+        "s3"
+      ];
+      cargoCheckFeatures = [
         "postgresql"
         "s3"
       ];
