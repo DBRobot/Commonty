@@ -230,6 +230,10 @@
           # crane rebuilt every dependency at once. After changing
           # Cargo.lock: nix run nixpkgs#crate2nix -- generate
           cargoNix = pkgs.callPackage ./Cargo.nix {
+            # cargo's release default: sixteen pieces of each crate compiled
+            # at once. buildRustCrate's is one, which made the first build of
+            # every crate - all ~800 of them - several times slower.
+            buildRustCrateForPkgs = pkgs: pkgs.buildRustCrate.override { defaultCodegenUnits = 16; };
             defaultCrateOverrides = pkgs.defaultCrateOverrides // {
               # askama finds the Photos pages' templates beside the gate's
               verify = _: {
