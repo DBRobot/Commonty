@@ -12,72 +12,65 @@
 }
 
 :root,
-.theme_light {
-  --color-primary-100: 222 236 229;
-  --color-primary-300: 125 176 150;
-  --color-primary-600: 29 92 66;
-  --color-primary-700: 18 61 43;
+.theme_light,
+.theme_dark {
+  /* the two palettes every colour in the web vault is drawn from: its
+     brand blue becomes Commonty green, its blue-grey our greys. Light and
+     dark pick different steps of the same scales, so both follow. */
+  --color-brand-050: #eef6f1;
+  --color-brand-100: #ddede4;
+  --color-brand-200: #bcdccb;
+  --color-brand-300: #8fc4a8;
+  --color-brand-400: #7ccba2;
+  --color-brand-500: #3a9469;
+  --color-brand-600: #2f7d59;
+  --color-brand-700: #1d5c42;
+  --color-brand-800: #123d2b;
+  --color-brand-900: #0e3022;
+  --color-brand-950: #0a2218;
+  --color-brand-950-rgb: 10, 34, 24;
 
-  --color-secondary-100: 227 230 225;
-  --color-secondary-300: 213 217 211;
-  --color-secondary-600: 82 90 85;
-  --color-secondary-700: 26 31 28;
+  --color-gray-050: #eef1f5;
+  --color-gray-100: #e3e6e1;
+  --color-gray-200: #d5d9d3;
+  --color-gray-300: #b7bdb8;
+  --color-gray-400: #858c87;
+  --color-gray-400-rgb: 133, 140, 135;
+  --color-gray-500: #6b746f;
+  --color-gray-600: #525a55;
+  --color-gray-700: #2a313b;
+  --color-gray-800: #171c22;
+  --color-gray-900: #0f1318;
+  --color-gray-950: #0a0d10;
+  --color-gray-950-rgb: 10, 13, 16;
 
-  --color-info-100: 227 236 245;
-  --color-info-600: 29 68 112;
-  --color-info-700: 22 48 79;
-
-  --color-warning-100: 246 236 217;
-  --color-warning-600: 138 90 18;
-  --color-warning-700: 110 71 12;
-
-  --color-background: 255 255 255;
-  --color-background-alt: 238 241 245;
-  --color-background-alt2: 29 68 112;
-  --color-background-alt3: 22 48 79;
-  --color-background-alt4: 18 36 58;
-
-  --color-text-main: 26 31 28;
-  --color-text-muted: 82 90 85;
-  --color-text-contrast: 255 255 255;
-  --color-text-alt2: 255 255 255;
-  --color-text-code: 29 92 66;
-
-  --tw-ring-offset-color: #EEF1F5;
+  --font-sans: "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
+/* the older names some screens still use, space-separated rgb */
+:root,
+.theme_light {
+  --color-primary-100: 221 237 228;
+  --color-primary-300: 143 196 168;
+  --color-primary-600: 29 92 66;
+  --color-primary-700: 18 61 43;
+  --color-background: 255 255 255;
+  --color-background-alt: 238 241 245;
+  --color-text-main: 26 31 28;
+  --color-text-muted: 82 90 85;
+}
 .theme_dark {
-  --color-primary-100: 21 44 34;
-  --color-primary-300: 58 148 105;
+  --color-primary-100: 14 48 34;
+  --color-primary-300: 47 125 89;
   --color-primary-600: 124 203 162;
   --color-primary-700: 168 224 194;
-
-  --color-secondary-100: 34 40 49;
-  --color-secondary-300: 42 49 59;
-  --color-secondary-600: 161 169 179;
-  --color-secondary-700: 229 233 238;
-
-  --color-info-100: 27 40 56;
-  --color-info-600: 156 195 234;
-  --color-info-700: 127 174 221;
-
-  --color-warning-100: 46 38 22;
-  --color-warning-600: 227 183 105;
-  --color-warning-700: 240 205 140;
-
   --color-background: 23 28 34;
   --color-background-alt: 15 19 24;
-  --color-background-alt2: 22 48 79;
-  --color-background-alt3: 18 36 58;
-  --color-background-alt4: 13 26 42;
-
+  --color-background-alt2: 23 28 34;
+  --color-background-alt3: 15 19 24;
+  --color-background-alt4: 10 13 16;
   --color-text-main: 229 233 238;
   --color-text-muted: 161 169 179;
-  --color-text-contrast: 15 19 24;
-  --color-text-alt2: 255 255 255;
-  --color-text-code: 124 203 162;
-
-  --tw-ring-offset-color: #0F1318;
 }
 
 html,
