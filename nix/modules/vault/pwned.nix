@@ -90,7 +90,7 @@ in
 
     # /pwned/range/ABCDE on the vault's host, inside only (the vault's
     # location rules in vaultwarden.nix)
-    services.nginx.virtualHosts."vault.${config.dd.domain}".locations."~ ^/pwned/range/([0-9A-Fa-f]{5})$" =
+    services.nginx.virtualHosts."vault.${config.dd.domain}".locations."~ \"^/pwned/range/([0-9A-Fa-f]{5})$\"" =
       {
         extraConfig =
           lib.optionalString (options.dd ? public && config.dd.public.enable) ''

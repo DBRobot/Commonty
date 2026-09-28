@@ -194,7 +194,8 @@ in
                 ''
                 + extra;
               };
-              uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+              # quoted where used: nginx reads a bare { in a location as a block
+          uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
             in
             {
               # inside: the web vault, with the Commonty bar added to its page;
@@ -228,10 +229,10 @@ in
               # what a Send link needs from outside: open it, ask for its file,
               # fetch the file (ciphertext; the key is in the link's #, which
               # never reaches a server)
-              "~ ^/api/sends/(access/[A-Za-z0-9_-]+|${uuid}/access/file/[a-z0-9]+)$" = toVault ''
+              "~ \"^/api/sends/(access/[A-Za-z0-9_-]+|${uuid}/access/file/[a-z0-9]+)$\"" = toVault ''
                 limit_except POST { deny all; }
               '';
-              "~ ^/api/sends/${uuid}/[a-z0-9]+$" = toVault ''
+              "~ \"^/api/sends/${uuid}/[a-z0-9]+$\"" = toVault ''
                 limit_except GET { deny all; }
               '';
               # the bar's and the Send page's files, and inside, /_dd/me for the bar
