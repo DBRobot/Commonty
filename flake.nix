@@ -221,6 +221,10 @@
                 || builtins.match "(box|client)/[^/]+/Cargo\\.toml" rel != null;
             };
           };
+          # The same, under the name of the source a crate builds from: a
+          # build script may record where it wrote (tauri does), and a cache
+          # made in "source" pointed the app's build in src-app at nothing
+          depsIn = src: pkgs.runCommandLocal src.name { } "cp -r ${depsSrc} $out";
           sources = {
             dd = crateSrc "dd" [
               "client/cli"
@@ -415,7 +419,7 @@
                   // {
                     inherit cargoExtraArgs;
                     pname = "${pname}-deps";
-                    dummySrc = depsSrc;
+                    dummySrc = depsIn source;
                     version = "0.1.0";
                   }
                 );
@@ -428,7 +432,7 @@
             // {
               src = sources.app;
               pname = "commonty-deps";
-              dummySrc = depsSrc;
+              dummySrc = depsIn sources.app;
               version = "0.1.0";
               cargoExtraArgs = "-p commonty";
             }
