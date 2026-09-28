@@ -94,7 +94,7 @@ function card(it, shape) {
     ? [yearOf(it), it.count ? `${it.count} episode${it.count === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
     : shape === 'wide' && p?.of ? `${minutes(p.of - p.at)} left` : String(yearOf(it) || human(it.size));
   b.append(pic, el('span', { class: 't', text: it.label || titleOf(it) }), el('span', { class: 's', text: sub }));
-  b.onclick = () => (it.kind === 'show' ? openShow(it) : play(it, { resume: true }));
+  b.onclick = () => openTitle(it);
   return b;
 }
 
@@ -198,10 +198,12 @@ async function load() {
   }));
 }
 
-// Posters, once per title, a few at a time after the shelves are up. Only
-// the library's owner asks: a reader sees what the owner's devices kept.
+// Posters, once per title, a few at a time after the shelves are up. The
+// owner's are kept in the library; a viewer who only reads it (the demo,
+// a shared library) looks up what the owner has not, and keeps that in
+// this tab (shelf.js keep).
 async function fillIn() {
-  if (!tmdb || lib.reader) return;
+  if (!tmdb) return;
   // lookUp passes over what it asked recently, and asks again what is due
   for (const it of [...films, ...shows]) {
     try {
@@ -214,29 +216,128 @@ async function fillIn() {
   }
 }
 
-// ---- a show
+// ---- a title, opened
+//
+// A card opens its title over the shelves, as Games opens a game: a band
+// with the poster, what it is, and what to do. A show's seasons and
+// episodes are in the same band, scrolling inside it, so there is no
+// page of its own to go to and come back from.
 
-async function openShow(it) {
-  show = it;
-  $('home').hidden = true;
-  $('show-page').hidden = false;
-  $('actions').hidden = true;
+let opened = null;               // the title in the band
+let openedCard = null;           // the card it was opened from, for the way back
+
+// the page behind the band, and the band behind the player, are out of
+// reach of Tab and of a screen reader
+function syncInert() {
+  const player = !$('player').hidden;
+  for (const e of document.querySelectorAll('main, header.dd-bar')) e.inert = player || !$('ribbon').hidden;
+  $('ribbon').inert = player;
+}
+
+// the episode a show goes on with: the one being watched, or the one
+// after the last finished, or the first
+function nextEpisode(it) {
+  const eps = it.episodes;
+  const watching = eps
+    .filter((e) => { const p = store.progress[e.path]; return p && !p.done && p.at > 30; })
+    .sort((a, b) => (store.progress[b.path].when || '').localeCompare(store.progress[a.path].when || ''))[0];
+  if (watching) return watching;
+  let last = -1;
+  eps.forEach((e, i) => { if (store.progress[e.path]?.done) last = i; });
+  return eps[last + 1] || eps[0];
+}
+
+async function openTitle(it, { at } = {}) {
+  // an episode on a shelf opens its show, at that episode
+  if (it.kind === 'episode') {
+    const s = shows.find((x) => x.name === it.show);
+    return s ? openTitle(s, { at: it }) : play(it, { resume: true });
+  }
+  if ($('ribbon').hidden) openedCard = document.activeElement;
+  opened = it;
+  const isShow = it.kind === 'show';
+  show = isShow ? it : null;
   const k = store.known(it.path) || {};
-  $('show-title').textContent = titleOf(it);
-  $('show-meta').replaceChildren(...[yearOf(it), `${it.count} episode${it.count === 1 ? '' : 's'}`].filter(Boolean).map((m) => el('span', { text: String(m) })));
-  $('show-text').textContent = k.overview || '';
-  paint($('show-poster'), [k.poster, k.still], titleOf(it));
-  $('addep').hidden = !!lib.reader;
-  const seasons = [...new Set(it.episodes.map((e) => e.parsed.season))];
-  const s = seasons.find((n) => it.episodes.some((e) => e.parsed.season === n && !store.progress[e.path]?.done)) ?? seasons[0];
-  $('seasons').replaceChildren(...seasons.map((n) => {
-    const b = el('button', { type: 'button', 'aria-pressed': String(n === s), text: `Season ${n}` });
-    b.onclick = () => season(n);
-    return b;
-  }));
-  $('seasons').hidden = seasons.length < 2;
-  await season(s ?? 1);
-  scrollTo(0, 0);
+  const p = store.progress[it.path];
+  $('ribbon').classList.toggle('show', isShow);
+  paint($('r-poster'), [k.poster, k.still], titleOf(it));
+  $('r-eyebrow').textContent = isShow ? 'Show' : 'Film';
+  $('r-title').textContent = titleOf(it);
+  const meta = isShow
+    ? [yearOf(it), `${it.count} episode${it.count === 1 ? '' : 's'} here`]
+    : [yearOf(it), p?.of ? minutes(p.of) : '', human(it.size)];
+  $('r-meta').replaceChildren(...meta.filter(Boolean).map((m) => el('span', { text: String(m) })));
+  $('r-text').textContent = k.overview || '';
+  $('r-text').hidden = !k.overview;
+  $('r-remove').hidden = !!lib.reader;
+  $('addep').hidden = !isShow || !!lib.reader;
+  $('seasons').hidden = !isShow;
+  $('eps').hidden = !isShow;
+  if (isShow) {
+    const next = at || nextEpisode(it);
+    const q = next && store.progress[next.path];
+    const going = !!(q && !q.done && q.at > 30);
+    const name = (e) => store.known(it.path)?.seasons?.[e.parsed.season]?.[e.parsed.episode]?.name || e.parsed.episodeTitle || '';
+    $('r-where').hidden = true;
+    $('r-play').textContent = next ? `${going ? 'Resume' : 'Play'} S${next.parsed.season} E${next.parsed.episode ?? '?'}` : 'Play';
+    $('r-play').disabled = !next;
+    $('r-play').onclick = () => next && play(next, { resume: true });
+    $('r-spec').textContent = next ? [name(next), going && q.of ? `${minutes(q.of - q.at)} left` : ''].filter(Boolean).join(' · ') : '';
+    $('r-over').hidden = true;
+    $('r-remove').textContent = 'Remove show';
+    $('r-remove').onclick = () => remove(it, `${titleOf(it)} and its ${it.count} episode${it.count === 1 ? '' : 's'}`);
+    const seasons = [...new Set(it.episodes.map((e) => e.parsed.season))];
+    const s = next?.parsed.season ?? seasons[0] ?? 1;
+    $('seasons').replaceChildren(...seasons.map((n) => {
+      const b = el('button', { type: 'button', 'aria-pressed': String(n === s), text: `Season ${n}` });
+      b.onclick = () => season(n);
+      return b;
+    }));
+    $('seasons').hidden = seasons.length < 2;
+    show.next = next;
+    await season(s);
+  } else {
+    const going = !!(p && !p.done && p.at > 30);
+    $('r-where').hidden = !(going && p.of);
+    if (going && p.of) {
+      $('r-where').querySelector('i').style.width = `${Math.round((p.at / p.of) * 100)}%`;
+      $('r-left').textContent = `${minutes(p.of - p.at)} left${p.where ? ` · stopped on ${p.where}` : ''}`;
+    }
+    $('r-play').disabled = false;
+    $('r-play').textContent = going ? `Resume at ${clock(p.at)}` : 'Play';
+    $('r-play').onclick = () => play(it, { resume: true });
+    $('r-spec').textContent = '';
+    $('r-over').hidden = !going;
+    $('r-over').onclick = () => play(it, { resume: false });
+    $('r-remove').textContent = 'Remove from library';
+    $('r-remove').onclick = () => remove(it, titleOf(it));
+  }
+  if ($('ribbon').hidden) {
+    $('veil').hidden = false;
+    $('ribbon').hidden = false;
+    $('ribbon').scrollTop = 0;
+    syncInert();
+    $('r-play').focus({ preventScroll: true });
+  }
+}
+
+function closeTitle() {
+  if ($('ribbon').hidden) return;
+  $('ribbon').hidden = true;
+  $('veil').hidden = true;
+  opened = null;
+  show = null;
+  syncInert();
+  render();
+  const back = openedCard?.dataset?.path && [...document.querySelectorAll('main [data-path]')].find((e) => e.dataset.path === openedCard.dataset.path);
+  (back || openedCard)?.focus?.();
+}
+
+async function remove(it, what) {
+  if (!confirm(`Remove ${what} from the library? It goes to the trash in Files, where it can be put back.`)) return;
+  await trash(lib, it.path);
+  closeTitle();
+  await reload();
 }
 
 async function season(n) {
@@ -248,33 +349,34 @@ async function season(n) {
     const p = store.progress[e.path];
     const still = el('span', { class: 'still' });
     paint(still, [info.still, store.known(e.path)?.still], e.parsed.episodeTitle || show.name);
-    const state = p?.done ? 'Watched' : p?.of && p.at > 30 ? `Watching · ${minutes(p.of - p.at)} left` : '';
+    if (p && !p.done && p.of && p.at > 30) still.append(progressBar(p.at / p.of));
+    const state = p?.done ? 'Watched' : '';
+    const left = p && !p.done && p.of && p.at > 30 ? `${minutes(p.of - p.at)} left` : info.runtime ? `${info.runtime} m` : human(e.size);
     const b = el('button', { type: 'button', class: 'ep', 'data-path': e.path },
       el('span', { class: 'n', text: e.parsed.episode ?? '·' }),
       still,
       el('span', {},
         el('span', { class: 't', text: info.name || e.parsed.episodeTitle || e.name }),
-        el('span', { class: 'd', text: state || info.overview || '' })),
-      el('span', { class: 'len', text: info.runtime ? `${info.runtime} m` : human(e.size) }));
+        el('span', { class: 'd', text: [state, info.overview].filter(Boolean).join(' · ') })),
+      el('span', { class: 'len', text: left }));
+    if (show.next?.path === e.path) b.setAttribute('aria-current', 'true');
     b.onclick = () => play(e, { resume: true });
     return el('li', {}, b);
   };
-  $('eps').replaceChildren(...eps.map(row));
+  const draw = () => {
+    $('eps').replaceChildren(...eps.map(row));
+    // the list opens on the episode it goes on with
+    const cur = $('eps').querySelector('[aria-current="true"]');
+    $('eps').scrollTop = cur ? cur.parentElement.offsetTop - $('eps').offsetTop - 8 : 0;
+  };
+  draw();
   // the season's names and stills, looked up once
-  if (!names && tmdb && !lib.reader && store.known(show.path)?.tmdb) {
+  if (!names && tmdb && store.known(show.path)?.tmdb) {
     try {
       names = await lookUpSeason(store, tmdb, show.path, n);
-      if (names && show && eps[0]?.show === show.name) $('eps').replaceChildren(...eps.map(row));
+      if (names && show && eps[0]?.show === show.name) draw();
     } catch { /* the filenames will do */ }
   }
-}
-
-function home() {
-  show = null;
-  $('show-page').hidden = true;
-  $('home').hidden = false;
-  $('actions').hidden = false;
-  render();
 }
 
 // ---- playing
@@ -339,16 +441,17 @@ async function stillFrom(v) {
 let openedFrom = null;
 function showPlayer(path) {
   openedFrom = path;
-  for (const e of document.querySelectorAll('main, header.dd-bar')) e.inert = true;
   $('player').hidden = false;
+  syncInert();
 }
 function hidePlayer() {
   $('player').hidden = true;
-  for (const e of document.querySelectorAll('main, header.dd-bar')) e.inert = false;
+  syncInert();
 }
 function backToFilm() {
-  const at = openedFrom && [...document.querySelectorAll('[data-path]')].find((e) => e.dataset.path === openedFrom);
-  at?.focus();
+  const where = $('ribbon').hidden ? 'main' : '#ribbon';
+  const at = openedFrom && [...document.querySelectorAll(`${where} [data-path]`)].find((e) => e.dataset.path === openedFrom);
+  (at || ($('ribbon').hidden ? null : $('r-play')))?.focus();
 }
 
 async function play(it, { resume }) {
@@ -361,47 +464,16 @@ async function play(it, { resume }) {
   $('p-sub').textContent = from ? `Picking up at ${minutes(from)}` : 'Unlocked on this device';
   $('p-note').textContent = 'Asking the box to play it…';
   $('p-save').hidden = true;
-  $('p-remove').hidden = !!lib.reader;
-  $('p-remove').onclick = async () => {
-    if (!confirm(`Remove ${titleOf(it)} from the library?`)) return;
-    await stop();
-    await trash(lib, it.path);
-    hidePlayer();
-    await reload();
-  };
   // on the picture, so Space plays and pauses from the start
   v.tabIndex = 0;
   v.focus();
-  playing = { it, offset: 0, duration: null, lastSave: Date.now(), stilled: false };
+  playing = { it, offset: from, duration: null, lastSave: Date.now(), stilled: false };
+  paintBar();
   // A film is bigger than a tab: the box decrypts it in its own memory for
   // this one viewing and sends a playlist. Safari plays a playlist itself;
   // everywhere else the page loads a player from the box.
   try {
-    const s = await transcode(lib, it.path, it.sealed, from);
-    session = s.url;
-    playing.offset = s.from;
-    playing.duration = s.duration;
-    // Our player wherever it runs (every desktop browser, Android), the
-    // browser's own only where it cannot (an iPhone). Chrome plays a
-    // playlist by itself now, and its own player took one still growing
-    // for a live broadcast: it chased the newest piece, then went back to
-    // the start once the box had packed the whole film.
-    const Hls = await playlistPlayer().catch(() => null);
-    if (!Hls && playsPlaylists()) {
-      v.src = s.url;
-    } else {
-      if (!Hls) throw new Error('this browser cannot play a film');
-      // the playlist grows as the box works: a moment's 404 or a slow
-      // segment is waiting, not failing
-      // and from its start: a playlist still growing looks like a live
-      // broadcast, which a player joins near the newest piece instead
-      hls = new Hls({ startPosition: 0, manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
-      hls.on(Hls.Events.ERROR, (_, d) => {
-        if (d.fatal) $('p-note').textContent = `The player stopped: ${d.details}. Close it and press play again.`;
-      });
-      hls.loadSource(s.url);
-      hls.attachMedia(v);
-    }
+    await attach(it, from);
     $('p-note').textContent = '';
     v.play().catch(() => {});
     return;
@@ -419,6 +491,8 @@ async function play(it, { resume }) {
   $('p-note').textContent = 'Opening…';
   try {
     const plain = await fetchPlain(lib, it.path);
+    // the whole file in the tab: its own time is the film's
+    playing.offset = 0;
     v.src = URL.createObjectURL(new Blob([plain]));
     if (from) v.addEventListener('loadedmetadata', () => { v.currentTime = from; }, { once: true });
     $('p-note').textContent = '';
@@ -428,11 +502,42 @@ async function play(it, { resume }) {
   }
 }
 
+// A session at the box from `from` on, and the player on its playlist
+async function attach(it, from) {
+  const v = $('video');
+  const s = await transcode(lib, it.path, it.sealed, from);
+  session = s.url;
+  playing.offset = s.from;
+  playing.duration = s.duration ?? playing.duration;
+  // Our player wherever it runs (every desktop browser, Android), the
+  // browser's own only where it cannot (an iPhone). Chrome plays a
+  // playlist by itself now, and its own player took one still growing
+  // for a live broadcast: it chased the newest piece, then went back to
+  // the start once the box had packed the whole film.
+  const Hls = await playlistPlayer().catch(() => null);
+  if (!Hls && playsPlaylists()) {
+    v.src = s.url;
+  } else {
+    if (!Hls) throw new Error('this browser cannot play a film');
+    // the playlist grows as the box works: a moment's 404 or a slow
+    // segment is waiting, not failing
+    // and from its start: a playlist still growing looks like a live
+    // broadcast, which a player joins near the newest piece instead
+    hls = new Hls({ startPosition: 0, manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
+    hls.on(Hls.Events.ERROR, (_, d) => {
+      if (d.fatal) $('p-note').textContent = `The player stopped: ${d.details}. Close it and press play again.`;
+    });
+    hls.loadSource(s.url);
+    hls.attachMedia(v);
+  }
+}
+
 async function closePlayer() {
   await stop();
   hidePlayer();
-  if (show) await season(Number($('seasons').querySelector('[aria-pressed="true"]')?.textContent.replace('Season ', '')) || show.episodes[0]?.parsed.season || 1);
-  else render();
+  // what was watched moves the band on too: the next episode, the time left
+  if (opened) await openTitle(opened);
+  render();
   backToFilm();
 }
 
@@ -446,13 +551,147 @@ function playerKeys(e) {
   if ((e.key === ' ' || e.key === 'k') && !onButton) {
     e.preventDefault();
     v.paused ? v.play().catch(() => {}) : v.pause();
-  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+  } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.target.id !== 'c-vol') {
     e.preventDefault();
-    v.currentTime = Math.max(0, v.currentTime + (e.key === 'ArrowLeft' ? -10 : 10));
+    seekTo(filmAt() + (e.key === 'ArrowLeft' ? -10 : 10));
   } else if (e.key === 'f' && !onButton) {
     e.preventDefault();
-    document.fullscreenElement ? document.exitFullscreen().catch(() => {}) : v.requestFullscreen?.().catch(() => {});
+    wholeScreen();
   }
+}
+
+// ---- the bar
+//
+// The box packs a film as it plays, so the video element only ever knows
+// the part packed so far: its own controls showed a film half a minute
+// long, then fourteen. The bar counts in the film's time instead - the
+// length the box read from the file, and where this session began - and a
+// jump past what is packed asks the box to start again from there.
+
+const clock = (t) => {
+  const s = Math.max(0, Math.floor(t || 0));
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`;
+};
+const filmAt = () => (playing ? playing.offset + ($('video').currentTime || 0) : 0);
+function filmLength() {
+  const v = $('video');
+  return playing?.duration || (Number.isFinite(v.duration) ? (playing?.offset || 0) + v.duration : 0);
+}
+// How far the box has packed, in the film's time: the end of the playlist
+// as it stands, which the video element does not say reliably of one
+// still growing. Safari's own player has only the element to ask.
+function readyTo() {
+  const d = hls?.latestLevelDetails;
+  const r = $('video').seekable;
+  const end = d ? d.edge : r.length ? r.end(r.length - 1) : 0;
+  return (playing?.offset || 0) + (Number.isFinite(end) ? end : 0);
+}
+
+let dragging = false;
+function paintBar() {
+  const v = $('video'), seek = $('c-seek');
+  const len = filmLength();
+  const at = dragging ? Number(seek.value) : filmAt();
+  const pct = (t) => `${len ? Math.min(100, Math.max(0, (t / len) * 100)) : 0}%`;
+  seek.max = String(Math.max(1, Math.round(len)));
+  if (!dragging) seek.value = String(Math.round(at));
+  seek.style.setProperty('--played', pct(at));
+  seek.style.setProperty('--from', pct(playing?.offset || 0));
+  seek.style.setProperty('--ready', pct(readyTo()));
+  seek.setAttribute('aria-valuetext', len ? `${clock(at)} of ${clock(len)}` : clock(at));
+  $('c-now').textContent = clock(at);
+  $('c-total').textContent = len ? clock(len) : '–:––';
+  const b = $('c-play');
+  b.dataset.on = v.paused ? 'play' : 'pause';
+  b.setAttribute('aria-label', v.paused ? 'Play' : 'Pause');
+  const muted = v.muted || v.volume === 0;
+  $('c-mute').dataset.on = muted ? 'muted' : 'sound';
+  $('c-mute').setAttribute('aria-label', muted ? 'Sound on' : 'Mute');
+  $('c-vol').value = String(muted ? 0 : v.volume);
+  $('c-vol').style.setProperty('--played', `${muted ? 0 : v.volume * 100}%`);
+}
+
+// Where in the film, not in the video: inside what is packed the video
+// just goes there; before where this session began, or past what the box
+// has packed, the box starts again at that point.
+let jumps = 0;
+async function seekTo(t) {
+  if (!playing) return;
+  const v = $('video');
+  const len = filmLength();
+  t = Math.max(0, len ? Math.min(t, len - 2) : t);
+  if (!session || (t >= playing.offset && t <= readyTo())) {
+    v.currentTime = Math.max(0, t - playing.offset);
+    return;
+  }
+  const mine = ++jumps;
+  const it = playing.it;
+  const going = !v.paused;
+  $('p-note').textContent = `Asking the box to start at ${clock(t)}…`;
+  hls?.destroy();
+  hls = null;
+  const old = session;
+  session = null;
+  Promise.resolve(stopTranscode(old)).catch(() => {});
+  v.removeAttribute('src');
+  v.load();
+  // the bar stands at the new place while the box gets there
+  playing.offset = t;
+  paintBar();
+  try {
+    await attach(it, t);
+    if (mine !== jumps) return; // a later jump took over
+    $('p-note').textContent = '';
+    if (going) v.play().catch(() => {});
+  } catch (e) {
+    if (mine === jumps) $('p-note').textContent = `The box could not start there: ${e.message}`;
+  }
+}
+
+function wholeScreen() {
+  document.fullscreenElement ? document.exitFullscreen().catch(() => {}) : $('player').requestFullscreen?.().catch(() => {});
+}
+
+// on the whole screen the bars step aside after a moment of playing
+let idle = null;
+function wake() {
+  $('player').classList.remove('idle');
+  clearTimeout(idle);
+  idle = setTimeout(() => { if (!$('video').paused) $('player').classList.add('idle'); }, 2500);
+}
+
+function initBar() {
+  const v = $('video'), seek = $('c-seek');
+  const toggle = () => (v.paused ? v.play().catch(() => {}) : v.pause());
+  $('c-play').onclick = toggle;
+  v.addEventListener('click', toggle);
+  v.addEventListener('dblclick', wholeScreen);
+  $('c-back').onclick = () => seekTo(filmAt() - 10);
+  $('c-on').onclick = () => seekTo(filmAt() + 10);
+  $('c-full').onclick = wholeScreen;
+  // dragging shows the time under the thumb; letting go goes there
+  seek.addEventListener('input', () => { dragging = true; paintBar(); });
+  seek.addEventListener('change', () => { dragging = false; seekTo(Number(seek.value)); });
+  $('c-mute').onclick = () => {
+    if (v.muted || v.volume === 0) { v.muted = false; if (v.volume === 0) v.volume = 0.5; } else v.muted = true;
+  };
+  $('c-vol').addEventListener('input', () => {
+    v.volume = Number($('c-vol').value);
+    v.muted = v.volume === 0;
+  });
+  try {
+    const kept = Number(localStorage.getItem('dd-volume'));
+    if (kept > 0 && kept <= 1) v.volume = kept;
+  } catch {}
+  v.addEventListener('volumechange', () => {
+    try { localStorage.setItem('dd-volume', String(v.volume)); } catch {}
+  });
+  for (const ev of ['timeupdate', 'progress', 'play', 'pause', 'durationchange', 'volumechange', 'loadedmetadata']) {
+    v.addEventListener(ev, paintBar);
+  }
+  v.addEventListener('pause', wake);
+  for (const ev of ['mousemove', 'keydown', 'focusin', 'touchstart']) $('player').addEventListener(ev, wake);
 }
 
 // ---- adding
@@ -482,10 +721,10 @@ async function upload(files, into) {
 
 async function reload() {
   await load();
-  if (show) {
-    show = shows.find((s) => s.path === show.path) || null;
-    if (show) return openShow(show);
-    return home();
+  if (opened) {
+    const again = [...films, ...shows].find((x) => x.path === opened.path);
+    if (again) await openTitle(again);
+    else closeTitle();
   }
   render();
   fillIn();
@@ -522,15 +761,21 @@ async function start() {
     await mkdir(lib, `Shows/${name}`);
     await load();
     const s = shows.find((x) => x.name === name);
-    if (s) openShow(s);
+    if (s) openTitle(s);
   };
-  $('back').onclick = home;
+  $('r-close').onclick = closeTitle;
+  $('veil').onclick = closeTitle;
   $('p-close').onclick = closePlayer;
   const v = $('video');
+  initBar();
   v.addEventListener('timeupdate', () => { remember(false); stillFrom(v); });
   v.addEventListener('pause', () => remember(true));
   v.addEventListener('ended', () => remember(true));
-  addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('player').hidden) closePlayer(); });
+  addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!$('player').hidden) closePlayer();
+    else closeTitle();
+  });
   addEventListener('keydown', playerKeys);
   // a tab closed mid-film keeps its place, and the box stops working on it
   addEventListener('pagehide', () => {
