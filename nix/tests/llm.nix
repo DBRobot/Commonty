@@ -25,6 +25,7 @@ in
     imports = [
       ./box.nix
       ../modules/llm/llama-cpp.nix
+      ../modules/llm/search.nix
     ];
     dd.llm.models = lib.mkForce {
       tiny = {

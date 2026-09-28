@@ -64,6 +64,7 @@ struct App {
     demo_library: Option<(String, String)>,
     app_manifest: Option<String>,
     tmdb: Option<String>,
+    search: Option<String>,
     /// the app manifest as last read, and when: a good one for ten
     /// minutes, the lack of one for one
     app_seen: Mutex<Option<(Instant, Option<SignedApp>)>>,
@@ -145,6 +146,8 @@ pub struct Config {
     /// sees the titles: they are sealed in the library. None: no posters,
     /// the pages draw stills and title cards instead.
     pub tmdb: Option<String>,
+    /// SearXNG on this box, for Chat's web search: None, no search
+    pub search: Option<String>,
 }
 
 /// What the photos page needs to make or open an ente account for a person:
@@ -1248,6 +1251,87 @@ async fn chat_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response 
     }
 }
 
+#[derive(Deserialize)]
+struct SearchQuery {
+    q: String,
+}
+
+/// Chat's web search. The model has no network at all; the page asks
+/// here, gets titles, links and a line of each, and hands them to the model
+/// with the question. Members only: the demo would make this box a search
+/// proxy for anyone.
+async fn chat_search(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    axum::extract::Query(sq): axum::extract::Query<SearchQuery>,
+) -> Response {
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    match app.sessions.user(cookie) {
+        Some(user) if app.role(&user) == Some(pages::Role::Member) => {}
+        Some(_) => return StatusCode::FORBIDDEN.into_response(),
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    }
+    let Some(base) = &app.search else {
+        return (StatusCode::NOT_FOUND, "web search is not on this box").into_response();
+    };
+    let q = sq.q.trim();
+    if q.is_empty() || q.chars().count() > 300 {
+        return (
+            StatusCode::BAD_REQUEST,
+            "ask for something, in under 300 characters",
+        )
+            .into_response();
+    }
+    let got = async {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(12))
+            .build()?;
+        let v: serde_json::Value = client
+            .get(format!("{base}/search"))
+            .query(&[("q", q), ("format", "json"), ("safesearch", "1")])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        anyhow::Ok(v)
+    }
+    .await;
+    let v = match got {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("verify: search: {e:#}");
+            return (StatusCode::BAD_GATEWAY, "the search did not answer").into_response();
+        }
+    };
+    let clip = |s: &str, n: usize| s.chars().take(n).collect::<String>();
+    let results: Vec<serde_json::Value> = v["results"]
+        .as_array()
+        .map(|r| {
+            r.iter()
+                .filter(|x| {
+                    x["url"]
+                        .as_str()
+                        .is_some_and(|u| u.starts_with("https://") || u.starts_with("http://"))
+                })
+                .take(6)
+                .map(|x| {
+                    serde_json::json!({
+                        "title": clip(x["title"].as_str().unwrap_or(""), 200),
+                        "url": clip(x["url"].as_str().unwrap_or(""), 500),
+                        "content": clip(x["content"].as_str().unwrap_or(""), 400),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    (
+        [("cache-control", "no-store")],
+        Json(serde_json::json!({ "results": results })),
+    )
+        .into_response()
+}
+
 /// Boxes, Backups, Devices, Network: the pages behind the bar's menu.
 /// Each is a member's own view of the fleet; the demo gets none of them.
 async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Response {
@@ -1414,6 +1498,7 @@ pub async fn start(
         demo_library: cfg.demo_library,
         app_manifest: cfg.app_manifest,
         tmdb: cfg.tmdb,
+        search: cfg.search,
         app_seen: Mutex::new(None),
         fleet: cfg.fleet,
         friends: friends::Store::open(&state_dir)?,
@@ -1551,6 +1636,7 @@ pub async fn start(
         // the network's door: a join key for an admitted device
         .route("/_dd/network/join", post(network::join))
         .route("/_dd/chat", get(chat_page))
+        .route("/_dd/chat/search", get(chat_search))
         .route("/_dd/friends", get(friends::page))
         .route("/_dd/friends/list", get(friends::list))
         .route("/_dd/friends/link", post(friends::make_link))
