@@ -41,68 +41,209 @@ pub struct Service {
 /// sees, with nothing of their own and nothing kept.
 pub const DEMO_USER: &str = "demo";
 
-/// the stylesheet and the scripts, by the name under /_dd/static/
-pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
-    let js = "text/javascript; charset=utf-8";
-    let woff2 = "font/woff2";
-    let text = |s: &'static str, ty| Some((s.as_bytes(), ty));
-    // the typefaces the stylesheet names, under the licence in web/fonts
-    match name {
-        "public-sans.woff2" => {
-            return Some((include_bytes!("../../web/fonts/public-sans.woff2"), woff2));
+// The pages, scripts, styles, fonts and pictures are files, read from a
+// directory laid out like the tree (box/web/..., box/<service>/web/...),
+// not compiled into the gate: a release builds them into a directory of
+// their own, so a page changing is not the gate being rebuilt, its tests
+// run again, or its checks redone. All of them are read once, at start,
+// and a missing one stops the gate starting rather than a page 404ing.
+static ASSETS: std::sync::OnceLock<std::collections::HashMap<&'static str, Vec<u8>>> =
+    std::sync::OnceLock::new();
+
+fn every_path() -> impl Iterator<Item = &'static str> {
+    STATIC
+        .iter()
+        .map(|(_, p, _)| *p)
+        .chain(PAGES.iter().map(|(_, p)| *p))
+        .chain(ICONS.iter().map(|(_, p)| *p))
+        .chain(OS_ICONS.iter().map(|(_, p)| *p))
+}
+
+fn read_all(
+    dir: &std::path::Path,
+) -> anyhow::Result<std::collections::HashMap<&'static str, Vec<u8>>> {
+    let mut out = std::collections::HashMap::new();
+    let mut missing = Vec::new();
+    for p in every_path() {
+        match std::fs::read(dir.join(p)) {
+            Ok(b) => {
+                out.insert(p, b);
+            }
+            Err(_) => missing.push(p),
         }
-        "plex-mono-400.woff2" => {
-            return Some((include_bytes!("../../web/fonts/plex-mono-400.woff2"), woff2));
-        }
-        "plex-mono-500.woff2" => {
-            return Some((include_bytes!("../../web/fonts/plex-mono-500.woff2"), woff2));
-        }
-        "fonts-license.txt" => {
-            return text(
-                include_str!("../../web/fonts/LICENSE"),
-                "text/plain; charset=utf-8",
-            );
-        }
-        _ => {}
     }
-    Some(match name {
-        "home.css" => (
-            include_str!("../../web/home.css"),
-            "text/css; charset=utf-8",
-        ),
-        "bar.css" => (include_str!("../../web/bar.css"), "text/css; charset=utf-8"),
-        "webauthn.js" => (include_str!("../../web/webauthn.js"), js),
-        "invite.js" => (include_str!("../web/invite.js"), js),
-        "login.js" => (include_str!("../web/login.js"), js),
-        "join.js" => (include_str!("../web/join.js"), js),
-        "friends.js" => (include_str!("../../web/friends.js"), js),
-        "chat.js" => (include_str!("../../chat/web/chat.js"), js),
-        "chat.css" => (
-            include_str!("../../chat/web/chat.css"),
-            "text/css; charset=utf-8",
-        ),
-        "enrol.js" => (include_str!("../web/enrol.js"), js),
-        "redeem.js" => (include_str!("../web/redeem.js"), js),
-        "photos.js" => (include_str!("../../photos/web/photos.js"), js),
-        "photos-passkey.js" => (include_str!("../../photos/web/photos-passkey.js"), js),
-        "files.js" => (include_str!("../../files/web/files.js"), js),
-        "media.js" => (include_str!("../../media/web/media.js"), js),
-        "shelf.js" => (include_str!("../../media/web/shelf.js"), js),
-        // TMDB's own logo, unaltered, for the credit their terms ask for
-        "tmdb.svg" => (
-            include_str!("../../media/web/icons/tmdb.svg"),
-            "image/svg+xml",
-        ),
-        "library.js" => (include_str!("../../web/library.js"), js),
-        "boxes.js" => (include_str!("../../fleet/web/boxes.js"), js),
-        "backups.js" => (include_str!("../../fleet/web/backups.js"), js),
-        "devices.js" => (include_str!("../../fleet/web/devices.js"), js),
-        "network.js" => (include_str!("../../fleet/web/network.js"), js),
-        "panel.js" => (include_str!("../../fleet/web/panel.js"), js),
-        "shell.js" => (include_str!("../../web/shell.js"), js),
-        _ => return None,
-    })
-    .map(|(s, ty)| (s.as_bytes(), ty))
+    anyhow::ensure!(
+        missing.is_empty(),
+        "the pages directory {} is missing {}",
+        dir.display(),
+        missing.join(", ")
+    );
+    Ok(out)
+}
+
+/// Read every file from `dir` now; the gate's start calls this, so a
+/// release missing one does not come up at all.
+pub fn load(dir: &std::path::Path) -> anyhow::Result<()> {
+    let all = read_all(dir)?;
+    let _ = ASSETS.set(all);
+    Ok(())
+}
+
+/// the tree itself, where the gate runs from a checkout (its tests)
+fn tree() -> std::path::PathBuf {
+    std::env::var_os("VERIFY_PAGES_DIR")
+        .map(Into::into)
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+}
+
+fn asset(path: &str) -> &'static [u8] {
+    ASSETS
+        .get_or_init(|| read_all(&tree()).unwrap_or_else(|e| panic!("{e:#}")))
+        .get(path)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+}
+
+/// Every file the gate serves as it is, by the name under /_dd/static/:
+/// where it lives in the tree and its type.
+const STATIC: &[(&str, &str, &str)] = &[
+    (
+        "public-sans.woff2",
+        "box/web/fonts/public-sans.woff2",
+        "font/woff2",
+    ),
+    (
+        "plex-mono-400.woff2",
+        "box/web/fonts/plex-mono-400.woff2",
+        "font/woff2",
+    ),
+    (
+        "plex-mono-500.woff2",
+        "box/web/fonts/plex-mono-500.woff2",
+        "font/woff2",
+    ),
+    (
+        "fonts-license.txt",
+        "box/web/fonts/LICENSE",
+        "text/plain; charset=utf-8",
+    ),
+    ("home.css", "box/web/home.css", "text/css; charset=utf-8"),
+    ("bar.css", "box/web/bar.css", "text/css; charset=utf-8"),
+    (
+        "webauthn.js",
+        "box/web/webauthn.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "invite.js",
+        "box/verify/web/invite.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "login.js",
+        "box/verify/web/login.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "join.js",
+        "box/verify/web/join.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "friends.js",
+        "box/web/friends.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "chat.js",
+        "box/chat/web/chat.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "chat.css",
+        "box/chat/web/chat.css",
+        "text/css; charset=utf-8",
+    ),
+    (
+        "enrol.js",
+        "box/verify/web/enrol.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "redeem.js",
+        "box/verify/web/redeem.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "photos.js",
+        "box/photos/web/photos.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "photos-passkey.js",
+        "box/photos/web/photos-passkey.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "files.js",
+        "box/files/web/files.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "media.js",
+        "box/media/web/media.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "shelf.js",
+        "box/media/web/shelf.js",
+        "text/javascript; charset=utf-8",
+    ),
+    ("tmdb.svg", "box/media/web/icons/tmdb.svg", "image/svg+xml"),
+    (
+        "library.js",
+        "box/web/library.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "boxes.js",
+        "box/fleet/web/boxes.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "backups.js",
+        "box/fleet/web/backups.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "devices.js",
+        "box/fleet/web/devices.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "network.js",
+        "box/fleet/web/network.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "panel.js",
+        "box/fleet/web/panel.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "shell.js",
+        "box/web/shell.js",
+        "text/javascript; charset=utf-8",
+    ),
+];
+
+/// the stylesheet, the scripts, the fonts and the pictures, by the name
+/// under /_dd/static/
+pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
+    STATIC
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, path, ty)| (asset(path), *ty))
 }
 
 /// What kind of account is looking.
@@ -126,17 +267,25 @@ impl Role {
 }
 
 /// the mark on a tile: an svg fragment from web/icons/, by the role's name
+const ICONS: &[(&str, &str)] = &[
+    ("photos", "box/web/icons/photos.svg"),
+    ("videos", "box/web/icons/videos.svg"),
+    ("files", "box/web/icons/files.svg"),
+    ("chat", "box/web/icons/chat.svg"),
+    ("code", "box/web/icons/code.svg"),
+    ("metrics", "box/web/icons/metrics.svg"),
+    ("games", "box/web/icons/games.svg"),
+    ("plain", "box/web/icons/plain.svg"),
+];
+
 fn icon(key: &str) -> &'static str {
-    match key {
-        "photos" => include_str!("../../web/icons/photos.svg"),
-        "videos" => include_str!("../../web/icons/videos.svg"),
-        "files" => include_str!("../../web/icons/files.svg"),
-        "chat" => include_str!("../../web/icons/chat.svg"),
-        "code" => include_str!("../../web/icons/code.svg"),
-        "metrics" => include_str!("../../web/icons/metrics.svg"),
-        "games" => include_str!("../../web/icons/games.svg"),
-        _ => include_str!("../../web/icons/plain.svg"),
-    }
+    let path = ICONS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .or_else(|| ICONS.iter().find(|(k, _)| *k == "plain"))
+        .map(|(_, p)| *p)
+        .unwrap_or_default();
+    std::str::from_utf8(asset(path)).unwrap_or_default()
 }
 
 pub(crate) fn initial(user: &str) -> String {
@@ -148,20 +297,24 @@ pub(crate) fn initial(user: &str) -> String {
 
 /// A signed-in page: a static file that fills itself from /_dd/me
 /// (web/pages/). The app carries the same files.
+const PAGES: &[(&str, &str)] = &[
+    ("home", "box/web/pages/home.html"),
+    ("files", "box/files/web/pages/files.html"),
+    ("media", "box/media/web/pages/media.html"),
+    ("boxes", "box/fleet/web/pages/boxes.html"),
+    ("backups", "box/fleet/web/pages/backups.html"),
+    ("devices", "box/fleet/web/pages/devices.html"),
+    ("network", "box/fleet/web/pages/network.html"),
+    ("friends", "box/web/pages/friends.html"),
+    ("chat", "box/chat/web/pages/chat.html"),
+    ("friend", "box/web/pages/friend.html"),
+];
+
 pub fn page(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "home" => include_str!("../../web/pages/home.html"),
-        "files" => include_str!("../../files/web/pages/files.html"),
-        "media" => include_str!("../../media/web/pages/media.html"),
-        "boxes" => include_str!("../../fleet/web/pages/boxes.html"),
-        "backups" => include_str!("../../fleet/web/pages/backups.html"),
-        "devices" => include_str!("../../fleet/web/pages/devices.html"),
-        "network" => include_str!("../../fleet/web/pages/network.html"),
-        "friends" => include_str!("../../web/pages/friends.html"),
-        "chat" => include_str!("../../chat/web/pages/chat.html"),
-        "friend" => include_str!("../../web/pages/friend.html"),
-        _ => return None,
-    })
+    PAGES
+        .iter()
+        .find(|(k, _)| *k == name)
+        .map(|(_, p)| std::str::from_utf8(asset(p)).unwrap_or_default())
 }
 
 /// Everything a signed-in page shows about who is looking: the name, the
@@ -336,13 +489,21 @@ pub struct AppFile {
 }
 
 /// the logo on a platform's card, from web/icons/os/
+const OS_ICONS: &[(&str, &str)] = &[
+    ("linux", "box/verify/web/icons/os/linux.svg"),
+    ("android", "box/verify/web/icons/os/android.svg"),
+    ("apple", "box/verify/web/icons/os/apple.svg"),
+    ("windows", "box/verify/web/icons/os/windows.svg"),
+];
+
 fn os_icon(key: &str) -> &'static str {
-    match key {
-        "linux" => include_str!("../web/icons/os/linux.svg"),
-        "android" => include_str!("../web/icons/os/android.svg"),
-        "apple" => include_str!("../web/icons/os/apple.svg"),
-        _ => include_str!("../web/icons/os/windows.svg"),
-    }
+    let path = OS_ICONS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .or_else(|| OS_ICONS.iter().find(|(k, _)| *k == "windows"))
+        .map(|(_, p)| *p)
+        .unwrap_or_default();
+    std::str::from_utf8(asset(path)).unwrap_or_default()
 }
 
 /// Where a stranger gets the app. Public: someone invited has nothing to

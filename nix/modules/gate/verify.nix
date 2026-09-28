@@ -304,6 +304,9 @@ in
         VERIFY_MEMBERS = builtins.toJSON config.dd.members;
         # our Rust for the browser, next to the pages that use it
         VERIFY_WEB_DIR = "${self.packages.${pkgs.stdenv.hostPlatform.system}.web}";
+        # the pages, scripts, styles and icons, apart from the gate program:
+        # a page edit is a new directory here, not a new gate
+        VERIFY_PAGES_DIR = "${self.packages.${pkgs.stdenv.hostPlatform.system}.pages}";
         VERIFY_HOME = builtins.toJSON (
           map (t: {
             inherit (t)

@@ -93,7 +93,12 @@
                     && (
                       type == "directory"
                       || craneLib.filterCargoSources path type
-                      || builtins.match ".*/(templates|web)/.*" rel != null
+                      || builtins.match ".*/templates/.*" rel != null
+                      # the pages, scripts and styles: the gate reads its own
+                      # from the pages directory at start (pages below), so
+                      # they are not its source; other crates still compile
+                      # theirs in, and the tests read them from the tree
+                      || (name != "verify" && builtins.match ".*/web/.*" rel != null)
                       # where askama looks for templates beyond the crate's own
                       || builtins.match ".*/askama\\.toml" rel != null
                       || appFile
@@ -160,6 +165,27 @@
             in
             go [ ] roots;
           crateSrc = name: roots: srcFor name (crateClosure roots);
+          # What the gate serves as it is - pages, scripts, styles, fonts,
+          # icons - in a directory laid out like the tree, apart from the
+          # gate itself: a page changing rebuilds this and nothing else.
+          pages = pkgs.lib.cleanSourceWith {
+            name = "dd-pages";
+            src = ./.;
+            filter =
+              path: type:
+              let
+                rel = pkgs.lib.removePrefix (toString ./. + "/") (toString path);
+              in
+              (
+                type == "directory"
+                && (
+                  rel == "box"
+                  || builtins.match "box/[^/]+" rel != null
+                  || builtins.match "box/[^/]+/web(/.*)?" rel != null
+                )
+              )
+              || builtins.match "box/[^/]+/web/.*" rel != null;
+          };
           # What a dependency build sees: the lockfile and the manifests, with
           # crane's stand-in for every target, and nothing else. Each
           # dependency cache is keyed on this, so a page, a template, a patch
@@ -401,6 +427,7 @@
           );
         in
         {
+          inherit pages;
           # the cli, and `git remote add origin dd::...`, which dd repo calls too
           # `dd media` mounts libraries with rclone; the binary knows where it is
           dd = (crate "dd" sources.dd "-p dd -p git-remote-dd").overrideAttrs (old: {
