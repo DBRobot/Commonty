@@ -192,10 +192,11 @@ textarea.write { min-height: 110px; resize: vertical; }
 .jobs a[aria-current="page"] { background: var(--line-2); font-weight: 600; }
 .jobs a:hover { background: var(--sunk); text-decoration: none !important; }
 .dag { position: relative; padding: 24px; overflow-x: auto; background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 16px 16px; border-radius: 0 0 4px 4px; }
-.dag .cols { display: flex; gap: 56px; align-items: center; position: relative; z-index: 1; min-width: max-content; }
-.dag .col { display: grid; gap: 14px; }
+.dag .cols { display: flex; gap: 40px; align-items: center; position: relative; z-index: 1; }
+/* columns share the width and only scroll sideways once each is as narrow as it can be */
+.dag .col { display: grid; gap: 14px; flex: 1 1 0; min-width: 160px; max-width: 230px; }
 .dag .grp { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); margin-bottom: -6px; }
-.job { width: 230px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
+.job { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
 .job > a, .job > div { display: flex; gap: 8px; align-items: center; padding: 8px 10px; color: var(--ink) !important; }
 .job > * + * { border-top: 1px solid var(--line-2); }
 .job > a:hover { background: var(--sunk); text-decoration: none !important; }

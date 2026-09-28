@@ -214,7 +214,7 @@ function drawGraph(r, run, g, jobs) {
     const cls = `job${state === 'running' ? ' busy' : state === 'failure' ? ' bad' : ''}`;
     const one = js.length === 1 && js[0].leaf === n.id;
     const head = el(one ? 'a' : 'div', one ? { href: `/${r.full_name}/actions/runs/${run.index_in_repo}${q({ job: js[0].index })}` } : {},
-      statusDot(state), el('span', { class: 't', text: n.id }), js.length > 1 ? el('small', { text: `${js.filter((j) => DONE.includes(j.state)).length} of ${js.length}` }) : el('small', {}, js[0]?.started ? took(js[0]) : js[0]?.description || ''));
+      statusDot(state), el('span', { class: 't', text: n.id }), js.length > 1 ? el('small', { text: `${js.filter((j) => DONE.includes(j.state)).length} of ${js.length}` }) : el('small', {}, js[0]?.started ? took(js[0]) : js[0] ? (js[0].state === 'blocked' ? 'blocked' : DONE.includes(js[0].state) ? '' : 'waiting') : ''));
     return el('div', { class: cls, 'data-id': n.id }, head,
       ...(js.length > 1 || (js.length === 1 && !one) ? js.map((j) => el('a', { class: 'sub', href: `/${r.full_name}/actions/runs/${run.index_in_repo}${q({ job: j.index })}` }, statusDot(j.state), el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: j.leaf.replace(`${n.id} `, '') || j.leaf }), el('small', {}, took(j))) ) : []));
   };
@@ -237,7 +237,8 @@ function drawGraph(r, run, g, jobs) {
     }).join('');
   };
   requestAnimationFrame(drawEdges);
-  addEventListener('resize', drawEdges);
+  const onResize = () => (dag.isConnected ? drawEdges() : removeEventListener('resize', onResize));
+  addEventListener('resize', onResize);
   return dag;
 }
 
@@ -294,9 +295,16 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
   let timer = null;
   const alive = () => current() && pane.isConnected;
   if (view === 'graph') {
-    const draw = () => pane.replaceChildren(el('div', { class: 'box' },
+    // redrawn every few seconds while it runs: where it was scrolled to stays
+    const draw = () => {
+      const was = pane.querySelector('.dag');
+      const x = was?.scrollLeft || 0;
+      pane.replaceChildren(el('div', { class: 'box' },
       el('header', {}, el('b', { text: run.workflow_id }), el('span', { class: 'small muted', text: `on: ${run.event}` }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: 'a job starts when every job before it has passed' })),
       g ? drawGraph(r, run, g, jobs) : el('div', { class: 'empty', text: 'The workflow file could not be read; the jobs are under Jobs and logs.' })));
+      const now = pane.querySelector('.dag');
+      if (now) now.scrollLeft = x;
+    };
     draw();
     const tick = async () => {
       if (!alive() || DONE.includes(run.status)) return;
