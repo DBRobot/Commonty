@@ -220,6 +220,20 @@
           # build script may record where it wrote (tauri does), and a cache
           # made in "source" pointed the app's build in src-app at nothing
           depsIn = src: pkgs.runCommandLocal src.name { } "cp -r ${depsSrc} $out";
+          # The programs that run on the boxes, and dd, one derivation per
+          # crate (Cargo.nix, made by crate2nix from Cargo.lock): a
+          # dependency moving rebuilds that crate and what uses it, where
+          # crane rebuilt every dependency at once. After changing
+          # Cargo.lock: nix run nixpkgs#crate2nix -- generate
+          cargoNix = pkgs.callPackage ./Cargo.nix {
+            defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+              # askama finds the Photos pages' templates beside the gate's
+              verify = _: {
+                postUnpack = "mkdir -p $NIX_BUILD_TOP/photos && cp -r ${./box/photos/templates} $NIX_BUILD_TOP/photos/templates";
+              };
+            };
+          };
+          perCrate = n: cargoNix.workspaceMembers.${n}.build;
           sources = {
             dd = crateSrc "dd" [
               "client/cli"
@@ -438,29 +452,29 @@
           pages = pkgs.runCommandLocal "dd-pages" { } "cp -r ${pages} $out";
           # the cli, and `git remote add origin dd::...`, which dd repo calls too
           # `dd media` mounts libraries with rclone; the binary knows where it is
-          dd = (crate "dd" sources.dd "-p dd -p git-remote-dd").overrideAttrs (old: {
-            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.makeWrapper ];
-            postFixup =
-              (old.postFixup or "")
-              + "\n"
-              + ''
-                wrapProgram $out/bin/dd --set DD_RCLONE ${pkgs.rclone}/bin/rclone
-              '';
-          });
+          dd = pkgs.symlinkJoin {
+            name = "dd";
+            paths = [
+              (perCrate "dd")
+              (perCrate "git-remote-dd")
+            ];
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+            postBuild = "wrapProgram $out/bin/dd --set DD_RCLONE ${pkgs.rclone}/bin/rclone";
+          };
           # The release agent, on every box. Server side like verify: the
           # release crate holds the file format the cli signs and this
           # binary checks, and nothing that needs a keyring.
-          agent = crate "dd-agent" sources.agent "-p release";
+          agent = perCrate "release";
           # The verifier behind nginx's auth_request. Built separately from dd
           # rather than as another binary in the same derivation: this one
           # runs on a server and has no business pulling in the keyring/dbus
           # stack that the cli needs.
-          verify = crate "verify" sources.verify "-p verify";
+          verify = perCrate "verify";
           # the manager behind the Games tile (modules/games.nix)
-          games = crate "dd-games" sources.games "-p games";
+          games = perCrate "games";
           # one file, one viewer, in memory: the compute side of the
           # encrypted libraries (modules/library/transcode.nix)
-          transcode = crate "dd-transcode" sources.transcode "-p transcode";
+          transcode = perCrate "transcode";
           # The app: the same crates as dd behind a window (app/). Wrapped
           # so the webview finds its schemas and gio modules; the dmabuf
           # renderer is off because on nvidia it draws a blank window.
@@ -538,6 +552,21 @@
           # and clippy in seconds, the tests once, all cached by content and
           # shared between the runner boxes through the bucket. ci builds
           # these instead of running cargo a second and third time.
+          # Cargo.nix follows Cargo.lock: the box programs build from it, and
+          # a stale one would build the old versions without a word
+          cargo-nix =
+            let
+              lib = pkgs.lib;
+              lock = builtins.fromTOML (builtins.readFile ./Cargo.lock);
+              want = lib.sort lib.lessThan (map (p: "${p.name} ${p.version}") lock.package);
+              have = lib.sort lib.lessThan (
+                lib.mapAttrsToList (_: c: "${c.crateName} ${c.version}") cargoNix.internal.crates
+              );
+            in
+            if want == have then
+              pkgs.runCommandLocal "cargo-nix-follows-cargo-lock" { } "touch $out"
+            else
+              throw "Cargo.nix does not match Cargo.lock (only in Cargo.lock: ${toString (lib.subtractLists have want)}; only in Cargo.nix: ${toString (lib.subtractLists want have)}). Run: nix run nixpkgs#crate2nix -- generate";
           fmt = craneLib.cargoFmt {
             inherit src;
             pname = "dd";
@@ -736,6 +765,7 @@
         // nixpkgs.lib.genAttrs vmTests vm
         // {
           inherit (rust)
+            cargo-nix
             fmt
             clippy
             clippy-app
