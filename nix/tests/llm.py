@@ -39,6 +39,7 @@ box.fail("journalctl -u llama-swap --no-pager | grep -q 'Once upon a time'")
 box.wait_for_unit("searx.service")
 box.wait_until_succeeds("curl -sf 'http://127.0.0.1:8888/search?q=test&format=json' | grep -q '\"results\"'", timeout=120)
 listen = box.succeed("ss -Hltn 'sport = :8888'")
-assert "127.0.0.1:8888" in listen and "0.0.0.0" not in listen and "[::]" not in listen, listen
+# the local address of every listening socket on the port: loopback alone
+assert [l.split()[3] for l in listen.splitlines()] == ["127.0.0.1:8888"], listen
 deny = box.succeed("systemctl show -p IPAddressDeny searx.service")
 assert "192.168.0.0/16" in deny and "100.64.0.0/10" in deny, deny
