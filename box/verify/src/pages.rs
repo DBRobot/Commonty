@@ -76,6 +76,11 @@ pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
         "login.js" => (include_str!("../web/login.js"), js),
         "join.js" => (include_str!("../web/join.js"), js),
         "friends.js" => (include_str!("../../web/friends.js"), js),
+        "chat.js" => (include_str!("../../chat/web/chat.js"), js),
+        "chat.css" => (
+            include_str!("../../chat/web/chat.css"),
+            "text/css; charset=utf-8",
+        ),
         "enrol.js" => (include_str!("../web/enrol.js"), js),
         "redeem.js" => (include_str!("../web/redeem.js"), js),
         "photos.js" => (include_str!("../../photos/web/photos.js"), js),
@@ -153,6 +158,7 @@ pub fn page(name: &str) -> Option<&'static str> {
         "devices" => include_str!("../../fleet/web/pages/devices.html"),
         "network" => include_str!("../../fleet/web/pages/network.html"),
         "friends" => include_str!("../../web/pages/friends.html"),
+        "chat" => include_str!("../../chat/web/pages/chat.html"),
         "friend" => include_str!("../../web/pages/friend.html"),
         _ => return None,
     })
