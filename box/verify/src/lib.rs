@@ -1251,6 +1251,24 @@ async fn chat_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response 
     }
 }
 
+/// Git (box/forge): our pages over the forge, for anyone signed in. The
+/// forge's API decides what each of them may see and do; the page is the
+/// same file for all.
+async fn git_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    match app.sessions.user(cookie) {
+        Some(_) => page("git"),
+        None => {
+            let at = headers
+                .get("x-original-uri")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("/");
+            let rd: String = url::form_urlencoded::byte_serialize(at.as_bytes()).collect();
+            Redirect::to(&format!("/_dd/login?rd={rd}")).into_response()
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct SearchQuery {
     q: String,
@@ -1636,6 +1654,7 @@ pub async fn start(
         // the network's door: a join key for an admitted device
         .route("/_dd/network/join", post(network::join))
         .route("/_dd/chat", get(chat_page))
+        .route("/_dd/git", get(git_page))
         .route("/_dd/chat/search", get(chat_search))
         .route("/_dd/friends", get(friends::page))
         .route("/_dd/friends/list", get(friends::list))

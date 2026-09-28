@@ -165,6 +165,56 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/css; charset=utf-8",
     ),
     (
+        "git.js",
+        "box/forge/web/git.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "git-core.js",
+        "box/forge/web/git-core.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "git-charts.js",
+        "box/forge/web/git-charts.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "git-diff.js",
+        "box/forge/web/git-diff.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "git-home.js",
+        "box/forge/web/git-home.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "git-repo.js",
+        "box/forge/web/git-repo.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "git-pulls.js",
+        "box/forge/web/git-pulls.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "git-actions.js",
+        "box/forge/web/git-actions.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "git-settings.js",
+        "box/forge/web/git-settings.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "git.css",
+        "box/forge/web/git.css",
+        "text/css; charset=utf-8",
+    ),
+    (
         "enrol.js",
         "box/verify/web/enrol.js",
         "text/javascript; charset=utf-8",
@@ -307,6 +357,7 @@ const PAGES: &[(&str, &str)] = &[
     ("network", "box/fleet/web/pages/network.html"),
     ("friends", "box/web/pages/friends.html"),
     ("chat", "box/chat/web/pages/chat.html"),
+    ("git", "box/forge/web/pages/git.html"),
     ("friend", "box/web/pages/friend.html"),
 ];
 
@@ -828,6 +879,7 @@ mod tests {
             ("backups", "backups.js"),
             ("devices", "devices.js"),
             ("network", "network.js"),
+            ("git", "git.js"),
         ] {
             let html = page(name).unwrap();
             // nobody's name in the file: it comes from /_dd/me

@@ -18,6 +18,22 @@ let
   sock = "/run/forgejo/forgejo.sock";
   cancelPort = 3003;
   cfg = config.dd.forgejo;
+  # the forge, as whoever the gate says is looking
+  toForge = {
+    proxyPass = "http://unix:${sock}:";
+    extraConfig = ''
+      client_max_body_size 0; # pushes over https, lfs
+      # who is this? the verifier says. The header the client sent is
+      # replaced either way, so nobody names themselves.
+      auth_request /_dd/verify;
+      auth_request_set $auth_user $upstream_http_x_auth_request_preferred_username;
+      # the demo is nobody here: public repos, no account made for it
+      proxy_set_header X-WEBAUTH-USER $forge_user;
+      # nobody: still let them in, as nobody. Public repos are public and
+      # forgejo shows private ones to no one it does not know.
+      error_page 401 = @anonymous;
+    '';
+  };
 in
 {
   # The one account that administers the forge. Every other account is made
@@ -91,6 +107,9 @@ in
           # sandboxed, and the host runners take the owner's repos alone.
         };
         mailer.ENABLED = false;
+        # a webhook goes out to the world, never to this box, the house or
+        # the tailnet
+        webhook.ALLOWED_HOST_LIST = "external";
         actions = {
           ENABLED = true; # the runner is modules/forgejo-runner.nix
           # `uses: actions/checkout@v4` is written out in full in our
@@ -246,21 +265,28 @@ in
     services.nginx.virtualHosts.${host} = {
       useACMEHost = base;
       forceSSL = true;
+      # The pages are ours (box/forge/web): every address that is not the
+      # forge's own below gets the one page, which draws itself from the
+      # forge's API.
       locations."/" = {
-        proxyPass = "http://unix:${sock}:";
+        proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";
         extraConfig = ''
-          client_max_body_size 0; # pushes over https, lfs
-          # who is this? the verifier says. The header the client sent is
-          # replaced either way, so nobody names themselves.
-          auth_request /_dd/verify;
-          auth_request_set $auth_user $upstream_http_x_auth_request_preferred_username;
-          # the demo is nobody here: public repos, no account made for it
-          proxy_set_header X-WEBAUTH-USER $forge_user;
-          # nobody: still let them in, as nobody. Public repos are public and
-          # forgejo shows private ones to no one it does not know.
-          error_page 401 = @anonymous;
+          rewrite ^ /_dd/git break;
+          proxy_set_header X-Original-URI $request_uri;
         '';
       };
+      # the forge's own: its API, git over https, raw files and archives,
+      # a job's log, avatars, and its account pages
+      locations."~ ^/(api|assets|avatars|repo-avatars|attachments|user|login|-|\\.well-known)(/|$)" = toForge;
+      locations."~ ^/[^/]+/[^/]+\\.git(/|$)" = toForge;
+      locations."~ ^/[^/]+/[^/]+/(info/refs|info/lfs|git-upload-pack|git-receive-pack)" = toForge;
+      locations."~ ^/[^/]+/[^/]+/(raw|archive|media|releases/download|attachments)/" = toForge;
+      locations."~ ^/[^/]+/[^/]+/actions/runs/[0-9]+/jobs/[0-9]+/attempt/[0-9]+/logs$" = toForge;
+      # which repository the boxes are built from: its pages show what they run
+      locations."= /fleet-repo.json".extraConfig = ''
+        default_type application/json;
+        return 200 '${builtins.toJSON { repo = config.dd.repo; }}';
+      '';
       # the ci cancel route: the secret is the credential, not a session
       locations."/_dd/ci/" = {
         proxyPass = "http://127.0.0.1:${toString cancelPort}";
