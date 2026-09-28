@@ -10,6 +10,9 @@
 import { me } from './shell.js';
 
 export const $ = (id) => document.getElementById(id);
+// replaceChildren that takes lists and skips what is not there (a bare
+// null would be drawn as the word)
+export const put = (parent, ...kids) => parent.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false));
 export const app = () => $('app');
 
 // ---- building the page

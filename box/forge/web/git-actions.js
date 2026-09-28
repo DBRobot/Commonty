@@ -1,7 +1,7 @@
 // Actions: the runs, and one run as a graph of its jobs - read from the
 // workflow files' `needs:` - or as its jobs and their logs, both live.
 
-import { app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, setTitle, short, pager } from './git-core.js';
+import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, setTitle, short, pager } from './git-core.js';
 import { repo, header } from './git-repo.js';
 
 const main = () => app();
@@ -25,7 +25,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
     el('div', { style: 'flex:1;min-width:0' }, el('div', { class: 't', text: x.title }),
       el('div', { class: 'sub' }, `Run ${x.index_in_repo} · ${x.workflow_id} · ${x.prettyref || ''} · ${x.event} · `, x.trigger_user?.login || '', ' · ', el('span', { class: 'mono', text: short(x.commit_sha) }))),
     el('div', { class: 'small muted', style: 'text-align:right' }, when(x.created), el('br'), x.status === 'running' ? 'running' : x.duration ? duration(ns(x.duration)) : x.status));
-  main().replaceChildren(el('div', { class: 'two left' },
+  put(main(), el('div', { class: 'two left' },
     el('aside', { class: 'jobs' },
       el('a', { href: `/${r.full_name}/actions`, 'aria-current': !workflow ? 'page' : null, text: 'All runs' }),
       ...flows.map((f) => el('a', { href: `/${r.full_name}/actions${q({ workflow: f })}`, 'aria-current': workflow === f ? 'page' : null, text: f.replace(/\.ya?ml$/, '') }))),
@@ -256,7 +256,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
   const seg = el('span', { class: 'gseg', role: 'group', 'aria-label': 'View' },
     el('a', { class: 'btn', href: `/${r.full_name}/actions/runs/${index}`, 'aria-pressed': String(view === 'graph'), text: 'Graph' }),
     el('a', { class: 'btn', href: `/${r.full_name}/actions/runs/${index}${q({ job: jobs.find((j) => j.state === 'failure')?.index ?? jobs.find((j) => j.state === 'running')?.index ?? jobs[0]?.index ?? 0 })}`, 'aria-pressed': String(view === 'log'), text: 'Jobs and logs' }));
-  main().replaceChildren(
+  put(main(), 
     el('div', { class: 'hrow gap' }, el('a', { href: `/${r.full_name}/actions`, text: '← All runs' }), el('h1', { class: 'h1', style: 'font-size:19px', text: `Run ${index} · ${run.title}` }), el('span', { class: 'spacer' }), seg),
     summary, pane);
   drawSummary();
