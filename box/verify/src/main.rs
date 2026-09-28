@@ -74,6 +74,17 @@ async fn main() -> Result<()> {
             Err(_) => None,
         }
         .filter(|k| !k.is_empty()),
+        oidc: match std::env::var("VERIFY_OIDC_ISSUER") {
+            Ok(issuer) if full => Some(verify::OidcConfig {
+                issuer,
+                client_id: env("VERIFY_OIDC_CLIENT_ID")?,
+                client_secret: std::fs::read_to_string(env("VERIFY_OIDC_CLIENT_SECRET_FILE")?)?
+                    .trim()
+                    .to_string(),
+                redirect: env("VERIFY_OIDC_REDIRECT")?,
+            }),
+            _ => None,
+        },
         search: std::env::var("VERIFY_SEARCH")
             .ok()
             .filter(|s| !s.is_empty()),
