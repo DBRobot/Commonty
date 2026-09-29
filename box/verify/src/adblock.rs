@@ -1,7 +1,7 @@
 //! Ad blocking at home (modules/adblock): Pi-hole on the house's main box,
-//! for the house network. Its own api listens on this box alone and asks
-//! for nothing; the gate is its only door, and only the household may use
-//! it. Pi-hole keeps counts and nothing about who looked up what, so all
+//! for the house network. Its own api listens on this box alone and wants
+//! a password only the gate holds; the gate is its only door, and only the
+//! household, signed in, may use it. Pi-hole keeps counts and nothing about who looked up what, so all
 //! there is to show is totals, the lists, and the sites let through.
 
 use std::time::Duration;
@@ -26,6 +26,62 @@ pub struct Adblock {
     /// where the household's on/off is kept: Pi-hole's own settings are
     /// written afresh by every release, which would switch it back on
     pub remember: Option<std::path::PathBuf>,
+    /// Pi-hole's api password (sops, handed to the gate alone)
+    pub password: Option<String>,
+}
+
+/// set once the household has used the switch since the gate started: the
+/// start-up restore must not undo what they just chose
+static SWITCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// the gate's session with Pi-hole, while it lasts
+static SID: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+async fn sign_in(ab: &Adblock) -> Option<String> {
+    let pw = ab.password.as_ref()?;
+    let r = match client()
+        .post(format!("{}/api/auth", ab.api))
+        .json(&json!({ "password": pw }))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("adblock: Pi-hole's api did not answer: {e}");
+            return None;
+        }
+    };
+    let status = r.status();
+    let v: Value = r.json().await.unwrap_or(Value::Null);
+    let Some(sid) = v["session"]["sid"].as_str().map(str::to_string) else {
+        eprintln!(
+            "adblock: Pi-hole refused the gate's password ({status}): {}",
+            v["session"]["message"]
+        );
+        return None;
+    };
+    // a minute short of what Pi-hole allows, so it never lapses mid-call
+    let secs = v["session"]["validity"]
+        .as_u64()
+        .unwrap_or(300)
+        .saturating_sub(60)
+        .max(30);
+    let until = std::time::Instant::now() + Duration::from_secs(secs);
+    if let Ok(mut g) = SID.lock() {
+        *g = Some((sid.clone(), until));
+    }
+    Some(sid)
+}
+
+async fn sid(ab: &Adblock, fresh: bool) -> Option<String> {
+    if !fresh
+        && let Ok(g) = SID.lock()
+        && let Some((s, until)) = g.as_ref()
+        && std::time::Instant::now() < *until
+    {
+        return Some(s.clone());
+    }
+    sign_in(ab).await
 }
 
 impl Adblock {
@@ -47,18 +103,32 @@ async fn ftl(
     path: &str,
     body: Option<Value>,
 ) -> Result<Value, StatusCode> {
-    let mut r = client().request(method, format!("{}/api{path}", ab.api));
-    if let Some(b) = body {
-        r = r.json(&b);
+    for fresh in [false, true] {
+        let mut r = client().request(method.clone(), format!("{}/api{path}", ab.api));
+        if ab.password.is_some() {
+            let Some(s) = sid(ab, fresh).await else {
+                return Err(StatusCode::BAD_GATEWAY);
+            };
+            r = r.header("X-FTL-SID", s);
+        }
+        if let Some(b) = &body {
+            r = r.json(b);
+        }
+        let r = r.send().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+        // the session lapsed or Pi-hole restarted: sign in again, once
+        if r.status() == reqwest::StatusCode::UNAUTHORIZED && !fresh && ab.password.is_some() {
+            continue;
+        }
+        if !r.status().is_success() {
+            eprintln!("adblock: Pi-hole said {} to {method} {path}", r.status());
+            return Err(StatusCode::BAD_GATEWAY);
+        }
+        if r.status() == reqwest::StatusCode::NO_CONTENT {
+            return Ok(Value::Null);
+        }
+        return r.json().await.map_err(|_| StatusCode::BAD_GATEWAY);
     }
-    let r = r.send().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
-    if !r.status().is_success() {
-        return Err(StatusCode::BAD_GATEWAY);
-    }
-    if r.status() == reqwest::StatusCode::NO_CONTENT {
-        return Ok(Value::Null);
-    }
-    r.json().await.map_err(|_| StatusCode::BAD_GATEWAY)
+    Err(StatusCode::BAD_GATEWAY)
 }
 
 /// the household member asking, or why not
@@ -188,6 +258,7 @@ pub(crate) async fn switch(
         Ok(x) => x,
         Err(s) => return s.into_response(),
     };
+    SWITCHED.store(true, std::sync::atomic::Ordering::SeqCst);
     let body = match (s.on, s.pause_minutes) {
         (_, Some(m)) if (1..=24 * 60).contains(&m) => json!({ "blocking": false, "timer": m * 60 }),
         (Some(on), None) => json!({ "blocking": on, "timer": null }),
@@ -221,8 +292,12 @@ pub async fn restore(ab: Adblock) {
     if said.trim() != "off" {
         return;
     }
-    // Pi-hole may still be starting: ask for a minute
+    // Pi-hole may still be starting: ask for a minute, unless the household
+    // switches it themselves first
     for _ in 0..30 {
+        if SWITCHED.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         if ftl(
             &ab,
             reqwest::Method::POST,
