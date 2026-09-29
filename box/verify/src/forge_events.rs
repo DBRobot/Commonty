@@ -105,8 +105,9 @@ pub(crate) async fn events(
         move |m| async move {
             let payload = m.ok()?;
             let v: serde_json::Value = serde_json::from_str(&payload).ok()?;
+            // sent on compact: Postgres writes its json with spaces
             (v["repo"].as_i64() == Some(repo))
-                .then(|| Ok::<_, Infallible>(Event::default().data(payload)))
+                .then(|| Ok::<_, Infallible>(Event::default().data(v.to_string())))
         },
     );
     let mut r = Sse::new(stream)
