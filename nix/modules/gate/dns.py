@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-# The fleet's names at Cloudflare, converged: `*` and the bare name point at
-# the gateway's tailnet address, and each public host is a proxied CNAME to
-# the tunnel while the door is open. Only records this script names are
+# The fleet's names at Cloudflare, converged: `*` points at the gateway's
+# tailnet address, and each public host is a proxied CNAME to the tunnel
+# while the door is open; the bare name is one of them when BARE is set,
+# and the tailnet address otherwise. Only records this script names are
 # touched; anything else in the zone is left alone. Environment: the token,
-# ZONE, TAILNET, TUNNEL, HOSTS (space separated), PUBLIC (true/false).
+# ZONE, TAILNET, TUNNEL, HOSTS (space separated), PUBLIC and BARE (true/false).
 import json
 import os
 import sys
@@ -16,6 +17,8 @@ tailnet = os.environ["TAILNET"]
 tunnel = os.environ["TUNNEL"]
 hosts = os.environ["HOSTS"].split()
 public = os.environ["PUBLIC"] == "true"
+# the bare name through the tunnel too: what people type to find the site
+bare = public and os.environ.get("BARE") == "true"
 
 
 def call(method, path, body=None):
@@ -38,7 +41,7 @@ for r in call("GET", "/zones/%s/dns_records?per_page=500" % zone_id):
     have.setdefault(r["name"], []).append(r)
 
 want = {
-    zone: ("A", tailnet, False),
+    zone: ("CNAME", tunnel + ".cfargotunnel.com", True) if bare else ("A", tailnet, False),
     "*." + zone: ("A", tailnet, False),
 }
 for h in hosts:

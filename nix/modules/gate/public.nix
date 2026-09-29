@@ -22,6 +22,9 @@ let
   base = config.dd.domain;
   # where the tunnel lands: an nginx listener that only cloudflared reaches
   tunnelPort = 8443;
+  # every name that answers an outsider: the public hosts, and the bare
+  # name when it is open too
+  publicNames = map (h: "${h}.${base}") cfg.hosts ++ lib.optional cfg.bare base;
 in
 {
   options.dd.public = {
@@ -29,6 +32,11 @@ in
     hosts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       description = "the subdomains that answer a connection from outside the tailnet: the gate's own pages (sign-in, sign-up, the demo), what they need, and the network's control server. Everything else is tailnet-only. Lists from every module add up.";
+    };
+    bare = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "the bare name answers outsiders too, through the tunnel: what people type to find the site. Its server block must offer nothing a stranger may not have (roles/gateway.nix: a redirect to home and the app download).";
     };
     tunnel = lib.mkOption {
       type = lib.types.str;
@@ -88,6 +96,7 @@ in
         TUNNEL = cfg.tunnel;
         HOSTS = lib.concatStringsSep " " cfg.hosts;
         PUBLIC = lib.boolToString cfg.enable;
+        BARE = lib.boolToString cfg.bare;
       };
     };
 
@@ -103,7 +112,7 @@ in
       tunnels.${cfg.tunnel} = {
         credentialsFile = cfg.credentialsFile;
         default = "http_status:404";
-        ingress = lib.genAttrs (map (h: "${h}.${base}") cfg.hosts) (host: {
+        ingress = lib.genAttrs publicNames (host: {
           service = "https://127.0.0.1:${toString tunnelPort}";
           originRequest.originServerName = host;
         });
@@ -138,17 +147,17 @@ in
       map "$dd_inside:$host" $dd_shut {
         default 1;
         "~^1:" 0;
-        ${lib.concatMapStringsSep "\n  " (h: ''"~^0:${h}\\.${lib.escapeRegex base}$" 0;'') cfg.hosts}
+        ${lib.concatMapStringsSep "\n  " (n: ''"~^0:${lib.escapeRegex n}$" 0;'') publicNames}
       }
     '';
     # every host the gate stands in front of, and every public host that
     # is not one of those (the network's control server): the same check,
     # and the tunnel's listener for the public ones
     services.nginx.virtualHosts = lib.mkIf cfg.enable (
-      lib.genAttrs (map (h: "${h}.${base}") (lib.unique (config.dd.verify.hosts ++ cfg.hosts))) (
+      lib.genAttrs (lib.unique (map (h: "${h}.${base}") config.dd.verify.hosts ++ publicNames)) (
         name:
         let
-          isPublic = builtins.elem name (map (h: "${h}.${base}") cfg.hosts);
+          isPublic = builtins.elem name publicNames;
           gated = builtins.elem name (map (h: "${h}.${base}") config.dd.verify.hosts);
         in
         {
