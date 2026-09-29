@@ -46,6 +46,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         fleet: Default::default(),
         thanos: None,
         adblock: None,
+        forge_events: None,
         demo_library: None,
         tmdb: None,
         search: None,

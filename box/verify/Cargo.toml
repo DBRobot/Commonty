@@ -40,3 +40,8 @@ sha2 = "0.10"
 jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
 p256 = "0.13"
 url = "2"
+# the forge's changes as they happen: Postgres LISTEN on a channel a trigger
+# in Forgejo's database announces on (forge_events.rs), no polling
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
+futures-util = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }

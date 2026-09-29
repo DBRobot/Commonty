@@ -13,6 +13,7 @@
 pub mod adblock;
 mod directory;
 pub mod fleet;
+mod forge_events;
 mod friends;
 pub mod library;
 pub mod network;
@@ -75,6 +76,8 @@ struct App {
     thanos: Option<String>,
     /// Ad blocking at home: Pi-hole's api on this box, and its household
     adblock: Option<adblock::Adblock>,
+    /// the forge's changes as they happen (forge_events.rs)
+    forge_events: Option<forge_events::ForgeEvents>,
     /// who is friends with whom, and who came in as a guest (friends.rs)
     friends: friends::Store,
 }
@@ -154,6 +157,9 @@ pub struct Config {
     pub thanos: Option<String>,
     /// Pi-hole on this box (adblock.rs). None: no ad blocking here.
     pub adblock: Option<adblock::Adblock>,
+    /// how to reach Forgejo's database to listen for its changes
+    /// (a libpq connection string); None: the Git pages do not update live
+    pub forge_events: Option<String>,
     /// The fleet's TMDB key, handed to signed-in pages so a member's own
     /// device can look up a film's poster by its title. The box never
     /// sees the titles: they are sealed in the library. None: no posters,
@@ -1706,6 +1712,7 @@ pub async fn start(
         fleet: cfg.fleet,
         thanos: cfg.thanos,
         adblock: cfg.adblock,
+        forge_events: cfg.forge_events.map(forge_events::ForgeEvents::start),
         friends: friends::Store::open(&state_dir)?,
     });
     // A held sign-up follows through when the member list names it: then it
@@ -1842,6 +1849,7 @@ pub async fn start(
         .route("/_dd/network/join", post(network::join))
         .route("/_dd/chat", get(chat_page))
         .route("/_dd/git", get(git_page))
+        .route("/_dd/git/events", get(forge_events::events))
         .route("/_dd/metrics", get(metrics_page))
         // anyone's: a Send decrypts in the browser with the key in its link
         .route(
