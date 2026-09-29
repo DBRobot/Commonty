@@ -77,6 +77,32 @@ function el(tag, props = {}, ...kids) {
   return e;
 }
 
+// A setting that belongs at hand (Ad blocking at home): its name opens its
+// page, the switch beside it flips it. Its state is asked for when the menu
+// opens, not on every page.
+function toggleRow(item) {
+  const sw = el('button', { type: 'button', class: 'switch', role: 'switch', 'aria-checked': 'false', 'aria-label': item.label });
+  sw.disabled = true;
+  const show = (s) => {
+    sw.disabled = false;
+    sw.setAttribute('aria-checked', String(!!s.on));
+    sw.title = s.on ? 'On' : s.resumesIn ? 'Paused' : 'Off';
+  };
+  const read = () => fetch(item.toggle).then((r) => (r.ok ? r.json() : Promise.reject(r))).then(show).catch(() => { sw.title = 'Not answering'; });
+  sw.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const on = sw.getAttribute('aria-checked') !== 'true';
+    sw.disabled = true;
+    try {
+      const r = await fetch(item.switch, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on }) });
+      if (r.ok) show(await r.json()); else read();
+    } catch { read(); }
+  });
+  const row = el('div', { class: 'toggle' }, el('a', { href: here(item.url), text: item.label }), sw);
+  row.read = read;
+  return row;
+}
+
 // the name is the control: it opens everything that is not a service
 function bar(m, slot) {
   const nav = el('nav');
@@ -87,6 +113,10 @@ function bar(m, slot) {
       // this device signs out
       if (inApp && item.url === '/_dd/logout') {
         nav.append(el('a', { href: deviceScreen, text: 'This device' }));
+        continue;
+      }
+      if (item.toggle) {
+        nav.append(toggleRow(item));
         continue;
       }
       nav.append(el('a', { href: here(item.url), text: item.label }));
@@ -100,6 +130,9 @@ function bar(m, slot) {
   const brand = document.querySelector('header.dd-bar .brand');
   if (brand && appOrigin) brand.setAttribute('href', appOrigin + '/_dd/home');
   const menu = el('details', { class: 'menu' }, summary, nav);
+  menu.addEventListener('toggle', () => {
+    if (menu.open) nav.querySelectorAll('.toggle').forEach((t) => t.read());
+  });
   slot.replaceChildren(menu);
   // a menu closes when you are done with it: a click anywhere else, or Escape
   document.addEventListener('click', (e) => {

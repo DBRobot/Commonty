@@ -38,6 +38,25 @@ async fn main() -> Result<()> {
         thanos: std::env::var("VERIFY_THANOS")
             .ok()
             .filter(|s| !s.is_empty()),
+        // Pi-hole's api on this box, the members of the house it serves,
+        // and the box's address on the house network
+        adblock: std::env::var("VERIFY_ADBLOCK")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|api| verify::adblock::Adblock {
+                api,
+                household: env_or("VERIFY_ADBLOCK_HOUSEHOLD", "")
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect(),
+                lan: env_or("VERIFY_ADBLOCK_LAN", ""),
+                remember: std::env::var("VERIFY_ADBLOCK_STATE")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .map(Into::into),
+            }),
         app_manifest: std::env::var("VERIFY_APP_MANIFEST")
             .ok()
             .filter(|u| !u.is_empty()),
@@ -96,6 +115,9 @@ async fn main() -> Result<()> {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
     };
+    if let Some(ab) = cfg.adblock.clone() {
+        tokio::spawn(verify::adblock::restore(ab));
+    }
     let (_, task) = verify::start(cfg).await?;
     task.await?
 }

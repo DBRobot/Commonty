@@ -28,6 +28,8 @@
     wired = "44:ED:57:10:00:40";
   };
   sops.secrets.wifi-psk = { };
+  # who lives in this house: they switch its ad blocking (roles/adblock.nix)
+  dd.adblock.household = [ "david" ];
   sops.templates."wifi.env".content = "psk=${config.sops.placeholder.wifi-psk}\n";
 
   # tank is the root pool and imports itself; vault is the usb disk
