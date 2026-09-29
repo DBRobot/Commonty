@@ -41,6 +41,7 @@ in
       pkgs.curl
       pkgs.jq
       pkgs.dig
+      pkgs.sqlite
     ];
     # Pi-hole's list update first checks the internet is there by looking
     # these up; the test has none, and its list is a file

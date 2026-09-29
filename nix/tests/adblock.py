@@ -29,6 +29,12 @@ away.wait_for_unit("multi-user.target")
 
 # the weekly update runs, and Pi-hole still has its list after it
 box.succeed("systemctl start dd-pihole-lists.service")
+# and again, after Pi-hole restarts, as a release does: the lists are
+# already there, and loading them again must not fail
+box.succeed("systemctl restart pihole-ftl.service")
+box.succeed("systemctl restart dd-pihole-lists.service")
+box.succeed("systemctl restart dd-pihole-lists.service")
+assert box.succeed("sqlite3 /var/lib/pihole/gravity.db 'select count(*) from adlist'").strip() == "1"
 box.wait_until_succeeds(f"{ftl} http://127.0.0.1:8053/api/stats/summary | jq -e '.gravity.domains_being_blocked > 0'", timeout=120)
 
 # the house is filtered
