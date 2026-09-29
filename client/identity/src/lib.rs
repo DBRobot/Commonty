@@ -497,7 +497,37 @@ fn check_assertion_with(sig_b64: &str, entry: &Entry, trusted: &[Passkey]) -> Re
     if c["challenge"].as_str() != Some(B64_URL.encode(challenge(entry)?).as_str()) {
         return Err(Error::Signature);
     }
+    let origin = c["origin"].as_str().unwrap_or_default();
+    if !presence_and_place(&auth, origin, passkey.rp_id.as_deref()) {
+        return Err(Error::Signature);
+    }
     Ok(())
+}
+
+/// Whether an assertion says "a person, here": user-present is set, which
+/// an authenticator does only after a touch or an unlock, and it was made on
+/// https for the relying party on record - or, for a passkey from before that
+/// was recorded, for a domain the origin sits in.
+fn presence_and_place(auth: &[u8], origin: &str, rp_id: Option<&str>) -> bool {
+    use sha2::Digest as _;
+    if auth.len() < 37 || auth[32] & 0x01 == 0 {
+        return false;
+    }
+    let Some(host) = origin
+        .strip_prefix("https://")
+        .map(|h| h.split(['/', ':']).next().unwrap_or_default())
+    else {
+        return false;
+    };
+    let within = |rp: &str| host == rp || host.ends_with(&format!(".{rp}"));
+    let hashed = |rp: &str| sha2::Sha256::digest(rp.as_bytes())[..] == auth[..32];
+    match rp_id {
+        Some(rp) => within(rp) && hashed(rp),
+        None => {
+            let labels: Vec<&str> = host.split('.').collect();
+            (0..labels.len().saturating_sub(1)).any(|i| hashed(&labels[i..].join(".")))
+        }
+    }
 }
 
 /// Is the entry signed by the root it names? True of every valid entry.
@@ -579,10 +609,20 @@ pub fn accept(existing: Option<&SignedEntry>, new: &SignedEntry) -> Result<()> {
             new.entry.version, old.entry.version
         )));
     }
-    if new.entry.root == old.entry.root {
+    // the paper key is the one thing a stolen root cannot take: only the
+    // recovery key on file may name a different one (a first one, where
+    // there was none, is the root's to set)
+    let recovery_changed =
+        new.entry.recovery != old.entry.recovery && !old.entry.recovery.is_empty();
+    if new.entry.root == old.entry.root && !recovery_changed {
         return Ok(());
     }
     let Some(rs) = &new.recovery_signature else {
+        if new.entry.root == old.entry.root {
+            return Err(Error::Rejected(
+                "only the recovery key may change the recovery key".into(),
+            ));
+        }
         return Err(Error::Rejected(
             "only the recovery key may change the root".into(),
         ));
@@ -766,20 +806,18 @@ mod tests {
             "a different relying party hashes differently"
         );
 
-        // and the origin has to be that domain or below it
-        let below = |origin: &str, rp: &str| {
-            let host = origin
-                .strip_prefix("https://")
-                .unwrap_or(origin)
-                .split('/')
-                .next()
-                .unwrap_or_default();
-            host == rp || host.ends_with(&format!(".{rp}"))
-        };
-        assert!(below("https://commonty.org", "commonty.org"));
-        assert!(below("https://home.commonty.org/x", "commonty.org"));
-        assert!(!below("https://commonty.org.evil.example", "commonty.org"));
-        assert!(!below("https://evil.example", "commonty.org"));
+        // the check itself: present, on https, for the relying party on record
+        use super::presence_and_place as ok;
+        assert!(ok(&with_presence, "https://home.commonty.org", Some("commonty.org")));
+        assert!(ok(&with_presence, "https://commonty.org", Some("commonty.org")));
+        assert!(!ok(&without, "https://home.commonty.org", Some("commonty.org")));
+        assert!(!ok(&elsewhere, "https://home.commonty.org", Some("commonty.org")));
+        assert!(!ok(&with_presence, "https://commonty.org.evil.example", Some("commonty.org")));
+        assert!(!ok(&with_presence, "http://home.commonty.org", Some("commonty.org")));
+        assert!(!ok(&with_presence[..20], "https://home.commonty.org", Some("commonty.org")));
+        // a passkey from before rp_id was recorded: some domain the origin is in
+        assert!(ok(&with_presence, "https://home.commonty.org", None));
+        assert!(!ok(&elsewhere, "https://home.commonty.org", None));
         let _ = B64_URL;
     }
 
@@ -863,6 +901,16 @@ mod tests {
         accept(Some(&s1), &s2).unwrap();
         // replaying the old one is refused
         assert!(accept(Some(&s2), &s1).is_err());
+        // the root alone may not name a new paper key: a stolen root would
+        // otherwise lock the owner out of recovery for good
+        let mut swap = e2.clone();
+        swap.version = 3;
+        swap.recovery = encode_public(&generate().verifying_key());
+        assert!(accept(Some(&s2), &sign(swap.clone(), &root).unwrap()).is_err());
+        // the paper key on file may, and the root still signs as before
+        accept(Some(&s2), &sign_recovery(swap.clone(), &root, &recovery).unwrap()).unwrap();
+        // and a wrong paper key may not
+        assert!(accept(Some(&s2), &sign_recovery(swap, &root, &generate()).unwrap()).is_err());
         // a new root on its own is refused, however well it signs itself
         let mut e3 = e2.clone();
         e3.version = 3;
