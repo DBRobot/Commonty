@@ -1,4 +1,4 @@
-{ config, ... }:
+{ config, lib, ... }:
 let
   base = config.dd.domain;
 in
@@ -41,5 +41,20 @@ in
       rejectSSL = true;
       locations."/".return = "444";
     };
+    # The access log keeps the path and never the query string: that is
+    # where share links, one-time codes and search terms travel. The
+    # referrer, which is another page's whole address, is cut the same way.
+    appendHttpConfig = ''
+      map $http_referer $dd_referer_path {
+        default "";
+        "~^(?<dd_ref>[^?#]*)" $dd_ref;
+      }
+      log_format dd_path '$remote_addr - $remote_user [$time_local] '
+                         '"$request_method $uri $server_protocol" $status $body_bytes_sent '
+                         '"$dd_referer_path" "$http_user_agent"';
+      access_log /var/log/nginx/access.log dd_path;
+    '';
   };
+  # and it is kept three weeks, not the half year logrotate would
+  services.logrotate.settings.nginx.rotate = lib.mkForce 3;
 }
