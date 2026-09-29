@@ -100,6 +100,7 @@ impl Box_ {
             photos: None,
             library: None,
             fleet: Default::default(),
+            thanos: None,
             demo_library: None,
             tmdb: None,
             search: None,
@@ -1357,6 +1358,7 @@ async fn start_at(
     let (addr, _task) = verify::start(verify::Config {
         home: vec![],
         fleet: Default::default(),
+        thanos: None,
         demo_library: None,
         tmdb: None,
         search: None,
@@ -1440,6 +1442,7 @@ async fn download_page_of(release_pub: String, manifest_url: String) -> (u16, St
         photos: None,
         library: None,
         fleet: Default::default(),
+        thanos: None,
         demo_library: None,
         tmdb: None,
         search: None,

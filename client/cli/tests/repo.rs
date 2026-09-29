@@ -110,6 +110,7 @@ async fn encrypted_remote_end_to_end() {
     let (addr, _task) = verify::start(verify::Config {
         home: vec![],
         fleet: Default::default(),
+        thanos: None,
         demo_library: None,
         tmdb: None,
         search: None,
@@ -411,6 +412,7 @@ async fn a_forge_cannot_pass_one_repository_off_as_another() {
     let (addr, _task) = verify::start(verify::Config {
         home: vec![],
         fleet: Default::default(),
+        thanos: None,
         demo_library: None,
         tmdb: None,
         search: None,
