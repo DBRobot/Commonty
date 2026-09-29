@@ -9,6 +9,10 @@ box.wait_until_succeeds("curl -sf http://127.0.0.1:8053/api/stats/summary | jq -
 house.wait_for_unit("multi-user.target")
 away.wait_for_unit("multi-user.target")
 
+# the weekly update runs, and Pi-hole still has its list after it
+box.succeed("systemctl start dd-pihole-lists.service")
+box.wait_until_succeeds("curl -sf http://127.0.0.1:8053/api/stats/summary | jq -e '.gravity.domains_being_blocked > 0'", timeout=120)
+
 # the house is filtered
 house.wait_until_succeeds("dig +short @192.168.1.2 ads.example.test | grep -qx 0.0.0.0", timeout=60)
 # our names: the house's address to the house, the network's to the network
