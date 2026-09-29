@@ -36,6 +36,9 @@ let
   };
 in
 {
+  # the Git pages update as runs and statuses change (live.nix)
+  imports = [ ./live.nix ];
+
   # The one account that administers the forge. Every other account is made
   # on first visit by the reverse-proxy login below; this one is made ahead
   # of time so that the same login lands on an admin.

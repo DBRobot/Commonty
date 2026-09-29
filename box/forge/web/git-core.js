@@ -267,6 +267,27 @@ export function setTitle(...parts) {
 // it (git-repo.js header) so the click finds it already here
 export const warmers = {};
 
+// ---- live: the forge's changes as they happen (box/verify/src/forge_events.rs)
+
+// What changes in one repository, as it happens: each run, job and commit
+// status the forge records. `on` gets them a little gathered (several at
+// once come as one call); the returned function stops listening, and so does
+// `until` turning false.
+export function watch(repoId, until, on) {
+  if (typeof EventSource === 'undefined') return () => {};
+  const src = new EventSource(`/_dd/git/events${q({ repo: repoId })}`);
+  let timer = null;
+  const got = [];
+  const stop = () => { src.close(); clearTimeout(timer); };
+  src.onmessage = (e) => {
+    if (!until()) { stop(); return; }
+    try { got.push(JSON.parse(e.data)); } catch { return; }
+    clearTimeout(timer);
+    timer = setTimeout(() => { const all = got.splice(0); if (until()) on(all); else stop(); }, 250);
+  };
+  return stop;
+}
+
 // ---- where we are
 
 const routes = [];

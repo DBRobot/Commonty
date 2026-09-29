@@ -56,3 +56,45 @@ assert '"name":"DD_CI"' in secrets, secrets
 box.wait_for_open_port(3003)
 box.succeed("test $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'X-DD-CI: wrong' http://127.0.0.1:3003/_dd/ci/cancel/1) = 404")
 box.succeed("test $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'X-DD-CI: test-ci-secret' http://127.0.0.1:3003/_dd/ci/cancel/1) = 502")
+
+# The Git pages update as things happen: a commit status the forge records
+# reaches a member watching the repository, through the gate, at once. The
+# trigger that announces it is put in after every forge start.
+import json
+box.wait_for_unit("dd-forge-notify.service")
+env = "DD_KEYRING_FILE=/root/keys.json"
+dirs = "--directory http://127.0.0.1:4181/_dd/directory"
+box.wait_for_open_port(4181)
+box.succeed(f"{env} {nix['dd']} identity new --name sarah {dirs}")
+box.succeed("mkdir -p /root/fleet/fleet")
+box.succeed(f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs}")
+box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
+box.succeed(
+    "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "
+    "\"$(jq -c . /root/fleet/fleet/members.json)\" "
+    "> /run/systemd/system/dd-verify.service.d/members.conf"
+)
+box.succeed("systemctl daemon-reload && systemctl restart dd-verify.service")
+box.wait_for_open_port(4181)
+token = box.succeed(f"{env} {nix['dd']} token").strip()
+head = box.succeed(f"curl -s -D - -o /dev/null -X POST --data-urlencode token={token} http://127.0.0.1:4181/_dd/app/signin")
+jar = [l for l in head.splitlines() if l.lower().startswith("set-cookie:")][0].split(":", 1)[1].split(";")[0].strip()
+
+forge = "curl -sf --unix-socket %s -H 'X-WEBAUTH-USER: %s' http://forgejo/api/v1/repos/%s/commonty" % (nix["sock"], nix["admin"], nix["admin"])
+repo = json.loads(box.succeed(forge))
+sha = json.loads(box.succeed(forge + "/branches/main"))["commit"]["id"]
+# nobody signed in hears nothing
+box.succeed(f"test $(curl -s -o /dev/null -w '%{{http_code}}' 'http://127.0.0.1:4181/_dd/git/events?repo={repo['id']}') = 401")
+# sarah watches; the gate's listener may still be connecting, so the status
+# is recorded until one arrives
+box.succeed(f"(curl -sN --max-time 60 -H 'Cookie: {jar}' 'http://127.0.0.1:4181/_dd/git/events?repo={repo['id']}' > /tmp/events &)")
+box.wait_until_succeeds(
+    f"{forge.replace('curl -sf', 'curl -sf -X POST -H content-type:application/json')}/statuses/{sha} "
+    "-d '{\"state\": \"pending\", \"context\": \"live test\"}' >/dev/null && sleep 1 && grep -q '\"kind\":\"status\"' /tmp/events",
+    timeout=45,
+)
+box.succeed(f"grep -q '\"sha\":\"{sha}\"' /tmp/events")
+# the gate's login may connect, and reads no table
+box.succeed("sudo -u dd-verify psql -h /run/postgresql -d forgejo -tAc 'select 1' | grep -qx 1")
+# psql fails here, as it should; the pipe must not take that for the test's
+box.succeed("(sudo -u dd-verify psql -h /run/postgresql -d forgejo -tAc 'select count(*) from repository' 2>&1 || true) | grep -q 'permission denied'")

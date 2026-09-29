@@ -1,7 +1,7 @@
 // Actions: the runs, and one run as a graph of its jobs - read from the
 // workflow files' `needs:` - or as its jobs and their logs, both live.
 
-import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, setTitle, short, pager, warmers } from './git-core.js';
+import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, setTitle, short, pager, warmers, watch } from './git-core.js';
 import { repo, header } from './git-repo.js';
 
 const main = () => app();
@@ -24,7 +24,7 @@ const ns = (d) => (d > 1e9 ? d / 1e6 : d); // the forge gives nanoseconds
 
 // ---- the runs
 
-const runsData = (r, page = 1) => api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 25 })}`);
+const runsData = (r, page = 1, fresh = false) => api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 25 })}`, { fresh });
 warmers.actions = (r) => runsData(r);
 
 route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
@@ -34,24 +34,42 @@ route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
   setTitle('Actions', r.full_name);
   const page = Number(params.get('page') || 1);
   const workflow = params.get('workflow') || '';
-  const { workflow_runs: runs = [], total_count: total = 0 } = await runsData(r, page);
+  let { workflow_runs: runs = [], total_count: total = 0 } = await runsData(r, page);
   if (!current()) return;
-  const flows = [...new Set(runs.map((x) => x.workflow_id))].sort();
-  const shown = workflow ? runs.filter((x) => x.workflow_id === workflow) : runs;
   const row = (x) => el('a', { class: 'item', href: `/${r.full_name}/actions/runs/${x.index_in_repo}` },
     el('span', { style: 'margin-top:6px' }, statusDot(x.status)),
     el('div', { style: 'flex:1;min-width:0' }, el('div', { class: 't', text: x.title }),
       el('div', { class: 'sub' }, `Run ${x.index_in_repo} · ${x.workflow_id} · ${x.prettyref || ''} · ${x.event} · `, x.trigger_user?.login || '', ' · ', el('span', { class: 'mono', text: short(x.commit_sha) }))),
     el('div', { class: 'small muted', style: 'text-align:right' }, when(x.created), el('br'), x.status === 'running' ? 'running' : x.duration ? duration(ns(x.duration)) : x.status));
-  if (!current()) return;
-  put(main(), el('div', { class: 'two left' },
-    el('aside', { class: 'jobs' },
+  const aside = el('aside', { class: 'jobs' });
+  const list = el('div', { class: 'list' });
+  const count = el('span', { class: 'small muted' });
+  const pagerSlot = el('div');
+  // drawn again in place as runs start and finish: where you are scrolled stays
+  const draw = () => {
+    const flows = [...new Set(runs.map((x) => x.workflow_id))].sort();
+    const shown = workflow ? runs.filter((x) => x.workflow_id === workflow) : runs;
+    aside.replaceChildren(
       el('a', { href: `/${r.full_name}/actions`, 'aria-current': !workflow ? 'page' : null, text: 'All runs' }),
-      ...flows.map((f) => el('a', { href: `/${r.full_name}/actions${q({ workflow: f })}`, 'aria-current': workflow === f ? 'page' : null, text: f.replace(/\.ya?ml$/, '') }))),
+      ...flows.map((f) => el('a', { href: `/${r.full_name}/actions${q({ workflow: f })}`, 'aria-current': workflow === f ? 'page' : null, text: f.replace(/\.ya?ml$/, '') })));
+    list.replaceChildren(...(shown.length ? shown.map(row) : [el('div', { class: 'empty', text: 'No runs yet.' })]));
+    count.textContent = plural(total, 'run');
+    pagerSlot.replaceChildren(pager(page, total, 25, (p) => go(`/${r.full_name}/actions${q({ page: p, workflow })}`)) || '');
+  };
+  draw();
+  put(main(), el('div', { class: 'two left' }, aside,
     el('div', {},
-      el('div', { class: 'box' }, el('header', {}, el('b', { text: workflow || 'All runs' }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: plural(total, 'run') })),
-        el('div', { class: 'list' }, ...(shown.length ? shown.map(row) : [el('div', { class: 'empty', text: 'No runs yet.' })]))),
-      pager(page, total, 25, (p) => go(`/${r.full_name}/actions${q({ page: p, workflow })}`)))));
+      el('div', { class: 'box' }, el('header', {}, el('b', { text: workflow || 'All runs' }), el('span', { class: 'spacer' }), count), list),
+      pagerSlot)));
+  // a run starting, a job moving, a run ending: the forge says so, and the
+  // list is asked again then, and only then
+  watch(r.id, () => current() && list.isConnected, async (changes) => {
+    if (!changes.some((c) => c.kind === 'run' || c.kind === 'job')) return;
+    try {
+      ({ workflow_runs: runs = [], total_count: total = 0 } = await runsData(r, page, true));
+      if (current() && list.isConnected) draw();
+    } catch { /* the next change asks again */ }
+  });
 });
 
 // ---- one run
@@ -306,15 +324,16 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
       if (now) now.scrollLeft = x;
     };
     draw();
-    const tick = async () => {
-      if (!alive() || DONE.includes(run.status)) return;
-      [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`, { fresh: true }), jobsOf(r, run, true)]);
-      if (!alive()) return;
-      drawSummary();
-      draw();
-      timer = setTimeout(tick, 5000);
-    };
-    timer = setTimeout(tick, 5000);
+    // this run's jobs moving, as the forge records them
+    watch(r.id, alive, async (changes) => {
+      if (!changes.some((c) => c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) return;
+      try {
+        [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`, { fresh: true }), jobsOf(r, run, true)]);
+        if (!alive()) return;
+        drawSummary();
+        draw();
+      } catch { /* the next change asks again */ }
+    });
     return;
   }
 

@@ -48,6 +48,9 @@ async fn main() -> Result<()> {
         thanos: std::env::var("VERIFY_THANOS")
             .ok()
             .filter(|s| !s.is_empty()),
+        forge_events: std::env::var("VERIFY_FORGE_EVENTS")
+            .ok()
+            .filter(|s| !s.is_empty()),
         // Pi-hole's api on this box, the members of the house it serves,
         // and the box's address on the house network
         adblock: std::env::var("VERIFY_ADBLOCK")

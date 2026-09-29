@@ -8156,6 +8156,20 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
+      "fallible-iterator" = rec {
+        crateName = "fallible-iterator";
+        version = "0.2.0";
+        edition = "2018";
+        sha256 = "1xq759lsr8gqss7hva42azn3whgrbrs2sd9xpn92c5ickxm1fhs4";
+        libName = "fallible_iterator";
+        authors = [
+          "Steven Fackler <sfackler@gmail.com>"
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
+      };
       "fastrand" = rec {
         crateName = "fastrand";
         version = "2.5.0";
@@ -9393,7 +9407,7 @@ rec {
           }
           {
             name = "wasi";
-            packageId = "wasi";
+            packageId = "wasi 0.11.1+wasi-snapshot-preview1";
             usesDefaultFeatures = false;
             target = { target, features }: ("wasi" == target."os" or null);
           }
@@ -13955,7 +13969,7 @@ rec {
           }
           {
             name = "wasi";
-            packageId = "wasi";
+            packageId = "wasi 0.11.1+wasi-snapshot-preview1";
             target = { target, features }: ("wasi" == target."os" or null);
           }
           {
@@ -15879,6 +15893,41 @@ rec {
           "std" = [ "alloc" ];
         };
         resolvedDefaultFeatures = [ "CADisplayLink" "CAFrameRateRange" "CALayer" "CAMediaTiming" "CAMediaTimingFunction" "CAOpenGLLayer" "CATransaction" "CATransform3D" "alloc" "bitflags" "objc2-core-foundation" "std" ];
+      };
+      "objc2-system-configuration" = rec {
+        crateName = "objc2-system-configuration";
+        version = "0.3.2";
+        edition = "2021";
+        sha256 = "15m39m325yhkjpcagcygbv3qx19vr4ym4kdqramwqm6src8vs5kj";
+        libName = "objc2_system_configuration";
+        dependencies = [
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            usesDefaultFeatures = false;
+            features = [ "CFError" ];
+          }
+        ];
+        features = {
+          "CaptiveNetwork" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFDictionary" ];
+          "SCDynamicStore" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFRunLoop" ];
+          "SCDynamicStoreCopyDHCPInfo" = [ "objc2-core-foundation/CFData" "objc2-core-foundation/CFDate" "objc2-core-foundation/CFDictionary" ];
+          "SCDynamicStoreCopySpecific" = [ "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFString" ];
+          "SCNetworkConfiguration" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFNumber" ];
+          "SCNetworkConnection" = [ "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFRunLoop" ];
+          "SCNetworkReachability" = [ "bitflags" "objc2-core-foundation/CFRunLoop" ];
+          "SCPreferences" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFData" "objc2-core-foundation/CFRunLoop" ];
+          "SCPreferencesPath" = [ "objc2-core-foundation/CFDictionary" ];
+          "SCPreferencesSetSpecific" = [ "objc2-core-foundation/CFString" ];
+          "bitflags" = [ "dep:bitflags" ];
+          "default" = [ "std" "CaptiveNetwork" "DHCPClientPreferences" "SCDynamicStore" "SCDynamicStoreCopyDHCPInfo" "SCDynamicStoreCopySpecific" "SCDynamicStoreKey" "SCNetwork" "SCNetworkConfiguration" "SCNetworkConnection" "SCNetworkReachability" "SCPreferences" "SCPreferencesPath" "SCPreferencesSetSpecific" "SCSchemaDefinitions" "bitflags" "dispatch2" "libc" "objc2" "objc2-security" ];
+          "dispatch2" = [ "dep:dispatch2" ];
+          "libc" = [ "dep:libc" ];
+          "objc2" = [ "dep:objc2" "dispatch2?/objc2" "objc2-core-foundation/objc2" "objc2-security?/objc2" ];
+          "objc2-security" = [ "dep:objc2-security" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "SCDynamicStore" "SCDynamicStoreCopySpecific" ];
       };
       "objc2-ui-kit" = rec {
         crateName = "objc2-ui-kit";
@@ -18075,6 +18124,133 @@ rec {
           "std" = [ "alloc" ];
         };
         resolvedDefaultFeatures = [ "alloc" ];
+      };
+      "postgres-protocol" = rec {
+        crateName = "postgres-protocol";
+        version = "0.6.12";
+        edition = "2024";
+        sha256 = "0565lrm7x316l60bny4xnnnxawzl6j1wflc022cyjiiw90y8x008";
+        libName = "postgres_protocol";
+        authors = [
+          "Steven Fackler <sfackler@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "byteorder";
+            packageId = "byteorder";
+          }
+          {
+            name = "bytes";
+            packageId = "bytes";
+          }
+          {
+            name = "fallible-iterator";
+            packageId = "fallible-iterator";
+          }
+          {
+            name = "hmac";
+            packageId = "hmac 0.13.0";
+          }
+          {
+            name = "md-5";
+            packageId = "md-5";
+          }
+          {
+            name = "memchr";
+            packageId = "memchr";
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.10.2";
+          }
+          {
+            name = "sha2";
+            packageId = "sha2 0.11.0";
+          }
+          {
+            name = "stringprep";
+            packageId = "stringprep";
+          }
+        ];
+        features = {
+          "getrandom" = [ "dep:getrandom" ];
+          "js" = [ "getrandom/wasm_js" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "postgres-types" = rec {
+        crateName = "postgres-types";
+        version = "0.2.14";
+        edition = "2024";
+        sha256 = "1gk8kf4x8h6x34k6jiqafh7pl233pqd1p0gaydljv4rj97dsj745";
+        libName = "postgres_types";
+        authors = [
+          "Steven Fackler <sfackler@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "bytes";
+            packageId = "bytes";
+          }
+          {
+            name = "fallible-iterator";
+            packageId = "fallible-iterator";
+          }
+          {
+            name = "postgres-protocol";
+            packageId = "postgres-protocol";
+          }
+        ];
+        features = {
+          "array-impls" = [ "array-init" ];
+          "array-init" = [ "dep:array-init" ];
+          "bit-vec-06" = [ "dep:bit-vec-06" ];
+          "bit-vec-07" = [ "dep:bit-vec-07" ];
+          "bit-vec-08" = [ "dep:bit-vec-08" ];
+          "bit-vec-09" = [ "dep:bit-vec-09" ];
+          "chrono-04" = [ "dep:chrono-04" ];
+          "cidr-02" = [ "dep:cidr-02" ];
+          "cidr-03" = [ "dep:cidr-03" ];
+          "derive" = [ "postgres-derive" ];
+          "eui48-04" = [ "dep:eui48-04" ];
+          "eui48-1" = [ "dep:eui48-1" ];
+          "geo-types-06" = [ "dep:geo-types-06" ];
+          "geo-types-0_7" = [ "dep:geo-types-0_7" ];
+          "jiff-01" = [ "dep:jiff-01" ];
+          "jiff-02" = [ "dep:jiff-02" ];
+          "js" = [ "postgres-protocol/js" ];
+          "postgres-derive" = [ "dep:postgres-derive" ];
+          "serde-1" = [ "dep:serde-1" ];
+          "serde_json-1" = [ "dep:serde_json-1" ];
+          "smol_str-01" = [ "dep:smol_str-01" ];
+          "time-02" = [ "dep:time-02" ];
+          "time-03" = [ "dep:time-03" ];
+          "uuid-08" = [ "dep:uuid-08" ];
+          "uuid-1" = [ "dep:uuid-1" ];
+          "with-bit-vec-0_6" = [ "bit-vec-06" ];
+          "with-bit-vec-0_7" = [ "bit-vec-07" ];
+          "with-bit-vec-0_8" = [ "bit-vec-08" ];
+          "with-bit-vec-0_9" = [ "bit-vec-09" ];
+          "with-chrono-0_4" = [ "chrono-04" ];
+          "with-cidr-0_2" = [ "cidr-02" ];
+          "with-cidr-0_3" = [ "cidr-03" ];
+          "with-eui48-0_4" = [ "eui48-04" ];
+          "with-eui48-1" = [ "eui48-1" ];
+          "with-geo-types-0_6" = [ "geo-types-06" ];
+          "with-geo-types-0_7" = [ "geo-types-0_7" ];
+          "with-jiff-0_1" = [ "jiff-01" ];
+          "with-jiff-0_2" = [ "jiff-02" ];
+          "with-serde_json-1" = [ "serde-1" "serde_json-1" ];
+          "with-smol_str-01" = [ "smol_str-01" ];
+          "with-time-0_2" = [ "time-02" ];
+          "with-time-0_3" = [ "time-03" ];
+          "with-uuid-0_8" = [ "uuid-08" ];
+          "with-uuid-1" = [ "uuid-1" ];
+        };
       };
       "potential_utf" = rec {
         crateName = "potential_utf";
@@ -23549,6 +23725,30 @@ rec {
         ];
 
       };
+      "stringprep" = rec {
+        crateName = "stringprep";
+        version = "0.1.5";
+        edition = "2015";
+        sha256 = "1cb3jis4h2b767csk272zw92lc6jzfzvh8d6m1cd86yqjb9z6kbv";
+        authors = [
+          "Steven Fackler <sfackler@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "unicode-bidi";
+            packageId = "unicode-bidi";
+          }
+          {
+            name = "unicode-normalization";
+            packageId = "unicode-normalization";
+          }
+          {
+            name = "unicode-properties";
+            packageId = "unicode-properties";
+          }
+        ];
+
+      };
       "strsim" = rec {
         crateName = "strsim";
         version = "0.11.1";
@@ -25818,6 +26018,136 @@ rec {
         ];
 
       };
+      "tokio-postgres" = rec {
+        crateName = "tokio-postgres";
+        version = "0.7.18";
+        edition = "2024";
+        sha256 = "1lq972lnjld23z9q2zf69dslkl0dbdqchdcn2k6vkmgnh39gfa55";
+        libName = "tokio_postgres";
+        authors = [
+          "Steven Fackler <sfackler@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "byteorder";
+            packageId = "byteorder";
+          }
+          {
+            name = "bytes";
+            packageId = "bytes";
+          }
+          {
+            name = "fallible-iterator";
+            packageId = "fallible-iterator";
+          }
+          {
+            name = "futures-channel";
+            packageId = "futures-channel";
+            features = [ "sink" ];
+          }
+          {
+            name = "futures-util";
+            packageId = "futures-util";
+            usesDefaultFeatures = false;
+            features = [ "sink" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot";
+          }
+          {
+            name = "percent-encoding";
+            packageId = "percent-encoding";
+          }
+          {
+            name = "phf";
+            packageId = "phf";
+          }
+          {
+            name = "pin-project-lite";
+            packageId = "pin-project-lite";
+          }
+          {
+            name = "postgres-protocol";
+            packageId = "postgres-protocol";
+          }
+          {
+            name = "postgres-types";
+            packageId = "postgres-types";
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.10.2";
+          }
+          {
+            name = "socket2";
+            packageId = "socket2";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "all" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "io-util" ];
+          }
+          {
+            name = "tokio-util";
+            packageId = "tokio-util";
+            features = [ "codec" ];
+          }
+          {
+            name = "whoami";
+            packageId = "whoami";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "futures-util";
+            packageId = "futures-util";
+            usesDefaultFeatures = false;
+            features = [ "async-await-macro" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "macros" "net" "rt" "rt-multi-thread" "time" ];
+          }
+        ];
+        features = {
+          "array-impls" = [ "postgres-types/array-impls" ];
+          "default" = [ "runtime" ];
+          "js" = [ "postgres-protocol/js" "postgres-types/js" ];
+          "runtime" = [ "tokio/net" "tokio/time" ];
+          "with-bit-vec-0_6" = [ "postgres-types/with-bit-vec-0_6" ];
+          "with-bit-vec-0_7" = [ "postgres-types/with-bit-vec-0_7" ];
+          "with-bit-vec-0_8" = [ "postgres-types/with-bit-vec-0_8" ];
+          "with-bit-vec-0_9" = [ "postgres-types/with-bit-vec-0_9" ];
+          "with-chrono-0_4" = [ "postgres-types/with-chrono-0_4" ];
+          "with-cidr-0_2" = [ "postgres-types/with-cidr-0_2" ];
+          "with-cidr-0_3" = [ "postgres-types/with-cidr-0_3" ];
+          "with-eui48-0_4" = [ "postgres-types/with-eui48-0_4" ];
+          "with-eui48-1" = [ "postgres-types/with-eui48-1" ];
+          "with-geo-types-0_6" = [ "postgres-types/with-geo-types-0_6" ];
+          "with-geo-types-0_7" = [ "postgres-types/with-geo-types-0_7" ];
+          "with-jiff-0_1" = [ "postgres-types/with-jiff-0_1" ];
+          "with-jiff-0_2" = [ "postgres-types/with-jiff-0_2" ];
+          "with-serde_json-1" = [ "postgres-types/with-serde_json-1" ];
+          "with-smol_str-01" = [ "postgres-types/with-smol_str-01" ];
+          "with-time-0_2" = [ "postgres-types/with-time-0_2" ];
+          "with-time-0_3" = [ "postgres-types/with-time-0_3" ];
+          "with-uuid-0_8" = [ "postgres-types/with-uuid-0_8" ];
+          "with-uuid-1" = [ "postgres-types/with-uuid-1" ];
+        };
+        resolvedDefaultFeatures = [ "runtime" ];
+      };
       "tokio-rustls" = rec {
         crateName = "tokio-rustls";
         version = "0.26.5";
@@ -26961,6 +27291,26 @@ rec {
         features = {
         };
       };
+      "unicode-bidi" = rec {
+        crateName = "unicode-bidi";
+        version = "0.3.18";
+        edition = "2018";
+        sha256 = "1xcxwbsqa24b8vfchhzyyzgj0l6bn51ib5v8j6krha0m77dva72w";
+        libName = "unicode_bidi";
+        authors = [
+          "The Servo Project Developers"
+        ];
+        features = {
+          "default" = [ "std" "hardcoded-data" ];
+          "flame" = [ "dep:flame" ];
+          "flame_it" = [ "flame" "flamer" ];
+          "flamer" = [ "dep:flamer" ];
+          "serde" = [ "dep:serde" ];
+          "smallvec" = [ "dep:smallvec" ];
+          "with_serde" = [ "serde" ];
+        };
+        resolvedDefaultFeatures = [ "default" "hardcoded-data" "std" ];
+      };
       "unicode-ident" = rec {
         crateName = "unicode-ident";
         version = "1.0.24";
@@ -26993,6 +27343,21 @@ rec {
           "default" = [ "std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "unicode-properties" = rec {
+        crateName = "unicode-properties";
+        version = "0.1.4";
+        edition = "2021";
+        sha256 = "07fpm3sqq7lm9gmgpxa93z31q933h3c3ypfwy4cdh6l42g3miw3x";
+        libName = "unicode_properties";
+        authors = [
+          "Charles Lew <crlf0710@gmail.com>"
+          "Manish Goregaokar <manishsmail@gmail.com>"
+        ];
+        features = {
+          "default" = [ "general-category" "emoji" ];
+        };
+        resolvedDefaultFeatures = [ "default" "emoji" "general-category" ];
       };
       "unicode-segmentation" = rec {
         crateName = "unicode-segmentation";
@@ -27449,6 +27814,10 @@ rec {
             packageId = "ed25519-dalek";
           }
           {
+            name = "futures-util";
+            packageId = "futures-util";
+          }
+          {
             name = "hmac";
             packageId = "hmac 0.12.1";
           }
@@ -27497,6 +27866,17 @@ rec {
             name = "tokio";
             packageId = "tokio";
             features = [ "macros" "rt-multi-thread" "sync" ];
+          }
+          {
+            name = "tokio-postgres";
+            packageId = "tokio-postgres";
+            usesDefaultFeatures = false;
+            features = [ "runtime" ];
+          }
+          {
+            name = "tokio-stream";
+            packageId = "tokio-stream";
+            features = [ "sync" ];
           }
           {
             name = "url";
@@ -27613,7 +27993,7 @@ rec {
         ];
 
       };
-      "wasi" = rec {
+      "wasi 0.11.1+wasi-snapshot-preview1" = rec {
         crateName = "wasi";
         version = "0.11.1+wasi-snapshot-preview1";
         edition = "2018";
@@ -27628,6 +28008,24 @@ rec {
           "rustc-std-workspace-alloc" = [ "dep:rustc-std-workspace-alloc" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "wasi 0.14.7+wasi-0.2.4" = rec {
+        crateName = "wasi";
+        version = "0.14.7+wasi-0.2.4";
+        edition = "2021";
+        sha256 = "133fq3mq7h65mzrsphcm7bbbx1gsz7srrbwh01624zin43g7hd48";
+        dependencies = [
+          {
+            name = "wasip2";
+            packageId = "wasip2";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "bitflags" = [ "wasip2/bitflags" ];
+          "default" = [ "wasip2/default" ];
+          "std" = [ "wasip2/std" ];
+        };
       };
       "wasip2" = rec {
         crateName = "wasip2";
@@ -27648,6 +28046,20 @@ rec {
           "default" = [ "std" "bitflags" ];
           "rustc-dep-of-std" = [ "core" "alloc" "wit-bindgen/rustc-dep-of-std" ];
         };
+      };
+      "wasite" = rec {
+        crateName = "wasite";
+        version = "1.0.2";
+        edition = "2021";
+        sha256 = "0hhsyylwsnbyz6dsr7i0gadzgk34nw4ljhnmafkji03b98mr1zk6";
+        dependencies = [
+          {
+            name = "wasi";
+            packageId = "wasi 0.14.7+wasi-0.2.4";
+            usesDefaultFeatures = false;
+          }
+        ];
+
       };
       "wasm-bindgen" = rec {
         crateName = "wasm-bindgen";
@@ -28385,7 +28797,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "wasm-bindgen/std" "js-sys/std" ];
         };
-        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Document" "Element" "EventTarget" "File" "FormData" "Headers" "HtmlCanvasElement" "HtmlElement" "ImageData" "Node" "OffscreenCanvas" "OffscreenCanvasRenderingContext2d" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "ReferrerPolicy" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "Response" "ServiceWorkerGlobalScope" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UnderlyingSink" "UnderlyingSource" "Window" "WorkerGlobalScope" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "default" "std" ];
+        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Document" "Element" "EventTarget" "File" "FormData" "Headers" "HtmlCanvasElement" "HtmlElement" "ImageData" "Location" "Navigator" "Node" "OffscreenCanvas" "OffscreenCanvasRenderingContext2d" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "ReferrerPolicy" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "Response" "ServiceWorkerGlobalScope" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UnderlyingSink" "UnderlyingSource" "Window" "WorkerGlobalScope" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "default" "std" ];
       };
       "web-time" = rec {
         crateName = "web-time";
@@ -29088,6 +29500,59 @@ rec {
           }
         ];
 
+      };
+      "whoami" = rec {
+        crateName = "whoami";
+        version = "2.1.3";
+        edition = "2021";
+        sha256 = "0b68vl8w5j02mblis170p6b1knsiqzmb40fb2by6zmsmcyn4nv32";
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ((("apple" == target."vendor" or null) || ("linux" == target."os" or null) || ("dragonfly" == target."os" or null) || ("freebsd" == target."os" or null) || ("netbsd" == target."os" or null) || ("openbsd" == target."os" or null) || ("illumos" == target."os" or null) || ("hurd" == target."os" or null)) && (!("wasm32" == target."arch" or null)));
+          }
+          {
+            name = "libredox";
+            packageId = "libredox";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (("redox" == target."os" or null) && (!("wasm32" == target."arch" or null)));
+            features = [ "call" ];
+          }
+          {
+            name = "objc2-system-configuration";
+            packageId = "objc2-system-configuration";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "SCDynamicStore" "SCDynamicStoreCopySpecific" ];
+          }
+          {
+            name = "wasite";
+            packageId = "wasite";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (("wasm32" == target."arch" or null) && ("wasi" == target."os" or null));
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (("wasm32" == target."arch" or null) && (!("wasi" == target."os" or null)) && (!(target."daku" or false)));
+            features = [ "Navigator" "Document" "Window" "Location" ];
+          }
+        ];
+        features = {
+          "default" = [ "std" "wasi-wasite" "wasm-web" ];
+          "std" = [ "dep:libc" "dep:libredox" "dep:objc2-system-configuration" "libc?/std" "web-sys?/std" ];
+          "wasi-wasite" = [ "dep:wasite" ];
+          "wasm-web" = [ "dep:web-sys" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" "wasi-wasite" "wasm-web" ];
       };
       "winapi" = rec {
         crateName = "winapi";
