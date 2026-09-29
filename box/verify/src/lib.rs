@@ -1428,6 +1428,35 @@ async fn fleet_json(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
     }
 }
 
+/// POST /_dd/csp: what a page's content policy would have blocked, as the
+/// browser reports it. Logged, one line each, for whoever tunes the policy;
+/// anyone may send one, so it is read small and never answered with more
+/// than a status.
+async fn csp_report(body: axum::body::Bytes) -> StatusCode {
+    let v: serde_json::Value = match serde_json::from_slice(&body[..body.len().min(8192)]) {
+        Ok(v) => v,
+        Err(_) => return StatusCode::BAD_REQUEST,
+    };
+    let r = &v["csp-report"];
+    let field = |k: &str| {
+        r[k].as_str()
+            .unwrap_or_default()
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(160)
+            .collect::<String>()
+    };
+    // the page's path only: a query string can carry anything
+    let page = field("document-uri");
+    let page = page.split(['?', '#']).next().unwrap_or_default();
+    eprintln!(
+        "csp: {} blocked {} on {page}",
+        field("violated-directive"),
+        field("blocked-uri").split(['?', '#']).next().unwrap_or_default()
+    );
+    StatusCode::NO_CONTENT
+}
+
 /// Where a stranger gets the app. The only page here that asks for
 /// nothing: an invited person has no way in until they have it.
 async fn download_page(State(app): State<Arc<App>>) -> Response {
@@ -1838,6 +1867,7 @@ pub async fn start(
         .route("/_dd/network/mine", get(network_mine))
         .route("/_dd/photos", get(photos::page))
         .route("/_dd/photos/config", post(photos::config))
+        .route("/_dd/csp", post(csp_report))
         .route("/_dd/photos/museum/{op}", post(photos::museum_verify))
         .route("/_dd/photos/forget", get(photos::forget))
         .route("/_dd/photos/handoff", post(photos::handoff_open))

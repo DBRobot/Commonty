@@ -13,7 +13,10 @@ let
   user = "dd-verify";
 in
 {
-  imports = [ ./strip-cookie.nix ];
+  imports = [
+    ./strip-cookie.nix
+    ./headers.nix
+  ];
   # A box that runs services verifies for them and serves its users' browser
   # login. A box that runs nothing else can still hold the directory: the
   # signed entries are self-authenticating, so a copy on a stranger's box is

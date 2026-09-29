@@ -24,8 +24,8 @@
     <div class="row">
       {% if idle %}
       <form method="post" action="/start/{{ s.id }}"><button>Start</button></form>
-      <form method="post" action="/keep/{{ s.id }}" onsubmit="return confirm('Keep the world and delete the server? The game files go; the world stays under Your saved worlds and can start a new server later.')"><button class="quiet">Keep world, delete server</button></form>
-      <form method="post" action="/delete/{{ s.id }}" onsubmit="return confirm('This deletes the server AND its world. There is no undo. Delete?')"><button class="quiet">Delete server and world</button></form>
+      <form method="post" action="/keep/{{ s.id }}" data-confirm="Keep the world and delete the server? The game files go; the world stays under Your saved worlds and can start a new server later."><button class="quiet">Keep world, delete server</button></form>
+      <form method="post" action="/delete/{{ s.id }}" data-confirm="This deletes the server AND its world. There is no undo. Delete?"><button class="quiet">Delete server and world</button></form>
       {% else %}
       <form method="post" action="/stop/{{ s.id }}"><button class="quiet">Stop</button></form>
       {% endif %}

@@ -74,3 +74,11 @@
     setTimeout(tick, 3000);
   }
 })();
+
+// A form that deletes asks first. The question is on the form itself
+// (data-confirm), not in an inline handler, so the page runs under a
+// content policy that allows no inline script.
+document.addEventListener('submit', (e) => {
+  const q = e.target.dataset && e.target.dataset.confirm;
+  if (q && !confirm(q)) e.preventDefault();
+});
