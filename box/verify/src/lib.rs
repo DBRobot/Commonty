@@ -1452,7 +1452,10 @@ async fn csp_report(body: axum::body::Bytes) -> StatusCode {
     eprintln!(
         "csp: {} blocked {} on {page}",
         field("violated-directive"),
-        field("blocked-uri").split(['?', '#']).next().unwrap_or_default()
+        field("blocked-uri")
+            .split(['?', '#'])
+            .next()
+            .unwrap_or_default()
     );
     StatusCode::NO_CONTENT
 }

@@ -1153,7 +1153,11 @@ mod tests {
         let e = m.create("tom", "valheim", &set).unwrap_err().to_string();
         assert!(e.contains("delete one"), "{e}");
         // deleting one makes room
-        let first = m.instances().into_iter().find(|i| i.owner == "tom").unwrap();
+        let first = m
+            .instances()
+            .into_iter()
+            .find(|i| i.owner == "tom")
+            .unwrap();
         m.delete("tom", &first.id).unwrap();
         m.create("tom", "valheim", &set).unwrap();
     }
