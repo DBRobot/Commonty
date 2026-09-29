@@ -14,7 +14,7 @@
       blurb = "Your passwords, on your devices, and shared with the people you choose.";
       url = "https://vault.${config.dd.domain}/";
       icon = "passwords";
-      color = "#2f7a5f";
+      color = "#1b8aa0";
       rank = 45;
     }
   ];
