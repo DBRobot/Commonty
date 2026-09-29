@@ -99,6 +99,35 @@ in
         ];
       };
     };
+    # the list update rewrites the database; Pi-hole reads it again only
+    # when told (the setup tells it only on the very first run)
+    systemd.services.pihole-ftl-setup.serviceConfig.ExecStartPost = [
+      "+${pkgs.systemd}/bin/systemctl kill -s SIGRTMIN pihole-ftl.service"
+    ];
+    # the lists again every week, as the page says
+    systemd.services.dd-pihole-lists = {
+      description = "Update the ad blocking lists";
+      after = [
+        "pihole-ftl.service"
+        "network-online.target"
+      ];
+      wants = [ "network-online.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        User = config.services.pihole-ftl.user;
+        Group = config.services.pihole-ftl.group;
+        ExecStart = "${lib.getExe config.services.pihole-ftl.piholePackage} -g";
+        ExecStartPost = "+${pkgs.systemd}/bin/systemctl kill -s SIGRTMIN pihole-ftl.service";
+      };
+    };
+    systemd.timers.dd-pihole-lists = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "Sun 04:30";
+        RandomizedDelaySec = "1h";
+        Persistent = true;
+      };
+    };
     networking.firewall.allowedUDPPorts = [ 53 ];
     networking.firewall.allowedTCPPorts = [ 53 ];
 
