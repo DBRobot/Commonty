@@ -46,10 +46,6 @@ in
     type = lib.types.str;
     description = "Directory name of the person who administers this forge.";
   };
-  options.dd.forgejo.ciSecretFile = lib.mkOption {
-    type = lib.types.path;
-    description = "the secret a ci job shows to stop its run (ci-cancel.py); the same value is the repo's DD_CI actions secret";
-  };
 
   config = {
     # reads plaintext: only on a box whose owner is trusted with it (modules/box.nix)
@@ -201,7 +197,6 @@ in
         ADMIN = cfg.admin;
         REPO = config.dd.repo;
         SOCK = sock;
-        CI_SECRET_FILE = cfg.ciSecretFile;
         RULE = builtins.toJSON {
           rule_name = "main";
           branch_name = "main";
@@ -238,7 +233,6 @@ in
         Type = "simple";
         DynamicUser = true;
         SupplementaryGroups = [ "forgejo" ]; # to open forgejo's socket
-        LoadCredential = [ "secret:${cfg.ciSecretFile}" ];
         ExecStart = "${pkgs.python3}/bin/python3 ${./ci-cancel.py}";
         Restart = "on-failure";
       };
@@ -246,7 +240,6 @@ in
         FORGE = sock;
         ADMIN = cfg.admin;
         REPO = config.dd.repo;
-        SECRET_FILE = "%d/secret";
         LISTEN = toString cancelPort;
       };
     };

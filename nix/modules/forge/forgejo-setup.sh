@@ -24,7 +24,5 @@ else
   echo "$rule" | as_admin -X POST -H 'content-type: application/json' -d @- $api/repos/$REPO/branch_protections >/dev/null
   echo "main protection created"
 fi
-# the ci secret the repo's jobs show ci-cancel.py: the value on this box,
-# set again each run (the api does not read it back)
-printf '{"data":"%s"}' "$(tr -d '\n' < "$CI_SECRET_FILE")" | as_admin -X PUT -H 'content-type: application/json' -d @- $api/repos/$REPO/actions/secrets/DD_CI >/dev/null
-echo "ci secret set"
+# ci-cancel.py needs no secret any more: the one jobs used to show it goes
+as_admin -X DELETE $api/repos/$REPO/actions/secrets/DD_CI >/dev/null 2>&1 || true

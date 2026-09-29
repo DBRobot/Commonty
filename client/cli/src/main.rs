@@ -1025,12 +1025,25 @@ async fn main() -> Result<()> {
                     key.set_comment(format!("dd device of {name}"));
                     let path = dir.join("device_ed25519");
                     // the same key the keyring holds, as a file git's ssh signing
-                    // can read; 0600, no passphrase, the standing of any ssh key
-                    std::fs::write(&path, key.to_openssh(ssh_key::LineEnding::LF)?.as_bytes())?;
-                    #[cfg(unix)]
+                    // can read; 0600 from the moment it exists (and narrowed
+                    // before writing, should an older copy be wider), no
+                    // passphrase, the standing of any ssh key
                     {
-                        use std::os::unix::fs::PermissionsExt as _;
-                        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+                        use std::io::Write as _;
+                        let mut o = std::fs::OpenOptions::new();
+                        o.write(true).create(true).truncate(true);
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::OpenOptionsExt as _;
+                            o.mode(0o600);
+                        }
+                        let mut f = o.open(&path)?;
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt as _;
+                            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+                        }
+                        f.write_all(key.to_openssh(ssh_key::LineEnding::LF)?.as_bytes())?;
                     }
                     std::fs::write(
                         dir.join("device_ed25519.pub"),

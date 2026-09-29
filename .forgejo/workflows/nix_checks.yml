@@ -21,7 +21,7 @@ jobs:
     if: ${{ inputs.run }}
     runs-on: nix
     steps:
-      - uses: https://github.com/actions/checkout@v4
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       # evaluate everything, build nothing: the vm tests are built by their
       # own jobs, only when what a box runs changed
       # the check does not write a derivation it has not seen, then asks
@@ -44,8 +44,6 @@ jobs:
         run: nix build --no-link .#checks.x86_64-linux.placement .#checks.x86_64-linux.boxes .#checks.x86_64-linux.ci .#checks.x86_64-linux.stylesheet .#checks.x86_64-linux.cargo-nix .#checks.x86_64-linux.nginx
       - uses: ./.forgejo/actions/stop-run
         if: failure()
-        with:
-          secret: ${{ secrets.DD_CI }}
 
   # The programs every box and every vm test carry. Built once, after the
   # cheap checks pass, and uploaded to the bucket; the jobs below then
@@ -63,7 +61,7 @@ jobs:
       matrix:
         part: [cli, boxes]
     steps:
-      - uses: https://github.com/actions/checkout@v4
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: build ${{ matrix.part }}
         run: |
           case "${{ matrix.part }}" in
@@ -72,8 +70,6 @@ jobs:
           esac
       - uses: ./.forgejo/actions/stop-run
         if: failure()
-        with:
-          secret: ${{ secrets.DD_CI }}
 
   # the name main's rule asks for, and what the later jobs wait on
   build_client:
@@ -98,7 +94,7 @@ jobs:
         host: [node1, node2]
         on: [node1, node2]
     steps:
-      - uses: https://github.com/actions/checkout@v4
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: build ${{ matrix.host }} on ${{ matrix.on }}
         run: nix build --print-out-paths .#nixosConfigurations.${{ matrix.host }}.config.system.build.toplevel | tee "$RUNNER_TEMP/toplevel"
       # what was built, as a status on the commit: `dd release publish`
@@ -110,8 +106,6 @@ jobs:
             "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha || github.sha }}"
       - uses: ./.forgejo/actions/stop-run
         if: failure()
-        with:
-          secret: ${{ secrets.DD_CI }}
 
   # one job per test, so they spread over every runner box and run at once
   vm_tests:
@@ -123,10 +117,8 @@ jobs:
       matrix:
         test: [console, directory, metrics, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, llm, vault, adblock]
     steps:
-      - uses: https://github.com/actions/checkout@v4
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: ${{ matrix.test }}
         run: nix build --no-link .#checks.x86_64-linux.${{ matrix.test }}
       - uses: ./.forgejo/actions/stop-run
         if: failure()
-        with:
-          secret: ${{ secrets.DD_CI }}

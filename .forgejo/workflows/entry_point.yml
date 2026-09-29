@@ -26,7 +26,7 @@ jobs:
       vm: ${{ steps.detect.outputs.vm }}
       app: ${{ steps.detect.outputs.app }}
     steps:
-      - uses: https://github.com/actions/checkout@v4
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
         with:
           fetch-depth: 0 # the diff against the base needs history
 
