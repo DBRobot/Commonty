@@ -8,6 +8,11 @@
   ...
 }:
 let
+  attachable = lib.concatStringsSep "," [
+    ".png" ".jpg" ".jpeg" ".gif" ".webp" ".avif"
+    ".pdf" ".txt" ".log" ".md" ".csv" ".json" ".patch"
+    ".zip" ".gz" ".tgz" ".mp4" ".webm" ".mov"
+  ];
   base = config.dd.domain;
   host = "git.${base}";
   port = 3001; # 3000 is grafana; kept for the runner's own url only
@@ -104,6 +109,18 @@ in
           # A workflow is code that runs on a box. Every repo may have one:
           # a member's lands on the members' runner (modules/members-runner.nix),
           # sandboxed, and the host runners take the owner's repos alone.
+        };
+        # What a member may attach to an issue or a release: files that are
+        # data, never a page. An .svg or .html served from this name runs as
+        # whoever opens it, so neither is on the list; nothing here needs a
+        # file bigger than 100 MB (the app's releases are on the mirror).
+        attachment = {
+          ALLOWED_TYPES = attachable;
+          MAX_SIZE = 100;
+        };
+        "repository.release" = {
+          ALLOWED_TYPES = attachable;
+          FILE_MAX_SIZE = 100;
         };
         mailer.ENABLED = false;
         # a webhook goes out to the world, never to this box, the house or

@@ -50,6 +50,8 @@ const MAX_SESSIONS: usize = 4;
 use library::crypt::{BLOCK, HEADER, SEALED_BLOCK};
 
 struct Session {
+    /// the member who started it, as the gate named them to nginx
+    owner: String,
     dir: PathBuf,
     last: Mutex<Instant>,
     child: Mutex<Option<tokio::process::Child>>,
@@ -134,7 +136,33 @@ async fn key(State(app): State<Arc<App>>) -> Json<serde_json::Value> {
     Json(serde_json::json!({ "key": app.public }))
 }
 
-async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
+async fn start(
+    State(app): State<Arc<App>>,
+    headers: axum::http::HeaderMap,
+    Json(s): Json<Start>,
+) -> Response {
+    // One film at a time per member: starting another ends the one they
+    // had going, so a person switching films never waits and nobody can
+    // hold every slot on the box.
+    let owner = headers
+        .get("x-dd-user")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    if !owner.is_empty() {
+        let theirs: Vec<Arc<Session>> = {
+            let mut all = app.sessions.lock().await;
+            let ids: Vec<String> = all
+                .iter()
+                .filter(|(_, x)| x.owner == owner)
+                .map(|(id, _)| id.clone())
+                .collect();
+            ids.iter().filter_map(|id| all.remove(id)).collect()
+        };
+        for old in theirs {
+            wipe(old).await;
+        }
+    }
     if app.sessions.lock().await.len() >= MAX_SESSIONS {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -184,6 +212,7 @@ async fn start(State(app): State<Arc<App>>, Json(s): Json<Start>) -> Response {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
     let session = Arc::new(Session {
+        owner,
         dir: dir.clone(),
         last: Mutex::new(Instant::now()),
         child: Mutex::new(None),

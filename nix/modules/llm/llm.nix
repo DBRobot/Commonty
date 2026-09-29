@@ -29,7 +29,12 @@ in
     # SearXNG on this box (search.nix); the model never touches the network
     locations."= /search" = {
       proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/chat/search";
-      extraConfig = "proxy_set_header X-Original-URI $request_uri;";
+      # a search goes out to the web for a message: paced like one
+      extraConfig = ''
+        proxy_set_header X-Original-URI $request_uri;
+        limit_req zone=dd_model burst=20 nodelay;
+        limit_req_status 429;
+      '';
     };
     # which model is awake, for the picker: behind the same gate
     locations."= /running" = {
@@ -55,7 +60,10 @@ in
         # defined for every browser-facing vhost in modules/verify.nix)
         error_page 401 = @login;
         error_page 403 = @waiting;
-        # the demo's prompts are counted at the gate (rate:N on the tile)
+        # the demo's prompts are counted at the gate (rate:N on the tile);
+        # everyone's, here, against a flood (modules/gate/verify.nix)
+        limit_req zone=dd_model burst=20 nodelay;
+        limit_req_status 429;
         proxy_buffering off; # streamed completions
         proxy_read_timeout 600s; # cpu generation is slow
         client_max_body_size 0;

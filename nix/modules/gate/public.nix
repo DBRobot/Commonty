@@ -181,6 +181,9 @@ in
               client_body_timeout 15s;
               client_header_timeout 15s;
               limit_conn dd_conn 20;
+              # anything at all, per visitor (the zone: modules/gate/verify.nix)
+              limit_req zone=dd_visitor burst=500 nodelay;
+              limit_req_status 429;
             ''
           );
         }

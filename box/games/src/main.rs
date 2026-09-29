@@ -341,6 +341,7 @@ async fn main() -> Result<()> {
             port_base: env_or("DD_GAMES_PORT_BASE", "27000").parse()?,
             port_count: env_or("DD_GAMES_PORT_COUNT", "200").parse()?,
             per_member: env_or("DD_GAMES_PER_MEMBER", "1").parse()?,
+            kept_per_member: env_or("DD_GAMES_KEPT_PER_MEMBER", "5").parse()?,
             memory_budget: env_or("DD_GAMES_MEMORY_MIB", "16384").parse()?,
             cores: std::thread::available_parallelism()
                 .map(|n| n.get() as u32)

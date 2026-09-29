@@ -205,6 +205,20 @@ in
         forceSSL = true;
       })
       // {
+        # The photos page makes or links a person's account against museum
+        # on its own name: same origin, so the member's session comes along.
+        # Museum as it is, but for the two calls that carry the fleet's
+        # verification code, which the gate makes with the code filled in
+        # (box/verify/src/photos.rs, museum_verify).
+        ${d "photos"} = {
+          useACMEHost = base;
+          forceSSL = true;
+          locations = {
+            "/_dd/museum/".proxyPass = "http://127.0.0.1:${toString museumPort}/";
+            "~ ^/_dd/museum/users/(verify-email|change-email)$".proxyPass =
+              "http://127.0.0.1:${toString config.dd.verify.port}/_dd/photos/museum/$1";
+          };
+        };
         ${d "locker"} = {
           useACMEHost = base;
           forceSSL = true;

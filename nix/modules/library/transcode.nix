@@ -100,6 +100,9 @@ in
         gated = {
           extraConfig = ''
             auth_request /_dd/verify;
+            # who is asking, as the gate says: one film at a time each
+            auth_request_set $dd_transcode_user $upstream_http_x_auth_request_preferred_username;
+            proxy_set_header X-DD-User $dd_transcode_user;
             # the session it makes is its own credential; it never replays
             # the caller's
             proxy_set_header Authorization "";

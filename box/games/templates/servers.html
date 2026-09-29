@@ -45,7 +45,7 @@
           <p>kept {{ w.when }} · {{ w.files }} files</p>
           <div class="row" style="margin-top:8px">
             <form method="post" action="/worlds/{{ w.name }}/start"><button>Start a server with it</button></form>
-            <form method="post" action="/worlds/{{ w.name }}/delete" onsubmit="return confirm('Delete this saved world? There is no undo.')"><button class="quiet">Delete</button></form>
+            <form method="post" action="/worlds/{{ w.name }}/delete" data-confirm="Delete this saved world? There is no undo."><button class="quiet">Delete</button></form>
           </div>
         </div>
       </div>

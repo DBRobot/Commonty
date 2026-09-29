@@ -27,6 +27,15 @@ if cmp -s "$rules" "$STATE/applied"; then
   exit 0
 fi
 
+# the chain is the firewall's; while it reloads, or on a box without it,
+# there is nothing to fill, and the firewall starts this again once it is up
+for ipt in iptables ip6tables; do
+  if ! $ipt -w -n -L dd-games >/dev/null 2>&1; then
+    echo "games-access: no dd-games chain in $ipt yet; nothing to do"
+    exit 0
+  fi
+done
+
 for ipt in iptables ip6tables; do
   $ipt -w -F dd-games
 done

@@ -20,14 +20,14 @@ function askToLink(cfg, password) {
         panel.hidden = true;
         const email = document.getElementById('le').value.trim();
         const old = document.getElementById('lp').value;
-        resolve(JSON.parse(await ente_adopt(cfg.api, email, old, cfg.email, password, cfg.code)));
+        resolve(JSON.parse(await ente_adopt(location.origin + cfg.accountApi, email, old, cfg.email, password, '')));
       } catch (e) { reject(e); }
     };
     document.getElementById('fresh').onclick = async () => {
       try {
         say('Making your photo account…');
         panel.hidden = true;
-        resolve(JSON.parse(await ente_create(cfg.api, cfg.email, password, cfg.code)));
+        resolve(JSON.parse(await ente_create(location.origin + cfg.accountApi, cfg.email, password, '')));
       } catch (e) { reject(e); }
     };
   });

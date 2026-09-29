@@ -76,22 +76,71 @@ pub(crate) async fn config(State(app): State<Arc<App>>, headers: HeaderMap) -> R
     };
     let mut cfg = serde_json::json!({
         "api": p.api,
+        // where the page makes or links the account: museum, on this
+        // site's own name, so the two calls that need the fleet's code
+        // come here (museum_verify) and the code never reaches a browser
+        "accountApi": "/_dd/museum",
         "email": format!("{user}{}", p.email_suffix),
         "rpId": app.domain,
     });
     if user == pages::DEMO_USER {
-        // the demo has an account already and never makes one, so it has
-        // no use for the code. The code is one value for the whole fleet:
-        // whoever holds it can verify an address at users.<domain> that is
-        // not theirs, and the demo is the one session anybody may open.
+        // the demo has an account already and never makes one
         let Some(pw) = &p.demo_password else {
             return StatusCode::FORBIDDEN.into_response();
         };
         cfg["password"] = serde_json::Value::String(pw.clone());
-    } else {
-        cfg["code"] = serde_json::Value::String(p.code.clone());
     }
     Json(cfg).into_response()
+}
+
+/// POST /_dd/photos/museum/{verify-email,change-email}: the two museum calls
+/// that carry the fleet's verification code, made for a member and only for
+/// their own address. The page sends them without a code; this puts it in
+/// and hands museum's answer back as it came. The code is one value for the
+/// whole fleet - whoever held it could claim any address at users.<domain> -
+/// so it stays on this box.
+pub(crate) async fn museum_verify(
+    State(app): State<Arc<App>>,
+    Path(op): Path<String>,
+    headers: HeaderMap,
+    Json(mut body): Json<serde_json::Value>,
+) -> Response {
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    let Some(user) = app.sessions.user(cookie) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if !app.member(&user) || user == pages::DEMO_USER {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(p) = &app.photos else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if op != "verify-email" && op != "change-email" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    if body["email"].as_str() != Some(format!("{user}{}", p.email_suffix).as_str()) {
+        return (StatusCode::FORBIDDEN, "only your own address").into_response();
+    }
+    body["ott"] = serde_json::Value::String(p.code.clone());
+    let mut r = reqwest::Client::new()
+        .post(format!("{}/users/{op}", p.api.trim_end_matches('/')))
+        .timeout(Duration::from_secs(20))
+        .json(&body);
+    // change-email acts on the account the person is signed in to
+    for h in ["x-auth-token", "x-client-package", "x-client-version"] {
+        if let Some(v) = headers.get(h) {
+            r = r.header(h, v);
+        }
+    }
+    match r.send().await {
+        Ok(res) => {
+            let status =
+                StatusCode::from_u16(res.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            let bytes = res.bytes().await.unwrap_or_default();
+            (status, [("content-type", "application/json")], bytes).into_response()
+        }
+        Err(_) => StatusCode::BAD_GATEWAY.into_response(),
+    }
 }
 
 /// the photos host, from its tile: https://photos.<domain>
