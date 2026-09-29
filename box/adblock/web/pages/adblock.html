@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ad blocking</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/adblock.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="adblock">
+    <div class="ab-title"><h1>Ad blocking at home</h1><span class="ab-pill" id="health">…</span></div>
+
+    <section class="ab-box">
+      <div class="ab-state">
+        <div class="ab-on">
+          <div class="ab-shield" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></div>
+          <div><h2 id="state-title">…</h2><div class="ab-muted ab-small" id="state-sub">For every device on the home network.</div></div>
+        </div>
+        <div class="ab-actions">
+          <div class="ab-pause" role="group" aria-label="Pause blocking" id="pause">
+            <span>Pause for</span>
+            <button type="button" data-min="5">5 min</button>
+            <button type="button" data-min="30">30 min</button>
+            <button type="button" data-min="60">1 hour</button>
+          </div>
+          <button type="button" class="ab-btn" id="switch">…</button>
+        </div>
+      </div>
+      <div class="ab-stats">
+        <div><b id="pct">…</b><span class="ab-muted ab-small">of lookups blocked today</span></div>
+        <div><b id="blocked">…</b><span class="ab-muted ab-small" id="of">blocked today</span></div>
+        <div><b id="sites">…</b><span class="ab-muted ab-small">sites on the blocklists</span></div>
+      </div>
+    </section>
+
+    <section class="ab-box" aria-label="Lookups today">
+      <header><b>Today, hour by hour</b></header>
+      <div class="ab-chart"><svg id="chart" viewBox="0 0 960 220" role="img" aria-label="Lookups per hour today, answered and blocked"></svg></div>
+      <div class="ab-legend"><span><i class="ab-sw-answered"></i>answered</span><span><i class="ab-sw-blocked"></i>blocked</span></div>
+    </section>
+
+    <div class="ab-two">
+      <section class="ab-box">
+        <header><b>A site that blocking broke</b><span class="ab-spacer"></span><span class="ab-muted ab-small">let through for the whole house</span></header>
+        <form class="ab-allow" id="allow-form">
+          <input id="allow-input" placeholder="shop.example.com" aria-label="Site to let through" autocomplete="off">
+          <button class="ab-btn ab-go" type="submit">Allow</button>
+        </form>
+        <p class="ab-err" id="allow-err" hidden></p>
+        <div class="ab-list" id="allowed"></div>
+      </section>
+
+      <section class="ab-box">
+        <header><b>Your home network</b><span class="ab-spacer"></span><span class="ab-muted ab-small">for the TV, consoles, guests</span></header>
+        <div class="ab-setup">
+          <span class="ab-muted ab-small">One change on the router, and every device on the house Wi-Fi is covered:</span>
+          <ol>
+            <li>Open your router's settings and find the <b>DHCP</b> or <b>LAN</b> DNS servers.</li>
+            <li>Set the first to <span class="ab-addr"><code id="lan">…</code><button class="ab-btn ab-copy" type="button" data-copy-from="lan">Copy</button></span> and the second to <span class="ab-addr"><code>1.1.1.1</code></span>.</li>
+            <li>Save. Devices pick it up when they next reconnect to the Wi-Fi.</li>
+          </ol>
+          <span class="ab-muted ab-small">The second address keeps the house online if this box is off; a device may use it now and then, and see an ad.</span>
+        </div>
+        <div class="ab-note"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.2"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg><span>Only totals are kept. Nothing records which device looked up which site.</span></div>
+      </section>
+    </div>
+
+    <section class="ab-box">
+      <header><b>Blocklists</b><span class="ab-spacer"></span><span class="ab-muted ab-small" id="lists-updated"></span></header>
+      <div class="ab-list" id="lists"></div>
+      <div class="ab-note"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7v4M8 5h.01"/></svg><span>The lists come with each release and refresh every week. Adding a list is a change to the fleet, not a setting here. Devices on the Commonty network away from home are not filtered.</span></div>
+    </section>
+  </main>
+  <script type="module" src="/_dd/static/adblock.js"></script>
+  <script type="module" src="/_dd/static/shell.js"></script>
+</body>
+</html>

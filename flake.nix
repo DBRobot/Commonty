@@ -52,6 +52,7 @@
         "pgrestore"
         "llm"
         "vault"
+        "adblock"
       ];
       rust =
         let

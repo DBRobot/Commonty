@@ -10,6 +10,7 @@
 //! person signs with a key they alone hold. This box stores and serves it and
 //! can add nothing to it. With VERIFY_ROLE=directory that is all a box does.
 
+pub mod adblock;
 mod directory;
 pub mod fleet;
 mod friends;
@@ -72,6 +73,8 @@ struct App {
     app_seen: Mutex<Option<(Instant, Option<SignedApp>)>>,
     fleet: fleet::Fleet,
     thanos: Option<String>,
+    /// Ad blocking at home: Pi-hole's api on this box, and its household
+    adblock: Option<adblock::Adblock>,
     /// who is friends with whom, and who came in as a guest (friends.rs)
     friends: friends::Store,
 }
@@ -149,6 +152,8 @@ pub struct Config {
     /// Thanos on this box, which holds every box's facts (fleet.rs). None:
     /// this box does not gather them, and every box shows as unknown.
     pub thanos: Option<String>,
+    /// Pi-hole on this box (adblock.rs). None: no ad blocking here.
+    pub adblock: Option<adblock::Adblock>,
     /// The fleet's TMDB key, handed to signed-in pages so a member's own
     /// device can look up a film's poster by its title. The box never
     /// sees the titles: they are sealed in the library. None: no posters,
@@ -1240,6 +1245,23 @@ async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
             {
                 v["tmdb"] = k.as_str().into();
             }
+            // the household's switch for the house network, above sign-out
+            if let Some(ab) = &app.adblock
+                && role == pages::Role::Member
+                && ab.allows(&user)
+                && let Some(menu) = v["menu"].as_array_mut()
+            {
+                let at = menu.len().saturating_sub(1);
+                menu.insert(
+                    at,
+                    serde_json::json!([{
+                        "label": "Ad blocking at home",
+                        "url": "/_dd/adblock",
+                        "toggle": "/_dd/adblock/state?brief",
+                        "switch": "/_dd/adblock/switch",
+                    }]),
+                );
+            }
             // who you are, never kept by the browser: sign-out leaves the
             // http cache alone (photos::forget)
             ([("cache-control", "no-store")], Json(v)).into_response()
@@ -1683,6 +1705,7 @@ pub async fn start(
         app_seen: Mutex::new(None),
         fleet: cfg.fleet,
         thanos: cfg.thanos,
+        adblock: cfg.adblock,
         friends: friends::Store::open(&state_dir)?,
     });
     // A held sign-up follows through when the member list names it: then it
@@ -1831,6 +1854,14 @@ pub async fn start(
             }),
         )
         .route("/_dd/chat/search", get(chat_search))
+        .route("/_dd/adblock", get(adblock::page))
+        .route("/_dd/adblock/state", get(adblock::state))
+        .route("/_dd/adblock/switch", post(adblock::switch))
+        .route("/_dd/adblock/allow", post(adblock::allow))
+        .route(
+            "/_dd/adblock/allow/{domain}",
+            axum::routing::delete(adblock::unallow),
+        )
         .route("/_dd/friends", get(friends::page))
         .route("/_dd/friends/list", get(friends::list))
         .route("/_dd/friends/link", post(friends::make_link))

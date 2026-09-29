@@ -245,6 +245,16 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/css; charset=utf-8",
     ),
     (
+        "adblock.js",
+        "box/adblock/web/adblock.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "adblock.css",
+        "box/adblock/web/adblock.css",
+        "text/css; charset=utf-8",
+    ),
+    (
         "enrol.js",
         "box/verify/web/enrol.js",
         "text/javascript; charset=utf-8",
@@ -391,6 +401,7 @@ const PAGES: &[(&str, &str)] = &[
     ("git", "box/forge/web/pages/git.html"),
     ("metrics", "box/observe/web/pages/metrics.html"),
     ("friend", "box/web/pages/friend.html"),
+    ("adblock", "box/adblock/web/pages/adblock.html"),
     // not signed in: whoever has a Send's link (modules/vault)
     ("send", "box/vault/web/pages/send.html"),
 ];
