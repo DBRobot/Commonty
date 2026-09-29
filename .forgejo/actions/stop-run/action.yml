@@ -1,10 +1,7 @@
 # The last step of every job: if the job failed, stop the whole run. The
 # forge's api cannot cancel a run; the forge box can (modules/forge/ci-cancel.py),
-# shown the repo's DD_CI secret.
+# once the forge has this job down as failed. No secret: nothing to leak.
 name: stop the run on failure
-inputs:
-  secret:
-    required: true
 runs:
   using: composite
   steps:
@@ -13,5 +10,5 @@ runs:
     - shell: bash
       run: |
         echo "this job failed; stopping run ${{ github.run_id }}"
-        curl -fsS -X POST -H "X-DD-CI: ${{ inputs.secret }}" \
+        curl -fsS -X POST \
           "${{ github.server_url }}/_dd/ci/cancel/${{ github.run_id }}" || echo "the forge did not stop the run"

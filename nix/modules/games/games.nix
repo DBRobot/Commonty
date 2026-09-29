@@ -290,7 +290,6 @@ in
           proxy_set_header X-DD-Role $auth_role;
           # likewise: the manager is told who, not handed the proof
           proxy_set_header Authorization "";
-          proxy_set_header Cookie $dd_cookie_stripped;
           error_page 401 = @login;
           error_page 403 = @waiting;
         '';

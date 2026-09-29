@@ -686,7 +686,14 @@ mod tests {
         Entry {
             name: name.into(),
             root: encode_public(&key.verifying_key()),
-            recovery: encode_public(&generate().verifying_key()),
+            // one paper key per person, the same in every version: a new one
+            // each time would be a recovery-key swap, which only the old
+            // paper key may sign
+            recovery: {
+                use sha2::Digest as _;
+                let seed: [u8; 32] = sha2::Sha256::digest(key.to_bytes()).into();
+                encode_public(&ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key())
+            },
             devices: vec![{
                 let p = encode_public(&generate().verifying_key());
                 Device {

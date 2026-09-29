@@ -215,10 +215,7 @@ in
               toVault = extra: {
                 proxyPass = "http://127.0.0.1:${toString port}";
                 proxyWebsockets = true;
-                extraConfig = ''
-                  proxy_set_header Cookie $dd_cookie_stripped;
-                ''
-                + extra;
+                extraConfig = extra;
               };
               # quoted where used: nginx reads a bare { in a location as a block
           uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";

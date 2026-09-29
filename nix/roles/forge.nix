@@ -21,8 +21,6 @@
     }
   ];
   dd.forgejo.admin = "david";
-  sops.secrets.forgejo-ci-secret = { };
-  dd.forgejo.ciSecretFile = config.sops.secrets.forgejo-ci-secret.path;
   dd.backup.paths = [ "/vault/forgejo" ]; # repositories, lfs, custom config; its db is in the postgres dumps
   dd.forgejo.mirrors = [
     {

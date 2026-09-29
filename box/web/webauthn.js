@@ -13,8 +13,12 @@ export const u8b64 = a =>
 // javascript: url - is someone else's idea of where you should go, and the
 // `rd` it travels in comes from the query string.
 export function safeRd(raw) {
-  const p = raw || '/';
-  return p.startsWith('/') && !p.startsWith('//') && !p.includes('\\') ? p : '/';
+  // parsed the way the browser will follow it: tabs and newlines dropped,
+  // backslashes read as slashes, so "/\t/evil" is judged as "//evil" is
+  let u;
+  try { u = new URL(raw || '/', location.origin); } catch { return '/'; }
+  if (u.origin !== location.origin || !String(raw || '/').trim().startsWith('/')) return '/';
+  return u.pathname + u.search + u.hash;
 }
 
 // the options the verifier sends, with their byte fields decoded

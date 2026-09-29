@@ -23,13 +23,11 @@ jobs:
     if: ${{ inputs.run }}
     runs-on: nix
     steps:
-      - uses: https://github.com/actions/checkout@v4
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: fmt and clippy
         run: nix build --no-link .#checks.x86_64-linux.fmt .#checks.x86_64-linux.clippy
       - uses: ./.forgejo/actions/stop-run
         if: failure()
-        with:
-          secret: ${{ secrets.DD_CI }}
 
   # The app on its own: its dependency tree (tauri, webkit) is most of
   # any compile, so the workspace checks above leave it out and this runs
@@ -38,22 +36,18 @@ jobs:
     if: ${{ inputs.app }}
     runs-on: nix
     steps:
-      - uses: https://github.com/actions/checkout@v4
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: clippy on the app
         run: nix build --no-link .#checks.x86_64-linux.clippy-app
       - uses: ./.forgejo/actions/stop-run
         if: failure()
-        with:
-          secret: ${{ secrets.DD_CI }}
 
   test:
     if: ${{ inputs.run }}
     runs-on: nix
     steps:
-      - uses: https://github.com/actions/checkout@v4
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: cargo test (unit tests + e2e gates on localhost; app excluded)
         run: nix build --no-link -L .#checks.x86_64-linux.tests
       - uses: ./.forgejo/actions/stop-run
         if: failure()
-        with:
-          secret: ${{ secrets.DD_CI }}
