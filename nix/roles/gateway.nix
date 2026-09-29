@@ -22,6 +22,9 @@
       "accounts"
       "headscale" # the network's control server, for the app's bridge (modules/net)
     ];
+    # commonty.org itself: what people type. It sends them to home and
+    # offers the app download, nothing else (its server block below)
+    bare = true;
     tunnel = "d0534bff-f478-48ab-a949-65e2e3c14c39";
     credentialsFile = config.sops.secrets.cloudflared-credentials.path;
     tokenFile = config.sops.templates."cloudflare.env".path;
@@ -39,10 +42,10 @@
     CF_DNS_API_TOKEN=${config.sops.placeholder.cloudflare-token}
   '';
 
-  # the bare domain: where the front door is, on the tailnet. The app the
-  # invited person needs before they can sign in to anything answers here
-  # and asks for nothing; the pages a stranger sees link to home.<domain>'s
-  # copy, since the bare name is not behind the tunnel.
+  # the bare domain: what people type to find the site, open to the web
+  # through the tunnel (dd.public.bare). It sends them to home.<domain> and
+  # offers the app an invited person needs before they can sign in to
+  # anything; it asks for nothing and serves nothing else.
   dd.verify.appManifest = "https://git.${config.dd.domain}/${config.dd.repo}/raw/branch/releases/app.json";
 
   services.nginx.virtualHosts.${config.dd.domain} = {
