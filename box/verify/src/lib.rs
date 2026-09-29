@@ -71,6 +71,7 @@ struct App {
     /// minutes, the lack of one for one
     app_seen: Mutex<Option<(Instant, Option<SignedApp>)>>,
     fleet: fleet::Fleet,
+    thanos: Option<String>,
     /// who is friends with whom, and who came in as a guest (friends.rs)
     friends: friends::Store,
 }
@@ -142,9 +143,12 @@ pub struct Config {
     /// beside the box releases). The downloads page offers what it names,
     /// and nothing else. None: no page.
     pub app_manifest: Option<String>,
-    /// Every box in the fleet and the address its prometheus answers on,
-    /// for the Boxes and Backups pages. Empty on a box that is not told.
+    /// Every box in the fleet, for the Boxes and Backups pages. Empty on a
+    /// box that is not told.
     pub fleet: fleet::Fleet,
+    /// Thanos on this box, which holds every box's facts (fleet.rs). None:
+    /// this box does not gather them, and every box shows as unknown.
+    pub thanos: Option<String>,
     /// The fleet's TMDB key, handed to signed-in pages so a member's own
     /// device can look up a film's poster by its title. The box never
     /// sees the titles: they are sealed in the library. None: no posters,
@@ -1390,7 +1394,7 @@ async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Re
 async fn fleet_json(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     match app.identify(&headers, "access") {
         Some(user) if app.member(&user) && user != pages::DEMO_USER => {
-            Json(fleet::look(&app.fleet).await).into_response()
+            Json(fleet::look(&app.fleet, app.thanos.as_deref()).await).into_response()
         }
         _ => StatusCode::FORBIDDEN.into_response(),
     }
@@ -1678,6 +1682,7 @@ pub async fn start(
         search: cfg.search,
         app_seen: Mutex::new(None),
         fleet: cfg.fleet,
+        thanos: cfg.thanos,
         friends: friends::Store::open(&state_dir)?,
     });
     // A held sign-up follows through when the member list names it: then it

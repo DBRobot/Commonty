@@ -63,9 +63,9 @@ in
     default = [ ];
     description = "Directory urls of the other boxes, e.g. https://files.example/_dd/directory.";
   };
-  # Every box in the fleet and the address its prometheus answers on. The
-  # Boxes and Backups pages ask each box for its own facts; nothing about
-  # another box is kept here.
+  # Every box in the fleet. The Boxes and Backups pages show each one's
+  # facts as thanos on this box gathered them; no box is asked by another
+  # (prometheus answers only on its own box).
   options.dd.verify.fleet = lib.mkOption {
     type = lib.types.attrsOf lib.types.str;
     default = { };
@@ -265,6 +265,10 @@ in
         VERIFY_DIR = "/var/lib/dd-verify/keys";
         VERIFY_PEERS = lib.concatStringsSep "," cfg.peers;
         VERIFY_FLEET = builtins.toJSON cfg.fleet;
+        # every box's facts, from thanos on this box (box/verify/src/fleet.rs)
+        VERIFY_THANOS = lib.optionalString (
+          config.services.thanos.query.enable or false
+        ) "http://${config.services.thanos.query.http-address}";
         VERIFY_SYNC_SECS = toString cfg.syncSeconds;
       }
       // lib.optionalAttrs (full && cfg.appManifest != null) {

@@ -44,6 +44,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
     let (addr, _task) = verify::start(verify::Config {
         home: vec![],
         fleet: Default::default(),
+        thanos: None,
         demo_library: None,
         tmdb: None,
         search: None,
