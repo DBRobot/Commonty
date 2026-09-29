@@ -35,6 +35,9 @@ async fn main() -> Result<()> {
         // every box and where its prometheus answers, for the pages that
         // show the fleet; a box that is not told has none to show
         fleet: serde_json::from_str(&env_or("VERIFY_FLEET", "{}")).context("VERIFY_FLEET")?,
+        thanos: std::env::var("VERIFY_THANOS")
+            .ok()
+            .filter(|s| !s.is_empty()),
         app_manifest: std::env::var("VERIFY_APP_MANIFEST")
             .ok()
             .filter(|u| !u.is_empty()),

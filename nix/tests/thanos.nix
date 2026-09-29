@@ -24,9 +24,9 @@ let
         bucket_lookup_type: path
     '';
   box = name: {
-    # the gate plays no part here: without it, a change to the gate
-    # is not a reason to run this again
-    dd.verify.enable = false;
+    # the gate only on the observe box, where the Boxes and Backups pages
+    # read every box's facts from thanos
+    dd.verify.enable = name == "a";
     imports = [
       ./box.nix
       ../modules/storage/garage.nix
@@ -70,6 +70,13 @@ in
             "192.168.1.1:10901"
             "192.168.1.2:10901"
           ];
+          dd.verify.role = pkgs.lib.mkForce "full";
+          # the fleet the gate shows; the addresses are not asked
+          dd.verify.fleet = {
+            a = "192.168.1.1";
+            b = "192.168.1.2";
+          };
+          environment.systemPackages = [ pkgs.jq ];
         }
       ];
     };
@@ -77,5 +84,6 @@ in
   };
   scriptEnv = {
     inherit rpc;
+    dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
   };
 }

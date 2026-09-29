@@ -1,8 +1,9 @@
-//! What the boxes are doing, for the pages that show it. Every box runs
-//! its own prometheus on the tailnet and every box writes its facts there
-//! (the agent's release, the backup's last good run, what the hardware
-//! is). Nothing new is stored: this asks each box the same questions `dd
-//! release status` asks, and hands the answers to a browser.
+//! What the boxes are doing, for the pages that show it. Every box writes
+//! its facts to its own prometheus (the agent's release, the backup's last
+//! good run, what the hardware is), which answers only on the box itself;
+//! thanos on the observing box gathers them all with a `box` label. This
+//! asks thanos, on this same box, the questions `dd release status` asks,
+//! and hands the answers to a browser. No box is asked by another.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -37,7 +38,8 @@ pub struct Backup {
     pub paths: Vec<String>,
 }
 
-/// the boxes and the address each answers on, from the release
+/// the boxes, from the release (the addresses are not used: nothing here
+/// talks to another box)
 pub type Fleet = BTreeMap<String, String>;
 
 fn client() -> reqwest::Client {
@@ -47,15 +49,17 @@ fn client() -> reqwest::Client {
         .unwrap_or_default()
 }
 
-/// every sample of one metric, as (labels, value)
+/// every sample of one metric for one box, as (labels, value)
 async fn query(
     http: &reqwest::Client,
-    addr: &str,
-    expr: &str,
+    thanos: &str,
+    name: &str,
+    metric: &str,
 ) -> Option<Vec<(BTreeMap<String, String>, f64)>> {
+    let expr = format!("{metric}{{box=\"{name}\"}}");
     let r = http
-        .get(format!("http://{addr}:9090/api/v1/query"))
-        .query(&[("query", expr)])
+        .get(format!("{thanos}/api/v1/query"))
+        .query(&[("query", expr.as_str())])
         .send()
         .await
         .ok()?;
@@ -83,7 +87,7 @@ async fn query(
     )
 }
 
-async fn one(http: &reqwest::Client, name: &str, addr: &str) -> Status {
+async fn one(http: &reqwest::Client, name: &str, thanos: &str) -> Status {
     let mut b = Status {
         name: name.to_string(),
         ..Default::default()
@@ -91,26 +95,33 @@ async fn one(http: &reqwest::Client, name: &str, addr: &str) -> Status {
     let num = |r: &Option<Vec<(BTreeMap<String, String>, f64)>>| {
         r.as_ref().and_then(|s| s.first()).map(|(_, v)| *v as u64)
     };
-    let Some(info) = query(http, addr, "dd_agent_info").await else {
-        return b; // nothing answered: the box is off, or the tailnet is
+    // every question at once: one round trip, not eleven
+    let (agent, counter, last_run, info, cores, memory, last, paths, snapshots, oldest, newest) = tokio::join!(
+        query(http, thanos, name, "dd_agent_info"),
+        query(http, thanos, name, "dd_agent_counter"),
+        query(http, thanos, name, "dd_agent_last_run_seconds"),
+        query(http, thanos, name, "dd_box_info"),
+        query(http, thanos, name, "dd_box_cpu_cores"),
+        query(http, thanos, name, "dd_box_memory_bytes"),
+        query(http, thanos, name, "dd_backup_last_success_seconds"),
+        query(http, thanos, name, "dd_backup_path"),
+        query(http, thanos, name, "dd_backup_snapshots"),
+        query(http, thanos, name, "dd_backup_oldest_seconds"),
+        query(http, thanos, name, "dd_backup_newest_seconds"),
+    );
+    // up: thanos has current facts from it; none, and it is off or unheard
+    let any = |r: &Option<Vec<(BTreeMap<String, String>, f64)>>| {
+        r.as_ref().is_some_and(|s| !s.is_empty())
     };
-    b.up = true;
-    if let Some((l, _)) = info.first() {
+    b.up = any(&agent) || any(&info) || any(&cores);
+    if !b.up {
+        return b;
+    }
+    if let Some(s) = &agent
+        && let Some((l, _)) = s.first()
+    {
         b.result = l.get("result").cloned();
     }
-    // the rest all at once: one round trip to a box, not ten
-    let (counter, last_run, info, cores, memory, last, paths, snapshots, oldest, newest) = tokio::join!(
-        query(http, addr, "dd_agent_counter"),
-        query(http, addr, "dd_agent_last_run_seconds"),
-        query(http, addr, "dd_box_info"),
-        query(http, addr, "dd_box_cpu_cores"),
-        query(http, addr, "dd_box_memory_bytes"),
-        query(http, addr, "dd_backup_last_success_seconds"),
-        query(http, addr, "dd_backup_path"),
-        query(http, addr, "dd_backup_snapshots"),
-        query(http, addr, "dd_backup_oldest_seconds"),
-        query(http, addr, "dd_backup_newest_seconds"),
-    );
     b.release = num(&counter);
     b.last_run = num(&last_run);
     if let Some(s) = info
@@ -147,14 +158,14 @@ static LAST: std::sync::Mutex<Option<(std::time::Instant, Vec<Status>)>> =
     std::sync::Mutex::new(None);
 const KEEP: std::time::Duration = std::time::Duration::from_secs(15);
 
-pub async fn look(fleet: &Fleet) -> Vec<Status> {
+pub async fn look(fleet: &Fleet, thanos: Option<&str>) -> Vec<Status> {
     if let Ok(g) = LAST.lock()
         && let Some((at, v)) = g.as_ref()
         && at.elapsed() < KEEP
     {
         return v.clone();
     }
-    let out = ask(fleet).await;
+    let out = ask(fleet, thanos).await;
     if let Ok(mut g) = LAST.lock() {
         *g = Some((std::time::Instant::now(), out.clone()));
     }
@@ -162,12 +173,21 @@ pub async fn look(fleet: &Fleet) -> Vec<Status> {
 }
 
 /// every box at once: one slow box does not hold up the page
-async fn ask(fleet: &Fleet) -> Vec<Status> {
+async fn ask(fleet: &Fleet, thanos: Option<&str>) -> Vec<Status> {
     let http = client();
     let mut set = tokio::task::JoinSet::new();
-    for (name, addr) in fleet {
-        let (http, name, addr) = (http.clone(), name.clone(), addr.clone());
-        set.spawn(async move { one(&http, &name, &addr).await });
+    for name in fleet.keys() {
+        let (http, name, thanos) = (http.clone(), name.clone(), thanos.map(str::to_string));
+        set.spawn(async move {
+            match thanos {
+                Some(t) => one(&http, &name, &t).await,
+                // this box does not gather the fleet's facts: every box unknown
+                None => Status {
+                    name,
+                    ..Default::default()
+                },
+            }
+        });
     }
     let mut out: Vec<Status> = set.join_all().await;
     out.sort_by(|a, b| a.name.cmp(&b.name));
