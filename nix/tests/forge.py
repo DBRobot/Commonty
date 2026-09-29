@@ -96,4 +96,5 @@ box.wait_until_succeeds(
 box.succeed(f"grep -q '\"sha\":\"{sha}\"' /tmp/events")
 # the gate's login may connect, and reads no table
 box.succeed("sudo -u dd-verify psql -h /run/postgresql -d forgejo -tAc 'select 1' | grep -qx 1")
-box.succeed("sudo -u dd-verify psql -h /run/postgresql -d forgejo -tAc 'select count(*) from repository' 2>&1 | grep -q 'permission denied'")
+# psql fails here, as it should; the pipe must not take that for the test's
+box.succeed("(sudo -u dd-verify psql -h /run/postgresql -d forgejo -tAc 'select count(*) from repository' 2>&1 || true) | grep -q 'permission denied'")
