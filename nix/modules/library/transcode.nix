@@ -103,7 +103,6 @@ in
             # the session it makes is its own credential; it never replays
             # the caller's
             proxy_set_header Authorization "";
-            proxy_set_header Cookie $dd_cookie_stripped;
             client_max_body_size 8m;
             proxy_read_timeout 120s;
           '';
