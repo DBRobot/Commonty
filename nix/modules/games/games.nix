@@ -167,6 +167,7 @@ in
         pkgs.curl
         pkgs.iptables
         pkgs.coreutils
+        pkgs.diffutils # cmp: the chain is rebuilt only when the answer changed
       ];
       serviceConfig.Type = "oneshot";
       script = ddScript ./games-access.sh {
