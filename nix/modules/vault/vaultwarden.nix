@@ -46,6 +46,12 @@ let
       for f in $hits; do
         sed -i 's|https://api.pwnedpasswords.com/range/|/pwned/range/|g' "$f"
       done
+      # master passwords from 8 characters, as Bitwarden had them before
+      # 12 (David's call, 2026-09-28): the check is the client's, here
+      grep -rl --include='*.js' 'minimumPasswordLength=12' $out/share/vaultwarden/vault | while read -r f; do
+        sed -i 's|minimumPasswordLength=12|minimumPasswordLength=8|g' "$f"
+      done
+      ! grep -rq --include='*.js' 'minimumPasswordLength=12' $out/share/vaultwarden/vault
     ''
     // {
       inherit (pkgs.vaultwarden.webvault) version;
