@@ -5,11 +5,11 @@
 # pages in a frame. Passwords is left to Vaultwarden, which sends its own
 # full set, but for HSTS.
 #
-# Our own pages - everything the gate serves - also get a content policy:
-# scripts from this site alone, no inline script, data from our own names.
-# It goes out report-only first: the browser says what it would have blocked
-# and blocks nothing, until every page is known to run under it. What it
-# would have blocked is reported to /_dd/csp, which the gate logs.
+# Our own pages - everything the gate serves, and the games pages - also
+# get a content policy: scripts from this site alone, no inline script, data
+# from our own names. Every page ran clean under it report-only (release
+# 132) before it was enforced. Anything it blocks is reported to /_dd/csp,
+# which the gate logs.
 { config, lib, ... }:
 let
   base = config.dd.domain;
@@ -19,9 +19,11 @@ let
   hsts = ''
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
   '';
-  common = hsts + ''
+  plain = hsts + ''
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
+  '';
+  common = plain + ''
     add_header Content-Security-Policy "frame-ancestors 'self' https://*.${base}" always;
   '';
   ours = lib.concatStringsSep "; " [
@@ -47,7 +49,8 @@ let
     { config, ... }:
     let
       to = if config.proxyPass == null then "" else config.proxyPass;
-      gate = lib.hasInfix gatePort to;
+      # the gate's pages, and the games manager's, are ours
+      gate = lib.hasInfix gatePort to || lib.hasInfix "dd-games.sock" to;
       vaultwarden = lib.hasInfix ":${toString vaultPort}" to;
     in
     {
@@ -55,9 +58,9 @@ let
         if vaultwarden then
           hsts
         else if gate then
-          common
+          plain
           + ''
-            add_header Content-Security-Policy-Report-Only "${ours}" always;
+            add_header Content-Security-Policy "${ours}" always;
           ''
         else
           common
