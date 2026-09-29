@@ -808,13 +808,41 @@ mod tests {
 
         // the check itself: present, on https, for the relying party on record
         use super::presence_and_place as ok;
-        assert!(ok(&with_presence, "https://home.commonty.org", Some("commonty.org")));
-        assert!(ok(&with_presence, "https://commonty.org", Some("commonty.org")));
-        assert!(!ok(&without, "https://home.commonty.org", Some("commonty.org")));
-        assert!(!ok(&elsewhere, "https://home.commonty.org", Some("commonty.org")));
-        assert!(!ok(&with_presence, "https://commonty.org.evil.example", Some("commonty.org")));
-        assert!(!ok(&with_presence, "http://home.commonty.org", Some("commonty.org")));
-        assert!(!ok(&with_presence[..20], "https://home.commonty.org", Some("commonty.org")));
+        assert!(ok(
+            &with_presence,
+            "https://home.commonty.org",
+            Some("commonty.org")
+        ));
+        assert!(ok(
+            &with_presence,
+            "https://commonty.org",
+            Some("commonty.org")
+        ));
+        assert!(!ok(
+            &without,
+            "https://home.commonty.org",
+            Some("commonty.org")
+        ));
+        assert!(!ok(
+            &elsewhere,
+            "https://home.commonty.org",
+            Some("commonty.org")
+        ));
+        assert!(!ok(
+            &with_presence,
+            "https://commonty.org.evil.example",
+            Some("commonty.org")
+        ));
+        assert!(!ok(
+            &with_presence,
+            "http://home.commonty.org",
+            Some("commonty.org")
+        ));
+        assert!(!ok(
+            &with_presence[..20],
+            "https://home.commonty.org",
+            Some("commonty.org")
+        ));
         // a passkey from before rp_id was recorded: some domain the origin is in
         assert!(ok(&with_presence, "https://home.commonty.org", None));
         assert!(!ok(&elsewhere, "https://home.commonty.org", None));
@@ -908,7 +936,11 @@ mod tests {
         swap.recovery = encode_public(&generate().verifying_key());
         assert!(accept(Some(&s2), &sign(swap.clone(), &root).unwrap()).is_err());
         // the paper key on file may, and the root still signs as before
-        accept(Some(&s2), &sign_recovery(swap.clone(), &root, &recovery).unwrap()).unwrap();
+        accept(
+            Some(&s2),
+            &sign_recovery(swap.clone(), &root, &recovery).unwrap(),
+        )
+        .unwrap();
         // and a wrong paper key may not
         assert!(accept(Some(&s2), &sign_recovery(swap, &root, &generate()).unwrap()).is_err());
         // a new root on its own is refused, however well it signs itself
