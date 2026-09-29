@@ -58,6 +58,12 @@
     locations."/_dd/static/" = {
       proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/static/";
     };
+    # the front page is the download page, not a sign-in form: a new name
+    # whose front page is a login is what phishing looks like to Google
+    locations."= /" = {
+      proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/download";
+      extraConfig = "proxy_set_header X-Original-URI $request_uri;";
+    };
     locations."/".return = "301 https://home.${config.dd.domain}$request_uri";
   };
 
