@@ -1838,6 +1838,7 @@ pub async fn start(
         .route("/_dd/network/mine", get(network_mine))
         .route("/_dd/photos", get(photos::page))
         .route("/_dd/photos/config", post(photos::config))
+        .route("/_dd/photos/museum/{op}", post(photos::museum_verify))
         .route("/_dd/photos/forget", get(photos::forget))
         .route("/_dd/photos/handoff", post(photos::handoff_open))
         .route(

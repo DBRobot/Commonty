@@ -1762,3 +1762,200 @@ async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
     assert_eq!(gate(&tom_c, "games.localhost").await.0, 403);
     assert_eq!(get_with_cookie(&b, "/_dd/me", &tom_c).await.0, 403);
 }
+
+/// A stand-in museum: answers every request 200 with `{}` and keeps the
+/// request line and body of each, in order.
+async fn fake_museum() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let keep = seen.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut s, _)) = l.accept().await else {
+                return;
+            };
+            let keep = keep.clone();
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                // headers, then as much body as content-length says
+                loop {
+                    let n = s.read(&mut chunk).await.unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    if let Some(end) = text.find("\r\n\r\n") {
+                        let len = text[..end]
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        if buf.len() >= end + 4 + len {
+                            let line = text.lines().next().unwrap_or_default().to_string();
+                            keep.lock()
+                                .unwrap()
+                                .push(format!("{line}\n{}", &text[end + 4..]));
+                            break;
+                        }
+                    }
+                }
+                let _ = s
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
+                    .await;
+            });
+        }
+    });
+    (format!("http://{addr}"), seen)
+}
+
+/// Photos' sign-up code is one value for the whole fleet: whoever holds it
+/// can claim any address at users.<domain>. So the page never gets it; the
+/// box puts it into the two museum calls that need it, for a member and
+/// only for that member's own address.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
+    let (museum, seen) = fake_museum().await;
+    // tom's account first, on a box that knows nobody, for his member id
+    let a = Box_::start(true, vec![], 300).await;
+    let d = dirs([&a]);
+    let dev = Device::new();
+    dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    let show = dev.dd_ok(&args(&["identity", "show"], &d));
+    let id = show
+        .lines()
+        .find_map(|l| l.strip_prefix("member id:"))
+        .unwrap()
+        .trim()
+        .to_string();
+    let dir = scratch("photos").join("keys");
+    let (addr, _task) = verify::start(verify::Config {
+        home: vec![],
+        members: Some(verify::Members::list(vec![id])),
+        release_pub: None,
+        web_dir: None,
+        photos: Some(verify::Photos {
+            api: museum.clone(),
+            email_suffix: "@users.localhost".into(),
+            code: "424242".into(),
+            demo_password: None,
+        }),
+        library: None,
+        fleet: Default::default(),
+        thanos: None,
+        adblock: None,
+        forge_events: None,
+        demo_library: None,
+        tmdb: None,
+        search: None,
+        oidc: None,
+        app_manifest: None,
+        network: None,
+        bind: "127.0.0.1:0".parse().unwrap(),
+        dir,
+        peers: vec![a.directory()],
+        sync_secs: 1,
+        domain: Some("localhost".to_string()),
+    })
+    .await
+    .unwrap();
+    let b = format!("http://{addr}");
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    // tom's entry reaches the new box, then his app token is a session
+    let token = dev.token();
+    let mut cookie = String::new();
+    for _ in 0..50 {
+        let r = http
+            .post(format!("{b}/_dd/app/signin"))
+            .form(&[("token", token.as_str())])
+            .send()
+            .await
+            .unwrap();
+        if let Some(c) = r.headers().get("set-cookie") {
+            cookie = c.to_str().unwrap().split(';').next().unwrap().to_string();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert!(!cookie.is_empty(), "tom signs in");
+
+    // the page's config has no code in it
+    let cfg: serde_json::Value = http
+        .post(format!("{b}/_dd/photos/config"))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(cfg.get("code").is_none(), "{cfg}");
+    assert_eq!(cfg["accountApi"], "/_dd/museum");
+
+    let call = |op: &'static str, cookie: Option<String>, email: &'static str| {
+        let http = http.clone();
+        let b = b.clone();
+        async move {
+            let mut r = http
+                .post(format!("{b}/_dd/photos/museum/{op}"))
+                .header("x-auth-token", "his-museum-session")
+                .json(&serde_json::json!({ "email": email, "ott": "" }));
+            if let Some(c) = cookie {
+                r = r.header("cookie", c);
+            }
+            r.send().await.unwrap().status().as_u16()
+        }
+    };
+    // nobody signed in, someone else's address, or any other museum call: no
+    assert_eq!(call("verify-email", None, "tom@users.localhost").await, 401);
+    assert_eq!(
+        call(
+            "verify-email",
+            Some(cookie.clone()),
+            "sarah@users.localhost"
+        )
+        .await,
+        403
+    );
+    assert_eq!(
+        call("send-otp", Some(cookie.clone()), "tom@users.localhost").await,
+        404
+    );
+    assert!(seen.lock().unwrap().is_empty(), "museum heard nothing yet");
+
+    // his own address: museum gets the call with the code in it, and his
+    // museum session for the one that acts on his account
+    assert_eq!(
+        call("verify-email", Some(cookie.clone()), "tom@users.localhost").await,
+        200
+    );
+    assert_eq!(
+        call("change-email", Some(cookie.clone()), "tom@users.localhost").await,
+        200
+    );
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert!(
+        seen[0].starts_with("POST /users/verify-email "),
+        "{}",
+        seen[0]
+    );
+    assert!(
+        seen[1].starts_with("POST /users/change-email "),
+        "{}",
+        seen[1]
+    );
+    for s in &seen {
+        assert!(s.contains("\"ott\":\"424242\""), "{s}");
+        assert!(s.contains("\"email\":\"tom@users.localhost\""), "{s}");
+    }
+}
