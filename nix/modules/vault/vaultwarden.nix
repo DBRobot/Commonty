@@ -46,6 +46,21 @@ let
       for f in $hits; do
         sed -i 's|https://api.pwnedpasswords.com/range/|/pwned/range/|g' "$f"
       done
+      # Commonty's own name and mark on every page. Bitwarden's name, its
+      # vault safe and its favicon on a login page at a domain that is not
+      # Bitwarden's is what browsers' phishing checks look for, and Chrome
+      # flagged commonty.org for it the night Passwords went live.
+      v=$out/share/vaultwarden/vault
+      sed -i 's|<title page-title>Vaultwarden Web</title>|<title page-title>Commonty Passwords</title>|; s|content="#175DDC"|content="#1D5C42"|g; s|color="#175DDC"|color="#1D5C42"|g' $v/index.html
+      for f in $(grep -rl --include='*.js' 'Vaultwarden Web' $v); do sed -i 's|Vaultwarden Web|Commonty Passwords|g' "$f"; done
+      for f in $(grep -rl --include='*.js' 'A modified version of the Bitwarden® Web Vault for Vaultwarden (an unofficial rewrite of the Bitwarden® server).' $v); do
+        sed -i 's|A modified version of the Bitwarden® Web Vault for Vaultwarden (an unofficial rewrite of the Bitwarden® server).|Built on Vaultwarden, open-source.|g' "$f"
+      done
+      for f in $v/*.json; do sed -i 's|"Vaultwarden Web"|"Commonty Passwords"|g; s|"Vaultwarden"|"Commonty Passwords"|g' "$f"; done
+      ${pkgs.imagemagick}/bin/magick ${../../../app/icons/icon.png} -resize 32x32 $v/images/favicon-32x32.png
+      ${pkgs.imagemagick}/bin/magick ${../../../app/icons/icon.png} -resize 16x16 $v/images/favicon-16x16.png
+      ${pkgs.imagemagick}/bin/magick ${../../../app/icons/icon.png} -resize 180x180 $v/images/apple-touch-icon.png
+      ! grep -q 'Vaultwarden Web' $v/index.html
       # master passwords from 8 characters, as Bitwarden had them before
       # 12 (David's call, 2026-09-28): the check is the client's, here
       grep -rl --include='*.js' 'minimumPasswordLength=12' $out/share/vaultwarden/vault | while read -r f; do

@@ -110,6 +110,12 @@ function homeLink(m, url) {
   return url.startsWith('/') && m.home ? m.home + url : url;
 }
 
+// Every page's tab shows the Commonty mark. Without one of its own, a
+// browser keeps whatever icon it last stored for the address.
+if (!document.querySelector('link[rel~="icon"]')) {
+  document.head.append(Object.assign(document.createElement('link'), { rel: 'icon', type: 'image/svg+xml', href: '/_dd/static/favicon.svg' }));
+}
+
 // the name is the control: it opens everything that is not a service
 function bar(m, slot) {
   const nav = el('nav');
