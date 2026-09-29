@@ -250,11 +250,18 @@ in
               "/_dd/static/" = {
                 proxyPass = "${gate}/_dd/static/";
               };
-              "/_dd/" = {
-                proxyPass = "${gate}/_dd/";
+              # what the bar above the vault asks the gate: who is looking, and
+              # the menu's switch. The gate's pages are the home site's: any
+              # other /_dd/ address here goes there, so nobody browses the
+              # whole site under vault.
+              "~ ^/_dd/(me|adblock/state|adblock/switch)$" = {
+                proxyPass = gate;
                 extraConfig = inside + ''
                   proxy_set_header X-Original-URI $request_uri;
                 '';
+              };
+              "/_dd/" = {
+                return = "302 https://home.${base}$request_uri";
               };
               # never fetched: a request for one would still tell the box a site
               "/icons/" = {

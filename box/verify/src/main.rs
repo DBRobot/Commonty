@@ -16,6 +16,16 @@ async fn main() -> Result<()> {
         let dir = env("VERIFY_PAGES_DIR")?;
         verify::pages::load(std::path::Path::new(&dir)).context("the pages")?;
     }
+    // Pi-hole's api password, for the gate alone (modules/adblock)
+    let adblock_password = match std::env::var("VERIFY_ADBLOCK_PASSWORD_FILE") {
+        Ok(f) if !f.is_empty() => Some(
+            std::fs::read_to_string(&f)
+                .with_context(|| format!("reading {f}"))?
+                .trim()
+                .to_string(),
+        ),
+        _ => None,
+    };
     let cfg = verify::Config {
         bind: env_or("VERIFY_BIND", "127.0.0.1:4181").parse()?,
         dir: env("VERIFY_DIR")?.into(),
@@ -52,6 +62,7 @@ async fn main() -> Result<()> {
                     .map(String::from)
                     .collect(),
                 lan: env_or("VERIFY_ADBLOCK_LAN", ""),
+                password: adblock_password.clone(),
                 remember: std::env::var("VERIFY_ADBLOCK_STATE")
                     .ok()
                     .filter(|s| !s.is_empty())

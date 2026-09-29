@@ -98,9 +98,16 @@ function toggleRow(item) {
       if (r.ok) show(await r.json()); else read();
     } catch { read(); }
   });
-  const row = el('div', { class: 'toggle' }, el('a', { href: here(item.url), text: item.label }), sw);
+  const row = el('div', { class: 'toggle' }, el('a', { href: here(item.home || item.url), text: item.label }), sw);
   row.read = read;
   return row;
+}
+
+// The bar's own pages live on the home site. On another of the fleet's
+// sites (Passwords, Git, Metrics) a bare /_dd/ link would open them there,
+// and every page after it would stay on that site.
+function homeLink(m, url) {
+  return url.startsWith('/') && m.home ? m.home + url : url;
 }
 
 // the name is the control: it opens everything that is not a service
@@ -116,10 +123,10 @@ function bar(m, slot) {
         continue;
       }
       if (item.toggle) {
-        nav.append(toggleRow(item));
+        nav.append(toggleRow({ ...item, home: homeLink(m, item.url) }));
         continue;
       }
-      nav.append(el('a', { href: here(item.url), text: item.label }));
+      nav.append(el('a', { href: here(homeLink(m, item.url)), text: item.label }));
     }
   });
   const summary = el('summary', {},
@@ -129,6 +136,7 @@ function bar(m, slot) {
   // the logo goes home: the app's home, when this page is in the app
   const brand = document.querySelector('header.dd-bar .brand');
   if (brand && appOrigin) brand.setAttribute('href', appOrigin + '/_dd/home');
+  else if (brand) brand.setAttribute('href', homeLink(m, '/_dd/home'));
   const menu = el('details', { class: 'menu' }, summary, nav);
   menu.addEventListener('toggle', () => {
     if (menu.open) nav.querySelectorAll('.toggle').forEach((t) => t.read());

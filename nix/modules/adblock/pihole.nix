@@ -5,9 +5,11 @@
 # every lookup would cross the VPN.
 #
 # Pi-hole keeps totals and nothing about which device looked up what
-# (privacy level 3). Its api answers on this box alone and asks for no
-# password: the gate is its only door, and only the household may use it
-# (box/verify/src/adblock.rs, the page and the menu's switch).
+# (privacy level 3). Its api answers on this box alone and wants a password
+# only the gate holds: the gate is its only door, and lets in only the
+# household, signed in (box/verify/src/adblock.rs, the page and the menu's
+# switch). What it asks the internet goes out encrypted, through Unbound
+# over TLS to Quad9 and Cloudflare, so the line's provider cannot read it.
 #
 # Its dnsmasq also takes over the fleet's own names from gate/public.nix:
 # every name this box serves resolves to the address on the network the
@@ -23,6 +25,8 @@ let
   base = config.dd.domain;
   tailnet = config.dd.box.tailnet;
   api = "127.0.0.1:8053";
+  # Unbound on the box: Pi-hole's only upstream, over TLS from here on
+  unbound = "127.0.0.1#5335";
   names = lib.filter (n: lib.hasSuffix ".${base}" n || n == base) (
     builtins.attrNames config.services.nginx.virtualHosts
   );
@@ -38,6 +42,14 @@ in
     lan = lib.mkOption {
       type = lib.types.str;
       description = "this box's address on the house network: what the router hands out as DNS";
+    };
+    passwordEnv = lib.mkOption {
+      type = lib.types.path;
+      description = "env file with FTLCONF_webserver_api_password: Pi-hole's api password";
+    };
+    passwordFile = lib.mkOption {
+      type = lib.types.path;
+      description = "the same password alone, for the gate";
     };
     household = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -63,11 +75,7 @@ in
       inherit (cfg) lists;
       settings = {
         dns = {
-          upstreams = [
-            "9.9.9.9"
-            "149.112.112.112"
-            "1.1.1.1"
-          ];
+          upstreams = [ unbound ];
           # where it listens is below, in dnsmasq's own words
           listeningMode = "NONE";
           domainNeeded = true;
@@ -79,7 +87,7 @@ in
           ipv6.active = false;
           sync.active = false;
         };
-        # the api, on this box alone; no password is set, so the gate needs none
+        # the api, on this box alone, behind the password (passwordEnv)
         webserver = {
           port = api;
           api.cli_pw = true;
@@ -99,6 +107,40 @@ in
         ];
       };
     };
+    systemd.services.pihole-ftl = {
+      serviceConfig.EnvironmentFile = [ cfg.passwordEnv ];
+      after = [ "unbound.service" ];
+      wants = [ "unbound.service" ];
+    };
+
+    services.unbound = {
+      enable = true;
+      # the box's own lookups stay as they are; this answers Pi-hole alone
+      resolveLocalQueries = false;
+      settings = {
+        server = {
+          interface = [ "127.0.0.1@5335" ];
+          access-control = [ "127.0.0.0/8 allow" ];
+          tls-cert-bundle = "/etc/ssl/certs/ca-certificates.crt";
+          hide-identity = true;
+          hide-version = true;
+          qname-minimisation = true;
+        };
+        forward-zone = [
+          {
+            name = ".";
+            forward-tls-upstream = true;
+            forward-addr = [
+              "9.9.9.9@853#dns.quad9.net"
+              "149.112.112.112@853#dns.quad9.net"
+              "1.1.1.1@853#cloudflare-dns.com"
+              "1.0.0.1@853#cloudflare-dns.com"
+            ];
+          }
+        ];
+      };
+    };
+
     # the list update rewrites the database; Pi-hole reads it again only
     # when told (the setup tells it only on the very first run)
     systemd.services.pihole-ftl-setup.serviceConfig.ExecStartPost = [
@@ -134,12 +176,14 @@ in
     systemd.services.dd-verify = lib.mkIf config.dd.verify.enable {
       environment = {
         VERIFY_ADBLOCK = "http://${api}";
+        VERIFY_ADBLOCK_PASSWORD_FILE = "/run/credentials/dd-verify.service/pihole-password";
         VERIFY_ADBLOCK_HOUSEHOLD = lib.concatStringsSep "," cfg.household;
         VERIFY_ADBLOCK_LAN = cfg.lan;
         # the household's on/off, kept by the gate across releases
         VERIFY_ADBLOCK_STATE = "/var/lib/dd-verify/adblock";
       };
       after = [ "pihole-ftl.service" ];
+      serviceConfig.LoadCredential = [ "pihole-password:${cfg.passwordFile}" ];
     };
   };
 }

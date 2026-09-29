@@ -3,15 +3,33 @@
 import json
 
 start_all()
+
+# Pi-hole's api, as only the gate may use it: with the password, signed
+# in once (Pi-hole turns away a sign-in every few seconds)
+box.wait_for_open_port(8053, addr="127.0.0.1")
+sid = box.wait_until_succeeds(
+    "curl -sf -X POST http://127.0.0.1:8053/api/auth -d '{\"password\": \"test-pihole-password\"}' | jq -er .session.sid",
+    timeout=120,
+).strip()
+ftl = f"curl -sf -H 'X-FTL-SID: {sid}'"
 box.wait_for_unit("pihole-ftl.service")
 # the list is in once Pi-hole says it is blocking something
-box.wait_until_succeeds("curl -sf http://127.0.0.1:8053/api/stats/summary | jq -e '.gravity.domains_being_blocked > 0'", timeout=600)
+box.wait_until_succeeds(f"{ftl} http://127.0.0.1:8053/api/stats/summary | jq -e '.gravity.domains_being_blocked > 0'", timeout=600)
+# without it, nothing
+box.succeed("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8053/api/stats/summary | grep -qx 401")
+# and what it asks the internet goes through Unbound, over TLS
+box.wait_for_unit("unbound.service")
+box.wait_for_open_port(5335, addr="127.0.0.1")
+box.succeed("grep -q '127.0.0.1#5335' /etc/pihole/pihole.toml")
+conf = "/etc/unbound/unbound.conf"
+box.succeed(f"grep -Eq 'forward-tls-upstream: *yes' {conf}")
+box.succeed(f"grep -q '9.9.9.9@853#dns.quad9.net' {conf}")
 house.wait_for_unit("multi-user.target")
 away.wait_for_unit("multi-user.target")
 
 # the weekly update runs, and Pi-hole still has its list after it
 box.succeed("systemctl start dd-pihole-lists.service")
-box.wait_until_succeeds("curl -sf http://127.0.0.1:8053/api/stats/summary | jq -e '.gravity.domains_being_blocked > 0'", timeout=120)
+box.wait_until_succeeds(f"{ftl} http://127.0.0.1:8053/api/stats/summary | jq -e '.gravity.domains_being_blocked > 0'", timeout=120)
 
 # the house is filtered
 house.wait_until_succeeds("dig +short @192.168.1.2 ads.example.test | grep -qx 0.0.0.0", timeout=60)
