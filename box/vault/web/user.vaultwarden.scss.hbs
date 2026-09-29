@@ -88,9 +88,23 @@ a[bitbutton] {
   border-radius: 4px !important;
 }
 
-/* the logo on the sign-in and sign-up pages is Bitwarden's product mark:
-   Commonty's bar is above it already */
-bit-landing-layout bit-landing-header svg,
-auth-anon-layout .logo {
+/* The sign-in and sign-up pages: no Bitwarden vault safe, no background
+   illustrations, no brand footer. A password manager's own login screen at
+   a domain that is not its own is what browsers' phishing checks look for;
+   these pages are Commonty's, under its bar. */
+auth-anon-layout bit-svg,
+bit-landing-hero bit-svg,
+bit-landing-layout bit-svg,
+auth-anon-layout footer {
   display: none !important;
+}
+bit-landing-hero h1::before {
+  content: "Commonty Passwords";
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-muted));
+  margin-bottom: 6px;
 }

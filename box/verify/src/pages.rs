@@ -129,6 +129,7 @@ const STATIC: &[(&str, &str, &str)] = &[
     ),
     ("home.css", "box/web/home.css", "text/css; charset=utf-8"),
     ("bar.css", "box/web/bar.css", "text/css; charset=utf-8"),
+    ("favicon.svg", "box/web/favicon.svg", "image/svg+xml"),
     (
         "webauthn.js",
         "box/web/webauthn.js",
