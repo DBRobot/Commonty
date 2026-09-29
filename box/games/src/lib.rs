@@ -261,6 +261,9 @@ pub struct Config {
     pub port_count: u16,
     /// servers one member may have up at once
     pub per_member: usize,
+    /// servers one member may keep at all, stopped ones too: each holds
+    /// its ports and its world on disk whether it runs or not
+    pub kept_per_member: usize,
     /// MiB every running guest together may have
     pub memory_budget: u64,
     /// the box's cpus: a guest gets no more
@@ -480,6 +483,10 @@ impl Manager {
             .get(game)
             .with_context(|| format!("no such game: {game}"))?;
         let all = self.instances();
+        let mine = all.iter().filter(|i| i.owner == owner).count();
+        if mine >= self.cfg.kept_per_member {
+            bail!("you have {mine} servers already; delete one you no longer play first");
+        }
         let mine_up = all
             .iter()
             .filter(|i| i.owner == owner && i.desired == "running")
@@ -1077,6 +1084,7 @@ mod tests {
                 port_base: 27000,
                 port_count: 4,
                 per_member,
+                kept_per_member: 2,
                 memory_budget: budget,
                 cores: 8,
                 address: "box.example".into(),
@@ -1129,6 +1137,25 @@ mod tests {
         assert!(m.access()["servers"].as_array().unwrap().is_empty());
         m.delete("tom", &i.id).unwrap();
         assert!(m.players(&i.id).is_empty());
+    }
+
+    #[test]
+    fn stopped_servers_count_toward_what_a_member_may_keep() {
+        let (m, _fake) = manager(1, 16384);
+        let mut set = BTreeMap::new();
+        set.insert("SRCDS_APPID".to_string(), "1".to_string());
+        // one up at a time: each is stopped before the next
+        for _ in 0..2 {
+            let i = m.create("tom", "valheim", &set).unwrap();
+            m.stop("tom", &i.id).unwrap();
+        }
+        // two kept, none running: a third is still one too many
+        let e = m.create("tom", "valheim", &set).unwrap_err().to_string();
+        assert!(e.contains("delete one"), "{e}");
+        // deleting one makes room
+        let first = m.instances().into_iter().find(|i| i.owner == "tom").unwrap();
+        m.delete("tom", &first.id).unwrap();
+        m.create("tom", "valheim", &set).unwrap();
     }
 
     #[test]

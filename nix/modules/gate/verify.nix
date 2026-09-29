@@ -376,6 +376,21 @@ in
         default $http_cookie;
         "~^(?<dd_a>.*?)dd_session=[^;]*;?[ ]?(?<dd_b>.*)$" "$dd_a$dd_b";
       }
+      # Flood limits, per credential: a session cookie, or a device's
+      # bearer token. Keyed before the gate has said who it is (limits run
+      # ahead of auth_request), so by what the request carries; one without
+      # either is counted by its address at the public door instead. Sized
+      # for a script hammering, never for a person clicking: a page that
+      # opens at once fires a few dozen requests, a film a segment a second.
+      map "$cookie_dd_session$http_authorization" $dd_credential {
+        default "$cookie_dd_session$http_authorization";
+      }
+      limit_req_zone $dd_credential zone=dd_user:10m rate=30r/s;
+      # and by address: the public door's lid on anything at all
+      limit_req_zone $binary_remote_addr zone=dd_visitor:10m rate=50r/s;
+      # a model's answer is seconds of the box's whole cpu: one message at a
+      # time is all a person sends
+      limit_req_zone $dd_credential zone=dd_model:1m rate=1r/s;
     '';
 
     # The verifier's browser side on every vhost that has one: the passkey
@@ -388,12 +403,16 @@ in
           map (h: {
             name = "${h}.${base}";
             value.locations = {
-              # No limit_req here: every abusable endpoint there demands a
-              # credential first.
+              # A flood from one credential is told to wait; a request with
+              # none is counted at the public door (gate/public.nix)
               "/_dd/" = {
                 proxyPass = "http://127.0.0.1:${toString port}/_dd/";
                 extraConfig = ''
                   proxy_set_header X-Original-URI $request_uri;
+                  # a location's limits replace the server's, so both here
+                  limit_req zone=dd_user burst=300 nodelay;
+                  limit_req zone=dd_visitor burst=500 nodelay;
+                  limit_req_status 429;
                 '';
               };
               "@login".extraConfig = ''

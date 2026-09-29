@@ -74,3 +74,15 @@ box.wait_until_fails("pgrep -f '[f]fmpeg.*%s' >/dev/null" % sid, timeout=30)
 # over: the session and its files are gone
 box.fail("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8" % sid)
 box.fail("test -d /run/dd-transcode/%s" % sid)
+# One film at a time per member: tom's second film ends his first, and
+# someone else's is left alone
+h = "-H 'content-type: application/json' -d @/tmp/body.json http://127.0.0.1:4190/session"
+t1 = json.loads(box.succeed("curl -sf -X POST -H 'X-DD-User: tom' " + h))["id"]
+s1 = json.loads(box.succeed("curl -sf -X POST -H 'X-DD-User: sarah' " + h))["id"]
+t2 = json.loads(box.succeed("curl -sf -X POST -H 'X-DD-User: tom' " + h))["id"]
+box.fail("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8" % t1)
+box.wait_until_fails("pgrep -f '[f]fmpeg.*%s' >/dev/null" % t1, timeout=30)
+box.wait_until_succeeds("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8" % s1, timeout=60)
+box.wait_until_succeeds("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8" % t2, timeout=60)
+for i in (s1, t2):
+    box.succeed("curl -sf -X DELETE http://127.0.0.1:4190/session/%s" % i)
