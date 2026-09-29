@@ -72,7 +72,10 @@ in
     services.pihole-ftl = {
       enable = true;
       privacyLevel = 3;
-      inherit (cfg) lists;
+      # the lists are loaded by dd-pihole-lists below, not the module's own
+      # setup: that one adds them through the api every time, and the second
+      # time Pi-hole answers "database_error" (the list is already there)
+      lists = [ ];
       settings = {
         dns = {
           upstreams = [ unbound ];
@@ -141,26 +144,45 @@ in
       };
     };
 
-    # the list update rewrites the database; Pi-hole reads it again only
-    # when told (the setup tells it only on the very first run)
-    systemd.services.pihole-ftl-setup.serviceConfig.ExecStartPost = [
-      "+${pkgs.systemd}/bin/systemctl kill -s SIGRTMIN pihole-ftl.service"
-    ];
-    # the lists again every week, as the page says
+    # The lists, declared: written into Pi-hole's list table (added if new,
+    # removed if no longer declared, left alone otherwise), then fetched and
+    # built, then Pi-hole told to read them. Safe to run any number of times:
+    # at every start, and weekly.
     systemd.services.dd-pihole-lists = {
-      description = "Update the ad blocking lists";
+      description = "Load and update the ad blocking lists";
+      wantedBy = [ "multi-user.target" ];
       after = [
         "pihole-ftl.service"
         "network-online.target"
       ];
       wants = [ "network-online.target" ];
+      requires = [ "pihole-ftl.service" ];
+      path = [ pkgs.sqlite ];
       serviceConfig = {
         Type = "oneshot";
         User = config.services.pihole-ftl.user;
         Group = config.services.pihole-ftl.group;
-        ExecStart = "${lib.getExe config.services.pihole-ftl.piholePackage} -g";
         ExecStartPost = "+${pkgs.systemd}/bin/systemctl kill -s SIGRTMIN pihole-ftl.service";
       };
+      script =
+        let
+          pihole = lib.getExe config.services.pihole-ftl.piholePackage;
+          db = config.services.pihole-ftl.settings.files.gravity;
+          sq = v: lib.replaceStrings [ "'" ] [ "''" ] v;
+          addresses = lib.concatMapStringsSep ", " (l: "'${sq l.url}'") cfg.lists;
+        in
+        ''
+          set -eu
+          # a first start: gravity makes the database, empty
+          [ -s ${db} ] || ${pihole} -g
+          sqlite3 ${db} <<'SQL'
+          ${lib.concatMapStrings (
+            l:
+            "INSERT OR IGNORE INTO adlist (address, enabled, comment, type) VALUES ('${sq l.url}', 1, '${sq (l.description or "")}', 0);\n"
+          ) cfg.lists}DELETE FROM adlist WHERE type = 0 AND address NOT IN (${addresses});
+          SQL
+          ${pihole} -g
+        '';
     };
     systemd.timers.dd-pihole-lists = {
       wantedBy = [ "timers.target" ];
