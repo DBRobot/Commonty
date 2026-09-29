@@ -175,7 +175,9 @@ in
           set -eu
           # a first start: gravity makes the database, empty
           [ -s ${db} ] || ${pihole} -g
+          # Pi-hole may be writing the file right now: wait for it, not fail
           sqlite3 ${db} <<'SQL'
+          .timeout 30000
           ${lib.concatMapStrings (
             l:
             "INSERT OR IGNORE INTO adlist (address, enabled, comment, type) VALUES ('${sq l.url}', 1, '${sq (l.description or "")}', 0);\n"
