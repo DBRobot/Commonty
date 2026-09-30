@@ -616,19 +616,31 @@ pub(crate) fn bearer(headers: &HeaderMap) -> Option<&str> {
 
 /// nginx auth_request lands here for every request to a protected service.
 async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    // A demo door (demo-<service>.<domain>, modules/gate/public.nix) is on
+    // the open internet so anyone can look around. It lets the demo in and
+    // nobody else: nothing of a member's is served through it, and the
+    // services' own names stay on the private network. Nobody at all is a
+    // 403 there, not a 401: some doors let a 401 through as anonymous (the
+    // forge's public repos), which on this name would be the whole internet.
+    let demo_door = asked_host(&headers).starts_with("demo-");
     let Some(user) = app.identify(&headers, "access") else {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return if demo_door {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::UNAUTHORIZED
+        }
+        .into_response();
     };
     let role = app.role(&user);
     let allowed = match role {
-        Some(pages::Role::Member) => true,
+        Some(pages::Role::Member) => !demo_door,
         // the demo looks and does not touch: reads only, and only where a
         // tile sends it. Decided here, where the name is certain; an nginx
         // `if` runs before the gate has answered and cannot know it
         Some(pages::Role::Demo) => app.demo_allows(&headers),
         // a guest reaches the games page and nothing else, whatever the
         // service behind another door would have made of them
-        Some(pages::Role::Guest) => app.guest_host(&headers),
+        Some(pages::Role::Guest) => !demo_door && app.guest_host(&headers),
         None => false,
     };
     if !allowed {
@@ -649,6 +661,35 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     r.headers_mut()
         .insert("X-DD-Role", HeaderValue::from_static(role.as_str()));
     r
+}
+
+/// On a demo door (demo-<service>.<domain>), the gate's own pages and
+/// calls answer the demo alone, as /verify does for everything behind
+/// nginx: a member's session there is sent back to the service's own name,
+/// and a stranger without one is started in the demo.
+async fn demo_door(
+    State(app): State<Arc<App>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let host = asked_host(req.headers());
+    let Some(service) = host.strip_prefix("demo-") else {
+        return next.run(req).await;
+    };
+    // the subrequest nginx makes for everything else decides for itself
+    if req.uri().path() == "/verify" {
+        return next.run(req).await;
+    }
+    let path = req.uri().path().to_string();
+    match app.identify(req.headers(), "access") {
+        Some(u) if u == pages::DEMO_USER => next.run(req).await,
+        Some(_) => Redirect::to(&format!("https://{service}{path}")).into_response(),
+        // the static files a page needs; everything else starts the demo
+        None if path.starts_with("/_dd/static/") || path.starts_with("/_dd/web/") => {
+            next.run(req).await
+        }
+        None => Redirect::to(&format!("https://home.{}/_dd/demo", app.domain)).into_response(),
+    }
 }
 
 fn with_challenge(v: impl Serialize, ceremony: String) -> Response {
@@ -1941,6 +1982,7 @@ pub async fn start(
         .route("/_dd/oidc/token", post(oidc_token))
         .route("/_dd/oidc/userinfo", get(oidc_userinfo))
         .route("/_dd/oidc/jwks", get(oidc_jwks))
+        .layer(axum::middleware::from_fn_with_state(app.clone(), demo_door))
         .with_state(app)
         .merge(directory::router(directory));
     eprintln!("verify listening on {addr}");

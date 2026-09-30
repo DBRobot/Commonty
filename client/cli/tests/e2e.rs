@@ -1959,3 +1959,109 @@ async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
         assert!(s.contains("\"email\":\"tom@users.localhost\""), "{s}");
     }
 }
+
+/// A demo door - demo-<service>.<domain> - is on the open internet so anyone
+/// can look around, and lets the demo in and nobody else: a member's session
+/// is refused there (sent back to the service's own name for a page), and a
+/// request with no session is forbidden, never let through as anonymous.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_demo_door_lets_in_the_demo_alone() {
+    let a = Box_::start(true, vec![], 300).await;
+    let d = dirs([&a]);
+    let dev = Device::new();
+    dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    let show = dev.dd_ok(&args(&["identity", "show"], &d));
+    let id = show
+        .lines()
+        .find_map(|l| l.strip_prefix("member id:"))
+        .unwrap()
+        .trim()
+        .to_string();
+    let tile = verify::pages::Service {
+        name: "git".into(),
+        url: "https://git.x/".into(),
+        icon: String::new(),
+        color: "#000".into(),
+        blurb: String::new(),
+        demo: Some("full".into()),
+        demo_url: Some("https://demo-git.x/".into()),
+        menu_only: false,
+    };
+    let b = Box_::start_on(
+        scratch("demodoor").join("keys"),
+        true,
+        vec![a.directory()],
+        1,
+        Some(verify::Members::list(vec![id])),
+        None,
+        vec![tile],
+    )
+    .await;
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let cookie_of = |r: &reqwest::Response| {
+        r.headers()
+            .get("set-cookie")
+            .map(|c| c.to_str().unwrap().split(';').next().unwrap().to_string())
+    };
+    let demo = cookie_of(&http.get(b.url("/_dd/demo")).send().await.unwrap()).unwrap();
+    let token = dev.token();
+    let mut tom = None;
+    for _ in 0..50 {
+        let r = http
+            .post(b.url("/_dd/app/signin"))
+            .form(&[("token", token.as_str())])
+            .send()
+            .await
+            .unwrap();
+        tom = cookie_of(&r);
+        if tom.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let tom = tom.expect("tom signs in");
+    let gate = |cookie: Option<&str>, host: &str| {
+        let mut r = http
+            .get(b.url("/verify"))
+            .header("x-original-method", "GET")
+            .header("x-original-host", host);
+        if let Some(c) = cookie {
+            r = r.header("cookie", c);
+        }
+        async move { r.send().await.unwrap().status().as_u16() }
+    };
+    // behind nginx: the demo in, tom and nobody out
+    assert_eq!(gate(Some(&demo), "demo-git.x").await, 200);
+    assert_eq!(gate(Some(&tom), "demo-git.x").await, 403);
+    assert_eq!(gate(None, "demo-git.x").await, 403);
+    // and on the service's own name, as ever
+    assert_eq!(gate(Some(&tom), "git.x").await, 200);
+    assert_eq!(gate(None, "git.x").await, 401);
+    // the gate's own pages on the door
+    let page = |cookie: Option<&str>| {
+        let mut r = http.get(b.url("/_dd/me")).header("host", "demo-git.x");
+        if let Some(c) = cookie {
+            r = r.header("cookie", c);
+        }
+        async move {
+            let r = r.send().await.unwrap();
+            let to = r
+                .headers()
+                .get("location")
+                .map(|v| v.to_str().unwrap().to_string());
+            (r.status().as_u16(), to)
+        }
+    };
+    assert_eq!(page(Some(&demo)).await.0, 200);
+    assert_eq!(
+        page(Some(&tom)).await,
+        (303, Some("https://git.x/_dd/me".into()))
+    );
+    assert_eq!(
+        page(None).await,
+        (303, Some("https://home.localhost/_dd/demo".into()))
+    );
+}
