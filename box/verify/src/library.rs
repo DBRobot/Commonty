@@ -107,9 +107,30 @@ async fn serve(app: Arc<App>, lib: String, raw: String, req: Request) -> Respons
     if req.method() == Method::OPTIONS {
         return library_gate::dav::options();
     }
-    let (_, role) = match allowed(&app, req.headers(), &lib) {
+    let (user, role) = match allowed(&app, req.headers(), &lib) {
         Ok(r) => r,
         Err(r) => return r,
     };
-    library_gate::dav::serve(g, lib, raw, role, req).await
+    // An upload counts against its owner's allowance, across every service
+    // (storage.rs). A file whose size is not said up front is let in while
+    // there is any room, and counted when it lands.
+    let upload = req.method() == Method::PUT && matches!(role, Role::Owner);
+    let size = req
+        .headers()
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    if upload && !app.storage.room(&user, size.max(1)) {
+        return (
+            StatusCode::INSUFFICIENT_STORAGE,
+            "this would go past your storage allowance: make room first (the Storage page shows what uses it)",
+        )
+            .into_response();
+    }
+    let r = library_gate::dav::serve(g, lib, raw, role, req).await;
+    if upload && r.status().is_success() {
+        app.storage.landed(&user, size);
+    }
+    r
 }

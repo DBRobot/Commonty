@@ -47,6 +47,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         thanos: None,
         adblock: None,
         forge_events: None,
+        storage_ledger: None,
         demo_library: None,
         tmdb: None,
         search: None,
