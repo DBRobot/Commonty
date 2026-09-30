@@ -251,6 +251,16 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "demo-photos.js",
+        "box/photos/web/demo-photos.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "demo-photos.css",
+        "box/photos/web/demo-photos.css",
+        "text/css; charset=utf-8",
+    ),
+    (
         "adblock.css",
         "box/adblock/web/adblock.css",
         "text/css; charset=utf-8",
@@ -403,6 +413,8 @@ const PAGES: &[(&str, &str)] = &[
     ("metrics", "box/observe/web/pages/metrics.html"),
     ("friend", "box/web/pages/friend.html"),
     ("adblock", "box/adblock/web/pages/adblock.html"),
+    // the demo's Photos, read through the gate (demo_photos.rs)
+    ("demo-photos", "box/photos/web/pages/demo-photos.html"),
     // not signed in: whoever has a Send's link (modules/vault)
     ("send", "box/vault/web/pages/send.html"),
 ];

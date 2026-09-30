@@ -11,6 +11,7 @@
 //! can add nothing to it. With VERIFY_ROLE=directory that is all a box does.
 
 pub mod adblock;
+mod demo_photos;
 mod directory;
 pub mod fleet;
 mod forge_events;
@@ -78,6 +79,8 @@ struct App {
     adblock: Option<adblock::Adblock>,
     /// the forge's changes as they happen (forge_events.rs)
     forge_events: Option<forge_events::ForgeEvents>,
+    /// the demo's Photos, read through the gate (demo_photos.rs)
+    demo_photos: demo_photos::DemoPhotos,
     /// who is friends with whom, and who came in as a guest (friends.rs)
     friends: friends::Store,
 }
@@ -1786,6 +1789,7 @@ pub async fn start(
         thanos: cfg.thanos,
         adblock: cfg.adblock,
         forge_events: cfg.forge_events.map(forge_events::ForgeEvents::start),
+        demo_photos: Default::default(),
         friends: friends::Store::open(&state_dir)?,
     });
     // A held sign-up follows through when the member list names it: then it
@@ -1911,6 +1915,10 @@ pub async fn start(
         .route("/_dd/network/mine", get(network_mine))
         .route("/_dd/photos", get(photos::page))
         .route("/_dd/photos/config", post(photos::config))
+        .route("/_dd/photos/demo", get(demo_photos::page))
+        .route("/_dd/photos/demo/list", get(demo_photos::list))
+        .route("/_dd/photos/demo/thumb/{id}", get(demo_photos::thumb))
+        .route("/_dd/photos/demo/photo/{id}", get(demo_photos::photo))
         .route("/_dd/csp", post(csp_report))
         .route("/_dd/photos/museum/{op}", post(photos::museum_verify))
         .route("/_dd/photos/forget", get(photos::forget))

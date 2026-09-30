@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Photos</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/demo-photos.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="wide dp">
+    <div class="intro">
+      <h1>Photos</h1>
+      <p>This is the demo's photo library. A member's Photos is Ente's own app,
+      with their library encrypted on their phone before it uploads; here you
+      can look, and nothing you do is kept.</p>
+    </div>
+    <p class="dp-state" id="state">Loading the photos…</p>
+    <ul class="dp-grid" id="grid"></ul>
+  </main>
+  <dialog class="dp-view" id="view">
+    <button class="dp-close" id="close" aria-label="Close">×</button>
+    <button class="dp-step prev" id="prev" aria-label="Previous">‹</button>
+    <img id="big" alt="">
+    <button class="dp-step next" id="next" aria-label="Next">›</button>
+    <p class="dp-cap" id="cap"></p>
+  </dialog>
+  <script type="module" src="/_dd/static/demo-photos.js"></script>
+  <script type="module" src="/_dd/static/shell.js"></script>
+</body>
+</html>
