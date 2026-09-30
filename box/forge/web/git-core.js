@@ -110,6 +110,10 @@ async function request(path, opts = {}) {
   }
   const r = await fetch(`/api/v1${path}`, init);
   if (r.status === 401) {
+    // the demo is nobody to the forge: public repos, and no account of its
+    // own, so "who am I" answers no one. That is the demo, not signed out
+    const m = await me().catch(() => null);
+    if (m && m.demo) throw new ApiError(401, 'the demo has no account here');
     location.href = '/_dd/login?rd=' + encodeURIComponent(location.pathname + location.search);
     throw new ApiError(401, 'signed out');
   }

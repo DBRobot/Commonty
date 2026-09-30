@@ -508,14 +508,18 @@ impl Menu {
             label,
             url: url.to_string(),
         };
-        let metrics = services
-            .iter()
-            .find(|s| s.icon == "metrics")
-            .map(|s| item("Metrics", &s.url));
+        let demo = user == DEMO_USER;
+        // the demo goes where its tile sends it: the service's demo door
+        let metrics = services.iter().find(|s| s.icon == "metrics").map(|s| {
+            let url = match (demo, &s.demo_url) {
+                (true, Some(u)) => u,
+                _ => &s.url,
+            };
+            item("Metrics", url)
+        });
         // The tile's url, where a tile says. A library page belongs on the
         // gate's own host: that is the only one serving /_dd/transcode, so
         // a relative link followed from another host plays nothing.
-        let demo = user == DEMO_USER;
         let mut groups = Vec::new();
         if !demo {
             // Files and Movies & TV are tiles on the home page; repeating
