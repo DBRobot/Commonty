@@ -80,7 +80,7 @@ struct App {
     /// the forge's changes as they happen (forge_events.rs)
     forge_events: Option<forge_events::ForgeEvents>,
     /// the demo's Photos, read through the gate (demo_photos.rs)
-    demo_photos: demo_photos::DemoPhotos,
+    demo_photos: Arc<demo_photos::DemoPhotos>,
     /// who is friends with whom, and who came in as a guest (friends.rs)
     friends: friends::Store,
 }
