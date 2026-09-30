@@ -2343,7 +2343,13 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 name = "ente"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "ente-accounts",
+ "ente-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -8002,6 +8008,7 @@ dependencies = [
  "base64 0.22.1",
  "biscuit-auth",
  "ed25519-dalek",
+ "ente",
  "futures-util",
  "hmac 0.12.1",
  "identity",

@@ -8,3 +8,10 @@ license.workspace = true
 # Their crypto and protocol, not ours. Not on crates.io, so pinned by commit -
 # there is no semver contract here.
 ente-accounts = { git = "https://github.com/ente-io/ente", rev = "d28c3462e70bf63f8323700ce77797237a0fd1b4" }
+ente-core = { git = "https://github.com/ente-io/ente", rev = "d28c3462e70bf63f8323700ce77797237a0fd1b4" }
+anyhow = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zeroize = "1"
+

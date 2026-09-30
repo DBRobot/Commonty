@@ -43,6 +43,9 @@
       # the demo has an ente account of its own with a zero quota: ente has
       # no demo mode, a quota is its read-only
       demo = "read";
+      # the demo's is a gallery on the gate's public name: Ente's app and
+      # server stay on the private network (box/verify/src/demo_photos.rs)
+      demoUrl = "https://home.${config.dd.domain}/_dd/photos/demo";
       icon = "photos";
       color = "#d9822b";
       rank = 10;

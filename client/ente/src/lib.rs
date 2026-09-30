@@ -13,3 +13,5 @@ pub fn client(origin: &str) -> Result<AccountsClient> {
         user_agent: None,
     })
 }
+
+pub mod gallery;

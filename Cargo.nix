@@ -7621,8 +7621,35 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./client/ente; };
         dependencies = [
           {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
             name = "ente-accounts";
             packageId = "ente-accounts";
+          }
+          {
+            name = "ente-core";
+            packageId = "ente-core";
+          }
+          {
+            name = "reqwest";
+            packageId = "reqwest 0.12.28";
+            usesDefaultFeatures = false;
+            features = [ "rustls-tls" "json" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
           }
         ];
 
@@ -27812,6 +27839,10 @@ rec {
           {
             name = "ed25519-dalek";
             packageId = "ed25519-dalek";
+          }
+          {
+            name = "ente";
+            packageId = "ente";
           }
           {
             name = "futures-util";
