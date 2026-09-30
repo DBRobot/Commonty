@@ -25,6 +25,12 @@ let
   # every name that answers an outsider: the public hosts, and the bare
   # name when it is open too
   publicNames = map (h: "${h}.${base}") cfg.hosts ++ lib.optional cfg.bare base;
+  # the demo's doors: demo-<service>.<domain>, each the service's own site
+  # under a second name that outsiders may reach and that lets only the
+  # demo in (the gate says who: box/verify/src/lib.rs, demo_door and verify)
+  demoParents = map (h: "${h}.${base}") cfg.demoDoors;
+  demoNames = map (h: "demo-${h}.${base}") cfg.demoDoors;
+  outside = publicNames ++ demoNames;
 in
 {
   options.dd.public = {
@@ -37,6 +43,11 @@ in
       type = lib.types.bool;
       default = false;
       description = "the bare name answers outsiders too, through the tunnel: what people type to find the site. Its server block must offer nothing a stranger may not have (roles/gateway.nix: a redirect to home and the app download).";
+    };
+    demoDoors = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "services whose site also answers outsiders as demo-<service>.<domain>, for the demo session alone: the demo is for anyone to look around, and the services themselves stay on the private network. Lists from every module add up.";
     };
     tunnel = lib.mkOption {
       type = lib.types.str;
@@ -94,7 +105,7 @@ in
         ZONE = base;
         TAILNET = config.dd.box.tailnet;
         TUNNEL = cfg.tunnel;
-        HOSTS = lib.concatStringsSep " " cfg.hosts;
+        HOSTS = lib.concatStringsSep " " (cfg.hosts ++ map (h: "demo-${h}") cfg.demoDoors);
         PUBLIC = lib.boolToString cfg.enable;
         BARE = lib.boolToString cfg.bare;
       };
@@ -112,7 +123,7 @@ in
       tunnels.${cfg.tunnel} = {
         credentialsFile = cfg.credentialsFile;
         default = "http_status:404";
-        ingress = lib.genAttrs publicNames (host: {
+        ingress = lib.genAttrs outside (host: {
           service = "https://127.0.0.1:${toString tunnelPort}";
           originRequest.originServerName = host;
         });
@@ -147,20 +158,24 @@ in
       map "$dd_inside:$host" $dd_shut {
         default 1;
         "~^1:" 0;
-        ${lib.concatMapStringsSep "\n  " (n: ''"~^0:${lib.escapeRegex n}$" 0;'') publicNames}
+        ${lib.concatMapStringsSep "\n  " (n: ''"~^0:${lib.escapeRegex n}$" 0;'') outside}
       }
     '';
     # every host the gate stands in front of, and every public host that
     # is not one of those (the network's control server): the same check,
     # and the tunnel's listener for the public ones
     services.nginx.virtualHosts = lib.mkIf cfg.enable (
-      lib.genAttrs (lib.unique (map (h: "${h}.${base}") config.dd.verify.hosts ++ publicNames)) (
+      lib.genAttrs
+        (lib.unique (map (h: "${h}.${base}") config.dd.verify.hosts ++ publicNames ++ demoParents))
+        (
         name:
         let
           isPublic = builtins.elem name publicNames;
           gated = builtins.elem name (map (h: "${h}.${base}") config.dd.verify.hosts);
+          demoDoor = builtins.elem name demoParents;
         in
         {
+          serverAliases = lib.optional demoDoor "demo-${name}";
           extraConfig = lib.mkBefore (
             ''
               if ($dd_shut) { return 444; }
@@ -184,6 +199,15 @@ in
               # anything at all, per visitor (the zone: modules/gate/verify.nix)
               limit_req zone=dd_visitor burst=500 nodelay;
               limit_req_status 429;
+            ''
+            # a demo door is the service's own site, which members use for
+            # uploads and streams: only the tunnel and the visitor's address
+            # here; the demo itself is read-only and paced at the gate
+            + lib.optionalString (demoDoor && !isPublic) ''
+              listen 127.0.0.1:${toString tunnelPort} ssl;
+              if ($http_x_forwarded_proto = "http") { return 301 https://$host$request_uri; }
+              set_real_ip_from 127.0.0.1;
+              real_ip_header CF-Connecting-IP;
             ''
           );
         }

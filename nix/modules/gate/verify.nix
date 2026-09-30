@@ -1,5 +1,6 @@
 {
   config,
+  options,
   lib,
   pkgs,
   self,
@@ -11,6 +12,10 @@ let
   base = config.dd.domain;
   port = config.dd.verify.port;
   user = "dd-verify";
+  # a tile's service by its host: https://git.<domain>/ is "git"
+  tileHost =
+    t: lib.removeSuffix ".${config.dd.domain}" (lib.head (lib.splitString "/" (lib.removePrefix "https://" t.url)));
+  demoDoors = if options.dd ? public then config.dd.public.demoDoors else [ ];
 in
 {
   imports = [
@@ -324,9 +329,17 @@ in
               color
               blurb
               demo
-              demoUrl
               menuOnly
               ;
+            # the demo takes the service's demo door where it has one: the
+            # same site under demo-<service>, which outsiders may reach
+            demoUrl =
+              if t.demoUrl != null then
+                t.demoUrl
+              else if t.demo != null && builtins.elem (tileHost t) demoDoors then
+                "https://demo-" + lib.removePrefix "https://" t.url
+              else
+                null;
           }) (lib.sort (a: b: a.rank < b.rank) config.dd.home.services)
         );
       };

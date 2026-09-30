@@ -22,6 +22,14 @@
       "accounts"
       "headscale" # the network's control server, for the app's bridge (modules/net)
     ];
+    # The demo, for anyone: each service the demo may use answers outsiders
+    # as demo-<service>, for the demo session alone. Photos is not one of
+    # them: it is Ente's own app, talking to Ente's server, and neither is
+    # something to open to the internet.
+    demoDoors = lib.unique (
+      map (t: lib.removeSuffix ".${config.dd.domain}" (lib.head (lib.splitString "/" (lib.removePrefix "https://" t.url))))
+        (lib.filter (t: t.demo != null && !(lib.hasPrefix "https://photos." t.url)) config.dd.home.services)
+    );
     # commonty.org itself: what people type. It sends them to home and
     # offers the app download, nothing else (its server block below)
     bare = true;
