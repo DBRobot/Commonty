@@ -22,19 +22,10 @@
 }:
 let
   cfg = config.dd.adblock;
-  base = config.dd.domain;
   tailnet = config.dd.box.tailnet;
   api = "127.0.0.1:8053";
   # Unbound on the box: Pi-hole's only upstream, over TLS from here on
   unbound = "127.0.0.1#5335";
-  names = lib.filter (n: lib.hasSuffix ".${base}" n || n == base) (
-    builtins.attrNames config.services.nginx.virtualHosts
-  );
-  # both addresses for each name; localise-queries answers with the one on
-  # the network the question came in on
-  hosts = pkgs.writeText "commonty-names" (
-    lib.concatMapStrings (n: "${tailnet} ${n}\n${cfg.lan} ${n}\n") names
-  );
 in
 {
   options.dd.adblock = {
@@ -103,10 +94,11 @@ in
           # the box itself: Pi-hole's own list update checks it answers here
           "listen-address=127.0.0.1"
           "bind-dynamic"
-          "localise-queries"
-          "addn-hosts=${hosts}"
-          # the fleet's names are answered here or not at all
-          "local=/${base}/"
+          # The fleet's own names are answered as the world answers them, not
+          # here: the box takes web traffic from the tailnet and the tunnel,
+          # never the house network, so a house address for them was a page
+          # that never loaded. Public ones go through the tunnel; the rest
+          # name the box's tailnet address, reached with the app's network on.
         ];
       };
     };

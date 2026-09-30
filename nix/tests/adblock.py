@@ -39,11 +39,9 @@ box.wait_until_succeeds(f"{ftl} http://127.0.0.1:8053/api/stats/summary | jq -e 
 
 # the house is filtered
 house.wait_until_succeeds("dig +short @192.168.1.2 ads.example.test | grep -qx 0.0.0.0", timeout=60)
-# our names: the house's address to the house, the network's to the network
-house.succeed("dig +short @192.168.1.2 home.test.invalid | grep -qx 192.168.1.2")
-away.succeed("dig +short @192.168.2.2 home.test.invalid | grep -qx 192.168.2.2")
-# a name of ours the box does not serve is answered by no one outside
-house.succeed("dig @192.168.1.2 nothing-here.test.invalid | grep -q NXDOMAIN")
+# our names are answered as the world answers them: never with the box's
+# house address, where it takes no web traffic (a page that never loads)
+house.fail("dig +short +time=3 +tries=1 @192.168.1.2 home.test.invalid | grep -qx 192.168.1.2")
 
 # the household: sarah lives here, with a session as the app's browser has
 env = "DD_KEYRING_FILE=/root/keys.json"
