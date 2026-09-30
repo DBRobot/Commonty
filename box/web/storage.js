@@ -10,7 +10,7 @@ const services = [
 
 function size(b) {
   if (b >= 1e12) return `${(b / 1e12).toFixed(2)} TB`;
-  if (b >= 1e9) return `${(b / 1e9).toFixed(1)} GB`;
+  if (b >= 1e9) return `${(b / 1e9).toFixed(1).replace(/\.0$/, '')} GB`;
   if (b >= 1e6) return `${Math.round(b / 1e6)} MB`;
   if (b > 0) return `${Math.max(1, Math.round(b / 1e3))} KB`;
   return '0';

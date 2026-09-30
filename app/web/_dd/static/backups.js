@@ -6,7 +6,16 @@
 
 import { ready, failed, section, ago, when } from './panel.js';
 
-const IMAGES = 'https://files.' + location.hostname.split('.').slice(-2).join('.') + '/images/';
+// The archives are on the files site, and this page reads them from there.
+// Opened anywhere else it moves there first: a page that reached the public
+// side through the tunnel may not ask the private network for anything,
+// and browsers now refuse it, while going to that page is only a link.
+const FILES = 'files.' + location.hostname.split('.').slice(-2).join('.');
+if (location.hostname !== FILES && location.protocol === 'https:') {
+  location.replace(`https://${FILES}/_dd/backups`);
+}
+// (the app's copy runs on its own origin and asks the files site as before)
+const IMAGES = location.protocol === 'https:' ? '/images/' : `https://${FILES}/images/`;
 
 async function listing(at) {
   const r = await fetch(at, { credentials: 'include' });
