@@ -19,6 +19,8 @@ pub struct Photo {
     pub taken: i64,
     /// 0 an image, 1 a video, 2 a live photo: only an image opens whole
     pub kind: i64,
+    /// the albums it is in
+    pub albums: Vec<i64>,
     key: Vec<u8>,
     thumbnail: String,
     file: String,
@@ -31,12 +33,25 @@ pub struct Gallery {
     master: Zeroizing<Vec<u8>>,
 }
 
+/// An album, by the name its owner gave it.
+#[derive(Clone)]
+pub struct Album {
+    pub id: i64,
+    pub name: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Collection {
     id: i64,
     encrypted_key: String,
     key_decryption_nonce: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    encrypted_name: Option<String>,
+    #[serde(default)]
+    name_decryption_nonce: Option<String>,
     #[serde(default)]
     is_deleted: bool,
 }
@@ -163,8 +178,8 @@ impl Gallery {
         Ok(r.json().await?)
     }
 
-    /// every photo in every album, newest first
-    pub async fn photos(&self) -> Result<Vec<Photo>> {
+    /// every album, and every photo in them, newest first
+    pub async fn photos(&self) -> Result<(Vec<Album>, Vec<Photo>)> {
         #[derive(Deserialize)]
         struct Collections {
             collections: Vec<Collection>,
@@ -172,8 +187,9 @@ impl Gallery {
         let cs: Collections = self
             .get("/collections/v2", &[("sinceTime", "0".into())])
             .await?;
-        let mut out = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        let mut out: Vec<Photo> = Vec::new();
+        let mut albums = Vec::new();
+        let mut seen: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
         for c in cs.collections.into_iter().filter(|c| !c.is_deleted) {
             let Some(nonce) = &c.key_decryption_nonce else {
                 continue;
@@ -181,6 +197,16 @@ impl Gallery {
             let Ok(ckey) = open(&c.encrypted_key, nonce, &self.master) else {
                 continue;
             };
+            // the name is sealed with the album's own key, or plain on an
+            // album from before names were
+            let name = match (&c.encrypted_name, &c.name_decryption_nonce) {
+                (Some(n), Some(nn)) => open(n, nn, &ckey)
+                    .ok()
+                    .and_then(|b| String::from_utf8(b).ok())
+                    .unwrap_or_default(),
+                _ => c.name.clone().unwrap_or_default(),
+            };
+            albums.push(Album { id: c.id, name });
             let mut since = 0i64;
             loop {
                 let d: Diff = self
@@ -194,7 +220,12 @@ impl Gallery {
                     .await?;
                 for f in &d.diff {
                     since = since.max(f.updation_time);
-                    if f.is_deleted || !seen.insert(f.id) {
+                    if f.is_deleted {
+                        continue;
+                    }
+                    // in another album already: one more album for it
+                    if let Some(&i) = seen.get(&f.id) {
+                        out[i].albums.push(c.id);
                         continue;
                     }
                     let Ok(key) = open(&f.encrypted_key, &f.key_decryption_nonce, &ckey) else {
@@ -218,7 +249,9 @@ impl Gallery {
                             serde_json::from_slice::<serde_json::Value>(&plain).ok()
                         })
                         .unwrap_or_default();
+                    seen.insert(f.id, out.len());
                     out.push(Photo {
+                        albums: vec![c.id],
                         id: f.id,
                         title: meta["title"].as_str().unwrap_or_default().to_string(),
                         taken: meta["creationTime"].as_i64().unwrap_or(f.updation_time),
@@ -234,7 +267,10 @@ impl Gallery {
             }
         }
         out.sort_by_key(|p| std::cmp::Reverse(p.taken));
-        Ok(out)
+        // an album with nothing in it, or only a name nobody can read, is
+        // not one to show
+        albums.retain(|a| !a.name.is_empty() && out.iter().any(|p| p.albums.contains(&a.id)));
+        Ok((albums, out))
     }
 
     /// museum answers with the sealed bytes, by way of a redirect to storage

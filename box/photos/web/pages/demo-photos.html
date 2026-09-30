@@ -22,15 +22,17 @@
       <div class="me" id="me"></div>
     </div>
   </header>
-  <main class="wide dp">
-    <div class="intro">
-      <h1>Photos</h1>
-      <p>This is the demo's photo library. A member's Photos is Ente's own app,
-      with their library encrypted on their phone before it uploads; here you
-      can look, and nothing you do is kept.</p>
+  <main class="dp">
+    <section class="dp-albums" aria-labelledby="albums-h">
+      <h2 id="albums-h">Albums</h2>
+      <div class="dp-strip" id="strip" role="tablist" aria-label="Albums"></div>
+    </section>
+    <div class="dp-head">
+      <h1 id="title">All</h1>
+      <p id="count"></p>
     </div>
     <p class="dp-state" id="state">Loading the photos…</p>
-    <ul class="dp-grid" id="grid"></ul>
+    <div id="days"></div>
   </main>
   <dialog class="dp-view" id="view">
     <button class="dp-close" id="close" aria-label="Close">×</button>

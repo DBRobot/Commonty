@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Json, Redirect, Response};
-use ente::gallery::{Gallery, Photo};
+use ente::gallery::{Album, Gallery, Photo};
 
 use crate::App;
 use crate::pages;
@@ -21,8 +21,8 @@ const FRESH: Duration = Duration::from_secs(600);
 /// the biggest original shown whole; a larger one shows its thumbnail
 const ORIGINAL: usize = 25 << 20;
 
-/// a signed-in gallery, its photos, and when they were listed
-type Open = (Arc<Gallery>, Arc<Vec<Photo>>, Instant);
+/// a signed-in gallery, its albums and photos, and when they were listed
+type Open = (Arc<Gallery>, Arc<(Vec<Album>, Vec<Photo>)>, Instant);
 
 #[derive(Default)]
 pub struct DemoPhotos {
@@ -33,7 +33,10 @@ pub struct DemoPhotos {
 impl DemoPhotos {
     /// the gallery and its photos, signing in again when the listing is old
     /// or the last attempt failed
-    async fn get(&self, app: &App) -> Result<(Arc<Gallery>, Arc<Vec<Photo>>), StatusCode> {
+    async fn get(
+        &self,
+        app: &App,
+    ) -> Result<(Arc<Gallery>, Arc<(Vec<Album>, Vec<Photo>)>), StatusCode> {
         let mut open = self.open.lock().await;
         if let Some((g, ps, at)) = open.as_ref()
             && at.elapsed() < FRESH
@@ -58,10 +61,10 @@ impl DemoPhotos {
 
     /// Every thumbnail opened ahead, a few at a time: the first person to
     /// look finds the grid ready instead of waiting on thirty of them.
-    fn warm(self: &Arc<Self>, g: Arc<Gallery>, ps: Arc<Vec<Photo>>) {
+    fn warm(self: &Arc<Self>, g: Arc<Gallery>, all: Arc<(Vec<Album>, Vec<Photo>)>) {
         let me = self.clone();
         tokio::spawn(async move {
-            for chunk in ps.chunks(4) {
+            for chunk in all.1.chunks(4) {
                 let todo: Vec<&Photo> = chunk
                     .iter()
                     .filter(|p| !me.thumbs.lock().unwrap().contains_key(&p.id))
@@ -102,20 +105,29 @@ pub(crate) async fn list(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
         return r;
     }
     match app.demo_photos.get(&app).await {
-        Ok((g, ps)) => {
-            app.demo_photos.warm(g, ps.clone());
-            Json(
-                ps.iter()
-                    .map(|p| {
-                        serde_json::json!({
-                            "id": p.id,
-                            "title": p.title,
-                            "taken": p.taken / 1_000_000,
-                            "still": p.kind == 0,
-                        })
+        Ok((g, all)) => {
+            app.demo_photos.warm(g, all.clone());
+            let (albums, photos) = all.as_ref();
+            Json(serde_json::json!({
+                // each album with how many it holds and the newest as its
+                // cover, as the photo app's strip shows them
+                "albums": albums.iter().map(|a| {
+                    let inside: Vec<&Photo> = photos.iter().filter(|p| p.albums.contains(&a.id)).collect();
+                    serde_json::json!({
+                        "id": a.id,
+                        "name": a.name,
+                        "count": inside.len(),
+                        "cover": inside.first().map(|p| p.id),
                     })
-                    .collect::<Vec<_>>(),
-            )
+                }).collect::<Vec<_>>(),
+                "photos": photos.iter().map(|p| serde_json::json!({
+                    "id": p.id,
+                    "title": p.title,
+                    "taken": p.taken / 1_000_000,
+                    "still": p.kind == 0,
+                    "albums": p.albums,
+                })).collect::<Vec<_>>(),
+            }))
             .into_response()
         }
         Err(s) => s.into_response(),
@@ -163,11 +175,11 @@ pub(crate) async fn thumb(
     if let Some(t) = app.demo_photos.thumbs.lock().unwrap().get(&id).cloned() {
         return picture(t);
     }
-    let (g, ps) = match app.demo_photos.get(&app).await {
+    let (g, all) = match app.demo_photos.get(&app).await {
         Ok(x) => x,
         Err(s) => return s.into_response(),
     };
-    let Some(p) = ps.iter().find(|p| p.id == id) else {
+    let Some(p) = all.1.iter().find(|p| p.id == id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     match g.thumbnail(p).await {
@@ -193,11 +205,11 @@ pub(crate) async fn photo(
     if let Some(r) = not_demo(&app, &headers) {
         return r;
     }
-    let (g, ps) = match app.demo_photos.get(&app).await {
+    let (g, all) = match app.demo_photos.get(&app).await {
         Ok(x) => x,
         Err(s) => return s.into_response(),
     };
-    let Some(p) = ps.iter().find(|p| p.id == id) else {
+    let Some(p) = all.1.iter().find(|p| p.id == id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     match g.original(p, ORIGINAL).await {
