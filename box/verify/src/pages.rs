@@ -18,7 +18,8 @@ pub struct Service {
     pub blurb: String,
     /// What the demo account may do here, as the gate enforces it: `full`
     /// (the service's own permissions are the limit), `read` (no writing
-    /// method), `rate:N` (reads free, N other requests an hour). None:
+    /// method), `rate:N` or `rate:N/M` (reads free, N other requests an
+    /// hour for each demo, M for all demos together). None:
     /// nothing, and the tile is greyed on its home page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub demo: Option<String>,

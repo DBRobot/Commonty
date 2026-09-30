@@ -117,7 +117,7 @@ in
           demo = lib.mkOption {
             type = lib.types.nullOr lib.types.str;
             default = null;
-            description = "What the demo account may do on this tile's host, enforced at the gate: `full` (the service's own permissions are the limit), `read` (no writing method), `rate:N` (reads free, N other requests an hour). Null: nothing; the tile is greyed for it. The demo exists when any tile grants something.";
+            description = "What the demo account may do on this tile's host, enforced at the gate: `full` (the service's own permissions are the limit), `read` (no writing method), `rate:N` or `rate:N/M` (reads free, N other requests an hour for each demo - every click on the demo is one - and M for all demos together). Null: nothing; the tile is greyed for it. The demo exists when any tile grants something.";
           };
         };
       }

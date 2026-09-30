@@ -60,7 +60,7 @@ in
         # defined for every browser-facing vhost in modules/verify.nix)
         error_page 401 = @login;
         error_page 403 = @waiting;
-        # the demo's prompts are counted at the gate (rate:N on the tile);
+        # the demo's prompts are counted at the gate (rate:N/M on the tile);
         # everyone's, here, against a flood (modules/gate/verify.nix)
         limit_req zone=dd_model burst=20 nodelay;
         limit_req_status 429;

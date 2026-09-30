@@ -59,7 +59,8 @@ struct App {
     domain: String,
     web_dir: Option<PathBuf>,
     photos: Option<Photos>,
-    /// the demo's counted requests, per host and hour (`rate:N`)
+    /// the demo's counted requests this hour, per host and per demo on it
+    /// (`rate:N/M`)
     demo_rate: Mutex<HashMap<String, (u64, u32)>>,
     /// photo passwords on their way from a browser to the app (photos.rs)
     handoffs: Mutex<HashMap<String, photos::Handoff>>,
@@ -380,20 +381,45 @@ impl App {
         match allow.as_str() {
             "full" => true,
             "read" => reading,
-            a => match a.strip_prefix("rate:").and_then(|n| n.parse::<u32>().ok()) {
-                Some(_) if reading => true,
-                Some(per_hour) => {
-                    let hour = session::now() / 3600;
-                    let mut m = self.demo_rate.lock().unwrap();
-                    let e = m.entry(host).or_insert((hour, 0));
-                    if e.0 != hour {
-                        *e = (hour, 0);
-                    }
-                    e.1 += 1;
-                    e.1 <= per_hour
+            a => {
+                // `rate:N` is N an hour for each demo, every click on the demo
+                // being a demo of its own; `rate:N/M` also holds all of them
+                // together to M, since a fresh demo is only a cleared cookie away
+                let Some(spec) = a.strip_prefix("rate:") else {
+                    return false;
+                };
+                let (each, all) = match spec.split_once('/') {
+                    Some((e, a)) => (e.parse::<u32>().ok(), a.parse::<u32>().ok()),
+                    None => (spec.parse::<u32>().ok(), None),
+                };
+                let Some(each) = each else {
+                    return false;
+                };
+                if reading {
+                    return true;
                 }
-                None => false,
-            },
+                // which demo: its session cookie, one per click
+                let this = headers
+                    .get("cookie")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|c| {
+                        c.split(';')
+                            .find_map(|p| p.trim().strip_prefix(&format!("{}=", session::COOKIE)))
+                    })
+                    .unwrap_or_default();
+                let hour = session::now() / 3600;
+                let mut m = self.demo_rate.lock().unwrap();
+                m.retain(|_, (h, _)| *h == hour);
+                let mine = format!("{host} {this}");
+                let used = |m: &HashMap<String, (u64, u32)>, k: &str| m.get(k).map_or(0, |e| e.1);
+                if used(&m, &mine) >= each || all.is_some_and(|all| used(&m, &host) >= all) {
+                    return false;
+                }
+                for k in [mine, host] {
+                    m.entry(k).or_insert((hour, 0)).1 += 1;
+                }
+                true
+            }
         }
     }
 
