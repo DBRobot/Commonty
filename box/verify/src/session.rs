@@ -39,19 +39,24 @@ impl Sessions {
         })
     }
 
-    fn mac(&self, user: &str, exp: u64) -> String {
+    /// `who` is the user, then `~` and the session's own random id: names
+    /// never hold a `~`, and a session from before the id is the user alone
+    fn mac(&self, who: &str, exp: u64) -> String {
         let mut m =
             Hmac::<Sha256>::new_from_slice(&self.secret).expect("hmac accepts any key length");
-        m.update(user.as_bytes());
+        m.update(who.as_bytes());
         m.update(b".");
         m.update(exp.to_string().as_bytes());
         B64.encode(m.finalize().into_bytes())
     }
 
     /// The Set-Cookie header value for a fresh session.
+    /// Each is its own, even for one user in one second: the demo counts
+    /// what each visitor does by the session they were given.
     pub fn issue(&self, user: &str) -> String {
         let exp = now() + TTL;
-        let value = format!("{user}.{exp}.{}", self.mac(user, exp));
+        let who = format!("{user}~{}", B64.encode(random(9).unwrap_or_default()));
+        let value = format!("{who}.{exp}.{}", self.mac(&who, exp));
         format!(
             "{COOKIE}={value}; Domain={}; Path=/; Max-Age={TTL}; Secure; HttpOnly; SameSite=Lax",
             self.domain
@@ -74,11 +79,11 @@ impl Sessions {
         let mut parts = raw.rsplitn(3, '.');
         let mac = parts.next()?;
         let exp: u64 = parts.next()?.parse().ok()?;
-        let user = parts.next()?;
-        if exp < now() || !same(self.mac(user, exp).as_bytes(), mac.as_bytes()) {
+        let who = parts.next()?;
+        if exp < now() || !same(self.mac(who, exp).as_bytes(), mac.as_bytes()) {
             return None;
         }
-        Some(user.to_string())
+        Some(who.split('~').next()?.to_string())
     }
 }
 
@@ -103,4 +108,39 @@ pub fn random(n: usize) -> Result<Vec<u8>> {
 
 pub fn random_id() -> String {
     B64.encode(random(18).unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sessions() -> Sessions {
+        Sessions {
+            secret: vec![7; 32],
+            domain: "x".into(),
+        }
+    }
+
+    fn value(set_cookie: &str) -> String {
+        set_cookie.split(';').next().unwrap().to_string()
+    }
+
+    #[test]
+    fn each_session_is_its_own_and_old_ones_still_hold() {
+        let s = sessions();
+        let (a, b) = (value(&s.issue("demo")), value(&s.issue("demo")));
+        assert_ne!(a, b, "two in one second are still two");
+        assert_eq!(s.user(Some(&a)).as_deref(), Some("demo"));
+        assert_eq!(s.user(Some(&b)).as_deref(), Some("demo"));
+        // a name with dots in it is still that name
+        let c = value(&s.issue("tom.b"));
+        assert_eq!(s.user(Some(&c)).as_deref(), Some("tom.b"));
+        // a session issued before the id: the user and the expiry alone
+        let exp = now() + 60;
+        let old = format!("{COOKIE}=tom.{exp}.{}", s.mac("tom", exp));
+        assert_eq!(s.user(Some(&old)).as_deref(), Some("tom"));
+        // and the id cannot be changed to pass as another session's
+        let forged = a.replacen("demo~", "demo~x", 1);
+        assert_eq!(s.user(Some(&forged)), None);
+    }
 }

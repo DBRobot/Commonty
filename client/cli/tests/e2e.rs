@@ -932,7 +932,7 @@ async fn the_demo_is_an_account_with_a_small_permission_set() {
         None,
         vec![
             tile("files", Some("read")),
-            tile("llm", Some("rate:2")),
+            tile("llm", Some("rate:2/3")),
             tile("grafana", Some("full")),
             tile("photos", None),
         ],
@@ -992,6 +992,44 @@ async fn the_demo_is_an_account_with_a_small_permission_set() {
     assert_eq!(gate("POST", "llm.x").await.0, 200);
     assert_eq!(gate("POST", "llm.x").await.0, 403);
     assert_eq!(gate("GET", "llm.x").await.0, 200);
+    // another click on the demo is another demo, with two of its own; the
+    // three between them all is the ceiling
+    let other = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .get(a.url("/_dd/demo"))
+        .send()
+        .await
+        .unwrap()
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    assert_ne!(other, cookie, "each click is a demo of its own");
+    let other_prompt = || {
+        let u = a.url("/verify");
+        let c = other.clone();
+        async move {
+            reqwest::Client::new()
+                .get(u)
+                .header("cookie", c)
+                .header("x-original-method", "POST")
+                .header("x-original-host", "llm.x")
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        }
+    };
+    assert_eq!(other_prompt().await, 200);
+    assert_eq!(other_prompt().await, 403, "three between them all");
     // no permission, no door; and a host that is no tile at all
     assert_eq!(gate("GET", "photos.x").await.0, 403);
     assert_eq!(gate("GET", "elsewhere.x").await.0, 403);
