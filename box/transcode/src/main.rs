@@ -149,7 +149,9 @@ async fn start(
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
         .to_string();
-    if !owner.is_empty() {
+    // Everyone watching the demo is the demo: each is one visitor of many,
+    // so theirs are left to the box's own limit on films at once.
+    if !owner.is_empty() && owner != "demo" {
         let theirs: Vec<Arc<Session>> = {
             let mut all = app.sessions.lock().await;
             let ids: Vec<String> = all

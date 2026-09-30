@@ -86,3 +86,10 @@ box.wait_until_succeeds("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8" %
 box.wait_until_succeeds("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8" % t2, timeout=60)
 for i in (s1, t2):
     box.succeed("curl -sf -X DELETE http://127.0.0.1:4190/session/%s" % i)
+# the demo is many visitors under one name: one's film never ends another's
+d1 = json.loads(box.succeed("curl -sf -X POST -H 'X-DD-User: demo' " + h))["id"]
+d2 = json.loads(box.succeed("curl -sf -X POST -H 'X-DD-User: demo' " + h))["id"]
+box.wait_until_succeeds("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8" % d1, timeout=60)
+box.wait_until_succeeds("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8" % d2, timeout=60)
+for i in (d1, d2):
+    box.succeed("curl -sf -X DELETE http://127.0.0.1:4190/session/%s" % i)
