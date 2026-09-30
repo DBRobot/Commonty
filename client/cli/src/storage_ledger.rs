@@ -107,7 +107,11 @@ pub async fn run(l: Ledger) -> Result<()> {
         if r.status().is_success() {
             let u: Value = r.json().await?;
             used_photos = u["details"]["usage"].as_u64().unwrap_or(0);
-            let id = u["user"]["id"].as_i64().unwrap_or(0);
+            // museum's user has no json name for its id: it goes out as "ID"
+            let id = u["user"]["ID"]
+                .as_i64()
+                .or(u["user"]["id"].as_i64())
+                .unwrap_or(0);
             let now = u["subscription"]["storage"].as_u64().unwrap_or(0);
             let want = photos_limit(l.budget, libraries + code + passwords, used_photos);
             if id != 0 && now != want {
