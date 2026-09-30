@@ -1551,10 +1551,15 @@ async fn network_mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Respon
 /// belongs to the photos host, so the way out passes through there
 /// (photos_forget), and on to the front door: signing in again lands on the
 /// home page, not on whichever service the person signed out from.
-async fn logout(State(app): State<Arc<App>>) -> Response {
+async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let home = format!("home.{}", app.domain);
     let back = fleet_host(&app.domain, &home).then(|| format!("https://{home}/"));
+    // the demo's photos are the gate's own page, never the photo app, and
+    // the photos host is on the private network where the demo cannot go
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    let demo = app.sessions.user(cookie).as_deref() == Some(pages::DEMO_USER);
     let to = match (photos::origin(&app.home), back) {
+        (_, Some(b)) if demo => b,
         (Some(p), Some(b)) => format!("{p}/_dd/photos/forget?then={b}"),
         _ => "/".to_string(),
     };
