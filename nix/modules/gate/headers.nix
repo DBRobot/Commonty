@@ -33,8 +33,9 @@ let
     "style-src 'self' 'unsafe-inline'"
     "img-src 'self' data: blob: https:"
     "media-src 'self' blob: https://*.${base}"
-    # Movies & TV looks titles up at TMDB from the page
-    "connect-src 'self' https://*.${base} wss://*.${base} https://api.themoviedb.org"
+    # Movies & TV looks titles up at TMDB from the page, and fetches the
+    # posters it finds there to keep them
+    "connect-src 'self' https://*.${base} wss://*.${base} https://api.themoviedb.org https://image.tmdb.org"
     "font-src 'self' data:"
     "frame-src 'self' blob: https://*.${base}"
     "worker-src 'self' blob:"
