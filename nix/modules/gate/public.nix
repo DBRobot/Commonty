@@ -195,7 +195,8 @@ in
               client_max_body_size 1m;
               client_body_timeout 15s;
               client_header_timeout 15s;
-              limit_conn dd_conn 20;
+              # requests in flight: a page of pictures opens thirty at once
+              limit_conn dd_conn 64;
               # anything at all, per visitor (the zone: modules/gate/verify.nix)
               limit_req zone=dd_visitor burst=500 nodelay;
               limit_req_status 429;

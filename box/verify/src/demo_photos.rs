@@ -55,6 +55,26 @@ impl DemoPhotos {
         *open = Some((g.clone(), ps.clone(), Instant::now()));
         Ok((g, ps))
     }
+
+    /// Every thumbnail opened ahead, a few at a time: the first person to
+    /// look finds the grid ready instead of waiting on thirty of them.
+    fn warm(self: &Arc<Self>, g: Arc<Gallery>, ps: Arc<Vec<Photo>>) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            for chunk in ps.chunks(4) {
+                let todo: Vec<&Photo> = chunk
+                    .iter()
+                    .filter(|p| !me.thumbs.lock().unwrap().contains_key(&p.id))
+                    .collect();
+                let got = futures_util::future::join_all(todo.iter().map(|p| g.thumbnail(p))).await;
+                for (p, b) in todo.iter().zip(got) {
+                    if let Ok(b) = b {
+                        me.thumbs.lock().unwrap().insert(p.id, Arc::new(b));
+                    }
+                }
+            }
+        });
+    }
 }
 
 /// where anyone but the demo goes instead: a member has their own Photos,
@@ -82,19 +102,22 @@ pub(crate) async fn list(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
         return r;
     }
     match app.demo_photos.get(&app).await {
-        Ok((_, ps)) => Json(
-            ps.iter()
-                .map(|p| {
-                    serde_json::json!({
-                        "id": p.id,
-                        "title": p.title,
-                        "taken": p.taken / 1_000_000,
-                        "still": p.kind == 0,
+        Ok((g, ps)) => {
+            app.demo_photos.warm(g, ps.clone());
+            Json(
+                ps.iter()
+                    .map(|p| {
+                        serde_json::json!({
+                            "id": p.id,
+                            "title": p.title,
+                            "taken": p.taken / 1_000_000,
+                            "still": p.kind == 0,
+                        })
                     })
-                })
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+                    .collect::<Vec<_>>(),
+            )
+            .into_response()
+        }
         Err(s) => s.into_response(),
     }
 }
