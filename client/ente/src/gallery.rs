@@ -138,6 +138,12 @@ impl Gallery {
         })
     }
 
+    /// the session, as museum reads it: for an account that may use its
+    /// admin api, the way to call that too
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
     async fn get<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,

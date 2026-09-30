@@ -252,6 +252,16 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "storage.js",
+        "box/web/storage.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "storage.css",
+        "box/web/storage.css",
+        "text/css; charset=utf-8",
+    ),
+    (
         "demo-photos.js",
         "box/photos/web/demo-photos.js",
         "text/javascript; charset=utf-8",
@@ -416,6 +426,8 @@ const PAGES: &[(&str, &str)] = &[
     ("adblock", "box/adblock/web/pages/adblock.html"),
     // the demo's Photos, read through the gate (demo_photos.rs)
     ("demo-photos", "box/photos/web/pages/demo-photos.html"),
+    // one allowance across every service (storage.rs)
+    ("storage", "box/web/pages/storage.html"),
     // not signed in: whoever has a Send's link (modules/vault)
     ("send", "box/vault/web/pages/send.html"),
 ];
@@ -526,6 +538,7 @@ impl Menu {
             // Files and Movies & TV are tiles on the home page; repeating
             // them here would be the same door twice
             let mut fleet = vec![
+                item("Storage", "/_dd/storage"),
                 item("Backups", "/_dd/backups"),
                 item("Devices", "/_dd/devices"),
                 item("Network", "/_dd/network"),

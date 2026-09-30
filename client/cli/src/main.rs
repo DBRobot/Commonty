@@ -3,6 +3,7 @@ mod librarycmd;
 mod mediacmd;
 mod member;
 mod release_cmd;
+mod storage_ledger;
 mod ui;
 mod vault;
 mod who;
@@ -195,6 +196,32 @@ enum Command {
         cmd: ImageCmd,
         #[arg(long, default_value = DEFAULT_IMAGES, global = true)]
         repo: String,
+    },
+    /// The storage ledger, on a box (a timer runs it): what each member keeps
+    /// across every service, counted and written for the gate, and each
+    /// member's Photos held to what is left of their allowance.
+    StorageLedger {
+        /// the gate on this box, for the members and their libraries
+        #[arg(long, default_value = "http://127.0.0.1:4181")]
+        gate: String,
+        #[arg(long, default_value = DEFAULT_ENTE)]
+        ente_origin: String,
+        /// a member's photo address is their name and this: @users.<domain>
+        #[arg(long)]
+        photos_suffix: String,
+        /// a member's Passwords address is their name and this: @<domain>
+        #[arg(long)]
+        vault_suffix: String,
+        /// the ledger's own photo account's password (secrets:
+        /// ente-storage-password); the account is storage+ledger<photos-suffix>
+        #[arg(long)]
+        password_file: std::path::PathBuf,
+        /// each member's allowance, in GB
+        #[arg(long)]
+        budget_gb: u64,
+        /// where the count is written, for the gate
+        #[arg(long)]
+        out: std::path::PathBuf,
     },
     /// The demo's photo account: made with the fleet's code and the
     /// password the boxes hold for it, then given a quota of nothing, which
@@ -1248,6 +1275,27 @@ async fn main() -> Result<()> {
                 }
                 None => println!("ente:   locked - run `dd unlock --email you@example.com`"),
             }
+        }
+
+        Command::StorageLedger {
+            gate,
+            ente_origin,
+            photos_suffix,
+            vault_suffix,
+            password_file,
+            budget_gb,
+            out,
+        } => {
+            storage_ledger::run(storage_ledger::Ledger {
+                gate,
+                ente_origin,
+                photos_suffix,
+                vault_suffix,
+                password_file,
+                budget: budget_gb * 1_000_000_000,
+                out,
+            })
+            .await?;
         }
 
         Command::PhotosDemo {

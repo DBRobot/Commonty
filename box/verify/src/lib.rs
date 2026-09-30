@@ -22,6 +22,7 @@ mod oidc;
 pub mod pages;
 mod photos;
 mod session;
+mod storage;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -80,6 +81,8 @@ struct App {
     adblock: Option<adblock::Adblock>,
     /// the forge's changes as they happen (forge_events.rs)
     forge_events: Option<forge_events::ForgeEvents>,
+    /// each member's allowance, as the storage ledger counted it (storage.rs)
+    storage: storage::Ledger,
     /// the demo's Photos, read through the gate (demo_photos.rs)
     demo_photos: Arc<demo_photos::DemoPhotos>,
     /// who is friends with whom, and who came in as a guest (friends.rs)
@@ -164,6 +167,8 @@ pub struct Config {
     /// how to reach Forgejo's database to listen for its changes
     /// (a libpq connection string); None: the Git pages do not update live
     pub forge_events: Option<String>,
+    /// where the storage ledger writes what each member keeps (storage.rs)
+    pub storage_ledger: Option<PathBuf>,
     /// The fleet's TMDB key, handed to signed-in pages so a member's own
     /// device can look up a film's poster by its title. The box never
     /// sees the titles: they are sealed in the library. None: no posters,
@@ -1821,6 +1826,7 @@ pub async fn start(
         adblock: cfg.adblock,
         forge_events: cfg.forge_events.map(forge_events::ForgeEvents::start),
         demo_photos: Default::default(),
+        storage: storage::Ledger::new(cfg.storage_ledger.clone()),
         friends: friends::Store::open(&state_dir)?,
     });
     // A held sign-up follows through when the member list names it: then it
@@ -1946,6 +1952,9 @@ pub async fn start(
         .route("/_dd/network/mine", get(network_mine))
         .route("/_dd/photos", get(photos::page))
         .route("/_dd/photos/config", post(photos::config))
+        .route("/_dd/storage", get(storage::page))
+        .route("/_dd/storage/mine", get(storage::mine))
+        .route("/internal/storage/members", get(storage::members))
         .route("/_dd/photos/demo", get(demo_photos::page))
         .route("/_dd/photos/demo/list", get(demo_photos::list))
         .route("/_dd/photos/demo/thumb/{id}", get(demo_photos::thumb))

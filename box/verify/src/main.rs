@@ -51,6 +51,11 @@ async fn main() -> Result<()> {
         forge_events: std::env::var("VERIFY_FORGE_EVENTS")
             .ok()
             .filter(|s| !s.is_empty()),
+        // what the storage ledger counted, for the allowance (storage.rs)
+        storage_ledger: std::env::var("VERIFY_STORAGE_LEDGER")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(Into::into),
         // Pi-hole's api on this box, the members of the house it serves,
         // and the box's address on the house network
         adblock: std::env::var("VERIFY_ADBLOCK")
