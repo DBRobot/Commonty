@@ -65,6 +65,81 @@ fn read_json(p: PathBuf) -> serde_json::Value {
         .unwrap_or(serde_json::Value::Null)
 }
 
+/// Who may change the house's Wi-Fi, as a box knows it: the full gate
+/// (App), or a box that runs only the directory (DirHouse).
+pub(crate) trait Vouch: Send + Sync {
+    fn entry_of(&self, user: &str) -> Option<identity::SignedEntry>;
+    /// a member: not a guest, not the demo
+    fn is_member(&self, user: &str) -> bool;
+    fn house(&self) -> &Home;
+}
+
+impl Vouch for App {
+    fn entry_of(&self, user: &str) -> Option<identity::SignedEntry> {
+        self.entry(user).ok().flatten()
+    }
+    fn is_member(&self, user: &str) -> bool {
+        self.member(user) && user != pages::DEMO_USER && !self.guest(user)
+    }
+    fn house(&self) -> &Home {
+        &self.home_net
+    }
+}
+
+/// A box that runs the directory and nothing else of the gate: it still has
+/// a Wi-Fi to change, the entries to check a change against, and the member
+/// list its release came with.
+pub struct DirHouse {
+    pub home: Home,
+    pub directory: Arc<crate::directory::Directory>,
+    pub members: Option<crate::Members>,
+}
+
+impl Vouch for DirHouse {
+    fn entry_of(&self, user: &str) -> Option<identity::SignedEntry> {
+        self.directory.entry(user).ok().flatten()
+    }
+    fn is_member(&self, user: &str) -> bool {
+        // no list, no members: this box does not guess
+        let (Some(m), Some(e)) = (&self.members, self.entry_of(user)) else {
+            return false;
+        };
+        let id = identity::member_id(&e.entry.root);
+        if m.revoked.contains(&id) {
+            return false;
+        }
+        m.members.contains(&id)
+            || (e.entry.grant.is_some()
+                && self
+                    .directory
+                    .release()
+                    .is_some_and(|r| identity::verify_grant(&e.entry, r).is_ok()))
+    }
+    fn house(&self) -> &Home {
+        &self.home
+    }
+}
+
+/// The routes a directory-only box serves for the house
+pub fn dir_router(h: Arc<DirHouse>) -> axum::Router {
+    axum::Router::new()
+        .route(
+            "/_dd/house/here",
+            axum::routing::get(|State(h): State<Arc<DirHouse>>| async move {
+                Json(here(&h.home)).into_response()
+            }),
+        )
+        .route(
+            "/_dd/house/wifi/relay",
+            axum::routing::post(
+                |State(h): State<Arc<DirHouse>>, Json(s): Json<Signed>| async move {
+                    relay_with(&*h, &s)
+                },
+            ),
+        )
+        .with_state(h)
+}
+
 /// This box: how it is connected, and how the last change went.
 fn here(home: &Home) -> serde_json::Value {
     let (status, last) = match &home.dir {
@@ -138,7 +213,7 @@ struct Change {
 }
 
 /// The member's own passkey said this, just now, and nobody has used it yet.
-fn check(app: &App, s: &Signed) -> Result<Change, (StatusCode, String)> {
+fn check(app: &dyn Vouch, s: &Signed) -> Result<Change, (StatusCode, String)> {
     let bad = |m: &str| (StatusCode::FORBIDDEN, m.to_string());
     let c: Change = serde_json::from_str(&s.payload)
         .map_err(|_| (StatusCode::BAD_REQUEST, "not a change".to_string()))?;
@@ -157,20 +232,16 @@ fn check(app: &App, s: &Signed) -> Result<Change, (StatusCode, String)> {
     if now().abs_diff(c.at) > FRESH {
         return Err(bad("that change is too old; make it again"));
     }
-    if !(app.member(&c.user) && c.user != pages::DEMO_USER && !app.guest(&c.user)) {
+    if !app.is_member(&c.user) {
         return Err(bad("not a member"));
     }
-    let entry = app
-        .entry(&c.user)
-        .ok()
-        .flatten()
-        .ok_or_else(|| bad("no such member"))?;
+    let entry = app.entry_of(&c.user).ok_or_else(|| bad("no such member"))?;
     let mut h = sha2::Sha256::new();
     h.update(LABEL);
     h.update(s.payload.as_bytes());
     identity::check_login(&entry.entry, &s.id, &s.assertion, &h.finalize())
         .map_err(|_| bad("your passkey did not sign that"))?;
-    let mut seen = app.home_net.seen.lock().unwrap();
+    let mut seen = app.house().seen.lock().unwrap();
     seen.retain(|_, t| now() < *t + FRESH * 2);
     if seen.insert(c.nonce.clone(), now()).is_some() {
         return Err(bad("that change was already made"));
@@ -201,7 +272,7 @@ pub(crate) async fn change(
     if member(&app, &headers).is_none() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let c = match check(&app, &s) {
+    let c = match check(&*app, &s) {
         Ok(c) => c,
         Err(e) => return e.into_response(),
     };
@@ -233,7 +304,11 @@ pub(crate) async fn change(
 /// POST /_dd/house/wifi/relay: another box passing a member's change on.
 /// Believed for the signature, not for who sent it.
 pub(crate) async fn relay(State(app): State<Arc<App>>, Json(s): Json<Signed>) -> Response {
-    match check(&app, &s).and_then(|c| hand_over(&app.home_net, &c).map(|_| c)) {
+    relay_with(&*app, &s)
+}
+
+fn relay_with(v: &dyn Vouch, s: &Signed) -> Response {
+    match check(v, s).and_then(|c| hand_over(v.house(), &c).map(|_| c)) {
         Ok(c) => Json(serde_json::json!({ "nonce": c.nonce })).into_response(),
         Err(e) => e.into_response(),
     }

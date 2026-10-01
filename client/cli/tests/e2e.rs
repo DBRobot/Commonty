@@ -2356,10 +2356,39 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
     )
     .unwrap();
     let house = scratch("house");
+    let house2 = scratch("house2");
     // the folder the root unit would watch (VERIFY_HOUSE), read at start
     unsafe { std::env::set_var("VERIFY_HOUSE", &house) };
     let a = Box_::start(true, vec![], 300).await;
-    let (addr, _task) = gate_for(&a, id, "house-gate").await;
+    let (addr, _task) = gate_for(&a, id.clone(), "house-gate").await;
+    // and a box that runs only the directory, as node2 does
+    unsafe { std::env::set_var("VERIFY_HOUSE", &house2) };
+    let (addr2, _task2) = verify::start(verify::Config {
+        home: vec![],
+        members: Some(verify::Members::list(vec![id])),
+        release_pub: None,
+        web_dir: None,
+        photos: None,
+        library: None,
+        fleet: Default::default(),
+        thanos: None,
+        adblock: None,
+        forge_events: None,
+        storage_ledger: None,
+        demo_library: None,
+        tmdb: None,
+        search: None,
+        oidc: None,
+        app_manifest: None,
+        network: None,
+        bind: "127.0.0.1:0".parse().unwrap(),
+        dir: scratch("house-dir").join("keys"),
+        peers: vec![],
+        sync_secs: 1,
+        domain: None,
+    })
+    .await
+    .unwrap();
     unsafe { std::env::remove_var("VERIFY_HOUSE") };
     let http = reqwest::Client::new();
     // the member's entry, published to this gate
@@ -2417,6 +2446,39 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
                 .as_u16()
         }
     };
+
+    // the directory-only box: the member's entry, its status, a change
+    let r = http
+        .put(format!("http://{addr2}/_dd/directory/tester"))
+        .json(&fixture["v3"])
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success());
+    let here = http
+        .get(format!("http://{addr2}/_dd/house/here"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(here.status().as_u16(), 200);
+    let r = http
+        .post(format!("http://{addr2}/_dd/house/wifi/relay"))
+        .json(&sign(&change("tester", now, "d1")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 200, "{}", r.text().await.unwrap());
+    assert!(
+        house2.join("request").exists(),
+        "the directory-only box took it"
+    );
+    let r = http
+        .post(format!("http://{addr2}/_dd/house/wifi/relay"))
+        .json(&sign(&change("nobody", now, "d2")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 403);
 
     let good = sign(&change("tester", now, "n1"));
     assert_eq!(relay(good.clone()).await, 200);
