@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your email</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/mail.css">
+</head>
+<body data-mode="{{mode}}" data-back="{{back}}">
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="https://home.{{domain}}/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+    </div>
+  </header>
+  <main class="fl">
+    <a class="fl-back" id="back" href="#">← Settings</a>
+
+    <section class="fl-card" id="s1">
+      <div class="fl-steps" aria-hidden="true"><i class="on"></i><i></i><i></i></div>
+      <p class="fl-count">Step 1 of 3</p>
+      <h1>Confirm it's you</h1>
+      <p id="s1-lead">Use your passkey to change your email.</p>
+      <div class="row"><button id="pass">Continue with passkey</button></div>
+      <p class="fl-bad" id="s1-msg" role="alert" hidden></p>
+    </section>
+
+    <section class="fl-card" id="s2" hidden>
+      <div class="fl-steps" aria-hidden="true"><i class="on"></i><i class="on"></i><i></i></div>
+      <p class="fl-count">Step 2 of 3</p>
+      <h1 id="s2-h">Your new email</h1>
+      <form id="form" class="fl-form">
+        <label for="email">Email address</label>
+        <input id="email" type="email" autocomplete="email" required>
+        <div class="row"><button type="submit" id="save">Continue</button><button type="button" class="quiet" id="cancel">Cancel</button></div>
+      </form>
+      <p class="fl-bad" id="s2-msg" role="alert" hidden></p>
+    </section>
+
+    <section class="fl-card" id="s3" hidden>
+      <div class="fl-steps" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i></div>
+      <p class="fl-count">Step 3 of 3</p>
+      <span class="fl-mail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 7 8.5-7"/></svg></span>
+      <h1>Check your email</h1>
+      <p>We sent a link to <b id="sent"></b>. Open it to finish.</p>
+      <p class="fl-wait"><i aria-hidden="true"></i>This page moves on once you have.</p>
+      <p class="fine">Nothing there? <button class="linkish" id="again">Send it again</button> or <button class="linkish" id="other">use a different email</button>.</p>
+      <p class="fine" id="s3-msg" role="status"></p>
+    </section>
+  </main>
+  <script type="module" src="/_dd/static/change.js"></script>
+</body>
+</html>

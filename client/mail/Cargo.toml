@@ -1,0 +1,27 @@
+[package]
+name = "dd-mail"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The mail Worker's checks: whose entry, a member, their passkey - the boxes' own code, run at Cloudflare"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+identity = { path = "../identity" }
+serde_json = "1"
+base64 = "0.22"
+# the version nixpkgs' wasm-bindgen-cli speaks; the two must match exactly
+wasm-bindgen = "=0.2.121"
+# identity pulls webauthn's rand; a Worker has crypto.getRandomValues
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+uuid = { version = "1", features = ["js"] }
+
+[dev-dependencies]
+# a made-up member with a software passkey, to sign real assertions in tests
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+ed25519-dalek = "2"
+sha2 = "0.10"
+webauthn-rs-core = "0.6.1-dev"

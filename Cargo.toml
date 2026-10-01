@@ -17,6 +17,7 @@ members = [
   "client/ente",
   "client/gitremote",
   "client/web",
+  "client/mail",
   "app",
 ]
 

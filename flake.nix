@@ -570,6 +570,51 @@
               }
             } $out/purify.js
           '';
+          # The mail Worker (client/mail): what `dd release publish` uploads
+          # to Cloudflare, file for file, and what the boxes compare the
+          # deployed Worker with. The checks are the boxes' own Rust in wasm;
+          # the member list and release key are this release's.
+          mail-worker =
+            let
+              mailCommon = wasmCommon // {
+                src = crateSrc "mail" [ "client/mail" ];
+                cargoExtraArgs = "-p dd-mail";
+              };
+              mailWasm = craneWasm.buildPackage (
+                mailCommon
+                // {
+                  pname = "dd-mail";
+                  version = "0.1.0";
+                  cargoArtifacts = craneWasm.buildDepsOnly (
+                    mailCommon
+                    // {
+                      pname = "dd-mail-deps";
+                      dummySrc = depsSrc;
+                      version = "0.1.0";
+                    }
+                  );
+                }
+              );
+            in
+            pkgs.runCommand "dd-mail-worker"
+              {
+                nativeBuildInputs = [
+                  pkgs.wasm-bindgen-cli
+                  pkgs.jq
+                ];
+              }
+              ''
+                mkdir -p $out
+                wasm-bindgen --target web --no-typescript --out-dir $out ${mailWasm}/lib/dd_mail.wasm
+                cp ${./client/mail/worker}/* $out/
+                cp ${./box/web/home.css} $out/home.css
+                cp ${./box/web/bar.css} $out/bar.css
+                cp ${./box/web/fonts}/*.woff2 $out/
+                {
+                  echo "export const MEMBERS = $(jq -c . ${./fleet/members.json} | jq -R .);"
+                  echo "export const RELEASE = $(tr -d '[:space:]' < ${./fleet/release.pub} | jq -R .);"
+                } > $out/fleet.js
+              '';
 
           # the checks, on the same compiled artifacts as the binaries: fmt
           # and clippy in seconds, the tests once, all cached by content and
