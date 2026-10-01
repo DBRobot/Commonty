@@ -33,14 +33,14 @@ fn member(app: &App, headers: &HeaderMap) -> Result<String, Response> {
     match app.sessions.user(cookie) {
         Some(u) if app.member(&u) && u != pages::DEMO_USER && !app.guest(&u) => Ok(u),
         Some(_) => Err(Redirect::to("/_dd/home").into_response()),
-        None => Err(Redirect::to("/_dd/login?rd=/_dd/email").into_response()),
+        None => Err(Redirect::to("/_dd/login?rd=/_dd/settings").into_response()),
     }
 }
 
-/// GET /_dd/email: the page
+/// GET /_dd/settings: the member's own settings, where their email is
 pub(crate) async fn page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     match member(&app, &headers) {
-        Ok(_) => crate::page("email"),
+        Ok(_) => crate::page("settings"),
         Err(r) => r,
     }
 }
@@ -124,6 +124,15 @@ pub(crate) async fn set(
     let Some(socket) = app.mail_forward.as_deref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    // where someone's mail goes is theirs to say, not a stolen session's:
+    // their passkey, shown in the last few minutes (signing up counts)
+    if !app.passkey_fresh(&user) {
+        return (
+            StatusCode::FORBIDDEN,
+            "confirm it is you with your passkey first",
+        )
+            .into_response();
+    }
     let email = g.email.trim();
     if email.len() > 254 || !email.contains('@') || email.contains(char::is_whitespace) {
         return (StatusCode::BAD_REQUEST, "that is not an email address").into_response();
