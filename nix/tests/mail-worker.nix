@@ -2,7 +2,7 @@
 # by wrangler (workerd), against a fake Cloudflare and directory, driven by
 # a browser through the change-email pages and the line in Settings, then
 # at its API with what it must refuse. A made-up member signs in
-# (tester.json, client/mail/examples/fixture.rs). No network, no vm: under a
+# (client/mail/tests/tester.json, made by client/mail/examples/fixture.rs). No network, no vm: under a
 # minute, and cached by content like every other check.
 { pkgs, self, ... }:
 let
@@ -28,11 +28,12 @@ pkgs.runCommand "mail-worker-e2e"
     # no network in here: wrangler would fetch request metadata it does not need
     export HOME=$TMPDIR WRANGLER_SEND_METRICS=false CI=1 CLOUDFLARE_CF_FETCH_ENABLED=false
     t=${./mail-worker}
+    tester=${../../client/mail/tests/tester.json}
     mkdir w
     cp -rL --no-preserve=mode ${bundle}/. w/
     # the made-up member is the only one on the list
     printf 'export const MEMBERS = %s;\nexport const RELEASE = "unused";\n' \
-      "$(jq -c '.members' $t/tester.json)" > w/fleet.js
+      "$(jq -c '.members' $tester)" > w/fleet.js
     cat > w/wrangler.toml <<'TOML'
     name = "mail-e2e"
     main = "worker.js"
@@ -54,7 +55,7 @@ pkgs.runCommand "mail-worker-e2e"
     sed -i 's/^    //' w/wrangler.toml
     printf 'SESSION_KEY=e2e-session-key-0123456789\nCF_TOKEN=fake\n' > w/.dev.vars
 
-    python3 $t/fake.py $t/tester.json > fake.log 2>&1 &
+    python3 $t/fake.py $tester > fake.log 2>&1 &
     fake=$!
     (cd w && wrangler dev --port 8787 --ip 127.0.0.1 > ../wrangler.log 2>&1) &
     worker=$!

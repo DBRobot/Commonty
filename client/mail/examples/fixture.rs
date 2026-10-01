@@ -1,7 +1,7 @@
 // The made-up member the mail Worker's end-to-end check signs in as
 // (nix/tests/mail-worker): a device root, one passkey on commonty.test, at
 // two versions. Its keys are test keys and nobody's. Regenerate with
-//   cargo run -q -p dd-mail --example fixture > nix/tests/mail-worker/tester.json
+//   cargo run -q -p dd-mail --example fixture > client/mail/tests/tester.json
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64_URL;
 use identity::{Device, Entry, Passkey, SignedEntry};

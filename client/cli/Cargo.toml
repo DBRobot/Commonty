@@ -45,6 +45,6 @@ verify = { path = "../../box/verify" }
 # webauthn ceremonies, so enrolment and login are tested without a person
 webauthn-rs = "0.6.1-dev"
 webauthn-authenticator-rs = { version = "0.6.1-dev", features = ["softpasskey"] }
-# the made-up member's passkey (nix/tests/mail-worker/tester.json) signing a
+# the made-up member's passkey (client/mail/tests/tester.json) signing a
 # Wi-Fi change the way a browser would
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }

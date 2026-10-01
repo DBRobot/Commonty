@@ -100,6 +100,8 @@
                       type == "directory"
                       || craneLib.filterCargoSources path type
                       || builtins.match ".*/templates/.*" rel != null
+                      # a test's fixtures beside it (client/mail/tests)
+                      || builtins.match ".*/tests/.*\\.json" rel != null
                       # the pages, scripts and styles: the gate reads its own
                       # from the pages directory at start (pages below), so
                       # they are not its source; other crates still compile

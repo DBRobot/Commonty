@@ -2347,7 +2347,7 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
     use sha2::Digest as _;
 
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../../../nix/tests/mail-worker/tester.json")).unwrap();
+        serde_json::from_str(include_str!("../../mail/tests/tester.json")).unwrap();
     let members: serde_json::Value =
         serde_json::from_str(fixture["members"].as_str().unwrap()).unwrap();
     let id = members["members"][0].as_str().unwrap().to_string();
