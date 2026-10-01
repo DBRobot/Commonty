@@ -29,7 +29,10 @@ initSync({ module: wasm });
 const API = 'https://api.cloudflare.com/client/v4';
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const EMAIL = /^[^@\s]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,}$/;
-const SESSION = 15 * 60;
+// shown your address for this long after the passkey, in this browser
+const SESSION = 30 * 86400;
+// changing it wants the passkey this recently
+const FRESH = 15 * 60;
 const CHALLENGE = 5 * 60;
 
 const STATIC = {
@@ -240,7 +243,7 @@ async function api(req, env, path, sent) {
     } catch (err) {
       return json({ error: 'your passkey was not accepted' }, 403);
     }
-    const s = await seal(env, { k: 'session', n: c.n, e: now() + SESSION });
+    const s = await seal(env, { k: 'session', n: c.n, p: now(), e: now() + SESSION });
     return json({ ok: true }, 200, { 'set-cookie': `mail_session=${s}; Path=/; Max-Age=${SESSION}; HttpOnly; Secure; SameSite=Strict` });
   }
   if (req.method === 'GET' && path === '/api/state') {
@@ -253,8 +256,10 @@ async function api(req, env, path, sent) {
   if (!me) return json({ error: 'confirm it is you first' }, 401);
   if (req.method === 'GET' && path === '/api/me') {
     const s = await state(env, me.n);
-    return json({ name: me.n, email: s.email, confirmed: s.confirmed });
+    return json({ name: me.n, email: s.email, confirmed: s.confirmed, fresh: now() - (me.p || 0) < FRESH });
   }
+  // a change wants the passkey just now, not a month ago
+  if (now() - (me.p || 0) >= FRESH) return json({ error: 'confirm it is you first' }, 401);
   if (req.method === 'POST' && path === '/api/email') {
     const { email } = body();
     if (!EMAIL.test((email || '').trim())) return json({ error: 'that is not an email address' }, 400);

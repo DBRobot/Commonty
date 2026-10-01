@@ -88,4 +88,4 @@ $('again').onclick = async () => {
 $('other').onclick = () => { clearTimeout(wait); step(2); };
 
 // signed in here a moment ago: straight to the address
-me().then((m) => { if (m && m.name === name) step(2); });
+me().then((m) => { if (m && m.name === name && m.fresh) step(2); });

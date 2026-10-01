@@ -35,15 +35,14 @@ window.addEventListener('hashchange', () => tab(location.hash.slice(1)));
 
 async function profile() {
   const me = await (await fetch('/_dd/me')).json();
-  // a guest has devices and sign-ins here, and no address or disk images
+  // a guest has devices and sign-ins here, and no email or disk images
   if (me.role === 'guest') {
-    for (const id of ['address', 'email']) $(id).closest('.se-row').hidden = true;
+    $('email').closest('.se-row').hidden = true;
     document.querySelector('[data-tab="backups"]').hidden = true;
   }
   // from the front door's name, not this page's: the app's copy is on its own
   const domain = new URL(me.home).hostname.split('.').slice(-2).join('.');
   $('name').textContent = me.user;
-  $('address').textContent = `${me.user}@${domain}`;
   $('role').textContent = me.role === 'member' ? 'Member' : me.role === 'guest' ? 'Guest' : me.role;
   const back = `${location.origin}/_dd/settings`;
   $('email').src = `https://mail.${domain}/row?name=${encodeURIComponent(me.user)}&back=${encodeURIComponent(back)}`;
