@@ -7,7 +7,8 @@
 #
 # One request per connection, one line of json each way:
 #   {"op": "set", "name": "sarah", "email": "sarah@example.com"}
-#   {"op": "state", "name": "sarah"}
+#   {"op": "state", "name": "sarah"}   forwarding set, and confirmed yet
+#   {"op": "resend", "name": "sarah"}  Cloudflare's confirmation, again
 # Environment: CF_DNS_API_TOKEN, ZONE, SOCKET.
 import json
 import os
@@ -54,6 +55,29 @@ def rule_for(address):
         page += 1
 
 
+def target(rule):
+    """where a rule forwards to, read here and never handed on"""
+    for a in rule.get("actions", []):
+        if a.get("type") == "forward" and a.get("value"):
+            return a["value"][0]
+    return None
+
+
+def destination(email):
+    """Cloudflare's record of a destination: its id and whether its owner
+    has confirmed it"""
+    page = 1
+    while True:
+        d = call("GET", "/accounts/%s/email/routing/addresses?per_page=50&page=%d" % (account_id, page))
+        found = d.get("result") or []
+        for a in found:
+            if a.get("email", "").lower() == email.lower():
+                return a
+        if len(found) < 50:
+            return None
+        page += 1
+
+
 def handle(req):
     name = req.get("name", "")
     if not NAME.match(name):
@@ -61,7 +85,22 @@ def handle(req):
     address = "%s@%s" % (name, zone_name)
     rule = rule_for(address)
     if req.get("op") == "state":
-        return {"ok": True, "forwarding": rule is not None}
+        to = target(rule) if rule else None
+        a = to and destination(to)
+        return {"ok": True, "forwarding": rule is not None, "confirmed": bool(a and a.get("verified"))}
+    if req.get("op") == "resend":
+        to = target(rule) if rule else None
+        a = to and destination(to)
+        if not a:
+            return {"ok": False, "why": "no address to confirm; give one first"}
+        if a.get("verified"):
+            return {"ok": True, "confirmed": True}
+        # Cloudflare sends its message when a destination is added: added
+        # again, it sends it again
+        call("DELETE", "/accounts/%s/email/routing/addresses/%s" % (account_id, a.get("tag") or a.get("id")))
+        again = call("POST", "/accounts/%s/email/routing/addresses" % account_id, {"email": to})
+        print("%s: confirmation sent again" % name, flush=True)
+        return {"ok": bool(again.get("success")), "confirmed": False}
     email = req.get("email", "").strip()
     if req.get("op") != "set" or not EMAIL.match(email):
         return {"ok": False, "why": "that is not an email address"}

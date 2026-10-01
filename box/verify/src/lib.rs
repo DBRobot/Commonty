@@ -1963,6 +1963,7 @@ pub async fn start(
             get(mail_forward::page).post(mail_forward::set),
         )
         .route("/_dd/email/state", get(mail_forward::state))
+        .route("/_dd/email/resend", post(mail_forward::resend))
         .route("/_dd/storage", get(storage::page))
         .route("/_dd/storage/mine", get(storage::mine))
         .route("/internal/storage/members", get(storage::members))
