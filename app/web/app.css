@@ -67,3 +67,6 @@ button.link:hover { background: none; color: var(--link-hover); }
 main.app > .wide-page h1 { font-size: 34px; }
 .panel .rows li .tag { margin-left: auto; }
 #add-device { margin-top: 16px; }
+
+/* the four digits both screens show while a device is added by code */
+.digits { font-family: var(--mono, monospace); font-size: 40px; letter-spacing: .18em; font-weight: 600; margin: 4px 0 8px; }

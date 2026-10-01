@@ -276,6 +276,7 @@ const STATIC: &[(&str, &str, &str)] = &[
         "box/web/settings.css",
         "text/css; charset=utf-8",
     ),
+    ("add.js", "box/web/add.js", "text/javascript; charset=utf-8"),
     (
         "demo-photos.js",
         "box/photos/web/demo-photos.js",
@@ -445,6 +446,8 @@ const PAGES: &[(&str, &str)] = &[
     ("settings", "box/web/pages/settings.html"),
     // not signed in: whoever has a Send's link (modules/vault)
     ("send", "box/vault/web/pages/send.html"),
+    // not signed in: the new device a QR code was scanned on (adddevice.rs)
+    ("add", "box/web/pages/add.html"),
 ];
 
 pub fn page(name: &str) -> Option<&'static str> {

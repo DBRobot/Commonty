@@ -36,3 +36,5 @@ aes = "0.8"
 ctr = "0.9"
 poly1305 = "0.8"
 ruzstd = "0.8"
+# Settings > Devices draws the code a new device scans (entry.rs)
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }

@@ -9,7 +9,7 @@ use serde::Serialize;
 use tauri::State;
 
 /// keyring account holding the name this device signs for
-const USER: &str = "user";
+pub const USER: &str = "user";
 
 pub struct Keys(pub auth::Store);
 
@@ -196,6 +196,35 @@ pub fn set_name(keys: State<'_, Keys>, name: String) -> Result<(), String> {
         return Err("a name is lowercase letters, digits and dashes".to_string());
     }
     keys.0.set(USER, &name).map_err(|e| e.to_string())
+}
+
+/// This device, joining an account from the code another device of it shows
+/// (Settings > Devices > Add a device): its key is offered against the code,
+/// and the four digits both screens show come back. The account's main key
+/// approves it there; the status the page checks says when it is in.
+#[tauri::command]
+pub async fn join_with_code(keys: State<'_, Keys>, code: String) -> Result<String, String> {
+    let (kp, _) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
+    let r = directory::http()
+        .map_err(|e| e.to_string())?
+        .post(format!("https://home.{}/_dd/add/offer", domain()))
+        .json(&serde_json::json!({
+            "code": code.trim(),
+            "public_key": auth::device::public_b64(&kp),
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("the box did not answer: {e}"))?;
+    if !r.status().is_success() {
+        return Err(r
+            .text()
+            .await
+            .unwrap_or_else(|_| "that did not work".into()));
+    }
+    let v: serde_json::Value = r.json().await.map_err(|e| e.to_string())?;
+    let user = v["user"].as_str().ok_or("the box gave no name")?;
+    keys.0.set(USER, user).map_err(|e| e.to_string())?;
+    Ok(v["digits"].as_str().unwrap_or_default().to_string())
 }
 
 /// A new member, from a code: the invite it derives is fetched from the

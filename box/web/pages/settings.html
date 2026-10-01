@@ -64,7 +64,7 @@
         <footer><button class="danger" id="dv-others" hidden>Sign out everywhere else</button></footer>
       </section>
       <section class="se-box" aria-labelledby="keys">
-        <header><h2 id="keys">Devices with a key</h2><span class="bk-spacer"></span><button class="quiet" id="dv-show">Show names</button></header>
+        <header><h2 id="keys">Devices with a key</h2><span class="bk-spacer"></span><button class="quiet" id="dv-show">Show names</button><button id="dv-add" hidden>Add a device</button></header>
         <p class="se-hint" id="dv-hint">Names are kept locked; your passkey shows them.</p>
         <ul class="dv-list" id="dv-keys"></ul>
       </section>
@@ -117,6 +117,29 @@
     <p>It is signed out everywhere and can't sign in again.</p>
     <p class="bad" id="rm-msg" hidden></p>
     <div class="row"><button class="quiet" id="rm-no">Close</button><button class="danger" id="rm-yes">Remove with passkey</button></div>
+  </dialog>
+  <dialog class="bk-dialog ad-dialog" id="add" aria-labelledby="ad-h">
+    <div class="ad-panel" id="ad-show">
+      <h3 id="ad-h">Add a device</h3>
+      <div class="ad-qr" id="ad-qr"></div>
+      <p>Point the new phone or computer's camera at this. It works for the next 10 minutes.</p>
+      <p>No camera? On the new device, open <span class="ad-code" id="ad-where"></span> or, in the Commonty app, choose <strong>Have a code?</strong> and type <span class="ad-code" id="ad-code"></span>.</p>
+      <div class="row"><button class="quiet" id="ad-cancel">Cancel</button></div>
+    </div>
+    <div class="ad-panel" id="ad-ask" hidden>
+      <h3 id="ad-what">A device wants to join</h3>
+      <p>Check the new device shows the same number:</p>
+      <div class="ad-digits" id="ad-digits"></div>
+      <p>Only approve it if this is your device, in your hand.</p>
+      <div class="row"><button class="quiet" id="ad-no">It isn't mine</button><button id="ad-yes">Approve</button></div>
+    </div>
+    <div class="ad-panel" id="ad-done" hidden>
+      <span class="ad-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m6 12.5 4 4 8-9"/></svg></span>
+      <h3>Added</h3>
+      <p>It's connecting to Commonty by itself. You can name it in the list.</p>
+      <div class="row"><button id="ad-close">Done</button></div>
+    </div>
+    <p class="bad" id="ad-msg" hidden></p>
   </dialog>
   <script type="module" src="/_dd/static/settings.js"></script>
   <script type="module" src="/_dd/static/shell.js"></script>

@@ -86,7 +86,7 @@ in
     };
     # the gate writes the request and reads the status and result
     systemd.services.dd-verify.serviceConfig.ReadWritePaths = [ "/run/dd-wifi" ];
-    systemd.services.dd-verify.environment.VERIFY_HOME = "/run/dd-wifi";
+    systemd.services.dd-verify.environment.VERIFY_HOUSE = "/run/dd-wifi";
 
     networking.networkmanager.ensureProfiles = {
       environmentFiles = [ cfg.pskFile ];

@@ -37,6 +37,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             account::status,
             account::set_name,
+            account::join_with_code,
             account::sign_up,
             account::admit_device,
             account::passkey_add,

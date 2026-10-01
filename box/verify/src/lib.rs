@@ -11,6 +11,7 @@
 //! can add nothing to it. With VERIFY_ROLE=directory that is all a box does.
 
 pub mod adblock;
+mod adddevice;
 mod demo_photos;
 mod directory;
 pub mod fleet;
@@ -55,6 +56,8 @@ struct App {
     state_dir: PathBuf,
     /// the house's boxes and their Wi-Fi (home.rs)
     home_net: home::Home,
+    /// devices being added by QR code, ten minutes each (adddevice.rs)
+    adding: adddevice::Adding,
     webauthn: Webauthn,
     ceremonies: Mutex<HashMap<String, (Instant, Ceremony)>>,
     /// a passkey the browser just made, waiting for `dd enrol` to collect
@@ -1925,8 +1928,9 @@ pub async fn start(
         sessions: session::Sessions::open(&state_dir, &domain)?,
         signins: signins::SignIns::open(Some(state_dir.join("signins.json"))),
         state_dir: state_dir.clone(),
+        adding: Default::default(),
         home_net: home::Home::new(
-            std::env::var("VERIFY_HOME")
+            std::env::var("VERIFY_HOUSE")
                 .ok()
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from),
@@ -2086,6 +2090,12 @@ pub async fn start(
                 member_page(&a, &h, "settings", "/_dd/settings").await
             }),
         )
+        .route("/_dd/add/start", post(adddevice::start))
+        .route("/_dd/add/status", get(adddevice::status))
+        .route("/_dd/add/cancel", post(adddevice::cancel))
+        .route("/_dd/add/offer", post(adddevice::offer))
+        // where the QR code goes: open to anyone, it only shows the code
+        .route("/_dd/add", get(|| async { page("add") }))
         .route("/_dd/house", get(home::list))
         .route("/_dd/house/here", get(home::here_route))
         .route("/_dd/house/wifi", post(home::change))
