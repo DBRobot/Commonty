@@ -6198,6 +6198,11 @@ rec {
         ];
         devDependencies = [
           {
+            name = "p256";
+            packageId = "p256";
+            features = [ "ecdsa" "pkcs8" ];
+          }
+          {
             name = "verify";
             packageId = "verify";
           }
@@ -6328,6 +6333,12 @@ rec {
           {
             name = "poly1305";
             packageId = "poly1305 0.8.0";
+          }
+          {
+            name = "qrcode";
+            packageId = "qrcode";
+            usesDefaultFeatures = false;
+            features = [ "svg" ];
           }
           {
             name = "ruzstd";
@@ -18780,6 +18791,21 @@ rec {
           "std" = [ "prost/std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "qrcode" = rec {
+        crateName = "qrcode";
+        version = "0.14.1";
+        edition = "2021";
+        crateBin = [];
+        sha256 = "1v693x68yg90wfpas5v4bf6cfmnq9dq54qfgd3kb33j07r3851yn";
+        authors = [
+          "kennytm <kennytm@gmail.com>"
+        ];
+        features = {
+          "default" = [ "image" "svg" "pic" ];
+          "image" = [ "dep:image" ];
+        };
+        resolvedDefaultFeatures = [ "svg" ];
       };
       "quick-xml" = rec {
         crateName = "quick-xml";

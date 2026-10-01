@@ -5,6 +5,8 @@
 const invoke = window.__TAURI__.core.invoke;
 const $ = (id) => document.getElementById(id);
 let timer = null;
+// the digits a code from another device gave, while waiting to be approved
+let digits = null;
 
 function show(page) {
   for (const p of document.querySelectorAll(".page")) p.hidden = p.id !== "page-" + page;
@@ -26,6 +28,8 @@ function render(st) {
   }
   if (!st.name) return show("name");
   if (!st.admitted) {
+    $("admit-match").hidden = !digits;
+    $("admit-digits").textContent = digits || "";
     $("admit-fp").textContent = st.fingerprint;
     $("admit-dirs").textContent = st.directories.map(([d, s]) => `${d.replace(/^https?:\/\//, "").replace(/\/_dd\/directory$/, "")}: ${s}`).join(" · ");
     return show("admit");
@@ -161,6 +165,19 @@ $("name-form").addEventListener("submit", async (ev) => {
   }
 });
 $("to-signup").addEventListener("click", () => show("signup"));
+$("to-code").addEventListener("click", () => { show("code"); $("code").focus(); });
+$("code-back").addEventListener("click", () => show("name"));
+$("code-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("code-error").hidden = true;
+  try {
+    digits = await invoke("join_with_code", { code: $("code").value });
+    refresh();
+  } catch (e) {
+    $("code-error").textContent = String(e);
+    $("code-error").hidden = false;
+  }
+});
 $("to-recover").addEventListener("click", () => show("recover"));
 $("recover-back").addEventListener("click", () => show("name"));
 $("recover-form").addEventListener("submit", async (ev) => {

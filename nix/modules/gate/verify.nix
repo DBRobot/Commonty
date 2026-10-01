@@ -473,6 +473,11 @@ in
               proxyPass = "http://127.0.0.1:${toString port}/_dd/home";
               extraConfig = "proxy_set_header X-Original-URI $request_uri;";
             };
+            # where a QR code from Settings > Devices goes, short to type
+            locations."= /add" = {
+              proxyPass = "http://127.0.0.1:${toString port}/_dd/add";
+              extraConfig = "proxy_set_header X-Original-URI $request_uri;";
+            };
           };
         }
       ]

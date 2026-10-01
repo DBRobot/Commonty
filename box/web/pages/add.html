@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Network</title>
+  <title>Add this device</title>
   <link rel="stylesheet" href="/_dd/static/home.css">
 </head>
 <body>
   <header class="dd-bar">
     <div class="bar">
-      <a class="brand" href="/_dd/home" aria-label="Commonty">
+      <a class="brand" href="/" aria-label="Commonty">
         <svg viewBox="0 0 22 22" aria-hidden="true">
           <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
           <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
@@ -18,21 +18,18 @@
         </svg>
         <span>Commonty</span>
       </a>
-      <div class="me" id="me"></div>
     </div>
   </header>
-  <main class="wide">
-    <div class="card" data-user="">
-      <div class="filesbar">
-        <h1>Network</h1>
-        <div class="grow"></div>
-      </div>
-      <p id="msg" class="lead">Asking the control server…</p>
-      <div id="body" hidden></div>
-      <p class="note">The fleet's own network, so your devices reach the boxes wherever they are.</p>
-    </div>
+  <main class="auth">
+    <section class="add-device">
+      <h1>Add this device</h1>
+      <p class="lead">This device joins your account through the Commonty app. Get it first if it isn't here yet.</p>
+      <p><a class="button" href="/_dd/download">Get the Commonty app</a></p>
+      <p class="lead" id="with-code" hidden>Then open it, choose <strong>Have a code?</strong> and enter:</p>
+      <p class="add-code" id="code" hidden></p>
+      <p class="note" id="without-code">Then open it, choose <strong>Have a code?</strong> and enter the code your other device shows.</p>
+    </section>
   </main>
-  <script type="module" src="/_dd/static/network.js"></script>
-  <script type="module" src="/_dd/static/shell.js"></script>
+  <script type="module" src="/_dd/static/add.js"></script>
 </body>
 </html>

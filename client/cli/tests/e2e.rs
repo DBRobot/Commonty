@@ -1752,7 +1752,7 @@ async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
         ("/_dd/boxes", 303),
         ("/_dd/settings", 200),
         ("/_dd/devices", 303),
-        ("/_dd/network", 200),
+        ("/_dd/network", 303),
         ("/_dd/friends", 200),
     ] {
         assert_eq!(get_with_cookie(&b, page, &tom_c).await.0, want, "{page}");
@@ -2332,4 +2332,214 @@ async fn sessions_are_listed_and_end_when_their_device_goes() {
         .await
         .unwrap();
     assert_eq!(list(mine).await.status().as_u16(), 401);
+}
+
+/// A Wi-Fi change is believed for the member's passkey signature over it,
+/// on every box, whoever hands it over: the right one reaches the box's
+/// folder; the same one again, an edited one, an old one, or one from a
+/// name that is not a member, does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wifi_change_counts_only_with_the_members_passkey() {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD as B64U};
+    use p256::ecdsa::signature::Signer as _;
+    use p256::pkcs8::DecodePrivateKey as _;
+    use sha2::Digest as _;
+
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../mail/tests/tester.json")).unwrap();
+    let members: serde_json::Value =
+        serde_json::from_str(fixture["members"].as_str().unwrap()).unwrap();
+    let id = members["members"][0].as_str().unwrap().to_string();
+    let key = p256::ecdsa::SigningKey::from_pkcs8_der(
+        &STANDARD.decode(fixture["pkcs8"].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+    let house = scratch("house");
+    // the folder the root unit would watch (VERIFY_HOUSE), read at start
+    unsafe { std::env::set_var("VERIFY_HOUSE", &house) };
+    let a = Box_::start(true, vec![], 300).await;
+    let (addr, _task) = gate_for(&a, id, "house-gate").await;
+    unsafe { std::env::remove_var("VERIFY_HOUSE") };
+    let http = reqwest::Client::new();
+    // the member's entry, published to this gate
+    let r = http
+        .put(format!("http://{addr}/_dd/directory/tester"))
+        .json(&fixture["v3"])
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "{}", r.text().await.unwrap());
+
+    let sign = |payload: &str| {
+        let mut h = sha2::Sha256::new();
+        h.update(b"commonty wifi v1\0");
+        h.update(payload.as_bytes());
+        let challenge = B64U.encode(h.finalize());
+        let mut auth = sha2::Sha256::digest(b"commonty.test").to_vec();
+        auth.extend_from_slice(&[5, 0, 0, 0, 1]);
+        let client = serde_json::json!({
+            "type": "webauthn.get",
+            "challenge": challenge,
+            "origin": "https://files.commonty.test",
+        })
+        .to_string();
+        let mut data = auth.clone();
+        data.extend_from_slice(&sha2::Sha256::digest(client.as_bytes()));
+        let sig: p256::ecdsa::Signature = key.sign(&data);
+        serde_json::json!({
+            "payload": payload,
+            "id": "cGsx",
+            "assertion": {
+                "authenticatorData": B64U.encode(&auth),
+                "clientDataJSON": B64U.encode(client.as_bytes()),
+                "signature": B64U.encode(sig.to_der().as_bytes()),
+            },
+        })
+    };
+    let change = |user: &str, at: u64, nonce: &str| {
+        serde_json::json!({ "user": user, "ssid": "House", "psk": "a-new-password", "at": at, "nonce": nonce })
+            .to_string()
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let relay = |body: serde_json::Value| {
+        let http = http.clone();
+        async move {
+            http.post(format!("http://{addr}/_dd/house/wifi/relay"))
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        }
+    };
+
+    let good = sign(&change("tester", now, "n1"));
+    assert_eq!(relay(good.clone()).await, 200);
+    let req: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(house.join("request")).unwrap()).unwrap();
+    assert_eq!(
+        (req["ssid"].as_str(), req["nonce"].as_str()),
+        (Some("House"), Some("n1"))
+    );
+    assert_eq!(relay(good).await, 403, "the same change twice");
+
+    let mut edited = sign(&change("tester", now, "n2"));
+    edited["payload"] = change("tester", now, "n2")
+        .replace("a-new-password", "someone-elses")
+        .into();
+    assert_eq!(relay(edited).await, 403, "an edited change");
+    assert_eq!(
+        relay(sign(&change("tester", now - 3600, "n3"))).await,
+        403,
+        "an old change"
+    );
+    assert_eq!(
+        relay(sign(&change("nobody", now, "n4"))).await,
+        403,
+        "not a member"
+    );
+}
+
+/// Adding a device by code: the signed-in device asks for a code, the new
+/// one offers its key against it and gets four digits, the first sees the
+/// same digits and the key; one offer per code, and a stranger's session
+/// sees nothing of it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_is_offered_by_code_and_seen_by_its_owner_alone() {
+    let a = Box_::start(true, vec![], 300).await;
+    let d = dirs([&a]);
+    let laptop = Device::new();
+    laptop.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    let id = laptop
+        .dd_ok(&args(&["identity", "show"], &d))
+        .lines()
+        .find_map(|l| l.strip_prefix("member id:"))
+        .unwrap()
+        .trim()
+        .to_string();
+    let (addr, _task) = gate_for(&a, id, "adding").await;
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let tom = app_signin(&http, addr, &laptop.token()).await;
+
+    let started: serde_json::Value = http
+        .post(format!("http://{addr}/_dd/add/start"))
+        .header("cookie", &tom)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let code = started["code"].as_str().unwrap().to_string();
+    assert!(
+        started["url"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("/add#{code}"))
+    );
+    let status = |c: String| {
+        let http = http.clone();
+        let code = code.clone();
+        async move {
+            let r = http
+                .get(format!("http://{addr}/_dd/add/status?code={code}"))
+                .header("cookie", c)
+                .send()
+                .await
+                .unwrap();
+            if r.status().is_success() {
+                r.json::<serde_json::Value>().await.unwrap()
+            } else {
+                serde_json::json!({ "status": r.status().as_u16() })
+            }
+        }
+    };
+    assert_eq!(status(tom.clone()).await["state"], "waiting");
+
+    // the new device, typed in lower case and without the dash
+    let phone = Device::new();
+    let typed = code.replace('-', " ").to_lowercase();
+    let r = http
+        .post(format!("http://{addr}/_dd/add/offer"))
+        .json(&serde_json::json!({ "code": typed, "public_key": phone.public_key() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 200);
+    let offered: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(offered["user"], "tom");
+    let digits = offered["digits"].as_str().unwrap().to_string();
+    assert_eq!(digits.len(), 4);
+
+    let s = status(tom.clone()).await;
+    assert_eq!(s["state"], "offered");
+    assert_eq!(s["offer"]["digits"], digits.as_str());
+    assert_eq!(s["offer"]["public_key"], phone.public_key().as_str());
+
+    // a second device cannot take the same code
+    let r = http
+        .post(format!("http://{addr}/_dd/add/offer"))
+        .json(&serde_json::json!({ "code": code, "public_key": Device::new().public_key() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 409);
+    // and nobody signed out sees any of it
+    assert_eq!(status("nobody=1".into()).await["status"], 401);
+
+    http.post(format!("http://{addr}/_dd/add/cancel"))
+        .header("cookie", &tom)
+        .json(&serde_json::json!({ "code": code }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(status(tom).await["state"], "gone");
 }

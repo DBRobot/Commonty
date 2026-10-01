@@ -973,3 +973,7 @@ main.home .guest-more p { margin: 0; max-width: 62ch; color: var(--ink-2); }
   main.friends .people li { grid-template-columns: 40px minmax(0, 1fr) auto; }
   main.friends .people li .kind { grid-column: 2; justify-self: start; }
 }
+
+/* the page a QR code from Settings > Devices opens (add.html) */
+.add-device { max-width: 440px; }
+.add-device .add-code { font-family: var(--mono); font-size: 34px; letter-spacing: .14em; font-weight: 600; margin: 8px 0 0; }

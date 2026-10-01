@@ -6,6 +6,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 let
@@ -42,6 +43,51 @@ in
   };
 
   config = {
+    # A member's Wi-Fi change from the Network tab: the gate leaves it in
+    # /run/dd-wifi, a root unit tries it and falls back (wifi-apply.sh), and
+    # the box's link is written out each minute for the tab (wifi-status.sh)
+    systemd.tmpfiles.rules = [ "d /run/dd-wifi 0770 root dd-verify -" ];
+    systemd.paths.dd-wifi-apply = lib.mkIf (cfg.wifi != null) {
+      wantedBy = [ "multi-user.target" ];
+      pathConfig.PathChanged = "/run/dd-wifi/request";
+    };
+    systemd.services.dd-wifi-apply = lib.mkIf (cfg.wifi != null) {
+      description = "Try a member's Wi-Fi change, falling back to the old details";
+      path = [
+        pkgs.networkmanager
+        pkgs.jq
+        pkgs.coreutils
+      ];
+      environment = {
+        IFACE = cfg.wifi;
+        DIR = "/run/dd-wifi";
+      };
+      serviceConfig.Type = "oneshot";
+      script = builtins.readFile ./wifi-apply.sh;
+      postStart = "systemctl start --no-block dd-wifi-status.service";
+    };
+    systemd.services.dd-wifi-status = lib.mkIf (cfg.wifi != null) {
+      description = "Write how this box is on the house network";
+      startAt = "minutely";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "NetworkManager.service" ];
+      path = [
+        pkgs.networkmanager
+        pkgs.jq
+        pkgs.coreutils
+        pkgs.gawk
+      ];
+      environment = {
+        IFACE = cfg.wifi;
+        DIR = "/run/dd-wifi";
+      };
+      serviceConfig.Type = "oneshot";
+      script = builtins.readFile ./wifi-status.sh;
+    };
+    # the gate writes the request and reads the status and result
+    systemd.services.dd-verify.serviceConfig.ReadWritePaths = [ "/run/dd-wifi" ];
+    systemd.services.dd-verify.environment.VERIFY_HOUSE = "/run/dd-wifi";
+
     networking.networkmanager.ensureProfiles = {
       environmentFiles = [ cfg.pskFile ];
       profiles =

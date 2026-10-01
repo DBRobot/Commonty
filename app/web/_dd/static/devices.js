@@ -4,10 +4,10 @@
 // names from a file only your library key opens, which the box keeps
 // without being able to read it.
 
-import init, { file_seal, file_open, entry_without, entry_signed } from '/_dd/web/dd_web.js';
+import init, { file_seal, file_open, entry_without, entry_signed, entry_with_device, qr_svg } from '/_dd/web/dd_web.js';
 import { unlock } from './library.js';
 import { requestOptions, assertion, post, b64u, u8b64 } from './webauthn.js';
-import { me } from './shell.js';
+import { me, inApp } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const ICON = {
@@ -124,8 +124,9 @@ function keyRow(k, n) {
   const actions = el('div', 'dv-actions');
   const rm = el('button', 'danger', 'Remove');
   rm.onclick = () => remove(k, names?.[k.key] || fallback);
-  // removing is signed by the account's main key: here, only a passkey one
-  if (!k.root && entry.entry.root.startsWith('webauthn:')) actions.append(rm);
+  // removing is signed by the account's main key: a passkey one here, a
+  // device one in the app on the device holding it
+  if (!k.root && (rootHere || entry.entry.root.startsWith('webauthn:'))) actions.append(rm);
   li.append(ico, text, actions);
   return li;
 }
@@ -235,9 +236,18 @@ function remove(k, label) {
   $('rm-h').textContent = `Remove ${label}?`;
   $('rm-msg').hidden = true;
   $('rm-yes').disabled = false;
+  $('rm-yes').textContent = rootHere ? 'Remove' : 'Remove with passkey';
   $('rm-yes').onclick = async () => {
     $('rm-yes').disabled = true;
     try {
+      if (rootHere) {
+        const r = await fetch('/_dd/app/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(k.passkey ? { passkey: k.passkey } : { fingerprint: k.fingerprint }) });
+        if (!r.ok) throw new Error(await r.text());
+        $('remove').close();
+        await load();
+        render();
+        return;
+      }
       await init();
       const e = entry.entry;
       const plan = JSON.parse(entry_without(JSON.stringify(entry), k.passkey ? undefined : k.fingerprint, k.passkey || undefined, BigInt(Math.floor(Date.now() / 1000))));
@@ -271,6 +281,113 @@ function remove(k, label) {
   $('remove').showModal();
 }
 
+// Adding a device by QR code (box/verify/src/adddevice.rs). The account's
+// main key approves: a passkey one here, or a device one in the app on the
+// device that holds it.
+let rootHere = false;
+let adding = null;
+
+async function canAdd() {
+  if (entry.entry.root.startsWith('webauthn:')) return true;
+  if (!inApp) return false;
+  const r = await fetch('/_dd/app/root').catch(() => null);
+  return !!(r && r.ok && (await r.json()).here && (rootHere = true));
+}
+
+function adPanel(which) {
+  for (const p of ['ad-show', 'ad-ask', 'ad-done']) $(p).hidden = p !== which;
+  $('ad-msg').hidden = true;
+}
+
+function adSay(text) {
+  $('ad-msg').textContent = text;
+  $('ad-msg').hidden = false;
+}
+
+async function addStart() {
+  await init();
+  const r = await fetch('/_dd/add/start', { method: 'POST' });
+  if (!r.ok) throw new Error(`the box said ${r.status}`);
+  adding = await r.json();
+  $('ad-qr').innerHTML = qr_svg(adding.url);
+  $('ad-code').textContent = adding.code;
+  $('ad-where').textContent = new URL(adding.url).host + '/add';
+  adPanel('ad-show');
+  $('add').showModal();
+  addWatch(adding.code);
+}
+
+async function addWatch(code) {
+  while (adding && adding.code === code && $('add').open) {
+    if (Date.now() / 1000 > adding.expires) {
+      adSay('That code ran out. Close this and make a new one.');
+      return;
+    }
+    const s = await fetch('/_dd/add/status?code=' + encodeURIComponent(code)).then((r) => r.json()).catch(() => null);
+    if (s?.state === 'offered') {
+      adding.offer = s.offer;
+      $('ad-what').textContent = `${s.offer.kind} wants to join`;
+      $('ad-digits').textContent = s.offer.digits;
+      $('ad-yes').textContent = rootHere ? 'Approve' : 'Approve with passkey';
+      adPanel('ad-ask');
+      return;
+    }
+    if (s?.state === 'gone') return adSay('That code ran out. Close this and make a new one.');
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+async function addCancel() {
+  if (adding) fetch('/_dd/add/cancel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: adding.code }) }).catch(() => {});
+  adding = null;
+  $('add').close();
+}
+
+async function addApprove() {
+  $('ad-yes').disabled = true;
+  try {
+    const pk = adding.offer.public_key;
+    if (rootHere) {
+      // the main key is on this device: the app signs it in
+      const r = await fetch('/_dd/app/admit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ public_key: pk }) });
+      if (!r.ok) throw new Error(await r.text());
+    } else {
+      // a passkey main key: the library is opened to seal its key to the
+      // device, then the new entry is signed with the passkey
+      if (!lib) {
+        const u = await unlock(who.user);
+        if (u.ok) lib = u.ok;
+      }
+      const plan = JSON.parse(entry_with_device(JSON.stringify(entry), pk, lib?.id, lib?.key, BigInt(Math.floor(Date.now() / 1000))));
+      const cfg = await (await fetch('/_dd/config')).json();
+      const a = await navigator.credentials.get({
+        publicKey: {
+          challenge: b64u(plan.challenge),
+          rpId: cfg.rpId,
+          allowCredentials: [{ type: 'public-key', id: b64u(entry.entry.root.split(':')[1]) }],
+          userVerification: 'preferred',
+        },
+      });
+      const signed = entry_signed(JSON.stringify(plan.entry), JSON.stringify({
+        authenticatorData: u8b64(a.response.authenticatorData),
+        clientDataJSON: u8b64(a.response.clientDataJSON),
+        signature: u8b64(a.response.signature),
+      }));
+      const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });
+      if (!r.ok) throw new Error(await r.text() || `the box said ${r.status}`);
+    }
+    fetch('/_dd/add/cancel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: adding.code }) }).catch(() => {});
+    adding = null;
+    adPanel('ad-done');
+    await load();
+    render();
+  } catch (e) {
+    adSay(e.name === 'NotAllowedError' ? 'Your passkey was not used. Nothing changed.' : String(e.message || e));
+  } finally {
+    $('ad-yes').disabled = false;
+  }
+}
+
 let started = false;
 
 /// the Devices tab, the first time it is shown
@@ -279,9 +396,18 @@ export async function start() {
   started = true;
   $('dv-show').onclick = openNames;
   $('dv-others').onclick = () => endSessions({ others: true }, $('dv-others'));
+  $('dv-add').onclick = () => addStart().catch((e) => { $('dv-msg').textContent = String(e.message || e); });
+  $('ad-cancel').onclick = addCancel;
+  $('ad-no').onclick = addCancel;
+  $('ad-yes').onclick = addApprove;
+  $('ad-close').onclick = () => $('add').close();
+  $('add').addEventListener('close', () => { adding = null; });
   try {
     await load();
     render();
+    $('dv-add').hidden = !(await canAdd());
+    // the main key may be here after all: Remove where it can be done
+    if (rootHere) render();
   } catch (e) {
     $('dv-msg').textContent = String(e.message || e);
   }

@@ -6,6 +6,7 @@
 //! of a browser's session; the library's key comes from this device's own
 //! keys instead of a passkey.
 
+use auth::KeyStore as _;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -30,8 +31,7 @@ fn page_for(path: &str) -> Option<&'static str> {
         "/_dd/files" => "files",
         "/_dd/media" => "media",
         "/_dd/boxes" => "boxes",
-        "/_dd/settings" | "/_dd/backups" | "/_dd/devices" => "settings",
-        "/_dd/network" => "network",
+        "/_dd/settings" | "/_dd/backups" | "/_dd/devices" | "/_dd/network" => "settings",
         _ => return None,
     })
 }
@@ -97,6 +97,19 @@ async fn serve<R: Runtime>(
     }
     if path == "/_dd/app/library" {
         return library(app).await;
+    }
+    // Settings > Devices in this window: whether the account's main key is
+    // here, and approving a device added by QR code with it
+    if path == "/_dd/app/root" {
+        let keys = app.state::<crate::account::Keys>();
+        let here = account::load_root(&keys.0).ok().flatten().is_some();
+        return Ok(json_response(&serde_json::json!({ "here": here })));
+    }
+    if path == "/_dd/app/admit" && req.method() == "POST" {
+        return admit(app, req.body()).await;
+    }
+    if path == "/_dd/app/remove" && req.method() == "POST" {
+        return remove(app, req.body()).await;
     }
     // Photos in this window (photos.rs): the page that signs the window in,
     // and what it asks
@@ -220,6 +233,72 @@ async fn proxy<R: Runtime>(
 /// The library a page opens: this device's own keys open the member's
 /// library, as the mount and the player do, and the key goes to the page
 /// that asked, which is one of the app's own.
+fn json_response(v: &serde_json::Value) -> Response<Vec<u8>> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(v.to_string().into_bytes())
+        .unwrap_or_default()
+}
+
+/// A device's key into the account, signed by the main key on this device:
+/// what a page in this window asks once both screens showed the same digits.
+async fn admit<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<Response<Vec<u8>>, String> {
+    let keys = app.state::<crate::account::Keys>();
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+    let pk = v["public_key"].as_str().ok_or("no key to add")?;
+    let Some(root) = account::load_root(&keys.0).map_err(|e| e.to_string())? else {
+        return Ok(plain(
+            StatusCode::FORBIDDEN,
+            "the account's main key is not on this device",
+        ));
+    };
+    let name = keys
+        .0
+        .get(crate::account::USER)
+        .map_err(|e| e.to_string())?
+        .ok_or("no name on this device")?;
+    account::admit(&crate::account::dirs(), &name, &root, pk)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(json_response(&serde_json::json!({ "ok": true })))
+}
+
+/// A device or a passkey out of the account, signed by the main key here.
+async fn remove<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<Response<Vec<u8>>, String> {
+    let keys = app.state::<crate::account::Keys>();
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+    let Some(root) = account::load_root(&keys.0).map_err(|e| e.to_string())? else {
+        return Ok(plain(
+            StatusCode::FORBIDDEN,
+            "the account's main key is not on this device",
+        ));
+    };
+    let name = keys
+        .0
+        .get(crate::account::USER)
+        .map_err(|e| e.to_string())?
+        .ok_or("no name on this device")?;
+    let dirs = crate::account::dirs();
+    // this device goes by signing out, not by removing itself
+    if let Some(fp) = v["fingerprint"].as_str()
+        && let Ok((kp, _)) = auth::device::load_or_create(&keys.0)
+        && identity::fingerprint(&auth::device::public_b64(&kp)) == fp
+    {
+        return Ok(plain(
+            StatusCode::BAD_REQUEST,
+            "not this device: sign out instead",
+        ));
+    }
+    let done = match (v["fingerprint"].as_str(), v["passkey"].as_str()) {
+        (Some(fp), _) => account::remove_device(&dirs, &name, &root, fp).await,
+        (_, Some(id)) => account::remove_passkey(&dirs, &name, &root, id).await,
+        _ => return Ok(plain(StatusCode::BAD_REQUEST, "remove what?")),
+    };
+    done.map_err(|e| format!("{e:#}"))?;
+    Ok(json_response(&serde_json::json!({ "ok": true })))
+}
+
 async fn library<R: Runtime>(app: &AppHandle<R>) -> Result<Response<Vec<u8>>, String> {
     use base64::Engine as _;
     let keys = app.state::<crate::account::Keys>();

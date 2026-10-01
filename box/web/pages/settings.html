@@ -28,6 +28,7 @@
     <nav class="se-nav" aria-label="Settings">
       <a href="#profile" data-tab="profile" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Profile</a>
       <a href="#devices" data-tab="devices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>Devices</a>
+      <a href="#network" data-tab="network"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>Network</a>
       <a href="#backups" data-tab="backups"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15h18"/><circle cx="17" cy="17" r=".9" fill="currentColor"/></svg>Backups</a>
     </nav>
 
@@ -63,9 +64,36 @@
         <footer><button class="danger" id="dv-others" hidden>Sign out everywhere else</button></footer>
       </section>
       <section class="se-box" aria-labelledby="keys">
-        <header><h2 id="keys">Devices with a key</h2><span class="bk-spacer"></span><button class="quiet" id="dv-show">Show names</button></header>
+        <header><h2 id="keys">Devices with a key</h2><span class="bk-spacer"></span><button class="quiet" id="dv-show">Show names</button><button id="dv-add" hidden>Add a device</button></header>
         <p class="se-hint" id="dv-hint">Names are kept locked; your passkey shows them.</p>
         <ul class="dv-list" id="dv-keys"></ul>
+      </section>
+    </div>
+
+    <div class="se-pane" data-pane="network" hidden>
+      <section class="se-box" aria-labelledby="nw-h">
+        <header><h2 id="nw-h">Your home's boxes</h2></header>
+        <ul class="dv-list" id="nw-boxes"></ul>
+      </section>
+      <section class="se-box" aria-labelledby="wifi-h">
+        <header><h2 id="wifi-h">Wi-Fi</h2><span class="bk-spacer"></span><button class="quiet" id="nw-change">Change Wi-Fi details</button></header>
+        <dl class="se-rows" id="nw-view">
+          <div class="se-row"><dt>Network</dt><dd id="nw-ssid">…</dd></div>
+          <div class="se-row"><dt>Password</dt><dd>•••••••••••</dd></div>
+        </dl>
+        <form class="nw-form" id="nw-form" hidden>
+          <p class="se-hint" style="padding:0">Changing your Wi-Fi password on the router? Put the new one in here first. A box on Wi-Fi can't hear about it once it's cut off.</p>
+          <label for="nw-new-ssid">Network name</label>
+          <input id="nw-new-ssid" autocomplete="off" spellcheck="false" maxlength="32" required>
+          <label for="nw-psk">Password</label>
+          <input id="nw-psk" type="password" autocomplete="new-password" minlength="8" maxlength="63" required>
+          <div class="row"><button id="nw-save">Save with passkey</button><button type="button" class="quiet" id="nw-cancel">Cancel</button></div>
+        </form>
+        <p class="nw-result" id="nw-result" role="status" hidden></p>
+      </section>
+      <section class="se-box" id="nw-ads-box" aria-labelledby="ads-h" hidden>
+        <header><h2 id="ads-h">Ad blocking at home</h2></header>
+        <div class="nw-switch"><div class="grow">Blocking ads and trackers<small id="nw-ads-state"></small></div><button class="switch" id="nw-ads" role="switch" aria-checked="false" aria-label="Ad blocking" disabled></button></div>
       </section>
     </div>
 
@@ -89,6 +117,29 @@
     <p>It is signed out everywhere and can't sign in again.</p>
     <p class="bad" id="rm-msg" hidden></p>
     <div class="row"><button class="quiet" id="rm-no">Close</button><button class="danger" id="rm-yes">Remove with passkey</button></div>
+  </dialog>
+  <dialog class="bk-dialog ad-dialog" id="add" aria-labelledby="ad-h">
+    <div class="ad-panel" id="ad-show">
+      <h3 id="ad-h">Add a device</h3>
+      <div class="ad-qr" id="ad-qr"></div>
+      <p>Point the new phone or computer's camera at this. It works for the next 10 minutes.</p>
+      <p>No camera? On the new device, open <span class="ad-code" id="ad-where"></span> or, in the Commonty app, choose <strong>Have a code?</strong> and type <span class="ad-code" id="ad-code"></span>.</p>
+      <div class="row"><button class="quiet" id="ad-cancel">Cancel</button></div>
+    </div>
+    <div class="ad-panel" id="ad-ask" hidden>
+      <h3 id="ad-what">A device wants to join</h3>
+      <p>Check the new device shows the same number:</p>
+      <div class="ad-digits" id="ad-digits"></div>
+      <p>Only approve it if this is your device, in your hand.</p>
+      <div class="row"><button class="quiet" id="ad-no">It isn't mine</button><button id="ad-yes">Approve</button></div>
+    </div>
+    <div class="ad-panel" id="ad-done" hidden>
+      <span class="ad-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m6 12.5 4 4 8-9"/></svg></span>
+      <h3>Added</h3>
+      <p>It's connecting to Commonty by itself. You can name it in the list.</p>
+      <div class="row"><button id="ad-close">Done</button></div>
+    </div>
+    <p class="bad" id="ad-msg" hidden></p>
   </dialog>
   <script type="module" src="/_dd/static/settings.js"></script>
   <script type="module" src="/_dd/static/shell.js"></script>

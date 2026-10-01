@@ -28,4 +28,3 @@ box/web/pages/settings.html       pages/settings.html
 box/fleet/web/devices.js          static/devices.js
 box/fleet/web/network.js          static/network.js
 box/fleet/web/pages/boxes.html    pages/boxes.html
-box/fleet/web/pages/network.html  pages/network.html

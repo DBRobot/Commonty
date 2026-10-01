@@ -38,6 +38,10 @@
       <p id="name-error" class="error" hidden></p>
       <div class="ways">
         <div class="way">
+          <span class="what">Your other device shows a code</span>
+          <p><button id="to-code" class="link">Have a code?</button></p>
+        </div>
+        <div class="way">
           <span class="what">Someone invited you</span>
           <p><button id="to-signup" class="link">Create an account with their code</button></p>
         </div>
@@ -83,9 +87,25 @@
       <button id="recovery-done">I wrote it down</button>
     </section>
 
+    <section id="page-code" class="page card" hidden>
+      <h1>Have a code?</h1>
+      <p class="lead">On a device already in your account, open Settings, then Devices, then Add a device. Enter the code it shows.</p>
+      <form id="code-form">
+        <label for="code">Code</label>
+        <input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="7KQ-4MZ">
+        <button type="submit">Continue</button>
+      </form>
+      <p id="code-error" class="error" hidden></p>
+      <button id="code-back" class="quiet">Back</button>
+    </section>
+
     <section id="page-admit" class="page card" hidden>
       <h1>Add this device</h1>
       <p class="lead">This device isn't in your account yet. Once it is added, it carries on from here by itself.</p>
+      <div id="admit-match" hidden>
+        <p class="lead">Check your other device shows the same number, then approve it there:</p>
+        <p class="digits" id="admit-digits"></p>
+      </div>
       <p class="small">Fingerprint <code id="admit-fp"></code>. The key never leaves this device.</p>
       <p id="admit-dirs" class="small"></p>
       <p class="small waiting">Checking again every few seconds…</p>
