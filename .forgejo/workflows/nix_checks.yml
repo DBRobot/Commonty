@@ -45,6 +45,21 @@ jobs:
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
+  # The mail Worker end to end: the files a release uploads, run by wrangler
+  # against a fake Cloudflare and driven by a browser (nix/tests/mail-worker).
+  # Beside the builds, not after them: seconds, and a cache hit when the
+  # Worker has not changed.
+  mail_worker:
+    if: ${{ inputs.run }}
+    needs: flake_check
+    runs-on: nix
+    steps:
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
+      - name: the mail Worker, in a browser
+        run: nix build --no-link -L .#checks.x86_64-linux.mail-worker
+      - uses: ./.forgejo/actions/stop-run
+        if: failure()
+
   # The programs every box and every vm test carry. Built once, after the
   # cheap checks pass, and uploaded to the bucket; the jobs below then
   # download them instead of each compiling the same rust workspace again

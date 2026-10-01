@@ -20,7 +20,8 @@ fn api() -> String {
 const TOKEN: &str = "cloudflare-workers";
 const SCRIPT: &str = "commonty-mail";
 const KV_TITLE: &str = "commonty-mail-pinned";
-const COMPATIBILITY: &str = "2026-09-01";
+// the same date the end-to-end check runs it at (nix/tests/mail-worker.nix)
+const COMPATIBILITY: &str = "2026-05-01";
 
 /// fleet/mail.json: where the Worker is. Nothing secret.
 #[derive(Serialize, Deserialize)]
