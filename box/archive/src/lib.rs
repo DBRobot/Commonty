@@ -22,7 +22,8 @@ use auth::KeyStore;
 use rustic_core::repofile::SnapshotFile;
 use rustic_core::{
     BackupOptions, ConfigOptions, Credentials, KeyOptions, LsOptions, PathList, ProgressBars,
-    RepairIndexOptions, Repository, RepositoryBackends, RepositoryOptions, SnapshotOptions,
+    PruneOptions, RepairIndexOptions, Repository, RepositoryBackends, RepositoryOptions,
+    SnapshotOptions,
 };
 use url::Url;
 use zeroize::Zeroizing;
@@ -139,6 +140,36 @@ impl<K: KeyStore + Send + Sync + 'static, P: ProgressBars + Clone> Archive<K, P>
         repo.repair_index(&RepairIndexOptions::default(), false)
             .context("repairing the index")?;
         Ok(())
+    }
+
+    /// Forget the archives whose ids start with these, and give their space
+    /// back: whatever no other archive shares is removed from the server.
+    /// A prefix that names no archive, or more than one, stops it before
+    /// anything is touched.
+    pub fn delete(&self, prefixes: &[String]) -> Result<Vec<Entry>> {
+        let repo = self.repo()?.open(&self.credentials())?;
+        let snaps = repo.get_all_snapshots()?;
+        let mut gone = Vec::new();
+        for p in prefixes {
+            let hits: Vec<_> = snaps
+                .iter()
+                .filter(|s| s.id.to_string().starts_with(p.as_str()))
+                .collect();
+            anyhow::ensure!(
+                hits.len() == 1,
+                "{p}: names {} archives, not one",
+                hits.len()
+            );
+            gone.push(hits[0]);
+        }
+        let ids: Vec<_> = gone.iter().map(|s| s.id).collect();
+        repo.delete_snapshots(&ids)
+            .context("forgetting the archives")?;
+        let opts = PruneOptions::default();
+        let plan = repo.prune_plan(&opts).context("planning what to remove")?;
+        repo.prune(&opts, plan)
+            .context("removing what nothing uses")?;
+        Ok(gone.into_iter().map(entry).collect())
     }
 
     pub fn list(&self) -> Result<Vec<Entry>> {

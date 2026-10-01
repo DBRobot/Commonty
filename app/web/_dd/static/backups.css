@@ -1,0 +1,42 @@
+/* Backups: the member's disk images, one row each */
+.bk { max-width: 980px; margin: 0 auto; padding: 22px 16px 48px; display: grid; gap: 18px; }
+.bk, .bk-dialog { --bk-bad: #9B2C2C; --bk-sunk: #F5F7F9; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) :is(.bk, .bk-dialog) { --bk-bad: #F08A8A; --bk-sunk: #13171C; } }
+:root[data-theme="dark"] :is(.bk, .bk-dialog) { --bk-bad: #F08A8A; --bk-sunk: #13171C; }
+.bk h1 { margin: 0; }
+.bk-lead { margin: 4px 0 0; color: var(--ink-2); max-width: 62ch; }
+.bk-box { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
+.bk-box > header { display: flex; align-items: baseline; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line-2); flex-wrap: wrap; }
+.bk-box > header h2 { margin: 0; font-size: 15px; }
+.bk-spacer { flex: 1; }
+.bk-muted { color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.bk-note { margin: 0; padding: 16px; color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.bk-note code { font-family: var(--mono); font-size: 13px; background: var(--bk-sunk); padding: 1px 6px; border-radius: 3px; color: var(--ink); }
+.bk-note button { margin: 12px 0 0; height: 38px; padding: 0 14px; font-size: 14px; }
+.bk-list { list-style: none; margin: 0; padding: 0; }
+.bk-item { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line-2); }
+.bk-item:last-child { border-bottom: 0; }
+.bk-icon { width: 40px; height: 40px; border-radius: 6px; background: var(--bk-sunk); display: grid; place-items: center; color: var(--ink-2); }
+.bk-icon svg { width: 22px; height: 22px; }
+.bk-name { font-weight: 600; font-size: 16px; overflow-wrap: anywhere; }
+.bk-meta { color: var(--ink-2); font-size: 13px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.bk-meta.bad { color: var(--bk-bad); }
+.bk-actions { display: flex; gap: 8px; }
+.bk-actions button { margin: 0; height: 38px; padding: 0 14px; font-size: 14px; }
+.bk-actions .danger { background: transparent; color: var(--bk-bad); border: 1px solid color-mix(in srgb, var(--bk-bad) 40%, transparent); }
+.bk-ring { position: relative; background: none; }
+.bk-ring svg { position: absolute; inset: 0; width: 40px; height: 40px; transform: rotate(-90deg); }
+.bk-ring circle { fill: none; stroke-width: 3; }
+.bk-ring .track { stroke: var(--line-2); }
+.bk-ring .fill { stroke: var(--accent); stroke-linecap: round; transition: stroke-dasharray .4s; }
+.bk-ring b { position: relative; font-size: 10.5px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+dialog.bk-dialog { width: min(460px, calc(100% - 32px)); background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.12); }
+dialog.bk-dialog[open] { display: grid; gap: 10px; }
+dialog.bk-dialog::backdrop { background: rgba(0,0,0,.35); }
+.bk-dialog h3 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.bk-dialog p { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.bk-dialog p.bad { color: var(--bk-bad); }
+.bk-dialog .row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+.bk-dialog button { margin: 0; height: 40px; }
+.bk-dialog .danger { background: var(--bk-bad); border-color: var(--bk-bad); color: var(--surface); }
+@media (max-width: 600px) { .bk-item { grid-template-columns: 40px minmax(0, 1fr); } .bk-actions { grid-column: 1 / -1; } .bk-actions button { flex: 1; } }

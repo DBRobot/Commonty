@@ -404,6 +404,17 @@ enum ImageCmd {
     },
     /// Every archive in your repository.
     List,
+    /// Let your passkey open your archives in a browser (the Backups page):
+    /// the archive password, sealed to each passkey in your entry, beside
+    /// the archives. `push` does it too.
+    Passkey,
+    /// Delete archives, by id prefix (from `list`), and give their space
+    /// back. Asks first unless --yes.
+    Delete {
+        ids: Vec<String>,
+        #[arg(long)]
+        yes: bool,
+    },
     /// Rebuild the index from what is on the server. After an interrupted
     /// push, this lets the rerun skip everything already uploaded.
     Repair,
@@ -414,6 +425,162 @@ enum ImageCmd {
         #[arg(long, default_value = "latest")]
         snapshot: String,
     },
+}
+
+/// The archive password, sealed to every passkey in this person's entry and
+/// put beside the archives as dd-passkeys.json: a browser holding one of
+/// those passkeys opens it the way it opens a library (client/web), and
+/// nothing on the server can. Returns how many passkeys it was sealed to.
+fn seal_for_passkeys(keys: &impl auth::KeyStore, repo: &str, password: &str) -> Result<usize> {
+    use base64::Engine as _;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(password)
+        .context("the archive password is not the derived kind")?;
+    let user = keys.get(USER)?.context("no name on this machine")?;
+    let kp = auth::device::load(keys)?.context("no device key here - `dd device show`")?;
+    let token = auth::device::mint(&kp, user.as_str(), std::time::Duration::from_secs(600))?;
+    let base = url::Url::parse(repo)?;
+    let host = base
+        .host_str()
+        .context("no host in the repository's address")?;
+    let domain = host.split_once('.').map(|(_, d)| d).unwrap_or(host);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async {
+        let http = reqwest::Client::new();
+        let entry: serde_json::Value = http
+            .get(format!(
+                "https://home.{domain}/_dd/directory/{}",
+                user.as_str()
+            ))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let mut sealed = serde_json::Map::new();
+        for p in entry["entry"]["passkeys"].as_array().into_iter().flatten() {
+            if let (Some(id), Some(k)) = (p["id"].as_str(), p["library_key"].as_str()) {
+                sealed.insert(
+                    id.to_string(),
+                    serde_json::Value::String(library::seal_to(k, &raw)?),
+                );
+            }
+        }
+        anyhow::ensure!(
+            !sealed.is_empty(),
+            "no passkey in your entry can open things in a browser yet: `dd enrol` one"
+        );
+        http.put(base.join("dd-passkeys.json")?)
+            .bearer_auth(&token)
+            .json(&serde_json::Value::Object(sealed.clone()))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(sealed.len())
+    })
+}
+
+/// Archives are written without locks (rustic keeps none), and the Backups
+/// page deletes packs straight away. So each says it is at work with a
+/// file beside the archives, `{"until": <unix secs>}` kept five minutes
+/// ahead while it runs, and neither starts while the other's is current.
+struct Busy {
+    stop: std::sync::mpsc::Sender<()>,
+    beat: Option<std::thread::JoinHandle<()>>,
+}
+
+fn busy_put(http: &reqwest::Client, url: &url::Url, token: &str) -> reqwest::RequestBuilder {
+    let until = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        + 300;
+    http.put(url.clone())
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "until": until }))
+}
+
+async fn busy_current(http: &reqwest::Client, url: url::Url, token: &str) -> Result<bool> {
+    let r = http.get(url).bearer_auth(token).send().await?;
+    if r.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    let v: serde_json::Value = r.error_for_status()?.json().await?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    Ok(v["until"].as_u64().is_some_and(|u| u > now))
+}
+
+impl Busy {
+    fn start(keys: &impl auth::KeyStore, repo: &str) -> Result<Busy> {
+        let user = keys.get(USER)?.context("no name on this machine")?;
+        let kp = auth::device::load(keys)?.context("no device key here - `dd device show`")?;
+        let base = url::Url::parse(&format!("{}/", repo.trim_end_matches('/')))?;
+        let mine = base.join("dd-pushing")?;
+        let theirs = base.join("dd-deleting")?;
+        let token =
+            move || auth::device::mint(&kp, user.as_str(), std::time::Duration::from_secs(600));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let http = reqwest::Client::new();
+        let t = token()?;
+        rt.block_on(async {
+            anyhow::ensure!(
+                !busy_current(&http, theirs.clone(), &t).await?,
+                "the Backups page is deleting an image here; push again when it is done"
+            );
+            busy_put(&http, &mine, &t)
+                .send()
+                .await?
+                .error_for_status()?;
+            // both may have looked at once: the second to look backs off
+            if busy_current(&http, theirs, &t).await? {
+                let _ = http.delete(mine.clone()).bearer_auth(&t).send().await;
+                anyhow::bail!(
+                    "the Backups page is deleting an image here; push again when it is done"
+                );
+            }
+            Ok(())
+        })?;
+        let (stop, rx) = std::sync::mpsc::channel::<()>();
+        let beat = std::thread::spawn(move || {
+            loop {
+                let done = !matches!(
+                    rx.recv_timeout(std::time::Duration::from_secs(60)),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                );
+                let Ok(t) = token() else { continue };
+                rt.block_on(async {
+                    let _ = if done {
+                        http.delete(mine.clone()).bearer_auth(&t).send().await
+                    } else {
+                        busy_put(&http, &mine, &t).send().await
+                    };
+                });
+                if done {
+                    break;
+                }
+            }
+        });
+        Ok(Busy {
+            stop,
+            beat: Some(beat),
+        })
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+        if let Some(b) = self.beat.take() {
+            let _ = b.join();
+        }
+    }
 }
 
 fn image(cmd: ImageCmd, repo: String) -> Result<()> {
@@ -429,7 +596,7 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
     )?;
 
     let tokens = std::sync::Arc::new(TokenProvider::new(auth::open(&service())));
-    let archive = Archive::new(url::Url::parse(&repo)?, tokens, password, Stderr)?;
+    let archive = Archive::new(url::Url::parse(&repo)?, tokens, password.clone(), Stderr)?;
 
     match cmd {
         ImageCmd::Init { .. } => {
@@ -442,15 +609,51 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
             } else {
                 Source::File(std::path::PathBuf::from(source))
             };
+            let busy = Busy::start(&keys, &repo)?;
             let e = archive.push(src, &name)?;
+            drop(busy);
             println!(
                 "archived {} as {}  ({} bytes)  snapshot {}",
                 name, e.name, e.bytes, e.id
             );
+            // so the Backups page opens it too; not a reason to fail the push
+            if let Err(err) = seal_for_passkeys(&keys, &repo, &password) {
+                eprintln!(
+                    "(the Backups page will not open this until `dd image passkey`: {err:#})"
+                );
+            }
         }
         ImageCmd::Repair => {
             archive.repair()?;
             println!("index rebuilt - rerun the push, it will skip what is already there");
+        }
+        ImageCmd::Passkey => {
+            let n = seal_for_passkeys(&keys, &repo, &password)?;
+            println!("your archives open with {n} passkey(s) on the Backups page");
+        }
+        ImageCmd::Delete { ids, yes } => {
+            anyhow::ensure!(!ids.is_empty(), "which archives? ids from `dd image list`");
+            let all = archive.list()?;
+            for p in &ids {
+                for e in all.iter().filter(|e| e.id.starts_with(p.as_str())) {
+                    println!(
+                        "{:<10} {:<28} {:>14}  {}",
+                        &e.id[..8.min(e.id.len())],
+                        e.name,
+                        e.bytes,
+                        e.time
+                    );
+                }
+            }
+            if !yes {
+                eprint!("delete these for good? type yes: ");
+                let mut answer = String::new();
+                std::io::stdin().read_line(&mut answer)?;
+                anyhow::ensure!(answer.trim() == "yes", "nothing deleted");
+            }
+            for e in archive.delete(&ids)? {
+                println!("deleted {} ({})", e.name, &e.id[..8.min(e.id.len())]);
+            }
         }
         ImageCmd::List => {
             let entries = archive.list()?;
