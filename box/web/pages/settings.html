@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Email</title>
+  <title>Settings</title>
   <link rel="stylesheet" href="/_dd/static/home.css">
   <link rel="stylesheet" href="/_dd/static/storage.css">
 </head>
@@ -23,34 +23,30 @@
     </div>
   </header>
   <main class="st">
-    <h1>Email</h1>
+    <h1>Settings</h1>
 
-    <section class="st-box" aria-labelledby="where">
-      <header><h2 id="where">Where your mail goes</h2></header>
+    <section class="st-box" aria-labelledby="mail">
+      <header><h2 id="mail">Email</h2></header>
       <div class="st-rules">
-        <p>Commonty writes to you at <strong id="address">your address here</strong>: an invitation to a shared vault, a new device signing in to Passwords. It reaches you at the address you gave when you signed up. Change it here.</p>
         <p class="st-state" id="state">Checking…</p>
         <p><button class="quiet" id="again" type="button" hidden>Send the confirmation again</button></p>
-        <form class="em-form" id="form">
-          <label for="email">A new address</label>
+
+        <div id="changer">
+          <button id="change" type="button">Change email</button>
+        </div>
+
+        <form class="em-form" id="form" hidden>
+          <label for="email">New email address</label>
           <div class="em-row">
             <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
             <button id="save" type="submit">Save</button>
           </div>
-          <p class="st-muted" id="said" role="status"></p>
         </form>
-      </div>
-    </section>
-
-    <section class="st-box" aria-labelledby="kept">
-      <header><h2 id="kept">Where it is kept</h2></header>
-      <div class="st-rules">
-        <p><strong>Not on Commonty’s boxes.</strong> Your address is handed to Cloudflare, which forwards your mail, and nothing on the boxes keeps a copy. This page can say whether forwarding is set up, not where it goes.</p>
-        <p>The first time you give an address, Cloudflare sends it a message with a link to confirm it. Mail is forwarded once you have clicked it.</p>
+        <p class="st-muted" id="msg" role="status"></p>
       </div>
     </section>
   </main>
-  <script type="module" src="/_dd/static/email.js"></script>
+  <script type="module" src="/_dd/static/settings.js"></script>
   <script type="module" src="/_dd/static/shell.js"></script>
 </body>
 </html>

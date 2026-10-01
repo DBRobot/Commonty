@@ -257,8 +257,8 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
-        "email.js",
-        "box/web/email.js",
+        "settings.js",
+        "box/web/settings.js",
         "text/javascript; charset=utf-8",
     ),
     (
@@ -433,8 +433,8 @@ const PAGES: &[(&str, &str)] = &[
     ("demo-photos", "box/photos/web/pages/demo-photos.html"),
     // one allowance across every service (storage.rs)
     ("storage", "box/web/pages/storage.html"),
-    // where a member's mail goes, kept at Cloudflare (mail_forward.rs)
-    ("email", "box/web/pages/email.html"),
+    // the member's own settings: where their mail goes (mail_forward.rs)
+    ("settings", "box/web/pages/settings.html"),
     // not signed in: whoever has a Send's link (modules/vault)
     ("send", "box/vault/web/pages/send.html"),
 ];
@@ -546,7 +546,6 @@ impl Menu {
             // them here would be the same door twice
             let mut fleet = vec![
                 item("Storage", "/_dd/storage"),
-                item("Email", "/_dd/email"),
                 item("Backups", "/_dd/backups"),
                 item("Devices", "/_dd/devices"),
                 item("Network", "/_dd/network"),
@@ -559,7 +558,14 @@ impl Menu {
             // devices, no backups and no boxes of its own
             groups.push(vec![m]);
         }
-        groups.push(vec![item("Sign out", "/_dd/logout")]);
+        if demo {
+            groups.push(vec![item("Sign out", "/_dd/logout")]);
+        } else {
+            groups.push(vec![
+                item("Settings", "/_dd/settings"),
+                item("Sign out", "/_dd/logout"),
+            ]);
+        }
         Menu { groups }
     }
 }

@@ -2111,3 +2111,79 @@ async fn a_demo_door_lets_in_the_demo_alone() {
         (303, Some("https://home.localhost/_dd/demo".into()))
     );
 }
+
+/// Where a member's mail goes is changed only just after their passkey: a
+/// session that came from somewhere else - a device token, a stolen cookie -
+/// is told to confirm with the passkey first.
+#[tokio::test(flavor = "multi_thread")]
+async fn changing_where_mail_goes_wants_the_passkey_just_now() {
+    let a = Box_::start(true, vec![], 300).await;
+    let d = dirs([&a]);
+    let dev = Device::new();
+    dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    let id = dev
+        .dd_ok(&args(&["identity", "show"], &d))
+        .lines()
+        .find_map(|l| l.strip_prefix("member id:"))
+        .unwrap()
+        .trim()
+        .to_string();
+    let (addr, _task) = verify::start(verify::Config {
+        home: vec![],
+        members: Some(verify::Members::list(vec![id])),
+        release_pub: None,
+        web_dir: None,
+        photos: None,
+        library: None,
+        fleet: Default::default(),
+        thanos: None,
+        adblock: None,
+        forge_events: None,
+        storage_ledger: None,
+        mail_forward: Some("/nonexistent/socket".into()),
+        demo_library: None,
+        tmdb: None,
+        search: None,
+        oidc: None,
+        app_manifest: None,
+        network: None,
+        bind: "127.0.0.1:0".parse().unwrap(),
+        dir: scratch("mailfresh").join("keys"),
+        peers: vec![a.directory()],
+        sync_secs: 1,
+        domain: Some("localhost".to_string()),
+    })
+    .await
+    .unwrap();
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let token = dev.token();
+    let mut cookie = None;
+    for _ in 0..50 {
+        let r = http
+            .post(format!("http://{addr}/_dd/app/signin"))
+            .form(&[("token", token.as_str())])
+            .send()
+            .await
+            .unwrap();
+        cookie = r
+            .headers()
+            .get("set-cookie")
+            .map(|c| c.to_str().unwrap().split(';').next().unwrap().to_string());
+        if cookie.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let r = http
+        .post(format!("http://{addr}/_dd/email"))
+        .header("cookie", cookie.expect("tom signs in"))
+        .json(&serde_json::json!({ "email": "tom@example.com" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 403);
+    assert!(r.text().await.unwrap().contains("passkey"));
+}

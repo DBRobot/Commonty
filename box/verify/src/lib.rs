@@ -86,6 +86,9 @@ struct App {
     storage: storage::Ledger,
     /// the socket of the service that forwards members' mail (mail_forward.rs)
     mail_forward: Option<String>,
+    /// who has just shown their passkey, and until when: what changes where
+    /// their mail goes asks for that, not only a session (mail_forward.rs)
+    fresh: Mutex<HashMap<String, u64>>,
     /// the demo's Photos, read through the gate (demo_photos.rs)
     demo_photos: Arc<demo_photos::DemoPhotos>,
     /// who is friends with whom, and who came in as a guest (friends.rs)
@@ -431,6 +434,23 @@ impl App {
                 true
             }
         }
+    }
+
+    /// they showed their passkey just now: for five minutes, what asks for
+    /// that may go ahead
+    fn saw_passkey(&self, user: &str) {
+        let now = session::now();
+        let mut f = self.fresh.lock().unwrap();
+        f.retain(|_, until| *until > now);
+        f.insert(user.to_string(), now + 300);
+    }
+
+    fn passkey_fresh(&self, user: &str) -> bool {
+        self.fresh
+            .lock()
+            .unwrap()
+            .get(user)
+            .is_some_and(|until| *until > session::now())
     }
 
     fn member(&self, user: &str) -> bool {
@@ -1125,6 +1145,8 @@ async fn join_sign(
     } else if let Err((status, why)) = app.directory.hold(&signed) {
         return (status, why).into_response();
     }
+    // the entry was just signed with the passkey made a moment ago
+    app.saw_passkey(&user);
     let mut r = Json(serde_json::json!({ "user": user })).into_response();
     r.headers_mut().insert(
         "set-cookie",
@@ -1187,6 +1209,7 @@ async fn login_finish(
     if let Err(e) = app.webauthn.finish_passkey_authentication(&cred, &state) {
         return (StatusCode::UNAUTHORIZED, format!("refused: {e}")).into_response();
     }
+    app.saw_passkey(&user);
     let mut r = StatusCode::OK.into_response();
     r.headers_mut().insert(
         "set-cookie",
@@ -1833,6 +1856,7 @@ pub async fn start(
         demo_photos: Default::default(),
         storage: storage::Ledger::new(cfg.storage_ledger.clone()),
         mail_forward: cfg.mail_forward.clone(),
+        fresh: Mutex::new(HashMap::new()),
         friends: friends::Store::open(&state_dir)?,
     });
     // A held sign-up follows through when the member list names it: then it
@@ -1958,10 +1982,8 @@ pub async fn start(
         .route("/_dd/network/mine", get(network_mine))
         .route("/_dd/photos", get(photos::page))
         .route("/_dd/photos/config", post(photos::config))
-        .route(
-            "/_dd/email",
-            get(mail_forward::page).post(mail_forward::set),
-        )
+        .route("/_dd/settings", get(mail_forward::page))
+        .route("/_dd/email", post(mail_forward::set))
         .route("/_dd/email/state", get(mail_forward::state))
         .route("/_dd/email/resend", post(mail_forward::resend))
         .route("/_dd/storage", get(storage::page))

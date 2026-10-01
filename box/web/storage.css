@@ -38,3 +38,5 @@
 .em-form label { font-weight: 600; font-size: 14px; }
 .em-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .em-row input { flex: 1 1 240px; min-width: 0; }
+/* the site's buttons stand off what is above them; here they sit in line */
+.st-rules button { margin-top: 0; }
