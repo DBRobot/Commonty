@@ -1892,8 +1892,20 @@ pub async fn start(
     // a box with nothing else on it: no domain, no sessions, no secrets. It
     // serves entries and accepts the ones that verify, and that is all.
     let Some(domain) = cfg.domain else {
+        let house = Arc::new(home::DirHouse {
+            home: home::Home::new(
+                std::env::var("VERIFY_HOUSE")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .map(PathBuf::from),
+                &[],
+            ),
+            directory: directory.clone(),
+            members: cfg.members.clone(),
+        });
         let router = Router::new()
             .route("/health", get(|| async { "ok" }))
+            .merge(home::dir_router(house))
             .merge(directory::router(directory));
         eprintln!("directory listening on {addr}");
         let task =
