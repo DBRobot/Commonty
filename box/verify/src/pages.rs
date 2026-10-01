@@ -802,8 +802,9 @@ mod tests {
             assert_eq!(page.matches("</header>").count(), 1);
             assert!(page.contains("/_dd/static/home.css"));
         }
-        assert!(login("commonty.org").contains("dd enrol"));
-        assert!(enrol().contains("dd enrol"));
+        // nobody signing in is told to use a command line
+        assert!(!login("commonty.org").contains("dd enrol"));
+        assert!(!enrol().contains("dd enrol"));
         assert!(login("commonty.org").contains("/_dd/static/login.js"));
         assert!(login("commonty.org").contains("href=\"/_dd/join\""));
         // somebody signing in on a phone needs the app before any of this

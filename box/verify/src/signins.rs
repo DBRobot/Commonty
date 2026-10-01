@@ -191,9 +191,11 @@ pub fn kind(agent: &str) -> String {
     } else {
         ""
     };
-    let what = if a.starts_with("dd/") {
-        "dd"
-    } else if a.contains("commonty") || a.contains("tauri") {
+    // the command line names itself dd/…: to a person it is their computer
+    if a.starts_with("dd/") {
+        return if os.is_empty() { "A computer".into() } else { format!("{os} computer") };
+    }
+    let what = if a.contains("commonty") || a.contains("tauri") {
         "Commonty app"
     } else if a.contains("edg/") {
         "Edge"
@@ -228,7 +230,7 @@ mod tests {
         assert_eq!(kind(fx), "Firefox on Windows");
         let safari = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
         assert_eq!(kind(safari), "Safari on iOS");
-        assert_eq!(kind("dd/0.1.0 (linux)"), "dd on Linux");
+        assert_eq!(kind("dd/0.1.0 (linux)"), "Linux computer");
         assert_eq!(kind(""), "Something unrecognised");
     }
 

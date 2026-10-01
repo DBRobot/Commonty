@@ -10,7 +10,7 @@ export async function passkeySecret(user, cfg) {
   const e = await fetch('/_dd/directory/' + encodeURIComponent(user));
   if (!e.ok) throw new Error('no entry');
   const allow = ((await e.json()).entry.passkeys || []).map(p => ({ type: 'public-key', id: b64u(p.id) }));
-  if (!allow.length) throw new Error('this account has no passkey in a browser yet: dd enrol adds one');
+  if (!allow.length) throw new Error('this account has no passkey in a browser yet');
 
   const salt = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('dd-photos')));
   const a = await navigator.credentials.get({
