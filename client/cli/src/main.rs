@@ -404,6 +404,10 @@ enum ImageCmd {
     },
     /// Every archive in your repository.
     List,
+    /// Let your passkey open your archives in a browser (the Backups page):
+    /// the archive password, sealed to each passkey in your entry, beside
+    /// the archives. `push` does it too.
+    Passkey,
     /// Delete archives, by id prefix (from `list`), and give their space
     /// back. Asks first unless --yes.
     Delete {
@@ -423,6 +427,61 @@ enum ImageCmd {
     },
 }
 
+/// The archive password, sealed to every passkey in this person's entry and
+/// put beside the archives as dd-passkeys.json: a browser holding one of
+/// those passkeys opens it the way it opens a library (client/web), and
+/// nothing on the server can. Returns how many passkeys it was sealed to.
+fn seal_for_passkeys(keys: &impl auth::KeyStore, repo: &str, password: &str) -> Result<usize> {
+    use base64::Engine as _;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(password)
+        .context("the archive password is not the derived kind")?;
+    let user = keys.get(USER)?.context("no name on this machine")?;
+    let kp = auth::device::load(keys)?.context("no device key here - `dd device show`")?;
+    let token = auth::device::mint(&kp, user.as_str(), std::time::Duration::from_secs(600))?;
+    let base = url::Url::parse(repo)?;
+    let host = base
+        .host_str()
+        .context("no host in the repository's address")?;
+    let domain = host.split_once('.').map(|(_, d)| d).unwrap_or(host);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async {
+        let http = reqwest::Client::new();
+        let entry: serde_json::Value = http
+            .get(format!(
+                "https://home.{domain}/_dd/directory/{}",
+                user.as_str()
+            ))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let mut sealed = serde_json::Map::new();
+        for p in entry["entry"]["passkeys"].as_array().into_iter().flatten() {
+            if let (Some(id), Some(k)) = (p["id"].as_str(), p["library_key"].as_str()) {
+                sealed.insert(
+                    id.to_string(),
+                    serde_json::Value::String(library::seal_to(k, &raw)?),
+                );
+            }
+        }
+        anyhow::ensure!(
+            !sealed.is_empty(),
+            "no passkey in your entry can open things in a browser yet: `dd enrol` one"
+        );
+        http.put(base.join("dd-passkeys.json")?)
+            .bearer_auth(&token)
+            .json(&serde_json::Value::Object(sealed.clone()))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(sealed.len())
+    })
+}
+
 fn image(cmd: ImageCmd, repo: String) -> Result<()> {
     use archive::{Archive, Source, Stderr, TokenProvider};
     let keys = auth::open(&service());
@@ -436,7 +495,7 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
     )?;
 
     let tokens = std::sync::Arc::new(TokenProvider::new(auth::open(&service())));
-    let archive = Archive::new(url::Url::parse(&repo)?, tokens, password, Stderr)?;
+    let archive = Archive::new(url::Url::parse(&repo)?, tokens, password.clone(), Stderr)?;
 
     match cmd {
         ImageCmd::Init { .. } => {
@@ -454,10 +513,20 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
                 "archived {} as {}  ({} bytes)  snapshot {}",
                 name, e.name, e.bytes, e.id
             );
+            // so the Backups page opens it too; not a reason to fail the push
+            if let Err(err) = seal_for_passkeys(&keys, &repo, &password) {
+                eprintln!(
+                    "(the Backups page will not open this until `dd image passkey`: {err:#})"
+                );
+            }
         }
         ImageCmd::Repair => {
             archive.repair()?;
             println!("index rebuilt - rerun the push, it will skip what is already there");
+        }
+        ImageCmd::Passkey => {
+            let n = seal_for_passkeys(&keys, &repo, &password)?;
+            println!("your archives open with {n} passkey(s) on the Backups page");
         }
         ImageCmd::Delete { ids, yes } => {
             anyhow::ensure!(!ids.is_empty(), "which archives? ids from `dd image list`");
