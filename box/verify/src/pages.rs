@@ -272,6 +272,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/css; charset=utf-8",
     ),
     (
+        "settings.css",
+        "box/web/settings.css",
+        "text/css; charset=utf-8",
+    ),
+    (
         "demo-photos.js",
         "box/photos/web/demo-photos.js",
         "text/javascript; charset=utf-8",
@@ -425,7 +430,6 @@ const PAGES: &[(&str, &str)] = &[
     ("files", "box/files/web/pages/files.html"),
     ("media", "box/media/web/pages/media.html"),
     ("boxes", "box/fleet/web/pages/boxes.html"),
-    ("backups", "box/fleet/web/pages/backups.html"),
     ("devices", "box/fleet/web/pages/devices.html"),
     ("network", "box/fleet/web/pages/network.html"),
     ("friends", "box/web/pages/friends.html"),
@@ -438,7 +442,8 @@ const PAGES: &[(&str, &str)] = &[
     ("demo-photos", "box/photos/web/pages/demo-photos.html"),
     // one allowance across every service (storage.rs)
     ("storage", "box/web/pages/storage.html"),
-    // the member's own settings: where their mail goes (mail_forward.rs)
+    // the member's own: their account, their email (the mail Worker,
+    // client/mail, in a frame) and their disk images
     ("settings", "box/web/pages/settings.html"),
     // not signed in: whoever has a Send's link (modules/vault)
     ("send", "box/vault/web/pages/send.html"),
@@ -551,7 +556,6 @@ impl Menu {
             // them here would be the same door twice
             let mut fleet = vec![
                 item("Storage", "/_dd/storage"),
-                item("Backups", "/_dd/backups"),
                 item("Devices", "/_dd/devices"),
                 item("Network", "/_dd/network"),
                 item("Boxes", "/_dd/boxes"),
@@ -936,7 +940,7 @@ mod tests {
     fn the_menu_offers_a_member_their_own_pages_and_the_demo_none_of_them() {
         let svcs = [svc("Metrics", "metrics"), svc("Chat", "chat")];
         let menu = menu_urls(&me("tom", &svcs));
-        for page in ["/_dd/backups", "/_dd/devices", "/_dd/network", "/_dd/boxes"] {
+        for page in ["/_dd/settings", "/_dd/devices", "/_dd/network", "/_dd/boxes"] {
             assert!(
                 menu.iter().any(|u| u == page),
                 "member's menu is missing {page}"
@@ -951,7 +955,7 @@ mod tests {
         // the demo opens the library the box keeps for it, and nothing
         // that belongs to an account with devices and boxes of its own
         let menu = menu_urls(&me(DEMO_USER, &svcs));
-        for page in ["/_dd/backups", "/_dd/devices", "/_dd/network", "/_dd/boxes"] {
+        for page in ["/_dd/settings", "/_dd/devices", "/_dd/network", "/_dd/boxes"] {
             assert!(
                 !menu.iter().any(|u| u == page),
                 "the demo was offered {page}"

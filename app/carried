@@ -22,9 +22,11 @@ box/fleet/web/panel.js            static/panel.js
 box/fleet/web/boxes.js            static/boxes.js
 box/fleet/web/backups.js          static/backups.js
 box/fleet/web/backups.css         static/backups.css
+box/web/settings.js               static/settings.js
+box/web/settings.css              static/settings.css
+box/web/pages/settings.html       pages/settings.html
 box/fleet/web/devices.js          static/devices.js
 box/fleet/web/network.js          static/network.js
 box/fleet/web/pages/boxes.html    pages/boxes.html
-box/fleet/web/pages/backups.html  pages/backups.html
 box/fleet/web/pages/devices.html  pages/devices.html
 box/fleet/web/pages/network.html  pages/network.html

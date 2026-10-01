@@ -8,7 +8,7 @@ const name = q.get('name') || '';
 const settings = q.get('back') || '';
 
 function status(forwarding, confirmed) {
-  $('status').textContent = !forwarding ? 'No email yet' : confirmed ? 'Confirmed' : 'Waiting for you to open the link we sent';
+  $('status').textContent = !forwarding ? 'No email yet' : confirmed ? 'Confirmed' : 'Not confirmed yet';
   $('status').className = confirmed ? 'ok' : '';
 }
 

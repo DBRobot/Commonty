@@ -17,7 +17,6 @@ pub mod fleet;
 mod forge_events;
 mod friends;
 pub mod library;
-mod mail_forward;
 pub mod network;
 mod oidc;
 pub mod pages;
@@ -84,10 +83,8 @@ struct App {
     forge_events: Option<forge_events::ForgeEvents>,
     /// each member's allowance, as the storage ledger counted it (storage.rs)
     storage: storage::Ledger,
-    /// the socket of the service that forwards members' mail (mail_forward.rs)
-    mail_forward: Option<String>,
-    /// who has just shown their passkey, and until when: what changes where
-    /// their mail goes asks for that, not only a session (mail_forward.rs)
+    /// who has just shown their passkey, and until when: deleting a disk
+    /// image asks for that, not only a session
     fresh: Mutex<HashMap<String, u64>>,
     /// the demo's Photos, read through the gate (demo_photos.rs)
     demo_photos: Arc<demo_photos::DemoPhotos>,
@@ -175,8 +172,6 @@ pub struct Config {
     pub forge_events: Option<String>,
     /// where the storage ledger writes what each member keeps (storage.rs)
     pub storage_ledger: Option<PathBuf>,
-    /// the mail forwarding service's socket (mail_forward.rs)
-    pub mail_forward: Option<String>,
     /// The fleet's TMDB key, handed to signed-in pages so a member's own
     /// device can look up a film's poster by its title. The box never
     /// sees the titles: they are sealed in the library. None: no posters,
@@ -1867,7 +1862,6 @@ pub async fn start(
         forge_events: cfg.forge_events.map(forge_events::ForgeEvents::start),
         demo_photos: Default::default(),
         storage: storage::Ledger::new(cfg.storage_ledger.clone()),
-        mail_forward: cfg.mail_forward.clone(),
         fresh: Mutex::new(HashMap::new()),
         friends: friends::Store::open(&state_dir)?,
     });
@@ -1970,11 +1964,10 @@ pub async fn start(
                 member_page(&a, &h, "boxes", "/_dd/boxes").await
             }),
         )
+        // Backups is a tab of Settings now
         .route(
             "/_dd/backups",
-            get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
-                member_page(&a, &h, "backups", "/_dd/backups").await
-            }),
+            get(|| async { Redirect::to("/_dd/settings#backups") }),
         )
         .route(
             "/_dd/devices",
@@ -1994,10 +1987,12 @@ pub async fn start(
         .route("/_dd/network/mine", get(network_mine))
         .route("/_dd/photos", get(photos::page))
         .route("/_dd/photos/config", post(photos::config))
-        .route("/_dd/settings", get(mail_forward::page))
-        .route("/_dd/email", post(mail_forward::set))
-        .route("/_dd/email/state", get(mail_forward::state))
-        .route("/_dd/email/resend", post(mail_forward::resend))
+        .route(
+            "/_dd/settings",
+            get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
+                member_page(&a, &h, "settings", "/_dd/settings").await
+            }),
+        )
         .route("/_dd/storage", get(storage::page))
         .route("/_dd/storage/mine", get(storage::mine))
         .route("/internal/storage/members", get(storage::members))

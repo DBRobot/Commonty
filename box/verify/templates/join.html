@@ -4,23 +4,11 @@
 {% block main %}
 <main class="auth">
   <div class="auth-grid">
-    <section id="confirm" hidden>
-      <h1>Check your inbox</h1>
-      <p class="lead">One last thing. We have asked Cloudflare to send <strong id="to"></strong> a message with a link to confirm it’s yours. Open it and press the link; this page carries on by itself once you have.</p>
-      <p class="hint">It comes from Cloudflare because they keep your address for us, so it never has to be stored on Commonty’s boxes. Not there after a minute? Look in spam, or send it again.</p>
-      <p class="waiting" id="waiting" role="status">Waiting for you to confirm…</p>
-      <div class="confirm-actions">
-        <button class="quiet" id="again" type="button">Send it again</button>
-        <a href="/_dd/home" id="later">Do this later</a>
-      </div>
-    </section>
     <section id="form">
       <h1>Create your account</h1>
       <p class="lead">Pick a name and make a passkey. The passkey is the account: it stays on your device and follows you to your other devices. No password, and nothing here can sign as you.</p>
       <label for="u">Name</label>
       <input id="u" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="lowercase letters, digits, - _ .">
-      <label for="e">Email address</label>
-      <input id="e" type="email" autocomplete="email" spellcheck="false" placeholder="where you read your mail">
       <label for="c">Invite code <span class="opt">(if someone gave you one)</span></label>
       <input id="c" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="xxxxx-xxxxx">
       <button id="go">Create passkey</button>

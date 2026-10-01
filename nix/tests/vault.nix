@@ -44,7 +44,6 @@ in
     };
     dd.memberMail = {
       smtpPasswordFile = pkgs.writeText "smtp" "unused";
-      emailsFile = pkgs.writeText "emails" "sarah: sarah@example.net\n";
     };
     services.postgresqlBackup.enable = true;
     environment.systemPackages = [

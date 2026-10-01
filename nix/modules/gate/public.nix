@@ -111,49 +111,6 @@ in
       };
     };
 
-    # Members' own addresses, at Cloudflare and nowhere here: mail to
-    # <name>@<domain> is forwarded by an Email Routing rule. A service of
-    # its own holds the token (which can also edit DNS) and makes the rule
-    # from an address the gate hands it once; only the gate may reach it.
-    users.users.dd-mail = lib.mkIf cfg.enable {
-      isSystemUser = true;
-      group = "dd-mail";
-    };
-    users.groups.dd-mail = lib.mkIf cfg.enable { };
-    users.users.dd-verify.extraGroups = lib.mkIf cfg.enable [ "dd-mail" ];
-    systemd.services.dd-mail-forward = lib.mkIf cfg.enable {
-      description = "Forward mail for each member to the address they gave";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
-      environment = {
-        ZONE = base;
-        SOCKET = "/run/dd-mail-forward/sock";
-      };
-      serviceConfig = {
-        User = "dd-mail";
-        Group = "dd-mail";
-        EnvironmentFile = cfg.tokenFile;
-        ExecStart = "${pkgs.python3}/bin/python3 ${./mail-forward.py}";
-        RuntimeDirectory = "dd-mail-forward";
-        RuntimeDirectoryMode = "0750";
-        Restart = "on-failure";
-        NoNewPrivileges = true;
-        ProtectSystem = "strict";
-        ProtectHome = true;
-        PrivateTmp = true;
-        RestrictAddressFamilies = [
-          "AF_UNIX"
-          "AF_INET"
-          "AF_INET6"
-        ];
-      };
-    };
-    systemd.services.dd-verify = lib.mkIf cfg.enable {
-      environment.VERIFY_MAIL_FORWARD = "/run/dd-mail-forward/sock";
-      serviceConfig.RestrictAddressFamilies = [ "AF_UNIX" ];
-    };
-
     # the door itself: an outbound tunnel, not an open port. Each public host
     # is handed to nginx's tunnel listener with its own name, so the same
     # server blocks and certificate serve both sides.
