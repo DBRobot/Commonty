@@ -710,6 +710,12 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let Some(role) = role else {
         return StatusCode::FORBIDDEN.into_response();
     };
+    // A disk image goes from the Backups page only after the passkey, and
+    // the box holds the page to that: a tab left signed in is not enough.
+    // `dd image delete` signs with the device's own key and asks itself.
+    if bearer(&headers).is_none() && deletes_image(&headers) && !app.passkey_fresh(&user) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     let mut r = StatusCode::OK.into_response();
     let v = HeaderValue::from_str(&user).unwrap();
     r.headers_mut()
@@ -720,6 +726,12 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     r.headers_mut()
         .insert("X-DD-Role", HeaderValue::from_static(role.as_str()));
     r
+}
+
+fn deletes_image(headers: &HeaderMap) -> bool {
+    let h = |k| headers.get(k).and_then(|v: &HeaderValue| v.to_str().ok());
+    h("x-original-method") == Some("DELETE")
+        && h("x-original-uri").is_some_and(|u| u.starts_with("/images/"))
 }
 
 /// On a demo door (demo-<service>.<domain>), the gate's own pages and
@@ -2112,6 +2124,20 @@ mod tests {
         assert_eq!(demo_allowance(&home, "files.x"), None);
         assert_eq!(demo_allowance(&home, "llm.x").as_deref(), Some("rate:10"));
         assert_eq!(demo_allowance(&home, "git.x"), None);
+    }
+
+    #[test]
+    fn only_deleting_an_image_wants_the_passkey() {
+        let h = |method: &str, uri: &str| {
+            let mut m = HeaderMap::new();
+            m.insert("x-original-method", method.parse().unwrap());
+            m.insert("x-original-uri", uri.parse().unwrap());
+            m
+        };
+        assert!(deletes_image(&h("DELETE", "/images/data/ab")));
+        assert!(!deletes_image(&h("GET", "/images/data/ab")));
+        assert!(!deletes_image(&h("PUT", "/images/locks/ab")));
+        assert!(!deletes_image(&h("DELETE", "/_dd/dav/x")));
     }
 
     #[test]

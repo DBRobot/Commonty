@@ -6207,8 +6207,16 @@ rec {
         libName = "dd_web";type = [ "cdylib" "rlib" ];
         dependencies = [
           {
+            name = "aes";
+            packageId = "aes 0.8.4";
+          }
+          {
             name = "base64";
             packageId = "base64 0.22.1";
+          }
+          {
+            name = "ctr";
+            packageId = "ctr";
           }
           {
             name = "ed25519-dalek";
@@ -6240,6 +6248,19 @@ rec {
           {
             name = "library";
             packageId = "library";
+          }
+          {
+            name = "poly1305";
+            packageId = "poly1305 0.8.0";
+          }
+          {
+            name = "ruzstd";
+            packageId = "ruzstd";
+          }
+          {
+            name = "scrypt";
+            packageId = "scrypt 0.11.0";
+            usesDefaultFeatures = false;
           }
           {
             name = "serde";
@@ -21161,6 +21182,31 @@ rec {
         ];
 
       };
+      "ruzstd" = rec {
+        crateName = "ruzstd";
+        version = "0.8.3";
+        edition = "2018";
+        sha256 = "1j4gsmmlwry87wlxgfcck0x6i611rfvlsplsgi93bn3hslwwihd7";
+        authors = [
+          "Moritz Borcherding <moritz.borcherding@web.de>"
+        ];
+        dependencies = [
+          {
+            name = "twox-hash";
+            packageId = "twox-hash";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "xxhash64" ];
+          }
+        ];
+        features = {
+          "default" = [ "hash" "std" ];
+          "dict_builder" = [ "std" "dep:fastrand" ];
+          "hash" = [ "dep:twox-hash" ];
+          "rustc-dep-of-std" = [ "dep:compiler_builtins" "dep:core" "dep:alloc" ];
+        };
+        resolvedDefaultFeatures = [ "default" "hash" "std" ];
+      };
       "ryu" = rec {
         crateName = "ryu";
         version = "1.0.23";
@@ -27182,6 +27228,23 @@ rec {
           "zeroize" = [ "digest/zeroize" "sponge-cursor/zeroize" ];
         };
         resolvedDefaultFeatures = [ "zeroize" ];
+      };
+      "twox-hash" = rec {
+        crateName = "twox-hash";
+        version = "2.1.4";
+        edition = "2021";
+        sha256 = "0yhin35iw4gq0b47f8682vyhk410pjs0nli0gcnfiscga57670sj";
+        libName = "twox_hash";
+        authors = [
+          "Jake Goulding <jake.goulding@gmail.com>"
+        ];
+        features = {
+          "default" = [ "random" "xxhash32" "xxhash64" "xxhash3_64" "xxhash3_128" "std" ];
+          "random" = [ "dep:rand" ];
+          "serialize" = [ "dep:serde" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "xxhash64" ];
       };
       "type-map" = rec {
         crateName = "type-map";

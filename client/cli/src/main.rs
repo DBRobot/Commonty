@@ -482,6 +482,107 @@ fn seal_for_passkeys(keys: &impl auth::KeyStore, repo: &str, password: &str) -> 
     })
 }
 
+/// Archives are written without locks (rustic keeps none), and the Backups
+/// page deletes packs straight away. So each says it is at work with a
+/// file beside the archives, `{"until": <unix secs>}` kept five minutes
+/// ahead while it runs, and neither starts while the other's is current.
+struct Busy {
+    stop: std::sync::mpsc::Sender<()>,
+    beat: Option<std::thread::JoinHandle<()>>,
+}
+
+fn busy_put(http: &reqwest::Client, url: &url::Url, token: &str) -> reqwest::RequestBuilder {
+    let until = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        + 300;
+    http.put(url.clone())
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "until": until }))
+}
+
+async fn busy_current(http: &reqwest::Client, url: url::Url, token: &str) -> Result<bool> {
+    let r = http.get(url).bearer_auth(token).send().await?;
+    if r.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    let v: serde_json::Value = r.error_for_status()?.json().await?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    Ok(v["until"].as_u64().is_some_and(|u| u > now))
+}
+
+impl Busy {
+    fn start(keys: &impl auth::KeyStore, repo: &str) -> Result<Busy> {
+        let user = keys.get(USER)?.context("no name on this machine")?;
+        let kp = auth::device::load(keys)?.context("no device key here - `dd device show`")?;
+        let base = url::Url::parse(&format!("{}/", repo.trim_end_matches('/')))?;
+        let mine = base.join("dd-pushing")?;
+        let theirs = base.join("dd-deleting")?;
+        let token =
+            move || auth::device::mint(&kp, user.as_str(), std::time::Duration::from_secs(600));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let http = reqwest::Client::new();
+        let t = token()?;
+        rt.block_on(async {
+            anyhow::ensure!(
+                !busy_current(&http, theirs.clone(), &t).await?,
+                "the Backups page is deleting an image here; push again when it is done"
+            );
+            busy_put(&http, &mine, &t)
+                .send()
+                .await?
+                .error_for_status()?;
+            // both may have looked at once: the second to look backs off
+            if busy_current(&http, theirs, &t).await? {
+                let _ = http.delete(mine.clone()).bearer_auth(&t).send().await;
+                anyhow::bail!(
+                    "the Backups page is deleting an image here; push again when it is done"
+                );
+            }
+            Ok(())
+        })?;
+        let (stop, rx) = std::sync::mpsc::channel::<()>();
+        let beat = std::thread::spawn(move || {
+            loop {
+                let done = !matches!(
+                    rx.recv_timeout(std::time::Duration::from_secs(60)),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                );
+                let Ok(t) = token() else { continue };
+                rt.block_on(async {
+                    let _ = if done {
+                        http.delete(mine.clone()).bearer_auth(&t).send().await
+                    } else {
+                        busy_put(&http, &mine, &t).send().await
+                    };
+                });
+                if done {
+                    break;
+                }
+            }
+        });
+        Ok(Busy {
+            stop,
+            beat: Some(beat),
+        })
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+        if let Some(b) = self.beat.take() {
+            let _ = b.join();
+        }
+    }
+}
+
 fn image(cmd: ImageCmd, repo: String) -> Result<()> {
     use archive::{Archive, Source, Stderr, TokenProvider};
     let keys = auth::open(&service());
@@ -508,7 +609,9 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
             } else {
                 Source::File(std::path::PathBuf::from(source))
             };
+            let busy = Busy::start(&keys, &repo)?;
             let e = archive.push(src, &name)?;
+            drop(busy);
             println!(
                 "archived {} as {}  ({} bytes)  snapshot {}",
                 name, e.name, e.bytes, e.id

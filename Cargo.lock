@@ -1912,7 +1912,9 @@ dependencies = [
 name = "dd-web"
 version = "0.1.0"
 dependencies = [
+ "aes 0.8.4",
  "base64 0.22.1",
+ "ctr",
  "ed25519-dalek",
  "ente-accounts",
  "ente-core",
@@ -1920,6 +1922,9 @@ dependencies = [
  "getrandom 0.4.3",
  "identity",
  "library",
+ "poly1305 0.8.0",
+ "ruzstd",
+ "scrypt 0.11.0",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6086,6 +6091,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "ruzstd"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7c1c839d570d835527c9a5e4db7cb2198683a988cb9d7293fc8674e6bd58fc8"
+dependencies = [
+ "twox-hash",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7786,6 +7800,12 @@ dependencies = [
  "keccak",
  "sponge-cursor",
 ]
+
+[[package]]
+name = "twox-hash"
+version = "2.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5283634e518fe9e82c7b20520bb4bc209009fd16c82077c802f8111ecbb0117a"
 
 [[package]]
 name = "type-map"

@@ -267,6 +267,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/css; charset=utf-8",
     ),
     (
+        "backups.css",
+        "box/fleet/web/backups.css",
+        "text/css; charset=utf-8",
+    ),
+    (
         "demo-photos.js",
         "box/photos/web/demo-photos.js",
         "text/javascript; charset=utf-8",

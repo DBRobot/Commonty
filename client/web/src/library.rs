@@ -18,6 +18,10 @@ fn err(e: impl std::fmt::Display) -> String {
 /// own so the photos key and this one are different keys, as an ed25519
 /// seed. The public half goes in the entry (`dd passkey link`), the secret
 /// half never exists outside this tab.
+pub(crate) fn keypair_of(prf_secret_b64: &str) -> Result<ed25519_dalek::SigningKey, String> {
+    keypair(prf_secret_b64).map_err(|e| e.to_string())
+}
+
 fn keypair(prf_secret_b64: &str) -> R<ed25519_dalek::SigningKey> {
     use base64::Engine as _;
     use sha2::Digest as _;
