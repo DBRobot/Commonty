@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Email</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/storage.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="st">
+    <h1>Email</h1>
+
+    <section class="st-box" aria-labelledby="where">
+      <header><h2 id="where">Where your mail goes</h2></header>
+      <div class="st-rules">
+        <p>Commonty writes to you at <strong id="address">your address here</strong>: an invitation to a shared vault, a new device signing in to Passwords. It reaches you at the address you give below.</p>
+        <p class="st-state" id="state">Checking…</p>
+        <form class="em-form" id="form">
+          <label for="email">Your email address</label>
+          <div class="em-row">
+            <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
+            <button id="save" type="submit">Save</button>
+          </div>
+          <p class="st-muted" id="said" role="status"></p>
+        </form>
+      </div>
+    </section>
+
+    <section class="st-box" aria-labelledby="kept">
+      <header><h2 id="kept">Where it is kept</h2></header>
+      <div class="st-rules">
+        <p><strong>Not on Commonty’s boxes.</strong> Your address is handed to Cloudflare, which forwards your mail, and nothing on the boxes keeps a copy. This page can say whether forwarding is set up, not where it goes.</p>
+        <p>The first time you give an address, Cloudflare sends it a message with a link to confirm it. Mail is forwarded once you have clicked it.</p>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/_dd/static/email.js"></script>
+  <script type="module" src="/_dd/static/shell.js"></script>
+</body>
+</html>

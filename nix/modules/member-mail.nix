@@ -1,7 +1,9 @@
 # Mail to members, for any service on the box. A service knows a member as
-# <name>@<domain>; the member's own address is only ever in sops, and this
-# sendmail swaps it in from the unit's credentials as each mail leaves, so
-# nobody's address is stored on the box. A service uses it with
+# <name>@<domain>, and that is where the mail goes: Cloudflare forwards it to
+# the address the member gave (modules/gate/mail-forward.py), so nobody's
+# address is stored on the box. An address in sops (member-emails) still
+# wins, swapped in from the unit's credentials as each mail leaves.
+# A service uses it with
 #   SENDMAIL_COMMAND (or its own setting) = config.dd.memberMail.sendmail;
 #   serviceConfig.LoadCredential = config.dd.memberMail.credentials;
 {
@@ -47,7 +49,10 @@ let
       case "$a" in
         -f) skip=1 ;;
         -*) ;;
-        *@*) if r=$(map "$a"); then rcpts+=("$r"); else echo "no address in sops for $a; not sent" >&2; fi ;;
+        # a member's own address from sops where one is there; otherwise
+        # their <name>@<domain> as it is, which Cloudflare forwards to the
+        # address they gave (modules/gate/mail-forward.py)
+        *@*) if r=$(map "$a"); then rcpts+=("$r"); else rcpts+=("$a"); fi ;;
       esac
     done
     [ ''${#rcpts[@]} -gt 0 ] || { cat >/dev/null; exit 0; }
@@ -63,7 +68,7 @@ in
     emailsFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
-      description = "lines of `name: address`, each member's own address (sops: member-emails); null: no mail leaves";
+      description = "lines of `name: address`, each member's own address (sops: member-emails), which wins over forwarding; null: none, and mail goes to <name>@<domain>";
     };
     sendmail = lib.mkOption {
       type = lib.types.path;

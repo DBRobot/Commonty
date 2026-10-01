@@ -51,6 +51,10 @@ async fn main() -> Result<()> {
         forge_events: std::env::var("VERIFY_FORGE_EVENTS")
             .ok()
             .filter(|s| !s.is_empty()),
+        // the service that forwards members' mail (mail_forward.rs)
+        mail_forward: std::env::var("VERIFY_MAIL_FORWARD")
+            .ok()
+            .filter(|s| !s.is_empty()),
         // what the storage ledger counted, for the allowance (storage.rs)
         storage_ledger: std::env::var("VERIFY_STORAGE_LEDGER")
             .ok()
