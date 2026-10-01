@@ -27,6 +27,7 @@
     <h1>Settings</h1>
     <nav class="se-nav" aria-label="Settings">
       <a href="#profile" data-tab="profile" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Profile</a>
+      <a href="#devices" data-tab="devices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>Devices</a>
       <a href="#backups" data-tab="backups"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15h18"/><circle cx="17" cy="17" r=".9" fill="currentColor"/></svg>Backups</a>
     </nav>
 
@@ -40,7 +41,6 @@
         <header><h2 id="acct">Account</h2></header>
         <dl class="se-rows">
           <div class="se-row"><dt>Username</dt><dd id="name">…</dd></div>
-          <div class="se-row"><dt>Commonty address</dt><dd class="mono" id="address">…</dd></div>
           <div class="se-row se-email"><dt>Email</dt><dd><iframe id="email" title="Email" allow="publickey-credentials-get"></iframe></dd></div>
           <div class="se-row"><dt>Membership</dt><dd id="role">…</dd></div>
         </dl>
@@ -48,10 +48,24 @@
       <section class="se-box" aria-labelledby="signin">
         <header><h2 id="signin">Signing in</h2></header>
         <dl class="se-rows">
-          <div class="se-row"><dt>Passkeys</dt><dd id="passkeys">…</dd></div>
-          <div class="se-row"><dt>Devices</dt><dd id="devices">…</dd></div>
+          <div class="se-row se-act"><dt>Devices</dt><dd id="devices">…<small>see them and sign out in Devices</small></dd><a class="button quiet" href="#devices" data-tab="devices">Devices</a></div>
           <div class="se-row"><dt>Recovery key</dt><dd id="recovery">…</dd></div>
         </dl>
+      </section>
+    </div>
+
+    <div class="se-pane" data-pane="devices" hidden>
+      <p class="se-msg" id="dv-msg" role="status"></p>
+      <section class="se-box" aria-labelledby="now">
+        <header><h2 id="now">Signed in now</h2></header>
+        <ul class="dv-list" id="dv-sessions"></ul>
+        <p class="se-hint" id="dv-none" hidden>Nowhere yet.</p>
+        <footer><button class="danger" id="dv-others" hidden>Sign out everywhere else</button></footer>
+      </section>
+      <section class="se-box" aria-labelledby="keys">
+        <header><h2 id="keys">Devices with a key</h2><span class="bk-spacer"></span><button class="quiet" id="dv-show">Show names</button></header>
+        <p class="se-hint" id="dv-hint">Names are kept locked; your passkey shows them.</p>
+        <ul class="dv-list" id="dv-keys"></ul>
       </section>
     </div>
 
@@ -69,6 +83,16 @@
     <p>Confirm with your passkey to delete it.</p>
     <p class="bad" id="ask-msg" hidden></p>
     <div class="row"><button class="quiet" id="ask-no">Cancel</button><button class="danger" id="ask-yes">Delete with passkey</button></div>
+  </dialog>
+  <dialog class="bk-dialog" id="remove" aria-labelledby="rm-h">
+    <h3 id="rm-h"></h3>
+    <p>It is signed out everywhere and can't sign in again.</p>
+    <div id="rm-dd">
+      <p>Removing it is signed with your account's main key. Run this where <code>dd</code> has it:</p>
+      <code class="dv-cmd" id="rm-cmd"></code>
+    </div>
+    <p class="bad" id="rm-msg" hidden></p>
+    <div class="row"><button class="quiet" id="rm-no">Close</button><button class="danger" id="rm-yes" hidden>Remove with passkey</button></div>
   </dialog>
   <script type="module" src="/_dd/static/settings.js"></script>
   <script type="module" src="/_dd/static/shell.js"></script>

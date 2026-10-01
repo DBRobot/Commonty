@@ -38,7 +38,7 @@ const deviceScreen = ((appOrigin || location.origin).startsWith('commonty:') ? '
 // pages the app carries: a service that is one of them opens the app's
 // copy, Photos opens in the app's window, and any other (games, code)
 // opens in the device's browser
-const carried = ['/_dd/home', '/_dd/files', '/_dd/media', '/_dd/boxes', '/_dd/settings', '/_dd/devices', '/_dd/network'];
+const carried = ['/_dd/home', '/_dd/files', '/_dd/media', '/_dd/boxes', '/_dd/settings', '/_dd/network'];
 function here(url) {
   if (!inApp) return url;
   try {

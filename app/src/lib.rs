@@ -20,6 +20,12 @@ use tauri::Manager as _;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // what the Devices tab calls this device's requests
+    directory::set_agent(format!(
+        "Commonty-app/{} ({})",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS
+    ));
     let builder = tauri::Builder::default();
     #[cfg(not(target_os = "android"))]
     let builder = builder.manage(account::Keys(auth::open(SERVICE)));

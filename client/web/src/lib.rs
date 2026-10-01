@@ -17,6 +17,7 @@ use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
 
 pub mod archive;
+pub mod entry;
 pub mod library;
 
 /// No prompts: the code is given up front, and an account made here has

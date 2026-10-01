@@ -38,3 +38,41 @@
   .se-row dt { font-size: 13px; }
   .se-row iframe { height: 84px; }
 }
+/* Devices */
+.se-msg { margin: 0; color: var(--bk-bad); font-size: 14px; }
+.se-msg:empty { display: none; }
+.se-hint { margin: 0; padding: 10px 16px 0; color: var(--ink-2); font-size: 13px; }
+.se-hint[hidden] { display: none; }
+.se-row.se-act { grid-template-columns: 170px minmax(0, 1fr) auto; }
+.se-row .button { margin: 0; height: 36px; padding: 0 14px; font-size: 14px; display: inline-flex; align-items: center; text-decoration: none; }
+.se-box > header .bk-spacer { flex: 1; }
+.se-box > header button { margin: 0; height: 30px; padding: 0 12px; font-size: 13px; }
+.se-box footer { display: flex; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--line-2); }
+.se-box footer:has(> [hidden]:only-child) { display: none; }
+.se-box footer button { margin: 0; height: 34px; padding: 0 14px; font-size: 13px; }
+.dv-list { list-style: none; margin: 0; padding: 0; }
+.dv-item { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 13px 16px; border-bottom: 1px solid var(--line-2); }
+.dv-item:last-child { border-bottom: 0; }
+.dv-ico { width: 36px; height: 36px; border-radius: 6px; background: var(--bk-sunk); display: grid; place-items: center; color: var(--ink-2); }
+.dv-ico svg { width: 20px; height: 20px; }
+.dv-name { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.dv-name.locked { color: var(--ink-2); font-weight: 500; }
+.dv-name .lock { width: 13px; height: 13px; flex: none; }
+.dv-meta { color: var(--ink-2); font-size: 13px; margin-top: 2px; }
+.dv-badge { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 3px; padding: 1px 6px; }
+.dv-actions { display: flex; gap: 8px; align-items: center; }
+.dv-actions button { margin: 0; height: 34px; padding: 0 12px; font-size: 13px; }
+.dv-actions .danger, .se-box footer .danger { background: transparent; color: var(--bk-bad); border: 1px solid color-mix(in srgb, var(--bk-bad) 40%, transparent); }
+.dv-pencil { background: none; border: 0; margin: 0; height: 26px; width: 26px; padding: 0; color: var(--ink-2); display: inline-grid; place-items: center; }
+.dv-pencil:hover { color: var(--ink); background: none; }
+.dv-pencil svg { width: 15px; height: 15px; }
+.dv-edit { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 1; }
+.dv-edit input { height: 34px; font-size: 15px; flex: 0 1 240px; min-width: 0; margin: 0; }
+.dv-edit button { margin: 0; height: 34px; padding: 0 12px; font-size: 13px; }
+.dv-cmd { display: block; font-family: var(--mono); font-size: 13px; background: var(--bk-sunk); padding: 8px 10px; border-radius: 4px; color: var(--ink); user-select: all; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .dv-item { grid-template-columns: 36px minmax(0, 1fr); }
+  .dv-actions { grid-column: 2; }
+  .se-row.se-act { grid-template-columns: 1fr; }
+}
+.se-row[hidden], .se-nav a[hidden] { display: none; }

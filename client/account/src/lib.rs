@@ -255,11 +255,22 @@ pub async fn remove_device(
 ) -> Result<SignedEntry> {
     let cur = ours(dirs, name, root).await?;
     let mut entry = cur.entry.clone();
-    let before = entry.devices.len();
-    entry.devices.retain(|d| d.fingerprint != fingerprint);
-    if entry.devices.len() == before {
-        bail!("no device {fingerprint} in the entry");
+    // the whole fingerprint, or enough of its start to name one device
+    let hits: Vec<String> = entry
+        .devices
+        .iter()
+        .filter(|d| d.fingerprint.starts_with(fingerprint))
+        .map(|d| d.fingerprint.clone())
+        .collect();
+    let fingerprint = match hits.as_slice() {
+        [one] => one.clone(),
+        [] => bail!("no device {fingerprint} in the entry"),
+        _ => bail!("{fingerprint} starts more than one device's fingerprint; give more of it"),
+    };
+    if entry.devices.len() == 1 && !entry.root.starts_with(identity::WEBAUTHN_ROOT) {
+        bail!("that is the last device, and an entry needs one");
     }
+    entry.devices.retain(|d| d.fingerprint != fingerprint);
     let sealed_to = format!("device:{fingerprint}");
     for lib in &mut entry.libraries {
         lib.keys.retain(|k| k.to != sealed_to);

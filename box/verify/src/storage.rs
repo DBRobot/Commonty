@@ -158,7 +158,7 @@ pub(crate) async fn members(State(app): State<Arc<App>>) -> Response {
 #[allow(clippy::result_large_err)]
 fn member(app: &App, headers: &HeaderMap) -> Result<String, Response> {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         Some(u) if app.member(&u) && u != pages::DEMO_USER && !app.guest(&u) => Ok(u),
         Some(_) => Err(Redirect::to("/_dd/home").into_response()),
         None => Err(Redirect::to("/_dd/login?rd=/_dd/storage").into_response()),

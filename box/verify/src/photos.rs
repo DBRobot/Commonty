@@ -37,7 +37,7 @@ fn sheet(user: &str, services: &[Service]) -> String {
 /// Photos, opened with the passkey: the page runs our wasm against ente.
 pub(crate) async fn page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         // the demo has no passkey: the page gets its password from the config
         Some(user) if user == pages::DEMO_USER => match &app.photos {
             Some(p) if p.demo_password.is_some() => Html(sheet(&user, &app.home)).into_response(),
@@ -65,7 +65,7 @@ pub(crate) async fn page(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
 /// verification code museum takes for addresses of ours.
 pub(crate) async fn config(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let Some(user) = app.sessions.user(cookie) else {
+    let Some(user) = app.signed_in(cookie) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !app.member(&user) {
@@ -106,7 +106,7 @@ pub(crate) async fn museum_verify(
     Json(mut body): Json<serde_json::Value>,
 ) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let Some(user) = app.sessions.user(cookie) else {
+    let Some(user) = app.signed_in(cookie) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !app.member(&user) || user == pages::DEMO_USER {
@@ -238,7 +238,7 @@ pub(crate) async fn handoff_fill(
     body: String,
 ) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let Some(user) = app.sessions.user(cookie) else {
+    let Some(user) = app.signed_in(cookie) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if body.is_empty() || body.len() > 1024 {
@@ -300,17 +300,29 @@ pub(crate) async fn app_signin(
     ) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let user = match app.verify_biscuit_for(&f.token, "access", &crate::asked_host(&headers)) {
-        Ok(u) => u,
-        Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
-    };
+    let (user, device) =
+        match app.verify_biscuit_device(&f.token, "access", &crate::asked_host(&headers)) {
+            Ok(u) => u,
+            Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+        };
     if !app.member(&user) || user == pages::DEMO_USER {
         return StatusCode::FORBIDDEN.into_response();
     }
     // on to the Photos step; the browser keeps the fragment the app's page
     // put on this address, which is where the password rides, never here
     let mut r = Redirect::to("/_dd/photos").into_response();
-    if let Ok(c) = HeaderValue::from_str(&app.sessions.issue(&user)) {
+    // the app's session belongs to the device that signed it in: removing
+    // the device ends it (signins.rs)
+    let (set, id, exp) = app.sessions.issue_noted(&user);
+    let agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    // the app signs in from its own window: a webview's agent, the app's name
+    let agent = format!("Commonty-app {agent}");
+    app.signins.saw(&user, &id, exp, &agent, Some(&device));
+    app.signins.used(&user, &device, &agent);
+    if let Ok(c) = HeaderValue::from_str(&set) {
         r.headers_mut().insert("set-cookie", c);
     }
     r

@@ -35,6 +35,31 @@ pub fn proxy() -> Option<Proxy> {
     VIA.read().ok().and_then(|v| v.clone())
 }
 
+/// What this process says it is, so a member's Devices tab can tell their
+/// devices apart: "dd/<version> (<os>)" unless the program says otherwise
+/// (the app does, app/src/lib.rs).
+static AGENT: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+pub fn set_agent(a: String) {
+    if let Ok(mut v) = AGENT.write() {
+        *v = Some(a);
+    }
+}
+
+fn agent() -> String {
+    AGENT
+        .read()
+        .ok()
+        .and_then(|v| v.clone())
+        .unwrap_or_else(|| {
+            format!(
+                "dd/{} ({})",
+                env!("CARGO_PKG_VERSION"),
+                std::env::consts::OS
+            )
+        })
+}
+
 /// a client: no redirects, a short timeout, through the network's proxy
 /// when this process is on it
 pub fn http() -> Result<reqwest::Client> {
@@ -47,7 +72,7 @@ pub fn http() -> Result<reqwest::Client> {
 
 /// the same, for callers that set their own limits
 pub fn builder() -> Result<reqwest::ClientBuilder> {
-    let mut b = reqwest::Client::builder();
+    let mut b = reqwest::Client::builder().user_agent(agent());
     if let Some(p) = proxy() {
         // socks5h: the name goes to the proxy unresolved
         let url = format!("socks5h://{}:{}@{}", p.user, p.password, p.addr);

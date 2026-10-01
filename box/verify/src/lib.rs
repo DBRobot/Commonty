@@ -22,6 +22,7 @@ mod oidc;
 pub mod pages;
 mod photos;
 mod session;
+mod signins;
 mod storage;
 
 use std::collections::HashMap;
@@ -47,6 +48,10 @@ use webauthn_rs::prelude::*;
 struct App {
     directory: Arc<directory::Directory>,
     sessions: session::Sessions,
+    /// who is signed in where, and what each key last did (signins.rs)
+    signins: signins::SignIns,
+    /// where this gate keeps what it keeps
+    state_dir: PathBuf,
     webauthn: Webauthn,
     ceremonies: Mutex<HashMap<String, (Instant, Ceremony)>>,
     /// a passkey the browser just made, waiting for `dd enrol` to collect
@@ -548,6 +553,17 @@ impl App {
         operation: &str,
         here: &str,
     ) -> Result<String> {
+        self.verify_biscuit_device(token, operation, here)
+            .map(|(user, _)| user)
+    }
+
+    /// As verify_biscuit_for, and which of the user's devices signed it.
+    pub(crate) fn verify_biscuit_device(
+        &self,
+        token: &str,
+        operation: &str,
+        here: &str,
+    ) -> Result<(String, String)> {
         let unverified = UnverifiedBiscuit::from_base64(token).context("not a biscuit")?;
         // the user is named in the authority block; it has to be read before the
         // signature can be checked, because the key to check with depends on it
@@ -560,6 +576,7 @@ impl App {
             .entry(&user)?
             .context("no identity published for that name")?;
         let mut verified: Option<Biscuit> = None;
+        let mut device = String::new();
         for k in &signed.entry.devices {
             let pk = match B64
                 .decode(&k.public_key)
@@ -571,6 +588,7 @@ impl App {
             };
             if let Ok(b) = unverified.clone().verify(|_| Ok(pk)) {
                 verified = Some(b);
+                device = k.fingerprint.clone();
                 break;
             }
         }
@@ -616,7 +634,7 @@ impl App {
         authorizer
             .authorize()
             .map_err(|e| anyhow!("refused: {e}"))?;
-        Ok(user)
+        Ok((user, device))
     }
 }
 
@@ -633,13 +651,21 @@ impl App {
     }
 
     /// Who this request is, if anyone: a device-signed biscuit or this box's
-    /// own session cookie. Nothing else counts.
+    /// own session cookie. Nothing else counts. A session ended from the
+    /// Devices tab, or signed in by a device since removed, is nobody.
     fn identify(&self, headers: &HeaderMap, operation: &str) -> Option<String> {
+        let agent = headers
+            .get("user-agent")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
         if let Some(tok) = bearer(headers)
             && UnverifiedBiscuit::from_base64(tok).is_ok()
         {
-            return match self.verify_biscuit_for(tok, operation, &asked_host(headers)) {
-                Ok(u) => Some(u),
+            return match self.verify_biscuit_device(tok, operation, &asked_host(headers)) {
+                Ok((u, device)) => {
+                    self.signins.used(&u, &device, agent);
+                    Some(u)
+                }
                 Err(e) => {
                     eprintln!("biscuit refused: {e:#}");
                     None
@@ -647,7 +673,42 @@ impl App {
             };
         }
         let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-        self.sessions.user(cookie)
+        let (user, id, exp) = self.sessions.session(cookie)?;
+        if id.is_empty() {
+            return Some(user);
+        }
+        if !self.session_live(&user, &id) {
+            return None;
+        }
+        self.signins.saw(&user, &id, exp, agent, None);
+        Some(user)
+    }
+
+    /// The user of a session cookie that this box made, that has not run
+    /// out, and that has not been ended since. Every handler asks this.
+    fn signed_in(&self, cookie: Option<&str>) -> Option<String> {
+        let (user, id, _) = self.sessions.session(cookie)?;
+        (id.is_empty() || self.session_live(&user, &id)).then_some(user)
+    }
+
+    /// Not ended from the Devices tab, and if a device signed it in, that
+    /// device is still the user's.
+    fn session_live(&self, user: &str, id: &str) -> bool {
+        if self.signins.is_ended(id) {
+            return false;
+        }
+        if let Some(device) = self.signins.device_of(id) {
+            let still = self
+                .entry(user)
+                .ok()
+                .flatten()
+                .is_some_and(|e| e.entry.devices.iter().any(|d| d.fingerprint == device));
+            if !still {
+                self.signins.end(id);
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -1060,7 +1121,7 @@ fn grant_claim(
 /// by `dd` redeems there.
 async fn redeem_start(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let Some(user) = app.sessions.user(cookie) else {
+    let Some(user) = app.signed_in(cookie) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(signed) = app.entry(&user).ok().flatten() else {
@@ -1217,11 +1278,25 @@ async fn login_finish(
         return (StatusCode::UNAUTHORIZED, format!("refused: {e}")).into_response();
     }
     app.saw_passkey(&user);
+    let agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    app.signins
+        .used(&user, &format!("passkey:{}", cred.id), agent);
+    // the session this one replaces in this browser is over
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    if let Some((was, id, _)) = app.sessions.session(cookie)
+        && was == user
+        && !id.is_empty()
+    {
+        app.signins.end(&id);
+    }
+    let (set, id, exp) = app.sessions.issue_noted(&user);
+    app.signins.saw(&user, &id, exp, agent, None);
     let mut r = StatusCode::OK.into_response();
-    r.headers_mut().insert(
-        "set-cookie",
-        HeaderValue::from_str(&app.sessions.issue(&user)).unwrap(),
-    );
+    r.headers_mut()
+        .insert("set-cookie", HeaderValue::from_str(&set).unwrap());
     r
 }
 
@@ -1229,7 +1304,7 @@ async fn login_finish(
 /// login page and comes back here.
 async fn home_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         Some(user) if app.role(&user).is_none() => {
             Html(pages::waiting(&user, &app.home)).into_response()
         }
@@ -1301,7 +1376,7 @@ async fn page_config(State(app): State<Arc<App>>, headers: HeaderMap) -> Respons
     // password already does. Nothing is given away: the library holds
     // nothing private, and anyone at all may be the demo.
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    if app.sessions.user(cookie).as_deref() == Some(pages::DEMO_USER)
+    if app.signed_in(cookie).as_deref() == Some(pages::DEMO_USER)
         && let Some((id, key)) = &app.demo_library
     {
         cfg["demoLibrary"] = serde_json::json!({ "id": id, "key": key });
@@ -1313,7 +1388,7 @@ async fn page_config(State(app): State<Arc<App>>, headers: HeaderMap) -> Respons
 /// demo has no passkey and no library, so it does not come here.
 async fn files_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         // the demo comes here too when the box keeps a library for it: it
         // reads that one and nothing else, and the page hides every
         // control a reader has no use for
@@ -1327,7 +1402,7 @@ async fn files_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
 /// Movies & TV: the library's Movies and Shows, opened by the passkey.
 async fn media_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         Some(user) if user == pages::DEMO_USER && app.demo_library.is_some() => page("media"),
         Some(user) if app.member(&user) && user != pages::DEMO_USER => page("media"),
         Some(_) => Redirect::to("/_dd/home").into_response(),
@@ -1390,7 +1465,7 @@ async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
 /// The page is the same for both; what differs is where it keeps chats.
 async fn chat_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         Some(user)
             if matches!(
                 app.role(&user),
@@ -1419,7 +1494,7 @@ async fn metrics_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Respon
 
 fn signed_in_page(app: &App, headers: &HeaderMap, name: &str) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         Some(_) => page(name),
         None => {
             let at = headers
@@ -1447,7 +1522,7 @@ async fn chat_search(
     axum::extract::Query(sq): axum::extract::Query<SearchQuery>,
 ) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         Some(user) if app.role(&user) == Some(pages::Role::Member) => {}
         Some(_) => return StatusCode::FORBIDDEN.into_response(),
         None => return StatusCode::UNAUTHORIZED.into_response(),
@@ -1517,11 +1592,12 @@ async fn chat_search(
 /// Each is a member's own view of the fleet; the demo gets none of them.
 async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         Some(user) if app.member(&user) && user != pages::DEMO_USER => page(name),
         // a guest has devices and joins the network like anyone, to reach
-        // the game servers they are invited to
-        Some(user) if matches!(name, "devices" | "network") && app.guest(&user) => page(name),
+        // the game servers they are invited to: Settings shows them their
+        // Profile and Devices
+        Some(user) if matches!(name, "settings" | "network") && app.guest(&user) => page(name),
         Some(_) => Redirect::to("/_dd/home").into_response(),
         None => Redirect::to(&format!("/_dd/login?rd={at}")).into_response(),
     }
@@ -1623,7 +1699,13 @@ async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     // the demo's photos are the gate's own page, never the photo app, and
     // the photos host is on the private network where the demo cannot go
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let demo = app.sessions.user(cookie).as_deref() == Some(pages::DEMO_USER);
+    let demo = app.signed_in(cookie).as_deref() == Some(pages::DEMO_USER);
+    // over here, and not only in this browser's cookie jar
+    if let Some((_, id, _)) = app.sessions.session(cookie)
+        && !id.is_empty()
+    {
+        app.signins.end(&id);
+    }
     let to = match (photos::origin(&app.home), back) {
         (_, Some(b)) if demo => b,
         (Some(p), Some(b)) => format!("{p}/_dd/photos/forget?then={b}"),
@@ -1674,7 +1756,7 @@ async fn oidc_authorize(
         return (StatusCode::BAD_REQUEST, "unknown client or redirect").into_response();
     }
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let Some(user) = app.sessions.user(cookie) else {
+    let Some(user) = app.signed_in(cookie) else {
         // no session here yet: passkey first, then back to this exact url
         let here = headers
             .get("x-original-uri")
@@ -1838,6 +1920,8 @@ pub async fn start(
     let app = Arc::new(App {
         directory: directory.clone(),
         sessions: session::Sessions::open(&state_dir, &domain)?,
+        signins: signins::SignIns::open(Some(state_dir.join("signins.json"))),
+        state_dir: state_dir.clone(),
         webauthn,
         ceremonies: Mutex::new(HashMap::new()),
         pending: Mutex::new(HashMap::new()),
@@ -1992,6 +2076,12 @@ pub async fn start(
             get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
                 member_page(&a, &h, "settings", "/_dd/settings").await
             }),
+        )
+        .route("/_dd/signins", get(signins::http::list))
+        .route("/_dd/signins/end", post(signins::http::end))
+        .route(
+            "/_dd/devices/names",
+            get(signins::http::names).put(signins::http::put_names),
         )
         .route("/_dd/storage", get(storage::page))
         .route("/_dd/storage/mine", get(storage::mine))

@@ -3,11 +3,12 @@
 // frame from the mail Worker (client/mail), and changing it happens there.
 // Backups is their disk images (box/fleet/web/backups.js).
 import { start as backups, FILES } from './backups.js';
+import { start as devices } from './devices.js';
 
 const $ = (id) => document.getElementById(id);
 
 function tab(name) {
-  if (!['profile', 'backups'].includes(name)) name = 'profile';
+  if (!['profile', 'devices', 'backups'].includes(name)) name = 'profile';
   // the disk images are read from the files site (backups.js)
   if (name === 'backups' && location.protocol === 'https:' && location.hostname !== FILES) {
     location.href = `https://${FILES}/_dd/settings#backups`;
@@ -19,6 +20,7 @@ function tab(name) {
   }
   for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
   if (name === 'backups') backups();
+  if (name === 'devices') devices();
 }
 
 for (const a of document.querySelectorAll('[data-tab]')) {
@@ -30,37 +32,23 @@ for (const a of document.querySelectorAll('[data-tab]')) {
 }
 window.addEventListener('hashchange', () => tab(location.hash.slice(1)));
 
-const day = (t) => new Date((t < 1e11 ? t : t / 1000) * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-
-function added(list) {
-  const times = list.map((x) => x.added).filter(Boolean).sort((a, b) => a - b);
-  if (!times.length) return '';
-  if (times.length === 1) return `added ${day(times[0])}`;
-  if (times.length === 2) return `added ${day(times[0])} and ${day(times[1])}`;
-  return `first added ${day(times[0])}, latest ${day(times[times.length - 1])}`;
-}
-
-function count(el, n, small) {
-  el.textContent = String(n);
-  if (small) {
-    const s = document.createElement('small');
-    s.textContent = small;
-    el.append(s);
-  }
-}
 
 async function profile() {
   const me = await (await fetch('/_dd/me')).json();
+  // a guest has devices and sign-ins here, and no email or disk images
+  if (me.role === 'guest') {
+    $('email').closest('.se-row').hidden = true;
+    document.querySelector('[data-tab="backups"]').hidden = true;
+  }
   // from the front door's name, not this page's: the app's copy is on its own
   const domain = new URL(me.home).hostname.split('.').slice(-2).join('.');
   $('name').textContent = me.user;
-  $('address').textContent = `${me.user}@${domain}`;
   $('role').textContent = me.role === 'member' ? 'Member' : me.role === 'guest' ? 'Guest' : me.role;
   const back = `${location.origin}/_dd/settings`;
   $('email').src = `https://mail.${domain}/row?name=${encodeURIComponent(me.user)}&back=${encodeURIComponent(back)}`;
   const { entry } = await (await fetch('/_dd/directory/' + encodeURIComponent(me.user))).json();
-  count($('passkeys'), (entry.passkeys || []).length, added(entry.passkeys || []));
-  count($('devices'), (entry.devices || []).length, added(entry.devices || []));
+  const n = (x, one) => `${x} ${one}${x === 1 ? '' : 's'}`;
+  $('devices').firstChild.textContent = `${n((entry.devices || []).length, 'device')}, ${n((entry.passkeys || []).length, 'passkey')}`;
   $('recovery').replaceChildren();
   const r = document.createElement('span');
   if (entry.recovery) {

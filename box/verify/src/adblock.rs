@@ -137,7 +137,7 @@ fn who(app: &App, headers: &HeaderMap) -> Result<(String, Adblock), StatusCode> 
         return Err(StatusCode::NOT_FOUND);
     };
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         Some(u) if app.member(&u) && ab.allows(&u) => Ok((u, ab)),
         Some(_) => Err(StatusCode::FORBIDDEN),
         None => Err(StatusCode::UNAUTHORIZED),

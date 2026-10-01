@@ -84,7 +84,7 @@ impl DemoPhotos {
 /// and nobody at all starts the demo
 fn not_demo(app: &App, headers: &HeaderMap) -> Option<Response> {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.sessions.user(cookie) {
+    match app.signed_in(cookie) {
         Some(u) if u == pages::DEMO_USER => None,
         Some(_) => Some(Redirect::to("/_dd/photos").into_response()),
         None => Some(Redirect::to("/_dd/demo").into_response()),
