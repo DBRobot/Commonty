@@ -212,13 +212,14 @@ function back(env, raw) {
 
 const attr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
-async function body(req) {
-  try { return await req.json(); } catch { return {}; }
+function parse(text) {
+  try { return JSON.parse(text); } catch { return {}; }
 }
 
-async function api(req, env, path) {
+async function api(req, env, path, sent) {
+  const body = () => parse(sent);
   if (req.method === 'POST' && path === '/api/challenge') {
-    const { name } = await body(req);
+    const { name } = body();
     if (!NAME.test(name || '')) return json({ error: 'no such member' }, 400);
     let e;
     try { e = JSON.parse(await entry(env, name)); } catch (err) { return json({ error: String(err.message || err) }, 403); }
@@ -231,7 +232,7 @@ async function api(req, env, path) {
     });
   }
   if (req.method === 'POST' && path === '/api/login') {
-    const { token, id, assertion } = await body(req);
+    const { token, id, assertion } = body();
     const c = await unseal(env, token, 'challenge');
     if (!c) return json({ error: 'that took too long; try again' }, 403);
     try {
@@ -255,7 +256,7 @@ async function api(req, env, path) {
     return json({ name: me.n, email: s.email, confirmed: s.confirmed });
   }
   if (req.method === 'POST' && path === '/api/email') {
-    const { email } = await body(req);
+    const { email } = body();
     if (!EMAIL.test((email || '').trim())) return json({ error: 'that is not an email address' }, 400);
     try {
       return json(await setEmail(env, me.n, email.trim()));
@@ -281,8 +282,13 @@ export default {
     if (path.startsWith('/api/')) {
       // the pages here are the only callers
       const origin = req.headers.get('origin');
-      if (req.method !== 'GET' && origin !== (env.ORIGIN || `https://mail.${env.DOMAIN}`)) return json({ error: 'not from here' }, 403);
-      return api(req, env, path);
+      // what was sent, read before anything is decided: a request answered
+      // with its body unread can be dropped by the runtime, a 503 to the caller
+      const sent = req.method === 'GET' ? '' : await req.text().catch(() => '');
+      if (req.method !== 'GET' && origin !== (env.ORIGIN || `https://mail.${env.DOMAIN}`)) {
+        return json({ error: 'not from here' }, 403);
+      }
+      return api(req, env, path, sent);
     }
     // the change, from Settings; and an email for a new member, from sign-up
     if (path === '/change' || path === '/start') {

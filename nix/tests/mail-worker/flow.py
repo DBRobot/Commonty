@@ -72,7 +72,7 @@ with sync_playwright() as p:
             except Exception: return e.code, {'raw': t[:120]}, None
     ok(call('/api/me')[0] == 401, 'no session: no address')
     ok(call('/api/email', {'email': 'x@example.com'})[0] == 401, 'no session: no change')
-    r = call('/api/challenge', {'name': 'tester'}, origin='http://localhost:9999'); ok(r[0] == 403, f'another site cannot call it {r[:2]}')
+    r = call('/api/challenge', {'name': 'tester'}, origin='http://127.0.0.1:8787'); ok(r[0] == 403, f'another origin cannot call it {r[:2]}')
     r = call('/api/challenge', {'name': 'nobody'}); ok(r[0] == 403, f'not a member: refused {r[:2]}')
     s, c, _ = call('/api/challenge', {'name': 'tester'})
     ok(call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign('AAAA')})[0] == 403, 'answer to another challenge: refused')
