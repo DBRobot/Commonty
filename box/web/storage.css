@@ -30,3 +30,11 @@
 .st-rules p { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.55; }
 .st-rules strong { color: var(--ink); }
 .st-rules p.st-grow { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--line-2); color: var(--st-ok); }
+
+/* the Email page (pages/email.html), on the same boxes */
+.st-state { font-weight: 600; }
+.st-state.on { color: var(--st-ok); }
+.em-form { display: grid; gap: 8px; margin-top: 4px; }
+.em-form label { font-weight: 600; font-size: 14px; }
+.em-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.em-row input { flex: 1 1 240px; min-width: 0; }

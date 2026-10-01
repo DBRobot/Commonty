@@ -292,6 +292,9 @@ label {
 }
 input + label, label + label { margin-top: 20px; }
 label .opt { font-weight: 400; color: var(--ink-2); }
+/* a line under a field saying what becomes of it */
+input + .hint { margin: 8px 0 0; font-size: 13px; color: var(--ink-2); }
+.hint + label { margin-top: 20px; }
 input {
   width: 100%;
   height: 48px;

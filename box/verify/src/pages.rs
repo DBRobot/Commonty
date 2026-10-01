@@ -257,6 +257,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "email.js",
+        "box/web/email.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "storage.css",
         "box/web/storage.css",
         "text/css; charset=utf-8",
@@ -428,6 +433,8 @@ const PAGES: &[(&str, &str)] = &[
     ("demo-photos", "box/photos/web/pages/demo-photos.html"),
     // one allowance across every service (storage.rs)
     ("storage", "box/web/pages/storage.html"),
+    // where a member's mail goes, kept at Cloudflare (mail_forward.rs)
+    ("email", "box/web/pages/email.html"),
     // not signed in: whoever has a Send's link (modules/vault)
     ("send", "box/vault/web/pages/send.html"),
 ];
@@ -539,6 +546,7 @@ impl Menu {
             // them here would be the same door twice
             let mut fleet = vec![
                 item("Storage", "/_dd/storage"),
+                item("Email", "/_dd/email"),
                 item("Backups", "/_dd/backups"),
                 item("Devices", "/_dd/devices"),
                 item("Network", "/_dd/network"),

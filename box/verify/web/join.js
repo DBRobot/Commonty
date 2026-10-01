@@ -9,6 +9,8 @@ async function go() {
   try {
     const username = document.getElementById('u').value.trim().toLowerCase();
     const code = document.getElementById('c').value.trim();
+    const email = document.getElementById('e').value.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('give the email address you read your mail at');
     if (code) await checkInvite(code);
 
     // the passkey
@@ -29,6 +31,12 @@ async function go() {
     await post('/_dd/join/sign', assertion(a), { 'x-dd-ceremony': sign.ceremony });
 
     try { localStorage.setItem('dd_user', username); } catch (e) {}
+    // where their mail goes: handed on to be forwarded, and not kept here
+    // (box/verify/src/mail_forward.rs). Someone not let in yet sets it from
+    // the Email page once they are.
+    try {
+      await fetch('/_dd/email', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) });
+    } catch (e) {}
     // back where they came from (a friend link), or home
     location.href = safeRd(new URLSearchParams(location.search).get('rd') || '/_dd/home');
   } catch (e) {
