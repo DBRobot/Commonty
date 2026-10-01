@@ -20,7 +20,8 @@ fn api() -> String {
 const TOKEN: &str = "cloudflare-workers";
 const SCRIPT: &str = "commonty-mail";
 const KV_TITLE: &str = "commonty-mail-pinned";
-const COMPATIBILITY: &str = "2026-09-01";
+// the same date the end-to-end check runs it at (nix/tests/mail-worker.nix)
+const COMPATIBILITY: &str = "2026-05-01";
 
 /// fleet/mail.json: where the Worker is. Nothing secret.
 #[derive(Serialize, Deserialize)]
@@ -174,6 +175,10 @@ pub async fn setup(
     domain: &str,
     r#ref: &str,
 ) -> Result<()> {
+    // given in the environment for setup: kept on the keyring for publish
+    if let Ok(t) = std::env::var("CLOUDFLARE_API_TOKEN") {
+        keys.set(TOKEN, t.trim())?;
+    }
     let token = token(keys)?;
     let http = reqwest::Client::new();
     let z = call(
@@ -257,7 +262,11 @@ pub async fn setup(
          Account > Email Routing Addresses Edit. It goes straight to the Worker and is\n\
          kept nowhere else."
     );
-    let routing = rpassword::prompt_password("Email Routing token: ")?;
+    // or from the environment, where nothing is kept
+    let routing = match std::env::var("CF_EMAIL_ROUTING_TOKEN") {
+        Ok(t) => t,
+        Err(_) => rpassword::prompt_password("Email Routing token: ")?,
+    };
     ensure!(!routing.trim().is_empty(), "no token given");
     call(
         &http,
