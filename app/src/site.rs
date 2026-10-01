@@ -30,8 +30,7 @@ fn page_for(path: &str) -> Option<&'static str> {
         "/_dd/files" => "files",
         "/_dd/media" => "media",
         "/_dd/boxes" => "boxes",
-        "/_dd/settings" | "/_dd/backups" => "settings",
-        "/_dd/devices" => "devices",
+        "/_dd/settings" | "/_dd/backups" | "/_dd/devices" => "settings",
         "/_dd/network" => "network",
         _ => return None,
     })

@@ -391,6 +391,10 @@ enum DeviceCmd {
     /// Admit a device to your identity by its public key, from `dd device
     /// show` there. Needs the root key on this machine.
     Admit { public_key: String },
+    /// Remove a device by its fingerprint, or the start of it (Settings >
+    /// Devices shows it): it is signed out everywhere and cannot sign in
+    /// again. Needs the root key on this machine.
+    Remove { fingerprint: String },
 }
 
 #[derive(Subcommand)]
@@ -1435,6 +1439,16 @@ async fn main() -> Result<()> {
                     identity::fingerprint(&public_key),
                     signed.entry.version
                 );
+            }
+            DeviceCmd::Remove { fingerprint } => {
+                let root = who::load_root(&keys)?.context(
+                    "no root key on this machine - `dd identity export` on one that has it",
+                )?;
+                let name = keys
+                    .get(USER)?
+                    .context("no name here - `dd identity new` or `dd identity import`")?;
+                let signed = who::remove_device(&directories, &name, &root, &fingerprint).await?;
+                println!("device removed; version {}", signed.entry.version);
             }
         },
 

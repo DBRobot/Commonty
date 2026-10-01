@@ -278,7 +278,7 @@ use crate::pages::{self, Role};
 
 fn signed_in(app: &App, headers: &HeaderMap) -> Option<String> {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    app.sessions.user(cookie)
+    app.signed_in(cookie)
 }
 
 /// A change asked for by this site's own page: a form another site posts

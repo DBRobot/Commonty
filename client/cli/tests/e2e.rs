@@ -1750,8 +1750,8 @@ async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
         ("/_dd/files", 303),
         ("/_dd/media", 303),
         ("/_dd/boxes", 303),
-        ("/_dd/settings", 303),
-        ("/_dd/devices", 200),
+        ("/_dd/settings", 200),
+        ("/_dd/devices", 303),
         ("/_dd/network", 200),
         ("/_dd/friends", 200),
     ] {
@@ -2108,6 +2108,60 @@ async fn a_demo_door_lets_in_the_demo_alone() {
     );
 }
 
+/// A gate for one member, syncing its directory from `a`.
+async fn gate_for(
+    a: &Box_,
+    member_id: String,
+    scratch_name: &str,
+) -> (
+    std::net::SocketAddr,
+    tokio::task::JoinHandle<anyhow::Result<()>>,
+) {
+    verify::start(verify::Config {
+        home: vec![],
+        members: Some(verify::Members::list(vec![member_id])),
+        release_pub: None,
+        web_dir: None,
+        photos: None,
+        library: None,
+        fleet: Default::default(),
+        thanos: None,
+        adblock: None,
+        forge_events: None,
+        storage_ledger: None,
+        demo_library: None,
+        tmdb: None,
+        search: None,
+        oidc: None,
+        app_manifest: None,
+        network: None,
+        bind: "127.0.0.1:0".parse().unwrap(),
+        dir: scratch(scratch_name).join("keys"),
+        peers: vec![a.directory()],
+        sync_secs: 1,
+        domain: Some("localhost".to_string()),
+    })
+    .await
+    .unwrap()
+}
+
+/// Sign in as the app does, with a device's token: the session cookie.
+async fn app_signin(http: &reqwest::Client, addr: std::net::SocketAddr, token: &str) -> String {
+    for _ in 0..50 {
+        let r = http
+            .post(format!("http://{addr}/_dd/app/signin"))
+            .form(&[("token", token)])
+            .send()
+            .await
+            .unwrap();
+        if let Some(c) = r.headers().get("set-cookie") {
+            return c.to_str().unwrap().split(';').next().unwrap().to_string();
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    panic!("never signed in");
+}
+
 /// A disk image goes only just after the passkey: a browser session that
 /// came from somewhere else - a stolen cookie, a tab left open - is refused
 /// a DELETE under /images/, while reading them and a device's own signed
@@ -2125,32 +2179,7 @@ async fn deleting_an_image_wants_the_passkey_just_now() {
         .unwrap()
         .trim()
         .to_string();
-    let (addr, _task) = verify::start(verify::Config {
-        home: vec![],
-        members: Some(verify::Members::list(vec![id])),
-        release_pub: None,
-        web_dir: None,
-        photos: None,
-        library: None,
-        fleet: Default::default(),
-        thanos: None,
-        adblock: None,
-        forge_events: None,
-        storage_ledger: None,
-        demo_library: None,
-        tmdb: None,
-        search: None,
-        oidc: None,
-        app_manifest: None,
-        network: None,
-        bind: "127.0.0.1:0".parse().unwrap(),
-        dir: scratch("imagefresh").join("keys"),
-        peers: vec![a.directory()],
-        sync_secs: 1,
-        domain: Some("localhost".to_string()),
-    })
-    .await
-    .unwrap();
+    let (addr, _task) = gate_for(&a, id, "imagefresh").await;
     let http = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -2201,4 +2230,106 @@ async fn deleting_an_image_wants_the_passkey_just_now() {
         200,
         "`dd image delete` signs for itself"
     );
+}
+
+/// The Devices tab's promises: every session is listed, ending another one
+/// wants the passkey just now, signing out ends a session for good, and
+/// removing a device ends what it signed in.
+#[tokio::test(flavor = "multi_thread")]
+async fn sessions_are_listed_and_end_when_their_device_goes() {
+    let a = Box_::start(true, vec![], 300).await;
+    let d = dirs([&a]);
+    let laptop = Device::new();
+    let phone = Device::new();
+    laptop.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    laptop.dd_ok(&args(&["device", "admit", &phone.public_key()], &d));
+    // the phone signs as tom too (it is handed the root, as in the test above)
+    let root = laptop.dd_ok(&["identity", "export"]);
+    {
+        use std::io::Write as _;
+        let mut c = Command::new(env!("CARGO_BIN_EXE_dd"))
+            .args(["identity", "import", "--name", "tom"])
+            .env("DD_KEYRING_FILE", &phone.keyring)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        c.stdin.take().unwrap().write_all(root.as_bytes()).unwrap();
+        assert!(c.wait().unwrap().success());
+    }
+    let id = laptop
+        .dd_ok(&args(&["identity", "show"], &d))
+        .lines()
+        .find_map(|l| l.strip_prefix("member id:"))
+        .unwrap()
+        .trim()
+        .to_string();
+    let (addr, _task) = gate_for(&a, id, "signins").await;
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let mine = app_signin(&http, addr, &laptop.token()).await;
+    let phones = app_signin(&http, addr, &phone.token()).await;
+    let list = |c: String| {
+        let http = http.clone();
+        async move {
+            http.get(format!("http://{addr}/_dd/signins"))
+                .header("cookie", c)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+
+    let r = list(mine.clone()).await;
+    assert_eq!(r.status().as_u16(), 200);
+    let v: serde_json::Value = r.json().await.unwrap();
+    let sessions = v["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 2, "{v}");
+    assert_eq!(sessions.iter().filter(|s| s["current"] == true).count(), 1);
+    assert_eq!(
+        v["keys"].as_object().unwrap().len(),
+        2,
+        "both devices were used"
+    );
+
+    // another session, ended without the passkey: refused
+    let r = http
+        .post(format!("http://{addr}/_dd/signins/end"))
+        .header("cookie", &mine)
+        .json(&serde_json::json!({ "others": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 403);
+    assert_eq!(list(phones.clone()).await.status().as_u16(), 200);
+
+    // the phone removed: what it signed in is nobody from then on
+    let fp = phone
+        .dd_ok(&["device", "show"])
+        .lines()
+        .next()
+        .unwrap()
+        .trim()
+        .to_string();
+    laptop.dd_ok(&args(&["device", "remove", &fp[..8]], &d));
+    let mut gone = false;
+    for _ in 0..50 {
+        if list(phones.clone()).await.status().as_u16() == 401 {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert!(gone, "the removed phone's session still works");
+    assert_eq!(list(mine.clone()).await.status().as_u16(), 200);
+
+    // signing out ends the session itself, not only the cookie
+    http.get(format!("http://{addr}/_dd/logout"))
+        .header("cookie", &mine)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(list(mine).await.status().as_u16(), 401);
 }

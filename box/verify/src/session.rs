@@ -71,7 +71,9 @@ impl Sessions {
     }
 
     /// The user a Cookie header names, if the session is ours and unexpired.
-    pub fn user(&self, cookie_header: Option<&str>) -> Option<String> {
+    /// The user, the session's own id ("" for one from before ids) and when
+    /// it runs out - of a cookie this box made and that has not.
+    pub fn session(&self, cookie_header: Option<&str>) -> Option<(String, String, u64)> {
         let raw = cookie_header?
             .split(';')
             .map(str::trim)
@@ -83,7 +85,21 @@ impl Sessions {
         if exp < now() || !same(self.mac(who, exp).as_bytes(), mac.as_bytes()) {
             return None;
         }
-        Some(who.split('~').next()?.to_string())
+        let (user, id) = who.split_once('~').unwrap_or((who, ""));
+        Some((user.to_string(), id.to_string(), exp))
+    }
+
+    /// A fresh session's Set-Cookie, with its id and expiry for the record.
+    pub fn issue_noted(&self, user: &str) -> (String, String, u64) {
+        let cookie = self.issue(user);
+        let value = cookie
+            .split(';')
+            .next()
+            .and_then(|c| c.strip_prefix(&format!("{COOKIE}=")))
+            .unwrap_or_default();
+        let header = format!("{COOKIE}={value}");
+        let (_, id, exp) = self.session(Some(&header)).unwrap_or_default();
+        (cookie, id, exp)
     }
 }
 
@@ -130,17 +146,17 @@ mod tests {
         let s = sessions();
         let (a, b) = (value(&s.issue("demo")), value(&s.issue("demo")));
         assert_ne!(a, b, "two in one second are still two");
-        assert_eq!(s.user(Some(&a)).as_deref(), Some("demo"));
-        assert_eq!(s.user(Some(&b)).as_deref(), Some("demo"));
+        assert_eq!(s.session(Some(&a)).map(|x| x.0).as_deref(), Some("demo"));
+        assert_eq!(s.session(Some(&b)).map(|x| x.0).as_deref(), Some("demo"));
         // a name with dots in it is still that name
         let c = value(&s.issue("tom.b"));
-        assert_eq!(s.user(Some(&c)).as_deref(), Some("tom.b"));
+        assert_eq!(s.session(Some(&c)).map(|x| x.0).as_deref(), Some("tom.b"));
         // a session issued before the id: the user and the expiry alone
         let exp = now() + 60;
         let old = format!("{COOKIE}=tom.{exp}.{}", s.mac("tom", exp));
-        assert_eq!(s.user(Some(&old)).as_deref(), Some("tom"));
+        assert_eq!(s.session(Some(&old)).map(|x| x.0).as_deref(), Some("tom"));
         // and the id cannot be changed to pass as another session's
         let forged = a.replacen("demo~", "demo~x", 1);
-        assert_eq!(s.user(Some(&forged)), None);
+        assert_eq!(s.session(Some(&forged)).map(|x| x.0), None);
     }
 }
