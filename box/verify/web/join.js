@@ -34,14 +34,49 @@ async function go() {
     // where their mail goes: handed on to be forwarded, and not kept here
     // (box/verify/src/mail_forward.rs). Someone not let in yet sets it from
     // the Email page once they are.
+    const onward = safeRd(new URLSearchParams(location.search).get('rd') || '/_dd/home');
+    let handed = false;
     try {
-      await fetch('/_dd/email', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) });
+      const r = await fetch('/_dd/email', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) });
+      handed = r.ok && (await r.json()).confirm === true;
     } catch (e) {}
-    // back where they came from (a friend link), or home
-    location.href = safeRd(new URLSearchParams(location.search).get('rd') || '/_dd/home');
+    // a new address: wait here for its owner to confirm it, and move on by
+    // ourselves when they have; anything else, straight on
+    if (handed) waitForConfirm(email, onward);
+    else location.href = onward;
   } catch (e) {
     say('Could not create the account: ' + e.message);
   }
+}
+
+// Cloudflare's link opens Cloudflare's page; this one notices and carries on
+function waitForConfirm(email, onward) {
+  document.getElementById('form').hidden = true;
+  document.getElementById('confirm').hidden = false;
+  document.getElementById('to').textContent = email;
+  document.getElementById('later').href = onward;
+  const waiting = document.getElementById('waiting');
+  const check = async () => {
+    try {
+      const r = await fetch('/_dd/email/state');
+      if (r.ok && (await r.json()).confirmed === true) {
+        waiting.textContent = 'Confirmed. Taking you in…';
+        location.href = onward;
+        return;
+      }
+    } catch (e) {}
+    setTimeout(check, 3000);
+  };
+  setTimeout(check, 3000);
+  document.getElementById('again').onclick = async () => {
+    waiting.textContent = 'Sending it again…';
+    try {
+      const r = await fetch('/_dd/email/resend', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      waiting.textContent = r.ok ? 'Sent again. Waiting for you to confirm…' : 'That did not work; try again in a minute.';
+    } catch (e) {
+      waiting.textContent = 'That did not work; try again in a minute.';
+    }
+  };
 }
 
 document.getElementById('go').onclick = go;

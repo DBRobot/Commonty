@@ -54,14 +54,47 @@ pub(crate) async fn state(State(app): State<Arc<App>>, headers: HeaderMap) -> Re
     let Some(socket) = app.mail_forward.as_deref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let forwarding = ask(socket, json!({ "op": "state", "name": user }))
-        .await
-        .and_then(|v| v["forwarding"].as_bool());
+    let said = ask(socket, json!({ "op": "state", "name": user })).await;
     Json(json!({
         "address": format!("{user}@{}", app.domain),
-        "forwarding": forwarding,
+        "forwarding": said.as_ref().and_then(|v| v["forwarding"].as_bool()),
+        // the address's owner has pressed Cloudflare's link: only then is
+        // anything forwarded
+        "confirmed": said.as_ref().and_then(|v| v["confirmed"].as_bool()),
     }))
     .into_response()
+}
+
+/// POST /_dd/email/resend: Cloudflare's confirmation, sent again
+pub(crate) async fn resend(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let json_body = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|t| t.starts_with("application/json"));
+    if !json_body {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Ok(user) = member(&app, &headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Some(socket) = app.mail_forward.as_deref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match ask(socket, json!({ "op": "resend", "name": user })).await {
+        Some(v) if v["ok"].as_bool() == Some(true) => {
+            Json(json!({ "confirmed": v["confirmed"].as_bool().unwrap_or(false) })).into_response()
+        }
+        Some(v) => (
+            StatusCode::BAD_GATEWAY,
+            v["why"].as_str().unwrap_or("that did not work").to_string(),
+        )
+            .into_response(),
+        None => (
+            StatusCode::BAD_GATEWAY,
+            "the forwarding service did not answer",
+        )
+            .into_response(),
+    }
 }
 
 #[derive(Deserialize)]
