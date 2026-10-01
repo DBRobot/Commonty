@@ -404,6 +404,13 @@ enum ImageCmd {
     },
     /// Every archive in your repository.
     List,
+    /// Delete archives, by id prefix (from `list`), and give their space
+    /// back. Asks first unless --yes.
+    Delete {
+        ids: Vec<String>,
+        #[arg(long)]
+        yes: bool,
+    },
     /// Rebuild the index from what is on the server. After an interrupted
     /// push, this lets the rerun skip everything already uploaded.
     Repair,
@@ -451,6 +458,30 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
         ImageCmd::Repair => {
             archive.repair()?;
             println!("index rebuilt - rerun the push, it will skip what is already there");
+        }
+        ImageCmd::Delete { ids, yes } => {
+            anyhow::ensure!(!ids.is_empty(), "which archives? ids from `dd image list`");
+            let all = archive.list()?;
+            for p in &ids {
+                for e in all.iter().filter(|e| e.id.starts_with(p.as_str())) {
+                    println!(
+                        "{:<10} {:<28} {:>14}  {}",
+                        &e.id[..8.min(e.id.len())],
+                        e.name,
+                        e.bytes,
+                        e.time
+                    );
+                }
+            }
+            if !yes {
+                eprint!("delete these for good? type yes: ");
+                let mut answer = String::new();
+                std::io::stdin().read_line(&mut answer)?;
+                anyhow::ensure!(answer.trim() == "yes", "nothing deleted");
+            }
+            for e in archive.delete(&ids)? {
+                println!("deleted {} ({})", e.name, &e.id[..8.min(e.id.len())]);
+            }
         }
         ImageCmd::List => {
             let entries = archive.list()?;
