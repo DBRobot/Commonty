@@ -1,5 +1,6 @@
 mod derive;
 mod librarycmd;
+mod mail_worker;
 mod mediacmd;
 mod member;
 mod release_cmd;
@@ -50,6 +51,15 @@ enum Command {
     Release {
         #[command(subcommand)]
         cmd: release_cmd::ReleaseCmd,
+        /// the repository checkout; defaults to the current directory
+        #[arg(long, default_value = ".", global = true)]
+        repo: String,
+    },
+    /// The mail Worker: members' addresses, kept at Cloudflare and out of
+    /// every box's reach (client/mail). `dd release publish` uploads it.
+    Mail {
+        #[command(subcommand)]
+        cmd: MailCmd,
         /// the repository checkout; defaults to the current directory
         #[arg(long, default_value = ".", global = true)]
         repo: String,
@@ -381,6 +391,24 @@ enum DeviceCmd {
     /// Admit a device to your identity by its public key, from `dd device
     /// show` there. Needs the root key on this machine.
     Admit { public_key: String },
+}
+
+#[derive(Subcommand)]
+enum MailCmd {
+    /// Once: make the Worker's store, upload it, give it its two secrets
+    /// and the name mail.<domain>; writes fleet/mail.json
+    Setup {
+        #[arg(long, default_value = "commonty.org")]
+        domain: String,
+        /// the branch whose Worker goes up first
+        #[arg(long, default_value = "main")]
+        r#ref: String,
+    },
+    /// Upload the Worker a branch builds (publish does this itself)
+    Deploy {
+        #[arg(long, default_value = "main")]
+        r#ref: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1017,6 +1045,16 @@ async fn main() -> Result<()> {
         },
 
         Command::Release { cmd, repo } => release_cmd::run(cmd, &repo, &auth::open(&service()))?,
+        Command::Mail { cmd, repo } => {
+            let root = release_cmd::repo_root(&repo)?;
+            let keys = auth::open(&service());
+            match cmd {
+                MailCmd::Setup { domain, r#ref } => {
+                    mail_worker::setup(&root, &keys, &domain, &r#ref).await?
+                }
+                MailCmd::Deploy { r#ref } => mail_worker::deploy(&root, &keys, &r#ref).await?,
+            }
+        }
 
         Command::Invite { ttl, directories } => {
             let key = release_cmd::load(&auth::open(&service()))?;

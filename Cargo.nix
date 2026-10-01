@@ -93,6 +93,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "dd-mail" = rec {
+      packageId = "dd-mail";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "dd-mail";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "dd-web" = rec {
       packageId = "dd-web";
       build = internal.buildRustCrateWithFeatures {
@@ -6113,6 +6123,10 @@ rec {
             packageId = "ente";
           }
           {
+            name = "getrandom";
+            packageId = "getrandom 0.3.4";
+          }
+          {
             name = "hkdf";
             packageId = "hkdf 0.12.4";
           }
@@ -6140,7 +6154,7 @@ rec {
             name = "reqwest";
             packageId = "reqwest 0.12.28";
             usesDefaultFeatures = false;
-            features = [ "rustls-tls" "json" ];
+            features = [ "rustls-tls" "json" "multipart" ];
           }
           {
             name = "rpassword";
@@ -6195,6 +6209,68 @@ rec {
           {
             name = "webauthn-rs";
             packageId = "webauthn-rs";
+          }
+        ];
+
+      };
+      "dd-mail" = rec {
+        crateName = "dd-mail";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./client/mail; };
+        libName = "dd_mail";type = [ "cdylib" "rlib" ];
+        dependencies = [
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.17";
+            rename = "getrandom_02";
+            features = [ "js" ];
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.3.4";
+            rename = "getrandom_03";
+            features = [ "wasm_js" ];
+          }
+          {
+            name = "identity";
+            packageId = "identity";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "js" ];
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+          }
+          {
+            name = "p256";
+            packageId = "p256";
+            features = [ "ecdsa" "pkcs8" ];
+          }
+          {
+            name = "sha2";
+            packageId = "sha2 0.10.9";
+          }
+          {
+            name = "webauthn-rs-core";
+            packageId = "webauthn-rs-core";
           }
         ];
 
@@ -19772,6 +19848,12 @@ rec {
             target = { target, features }: (!("wasm32" == target."arch" or null));
           }
           {
+            name = "mime_guess";
+            packageId = "mime_guess";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "percent-encoding";
             packageId = "percent-encoding";
             target = { target, features }: (!("wasm32" == target."arch" or null));
@@ -19989,7 +20071,7 @@ rec {
           "system-proxy" = [ "hyper-util/client-proxy-system" ];
           "zstd" = [ "tower-http/decompression-zstd" ];
         };
-        resolvedDefaultFeatures = [ "__rustls" "__rustls-ring" "__tls" "blocking" "charset" "h2" "http2" "json" "rustls-tls" "rustls-tls-native-roots" "rustls-tls-native-roots-no-provider" "rustls-tls-webpki-roots" "rustls-tls-webpki-roots-no-provider" "socks" "stream" "system-proxy" ];
+        resolvedDefaultFeatures = [ "__rustls" "__rustls-ring" "__tls" "blocking" "charset" "h2" "http2" "json" "multipart" "rustls-tls" "rustls-tls-native-roots" "rustls-tls-native-roots-no-provider" "rustls-tls-webpki-roots" "rustls-tls-webpki-roots-no-provider" "socks" "stream" "system-proxy" ];
       };
       "reqwest 0.13.5" = rec {
         crateName = "reqwest";

@@ -454,8 +454,6 @@ fn check_assertion(sig_b64: &str, entry: &Entry) -> Result<()> {
 /// from the entry under check it would only say that whoever wrote the entry
 /// also chose the key, which is no statement at all.
 fn check_assertion_with(sig_b64: &str, entry: &Entry, trusted: &[Passkey]) -> Result<()> {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64_URL;
-    use sha2::Digest as _;
     let (id, digest) = root_parts(&entry.root)
         .ok_or_else(|| Error::Key("a passkey root must commit to its key".into()))?;
     let passkey = trusted
@@ -470,12 +468,31 @@ fn check_assertion_with(sig_b64: &str, entry: &Entry, trusted: &[Passkey]) -> Re
             "the root does not name this passkey's key".into(),
         ));
     }
+    let a: Assertion = serde_json::from_slice(&B64.decode(sig_b64).map_err(|_| Error::Signature)?)
+        .map_err(|_| Error::Signature)?;
+    assertion_over(passkey, &a, &challenge(entry)?)
+}
+
+/// A sign-in: `a` is the passkey `id` of `entry` answering `challenge`, made
+/// by a person on a page of the relying party on record. For something
+/// other than a box that holds the person's passkeys - it reads them from
+/// the signed entry.
+pub fn check_login(entry: &Entry, id: &str, a: &Assertion, challenge: &[u8]) -> Result<()> {
+    let passkey = entry
+        .passkeys
+        .iter()
+        .find(|p| p.id == id)
+        .ok_or_else(|| Error::Key("that passkey is not in the entry".into()))?;
+    assertion_over(passkey, a, challenge)
+}
+
+fn assertion_over(passkey: &Passkey, a: &Assertion, expected: &[u8]) -> Result<()> {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64_URL;
+    use sha2::Digest as _;
     // the credential as webauthn-rs serialises it: Passkey { cred: Credential { cred: COSEKey } }
     let key: webauthn_rs_core::proto::COSEKey =
         serde_json::from_value(passkey.cred["cred"]["cred"].clone())
             .map_err(|e| Error::Key(format!("passkey public key: {e}")))?;
-    let a: Assertion = serde_json::from_slice(&B64.decode(sig_b64).map_err(|_| Error::Signature)?)
-        .map_err(|_| Error::Signature)?;
     let auth = B64_URL
         .decode(&a.authenticator_data)
         .map_err(|_| Error::Signature)?;
@@ -494,7 +511,7 @@ fn check_assertion_with(sig_b64: &str, entry: &Entry, trusted: &[Passkey]) -> Re
     if c["type"].as_str() != Some("webauthn.get") {
         return Err(Error::Signature);
     }
-    if c["challenge"].as_str() != Some(B64_URL.encode(challenge(entry)?).as_str()) {
+    if c["challenge"].as_str() != Some(B64_URL.encode(expected).as_str()) {
         return Err(Error::Signature);
     }
     let origin = c["origin"].as_str().unwrap_or_default();

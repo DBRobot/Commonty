@@ -1,0 +1,38 @@
+/* the change-email pages and the email line on Settings */
+body { background: var(--bg); }
+.fl { max-width: 520px; margin: 0 auto; padding: 40px 16px 64px; display: grid; gap: 18px; }
+.fl-back { color: var(--ink-2); text-decoration: none; font-size: 14px; font-weight: 600; }
+.fl-back:hover { color: var(--ink); }
+.fl-card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 28px; display: grid; gap: 16px; }
+.fl-card[hidden] { display: none; }
+.fl-steps { display: flex; gap: 6px; }
+.fl-steps i { height: 4px; flex: 1; border-radius: 2px; background: var(--line-2); }
+.fl-steps i.on { background: var(--accent); }
+.fl-count { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); margin: 0; }
+.fl-card h1 { margin: 0; font-size: 26px; text-wrap: balance; }
+.fl-card p { margin: 0; color: var(--ink-2); line-height: 1.55; }
+.fl-form { display: grid; gap: 8px; }
+.fl-card label { font-weight: 600; font-size: 14px; }
+.fl-card input { width: 100%; height: 46px; font-size: 16px; box-sizing: border-box; }
+.fl-card .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.fl-card .row button { margin: 0; height: 44px; padding: 0 18px; }
+.fl-card .fine { font-size: 14px; }
+.fl-card .fl-bad { color: #9B2C2C; font-size: 14px; }
+.fl-mail { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); }
+.fl-mail svg { width: 28px; height: 28px; }
+.fl-wait { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.fl-wait i { width: 14px; height: 14px; border: 2px solid var(--line-2); border-top-color: var(--accent); border-radius: 50%; animation: fl-spin 1s linear infinite; }
+@keyframes fl-spin { to { transform: rotate(360deg); } }
+.linkish { background: none; border: 0; padding: 0; height: auto; color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; margin: 0; font-size: inherit; }
+@media (prefers-color-scheme: dark) { .fl-card .fl-bad { color: #F08A8A; } }
+@media (max-width: 600px) { .fl-card { padding: 20px; } }
+
+/* the line inside Settings: its frame is transparent onto the row */
+body.row-frame { background: transparent; margin: 0; }
+.er { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 56px; }
+.er-text { flex: 1; min-width: 180px; display: grid; gap: 2px; }
+.er-text span { font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
+.er-text small { font-size: 13px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+.er-text small.ok::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.er-actions { display: flex; gap: 8px; }
+.er-actions button, .er-actions .button { margin: 0; height: 36px; padding: 0 14px; font-size: 14px; display: inline-flex; align-items: center; text-decoration: none; }

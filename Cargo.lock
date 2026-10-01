@@ -1887,6 +1887,7 @@ dependencies = [
  "directory",
  "ed25519-dalek",
  "ente",
+ "getrandom 0.3.4",
  "hkdf 0.12.4",
  "identity",
  "libc",
@@ -1906,6 +1907,23 @@ dependencies = [
  "webauthn-authenticator-rs",
  "webauthn-rs",
  "zeroize",
+]
+
+[[package]]
+name = "dd-mail"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
+ "identity",
+ "p256",
+ "serde_json",
+ "sha2 0.10.9",
+ "uuid",
+ "wasm-bindgen",
+ "webauthn-rs-core",
 ]
 
 [[package]]
@@ -5765,6 +5783,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "percent-encoding",
  "pin-project-lite",
  "quinn",

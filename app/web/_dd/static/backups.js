@@ -11,13 +11,10 @@ import { inApp } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 
-// The archives are on the files site, and this page reads them from there.
-// Opened anywhere else it moves there first: a page that reached the public
-// side through the tunnel may not ask the private network for anything.
-const FILES = 'files.' + location.hostname.split('.').slice(-2).join('.');
-if (!inApp && location.hostname !== FILES && location.protocol === 'https:') {
-  location.replace(`https://${FILES}/_dd/backups`);
-}
+// The archives are on the files site, and the Backups tab reads them from
+// there: a page that reached the public side through the tunnel may not ask
+// the private network for anything, so Settings moves there for this tab.
+export const FILES = 'files.' + location.hostname.split('.').slice(-2).join('.');
 const ROOT = '/images/';
 
 function say(text, html) {
@@ -414,9 +411,22 @@ async function remove(s, ui) {
   }
 }
 
-async function start() {
+let started = false;
+
+/// the Backups tab, the first time it is shown
+export async function start() {
+  if (started) return;
+  started = true;
+  try {
+    await show();
+  } catch (e) {
+    say(String(e.message || e));
+  }
+}
+
+async function show() {
   if (inApp) {
-    say('', `Your disk images open in a browser, with your passkey: <a href="https://${FILES}/_dd/backups">${FILES}/_dd/backups</a>`);
+    say('', `Your disk images open in a browser, with your passkey: <a href="https://${FILES}/_dd/settings#backups">${FILES}/_dd/settings</a>`);
     return;
   }
   const me = await (await fetch('/_dd/me')).json();
@@ -438,4 +448,3 @@ async function start() {
   render();
 }
 
-start().catch((e) => say(String(e.message || e)));

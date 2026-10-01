@@ -104,7 +104,6 @@ impl Box_ {
             adblock: None,
             forge_events: None,
             storage_ledger: None,
-            mail_forward: None,
             demo_library: None,
             tmdb: None,
             search: None,
@@ -600,7 +599,7 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
         "/_dd/files",
         "/_dd/media",
         "/_dd/boxes",
-        "/_dd/backups",
+        "/_dd/settings",
         "/_dd/devices",
         "/_dd/network",
     ] {
@@ -1404,7 +1403,6 @@ async fn start_at(
         adblock: None,
         forge_events: None,
         storage_ledger: None,
-        mail_forward: None,
         demo_library: None,
         tmdb: None,
         search: None,
@@ -1492,7 +1490,6 @@ async fn download_page_of(release_pub: String, manifest_url: String) -> (u16, St
         adblock: None,
         forge_events: None,
         storage_ledger: None,
-        mail_forward: None,
         demo_library: None,
         tmdb: None,
         search: None,
@@ -1753,7 +1750,7 @@ async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
         ("/_dd/files", 303),
         ("/_dd/media", 303),
         ("/_dd/boxes", 303),
-        ("/_dd/backups", 303),
+        ("/_dd/settings", 303),
         ("/_dd/devices", 200),
         ("/_dd/network", 200),
         ("/_dd/friends", 200),
@@ -1896,7 +1893,6 @@ async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
         adblock: None,
         forge_events: None,
         storage_ledger: None,
-        mail_forward: None,
         demo_library: None,
         tmdb: None,
         search: None,
@@ -2112,11 +2108,12 @@ async fn a_demo_door_lets_in_the_demo_alone() {
     );
 }
 
-/// Where a member's mail goes is changed only just after their passkey: a
-/// session that came from somewhere else - a device token, a stolen cookie -
-/// is told to confirm with the passkey first.
+/// A disk image goes only just after the passkey: a browser session that
+/// came from somewhere else - a stolen cookie, a tab left open - is refused
+/// a DELETE under /images/, while reading them and a device's own signed
+/// token are let through.
 #[tokio::test(flavor = "multi_thread")]
-async fn changing_where_mail_goes_wants_the_passkey_just_now() {
+async fn deleting_an_image_wants_the_passkey_just_now() {
     let a = Box_::start(true, vec![], 300).await;
     let d = dirs([&a]);
     let dev = Device::new();
@@ -2140,7 +2137,6 @@ async fn changing_where_mail_goes_wants_the_passkey_just_now() {
         adblock: None,
         forge_events: None,
         storage_ledger: None,
-        mail_forward: Some("/nonexistent/socket".into()),
         demo_library: None,
         tmdb: None,
         search: None,
@@ -2148,7 +2144,7 @@ async fn changing_where_mail_goes_wants_the_passkey_just_now() {
         app_manifest: None,
         network: None,
         bind: "127.0.0.1:0".parse().unwrap(),
-        dir: scratch("mailfresh").join("keys"),
+        dir: scratch("imagefresh").join("keys"),
         peers: vec![a.directory()],
         sync_secs: 1,
         domain: Some("localhost".to_string()),
@@ -2177,13 +2173,32 @@ async fn changing_where_mail_goes_wants_the_passkey_just_now() {
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    let r = http
-        .post(format!("http://{addr}/_dd/email"))
-        .header("cookie", cookie.expect("tom signs in"))
-        .json(&serde_json::json!({ "email": "tom@example.com" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(r.status().as_u16(), 403);
-    assert!(r.text().await.unwrap().contains("passkey"));
+    let cookie = cookie.expect("tom signs in");
+    let ask = |method: &str, auth: (&str, String)| {
+        http.get(format!("http://{addr}/verify"))
+            .header("x-original-method", method)
+            .header("x-original-uri", "/images/snapshots/abc")
+            .header("x-original-host", "files.localhost")
+            .header(auth.0, auth.1)
+            .send()
+    };
+    let deleting = ask("DELETE", ("cookie", cookie.clone())).await.unwrap();
+    assert_eq!(
+        deleting.status().as_u16(),
+        403,
+        "a session alone deletes nothing"
+    );
+    let reading = ask("GET", ("cookie", cookie)).await.unwrap();
+    assert_eq!(reading.status().as_u16(), 200, "reading needs no passkey");
+    let device = ask(
+        "DELETE",
+        ("authorization", format!("Bearer {}", dev.token())),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        device.status().as_u16(),
+        200,
+        "`dd image delete` signs for itself"
+    );
 }
