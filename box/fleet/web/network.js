@@ -17,7 +17,7 @@ async function start() {
     (m.addresses || []).join(' '),
     m.online ? 'online' : `last seen ${ago(m.lastSeen ? Date.parse(m.lastSeen) / 1000 : 0)}`,
     m.os || '',
-  ].filter(Boolean)), 'No machine of yours is on the network yet. `dd net join` puts one on it.');
+  ].filter(Boolean)), 'No device of yours is on the network yet.');
 }
 
 start().catch(failed);

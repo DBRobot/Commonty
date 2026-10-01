@@ -10,7 +10,7 @@ import { inApp } from './shell.js';
 // the passkey's own secret, under a label of this page's own
 export async function passkeySecret(cfg, passkeys) {
   const allow = passkeys.map((p) => ({ type: 'public-key', id: b64u(p.id) }));
-  if (!allow.length) throw new Error('this account has no passkey in a browser yet: `dd enrol` adds one');
+  if (!allow.length) throw new Error('this account has no passkey in a browser yet');
   const salt = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('dd-library')));
   const a = await navigator.credentials.get({
     publicKey: {

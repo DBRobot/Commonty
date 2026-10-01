@@ -26,7 +26,6 @@ function render(st) {
   }
   if (!st.name) return show("name");
   if (!st.admitted) {
-    $("admit-cmd").textContent = `dd device admit ${st.public_key}`;
     $("admit-fp").textContent = st.fingerprint;
     $("admit-dirs").textContent = st.directories.map(([d, s]) => `${d.replace(/^https?:\/\//, "").replace(/\/_dd\/directory$/, "")}: ${s}`).join(" · ");
     return show("admit");

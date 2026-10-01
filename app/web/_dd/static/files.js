@@ -432,7 +432,7 @@ async function upload(files) {
 async function start() {
   const r = await unlock(user);
   if (r.none) {
-    $('msg').textContent = 'No library yet. `dd library new` makes one on the machine that holds your key.';
+    $('msg').textContent = 'No library yet.';
     return;
   }
   if (r.link) {

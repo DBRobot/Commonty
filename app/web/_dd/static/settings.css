@@ -69,7 +69,6 @@
 .dv-edit { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 1; }
 .dv-edit input { height: 34px; font-size: 15px; flex: 0 1 240px; min-width: 0; margin: 0; }
 .dv-edit button { margin: 0; height: 34px; padding: 0 12px; font-size: 13px; }
-.dv-cmd { display: block; font-family: var(--mono); font-size: 13px; background: var(--bk-sunk); padding: 8px 10px; border-radius: 4px; color: var(--ink); user-select: all; overflow-wrap: anywhere; }
 @media (max-width: 760px) {
   .dv-item { grid-template-columns: 36px minmax(0, 1fr); }
   .dv-actions { grid-column: 2; }
