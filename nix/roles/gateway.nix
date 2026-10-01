@@ -1,4 +1,10 @@
 { config, lib, ... }:
+let
+  mailSetup = ../../fleet/mail.json;
+  canReadWorker = lib.hasInfix "\ncloudflare-workers-read:" (
+    "\n" + builtins.readFile (../../secrets + "/${config.networking.hostName}.yaml")
+  );
+in
 {
   # A box with a public name: certificates, nginx and the browser login.
   # The verifier's full role lives here.
@@ -6,10 +12,24 @@
     ./_sops.nix
     ../modules/gate/acme.nix
     ../modules/gate/public.nix
+    ../modules/gate/mail-worker.nix
     ../modules/net/headscale.nix
   ];
   # the fleet's own network is run from here
   dd.headscale.enable = true;
+  # members' addresses: kept by the mail Worker at Cloudflare; this box
+  # carries its files and checks Cloudflare runs them (`dd mail setup`
+  # writes fleet/mail.json; the read token is in sops once someone adds it)
+  dd.mailWorker = {
+    enable = true;
+    account = if builtins.pathExists mailSetup then (builtins.fromJSON (builtins.readFile mailSetup)).account else "";
+    readTokenFile = if canReadWorker then config.sops.templates."cloudflare-workers-read.env".path else null;
+  };
+  sops.secrets.cloudflare-workers-read = lib.mkIf canReadWorker { };
+  sops.templates."cloudflare-workers-read.env" = lib.mkIf canReadWorker {
+    content = "CF_WORKERS_READ_TOKEN=${config.sops.placeholder.cloudflare-workers-read}";
+    owner = "node-exporter";
+  };
   # the front door on the open internet: a Cloudflare tunnel this box opens
   # outward (the house line is carrier nat; nothing can be forwarded here).
   # Off, the names point at this box's tailnet address and no outsider is

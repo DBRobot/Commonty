@@ -362,6 +362,16 @@ fn publish(
     )?;
     print(&signed);
     nudge(&boxes);
+    // the mail Worker this release carries (the gateway's closure holds the
+    // same files, which the boxes vouched for and check Cloudflare against)
+    let deployed = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(crate::mail_worker::deploy(&root, keys, r#ref))
+    });
+    if let Err(e) = deployed {
+        eprintln!(
+            "== the mail Worker did not go up: {e:#}\n   `dd mail deploy --ref {ref}` when it can"
+        );
+    }
     Ok(())
 }
 
@@ -1004,7 +1014,7 @@ fn app(repo: &str, keys: &auth::Store, tag: &str, from: &str, dry_run: bool) -> 
     Ok(())
 }
 
-fn repo_root(repo: &str) -> Result<PathBuf> {
+pub(crate) fn repo_root(repo: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(
         git(Path::new(repo), &["rev-parse", "--show-toplevel"]).context("not in the repository")?,
     ))

@@ -29,13 +29,14 @@ url = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal"] }
 anyhow = "1"
 rpassword = "7"
+getrandom = "0.3"
 zeroize = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 # `dd signup` talks to the signup service; the same crate auth already uses.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
 
 [dev-dependencies]
 # the boxes the end-to-end tests run in-process

@@ -126,8 +126,8 @@ mod tests {
                 type_: COSEAlgorithm::ES256,
                 key: COSEKeyType::EC_EC2(COSEEC2Key {
                     curve: ECDSACurve::SECP256R1,
-                    x: p.x().unwrap().to_vec().into(),
-                    y: p.y().unwrap().to_vec().into(),
+                    x: p.x().unwrap().to_vec(),
+                    y: p.y().unwrap().to_vec(),
                 }),
             };
             let public = identity::encode_public(&self.root.verifying_key());

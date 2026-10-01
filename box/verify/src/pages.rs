@@ -940,7 +940,12 @@ mod tests {
     fn the_menu_offers_a_member_their_own_pages_and_the_demo_none_of_them() {
         let svcs = [svc("Metrics", "metrics"), svc("Chat", "chat")];
         let menu = menu_urls(&me("tom", &svcs));
-        for page in ["/_dd/settings", "/_dd/devices", "/_dd/network", "/_dd/boxes"] {
+        for page in [
+            "/_dd/settings",
+            "/_dd/devices",
+            "/_dd/network",
+            "/_dd/boxes",
+        ] {
             assert!(
                 menu.iter().any(|u| u == page),
                 "member's menu is missing {page}"
@@ -955,7 +960,12 @@ mod tests {
         // the demo opens the library the box keeps for it, and nothing
         // that belongs to an account with devices and boxes of its own
         let menu = menu_urls(&me(DEMO_USER, &svcs));
-        for page in ["/_dd/settings", "/_dd/devices", "/_dd/network", "/_dd/boxes"] {
+        for page in [
+            "/_dd/settings",
+            "/_dd/devices",
+            "/_dd/network",
+            "/_dd/boxes",
+        ] {
             assert!(
                 !menu.iter().any(|u| u == page),
                 "the demo was offered {page}"
@@ -975,7 +985,7 @@ mod tests {
             ("files", "files.js"),
             ("media", "media.js"),
             ("boxes", "boxes.js"),
-            ("backups", "backups.js"),
+            ("settings", "settings.js"),
             ("devices", "devices.js"),
             ("network", "network.js"),
             ("git", "git.js"),

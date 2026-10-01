@@ -104,7 +104,7 @@ impl Box_ {
             adblock: None,
             forge_events: None,
             storage_ledger: None,
-                demo_library: None,
+            demo_library: None,
             tmdb: None,
             search: None,
             oidc: None,
@@ -599,7 +599,7 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
         "/_dd/files",
         "/_dd/media",
         "/_dd/boxes",
-        "/_dd/backups",
+        "/_dd/settings",
         "/_dd/devices",
         "/_dd/network",
     ] {
@@ -1750,7 +1750,7 @@ async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
         ("/_dd/files", 303),
         ("/_dd/media", 303),
         ("/_dd/boxes", 303),
-        ("/_dd/backups", 303),
+        ("/_dd/settings", 303),
         ("/_dd/devices", 200),
         ("/_dd/network", 200),
         ("/_dd/friends", 200),
@@ -2183,11 +2183,22 @@ async fn deleting_an_image_wants_the_passkey_just_now() {
             .send()
     };
     let deleting = ask("DELETE", ("cookie", cookie.clone())).await.unwrap();
-    assert_eq!(deleting.status().as_u16(), 403, "a session alone deletes nothing");
+    assert_eq!(
+        deleting.status().as_u16(),
+        403,
+        "a session alone deletes nothing"
+    );
     let reading = ask("GET", ("cookie", cookie)).await.unwrap();
     assert_eq!(reading.status().as_u16(), 200, "reading needs no passkey");
-    let device = ask("DELETE", ("authorization", format!("Bearer {}", dev.token())))
-        .await
-        .unwrap();
-    assert_eq!(device.status().as_u16(), 200, "`dd image delete` signs for itself");
+    let device = ask(
+        "DELETE",
+        ("authorization", format!("Bearer {}", dev.token())),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        device.status().as_u16(),
+        200,
+        "`dd image delete` signs for itself"
+    );
 }

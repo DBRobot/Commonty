@@ -494,54 +494,6 @@ async fn keyframe(ffprobe: &std::path::Path, input: &str, start: f64, from: f64)
 }
 
 /// the film's length and streams, if its container says within a few seconds
-/// What the container says: how long the film is, and what its picture and
-/// sound are, so the box does only the work a browser needs
-#[derive(Default)]
-struct Probe {
-    duration: Option<f64>,
-    video: String,
-    pixels: String,
-    audio: String,
-    channels: u64,
-}
-
-impl Probe {
-    /// H.264 in 4:2:0 is what every browser plays: packed into the playlist
-    /// as it is, no encoding - a second's work instead of all the cores
-    fn picture_as_is(&self) -> bool {
-        self.video == "h264" && matches!(self.pixels.as_str(), "yuv420p" | "yuvj420p")
-    }
-    /// stereo AAC plays everywhere; anything else (5.1, AC-3, DTS) is made so
-    fn sound_as_is(&self) -> bool {
-        self.audio == "aac" && self.channels <= 2
-    }
-}
-
-/// the film's length and streams, if its container says within a few seconds
-/// What the container says: how long the film is, and what its picture and
-/// sound are, so the box does only the work a browser needs
-#[derive(Default)]
-struct Probe {
-    duration: Option<f64>,
-    video: String,
-    pixels: String,
-    audio: String,
-    channels: u64,
-}
-
-impl Probe {
-    /// H.264 in 4:2:0 is what every browser plays: packed into the playlist
-    /// as it is, no encoding - a second's work instead of all the cores
-    fn picture_as_is(&self) -> bool {
-        self.video == "h264" && matches!(self.pixels.as_str(), "yuv420p" | "yuvj420p")
-    }
-    /// stereo AAC plays everywhere; anything else (5.1, AC-3, DTS) is made so
-    fn sound_as_is(&self) -> bool {
-        self.audio == "aac" && self.channels <= 2
-    }
-}
-
-/// the film's length and streams, if its container says within a few seconds
 async fn probe(ffprobe: &std::path::Path, input: &str) -> Probe {
     let out = tokio::time::timeout(
         Duration::from_secs(15),
@@ -554,7 +506,7 @@ async fn probe(ffprobe: &std::path::Path, input: &str) -> Probe {
                 "-format_whitelist",
                 FORMATS,
                 "-show_entries",
-                "format=duration:stream=codec_type,codec_name,pix_fmt,channels",
+                "format=duration,start_time:stream=codec_type,codec_name,pix_fmt,channels",
                 "-of",
                 "json",
                 input,
@@ -579,6 +531,11 @@ async fn probe(ffprobe: &std::path::Path, input: &str) -> Probe {
     };
     let (video, audio) = (first("video"), first("audio"));
     Probe {
+        start: v["format"]["start_time"]
+            .as_str()
+            .and_then(|d| d.parse::<f64>().ok())
+            .filter(|d| d.is_finite())
+            .unwrap_or(0.0),
         duration: v["format"]["duration"]
             .as_str()
             .and_then(|d| d.parse::<f64>().ok())
