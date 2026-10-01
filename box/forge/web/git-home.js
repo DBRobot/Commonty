@@ -149,7 +149,7 @@ route(/^\/new$/, async ({ current }) => {
       out.append(el('div', { class: 'box', style: 'margin-top:16px' },
         el('header', {}, el('b', { text: 'From a checkout on your device' })),
         el('div', { class: 'md pad' }, el('pre', { text: `git remote add origin ${url}\ngit push -u origin main` }),
-          el('p', { class: 'small muted', text: 'The push makes it, sealed. dd repo share gives another of your devices the key.' }))));
+          el('p', { class: 'small muted', text: 'The push makes it, sealed.' }))));
       return;
     }
     try {
@@ -291,7 +291,7 @@ route(/^\/settings(?:\/(tokens|keys|profile))?$/, async ({ m, current }) => {
     };
     const list = el('div', { class: 'box list' }, ...tokens.map(tokenRow));
     body.append(el('h2', { class: 'ph', text: 'API tokens' }),
-      el('p', { class: 'muted small', text: 'For scripts and other programs that use the Git API as you. On your own devices the dd cli signs in for you and needs none of these.' }),
+      el('p', { class: 'muted small', text: 'For scripts and other programs that use the Git API as you.' }),
       shown, form, tokens.length ? list : el('p', { class: 'muted', text: 'No tokens yet.' }));
   }
 
@@ -311,7 +311,7 @@ route(/^\/settings(?:\/(tokens|keys|profile))?$/, async ({ m, current }) => {
       try { const k = await api('/user/keys', { method: 'POST', body: { title: title.value, key: key.value.trim() } }); sshList.append(keyRow(k, '/user/keys', k.title)); add.reset(); } catch (err) { toast(err.message); }
     };
     const sshList = el('div', { class: 'box list gap' }, ...keys.map((k) => keyRow(k, '/user/keys', k.title)));
-    body.append(el('h2', { class: 'ph', text: 'SSH keys' }), el('p', { class: 'muted small', text: 'For git over SSH, and for signing commits with that same key: a commit signed with one of these shows as Verified. The dd cli needs none.' }),
+    body.append(el('h2', { class: 'ph', text: 'SSH keys' }), el('p', { class: 'muted small', text: 'For git over SSH, and for signing commits with that same key: a commit signed with one of these shows as Verified.' }),
       keys.length ? sshList : el('p', { class: 'muted', text: 'No keys yet.' }), add,
       el('h2', { class: 'ph', style: 'margin-top:24px', text: 'GPG keys' }),
       gpg.length ? el('div', { class: 'box list' }, ...gpg.map((k) => keyRow(k, '/user/gpg_keys', k.key_id))) : el('p', { class: 'muted small', text: 'None. SSH keys sign commits too.' }));

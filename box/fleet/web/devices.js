@@ -124,7 +124,8 @@ function keyRow(k, n) {
   const actions = el('div', 'dv-actions');
   const rm = el('button', 'danger', 'Remove');
   rm.onclick = () => remove(k, names?.[k.key] || fallback);
-  if (!k.root) actions.append(rm);
+  // removing is signed by the account's main key: here, only a passkey one
+  if (!k.root && entry.entry.root.startsWith('webauthn:')) actions.append(rm);
   li.append(ico, text, actions);
   return li;
 }
@@ -228,14 +229,10 @@ function rename(name, k, fallback) {
   input.focus();
 }
 
-// Removing: a passkey root signs the new entry here; a device root's is
-// signed by dd, so the page says what to run.
+// Removing: the account's main key signs the new entry, here when it is a
+// passkey; an account whose main key is a device's gets no Remove.
 function remove(k, label) {
-  const passkeyRoot = entry.entry.root.startsWith('webauthn:');
   $('rm-h').textContent = `Remove ${label}?`;
-  $('rm-cmd').textContent = k.passkey ? `dd passkey remove ${k.passkey}` : `dd device remove ${k.fingerprint.slice(0, 8)}`;
-  $('rm-dd').hidden = passkeyRoot;
-  $('rm-yes').hidden = !passkeyRoot;
   $('rm-msg').hidden = true;
   $('rm-yes').disabled = false;
   $('rm-yes').onclick = async () => {

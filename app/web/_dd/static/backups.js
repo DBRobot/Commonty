@@ -85,7 +85,7 @@ async function open(user) {
   const entry = await (await fetch('/_dd/directory/' + encodeURIComponent(user))).json();
   const passkeys = (entry.entry.passkeys || []).filter((p) => sealed[p.id]);
   if (!passkeys.length) {
-    say('', 'This browser cannot open your images yet. On the computer that made them, run <code>dd image passkey</code>.');
+    say('This browser cannot open your images yet.');
     return null;
   }
   const { secret, id } = await passkeySecret(cfg, passkeys);

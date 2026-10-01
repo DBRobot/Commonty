@@ -40,7 +40,6 @@ async function go() {
     const r = await fetch('/_dd/enrol/start', { method: 'POST', headers: auth });
     if (r.status === 401) {
       say('This link is not valid, or has expired.');
-      document.getElementById('how').hidden = false;
       return;
     }
     if (!r.ok) throw new Error(await r.text());
