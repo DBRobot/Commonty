@@ -16,6 +16,7 @@ mod directory;
 pub mod fleet;
 mod forge_events;
 mod friends;
+mod home;
 pub mod library;
 pub mod network;
 mod oidc;
@@ -52,6 +53,8 @@ struct App {
     signins: signins::SignIns,
     /// where this gate keeps what it keeps
     state_dir: PathBuf,
+    /// the house's boxes and their Wi-Fi (home.rs)
+    home_net: home::Home,
     webauthn: Webauthn,
     ceremonies: Mutex<HashMap<String, (Instant, Ceremony)>>,
     /// a passkey the browser just made, waiting for `dd enrol` to collect
@@ -1597,7 +1600,7 @@ async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Re
         // a guest has devices and joins the network like anyone, to reach
         // the game servers they are invited to: Settings shows them their
         // Profile and Devices
-        Some(user) if matches!(name, "settings" | "network") && app.guest(&user) => page(name),
+        Some(user) if name == "settings" && app.guest(&user) => page(name),
         Some(_) => Redirect::to("/_dd/home").into_response(),
         None => Redirect::to(&format!("/_dd/login?rd={at}")).into_response(),
     }
@@ -1922,6 +1925,13 @@ pub async fn start(
         sessions: session::Sessions::open(&state_dir, &domain)?,
         signins: signins::SignIns::open(Some(state_dir.join("signins.json"))),
         state_dir: state_dir.clone(),
+        home_net: home::Home::new(
+            std::env::var("VERIFY_HOME")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from),
+            &cfg.peers,
+        ),
         webauthn,
         ceremonies: Mutex::new(HashMap::new()),
         pending: Mutex::new(HashMap::new()),
@@ -2059,11 +2069,10 @@ pub async fn start(
                 member_page(&a, &h, "devices", "/_dd/devices").await
             }),
         )
+        // Network is a tab of Settings now
         .route(
             "/_dd/network",
-            get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
-                member_page(&a, &h, "network", "/_dd/network").await
-            }),
+            get(|| async { Redirect::to("/_dd/settings#network") }),
         )
         .route("/_dd/download", get(download_page))
         .route("/_dd/fleet.json", get(fleet_json))
@@ -2077,6 +2086,10 @@ pub async fn start(
                 member_page(&a, &h, "settings", "/_dd/settings").await
             }),
         )
+        .route("/_dd/house", get(home::list))
+        .route("/_dd/house/here", get(home::here_route))
+        .route("/_dd/house/wifi", post(home::change))
+        .route("/_dd/house/wifi/relay", post(home::relay))
         .route("/_dd/signins", get(signins::http::list))
         .route("/_dd/signins/end", post(signins::http::end))
         .route(

@@ -1893,6 +1893,7 @@ dependencies = [
  "libc",
  "library",
  "media",
+ "p256",
  "release",
  "reqwest 0.12.28",
  "rpassword",

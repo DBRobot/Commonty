@@ -75,3 +75,28 @@
   .se-row.se-act { grid-template-columns: 1fr; }
 }
 .se-row[hidden], .se-nav a[hidden] { display: none; }
+/* Network */
+.nw-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 13px 16px; border-bottom: 1px solid var(--line-2); }
+.nw-row:last-child { border-bottom: 0; }
+.nw-state { font-size: 13px; color: var(--ink-2); display: flex; gap: 6px; align-items: center; }
+.nw-state.ok::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.nw-bars { display: inline-flex; gap: 2px; align-items: flex-end; height: 14px; vertical-align: -2px; margin-left: 2px; }
+.nw-bars i { width: 3px; background: var(--accent); border-radius: 1px; }
+.nw-bars i.off { background: var(--line-2); }
+.nw-form { display: grid; gap: 8px; padding: 14px 16px 16px; max-width: 460px; }
+.nw-form[hidden] { display: none; }
+.nw-form label { font-weight: 600; font-size: 14px; margin-top: 4px; }
+.nw-form input { height: 40px; font-size: 15px; margin: 0; width: 100%; box-sizing: border-box; }
+.nw-form .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.nw-form button { margin: 0; height: 40px; }
+.nw-result { margin: 0; padding: 0 16px 16px; font-size: 14px; line-height: 1.5; }
+.nw-result.ok { color: var(--ink-2); }
+.nw-result.bad { color: var(--bk-bad); }
+.nw-switch { display: flex; align-items: center; gap: 14px; padding: 14px 16px; }
+.nw-switch .grow { flex: 1; }
+.nw-switch small { display: block; color: var(--ink-2); font-size: 13px; margin-top: 2px; }
+.nw-switch .switch { width: 40px; height: 24px; border-radius: 12px; border: 0; margin: 0; padding: 0; position: relative; background: var(--line); flex: none; }
+.nw-switch .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.nw-switch .switch[aria-checked="true"] { background: var(--accent); }
+.nw-switch .switch[aria-checked="true"]::after { transform: translateX(16px); }
+.nw-switch .switch:disabled { opacity: .5; }

@@ -430,7 +430,6 @@ const PAGES: &[(&str, &str)] = &[
     ("files", "box/files/web/pages/files.html"),
     ("media", "box/media/web/pages/media.html"),
     ("boxes", "box/fleet/web/pages/boxes.html"),
-    ("network", "box/fleet/web/pages/network.html"),
     ("friends", "box/web/pages/friends.html"),
     ("chat", "box/chat/web/pages/chat.html"),
     ("git", "box/forge/web/pages/git.html"),
@@ -521,10 +520,7 @@ impl Menu {
         };
         Menu {
             groups: vec![
-                vec![
-                    item("Settings", "/_dd/settings"),
-                    item("Network", "/_dd/network"),
-                ],
+                vec![item("Settings", "/_dd/settings")],
                 vec![item("Sign out", "/_dd/logout")],
             ],
         }
@@ -553,11 +549,7 @@ impl Menu {
         if !demo {
             // Files and Movies & TV are tiles on the home page; repeating
             // them here would be the same door twice
-            let mut fleet = vec![
-                item("Storage", "/_dd/storage"),
-                item("Network", "/_dd/network"),
-                item("Boxes", "/_dd/boxes"),
-            ];
+            let mut fleet = vec![item("Storage", "/_dd/storage"), item("Boxes", "/_dd/boxes")];
             fleet.extend(metrics);
             groups.push(fleet);
         } else if let Some(m) = metrics {
@@ -920,10 +912,7 @@ mod tests {
         assert_eq!(names, ["Games"]);
         assert_eq!(m["role"], "guest");
         // their own devices and network, and the way out; none of the fleet's pages
-        assert_eq!(
-            menu_urls(&m),
-            ["/_dd/settings", "/_dd/network", "/_dd/logout"]
-        );
+        assert_eq!(menu_urls(&m), ["/_dd/settings", "/_dd/logout"]);
     }
     fn menu_urls(m: &serde_json::Value) -> Vec<String> {
         m["menu"]
@@ -939,7 +928,7 @@ mod tests {
     fn the_menu_offers_a_member_their_own_pages_and_the_demo_none_of_them() {
         let svcs = [svc("Metrics", "metrics"), svc("Chat", "chat")];
         let menu = menu_urls(&me("tom", &svcs));
-        for page in ["/_dd/settings", "/_dd/network", "/_dd/boxes"] {
+        for page in ["/_dd/settings", "/_dd/boxes"] {
             assert!(
                 menu.iter().any(|u| u == page),
                 "member's menu is missing {page}"
@@ -954,7 +943,7 @@ mod tests {
         // the demo opens the library the box keeps for it, and nothing
         // that belongs to an account with devices and boxes of its own
         let menu = menu_urls(&me(DEMO_USER, &svcs));
-        for page in ["/_dd/settings", "/_dd/network", "/_dd/boxes"] {
+        for page in ["/_dd/settings", "/_dd/boxes"] {
             assert!(
                 !menu.iter().any(|u| u == page),
                 "the demo was offered {page}"
@@ -975,7 +964,6 @@ mod tests {
             ("media", "media.js"),
             ("boxes", "boxes.js"),
             ("settings", "settings.js"),
-            ("network", "network.js"),
             ("git", "git.js"),
             ("metrics", "metrics.js"),
         ] {
