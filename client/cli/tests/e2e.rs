@@ -2672,3 +2672,28 @@ async fn a_device_is_offered_by_code_and_seen_by_its_owner_alone() {
         .unwrap();
     assert_eq!(status(tom).await["state"], "gone");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_opened_again_is_told_nothing_changed() {
+    let a = Box_::start(true, vec![], 300).await;
+    let http = reqwest::Client::new();
+    let first = http
+        .get(a.url("/_dd/static/shell.js"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 200);
+    let tag = first.headers()["etag"].to_str().unwrap().to_string();
+    assert!(!first.bytes().await.unwrap().is_empty());
+    let again = |t: String| {
+        http.get(a.url("/_dd/static/shell.js"))
+            .header("if-none-match", t)
+            .send()
+    };
+    let r = again(tag.clone()).await.unwrap();
+    assert_eq!(r.status(), 304);
+    assert!(r.bytes().await.unwrap().is_empty());
+    // as nginx's gzip passes it on, weakened
+    assert_eq!(again(format!("W/{tag}")).await.unwrap().status(), 304);
+    assert_eq!(again("\"other\"".into()).await.unwrap().status(), 200);
+}

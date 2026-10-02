@@ -357,11 +357,36 @@ const STATIC: &[(&str, &str, &str)] = &[
 
 /// the stylesheet, the scripts, the fonts and the pictures, by the name
 /// under /_dd/static/
-pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str)> {
+pub fn static_file(name: &str) -> Option<(&'static [u8], &'static str, &'static str)> {
     STATIC
         .iter()
         .find(|(n, _, _)| *n == name)
-        .map(|(_, path, ty)| (asset(path), *ty))
+        .map(|(_, path, ty)| (asset(path), *ty, etag(path)))
+}
+
+/// A file's tag for the browser's "has it changed": the same bytes, the
+/// same tag, so a page opened again is told 304 rather than sent it all.
+pub fn tag_of(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    let h = sha2::Sha256::digest(bytes);
+    format!(
+        "\"{}\"",
+        h[..12]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    )
+}
+
+static ETAGS: std::sync::OnceLock<std::collections::HashMap<&'static str, String>> =
+    std::sync::OnceLock::new();
+
+fn etag(path: &str) -> &'static str {
+    ETAGS
+        .get_or_init(|| every_path().map(|p| (p, tag_of(asset(p)))).collect())
+        .get(path)
+        .map(String::as_str)
+        .unwrap_or_default()
 }
 
 /// What kind of account is looking.

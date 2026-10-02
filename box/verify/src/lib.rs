@@ -1403,24 +1403,67 @@ async fn demo(State(app): State<Arc<App>>) -> Response {
 }
 
 /// The pages' own stylesheet and scripts (pages::static_file).
-async fn static_file(axum::extract::Path(file): axum::extract::Path<String>) -> Response {
+async fn static_file(
+    headers: HeaderMap,
+    axum::extract::Path(file): axum::extract::Path<String>,
+) -> Response {
     match pages::static_file(&file) {
-        Some((body, ty)) => {
+        Some((body, ty, tag)) => {
             // a font is the same bytes until a release changes its name
             let cache = if ty.starts_with("font/") {
                 "public, max-age=604800"
             } else {
                 "no-cache"
             };
-            ([("content-type", ty), ("cache-control", cache)], body).into_response()
+            tagged(
+                &headers,
+                ty,
+                cache,
+                tag,
+                axum::body::Bytes::from_static(body),
+            )
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
+/// A file, or 304 when the browser already holds these bytes: no-cache
+/// means ask each time, and the asking is all it costs.
+fn tagged(
+    headers: &HeaderMap,
+    ty: &str,
+    cache: &str,
+    tag: &str,
+    body: axum::body::Bytes,
+) -> Response {
+    let held = headers
+        .get("if-none-match")
+        .and_then(|v| v.to_str().ok())
+        // nginx's gzip makes a tag weak (W/"…") on the way out
+        .is_some_and(|v| {
+            v.split(',')
+                .any(|t| t.trim().trim_start_matches("W/") == tag)
+        });
+    let head = [
+        ("content-type", ty.to_string()),
+        ("cache-control", cache.to_string()),
+        ("etag", tag.to_string()),
+    ];
+    if held {
+        (StatusCode::NOT_MODIFIED, head).into_response()
+    } else {
+        (head, body).into_response()
+    }
+}
+
+/// the web bundle's files, read once: a release is a new gate
+static WEB: std::sync::LazyLock<std::sync::Mutex<HashMap<String, (axum::body::Bytes, String)>>> =
+    std::sync::LazyLock::new(Default::default);
+
 /// The browser-side Rust, as wasm-bindgen laid it out: a .js and a .wasm.
 async fn web_file(
     State(app): State<Arc<App>>,
+    headers: HeaderMap,
     axum::extract::Path(file): axum::extract::Path<String>,
 ) -> Response {
     let Some(dir) = &app.web_dir else {
@@ -1434,10 +1477,20 @@ async fn web_file(
         Some("wasm") => "application/wasm",
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
-    match std::fs::read(dir.join(&file)) {
-        Ok(b) => ([("content-type", ty), ("cache-control", "no-cache")], b).into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
-    }
+    let known = WEB.lock().unwrap().get(&file).cloned();
+    let (b, tag) = match known {
+        Some(k) => k,
+        None => match std::fs::read(dir.join(&file)) {
+            Ok(b) => {
+                let tag = pages::tag_of(&b);
+                let k = (axum::body::Bytes::from(b), tag);
+                WEB.lock().unwrap().insert(file, k.clone());
+                k
+            }
+            Err(_) => return StatusCode::NOT_FOUND.into_response(),
+        },
+    };
+    tagged(&headers, ty, "no-cache", &tag, b)
 }
 
 /// The one thing every page needs to talk to a passkey: which domain the
