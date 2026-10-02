@@ -309,6 +309,9 @@ in
         extraConfig = ''
           client_max_body_size 0;
           proxy_set_header X-WEBAUTH-USER "";
+          # and not whoever forgejo's own cookie remembers: a session the
+          # gate has ended is ended here too
+          proxy_set_header Cookie "";
         '';
       };
       # forgejo's own sign-in page is a password form that is switched off;

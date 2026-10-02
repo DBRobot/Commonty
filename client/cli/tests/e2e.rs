@@ -685,7 +685,18 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
 
 /// Sign in on `b` with a passkey already in the entry; the session cookie.
 async fn login_in_browser(b: &Box_, authenticator: &mut SoftPasskey, name: &str) -> (u16, String) {
-    let origin = Url::parse("https://localhost").unwrap();
+    login_in_browser_at(b, authenticator, name, "https://localhost").await
+}
+
+/// The same, on a page at `origin`: what a box serving some other host of
+/// the domain would get if it handed this box's challenge to the person.
+async fn login_in_browser_at(
+    b: &Box_,
+    authenticator: &mut SoftPasskey,
+    name: &str,
+    origin: &str,
+) -> (u16, String) {
+    let origin = Url::parse(origin).unwrap();
     let http = reqwest::Client::new();
     let r = http
         .post(b.url("/_dd/login/start"))
@@ -867,6 +878,9 @@ async fn an_invite_code_lets_one_person_in_once() {
     .await;
     wait_for(|| async { entry(&b, "fay").await.is_some() && entry(&b, "eve").await.is_some() })
         .await;
+    // a page of another host of the domain is not this box's to ask from
+    let (st, _) = login_in_browser_at(&b, &mut fay, "fay", "https://other.localhost").await;
+    assert_ne!(st, 200, "a sign-in made on another host was taken");
     let (st, c) = login_in_browser(&b, &mut fay, "fay").await;
     assert_eq!(st, 200);
     assert_eq!(
@@ -2359,6 +2373,8 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
     let house2 = scratch("house2");
     // the folder the root unit would watch (VERIFY_HOUSE), read at start
     unsafe { std::env::set_var("VERIFY_HOUSE", &house) };
+    // the one page a change may be signed on
+    unsafe { std::env::set_var("VERIFY_HOUSE_ORIGINS", "https://files.commonty.test") };
     let a = Box_::start(true, vec![], 300).await;
     let (addr, _task) = gate_for(&a, id.clone(), "house-gate").await;
     // and a box that runs only the directory, as node2 does
@@ -2390,6 +2406,7 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
     .await
     .unwrap();
     unsafe { std::env::remove_var("VERIFY_HOUSE") };
+    unsafe { std::env::remove_var("VERIFY_HOUSE_ORIGINS") };
     let http = reqwest::Client::new();
     // the member's entry, published to this gate
     let r = http
@@ -2400,7 +2417,7 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
         .unwrap();
     assert!(r.status().is_success(), "{}", r.text().await.unwrap());
 
-    let sign = |payload: &str| {
+    let sign_at = |payload: &str, origin: &str| {
         let mut h = sha2::Sha256::new();
         h.update(b"commonty wifi v1\0");
         h.update(payload.as_bytes());
@@ -2410,7 +2427,7 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
         let client = serde_json::json!({
             "type": "webauthn.get",
             "challenge": challenge,
-            "origin": "https://files.commonty.test",
+            "origin": origin,
         })
         .to_string();
         let mut data = auth.clone();
@@ -2426,6 +2443,7 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
             },
         })
     };
+    let sign = |payload: &str| sign_at(payload, "https://files.commonty.test");
     let change = |user: &str, at: u64, nonce: &str| {
         serde_json::json!({ "user": user, "ssid": "House", "psk": "a-new-password", "at": at, "nonce": nonce })
             .to_string()
@@ -2480,6 +2498,16 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
         .unwrap();
     assert_eq!(r.status().as_u16(), 403);
 
+    // signed on a page of the domain that is not Settings': refused
+    assert_eq!(
+        relay(sign_at(
+            &change("tester", now, "n0"),
+            "https://home.commonty.test"
+        ))
+        .await,
+        403,
+        "a change signed on another page"
+    );
     let good = sign(&change("tester", now, "n1"));
     assert_eq!(relay(good.clone()).await, 200);
     let req: serde_json::Value =
@@ -2566,30 +2594,80 @@ async fn a_device_is_offered_by_code_and_seen_by_its_owner_alone() {
     };
     assert_eq!(status(tom.clone()).await["state"], "waiting");
 
-    // the new device, typed in lower case and without the dash
+    // the new device, typed in lower case and without the dash: its key,
+    // and a commitment to a number of its own
     let phone = Device::new();
+    let pk = phone.public_key();
+    let mine = "0123456789abcdef0123456789abcdef";
     let typed = code.replace('-', " ").to_lowercase();
     let r = http
         .post(format!("http://{addr}/_dd/add/offer"))
-        .json(&serde_json::json!({ "code": typed, "public_key": phone.public_key() }))
+        .json(&serde_json::json!({
+            "code": typed,
+            "public_key": pk,
+            "commit": identity::pairing_commit(&pk, mine),
+        }))
         .send()
         .await
         .unwrap();
     assert_eq!(r.status().as_u16(), 200);
     let offered: serde_json::Value = r.json().await.unwrap();
     assert_eq!(offered["user"], "tom");
-    let digits = offered["digits"].as_str().unwrap().to_string();
-    assert_eq!(digits.len(), 4);
 
     let s = status(tom.clone()).await;
     assert_eq!(s["state"], "offered");
-    assert_eq!(s["offer"]["digits"], digits.as_str());
-    assert_eq!(s["offer"]["public_key"], phone.public_key().as_str());
+    assert_eq!(s["offer"]["public_key"], pk.as_str());
+    assert!(
+        s["revealed"].is_null(),
+        "nothing revealed before the other number"
+    );
+    // the approving device's number; then the new device sees it and reveals
+    let theirs = "fedcba9876543210fedcba9876543210";
+    let r = http
+        .post(format!("http://{addr}/_dd/add/theirs"))
+        .header("cookie", &tom)
+        .json(&serde_json::json!({ "code": code, "nonce": theirs }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 204);
+    let w: serde_json::Value = http
+        .get(format!("http://{addr}/_dd/add/wait?code={code}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(w["theirs"], theirs);
+    let r = http
+        .post(format!("http://{addr}/_dd/add/reveal"))
+        .json(&serde_json::json!({ "code": code, "nonce": mine }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 204);
+    // the approving side checks the reveal against the commitment and both
+    // sides come to the same digits
+    let s = status(tom.clone()).await;
+    let revealed = s["revealed"].as_str().unwrap();
+    assert_eq!(
+        identity::pairing_commit(&pk, revealed),
+        s["offer"]["commit"].as_str().unwrap()
+    );
+    assert_eq!(
+        identity::pairing_digits(&pk, revealed, theirs),
+        identity::pairing_digits(&pk, mine, theirs)
+    );
 
     // a second device cannot take the same code
     let r = http
         .post(format!("http://{addr}/_dd/add/offer"))
-        .json(&serde_json::json!({ "code": code, "public_key": Device::new().public_key() }))
+        .json(&serde_json::json!({
+            "code": code,
+            "public_key": Device::new().public_key(),
+            "commit": "0".repeat(64),
+        }))
         .send()
         .await
         .unwrap();

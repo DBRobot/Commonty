@@ -332,7 +332,7 @@ pub(crate) mod http {
             Ok(m) => m,
             Err(r) => return r,
         };
-        if !app.passkey_fresh(&user) {
+        if !app.passkey_fresh(&here) {
             return (
                 StatusCode::FORBIDDEN,
                 "confirm it is you with your passkey first",
@@ -352,6 +352,10 @@ pub(crate) mod http {
         };
         for id in &gone {
             app.signins.end(id);
+        }
+        // and every other way in that this gate signed them into
+        if e.others {
+            app.directory.end_elsewhere(&user);
         }
         Json(serde_json::json!({ "ended": gone.len() })).into_response()
     }

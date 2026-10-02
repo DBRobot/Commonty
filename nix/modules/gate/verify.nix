@@ -314,6 +314,8 @@ in
         # the browser login: passkeys scoped to the whole domain, so one login
         # covers every service on this box and the session cookie rides along
         VERIFY_DOMAIN = base;
+        # the hosts whose pages may ask for a passkey here (box/verify own_hosts)
+        VERIFY_HOSTS = lib.concatStringsSep "," cfg.hosts;
         VERIFY_MEMBERS = builtins.toJSON config.dd.members;
         # our Rust for the browser, next to the pages that use it
         VERIFY_WEB_DIR = "${self.packages.${pkgs.stdenv.hostPlatform.system}.web}";
@@ -433,6 +435,11 @@ in
               };
               "@login".extraConfig = ''
                 return 302 /_dd/login?rd=$request_uri;
+              '';
+              # one box passing a member's Wi-Fi change to another goes box
+              # to box on the fleet's network; nothing comes here for it
+              "= /_dd/house/wifi/relay".extraConfig = ''
+                return 404;
               '';
               # signed in, not a member: the home page says so
               "@waiting".extraConfig = ''

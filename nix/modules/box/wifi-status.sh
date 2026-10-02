@@ -13,6 +13,6 @@ ssid=""
 signal=$(nmcli -t -f ACTIVE,SIGNAL device wifi list ifname "$IFACE" --rescan no 2>/dev/null | awk -F: '$1=="yes"{print $2; exit}')
 jq -n --argjson wired "$wired" --arg state "$wstate" --arg ssid "$ssid" --arg signal "${signal:-}" --arg at "$(date +%s)" \
   '{wired: $wired, wifi: {state: $state, ssid: $ssid, signal: (if $signal == "" then null else ($signal | tonumber) end)}, at: ($at | tonumber)}' \
-  > "$DIR/status.json.tmp"
-chmod 0644 "$DIR/status.json.tmp"
-mv "$DIR/status.json.tmp" "$DIR/status.json"
+  > "$DIR/root/status.json"
+chmod 0644 "$DIR/root/status.json"
+mv -fT "$DIR/root/status.json" "$DIR/status.json"

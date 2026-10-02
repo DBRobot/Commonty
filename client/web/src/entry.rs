@@ -11,6 +11,15 @@ use wasm_bindgen::prelude::*;
 
 type R<T> = Result<T, String>;
 
+/// The entry the box handed the page, held to its own signature: the passkey
+/// is about to sign the next version of it, and must not sign over a device
+/// or a sealed key a box slipped into "the current one".
+fn verified(signed: &str) -> R<()> {
+    let s: SignedEntry = serde_json::from_str(signed).map_err(|e| e.to_string())?;
+    identity::verify(&s)
+        .map_err(|_| "this account's entry is not signed by its own key".to_string())
+}
+
 fn change(
     signed: &str,
     device: Option<&str>,
@@ -19,7 +28,7 @@ fn change(
 ) -> R<identity::Entry> {
     let s: SignedEntry = serde_json::from_str(signed).map_err(|e| e.to_string())?;
     if !s.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
-        return Err("this entry's root is a device key: change it with dd".into());
+        return Err("this account's main key is a device's: it changes the account itself".into());
     }
     let mut e = s.entry;
     if let Some(fp) = device {
@@ -54,6 +63,44 @@ fn change(
 /// and every library key sealed to it as well, and the challenge its root
 /// passkey has to sign: `{ "entry": …, "challenge": base64url }`. The
 /// library is open in this page (its key, base64, from library.js).
+fn with_device(
+    signed: &str,
+    public_key: &str,
+    library_id: Option<String>,
+    library_key: Option<String>,
+    now: u64,
+) -> R<String> {
+    let s: SignedEntry = serde_json::from_str(signed).map_err(|e| e.to_string())?;
+    if !s.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
+        return Err("this entry's root is a device key: it adds devices itself".into());
+    }
+    identity::decode_public(public_key).map_err(|e| e.to_string())?;
+    let mut e = s.entry;
+    if e.devices.iter().any(|d| d.public_key == public_key) {
+        return Err("that device is in the account already".into());
+    }
+    let fp = identity::fingerprint(public_key);
+    e.devices.push(identity::Device {
+        fingerprint: fp.clone(),
+        public_key: public_key.to_string(),
+        added: now,
+    });
+    if let (Some(id), Some(key)) = (library_id, library_key) {
+        let raw = B64.decode(&key).map_err(|e| e.to_string())?;
+        let sealed = library::seal_to(public_key, &raw).map_err(|e| e.to_string())?;
+        if let Some(l) = e.libraries.iter_mut().find(|l| l.id == id) {
+            l.keys.push(identity::SealedKey {
+                to: format!("device:{fp}"),
+                sealed,
+            });
+        }
+    }
+    e.version += 1;
+    e.updated = now;
+    let c = identity::challenge(&e).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "entry": e, "challenge": B64_URL.encode(c) }).to_string())
+}
+
 #[wasm_bindgen]
 pub fn entry_with_device(
     signed: &str,
@@ -63,35 +110,8 @@ pub fn entry_with_device(
     now: u64,
 ) -> Result<String, JsValue> {
     let run = || -> R<String> {
-        let s: SignedEntry = serde_json::from_str(signed).map_err(|e| e.to_string())?;
-        if !s.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
-            return Err("this entry's root is a device key: it adds devices itself".into());
-        }
-        identity::decode_public(public_key).map_err(|e| e.to_string())?;
-        let mut e = s.entry;
-        if e.devices.iter().any(|d| d.public_key == public_key) {
-            return Err("that device is in the account already".into());
-        }
-        let fp = identity::fingerprint(public_key);
-        e.devices.push(identity::Device {
-            fingerprint: fp.clone(),
-            public_key: public_key.to_string(),
-            added: now,
-        });
-        if let (Some(id), Some(key)) = (library_id, library_key) {
-            let raw = B64.decode(&key).map_err(|e| e.to_string())?;
-            let sealed = library::seal_to(public_key, &raw).map_err(|e| e.to_string())?;
-            if let Some(l) = e.libraries.iter_mut().find(|l| l.id == id) {
-                l.keys.push(identity::SealedKey {
-                    to: format!("device:{fp}"),
-                    sealed,
-                });
-            }
-        }
-        e.version += 1;
-        e.updated = now;
-        let c = identity::challenge(&e).map_err(|e| e.to_string())?;
-        Ok(serde_json::json!({ "entry": e, "challenge": B64_URL.encode(c) }).to_string())
+        verified(signed)?;
+        with_device(signed, public_key, library_id, library_key, now)
     };
     run().map_err(|e| JsValue::from_str(&e))
 }
@@ -118,6 +138,7 @@ pub fn entry_without(
     now: u64,
 ) -> Result<String, JsValue> {
     let run = || -> R<String> {
+        verified(signed)?;
         let e = change(signed, device.as_deref(), passkey.as_deref(), now)?;
         let c = identity::challenge(&e).map_err(|e| e.to_string())?;
         Ok(serde_json::json!({ "entry": e, "challenge": B64_URL.encode(c) }).to_string())
@@ -170,7 +191,7 @@ mod tests {
         assert!(
             change(&signed, Some("f1"), None, 2)
                 .unwrap_err()
-                .contains("dd")
+                .contains("main key")
         );
 
         let mut p = e;
@@ -194,6 +215,28 @@ mod tests {
                 .unwrap_err()
                 .contains("root")
         );
+    }
+
+    #[test]
+    fn an_entry_the_box_made_up_is_not_signed_over() {
+        let e = identity::Entry {
+            name: "tom".into(),
+            root: format!("{}pk1:digest", identity::WEBAUTHN_ROOT),
+            recovery: String::new(),
+            devices: vec![],
+            passkeys: vec![],
+            grant: None,
+            libraries: vec![],
+            version: 4,
+            updated: 4,
+        };
+        let forged = serde_json::to_string(&SignedEntry {
+            entry: e,
+            signature: "c2lnbmVk".into(),
+            recovery_signature: None,
+        })
+        .unwrap();
+        assert!(verified(&forged).is_err());
     }
 
     #[test]
@@ -225,7 +268,7 @@ mod tests {
         .unwrap();
         let key = B64.encode([9u8; 32]);
         let out: serde_json::Value = serde_json::from_str(
-            &entry_with_device(
+            &with_device(
                 &signed,
                 &pk,
                 Some("0123456789abcdef0123456789abcdef".into()),

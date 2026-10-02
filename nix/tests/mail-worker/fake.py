@@ -12,6 +12,10 @@ b64u = lambda b: base64.urlsafe_b64encode(b).rstrip(b'=').decode()
 lock = threading.Lock()
 
 class H(BaseHTTPRequestHandler):
+    # kept open, as Cloudflare does: the Worker reuses connections, and one
+    # this end had closed under it was "Network connection lost" now and then
+    protocol_version = 'HTTP/1.1'
+    disable_nagle_algorithm = True
     def log_message(self, *a): pass
     def send(self, v, code=200):
         b = json.dumps(v).encode(); self.send_response(code)

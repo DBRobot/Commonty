@@ -29,6 +29,8 @@ const FRESH: u64 = 600;
 pub struct Home {
     /// /run/dd-wifi, where the root unit reads requests and writes status
     dir: Option<PathBuf>,
+    /// the pages a change may be signed on: Settings' (VERIFY_HOUSE_ORIGINS)
+    origins: Vec<String>,
     /// the other boxes' gates, to relay to and ask after
     peers: Vec<String>,
     /// changes already acted on, by nonce, so a signed one is used once
@@ -36,9 +38,33 @@ pub struct Home {
 }
 
 impl Home {
+    fn seen_file(dir: &Option<PathBuf>) -> Option<PathBuf> {
+        dir.as_ref().map(|d| d.join("seen.json"))
+    }
+
+    fn keep_seen(&self, seen: &HashMap<String, u64>) {
+        if let Some(p) = Self::seen_file(&self.dir)
+            && let Ok(b) = serde_json::to_vec(seen)
+        {
+            let tmp = p.with_extension("json.tmp");
+            if std::fs::write(&tmp, b).is_ok() {
+                let _ = std::fs::rename(&tmp, &p);
+            }
+        }
+    }
+
     pub fn new(dir: Option<PathBuf>, directory_peers: &[String]) -> Home {
+        let seen = Self::seen_file(&dir)
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
         Home {
             dir,
+            origins: std::env::var("VERIFY_HOUSE_ORIGINS")
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(str::to_string)
+                .collect(),
             peers: directory_peers
                 .iter()
                 .map(|p| {
@@ -47,7 +73,7 @@ impl Home {
                         .to_string()
                 })
                 .collect(),
-            seen: Mutex::new(HashMap::new()),
+            seen: Mutex::new(seen),
         }
     }
 }
@@ -126,7 +152,7 @@ pub fn dir_router(h: Arc<DirHouse>) -> axum::Router {
         .route(
             "/_dd/house/here",
             axum::routing::get(|State(h): State<Arc<DirHouse>>| async move {
-                Json(here(&h.home)).into_response()
+                Json(here(&h.home, false)).into_response()
             }),
         )
         .route(
@@ -140,21 +166,26 @@ pub fn dir_router(h: Arc<DirHouse>) -> axum::Router {
         .with_state(h)
 }
 
-/// This box: how it is connected, and how the last change went.
-fn here(home: &Home) -> serde_json::Value {
-    let (status, last) = match &home.dir {
+/// This box: how it is connected, and how the last change went. The house's
+/// network name only for a member asking this box (`named`): what any box
+/// or stranger can ask leaves it out, as it would point to the house.
+fn here(home: &Home, named: bool) -> serde_json::Value {
+    let (mut status, last) = match &home.dir {
         Some(d) => (
             read_json(d.join("status.json")),
             read_json(d.join("result.json")),
         ),
         None => (serde_json::Value::Null, serde_json::Value::Null),
     };
+    if !named && let Some(w) = status.get_mut("wifi").and_then(|w| w.as_object_mut()) {
+        w.remove("ssid");
+    }
     serde_json::json!({ "box": hostname(), "status": status, "last": last })
 }
 
 /// GET /_dd/house/here - for the other boxes' gates; nothing secret in it
 pub(crate) async fn here_route(State(app): State<Arc<App>>) -> Response {
-    Json(here(&app.home_net)).into_response()
+    Json(here(&app.home_net, false)).into_response()
 }
 
 fn member(app: &App, headers: &HeaderMap) -> Option<String> {
@@ -168,7 +199,7 @@ pub(crate) async fn list(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
     if member(&app, &headers).is_none() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let mut boxes = vec![here(&app.home_net)];
+    let mut boxes = vec![here(&app.home_net, true)];
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(4))
         .build()
@@ -217,35 +248,52 @@ fn check(app: &dyn Vouch, s: &Signed) -> Result<Change, (StatusCode, String)> {
     let bad = |m: &str| (StatusCode::FORBIDDEN, m.to_string());
     let c: Change = serde_json::from_str(&s.payload)
         .map_err(|_| (StatusCode::BAD_REQUEST, "not a change".to_string()))?;
-    if c.ssid.is_empty() || c.ssid.len() > 32 || c.ssid.contains(['\n', '\r']) {
+    // nothing NetworkManager's keyfile would read as more than a name
+    if c.ssid.is_empty()
+        || c.ssid.len() > 32
+        || c.ssid.chars().any(|ch| ch.is_control() || ch == '\\')
+    {
         return Err((
             StatusCode::BAD_REQUEST,
             "that network name will not do".into(),
         ));
     }
-    if !(8..=63).contains(&c.psk.len()) || c.psk.chars().any(|ch| ch.is_control()) {
+    if !(8..=63).contains(&c.psk.len()) || c.psk.chars().any(|ch| ch.is_control() || ch == '\\') {
         return Err((
             StatusCode::BAD_REQUEST,
             "a Wi-Fi password is 8 to 63 characters".into(),
         ));
     }
-    if now().abs_diff(c.at) > FRESH {
+    // made in the last ten minutes, and not dated ahead to last longer
+    if c.at > now() + 60 || now().saturating_sub(c.at) > FRESH {
         return Err(bad("that change is too old; make it again"));
     }
+    // one answer whatever went wrong: who is a member is not told here
     if !app.is_member(&c.user) {
-        return Err(bad("not a member"));
+        return Err(bad("your passkey did not sign that"));
     }
-    let entry = app.entry_of(&c.user).ok_or_else(|| bad("no such member"))?;
+    let entry = app
+        .entry_of(&c.user)
+        .ok_or_else(|| bad("your passkey did not sign that"))?;
     let mut h = sha2::Sha256::new();
     h.update(LABEL);
     h.update(s.payload.as_bytes());
-    identity::check_login(&entry.entry, &s.id, &s.assertion, &h.finalize())
-        .map_err(|_| bad("your passkey did not sign that"))?;
+    identity::check_login(
+        &entry.entry,
+        &s.id,
+        &s.assertion,
+        &h.finalize(),
+        &app.house().origins,
+    )
+    .map_err(|_| bad("your passkey did not sign that"))?;
     let mut seen = app.house().seen.lock().unwrap();
     seen.retain(|_, t| now() < *t + FRESH * 2);
     if seen.insert(c.nonce.clone(), now()).is_some() {
         return Err(bad("that change was already made"));
     }
+    // and kept where the gate's next start reads it, so a restart does not
+    // make a change usable again
+    app.house().keep_seen(&seen);
     Ok(c)
 }
 

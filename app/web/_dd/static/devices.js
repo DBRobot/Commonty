@@ -7,7 +7,7 @@
 import init, { file_seal, file_open, entry_without, entry_signed, entry_with_device, qr_svg } from '/_dd/web/dd_web.js';
 import { unlock } from './library.js';
 import { requestOptions, assertion, post, b64u, u8b64 } from './webauthn.js';
-import { me, inApp } from './shell.js';
+import { me, inApp, appFetch } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const ICON = {
@@ -62,6 +62,15 @@ async function confirm() {
   await post('/_dd/login/finish', assertion(cred), { 'x-dd-ceremony': ceremony });
 }
 
+// The email address's unlock lives at the mail Worker, which no box can
+// end: the email line on Profile is its frame, and is asked to end the
+// others there. Nothing comes back but whether it did.
+function endMailElsewhere() {
+  const frame = document.getElementById('email');
+  if (!frame?.src || !frame.contentWindow) return;
+  frame.contentWindow.postMessage('end-others', new URL(frame.src).origin);
+}
+
 async function endSessions(body, button) {
   button.disabled = true;
   const send = () => fetch('/_dd/signins/end', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -72,6 +81,7 @@ async function endSessions(body, button) {
       r = await send();
     }
     if (!r.ok) throw new Error(await r.text());
+    if (body.others) endMailElsewhere();
     await load();
     render();
   } catch (e) {
@@ -176,12 +186,17 @@ async function openNames() {
       if (!u.ok) throw new Error(u.none ? 'names need your library, and this account has none yet' : 'this browser cannot open your library yet');
       lib = u.ok;
     }
+    // none yet is a fresh start; a file that will not open is not, or the
+    // next rename would write over every name in it
     const r = await fetch('/_dd/devices/names');
-    names = {};
-    if (r.ok) {
+    if (r.status === 404) names = {};
+    else if (!r.ok) throw new Error(`the box said ${r.status}`);
+    else {
       try {
         names = JSON.parse(new TextDecoder().decode(file_open(lib.key, lib.id, new Uint8Array(await r.arrayBuffer()))));
-      } catch { names = {}; }
+      } catch {
+        throw new Error('your device names could not be opened, so they were left as they are');
+      }
     }
     render();
   } catch (e) {
@@ -241,8 +256,9 @@ function remove(k, label) {
     $('rm-yes').disabled = true;
     try {
       if (rootHere) {
-        const r = await fetch('/_dd/app/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(k.passkey ? { passkey: k.passkey } : { fingerprint: k.fingerprint }) });
+        const r = await appFetch('/_dd/app/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(k.passkey ? { passkey: k.passkey } : { fingerprint: k.fingerprint }) });
         if (!r.ok) throw new Error(await r.text());
+        endMailElsewhere();
         $('remove').close();
         await load();
         render();
@@ -268,6 +284,7 @@ function remove(k, label) {
       }));
       const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });
       if (!r.ok) throw new Error(await r.text() || `the box said ${r.status}`);
+      endMailElsewhere();
       $('remove').close();
       await load();
       render();
@@ -290,7 +307,7 @@ let adding = null;
 async function canAdd() {
   if (entry.entry.root.startsWith('webauthn:')) return true;
   if (!inApp) return false;
-  const r = await fetch('/_dd/app/root').catch(() => null);
+  const r = await appFetch('/_dd/app/root').catch(() => null);
   return !!(r && r.ok && (await r.json()).here && (rootHere = true));
 }
 
@@ -317,6 +334,19 @@ async function addStart() {
   addWatch(adding.code);
 }
 
+// the pairing sums, the same as identity::pairing_commit and _digits make
+const enc = (t) => new TextEncoder().encode(t);
+const sha = async (t) => new Uint8Array(await crypto.subtle.digest('SHA-256', enc(t)));
+const hex = (b) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+async function pairingDigits(pk, newDevice, approver) {
+  const d = await sha(`commonty pairing v1\0${pk}\0${newDevice}\0${approver}`);
+  return String(new DataView(d.buffer).getUint32(0) % 1000000).padStart(6, '0');
+}
+
+// The new device commits to a number of its own; this page then gives it
+// one, and only after that does the new device reveal its own. The digits
+// come from the key and both numbers, worked out here, so a box that put
+// its own key in the new device's place could not make them match.
 async function addWatch(code) {
   while (adding && adding.code === code && $('add').open) {
     if (Date.now() / 1000 > adding.expires) {
@@ -324,15 +354,25 @@ async function addWatch(code) {
       return;
     }
     const s = await fetch('/_dd/add/status?code=' + encodeURIComponent(code)).then((r) => r.json()).catch(() => null);
+    if (s?.state === 'gone') return adSay('That code ran out. Close this and make a new one.');
     if (s?.state === 'offered') {
       adding.offer = s.offer;
-      $('ad-what').textContent = `${s.offer.kind} wants to join`;
-      $('ad-digits').textContent = s.offer.digits;
-      $('ad-yes').textContent = rootHere ? 'Approve' : 'Approve with passkey';
-      adPanel('ad-ask');
-      return;
+      if (!adding.mine) {
+        adding.mine = hex(crypto.getRandomValues(new Uint8Array(16)));
+        await fetch('/_dd/add/theirs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, nonce: adding.mine }) });
+      }
+      if (s.revealed) {
+        const pk = s.offer.public_key;
+        if (hex(await sha(`commonty pairing commit v1\0${pk}\0${s.revealed}`)) !== s.offer.commit) {
+          return adSay("The new device's answer didn't add up. Close this and make a new code.");
+        }
+        $('ad-what').textContent = `${s.offer.kind} wants to join`;
+        $('ad-digits').textContent = await pairingDigits(pk, s.revealed, adding.mine);
+        $('ad-yes').textContent = rootHere ? 'Approve' : 'Approve with passkey';
+        adPanel('ad-ask');
+        return;
+      }
     }
-    if (s?.state === 'gone') return adSay('That code ran out. Close this and make a new one.');
     await new Promise((r) => setTimeout(r, 2000));
   }
 }
@@ -349,7 +389,7 @@ async function addApprove() {
     const pk = adding.offer.public_key;
     if (rootHere) {
       // the main key is on this device: the app signs it in
-      const r = await fetch('/_dd/app/admit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ public_key: pk }) });
+      const r = await appFetch('/_dd/app/admit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ public_key: pk }) });
       if (!r.ok) throw new Error(await r.text());
     } else {
       // a passkey main key: the library is opened to seal its key to the

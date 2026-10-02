@@ -21,6 +21,14 @@ Object.defineProperty(navigator.credentials, 'get', { configurable: true, value:
   return { rawId: u(a.id), response: { authenticatorData: u(a.authenticatorData), clientDataJSON: u(a.clientDataJSON), signature: u(a.signature) } };
 } });
 """
+def settled(page):
+    # the email line has its answer; asked from here, as the page's own
+    # policy refuses the string a wait_for_function would evaluate
+    import time
+    for _ in range(100):
+        if page.inner_text('#status') != 'Checking…': return
+        time.sleep(0.1)
+    raise TimeoutError('the email line never settled')
 failed = []
 def ok(c, m):
     print(('PASS ' if c else 'FAIL ') + m, flush=True)
@@ -44,11 +52,11 @@ with sync_playwright() as p:
     fake('/verify', {'email': 'first@example.com'})
     pg.wait_for_url('**/_dd/settings?email=changed', timeout=15000); ok(True, 'moved on by itself once opened -> ' + pg.url)
     # the email line, signed in here already
-    pg.goto(f'{W}/row?name=tester&back={back}'); pg.wait_for_function("document.getElementById('status').textContent !== 'Checking…'")
+    pg.goto(f'{W}/row?name=tester&back={back}'); settled(pg)
     ok(pg.inner_text('#addr') == 'first@example.com' and pg.inner_text('#status') == 'Confirmed', 'email line shows address: ' + pg.inner_text('.er'))
     # a stranger's browser: no address until the passkey
     ctx2 = b.new_context(); ctx2.expose_function('__sign', lambda c: sign(c)); ctx2.add_init_script(STUB)
-    p2 = ctx2.new_page(); p2.goto(f'{W}/row?name=tester&back={back}'); p2.wait_for_function("document.getElementById('status').textContent !== 'Checking…'")
+    p2 = ctx2.new_page(); p2.goto(f'{W}/row?name=tester&back={back}'); settled(p2)
     ok(p2.is_hidden('#addr') and p2.is_visible('#show') and p2.inner_text('#status') == 'Confirmed', 'without passkey: status only, Show button')
     p2.click('#show'); p2.wait_for_selector('#addr:not([hidden])', timeout=10000); ok(p2.inner_text('#addr') == 'first@example.com', 'Show reveals after passkey')
     # change to an address already confirmed elsewhere in the account: no wait
@@ -78,6 +86,7 @@ with sync_playwright() as p:
     ok(call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign('AAAA')})[0] == 403, 'answer to another challenge: refused')
     ok(call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'], origin='https://evil.example', rp='evil.example')})[0] == 403, 'made for another site: refused')
     ok(call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'], flags=4)})[0] == 403, 'nobody present: refused')
+    ok(call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'], origin='https://home.commonty.test')})[0] == 403, 'made on a page a box serves: refused')
     ok(call('/api/login', {'token': c['token'] + 'x', 'id': 'cGsx', 'assertion': sign(c['challenge'])})[0] == 403, 'tampered challenge token: refused')
     s, _, ck = call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'])}); ok(s == 200 and ck, 'a right answer signs in')
     sess = ck.split(';')[0]
@@ -87,6 +96,17 @@ with sync_playwright() as p:
     # a box replaying an old entry after a newer one was seen
     fake('/entry', {'v': 4}); ok(call('/api/challenge', {'name': 'tester'})[0] == 200, 'newer entry v4 taken')
     fake('/entry', {'v': 3}); ok(call('/api/challenge', {'name': 'tester'})[0] == 200, 'old v3 replayed: still served from pinned v4')
+    # "sign out everywhere else" from Settings: the other sessions end, this one stays
+    ok(call('/api/me', cookie=sess)[0] == 200, 'the first session still works')
+    s, c, _ = call('/api/challenge', {'name': 'tester'})
+    sess2 = call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'])})[2].split(';')[0]
+    ok(call('/api/end-others', {}, origin='http://127.0.0.1:8787', cookie=sess2)[0] == 403, 'end-others from another origin: refused')
+    s, _, ck = call('/api/end-others', {}, cookie=sess2); ok(s == 200 and ck, 'end-others from this browser')
+    sess2 = ck.split(';')[0]
+    ok(call('/api/me', cookie=sess)[0] == 401, 'the other session is ended')
+    ok(call('/api/me', cookie=sess2)[0] == 200, 'this browser stays signed in')
+    # the passkey it was opened with is removed from the entry: ended too
+    fake('/entry', {'v': 5}); ok(call('/api/me', cookie=sess2)[0] == 401, 'its passkey removed: session ended')
     b.close()
 if failed:
     sys.exit(f'{len(failed)} failed')

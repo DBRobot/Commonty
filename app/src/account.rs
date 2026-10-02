@@ -199,18 +199,28 @@ pub fn set_name(keys: State<'_, Keys>, name: String) -> Result<(), String> {
 }
 
 /// This device, joining an account from the code another device of it shows
-/// (Settings > Devices > Add a device): its key is offered against the code,
-/// and the four digits both screens show come back. The account's main key
-/// approves it there; the status the page checks says when it is in.
+/// (Settings > Devices > Add a device). Its key is offered against the code
+/// with a commitment to a random number of its own; once the approving
+/// device's number arrives, its own is revealed, and the six digits both
+/// screens show are worked out here from the key and both numbers - not
+/// taken from the box that carried them. The account's main key approves
+/// there; the status the page checks says when this device is in.
 #[tauri::command]
 pub async fn join_with_code(keys: State<'_, Keys>, code: String) -> Result<String, String> {
     let (kp, _) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
-    let r = directory::http()
-        .map_err(|e| e.to_string())?
-        .post(format!("https://home.{}/_dd/add/offer", domain()))
+    let public_key = auth::device::public_b64(&kp);
+    let mut raw = [0u8; 16];
+    getrandom::fill(&mut raw).map_err(|e| e.to_string())?;
+    let mine: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    let code = code.trim().to_string();
+    let base = format!("https://home.{}/_dd/add", domain());
+    let http = directory::http().map_err(|e| e.to_string())?;
+    let r = http
+        .post(format!("{base}/offer"))
         .json(&serde_json::json!({
-            "code": code.trim(),
-            "public_key": auth::device::public_b64(&kp),
+            "code": code,
+            "public_key": public_key,
+            "commit": identity::pairing_commit(&public_key, &mine),
         }))
         .send()
         .await
@@ -222,9 +232,37 @@ pub async fn join_with_code(keys: State<'_, Keys>, code: String) -> Result<Strin
             .unwrap_or_else(|_| "that did not work".into()));
     }
     let v: serde_json::Value = r.json().await.map_err(|e| e.to_string())?;
-    let user = v["user"].as_str().ok_or("the box gave no name")?;
-    keys.0.set(USER, user).map_err(|e| e.to_string())?;
-    Ok(v["digits"].as_str().unwrap_or_default().to_string())
+    let user = v["user"]
+        .as_str()
+        .ok_or("the box gave no name")?
+        .to_string();
+    // the other device's number, once it has seen this one's offer
+    let theirs = loop {
+        let w: serde_json::Value = http
+            .get(format!("{base}/wait"))
+            .query(&[("code", &code)])
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .error_for_status()
+            .map_err(|_| "that code ran out; make a new one on your other device".to_string())?
+            .json()
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(t) = w["theirs"].as_str() {
+            break t.to_string();
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    };
+    http.post(format!("{base}/reveal"))
+        .json(&serde_json::json!({ "code": code, "nonce": mine }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?;
+    keys.0.set(USER, &user).map_err(|e| e.to_string())?;
+    Ok(identity::pairing_digits(&public_key, &mine, &theirs))
 }
 
 /// A new member, from a code: the invite it derives is fetched from the

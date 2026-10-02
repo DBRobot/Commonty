@@ -442,21 +442,24 @@ impl App {
         }
     }
 
-    /// they showed their passkey just now: for five minutes, what asks for
-    /// that may go ahead
-    fn saw_passkey(&self, user: &str) {
+    /// This session showed its passkey just now: for five minutes, what asks
+    /// for that may go ahead - in this browser, not in every one the person
+    /// is signed in on.
+    fn saw_passkey(&self, session: &str) {
         let now = session::now();
         let mut f = self.fresh.lock().unwrap();
         f.retain(|_, until| *until > now);
-        f.insert(user.to_string(), now + 300);
+        f.insert(session.to_string(), now + 300);
     }
 
-    fn passkey_fresh(&self, user: &str) -> bool {
-        self.fresh
-            .lock()
-            .unwrap()
-            .get(user)
-            .is_some_and(|until| *until > session::now())
+    fn passkey_fresh(&self, session: &str) -> bool {
+        !session.is_empty()
+            && self
+                .fresh
+                .lock()
+                .unwrap()
+                .get(session)
+                .is_some_and(|until| *until > session::now())
     }
 
     fn member(&self, user: &str) -> bool {
@@ -775,7 +778,12 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     // A disk image goes from the Backups page only after the passkey, and
     // the box holds the page to that: a tab left signed in is not enough.
     // `dd image delete` signs with the device's own key and asks itself.
-    if bearer(&headers).is_none() && deletes_image(&headers) && !app.passkey_fresh(&user) {
+    let this_session = app
+        .sessions
+        .session(headers.get("cookie").and_then(|v| v.to_str().ok()))
+        .map(|s| s.1)
+        .unwrap_or_default();
+    if bearer(&headers).is_none() && deletes_image(&headers) && !app.passkey_fresh(&this_session) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let mut r = StatusCode::OK.into_response();
@@ -790,10 +798,70 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     r
 }
 
+/// The pages this gate serves, as origins: "https://<host>.<domain>" for each
+/// of VERIFY_HOSTS, and home. Nothing else may ask for a passkey here.
+fn own_hosts(domain: &str) -> Vec<String> {
+    let mut hosts: Vec<String> = std::env::var("VERIFY_HOSTS")
+        .unwrap_or_default()
+        .split([',', ' '])
+        .filter(|h| !h.is_empty())
+        .map(|h| format!("https://{h}.{domain}"))
+        .collect();
+    hosts.push(format!("https://home.{domain}"));
+    hosts.dedup();
+    hosts
+}
+
+/// A change to a disk image - anything but reading, under /images/ - asked
+/// by a browser. The path is held as nginx will route it, not as it was
+/// spelled: `//images/`, `/%69mages/` and `/x/../images/` are /images/ too.
 fn deletes_image(headers: &HeaderMap) -> bool {
     let h = |k| headers.get(k).and_then(|v: &HeaderValue| v.to_str().ok());
-    h("x-original-method") == Some("DELETE")
-        && h("x-original-uri").is_some_and(|u| u.starts_with("/images/"))
+    let reads = matches!(
+        h("x-original-method").unwrap_or("GET"),
+        "GET" | "HEAD" | "OPTIONS" | "PROPFIND"
+    );
+    !reads && h("x-original-uri").is_some_and(|u| routed_path(u).starts_with("/images/"))
+}
+
+/// The path of a request as nginx routes it: no query, percent-escapes
+/// decoded, runs of slashes merged, `.` and `..` resolved.
+fn routed_path(uri: &str) -> String {
+    let raw = uri.split(['?', '#']).next().unwrap_or_default();
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(b) = u8::from_str_radix(
+                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("zz"),
+                16,
+            )
+        {
+            decoded.push(b);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    let text = String::from_utf8_lossy(&decoded);
+    let mut out: Vec<&str> = Vec::new();
+    for part in text.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            p => out.push(p),
+        }
+    }
+    let mut path = format!("/{}", out.join("/"));
+    if text.ends_with('/') && path != "/" {
+        path.push('/');
+    }
+    path
 }
 
 /// On a demo door (demo-<service>.<domain>), the gate's own pages and
@@ -1220,12 +1288,11 @@ async fn join_sign(
         return (status, why).into_response();
     }
     // the entry was just signed with the passkey made a moment ago
-    app.saw_passkey(&user);
+    let (set, id, _) = app.sessions.issue_noted(&user);
+    app.saw_passkey(&id);
     let mut r = Json(serde_json::json!({ "user": user })).into_response();
-    r.headers_mut().insert(
-        "set-cookie",
-        HeaderValue::from_str(&app.sessions.issue(&user)).unwrap(),
-    );
+    r.headers_mut()
+        .insert("set-cookie", HeaderValue::from_str(&set).unwrap());
     r
 }
 
@@ -1283,7 +1350,6 @@ async fn login_finish(
     if let Err(e) = app.webauthn.finish_passkey_authentication(&cred, &state) {
         return (StatusCode::UNAUTHORIZED, format!("refused: {e}")).into_response();
     }
-    app.saw_passkey(&user);
     let agent = headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
@@ -1300,6 +1366,8 @@ async fn login_finish(
     }
     let (set, id, exp) = app.sessions.issue_noted(&user);
     app.signins.saw(&user, &id, exp, agent, None);
+    // fresh for this session, the one this browser holds from now
+    app.saw_passkey(&id);
     let mut r = StatusCode::OK.into_response();
     r.headers_mut()
         .insert("set-cookie", HeaderValue::from_str(&set).unwrap());
@@ -1918,12 +1986,16 @@ pub async fn start(
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| cfg.dir.clone());
     // the browser login's scope: the whole domain, so one passkey login covers
-    // every service on this box, and the cookie rides along to all of them
+    // every service on this box, and the cookie rides along to all of them.
+    // But only this box's own pages may ask for it (VERIFY_HOSTS): a page of
+    // any other host of the domain could be another box, relaying this
+    // box's challenge to get a session here.
     let rp_origin = Url::parse(&format!("https://{domain}"))?;
-    let webauthn = WebauthnBuilder::new(&domain, &rp_origin)?
-        .rp_name("Commonty")
-        .allow_subdomains(true)
-        .build()?;
+    let mut webauthn = WebauthnBuilder::new(&domain, &rp_origin)?.rp_name("Commonty");
+    for h in own_hosts(&domain) {
+        webauthn = webauthn.append_allowed_origin(&Url::parse(&h)?);
+    }
+    let webauthn = webauthn.build()?;
     let oidc = match cfg.oidc {
         Some(o) => Some(oidc::Issuer::open(
             &state_dir,
@@ -2105,6 +2177,9 @@ pub async fn start(
         .route("/_dd/add/status", get(adddevice::status))
         .route("/_dd/add/cancel", post(adddevice::cancel))
         .route("/_dd/add/offer", post(adddevice::offer))
+        .route("/_dd/add/theirs", post(adddevice::theirs))
+        .route("/_dd/add/wait", get(adddevice::wait))
+        .route("/_dd/add/reveal", post(adddevice::reveal))
         // where the QR code goes: open to anyone, it only shows the code
         .route("/_dd/add", get(|| async { page("add") }))
         .route("/_dd/house", get(home::list))
@@ -2259,8 +2334,20 @@ mod tests {
         };
         assert!(deletes_image(&h("DELETE", "/images/data/ab")));
         assert!(!deletes_image(&h("GET", "/images/data/ab")));
-        assert!(!deletes_image(&h("PUT", "/images/locks/ab")));
+        assert!(!deletes_image(&h("PROPFIND", "/images/")));
         assert!(!deletes_image(&h("DELETE", "/_dd/dav/x")));
+        // every other change too, and however the path is spelled
+        for m in ["PUT", "MOVE", "COPY", "MKCOL", "PATCH"] {
+            assert!(deletes_image(&h(m, "/images/data/ab")), "{m}");
+        }
+        for u in [
+            "//images/data/ab",
+            "/%69mages/data/ab",
+            "/x/../images/ab",
+            "/./images/ab?x=1",
+        ] {
+            assert!(deletes_image(&h("DELETE", u)), "{u}");
+        }
     }
 
     #[test]

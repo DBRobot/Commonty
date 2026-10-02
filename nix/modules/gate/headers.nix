@@ -24,7 +24,7 @@ let
     add_header Referrer-Policy strict-origin-when-cross-origin always;
   '';
   common = plain + ''
-    add_header Content-Security-Policy "frame-ancestors 'self' https://*.${base}" always;
+    add_header Content-Security-Policy "frame-ancestors 'self'" always;
   '';
   ours = lib.concatStringsSep "; " [
     "default-src 'self'"
@@ -42,7 +42,7 @@ let
     "object-src 'none'"
     "base-uri 'self'"
     "form-action 'self' https://*.${base}"
-    "frame-ancestors 'self' https://*.${base}"
+    "frame-ancestors 'self'"
     "report-uri /_dd/csp"
   ];
   # every location, not the server: nginx drops a server's add_header in

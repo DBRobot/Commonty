@@ -170,10 +170,13 @@ $("code-back").addEventListener("click", () => show("name"));
 $("code-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   $("code-error").hidden = true;
+  $("code-wait").hidden = false;
   try {
     digits = await invoke("join_with_code", { code: $("code").value });
+    $("code-wait").hidden = true;
     refresh();
   } catch (e) {
+    $("code-wait").hidden = true;
     $("code-error").textContent = String(e);
     $("code-error").hidden = false;
   }

@@ -185,6 +185,45 @@ in
           serviceConfig.LoadCredential = config.dd.memberMail.credentials;
         };
 
+        # Signing a member out of Passwords: the gate drops their name in
+        # /run/dd-ended when one of their devices or passkeys is removed, or
+        # they sign out everywhere else (box/verify/src/directory.rs). Their
+        # apps and browsers here are forgotten, as the admin page's
+        # "deauthorize" does, and they sign in again through the gate. The
+        # gate never touches the vault's database; this runs as the vault.
+        systemd.tmpfiles.rules = [ "d /run/dd-ended 0770 dd-verify vaultwarden -" ];
+        systemd.paths.dd-vault-end = {
+          wantedBy = [ "paths.target" ];
+          pathConfig.DirectoryNotEmpty = "/run/dd-ended";
+        };
+        systemd.services.dd-vault-end = {
+          after = [ "postgresql.service" ];
+          path = [ config.services.postgresql.package ];
+          serviceConfig = {
+            Type = "oneshot";
+            User = "vaultwarden";
+            Group = "vaultwarden";
+          };
+          script = ''
+            for f in /run/dd-ended/*; do
+              [ -e "$f" ] || continue
+              name=$(basename "$f")
+              rm -f -- "$f"
+              case "$name" in
+                *[!a-z0-9._-]* | [!a-z0-9]*) echo "not a name: skipped"; continue ;;
+              esac
+              psql -v ON_ERROR_STOP=1 -q -d vaultwarden -v email="$name@${base}" <<'SQL'
+            BEGIN;
+            DELETE FROM devices WHERE user_uuid IN (SELECT uuid FROM users WHERE lower(email) = lower(:'email'));
+            UPDATE users SET security_stamp = gen_random_uuid()::text, stamp_exception = NULL, updated_at = now()
+              WHERE lower(email) = lower(:'email');
+            COMMIT;
+            SQL
+              echo "$name: signed out of Passwords everywhere"
+            done
+          '';
+        };
+
         # the gate: the issuer this sign-in goes through (box/verify/src/oidc.rs)
         systemd.services.dd-verify = {
           environment = {
@@ -193,7 +232,9 @@ in
             VERIFY_OIDC_CLIENT_SECRET_FILE = "/run/credentials/dd-verify.service/oidc-secret";
             VERIFY_OIDC_REDIRECT = "https://${host}/identity/connect/oidc-signin";
           };
+          environment.VERIFY_ENDED = "/run/dd-ended";
           serviceConfig.LoadCredential = [ "oidc-secret:${cfg.oidcSecretFile}" ];
+          serviceConfig.ReadWritePaths = [ "/run/dd-ended" ];
         };
 
         # the vault's records, in the hourly dumps the backups ship

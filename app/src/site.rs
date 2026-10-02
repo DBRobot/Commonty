@@ -58,6 +58,55 @@ fn plain(status: StatusCode, text: &str) -> Response<Vec<u8>> {
         .unwrap_or_default()
 }
 
+/// A secret made at each launch, handed to the app's own pages in a meta tag
+/// and asked of every request to the app's own routes (/_dd/app/...): what
+/// speaks for the device's keys is a page the app wrote, and nothing a box
+/// or a link could put in front of it.
+fn launch_secret() -> &'static str {
+    static S: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    S.get_or_init(|| {
+        let mut b = [0u8; 24];
+        getrandom::fill(&mut b).expect("random");
+        b.iter().map(|x| format!("{x:02x}")).collect()
+    })
+}
+
+fn has_secret(req: &Request<Vec<u8>>) -> bool {
+    req.headers()
+        .get("x-dd-app")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == launch_secret())
+}
+
+/// A type the window would run, or show as a page of its own
+fn runnable(kind: &str) -> bool {
+    ["html", "xml", "svg", "javascript", "ecmascript", "css"]
+        .iter()
+        .any(|k| kind.contains(k))
+}
+
+/// One of the app's own pages, with the launch secret in it
+fn page_asset<R: Runtime>(app: &AppHandle<R>, path: &str) -> Response<Vec<u8>> {
+    match app.asset_resolver().get(path.to_string()) {
+        Some(a) => {
+            let html = String::from_utf8_lossy(&a.bytes).replacen(
+                "</head>",
+                &format!(
+                    "<meta name=\"dd-app\" content=\"{}\"></head>",
+                    launch_secret()
+                ),
+                1,
+            );
+            Response::builder()
+                .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                .header(header::CACHE_CONTROL, "no-store")
+                .body(html.into_bytes())
+                .unwrap_or_default()
+        }
+        None => plain(StatusCode::NOT_FOUND, "not in the app"),
+    }
+}
+
 fn asset<R: Runtime>(app: &AppHandle<R>, path: &str) -> Response<Vec<u8>> {
     match app.asset_resolver().get(path.to_string()) {
         Some(a) => Response::builder()
@@ -87,7 +136,24 @@ async fn serve<R: Runtime>(
         return Ok(plain(StatusCode::FORBIDDEN, "not one of the app's pages"));
     }
     if let Some(p) = page_for(&path) {
-        return Ok(asset(app, &format!("_dd/pages/{p}.html")));
+        return Ok(page_asset(app, &format!("_dd/pages/{p}.html")));
+    }
+    // the page code's wasm and players: carried, never fetched from a box
+    if let Some(f) = path.strip_prefix("/_dd/web/") {
+        if f.contains('/') || f.starts_with('.') {
+            return Ok(plain(StatusCode::NOT_FOUND, "no such file"));
+        }
+        return Ok(asset(app, &format!("_dd/web/{f}")));
+    }
+    // the app's own routes answer the app's own pages alone
+    if path.starts_with("/_dd/app/")
+        && !matches!(
+            path.as_str(),
+            "/_dd/app/photos" | "/_dd/app/photos.js" | "/_dd/app/open"
+        )
+        && !has_secret(&req)
+    {
+        return Ok(plain(StatusCode::FORBIDDEN, "not one of the app's pages"));
     }
     if let Some(f) = path.strip_prefix("/_dd/static/") {
         if f.contains('/') || f.starts_with('.') {
@@ -114,7 +180,7 @@ async fn serve<R: Runtime>(
     // Photos in this window (photos.rs): the page that signs the window in,
     // and what it asks
     if path == "/_dd/app/photos" {
-        return Ok(asset(app, "photos.html"));
+        return Ok(page_asset(app, "photos.html"));
     }
     // its script: without this route the page never got past "Opening"
     if path == "/_dd/app/photos.js" {
@@ -208,7 +274,30 @@ async fn proxy<R: Runtime>(
         out = out.body(body);
     }
     let r = out.send().await.map_err(|e| e.to_string())?;
-    let mut back = Response::builder().status(r.status().as_u16());
+    // What a box answers is data for the app's pages - json, files, media -
+    // and never something the window would run or show as a page of its
+    // own: that would speak with the app's voice, keys and all. So no html,
+    // xml, svg or script passes, nothing goes without its type, and the
+    // browser is told not to guess one.
+    let kind = r
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if runnable(&kind) {
+        return Ok(plain(
+            StatusCode::BAD_GATEWAY,
+            "the box answered with a page; the app shows only its own",
+        ));
+    }
+    let mut back = Response::builder()
+        .status(r.status().as_u16())
+        .header("x-content-type-options", "nosniff")
+        .header("content-security-policy", "sandbox; default-src 'none'");
+    if kind.is_empty() {
+        back = back.header("content-type", "application/octet-stream");
+    }
     for h in [
         "content-type",
         "content-range",
@@ -346,4 +435,32 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_box_sends_data_and_never_a_page() {
+        for k in [
+            "text/html; charset=utf-8",
+            "application/xhtml+xml",
+            "image/svg+xml",
+            "text/javascript",
+            "application/javascript",
+            "text/xml",
+            "text/css",
+        ] {
+            assert!(super::runnable(k), "{k}");
+        }
+        for k in [
+            "application/json",
+            "video/mp4",
+            "application/vnd.apple.mpegurl",
+            "image/jpeg",
+            "application/octet-stream",
+            "text/plain",
+        ] {
+            assert!(!super::runnable(k), "{k}");
+        }
+    }
 }

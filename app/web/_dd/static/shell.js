@@ -28,6 +28,13 @@ const appOrigin = (() => {
   try { return sessionStorage.getItem('dd-app-origin'); } catch { return null; }
 })();
 export const inApp = location.protocol === 'commonty:' || location.hostname === 'commonty.localhost' || !!appOrigin;
+
+/// a request to the app's own routes (/_dd/app/...), with the secret the
+/// app put in this page when it served it: the app answers nothing else
+export function appFetch(url, init = {}) {
+  const secret = document.querySelector('meta[name="dd-app"]')?.content || '';
+  return fetch(url, { ...init, headers: { ...(init.headers || {}), 'x-dd-app': secret } });
+}
 // where the app's pages are, from wherever this page is
 const appPages = appOrigin || '';
 

@@ -129,3 +129,23 @@ assert "access_token" in got, got
 # sets the master password on her own device next
 rows = box.succeed("sudo -u postgres psql -d vaultwarden -tAc \"select email from users\"").split()
 assert rows == ["sarah@test.invalid"], rows
+
+# Signed out of Passwords everywhere: the gate drops her name when a device
+# or passkey of hers goes, or she signs out everywhere else; her session
+# here stops working and her app cannot refresh it
+tokens = json.loads(got)
+api = f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Authorization: Bearer {tokens['access_token']}' http://127.0.0.1:8222/api/accounts/revision-date"
+assert box.succeed(api).strip() == "200"
+box.succeed("systemctl show dd-verify.service -p Environment | grep -q VERIFY_ENDED=/run/dd-ended")
+box.succeed("sudo -u dd-verify touch /run/dd-ended/sarah")
+box.wait_until_succeeds("test ! -e /run/dd-ended/sarah", timeout=30)
+box.wait_until_succeeds(f"test \"$({api})\" = 401", timeout=10)
+again = box.succeed(
+    "curl -s -X POST http://127.0.0.1:8222/identity/connect/token "
+    f"--data-urlencode grant_type=refresh_token --data-urlencode refresh_token={tokens['refresh_token']} "
+    "--data-urlencode client_id=web"
+)
+assert "access_token" not in again, again
+# a name that is not one is dropped and goes no further
+box.succeed("sudo -u dd-verify touch '/run/dd-ended/-x'")
+box.wait_until_succeeds("test ! -e '/run/dd-ended/-x'", timeout=30)
