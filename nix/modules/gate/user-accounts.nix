@@ -5,7 +5,6 @@
   ...
 }:
 let
-  root = "/srv/users";
   images = "/srv/images";
   directory = "/var/lib/dd-verify/keys";
 
@@ -22,7 +21,6 @@ let
     ddScript ./user-accounts.sh {
       DIRECTORY = directory;
       IMAGES = images;
-      ROOT = root;
     }
   );
 in
