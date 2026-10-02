@@ -1,5 +1,5 @@
 //! `dd storage-ledger`: one allowance per member, across every service.
-//! Counted on the box every ten minutes, by a unit of its own that holds a
+//! Counted on the box every hour, by a unit of its own that holds a
 //! Photos admin login the gate never sees: each member's Photos (museum's
 //! admin api), their libraries (the gate lists the bucket), Code (the
 //! forge's repository sizes) and Passwords (attachments). Written down for

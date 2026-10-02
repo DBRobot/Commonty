@@ -26,7 +26,7 @@ async function load() {
   const r = await fetch('/_dd/storage/mine');
   if (r.status === 401) { location.href = '/_dd/login?rd=/_dd/settings%23storage'; return; }
   const d = await r.json();
-  if (!d.counted) { $('st-state').textContent = 'Your storage has not been counted yet. It is counted every 10 minutes.'; return; }
+  if (!d.counted) { $('st-state').textContent = 'Your storage has not been counted yet. It is counted every hour.'; return; }
   $('st-state').hidden = true;
   $('st-updated').textContent = ago(d.updated);
   $('st-budget').textContent = size(d.budget);
