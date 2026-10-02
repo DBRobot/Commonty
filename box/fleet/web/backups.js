@@ -49,9 +49,24 @@ let arch = null;
 let packPath = (id) => `data/${id}`;
 let blobs = new Map(); // blob id -> { pack, offset, length, ulen }
 
+// six at a time, as a browser would fetch a page's own files: an archive's
+// hundreds of index files do not all go out at once
+async function each(items, fn, n = 6) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+  return out;
+}
+
 async function readIndex() {
   const files = (await listing('index/')).filter((e) => e.type === 'file');
-  const all = await Promise.all(files.map(async (f) => ({ id: f.name, index: json(arch.file(await bytes('index/' + f.name))) })));
+  const all = await each(files, async (f) => ({ id: f.name, index: json(arch.file(await bytes('index/' + f.name))) }));
   blobs = new Map();
   for (const { index } of all) {
     for (const p of index.packs || []) {
@@ -70,7 +85,7 @@ async function readBlob(id) {
 
 async function readSnapshots() {
   const files = (await listing('snapshots/')).filter((e) => e.type === 'file');
-  const snaps = await Promise.all(files.map(async (f) => ({ id: f.name, ...json(arch.file(await bytes('snapshots/' + f.name))) })));
+  const snaps = await each(files, async (f) => ({ id: f.name, ...json(arch.file(await bytes('snapshots/' + f.name))) }));
   return snaps.sort((a, b) => Date.parse(b.time) - Date.parse(a.time));
 }
 
