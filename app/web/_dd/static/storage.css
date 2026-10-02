@@ -3,7 +3,6 @@
       --c-photos: #d9822b; --c-files: #2f6fd6; --c-movies: #b4457a; --c-code: #4a5a8a; --c-games: #7a4fb5; --c-pw: #1b8aa0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .st-pane { --st-sunk: #13171C; --st-ink-3: #87909A; --st-ok: #7CCBA2; --st-warn: #E3B769; --st-bad: #F08A8A; } }
 :root[data-theme="dark"] .st-pane { --st-sunk: #13171C; --st-ink-3: #87909A; --st-ok: #7CCBA2; --st-warn: #E3B769; --st-bad: #F08A8A; }
-.st-lead { margin: 4px 0 0; color: var(--ink-2); max-width: 62ch; }
 .st-box { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; min-width: 0; }
 .st-box > header { display: flex; align-items: baseline; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line-2); flex-wrap: wrap; }
 .st-box > header h2 { margin: 0; font-size: 15px; }
@@ -23,18 +22,10 @@
 .st-legend li { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line-2); }
 .st-dot { width: 10px; height: 10px; border-radius: 2px; }
 .st-legend .st-num { color: var(--ink-2); }
-@media (max-width: 860px) {  }
 .st-rules { padding: 14px 16px 16px; display: grid; gap: 10px; }
 .st-rules p { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.55; }
 .st-rules strong { color: var(--ink); }
 .st-rules p.st-grow { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--line-2); color: var(--st-ok); }
 
-/* the Email page (pages/email.html), on the same boxes */
-.st-state { font-weight: 600; }
-.st-state.on { color: var(--st-ok); }
-.em-form { display: grid; gap: 8px; margin-top: 4px; }
-.em-form label { font-weight: 600; font-size: 14px; }
-.em-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.em-row input { flex: 1 1 240px; min-width: 0; }
 /* the site's buttons stand off what is above them; here they sit in line */
 .st-rules button { margin-top: 0; }

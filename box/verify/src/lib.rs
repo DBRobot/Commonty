@@ -170,7 +170,7 @@ pub struct Config {
     /// beside the box releases). The downloads page offers what it names,
     /// and nothing else. None: no page.
     pub app_manifest: Option<String>,
-    /// Every box in the fleet, for the Boxes and Backups pages. Empty on a
+    /// Every box in the fleet, for Settings (Network) and the Git page. Empty on a
     /// box that is not told.
     pub fleet: fleet::Fleet,
     /// Thanos on this box, which holds every box's facts (fleet.rs). None:
@@ -775,7 +775,7 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let Some(role) = role else {
         return StatusCode::FORBIDDEN.into_response();
     };
-    // A disk image goes from the Backups page only after the passkey, and
+    // A disk image goes from Backups in Settings only after the passkey, and
     // the box holds the page to that: a tab left signed in is not enough.
     // `dd image delete` signs with the device's own key and asks itself.
     let this_session = app

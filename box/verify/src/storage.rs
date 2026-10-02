@@ -2,7 +2,7 @@
 //! ledger (`dd storage-ledger`, a timer on this box) adds up what each
 //! member keeps - Photos, their libraries, Code, Passwords - and writes it
 //! down; it also holds Photos to what is left. This reads what it wrote, for
-//! the Storage page, and holds the libraries to it as uploads arrive: what
+//! the Storage tab of Settings, and holds the libraries to it as uploads arrive: what
 //! arrived since the ledger last counted is added as it lands, so the ten
 //! minutes between counts is no way past the allowance.
 

@@ -24,8 +24,8 @@ let
         bucket_lookup_type: path
     '';
   box = name: {
-    # the gate only on the observe box, where the Boxes and Backups pages
-    # read every box's facts from thanos
+    # the gate only on the observe box, where Settings' Network tab
+    # reads every box's facts from thanos
     dd.verify.enable = name == "a";
     imports = [
       ./box.nix
