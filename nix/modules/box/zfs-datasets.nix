@@ -1,7 +1,7 @@
 # Declared ZFS datasets. A box's hardware file says which pool holds what;
-# the oneshot below creates a dataset if missing and re-applies properties
-# on every rebuild. It never destroys anything, so it is safe to run
-# against live data.
+# the oneshot below creates a dataset if missing and sets any property that
+# differs. It never destroys or remounts anything that is already right, so
+# it is safe to run against live data.
 {
   config,
   pkgs,
@@ -14,7 +14,11 @@ let
     name: props:
     lib.concatStringsSep "\n" (
       [ "${zfs} list -H ${name} >/dev/null 2>&1 || ${zfs} create ${name}" ]
-      ++ lib.mapAttrsToList (k: v: "${zfs} set ${k}=${v} ${name}") props
+      # only what differs: setting even the same mountpoint unmounts the
+      # dataset, and one in use (forgejo's) fails, taking its service down
+      ++ lib.mapAttrsToList (
+        k: v: ''[ "$(${zfs} get -H -o value ${k} ${name})" = "${v}" ] || ${zfs} set ${k}=${v} ${name}''
+      ) props
     );
 in
 {
