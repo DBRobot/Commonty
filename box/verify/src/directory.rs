@@ -48,6 +48,11 @@ pub struct Directory {
     /// removed, or "sign out everywhere else". Passwords reads it
     /// (modules/vault/vaultwarden.nix). None: nothing else to tell.
     ended: Option<PathBuf>,
+    /// entries as last read, by name, with the file's time and size then:
+    /// every request asks whose it is, and the file rarely changes
+    read: std::sync::Mutex<
+        std::collections::HashMap<String, (std::time::SystemTime, u64, identity::SignedEntry)>,
+    >,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -76,6 +81,7 @@ impl Directory {
         let synced = AtomicBool::new(peers.is_empty());
         Ok(Self {
             ended: std::env::var_os("VERIFY_ENDED").map(PathBuf::from),
+            read: Default::default(),
             dir,
             invites,
             held,
@@ -98,19 +104,44 @@ impl Directory {
             return Ok(None);
         }
         let p = self.dir.join(format!("{name}.json"));
-        match std::fs::read(&p) {
-            Ok(b) => {
-                let e: identity::SignedEntry = serde_json::from_slice(&b)?;
-                if guest_expired(&e.entry) {
-                    // a probe's account, past its time: gone, name free again
-                    let _ = std::fs::remove_file(&p);
-                    return Ok(None);
-                }
-                Ok(Some(e))
+        let meta = match std::fs::metadata(&p) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.read.lock().unwrap().remove(name);
+                return Ok(None);
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e.into()),
+            Err(e) => return Err(e.into()),
+        };
+        let stamp = (meta.modified()?, meta.len());
+        let known = self
+            .read
+            .lock()
+            .unwrap()
+            .get(name)
+            .filter(|(t, l, _)| (*t, *l) == stamp)
+            .map(|(_, _, e)| e.clone());
+        let e = match known {
+            Some(e) => e,
+            None => {
+                let e: identity::SignedEntry = match std::fs::read(&p) {
+                    Ok(b) => serde_json::from_slice(&b)?,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                    Err(e) => return Err(e.into()),
+                };
+                self.read
+                    .lock()
+                    .unwrap()
+                    .insert(name.to_string(), (stamp.0, stamp.1, e.clone()));
+                e
+            }
+        };
+        if guest_expired(&e.entry) {
+            // a probe's account, past its time: gone, name free again
+            let _ = std::fs::remove_file(&p);
+            self.read.lock().unwrap().remove(name);
+            return Ok(None);
         }
+        Ok(Some(e))
     }
 
     pub fn list(&self) -> Result<Vec<Listed>> {
@@ -186,6 +217,8 @@ impl Directory {
         let tmp = self.dir.join(format!(".{name}.tmp"));
         std::fs::write(&tmp, serde_json::to_vec_pretty(signed)?)?;
         std::fs::rename(&tmp, &p)?;
+        // two writes in the same instant with the same length look alike
+        self.read.lock().unwrap().remove(name.as_str());
         Ok(())
     }
 
@@ -749,6 +782,25 @@ mod tests {
             version,
             updated: identity::now(),
         }
+    }
+
+    #[test]
+    fn an_entry_changed_on_disk_is_read_again() {
+        let dir = scratch("cache");
+        let d = Directory::open(dir.clone(), vec![], None).unwrap();
+        let k = generate();
+        let write = |v| {
+            let e = sign(entry("ann", &k, &[], v), &k).unwrap();
+            std::fs::write(dir.join("ann.json"), serde_json::to_vec(&e).unwrap()).unwrap();
+        };
+        write(1);
+        assert_eq!(d.entry("ann").unwrap().unwrap().entry.version, 1);
+        assert_eq!(d.entry("ann").unwrap().unwrap().entry.version, 1);
+        write(22);
+        assert_eq!(d.entry("ann").unwrap().unwrap().entry.version, 22);
+        std::fs::remove_file(dir.join("ann.json")).unwrap();
+        assert!(d.entry("ann").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
