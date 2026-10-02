@@ -46,7 +46,12 @@ in
     # A member's Wi-Fi change from the Network tab: the gate leaves it in
     # /run/dd-wifi, a root unit tries it and falls back (wifi-apply.sh), and
     # the box's link is written out each minute for the tab (wifi-status.sh)
-    systemd.tmpfiles.rules = [ "d /run/dd-wifi 0770 root dd-verify -" ];
+    systemd.tmpfiles.rules = lib.optionals (cfg.wifi != null) [
+      "d /run/dd-wifi 0770 root dd-verify -"
+      # root's own files, made here and renamed into place: never created
+      # in the folder the gate can write to
+      "d /run/dd-wifi/root 0700 root root -"
+    ];
     systemd.paths.dd-wifi-apply = lib.mkIf (cfg.wifi != null) {
       wantedBy = [ "multi-user.target" ];
       pathConfig.PathChanged = "/run/dd-wifi/request";
@@ -85,8 +90,10 @@ in
       script = builtins.readFile ./wifi-status.sh;
     };
     # the gate writes the request and reads the status and result
-    systemd.services.dd-verify.serviceConfig.ReadWritePaths = [ "/run/dd-wifi" ];
-    systemd.services.dd-verify.environment.VERIFY_HOUSE = "/run/dd-wifi";
+    systemd.services.dd-verify.serviceConfig.ReadWritePaths = lib.mkIf (cfg.wifi != null) [ "/run/dd-wifi" ];
+    # a box without Wi-Fi has no folder for a change: it reports and passes
+    # changes on, and no password is ever written down on it
+    systemd.services.dd-verify.environment.VERIFY_HOUSE = lib.mkIf (cfg.wifi != null) "/run/dd-wifi";
     # Settings, where a Wi-Fi change is signed: every box checks the
     # signature was made there and on no other page
     systemd.services.dd-verify.environment.VERIFY_HOUSE_ORIGINS = "https://home.${config.dd.domain} https://files.${config.dd.domain}";

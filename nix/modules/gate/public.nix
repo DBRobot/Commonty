@@ -214,10 +214,10 @@ in
         }
         // lib.optionalAttrs (isPublic && gated) {
           # the ceremonies a stranger may start: sign-up, sign-in, enrol, a
-          # code, a device joining the network. A person clicks these a few
-          # times; a script gets told to wait. The rest of /_dd/ stays
-          # unlimited: every endpoint there wants a credential first
-          locations."~ ^/_dd/(join|login|enrol|redeem|network)/" = {
+          # code, a device joining the network, a device being added by code.
+          # A person clicks these a few times; a script gets told to wait.
+          # The rest of /_dd/ wants a credential first
+          locations."~ ^/_dd/(join|login|enrol|redeem|network|add)/" = {
             proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";
             extraConfig = ''
               limit_req zone=dd_ceremony burst=10 nodelay;

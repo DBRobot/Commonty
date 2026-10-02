@@ -6,7 +6,10 @@
 # Environment: IFACE (the wifi interface), DIR (/run/dd-wifi).
 set -u
 req="$DIR/request"
-[ -f "$req" ] || exit 0
+# the gate may write in $DIR, so nothing of root's is made there but by a
+# rename from root's own folder, and a link is not followed
+own="$DIR/root"
+[ -f "$req" ] && [ ! -L "$req" ] || { rm -f "$req"; exit 0; }
 nonce=$(jq -r .nonce "$req")
 ssid=$(jq -r .ssid "$req")
 psk=$(jq -r .psk "$req")
@@ -14,15 +17,15 @@ rm -f "$req"
 
 name=house-wifi-new
 file=/etc/NetworkManager/system-connections/$name.nmconnection
-prev="$DIR/prev.nmconnection"
+prev="$own/prev.nmconnection"
 rm -f "$prev"
 [ -f "$file" ] && cp -p "$file" "$prev"
 
 result() {
   jq -n --arg nonce "$nonce" --argjson ok "$1" --arg why "$2" --arg at "$(date +%s)" \
-    '{nonce: $nonce, ok: $ok, why: $why, at: ($at | tonumber)}' > "$DIR/result.json.tmp"
-  chmod 0644 "$DIR/result.json.tmp"
-  mv "$DIR/result.json.tmp" "$DIR/result.json"
+    '{nonce: $nonce, ok: $ok, why: $why, at: ($at | tonumber)}' > "$own/result.json"
+  chmod 0644 "$own/result.json"
+  mv -fT "$own/result.json" "$DIR/result.json"
 }
 
 # written as a keyfile, not given on a command line where ps would show it

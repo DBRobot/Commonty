@@ -436,6 +436,11 @@ in
               "@login".extraConfig = ''
                 return 302 /_dd/login?rd=$request_uri;
               '';
+              # one box passing a member's Wi-Fi change to another goes box
+              # to box on the fleet's network; nothing comes here for it
+              "= /_dd/house/wifi/relay".extraConfig = ''
+                return 404;
+              '';
               # signed in, not a member: the home page says so
               "@waiting".extraConfig = ''
                 return 302 https://home.${base}/;

@@ -442,21 +442,24 @@ impl App {
         }
     }
 
-    /// they showed their passkey just now: for five minutes, what asks for
-    /// that may go ahead
-    fn saw_passkey(&self, user: &str) {
+    /// This session showed its passkey just now: for five minutes, what asks
+    /// for that may go ahead - in this browser, not in every one the person
+    /// is signed in on.
+    fn saw_passkey(&self, session: &str) {
         let now = session::now();
         let mut f = self.fresh.lock().unwrap();
         f.retain(|_, until| *until > now);
-        f.insert(user.to_string(), now + 300);
+        f.insert(session.to_string(), now + 300);
     }
 
-    fn passkey_fresh(&self, user: &str) -> bool {
-        self.fresh
-            .lock()
-            .unwrap()
-            .get(user)
-            .is_some_and(|until| *until > session::now())
+    fn passkey_fresh(&self, session: &str) -> bool {
+        !session.is_empty()
+            && self
+                .fresh
+                .lock()
+                .unwrap()
+                .get(session)
+                .is_some_and(|until| *until > session::now())
     }
 
     fn member(&self, user: &str) -> bool {
@@ -775,7 +778,12 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     // A disk image goes from the Backups page only after the passkey, and
     // the box holds the page to that: a tab left signed in is not enough.
     // `dd image delete` signs with the device's own key and asks itself.
-    if bearer(&headers).is_none() && deletes_image(&headers) && !app.passkey_fresh(&user) {
+    let this_session = app
+        .sessions
+        .session(headers.get("cookie").and_then(|v| v.to_str().ok()))
+        .map(|s| s.1)
+        .unwrap_or_default();
+    if bearer(&headers).is_none() && deletes_image(&headers) && !app.passkey_fresh(&this_session) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let mut r = StatusCode::OK.into_response();
@@ -1280,12 +1288,11 @@ async fn join_sign(
         return (status, why).into_response();
     }
     // the entry was just signed with the passkey made a moment ago
-    app.saw_passkey(&user);
+    let (set, id, _) = app.sessions.issue_noted(&user);
+    app.saw_passkey(&id);
     let mut r = Json(serde_json::json!({ "user": user })).into_response();
-    r.headers_mut().insert(
-        "set-cookie",
-        HeaderValue::from_str(&app.sessions.issue(&user)).unwrap(),
-    );
+    r.headers_mut()
+        .insert("set-cookie", HeaderValue::from_str(&set).unwrap());
     r
 }
 
@@ -1343,7 +1350,6 @@ async fn login_finish(
     if let Err(e) = app.webauthn.finish_passkey_authentication(&cred, &state) {
         return (StatusCode::UNAUTHORIZED, format!("refused: {e}")).into_response();
     }
-    app.saw_passkey(&user);
     let agent = headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
@@ -1360,6 +1366,8 @@ async fn login_finish(
     }
     let (set, id, exp) = app.sessions.issue_noted(&user);
     app.signins.saw(&user, &id, exp, agent, None);
+    // fresh for this session, the one this browser holds from now
+    app.saw_passkey(&id);
     let mut r = StatusCode::OK.into_response();
     r.headers_mut()
         .insert("set-cookie", HeaderValue::from_str(&set).unwrap());

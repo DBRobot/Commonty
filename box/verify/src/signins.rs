@@ -332,7 +332,7 @@ pub(crate) mod http {
             Ok(m) => m,
             Err(r) => return r,
         };
-        if !app.passkey_fresh(&user) {
+        if !app.passkey_fresh(&here) {
             return (
                 StatusCode::FORBIDDEN,
                 "confirm it is you with your passkey first",
