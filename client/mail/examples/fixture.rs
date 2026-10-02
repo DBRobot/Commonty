@@ -1,6 +1,6 @@
 // The made-up member the mail Worker's end-to-end check signs in as
 // (nix/tests/mail-worker): a device root, one passkey on commonty.test, at
-// two versions. Its keys are test keys and nobody's. Regenerate with
+// three versions: at the third, the passkey is a new one. Its keys are test keys and nobody's. Regenerate with
 //   cargo run -q -p dd-mail --example fixture > client/mail/tests/tester.json
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64_URL;
@@ -23,7 +23,7 @@ impl Tester {
         }
     }
 
-    fn entry(&self, version: u64) -> SignedEntry {
+    fn entry(&self, version: u64, passkey_id: &str) -> SignedEntry {
         let p = self.passkey.verifying_key().to_encoded_point(false);
         let cose = COSEKey {
             type_: COSEAlgorithm::ES256,
@@ -44,7 +44,7 @@ impl Tester {
                 added: 1,
             }],
             passkeys: vec![Passkey {
-                id: "cGsx".into(),
+                id: passkey_id.into(),
                 cred: serde_json::json!({ "cred": { "cred": cose } }),
                 added: 1,
                 rp_id: Some("commonty.test".into()),
@@ -92,8 +92,9 @@ fn main() {
     println!(
         "{}",
         serde_json::json!({
-            "v3": t.entry(3),
-            "v4": t.entry(4),
+            "v3": t.entry(3, "cGsx"),
+            "v4": t.entry(4, "cGsx"),
+            "v5": t.entry(5, "cGsy"),
             "members": t.members(),
             "pkcs8": base64::engine::general_purpose::STANDARD.encode(key.as_bytes()),
         })

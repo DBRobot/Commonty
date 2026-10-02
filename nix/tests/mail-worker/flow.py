@@ -88,6 +88,17 @@ with sync_playwright() as p:
     # a box replaying an old entry after a newer one was seen
     fake('/entry', {'v': 4}); ok(call('/api/challenge', {'name': 'tester'})[0] == 200, 'newer entry v4 taken')
     fake('/entry', {'v': 3}); ok(call('/api/challenge', {'name': 'tester'})[0] == 200, 'old v3 replayed: still served from pinned v4')
+    # "sign out everywhere else" from Settings: the other sessions end, this one stays
+    ok(call('/api/me', cookie=sess)[0] == 200, 'the first session still works')
+    s, c, _ = call('/api/challenge', {'name': 'tester'})
+    sess2 = call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'])})[2].split(';')[0]
+    ok(call('/api/end-others', {}, origin='http://127.0.0.1:8787', cookie=sess2)[0] == 403, 'end-others from another origin: refused')
+    s, _, ck = call('/api/end-others', {}, cookie=sess2); ok(s == 200 and ck, 'end-others from this browser')
+    sess2 = ck.split(';')[0]
+    ok(call('/api/me', cookie=sess)[0] == 401, 'the other session is ended')
+    ok(call('/api/me', cookie=sess2)[0] == 200, 'this browser stays signed in')
+    # the passkey it was opened with is removed from the entry: ended too
+    fake('/entry', {'v': 5}); ok(call('/api/me', cookie=sess2)[0] == 401, 'its passkey removed: session ended')
     b.close()
 if failed:
     sys.exit(f'{len(failed)} failed')

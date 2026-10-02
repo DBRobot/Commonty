@@ -43,6 +43,11 @@ pub struct Directory {
     synced: AtomicBool,
     /// held by every write of an entry, from its last check to its rename
     writing: std::sync::Mutex<()>,
+    /// where a member's name is dropped when their sessions in the other
+    /// services on this box are to end (VERIFY_ENDED): a device or passkey
+    /// removed, or "sign out everywhere else". Passwords reads it
+    /// (modules/vault/vaultwarden.nix). None: nothing else to tell.
+    ended: Option<PathBuf>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -70,6 +75,7 @@ impl Directory {
         std::fs::create_dir_all(&held)?;
         let synced = AtomicBool::new(peers.is_empty());
         Ok(Self {
+            ended: std::env::var_os("VERIFY_ENDED").map(PathBuf::from),
             dir,
             invites,
             held,
@@ -154,7 +160,23 @@ impl Directory {
         self.store(signed).map_err(|e| {
             eprintln!("directory: {e:#}");
             (StatusCode::INTERNAL_SERVER_ERROR, String::new())
-        })
+        })?;
+        if current.is_some_and(|c| lost_a_key(&c.entry, &signed.entry)) {
+            self.end_elsewhere(&signed.entry.name);
+        }
+        Ok(())
+    }
+
+    /// The member's sessions in the other services end; theirs to sign in
+    /// to again, through the gate.
+    pub fn end_elsewhere(&self, name: &str) {
+        let Some(d) = &self.ended else { return };
+        if !identity::valid_name(name) {
+            return;
+        }
+        if let Err(e) = std::fs::write(d.join(name), b"") {
+            eprintln!("directory: ending {name}'s sessions elsewhere: {e}");
+        }
     }
 
     fn store(&self, signed: &identity::SignedEntry) -> Result<()> {
@@ -510,6 +532,17 @@ async fn put_entry(
     }
 }
 
+/// a device or passkey the old entry had and the new one does not
+fn lost_a_key(old: &identity::Entry, new: &identity::Entry) -> bool {
+    old.devices
+        .iter()
+        .any(|d| !new.devices.iter().any(|n| n.fingerprint == d.fingerprint))
+        || old
+            .passkeys
+            .iter()
+            .any(|p| !new.passkeys.iter().any(|n| n.id == p.id))
+}
+
 /// Names that begin with `guest` are for probes: a walk of the fleet as a
 /// stranger, after a release. Nobody keeps one; a box drops the entry this
 /// long after its last update, grant and all, and never pulls an old one.
@@ -716,6 +749,24 @@ mod tests {
             version,
             updated: identity::now(),
         }
+    }
+
+    #[test]
+    fn removing_a_device_or_passkey_is_noticed_and_adding_one_is_not() {
+        let k = generate();
+        let old = entry("ann", &k, &[], 1);
+        let mut added = old.clone();
+        let p = encode_public(&generate().verifying_key());
+        added.devices.push(Device {
+            fingerprint: fingerprint(&p),
+            public_key: p,
+            added: 2,
+        });
+        assert!(!lost_a_key(&old, &added));
+        assert!(lost_a_key(&added, &old));
+        let mut fewer = added.clone();
+        fewer.devices.remove(0);
+        assert!(lost_a_key(&added, &fewer));
     }
 
     /// A sign-up without a code stays here: not served, not listed, not a

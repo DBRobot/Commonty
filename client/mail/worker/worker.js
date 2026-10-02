@@ -106,9 +106,23 @@ function cookie(req, name) {
   }
   return '';
 }
+// a session lasts while the passkey that opened it is still the member's,
+// and until they sign out everywhere else (ENDED: the time they last did)
 async function session(req, env) {
-  return unseal(env, cookie(req, 'mail_session'), 'session');
+  const s = await unseal(env, cookie(req, 'mail_session'), 'session');
+  if (!s || !s.i || !s.t) return null;
+  if (s.t < Number((await env.PINNED.get(`ended:${s.n}`)) || 0)) return null;
+  try {
+    const e = JSON.parse(await entry(env, s.n));
+    return e.entry.passkeys.some((p) => p.id === s.i) ? s : null;
+  } catch {
+    return null;
+  }
 }
+const opened = async (env, v) => {
+  const s = await seal(env, { k: 'session', ...v, e: now() + SESSION });
+  return { 'set-cookie': `mail_session=${s}; Path=/; Max-Age=${SESSION}; HttpOnly; Secure; SameSite=Strict` };
+};
 
 // The member's entry, as the directory has it, held to the newest this
 // Worker has accepted. Throws for a name that is not a member.
@@ -164,6 +178,28 @@ async function state(env, name) {
   const to = target(rule);
   const d = to ? await destination(env, to) : null;
   return { rule, email: to, confirmed: !!d?.verified };
+}
+
+// What anyone may ask - has this member an address, is it confirmed - is
+// answered from lists at most a minute old, one fetch of each for every
+// name: asking over and over cannot spend the token's Cloudflare allowance.
+// Your own address, behind your passkey, is always read fresh.
+const SHARED = 60 * 1000;
+let shared = null;
+async function sharedState(env, name) {
+  if (!shared || Date.now() - shared.at > SHARED) {
+    const z = await zone(env);
+    const [rules, addresses] = await Promise.all([
+      pages(env, `/zones/${z.id}/email/routing/rules`),
+      pages(env, `/accounts/${z.account}/email/routing/addresses`),
+    ]);
+    shared = { at: Date.now(), rules, addresses };
+  }
+  const address = `${name}@${env.DOMAIN}`;
+  const rule = shared.rules.find((r) => (r.matchers || []).some((m) => m.field === 'to' && m.value === address));
+  const to = target(rule);
+  const d = to && shared.addresses.find((a) => (a.email || '').toLowerCase() === to.toLowerCase());
+  return { forwarding: !!rule, confirmed: !!d?.verified };
 }
 
 async function setEmail(env, name, email) {
@@ -244,14 +280,12 @@ async function api(req, env, path, sent) {
     } catch (err) {
       return json({ error: 'your passkey was not accepted' }, 403);
     }
-    const s = await seal(env, { k: 'session', n: c.n, p: now(), e: now() + SESSION });
-    return json({ ok: true }, 200, { 'set-cookie': `mail_session=${s}; Path=/; Max-Age=${SESSION}; HttpOnly; Secure; SameSite=Strict` });
+    return json({ ok: true }, 200, await opened(env, { n: c.n, i: id, p: now(), t: Date.now() }));
   }
   if (req.method === 'GET' && path === '/api/state') {
     const name = new URL(req.url).searchParams.get('name') || '';
     if (!NAME.test(name)) return json({ error: 'no such member' }, 400);
-    const s = await state(env, name);
-    return json({ forwarding: !!s.rule, confirmed: s.confirmed });
+    return json(await sharedState(env, name));
   }
   const me = await session(req, env);
   if (!me) return json({ error: 'confirm it is you first' }, 401);
@@ -259,11 +293,19 @@ async function api(req, env, path, sent) {
     const s = await state(env, me.n);
     return json({ name: me.n, email: s.email, confirmed: s.confirmed, fresh: now() - (me.p || 0) < FRESH });
   }
+  // Settings' "sign out everywhere else": every other session of this
+  // member's ends; this one is opened again, after the line
+  if (req.method === 'POST' && path === '/api/end-others') {
+    const t = Date.now();
+    await env.PINNED.put(`ended:${me.n}`, String(t));
+    return json({ ok: true }, 200, await opened(env, { n: me.n, i: me.i, p: me.p, t }));
+  }
   // a change wants the passkey just now, not a month ago
   if (now() - (me.p || 0) >= FRESH) return json({ error: 'confirm it is you first' }, 401);
   if (req.method === 'POST' && path === '/api/email') {
     const { email } = body();
     if (!EMAIL.test((email || '').trim())) return json({ error: 'that is not an email address' }, 400);
+    shared = null;
     try {
       return json(await setEmail(env, me.n, email.trim()));
     } catch (err) {
