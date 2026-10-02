@@ -62,6 +62,15 @@ async function confirm() {
   await post('/_dd/login/finish', assertion(cred), { 'x-dd-ceremony': ceremony });
 }
 
+// The email address's unlock lives at the mail Worker, which no box can
+// end: the email line on Profile is its frame, and is asked to end the
+// others there. Nothing comes back but whether it did.
+function endMailElsewhere() {
+  const frame = document.getElementById('email');
+  if (!frame?.src || !frame.contentWindow) return;
+  frame.contentWindow.postMessage('end-others', new URL(frame.src).origin);
+}
+
 async function endSessions(body, button) {
   button.disabled = true;
   const send = () => fetch('/_dd/signins/end', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -72,6 +81,7 @@ async function endSessions(body, button) {
       r = await send();
     }
     if (!r.ok) throw new Error(await r.text());
+    if (body.others) endMailElsewhere();
     await load();
     render();
   } catch (e) {
@@ -176,12 +186,17 @@ async function openNames() {
       if (!u.ok) throw new Error(u.none ? 'names need your library, and this account has none yet' : 'this browser cannot open your library yet');
       lib = u.ok;
     }
+    // none yet is a fresh start; a file that will not open is not, or the
+    // next rename would write over every name in it
     const r = await fetch('/_dd/devices/names');
-    names = {};
-    if (r.ok) {
+    if (r.status === 404) names = {};
+    else if (!r.ok) throw new Error(`the box said ${r.status}`);
+    else {
       try {
         names = JSON.parse(new TextDecoder().decode(file_open(lib.key, lib.id, new Uint8Array(await r.arrayBuffer()))));
-      } catch { names = {}; }
+      } catch {
+        throw new Error('your device names could not be opened, so they were left as they are');
+      }
     }
     render();
   } catch (e) {
@@ -243,6 +258,7 @@ function remove(k, label) {
       if (rootHere) {
         const r = await appFetch('/_dd/app/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(k.passkey ? { passkey: k.passkey } : { fingerprint: k.fingerprint }) });
         if (!r.ok) throw new Error(await r.text());
+        endMailElsewhere();
         $('remove').close();
         await load();
         render();
@@ -268,6 +284,7 @@ function remove(k, label) {
       }));
       const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });
       if (!r.ok) throw new Error(await r.text() || `the box said ${r.status}`);
+      endMailElsewhere();
       $('remove').close();
       await load();
       render();
