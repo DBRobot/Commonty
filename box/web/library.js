@@ -5,7 +5,7 @@
 
 import init, { library_device_key, library_open, library_key_for_box, path_encrypt, path_decrypt, file_open, file_seal, plain_size, Sealer, Opener } from '/_dd/web/dd_web.js';
 import { b64u, u8b64 } from './webauthn.js';
-import { inApp, appFetch } from './shell.js';
+import { inApp, appFetch, pageConfig, entryText } from './shell.js';
 
 // the passkey's own secret, under a label of this page's own
 export async function passkeySecret(cfg, passkeys) {
@@ -44,12 +44,12 @@ export async function unlock(user) {
     if (!r.ok) throw new Error(`the app said ${r.status}: ${await r.text()}`);
     return { ok: await r.json() };
   }
-  const cfg = await (await fetch('/_dd/config')).json();
+  const cfg = await pageConfig();
   // the demo holds no key of its own; the box hands it one (verify.nix)
   if (cfg.demoLibrary) {
     return { ok: { id: cfg.demoLibrary.id, key: cfg.demoLibrary.key, reader: true } };
   }
-  const text = await (await fetch('/_dd/directory/' + encodeURIComponent(user))).text();
+  const text = await entryText(user);
   const entry = JSON.parse(text);
   const { secret, id } = await passkeySecret(cfg, entry.entry.passkeys || []);
   const libraries = entry.entry.libraries || [];

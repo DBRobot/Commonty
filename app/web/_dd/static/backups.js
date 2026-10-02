@@ -7,7 +7,7 @@
 import init, { Archive } from '/_dd/web/dd_web.js';
 import { passkeySecret, human } from './library.js';
 import { requestOptions, assertion, post } from './webauthn.js';
-import { inApp } from './shell.js';
+import { inApp, me, pageConfig, entryOf } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -81,8 +81,7 @@ async function open(user) {
   const sealedText = await (await fetch(ROOT + 'dd-passkeys.json')).text().catch(() => '');
   let sealed = {};
   try { sealed = JSON.parse(sealedText); } catch { /* none yet */ }
-  const cfg = await (await fetch('/_dd/config')).json();
-  const entry = await (await fetch('/_dd/directory/' + encodeURIComponent(user))).json();
+  const [cfg, entry] = await Promise.all([pageConfig(), entryOf(user)]);
   const passkeys = (entry.entry.passkeys || []).filter((p) => sealed[p.id]);
   if (!passkeys.length) {
     say('This browser cannot open your images yet.');
@@ -295,8 +294,8 @@ function ask(s, ui) {
   $('ask-yes').onclick = async () => {
     $('ask-yes').disabled = true;
     try {
-      const me = await (await fetch('/_dd/me')).json();
-      const start = await post('/_dd/login/start', { username: me.user });
+      const who = await me();
+      const start = await post('/_dd/login/start', { username: who.user });
       const { publicKey, ceremony } = await start.json();
       const cred = await navigator.credentials.get({ publicKey: requestOptions(publicKey) });
       await post('/_dd/login/finish', assertion(cred), { 'x-dd-ceremony': ceremony });
@@ -429,8 +428,8 @@ async function show() {
     say('', `Your disk images open in a browser, with your passkey: <a href="https://${FILES}/_dd/settings#backups">${FILES}/_dd/settings</a>`);
     return;
   }
-  const me = await (await fetch('/_dd/me')).json();
-  const data = await open(me.user);
+  const who = await me();
+  const data = await open(who.user);
   if (data === null) return;
   if (data === false) {
     say('No disk images yet.');
