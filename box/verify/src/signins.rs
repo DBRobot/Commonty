@@ -46,6 +46,9 @@ struct State {
 pub struct SignIns {
     path: Option<PathBuf>,
     state: Mutex<(State, u64)>,
+    /// each copy taken is numbered, and the file holds the highest written
+    taken: std::sync::atomic::AtomicU64,
+    written: Mutex<u64>,
 }
 
 /// how stale "last seen" may get before it is written down
@@ -61,24 +64,41 @@ impl SignIns {
         SignIns {
             path,
             state: Mutex::new((state, 0)),
+            taken: Default::default(),
+            written: Mutex::new(0),
         }
     }
 
-    fn save(&self, s: &mut (State, u64), force: bool) {
+    /// What to write, taken while the state is held; the writing is done
+    /// after it is let go (`write`), so no request waits on the disk.
+    fn save(&self, s: &mut (State, u64), force: bool) -> Option<(u64, Vec<u8>)> {
         let t = now();
         if !force && t < s.1 + WRITE_EVERY {
-            return;
+            return None;
         }
         s.0.sessions.retain(|_, v| v.exp > t);
         s.0.ended.retain(|_, exp| *exp > t);
         s.1 = t;
-        if let Some(p) = &self.path
-            && let Ok(b) = serde_json::to_vec(&s.0)
-        {
-            let tmp = p.with_extension("json.tmp");
-            if std::fs::write(&tmp, b).is_ok() {
-                let _ = std::fs::rename(&tmp, p);
-            }
+        self.path.as_ref()?;
+        let seq = self
+            .taken
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        serde_json::to_vec(&s.0).ok().map(|b| (seq, b))
+    }
+
+    /// the newest of what was taken wins, whichever finishes first
+    fn write(&self, taken: Option<(u64, Vec<u8>)>) {
+        let (Some((seq, b)), Some(p)) = (taken, &self.path) else {
+            return;
+        };
+        let mut last = self.written.lock().unwrap();
+        if seq <= *last {
+            return;
+        }
+        let tmp = p.with_extension("json.tmp");
+        if std::fs::write(&tmp, b).is_ok() && std::fs::rename(&tmp, p).is_ok() {
+            *last = seq;
         }
     }
 
@@ -106,7 +126,9 @@ impl SignIns {
         if device.is_some() && e.device.is_none() {
             e.device = device.map(str::to_string);
         }
-        self.save(&mut s, fresh);
+        let taken = self.save(&mut s, fresh);
+        drop(s);
+        self.write(taken);
     }
 
     /// The device a session was signed in by, if one was.
@@ -129,7 +151,9 @@ impl SignIns {
                 .map(|v| v.exp)
                 .unwrap_or(now() + crate::session::TTL);
         s.0.ended.insert(id.to_string(), exp);
-        self.save(&mut s, true);
+        let taken = self.save(&mut s, true);
+        drop(s);
+        self.write(taken);
     }
 
     pub fn sessions(&self, user: &str) -> Vec<(String, Session)> {
@@ -158,7 +182,9 @@ impl SignIns {
             _ => said,
         };
         k.insert(key.to_string(), KeyUse { kind, last: t });
-        self.save(&mut s, fresh);
+        let taken = self.save(&mut s, fresh);
+        drop(s);
+        self.write(taken);
     }
 
     pub fn keys(&self, user: &str) -> BTreeMap<String, KeyUse> {
