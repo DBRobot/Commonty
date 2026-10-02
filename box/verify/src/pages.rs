@@ -334,11 +334,6 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
-        "boxes.js",
-        "box/fleet/web/boxes.js",
-        "text/javascript; charset=utf-8",
-    ),
-    (
         "backups.js",
         "box/fleet/web/backups.js",
         "text/javascript; charset=utf-8",
@@ -430,7 +425,6 @@ const PAGES: &[(&str, &str)] = &[
     ("home", "box/web/pages/home.html"),
     ("files", "box/files/web/pages/files.html"),
     ("media", "box/media/web/pages/media.html"),
-    ("boxes", "box/fleet/web/pages/boxes.html"),
     ("friends", "box/web/pages/friends.html"),
     ("chat", "box/chat/web/pages/chat.html"),
     ("git", "box/forge/web/pages/git.html"),
@@ -439,8 +433,6 @@ const PAGES: &[(&str, &str)] = &[
     ("adblock", "box/adblock/web/pages/adblock.html"),
     // the demo's Photos, read through the gate (demo_photos.rs)
     ("demo-photos", "box/photos/web/pages/demo-photos.html"),
-    // one allowance across every service (storage.rs)
-    ("storage", "box/web/pages/storage.html"),
     // the member's own: their account, their email (the mail Worker,
     // client/mail, in a frame) and their disk images
     ("settings", "box/web/pages/settings.html"),
@@ -548,16 +540,10 @@ impl Menu {
         // The tile's url, where a tile says. A library page belongs on the
         // gate's own host: that is the only one serving /_dd/transcode, so
         // a relative link followed from another host plays nothing.
+        // Files and Movies & TV are tiles on the home page, and everything
+        // of a member's own is in Settings: the menu repeats neither
         let mut groups = Vec::new();
-        if !demo {
-            // Files and Movies & TV are tiles on the home page; repeating
-            // them here would be the same door twice
-            let mut fleet = vec![item("Storage", "/_dd/storage"), item("Boxes", "/_dd/boxes")];
-            fleet.extend(metrics);
-            groups.push(fleet);
-        } else if let Some(m) = metrics {
-            // the fleet's pages mean nothing to an account with no
-            // devices, no backups and no boxes of its own
+        if let Some(m) = metrics {
             groups.push(vec![m]);
         }
         if demo {
@@ -931,14 +917,9 @@ mod tests {
     fn the_menu_offers_a_member_their_own_pages_and_the_demo_none_of_them() {
         let svcs = [svc("Metrics", "metrics"), svc("Chat", "chat")];
         let menu = menu_urls(&me("tom", &svcs));
-        for page in ["/_dd/settings", "/_dd/boxes"] {
-            assert!(
-                menu.iter().any(|u| u == page),
-                "member's menu is missing {page}"
-            );
-        }
-        // these are services on the home page, so the menu must not repeat them
-        for page in ["/_dd/files", "/_dd/media"] {
+        assert!(menu.iter().any(|u| u == "/_dd/settings"));
+        // services on the home page, and what is a tab of Settings now
+        for page in ["/_dd/files", "/_dd/media", "/_dd/boxes", "/_dd/storage"] {
             assert!(!menu.iter().any(|u| u == page), "the menu repeats {page}");
         }
         assert!(menu.iter().any(|u| u == "https://metrics.example/"));
@@ -946,17 +927,15 @@ mod tests {
         // the demo opens the library the box keeps for it, and nothing
         // that belongs to an account with devices and boxes of its own
         let menu = menu_urls(&me(DEMO_USER, &svcs));
-        for page in ["/_dd/settings", "/_dd/boxes"] {
-            assert!(
-                !menu.iter().any(|u| u == page),
-                "the demo was offered {page}"
-            );
-        }
+        assert!(
+            !menu.iter().any(|u| u == "/_dd/settings"),
+            "the demo was offered Settings"
+        );
         assert!(menu.iter().any(|u| u == "https://metrics.example/"));
         // no metrics on this box: no line for it, and nothing else moves
         let menu = menu_urls(&me("tom", &[svc("Chat", "chat")]));
         assert!(!menu.iter().any(|u| u.contains("metrics")));
-        assert!(menu.iter().any(|u| u == "/_dd/boxes"));
+        assert!(menu.iter().any(|u| u == "/_dd/settings"));
     }
 
     #[test]
@@ -965,7 +944,6 @@ mod tests {
             ("home", "shell.js"),
             ("files", "files.js"),
             ("media", "media.js"),
-            ("boxes", "boxes.js"),
             ("settings", "settings.js"),
             ("git", "git.js"),
             ("metrics", "metrics.js"),

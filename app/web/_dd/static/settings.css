@@ -114,3 +114,4 @@
 .ad-ok { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); }
 .ad-ok svg { width: 28px; height: 28px; }
 .ad-dialog .bad { color: var(--bk-bad); margin: 10px 0 0; text-align: center; font-size: 14px; }
+.nw-health .bad { color: var(--bk-bad); font-weight: 600; }
