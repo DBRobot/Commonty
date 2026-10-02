@@ -1,10 +1,12 @@
 // Photos in the app's window (src/photos.rs): sign the window in as this
+// the app's routes want the secret it put in this page (app/src/site.rs)
+const secret = () => ({ 'x-dd-app': document.querySelector('meta[name="dd-app"]')?.content || '' });
 // device and go on to the Photos page, the password after the # of its
 // address; or, the first time here, have the browser's passkey send it.
 const $ = (id) => document.getElementById(id);
 
 async function state() {
-  const r = await fetch('/_dd/app/photos/state');
+  const r = await fetch('/_dd/app/photos/state', { headers: secret() });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -34,7 +36,7 @@ async function poll() {
 $('go').onclick = async () => {
   $('go').disabled = true;
   try {
-    const r = await fetch('/_dd/app/photos/start');
+    const r = await fetch('/_dd/app/photos/start', { headers: secret() });
     if (!r.ok) throw new Error(await r.text());
     $('first').hidden = true;
     $('wait').hidden = false;

@@ -17,6 +17,8 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# the launch secret the app's own pages carry (site.rs)
+getrandom = "0.3"
 auth = { path = "../client/auth" }
 identity = { path = "../client/identity" }
 directory = { path = "../client/directory" }

@@ -1,0 +1,2 @@
+# the web bundle, copied in at build time (flake.nix app, scripts/sync-app-web)
+/web/_dd/web/

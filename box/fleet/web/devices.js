@@ -7,7 +7,7 @@
 import init, { file_seal, file_open, entry_without, entry_signed, entry_with_device, qr_svg } from '/_dd/web/dd_web.js';
 import { unlock } from './library.js';
 import { requestOptions, assertion, post, b64u, u8b64 } from './webauthn.js';
-import { me, inApp } from './shell.js';
+import { me, inApp, appFetch } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const ICON = {
@@ -241,7 +241,7 @@ function remove(k, label) {
     $('rm-yes').disabled = true;
     try {
       if (rootHere) {
-        const r = await fetch('/_dd/app/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(k.passkey ? { passkey: k.passkey } : { fingerprint: k.fingerprint }) });
+        const r = await appFetch('/_dd/app/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(k.passkey ? { passkey: k.passkey } : { fingerprint: k.fingerprint }) });
         if (!r.ok) throw new Error(await r.text());
         $('remove').close();
         await load();
@@ -290,7 +290,7 @@ let adding = null;
 async function canAdd() {
   if (entry.entry.root.startsWith('webauthn:')) return true;
   if (!inApp) return false;
-  const r = await fetch('/_dd/app/root').catch(() => null);
+  const r = await appFetch('/_dd/app/root').catch(() => null);
   return !!(r && r.ok && (await r.json()).here && (rootHere = true));
 }
 
@@ -349,7 +349,7 @@ async function addApprove() {
     const pk = adding.offer.public_key;
     if (rootHere) {
       // the main key is on this device: the app signs it in
-      const r = await fetch('/_dd/app/admit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ public_key: pk }) });
+      const r = await appFetch('/_dd/app/admit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ public_key: pk }) });
       if (!r.ok) throw new Error(await r.text());
     } else {
       // a passkey main key: the library is opened to seal its key to the

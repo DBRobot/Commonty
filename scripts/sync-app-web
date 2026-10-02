@@ -10,3 +10,11 @@ grep -v '^#' app/carried | while read -r from to; do
   mkdir -p "app/web/_dd/$(dirname "$to")"
   cp "$from" "app/web/_dd/$to"
 done
+# and the web bundle the app's pages load (wasm, players): carried by the
+# app, never fetched from a box. Built here, not kept in git (app/.gitignore);
+# the app's nix build copies the same in itself.
+if command -v nix >/dev/null 2>&1; then
+  web=$(nix build --no-link --print-out-paths .#web)
+  rm -rf app/web/_dd/web && mkdir -p app/web/_dd/web
+  cp "$web"/* app/web/_dd/web/ && chmod -R u+w app/web/_dd/web
+fi

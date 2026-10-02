@@ -5,7 +5,7 @@
 
 import init, { library_device_key, library_open, library_key_for_box, path_encrypt, path_decrypt, file_open, file_seal, plain_size, Sealer, Opener } from '/_dd/web/dd_web.js';
 import { b64u, u8b64 } from './webauthn.js';
-import { inApp } from './shell.js';
+import { inApp, appFetch } from './shell.js';
 
 // the passkey's own secret, under a label of this page's own
 export async function passkeySecret(cfg, passkeys) {
@@ -39,7 +39,7 @@ export async function unlock(user) {
   // in the app the device's own keys open the library; the app hands this
   // page the key for as long as it is open, and no passkey is asked
   if (inApp) {
-    const r = await fetch('/_dd/app/library');
+    const r = await appFetch('/_dd/app/library');
     if (r.status === 404) return { none: true };
     if (!r.ok) throw new Error(`the app said ${r.status}: ${await r.text()}`);
     return { ok: await r.json() };

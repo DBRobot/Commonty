@@ -458,6 +458,30 @@
               cargoExtraArgs = "-p commonty";
             }
           );
+          webDist = pkgs.runCommand "dd-web-dist" { nativeBuildInputs = [ pkgs.wasm-bindgen-cli ]; } ''
+            mkdir -p $out
+            wasm-bindgen --target web --no-typescript --out-dir $out ${wasmBuild}/lib/dd_web.wasm
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.6.5/hls.min.js";
+                hash = "sha256-k36IEw6HrUntpsfxCOk+QsInVYxti01bU9205DB6Msw=";
+              }
+            } $out/hls.js
+            # Chat's answers are markdown: turned into html, then cleaned of
+            # anything that could run, before the page shows them
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdnjs.cloudflare.com/ajax/libs/marked/18.0.14/lib/marked.esm.min.js";
+                hash = "sha256-brZkvp2IUr5XYSw1XbTW18R/HjM/LClHqIFOEuOxLUY=";
+              }
+            } $out/marked.js
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.16/purify.min.js";
+                hash = "sha256-LJCptG1kY/JgOKKbaG6CvJHeAf2snVIp58/js2ATTqI=";
+              }
+            } $out/purify.js
+          '';
         in
         {
           # a package must be a derivation (flake check), not a source path
@@ -492,6 +516,13 @@
           # renderer is off because on nvidia it draws a blank window.
           app = (crateWith appCommon "commonty" sources.app "-p commonty").overrideAttrs (old: {
             nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.wrapGAppsHook3 ];
+            # the page code that runs in the app's window comes with the
+            # app, never from a box: the wasm bundle and the players too
+            # (app/src/site.rs serves them from here)
+            preBuild = (old.preBuild or "") + ''
+              mkdir -p app/web/_dd/web
+              cp ${webDist}/* app/web/_dd/web/
+            '';
             # glib-networking for https; GStreamer is how WebKit plays media,
             # and without its plugins nothing played in the app ("appsink not
             # found"): base and good for the pipeline, bad for the streaming
@@ -548,30 +579,7 @@
           # and served from this directory beside our own wasm: no
           # third-party blob in the tree, and the page fetches it from the
           # box like everything else it loads.
-          web = pkgs.runCommand "dd-web-dist" { nativeBuildInputs = [ pkgs.wasm-bindgen-cli ]; } ''
-            mkdir -p $out
-            wasm-bindgen --target web --no-typescript --out-dir $out ${wasmBuild}/lib/dd_web.wasm
-            cp ${
-              pkgs.fetchurl {
-                url = "https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.6.5/hls.min.js";
-                hash = "sha256-k36IEw6HrUntpsfxCOk+QsInVYxti01bU9205DB6Msw=";
-              }
-            } $out/hls.js
-            # Chat's answers are markdown: turned into html, then cleaned of
-            # anything that could run, before the page shows them
-            cp ${
-              pkgs.fetchurl {
-                url = "https://cdnjs.cloudflare.com/ajax/libs/marked/18.0.14/lib/marked.esm.min.js";
-                hash = "sha256-brZkvp2IUr5XYSw1XbTW18R/HjM/LClHqIFOEuOxLUY=";
-              }
-            } $out/marked.js
-            cp ${
-              pkgs.fetchurl {
-                url = "https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.16/purify.min.js";
-                hash = "sha256-LJCptG1kY/JgOKKbaG6CvJHeAf2snVIp58/js2ATTqI=";
-              }
-            } $out/purify.js
-          '';
+          web = webDist;
           # The mail Worker (client/mail): what `dd release publish` uploads
           # to Cloudflare, file for file, and what the boxes compare the
           # deployed Worker with. The checks are the boxes' own Rust in wasm;
