@@ -239,7 +239,8 @@ async function api(req, env, path, sent) {
     const c = await unseal(env, token, 'challenge');
     if (!c) return json({ error: 'that took too long; try again' }, 403);
     try {
-      login(await entry(env, c.n), id, JSON.stringify(assertion), c.c);
+      // made on this Worker's own page, not on any of the fleet's
+      login(await entry(env, c.n), id, JSON.stringify(assertion), c.c, `https://mail.${env.DOMAIN}`);
     } catch (err) {
       return json({ error: 'your passkey was not accepted' }, 403);
     }

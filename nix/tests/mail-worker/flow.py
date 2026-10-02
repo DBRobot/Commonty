@@ -78,6 +78,7 @@ with sync_playwright() as p:
     ok(call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign('AAAA')})[0] == 403, 'answer to another challenge: refused')
     ok(call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'], origin='https://evil.example', rp='evil.example')})[0] == 403, 'made for another site: refused')
     ok(call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'], flags=4)})[0] == 403, 'nobody present: refused')
+    ok(call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'], origin='https://home.commonty.test')})[0] == 403, 'made on a page a box serves: refused')
     ok(call('/api/login', {'token': c['token'] + 'x', 'id': 'cGsx', 'assertion': sign(c['challenge'])})[0] == 403, 'tampered challenge token: refused')
     s, _, ck = call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'])}); ok(s == 200 and ck, 'a right answer signs in')
     sess = ck.split(';')[0]

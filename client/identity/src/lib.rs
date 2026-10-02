@@ -474,15 +474,32 @@ fn check_assertion_with(sig_b64: &str, entry: &Entry, trusted: &[Passkey]) -> Re
 }
 
 /// A sign-in: `a` is the passkey `id` of `entry` answering `challenge`, made
-/// by a person on a page of the relying party on record. For something
-/// other than a box that holds the person's passkeys - it reads them from
-/// the signed entry.
-pub fn check_login(entry: &Entry, id: &str, a: &Assertion, challenge: &[u8]) -> Result<()> {
+/// by a person on one of the pages in `origins` (exactly: "https://host").
+/// For something other than a box that holds the person's passkeys - it
+/// reads them from the signed entry. Any page of the relying party would be
+/// too many: a box serving one could ask for an answer to another's
+/// challenge and hand it on.
+pub fn check_login(
+    entry: &Entry,
+    id: &str,
+    a: &Assertion,
+    challenge: &[u8],
+    origins: &[String],
+) -> Result<()> {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64_URL;
     let passkey = entry
         .passkeys
         .iter()
         .find(|p| p.id == id)
         .ok_or_else(|| Error::Key("that passkey is not in the entry".into()))?;
+    let client = B64_URL
+        .decode(&a.client_data_json)
+        .map_err(|_| Error::Signature)?;
+    let c: serde_json::Value = serde_json::from_slice(&client).map_err(|_| Error::Signature)?;
+    let origin = c["origin"].as_str().unwrap_or_default();
+    if !origins.iter().any(|o| o == origin) {
+        return Err(Error::Signature);
+    }
     assertion_over(passkey, a, challenge)
 }
 

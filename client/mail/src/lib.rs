@@ -71,15 +71,16 @@ fn member(e: &SignedEntry, members: &str, release: &str) -> R<bool> {
     Ok(e.entry.grant.is_some() && identity::verify_grant(&e.entry, &release).is_ok())
 }
 
-/// The member's passkey `id`, in `entry`, answering `challenge` (base64url).
-pub fn login(entry: &str, id: &str, assertion: &str, challenge: &str) -> R<()> {
+/// The member's passkey `id`, in `entry`, answering `challenge` (base64url),
+/// on the Worker's own page `origin` and nowhere else.
+pub fn login(entry: &str, id: &str, assertion: &str, challenge: &str, origin: &str) -> R<()> {
     let e = parse(entry)?;
     let a: Assertion =
         serde_json::from_str(assertion).map_err(|_| "not an assertion".to_string())?;
     let c = B64_URL
         .decode(challenge)
         .map_err(|_| "not a challenge".to_string())?;
-    identity::check_login(&e.entry, id, &a, &c).map_err(|e| e.to_string())
+    identity::check_login(&e.entry, id, &a, &c, &[origin.to_string()]).map_err(|e| e.to_string())
 }
 
 #[wasm_bindgen(js_name = admit)]
@@ -94,8 +95,14 @@ pub fn admit_js(
 }
 
 #[wasm_bindgen(js_name = login)]
-pub fn login_js(entry: &str, id: &str, assertion: &str, challenge: &str) -> Result<(), JsValue> {
-    login(entry, id, assertion, challenge).map_err(|e| JsValue::from_str(&e))
+pub fn login_js(
+    entry: &str,
+    id: &str,
+    assertion: &str,
+    challenge: &str,
+    origin: &str,
+) -> Result<(), JsValue> {
+    login(entry, id, assertion, challenge, origin).map_err(|e| JsValue::from_str(&e))
 }
 
 #[cfg(test)]
@@ -231,27 +238,24 @@ mod tests {
         let c = [5u8; 32];
         let ch = B64_URL.encode(c);
         let here = "https://mail.commonty.org";
-        assert!(login(&e, "pk1", &t.answer(&c, "commonty.org", 0b101, here), &ch).is_ok());
+        let try_ = |id: &str, answer: String| login(&e, id, &answer, &ch, here).is_ok();
+        assert!(try_("pk1", t.answer(&c, "commonty.org", 0b101, here)));
         // another challenge, nobody present, another site, another passkey
-        assert!(
-            login(
-                &e,
-                "pk1",
-                &t.answer(&[6; 32], "commonty.org", 0b101, here),
-                &ch
-            )
-            .is_err()
-        );
-        assert!(login(&e, "pk1", &t.answer(&c, "commonty.org", 0b100, here), &ch).is_err());
-        assert!(
-            login(
-                &e,
-                "pk1",
-                &t.answer(&c, "evil.example", 0b101, "https://evil.example"),
-                &ch
-            )
-            .is_err()
-        );
-        assert!(login(&e, "pk2", &t.answer(&c, "commonty.org", 0b101, here), &ch).is_err());
+        assert!(!try_(
+            "pk1",
+            t.answer(&[6; 32], "commonty.org", 0b101, here)
+        ));
+        assert!(!try_("pk1", t.answer(&c, "commonty.org", 0b100, here)));
+        assert!(!try_(
+            "pk1",
+            t.answer(&c, "evil.example", 0b101, "https://evil.example")
+        ));
+        assert!(!try_("pk2", t.answer(&c, "commonty.org", 0b101, here)));
+        // the same passkey, the same relying party, on a page a box serves:
+        // a box that asked for it there must not get into the mail
+        assert!(!try_(
+            "pk1",
+            t.answer(&c, "commonty.org", 0b101, "https://home.commonty.org")
+        ));
     }
 }

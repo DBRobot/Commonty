@@ -87,6 +87,9 @@ in
     # the gate writes the request and reads the status and result
     systemd.services.dd-verify.serviceConfig.ReadWritePaths = [ "/run/dd-wifi" ];
     systemd.services.dd-verify.environment.VERIFY_HOUSE = "/run/dd-wifi";
+    # Settings, where a Wi-Fi change is signed: every box checks the
+    # signature was made there and on no other page
+    systemd.services.dd-verify.environment.VERIFY_HOUSE_ORIGINS = "https://home.${config.dd.domain} https://files.${config.dd.domain}";
 
     networking.networkmanager.ensureProfiles = {
       environmentFiles = [ cfg.pskFile ];

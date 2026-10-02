@@ -29,6 +29,8 @@ const FRESH: u64 = 600;
 pub struct Home {
     /// /run/dd-wifi, where the root unit reads requests and writes status
     dir: Option<PathBuf>,
+    /// the pages a change may be signed on: Settings' (VERIFY_HOUSE_ORIGINS)
+    origins: Vec<String>,
     /// the other boxes' gates, to relay to and ask after
     peers: Vec<String>,
     /// changes already acted on, by nonce, so a signed one is used once
@@ -39,6 +41,11 @@ impl Home {
     pub fn new(dir: Option<PathBuf>, directory_peers: &[String]) -> Home {
         Home {
             dir,
+            origins: std::env::var("VERIFY_HOUSE_ORIGINS")
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(str::to_string)
+                .collect(),
             peers: directory_peers
                 .iter()
                 .map(|p| {
@@ -239,8 +246,14 @@ fn check(app: &dyn Vouch, s: &Signed) -> Result<Change, (StatusCode, String)> {
     let mut h = sha2::Sha256::new();
     h.update(LABEL);
     h.update(s.payload.as_bytes());
-    identity::check_login(&entry.entry, &s.id, &s.assertion, &h.finalize())
-        .map_err(|_| bad("your passkey did not sign that"))?;
+    identity::check_login(
+        &entry.entry,
+        &s.id,
+        &s.assertion,
+        &h.finalize(),
+        &app.house().origins,
+    )
+    .map_err(|_| bad("your passkey did not sign that"))?;
     let mut seen = app.house().seen.lock().unwrap();
     seen.retain(|_, t| now() < *t + FRESH * 2);
     if seen.insert(c.nonce.clone(), now()).is_some() {

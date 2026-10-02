@@ -790,6 +790,20 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     r
 }
 
+/// The pages this gate serves, as origins: "https://<host>.<domain>" for each
+/// of VERIFY_HOSTS, and home. Nothing else may ask for a passkey here.
+fn own_hosts(domain: &str) -> Vec<String> {
+    let mut hosts: Vec<String> = std::env::var("VERIFY_HOSTS")
+        .unwrap_or_default()
+        .split([',', ' '])
+        .filter(|h| !h.is_empty())
+        .map(|h| format!("https://{h}.{domain}"))
+        .collect();
+    hosts.push(format!("https://home.{domain}"));
+    hosts.dedup();
+    hosts
+}
+
 fn deletes_image(headers: &HeaderMap) -> bool {
     let h = |k| headers.get(k).and_then(|v: &HeaderValue| v.to_str().ok());
     h("x-original-method") == Some("DELETE")
@@ -1918,12 +1932,16 @@ pub async fn start(
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| cfg.dir.clone());
     // the browser login's scope: the whole domain, so one passkey login covers
-    // every service on this box, and the cookie rides along to all of them
+    // every service on this box, and the cookie rides along to all of them.
+    // But only this box's own pages may ask for it (VERIFY_HOSTS): a page of
+    // any other host of the domain could be another box, relaying this
+    // box's challenge to get a session here.
     let rp_origin = Url::parse(&format!("https://{domain}"))?;
-    let webauthn = WebauthnBuilder::new(&domain, &rp_origin)?
-        .rp_name("Commonty")
-        .allow_subdomains(true)
-        .build()?;
+    let mut webauthn = WebauthnBuilder::new(&domain, &rp_origin)?.rp_name("Commonty");
+    for h in own_hosts(&domain) {
+        webauthn = webauthn.append_allowed_origin(&Url::parse(&h)?);
+    }
+    let webauthn = webauthn.build()?;
     let oidc = match cfg.oidc {
         Some(o) => Some(oidc::Issuer::open(
             &state_dir,
