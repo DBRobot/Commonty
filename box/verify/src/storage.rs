@@ -161,15 +161,7 @@ fn member(app: &App, headers: &HeaderMap) -> Result<String, Response> {
     match app.signed_in(cookie) {
         Some(u) if app.member(&u) && u != pages::DEMO_USER && !app.guest(&u) => Ok(u),
         Some(_) => Err(Redirect::to("/_dd/home").into_response()),
-        None => Err(Redirect::to("/_dd/login?rd=/_dd/storage").into_response()),
-    }
-}
-
-/// GET /_dd/storage: the page
-pub(crate) async fn page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    match member(&app, &headers) {
-        Ok(_) => crate::page("storage"),
-        Err(r) => r,
+        None => Err(Redirect::to("/_dd/login?rd=/_dd/settings").into_response()),
     }
 }
 

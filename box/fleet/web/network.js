@@ -32,6 +32,31 @@ function bars(signal) {
 }
 
 let house = null;
+let fleet = {}; // by box: its release and backup, from the boxes' metrics
+
+function since(t) {
+  const d = Math.max(0, Date.now() / 1000 - t);
+  if (d < 5400) return `${Math.max(1, Math.round(d / 60))} min ago`;
+  if (d < 172800) return `${Math.round(d / 3600)} h ago`;
+  return `${Math.round(d / 86400)} days ago`;
+}
+
+// "is it all right": on the latest release, and backed up lately; a
+// problem in plain words where there is one
+function health(name) {
+  const f = fleet[name];
+  if (!f || !f.up) return [];
+  const newest = Math.max(...Object.values(fleet).filter((x) => x.up && x.release != null).map((x) => x.release));
+  const out = [];
+  if (f.release != null && f.release < newest) out.push(['Behind on updates', true]);
+  else if (f.result && f.result !== 'ok') out.push([`Last update ${f.result}`, true]);
+  else out.push(['Up to date', false]);
+  const b = f.backup?.last_success;
+  if (!b) out.push(['Never backed up', true]);
+  else if (Date.now() / 1000 - b > 2 * 86400) out.push([`Not backed up for ${Math.floor((Date.now() / 1000 - b) / 86400)} days`, true]);
+  else out.push([`Backed up ${since(b)}`, false]);
+  return out;
+}
 
 function row(b) {
   const li = el('li', 'nw-row');
@@ -55,6 +80,15 @@ function row(b) {
     meta.textContent = 'No connection to the router';
   }
   text.append(meta);
+  const h = health(b.box);
+  if (h.length) {
+    const line = el('div', 'dv-meta nw-health');
+    h.forEach(([words, bad], i) => {
+      if (i) line.append(' · ');
+      line.append(el('span', bad ? 'bad' : '', words));
+    });
+    text.append(line);
+  }
   const state = el('span', 'nw-state', b.unreachable ? 'Offline' : 'Online');
   if (!b.unreachable) state.classList.add('ok');
   li.append(ico, text, state);
@@ -62,9 +96,10 @@ function row(b) {
 }
 
 async function load() {
-  const r = await fetch('/_dd/house');
+  const [r, f] = await Promise.all([fetch('/_dd/house'), fetch('/_dd/fleet.json').catch(() => null)]);
   if (!r.ok) throw new Error(`the box said ${r.status}`);
   house = await r.json();
+  if (f && f.ok) fleet = Object.fromEntries((await f.json()).map((x) => [x.name, x]));
   $('nw-boxes').replaceChildren(...house.boxes.map(row));
   const ssid = house.boxes.map((b) => b.status?.wifi?.ssid).find(Boolean);
   $('nw-ssid').textContent = ssid || 'Not set';

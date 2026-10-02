@@ -19,12 +19,12 @@ box/media/web/shelf.js            static/shelf.js
 box/media/web/icons/tmdb.svg      static/tmdb.svg
 box/media/web/pages/media.html    pages/media.html
 box/fleet/web/panel.js            static/panel.js
-box/fleet/web/boxes.js            static/boxes.js
 box/fleet/web/backups.js          static/backups.js
 box/fleet/web/backups.css         static/backups.css
 box/web/settings.js               static/settings.js
 box/web/settings.css              static/settings.css
+box/web/storage.js                static/storage.js
+box/web/storage.css               static/storage.css
 box/web/pages/settings.html       pages/settings.html
 box/fleet/web/devices.js          static/devices.js
 box/fleet/web/network.js          static/network.js
-box/fleet/web/pages/boxes.html    pages/boxes.html

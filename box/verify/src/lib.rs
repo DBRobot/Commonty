@@ -2068,11 +2068,10 @@ pub async fn start(
         .route("/_dd/config", get(page_config))
         .route("/_dd/files", get(files_page))
         .route("/_dd/media", get(media_page))
+        // the boxes are on Settings' Network tab now
         .route(
             "/_dd/boxes",
-            get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
-                member_page(&a, &h, "boxes", "/_dd/boxes").await
-            }),
+            get(|| async { Redirect::to("/_dd/settings#network") }),
         )
         // Backups is a tab of Settings now
         .route(
@@ -2118,7 +2117,11 @@ pub async fn start(
             "/_dd/devices/names",
             get(signins::http::names).put(signins::http::put_names),
         )
-        .route("/_dd/storage", get(storage::page))
+        // Storage is a tab of Settings now
+        .route(
+            "/_dd/storage",
+            get(|| async { Redirect::to("/_dd/settings#storage") }),
+        )
         .route("/_dd/storage/mine", get(storage::mine))
         .route("/internal/storage/members", get(storage::members))
         .route("/_dd/photos/demo", get(demo_photos::page))

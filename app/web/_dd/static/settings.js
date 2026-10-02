@@ -5,11 +5,12 @@
 import { start as backups, FILES } from './backups.js';
 import { start as devices } from './devices.js';
 import { start as network } from './network.js';
+import { start as storage } from './storage.js';
 
 const $ = (id) => document.getElementById(id);
 
 function tab(name) {
-  if (!['profile', 'devices', 'network', 'backups'].includes(name)) name = 'profile';
+  if (!['profile', 'devices', 'storage', 'network', 'backups'].includes(name)) name = 'profile';
   // the disk images are read from the files site (backups.js)
   if (name === 'backups' && location.protocol === 'https:' && location.hostname !== FILES) {
     location.href = `https://${FILES}/_dd/settings#backups`;
@@ -23,6 +24,7 @@ function tab(name) {
   if (name === 'backups') backups();
   if (name === 'devices') devices();
   if (name === 'network') network();
+  if (name === 'storage') storage();
 }
 
 for (const a of document.querySelectorAll('[data-tab]')) {

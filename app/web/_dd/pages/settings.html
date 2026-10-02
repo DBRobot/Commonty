@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/_dd/static/home.css">
   <link rel="stylesheet" href="/_dd/static/settings.css">
   <link rel="stylesheet" href="/_dd/static/backups.css">
+  <link rel="stylesheet" href="/_dd/static/storage.css">
 </head>
 <body>
   <header class="dd-bar">
@@ -28,6 +29,7 @@
     <nav class="se-nav" aria-label="Settings">
       <a href="#profile" data-tab="profile" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Profile</a>
       <a href="#devices" data-tab="devices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>Devices</a>
+      <a href="#storage" data-tab="storage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Storage</a>
       <a href="#network" data-tab="network"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>Network</a>
       <a href="#backups" data-tab="backups"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15h18"/><circle cx="17" cy="17" r=".9" fill="currentColor"/></svg>Backups</a>
     </nav>
@@ -67,6 +69,28 @@
         <header><h2 id="keys">Devices with a key</h2><span class="bk-spacer"></span><button class="quiet" id="dv-show">Show names</button><button id="dv-add" hidden>Add a device</button></header>
         <p class="se-hint" id="dv-hint">Names are kept locked; your passkey shows them.</p>
         <ul class="dv-list" id="dv-keys"></ul>
+      </section>
+    </div>
+
+    <div class="se-pane st-pane" data-pane="storage" hidden>
+      <section class="st-box" aria-labelledby="st-yours">
+        <header><h2 id="st-yours">Your allowance</h2><span class="st-spacer"></span><span class="st-muted" id="st-updated"></span></header>
+        <div class="st-total">
+          <p class="st-muted" id="st-state">Counting…</p>
+          <div class="st-figure" id="st-figure" hidden><b id="st-used"></b><span id="st-of"></span><span class="st-pill" id="st-pct"></span></div>
+          <div class="st-bar" id="st-bar" role="img" hidden></div>
+          <ul class="st-legend" id="st-legend"></ul>
+        </div>
+      </section>
+
+      <section class="st-box" aria-labelledby="st-rules-h">
+        <header><h2 id="st-rules-h">When you reach <span id="st-budget">your allowance</span></h2></header>
+        <div class="st-rules">
+          <p><strong>Nothing is deleted.</strong> You can still open, play and download everything you have.</p>
+          <p><strong>New uploads stop</strong> in Photos, Files and Movies &amp; TV until you make room. Deleting something anywhere frees space everywhere within 10 minutes.</p>
+          <p>Photos in the bin, and files in a library’s trash, still count until they are emptied.</p>
+          <p class="st-grow">As more members contribute hardware to Commonty, everyone’s allowance can grow.</p>
+        </div>
       </section>
     </div>
 
