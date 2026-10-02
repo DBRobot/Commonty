@@ -272,6 +272,19 @@ pub struct OidcConfig {
     pub redirect: String,
 }
 
+/// The one client for the calls this gate makes out - Pi-hole, thanos, the
+/// other boxes, search: connections are kept and used again. Each call sets
+/// how long it will wait.
+pub(crate) fn http() -> reqwest::Client {
+    static C: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .build()
+            .unwrap_or_default()
+    });
+    C.clone()
+}
+
 /// Usernames are also filenames here, so the whitelist is strict.
 fn valid_user(s: &str) -> bool {
     !s.is_empty()
@@ -307,11 +320,9 @@ impl App {
         }
         let read = async {
             let key = self.directory.release()?;
-            let raw = reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .ok()?
+            let raw = http()
                 .get(url)
+                .timeout(Duration::from_secs(10))
                 .send()
                 .await
                 .ok()?
@@ -1666,11 +1677,9 @@ async fn chat_search(
             .into_response();
     }
     let got = async {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(12))
-            .build()?;
-        let v: serde_json::Value = client
+        let v: serde_json::Value = http()
             .get(format!("{base}/search"))
+            .timeout(Duration::from_secs(12))
             .query(&[("q", q), ("format", "json"), ("safesearch", "1")])
             .send()
             .await?

@@ -39,8 +39,9 @@ static SID: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::
 
 async fn sign_in(ab: &Adblock) -> Option<String> {
     let pw = ab.password.as_ref()?;
-    let r = match client()
+    let r = match crate::http()
         .post(format!("{}/api/auth", ab.api))
+        .timeout(Duration::from_secs(10))
         .json(&json!({ "password": pw }))
         .send()
         .await
@@ -90,13 +91,6 @@ impl Adblock {
     }
 }
 
-fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .unwrap_or_default()
-}
-
 async fn ftl(
     ab: &Adblock,
     method: reqwest::Method,
@@ -104,7 +98,9 @@ async fn ftl(
     body: Option<Value>,
 ) -> Result<Value, StatusCode> {
     for fresh in [false, true] {
-        let mut r = client().request(method.clone(), format!("{}/api{path}", ab.api));
+        let mut r = crate::http()
+            .request(method.clone(), format!("{}/api{path}", ab.api))
+            .timeout(Duration::from_secs(10));
         if ab.password.is_some() {
             let Some(s) = sid(ab, fresh).await else {
                 return Err(StatusCode::BAD_GATEWAY);

@@ -33,13 +33,6 @@ pub struct Backup {
 /// talks to another box)
 pub type Fleet = BTreeMap<String, String>;
 
-fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap_or_default()
-}
-
 /// every sample of one metric for one box, as (labels, value)
 async fn query(
     http: &reqwest::Client,
@@ -50,6 +43,7 @@ async fn query(
     let expr = format!("{metric}{{box=\"{name}\"}}");
     let r = http
         .get(format!("{thanos}/api/v1/query"))
+        .timeout(Duration::from_secs(5))
         .query(&[("query", expr.as_str())])
         .send()
         .await
@@ -136,7 +130,7 @@ pub async fn look(fleet: &Fleet, thanos: Option<&str>) -> Vec<Status> {
 
 /// every box at once: one slow box does not hold up the page
 async fn ask(fleet: &Fleet, thanos: Option<&str>) -> Vec<Status> {
-    let http = client();
+    let http = crate::http();
     let mut set = tokio::task::JoinSet::new();
     for name in fleet.keys() {
         let (http, name, thanos) = (http.clone(), name.clone(), thanos.map(str::to_string));

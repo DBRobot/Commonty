@@ -122,7 +122,7 @@ pub(crate) async fn museum_verify(
         return (StatusCode::FORBIDDEN, "only your own address").into_response();
     }
     body["ott"] = serde_json::Value::String(p.code.clone());
-    let mut r = reqwest::Client::new()
+    let mut r = crate::http()
         .post(format!("{}/users/{op}", p.api.trim_end_matches('/')))
         .timeout(Duration::from_secs(20))
         .json(&body);
