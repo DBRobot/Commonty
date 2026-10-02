@@ -317,6 +317,19 @@ async function addStart() {
   addWatch(adding.code);
 }
 
+// the pairing sums, the same as identity::pairing_commit and _digits make
+const enc = (t) => new TextEncoder().encode(t);
+const sha = async (t) => new Uint8Array(await crypto.subtle.digest('SHA-256', enc(t)));
+const hex = (b) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+async function pairingDigits(pk, newDevice, approver) {
+  const d = await sha(`commonty pairing v1\0${pk}\0${newDevice}\0${approver}`);
+  return String(new DataView(d.buffer).getUint32(0) % 1000000).padStart(6, '0');
+}
+
+// The new device commits to a number of its own; this page then gives it
+// one, and only after that does the new device reveal its own. The digits
+// come from the key and both numbers, worked out here, so a box that put
+// its own key in the new device's place could not make them match.
 async function addWatch(code) {
   while (adding && adding.code === code && $('add').open) {
     if (Date.now() / 1000 > adding.expires) {
@@ -324,15 +337,25 @@ async function addWatch(code) {
       return;
     }
     const s = await fetch('/_dd/add/status?code=' + encodeURIComponent(code)).then((r) => r.json()).catch(() => null);
+    if (s?.state === 'gone') return adSay('That code ran out. Close this and make a new one.');
     if (s?.state === 'offered') {
       adding.offer = s.offer;
-      $('ad-what').textContent = `${s.offer.kind} wants to join`;
-      $('ad-digits').textContent = s.offer.digits;
-      $('ad-yes').textContent = rootHere ? 'Approve' : 'Approve with passkey';
-      adPanel('ad-ask');
-      return;
+      if (!adding.mine) {
+        adding.mine = hex(crypto.getRandomValues(new Uint8Array(16)));
+        await fetch('/_dd/add/theirs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, nonce: adding.mine }) });
+      }
+      if (s.revealed) {
+        const pk = s.offer.public_key;
+        if (hex(await sha(`commonty pairing commit v1\0${pk}\0${s.revealed}`)) !== s.offer.commit) {
+          return adSay("The new device's answer didn't add up. Close this and make a new code.");
+        }
+        $('ad-what').textContent = `${s.offer.kind} wants to join`;
+        $('ad-digits').textContent = await pairingDigits(pk, s.revealed, adding.mine);
+        $('ad-yes').textContent = rootHere ? 'Approve' : 'Approve with passkey';
+        adPanel('ad-ask');
+        return;
+      }
     }
-    if (s?.state === 'gone') return adSay('That code ran out. Close this and make a new one.');
     await new Promise((r) => setTimeout(r, 2000));
   }
 }

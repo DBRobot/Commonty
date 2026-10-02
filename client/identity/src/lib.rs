@@ -683,6 +683,35 @@ pub fn valid_name(s: &str) -> bool {
         && !s.starts_with('.')
 }
 
+/// Adding a device by code: what the new device commits to before it sees
+/// the approving device's number - its key and its own number, hashed.
+pub fn pairing_commit(public_key: &str, mine: &str) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(b"commonty pairing commit v1\0");
+    h.update(public_key.as_bytes());
+    h.update(b"\0");
+    h.update(mine.as_bytes());
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The six digits both screens show: the key and both devices' numbers,
+/// worked out on each device. Neither the box between them nor either
+/// device alone chooses them.
+pub fn pairing_digits(public_key: &str, new_device: &str, approver: &str) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(b"commonty pairing v1\0");
+    h.update(public_key.as_bytes());
+    h.update(b"\0");
+    h.update(new_device.as_bytes());
+    h.update(b"\0");
+    h.update(approver.as_bytes());
+    let d = h.finalize();
+    let n = u32::from_be_bytes([d[0], d[1], d[2], d[3]]) % 1_000_000;
+    format!("{n:06}")
+}
+
 pub fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -692,6 +721,16 @@ pub fn now() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pairing_sums_are_the_browsers() {
+        // the same sums as box/fleet/web/devices.js makes with SubtleCrypto
+        assert_eq!(
+            super::pairing_commit("PK", "aa"),
+            "d82c73c3d371a64897284f4167a9b89cee2999c7fcef74de148ce8ecae0649f8"
+        );
+        assert_eq!(super::pairing_digits("PK", "aa", "bb"), "039979");
+    }
+
     use super::*;
 
     #[test]

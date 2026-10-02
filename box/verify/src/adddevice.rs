@@ -1,9 +1,14 @@
 //! Adding a device by QR code: a signed-in device asks for a code and shows
 //! it; the new device - the app, with a key of its own - offers that key
-//! against the code; both show the same four digits; the account's main key
-//! approves by signing the key into the entry, as any device is added. The
-//! box only keeps the pending offer, ten minutes at most, and lets nobody in
-//! by itself: a key is in once the entry says so.
+//! against the code; the account's main key approves by signing the key into
+//! the entry, as any device is added. The box only carries messages, ten
+//! minutes at most, and lets nobody in by itself.
+//!
+//! The six digits both screens show are worked out on each device, not
+//! here: a hash of the offered key and two random numbers, the new device's
+//! committed to before the approving device's is revealed. A box that put
+//! its own key in place of the new device's could not make the digits match
+//! but by a one-in-a-million guess.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -26,6 +31,10 @@ struct Pending {
     user: String,
     made: u64,
     offer: Option<Offer>,
+    /// the approving device's random number, once the offer is seen
+    theirs: Option<String>,
+    /// the new device's, revealed after it has seen the other
+    revealed: Option<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -33,7 +42,8 @@ struct Offer {
     public_key: String,
     fingerprint: String,
     kind: String,
-    digits: String,
+    /// sha256(public_key || its random number), hex
+    commit: String,
 }
 
 #[derive(Default)]
@@ -62,10 +72,8 @@ fn normal(raw: &str) -> String {
     }
 }
 
-fn digits() -> String {
-    let b = random(4).unwrap_or_default();
-    let n = u32::from_le_bytes([b[0], b[1], b[2], b[3]]) % 10_000;
-    format!("{n:04}")
+fn hexish(s: &str, len: usize) -> bool {
+    s.len() == len && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// members and guests: anyone with devices of their own
@@ -98,6 +106,8 @@ pub(crate) async fn start(State(app): State<Arc<App>>, headers: HeaderMap) -> Re
             user,
             made: now(),
             offer: None,
+            theirs: None,
+            revealed: None,
         },
     );
     Json(serde_json::json!({
@@ -126,7 +136,13 @@ pub(crate) async fn status(
     Adding::tidy(&mut m);
     match m.get(&normal(&q.code)) {
         Some(p) if p.user == user => match &p.offer {
-            Some(o) => Json(serde_json::json!({ "state": "offered", "offer": o })).into_response(),
+            Some(o) => Json(serde_json::json!({
+                "state": "offered",
+                "offer": o,
+                "theirs": p.theirs,
+                "revealed": p.revealed,
+            }))
+            .into_response(),
             None => Json(serde_json::json!({ "state": "waiting" })).into_response(),
         },
         _ => Json(serde_json::json!({ "state": "gone" })).into_response(),
@@ -151,6 +167,7 @@ pub(crate) async fn cancel(
 pub(crate) struct OfferIn {
     code: String,
     public_key: String,
+    commit: String,
 }
 
 /// POST /_dd/add/offer {code, public_key} - from the new device, which has
@@ -160,7 +177,7 @@ pub(crate) async fn offer(
     headers: HeaderMap,
     Json(o): Json<OfferIn>,
 ) -> Response {
-    if identity::decode_public(&o.public_key).is_err() {
+    if identity::decode_public(&o.public_key).is_err() || !hexish(&o.commit, 64) {
         return (StatusCode::BAD_REQUEST, "that is not a device key").into_response();
     }
     let agent = headers
@@ -183,14 +200,68 @@ pub(crate) async fn offer(
         )
             .into_response();
     }
-    let d = digits();
     p.offer = Some(Offer {
         fingerprint: identity::fingerprint(&o.public_key),
         public_key: o.public_key,
         kind: crate::signins::kind(agent),
-        digits: d.clone(),
+        commit: o.commit,
     });
-    Json(serde_json::json!({ "user": p.user, "digits": d })).into_response()
+    Json(serde_json::json!({ "user": p.user })).into_response()
+}
+
+#[derive(Deserialize)]
+pub(crate) struct NonceIn {
+    code: String,
+    nonce: String,
+}
+
+/// POST /_dd/add/theirs {code, nonce} - the approving device's number, once
+/// it has the new device's commitment. Set once.
+pub(crate) async fn theirs(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Json(n): Json<NonceIn>,
+) -> Response {
+    let Some(user) = person(&app, &headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if !hexish(&n.nonce, 32) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let mut m = app.adding.0.lock().unwrap();
+    match m.get_mut(&normal(&n.code)) {
+        Some(p) if p.user == user && p.offer.is_some() && p.theirs.is_none() => {
+            p.theirs = Some(n.nonce);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        _ => StatusCode::CONFLICT.into_response(),
+    }
+}
+
+/// GET /_dd/add/wait?code= - the new device, for the approving device's number
+pub(crate) async fn wait(State(app): State<Arc<App>>, Query(q): Query<CodeQ>) -> Response {
+    let mut m = app.adding.0.lock().unwrap();
+    Adding::tidy(&mut m);
+    match m.get(&normal(&q.code)) {
+        Some(p) => Json(serde_json::json!({ "theirs": p.theirs })).into_response(),
+        None => (StatusCode::NOT_FOUND, "that code ran out").into_response(),
+    }
+}
+
+/// POST /_dd/add/reveal {code, nonce} - the new device's number, now that it
+/// has seen the other. Set once.
+pub(crate) async fn reveal(State(app): State<Arc<App>>, Json(n): Json<NonceIn>) -> Response {
+    if !hexish(&n.nonce, 32) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let mut m = app.adding.0.lock().unwrap();
+    match m.get_mut(&normal(&n.code)) {
+        Some(p) if p.theirs.is_some() && p.revealed.is_none() => {
+            p.revealed = Some(n.nonce);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        _ => StatusCode::CONFLICT.into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -208,6 +279,5 @@ mod tests {
             );
             assert_eq!(normal(&c.to_lowercase().replace('-', " ")), c);
         }
-        assert_eq!(digits().len(), 4);
     }
 }

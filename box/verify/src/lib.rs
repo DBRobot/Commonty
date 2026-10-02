@@ -804,10 +804,56 @@ fn own_hosts(domain: &str) -> Vec<String> {
     hosts
 }
 
+/// A change to a disk image - anything but reading, under /images/ - asked
+/// by a browser. The path is held as nginx will route it, not as it was
+/// spelled: `//images/`, `/%69mages/` and `/x/../images/` are /images/ too.
 fn deletes_image(headers: &HeaderMap) -> bool {
     let h = |k| headers.get(k).and_then(|v: &HeaderValue| v.to_str().ok());
-    h("x-original-method") == Some("DELETE")
-        && h("x-original-uri").is_some_and(|u| u.starts_with("/images/"))
+    let reads = matches!(
+        h("x-original-method").unwrap_or("GET"),
+        "GET" | "HEAD" | "OPTIONS" | "PROPFIND"
+    );
+    !reads && h("x-original-uri").is_some_and(|u| routed_path(u).starts_with("/images/"))
+}
+
+/// The path of a request as nginx routes it: no query, percent-escapes
+/// decoded, runs of slashes merged, `.` and `..` resolved.
+fn routed_path(uri: &str) -> String {
+    let raw = uri.split(['?', '#']).next().unwrap_or_default();
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(b) = u8::from_str_radix(
+                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("zz"),
+                16,
+            )
+        {
+            decoded.push(b);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    let text = String::from_utf8_lossy(&decoded);
+    let mut out: Vec<&str> = Vec::new();
+    for part in text.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            p => out.push(p),
+        }
+    }
+    let mut path = format!("/{}", out.join("/"));
+    if text.ends_with('/') && path != "/" {
+        path.push('/');
+    }
+    path
 }
 
 /// On a demo door (demo-<service>.<domain>), the gate's own pages and
@@ -2123,6 +2169,9 @@ pub async fn start(
         .route("/_dd/add/status", get(adddevice::status))
         .route("/_dd/add/cancel", post(adddevice::cancel))
         .route("/_dd/add/offer", post(adddevice::offer))
+        .route("/_dd/add/theirs", post(adddevice::theirs))
+        .route("/_dd/add/wait", get(adddevice::wait))
+        .route("/_dd/add/reveal", post(adddevice::reveal))
         // where the QR code goes: open to anyone, it only shows the code
         .route("/_dd/add", get(|| async { page("add") }))
         .route("/_dd/house", get(home::list))
@@ -2277,8 +2326,20 @@ mod tests {
         };
         assert!(deletes_image(&h("DELETE", "/images/data/ab")));
         assert!(!deletes_image(&h("GET", "/images/data/ab")));
-        assert!(!deletes_image(&h("PUT", "/images/locks/ab")));
+        assert!(!deletes_image(&h("PROPFIND", "/images/")));
         assert!(!deletes_image(&h("DELETE", "/_dd/dav/x")));
+        // every other change too, and however the path is spelled
+        for m in ["PUT", "MOVE", "COPY", "MKCOL", "PATCH"] {
+            assert!(deletes_image(&h(m, "/images/data/ab")), "{m}");
+        }
+        for u in [
+            "//images/data/ab",
+            "/%69mages/data/ab",
+            "/x/../images/ab",
+            "/./images/ab?x=1",
+        ] {
+            assert!(deletes_image(&h("DELETE", u)), "{u}");
+        }
     }
 
     #[test]

@@ -2594,30 +2594,80 @@ async fn a_device_is_offered_by_code_and_seen_by_its_owner_alone() {
     };
     assert_eq!(status(tom.clone()).await["state"], "waiting");
 
-    // the new device, typed in lower case and without the dash
+    // the new device, typed in lower case and without the dash: its key,
+    // and a commitment to a number of its own
     let phone = Device::new();
+    let pk = phone.public_key();
+    let mine = "0123456789abcdef0123456789abcdef";
     let typed = code.replace('-', " ").to_lowercase();
     let r = http
         .post(format!("http://{addr}/_dd/add/offer"))
-        .json(&serde_json::json!({ "code": typed, "public_key": phone.public_key() }))
+        .json(&serde_json::json!({
+            "code": typed,
+            "public_key": pk,
+            "commit": identity::pairing_commit(&pk, mine),
+        }))
         .send()
         .await
         .unwrap();
     assert_eq!(r.status().as_u16(), 200);
     let offered: serde_json::Value = r.json().await.unwrap();
     assert_eq!(offered["user"], "tom");
-    let digits = offered["digits"].as_str().unwrap().to_string();
-    assert_eq!(digits.len(), 4);
 
     let s = status(tom.clone()).await;
     assert_eq!(s["state"], "offered");
-    assert_eq!(s["offer"]["digits"], digits.as_str());
-    assert_eq!(s["offer"]["public_key"], phone.public_key().as_str());
+    assert_eq!(s["offer"]["public_key"], pk.as_str());
+    assert!(
+        s["revealed"].is_null(),
+        "nothing revealed before the other number"
+    );
+    // the approving device's number; then the new device sees it and reveals
+    let theirs = "fedcba9876543210fedcba9876543210";
+    let r = http
+        .post(format!("http://{addr}/_dd/add/theirs"))
+        .header("cookie", &tom)
+        .json(&serde_json::json!({ "code": code, "nonce": theirs }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 204);
+    let w: serde_json::Value = http
+        .get(format!("http://{addr}/_dd/add/wait?code={code}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(w["theirs"], theirs);
+    let r = http
+        .post(format!("http://{addr}/_dd/add/reveal"))
+        .json(&serde_json::json!({ "code": code, "nonce": mine }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 204);
+    // the approving side checks the reveal against the commitment and both
+    // sides come to the same digits
+    let s = status(tom.clone()).await;
+    let revealed = s["revealed"].as_str().unwrap();
+    assert_eq!(
+        identity::pairing_commit(&pk, revealed),
+        s["offer"]["commit"].as_str().unwrap()
+    );
+    assert_eq!(
+        identity::pairing_digits(&pk, revealed, theirs),
+        identity::pairing_digits(&pk, mine, theirs)
+    );
 
     // a second device cannot take the same code
     let r = http
         .post(format!("http://{addr}/_dd/add/offer"))
-        .json(&serde_json::json!({ "code": code, "public_key": Device::new().public_key() }))
+        .json(&serde_json::json!({
+            "code": code,
+            "public_key": Device::new().public_key(),
+            "commit": "0".repeat(64),
+        }))
         .send()
         .await
         .unwrap();
