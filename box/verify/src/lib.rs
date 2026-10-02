@@ -1740,28 +1740,6 @@ async fn download_page(State(app): State<Arc<App>>) -> Response {
     }
 }
 
-/// The member's own machines on the fleet's network.
-async fn network_mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let Some(user) = app.identify(&headers, "access") else {
-        return StatusCode::FORBIDDEN.into_response();
-    };
-    if !(app.member(&user) || app.guest(&user)) || user == pages::DEMO_USER {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    match &app.network {
-        // the control server is on one box; elsewhere the page says so
-        None => Json(serde_json::json!({ "here": false, "machines": [] })).into_response(),
-        Some(door) => match door.mine(&user).await {
-            Ok(m) => Json(serde_json::json!({ "here": true, "machines": m })).into_response(),
-            Err(e) => (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response(),
-        },
-    }
-}
-
 /// Signing out: the session goes, and so does what the photo app keeps in
 /// this browser - its list of the library and the pictures it unlocked. That
 /// belongs to the photos host, so the way out passes through there
@@ -2150,11 +2128,10 @@ pub async fn start(
             "/_dd/backups",
             get(|| async { Redirect::to("/_dd/settings#backups") }),
         )
+        // and Devices
         .route(
             "/_dd/devices",
-            get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
-                member_page(&a, &h, "devices", "/_dd/devices").await
-            }),
+            get(|| async { Redirect::to("/_dd/settings#devices") }),
         )
         // Network is a tab of Settings now
         .route(
@@ -2164,7 +2141,6 @@ pub async fn start(
         .route("/_dd/download", get(download_page))
         .route("/_dd/fleet.json", get(fleet_json))
         .route("/_dd/me", get(me))
-        .route("/_dd/network/mine", get(network_mine))
         .route("/_dd/photos", get(photos::page))
         .route("/_dd/photos/config", post(photos::config))
         .route(

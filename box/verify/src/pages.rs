@@ -349,11 +349,6 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
-        "panel.js",
-        "box/fleet/web/panel.js",
-        "text/javascript; charset=utf-8",
-    ),
-    (
         "shell.js",
         "box/web/shell.js",
         "text/javascript; charset=utf-8",
