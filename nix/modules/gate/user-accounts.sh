@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# A folder for every name in the directory, and a denied one.
+# An archive folder for every name in the directory, and a denied one.
 set -euo pipefail
 
-install -d -m 0755 -o root -g root $ROOT
 install -d -m 0755 -o root -g root $IMAGES
 # where modules/webdav-media.nix sends a request whose token carried no
 # usable username. Root-owned and unwritable on purpose.
-install -d -m 0555 -o root -g root $ROOT/__denied__
 install -d -m 0555 -o root -g root $IMAGES/__denied__
 
 for f in $DIRECTORY/*.json; do
@@ -24,20 +22,13 @@ for f in $DIRECTORY/*.json; do
   # are the mask that caps named entries, so 0700 masks the nginx
   # entry down to nothing. The group holds only this user, so the bits
   # grant no one anything by themselves.
-  install -d -m 0750 -o "$uid" -g "$uid" $ROOT/"$u"
   install -d -m 0750 -o "$uid" -g "$uid" $IMAGES/"$u"
   # a directory made under an earlier scheme (kanidm handed out the
   # numbers once) is taken over rather than orphaned
-  for d in $ROOT/"$u" $IMAGES/"$u"; do
-    [ "$(stat -c %u "$d")" = "$uid" ] || chown -R "$uid:$uid" "$d"
-  done
+  [ "$(stat -c %u $IMAGES/"$u")" = "$uid" ] || chown -R "$uid:$uid" $IMAGES/"$u"
 
-  setfacl -m u:nginx:rwx $ROOT/"$u"
-  setfacl -d -m u:nginx:rwx $ROOT/"$u"
-  setfacl -d -m "u:$uid:rwx" $ROOT/"$u"
-
-  # The archive dir: same owner and the same nginx entry. Nothing in here
-  # is readable by anyone but the uploader anyway - it arrives encrypted.
+  # Nothing in here is readable by anyone but the uploader anyway - it
+  # arrives encrypted.
   setfacl -m u:nginx:rwx $IMAGES/"$u"
   setfacl -d -m u:nginx:rwx $IMAGES/"$u"
   setfacl -d -m "u:$uid:rwx" $IMAGES/"$u"

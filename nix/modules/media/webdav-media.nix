@@ -32,16 +32,12 @@ let
   '';
 in
 {
-  # /srv/users is retired. A member's files are their library now: named
+  # A member's files are their library: named
   # and encrypted on their own machine, stored as ciphertext under
   # /_dd/dav (modules/gate/verify.nix, box/library/src/dav.rs), opened in
   # the browser at /_dd/files or mounted with `dd media`. This host keeps
   # /images/, which is the same idea by hand: archives that arrive
   # already encrypted by rclone crypt on the client, for `dd image`.
-  #
-  # Nothing under /srv/users is deleted here. It is still backed up and
-  # still on the disk; it is only no longer served. Removing it is a
-  # decision for whoever owns the box, once they have looked.
   services.nginx.virtualHosts.${host} = {
     useACMEHost = base;
     forceSSL = true;

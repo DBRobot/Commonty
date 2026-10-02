@@ -74,8 +74,7 @@
 
     # Per-user archives of old computers - disk images or copied-out user
     # folders - uploaded already encrypted (rclone crypt, key on the client),
-    # so this dataset only ever holds ciphertext. Separate from vault/users on
-    # purpose, and NO snapshots - an archive is written once and never
+    # so this dataset only ever holds ciphertext. NO snapshots - an archive is written once and never
     # changed, so a snapshot buys nothing and would keep a deleted 80 G image
     # on disk for a year.
     "vault/images" = {
@@ -83,16 +82,6 @@
       recordsize = "1M"; # gigabyte chunks, sequential
       compression = "lz4"; # ciphertext is incompressible; lz4 early-aborts, costs nothing
       "com.sun:auto-snapshot" = "false";
-    };
-
-    # Per-user uploads. User data belongs on the pool with everything else.
-    # Snapshots are on: unlike vault/media this is not re-rippable, and they
-    # cost nothing until a file changes.
-    "vault/users" = {
-      mountpoint = "/srv/users";
-      recordsize = "1M";
-      compression = "lz4";
-      "com.sun:auto-snapshot" = "true";
     };
 
     # The forge: repositories, lfs objects and its own config. Small, hot,

@@ -38,7 +38,6 @@
   ];
 
   dd.backup.paths = [
-    "/srv/users" # people's uploads
     "/srv/images" # archives of old computers, already ciphertext
   ];
 }
