@@ -375,16 +375,7 @@ code {
 }
 .cmd code { background: none; padding: 0; }
 
-/* files, films and the pages behind the menu: a list with a toolbar */
-.filesbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 4px;
-}
-.filesbar h1, .filesbar h2 { margin: 0; }
-.filesbar .grow { flex: 1; }
-.filesbar button { margin-top: 0; height: 40px; padding: 0 16px; font-size: 15px; }
+/* files and films: where you are in a folder, and a list */
 .crumbs {
   display: flex;
   flex-wrap: wrap;
@@ -422,48 +413,11 @@ button.crumb:hover { background: none; color: var(--link-hover); text-decoration
   padding: 12px 16px;
 }
 .rows li + li { border-top: 1px solid var(--line-2); }
-/* a row's name: a button where it opens something, plain text where it
-   only says what is there */
-.rowname {
-  flex: 1;
-  min-width: 40%;
-  height: auto;
-  margin: 0;
-  padding: 0;
-  background: none;
-  border: none;
-  color: var(--ink);
-  font: inherit;
-  font-weight: 600;
-  text-align: left;
-  justify-content: flex-start;
-}
-button.rowname { cursor: pointer; }
-button.rowname:hover { background: none; color: var(--link-hover); text-decoration: underline; }
 /* what a row says about its name: a size, a release, when it last ran */
 .tag { color: var(--ink-2); font-size: 14px; white-space: nowrap; }
 button.inline { margin: 0; height: 32px; padding: 0 12px; font-size: 14px; }
-.rows.jobs { margin-top: 16px; }
-.rows.jobs li { color: var(--ink-2); font-size: 14px; }
 .shelf { margin: 28px 0 8px; }
 .shelf h2 { font-size: 20px; }
-.quiet-head { color: var(--ink-2); font-weight: 500; }
-.quiet-head::before { content: "/"; margin: 0 8px 0 2px; color: var(--line); }
-.playing {
-  margin: 16px 0 8px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg);
-}
-.playing h2 { font-size: 17px; }
-.playing video {
-  width: 100%;
-  max-height: 70vh;
-  margin-top: 12px;
-  border-radius: var(--radius);
-  background: #000;
-}
 
 /* the downloads page: a panel per platform, grouped by what you hold */
 .download .version { font-size: 15px; }

@@ -72,7 +72,7 @@ in
     default = [ ];
     description = "Directory urls of the other boxes, e.g. https://files.example/_dd/directory.";
   };
-  # Every box in the fleet. The Boxes and Backups pages show each one's
+  # Every box in the fleet. Settings' Network tab and the Git page show each one's
   # facts as thanos on this box gathered them; no box is asked by another
   # (prometheus answers only on its own box).
   options.dd.verify.fleet = lib.mkOption {

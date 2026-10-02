@@ -4,7 +4,7 @@
 // its old details if the new ones do not work (box/verify/src/home.rs,
 // nix/modules/box/wifi-apply.sh).
 
-import { me } from './shell.js';
+import { me, pageConfig, entryOf } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const BOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><circle cx="7" cy="7.5" r=".9" fill="currentColor"/><circle cx="7" cy="16.5" r=".9" fill="currentColor"/></svg>';
@@ -126,10 +126,7 @@ async function save(e) {
     body.set(LABEL);
     body.set(new TextEncoder().encode(payload), LABEL.length);
     const challenge = new Uint8Array(await crypto.subtle.digest('SHA-256', body));
-    const [cfg, entry] = await Promise.all([
-      fetch('/_dd/config').then((r) => r.json()),
-      fetch('/_dd/directory/' + encodeURIComponent(who.user)).then((r) => r.json()),
-    ]);
+    const [cfg, entry] = await Promise.all([pageConfig(), entryOf(who.user)]);
     const a = await navigator.credentials.get({
       publicKey: {
         challenge,

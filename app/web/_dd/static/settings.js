@@ -6,6 +6,7 @@ import { start as backups, FILES } from './backups.js';
 import { start as devices } from './devices.js';
 import { start as network } from './network.js';
 import { start as storage } from './storage.js';
+import { me as whoIsIt, entryOf } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -38,7 +39,7 @@ window.addEventListener('hashchange', () => tab(location.hash.slice(1)));
 
 
 async function profile() {
-  const me = await (await fetch('/_dd/me')).json();
+  const me = await whoIsIt();
   // a guest has devices and sign-ins here, and no email or disk images
   if (me.role === 'guest') {
     $('email').closest('.se-row').hidden = true;
@@ -51,7 +52,7 @@ async function profile() {
   $('role').textContent = me.role === 'member' ? 'Member' : me.role === 'guest' ? 'Guest' : me.role;
   const back = `${location.origin}/_dd/settings`;
   $('email').src = `https://mail.${domain}/row?name=${encodeURIComponent(me.user)}&back=${encodeURIComponent(back)}`;
-  const { entry } = await (await fetch('/_dd/directory/' + encodeURIComponent(me.user))).json();
+  const { entry } = await entryOf(me.user);
   const n = (x, one) => `${x} ${one}${x === 1 ? '' : 's'}`;
   $('devices').firstChild.textContent = `${n((entry.devices || []).length, 'device')}, ${n((entry.passkeys || []).length, 'passkey')}`;
   $('recovery').replaceChildren();

@@ -595,22 +595,11 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     assert_eq!(get_with_cookie(&a, "/verify", &cookie).await.0, 403);
     assert_eq!(get_with_cookie(&a, "/_dd/me", &cookie).await.0, 403);
     // and none of a member's own pages open to an account that is not one
-    for page in [
-        "/_dd/files",
-        "/_dd/media",
-        "/_dd/boxes",
-        "/_dd/settings",
-        "/_dd/devices",
-        "/_dd/network",
-    ] {
+    for page in ["/_dd/files", "/_dd/media", "/_dd/boxes", "/_dd/settings"] {
         let (st, _) = get_with_cookie(&a, page, &cookie).await;
         assert_eq!(st, 303, "{page} opened to a non-member");
     }
     assert_eq!(get_with_cookie(&a, "/_dd/fleet.json", &cookie).await.0, 403);
-    assert_eq!(
-        get_with_cookie(&a, "/_dd/network/mine", &cookie).await.0,
-        403
-    );
 
     // the name is taken now, by a different passkey too
     let mut mallory = SoftPasskey::new(true);
@@ -2682,4 +2671,29 @@ async fn a_device_is_offered_by_code_and_seen_by_its_owner_alone() {
         .await
         .unwrap();
     assert_eq!(status(tom).await["state"], "gone");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_opened_again_is_told_nothing_changed() {
+    let a = Box_::start(true, vec![], 300).await;
+    let http = reqwest::Client::new();
+    let first = http
+        .get(a.url("/_dd/static/shell.js"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 200);
+    let tag = first.headers()["etag"].to_str().unwrap().to_string();
+    assert!(!first.bytes().await.unwrap().is_empty());
+    let again = |t: String| {
+        http.get(a.url("/_dd/static/shell.js"))
+            .header("if-none-match", t)
+            .send()
+    };
+    let r = again(tag.clone()).await.unwrap();
+    assert_eq!(r.status(), 304);
+    assert!(r.bytes().await.unwrap().is_empty());
+    // as nginx's gzip passes it on, weakened
+    assert_eq!(again(format!("W/{tag}")).await.unwrap().status(), 304);
+    assert_eq!(again("\"other\"".into()).await.unwrap().status(), 200);
 }

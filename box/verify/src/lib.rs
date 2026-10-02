@@ -170,7 +170,7 @@ pub struct Config {
     /// beside the box releases). The downloads page offers what it names,
     /// and nothing else. None: no page.
     pub app_manifest: Option<String>,
-    /// Every box in the fleet, for the Boxes and Backups pages. Empty on a
+    /// Every box in the fleet, for Settings (Network) and the Git page. Empty on a
     /// box that is not told.
     pub fleet: fleet::Fleet,
     /// Thanos on this box, which holds every box's facts (fleet.rs). None:
@@ -272,6 +272,19 @@ pub struct OidcConfig {
     pub redirect: String,
 }
 
+/// The one client for the calls this gate makes out - Pi-hole, thanos, the
+/// other boxes, search: connections are kept and used again. Each call sets
+/// how long it will wait.
+pub(crate) fn http() -> reqwest::Client {
+    static C: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .build()
+            .unwrap_or_default()
+    });
+    C.clone()
+}
+
 /// Usernames are also filenames here, so the whitelist is strict.
 fn valid_user(s: &str) -> bool {
     !s.is_empty()
@@ -307,11 +320,9 @@ impl App {
         }
         let read = async {
             let key = self.directory.release()?;
-            let raw = reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .ok()?
+            let raw = http()
                 .get(url)
+                .timeout(Duration::from_secs(10))
                 .send()
                 .await
                 .ok()?
@@ -775,7 +786,7 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let Some(role) = role else {
         return StatusCode::FORBIDDEN.into_response();
     };
-    // A disk image goes from the Backups page only after the passkey, and
+    // A disk image goes from Backups in Settings only after the passkey, and
     // the box holds the page to that: a tab left signed in is not enough.
     // `dd image delete` signs with the device's own key and asks itself.
     let this_session = app
@@ -1403,24 +1414,67 @@ async fn demo(State(app): State<Arc<App>>) -> Response {
 }
 
 /// The pages' own stylesheet and scripts (pages::static_file).
-async fn static_file(axum::extract::Path(file): axum::extract::Path<String>) -> Response {
+async fn static_file(
+    headers: HeaderMap,
+    axum::extract::Path(file): axum::extract::Path<String>,
+) -> Response {
     match pages::static_file(&file) {
-        Some((body, ty)) => {
+        Some((body, ty, tag)) => {
             // a font is the same bytes until a release changes its name
             let cache = if ty.starts_with("font/") {
                 "public, max-age=604800"
             } else {
                 "no-cache"
             };
-            ([("content-type", ty), ("cache-control", cache)], body).into_response()
+            tagged(
+                &headers,
+                ty,
+                cache,
+                tag,
+                axum::body::Bytes::from_static(body),
+            )
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
+/// A file, or 304 when the browser already holds these bytes: no-cache
+/// means ask each time, and the asking is all it costs.
+fn tagged(
+    headers: &HeaderMap,
+    ty: &str,
+    cache: &str,
+    tag: &str,
+    body: axum::body::Bytes,
+) -> Response {
+    let held = headers
+        .get("if-none-match")
+        .and_then(|v| v.to_str().ok())
+        // nginx's gzip makes a tag weak (W/"…") on the way out
+        .is_some_and(|v| {
+            v.split(',')
+                .any(|t| t.trim().trim_start_matches("W/") == tag)
+        });
+    let head = [
+        ("content-type", ty.to_string()),
+        ("cache-control", cache.to_string()),
+        ("etag", tag.to_string()),
+    ];
+    if held {
+        (StatusCode::NOT_MODIFIED, head).into_response()
+    } else {
+        (head, body).into_response()
+    }
+}
+
+/// the web bundle's files, read once: a release is a new gate
+static WEB: std::sync::LazyLock<std::sync::Mutex<HashMap<String, (axum::body::Bytes, String)>>> =
+    std::sync::LazyLock::new(Default::default);
+
 /// The browser-side Rust, as wasm-bindgen laid it out: a .js and a .wasm.
 async fn web_file(
     State(app): State<Arc<App>>,
+    headers: HeaderMap,
     axum::extract::Path(file): axum::extract::Path<String>,
 ) -> Response {
     let Some(dir) = &app.web_dir else {
@@ -1434,10 +1488,20 @@ async fn web_file(
         Some("wasm") => "application/wasm",
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
-    match std::fs::read(dir.join(&file)) {
-        Ok(b) => ([("content-type", ty), ("cache-control", "no-cache")], b).into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
-    }
+    let known = WEB.lock().unwrap().get(&file).cloned();
+    let (b, tag) = match known {
+        Some(k) => k,
+        None => match std::fs::read(dir.join(&file)) {
+            Ok(b) => {
+                let tag = pages::tag_of(&b);
+                let k = (axum::body::Bytes::from(b), tag);
+                WEB.lock().unwrap().insert(file, k.clone());
+                k
+            }
+            Err(_) => return StatusCode::NOT_FOUND.into_response(),
+        },
+    };
+    tagged(&headers, ty, "no-cache", &tag, b)
 }
 
 /// The one thing every page needs to talk to a passkey: which domain the
@@ -1613,11 +1677,9 @@ async fn chat_search(
             .into_response();
     }
     let got = async {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(12))
-            .build()?;
-        let v: serde_json::Value = client
+        let v: serde_json::Value = http()
             .get(format!("{base}/search"))
+            .timeout(Duration::from_secs(12))
             .query(&[("q", q), ("format", "json"), ("safesearch", "1")])
             .send()
             .await?
@@ -1737,28 +1799,6 @@ async fn download_page(State(app): State<Arc<App>>) -> Response {
         ))
         .into_response(),
         None => (StatusCode::NOT_FOUND, "nothing signed to download yet").into_response(),
-    }
-}
-
-/// The member's own machines on the fleet's network.
-async fn network_mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let Some(user) = app.identify(&headers, "access") else {
-        return StatusCode::FORBIDDEN.into_response();
-    };
-    if !(app.member(&user) || app.guest(&user)) || user == pages::DEMO_USER {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    match &app.network {
-        // the control server is on one box; elsewhere the page says so
-        None => Json(serde_json::json!({ "here": false, "machines": [] })).into_response(),
-        Some(door) => match door.mine(&user).await {
-            Ok(m) => Json(serde_json::json!({ "here": true, "machines": m })).into_response(),
-            Err(e) => (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response(),
-        },
     }
 }
 
@@ -2150,11 +2190,10 @@ pub async fn start(
             "/_dd/backups",
             get(|| async { Redirect::to("/_dd/settings#backups") }),
         )
+        // and Devices
         .route(
             "/_dd/devices",
-            get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
-                member_page(&a, &h, "devices", "/_dd/devices").await
-            }),
+            get(|| async { Redirect::to("/_dd/settings#devices") }),
         )
         // Network is a tab of Settings now
         .route(
@@ -2164,7 +2203,6 @@ pub async fn start(
         .route("/_dd/download", get(download_page))
         .route("/_dd/fleet.json", get(fleet_json))
         .route("/_dd/me", get(me))
-        .route("/_dd/network/mine", get(network_mine))
         .route("/_dd/photos", get(photos::page))
         .route("/_dd/photos/config", post(photos::config))
         .route(

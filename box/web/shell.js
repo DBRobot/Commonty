@@ -18,6 +18,29 @@ export function me() {
   return answer;
 }
 
+let config = null;
+const entries = new Map();
+
+/// which domain passkeys are for; asked once per page
+export function pageConfig() {
+  config ??= fetch('/_dd/config').then((r) => r.json());
+  return config;
+}
+
+/// someone's signed entry, as the directory's text; asked once per page,
+/// or again after `forgetEntry` when it has just been changed
+export function entryText(user) {
+  if (!entries.has(user)) {
+    entries.set(user, fetch('/_dd/directory/' + encodeURIComponent(user)).then((r) => {
+      if (!r.ok) { entries.delete(user); throw new Error(`the box said ${r.status}`); }
+      return r.text();
+    }));
+  }
+  return entries.get(user);
+}
+export const entryOf = async (user) => JSON.parse(await entryText(user));
+export function forgetEntry(user) { entries.delete(user); }
+
 /// Running inside the app rather than a browser tab: the app serves these
 /// same files under its own address (app/src/site.rs), and answers the
 /// library's key itself instead of a passkey.

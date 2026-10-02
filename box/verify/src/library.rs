@@ -124,7 +124,7 @@ async fn serve(app: Arc<App>, lib: String, raw: String, req: Request) -> Respons
     if upload && !app.storage.room(&user, size.max(1)) {
         return (
             StatusCode::INSUFFICIENT_STORAGE,
-            "this would go past your storage allowance: make room first (the Storage page shows what uses it)",
+            "this would go past your storage allowance: make room first (Settings, Storage shows what uses it)",
         )
             .into_response();
     }

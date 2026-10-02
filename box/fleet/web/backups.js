@@ -7,7 +7,7 @@
 import init, { Archive } from '/_dd/web/dd_web.js';
 import { passkeySecret, human } from './library.js';
 import { requestOptions, assertion, post } from './webauthn.js';
-import { inApp } from './shell.js';
+import { inApp, me, pageConfig, entryOf } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -49,9 +49,24 @@ let arch = null;
 let packPath = (id) => `data/${id}`;
 let blobs = new Map(); // blob id -> { pack, offset, length, ulen }
 
+// six at a time, as a browser would fetch a page's own files: an archive's
+// hundreds of index files do not all go out at once
+async function each(items, fn, n = 6) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+  return out;
+}
+
 async function readIndex() {
   const files = (await listing('index/')).filter((e) => e.type === 'file');
-  const all = await Promise.all(files.map(async (f) => ({ id: f.name, index: json(arch.file(await bytes('index/' + f.name))) })));
+  const all = await each(files, async (f) => ({ id: f.name, index: json(arch.file(await bytes('index/' + f.name))) }));
   blobs = new Map();
   for (const { index } of all) {
     for (const p of index.packs || []) {
@@ -70,7 +85,7 @@ async function readBlob(id) {
 
 async function readSnapshots() {
   const files = (await listing('snapshots/')).filter((e) => e.type === 'file');
-  const snaps = await Promise.all(files.map(async (f) => ({ id: f.name, ...json(arch.file(await bytes('snapshots/' + f.name))) })));
+  const snaps = await each(files, async (f) => ({ id: f.name, ...json(arch.file(await bytes('snapshots/' + f.name))) }));
   return snaps.sort((a, b) => Date.parse(b.time) - Date.parse(a.time));
 }
 
@@ -81,8 +96,7 @@ async function open(user) {
   const sealedText = await (await fetch(ROOT + 'dd-passkeys.json')).text().catch(() => '');
   let sealed = {};
   try { sealed = JSON.parse(sealedText); } catch { /* none yet */ }
-  const cfg = await (await fetch('/_dd/config')).json();
-  const entry = await (await fetch('/_dd/directory/' + encodeURIComponent(user))).json();
+  const [cfg, entry] = await Promise.all([pageConfig(), entryOf(user)]);
   const passkeys = (entry.entry.passkeys || []).filter((p) => sealed[p.id]);
   if (!passkeys.length) {
     say('This browser cannot open your images yet.');
@@ -295,8 +309,8 @@ function ask(s, ui) {
   $('ask-yes').onclick = async () => {
     $('ask-yes').disabled = true;
     try {
-      const me = await (await fetch('/_dd/me')).json();
-      const start = await post('/_dd/login/start', { username: me.user });
+      const who = await me();
+      const start = await post('/_dd/login/start', { username: who.user });
       const { publicKey, ceremony } = await start.json();
       const cred = await navigator.credentials.get({ publicKey: requestOptions(publicKey) });
       await post('/_dd/login/finish', assertion(cred), { 'x-dd-ceremony': ceremony });
@@ -429,8 +443,8 @@ async function show() {
     say('', `Your disk images open in a browser, with your passkey: <a href="https://${FILES}/_dd/settings#backups">${FILES}/_dd/settings</a>`);
     return;
   }
-  const me = await (await fetch('/_dd/me')).json();
-  const data = await open(me.user);
+  const who = await me();
+  const data = await open(who.user);
   if (data === null) return;
   if (data === false) {
     say('No disk images yet.');

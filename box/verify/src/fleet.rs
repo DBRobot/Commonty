@@ -20,11 +20,6 @@ pub struct Status {
     pub release: Option<u64>,
     /// what the agent's last run came to: "ok", "rolled back", …
     pub result: Option<String>,
-    pub last_run: Option<u64>,
-    pub model: Option<String>,
-    pub kernel: Option<String>,
-    pub cores: Option<u64>,
-    pub memory: Option<u64>,
     /// the backup's own facts (modules/storage/backup.nix)
     pub backup: Option<Backup>,
 }
@@ -32,22 +27,11 @@ pub struct Status {
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct Backup {
     pub last_success: Option<u64>,
-    pub snapshots: Option<u64>,
-    pub oldest: Option<u64>,
-    pub newest: Option<u64>,
-    pub paths: Vec<String>,
 }
 
 /// the boxes, from the release (the addresses are not used: nothing here
 /// talks to another box)
 pub type Fleet = BTreeMap<String, String>;
-
-fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap_or_default()
-}
 
 /// every sample of one metric for one box, as (labels, value)
 async fn query(
@@ -59,6 +43,7 @@ async fn query(
     let expr = format!("{metric}{{box=\"{name}\"}}");
     let r = http
         .get(format!("{thanos}/api/v1/query"))
+        .timeout(Duration::from_secs(5))
         .query(&[("query", expr.as_str())])
         .send()
         .await
@@ -95,25 +80,18 @@ async fn one(http: &reqwest::Client, name: &str, thanos: &str) -> Status {
     let num = |r: &Option<Vec<(BTreeMap<String, String>, f64)>>| {
         r.as_ref().and_then(|s| s.first()).map(|(_, v)| *v as u64)
     };
-    // every question at once: one round trip, not eleven
-    let (agent, counter, last_run, info, cores, memory, last, paths, snapshots, oldest, newest) = tokio::join!(
+    // what the pages show (Network, the Git page): every question at once
+    let (agent, counter, info, last) = tokio::join!(
         query(http, thanos, name, "dd_agent_info"),
         query(http, thanos, name, "dd_agent_counter"),
-        query(http, thanos, name, "dd_agent_last_run_seconds"),
         query(http, thanos, name, "dd_box_info"),
-        query(http, thanos, name, "dd_box_cpu_cores"),
-        query(http, thanos, name, "dd_box_memory_bytes"),
         query(http, thanos, name, "dd_backup_last_success_seconds"),
-        query(http, thanos, name, "dd_backup_path"),
-        query(http, thanos, name, "dd_backup_snapshots"),
-        query(http, thanos, name, "dd_backup_oldest_seconds"),
-        query(http, thanos, name, "dd_backup_newest_seconds"),
     );
     // up: thanos has current facts from it; none, and it is off or unheard
     let any = |r: &Option<Vec<(BTreeMap<String, String>, f64)>>| {
         r.as_ref().is_some_and(|s| !s.is_empty())
     };
-    b.up = any(&agent) || any(&info) || any(&cores);
+    b.up = any(&agent) || any(&info);
     if !b.up {
         return b;
     }
@@ -123,31 +101,9 @@ async fn one(http: &reqwest::Client, name: &str, thanos: &str) -> Status {
         b.result = l.get("result").cloned();
     }
     b.release = num(&counter);
-    b.last_run = num(&last_run);
-    if let Some(s) = info
-        && let Some((l, _)) = s.first()
-    {
-        b.model = l.get("model").cloned();
-        b.kernel = l.get("kernel").cloned();
-    }
-    b.cores = num(&cores);
-    b.memory = num(&memory);
     let last = num(&last);
-    let paths: Vec<String> = paths
-        .map(|s| {
-            s.iter()
-                .filter_map(|(l, _)| l.get("path").cloned())
-                .collect()
-        })
-        .unwrap_or_default();
-    if last.is_some() || !paths.is_empty() {
-        b.backup = Some(Backup {
-            last_success: last,
-            snapshots: num(&snapshots),
-            oldest: num(&oldest),
-            newest: num(&newest),
-            paths,
-        });
+    if last.is_some() {
+        b.backup = Some(Backup { last_success: last });
     }
     b
 }
@@ -174,7 +130,7 @@ pub async fn look(fleet: &Fleet, thanos: Option<&str>) -> Vec<Status> {
 
 /// every box at once: one slow box does not hold up the page
 async fn ask(fleet: &Fleet, thanos: Option<&str>) -> Vec<Status> {
-    let http = client();
+    let http = crate::http();
     let mut set = tokio::task::JoinSet::new();
     for name in fleet.keys() {
         let (http, name, thanos) = (http.clone(), name.clone(), thanos.map(str::to_string));

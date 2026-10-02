@@ -152,32 +152,38 @@ async function zone(env) {
   }
   return zoneCache;
 }
+// every page of a listing; a page Cloudflare refused stops it, rather than
+// passing for "there are none" and a second rule being made
 async function pages(env, path) {
   const out = [];
   for (let page = 1; ; page++) {
     const d = await cf(env, 'GET', `${path}${path.includes('?') ? '&' : '?'}per_page=50&page=${page}`);
+    if (!d.success) throw new Error('Cloudflare did not answer; try again in a minute');
     const got = d.result || [];
     out.push(...got);
     if (got.length < 50) return out;
   }
 }
-async function ruleFor(env, name) {
+// the zone's rules and the account's addresses, both at once
+async function lists(env) {
   const z = await zone(env);
-  const address = `${name}@${env.DOMAIN}`;
-  const rules = await pages(env, `/zones/${z.id}/email/routing/rules`);
-  return rules.find((r) => (r.matchers || []).some((m) => m.field === 'to' && m.value === address)) || null;
+  const [rules, addresses] = await Promise.all([
+    pages(env, `/zones/${z.id}/email/routing/rules`),
+    pages(env, `/accounts/${z.account}/email/routing/addresses`),
+  ]);
+  return { rules, addresses };
 }
 const target = (rule) => (rule?.actions || []).find((a) => a.type === 'forward')?.value?.[0] || null;
-async function destination(env, email) {
-  const z = await zone(env);
-  const all = await pages(env, `/accounts/${z.account}/email/routing/addresses`);
-  return all.find((a) => (a.email || '').toLowerCase() === email.toLowerCase()) || null;
+const same = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase();
+function stateIn(l, env, name) {
+  const address = `${name}@${env.DOMAIN}`;
+  const rule = l.rules.find((r) => (r.matchers || []).some((m) => m.field === 'to' && m.value === address)) || null;
+  const to = target(rule);
+  const d = to ? l.addresses.find((a) => same(a.email, to)) : null;
+  return { rule, email: to, confirmed: !!d?.verified, destination: d || null };
 }
 async function state(env, name) {
-  const rule = await ruleFor(env, name);
-  const to = target(rule);
-  const d = to ? await destination(env, to) : null;
-  return { rule, email: to, confirmed: !!d?.verified };
+  return stateIn(await lists(env), env, name);
 }
 
 // What anyone may ask - has this member an address, is it confirmed - is
@@ -187,28 +193,19 @@ async function state(env, name) {
 const SHARED = 60 * 1000;
 let shared = null;
 async function sharedState(env, name) {
-  if (!shared || Date.now() - shared.at > SHARED) {
-    const z = await zone(env);
-    const [rules, addresses] = await Promise.all([
-      pages(env, `/zones/${z.id}/email/routing/rules`),
-      pages(env, `/accounts/${z.account}/email/routing/addresses`),
-    ]);
-    shared = { at: Date.now(), rules, addresses };
-  }
-  const address = `${name}@${env.DOMAIN}`;
-  const rule = shared.rules.find((r) => (r.matchers || []).some((m) => m.field === 'to' && m.value === address));
-  const to = target(rule);
-  const d = to && shared.addresses.find((a) => (a.email || '').toLowerCase() === to.toLowerCase());
-  return { forwarding: !!rule, confirmed: !!d?.verified };
+  if (!shared || Date.now() - shared.at > SHARED) shared = { at: Date.now(), ...(await lists(env)) };
+  const s = stateIn(shared, env, name);
+  return { forwarding: !!s.rule, confirmed: s.confirmed };
 }
 
 async function setEmail(env, name, email) {
   const z = await zone(env);
-  const before = await state(env, name);
+  const l = await lists(env);
+  const before = stateIn(l, env, name);
   // Adding an address Cloudflare does not know sends its confirmation; one
   // the account already holds confirmed gets none, and none is waited for
-  await cf(env, 'POST', `/accounts/${z.account}/email/routing/addresses`, { email });
-  const known = await destination(env, email);
+  const had = l.addresses.find((a) => same(a.email, email));
+  if (!had) await cf(env, 'POST', `/accounts/${z.account}/email/routing/addresses`, { email });
   const body = {
     name: `Commonty member ${name}`,
     enabled: true,
@@ -220,13 +217,12 @@ async function setEmail(env, name, email) {
     : await cf(env, 'POST', `/zones/${z.id}/email/routing/rules`, body);
   if (!d.success) throw new Error('that did not work; try again in a minute');
   // the old address is no one's business once no rule sends there
-  if (before.email && before.email.toLowerCase() !== email.toLowerCase()) {
-    const rules = await pages(env, `/zones/${z.id}/email/routing/rules`);
-    const used = rules.some((r) => (r.actions || []).some((a) => (a.value || []).some((v) => v.toLowerCase() === before.email.toLowerCase())));
-    const old = used ? null : await destination(env, before.email);
-    if (old) await cf(env, 'DELETE', `/accounts/${z.account}/email/routing/addresses/${old.tag || old.id}`);
+  if (before.destination && !same(before.email, email)) {
+    const used = l.rules.some((r) => r.id !== before.rule.id && (r.actions || []).some((a) => (a.value || []).some((v) => same(v, before.email))));
+    const old = before.destination;
+    if (!used) await cf(env, 'DELETE', `/accounts/${z.account}/email/routing/addresses/${old.tag || old.id}`);
   }
-  return { confirm: !known?.verified };
+  return { confirm: !had?.verified };
 }
 
 async function resend(env, name) {
@@ -234,7 +230,7 @@ async function resend(env, name) {
   const s = await state(env, name);
   if (!s.email) return { ok: false };
   if (s.confirmed) return { ok: true, confirmed: true };
-  const d = await destination(env, s.email);
+  const d = s.destination;
   if (d) await cf(env, 'DELETE', `/accounts/${z.account}/email/routing/addresses/${d.tag || d.id}`);
   const again = await cf(env, 'POST', `/accounts/${z.account}/email/routing/addresses`, { email: s.email });
   return { ok: !!again.success, confirmed: false };

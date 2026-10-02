@@ -30,7 +30,7 @@ a.wait_for_unit("thanos-query.service")
 a.wait_for_open_port(10903)
 a.wait_until_succeeds("curl -sf 'http://127.0.0.1:10903/api/v1/query?query=dd_box_cpu_cores' -o /tmp/q && grep -q '\"box\":\"a\"' /tmp/q && grep -q '\"box\":\"b\"' /tmp/q")
 
-# The Boxes and Backups pages: the gate on a reads both boxes' facts from
+# Settings' Network tab: the gate on a reads both boxes' facts from
 # thanos beside it. Neither box's prometheus answers anyone but itself.
 import json
 env = "DD_KEYRING_FILE=/root/keys.json"
@@ -53,7 +53,7 @@ seen = json.loads(a.succeed(f"curl -sf -H 'authorization: Bearer {token}' http:/
 by = {x["name"]: x for x in seen}
 assert set(by) == {"a", "b"}, seen
 for n in ("a", "b"):
-    assert by[n]["up"] and by[n]["cores"], (n, seen)
+    assert by[n]["up"], (n, seen)
 
 # b goes away: a still answers, with what it has
 b.shutdown()

@@ -18,7 +18,6 @@ box/media/web/media.js            static/media.js
 box/media/web/shelf.js            static/shelf.js
 box/media/web/icons/tmdb.svg      static/tmdb.svg
 box/media/web/pages/media.html    pages/media.html
-box/fleet/web/panel.js            static/panel.js
 box/fleet/web/backups.js          static/backups.js
 box/fleet/web/backups.css         static/backups.css
 box/web/settings.js               static/settings.js

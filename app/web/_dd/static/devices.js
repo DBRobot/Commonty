@@ -7,7 +7,7 @@
 import init, { file_seal, file_open, entry_without, entry_signed, entry_with_device, qr_svg } from '/_dd/web/dd_web.js';
 import { unlock } from './library.js';
 import { requestOptions, assertion, post, b64u, u8b64 } from './webauthn.js';
-import { me, inApp, appFetch } from './shell.js';
+import { me, inApp, appFetch, pageConfig, entryOf, forgetEntry } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const ICON = {
@@ -44,10 +44,12 @@ let signins = null;
 let lib = null; // the library, once the passkey has been shown
 let names = null; // { key: name }, once opened
 
-async function load() {
+// again after a change: the entry is read fresh, not as the page first had it
+async function load(changed = true) {
   who = who || (await me());
+  if (changed) forgetEntry(who.user);
   const [d, s] = await Promise.all([
-    fetch('/_dd/directory/' + encodeURIComponent(who.user)).then((r) => r.json()),
+    entryOf(who.user),
     fetch('/_dd/signins').then((r) => (r.ok ? r.json() : { sessions: [], keys: {} })),
   ]);
   entry = d;
@@ -267,7 +269,7 @@ function remove(k, label) {
       await init();
       const e = entry.entry;
       const plan = JSON.parse(entry_without(JSON.stringify(entry), k.passkey ? undefined : k.fingerprint, k.passkey || undefined, BigInt(Math.floor(Date.now() / 1000))));
-      const cfg = await (await fetch('/_dd/config')).json();
+      const cfg = await pageConfig();
       const rootId = e.root.split(':')[1];
       const a = await navigator.credentials.get({
         publicKey: {
@@ -399,7 +401,7 @@ async function addApprove() {
         if (u.ok) lib = u.ok;
       }
       const plan = JSON.parse(entry_with_device(JSON.stringify(entry), pk, lib?.id, lib?.key, BigInt(Math.floor(Date.now() / 1000))));
-      const cfg = await (await fetch('/_dd/config')).json();
+      const cfg = await pageConfig();
       const a = await navigator.credentials.get({
         publicKey: {
           challenge: b64u(plan.challenge),
@@ -443,7 +445,7 @@ export async function start() {
   $('ad-close').onclick = () => $('add').close();
   $('add').addEventListener('close', () => { adding = null; });
   try {
-    await load();
+    await load(false);
     render();
     $('dv-add').hidden = !(await canAdd());
     // the main key may be here after all: Remove where it can be done

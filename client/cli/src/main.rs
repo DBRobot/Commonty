@@ -436,7 +436,7 @@ enum ImageCmd {
     },
     /// Every archive in your repository.
     List,
-    /// Let your passkey open your archives in a browser (the Backups page):
+    /// Let your passkey open your archives in a browser (Backups in Settings):
     /// the archive password, sealed to each passkey in your entry, beside
     /// the archives. `push` does it too.
     Passkey,
@@ -564,7 +564,7 @@ impl Busy {
         rt.block_on(async {
             anyhow::ensure!(
                 !busy_current(&http, theirs.clone(), &t).await?,
-                "the Backups page is deleting an image here; push again when it is done"
+                "Backups in Settings is deleting an image here; push again when it is done"
             );
             busy_put(&http, &mine, &t)
                 .send()
@@ -574,7 +574,7 @@ impl Busy {
             if busy_current(&http, theirs, &t).await? {
                 let _ = http.delete(mine.clone()).bearer_auth(&t).send().await;
                 anyhow::bail!(
-                    "the Backups page is deleting an image here; push again when it is done"
+                    "Backups in Settings is deleting an image here; push again when it is done"
                 );
             }
             Ok(())
@@ -648,10 +648,10 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
                 "archived {} as {}  ({} bytes)  snapshot {}",
                 name, e.name, e.bytes, e.id
             );
-            // so the Backups page opens it too; not a reason to fail the push
+            // so Backups in Settings opens it too; not a reason to fail the push
             if let Err(err) = seal_for_passkeys(&keys, &repo, &password) {
                 eprintln!(
-                    "(the Backups page will not open this until `dd image passkey`: {err:#})"
+                    "(Backups in Settings will not open this until `dd image passkey`: {err:#})"
                 );
             }
         }
@@ -661,7 +661,7 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
         }
         ImageCmd::Passkey => {
             let n = seal_for_passkeys(&keys, &repo, &password)?;
-            println!("your archives open with {n} passkey(s) on the Backups page");
+            println!("your archives open with {n} passkey(s) in Backups, in Settings");
         }
         ImageCmd::Delete { ids, yes } => {
             anyhow::ensure!(!ids.is_empty(), "which archives? ids from `dd image list`");

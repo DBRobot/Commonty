@@ -523,7 +523,7 @@ pub(crate) async fn game_access(
     State(app): State<Arc<App>>,
     Json(servers): Json<Vec<Server>>,
 ) -> Response {
-    let mut out = Vec::new();
+    let mut allowed = Vec::new();
     for s in servers {
         let mut who = Vec::new();
         if app.role(&s.owner) == Some(Role::Member) {
@@ -538,25 +538,26 @@ pub(crate) async fn game_access(
                 }
             }
         }
-        let mut addresses = Vec::new();
-        if let Some(door) = &app.network {
-            for u in &who {
-                match door.mine(u).await {
-                    Ok(machines) => {
-                        for m in machines {
-                            for a in m["addresses"].as_array().into_iter().flatten() {
-                                if let Some(a) = a.as_str() {
-                                    addresses.push(a.to_string());
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => eprintln!("games access: {u}: {e:#}"),
-                }
-            }
-        }
-        out.push(serde_json::json!({ "players": who, "addresses": addresses }));
+        allowed.push(who);
     }
+    // whose machine is at which address: asked once for every server
+    let owned = match &app.network {
+        Some(door) if allowed.iter().any(|w| !w.is_empty()) => {
+            door.addresses_by_owner().await.unwrap_or_else(|e| {
+                eprintln!("games access: the network did not answer: {e:#}");
+                Default::default()
+            })
+        }
+        _ => Default::default(),
+    };
+    let out: Vec<_> = allowed
+        .into_iter()
+        .map(|who| {
+            let addresses: Vec<&String> =
+                who.iter().filter_map(|u| owned.get(u)).flatten().collect();
+            serde_json::json!({ "players": who, "addresses": addresses })
+        })
+        .collect();
     Json(out).into_response()
 }
 

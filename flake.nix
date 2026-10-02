@@ -946,7 +946,7 @@
                   dd.box.site = box.siteId;
                   dd.box.region = box.regionId;
                   dd.verify.peers = lib.mapAttrsToList directoryOf (lib.filterAttrs (n: _: n != name) boxes);
-                  # itself included: the Boxes page is the whole fleet
+                  # itself included: Settings' Network tab is the whole fleet
                   dd.verify.fleet = lib.mapAttrs (_: b: b.tailnet) boxes;
                   # the other boxes, as the agent checks a release did not
                   # cost this box its way off itself

@@ -200,15 +200,12 @@ pub(crate) async fn list(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
         return StatusCode::UNAUTHORIZED.into_response();
     }
     let mut boxes = vec![here(&app.home_net, true)];
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(4))
-        .build()
-        .unwrap_or_default();
+    let http = crate::http();
     let asks = app.home_net.peers.iter().map(|p| {
         let http = http.clone();
         let url = format!("{p}/_dd/house/here");
         async move {
-            match http.get(&url).send().await {
+            match http.get(&url).timeout(Duration::from_secs(4)).send().await {
                 Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().await.ok(),
                 _ => None,
             }
@@ -330,22 +327,19 @@ pub(crate) async fn change(
             return e.into_response();
         }
     }
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .unwrap_or_default();
-    let mut passed = 0;
-    for p in &app.home_net.peers {
-        if let Ok(r) = http
-            .post(format!("{p}/_dd/house/wifi/relay"))
+    // every box at once: one rejoining its Wi-Fi does not hold up the rest
+    let http = crate::http();
+    let passes = app.home_net.peers.iter().map(|p| {
+        http.post(format!("{p}/_dd/house/wifi/relay"))
+            .timeout(Duration::from_secs(10))
             .json(&s)
             .send()
-            .await
-            && r.status().is_success()
-        {
-            passed += 1;
-        }
-    }
+    });
+    let passed = futures_util::future::join_all(passes)
+        .await
+        .into_iter()
+        .filter(|r| r.as_ref().is_ok_and(|r| r.status().is_success()))
+        .count();
     Json(serde_json::json!({ "nonce": c.nonce, "passed": passed })).into_response()
 }
 
