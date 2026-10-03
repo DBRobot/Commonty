@@ -249,6 +249,10 @@
               verify = _: {
                 postUnpack = "mkdir -p $NIX_BUILD_TOP/photos && cp -r ${./box/photos/templates} $NIX_BUILD_TOP/photos/templates";
               };
+              # fl! wrote a message's arguments in hash-map order, so age's
+              # library differed on every build and a box rebuilding dd to
+              # vouch for it never matched what CI had built
+              i18n-embed-fl = _: { patches = [ ./nix/patches/i18n-embed-fl-args-in-order.patch ]; };
             };
           };
           perCrate = n: cargoNix.workspaceMembers.${n}.build;
