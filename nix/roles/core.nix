@@ -60,6 +60,13 @@ in
   # the full verifier with the browser login
   dd.verify.role = lib.mkDefault "directory";
 
+  # The logs name members, their addresses and where they connected from:
+  # two weeks is enough to look into a problem, and no more is kept
+  services.journald.extraConfig = ''
+    MaxRetentionSec=14day
+    SystemMaxUse=1G
+  '';
+
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
   boot.supportedFilesystems = [ "zfs" ];
