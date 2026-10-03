@@ -1,0 +1,85 @@
+--- a/src/db/models/device.rs
++++ b/src/db/models/device.rs
+@@ -61,6 +61,16 @@
+         crypto::encode_random_bytes::<64>(&BASE64URL)
+     }
+ 
++    // The table keeps sha256(refresh_token); the token itself (88 chars of
++    // base64url) is held here only after new, rotate or find_by_refresh_token
++    fn stored_refresh_token(token: &str) -> String {
++        if token.len() == 64 && token.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
++            token.to_owned()
++        } else {
++            crypto::sha256_hex(token.as_bytes())
++        }
++    }
++
+     pub fn to_json(&self) -> Value {
+         json!({
+             "id": self.uuid,
+@@ -145,11 +155,14 @@
+             self.updated_at = Utc::now().naive_utc();
+         }
+ 
+-        db_run! { conn:
++        let token = std::mem::take(&mut self.refresh_token);
++        self.refresh_token = Self::stored_refresh_token(&token);
++        let this = &*self;
++        let res = db_run! { conn:
+             sqlite, mysql {
+                 crate::util::retry(||
+                     diesel::replace_into(devices::table)
+-                        .values(&*self)
++                        .values(this)
+                         .execute(conn),
+                     10,
+                 ).map_res("Error saving device")
+@@ -157,15 +170,17 @@
+             postgresql {
+                 crate::util::retry(||
+                     diesel::insert_into(devices::table)
+-                        .values(&*self)
++                        .values(this)
+                         .on_conflict((devices::uuid, devices::user_uuid))
+                         .do_update()
+-                        .set(&*self)
++                        .set(this)
+                         .execute(conn),
+                     10,
+                 ).map_res("Error saving device")
+             }
+-        }
++        };
++        self.refresh_token = token;
++        res
+     }
+ 
+     pub async fn delete_all_by_user(user_uuid: &UserId, conn: &DbConn) -> EmptyResult {
+@@ -220,8 +235,11 @@
+         .await
+     }
+     pub async fn find_by_refresh_token(refresh_token: &str, conn: &DbConn) -> Option<Self> {
+-        conn.run(move |conn| devices::table.filter(devices::refresh_token.eq(refresh_token)).first::<Self>(conn).ok())
+-            .await
++        let hashed = crypto::sha256_hex(refresh_token.as_bytes());
++        let mut device =
++            conn.run(move |conn| devices::table.filter(devices::refresh_token.eq(hashed)).first::<Self>(conn).ok()).await?;
++        device.refresh_token = refresh_token.to_owned();
++        Some(device)
+     }
+ 
+     pub async fn find_latest_active_by_user(user_uuid: &UserId, conn: &DbConn) -> Option<Self> {
+--- a/src/api/identity.rs
++++ b/src/api/identity.rs
+@@ -762,7 +762,10 @@
+     let device_name = data.device_name.clone().expect("No device name provided");
+ 
+     // Find device or create new
+-    if let Some(device) = Device::find_by_uuid_and_user(&device_id, &user.uuid, conn).await {
++    if let Some(mut device) = Device::find_by_uuid_and_user(&device_id, &user.uuid, conn).await {
++        // the table holds only a hash of the old token, so a new login gets a new one
++        device.refresh_token = Device::generate_refresh_token();
++        device.save(false, conn).await?;
+         Ok(device)
+     } else {
+         let mut device = Device::new(device_id, user.uuid.clone(), device_name, device_type);

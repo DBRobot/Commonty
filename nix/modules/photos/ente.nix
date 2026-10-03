@@ -58,6 +58,11 @@ in
             rev = "photos-v1.3.36";
             hash = "sha256-9MWmJ3QUgS7BToTnSZzTi4ywGW1RtwrCO+9yQJkvejM=";
           };
+          # sessions kept as sha256 of their token: a copy of the database
+          # signs nobody in. Newer museum does this itself (its migrations
+          # 134+), from the plain tokens: a bump has to carry these hashes
+          # into its token_hash column by hand, not hash them again
+          patches = (o.patches or [ ]) ++ [ ../../../box/photos/museum-hash-tokens.patch ];
         });
         ente-web = prev.ente-web.overrideAttrs (
           o:
@@ -132,6 +137,17 @@ in
 
     # the login route, probed every few minutes; a 500 there is the known
     # panic and a restart is the cure (ente-health.sh)
+    # the sessions made before the patch, hashed once (a token is never 64
+    # hex characters, a hash always is), before museum reads the table
+    systemd.services.ente.path = [ config.services.postgresql.package ];
+    systemd.services.ente.preStart = lib.mkAfter ''
+      psql -v ON_ERROR_STOP=1 -q -d ente <<'SQL'
+      DO $$ BEGIN IF to_regclass('public.tokens') IS NOT NULL THEN
+        UPDATE tokens SET token = encode(sha256(convert_to(token,'UTF8')),'hex') WHERE token !~ '^[0-9a-f]{64}$';
+      END IF; END $$;
+      SQL
+    '';
+
     systemd.services.ente-health = {
       description = "Restart museum when its login route is broken";
       after = [ "ente.service" ];

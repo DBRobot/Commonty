@@ -21,7 +21,9 @@ let
   vaultwarden =
     assert lib.assertMsg (pkgs.vaultwarden.version == version)
       "vaultwarden is ${pkgs.vaultwarden.version} in nixpkgs, pinned to ${version}: check the release notes, then update modules/vault/vaultwarden.nix";
-    (pkgs.vaultwarden.override { dbBackend = "postgresql"; }).overrideAttrs (_: {
+    (pkgs.vaultwarden.override { dbBackend = "postgresql"; }).overrideAttrs (o: {
+      # refresh tokens kept as sha256: a copy of the database renews nobody
+      patches = (o.patches or [ ]) ++ [ ../../../box/vault/vaultwarden-hash-refresh.patch ];
       # files (attachments, sends) in garage, not on this laptop's disk.
       # buildRustPackage turns buildFeatures into these when the package is
       # made, so an override has to set them directly
@@ -179,6 +181,15 @@ in
         };
 
         systemd.services.vaultwarden = {
+          path = [ config.services.postgresql.package ];
+          # the refresh tokens made before the patch, hashed once
+          preStart = ''
+            psql -v ON_ERROR_STOP=1 -q -d vaultwarden <<'SQL'
+            DO $$ BEGIN IF to_regclass('public.devices') IS NOT NULL THEN
+              UPDATE devices SET refresh_token = encode(sha256(convert_to(refresh_token,'UTF8')),'hex') WHERE refresh_token !~ '^[0-9a-f]{64}$';
+            END IF; END $$;
+            SQL
+          '';
           after = [ "garage-setup.service" ];
           wants = [ "garage-setup.service" ];
           environment.AWS_REGION = "us-east-1";

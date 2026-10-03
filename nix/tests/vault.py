@@ -134,6 +134,16 @@ assert rows == ["sarah@test.invalid"], rows
 # or passkey of hers goes, or she signs out everywhere else; her session
 # here stops working and her app cannot refresh it
 tokens = json.loads(got)
+# the refresh token works while she is signed in (only its hash is kept)
+renewed = json.loads(box.succeed(
+    "curl -s -X POST http://127.0.0.1:8222/identity/connect/token "
+    f"--data-urlencode grant_type=refresh_token --data-urlencode refresh_token={tokens['refresh_token']} "
+    "--data-urlencode client_id=web"
+))
+assert "access_token" in renewed, renewed
+kept = box.succeed("sudo -u postgres psql -d vaultwarden -tAc 'select refresh_token from devices'").split()
+assert kept and all(len(k) == 64 for k in kept) and tokens["refresh_token"] not in kept, "refresh tokens are kept as hashes"
+tokens = renewed
 api = f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Authorization: Bearer {tokens['access_token']}' http://127.0.0.1:8222/api/accounts/revision-date"
 assert box.succeed(api).strip() == "200"
 box.succeed("systemctl show dd-verify.service -p Environment | grep -q VERIFY_ENDED=/run/dd-ended")

@@ -1,0 +1,167 @@
+--- a/pkg/utils/auth/auth.go
++++ b/pkg/utils/auth/auth.go
+@@ -2,7 +2,9 @@
+ 
+ import (
+ 	"crypto/rand"
++	"crypto/sha256"
+ 	"encoding/base64"
++	"encoding/hex"
+ 	"math/big"
+ 	"net/http"
+ 	"strconv"
+@@ -62,6 +64,25 @@
+ 	return base64.URLEncoding.EncodeToString(b), stacktrace.Propagate(err, "")
+ }
+ 
++// HashToken is what the tokens table keeps in place of a session token
++func HashToken(token string) string {
++	sum := sha256.Sum256([]byte(token))
++	return hex.EncodeToString(sum[:])
++}
++
++// IsTokenHash: a session token is 44 chars of base64url, its hash 64 of lowercase hex
++func IsTokenHash(s string) bool {
++	if len(s) != 2*sha256.Size {
++		return false
++	}
++	for _, c := range s {
++		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
++			return false
++		}
++	}
++	return true
++}
++
+ // GetHashedPassword returns the has of a specified password
+ func GetHashedPassword(password string) (string, error) {
+ 	saltedBytes := []byte(password)
+--- a/pkg/repo/userauth.go
++++ b/pkg/repo/userauth.go
+@@ -4,6 +4,7 @@
+ 	"database/sql"
+ 
+ 	"github.com/ente-io/museum/ente"
++	"github.com/ente-io/museum/pkg/utils/auth"
+ 	"github.com/ente-io/museum/pkg/utils/network"
+ 
+ 	"github.com/ente-io/museum/pkg/utils/time"
+@@ -41,7 +42,7 @@
+ 
+ // GetTokenCreationTime return the creation_time for the given token
+ func (repo *UserAuthRepository) GetTokenCreationTime(token string) (int64, error) {
+-	row := repo.DB.QueryRow(`SELECT creation_time from tokens where token = $1`, token)
++	row := repo.DB.QueryRow(`SELECT creation_time from tokens where token = $1`, auth.HashToken(token))
+ 	var result int64
+ 	if err := row.Scan(&result); err != nil {
+ 		return 0, stacktrace.Propagate(err, "Failed to scan row")
+@@ -130,7 +131,7 @@
+ // AddToken saves the provided long lived token for the specified user
+ func (repo *UserAuthRepository) AddToken(userID int64, app ente.App, token string, ip string, userAgent string) error {
+ 	_, err := repo.DB.Exec(`INSERT INTO tokens(user_id, app, token, creation_time, ip, user_agent) VALUES($1, $2, $3, $4, $5, $6)`,
+-		userID, app, token, time.Microseconds(), ip, userAgent)
++		userID, app, auth.HashToken(token), time.Microseconds(), ip, userAgent)
+ 	return stacktrace.Propagate(err, "")
+ }
+ 
+@@ -145,7 +146,7 @@
+ 				ELSE false 
+ 			END as is_expired
+ 		FROM tokens 
+-		WHERE token = $1 AND app = $2 AND is_deleted = false`, token, app)
++		WHERE token = $1 AND app = $2 AND is_deleted = false`, auth.HashToken(token), app)
+ 	var id int64
+ 	var isExpired bool
+ 	err := row.Scan(&id, &isExpired)
+@@ -155,24 +156,24 @@
+ 	return id, isExpired, nil
+ }
+ 
+-// RemoveToken marks the specified token (to be used when a user logs out) as deleted
+-func (repo *UserAuthRepository) RemoveToken(userID int64, token string) error {
++// RemoveToken marks the token with this hash (to be used when a user logs out) as deleted
++func (repo *UserAuthRepository) RemoveToken(userID int64, tokenHash string) error {
+ 	_, err := repo.DB.Exec(`UPDATE tokens SET is_deleted = true WHERE user_id = $1 AND token = $2`,
+-		userID, token)
++		userID, tokenHash)
+ 	return stacktrace.Propagate(err, "")
+ }
+ 
+ // UpdateLastUsedAt updates the last used at timestamp for the particular token
+ func (repo *UserAuthRepository) UpdateLastUsedAt(userID int64, token string, ip string, userAgent string) error {
+ 	_, err := repo.DB.Exec(`UPDATE tokens SET ip = $1, user_agent = $2, last_used_at = $3 WHERE user_id = $4 AND token = $5`,
+-		ip, userAgent, time.Microseconds(), userID, token)
++		ip, userAgent, time.Microseconds(), userID, auth.HashToken(token))
+ 	return stacktrace.Propagate(err, "")
+ }
+ 
+ // RemoveAllOtherTokens marks the all tokens apart from the specified one for a user as deleted
+ func (repo *UserAuthRepository) RemoveAllOtherTokens(userID int64, token string) error {
+ 	_, err := repo.DB.Exec(`UPDATE tokens SET is_deleted = true WHERE user_id = $1 AND token <> $2`,
+-		userID, token)
++		userID, auth.HashToken(token))
+ 	return stacktrace.Propagate(err, "")
+ }
+ 
+@@ -201,7 +202,7 @@
+ 	return stacktrace.Propagate(err, "")
+ }
+ 
+-// GetActiveSessions returns the list of tokens that are valid for a given user
++// GetActiveSessions returns the list of tokens that are valid for a given user; Token is its hash
+ func (repo *UserAuthRepository) GetActiveSessions(userID int64, app ente.App) ([]ente.Session, error) {
+ 	rows, err := repo.DB.Query(`SELECT token, creation_time, ip, user_agent, last_used_at FROM tokens WHERE user_id = $1 AND app = $2 AND is_deleted = false`, userID, app)
+ 	if err != nil {
+--- a/pkg/middleware/auth.go
++++ b/pkg/middleware/auth.go
+@@ -38,7 +38,7 @@
+ 			return
+ 		}
+ 		app := auth.GetApp(c)
+-		cacheKey := fmt.Sprintf("%s:%s", app, token)
++		cacheKey := fmt.Sprintf("%s:%s", app, auth.HashToken(token))
+ 		isJWT := false
+ 		if jwtClaimScope != nil {
+ 			isJWT = true
+--- a/pkg/controller/user/userauth.go
++++ b/pkg/controller/user/userauth.go
+@@ -390,6 +390,14 @@
+ 	if err != nil {
+ 		return nil, stacktrace.Propagate(err, "")
+ 	}
++	// the apps find "this device" by comparing against their own token
++	current := auth.GetToken(context)
++	currentHash := auth.HashToken(current)
++	for i := range tokens {
++		if tokens[i].Token == currentHash {
++			tokens[i].Token = current
++		}
++	}
+ 	return tokens, nil
+ }
+ 
+@@ -510,16 +518,21 @@
+ 	return nil
+ }
+ 
+-// TerminateSession removes the token for a user from cache and database
++// TerminateSession removes the token for a user from cache and database. The
++// token is the session's own, or the hash a session listing gave out.
+ func (c *UserController) TerminateSession(userID int64, token string) error {
++	tokenHash := token
++	if !auth.IsTokenHash(token) {
++		tokenHash = auth.HashToken(token)
++	}
+ 	apps, err := c.UserAuthRepo.GetAppsForUser(userID)
+ 	if err != nil {
+ 		return stacktrace.Propagate(err, "failed to get user apps")
+ 	}
+ 	for _, app := range apps {
+-		c.Cache.Delete(fmt.Sprintf("%s:%s", app, token))
++		c.Cache.Delete(fmt.Sprintf("%s:%s", app, tokenHash))
+ 	}
+-	return stacktrace.Propagate(c.UserAuthRepo.RemoveToken(userID, token), "")
++	return stacktrace.Propagate(c.UserAuthRepo.RemoveToken(userID, tokenHash), "")
+ }
+ 
+ // Auth middleware trusts cached app:token entries for up to a minute, so token
