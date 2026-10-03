@@ -1,0 +1,14 @@
+--- a/src/lib.rs	2026-10-03 00:13:20.868125306 -0400
++++ b/src/lib.rs	2026-10-03 00:13:20.878051150 -0400
+@@ -547,7 +547,10 @@
+         }
+         FlArgs::KeyValuePairs { specified_args } => {
+             let mut arg_assignments = proc_macro2::TokenStream::default();
+-            for (key, value) in &specified_args {
++            // in key order, not the hash map's: the same code every build
++            let mut in_order: Vec<_> = specified_args.iter().collect();
++            in_order.sort_by_key(|(key, _)| key.value());
++            for (key, value) in in_order {
+                 arg_assignments = quote! {
+                     #arg_assignments
+                     args.insert(#key, #value.into());
