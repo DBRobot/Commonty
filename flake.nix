@@ -16,6 +16,10 @@
     # the app drawn by the machine's own NVIDIA driver, off NixOS
     nix-gl-host.url = "github:numtide/nix-gl-host";
     nix-gl-host.inputs.nixpkgs.follows = "nixpkgs";
+    # Secure Boot: the boxes sign what they boot, so their TPMs unlock the
+    # disks only for software signed here (nix/modules/box/secure-boot.nix)
+    lanzaboote.url = "github:nix-community/lanzaboote/v1.2.0";
+    lanzaboote.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
@@ -27,6 +31,7 @@
       crane,
       rust-overlay,
       nix-gl-host,
+      lanzaboote,
       ...
     }:
     let
@@ -963,6 +968,10 @@
               ++ [
                 (backupEndpoint name box)
                 (cacheOf name box)
+              ]
+              ++ [
+                lanzaboote.nixosModules.lanzaboote
+                ./nix/modules/box/secure-boot.nix
               ]
               ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops
               ++ lib.optional (builtins.pathExists ./nix/hosts/${name}/disko.nix) disko.nixosModules.disko
