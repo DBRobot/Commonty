@@ -6,7 +6,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64_URL;
 use identity::{Device, Entry, Passkey, SignedEntry};
 use p256::ecdsa::signature::Signer as _;
-use p256::pkcs8::EncodePrivateKey as _;
+use p256::pkcs8::{EncodePrivateKey as _, EncodePublicKey as _};
 use sha2::Digest as _;
 use webauthn_rs_core::proto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, ECDSACurve};
 // a made-up member: a device root, and one passkey on commonty.org
@@ -89,6 +89,7 @@ impl Tester {
 fn main() {
     let t = Tester::new();
     let key = t.passkey.to_pkcs8_der().unwrap();
+    let boxkey = p256::ecdsa::SigningKey::from_bytes(&[11; 32].into()).unwrap();
     println!(
         "{}",
         serde_json::json!({
@@ -97,6 +98,9 @@ fn main() {
             "v5": t.entry(5, "cGsy"),
             "members": t.members(),
             "pkcs8": base64::engine::general_purpose::STANDARD.encode(key.as_bytes()),
+            // a made-up box's TPM-held unlock key (client/mail/worker/unlock.js)
+            "box_pkcs8": base64::engine::general_purpose::STANDARD.encode(boxkey.to_pkcs8_der().unwrap().as_bytes()),
+            "box_spki": base64::engine::general_purpose::STANDARD.encode(boxkey.verifying_key().to_public_key_der().unwrap().as_bytes()),
         })
     );
 }

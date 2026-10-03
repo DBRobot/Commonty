@@ -130,7 +130,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [console, directory, metrics, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, llm, vault, adblock]
+        test: [console, directory, metrics, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, llm, vault, adblock, unlock]
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: ${{ matrix.test }}

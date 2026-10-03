@@ -231,6 +231,12 @@ export async function start() {
     $('nw-result').hidden = true;
   };
   $('nw-form').addEventListener('submit', save);
+  // letting a box in from a new place, or marking one stolen, happens where
+  // no box can answer for it: the unlock Worker's own page
+  me().then((who) => {
+    const domain = new URL(who.home).hostname.split('.').slice(-2).join('.');
+    $('nw-unlock').href = `https://mail.${domain}/boxes?name=${encodeURIComponent(who.user)}`;
+  }).catch(() => {});
   ads();
   try {
     await load();

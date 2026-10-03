@@ -12,6 +12,9 @@
 import { initSync, admit, login } from './dd_mail.js';
 import wasm from './dd_mail_bg.wasm';
 import { MEMBERS, RELEASE } from './fleet.js';
+import { boxApi, memberApi } from './unlock.js';
+import boxesHtml from './boxes.html';
+import boxesJs from './boxes.js';
 import changeHtml from './change.html';
 import rowHtml from './row.html';
 import changeJs from './change.js';
@@ -38,6 +41,7 @@ const CHALLENGE = 5 * 60;
 const STATIC = {
   '/_dd/static/change.js': [changeJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/row.js': [rowJs, 'text/javascript; charset=utf-8'],
+  '/_dd/static/boxes.js': [boxesJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/passkey.js': [passkeyJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/mail.css': [mailCss, 'text/css; charset=utf-8'],
   '/_dd/static/home.css': [homeCss, 'text/css; charset=utf-8'],
@@ -289,6 +293,10 @@ async function api(req, env, path, sent) {
     const s = await state(env, me.n);
     return json({ name: me.n, email: s.email, confirmed: s.confirmed, fresh: now() - (me.p || 0) < FRESH });
   }
+  // the boxes' disks: which are waiting to be let in, and the stolen switch
+  if (path === '/api/boxes' || path.startsWith('/api/boxes/')) {
+    return memberApi(req, env, path, body(), json, now() - (me.p || 0) < FRESH);
+  }
   // Settings' "sign out everywhere else": every other session of this
   // member's ends; this one is opened again, after the line
   if (req.method === 'POST' && path === '/api/end-others') {
@@ -329,6 +337,8 @@ export default {
       // what was sent, read before anything is decided: a request answered
       // with its body unread can be dropped by the runtime, a 503 to the caller
       const sent = req.method === 'GET' ? '' : await req.text().catch(() => '');
+      // a box at boot: signed by its TPM, from no page at all
+      if (path === '/api/unlock' || path.startsWith('/api/unlock/')) return boxApi(req, env, path, parse(sent), json);
       if (req.method !== 'GET' && origin !== (env.ORIGIN || `https://mail.${env.DOMAIN}`)) {
         return json({ error: 'not from here' }, 403);
       }
@@ -343,6 +353,8 @@ export default {
     }
     // the email line on Settings, in a frame on the fleet's own pages
     if (path === '/row') return page(rowHtml, env, `https://*.${env.DOMAIN}`);
+    // the boxes: approve one in a new place, or mark one stolen
+    if (path === '/boxes') return page(boxesHtml, env);
     return Response.redirect(`https://home.${env.DOMAIN}/_dd/settings`, 302);
   },
 };

@@ -108,18 +108,27 @@ version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "047a482d1843edf1ce76ada63183698144030fe1191bd5ddba6e41e164e0bc43"
 dependencies = [
+ "aes 0.8.4",
+ "aes-gcm",
  "age-core",
  "base64 0.21.7",
+ "bcrypt-pbkdf",
  "bech32",
+ "cbc 0.1.2",
  "chacha20poly1305 0.10.1",
+ "cipher 0.4.4",
  "cookie-factory",
+ "ctr",
+ "curve25519-dalek 4.1.3",
  "hmac 0.12.1",
  "i18n-embed",
  "i18n-embed-fl",
  "lazy_static",
  "nom",
+ "num-traits",
  "pin-project",
  "rand 0.8.8",
+ "rsa",
  "rust-embed",
  "scrypt 0.11.0",
  "sha2 0.10.9",
@@ -707,6 +716,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcrypt-pbkdf"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6aeac2e1fe888769f34f05ac343bbef98b14d1ffb292ab69d4608b3abc86f2a2"
+dependencies = [
+ "blowfish",
+ "pbkdf2 0.12.2",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "bech32"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -927,6 +947,16 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "piper",
+]
+
+[[package]]
+name = "blowfish"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e412e2cd0f2b2d93e02543ceae7917b3c70331573df19ee046bcbc35e45e87d7"
+dependencies = [
+ "byteorder",
+ "cipher 0.4.4",
 ]
 
 [[package]]

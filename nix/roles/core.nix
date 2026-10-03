@@ -56,6 +56,9 @@ in
   dd.backup.exclude = [ "/var/lib/prometheus2/data/wal" ];
   dd.domain = "commonty.org";
   dd.repo = "david/commonty";
+  # the owner's paper key (david's entry, recovery): every box's disk keys
+  # have a copy encrypted to it in /boot/dd, for a dead TPM
+  dd.unlock.recovery = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL/mxoTUtKHXC9Agc7bupMcFzsalpVweep3E76AhudEC david-paper-key";
   # every box holds a directory replica; the gateway role turns this into
   # the full verifier with the browser login
   dd.verify.role = lib.mkDefault "directory";

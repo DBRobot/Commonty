@@ -19,7 +19,7 @@ biscuit-auth = "6"
 # the device key written as an OpenSSH key, so git signs commits with it
 ssh-key = { version = "0.6", features = ["ed25519", "std"] }
 # an age identity for editing the repo's sops files, kept in the keyring
-age = { version = "0.11", default-features = false }
+age = { version = "0.11", default-features = false, features = ["ssh"] }
 secrecy = "0.10"
 archive = { path = "../../box/archive" }
 # already in the tree through ente; used to derive the archive password

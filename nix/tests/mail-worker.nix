@@ -32,18 +32,18 @@ pkgs.runCommand "mail-worker-e2e"
     mkdir w
     cp -rL --no-preserve=mode ${bundle}/. w/
     # the made-up member is the only one on the list
-    printf 'export const MEMBERS = %s;\nexport const RELEASE = "unused";\n' \
-      "$(jq -c '.members' $tester)" > w/fleet.js
+    printf 'export const MEMBERS = %s;\nexport const RELEASE = "unused";\nexport const BOXES = {"testbox": %s};\n' \
+      "$(jq -c '.members' $tester)" "$(jq -c '.box_spki' $tester)" > w/fleet.js
     cat > w/wrangler.toml <<'TOML'
     name = "mail-e2e"
     main = "worker.js"
     compatibility_date = "2026-05-01"
     no_bundle = true
     rules = [
-      { type = "Text", globs = ["**/*.html", "**/*.css", "**/change.js", "**/row.js", "**/passkey.js"] },
+      { type = "Text", globs = ["**/*.html", "**/*.css", "**/change.js", "**/row.js", "**/passkey.js", "**/boxes.js"] },
       { type = "Data", globs = ["**/*.woff2"] },
       { type = "CompiledWasm", globs = ["**/*.wasm"] },
-      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js"] },
+      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js"] },
     ]
     kv_namespaces = [{ binding = "PINNED", id = "local" }]
     [vars]
@@ -66,7 +66,7 @@ pkgs.runCommand "mail-worker-e2e"
     curl -sf -o /dev/null http://127.0.0.1:8787/change || { cat wrangler.log; exit 1; }
 
     status=0
-    DEBUG=pw:browser python3 $t/flow.py 2> browser.log || status=$?
+    DEBUG=pw:browser python3 $t/flow.py $tester 2> browser.log || status=$?
     kill $worker $fake 2>/dev/null || true
     if [ $status -ne 0 ]; then
       echo "--- browser log"; grep -iE "crash|error|fatal|signal" browser.log | tail -20

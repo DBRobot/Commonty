@@ -584,6 +584,16 @@ rec {
         ];
         dependencies = [
           {
+            name = "aes";
+            packageId = "aes 0.8.4";
+            optional = true;
+          }
+          {
+            name = "aes-gcm";
+            packageId = "aes-gcm";
+            optional = true;
+          }
+          {
             name = "age-core";
             packageId = "age-core";
           }
@@ -592,8 +602,18 @@ rec {
             packageId = "base64 0.21.7";
           }
           {
+            name = "bcrypt-pbkdf";
+            packageId = "bcrypt-pbkdf";
+            optional = true;
+          }
+          {
             name = "bech32";
             packageId = "bech32";
+          }
+          {
+            name = "cbc";
+            packageId = "cbc 0.1.2";
+            optional = true;
           }
           {
             name = "chacha20poly1305";
@@ -602,8 +622,24 @@ rec {
             features = [ "alloc" ];
           }
           {
+            name = "cipher";
+            packageId = "cipher 0.4.4";
+            optional = true;
+            features = [ "alloc" ];
+          }
+          {
             name = "cookie-factory";
             packageId = "cookie-factory";
+          }
+          {
+            name = "ctr";
+            packageId = "ctr";
+            optional = true;
+          }
+          {
+            name = "curve25519-dalek";
+            packageId = "curve25519-dalek 4.1.3";
+            optional = true;
           }
           {
             name = "hmac";
@@ -629,12 +665,23 @@ rec {
             features = [ "alloc" ];
           }
           {
+            name = "num-traits";
+            packageId = "num-traits";
+            optional = true;
+          }
+          {
             name = "pin-project";
             packageId = "pin-project";
           }
           {
             name = "rand";
             packageId = "rand 0.8.8";
+          }
+          {
+            name = "rsa";
+            packageId = "rsa";
+            optional = true;
+            usesDefaultFeatures = false;
           }
           {
             name = "rust-embed";
@@ -695,6 +742,7 @@ rec {
           "which" = [ "dep:which" ];
           "wsl" = [ "dep:wsl" ];
         };
+        resolvedDefaultFeatures = [ "aes" "aes-gcm" "bcrypt-pbkdf" "cbc" "cipher" "ctr" "curve25519-dalek" "num-traits" "rsa" "ssh" ];
       };
       "age-core" = rec {
         crateName = "age-core";
@@ -2453,6 +2501,38 @@ rec {
         ];
 
       };
+      "bcrypt-pbkdf" = rec {
+        crateName = "bcrypt-pbkdf";
+        version = "0.10.0";
+        edition = "2021";
+        sha256 = "18pjhsy3m2v0silsp4mjzz8i92zrpqxk9b059zrnk1w8zvhw5ska";
+        libName = "bcrypt_pbkdf";
+        authors = [
+          "RustCrypto Developers"
+        ];
+        dependencies = [
+          {
+            name = "blowfish";
+            packageId = "blowfish";
+            features = [ "bcrypt" ];
+          }
+          {
+            name = "pbkdf2";
+            packageId = "pbkdf2 0.12.2";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "sha2";
+            packageId = "sha2 0.10.9";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "default" = [ "alloc" "std" ];
+          "zeroize" = [ "dep:zeroize" ];
+        };
+        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
+      };
       "bech32" = rec {
         crateName = "bech32";
         version = "0.9.1";
@@ -3130,6 +3210,37 @@ rec {
         features = {
           "tracing" = [ "dep:tracing" ];
         };
+      };
+      "blowfish" = rec {
+        crateName = "blowfish";
+        version = "0.9.1";
+        edition = "2021";
+        sha256 = "1mw7bvj3bg5w8vh9xw9xawqh7ixk2xwsxkj34ph96b9b1z6y44p4";
+        authors = [
+          "RustCrypto Developers"
+        ];
+        dependencies = [
+          {
+            name = "byteorder";
+            packageId = "byteorder";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "cipher";
+            packageId = "cipher 0.4.4";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "cipher";
+            packageId = "cipher 0.4.4";
+            features = [ "dev" ];
+          }
+        ];
+        features = {
+          "zeroize" = [ "cipher/zeroize" ];
+        };
+        resolvedDefaultFeatures = [ "bcrypt" ];
       };
       "brotli" = rec {
         crateName = "brotli";
@@ -4393,6 +4504,10 @@ rec {
           {
             name = "ed25519-dalek";
             packageId = "ed25519-dalek";
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.3.4";
           }
           {
             name = "gtk";
@@ -6084,6 +6199,7 @@ rec {
             name = "age";
             packageId = "age";
             usesDefaultFeatures = false;
+            features = [ "ssh" ];
           }
           {
             name = "anyhow";

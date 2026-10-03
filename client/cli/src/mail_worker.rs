@@ -99,7 +99,7 @@ fn bundle(root: &Path, r#ref: &str) -> Result<std::path::PathBuf> {
 /// styles as text it serves, the fonts as bytes, the checks as wasm.
 fn kind(name: &str) -> &'static str {
     match name {
-        "worker.js" | "dd_mail.js" | "fleet.js" => "application/javascript+module",
+        "worker.js" | "dd_mail.js" | "fleet.js" | "unlock.js" => "application/javascript+module",
         n if n.ends_with(".wasm") => "application/wasm",
         n if n.ends_with(".woff2") => "application/octet-stream",
         _ => "text/plain",

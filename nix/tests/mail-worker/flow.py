@@ -107,6 +107,58 @@ with sync_playwright() as p:
     ok(call('/api/me', cookie=sess2)[0] == 200, 'this browser stays signed in')
     # the passkey it was opened with is removed from the entry: ended too
     fake('/entry', {'v': 5}); ok(call('/api/me', cookie=sess2)[0] == 401, 'its passkey removed: session ended')
+    # A box unlocking its disks at boot (unlock.js): signed as its TPM would
+    from cryptography.hazmat.primitives import hashes as H, serialization as S
+    from cryptography.hazmat.primitives.asymmetric import ec as EC
+    boxkey = S.load_der_private_key(base64.b64decode(json.load(open(sys.argv[1]))['box_pkcs8']), None)
+    import time
+    clock = [int(time.time()) - 100]
+    def boxcall(path, kind, mac='', ip='203.0.113.5', extra=None, at=None, key=None):
+        clock[0] += 1
+        t = at if at is not None else clock[0]
+        if kind == 'share':
+            msg = f"commonty unlock share v1\0testbox\0{t}\0{extra}"
+        else:
+            msg = f"commonty unlock{' checkin' if kind == 'checkin' else ''} v1\0testbox\0{t}\0{mac}"
+        sig = b64u((key or boxkey).sign(msg.encode(), EC.ECDSA(H.SHA256())))
+        body = {'box': 'testbox', 'at': t, 'mac': mac, 'sig': sig}
+        if extra: body['share'] = extra
+        req = urllib.request.Request(W + path, data=json.dumps(body).encode(), method='POST', headers={'content-type': 'application/json', 'cf-connecting-ip': ip})
+        try:
+            r = urllib.request.urlopen(req); return r.status, json.load(r)
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b'{}')
+    HOME_MAC, AWAY_MAC = 'aa:bb:cc:dd:ee:01', 'aa:bb:cc:dd:ee:99'
+    share = b64u(b'S' * 32)
+    ok(boxcall('/api/unlock', 'unlock', HOME_MAC)[0] == 404, 'no half kept yet: nothing to give')
+    ok(boxcall('/api/unlock/share', 'share', extra=share)[0] == 200, 'the box keeps its half here')
+    ok(boxcall('/api/unlock/share', 'share', extra=b64u(b'X' * 32))[0] == 409, 'and cannot be made to swap it')
+    ok(boxcall('/api/unlock/checkin', 'checkin', HOME_MAC)[0] == 200, 'running at home, it says where home is')
+    s, v = boxcall('/api/unlock', 'unlock', HOME_MAC); ok(s == 200 and v.get('share') == share, f'at home: the half {s}')
+    s, v = boxcall('/api/unlock', 'unlock', HOME_MAC, ip='198.51.100.7'); ok(s == 200 and v.get('share') == share, f'new address, same router: the half {s}')
+    # home is now that new address with the old router
+    s, v = boxcall('/api/unlock', 'unlock', AWAY_MAC, ip='198.51.100.7'); ok(s == 200, f'same address, new router: the half {s}')
+    t0 = clock[0]
+    ok(boxcall('/api/unlock', 'unlock', HOME_MAC, at=t0)[0] == 403, 'a recorded request sent again: refused')
+    ok(boxcall('/api/unlock', 'unlock', HOME_MAC, key=EC.generate_private_key(EC.SECP256R1()))[0] == 403, 'signed by another key: refused')
+    s, v = boxcall('/api/unlock', 'unlock', 'aa:bb:cc:dd:ee:77', ip='192.0.2.50'); ok(s == 202 and 'share' not in v, f'somewhere new: waits, no half {s}')
+    # a member lets it in, with their passkey just now
+    s, c, _ = call('/api/challenge', {'name': 'tester'})
+    # the entry is at v5 now, where the passkey is cGsy
+    s, _, ck = call('/api/login', {'token': c['token'], 'id': 'cGsy', 'assertion': sign(c['challenge'])})
+    m = ck.split(';')[0] if ck else ''
+    ok(call('/api/boxes/approve', {'box': 'testbox'}, origin='http://127.0.0.1:8787', cookie=m)[0] == 403, 'approving from another page: refused')
+    boxes = call('/api/boxes', cookie=m)[1]
+    ok(isinstance(boxes, list) and boxes and boxes[0].get('waiting'), f'the member sees it waiting {boxes}')
+    ok(call('/api/boxes/approve', {'box': 'testbox'}, cookie=m)[0] == 200, 'the member lets it in')
+    s, v = boxcall('/api/unlock', 'unlock', 'aa:bb:cc:dd:ee:66', ip='192.0.2.51'); ok(s == 202, f'approval is for where it waited, not anywhere {s}')
+    s, v = boxcall('/api/unlock', 'unlock', 'aa:bb:cc:dd:ee:77', ip='192.0.2.50'); ok(s == 200 and v.get('share') == share, f'approved: the half {s}')
+    ok(call('/api/boxes/stolen', {'box': 'testbox', 'stolen': True}, cookie=m)[0] == 200, 'marked stolen')
+    ok(boxcall('/api/unlock', 'unlock', 'aa:bb:cc:dd:ee:77', ip='192.0.2.50')[0] == 403, 'stolen: refused even at its home')
+    ok(boxcall('/api/unlock/checkin', 'checkin', HOME_MAC)[0] == 403, 'stolen: cannot move home either')
+    ok(call('/api/boxes/stolen', {'box': 'testbox', 'stolen': False}, cookie=m)[0] == 200, 'not stolen after all')
+    ok(boxcall('/api/unlock', 'unlock', 'aa:bb:cc:dd:ee:77', ip='192.0.2.50')[0] == 200, 'and it unlocks again')
+    ok(call('/api/boxes', cookie='')[0] == 401, 'nobody signed in sees no boxes')
     b.close()
 if failed:
     sys.exit(f'{len(failed)} failed')
