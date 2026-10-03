@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your boxes</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/mail.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="https://home.{{domain}}/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+    </div>
+  </header>
+  <main class="fl">
+    <a class="fl-back" href="https://home.{{domain}}/_dd/settings#network">← Settings</a>
+
+    <section class="fl-card" id="ask">
+      <h1>Your boxes</h1>
+      <p>Each box unlocks its disks by itself when it starts at home. One that starts somewhere new waits for you here.</p>
+      <div class="row"><button id="pass">Continue with passkey</button></div>
+      <p class="fl-bad" id="ask-msg" role="alert" hidden></p>
+    </section>
+
+    <section class="fl-card" id="list" hidden>
+      <h1>Your boxes</h1>
+      <p>Each box unlocks its disks by itself when it starts at home. One that starts somewhere new waits for you here.</p>
+      <ul class="bx-list" id="boxes"></ul>
+      <p class="fl-bad" id="list-msg" role="alert" hidden></p>
+    </section>
+  </main>
+  <script type="module" src="/_dd/static/boxes.js"></script>
+</body>
+</html>

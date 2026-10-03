@@ -1,4 +1,5 @@
 mod derive;
+mod diskcmd;
 mod librarycmd;
 mod mail_worker;
 mod mediacmd;
@@ -115,6 +116,12 @@ enum Command {
         cmd: PasskeyCmd,
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES, global = true)]
         directories: Vec<String>,
+    },
+    /// A box's disks, when its TPM will not open them: the key from the
+    /// copy in its /boot/dd, with your paper key.
+    Disk {
+        #[command(subcommand)]
+        cmd: DiskCmd,
     },
     /// Who you are: a root key here, a recovery key on paper, and the entry
     /// you sign listing your devices. No server issues it.
@@ -265,6 +272,16 @@ enum Command {
         /// Also remove the identity root. Not undoable except by recovery.
         #[arg(long)]
         forget_identity: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DiskCmd {
+    /// Open <box>-disk.age (or -vault.age) from the box's /boot/dd with your
+    /// paper key, and write the raw key to OUT (a new file, yours alone)
+    Recover {
+        file: std::path::PathBuf,
+        out: std::path::PathBuf,
     },
 }
 
@@ -929,6 +946,23 @@ async fn main() -> Result<()> {
                 }
             }
         },
+
+        Command::Disk {
+            cmd: DiskCmd::Recover { file, out },
+        } => {
+            let paper = Zeroizing::new(rpassword::prompt_password("recovery key: ")?);
+            let key = diskcmd::recover(&paper, &file)?;
+            let mut o = std::fs::OpenOptions::new();
+            o.write(true).create_new(true);
+            #[cfg(unix)]
+            std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o400);
+            std::io::Write::write_all(&mut o.open(&out)?, &key)?;
+            println!(
+                "the key is in {} - on the box: zfs load-key -L file://{} <pool>/enc",
+                out.display(),
+                out.display()
+            );
+        }
 
         Command::Identity { cmd, directories } => match cmd {
             IdentityCmd::New { name, code } => {

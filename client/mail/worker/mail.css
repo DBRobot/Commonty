@@ -36,3 +36,14 @@ body.row-frame { background: transparent; margin: 0; }
 .er-text small.ok::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .er-actions { display: flex; gap: 8px; }
 .er-actions button, .er-actions .button { margin: 0; height: 36px; padding: 0 14px; font-size: 14px; display: inline-flex; align-items: center; text-decoration: none; }
+
+/* the boxes page: one line a box, what it is doing and what you can do */
+.bx-list { list-style: none; margin: 16px 0 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.bx-item { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 16px; }
+.bx-item + .bx-item { border-top: 1px solid var(--line-2); }
+.bx-item > div:first-child { flex: 1 1 220px; min-width: 0; }
+.bx-name { font-weight: 600; }
+.bx-meta { color: var(--ink-2); font-size: 14px; margin-top: 2px; }
+.bx-meta.bad { color: var(--bad, #9B2C2C); }
+.bx-actions { display: flex; gap: 8px; }
+.bx-actions button { margin-top: 0; }

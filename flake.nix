@@ -58,6 +58,7 @@
         "llm"
         "vault"
         "adblock"
+        "unlock"
       ];
       rust =
         let
@@ -628,6 +629,8 @@
                 {
                   echo "export const MEMBERS = $(jq -c . ${./fleet/members.json} | jq -R .);"
                   echo "export const RELEASE = $(tr -d '[:space:]' < ${./fleet/release.pub} | jq -R .);"
+                  # each box's TPM-held unlock key, where it has one (unlock.js)
+                  echo "export const BOXES = $(jq -c 'with_entries(select(.value.unlockKey) | .value = .value.unlockKey)' ${./fleet/boxes.json});"
                 } > $out/fleet.js
               '';
 
@@ -972,6 +975,7 @@
               ++ [
                 lanzaboote.nixosModules.lanzaboote
                 ./nix/modules/box/secure-boot.nix
+                ./nix/modules/box/disk-unlock.nix
               ]
               ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops
               ++ lib.optional (builtins.pathExists ./nix/hosts/${name}/disko.nix) disko.nixosModules.disko
