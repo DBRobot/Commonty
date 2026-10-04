@@ -34,6 +34,9 @@ in
     environment.systemPackages = [ pkg.dd-control ];
     environment.etc."dd-control/config.json".source = pkg.control-config;
     systemd.services.dd-control = {
+      # the voters are in the config; a new list read only at start would sit
+      # unread (176 did: no votes until a hand restart)
+      restartTriggers = [ pkg.control-config ];
       description = "The control plane: heartbeats and the agreed state";
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
