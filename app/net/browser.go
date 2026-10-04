@@ -1,7 +1,11 @@
 // The browser's way in. The engine's own proxy wants a password, which no
 // browser can be given; this one wants none, listens on loopback only, and
 // reaches the fleet's names and nothing else, so it is no way out to the
-// internet for anything on the machine. Beside it, the proxy rules a
+// internet for anything on the machine. It answers only the person running
+// the app: a connection from another account on the same machine is closed
+// unanswered (owner.go), so nobody else there reaches the boxes as this
+// device. Its ports are whatever is free, so two people on one machine do
+// not collide; the rules name the port of this run. Beside it, the proxy rules a
 // browser reads (a PAC file): the fleet's names to this proxy, everything
 // else straight out as before. The app registers the rules with the system
 // (app/src/browser.rs); while the app is closed nothing answers here and a
@@ -20,20 +24,18 @@ import (
 	"tailscale.com/tsnet"
 )
 
-// fixed, so the rules the system holds stay right across restarts
-const (
-	pacPort   = 41650
-	socksPort = 41651
-)
-
 type browserDoor struct {
 	socks, pac net.Listener
 	domain     string
 }
 
+func port(l net.Listener) int { return l.Addr().(*net.TCPAddr).Port }
+
 func (d *browserDoor) url() string {
-	return fmt.Sprintf("http://127.0.0.1:%d/proxy.pac", pacPort)
+	return fmt.Sprintf("http://127.0.0.1:%d/proxy.pac", port(d.pac))
 }
+
+func (d *browserDoor) rules() string { return pacFile(d.domain, port(d.socks)) }
 
 func (d *browserDoor) close() {
 	d.socks.Close()
@@ -49,7 +51,7 @@ func ours(host, domain string) bool {
 // not there to take them (quit without clearing, or crashed): a browser
 // holding these rules then still opens the public pages, and only what is
 // on the network alone waits for the app.
-func pacFile(domain string) string {
+func pacFile(domain string, socksPort int) string {
 	return fmt.Sprintf(`function FindProxyForURL(url, host) {
   host = host.toLowerCase();
   if (host == %q || dnsDomainIs(host, %q))
@@ -68,11 +70,11 @@ func newBrowserDoor(s *tsnet.Server, domain string) (*browserDoor, error) {
 	if err != nil {
 		return nil, err
 	}
-	sl, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", socksPort))
+	sl, err := listenOwn()
 	if err != nil {
 		return nil, err
 	}
-	pl, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", pacPort))
+	pl, err := listenOwn()
 	if err != nil {
 		sl.Close()
 		return nil, err
@@ -97,7 +99,7 @@ func newBrowserDoor(s *tsnet.Server, domain string) (*browserDoor, error) {
 		},
 	}
 	go func() { _ = srv.Serve(sl) }()
-	pac := pacFile(domain)
+	pac := pacFile(domain, port(sl))
 	go func() {
 		_ = http.Serve(pl, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")

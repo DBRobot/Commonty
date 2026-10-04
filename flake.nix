@@ -793,6 +793,30 @@
               cargoClippyExtraArgs = "--all-targets -- -D warnings";
             }
           );
+          # the app's own tests, on the app's cached dependency build: the
+          # workspace's tests leave the app out (workspaceArgs)
+          tests-app = craneLib.cargoTest (
+            appCommon
+            // {
+              src = sources.app;
+              cargoArtifacts = appArtifacts;
+              pname = "commonty";
+              version = "0.1.0";
+              cargoExtraArgs = "-p commonty";
+              doCheck = true;
+            }
+          );
+          # the app's network engine: go vet, and its tests (app/net/*_test.go)
+          net-check = appNet.overrideAttrs (_: {
+            pname = "commonty-net-check";
+            doCheck = true;
+            checkPhase = ''
+              runHook preCheck
+              go vet ./...
+              go test ./...
+              runHook postCheck
+            '';
+          });
           tests = craneLib.cargoTest (
             common
             // {
@@ -913,6 +937,8 @@
           "fmt"
           "clippy"
           "tests"
+          "tests-app"
+          "net-check"
           "android-sdk"
         ]
         // {
@@ -961,6 +987,8 @@
             fmt
             clippy
             clippy-app
+            tests-app
+            net-check
             tests
             ;
           placement = import ./nix/tests/placement.nix args;

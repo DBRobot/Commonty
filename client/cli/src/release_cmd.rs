@@ -66,6 +66,11 @@ pub enum ReleaseCmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Make the key Android apps are signed with, once, on this machine
+    /// beside the release key. `app` signs the apk with it; a phone
+    /// installs only a signed apk, and takes an update only from the same
+    /// key, so it is made once and kept.
+    AndroidInit,
     /// The next app, when what it is built from changed since the last:
     /// tag it, wait for GitHub to build it, and sign it as `app` does.
     /// `publish` starts this on its own, in the background; it never holds
@@ -127,6 +132,7 @@ pub fn run(cmd: ReleaseCmd, repo: &str, keys: &auth::Store) -> Result<()> {
         }
         ReleaseCmd::Status { url } => status(repo, &url)?,
         ReleaseCmd::App { tag, from, dry_run } => app(repo, keys, &tag, &from, dry_run)?,
+        ReleaseCmd::AndroidInit => android_init(repo, keys)?,
         ReleaseCmd::AppNext {
             r#ref,
             from,
@@ -413,7 +419,8 @@ fn publish(
 /// The app follows the release on its own time: GitHub's build takes the
 /// better part of half an hour, and the boxes do not wait for it. A process
 /// of its own, in a session of its own, so the end of this one (or of the
-/// terminal that ran it) does not take it along.
+/// terminal that ran it) does not take it along - and holding nothing this
+/// one had open.
 fn app_in_background(root: &Path, r#ref: &str) {
     let log = dirs_cache().join("app-release.log");
     let started = (|| -> Result<()> {
@@ -422,14 +429,14 @@ fn app_in_background(root: &Path, r#ref: &str) {
             .create(true)
             .append(true)
             .open(&log)?;
-        Command::new("setsid")
-            .arg(std::env::current_exe()?)
-            .args(["release", "app-next", "--ref", r#ref])
+        let mut cmd = Command::new(std::env::current_exe()?);
+        cmd.args(["release", "app-next", "--ref", r#ref])
             .current_dir(root)
             .stdin(std::process::Stdio::null())
             .stdout(out.try_clone()?)
-            .stderr(out)
-            .spawn()?;
+            .stderr(out);
+        detach(&mut cmd);
+        cmd.spawn()?;
         Ok(())
     })();
     match started {
@@ -441,6 +448,35 @@ fn app_in_background(root: &Path, r#ref: &str) {
             eprintln!("== the app was not started: {e:#}\n   `dd release app-next` when it can")
         }
     }
+}
+
+/// A session of its own, and nothing of ours but its stdio: whatever else
+/// is open here - the release lock a ship script holds, for one
+/// (docs/ci.md) - closes as the child starts. Release 196's app run kept
+/// that lock for its whole wait on GitHub.
+fn detach(cmd: &mut Command) {
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt as _;
+        cmd.pre_exec(|| {
+            libc::setsid();
+            let max = match libc::sysconf(libc::_SC_OPEN_MAX) {
+                n if n > 0 => n.min(65536) as i32,
+                _ => 1024,
+            };
+            // marked, not closed: std's own pipe for reporting a failed
+            // exec is among them, and it closes at exec the same way
+            for fd in 3..max {
+                let flags = libc::fcntl(fd, libc::F_GETFD);
+                if flags >= 0 {
+                    libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+                }
+            }
+            Ok(())
+        });
+    }
+    #[cfg(not(unix))]
+    let _ = cmd;
 }
 
 fn dirs_cache() -> PathBuf {
@@ -467,6 +503,178 @@ fn next_tag(prev: &str) -> Option<String> {
     let v = prev.strip_prefix('v')?;
     let (head, patch) = v.rsplit_once('.')?;
     Some(format!("v{head}.{}", patch.parse::<u64>().ok()? + 1))
+}
+
+/// the keystore's names for the Android signing key and its certificate,
+/// both base64 DER (PKCS#8, X.509)
+const ANDROID_KEY: &str = "android-key";
+const ANDROID_CERT: &str = "android-cert";
+/// what the signed apk is called among the release's files
+const SIGNED_APK: &str = "commonty-signed.apk";
+
+/// a tool from the flake's own nixpkgs, as every other this command runs
+fn pinned(root: &Path, pkg: &str, bin: &str) -> Command {
+    let mut c = Command::new("nix");
+    c.current_dir(root).args([
+        "shell",
+        "--inputs-from",
+        ".",
+        &format!("nixpkgs#{pkg}"),
+        "-c",
+        bin,
+    ]);
+    c
+}
+
+fn run_ok(mut c: Command, what: &str) -> Result<()> {
+    let out = c.output().with_context(|| format!("running {what}"))?;
+    ensure!(
+        out.status.success(),
+        "{what}: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
+    Ok(())
+}
+
+fn android_init(repo: &str, keys: &auth::Store) -> Result<()> {
+    use base64::Engine as _;
+    if keys.get(ANDROID_KEY)?.is_some() {
+        bail!(
+            "there is an Android key here already: a new one would leave every phone unable to update"
+        );
+    }
+    let root = repo_root(repo)?;
+    let dir = std::env::temp_dir().join(format!("dd-android-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let made = (|| -> Result<(Vec<u8>, Vec<u8>)> {
+        let pem = dir.join("key.pem");
+        let mut c = pinned(&root, "openssl", "openssl");
+        c.args([
+            "genpkey",
+            "-algorithm",
+            "RSA",
+            "-pkeyopt",
+            "rsa_keygen_bits:4096",
+            "-out",
+        ])
+        .arg(&pem);
+        run_ok(c, "openssl genpkey")?;
+        let mut c = pinned(&root, "openssl", "openssl");
+        c.args(["pkcs8", "-topk8", "-nocrypt", "-outform", "DER", "-in"])
+            .arg(&pem)
+            .arg("-out")
+            .arg(dir.join("key.der"));
+        run_ok(c, "openssl pkcs8")?;
+        // a hundred years: an app's signing certificate is not renewed,
+        // only replaced, and a replaced one is a new app to every phone
+        let mut c = pinned(&root, "openssl", "openssl");
+        c.args([
+            "req",
+            "-new",
+            "-x509",
+            "-days",
+            "36500",
+            "-subj",
+            "/CN=Commonty",
+            "-outform",
+            "DER",
+            "-key",
+        ])
+        .arg(&pem)
+        .arg("-out")
+        .arg(dir.join("cert.der"));
+        run_ok(c, "openssl req")?;
+        Ok((
+            std::fs::read(dir.join("key.der"))?,
+            std::fs::read(dir.join("cert.der"))?,
+        ))
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    let (key, cert) = made?;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    keys.set(ANDROID_KEY, &b64.encode(&key))?;
+    keys.set(ANDROID_CERT, &b64.encode(&cert))?;
+    use sha2::Digest as _;
+    let fp = sha2::Sha256::digest(&cert)
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(":");
+    println!("Android key made, in this machine's keystore beside the release key");
+    println!("certificate SHA-256: {fp}");
+    println!("keep it as you keep the release key: without it, phones cannot update the app");
+    Ok(())
+}
+
+fn android_key(keys: &auth::Store) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    match (keys.get(ANDROID_KEY)?, keys.get(ANDROID_CERT)?) {
+        (Some(k), Some(c)) => Ok(Some((b64.decode(k.trim())?, b64.decode(c.trim())?))),
+        _ => Ok(None),
+    }
+}
+
+/// the attested apk, signed with the Android key (v2 and v3 schemes); the key
+/// touches the disk only inside `dir`, which `app` removes
+fn sign_apk(root: &Path, dir: &Path, apk: &Path, key: &[u8], cert: &[u8]) -> Result<PathBuf> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let k = dir.join("android.key.der");
+    let c = dir.join("android.cert.der");
+    for (path, bytes) in [(&k, key), (&c, cert)] {
+        use std::io::Write as _;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)?
+            .write_all(bytes)?;
+    }
+    let out = dir.join(SIGNED_APK);
+    let mut s = pinned(root, "apksigner", "apksigner");
+    s.args(["sign", "--key"])
+        .arg(&k)
+        .arg("--cert")
+        .arg(&c)
+        .arg("--out")
+        .arg(&out)
+        // apksigner aligns as it signs
+        .arg(apk);
+    let signed = run_ok(s, "apksigner sign");
+    let _ = std::fs::remove_file(&k);
+    signed?;
+    let mut v = pinned(root, "apksigner", "apksigner");
+    v.arg("verify").arg(&out);
+    run_ok(v, "apksigner verify")?;
+    Ok(out)
+}
+
+/// the signed apk onto the release GitHub built, beside what it built
+fn upload_asset(root: &Path, from: &str, tag: &str, file: &Path) -> Result<()> {
+    let mut gh = Command::new("nix");
+    gh.current_dir(root)
+        .args([
+            "run",
+            ".#gh",
+            "--",
+            "release",
+            "upload",
+            tag,
+            "--clobber",
+            "--repo",
+            from,
+        ])
+        .arg(file);
+    if let Some(t) = Command::new("gh")
+        .args(["auth", "token"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    {
+        gh.env("GH_TOKEN", t);
+    }
+    run_ok(gh, "uploading the signed apk")
 }
 
 /// the files the release workflow publishes, by name (.github/workflows/release.yml)
@@ -1290,6 +1498,10 @@ fn app(repo: &str, keys: &auth::Store, tag: &str, from: &str, dry_run: bool) -> 
     let result = (|| -> Result<serde_json::Value> {
         let mut files = serde_json::Map::new();
         for (name, url) in github_assets(from, tag)? {
+            // the signed apk is ours, made below from the attested one
+            if name == SIGNED_APK {
+                continue;
+            }
             let path = dir.join(&name);
             let st = Command::new("curl")
                 .args(["-sfL", "-o"])
@@ -1345,6 +1557,33 @@ fn app(repo: &str, keys: &auth::Store, tag: &str, from: &str, dry_run: bool) -> 
             if built_from != want {
                 bail!("{name} was built from {built_from}, and {tag} is {want}");
             }
+            // The apk GitHub builds is unsigned, and no phone installs that.
+            // Signed here, with the Android key beside the release key, and
+            // offered from the release as a file of its own; without the key,
+            // left out, so the downloads page shows Android as not ready
+            // rather than offering a file that cannot install.
+            let (path, url) = if name == "commonty.apk" {
+                match android_key(keys)? {
+                    Some((k, c)) => {
+                        let signed = sign_apk(&root, &dir, &path, &k, &c)?;
+                        if !dry_run {
+                            upload_asset(&root, from, tag, &signed)?;
+                        }
+                        let url = format!(
+                            "https://github.com/{from}/releases/download/{tag}/{SIGNED_APK}"
+                        );
+                        (signed, url)
+                    }
+                    None => {
+                        eprintln!(
+                            "   {name}: left out - no Android key here (`dd release android-init`), and a phone installs only a signed apk"
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                (path, url)
+            };
             let bytes = std::fs::read(&path)?;
             let sha = format!("{:x}", sha2::Sha256::digest(&bytes));
             eprintln!("   {name}  {sha}");
@@ -1416,6 +1655,36 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // the lock a ship script holds is an fd it opened without close-on-exec;
+    // the app's background run must not carry it off
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_app_run_holds_nothing_it_was_handed() {
+        use std::os::fd::AsRawFd as _;
+        let dir = std::env::temp_dir().join(format!("dd-detach-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let held = std::fs::File::create(dir.join("lock")).unwrap();
+        let fd = held.as_raw_fd();
+        unsafe {
+            let f = libc::fcntl(fd, libc::F_GETFD);
+            libc::fcntl(fd, libc::F_SETFD, f & !libc::FD_CLOEXEC);
+        }
+        let probe = format!("test -e /proc/self/fd/{fd} && echo held || echo free");
+        let plain = Command::new("sh").args(["-c", &probe]).output().unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&plain.stdout).trim(),
+            "held",
+            "the probe sees a handed fd"
+        );
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", &probe]);
+        detach(&mut cmd);
+        let out = cmd.output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "free");
+        drop(held);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn the_app_follows_what_it_is_built_from() {

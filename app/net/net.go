@@ -200,7 +200,7 @@ func commonty_net_browser(domain *C.char) *C.char {
 		}
 		browser = b
 	}
-	return reply(out{Pac: browser.url(), Rules: pacFile(browser.domain)})
+	return reply(out{Pac: browser.url(), Rules: browser.rules()})
 }
 
 // commonty_net_stop leaves the network for this run; the state stays for

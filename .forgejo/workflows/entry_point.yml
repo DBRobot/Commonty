@@ -351,15 +351,19 @@ jobs:
 
   # The app on its own: its dependency tree (tauri, webkit) is most of
   # any compile, so the workspace checks leave it out and this runs only
-  # when the app or what it builds on changed.
+  # when the app or what it builds on changed. Its Android and Windows
+  # builds are GitHub's (.github/workflows/release.yml), after each release
+  # that changes the app (dd release app-next).
   app_lint:
     needs: files_modified
     if: ${{ needs.files_modified.outputs.app == 'true' }}
     runs-on: nix
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
-      - name: clippy on the app
-        run: nix build --no-link .#checks.x86_64-linux.clippy-app
+      # its lint, its tests, and its network engine's vet and tests: one
+      # job, on the app's own cached dependency build
+      - name: the app's lint and tests, and its engine's
+        run: nix build --no-link -L .#checks.x86_64-linux.clippy-app .#checks.x86_64-linux.tests-app .#checks.x86_64-linux.net-check
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
