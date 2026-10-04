@@ -32,29 +32,66 @@ in
     assertions = [
       {
         assertion = clashes == { };
-        message = "two services on ${config.networking.hostName} claim one port: " + lib.concatStringsSep "; " (
-          lib.mapAttrsToList (p: svcs: "${p} by ${lib.concatStringsSep " and " svcs}") clashes
-        );
+        message =
+          "two services on ${config.networking.hostName} claim one port: "
+          + lib.concatStringsSep "; " (
+            lib.mapAttrsToList (p: svcs: "${p} by ${lib.concatStringsSep " and " svcs}") clashes
+          );
       }
     ];
 
     # what nixpkgs runs here, when it does
     dd.ports = lib.mkMerge [
       (lib.mkIf (has "sshd") { ssh = [ 22 ]; })
-      (lib.mkIf (has "nginx") { nginx = [ 80 443 ]; })
+      (lib.mkIf (has "nginx") {
+        nginx = [
+          80
+          443
+        ];
+      })
       (lib.mkIf (has "postgresql") { postgresql = [ config.services.postgresql.settings.port ]; })
-      (lib.mkIf (has "garage") { garage = [ 3900 3901 3903 ]; })
+      (lib.mkIf (has "garage") {
+        garage = [
+          3900
+          3901
+          3903
+        ];
+      })
       (lib.mkIf (has "prometheus") { prometheus = [ config.services.prometheus.port ]; })
-      (lib.mkIf (has "prometheus-node-exporter") { node-exporter = [ config.services.prometheus.exporters.node.port ]; })
-      (lib.mkIf (has "prometheus-smartctl-exporter") { smartctl-exporter = [ config.services.prometheus.exporters.smartctl.port ]; })
+      (lib.mkIf (has "prometheus-node-exporter") {
+        node-exporter = [ config.services.prometheus.exporters.node.port ];
+      })
+      (lib.mkIf (has "prometheus-smartctl-exporter") {
+        smartctl-exporter = [ config.services.prometheus.exporters.smartctl.port ];
+      })
       (lib.mkIf (has "headscale") { headscale = [ config.services.headscale.port ]; })
       (lib.mkIf (has "unbound") { unbound = [ 5335 ]; })
-      (lib.mkIf (has "searx") { searxng = [ 8888 ]; })
+      (lib.mkIf (has "searx") { searxng = [ 4196 ]; })
       (lib.mkIf (has "vaultwarden") { vaultwarden = [ config.services.vaultwarden.config.ROCKET_PORT ]; })
-      (lib.mkIf (has "pihole-ftl") { pihole = [ 53 8053 ]; })
-      (lib.mkIf (has "thanos-sidecar") { thanos-sidecar = [ 10901 10902 ]; })
-      (lib.mkIf (has "thanos-store") { thanos-store = [ 10905 10906 ]; })
-      (lib.mkIf (has "thanos-query") { thanos-query = [ 10907 10903 ]; })
+      (lib.mkIf (has "pihole-ftl") {
+        pihole = [
+          53
+          8053
+        ];
+      })
+      (lib.mkIf (has "thanos-sidecar") {
+        thanos-sidecar = [
+          10901
+          10902
+        ];
+      })
+      (lib.mkIf (has "thanos-store") {
+        thanos-store = [
+          10905
+          10906
+        ];
+      })
+      (lib.mkIf (has "thanos-query") {
+        thanos-query = [
+          10907
+          10903
+        ];
+      })
       (lib.mkIf (has "thanos-compact") { thanos-compact = [ 10908 ]; })
       # its metrics, which nothing reads yet
       (lib.mkIf (lib.any (lib.hasPrefix "cloudflared-tunnel-") (lib.attrNames config.systemd.services)) {
@@ -62,17 +99,42 @@ in
       })
       # ours (box/*): each where its module runs it
       (lib.mkIf (has "dd-verify") { verify = [ config.dd.verify.port ]; })
-      (lib.mkIf (has "dd-transcode") { transcode = [ 4190 4191 ]; })
+      (lib.mkIf (has "dd-transcode") {
+        transcode = [
+          4190
+          4191
+        ];
+      })
+      # the pool worlds are handed ports from, and every port a game insists
+      # on (data/games/catalogue.json fixed_ports): no service of ours may
+      # take one, or that game could never start here
+      (lib.mkIf (has "dd-games") {
+        games =
+          lib.range config.dd.games.portBase (config.dd.games.portBase + config.dd.games.portCount - 1)
+          ++ lib.unique (
+            lib.concatMap (
+              g: lib.attrValues (g.fixed_ports or { })
+            ) (lib.importJSON ../../../data/games/catalogue.json).games
+          );
+      })
       (lib.mkIf (has "dd-control") { control = [ 4195 ]; })
       (lib.mkIf (has "dd-ci-cancel") { ci-cancel = [ 3003 ]; })
-      (lib.mkIf (has "ente") { museum = [ 8080 2112 ]; })
+      (lib.mkIf (has "ente") {
+        museum = [
+          8080
+          2112
+        ];
+      })
       # the public listener nginx keeps for the tunnel (gate/public.nix)
       (lib.mkIf (has "nginx" && config.dd ? public && config.dd.public.enable) { tunnel = [ 8443 ]; })
     ];
 
     systemd.services.dd-ports-check = {
       description = "Every listening port is one a service declared";
-      path = [ pkgs.iproute2 pkgs.gawk ];
+      path = [
+        pkgs.iproute2
+        pkgs.gawk
+      ];
       serviceConfig.Type = "oneshot";
       script = ''
         allowed=" ${lib.concatMapStringsSep " " toString allowed} "

@@ -59,7 +59,8 @@
       pkgs.jq
     ];
     virtualisation.memorySize = 4096;
-    dd.games.memoryMiB = 1536;
+    # a 1536M guest and its qemu (box/games/src/lib.rs, QEMU_OVERHEAD_MIB)
+    dd.games.memoryMiB = 2048;
     virtualisation.cores = 2;
     virtualisation.diskSize = 8192;
   };
