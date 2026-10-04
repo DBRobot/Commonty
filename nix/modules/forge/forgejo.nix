@@ -7,9 +7,25 @@
 }:
 let
   attachable = lib.concatStringsSep "," [
-    ".png" ".jpg" ".jpeg" ".gif" ".webp" ".avif"
-    ".pdf" ".txt" ".log" ".md" ".csv" ".json" ".patch"
-    ".zip" ".gz" ".tgz" ".mp4" ".webm" ".mov"
+    ".png"
+    ".jpg"
+    ".jpeg"
+    ".gif"
+    ".webp"
+    ".avif"
+    ".pdf"
+    ".txt"
+    ".log"
+    ".md"
+    ".csv"
+    ".json"
+    ".patch"
+    ".zip"
+    ".gz"
+    ".tgz"
+    ".mp4"
+    ".webm"
+    ".mov"
   ];
   base = config.dd.domain;
   host = "git.${base}";
@@ -279,7 +295,8 @@ in
       };
       # the forge's own: its API, git over https, raw files and archives,
       # a job's log, avatars, and its account pages
-      locations."~ ^/(api|assets|avatars|repo-avatars|attachments|user|login|-|\\.well-known)(/|$)" = toForge;
+      locations."~ ^/(api|assets|avatars|repo-avatars|attachments|user|login|-|\\.well-known)(/|$)" =
+        toForge;
       locations."~ ^/[^/]+/[^/]+\\.git(/|$)" = toForge;
       locations."~ ^/[^/]+/[^/]+/(info/refs|info/lfs|git-upload-pack|git-receive-pack)" = toForge;
       locations."~ ^/[^/]+/[^/]+/(raw|archive|media|releases/download|attachments)/" = toForge;

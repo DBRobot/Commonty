@@ -559,6 +559,23 @@
         {
           # a package must be a derivation (flake check), not a source path
           pages = pkgs.runCommandLocal "dd-pages" { } "cp -r ${pages} $out";
+          # what ci's style and lint jobs run (.forgejo/checks), pinned with
+          # everything else
+          ci-tools = pkgs.buildEnv {
+            name = "ci-tools";
+            paths = with pkgs; [
+              python3
+              gitMinimal
+              yq-go
+              nixfmt
+              ruff
+              shellcheck
+              actionlint
+              biome
+              gitleaks
+              typos
+            ];
+          };
           # the cli, and `git remote add origin dd::...`, which dd repo calls too
           # `dd media` mounts libraries with rclone; the binary knows where it is
           dd = pkgs.symlinkJoin {

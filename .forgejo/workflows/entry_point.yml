@@ -11,9 +11,13 @@ name: entry_point
 
 # once per change: a pull request runs it. main moves only by merging a
 # branch rebased onto it (the rule refuses an outdated one), so what lands
-# is the tree this ran on, and a push to main runs nothing
+# is the tree this ran on, and a push to main runs nothing.
+# A draft ("WIP: " in its title) runs the style and lint checks alone, and
+# cannot pass ci_ok; taking WIP out is an edit, which starts the full run.
+# An edit to a commit that already passed reruns the style check alone.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 # one run per pull request: a new push cancels the run of the push before it
 concurrency:
@@ -28,6 +32,8 @@ jobs:
       rust: ${{ steps.detect.outputs.rust }}
       vm: ${{ steps.detect.outputs.vm }}
       app: ${{ steps.detect.outputs.app }}
+      draft: ${{ steps.detect.outputs.draft }}
+      proven: ${{ steps.detect.outputs.proven }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
         with:
@@ -39,7 +45,25 @@ jobs:
       # at every release and roll back what does not come up.
       - name: what changed?
         id: detect
+        env:
+          DRAFT: ${{ github.event.pull_request.draft }}
+          ACTION: ${{ github.event.action }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STATUS: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/status?limit=100
         run: |
+          echo "draft=${DRAFT:-false}" >> "$GITHUB_OUTPUT"
+          # a draft builds nothing; and an edit (the title, the body) to a
+          # commit whose ci_ok already passed has nothing new to build
+          proven=false
+          if [ "$ACTION" = edited ]; then
+            proven=$(printf 'Authorization: token %s\n' "$TOKEN" | curl -fsS -H @- "$STATUS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const st=JSON.parse(s).statuses||[];console.log(st.some(x=>x.context==="entry_point / ci_ok (pull_request)"&&x.status==="success")?"true":"false")})') || proven=false
+          fi
+          echo "proven=$proven" >> "$GITHUB_OUTPUT"
+          if [ "$DRAFT" = true ] || [ "$proven" = true ]; then
+            echo "draft: $DRAFT  already passed: $proven  - nothing to build"
+            for k in nix rust vm app; do echo "$k=false" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "nix=true" >> "$GITHUB_OUTPUT"
             echo "rust=true" >> "$GITHUB_OUTPUT"
@@ -238,6 +262,50 @@ jobs:
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
+  # ---- the pull request itself: its title and body, its commits, and the
+  # files it changes (.forgejo/checks/style.py). Every finding blocks.
+
+  style:
+    runs-on: nix
+    steps:
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
+        with:
+          fetch-depth: 0 # the commits since the base
+      # the title and body by the environment, never pasted into the script:
+      # a title is anyone's text
+      - name: title, body, commits and files
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          AUTHORS: davidsprojects7@gmail.com
+        run: nix shell .#ci-tools -c python3 .forgejo/checks/style.py
+      - uses: ./.forgejo/actions/stop-run
+        if: failure()
+
+  # The linters, on what changed (.forgejo/checks/lint.py): a real fault
+  # blocks, the rest is a yellow lint/warnings status that blocks nothing.
+  lint:
+    needs: files_modified
+    if: ${{ needs.files_modified.outputs.proven != 'true' }}
+    runs-on: nix
+    steps:
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
+        with:
+          fetch-depth: 0
+      - name: faults and warnings
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}
+        run: nix shell .#ci-tools -c python3 .forgejo/checks/lint.py
+      - uses: ./.forgejo/actions/stop-run
+        if: failure()
+
   # ---- rust: everything in box/ and client/ formatted, lint-clean, and
   # the tests pass - the end-to-end ones included, which run boxes
   # in-process and try to break them. Each is a nix derivation on the same
@@ -245,7 +313,7 @@ jobs:
   # tests), cached by content: a run whose rust did not change gets last
   # time's answer in seconds.
 
-  lint:
+  rust_lint:
     needs: files_modified
     if: ${{ needs.files_modified.outputs.rust == 'true' }}
     runs-on: nix
@@ -283,22 +351,27 @@ jobs:
 
   # ---- the one check main's rule asks for
 
-  # Every job above, passed or rightly skipped. It runs whatever they did
+  # Every job above, passed or rightly skipped, and not a draft. It runs whatever they did
   # (always()), so a failure reports here at once; a run stop-run cancels
   # never reaches it and is refused the same way. nix/tests/ci.nix fails
   # the build if a job is missing from this list.
   ci_ok:
-    needs: [files_modified, flake_check, mail_worker, build_part, build_host, same_build, vm_tests, lint, app_lint, test]
+    needs: [files_modified, style, lint, flake_check, mail_worker, build_part, build_host, same_build, vm_tests, rust_lint, app_lint, test]
     if: ${{ always() }}
     runs-on: nix
     steps:
       - name: every job passed or was skipped
         env:
           NEEDS: ${{ toJSON(needs) }}
+          DRAFT: ${{ needs.files_modified.outputs.draft }}
         run: |
           node --input-type=module - <<'EOF'
           const needs = JSON.parse(process.env.NEEDS);
           let bad = false;
+          if (process.env.DRAFT === 'true') {
+            console.log('a draft: take "WIP: " out of the title to run everything and merge');
+            bad = true;
+          }
           for (const [job, { result }] of Object.entries(needs)) {
             const ok = result === 'success' || (result === 'skipped' && job !== 'files_modified');
             console.log(`${ok ? 'ok  ' : 'FAIL'} ${job}: ${result}`);
