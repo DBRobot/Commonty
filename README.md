@@ -48,6 +48,16 @@ silently redeploy the previous revision.
   sidecar channel goes too and a box's history reaches the fleet view only
   through the bucket.
 - **An off-site copy.** Every copy of every member's data is in one building.
+- **One vote per house in the control plane.** It starts with three voters:
+  node1, node2 and the Cloudflare witness (docs/control-plane.md). That
+  survives any one of them going down, but it is not Byzantine-safe (that
+  takes four), and node1 and node2 share a house, so the house votes twice.
+  As boxes go off site: each new house gets one validator and node2 stops
+  voting; outside witnesses fill the count up to four in the meantime (a
+  small VPS, or a member's always-on device in another place); and once
+  there are four houses, the witnesses retire, the Cloudflare one last. A
+  house that joins changes the validator list in a signed release, never on
+  its own say.
 
 ## License
 
