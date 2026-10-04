@@ -1055,6 +1055,7 @@
                 ./nix/modules/box/secure-boot.nix
                 ./nix/modules/box/disk-unlock.nix
                 ./nix/modules/box/control.nix
+                ./nix/modules/box/ports.nix
                 {
                   dd.control.enable = true;
                   dd.control.roles = box.roles;
