@@ -1,6 +1,7 @@
 # The control plane end to end (nix/tests/control/run.py): the relay bundle
-# this release builds, under wrangler, and three dd-control validators. No
-# network, no vm.
+# this release builds, under wrangler, three dd-control validators, and a
+# gate on each box keeping the directory as the agreed log. No network, no
+# vm.
 { pkgs, self, ... }:
 let
   sys = pkgs.stdenv.hostPlatform.system;
@@ -12,12 +13,20 @@ pkgs.runCommand "control-e2e"
       python
       pkgs.wrangler
       pkgs.curl
+      pkgs.go_1_26
     ];
   }
   ''
     export HOME=$TMPDIR WRANGLER_SEND_METRICS=false CI=1 CLOUDFLARE_CF_FETCH_ENABLED=false
+    # the state machine's and the validators' own tests first: the build of
+    # dd-control compiles only its command
+    cp -r ${../../box/control} src && chmod -R u+w src
+    cp -r ${self.packages.${sys}.dd-control.goModules} src/vendor
+    (cd src && GOFLAGS=-mod=vendor GOCACHE=$TMPDIR/go-cache CGO_ENABLED=0 go test ./state/ ./validator/)
     mkdir w && cp ${self.packages.${sys}.control-worker}/{worker.js,wasm_exec.js,witness.wasm} w/
     cp ${self.packages.${sys}.dd-control}/bin/dd-control . && chmod u+w w/*
+    # each box's gate, for the directory over the agreed log
+    cp ${self.packages.${sys}.verify}/bin/verify .
     # a test fleet: three boxes that each vote, and the witness
     python3 - <<'PY'
     import json, base64, os, subprocess
@@ -62,7 +71,7 @@ pkgs.runCommand "control-e2e"
     python3 ${./control/run.py} || status=$?
     kill $worker 2>/dev/null || true
     if [ $status -ne 0 ]; then
-      echo "--- relay"; tail -30 wrangler.log; for i in 1 2 3; do echo "--- node$i"; tail -15 n$i.log; done
+      echo "--- relay"; tail -30 wrangler.log; for i in 1 2 3; do echo "--- node$i"; tail -15 n$i.log; echo "--- gate$i"; tail -15 g$i.log 2>/dev/null; done
       exit $status
     fi
     touch $out

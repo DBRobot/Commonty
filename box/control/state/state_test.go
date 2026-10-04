@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -158,5 +159,35 @@ func TestEveryValidatorReachesTheSameState(t *testing.T) {
 	}
 	if a, b := run(), run(); a != b {
 		t.Fatalf("two runs differ:\n%s\n%s", a, b)
+	}
+}
+
+func TestTheDirectoryLogKeepsOrderAndBoundsEachBox(t *testing.T) {
+	f := newFleet(t)
+	item := map[string]any{"entry": map[string]any{"name": "ann"}}
+	if got := f.block(1_000, f.req("node1", "directory", item), f.req("node2", "directory", item)); got != 2 {
+		t.Fatalf("applied %d of 2", got)
+	}
+	d := f.s.Directory
+	if len(d) != 2 || d[0].Box != "node1" || d[1].Box != "node2" || d[0].Height != f.s.Height || d[0].Time != 1_000 {
+		t.Fatalf("log: %+v", d)
+	}
+	// too big, or not json: never in the log
+	big := f.req("node1", "directory", strings.Repeat("x", MaxDirItem))
+	bad := f.req("node1", "directory", nil)
+	bad.Body = []byte("{nope")
+	if got := f.block(2_000, big, bad); got != 0 {
+		t.Fatalf("applied %d bad items", got)
+	}
+	// a box sends at most DirPerMinute a minute; the next minute it may again
+	var many []Request
+	for i := 0; i < DirPerMinute+5; i++ {
+		many = append(many, f.req("node1", "directory", item))
+	}
+	if got := f.block(3_000, many...); got != DirPerMinute-1 {
+		t.Fatalf("applied %d in the minute that had one already; want %d", got, DirPerMinute-1)
+	}
+	if got := f.block(62_000, f.req("node1", "directory", item)); got != 1 {
+		t.Fatal("a new minute takes items again")
 	}
 }

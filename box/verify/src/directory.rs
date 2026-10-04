@@ -48,6 +48,10 @@ pub struct Directory {
     /// removed, or "sign out everywhere else". Passwords reads it
     /// (modules/vault/vaultwarden.nix). None: nothing else to tell.
     ended: Option<PathBuf>,
+    /// the control plane, when the directory is the agreed log's
+    /// (VERIFY_CONTROL): writes go there, and this box's copy is what the
+    /// log says, replayed through the same rules on every box
+    agreed: Option<Agreed>,
     /// entries as last read, by name, with the file's time and size then:
     /// every request asks whose it is, and the file rarely changes
     read: std::sync::Mutex<
@@ -93,7 +97,56 @@ impl Directory {
                 .build()?,
             synced,
             writing: std::sync::Mutex::new(()),
+            agreed: None,
         })
+    }
+
+    /// The directory as the control plane's agreed log has it: no peers,
+    /// no pulls. `control` is dd-control's address on this box, `submit` its
+    /// socket for this box's items, `voters` the boxes whose gates must all
+    /// acknowledge a new name before it is anyone's, `me` this box.
+    pub fn agreed(
+        mut self,
+        control: String,
+        submit: PathBuf,
+        voters: Vec<String>,
+        me: String,
+    ) -> Result<Self> {
+        let replay_file = self
+            .dir
+            .parent()
+            .map(|p| p.join("replay.json"))
+            .unwrap_or_else(|| self.dir.join("replay.json"));
+        let replay = match std::fs::read(&replay_file) {
+            Ok(b) => serde_json::from_slice(&b).context("replay.json")?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Replay::default(),
+            Err(e) => return Err(e.into()),
+        };
+        // what this box held before the log: served until the log has it
+        let legacy = self
+            .dir
+            .parent()
+            .map(|p| p.join("directory-before-log"))
+            .unwrap_or_else(|| self.dir.join("before-log"));
+        if !legacy.exists() && replay.next == 0 {
+            std::fs::rename(&self.dir, &legacy)?;
+            std::fs::create_dir_all(&self.dir)?;
+        }
+        self.peers.clear();
+        self.synced.store(true, Ordering::Relaxed);
+        let migrated = AtomicBool::new(replay.migrated);
+        self.agreed = Some(Agreed {
+            control,
+            submit,
+            voters,
+            me,
+            legacy,
+            replay_file,
+            replay: std::sync::Mutex::new(replay),
+            changed: tokio::sync::Notify::new(),
+            migrated,
+        });
+        Ok(self)
     }
 
     /// The person's own signed entry, as last accepted by this box.
@@ -103,7 +156,13 @@ impl Directory {
         if !identity::valid_name(name) {
             return Ok(None);
         }
-        let p = self.dir.join(format!("{name}.json"));
+        let mut p = self.dir.join(format!("{name}.json"));
+        if let Some(a) = &self.agreed
+            && !p.exists()
+            && !a.migrated.load(Ordering::Relaxed)
+        {
+            p = a.legacy.join(format!("{name}.json"));
+        }
         let meta = match std::fs::metadata(&p) {
             Ok(m) => m,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -541,7 +600,7 @@ async fn put_invite(
     if invite_key(&key).as_deref() != Some(inv.invite.public_key.as_str()) {
         return (StatusCode::BAD_REQUEST, "key in path and invite differ").into_response();
     }
-    match d.put_invite(&inv) {
+    match d.put_invite_anywhere(&inv).await {
         Ok(()) => {
             eprintln!("directory: invite held until {}", inv.invite.expires);
             StatusCode::OK.into_response()
@@ -605,6 +664,23 @@ impl Directory {
 
     /// An invite the owner signed, kept until it expires. Anyone may put
     /// one; only one the release key signed is kept.
+    pub async fn put_invite_anywhere(
+        &self,
+        inv: &identity::SignedInvite,
+    ) -> std::result::Result<(), String> {
+        if self.agreed.is_some() {
+            let Some(release) = &self.release else {
+                return Err("this box holds no release key to check invites with".into());
+            };
+            identity::verify_invite(inv, release).map_err(|e| format!("refused: {e}"))?;
+            return self
+                .through_the_log(Item::Invite(inv.clone()))
+                .await
+                .map_err(|(_, e)| e);
+        }
+        self.put_invite(inv)
+    }
+
     pub fn put_invite(&self, inv: &identity::SignedInvite) -> std::result::Result<(), String> {
         let Some(release) = &self.release else {
             return Err("this box holds no release key to check invites with".into());
@@ -669,6 +745,7 @@ impl Directory {
         &self,
         existing: Option<&identity::SignedEntry>,
         new: &identity::Entry,
+        at: u64,
     ) -> std::result::Result<(), String> {
         let Some(g) = &new.grant else {
             return Ok(());
@@ -681,7 +758,7 @@ impl Directory {
             .and_then(|e| e.entry.grant.as_ref())
             .is_some_and(|old| old == g);
         if !already {
-            if g.invite.invite.expires <= identity::now() {
+            if g.invite.invite.expires <= at {
                 return Err("that invite has expired".into());
             }
             if self.grant_taken(&g.invite.invite.public_key, &new.root) {
@@ -706,7 +783,7 @@ impl Directory {
             eprintln!("directory: refused update for {name}: {e}");
             return Err((StatusCode::FORBIDDEN, format!("refused: {e}")));
         }
-        if let Err(e) = self.check_grant(existing.as_ref(), &signed.entry) {
+        if let Err(e) = self.check_grant(existing.as_ref(), &signed.entry, identity::now()) {
             eprintln!("directory: refused update for {name}: {e}");
             return Err((StatusCode::CONFLICT, e));
         }
@@ -720,8 +797,13 @@ impl Directory {
             eprintln!("directory: refused new name {name}: {why}");
             return Err((status, why));
         }
-        self.commit(&signed, |current| self.check_grant(current, &signed.entry))
-            .inspect_err(|(_, why)| eprintln!("directory: refused update for {name}: {why}"))?;
+        if self.agreed.is_some() {
+            return self.through_the_log(Item::Entry(Box::new(signed))).await;
+        }
+        self.commit(&signed, |current| {
+            self.check_grant(current, &signed.entry, identity::now())
+        })
+        .inspect_err(|(_, why)| eprintln!("directory: refused update for {name}: {why}"))?;
         eprintln!(
             "directory: {name} version {} ({} device(s), {} passkey(s){})",
             signed.entry.version,
@@ -733,6 +815,411 @@ impl Directory {
                 ""
             }
         );
+        Ok(())
+    }
+}
+
+// ---- the directory as the control plane's agreed log
+//
+// Every write goes into the log through this box's dd-control (signed by
+// its TPM); the validators order items and judge none. Every gate replays
+// the log through the rules above, at each item's agreed time, so every
+// box ends at the same directory. An update is the owner's own signature
+// and needs nothing more. A name nobody holds yet is a claim: it is the
+// claimant's only once the gate of every voting box has acknowledged that
+// very claim in the log. A voter that lies can then stall a new name, and
+// never give it to two people.
+
+pub struct Agreed {
+    control: String,
+    submit: PathBuf,
+    voters: Vec<String>,
+    me: String,
+    legacy: PathBuf,
+    replay_file: PathBuf,
+    replay: std::sync::Mutex<Replay>,
+    changed: tokio::sync::Notify,
+    /// Replay::migrated, read without its lock: every read of an entry
+    /// asks, the replay among them while it holds the lock
+    migrated: AtomicBool,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct Replay {
+    /// the next log item to replay
+    next: usize,
+    /// claims to names nobody holds, waiting for every voter's ack, in log order
+    pending: Vec<Pending>,
+    /// claim hash -> the boxes whose gates acknowledged it
+    acks: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    /// item hash -> what became of it, for a write waiting on it
+    outcome: std::collections::BTreeMap<String, std::result::Result<(), String>>,
+    /// this box's legacy entries are all in the log
+    migrated: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct Pending {
+    hash: String,
+    entry: identity::SignedEntry,
+    at: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Item {
+    Entry(Box<identity::SignedEntry>),
+    Invite(identity::SignedInvite),
+    Ack(String),
+}
+
+#[derive(Deserialize)]
+struct LogItem {
+    time: i64,
+    #[serde(rename = "box")]
+    from: String,
+    item: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct LogPage {
+    items: Vec<LogItem>,
+    next: usize,
+}
+
+/// an item's name in the log: its canonical json's sha256, the same
+/// whichever way the control plane escaped it
+fn item_hash(v: &serde_json::Value) -> String {
+    use sha2::Digest as _;
+    let b = serde_json::to_vec(v).unwrap_or_default();
+    sha2::Sha256::digest(&b)
+        .iter()
+        .map(|x| format!("{x:02x}"))
+        .collect()
+}
+
+impl Directory {
+    /// a write: this box's checks have passed; into the log, and the answer
+    /// is what the replay made of it
+    async fn through_the_log(&self, item: Item) -> std::result::Result<(), (StatusCode, String)> {
+        let a = self.agreed.as_ref().expect("agreed mode");
+        let v = serde_json::to_value(&item)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let hash = item_hash(&v);
+        self.submit(&v).await.map_err(|e| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("the control plane: {e:#}"),
+            )
+        })?;
+        // a new name waits for every voter's gate; updates land in seconds
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+        loop {
+            if let Some(r) = a.replay.lock().unwrap().outcome.get(&hash).cloned() {
+                return r.map_err(|e| (StatusCode::CONFLICT, e));
+            }
+            let wait = a.changed.notified();
+            if tokio::time::timeout_at(deadline, wait).await.is_err() {
+                return Err((
+                    StatusCode::ACCEPTED,
+                    "sent; not agreed yet - it lands once every voting box has seen it".into(),
+                ));
+            }
+        }
+    }
+
+    /// one item to this box's dd-control, over its socket
+    async fn submit(&self, v: &serde_json::Value) -> Result<()> {
+        let a = self.agreed.as_ref().expect("agreed mode");
+        let sock = a.submit.clone();
+        let body = serde_json::to_vec(v)?;
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            use std::io::{Read as _, Write as _};
+            let mut c = std::os::unix::net::UnixStream::connect(&sock)
+                .with_context(|| format!("{}", sock.display()))?;
+            c.set_read_timeout(Some(Duration::from_secs(30)))?;
+            write!(
+                c,
+                "POST /submit HTTP/1.1\r\nHost: control\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )?;
+            c.write_all(&body)?;
+            let mut answer = String::new();
+            c.read_to_string(&mut answer)?;
+            let status = answer.split_whitespace().nth(1).unwrap_or("");
+            anyhow::ensure!(status == "202", "dd-control answered {}", answer.lines().next().unwrap_or(""));
+            Ok(())
+        })
+        .await?
+    }
+
+    /// Forever: replay what the log has added, acknowledge the claims this
+    /// box finds good, and put this box's pre-log entries into the log.
+    pub async fn follow(self: Arc<Self>) {
+        let Some(a) = self.agreed.as_ref() else {
+            return;
+        };
+        let mut sent_legacy = std::collections::BTreeSet::new();
+        loop {
+            match self.catch_up().await {
+                Ok(acks) => {
+                    for hash in acks {
+                        if let Err(e) = self
+                            .submit(
+                                &serde_json::to_value(Item::Ack(hash.clone())).unwrap_or_default(),
+                            )
+                            .await
+                        {
+                            eprintln!("directory: acknowledging {hash}: {e:#}");
+                        }
+                    }
+                    if let Err(e) = self.migrate(&mut sent_legacy).await {
+                        eprintln!("directory: putting the old entries in the log: {e:#}");
+                    }
+                }
+                Err(e) => eprintln!("directory: reading the log: {e:#}"),
+            }
+            let _ = a;
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    /// Replay every new item; returns the claims this box should ack
+    async fn catch_up(&self) -> Result<Vec<String>> {
+        let a = self.agreed.as_ref().expect("agreed mode");
+        let next = a.replay.lock().unwrap().next;
+        let page: LogPage = self
+            .http
+            .get(format!(
+                "{}/directory?since={next}",
+                a.control.trim_end_matches('/')
+            ))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let mut to_ack = Vec::new();
+        if page.items.is_empty() {
+            return Ok(to_ack);
+        }
+        {
+            let mut r = a.replay.lock().unwrap();
+            for it in page.items {
+                let at = (it.time / 1000).max(0) as u64;
+                if let Some(h) = self.replay_one(&mut r, &it.from, it.item, at) {
+                    to_ack.push(h);
+                }
+                r.next += 1;
+            }
+            debug_assert!(r.next <= page.next);
+            let b = serde_json::to_vec(&*r)?;
+            let tmp = a.replay_file.with_extension("tmp");
+            std::fs::write(&tmp, b)?;
+            std::fs::rename(&tmp, &a.replay_file)?;
+        }
+        a.changed.notify_waiters();
+        Ok(to_ack)
+    }
+
+    /// One item, at its agreed time. Returns a claim's hash when this box's
+    /// gate should acknowledge it.
+    fn replay_one(
+        &self,
+        r: &mut Replay,
+        from: &str,
+        v: serde_json::Value,
+        at: u64,
+    ) -> Option<String> {
+        let a = self.agreed.as_ref().expect("agreed mode");
+        let hash = item_hash(&v);
+        let item: Item = match serde_json::from_value(v) {
+            Ok(i) => i,
+            Err(e) => {
+                r.outcome.insert(hash, Err(format!("not an item: {e}")));
+                return None;
+            }
+        };
+        let mut ack = None;
+        match item {
+            Item::Ack(claim) => {
+                if a.voters.iter().any(|v| v == from) {
+                    r.acks.entry(claim).or_default().insert(from.to_string());
+                }
+            }
+            Item::Invite(inv) => {
+                let ok = match &self.release {
+                    Some(k) => identity::verify_invite(&inv, k)
+                        .map_err(|e| format!("refused: {e}"))
+                        .and_then(|()| {
+                            if inv.invite.expires <= at {
+                                Err("that invite had expired".into())
+                            } else {
+                                self.put_invite(&inv)
+                            }
+                        }),
+                    None => Err("no release key here".into()),
+                };
+                r.outcome.insert(hash, ok);
+            }
+            Item::Entry(signed) => {
+                let signed = *signed;
+                let name = signed.entry.name.clone();
+                let existing = self.agreed_entry(&name, at);
+                if existing.is_some() {
+                    // an update: the owner's signature is all it needs
+                    let res = self
+                        .commit(&signed, |cur| self.check_grant(cur, &signed.entry, at))
+                        .map_err(|(_, e)| e);
+                    r.outcome.insert(hash, res);
+                } else {
+                    // a claim: good now, and then every voter's gate says so
+                    let good = identity::accept(None, &signed)
+                        .map_err(|e| format!("refused: {e}"))
+                        .and_then(|()| self.check_grant(None, &signed.entry, at))
+                        .and_then(|()| self.claims_free(&signed));
+                    match good {
+                        Ok(()) => {
+                            if !r.pending.iter().any(|p| p.hash == hash) {
+                                r.pending.push(Pending {
+                                    hash: hash.clone(),
+                                    entry: signed,
+                                    at,
+                                });
+                            }
+                            if a.voters.iter().any(|v| v == &a.me) {
+                                ack = Some(hash);
+                            }
+                        }
+                        Err(e) => {
+                            r.outcome.insert(hash, Err(e));
+                        }
+                    }
+                }
+            }
+        }
+        self.settle(r);
+        ack
+    }
+
+    /// Claims every voter acknowledged become entries, the first in log
+    /// order winning its name; the rest for that name are refused.
+    fn settle(&self, r: &mut Replay) {
+        let a = self.agreed.as_ref().expect("agreed mode");
+        loop {
+            let ready = r.pending.iter().position(|p| {
+                r.acks
+                    .get(&p.hash)
+                    .is_some_and(|got| a.voters.iter().all(|v| got.contains(v)))
+            });
+            let Some(i) = ready else { break };
+            let p = r.pending.remove(i);
+            let name = p.entry.entry.name.clone();
+            let res = if self.agreed_entry(&name, p.at).is_some() {
+                Err(format!("{name} is already taken"))
+            } else {
+                self.commit(&p.entry, |cur| self.check_grant(cur, &p.entry.entry, p.at))
+                    .map_err(|(_, e)| e)
+            };
+            if res.is_ok() {
+                eprintln!("directory: {name} is now in the agreed log");
+                // the rest for this name: an update by the same owner (sent
+                // while the name was still being agreed) lands now as one;
+                // anyone else's claim lost
+                let others: Vec<Pending> = r
+                    .pending
+                    .iter()
+                    .filter(|q| q.entry.entry.name == name)
+                    .cloned()
+                    .collect();
+                r.pending.retain(|q| q.entry.entry.name != name);
+                let mut others = others;
+                others.sort_by_key(|q| q.entry.entry.version);
+                for q in others {
+                    let res = self
+                        .commit(&q.entry, |cur| self.check_grant(cur, &q.entry.entry, q.at))
+                        .map_err(|_| format!("{name} went to an earlier claim"));
+                    r.outcome.insert(q.hash, res);
+                }
+            }
+            r.outcome.insert(p.hash, res);
+        }
+    }
+
+    /// the entry the log has given this name, never the pre-log copy
+    fn agreed_entry(&self, name: &str, at: u64) -> Option<identity::SignedEntry> {
+        if !identity::valid_name(name) {
+            return None;
+        }
+        let b = std::fs::read(self.dir.join(format!("{name}.json"))).ok()?;
+        let e: identity::SignedEntry = serde_json::from_slice(&b).ok()?;
+        (!(is_guest(&e.entry.name) && e.entry.updated + GUEST_TTL < at)).then_some(e)
+    }
+
+    /// This box's entries and invites from before the log, into it, once
+    /// each; when the log has every one, the old copy is no longer read.
+    async fn migrate(&self, sent: &mut std::collections::BTreeSet<String>) -> Result<()> {
+        let a = self.agreed.as_ref().expect("agreed mode");
+        if a.migrated.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let mut missing = 0;
+        if let Ok(rd) = std::fs::read_dir(&a.legacy) {
+            for f in rd.flatten() {
+                let Some(name) = f
+                    .file_name()
+                    .to_str()
+                    .and_then(|n| n.strip_suffix(".json"))
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+                if !identity::valid_name(&name)
+                    || self.agreed_entry(&name, identity::now()).is_some()
+                {
+                    continue;
+                }
+                let Ok(b) = std::fs::read(f.path()) else {
+                    continue;
+                };
+                let Ok(e) = serde_json::from_slice::<identity::SignedEntry>(&b) else {
+                    continue;
+                };
+                if guest_expired(&e.entry) {
+                    continue;
+                }
+                missing += 1;
+                if sent.insert(name.clone()) {
+                    self.submit(&serde_json::to_value(Item::Entry(Box::new(e)))?)
+                        .await?;
+                    eprintln!("directory: {name} sent to the log");
+                }
+            }
+        }
+        if let Ok(rd) = std::fs::read_dir(&self.invites) {
+            for f in rd.flatten() {
+                let key = f.path().display().to_string();
+                if sent.contains(&key) {
+                    continue;
+                }
+                let Ok(b) = std::fs::read(f.path()) else {
+                    continue;
+                };
+                let Ok(inv) = serde_json::from_slice::<identity::SignedInvite>(&b) else {
+                    continue;
+                };
+                if inv.invite.expires > identity::now() {
+                    self.submit(&serde_json::to_value(Item::Invite(inv))?)
+                        .await?;
+                }
+                sent.insert(key);
+            }
+        }
+        if missing == 0 {
+            a.replay.lock().unwrap().migrated = true;
+            a.migrated.store(true, Ordering::Relaxed);
+            eprintln!("directory: every entry from before the log is in it");
+        }
         Ok(())
     }
 }
@@ -933,5 +1420,192 @@ mod tests {
         assert_eq!(d.entry("sarah").unwrap().unwrap().entry.version, 7);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    // ---- the agreed log
+
+    /// a gate in agreed mode, its log fed by hand
+    fn agreed_box(what: &str, me: &str) -> Directory {
+        let dir = scratch(what);
+        Directory::open(dir.join("directory"), vec![], None)
+            .unwrap()
+            .agreed(
+                "http://127.0.0.1:1".into(),
+                dir.join("submit.sock"),
+                vec!["node1".into(), "node2".into()],
+                me.into(),
+            )
+            .unwrap()
+    }
+
+    fn feed(d: &Directory, from: &str, item: Item, at: u64) -> (String, Option<String>) {
+        let v = serde_json::to_value(&item).unwrap();
+        let hash = item_hash(&v);
+        let a = d.agreed.as_ref().unwrap();
+        let mut r = a.replay.lock().unwrap();
+        let ack = d.replay_one(&mut r, from, v, at);
+        r.next += 1;
+        (hash, ack)
+    }
+
+    fn outcome(d: &Directory, hash: &str) -> Option<std::result::Result<(), String>> {
+        d.agreed
+            .as_ref()
+            .unwrap()
+            .replay
+            .lock()
+            .unwrap()
+            .outcome
+            .get(hash)
+            .cloned()
+    }
+
+    #[test]
+    fn a_new_name_is_its_claimants_only_when_every_voting_box_says_so() {
+        let d = agreed_box("agreed-claim", "node1");
+        let ann = generate();
+        let claim = sign(entry("ann", &ann, &[], 1), &ann).unwrap();
+        let (hash, ack) = feed(&d, "node1", Item::Entry(Box::new(claim)), 10);
+        assert_eq!(
+            ack.as_deref(),
+            Some(hash.as_str()),
+            "a voter's gate acks a good claim"
+        );
+        assert!(
+            d.agreed_entry("ann", 10).is_none(),
+            "not hers on a claim alone"
+        );
+        feed(&d, "node1", Item::Ack(hash.clone()), 11);
+        // the witness, or any box that does not vote, counts for nothing
+        feed(&d, "node3", Item::Ack(hash.clone()), 12);
+        assert!(
+            d.agreed_entry("ann", 12).is_none(),
+            "one voter is not every voter"
+        );
+        feed(&d, "node2", Item::Ack(hash.clone()), 13);
+        assert!(
+            d.agreed_entry("ann", 13).is_some(),
+            "every voter acked: hers"
+        );
+        assert_eq!(outcome(&d, &hash), Some(Ok(())));
+    }
+
+    #[test]
+    fn two_claims_to_one_name_go_to_the_first_agreed_and_the_other_is_refused() {
+        let d = agreed_box("agreed-race", "node2");
+        let (a, b) = (generate(), generate());
+        let (first, _) = feed(
+            &d,
+            "node1",
+            Item::Entry(Box::new(sign(entry("sam", &a, &[], 1), &a).unwrap())),
+            10,
+        );
+        let (second, _) = feed(
+            &d,
+            "node2",
+            Item::Entry(Box::new(sign(entry("sam", &b, &[], 1), &b).unwrap())),
+            11,
+        );
+        for v in ["node1", "node2"] {
+            feed(&d, v, Item::Ack(first.clone()), 12);
+        }
+        assert_eq!(outcome(&d, &first), Some(Ok(())));
+        assert!(
+            outcome(&d, &second).unwrap().is_err(),
+            "the later claim lost"
+        );
+        let held = d.agreed_entry("sam", 13).unwrap();
+        assert_eq!(held.entry.root, encode_public(&a.verifying_key()));
+        // acks arriving for the loser change nothing
+        for v in ["node1", "node2"] {
+            feed(&d, v, Item::Ack(second.clone()), 14);
+        }
+        assert_eq!(
+            d.agreed_entry("sam", 15).unwrap().entry.root,
+            held.entry.root
+        );
+    }
+
+    #[test]
+    fn an_update_by_its_owner_lands_at_once_and_a_forgery_never() {
+        let d = agreed_box("agreed-update", "node1");
+        let ann = generate();
+        let (hash, _) = feed(
+            &d,
+            "node1",
+            Item::Entry(Box::new(sign(entry("ann", &ann, &[], 1), &ann).unwrap())),
+            10,
+        );
+        for v in ["node1", "node2"] {
+            feed(&d, v, Item::Ack(hash.clone()), 11);
+        }
+        let (up, ack) = feed(
+            &d,
+            "node2",
+            Item::Entry(Box::new(sign(entry("ann", &ann, &[], 2), &ann).unwrap())),
+            12,
+        );
+        assert!(ack.is_none(), "an update is no claim");
+        assert_eq!(outcome(&d, &up), Some(Ok(())));
+        assert_eq!(d.agreed_entry("ann", 12).unwrap().entry.version, 2);
+        let eve = generate();
+        let (forged, _) = feed(
+            &d,
+            "node1",
+            Item::Entry(Box::new(sign(entry("ann", &eve, &[], 3), &eve).unwrap())),
+            13,
+        );
+        assert!(outcome(&d, &forged).unwrap().is_err());
+        assert_eq!(d.agreed_entry("ann", 13).unwrap().entry.version, 2);
+    }
+
+    #[test]
+    fn every_box_replaying_the_same_log_has_the_same_directory() {
+        let (ann, bob) = (generate(), generate());
+        let claim_a = sign(
+            entry("ann", &ann, &["a996a28ca51c9cf1d3f8e2038c8339c8"], 1),
+            &ann,
+        )
+        .unwrap();
+        let claim_b = sign(
+            entry("bob", &bob, &["a996a28ca51c9cf1d3f8e2038c8339c8"], 1),
+            &bob,
+        )
+        .unwrap();
+        let ha = item_hash(&serde_json::to_value(Item::Entry(Box::new(claim_a.clone()))).unwrap());
+        let hb = item_hash(&serde_json::to_value(Item::Entry(Box::new(claim_b.clone()))).unwrap());
+        let log = [
+            ("node1", Item::Entry(Box::new(claim_a))),
+            ("node2", Item::Entry(Box::new(claim_b))),
+            ("node2", Item::Ack(hb.clone())),
+            ("node1", Item::Ack(hb)),
+            ("node1", Item::Ack(ha.clone())),
+            ("node2", Item::Ack(ha)),
+        ];
+        let boxes = [
+            agreed_box("agreed-same-1", "node1"),
+            agreed_box("agreed-same-2", "node2"),
+        ];
+        for d in &boxes {
+            for (i, (from, item)) in log.iter().enumerate() {
+                let v = serde_json::to_value(item).unwrap();
+                feed(d, from, serde_json::from_value(v).unwrap(), 10 + i as u64);
+            }
+        }
+        let names = |d: &Directory| {
+            let mut l: Vec<_> = d
+                .list()
+                .unwrap()
+                .into_iter()
+                .map(|l| (l.name, l.version))
+                .collect();
+            l.sort();
+            l
+        };
+        assert_eq!(names(&boxes[0]), names(&boxes[1]));
+        // bob's claim was acked first, so the shared library id is his and
+        // ann's claim, naming it too, is refused on both
+        assert!(boxes[0].agreed_entry("bob", 20).is_some());
+        assert!(boxes[0].agreed_entry("ann", 20).is_none());
+        assert!(boxes[1].agreed_entry("ann", 20).is_none());
     }
 }

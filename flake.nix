@@ -1065,6 +1065,10 @@
                   dd.box.site = box.siteId;
                   dd.box.region = box.regionId;
                   dd.verify.peers = lib.mapAttrsToList directoryOf (lib.filterAttrs (n: _: n != name) boxes);
+                  # the same house's boxes alone: its Wi-Fi and its page
+                  dd.verify.housePeers = lib.mapAttrsToList directoryOf (
+                    lib.filterAttrs (n: b: n != name && b.siteId == box.siteId) boxes
+                  );
                   # itself included: Settings' Network tab is the whole fleet
                   dd.verify.fleet = lib.mapAttrs (_: b: b.tailnet) boxes;
                   # the other boxes, as the agent checks a release did not

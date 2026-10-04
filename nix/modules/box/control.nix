@@ -53,9 +53,13 @@ in
           "-tpm-keys /boot/dd/unlock"
           "-listen 127.0.0.1:4195"
           (lib.optionalString (roles != "") "-roles ${roles}")
+          # the gate hands in directory items here (box/verify/src/directory.rs)
+          (lib.optionalString config.dd.verify.enable "-submit /run/dd-control/submit.sock -submit-group dd-verify")
         ];
         StateDirectory = "dd-control";
         StateDirectoryMode = "0700";
+        RuntimeDirectory = "dd-control";
+        RuntimeDirectoryMode = "0755";
         Restart = "always";
         RestartSec = 10;
         # root for the TPM and the key files on /boot; nothing else is written

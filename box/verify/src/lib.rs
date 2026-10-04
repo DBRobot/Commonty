@@ -139,7 +139,14 @@ pub struct Config {
     pub dir: PathBuf,
     /// the other boxes' directory urls
     pub peers: Vec<String>,
+    /// the other boxes in this house, which a Wi-Fi change is relayed to
+    /// and the house page asks after; not the rest of the fleet
+    pub house_peers: Vec<String>,
     pub sync_secs: u64,
+    /// the directory as the control plane's agreed log, not pulled from
+    /// peers: dd-control's address, its submit socket, and its config (the
+    /// voting boxes); None: the peers as before
+    pub control: Option<(String, PathBuf, PathBuf)>,
     /// None: the directory alone. Some(domain): the full verifier, with the
     /// browser login scoped to that domain.
     pub domain: Option<String>,
@@ -2020,12 +2027,47 @@ pub async fn start(
         Some(k) => Some(identity::decode_public(k).map_err(|e| anyhow!("release key: {e}"))?),
         None => None,
     };
-    let directory = Arc::new(directory::Directory::open(
-        cfg.dir.clone(),
-        cfg.peers.clone(),
-        release,
-    )?);
-    tokio::spawn(directory.clone().sync_forever(cfg.sync_secs));
+    let mut directory = directory::Directory::open(cfg.dir.clone(), cfg.peers.clone(), release)?;
+    if let Some((control, submit, config)) = &cfg.control {
+        // the boxes that vote: every one of their gates acknowledges a new
+        // name before it is anyone's (the witness has no gate and no say)
+        #[derive(serde::Deserialize)]
+        struct Control {
+            boxes: std::collections::BTreeMap<String, serde_json::Value>,
+            validators: Vec<Named>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Named {
+            name: String,
+        }
+        let c: Control = serde_json::from_slice(&std::fs::read(config)?)
+            .with_context(|| format!("{}", config.display()))?;
+        let voters: Vec<String> = c
+            .validators
+            .into_iter()
+            .map(|v| v.name)
+            .filter(|n| c.boxes.contains_key(n))
+            .collect();
+        anyhow::ensure!(!voters.is_empty(), "no voting box in {}", config.display());
+        // this box: its hostname; a test running several gates names each
+        let me = match std::env::var("VERIFY_BOX") {
+            Ok(b) if !b.is_empty() => b,
+            _ => std::fs::read_to_string("/proc/sys/kernel/hostname")?
+                .trim()
+                .to_string(),
+        };
+        eprintln!(
+            "directory: the agreed log, acknowledged by {}",
+            voters.join(", ")
+        );
+        directory = directory.agreed(control.clone(), submit.clone(), voters, me)?;
+    }
+    let directory = Arc::new(directory);
+    if cfg.control.is_some() {
+        tokio::spawn(directory.clone().follow());
+    } else {
+        tokio::spawn(directory.clone().sync_forever(cfg.sync_secs));
+    }
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
     let addr = listener.local_addr()?;
     // a box with nothing else on it: no domain, no sessions, no secrets. It
@@ -2089,7 +2131,7 @@ pub async fn start(
                 .ok()
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from),
-            &cfg.peers,
+            &cfg.house_peers,
         ),
         webauthn,
         ceremonies: Mutex::new(HashMap::new()),

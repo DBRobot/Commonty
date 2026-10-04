@@ -18,10 +18,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -234,6 +237,8 @@ func main() {
 	every := flag.Duration("heartbeat", 30*time.Second, "how often to heartbeat")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
+	submitSock := flag.String("submit", "", "a unix socket where this box's gate hands in directory items (POST /submit); empty: none")
+	submitGroup := flag.String("submit-group", "", "the group that may open -submit (the gate's)")
 	report := flag.String("sign-report", "", "sign the box's report in this directory (hardware.json, hardware-configuration.nix) as -box, into report.sig, and exit")
 	flag.Parse()
 	log.SetFlags(0)
@@ -360,31 +365,98 @@ func main() {
 	}
 	go r.run(n.Receive, ask)
 
-	// heartbeats, signed by the TPM; a reader also asks for the latest each time
+	// Everything this box asks the validators, signed by the TPM, under one
+	// rising sequence: a heartbeat and a directory item never share a number
+	var seqMu sync.Mutex
+	seq := uint64(time.Now().UnixMilli()) // above any earlier run's
+	submit := func(kind string, body []byte) error {
+		seqMu.Lock()
+		seq++
+		q := state.Request{Kind: kind, Box: *box, Seq: seq, Body: body}
+		seqMu.Unlock()
+		sig, err := sign(q.Bytes())
+		if err != nil {
+			return err
+		}
+		q.Sig = sig
+		b, _ := json.Marshal(q)
+		r.Send(wire.ToValidators, wire.Submit, b)
+		if mine != nil {
+			n.Receive(self, wire.Submit, b) // our own validator too
+		}
+		return nil
+	}
+
+	// heartbeats; a reader also asks for the latest each time
 	go func() {
-		var seq uint64 = uint64(time.Now().UnixMilli()) // above any earlier run's
 		for {
-			seq++
 			body, _ := json.Marshal(state.Heartbeat{Facts: facts(), Roles: splitRoles(*roles)})
-			q := state.Request{Kind: "heartbeat", Box: *box, Seq: seq, Body: body}
-			if sig, err := sign(q.Bytes()); err != nil {
+			if err := submit("heartbeat", body); err != nil {
 				log.Printf("heartbeat: %v", err)
-			} else {
-				q.Sig = sig
-				b, _ := json.Marshal(q)
-				r.Send(wire.ToValidators, wire.Submit, b)
-				if mine != nil {
-					n.Receive(self, wire.Submit, b) // our own validator too
-				}
 			}
 			ask()
 			time.Sleep(*every)
 		}
 	}()
 
+	// The gate's way in: a directory item, sent as this box's request. Only
+	// the gate may open the socket; the validators bound what any box adds
+	// (state.DirPerMinute), and the gates judge what it says.
+	if *submitSock != "" {
+		_ = os.Remove(*submitSock)
+		l, err := net.Listen("unix", *submitSock)
+		if err != nil {
+			log.Fatal(err)
+		}
+		g, err := user.LookupGroup(*submitGroup)
+		if err != nil {
+			log.Fatal(err)
+		}
+		gid, _ := strconv.Atoi(g.Gid)
+		// already ours (a test running as the gate's group): nothing to change
+		if gid != os.Getgid() {
+			if err := os.Chown(*submitSock, -1, gid); err != nil {
+				log.Fatal(err)
+			}
+		}
+		if err := os.Chmod(*submitSock, 0o660); err != nil {
+			log.Fatal(err)
+		}
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /submit", func(w http.ResponseWriter, req *http.Request) {
+			body, err := io.ReadAll(io.LimitReader(req.Body, state.MaxDirItem+1))
+			if err != nil || len(body) > state.MaxDirItem || !json.Valid(body) {
+				http.Error(w, "a directory item: json, at most 64K", http.StatusBadRequest)
+				return
+			}
+			if err := submit("directory", body); err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+		})
+		go func() {
+			s := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+			if err := s.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatal(err)
+			}
+		}()
+	}
+
 	http.HandleFunc("/state", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(n.State())
+	})
+	// the directory log from item `since` on, and where the next will be
+	http.HandleFunc("/directory", func(w http.ResponseWriter, req *http.Request) {
+		since, _ := strconv.Atoi(req.URL.Query().Get("since"))
+		s := n.State()
+		items := []state.DirItem{}
+		if since >= 0 && since < len(s.Directory) {
+			items = s.Directory[since:]
+		}
+		w.Header().Set("content-type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "next": len(s.Directory), "height": s.Height})
 	})
 	srv := &http.Server{Addr: *listen, ReadHeaderTimeout: 5 * time.Second}
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
