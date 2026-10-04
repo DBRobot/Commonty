@@ -66,6 +66,21 @@ pub enum ReleaseCmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// The next app, when what it is built from changed since the last:
+    /// tag it, wait for GitHub to build it, and sign it as `app` does.
+    /// `publish` starts this on its own, in the background; it never holds
+    /// a release of the boxes up.
+    AppNext {
+        /// the branch the release came from
+        #[arg(long, default_value = "main")]
+        r#ref: String,
+        /// the GitHub repository the mirror builds in
+        #[arg(long, default_value = "DBRobot/Home-Server")]
+        from: String,
+        /// how long to wait for GitHub's build before giving up
+        #[arg(long, default_value_t = 120)]
+        wait_mins: u64,
+    },
     /// The release the boxes see.
     Show {
         #[arg(long, default_value = DEFAULT_URL)]
@@ -112,6 +127,11 @@ pub fn run(cmd: ReleaseCmd, repo: &str, keys: &auth::Store) -> Result<()> {
         }
         ReleaseCmd::Status { url } => status(repo, &url)?,
         ReleaseCmd::App { tag, from, dry_run } => app(repo, keys, &tag, &from, dry_run)?,
+        ReleaseCmd::AppNext {
+            r#ref,
+            from,
+            wait_mins,
+        } => app_next(repo, keys, &r#ref, &from, wait_mins)?,
         ReleaseCmd::Publish {
             r#ref,
             cache,
@@ -386,6 +406,170 @@ fn publish(
     if let Err(e) = forge_release(&root, url, &rev, counter, keys) {
         eprintln!("== the forge's release page was not made: {e:#}");
     }
+    app_in_background(&root, r#ref);
+    Ok(())
+}
+
+/// The app follows the release on its own time: GitHub's build takes the
+/// better part of half an hour, and the boxes do not wait for it. A process
+/// of its own, in a session of its own, so the end of this one (or of the
+/// terminal that ran it) does not take it along.
+fn app_in_background(root: &Path, r#ref: &str) {
+    let log = dirs_cache().join("app-release.log");
+    let started = (|| -> Result<()> {
+        std::fs::create_dir_all(log.parent().context("no cache dir")?)?;
+        let out = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)?;
+        Command::new("setsid")
+            .arg(std::env::current_exe()?)
+            .args(["release", "app-next", "--ref", r#ref])
+            .current_dir(root)
+            .stdin(std::process::Stdio::null())
+            .stdout(out.try_clone()?)
+            .stderr(out)
+            .spawn()?;
+        Ok(())
+    })();
+    match started {
+        Ok(()) => eprintln!(
+            "== the app: checked and, if it changed, built and signed in the background ({})",
+            log.display()
+        ),
+        Err(e) => {
+            eprintln!("== the app was not started: {e:#}\n   `dd release app-next` when it can")
+        }
+    }
+}
+
+fn dirs_cache() -> PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("dd")
+}
+
+/// What the app is built from: its own tree, the client crates it uses, the
+/// workspace's manifest and lockfile, and the workflow that builds it. The
+/// site's pages it carries are copied into app/ by the same pull request
+/// (the stylesheet check), so they count through app/.
+fn app_input(path: &str) -> bool {
+    path.starts_with("app/")
+        || path.starts_with("client/")
+        || matches!(path, "Cargo.toml" | "Cargo.lock")
+        || path == ".github/workflows/release.yml"
+}
+
+/// v0.1.21 -> v0.1.22
+fn next_tag(prev: &str) -> Option<String> {
+    let v = prev.strip_prefix('v')?;
+    let (head, patch) = v.rsplit_once('.')?;
+    Some(format!("v{head}.{}", patch.parse::<u64>().ok()? + 1))
+}
+
+/// the files the release workflow publishes, by name (.github/workflows/release.yml)
+fn app_files(tag: &str) -> Vec<String> {
+    let v = tag.trim_start_matches('v');
+    vec![
+        format!("commonty_{v}_amd64.deb"),
+        format!("commonty_{v}_amd64.AppImage"),
+        "commonty.apk".into(),
+        "commonty-setup.exe".into(),
+        "dd.exe".into(),
+    ]
+}
+
+fn app_next(repo: &str, keys: &auth::Store, r#ref: &str, from: &str, wait_mins: u64) -> Result<()> {
+    let root = repo_root(repo)?;
+    let stamp = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default()
+    };
+    git(&root, &["fetch", "-q", "--tags", "forge"])?;
+    let rev = git(&root, &["rev-parse", &format!("refs/remotes/forge/{ref}")])?;
+    let prev = git(
+        &root,
+        &["describe", "--tags", "--abbrev=0", "--match", "v*", &rev],
+    )
+    .context("no app tag before this one")?;
+    let changed: Vec<String> = git(&root, &["diff", "--name-only", &format!("{prev}..{rev}")])?
+        .lines()
+        .filter(|p| app_input(p))
+        .map(str::to_owned)
+        .collect();
+    if changed.is_empty() {
+        println!(
+            "[{}] the app: nothing it is built from changed since {prev}",
+            stamp()
+        );
+        return Ok(());
+    }
+    let tag = next_tag(&prev).with_context(|| format!("{prev} is not vX.Y.Z"))?;
+    println!(
+        "[{}] the app: {} of its files changed since {prev}; {tag} at {}",
+        stamp(),
+        changed.len(),
+        &rev[..12]
+    );
+    // a tag someone else made first is theirs to finish
+    git(&root, &["tag", &tag, &rev])?;
+    if let Err(e) = git(&root, &["push", "-q", "forge", &tag]) {
+        let _ = git(&root, &["tag", "-d", &tag]);
+        bail!("{tag} was not pushed (made elsewhere first?): {e:#}");
+    }
+    // the mirror carries the tag to GitHub too, but its token may not push
+    // a commit that changes a workflow; over ssh it goes either way
+    if let Err(e) = git(
+        &root,
+        &["push", "-q", &format!("git@github.com:{from}.git"), &tag],
+    ) {
+        println!(
+            "[{}] the app: {tag} not pushed to GitHub directly ({e:#}); the mirror will",
+            stamp()
+        );
+    }
+    // GitHub builds and attests it
+    let want = app_files(&tag);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait_mins * 60);
+    loop {
+        if let Ok(files) = github_assets(from, &tag)
+            && want.iter().all(|w| files.iter().any(|(n, _)| n == w))
+        {
+            break;
+        }
+        // a build that failed is not worth waiting out
+        let runs = ureq_get(&format!(
+            "https://api.github.com/repos/{from}/actions/runs?branch={tag}&per_page=1"
+        ))
+        .ok()
+        .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok());
+        if let Some(run) = runs.as_ref().and_then(|r| r["workflow_runs"].get(0))
+            && run["status"] == "completed"
+            && run["conclusion"] != "success"
+        {
+            bail!(
+                "GitHub's build of {tag} ended {}: {}",
+                run["conclusion"],
+                run["html_url"].as_str().unwrap_or_default()
+            );
+        }
+        ensure!(
+            std::time::Instant::now() < deadline,
+            "GitHub has not built {tag} in {wait_mins} minutes; `dd release app --tag {tag}` once it has"
+        );
+        // three minutes: GitHub answers sixty unsigned questions an hour
+        std::thread::sleep(std::time::Duration::from_secs(180));
+    }
+    println!("[{}] the app: GitHub built {tag}; signing it", stamp());
+    app(repo, keys, &tag, from, false)?;
+    println!(
+        "[{}] the app: {tag} is what the downloads page offers",
+        stamp()
+    );
     Ok(())
 }
 
@@ -1232,6 +1416,25 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_app_follows_what_it_is_built_from() {
+        assert!(app_input("app/src/main.rs"));
+        assert!(app_input("app/web/_dd/static/shell.js"));
+        assert!(app_input("client/library/src/lib.rs"));
+        assert!(app_input("Cargo.lock"));
+        assert!(app_input(".github/workflows/release.yml"));
+        assert!(
+            !app_input("box/web/shell.js"),
+            "counted through its copy in app/"
+        );
+        assert!(!app_input("nix/modules/forge/forgejo.nix"));
+        assert!(!app_input("docs/ci.md"));
+        assert_eq!(next_tag("v0.1.21").as_deref(), Some("v0.1.22"));
+        assert_eq!(next_tag("v1.9").as_deref(), Some("v1.10"));
+        assert_eq!(next_tag("0.1.2"), None);
+        assert_eq!(app_files("v0.1.22")[0], "commonty_0.1.22_amd64.deb");
+    }
 
     #[test]
     fn release_notes_group_pull_requests_by_kind() {

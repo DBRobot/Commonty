@@ -43,6 +43,20 @@ def changed(base, head, *suffixes):
     ]
 
 
+# every workflow: the forge's ci, and the app's release build on GitHub
+FLOW_DIRS = (".forgejo/workflows", ".github/workflows")
+
+
+def workflows():
+    return [
+        os.path.join(d, f)
+        for d in FLOW_DIRS
+        if os.path.isdir(d)
+        for f in sorted(os.listdir(d))
+        if f.endswith((".yml", ".yaml"))
+    ]
+
+
 def actionlint():
     # the workflows, whole: they are small, and a fault anywhere stops every run.
     # Forgejo takes an action by its url, which actionlint does not know.
@@ -54,11 +68,7 @@ def actionlint():
         "-ignore",
         "specifying action .* in invalid format",
     ]
-    flows = [
-        os.path.join(".forgejo/workflows", f)
-        for f in sorted(os.listdir(".forgejo/workflows"))
-        if f.endswith((".yml", ".yaml"))
-    ]
+    flows = workflows()
     _, out, _ = run(common + flows, {"SHELLCHECK_OPTS": "--severity=error"})
     blocking = set(lines(out))
     faults.extend(f"actionlint: {ln}" for ln in blocking)
@@ -165,9 +175,7 @@ def spelling(paths):
 def pinned():
     # an action by a full commit hash or from this repository, never by a
     # tag or a branch, which whoever holds the action's repository can move
-    files = [
-        os.path.join(".forgejo/workflows", f) for f in os.listdir(".forgejo/workflows")
-    ]
+    files = workflows()
     for root, _, names in os.walk(".forgejo/actions"):
         files += [os.path.join(root, n) for n in names if n.endswith((".yml", ".yaml"))]
     for f in sorted(files):

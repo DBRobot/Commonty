@@ -36,8 +36,7 @@ pull request opened, pushed, or edited
 ├─ files_modified ── what changed: nix, rust, vm, app (and: a draft? already passed?)
 │   ├─ flake_check ─── the flake evaluates; placement, box list, this file
 │   ├─ mail_worker ─── the mail Worker and the control plane, end to end
-│   ├─ build_part ──┬─ build_host (every box's system, built on every box with the runner role:
-│   │               │    both lists from fleet/boxes.json, so a box that joins needs no change here)
+│   ├─ build_part ──┬─ build_host (every box's system, built on every box)
 │   │               │    └─ same_build (both builds of a system are one path)
 │   │               └─ vm_tests (one job per test)
 │   ├─ rust_lint · test · app_lint
@@ -88,7 +87,12 @@ The same steps for everyone, a person or an agent:
    refuses an outdated branch anyway), the merge, `dd release publish`,
    and waiting until every box runs the new release.
 5. **Publish with the dd built from what merged**, not an older build, and
-   read the release's number from what `dd release publish` prints.
+   read the release's number from what `dd release publish` prints. When
+   the app's sources changed since its last tag, publish also starts
+   `dd release app-next` in the background: it tags the next `v*`, waits
+   for GitHub to build it ([`.github/workflows/release.yml`](../.github/workflows/release.yml)),
+   and signs it for the downloads page. The boxes never wait for it; its
+   log is `~/.cache/dd/app-release.log`.
 6. **Wait on `ci_ok`**, not on every status being green: a failure anywhere
    is final, since the run stops at the first one.
 
