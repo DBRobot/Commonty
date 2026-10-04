@@ -3,7 +3,93 @@
   "bootDisk": "/dev/disk/by-id/nvme-Micron_2450_MTFDKBA512TFK_2311403FB25B",
   "wired": "00:E0:4C:3A:46:58",
   "wifi": "wlp2s0",
-  "gpu": { "driver": "amdgpu", "render": "/dev/dri/renderD128" },
+  "gpu": {
+    "driver": "amdgpu",
+    "render": "/dev/dri/renderD128"
+  },
   "usbNic": true,
-  "secretsKey": "age1tpm1qvfng390u93dcwmhpkuvcmpjm6fhdzcuegqmlhm38a9e8f0k9waxugt2mkf"
+  "secretsKey": "age1tpm1qvfng390u93dcwmhpkuvcmpjm6fhdzcuegqmlhm38a9e8f0k9waxugt2mkf",
+  "firmware": {
+    "uefi": true,
+    "secureBoot": true,
+    "setupMode": false,
+    "tpm": {
+      "version": 2,
+      "p256": true,
+      "ppi": "1.3"
+    },
+    "settingsFromLinux": null
+  },
+  "cpu": {
+    "arch": "x86_64",
+    "vendor": "AuthenticAMD",
+    "model": "AMD Ryzen 5 7520U with Radeon Graphics",
+    "threads": 8,
+    "flags": [
+      "aes",
+      "avx",
+      "svm",
+      "avx2",
+      "sha_ni"
+    ]
+  },
+  "memoryBytes": 15962398720,
+  "virt": {
+    "kvm": true,
+    "nested": true
+  },
+  "gpus": [
+    {
+      "render": "/dev/dri/renderD128",
+      "driver": "amdgpu",
+      "vendor": "0x1002",
+      "encode": []
+    }
+  ],
+  "disks": [
+    {
+      "id": "/dev/disk/by-id/nvme-Micron_2450_MTFDKBA512TFK_2311403FB25B",
+      "kind": "nvme",
+      "usb": false,
+      "bytes": 512110190592
+    }
+  ],
+  "pools": [
+    {
+      "name": "tank",
+      "vdevs": [
+        {
+          "type": "disk",
+          "disks": [
+            "/dev/disk/by-id/nvme-Micron_2450_MTFDKBA512TFK_2311403FB25B_1-part2"
+          ]
+        }
+      ],
+      "bytes": 506806140928,
+      "encrypted": true,
+      "redundancy": "none"
+    }
+  ],
+  "nics": [
+    {
+      "name": "enp3s0f4u1",
+      "mac": "00:E0:4C:3A:46:58",
+      "driver": "r8152",
+      "wireless": false,
+      "usb": true,
+      "initrd": true
+    },
+    {
+      "name": "wlp2s0",
+      "mac": "D0:39:57:65:37:A1",
+      "driver": "mt7921e",
+      "wireless": true,
+      "usb": false,
+      "initrd": false
+    }
+  ],
+  "power": {
+    "battery": true,
+    "mains": true
+  }
 }
