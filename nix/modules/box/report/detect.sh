@@ -25,4 +25,10 @@ for r in /sys/class/drm/renderD*; do
   case "$drv" in i915|xe) drv=intel ;; esac
   gpu="{ \"driver\": \"$drv\", \"render\": \"/dev/dri/$(basename $r)\" }"; break
 done
-printf '{\n  "hostId": "%s",\n  "bootDisk": "/dev/disk/by-id/%s",\n  "wired": %s,\n  "wifi": %s,\n  "gpu": %s,\n  "usbNic": %s\n}\n' "$(hostid)" "$boot" "$wired" "$wifi" "$gpu" "$usb"
+# what its secrets are encrypted to, sops's form of it (the older recipient
+# kind: sops cannot encrypt to the newer one yet)
+secrets=null
+if [ -n "${SECRETS_KEY:-}" ] && [ -e "$SECRETS_KEY" ]; then
+  secrets="\"$(age-plugin-tpm -y --tpm-recipient "$SECRETS_KEY")\""
+fi
+printf '{\n  "hostId": "%s",\n  "bootDisk": "/dev/disk/by-id/%s",\n  "wired": %s,\n  "wifi": %s,\n  "gpu": %s,\n  "usbNic": %s,\n  "secretsKey": %s\n}\n' "$(hostid)" "$boot" "$wired" "$wifi" "$gpu" "$usb" "$secrets"
