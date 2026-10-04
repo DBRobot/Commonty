@@ -1,0 +1,124 @@
+# The control plane
+
+Status: design, for review. Nothing here is built yet.
+
+## What it is for
+
+Every box needs the same answer to three questions, without any box being
+able to impose it:
+
+1. Which boxes are alive, and what they have (cores, RAM, disk, load, heat).
+2. Who is the one writer for each single-writer role (Postgres, Forgejo)
+   right now.
+3. Who belongs: which houses, boxes and witnesses.
+
+From those, every box computes the same role placement (a pure function, in
+the signed release) and starts or stops only its own roles. The control plane
+gives nothing orders. It keeps one agreed log, and the log only holds
+requests that pass the rules.
+
+k3s and etcd/Raft are out: whoever leads them can write anything.
+
+## Shape
+
+```
+  box ──ws──┐                       ┌──ws── box
+  box ──ws──┤   relay (one Durable  ├──ws── validator (house A)
+  box ──ws──┤   Object, Cloudflare) ├──ws── validator (house B)
+            └───────────────────────┴──ws── witness 1, witness 2
+```
+
+- **Validators** run SmartBFT (github.com/hyperledger/SmartBFT, Apache-2.0,
+  the consensus engine in Hyperledger Fabric 3). One validator per house, plus
+  outside witnesses until there are four houses. BFT needs n ≥ 3f+1: four
+  voters survive one bad or absent voter.
+- **Everyone else** (other boxes in a house, and later hundreds of boxes)
+  reads the agreed state and submits signed requests. They never vote.
+- **No box talks to another box.** Every box dials out to the relay over one
+  WebSocket. The relay forwards frames addressed to one node, to the
+  validators, or to everyone. Every frame is signed, so the relay can delay or
+  drop messages but never forge them. Safety never depends on it; liveness
+  does.
+
+## What is voted on
+
+The validators order and validate signed requests. Each request is accepted
+only if it passes the rule, run identically by every validator:
+
+| Request | Valid when |
+|---|---|
+| heartbeat {box, seq, facts, roles running} | signed by that box's TPM key from the signed box list; seq above the last |
+| lease acquire {role, box} | signed by the box; lease free or expired; placement (from agreed state) says the box may hold it |
+| lease renew {role, box, epoch} | signed by the current holder, before expiry |
+| lease release {role, box, epoch} | signed by the holder |
+| membership {add/remove house, box, witness} | signed by the owner key(s): today the release key, later k of n house owners |
+
+Rules, copy counts and role requirements come from the signed release, not
+from the log.
+
+**Time.** The proposer stamps each batch. A validator rejects a batch whose
+stamp is more than 2 s from its own clock and earlier than the last one.
+Lease expiry uses this agreed time, so no single clock can end a lease early.
+
+**Fencing.** Each lease grant raises the role's epoch. The holder stamps its
+epoch on what it writes (WAL segments, for example), and readers ignore
+anything from a lower epoch. A writer that wakes up confused can't win.
+
+## Timing
+
+| | Value | Why |
+|---|---|---|
+| batch interval | 2 s | agreement within seconds, and fits the free tier |
+| lease TTL | 15 s, renewed every 4 s | failover in about 15–20 s |
+| ordinary heartbeat | 30 s | liveness for placement; cheap |
+| a box counts as gone | 3 heartbeats missed (90 s) | stateless roles move |
+| SmartBFT leader heartbeat / view change | 2 s / 4 s | Fabric's defaults (1 min / 20 s) are far too slow |
+
+Free tier, as estimated: about 55k billable requests/day, under the 100k limit
+(Durable Objects bill incoming WebSocket messages at 20 per request; outgoing
+messages are free). Every box heartbeating fast would need Workers Paid,
+about $5.50/month.
+
+## When things fail
+
+- **The relay is down.** Nothing new is agreed. Running roles keep running.
+  Leases can't renew, so writers stop writing when theirs expire (15 s).
+  Nothing unsafe happens. A second relay can be added later; frames are
+  deduplicated by hash.
+- **A validator is down or lying.** With n ≥ 4, one is tolerated. A lying
+  proposer can only omit requests, and the proposer rotates.
+- **More than a third of validators are down.** The fleet halts safely, as
+  above. Enough houses make this rare.
+- **A box lies about its facts.** Caps per box and copies spread across
+  houses limit it. The data it attracts is end-to-end encrypted.
+- **A box can't reach the relay.** It stops any writer role when its lease
+  runs out and keeps serving read-only where the role allows.
+
+## Trust
+
+- Box keys are the TPM-held keys already in fleet/boxes.json (unlockKey).
+  Validator keys are the same keys.
+- Voting weight is per house: a house runs one validator however many boxes
+  it has.
+- Witnesses are validators listed in the membership with no boxes behind
+  them. They are removed once four houses exist.
+
+## Not in scope
+
+The control plane doesn't run commands, push configuration, hold secrets or
+move data. Placement and stateful replication build on it and come after.
+
+## Build order
+
+1. The relay (a Durable Object in the existing Worker) and its tests.
+2. The validator: a Go program around SmartBFT holding the state machine
+   above. It ships through Nix (buildGoModule, Go 1.26).
+3. A VM test: four validators and a fake relay, killing and lying validators,
+   relay outages, lease handover and fencing.
+4. Run it on the boxes beside everything else, with nothing acting on it,
+   and watch.
+
+## Open
+
+- Both boxes are in one house today, so there is one house validator. Four
+  voters means three witnesses until more houses join. Who runs them?

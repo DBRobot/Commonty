@@ -492,6 +492,67 @@
               }
             } $out/purify.js
           '';
+          # The control plane (box/control, docs/control-plane.md): every box
+          # runs dd-control; the witness is the same validator as wasm.
+          control =
+            let
+              # each box's address on the relay and its TPM-held key; the
+              # voters and rules from fleet/control.json
+              boxList = builtins.fromJSON (builtins.readFile ./fleet/boxes.json);
+              names = builtins.sort builtins.lessThan (builtins.attrNames boxList);
+              withKeys = builtins.filter (n: boxList.${n} ? unlockKey) names;
+              ctl = builtins.fromJSON (builtins.readFile ./fleet/control.json);
+              config = {
+                boxes = builtins.listToAttrs (
+                  nixpkgs.lib.imap1 (i: n: {
+                    name = n;
+                    value = {
+                      id = 100 + i;
+                      house = boxList.${n}.siteId;
+                      key = boxList.${n}.unlockKey;
+                    };
+                  }) withKeys
+                );
+                inherit (ctl) validators rules;
+              };
+              src = pkgs.lib.fileset.toSource {
+                root = ./box/control;
+                fileset = pkgs.lib.fileset.unions [
+                  ./box/control/go.mod
+                  ./box/control/go.sum
+                  ./box/control/state
+                  ./box/control/validator
+                  ./box/control/wire
+                  ./box/control/cmd
+                ];
+              };
+              dd-control = pkgs.buildGoModule {
+                pname = "dd-control";
+                version = "0.1.0";
+                inherit src;
+                vendorHash = "sha256-sYPGMtJetj/Ou1Q52s2tfRJkNcaiPlhuqIiq/H/1UjY=";
+                subPackages = [ "cmd/dd-control" ];
+              };
+            in
+            {
+              configFile = pkgs.writeText "control-config.json" (builtins.toJSON config);
+              inherit dd-control;
+              # wasm for the relay's Durable Object, from the same vendored
+              # modules (buildGoModule lists packages for the build machine,
+              # which leaves out a js-only one)
+              witness =
+                pkgs.runCommand "dd-control-witness"
+                  {
+                    nativeBuildInputs = [ pkgs.go ];
+                  }
+                  ''
+                    export HOME=$TMPDIR GOCACHE=$TMPDIR/cache GOFLAGS=-mod=vendor GOOS=js GOARCH=wasm CGO_ENABLED=0
+                    cp -r ${src} src && chmod -R u+w src && cd src
+                    cp -r ${dd-control.goModules} vendor
+                    mkdir -p $out
+                    go build -trimpath -ldflags="-s -w" -o $out/witness.wasm ./cmd/witness
+                  '';
+            };
         in
         {
           # a package must be a derivation (flake check), not a source path
@@ -590,6 +651,17 @@
           # third-party blob in the tree, and the page fetches it from the
           # box like everything else it loads.
           web = webDist;
+          # The relay Worker: what `dd release publish` uploads as
+          # control.<domain>, with this release's config inside
+          control-worker = pkgs.runCommand "dd-control-worker" { } ''
+            mkdir -p $out
+            cp ${./box/control/worker/worker.js} $out/worker.js
+            cp ${pkgs.go}/share/go/lib/wasm/wasm_exec.js $out/wasm_exec.js
+            cp ${control.witness}/witness.wasm $out/witness.wasm
+            echo "export default $(cat ${control.configFile});" > $out/config.js
+          '';
+          dd-control = control.dd-control;
+          control-config = control.configFile;
           # The mail Worker (client/mail): what `dd release publish` uploads
           # to Cloudflare, file for file, and what the boxes compare the
           # deployed Worker with. The checks are the boxes' own Rust in wasm;
@@ -867,6 +939,8 @@
           nginx = import ./nix/tests/nginx.nix args;
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
+          # the control plane: relay, witness and three validators, offline
+          control = import ./nix/tests/control.nix args;
           # the app carries the site's signed-in pages, their scripts, the
           # stylesheet and the fonts at the site's paths (app/carried
           # lists them, scripts/sync-app-web copies them); two copies, kept
@@ -980,6 +1054,11 @@
                 lanzaboote.nixosModules.lanzaboote
                 ./nix/modules/box/secure-boot.nix
                 ./nix/modules/box/disk-unlock.nix
+                ./nix/modules/box/control.nix
+                {
+                  dd.control.enable = true;
+                  dd.control.roles = box.roles;
+                }
               ]
               ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops
               ++ lib.optional (builtins.pathExists ./nix/hosts/${name}/disko.nix) disko.nixosModules.disko
