@@ -506,7 +506,11 @@ impl Manager {
                 if mine_up == 1 { "" } else { "s" }
             );
         }
-        self.room_for(&all, spec.memory().min(self.cfg.memory_budget))?;
+        // a guest is never more than the budget leaves beside its qemu
+        let memory = spec
+            .memory()
+            .min(self.cfg.memory_budget.saturating_sub(QEMU_OVERHEAD_MIB));
+        self.room_for(&all, memory)?;
 
         let used: HashSet<u16> = all
             .iter()
@@ -598,7 +602,6 @@ impl Manager {
 
         // no more than the box has: the budget bounds memory, the cpu count
         // bounds cores (qemu warns past it, kvm crawls)
-        let memory = spec.memory().min(self.cfg.memory_budget);
         let cores = spec.cores().min(self.cfg.cores.max(1));
         let i = Instance {
             id,
