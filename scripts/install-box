@@ -67,9 +67,12 @@ mkdir -p "$tree"
 # what makes the box itself, none of it restorable from a backup: the ssh
 # host key (fleet/boxes.json names it), tailscale's node identity, garage's
 # node key (the layout names it), the uid map (files on its other pools
-# are owned by those numbers), the verifier's keys, certificates it holds
+# are owned by those numbers), the verifier's keys, certificates it holds,
+# its secrets key (a handle into this box's TPM: without it the box cannot
+# read secrets/<box>.yaml at first boot) and its control-plane vote key
 identity="etc/ssh/ssh_host_ed25519_key etc/ssh/ssh_host_ed25519_key.pub var/lib/tailscale var/lib/tailscale-certs \
-  var/lib/garage/meta/node_key var/lib/garage/meta/node_key.pub var/lib/nixos var/lib/dd-verify var/lib/acme"
+  var/lib/garage/meta/node_key var/lib/garage/meta/node_key.pub var/lib/nixos var/lib/dd-verify var/lib/acme \
+  var/lib/dd/secrets-key.txt var/lib/dd-control/validator.key"
 # shellcheck disable=SC2029 # the list expands here on purpose
 ssh "${ssh_opts[@]}" "admin@$lan" "sudo sh -c 'for p in $identity; do [ -e /\$p ] && echo \$p; done | tar czf - -C / -T -'" \
   | (umask 022; tar xzf - -C "$tree" --no-same-owner --no-same-permissions)
