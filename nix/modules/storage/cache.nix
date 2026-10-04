@@ -44,10 +44,20 @@ in
         set -eu
         export HOME=/root
         export AWS_SHARED_CREDENTIALS_FILE=${cfg.credentialsFile}
+        # nix waits on this hook, so a VM test's 1.5 GB disk image held CI for
+        # ten minutes; nothing big is worth the wait, and test images are
+        # rebuilt in seconds
+        paths=()
+        for p in $OUT_PATHS; do
+          case $p in *-nixos-disk-image) continue ;; esac
+          [ "$(${pkgs.coreutils}/bin/du -s --block-size=1M "$p" | ${pkgs.coreutils}/bin/cut -f1)" -gt 256 ] && continue
+          paths+=("$p")
+        done
+        [ ''${#paths[@]} -gt 0 ] || exit 0
         # never fail a build over the cache; it is a copy, not the result
         ${config.nix.package}/bin/nix --extra-experimental-features nix-command \
-          copy --to '${url}&secret-key=${cfg.signingKeyFile}' $OUT_PATHS \
-          || echo "cache upload failed for $OUT_PATHS" >&2
+          copy --to '${url}&secret-key=${cfg.signingKeyFile}' "''${paths[@]}" \
+          || echo "cache upload failed for ''${paths[*]}" >&2
       '';
     };
     # the daemon substitutes as root; its credentials live at the usual place
