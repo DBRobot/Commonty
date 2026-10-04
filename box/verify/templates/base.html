@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/_dd/static/home.css">
 </head>
 <body>
-  <header class="dd-bar">
+  <header class="dd-bar" data-public>
     <div class="bar">
       <a class="brand" href="/_dd/home" aria-label="Commonty">
         <svg viewBox="0 0 22 22" aria-hidden="true">
@@ -23,5 +23,7 @@
     </div>
   </header>
   {% block main %}{% endblock %}
+  <!-- the bar's docs and search; nobody here need be signed in -->
+  <script type="module" src="/_dd/static/shell.js"></script>
 </body>
 </html>

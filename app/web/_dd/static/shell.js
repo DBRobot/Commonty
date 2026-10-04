@@ -5,9 +5,15 @@
 
 let answer = null;
 
-/// who this is and what they may open; asked once per page
+// A page anyone may read (the docs) marks its bar so: someone signed out
+// is shown the way in there, not sent through it.
+const open = !!document.querySelector('header.dd-bar[data-public]');
+
+/// who this is and what they may open; asked once per page. On an open
+/// page, null for someone who is not signed in.
 export function me() {
   answer ??= fetch('/_dd/me').then(async (r) => {
+    if (open && (r.status === 401 || r.status === 403)) return null;
     if (r.status === 401) {
       location.href = '/_dd/login?rd=' + encodeURIComponent(location.pathname);
       throw new Error('signed out');
@@ -292,8 +298,210 @@ function services(m, list) {
   }));
 }
 
+// ---- the search in the bar, and the docs beside it
+
+/// A heading's anchor, the same here and on the docs page
+export function slug(text) {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').trim().replace(/\s+/g, '-');
+}
+
+// The fleet's bare name, where the docs are, from wherever this page is:
+// home.<domain> once someone signed in says it, else this host less its
+// first label, and the host itself when it is the bare name already.
+let site = null;
+function docsUrl(path = '') {
+  if (site) return `https://${site}/docs${path}`;
+  const parts = location.hostname.split('.');
+  if (parts.length <= 2 || inApp) return `/docs${path}`;
+  return `https://${parts.slice(1).join('.')}/docs${path}`;
+}
+
+/// A page's own results in the bar's search, above the services and the
+/// docs: `find(text)` answers [{ title, sub, href, icon? }], and `more(text)`,
+/// if given, is where all of them are.
+const sources = [];
+export function searchFrom(source) {
+  sources.push(source);
+}
+
+const glass = '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>';
+const docIcon = '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>';
+function svg(viewBox, inner, cls) {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', viewBox);
+  s.setAttribute('aria-hidden', 'true');
+  if (cls) s.setAttribute('class', cls);
+  s.innerHTML = inner;
+  return s;
+}
+
+let docsIndex = null;
+function docs() {
+  docsIndex ??= fetch('/_dd/docs/index.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  return docsIndex;
+}
+
+/// a page path under docs/ as its address: README.md is the docs' front
+export function docsPath(file) {
+  return file === 'README.md' ? '' : '/' + file.replace(/\.md$/, '').replace(/\/README$/, '');
+}
+
+function findDocs(index, text) {
+  const w = text.toLowerCase();
+  const hits = [];
+  for (const [file, p] of Object.entries(index.pages)) {
+    const at = docsPath(file);
+    if (p.title.toLowerCase().includes(w)) hits.push({ rank: 0, title: p.title, href: docsUrl(at) });
+    for (const [, h] of p.headings) {
+      if (h.toLowerCase().includes(w)) hits.push({ rank: 1, title: h, sub: p.title, href: docsUrl(at) + '#' + slug(h) });
+    }
+    if (!p.title.toLowerCase().includes(w)) {
+      const i = p.text.toLowerCase().indexOf(w);
+      if (i >= 0) {
+        const from = Math.max(0, p.text.lastIndexOf(' ', Math.max(0, i - 40)));
+        hits.push({ rank: 2, title: p.title, sub: '…' + p.text.slice(from, i + w.length + 60).trim() + '…', href: docsUrl(at) });
+      }
+    }
+  }
+  return hits.sort((a, b) => a.rank - b.rank).slice(0, 6);
+}
+
+// the words searched for, marked where they show
+function marked(text, w) {
+  const out = document.createDocumentFragment();
+  const low = text.toLowerCase();
+  let at = 0;
+  for (let i = low.indexOf(w); w && i >= 0; i = low.indexOf(w, i + w.length)) {
+    out.append(text.slice(at, i), el('mark', { text: text.slice(i, i + w.length) }));
+    at = i + w.length;
+  }
+  out.append(text.slice(at));
+  return out;
+}
+
+function tools() {
+  const row = document.querySelector('header.dd-bar .bar');
+  if (!row || row.querySelector('.dd-search')) return;
+  // before the name, or whatever a page keeps at the right end of its bar
+  const after = row.querySelector('#me') || row.querySelector('.brand ~ :not(.links)');
+
+  const docsLink = el('a', { class: 'docs-link', href: here(docsUrl()), text: 'Docs' });
+  if (location.pathname === '/docs' || location.pathname.startsWith('/docs/')) docsLink.setAttribute('aria-current', 'page');
+
+  const input = el('input', { id: 'dd-q', type: 'search', placeholder: 'Search Commonty', 'aria-label': 'Search Commonty', autocomplete: 'off', spellcheck: 'false' });
+  const found = el('div', { class: 'found', role: 'listbox' });
+  found.hidden = true;
+  const opener = el('button', { type: 'button', class: 'open-search', 'aria-label': 'Search' }, svg('0 0 24 24', glass));
+  const form = el('form', { class: 'dd-search', role: 'search' }, opener, svg('0 0 24 24', glass, 'glass'), input, el('kbd', { text: '/' }), found);
+  row.insertBefore(docsLink, after);
+  row.insertBefore(form, after);
+
+  const close = () => {
+    found.hidden = true;
+    form.classList.remove('open');
+  };
+  let asked = 0;
+  async function show() {
+    const text = input.value.trim();
+    const w = text.toLowerCase();
+    const n = ++asked;
+    if (!text) {
+      found.hidden = true;
+      return;
+    }
+    const item = (r, cls, icon, color) => {
+      const ic = el('span', { class: 'ic' }, icon);
+      if (color) ic.style.setProperty('--c', color);
+      return el('a', { class: cls, href: here(r.href), role: 'option' }, ic,
+        el('span', {}, el('b', {}, marked(r.title, w)), ...(r.sub ? [el('small', {}, marked(r.sub, w))] : [])));
+    };
+    const ours = await Promise.all(sources.map((s) => Promise.resolve(s.find(text)).catch(() => [])));
+    const m = await (answer || Promise.resolve(null)).catch(() => null);
+    const index = await docs();
+    if (n !== asked) return;
+    const parts = [];
+    sources.forEach((s, i) => {
+      if (!ours[i].length && !s.more) return;
+      parts.push(el('h4', { text: s.name }));
+      for (const r of ours[i].slice(0, 6)) parts.push(item(r, 'plain', svg('0 0 24 24', r.icon || docIcon)));
+      if (s.more) parts.push(el('a', { class: 'more', href: s.more(text), text: `All results for “${text}”` }));
+    });
+    const svcs = (m?.services || []).filter((s) => !s.shut && `${s.name} ${s.blurb}`.toLowerCase().includes(w));
+    if (svcs.length) {
+      parts.push(el('h4', { text: 'Services' }));
+      for (const s of svcs) {
+        const ic = svg('0 0 20 20', s.icon);
+        parts.push(item({ title: s.name, sub: s.blurb, href: s.url }, '', ic, s.color));
+      }
+    }
+    const hits = index ? findDocs(index, text) : [];
+    if (hits.length) {
+      parts.push(el('h4', { text: 'Docs' }));
+      for (const h of hits) parts.push(item(h, 'plain', svg('0 0 24 24', docIcon)));
+    }
+    if (!parts.length) parts.push(el('p', { text: `Nothing matches “${text}”.` }));
+    found.replaceChildren(...parts);
+    found.hidden = false;
+  }
+  input.addEventListener('focus', () => docs());
+  input.addEventListener('input', show);
+  const step = (by) => {
+    const all = [...found.querySelectorAll('a')];
+    if (!all.length) return;
+    const at = all.findIndex((a) => a.classList.contains('on'));
+    all[at]?.classList.remove('on');
+    const next = all[(at + by + all.length) % all.length];
+    next.classList.add('on');
+    next.scrollIntoView({ block: 'nearest' });
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); step(1); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); step(-1); }
+    if (e.key === 'Escape') { close(); input.blur(); }
+  });
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const pick = found.querySelector('a.on') || found.querySelector('a');
+    if (pick) pick.click();
+  });
+  found.addEventListener('click', () => { close(); input.value = ''; });
+  opener.addEventListener('click', () => {
+    form.classList.add('open');
+    input.focus();
+  });
+  document.addEventListener('click', (e) => {
+    if (!form.contains(e.target)) close();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
+    e.preventDefault();
+    form.classList.add('open');
+    input.focus();
+  });
+  // the docs are on the bare name, which the signed-in answer says for sure
+  me().then((m) => {
+    if (!m?.home) return;
+    site = new URL(m.home).hostname.replace(/^home\./, '');
+    docsLink.href = here(docsUrl());
+  }).catch(() => {});
+}
+tools();
+
+// someone signed out, on a page anyone may read: the way in
+function signedOut(slot) {
+  const parts = location.hostname.split('.');
+  const base = parts.length > 2 ? parts.slice(1).join('.') : location.hostname;
+  slot.replaceChildren(el('a', { class: 'sign-in', href: `https://home.${base}/`, text: 'Sign in' }));
+}
+
 me().then((m) => {
   const slot = document.getElementById('me');
+  if (!m) {
+    if (slot) signedOut(slot);
+    return;
+  }
   if (slot) bar(m, slot);
   links(m);
   if (m.role === 'guest' && document.getElementById('services')) guestHome(m);
