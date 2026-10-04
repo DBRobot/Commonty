@@ -52,15 +52,19 @@ in
           boot.zfs.devNodes = "/dev";
           networking.hostId = "8425e349";
           networking.firewall.enable = false;
-          environment.systemPackages = [
-            self.packages.${pkgs.stdenv.hostPlatform.system}.dd
-            pkgs.tpm2-tools
-          ];
+          # small: everything here goes into the box's bootable disk image,
+          # which is most of this test's time. dd (the paper-key step) runs
+          # on the worker, which boots from the host's store
+          environment.systemPackages = [ pkgs.tpm2-tools ];
+          documentation.enable = false;
         };
       };
     worker = {
       networking.firewall.enable = false;
-      environment.systemPackages = [ pkgs.jq ];
+      environment.systemPackages = [
+        pkgs.jq
+        self.packages.${pkgs.stdenv.hostPlatform.system}.dd
+      ];
       systemd.services.fake-worker = {
         wantedBy = [ "multi-user.target" ];
         serviceConfig.ExecStart = "${python}/bin/python3 ${./unlock/fake-worker.py}";
