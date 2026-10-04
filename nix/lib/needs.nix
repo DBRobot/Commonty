@@ -4,6 +4,7 @@
 { lib }:
 let
   files = [
+    ../modules/adblock/needs.nix
     ../modules/forge/needs.nix
     ../modules/games/needs.nix
     ../modules/library/needs.nix

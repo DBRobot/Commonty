@@ -174,6 +174,25 @@ in
     networking.hosts = lib.mkIf (!bridged) { ${cfg.controlAddress} = [ "headscale.${base}" ]; };
 
     networking.firewall.allowedUDPPorts = [ 41642 ];
+    # The Commonty network reaches this box's services and nothing past it:
+    # the box forwards (docker, the owner's tailscaled), and a member who
+    # sent a packet for a house address (192.168.1.x) to this box would
+    # otherwise be let into the house. Nothing is forwarded in or out on
+    # commonty0, whatever routes anyone adds.
+    networking.firewall.extraCommands = ''
+      for ipt in iptables ip6tables; do
+        $ipt -D FORWARD -i commonty0 -j DROP 2>/dev/null || true
+        $ipt -D FORWARD -o commonty0 -j DROP 2>/dev/null || true
+        $ipt -I FORWARD 1 -i commonty0 -j DROP
+        $ipt -I FORWARD 1 -o commonty0 -j DROP
+      done
+    '';
+    networking.firewall.extraStopCommands = ''
+      for ipt in iptables ip6tables; do
+        $ipt -D FORWARD -i commonty0 -j DROP 2>/dev/null || true
+        $ipt -D FORWARD -o commonty0 -j DROP 2>/dev/null || true
+      done
+    '';
     networking.networkmanager.unmanaged = [ "interface-name:commonty0" ];
   };
 }

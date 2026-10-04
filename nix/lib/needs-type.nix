@@ -90,6 +90,14 @@ let
         );
         default = null;
       };
+      place = lib.mkOption {
+        type = t.enum [
+          "any"
+          "house"
+        ];
+        default = "any";
+        description = "house: the box sits on a household's own network, with its fixed address and household in box.json";
+      };
       threads = lib.mkOption {
         type = t.ints.unsigned;
         default = 0;
@@ -120,10 +128,11 @@ let
         type = t.enum [
           "none"
           "localhost"
+          "lan"
           "tailnet"
           "public"
         ];
-        description = "who reaches it: nobody (it only calls out); only this box; the Commonty network; anyone";
+        description = "who reaches it: nobody (it only calls out); only this box; the household's own network and its owner's tailnet; the Commonty network; anyone";
       };
     };
   };
@@ -211,6 +220,11 @@ t.attrsOf (
         type = t.bool;
         default = false;
         description = "the box hands people the code that handles their secrets (a page a master password is typed into): whoever has root there could change it. fleet/policy.json can keep such a service on the fleet owner's own hardware";
+      };
+      perHouse = lib.mkOption {
+        type = t.nullOr t.ints.positive;
+        default = null;
+        description = "at most this many in one house (a house's DNS is one box)";
       };
       instances = lib.mkOption {
         type = t.nullOr t.ints.positive;
