@@ -664,6 +664,8 @@
           '';
           dd-control = control.dd-control;
           control-config = control.configFile;
+          # every service's needs, typed (nix/lib/needs.nix): what placement reads
+          needs = pkgs.writeText "needs.json" (builtins.toJSON (import ./nix/lib/needs.nix { lib = nixpkgs.lib; }));
           # The mail Worker (client/mail): what `dd release publish` uploads
           # to Cloudflare, file for file, and what the boxes compare the
           # deployed Worker with. The checks are the boxes' own Rust in wasm;

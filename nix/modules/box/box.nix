@@ -25,7 +25,28 @@
     type = lib.types.str;
     default = "";
   };
-  # a hardware fact, set in the box's hardware file with the driver
+  # hardware facts, from the box's own report (modules/box/host.nix)
+  options.dd.box.gpus = lib.mkOption {
+    type = lib.types.listOf (
+      lib.types.submodule {
+        options = {
+          render = lib.mkOption { type = lib.types.str; };
+          driver = lib.mkOption { type = lib.types.str; };
+          encode = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+          };
+        };
+      }
+    );
+    default = [ ];
+    description = "Every GPU the box has, whatever its maker: Vulkan is on for all of them.";
+  };
+  options.dd.box.threads = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = 1;
+    description = "CPU threads, from the report: the default for whatever sizes itself by them";
+  };
   options.dd.box.vaapi = lib.mkOption {
     type = lib.types.nullOr lib.types.str;
     default = null;
