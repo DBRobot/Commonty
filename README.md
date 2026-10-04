@@ -8,10 +8,10 @@ committed encrypted rather than kept out of tree.
 
     flake.nix          entry point; `nixosConfigurations.<box>` from fleet/boxes.json
     fleet/             what the fleet is: the boxes, the members
+      boxes/<box>/     one box as data: its own hardware report, its owner's choices
     nix/               what a box is
       modules/         NixOS modules, grouped by concern (box, gate, forge, games, ...)
       roles/           what a box runs, by role; a box lists its roles in fleet/
-      hosts/           per-machine hardware
       tests/           VM tests: boxes booted and driven
     box/               Rust that runs on boxes: the agent, the gate, the games manager
     client/            Rust a person runs: the dd cli, its libraries, the browser wasm

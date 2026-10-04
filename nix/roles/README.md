@@ -3,8 +3,9 @@
 A box is its hardware plus a list of roles from `fleet/boxes.json`. A role is
 a bundle of modules that have to move together, with the secrets those
 modules read declared beside them. `flake.nix` builds one `nixosConfiguration`
-per box from its entry; `hosts/<box>/hardware.nix` holds only what is true of
-that machine (disks, network, lid).
+per box from its entry and its folder in `fleet/boxes/<box>/`, which is data,
+not Nix: what the box found on itself and what its owner chose
+(modules/box/host.nix).
 
     core      every box: identity, directory replica, metrics, tailnet, ssh, admin
     gateway   nginx, certificates, the browser login: a box with a public name

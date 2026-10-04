@@ -1025,7 +1025,7 @@
                 ddScript = import ./nix/lib/script.nix { lib = nixpkgs.lib; };
               };
               modules = [
-                ./nix/hosts/${name}/hardware.nix
+                (import ./nix/modules/box/host.nix ./fleet/boxes/${name})
                 {
                   networking.hostName = name;
                   dd.box.tailnet = box.tailnet;
@@ -1062,7 +1062,7 @@
                 }
               ]
               ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops
-              ++ lib.optional (builtins.pathExists ./nix/hosts/${name}/disko.nix) disko.nixosModules.disko
+              ++ [ disko.nixosModules.disko ]
               ++ lib.optional (builtins.elem "observe" box.roles) {
                 # every box's sidecar, for the fleet-wide query
                 dd.thanos.sidecars = lib.mapAttrsToList (
