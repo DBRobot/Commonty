@@ -15,6 +15,13 @@ mod vpn;
 /// `dd` on one machine is a device of its own
 const SERVICE: &str = "commonty-app";
 
+/// The version people downloaded: the release tag's, which the release
+/// build hands over (COMMONTY_VERSION); a build from a checkout says the
+/// workspace's
+pub fn version() -> &'static str {
+    option_env!("COMMONTY_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
 #[cfg(target_os = "android")]
 use tauri::Manager as _;
 
@@ -23,7 +30,7 @@ pub fn run() {
     // what the Devices tab calls this device's requests
     directory::set_agent(format!(
         "Commonty-app/{} ({})",
-        env!("CARGO_PKG_VERSION"),
+        version(),
         std::env::consts::OS
     ));
     let builder = tauri::Builder::default();
@@ -39,9 +46,7 @@ pub fn run() {
             account::set_name,
             account::join_with_code,
             account::sign_up,
-            account::admit_device,
             account::passkey_add,
-            account::remove_device,
             account::recover,
             account::forget,
             net::net_status,

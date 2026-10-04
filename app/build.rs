@@ -5,6 +5,8 @@ fn main() {
     // apk (gen/android/.../jniLibs/<abi>/), which is where the
     // COMMONTY_NET_LIB_DIR for that target points.
     println!("cargo:rerun-if-env-changed=COMMONTY_NET_LIB_DIR");
+    // the release tag's version (lib.rs version())
+    println!("cargo:rerun-if-env-changed=COMMONTY_VERSION");
     let target = std::env::var("TARGET").unwrap_or_default();
     let dir = std::env::var("COMMONTY_NET_LIB_DIR")
         .expect("COMMONTY_NET_LIB_DIR: where libcommontynet is (nix build .#net)");

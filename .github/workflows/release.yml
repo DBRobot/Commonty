@@ -30,6 +30,14 @@ jobs:
         # the tag, whether it was pushed or named by hand: a hand run
         # would otherwise build the default branch under the tag's name
         with: { ref: "${{ github.event.inputs.tag || github.ref }}" }
+      # the tag's version, for the app to say and the bundles to carry: a
+      # build from a checkout says the workspace's 0.1.0, which told nobody
+      # which release they had (and Android's version code never moved)
+      - name: the version, from the tag
+        shell: bash
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: echo "COMMONTY_VERSION=${TAG#v}" >> "$GITHUB_ENV"
       - name: what tauri needs on ubuntu
         run: |
           sudo apt-get update
@@ -70,7 +78,7 @@ jobs:
         env:
           COMMONTY_NET_LIB_DIR: ${{ runner.temp }}/netlib
         run: |
-          cd app && cargo tauri build --bundles deb,appimage
+          cd app && cargo tauri build --config "{\"version\":\"$COMMONTY_VERSION\"}" --bundles deb,appimage
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux
@@ -85,6 +93,14 @@ jobs:
         # the tag, whether it was pushed or named by hand: a hand run
         # would otherwise build the default branch under the tag's name
         with: { ref: "${{ github.event.inputs.tag || github.ref }}" }
+      # the tag's version, for the app to say and the bundles to carry: a
+      # build from a checkout says the workspace's 0.1.0, which told nobody
+      # which release they had (and Android's version code never moved)
+      - name: the version, from the tag
+        shell: bash
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: echo "COMMONTY_VERSION=${TAG#v}" >> "$GITHUB_ENV"
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with: { distribution: temurin, java-version: "17" }
       # the runner image carries the sdk and an ndk; setup-android trips on
@@ -132,7 +148,7 @@ jobs:
           mkdir -p app/gen/android/app/src/main/jniLibs
           cp -r "$RUNNER_TEMP/jni/." app/gen/android/app/src/main/jniLibs/
           # the two abis the engine is built for; tauri would build all four
-          cd app && cargo tauri android build --apk --target aarch64 --target x86_64
+          cd app && cargo tauri android build --config "{\"version\":\"$COMMONTY_VERSION\"}" --apk --target aarch64 --target x86_64
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android
@@ -146,6 +162,14 @@ jobs:
         # the tag, whether it was pushed or named by hand: a hand run
         # would otherwise build the default branch under the tag's name
         with: { ref: "${{ github.event.inputs.tag || github.ref }}" }
+      # the tag's version, for the app to say and the bundles to carry: a
+      # build from a checkout says the workspace's 0.1.0, which told nobody
+      # which release they had (and Android's version code never moved)
+      - name: the version, from the tag
+        shell: bash
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: echo "COMMONTY_VERSION=${TAG#v}" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with: { toolchain: "1.95.0" }
       # the dependencies, built once per Cargo.lock and toolchain, as the
@@ -215,7 +239,7 @@ jobs:
         env:
           COMMONTY_NET_LIB_DIR: ${{ runner.temp }}/netlib
         run: |
-          cd app && cargo tauri build --bundles nsis
+          cd app && cargo tauri build --config "{\"version\":\"$COMMONTY_VERSION\"}" --bundles nsis
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows

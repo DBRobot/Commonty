@@ -107,69 +107,30 @@
         <p class="lead">Check your other device shows the same number, then approve it there:</p>
         <p class="digits" id="admit-digits"></p>
       </div>
-      <p class="small">Fingerprint <code id="admit-fp"></code>. The key never leaves this device.</p>
-      <p id="admit-dirs" class="small"></p>
       <p class="small waiting">Checking again every few seconds…</p>
       <button id="admit-back" class="quiet">Different name</button>
     </section>
 
-    <section id="page-home" class="page wide-page" hidden>
-      <div class="intro">
-        <h1>This device</h1>
-        <p>Signed in as <strong id="home-name"></strong>. <a id="to-site" href="#">Your services</a></p>
+    <!-- What only the app can do. Everything else (devices, passkeys, the
+         services) is on the site's own pages, which the app carries. -->
+    <section id="page-home" class="page card" hidden>
+      <h1>This device</h1>
+      <p class="lead">Signed in as <strong id="home-name"></strong>.</p>
+      <p id="net-text" class="small"></p>
+      <p id="net-error" class="error small" hidden></p>
+      <div class="row">
+        <a id="to-site" class="button" href="#">Open your services</a>
+        <button id="net-join" class="quiet" hidden>Connect</button>
       </div>
 
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Network</h2>
-        </div>
-        <p id="net-text" class="small"></p>
-        <div class="row">
-          <button id="net-join">Join</button>
-        </div>
-        <ul id="net-peers" class="rows"></ul>
-        <p id="net-error" class="error small" hidden></p>
-      </div>
+      <h2>Your browser</h2>
+      <p class="small">The website signs in with a passkey. Make one in this computer's browser, and your pages open there too.</p>
+      <button id="passkey-add" class="quiet">Set up a passkey</button>
+      <p id="passkey-text" class="small" hidden></p>
 
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Browser</h2>
-        </div>
-        <p class="small">The website signs in with a passkey. Make one in this device's browser, and every page opens there too.</p>
-        <div class="row">
-          <button id="passkey-add">Set up a passkey</button>
-        </div>
-        <p id="passkey-text" class="small" hidden></p>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Devices</h2>
-        </div>
-        <ul id="home-devices" class="rows devices"></ul>
-        <div id="add-device" hidden>
-          <p class="small">A new device shows a key on its "Add this device" page. Paste it here and it is yours, with every library key sealed to it.</p>
-          <form id="admit-form" class="row">
-            <input id="admit-key" autocomplete="off" spellcheck="false" placeholder="the new device's key" aria-label="The new device's key">
-            <button type="submit">Add</button>
-          </form>
-          <p id="admit-error" class="error small" hidden></p>
-        </div>
-        <p id="no-root" class="small" hidden>Devices are added and removed from the device that made the account.</p>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Account</h2>
-        </div>
-        <dl class="facts">
-          <dt>Entry</dt><dd id="home-entry"></dd>
-          <dt>Libraries</dt><dd id="home-libraries"></dd>
-          <dt>Passkeys</dt><dd id="home-passkeys"></dd>
-          <dt>Gate</dt><dd id="home-gate"></dd>
-        </dl>
-        <button id="home-forget" class="quiet">Sign out on this device</button>
-      </div>
+      <h2>This device</h2>
+      <p class="small">Devices are added and removed in Settings, under Devices.</p>
+      <button id="home-forget" class="quiet">Sign out on this device</button>
     </section>
 
     <section id="page-error" class="page card" hidden>
