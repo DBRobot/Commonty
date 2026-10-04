@@ -201,6 +201,11 @@ t.attrsOf (
   t.submodule {
     options = {
       what = lib.mkOption { type = t.str; };
+      servesCode = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "the box hands people the code that handles their secrets (a page a master password is typed into): whoever has root there could change it. fleet/policy.json can keep such a service on the fleet owner's own hardware";
+      };
       instances = lib.mkOption {
         type = t.nullOr t.ints.positive;
         default = null;

@@ -109,13 +109,9 @@ in
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
       (lib.optionalAttrs hasPublic { dd.public.hosts = [ "vault" ]; })
-      {
-        # what the box holds: every vault encrypted on its owner's devices; names,
-        # who is in the Family and when things changed are in the clear. The web
-        # vault's code comes from here, so a box that turned hostile could serve a
-        # page that reads a master password as it is typed: label it as such.
-        dd.box.plaintext = [ "vaultwarden (serves the page master passwords are typed into)" ];
-
+      # the bucket and its key are made by the garage on this box, when there
+      # is one; a vault on a box without garage needs them made already
+      (lib.optionalAttrs (options.dd ? garage) {
         dd.garage.setupEnvFiles = [ cfg.envFile ];
         dd.garage.buckets.vaultwarden = {
           key = {
@@ -127,6 +123,13 @@ in
             "write"
           ];
         };
+      })
+      {
+        # what the box holds: every vault encrypted on its owner's devices; names,
+        # who is in the Family and when things changed are in the clear. The web
+        # vault's code comes from here, so a box that turned hostile could serve a
+        # page that reads a master password as it is typed: label it as such.
+        dd.box.plaintext = [ "vaultwarden (serves the page master passwords are typed into)" ];
 
         services.vaultwarden = {
           enable = true;
@@ -139,7 +142,9 @@ in
             DOMAIN = "https://${host}";
             ROCKET_ADDRESS = "127.0.0.1";
             ROCKET_PORT = port;
-            DATA_FOLDER = "s3://vaultwarden/data?endpoint=http://127.0.0.1:3900&region=us-east-1&enable_virtual_host_style=false&default_storage_class=STANDARD";
+            # the storage pool, wherever it is: this box's garage or a
+            # storage box's over the tailnet
+            DATA_FOLDER = "s3://vaultwarden/data?endpoint=${config.dd.box.s3}&region=us-east-1&enable_virtual_host_style=false&default_storage_class=STANDARD";
             TMP_FOLDER = "/var/lib/vaultwarden/tmp";
             TEMPLATES_FOLDER = "${templates}";
 
@@ -198,8 +203,8 @@ in
             END IF; END $$;
             SQL
           '';
-          after = [ "garage-setup.service" ];
-          wants = [ "garage-setup.service" ];
+          after = lib.optional (options.dd ? garage) "garage-setup.service";
+          wants = lib.optional (options.dd ? garage) "garage-setup.service";
           environment.AWS_REGION = "us-east-1";
           serviceConfig.LoadCredential = config.dd.memberMail.credentials;
         };

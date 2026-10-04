@@ -1,0 +1,69 @@
+# What Passwords needs of a box (types: nix/lib/needs-type.nix)
+{
+  vaultwarden = {
+    what = "passwords: everyone's vault, encrypted on their own devices";
+    servesCode = true; # the web vault's page, where master passwords are typed
+    base = {
+      # its own files and room for a great many vaults' records: its
+      # database is postgresql's, its attachments the storage pool's
+      requires.disk.size.min = "10G";
+      # node1, 2026-10-04
+      uses = {
+        memory = "20M";
+        storage = "1M";
+      };
+      network = {
+        outbound = [ "smtp.gmail.com" ];
+        inbound = "tailnet";
+      };
+      depends = {
+        postgresql.local = true;
+        garage.local = false;
+        nginx.local = true;
+        dd-verify.local = true; # sign-in, and /run/dd-ended
+        pwned-list.local = true; # breach checks never leave the box
+      };
+      privacy = "metadata"; # vaults are ciphertext; it sees names, emails, when things change
+    };
+  };
+
+  vaultwarden-send = {
+    what = "Send links: one thing shared with anyone, opened without an account";
+    servesCode = true; # the Send page decrypts in the visitor's browser
+    base = {
+      uses = {
+        memory = "0";
+        storage = "0";
+      }; # vaultwarden's own process
+      network = {
+        outbound = "none";
+        inbound = "public"; # only its own routes; the vault stays tailnet-only
+      };
+      depends = {
+        vaultwarden.local = true;
+        nginx.local = true;
+      };
+      privacy = "none"; # ciphertext, with the key in the link's #, which never reaches a server
+    };
+  };
+
+  pwned-list = {
+    what = "the breach list, so checking a password never leaves the box";
+    base = {
+      # 80G a copy, and a refresh builds the next beside it
+      requires.disk.size.min = "170G";
+      # the weekly fetch: curl, 64 transfers at once; not yet measured
+      uses = {
+        memory = "256M";
+        storage = "80G";
+        estimated = true;
+      };
+      network = {
+        outbound = [ "api.pwnedpasswords.com" ];
+        inbound = "localhost";
+      };
+      depends.nginx.local = true;
+      privacy = "none"; # a public list
+    };
+  };
+}

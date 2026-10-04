@@ -6,6 +6,7 @@ let
     roles = lib.importJSON ../../fleet/roles.json;
     boxes = lib.importJSON ../../fleet/boxes.json;
     dir = ../../fleet/boxes;
+    policy = lib.importJSON ../../fleet/policy.json;
   };
 in
 pkgs.runCommand "role-fit" { } (
