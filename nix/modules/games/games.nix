@@ -303,6 +303,8 @@ in
     systemd.services.dd-games-measure = {
       description = "Record what each running game takes";
       path = [
+        pkgs.bash
+        pkgs.coreutils
         pkgs.jq
         pkgs.gawk
         pkgs.systemd
