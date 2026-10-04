@@ -44,6 +44,25 @@ clock      NTP synced and offset (validators reject >2 s; unlock signs a timesta
 firewall   iptables backend (several roles add iptables rules) vs nftables
 ```
 
+## Booting on a stock PC (decided 2026-10-04)
+
+The TPM, sealed to our signed boot, is what protects the disks. Getting our
+boot loader to run on a PC with Secure Boot on (most ship that way):
+
+- now: shim + MOK. The box boots a distro's Microsoft-signed shim, and the
+  owner confirms our key once on a blue screen at first boot. No BIOS, no cost.
+- later: NixOS's own Microsoft-signed shim (nixos-shim, through rhboot/shim-review)
+  once it exists. That means no prompt at all.
+- not doing: our own shim through review. It needs an EV certificate, a few
+  hundred dollars a year.
+- node1 and node2 keep their own enrolled keys (lanzaboote).
+
+Other BIOS settings a box may need, all checked by discovery: virtualization
+(games, CI), TPM on (PPI can ask with one key at boot), power on after an
+outage (can't be read from Linux), boot from the internal disk. On business
+PCs, Linux can change these (think-lmi, dell-wmi-sysman, hp-bioscfg).
+node1's HP and node2's Acer can't.
+
 ## 2. Every box needs (core + boot)
 
 - UEFI, an ESP of 1G (lanzaboote keeps 8 generations), Secure Boot with our
