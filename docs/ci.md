@@ -92,7 +92,8 @@ The same steps for everyone, a person or an agent:
    `dd release app-next` in the background: it tags the next `v*`, waits
    for GitHub to build it ([`.github/workflows/release.yml`](../.github/workflows/release.yml)),
    and signs it for the downloads page. The boxes never wait for it; its
-   log is `~/.cache/dd/app-release.log`.
+   log is `~/.cache/dd/app-release.log`. The GitHub side is
+   [its own page](github.md).
 6. **Wait on `ci_ok`**, not on every status being green: a failure anywhere
    is final, since the run stops at the first one.
 
