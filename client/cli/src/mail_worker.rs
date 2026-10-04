@@ -12,7 +12,7 @@ use std::path::Path;
 const API: &str = "https://api.cloudflare.com/client/v4";
 
 /// Cloudflare's API, or a stand-in for a test (DD_CF_API)
-fn api() -> String {
+pub(crate) fn api() -> String {
     std::env::var("DD_CF_API").unwrap_or_else(|_| API.to_string())
 }
 /// keyring entry: Workers Scripts Edit, Workers KV Edit, Workers Routes
@@ -33,7 +33,7 @@ pub struct Setup {
     pub script: String,
 }
 
-fn token(keys: &impl auth::KeyStore) -> Result<String> {
+pub(crate) fn token(keys: &impl auth::KeyStore) -> Result<String> {
     // the name wrangler reads it under, for a one-off
     if let Ok(t) = std::env::var("CLOUDFLARE_API_TOKEN") {
         return Ok(t);
@@ -53,7 +53,7 @@ fn token(keys: &impl auth::KeyStore) -> Result<String> {
     Ok(t.trim().to_string())
 }
 
-async fn call(
+pub(crate) async fn call(
     http: &reqwest::Client,
     token: &str,
     method: reqwest::Method,

@@ -362,6 +362,16 @@ fn publish(
     )?;
     print(&signed);
     nudge(&boxes);
+    // the control plane's relay this release carries
+    let relayed = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current()
+            .block_on(crate::control_worker::deploy(&root, keys, r#ref))
+    });
+    if let Err(e) = relayed {
+        eprintln!(
+            "== the control relay did not go up: {e:#}\n   `dd control deploy --ref {ref}` when it can"
+        );
+    }
     // the mail Worker this release carries (the gateway's closure holds the
     // same files, which the boxes vouched for and check Cloudflare against)
     let deployed = tokio::task::block_in_place(|| {

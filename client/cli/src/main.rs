@@ -1,3 +1,4 @@
+mod control_worker;
 mod derive;
 mod diskcmd;
 mod librarycmd;
@@ -61,6 +62,15 @@ enum Command {
     Mail {
         #[command(subcommand)]
         cmd: MailCmd,
+        /// the repository checkout; defaults to the current directory
+        #[arg(long, default_value = ".", global = true)]
+        repo: String,
+    },
+    /// The control plane's relay and witness at Cloudflare (box/control).
+    /// `dd release publish` uploads it.
+    Control {
+        #[command(subcommand)]
+        cmd: ControlCmd,
         /// the repository checkout; defaults to the current directory
         #[arg(long, default_value = ".", global = true)]
         repo: String,
@@ -426,6 +436,26 @@ enum MailCmd {
         r#ref: String,
     },
     /// Upload the Worker a branch builds (publish does this itself)
+    Deploy {
+        #[arg(long, default_value = "main")]
+        r#ref: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ControlCmd {
+    /// Once: the voters in fleet/control.json - each box's validator key
+    /// (`sudo dd-control -print-validator-key` on it), then a witness made
+    /// here whose key goes only to Cloudflare - the first upload, and the
+    /// name control.<domain>
+    Setup {
+        #[arg(long, default_value = "commonty.org")]
+        domain: String,
+        /// a voting box as name=key, in order; one per house
+        #[arg(long = "validator")]
+        validators: Vec<String>,
+    },
+    /// Upload the relay a branch builds (publish does this itself)
     Deploy {
         #[arg(long, default_value = "main")]
         r#ref: String,
@@ -1091,6 +1121,19 @@ async fn main() -> Result<()> {
                     mail_worker::setup(&root, &keys, &domain, &r#ref).await?
                 }
                 MailCmd::Deploy { r#ref } => mail_worker::deploy(&root, &keys, &r#ref).await?,
+            }
+        }
+
+        Command::Control { cmd, repo } => {
+            let root = release_cmd::repo_root(&repo)?;
+            let keys = auth::open(&service());
+            match cmd {
+                ControlCmd::Setup { domain, validators } => {
+                    control_worker::setup(&root, &keys, &domain, &validators).await?
+                }
+                ControlCmd::Deploy { r#ref } => {
+                    control_worker::deploy(&root, &keys, &r#ref).await?
+                }
             }
         }
 
