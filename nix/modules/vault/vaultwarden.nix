@@ -86,6 +86,7 @@ in
   imports = [
     ./pwned.nix
     ../member-mail.nix
+    ../storage/usage.nix
   ];
 
   options.dd.vault = {
@@ -180,6 +181,13 @@ in
           };
         };
 
+        # each member's attachments, counted by the vault itself (storage/usage.nix)
+        dd.usage.vaultwarden = {
+          user = "vaultwarden";
+          database = "vaultwarden";
+          query = "select u.email, coalesce(sum(a.file_size), 0) from attachments a join ciphers c on c.uuid = a.cipher_uuid join users u on u.uuid = c.user_uuid group by u.email";
+        };
+
         systemd.services.vaultwarden = {
           path = [ config.services.postgresql.package ];
           # the refresh tokens made before the patch, hashed once
@@ -270,7 +278,7 @@ in
                 extraConfig = extra;
               };
               # quoted where used: nginx reads a bare { in a location as a block
-          uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+              uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
             in
             {
               # inside: the web vault, with the Commonty bar added to its page;

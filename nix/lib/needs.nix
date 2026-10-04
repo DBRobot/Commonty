@@ -5,6 +5,8 @@
 let
   files = [
     ../modules/llm/needs.nix
+    ../modules/photos/needs.nix
+    ../modules/storage/needs.nix
   ];
   checked = lib.evalModules {
     modules = [

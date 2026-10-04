@@ -1,7 +1,8 @@
 # One allowance per member across every service (box/verify/src/storage.rs,
-# client/cli/src/storage_ledger.rs). A unit of its own counts, every ten
-# minutes: it holds a Photos admin login, which the gate - the box's front
-# door - never does, and reads only the columns it adds up. The gate reads
+# client/cli/src/storage_ledger.rs). A unit of its own counts, every
+# hour: it holds a Photos admin login, which the gate - the box's front
+# door - never does, and reads no database: each service counts
+# its own (storage/usage.nix). The gate reads
 # what it writes, to show it and to hold library uploads to it.
 {
   config,
@@ -28,20 +29,19 @@ in
     users.users.${user} = {
       isSystemUser = true;
       group = user;
+      # the services' own counts (storage/usage.nix)
+      extraGroups = [ "dd-usage" ];
     };
     users.groups.${user} = { };
     sops.secrets.ente-storage-password.owner = user;
 
-    # the ledger's database login may read what it adds up and nothing else
-    services.postgresql.ensureUsers = [ { name = user; } ];
-    systemd.services.dd-storage-grants = {
-      description = "Let the storage ledger read repository and attachment sizes";
+    # It once had a database login with grants on the forge's and the
+    # vault's tables; it reads their counts now (storage/usage.nix). The
+    # old login goes, grants and all.
+    systemd.services.dd-storage-forget-login = {
+      description = "Drop the storage ledger's old database login";
       wantedBy = [ "multi-user.target" ];
-      after = [
-        "postgresql.service"
-        "forgejo.service"
-        "vaultwarden.service"
-      ];
+      after = [ "postgresql.service" ];
       path = [ config.services.postgresql.package ];
       serviceConfig = {
         Type = "oneshot";
@@ -49,17 +49,13 @@ in
         User = "postgres";
       };
       script = ''
-        # the tables exist once their services have started once
-        for _ in $(seq 1 120); do
-          [ "$(psql -d forgejo -tAc "select to_regclass('public.repository') is not null")" = t ] \
-            && [ "$(psql -d vaultwarden -tAc "select to_regclass('public.attachments') is not null")" = t ] && break
-          sleep 1
+        [ "$(psql -tAc "select 1 from pg_roles where rolname = '${user}'")" = 1 ] || exit 0
+        for db in forgejo vaultwarden ente; do
+          [ "$(psql -tAc "select 1 from pg_database where datname = '$db'")" = 1 ] || continue
+          psql -d "$db" -v ON_ERROR_STOP=1 -q -c 'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "${user}"' -c 'DROP OWNED BY "${user}"'
         done
-        psql -d forgejo -v ON_ERROR_STOP=1 -q -c 'GRANT SELECT (owner_name, size, lfs_size) ON repository TO "${user}"'
-        psql -d vaultwarden -v ON_ERROR_STOP=1 -q \
-          -c 'GRANT SELECT (uuid, email) ON users TO "${user}"' \
-          -c 'GRANT SELECT (uuid, user_uuid) ON ciphers TO "${user}"' \
-          -c 'GRANT SELECT (cipher_uuid, file_size) ON attachments TO "${user}"'
+        psql -v ON_ERROR_STOP=1 -q -c 'DROP ROLE "${user}"'
+        echo "the ledger's database login is gone"
       '';
     };
 
@@ -67,10 +63,9 @@ in
       description = "Count what each member keeps, and hold Photos to what is left";
       after = [
         "dd-verify.service"
-        "dd-storage-grants.service"
+        "dd-usage-forgejo.service"
+        "dd-usage-vaultwarden.service"
       ];
-      wants = [ "dd-storage-grants.service" ];
-      path = [ config.services.postgresql.package ];
       serviceConfig = {
         Type = "oneshot";
         User = user;
@@ -93,6 +88,10 @@ in
           "@${base}"
           "--password-file"
           config.sops.secrets.ente-storage-password.path
+          "--usage"
+          "code=/var/lib/dd-usage/forgejo/usage.tsv"
+          "--usage"
+          "passwords=/var/lib/dd-usage/vaultwarden/usage.tsv"
           "--budget-gb"
           (toString cfg.budgetGb)
           "--out"
