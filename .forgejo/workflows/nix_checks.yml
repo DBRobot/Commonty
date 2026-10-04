@@ -57,6 +57,9 @@ jobs:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: the mail Worker, in a browser
         run: nix build --no-link -L .#checks.x86_64-linux.mail-worker
+      # and the control plane's relay, witness and validators (nix/tests/control)
+      - name: the control plane, end to end
+        run: nix build --no-link -L .#checks.x86_64-linux.control
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
