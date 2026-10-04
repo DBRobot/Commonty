@@ -49,6 +49,7 @@ in
         pkgs.tpm2-tools
         pkgs.age-plugin-tpm
         pkgs.jq
+        pkgs.gawk
         pkgs.libva-utils
         config.boot.zfs.package
         config.system.build.nixos-generate-config
