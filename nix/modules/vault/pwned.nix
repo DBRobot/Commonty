@@ -99,8 +99,23 @@ in
             # not next week: until it finishes the old list is kept beside it
             Restart = "on-failure";
             RestartSec = "1h";
+            # its dataset is mounted root's over the directory tmpfiles made:
+            # the list's own user owns it before every run
+            ExecStartPre = "+${pkgs.coreutils}/bin/chown dd-pwned:dd-pwned ${dir}";
           };
           script = "exec ${fetch}";
+        };
+        # a box with no list yet fetches one now, not on Sunday: a timer of its
+        # own, since a run that takes hours must not hold a deploy
+        systemd.services.dd-pwned-first = {
+          description = "Fetch the breach list if this box has none";
+          unitConfig.ConditionPathExists = "!${dir}/current";
+          serviceConfig.Type = "oneshot";
+          script = "systemctl start --no-block dd-pwned.service";
+        };
+        systemd.timers.dd-pwned-first = {
+          wantedBy = [ "timers.target" ];
+          timerConfig.OnActiveSec = "2min";
         };
         systemd.timers.dd-pwned = {
           wantedBy = [ "timers.target" ];
