@@ -10,7 +10,8 @@ keys:
   - &node2 age1ttsgyu66t9xuwt5qa9g0wrnnudlzy2hjyr4dt4v6vcawjqjzfq0qexvrxt
   # each box's key in its own TPM (nix/modules/box/report.nix), from the
   # report the box signed (fleet/boxes/<box>/hardware.json, secretsKey).
-  # The ssh-derived keys above go once the boxes decrypt with these.
+  # The ssh-derived keys above no longer decrypt anything (2026-10-04); kept
+  # only as the boxes' names for these keys' history.
   - &node1-tpm age1tpm1qwa2gztkdup8mr7hvmymm7utnlx888j6klgq0peyxpt2q2qzgwhjxcvu44k
   - &node2-tpm age1tpm1qvfng390u93dcwmhpkuvcmpjm6fhdzcuegqmlhm38a9e8f0k9waxugt2mkf
   - &david age18cw3l0s8w85spjne4u7sfvedpdwgqvkw626yqjl9lar9drtlqvps4jdd7x
@@ -25,7 +26,6 @@ creation_rules:
   - path_regex: secrets/node1\.yaml$
     key_groups:
       - age:
-          - *node1
           - *node1-tpm
           - *david
           - *david-dd
@@ -40,7 +40,6 @@ creation_rules:
   - path_regex: secrets/node2\.yaml$
     key_groups:
       - age:
-          - *node2
           - *node2-tpm
           - *david
           - *david-dd
