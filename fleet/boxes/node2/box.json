@@ -1,0 +1,14 @@
+{
+  "house": { "ssid": "Zyxel05804", "address": "192.168.1.21/24" },
+  "encrypted": true,
+  "extraPools": [],
+  "neverSleep": true,
+  "datasets": {
+    "tank/enc/garage": {
+      "note": "garage's blocks, content-addressed ciphertext: nothing to gain from snapshots",
+      "mountpoint": "/srv/garage",
+      "recordsize": "1M",
+      "com.sun:auto-snapshot": "false"
+    }
+  }
+}

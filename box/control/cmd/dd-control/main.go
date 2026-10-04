@@ -152,6 +152,21 @@ func tpmSign(keys string, msg []byte) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
+// reportMessage is what a box signs over its own report: the files' hashes
+// under a label no heartbeat starts with, so neither signature passes for
+// the other (nix/checks/box-reports.py checks it the same way)
+func reportMessage(box, dir string) ([]byte, error) {
+	m := "commonty box report v1\x00" + box
+	for _, f := range []string{"hardware.json", "hardware-configuration.nix"} {
+		b, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			return nil, err
+		}
+		m += fmt.Sprintf("\x00%x", sha256.Sum256(b))
+	}
+	return []byte(m), nil
+}
+
 // facts: what this box has, as the placement rules will read them
 func facts() map[string]float64 {
 	f := map[string]float64{"cores": float64(runtime.NumCPU())}
@@ -219,6 +234,7 @@ func main() {
 	every := flag.Duration("heartbeat", 30*time.Second, "how often to heartbeat")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
+	report := flag.String("sign-report", "", "sign the box's report in this directory (hardware.json, hardware-configuration.nix) as -box, into report.sig, and exit")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -228,6 +244,25 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println(base64.StdEncoding.EncodeToString(k.Public().(ed25519.PublicKey)))
+		return
+	}
+
+	if *report != "" {
+		msg, err := reportMessage(*box, *report)
+		if err != nil {
+			log.Fatal(err)
+		}
+		sign := func(m []byte) (string, error) { return tpmSign(*tpmKeys, m) }
+		if *softKey != "" {
+			sign = softSigner(*softKey)
+		}
+		sig, err := sign(msg)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(*report, "report.sig"), []byte(sig+"\n"), 0o644); err != nil {
+			log.Fatal(err)
+		}
 		return
 	}
 

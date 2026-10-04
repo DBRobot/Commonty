@@ -8,10 +8,10 @@ committed encrypted rather than kept out of tree.
 
     flake.nix          entry point; `nixosConfigurations.<box>` from fleet/boxes.json
     fleet/             what the fleet is: the boxes, the members
+      boxes/<box>/     one box as data: its own hardware report, its owner's choices
     nix/               what a box is
       modules/         NixOS modules, grouped by concern (box, gate, forge, games, ...)
       roles/           what a box runs, by role; a box lists its roles in fleet/
-      hosts/           per-machine hardware
       tests/           VM tests: boxes booted and driven
     box/               Rust that runs on boxes: the agent, the gate, the games manager
     client/            Rust a person runs: the dd cli, its libraries, the browser wasm
@@ -58,6 +58,13 @@ silently redeploy the previous revision.
   there are four houses, the witnesses retire, the Cloudflare one last. A
   house that joins changes the validator list in a signed release, never on
   its own say.
+- **Nothing readable by Cloudflare.** The tunnel ends TLS at Cloudflare, so
+  today it sees and could change every page and request that comes in
+  through the public front door. Accepted for now. The way out: TLS that
+  ends on the box (a pass-through relay, or members over the tailnet), with
+  Cloudflare left carrying only what is end-to-end encrypted. Passwords is
+  already there: tailnet only, TLS on the box, and Cloudflare sees none of
+  it; its page stays on the box, and the box's keys move into its TPM.
 
 ## License
 

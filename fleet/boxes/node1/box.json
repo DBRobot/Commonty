@@ -1,0 +1,56 @@
+{
+  "house": { "ssid": "Zyxel05804", "address": "192.168.1.20/24", "household": ["david"] },
+  "encrypted": true,
+  "extraPools": ["vault"],
+  "arcMaxBytes": 8589934592,
+  "runnerCapacity": 2,
+  "neverSleep": false,
+  "datasets": {
+    "vault/enc/photos": {
+      "note": "garage's blocks: ente's and the media tier's ciphertext. Snapshots are cheap on immutable files and save you from rm -rf",
+      "mountpoint": "/vault/photos",
+      "recordsize": "1M",
+      "com.sun:auto-snapshot": "true"
+    },
+    "vault/enc/backups": {
+      "note": "the database dumps: a different disk from the source, snapshotted, in this box's backup. ente's key hierarchy is a row in postgres; without it nobody can decrypt the blobs",
+      "mountpoint": "/vault/backups",
+      "recordsize": "128K",
+      "compression": "zstd",
+      "com.sun:auto-snapshot": "true"
+    },
+    "vault/enc/media": {
+      "note": "all re-rippable, so no snapshots (one is the size of the library). lz4 early-aborts on what is already compressed",
+      "mountpoint": "/vault/media",
+      "recordsize": "1M",
+      "compression": "lz4",
+      "com.sun:auto-snapshot": "false"
+    },
+    "vault/enc/images": {
+      "note": "archives of old computers, encrypted on the client; written once, so no snapshots",
+      "mountpoint": "/srv/images",
+      "recordsize": "1M",
+      "compression": "lz4",
+      "com.sun:auto-snapshot": "false"
+    },
+    "vault/enc/forgejo": {
+      "note": "the forge: small, hot, irreplaceable, snapshotted, on the pool with what people made",
+      "mountpoint": "/vault/forgejo",
+      "recordsize": "128K",
+      "compression": "zstd",
+      "com.sun:auto-snapshot": "true"
+    },
+    "tank/enc/games": {
+      "note": "members' game servers: each one's record, saves and guest disk",
+      "mountpoint": "/var/lib/dd-games"
+    },
+    "tank/enc/models": {
+      "note": "GGUF weights: incompressible, mlocked by llama-server so ARC keeps only metadata, and a snapshot of one costs its size",
+      "mountpoint": "/tank/models",
+      "recordsize": "1M",
+      "compression": "off",
+      "primarycache": "metadata",
+      "com.sun:auto-snapshot": "false"
+    }
+  }
+}

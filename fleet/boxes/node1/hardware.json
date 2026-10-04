@@ -1,0 +1,8 @@
+{
+  "hostId": "0195f284",
+  "bootDisk": "/dev/disk/by-id/nvme-INTEL_SSDPEKNW010T8H_BTNH11901JBE1P0B",
+  "wired": "44:ED:57:10:00:40",
+  "wifi": "wlo1",
+  "gpu": { "driver": "intel", "render": "/dev/dri/renderD128" },
+  "usbNic": true
+}
