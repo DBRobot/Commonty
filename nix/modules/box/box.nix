@@ -42,6 +42,21 @@
     default = [ ];
     description = "Every GPU the box has, whatever its maker: Vulkan is on for all of them.";
   };
+  options.dd.box.s3 = lib.mkOption {
+    type = lib.types.str;
+    default = "http://127.0.0.1:3900";
+    description = "the storage pool's S3 address for this box: its own garage, or a storage box's over the tailnet (flake.nix)";
+  };
+  options.dd.box.bulkPool = lib.mkOption {
+    type = lib.types.str;
+    default = "tank";
+    description = "the pool for big, slow-to-matter data (box.json pools.bulk): a hard disk if the box has one";
+  };
+  options.dd.box.owner = lib.mkOption {
+    type = lib.types.nullOr lib.types.str;
+    default = null;
+    description = "whose box it is (box.json owner): services the policy keeps on the fleet owner's own hardware go only here";
+  };
   options.dd.box.threads = lib.mkOption {
     type = lib.types.ints.positive;
     default = 1;

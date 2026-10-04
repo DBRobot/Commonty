@@ -42,69 +42,91 @@ in
 {
   options.dd.vault.pwnedDir = lib.mkOption {
     type = lib.types.str;
-    default = "/vault/pwned";
-    description = "where the breach list lives (about 90 GB: a million ranges of 80-100 KB)";
+    default = "/srv/pwned";
+    description = "where the breach list lives (about 80G: a million ranges of 80-100 KB), on its own dataset in the box's bulk pool";
   };
 
-  config = lib.mkIf cfg.enable {
-    # public data: readable by anyone on the box, nginx included
-    users.users.dd-pwned = {
-      isSystemUser = true;
-      group = "dd-pwned";
-    };
-    users.groups.dd-pwned = { };
-    # made before the unit starts: its sandbox names the directory, and a
-    # directory made from inside the unit comes too late (the first start
-    # on node1 failed with "Failed to set up mount namespacing")
-    systemd.tmpfiles.rules = [ "d ${dir} 0755 dd-pwned dd-pwned -" ];
-    systemd.services.dd-pwned = {
-      description = "Fetch the Pwned Passwords list";
-      after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
-      unitConfig.RequiresMountsFor = dir;
-      path = [
-        pkgs.curl
-        pkgs.coreutils
-        pkgs.findutils
-        pkgs.gnugrep
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        User = "dd-pwned";
-        Group = "dd-pwned";
-        ProtectSystem = "strict";
-        ReadWritePaths = [ dir ];
-        PrivateTmp = true;
-        NoNewPrivileges = true;
-        UMask = "0022";
-        Nice = 19;
-        IOSchedulingClass = "idle";
-      };
-      script = "exec ${fetch}";
-    };
-    systemd.timers.dd-pwned = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = "Sun 04:00";
-        RandomizedDelaySec = "2h";
-        Persistent = true;
-      };
-    };
-
-    # /pwned/range/ABCDE on the vault's host, inside only (the vault's
-    # location rules in vaultwarden.nix)
-    services.nginx.virtualHosts."vault.${config.dd.domain}".locations."~ \"^/pwned/range/([0-9A-Fa-f]{5})$\"" =
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge [
+      (lib.optionalAttrs (options.dd ? zfs) {
+        dd.zfs.datasets."${config.dd.box.bulkPool}/enc/pwned" = {
+          mountpoint = dir;
+          recordsize = "128K";
+          compression = "zstd";
+          "com.sun:auto-snapshot" = "false";
+        };
+      })
       {
-        extraConfig =
-          lib.optionalString (options.dd ? public && config.dd.public.enable) ''
-            if ($dd_inside = 0) { return 444; }
-          ''
-          + ''
-            access_log off;
-            default_type text/plain;
-            add_header Cache-Control "private, max-age=86400";
-            alias ${dir}/current/$1;
-          '';
-      };
-  };
+        # Its own dataset, under the pool's encrypted root like every other
+        # (box/disk-check.sh boots no pool with an unencrypted one), though the
+        # list is public. Room for two: a refresh builds the next beside it.
+        # public data: readable by anyone on the box, nginx included
+        users.users.dd-pwned = {
+          isSystemUser = true;
+          group = "dd-pwned";
+        };
+        users.groups.dd-pwned = { };
+        # made before the unit starts: its sandbox names the directory, and a
+        # directory made from inside the unit comes too late (the first start
+        # on node1 failed with "Failed to set up mount namespacing")
+        systemd.tmpfiles.rules = [ "d ${dir} 0755 dd-pwned dd-pwned -" ];
+        systemd.services.dd-pwned = {
+          description = "Fetch the Pwned Passwords list";
+          after = [
+            "network-online.target"
+            "zfs-datasets.service"
+          ];
+          wants = [ "network-online.target" ];
+          unitConfig.RequiresMountsFor = dir;
+          path = [
+            pkgs.curl
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.gnugrep
+          ];
+          serviceConfig = {
+            Type = "oneshot";
+            User = "dd-pwned";
+            Group = "dd-pwned";
+            ProtectSystem = "strict";
+            ReadWritePaths = [ dir ];
+            PrivateTmp = true;
+            NoNewPrivileges = true;
+            UMask = "0022";
+            Nice = 19;
+            IOSchedulingClass = "idle";
+            # a refresh that came up a few ranges short goes on an hour later,
+            # not next week: until it finishes the old list is kept beside it
+            Restart = "on-failure";
+            RestartSec = "1h";
+          };
+          script = "exec ${fetch}";
+        };
+        systemd.timers.dd-pwned = {
+          wantedBy = [ "timers.target" ];
+          timerConfig = {
+            OnCalendar = "Sun 04:00";
+            RandomizedDelaySec = "2h";
+            Persistent = true;
+          };
+        };
+
+        # /pwned/range/ABCDE on the vault's host, inside only (the vault's
+        # location rules in vaultwarden.nix)
+        services.nginx.virtualHosts."vault.${config.dd.domain}".locations."~ \"^/pwned/range/([0-9A-Fa-f]{5})$\"" =
+          {
+            extraConfig =
+              lib.optionalString (options.dd ? public && config.dd.public.enable) ''
+                if ($dd_inside = 0) { return 444; }
+              ''
+              + ''
+                access_log off;
+                default_type text/plain;
+                add_header Cache-Control "private, max-age=86400";
+                alias ${dir}/current/$1;
+              '';
+          };
+      }
+    ]
+  );
 }

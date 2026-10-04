@@ -1,7 +1,19 @@
 {
-  "house": { "ssid": "Zyxel05804", "address": "192.168.1.20/24", "household": ["david"] },
+  "owner": "david",
+  "pools": {
+    "bulk": "vault"
+  },
+  "house": {
+    "ssid": "Zyxel05804",
+    "address": "192.168.1.20/24",
+    "household": [
+      "david"
+    ]
+  },
   "encrypted": true,
-  "extraPools": ["vault"],
+  "extraPools": [
+    "vault"
+  ],
   "arcMaxBytes": 8589934592,
   "runnerCapacity": 2,
   "neverSleep": false,

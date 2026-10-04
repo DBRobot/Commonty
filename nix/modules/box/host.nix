@@ -28,6 +28,8 @@ in
 
   config = lib.mkMerge [
     {
+      dd.box.bulkPool = (box.pools or { }).bulk or "tank";
+      dd.box.owner = box.owner or null;
       dd.box.threads = hw.cpu.threads;
       dd.box.gpus = map (g: { inherit (g) render driver encode; }) hw.gpus;
     }
@@ -37,7 +39,8 @@ in
     (lib.mkIf (hw.gpus != [ ]) {
       hardware.graphics.enable = true;
       hardware.graphics.extraPackages = lib.optional (lib.any (
-        g: builtins.elem g.driver [
+        g:
+        builtins.elem g.driver [
           "i915"
           "xe"
         ]

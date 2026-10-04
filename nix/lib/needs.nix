@@ -7,6 +7,7 @@ let
     ../modules/llm/needs.nix
     ../modules/photos/needs.nix
     ../modules/storage/needs.nix
+    ../modules/vault/needs.nix
   ];
   checked = lib.evalModules {
     modules = [

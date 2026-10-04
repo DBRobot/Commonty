@@ -1040,6 +1040,7 @@
             in
             {
               dd.agent.cache = "s3://nix-cache?endpoint=${host}:3900&scheme=http&region=us-east-1";
+              dd.box.s3 = "http://${host}:3900";
             };
           # a box without garage backs up to a storage box over the tailnet
           backupEndpoint =
