@@ -1,5 +1,14 @@
 {
-  "_": "Where the fleet's owner wants things. ownHardware: services that run and serve only on boxes the owner owns (box.json owner), because their box hands people the code that handles their secrets (needs servesCode). Checked by nix/tests/role-fit.nix.",
+  "_": "Where the fleet's owner wants things. ownHardware: services that run and serve only on boxes the owner owns (box.json owner), because their box hands people the code that handles their secrets (needs servesCode). Checked by nix/tests/role-fit.nix. forgeMirrors: the forge's push mirrors (repo defaults to the fleet's own; the token is sops github-mirror-token).",
   "owner": "david",
-  "ownHardware": ["vaultwarden", "vaultwarden-send"]
+  "ownHardware": [
+    "vaultwarden",
+    "vaultwarden-send"
+  ],
+  "forgeMirrors": [
+    {
+      "to": "https://github.com/DBRobot/Home-Server.git",
+      "user": "DBRobot"
+    }
+  ]
 }

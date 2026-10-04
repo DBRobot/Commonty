@@ -1,6 +1,7 @@
 {
   ddScript,
   config,
+  options,
   pkgs,
   lib,
   ...
@@ -64,304 +65,320 @@ in
   # The one account that administers the forge. Every other account is made
   # on first visit by the reverse-proxy login below; this one is made ahead
   # of time so that the same login lands on an admin.
+  options.dd.forgejo.stateDir = lib.mkOption {
+    type = lib.types.str;
+    default = "/vault/forgejo";
+    description = "repositories, LFS and its config: the mountpoint of <bulk pool>/enc/forgejo";
+  };
   options.dd.forgejo.admin = lib.mkOption {
     type = lib.types.str;
     description = "Directory name of the person who administers this forge.";
   };
 
-  config = {
-    # reads plaintext: only on a box whose owner is trusted with it (modules/box.nix)
-    dd.box.plaintext = [ "forgejo (plain repositories)" ];
-    # Private repositories here are private from the world, not from whoever
-    # runs this box. The forge reads the code; that is what a forge is. What
-    # must be private from the box too goes through the dd remote helper,
-    # which stores ciphertext in an ordinary repository here.
-    services.forgejo = {
-      enable = true;
-      package = pkgs.forgejo-lts;
-      # on the pool, with snapshots: this is people's work
-      stateDir = "/vault/forgejo";
-      database.type = "postgres"; # the instance ente already runs; socket auth
-      lfs.enable = true;
-      settings = {
-        DEFAULT.APP_NAME = "Commonty";
-        server = {
-          DOMAIN = host;
-          ROOT_URL = "https://${host}/";
-          PROTOCOL = "http+unix";
-          HTTP_ADDR = sock;
-          UNIX_SOCKET_PERMISSION = "660";
-          # git over ssh goes through the box's own sshd on 22: forgejo keeps
-          # the forgejo user's authorized_keys, sshd does the rest
-          START_SSH_SERVER = false;
-          SSH_DOMAIN = host;
-          SSH_PORT = 22;
-          LANDING_PAGE = "explore";
-        };
-        # Nobody signs up here and nobody has a password here. nginx asks the
-        # verifier who this is and says so in a header; forgejo trusts that
-        # header from this box alone and makes the account on first sight.
-        service = {
-          DISABLE_REGISTRATION = true;
-          ENABLE_REVERSE_PROXY_AUTHENTICATION = true;
-          ENABLE_REVERSE_PROXY_AUTHENTICATION_API = true;
-          ENABLE_REVERSE_PROXY_AUTO_REGISTRATION = true;
-          ENABLE_REVERSE_PROXY_EMAIL = false;
-          ENABLE_PASSWORD_SIGNIN_FORM = false;
-          REQUIRE_SIGNIN_VIEW = false; # public repos are public
-          DEFAULT_KEEP_EMAIL_PRIVATE = true;
-          NO_REPLY_ADDRESS = "noreply.${base}";
-        };
-        security = {
-          REVERSE_PROXY_AUTHENTICATION_USER = "X-WEBAUTH-USER";
-          # the socket is the boundary; this stays for forgejo's own sake
-          REVERSE_PROXY_TRUSTED_PROXIES = "127.0.0.0/8,::1";
-          REVERSE_PROXY_LIMIT = 1;
-        };
-        session.COOKIE_SECURE = true;
-        repository = {
-          DEFAULT_PRIVATE = "public";
-          DEFAULT_PUSH_CREATE_PRIVATE = false;
-          ENABLE_PUSH_CREATE_USER = true;
-          # A workflow is code that runs on a box. Every repo may have one:
-          # a member's lands on the members' runner (modules/members-runner.nix),
-          # sandboxed, and the host runners take the owner's repos alone.
-        };
-        # What a member may attach to an issue or a release: files that are
-        # data, never a page. An .svg or .html served from this name runs as
-        # whoever opens it, so neither is on the list; nothing here needs a
-        # file bigger than 100 MB (the app's releases are on the mirror).
-        attachment = {
-          ALLOWED_TYPES = attachable;
-          MAX_SIZE = 100;
-        };
-        "repository.release" = {
-          ALLOWED_TYPES = attachable;
-          FILE_MAX_SIZE = 100;
-        };
-        mailer.ENABLED = false;
-        # a webhook goes out to the world, never to this box, the house or
-        # the tailnet
-        webhook.ALLOWED_HOST_LIST = "external";
-        actions = {
-          ENABLED = true; # the runner is modules/forgejo-runner.nix
-          # `uses: actions/checkout@v4` is written out in full in our
-          # workflows; this is where a bare one would be looked up
-          DEFAULT_ACTIONS_URL = "github";
-        };
-        "ui.meta".DESCRIPTION = "git for commonty";
-        other.SHOW_FOOTER_VERSION = false;
+  config = lib.mkMerge [
+    # its own dataset in the box's bulk pool, under the encrypted root
+    (lib.optionalAttrs (options.dd ? zfs && options.dd ? box) {
+      dd.zfs.datasets."${config.dd.box.bulkPool}/enc/forgejo" = {
+        mountpoint = cfg.stateDir;
+        recordsize = "128K";
+        compression = "zstd";
+        "com.sun:auto-snapshot" = "true";
       };
-    };
+    })
+    {
+      # reads plaintext: only on a box whose owner is trusted with it (modules/box.nix)
+      dd.box.plaintext = [ "forgejo (plain repositories)" ];
+      # Private repositories here are private from the world, not from whoever
+      # runs this box. The forge reads the code; that is what a forge is. What
+      # must be private from the box too goes through the dd remote helper,
+      # which stores ciphertext in an ordinary repository here.
+      services.forgejo = {
+        enable = true;
+        package = pkgs.forgejo-lts;
+        # on the pool, with snapshots: this is people's work
+        stateDir = cfg.stateDir;
+        database.type = "postgres"; # the instance ente already runs; socket auth
+        lfs.enable = true;
+        settings = {
+          DEFAULT.APP_NAME = "Commonty";
+          server = {
+            DOMAIN = host;
+            ROOT_URL = "https://${host}/";
+            PROTOCOL = "http+unix";
+            HTTP_ADDR = sock;
+            UNIX_SOCKET_PERMISSION = "660";
+            # git over ssh goes through the box's own sshd on 22: forgejo keeps
+            # the forgejo user's authorized_keys, sshd does the rest
+            START_SSH_SERVER = false;
+            SSH_DOMAIN = host;
+            SSH_PORT = 22;
+            LANDING_PAGE = "explore";
+          };
+          # Nobody signs up here and nobody has a password here. nginx asks the
+          # verifier who this is and says so in a header; forgejo trusts that
+          # header from this box alone and makes the account on first sight.
+          service = {
+            DISABLE_REGISTRATION = true;
+            ENABLE_REVERSE_PROXY_AUTHENTICATION = true;
+            ENABLE_REVERSE_PROXY_AUTHENTICATION_API = true;
+            ENABLE_REVERSE_PROXY_AUTO_REGISTRATION = true;
+            ENABLE_REVERSE_PROXY_EMAIL = false;
+            ENABLE_PASSWORD_SIGNIN_FORM = false;
+            REQUIRE_SIGNIN_VIEW = false; # public repos are public
+            DEFAULT_KEEP_EMAIL_PRIVATE = true;
+            NO_REPLY_ADDRESS = "noreply.${base}";
+          };
+          security = {
+            REVERSE_PROXY_AUTHENTICATION_USER = "X-WEBAUTH-USER";
+            # the socket is the boundary; this stays for forgejo's own sake
+            REVERSE_PROXY_TRUSTED_PROXIES = "127.0.0.0/8,::1";
+            REVERSE_PROXY_LIMIT = 1;
+          };
+          session.COOKIE_SECURE = true;
+          repository = {
+            DEFAULT_PRIVATE = "public";
+            DEFAULT_PUSH_CREATE_PRIVATE = false;
+            ENABLE_PUSH_CREATE_USER = true;
+            # A workflow is code that runs on a box. Every repo may have one:
+            # a member's lands on the members' runner (modules/members-runner.nix),
+            # sandboxed, and the host runners take the owner's repos alone.
+          };
+          # What a member may attach to an issue or a release: files that are
+          # data, never a page. An .svg or .html served from this name runs as
+          # whoever opens it, so neither is on the list; nothing here needs a
+          # file bigger than 100 MB (the app's releases are on the mirror).
+          attachment = {
+            ALLOWED_TYPES = attachable;
+            MAX_SIZE = 100;
+          };
+          "repository.release" = {
+            ALLOWED_TYPES = attachable;
+            FILE_MAX_SIZE = 100;
+          };
+          mailer.ENABLED = false;
+          # a webhook goes out to the world, never to this box, the house or
+          # the tailnet
+          webhook.ALLOWED_HOST_LIST = "external";
+          actions = {
+            ENABLED = true; # the runner is modules/forgejo-runner.nix
+            # `uses: actions/checkout@v4` is written out in full in our
+            # workflows; this is where a bare one would be looked up
+            DEFAULT_ACTIONS_URL = "github";
+          };
+          "ui.meta".DESCRIPTION = "git for commonty";
+          other.SHOW_FOOTER_VERSION = false;
+        };
+      };
 
-    # The state dir is a dataset (modules/zfs-datasets.nix); do not start
-    # before it is mounted, or forgejo would happily initialise itself onto
-    # the root disk underneath the mountpoint. The secret bootstrap is the
-    # first thing to write there and tmpfiles may have run before the dataset
-    # existed (it did, on the activation that created it), so it makes its
-    # own directory as root before dropping to forgejo.
-    # each owner's repositories, counted by the forge itself (storage/usage.nix)
-    dd.usage.forgejo = {
-      user = "forgejo";
-      database = "forgejo";
-      query = "select owner_name, coalesce(sum(size + lfs_size), 0) from repository group by owner_name";
-    };
-
-    systemd.services.forgejo-secrets = {
-      after = [ "zfs-datasets.service" ];
-      requires = [ "zfs-datasets.service" ];
-      unitConfig.RequiresMountsFor = "/vault/forgejo";
-      serviceConfig.ExecStartPre = [
-        "+${pkgs.coreutils}/bin/install -d -o forgejo -g forgejo -m 0750 /vault/forgejo /vault/forgejo/custom /vault/forgejo/custom/conf"
-      ];
-    };
-    systemd.services.forgejo = {
-      after = [ "zfs-datasets.service" ];
-      requires = [ "zfs-datasets.service" ];
-      unitConfig.RequiresMountsFor = "/vault/forgejo";
-    };
-
-    # The admin account, made before it is ever logged into. The password is
-    # random and never used: the password form is off, the header is the
-    # login. Idempotent - "already exists" is the normal case.
-    systemd.services.forgejo-admin = {
-      description = "Make sure the forge's admin account exists";
-      after = [ "forgejo.service" ];
-      requires = [ "forgejo.service" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.forgejo-lts ];
-      environment = {
-        USER = "forgejo";
-        HOME = "/vault/forgejo";
-        FORGEJO_WORK_DIR = "/vault/forgejo";
-        FORGEJO_CUSTOM = "/vault/forgejo/custom";
+      # The state dir is a dataset (modules/zfs-datasets.nix); do not start
+      # before it is mounted, or forgejo would happily initialise itself onto
+      # the root disk underneath the mountpoint. The secret bootstrap is the
+      # first thing to write there and tmpfiles may have run before the dataset
+      # existed (it did, on the activation that created it), so it makes its
+      # own directory as root before dropping to forgejo.
+      # each owner's repositories, counted by the forge itself (storage/usage.nix)
+      dd.usage.forgejo = {
+        user = "forgejo";
+        database = "forgejo";
+        query = "select owner_name, coalesce(sum(size + lfs_size), 0) from repository group by owner_name";
       };
-      serviceConfig = {
-        Type = "oneshot";
-        User = "forgejo";
-        Group = "forgejo";
-      };
-      script = ''
-        for i in $(seq 1 30); do
-          ${pkgs.curl}/bin/curl -fs --unix-socket ${sock} http://forgejo/api/healthz >/dev/null && break
-          sleep 2
-        done
-        if forgejo admin user list --admin | ${pkgs.gnugrep}/bin/grep -qw '${cfg.admin}'; then
-          exit 0
-        fi
-        forgejo admin user create --admin --username '${cfg.admin}' \
-          --email '${cfg.admin}@${config.services.forgejo.settings.service.NO_REPLY_ADDRESS}' \
-          --random-password --must-change-password=false >/dev/null
-        echo "admin ${cfg.admin} created"
-      '';
-    };
 
-    # main takes merges only, after the forge's own CI has passed on the
-    # pull request. Declared here so a rebuilt box gets it back, and
-    # idempotent: an existing rule is updated, not duplicated. The admin
-    # may still push main directly while GitHub is where merges happen;
-    # that allowance goes when the forge is the only source.
-    systemd.services.forgejo-protection = {
-      description = "Make sure main is protected by the forge's CI";
-      after = [ "forgejo-admin.service" ];
-      requires = [ "forgejo.service" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [
-        pkgs.curl
-        pkgs.jq
-      ];
-      serviceConfig.Type = "oneshot";
-      # the rule main is held to: ci_ok, the job that waits on every other
-      # (.forgejo/workflows/entry_point.yml), so the rule names one check
-      # that always exists and no job can fail without blocking the merge;
-      # and the branch up to date with main, so what merges is the tree ci
-      # ran on, not a green branch on an old base
-      script = ddScript ./forgejo-setup.sh {
-        ADMIN = cfg.admin;
-        REPO = config.dd.repo;
-        SOCK = sock;
-        RULE = builtins.toJSON {
-          rule_name = "main";
-          branch_name = "main";
-          enable_push = true;
-          enable_push_whitelist = true;
-          push_whitelist_usernames = [ cfg.admin ];
-          enable_status_check = true;
-          status_check_contexts = [ "entry_point / ci_ok (pull_request)" ];
-          block_on_outdated_branch = true;
-          required_approvals = 0;
+      systemd.services.forgejo-secrets = {
+        after = [ "zfs-datasets.service" ];
+        requires = [ "zfs-datasets.service" ];
+        unitConfig.RequiresMountsFor = cfg.stateDir;
+        serviceConfig.ExecStartPre = [
+          "+${pkgs.coreutils}/bin/install -d -o forgejo -g forgejo -m 0750 ${cfg.stateDir} ${cfg.stateDir}/custom ${cfg.stateDir}/custom/conf"
+        ];
+      };
+      systemd.services.forgejo = {
+        after = [ "zfs-datasets.service" ];
+        requires = [ "zfs-datasets.service" ];
+        unitConfig.RequiresMountsFor = cfg.stateDir;
+      };
+
+      # The admin account, made before it is ever logged into. The password is
+      # random and never used: the password form is off, the header is the
+      # login. Idempotent - "already exists" is the normal case.
+      systemd.services.forgejo-admin = {
+        description = "Make sure the forge's admin account exists";
+        after = [ "forgejo.service" ];
+        requires = [ "forgejo.service" ];
+        wantedBy = [ "multi-user.target" ];
+        path = [ pkgs.forgejo-lts ];
+        environment = {
+          USER = "forgejo";
+          HOME = cfg.stateDir;
+          FORGEJO_WORK_DIR = cfg.stateDir;
+          FORGEJO_CUSTOM = "${cfg.stateDir}/custom";
         };
-      };
-    };
-
-    # a failing ci job stops the rest of its run: the job posts here with
-    # the ci secret and this cancels the run as the admin, the one thing
-    # the forge's api cannot do
-    systemd.services.dd-ci-cancel = {
-      description = "Cancel a ci run at a failing job's request";
-      after = [ "forgejo.service" ];
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
-        Type = "simple";
-        DynamicUser = true;
-        SupplementaryGroups = [ "forgejo" ]; # to open forgejo's socket
-        ExecStart = "${pkgs.python3}/bin/python3 ${./ci-cancel.py}";
-        Restart = "on-failure";
-      };
-      environment = {
-        FORGE = sock;
-        ADMIN = cfg.admin;
-        REPO = config.dd.repo;
-        LISTEN = toString cancelPort;
-      };
-    };
-
-    # a run killed from outside (the forge or a runner restarting under it)
-    # is run again, once: ci-resume.py, every few minutes
-    systemd.services.dd-ci-resume = {
-      description = "Run again a ci run that a restart killed";
-      after = [ "forgejo.service" ];
-      serviceConfig = {
-        Type = "oneshot";
-        DynamicUser = true;
-        SupplementaryGroups = [ "forgejo" ]; # to open forgejo's socket
-        StateDirectory = "dd-ci-resume";
-        ExecStart = "${pkgs.python3}/bin/python3 ${./ci-resume.py}";
-      };
-      environment = {
-        FORGE = sock;
-        ADMIN = cfg.admin;
-        REPO = config.dd.repo;
-        STATE = "/var/lib/dd-ci-resume";
-      };
-    };
-    systemd.timers.dd-ci-resume = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "5min";
-        OnUnitActiveSec = "3min";
-      };
-    };
-
-    services.nginx.appendHttpConfig = ''
-      map $auth_user $forge_user {
-        default $auth_user;
-        demo "";
-      }
-    '';
-    # the socket's directory: forgejo makes it, its group may enter it, and
-    # the runner's user - which is what a CI job runs as - is not in it
-    systemd.services.forgejo.serviceConfig.RuntimeDirectoryMode = lib.mkForce "0750";
-    # the whole attribute, not just its value: naming users.users.nginx
-    # where nginx does not run leaves a user with no group and no kind
-    users.users = lib.mkIf config.services.nginx.enable {
-      nginx.extraGroups = [ "forgejo" ];
-    };
-    services.nginx.virtualHosts.${host} = {
-      useACMEHost = base;
-      forceSSL = true;
-      # The pages are ours (box/forge/web): every address that is not the
-      # forge's own below gets the one page, which draws itself from the
-      # forge's API.
-      locations."/" = {
-        proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";
-        extraConfig = ''
-          rewrite ^ /_dd/git break;
-          proxy_set_header X-Original-URI $request_uri;
+        serviceConfig = {
+          Type = "oneshot";
+          User = "forgejo";
+          Group = "forgejo";
+        };
+        script = ''
+          for i in $(seq 1 30); do
+            ${pkgs.curl}/bin/curl -fs --unix-socket ${sock} http://forgejo/api/healthz >/dev/null && break
+            sleep 2
+          done
+          if forgejo admin user list --admin | ${pkgs.gnugrep}/bin/grep -qw '${cfg.admin}'; then
+            exit 0
+          fi
+          forgejo admin user create --admin --username '${cfg.admin}' \
+            --email '${cfg.admin}@${config.services.forgejo.settings.service.NO_REPLY_ADDRESS}' \
+            --random-password --must-change-password=false >/dev/null
+          echo "admin ${cfg.admin} created"
         '';
       };
-      # the forge's own: its API, git over https, raw files and archives,
-      # a job's log, avatars, and its account pages
-      locations."~ ^/(api|assets|avatars|repo-avatars|attachments|user|login|-|\\.well-known)(/|$)" =
-        toForge;
-      locations."~ ^/[^/]+/[^/]+\\.git(/|$)" = toForge;
-      locations."~ ^/[^/]+/[^/]+/(info/refs|info/lfs|git-upload-pack|git-receive-pack)" = toForge;
-      locations."~ ^/[^/]+/[^/]+/(raw|archive|media|releases/download|attachments)/" = toForge;
-      locations."~ ^/[^/]+/[^/]+/actions/runs/[0-9]+/jobs/[0-9]+/attempt/[0-9]+/logs$" = toForge;
-      # which repository the boxes are built from: its pages show what they run
-      locations."= /fleet-repo.json".extraConfig = ''
-        default_type application/json;
-        return 200 '${builtins.toJSON { repo = config.dd.repo; }}';
-      '';
-      # the ci cancel route: the secret is the credential, not a session
-      locations."/_dd/ci/" = {
-        proxyPass = "http://127.0.0.1:${toString cancelPort}";
+
+      # main takes merges only, after the forge's own CI has passed on the
+      # pull request. Declared here so a rebuilt box gets it back, and
+      # idempotent: an existing rule is updated, not duplicated. The admin
+      # may still push main directly while GitHub is where merges happen;
+      # that allowance goes when the forge is the only source.
+      systemd.services.forgejo-protection = {
+        description = "Make sure main is protected by the forge's CI";
+        after = [ "forgejo-admin.service" ];
+        requires = [ "forgejo.service" ];
+        wantedBy = [ "multi-user.target" ];
+        path = [
+          pkgs.curl
+          pkgs.jq
+        ];
+        serviceConfig.Type = "oneshot";
+        # the rule main is held to: ci_ok, the job that waits on every other
+        # (.forgejo/workflows/entry_point.yml), so the rule names one check
+        # that always exists and no job can fail without blocking the merge;
+        # and the branch up to date with main, so what merges is the tree ci
+        # ran on, not a green branch on an old base
+        script = ddScript ./forgejo-setup.sh {
+          ADMIN = cfg.admin;
+          REPO = config.dd.repo;
+          SOCK = sock;
+          RULE = builtins.toJSON {
+            rule_name = "main";
+            branch_name = "main";
+            enable_push = true;
+            enable_push_whitelist = true;
+            push_whitelist_usernames = [ cfg.admin ];
+            enable_status_check = true;
+            status_check_contexts = [ "entry_point / ci_ok (pull_request)" ];
+            block_on_outdated_branch = true;
+            required_approvals = 0;
+          };
+        };
       };
-      locations."@anonymous" = {
-        proxyPass = "http://unix:${sock}:";
-        extraConfig = ''
-          client_max_body_size 0;
-          proxy_set_header X-WEBAUTH-USER "";
-          # and not whoever forgejo's own cookie remembers: a session the
-          # gate has ended is ended here too
-          proxy_set_header Cookie "";
+
+      # a failing ci job stops the rest of its run: the job posts here with
+      # the ci secret and this cancels the run as the admin, the one thing
+      # the forge's api cannot do
+      systemd.services.dd-ci-cancel = {
+        description = "Cancel a ci run at a failing job's request";
+        after = [ "forgejo.service" ];
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          Type = "simple";
+          DynamicUser = true;
+          SupplementaryGroups = [ "forgejo" ]; # to open forgejo's socket
+          ExecStart = "${pkgs.python3}/bin/python3 ${./ci-cancel.py}";
+          Restart = "on-failure";
+        };
+        environment = {
+          FORGE = sock;
+          ADMIN = cfg.admin;
+          REPO = config.dd.repo;
+          LISTEN = toString cancelPort;
+        };
+      };
+
+      # a run killed from outside (the forge or a runner restarting under it)
+      # is run again, once: ci-resume.py, every few minutes
+      systemd.services.dd-ci-resume = {
+        description = "Run again a ci run that a restart killed";
+        after = [ "forgejo.service" ];
+        serviceConfig = {
+          Type = "oneshot";
+          DynamicUser = true;
+          SupplementaryGroups = [ "forgejo" ]; # to open forgejo's socket
+          StateDirectory = "dd-ci-resume";
+          ExecStart = "${pkgs.python3}/bin/python3 ${./ci-resume.py}";
+        };
+        environment = {
+          FORGE = sock;
+          ADMIN = cfg.admin;
+          REPO = config.dd.repo;
+          STATE = "/var/lib/dd-ci-resume";
+        };
+      };
+      systemd.timers.dd-ci-resume = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnBootSec = "5min";
+          OnUnitActiveSec = "3min";
+        };
+      };
+
+      services.nginx.appendHttpConfig = ''
+        map $auth_user $forge_user {
+          default $auth_user;
+          demo "";
+        }
+      '';
+      # the socket's directory: forgejo makes it, its group may enter it, and
+      # the runner's user - which is what a CI job runs as - is not in it
+      systemd.services.forgejo.serviceConfig.RuntimeDirectoryMode = lib.mkForce "0750";
+      # the whole attribute, not just its value: naming users.users.nginx
+      # where nginx does not run leaves a user with no group and no kind
+      users.users = lib.mkIf config.services.nginx.enable {
+        nginx.extraGroups = [ "forgejo" ];
+      };
+      services.nginx.virtualHosts.${host} = {
+        useACMEHost = base;
+        forceSSL = true;
+        # The pages are ours (box/forge/web): every address that is not the
+        # forge's own below gets the one page, which draws itself from the
+        # forge's API.
+        locations."/" = {
+          proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";
+          extraConfig = ''
+            rewrite ^ /_dd/git break;
+            proxy_set_header X-Original-URI $request_uri;
+          '';
+        };
+        # the forge's own: its API, git over https, raw files and archives,
+        # a job's log, avatars, and its account pages
+        locations."~ ^/(api|assets|avatars|repo-avatars|attachments|user|login|-|\\.well-known)(/|$)" =
+          toForge;
+        locations."~ ^/[^/]+/[^/]+\\.git(/|$)" = toForge;
+        locations."~ ^/[^/]+/[^/]+/(info/refs|info/lfs|git-upload-pack|git-receive-pack)" = toForge;
+        locations."~ ^/[^/]+/[^/]+/(raw|archive|media|releases/download|attachments)/" = toForge;
+        locations."~ ^/[^/]+/[^/]+/actions/runs/[0-9]+/jobs/[0-9]+/attempt/[0-9]+/logs$" = toForge;
+        # which repository the boxes are built from: its pages show what they run
+        locations."= /fleet-repo.json".extraConfig = ''
+          default_type application/json;
+          return 200 '${builtins.toJSON { repo = config.dd.repo; }}';
+        '';
+        # the ci cancel route: the secret is the credential, not a session
+        locations."/_dd/ci/" = {
+          proxyPass = "http://127.0.0.1:${toString cancelPort}";
+        };
+        locations."@anonymous" = {
+          proxyPass = "http://unix:${sock}:";
+          extraConfig = ''
+            client_max_body_size 0;
+            proxy_set_header X-WEBAUTH-USER "";
+            # and not whoever forgejo's own cookie remembers: a session the
+            # gate has ended is ended here too
+            proxy_set_header Cookie "";
+          '';
+        };
+        # forgejo's own sign-in page is a password form that is switched off;
+        # the box's passkey page is the sign-in
+        locations."= /user/login".extraConfig = ''
+          return 302 /_dd/login?rd=$arg_redirect_to;
         '';
       };
-      # forgejo's own sign-in page is a password form that is switched off;
-      # the box's passkey page is the sign-in
-      locations."= /user/login".extraConfig = ''
-        return 302 /_dd/login?rd=$arg_redirect_to;
-      '';
-    };
-  };
+    }
+  ];
 }
