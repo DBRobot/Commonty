@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# What the laptop (Ubuntu, nix beside it) needs that no flake can set:
+#
+#   scripts/laptop-setup
+#
+# - /dev/kvm usable by nix's build users, so VM tests run at full speed
+set -eu
+here=$(cd "$(dirname "$0")/.." && pwd)
+sudo install -m 0644 "$here/nix/laptop/60-kvm.rules" /etc/udev/rules.d/60-kvm.rules
+sudo udevadm control --reload
+sudo udevadm trigger --name-match=kvm
+ls -l /dev/kvm

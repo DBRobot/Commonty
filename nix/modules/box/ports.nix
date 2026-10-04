@@ -77,7 +77,9 @@ in
       script = ''
         allowed=" ${lib.concatMapStringsSep " " toString allowed} "
         stray=$(ss -Hltnu | awk '{n=split($5,a,":"); print a[n]}' | sort -nu | while read -r p; do
-          [ "$p" -lt 32768 ] && case "$allowed" in *" $p "*) ;; *) echo "$p" ;; esac
+          # (an if, not &&: a high last port would end the loop non-zero, and
+          # set -e would quit here with nothing said)
+          if [ "$p" -lt 32768 ]; then case "$allowed" in *" $p "*) ;; *) echo "$p" ;; esac; fi
         done)
         if [ -n "$stray" ]; then
           for p in $stray; do echo "port $p: $(ss -Hltnup "sport = :$p" | grep -o 'users:(("[^"]*' | head -1 | cut -d'"' -f2) listens, and no service declared it (dd.ports)"; done

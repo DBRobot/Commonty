@@ -66,6 +66,11 @@ box.succeed("tpm2_pcrextend 7:sha256=0000000000000000000000000000000000000000000
 box.fail((sign + " && echo hi > m && tpm2_sign -Q -c k.ctx -g sha256 -s ecdsa -f plain -p session:s.ctx -o sig m").format("sig"))
 box.fail((sign + " && tpm2_unseal -c k.ctx -p session:s.ctx -o half").format("half"))
 
-# 4. the paper key opens the copy on the boot partition
-box.succeed(f"printf '%s\\n' '{nix['paper']}' | script -qc 'dd disk recover /boot/dd/box-disk.age /root/recovered.key' /dev/null")
+# 4. the paper key opens the copy on the boot partition: the owner reads it
+# off the box, opens it elsewhere (the worker), and the key opens the pool
+sealed = box.succeed("base64 -w0 /boot/dd/box-disk.age").strip()
+worker.succeed(f"echo {sealed} | base64 -d > /root/box-disk.age")
+worker.succeed(f"printf '%s\\n' '{nix['paper']}' | script -qc 'dd disk recover /root/box-disk.age /root/recovered.key' /dev/null")
+key = worker.succeed("base64 -w0 /root/recovered.key").strip()
+box.succeed(f"echo {key} | base64 -d > /root/recovered.key && chmod 400 /root/recovered.key")
 box.succeed("zfs unmount data/enc && zfs unload-key data/enc && zfs load-key -L file:///root/recovered.key data/enc && zfs mount data/enc && grep -q kept /data/proof")

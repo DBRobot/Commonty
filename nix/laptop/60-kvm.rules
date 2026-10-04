@@ -1,0 +1,4 @@
+# nix's build users run VM tests; Ubuntu leaves /dev/kvm to the kvm group
+# and the logged-in user, so without this they fall back to emulation.
+# NixOS does the same (0666)
+KERNEL=="kvm", MODE="0666"
