@@ -1,9 +1,8 @@
-//! What the boxes are doing, for the pages that show it. Every box writes
-//! its facts to its own prometheus (the agent's release, the backup's last
-//! good run, what the hardware is), which answers only on the box itself;
-//! thanos on the observing box gathers them all with a `box` label. This
-//! asks thanos, on this same box, the questions `dd release status` asks,
-//! and hands the answers to a browser. No box is asked by another.
+//! What the boxes are doing, for the pages that show it. Every box puts its
+//! release, how its agent's last run ended and its last good backup in its
+//! signed heartbeat, and the control plane agrees on them; this reads the
+//! agreed state from this box's own dd-control. Where there is no control
+//! plane it asks thanos on this box, as before. No box is asked by another.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -114,14 +113,60 @@ static LAST: std::sync::Mutex<Option<(std::time::Instant, Vec<Status>)>> =
     std::sync::Mutex::new(None);
 const KEEP: std::time::Duration = std::time::Duration::from_secs(15);
 
-pub async fn look(fleet: &Fleet, thanos: Option<&str>) -> Vec<Status> {
+/// a box unheard this long is down (the control plane's own goneAfter is 90 s)
+const GONE_MS: i64 = 120_000;
+
+/// every box from the agreed state: its heartbeat's facts, and whether it
+/// has been heard lately by agreed time
+async fn from_control(fleet: &Fleet, control: &str) -> Option<Vec<Status>> {
+    let s: serde_json::Value = crate::http()
+        .get(format!("{}/state", control.trim_end_matches('/')))
+        .timeout(Duration::from_secs(3))
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let now = s["time"].as_i64()?;
+    Some(
+        fleet
+            .keys()
+            .map(|name| {
+                let b = &s["boxes"][name];
+                let f = &b["facts"];
+                let seen = b["lastSeen"].as_i64().unwrap_or(0);
+                Status {
+                    name: name.clone(),
+                    up: seen > 0 && now - seen <= GONE_MS,
+                    release: f["release"].as_f64().map(|v| v as u64),
+                    result: f["agent_ok"]
+                        .as_f64()
+                        .map(|v| if v >= 1.0 { "ok" } else { "refused" }.to_string()),
+                    backup: f["backup_last"].as_f64().map(|v| Backup {
+                        last_success: Some(v as u64),
+                    }),
+                }
+            })
+            .collect(),
+    )
+}
+
+pub async fn look(fleet: &Fleet, thanos: Option<&str>, control: Option<&str>) -> Vec<Status> {
     if let Ok(g) = LAST.lock()
         && let Some((at, v)) = g.as_ref()
         && at.elapsed() < KEEP
     {
         return v.clone();
     }
-    let out = ask(fleet, thanos).await;
+    let agreed = match control {
+        Some(c) => from_control(fleet, c).await,
+        None => None,
+    };
+    let out = match agreed {
+        Some(v) => v,
+        None => ask(fleet, thanos).await,
+    };
     if let Ok(mut g) = LAST.lock() {
         *g = Some((std::time::Instant::now(), out.clone()));
     }

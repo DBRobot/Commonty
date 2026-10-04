@@ -32,6 +32,7 @@ in
       dd.box.owner = box.owner or null;
       dd.box.threads = hw.cpu.threads;
       dd.box.memoryBytes = hw.memoryBytes;
+      dd.box.disks = map (d: d.id) (hw.disks or [ ]);
       dd.box.gpus = map (g: { inherit (g) render driver encode; }) hw.gpus;
     }
     # Any GPU, whoever made it: Mesa's Vulkan drivers (Intel's, AMD's, and

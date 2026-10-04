@@ -62,6 +62,11 @@
     default = 0;
     description = "RAM, from the report: what sizes itself by memory starts here";
   };
+  options.dd.box.disks = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    description = "every disk the box has, by stable id, from its report: what smartd watches";
+  };
   options.dd.box.threads = lib.mkOption {
     type = lib.types.ints.positive;
     default = 1;

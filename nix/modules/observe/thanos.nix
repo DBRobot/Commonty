@@ -29,7 +29,17 @@ in
     sidecars = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
-      description = "Every box's sidecar as host:port, for the query service; set on the observe box.";
+      description = "This box's own sidecar as host:port, for the query service; set on the observe box. Other boxes' history comes from the bucket.";
+    };
+    blockDuration = lib.mkOption {
+      type = lib.types.str;
+      default = "2h";
+      description = "how often prometheus cuts a block the sidecar uploads: how long other boxes' newest history takes to reach the fleet view (a test makes it minutes)";
+    };
+    storeSync = lib.mkOption {
+      type = lib.types.str;
+      default = "3m";
+      description = "how often the store looks in the bucket for new blocks";
     };
   };
 
@@ -39,8 +49,8 @@ in
       services.prometheus = {
         globalConfig.external_labels.box = config.networking.hostName;
         extraFlags = [
-          "--storage.tsdb.min-block-duration=2h"
-          "--storage.tsdb.max-block-duration=2h"
+          "--storage.tsdb.min-block-duration=${cfg.blockDuration}"
+          "--storage.tsdb.max-block-duration=${cfg.blockDuration}"
         ];
       };
       services.thanos.sidecar = {
@@ -48,9 +58,8 @@ in
         prometheus.url = "http://127.0.0.1:${toString prom.port}";
         tsdb.path = tsdb;
         objstore.config-file = cfg.objstoreFile;
-        # the query service reaches it over the tailnet; the firewall admits
-        # nothing else
-        grpc-address = "0.0.0.0:10901";
+        # this box's query alone reads it; other boxes read the bucket
+        grpc-address = "127.0.0.1:10901";
         http-address = "127.0.0.1:10902";
       };
     })
@@ -63,6 +72,7 @@ in
           grpc-address = "127.0.0.1:10905";
           http-address = "127.0.0.1:10906";
           stateDir = "thanos-store";
+          sync-block-duration = cfg.storeSync;
         };
         query = {
           enable = true;

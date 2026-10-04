@@ -261,9 +261,6 @@ in
           serviceConfig.ReadWritePaths = [ "/run/dd-ended" ];
         };
 
-        # the vault's records, in the hourly dumps the backups ship
-        services.postgresqlBackup.databases = [ "vaultwarden" ];
-
         # Only on the Commonty network - apps reach it through the phone's or
         # laptop's tailnet - except what a Send needs: someone outside opening a
         # link gets the Send page and the calls it makes, and nothing else.

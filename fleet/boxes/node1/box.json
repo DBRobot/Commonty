@@ -24,13 +24,6 @@
       "recordsize": "1M",
       "com.sun:auto-snapshot": "true"
     },
-    "vault/enc/backups": {
-      "note": "the database dumps: a different disk from the source, snapshotted, in this box's backup. ente's key hierarchy is a row in postgres; without it nobody can decrypt the blobs",
-      "mountpoint": "/vault/backups",
-      "recordsize": "128K",
-      "compression": "zstd",
-      "com.sun:auto-snapshot": "true"
-    },
     "vault/enc/media": {
       "note": "all re-rippable, so no snapshots (one is the size of the library). lz4 early-aborts on what is already compressed",
       "mountpoint": "/vault/media",
