@@ -945,6 +945,7 @@
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;
           box-reports = import ./nix/tests/box-reports.nix args;
+          role-fit = import ./nix/tests/role-fit.nix args;
           nginx = import ./nix/tests/nginx.nix args;
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
