@@ -1,0 +1,60 @@
+{
+  "_": "What each role needs from a box (docs/hardware.md has the evidence). requires: against the box's signed report (fleet/boxes/<box>/hardware.json); box: against its owner's box.json; with: roles that must be on the same box, because the code reaches them on localhost; perFleet: exactly that many boxes run it. nix/tests/role-fit.nix fails when fleet/boxes.json breaks any of it; placement will read the same file.",
+  "core": {
+    "requires": { "arch": "x86_64", "uefi": true, "tpmP256": true, "wiredInitrd": true },
+    "why": "every box: the disk unlock needs the TPM and a cable its initrd has the driver for"
+  },
+  "gateway": {
+    "perFleet": 1,
+    "with": ["storage"],
+    "why": "one public front door (dd-dns points *.domain at it); s3.<domain> proxies its own garage"
+  },
+  "storage": {
+    "why": "garage: a dataset for blocks; rf=2, so the smallest box caps the usable space"
+  },
+  "photos": {
+    "with": ["forge", "vault", "gateway"],
+    "why": "the storage ledger reads ente's, forgejo's and vaultwarden's databases in one postgres"
+  },
+  "vault": {
+    "with": ["storage"],
+    "why": "DATA_FOLDER is garage on 127.0.0.1"
+  },
+  "media": {
+    "with": ["gateway"],
+    "why": "files.<domain> and /srv/images"
+  },
+  "library": {
+    "prefers": { "gpuEncode": "H264" },
+    "why": "transcode: H.264 encode on a GPU (Intel only today), else every core"
+  },
+  "llm": {
+    "requires": { "memoryGiB": 48, "cpuFlags": ["avx2"] },
+    "prefers": { "cpuFlags": ["avx512_vnni"], "gpuDriver": "i915" },
+    "why": "a 23G model mlocked, MemoryMax 32G, beside the ARC and the rest"
+  },
+  "game": {
+    "requires": { "kvm": true, "memoryGiB": 24 },
+    "why": "every world is a KVM guest of 6-8G; the budget is 20G"
+  },
+  "forge": {
+    "with": ["gateway"],
+    "why": "git.<domain>, and postgres shared with photos and vault"
+  },
+  "runner": {
+    "requires": { "kvm": true, "nestedKvm": true, "threads": 4, "memoryGiB": 12 },
+    "with": ["storage"],
+    "why": "VM tests (games nests one), members' jobs at --cpus=4 --memory=4g twice; the nix cache is garage on 127.0.0.1"
+  },
+  "observe": {
+    "with": ["storage", "photos", "forge"],
+    "why": "thanos keeps to local garage; the dumps take ente's and forgejo's databases"
+  },
+  "adblock": {
+    "box": ["household"],
+    "why": "it answers the house's DNS: the box has to be in the house, with who lives there"
+  },
+  "net": {
+    "why": "a second tailscaled; /dev/net/tun is everywhere"
+  }
+}
