@@ -72,6 +72,10 @@ in
         systemd.tmpfiles.rules = [ "d ${dir} 0755 dd-pwned dd-pwned -" ];
         systemd.services.dd-pwned = {
           description = "Fetch the Pwned Passwords list";
+          # a fetch runs for hours: a deploy must not restart it and wait on it
+          # (release 193 sat in node1's switch for one); it picks up the new
+          # definition on its next start
+          restartIfChanged = false;
           after = [
             "network-online.target"
             "zfs-datasets.service"

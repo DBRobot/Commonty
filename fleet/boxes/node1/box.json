@@ -45,13 +45,6 @@
       "compression": "lz4",
       "com.sun:auto-snapshot": "false"
     },
-    "vault/enc/forgejo": {
-      "note": "the forge: small, hot, irreplaceable, snapshotted, on the pool with what people made",
-      "mountpoint": "/vault/forgejo",
-      "recordsize": "128K",
-      "compression": "zstd",
-      "com.sun:auto-snapshot": "true"
-    },
     "tank/enc/games": {
       "note": "members' game servers: each one's record, saves and guest disk",
       "mountpoint": "/var/lib/dd-games"

@@ -1,4 +1,7 @@
-{ config, ... }:
+{ config, lib, ... }:
+let
+  policy = lib.importJSON ../../fleet/policy.json;
+in
 {
   # The forge and the mirror that keeps GitHub's copy current. Its runner
   # is the runner role: any box can run one, the forge runs on one.
@@ -23,13 +26,11 @@
       rank = 50;
     }
   ];
-  dd.forgejo.admin = "david";
-  dd.backup.paths = [ "/vault/forgejo" ]; # repositories, lfs, custom config; its db is in the postgres dumps
-  dd.forgejo.mirrors = [
-    {
-      repo = config.dd.repo;
-      to = "https://github.com/DBRobot/Home-Server.git";
-      user = "DBRobot";
-    }
-  ];
+  # the fleet's owner administers its forge; the mirrors are the fleet's
+  # choice too (fleet/policy.json)
+  dd.forgejo.admin = policy.owner;
+  dd.backup.paths = [ config.dd.forgejo.stateDir ]; # repositories, lfs, custom config; its db is in the postgres dumps
+  dd.forgejo.mirrors = map (m: m // { repo = m.repo or config.dd.repo; }) (
+    policy.forgeMirrors or [ ]
+  );
 }
