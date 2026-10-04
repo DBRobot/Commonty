@@ -21,7 +21,10 @@
         outbound = [ "huggingface.co" ];
         inbound = "localhost";
       };
-      "with" = [ "nginx" "dd-verify" ];
+      depends = {
+        nginx.local = true;
+        dd-verify.local = true;
+      };
       privacy = "plaintext";
     };
     variants."qwen3.6-35b" = {
@@ -31,7 +34,7 @@
           perKContext = null;
           locked = true;
         };
-        disk.size = "22G";
+        disk.size.min = "22G";
       };
       uses = {
         memory = "22G";
@@ -57,7 +60,7 @@
         outbound = "internet";
         inbound = "localhost";
       };
-      "with" = [ "dd-verify" ];
+      depends.dd-verify.local = true;
       privacy = "plaintext";
     };
   };

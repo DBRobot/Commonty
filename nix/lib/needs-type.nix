@@ -47,7 +47,7 @@ let
         type = t.nullOr (t.submodule {
           options = {
             kind = lib.mkOption { type = t.enum [ "ssd" "any" ]; default = "any"; };
-            size = lib.mkOption { type = t.nullOr size; default = null; };
+            size = lib.mkOption { type = t.nullOr room; default = null; description = "its own space on this box"; };
           };
         });
         default = null;
@@ -68,6 +68,21 @@ let
         type = t.enum [ "localhost" "tailnet" "public" ];
         description = "who reaches it: only this box; the Commonty network; anyone";
       };
+    };
+  };
+  # the least space it needs on a box: a floor that makes sense for the
+  # service, not what it holds today (that is uses.storage). Data it keeps
+  # in another service (a bucket, a database) is that service's floor.
+  room = t.submodule {
+    options = {
+      min = lib.mkOption { type = size0; default = "0"; };
+    };
+  };
+  # another service it needs: on this box (reached on localhost or a
+  # socket) or anywhere
+  dependency = t.submodule {
+    options = {
+      local = lib.mkOption { type = t.bool; };
     };
   };
   # what it costs to run, measured where it runs (systemd's peak, du of its
@@ -92,11 +107,10 @@ let
         network = lib.mkOption ({ type = if full then network else t.nullOr network; } // lib.optionalAttrs (!full) { default = null; });
       requires = lib.mkOption { type = want; default = { }; description = "it does not run without these"; };
       faster = lib.mkOption { type = want; default = { }; description = "it runs without these, slower"; };
-      "with" = lib.mkOption {
-        type = t.listOf t.str;
-        default = [ ];
-        description = "services that must be on the same box (it reaches them on localhost)";
-      };
+      depends = lib.mkOption ({
+        type = t.attrsOf dependency;
+        description = "the services it needs, by name; empty if none";
+      } // lib.optionalAttrs (!full) { default = { }; });
       privacy = lib.mkOption {
         type = t.nullOr (t.enum [ "none" "metadata" "plaintext" ]);
         default = null;
@@ -108,6 +122,11 @@ in
 t.attrsOf (t.submodule {
   options = {
     what = lib.mkOption { type = t.str; };
+    instances = lib.mkOption {
+      type = t.nullOr t.ints.positive;
+      default = null;
+      description = "at most this many running at once (a database's single writer is 1); null: any";
+    };
     base = lib.mkOption { type = part true; };
     variants = lib.mkOption {
       type = t.attrsOf (part false);
