@@ -40,13 +40,16 @@
   boot.zfs.extraPools = [ "vault" ];
 
   # Which pool holds what. vault is the 4T usb disk; tank the nvme root.
+  # Both encrypted: everything below <pool>/enc, keyed at boot (disk-unlock.nix).
+  # vault's own top level keeps only the Pwned Passwords list, which is public.
   # 62G and 8 threads: four ci jobs at once, vm tests mostly wait on
   # timers (the 14G box takes the default two)
   # two at a time: a nix build takes every thread, and this is a 19 W laptop
   # chip; four jobs at once ran at 2.4 GHz and 95 °C, two run faster
   dd.runner.capacity = 2;
   dd.zfs.datasets = {
-    "vault/photos" = {
+    "vault/enc/photos" = {
+      mountpoint = "/vault/photos";
       # garage's blocks: ente's and the media tier's ciphertext
       recordsize = "1M"; # large sequential reads
       "com.sun:auto-snapshot" = "true"; # cheap on immutable files, saves you from rm -rf
@@ -58,7 +61,8 @@
     # master_key_encrypted_with_recovery_key is itself a row in that database.
     # Dumps land here: different physical disk to the source, snapshotted,
     # and in this box's backup.
-    "vault/backups" = {
+    "vault/enc/backups" = {
+      mountpoint = "/vault/backups";
       recordsize = "128K"; # small compressible dumps, not media
       compression = "zstd";
       "com.sun:auto-snapshot" = "true";
@@ -67,7 +71,8 @@
     # Media is the one dataset where losing the single vdev costs only time:
     # it is all re-rippable. No snapshots either - a snapshot of a library is
     # the size of the library.
-    "vault/media" = {
+    "vault/enc/media" = {
+      mountpoint = "/vault/media";
       recordsize = "1M"; # large sequential reads
       # h264/hevc is already compressed, so this should do nothing - but
       # vault/photos gets 1.93x on blobs that "should" be incompressible too,
@@ -81,7 +86,7 @@
     # so this dataset only ever holds ciphertext. NO snapshots - an archive is written once and never
     # changed, so a snapshot buys nothing and would keep a deleted 80 G image
     # on disk for a year.
-    "vault/images" = {
+    "vault/enc/images" = {
       mountpoint = "/srv/images";
       recordsize = "1M"; # gigabyte chunks, sequential
       compression = "lz4"; # ciphertext is incompressible; lz4 early-aborts, costs nothing
@@ -91,19 +96,19 @@
     # The forge: repositories, lfs objects and its own config. Small, hot,
     # irreplaceable, so snapshots are on and it sits on the pool with the
     # rest of what people made rather than on the root disk.
-    "vault/forgejo" = {
+    "vault/enc/forgejo" = {
       mountpoint = "/vault/forgejo";
       recordsize = "128K";
       compression = "zstd";
       "com.sun:auto-snapshot" = "true";
     };
 
-    "tank/games" = {
+    "tank/enc/games" = {
       # members' game servers: each one's record, saves and guest disk
       mountpoint = "/var/lib/dd-games";
     };
 
-    "tank/models" = {
+    "tank/enc/models" = {
       # the template's pool root has no mountpoint, so a dataset needs its own
       mountpoint = "/tank/models";
       recordsize = "1M"; # large sequential reads of GGUF weights
