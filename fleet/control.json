@@ -1,8 +1,24 @@
 {
-  "validators": [],
   "rules": {
-    "leaseTtlMs": 15000,
     "goneAfterMs": 90000,
+    "leaseTtlMs": 15000,
     "leases": {}
-  }
+  },
+  "validators": [
+    {
+      "id": 1,
+      "key": "ySFFY9wNa5OP5y2jx/XbQn6Lzn54yL5u/MpVEezyHtc=",
+      "name": "node1"
+    },
+    {
+      "id": 2,
+      "key": "JD/J+8G9wKZRaXFn/DsNEsicGaMQhaT9EOhN4pdsU2Y=",
+      "name": "node2"
+    },
+    {
+      "id": 3,
+      "key": "zF+A+n3gV0ijMsv6g9VIMlnmH/KSUkGOM05fhSGKEKQ=",
+      "name": "cloudflare"
+    }
+  ]
 }
