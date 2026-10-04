@@ -86,6 +86,7 @@ in
   imports = [
     ./pwned.nix
     ../member-mail.nix
+    ../storage/usage.nix
   ];
 
   options.dd.vault = {
