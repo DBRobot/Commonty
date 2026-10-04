@@ -118,6 +118,7 @@ let
       };
       inbound = lib.mkOption {
         type = t.enum [
+          "none"
           "localhost"
           "tailnet"
           "public"

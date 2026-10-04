@@ -71,10 +71,7 @@
       "threads": 4,
       "memoryGiB": 12
     },
-    "with": [
-      "storage"
-    ],
-    "why": "VM tests (games nests one), members' jobs at --cpus=4 --memory=4g twice; the nix cache is garage on 127.0.0.1"
+    "why": "VM tests (games nests one) and members' jobs; the nix cache at the storage pool's address (nix/modules/forge/needs.nix)"
   },
   "observe": {
     "with": [

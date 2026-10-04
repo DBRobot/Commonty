@@ -36,7 +36,8 @@ pull request opened, pushed, or edited
 ├─ files_modified ── what changed: nix, rust, vm, app (and: a draft? already passed?)
 │   ├─ flake_check ─── the flake evaluates; placement, box list, this file
 │   ├─ mail_worker ─── the mail Worker and the control plane, end to end
-│   ├─ build_part ──┬─ build_host (every box's system, built on every box)
+│   ├─ build_part ──┬─ build_host (every box's system, built on every box with the runner role:
+│   │               │    both lists from fleet/boxes.json, so a box that joins needs no change here)
 │   │               │    └─ same_build (both builds of a system are one path)
 │   │               └─ vm_tests (one job per test)
 │   ├─ rust_lint · test · app_lint

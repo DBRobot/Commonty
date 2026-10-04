@@ -61,4 +61,57 @@
       privacy = "none";
     };
   };
+
+  forgejo-runner = {
+    what = "runs the fleet's own CI: builds, checks, VM tests";
+    base = {
+      requires = {
+        threads = 4;
+        # the nix store (90G on each box, 2026-10-04) and what builds in it
+        disk = {
+          kind = "ssd";
+          size.min = "200G";
+        };
+      };
+      # node1, 2026-10-04: peak with its VMs; the store and its own state
+      uses = {
+        memory = "11G";
+        storage = "98G";
+      };
+      network = {
+        outbound = [
+          "github.com"
+          "cache.nixos.org"
+        ];
+        inbound = "none";
+      };
+      depends = {
+        forgejo.local = false; # git.<domain>, from anywhere
+        garage.local = false; # the nix cache, at the storage pool's address
+      };
+      privacy = "none"; # the fleet's own public code
+    };
+    variants = {
+      vm-tests.requires.kvm = true; # all but the games test
+      nested-vm-tests.requires.nestedKvm = true; # the games test boots a VM in a VM
+    };
+  };
+
+  members-runner = {
+    what = "runs members' own CI, sandboxed (Docker and gVisor), with no way into the fleet";
+    base = {
+      requires.threads = 4; # a job's --cpus; docker refuses more than the box has
+      # two jobs at their limit; the job image
+      uses = {
+        memory = "8G";
+        storage = "1.2G";
+      };
+      network = {
+        outbound = "internet";
+        inbound = "none";
+      };
+      depends.docker.local = true;
+      privacy = "none"; # each job sees only itself
+    };
+  };
 }
