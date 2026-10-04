@@ -30,9 +30,9 @@
 
   networking.hostId = "083f7ed3";
 
-  # garage's blocks on the one pool there is. Content-addressed ciphertext:
-  # no snapshots, nothing to gain from them
-  dd.zfs.datasets."tank/garage" = {
+  # garage's blocks on the one pool there is, encrypted with the rest.
+  # Content-addressed ciphertext: no snapshots, nothing to gain from them
+  dd.zfs.datasets."tank/enc/garage" = {
     mountpoint = "/srv/garage";
     recordsize = "1M";
     "com.sun:auto-snapshot" = "false";
