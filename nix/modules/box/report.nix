@@ -48,6 +48,9 @@ in
         pkgs.coreutils
         pkgs.tpm2-tools
         pkgs.age-plugin-tpm
+        pkgs.jq
+        pkgs.libva-utils
+        config.boot.zfs.package
         config.system.build.nixos-generate-config
         pkg.dd-control
       ];
@@ -60,7 +63,9 @@ in
         w=$(mktemp -d)
         trap 'rm -rf "$w"' EXIT
         nixos-generate-config --no-filesystems --show-hardware-config > "$w/hardware-configuration.nix"
-        SECRETS_KEY=${key} bash ${./report/detect.sh} > "$w/hardware.json"
+        SECRETS_KEY=${key} INITRD_MODULES="${lib.concatStringsSep " " config.boot.initrd.availableKernelModules}" \
+          LIBVA_DRIVERS_PATH=/run/opengl-driver/lib/dri TPM2TOOLS_TCTI=device:/dev/tpmrm0 \
+          bash ${./report/detect.sh} > "$w/hardware.json"
         dd-control -sign-report "$w" -box ${config.networking.hostName}
         mkdir -p ${out}
         cp "$w"/hardware-configuration.nix "$w"/hardware.json "$w"/report.sig ${out}/
