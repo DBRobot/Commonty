@@ -1,7 +1,7 @@
 // dd-control: a box's part in the control plane. Every box heartbeats -
 // what it has and what it runs, signed by its TPM - and keeps the agreed
 // state, checked against the validators' signatures, at
-// http://127.0.0.1:4190/state for the box's own services. A box named as
+// http://127.0.0.1:4195/state for the box's own services. A box named as
 // its house's validator also votes. It dials out to the relay and nothing
 // dials in.
 package main
@@ -214,7 +214,7 @@ func main() {
 	relayURL := flag.String("relay", "", "wss://.../relay")
 	dir := flag.String("state", "/var/lib/dd-control", "where the validator keeps its key, log and state")
 	tpmKeys := flag.String("tpm-keys", "/boot/dd/unlock", "the TPM-held key's files")
-	listen := flag.String("listen", "127.0.0.1:4190", "the agreed state, for this box")
+	listen := flag.String("listen", "127.0.0.1:4195", "the agreed state, for this box")
 	roles := flag.String("roles", "", "roles this box runs, comma separated")
 	every := flag.Duration("heartbeat", 30*time.Second, "how often to heartbeat")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")

@@ -37,28 +37,25 @@ box.succeed("zfs get -H -o value keystatus data/enc | grep -q available")
 box.wait_until_succeeds("test ! -e /run/dd/disk.key")
 box.succeed("journalctl -b -o cat | grep -q 'dd-unlock: unlocked'")
 
-# 2. somewhere new: it waits, and a member lets it in
-post("/test/away", {"box": "box"})
+# 2. marked stolen, at its own home: refused, again and again. Then, while
+# it waits in its initrd, it is unmarked and found somewhere new: it waits
+# for a member, who lets it in. One boot for both.
+post("/test/stolen", {"box": "box", "stolen": True})
+asked = state()["asked"]
 box.shutdown()
 box.start()
-worker.wait_until_succeeds("curl -s http://127.0.0.1:8000/state | grep -q '\"pending\": {\"box\"'", timeout=300)
+worker.wait_until_succeeds(f"test $(curl -s http://127.0.0.1:8000/state | jq .asked) -gt {asked + 1}", timeout=300)
+now = state()
+assert "box" not in now["pending"], f"a stolen box was put on the waiting list: {now}"
+post("/test/away", {"box": "box"})
+post("/test/stolen", {"box": "box", "stolen": False})
+worker.wait_until_succeeds("curl -s http://127.0.0.1:8000/state | grep -q '\"pending\": {\"box\"'", timeout=120)
 # (the box is in its initrd, waiting: nothing on it answers yet)
 post("/test/approve", {"box": "box"})
 box.wait_for_unit("multi-user.target", timeout=300)
 box.succeed("grep -q kept /data/proof")
 
-# 3. marked stolen: it stays locked, even at home
-post("/test/stolen", {"box": "box", "stolen": True})
-box.shutdown()
-box.start()
-worker.wait_until_succeeds("curl -s http://127.0.0.1:8000/state | grep -q '\"asked\": [1-9]'", timeout=300)
-asked = state()["asked"]
-worker.wait_until_succeeds(f"test $(curl -s http://127.0.0.1:8000/state | jq .asked) -gt {asked}", timeout=400)
-post("/test/stolen", {"box": "box", "stolen": False})
-box.wait_for_unit("multi-user.target", timeout=600)
-box.succeed("grep -q kept /data/proof")
-
-# 4. under another boot state (PCR 7 moved) the TPM neither signs nor unseals
+# 3. under another boot state (PCR 7 moved) the TPM neither signs nor unseals
 sign = (
     "cd $(mktemp -d) && export TPM2TOOLS_TCTI=device:/dev/tpmrm0 && tpm2_createprimary -Q -C o -G ecc256 -c srk.ctx"
     " && tpm2_load -Q -C srk.ctx -u /boot/dd/unlock/{0}.pub -r /boot/dd/unlock/{0}.priv -c k.ctx"
@@ -69,6 +66,6 @@ box.succeed("tpm2_pcrextend 7:sha256=0000000000000000000000000000000000000000000
 box.fail((sign + " && echo hi > m && tpm2_sign -Q -c k.ctx -g sha256 -s ecdsa -f plain -p session:s.ctx -o sig m").format("sig"))
 box.fail((sign + " && tpm2_unseal -c k.ctx -p session:s.ctx -o half").format("half"))
 
-# 5. the paper key opens the copy on the boot partition
+# 4. the paper key opens the copy on the boot partition
 box.succeed(f"printf '%s\\n' '{nix['paper']}' | script -qc 'dd disk recover /boot/dd/box-disk.age /root/recovered.key' /dev/null")
 box.succeed("zfs unmount data/enc && zfs unload-key data/enc && zfs load-key -L file:///root/recovered.key data/enc && zfs mount data/enc && grep -q kept /data/proof")
