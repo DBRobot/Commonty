@@ -60,7 +60,7 @@ pub enum ReleaseCmd {
         #[arg(long)]
         tag: String,
         /// the GitHub repository it was built in
-        #[arg(long, default_value = "DBRobot/Home-Server")]
+        #[arg(long, default_value = "DBRobot/Commonty")]
         from: String,
         /// sign and print the manifest, push nothing
         #[arg(long)]
@@ -75,7 +75,7 @@ pub enum ReleaseCmd {
         #[arg(long, default_value = "main")]
         r#ref: String,
         /// the GitHub repository the mirror builds in
-        #[arg(long, default_value = "DBRobot/Home-Server")]
+        #[arg(long, default_value = "DBRobot/Commonty")]
         from: String,
         /// how long to wait for GitHub's build before giving up
         #[arg(long, default_value_t = 120)]

@@ -7,7 +7,7 @@ Windows, on machines that have those systems.
 
 ## The mirror
 
-The forge pushes every change to `DBRobot/Home-Server` on GitHub as it
+The forge pushes every change to `DBRobot/Commonty` on GitHub as it
 happens ([`nix/modules/forge/forgejo-mirror.nix`](../nix/modules/forge/forgejo-mirror.nix)),
 with a GitHub token kept in `secrets/`. Nothing is ever changed on GitHub
 directly: the mirror would overwrite it.
@@ -15,7 +15,11 @@ directly: the mirror would overwrite it.
 The token must be allowed to push workflows (its **Workflows** permission).
 Without it, GitHub refuses any commit that changes a file in
 `.github/workflows/`, and the mirror stops at that commit until someone
-pushes it over ssh: `git push git@github.com:DBRobot/Home-Server.git main`.
+pushes it over ssh: `git push git@github.com:DBRobot/Commonty.git main`.
+
+The repository was called `DBRobot/Home-Server` until 2026-10-04; GitHub
+redirects the old name, and the mirror still pushes to it. GitHub attests
+new builds under the new name, which is the one `dd release app` checks.
 
 ## The app's release
 
