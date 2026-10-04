@@ -54,34 +54,36 @@ let
   '';
 in
 {
-  config = lib.mkIf (config.services.forgejo.enable && config.services.forgejo.database.type == "postgres") {
-    systemd.services.dd-forge-notify = {
-      description = "The trigger that tells the Git pages what changed";
-      wantedBy = [ "forgejo.service" ];
-      after = [ "forgejo.service" ];
-      partOf = [ "forgejo.service" ];
-      path = [ config.services.postgresql.package ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        User = "postgres";
-      };
-      script = ''
-        # the first start: Forgejo makes its tables as it comes up
-        for _ in $(seq 1 120); do
-          [ "$(psql -d ${db} -tAc "select to_regclass('public.commit_status') is not null and to_regclass('public.action_run_job') is not null")" = t ] && break
-          sleep 1
-        done
-        psql -d ${db} -v ON_ERROR_STOP=1 -q -f ${sql}
-      '';
-    };
+  config =
+    lib.mkIf (config.services.forgejo.enable && config.services.forgejo.database.type == "postgres")
+      {
+        systemd.services.dd-forge-notify = {
+          description = "The trigger that tells the Git pages what changed";
+          wantedBy = [ "forgejo.service" ];
+          after = [ "forgejo.service" ];
+          partOf = [ "forgejo.service" ];
+          path = [ config.services.postgresql.package ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            User = "postgres";
+          };
+          script = ''
+            # the first start: Forgejo makes its tables as it comes up
+            for _ in $(seq 1 120); do
+              [ "$(psql -d ${db} -tAc "select to_regclass('public.commit_status') is not null and to_regclass('public.action_run_job') is not null")" = t ] && break
+              sleep 1
+            done
+            psql -d ${db} -v ON_ERROR_STOP=1 -q -f ${sql}
+          '';
+        };
 
-    # the gate listens as its own user: connect, and nothing else
-    services.postgresql.ensureUsers = lib.mkIf config.dd.verify.enable [ { name = "dd-verify"; } ];
-    systemd.services.dd-verify = lib.mkIf config.dd.verify.enable {
-      environment.VERIFY_FORGE_EVENTS = "host=/run/postgresql user=dd-verify dbname=${db}";
-      after = [ "postgresql.service" ];
-      serviceConfig.RestrictAddressFamilies = [ "AF_UNIX" ];
-    };
-  };
+        # the gate listens as its own user: connect, and nothing else
+        services.postgresql.ensureUsers = lib.mkIf config.dd.verify.enable [ { name = "dd-verify"; } ];
+        systemd.services.dd-verify = lib.mkIf config.dd.verify.enable {
+          environment.VERIFY_FORGE_EVENTS = "host=/run/postgresql user=dd-verify dbname=${db}";
+          after = [ "postgresql.service" ];
+          serviceConfig.RestrictAddressFamilies = [ "AF_UNIX" ];
+        };
+      };
 }

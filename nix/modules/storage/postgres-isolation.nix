@@ -11,7 +11,10 @@ in
     systemd.services.dd-postgres-isolation = {
       description = "Each database admits only its own service";
       wantedBy = [ "multi-user.target" ];
-      after = [ "postgresql.service" "postgresql-setup.service" ];
+      after = [
+        "postgresql.service"
+        "postgresql-setup.service"
+      ];
       requires = [ "postgresql.service" ];
       path = [ pg.package ];
       serviceConfig = {

@@ -33,7 +33,10 @@ in
       name: u:
       lib.nameValuePair "dd-usage-${name}" {
         description = "Count what each member keeps in ${name}";
-        after = [ "postgresql.service" "${name}.service" ];
+        after = [
+          "postgresql.service"
+          "${name}.service"
+        ];
         path = [ config.services.postgresql.package ];
         serviceConfig = {
           Type = "oneshot";
