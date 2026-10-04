@@ -90,6 +90,11 @@ let
         );
         default = null;
       };
+      threads = lib.mkOption {
+        type = t.ints.unsigned;
+        default = 0;
+        description = "at least this many CPU threads";
+      };
       kvm = lib.mkOption {
         type = t.bool;
         default = false;
@@ -113,11 +118,12 @@ let
       };
       inbound = lib.mkOption {
         type = t.enum [
+          "none"
           "localhost"
           "tailnet"
           "public"
         ];
-        description = "who reaches it: only this box; the Commonty network; anyone";
+        description = "who reaches it: nobody (it only calls out); only this box; the Commonty network; anyone";
       };
     };
   };
