@@ -66,6 +66,31 @@ pull request opened, pushed, or edited
   as a release can) is run again once, by
   [`ci-resume.py`](../nix/modules/forge/ci-resume.py) on the forge box.
 
+## Making a change
+
+The same steps for everyone, a person or an agent:
+
+1. **Work in your own worktree**, on a new branch from the forge's `main`:
+   `git worktree add ../Home-Server-<task> -b <branch> forge/main`. Never
+   switch branches in someone else's checkout: an editor watching it shows
+   a checkout as edits.
+2. **Commit as the repository's author**
+   (`git -c user.email=davidsprojects7@gmail.com commit ...`), and never
+   name a tool as an author: no `Co-Authored-By`, "Generated with" or
+   session links, in commits or in pull requests.
+3. **Open the pull request as a draft** (`WIP:` in the title) while it is
+   being worked on, with a title and body the style check accepts.
+4. **One release at a time.** Everything from taking the draft out to the
+   release landing on the boxes happens inside the release lock:
+   `exec 9>~/.cache/dd-release.lock; flock 9` ... `exec 9>&-`. That covers
+   the full CI run, rebasing onto `main` right before merging (the rule
+   refuses an outdated branch anyway), the merge, `dd release publish`,
+   and waiting until every box runs the new release.
+5. **Publish with the dd built from what merged**, not an older build, and
+   read the release's number from what `dd release publish` prints.
+6. **Wait on `ci_ok`**, not on every status being green: a failure anywhere
+   is final, since the run stops at the first one.
+
 ## What blocks a merge
 
 `main` takes a pull request when:
