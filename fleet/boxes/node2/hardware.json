@@ -43,7 +43,13 @@
       "render": "/dev/dri/renderD128",
       "driver": "amdgpu",
       "vendor": "0x1002",
-      "encode": []
+      "encode": [
+        "H264ConstrainedBaseline",
+        "H264High",
+        "H264Main",
+        "HEVCMain",
+        "HEVCMain10"
+      ]
     }
   ],
   "disks": [

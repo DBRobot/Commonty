@@ -607,6 +607,13 @@ function readyTo() {
   return (playing?.offset || 0) + (Number.isFinite(end) ? end : 0);
 }
 
+// How far back the box still has it: it keeps six minutes behind where the
+// player has asked (box/transcode/src/main.rs, BEHIND), so five behind where
+// it plays is safely there; further back, the box starts again.
+function keptFrom() {
+  return Math.max(playing?.offset || 0, filmAt() - 300);
+}
+
 let dragging = false;
 function paintBar() {
   const v = $('video'), seek = $('c-seek');
@@ -616,7 +623,7 @@ function paintBar() {
   seek.max = String(Math.max(1, Math.round(len)));
   if (!dragging) seek.value = String(Math.round(at));
   seek.style.setProperty('--played', pct(at));
-  seek.style.setProperty('--from', pct(playing?.offset || 0));
+  seek.style.setProperty('--from', pct(keptFrom()));
   seek.style.setProperty('--ready', pct(readyTo()));
   seek.setAttribute('aria-valuetext', len ? `${clock(at)} of ${clock(len)}` : clock(at));
   $('c-now').textContent = clock(at);
@@ -643,7 +650,7 @@ async function seekTo(t) {
   // a file opened whole in the tab seeks itself; one from the box seeks
   // within what it has packed, and anywhere else - including while an
   // earlier jump is still starting - asks the box to start there
-  if (playing.inline || (session && t >= playing.offset && t <= readyTo())) {
+  if (playing.inline || (session && t >= keptFrom() && t <= readyTo())) {
     v.currentTime = Math.max(0, t - playing.offset);
     return;
   }

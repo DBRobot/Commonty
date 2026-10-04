@@ -6,6 +6,7 @@ let
   files = [
     ../modules/forge/needs.nix
     ../modules/games/needs.nix
+    ../modules/library/needs.nix
     ../modules/llm/needs.nix
     ../modules/photos/needs.nix
     ../modules/storage/needs.nix

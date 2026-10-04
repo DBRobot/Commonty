@@ -46,6 +46,12 @@ const PIECE: u64 = 64;
 /// ffmpegs at once: each takes cores for as long as its film plays, and
 /// anyone who can reach start could otherwise ask for a hundred
 const MAX_SESSIONS: usize = 4;
+/// Segments (4 s each) kept behind the furthest one the player asked for,
+/// and made ahead of it before ffmpeg is paused: six minutes each way. The
+/// segments are plaintext, so they live in memory only, and a whole film
+/// would not fit; a jump outside the window starts a new session there.
+const BEHIND: u64 = 90;
+const AHEAD: u64 = 90;
 
 use library::crypt::{BLOCK, HEADER, SEALED_BLOCK};
 
@@ -60,6 +66,10 @@ struct Session {
     /// plain bytes
     size: u64,
     cache: Mutex<HashMap<u64, Arc<Vec<u8>>>>,
+    /// the furthest segment the player has asked for
+    asked: std::sync::atomic::AtomicU64,
+    /// ffmpeg stopped (SIGSTOP) because it is AHEAD of the player
+    paused: std::sync::atomic::AtomicBool,
 }
 
 impl Session {
@@ -217,6 +227,8 @@ async fn start(
         owner,
         dir: dir.clone(),
         last: Mutex::new(Instant::now()),
+        asked: std::sync::atomic::AtomicU64::new(0),
+        paused: std::sync::atomic::AtomicBool::new(false),
         child: Mutex::new(None),
         url: s.url,
         dec,
@@ -635,6 +647,10 @@ async fn serve(State(app): State<Arc<App>>, Path((id, file)): Path<(String, Stri
         return StatusCode::NOT_FOUND.into_response();
     };
     *sess.last.lock().await = Instant::now();
+    if let Some(n) = segment(&file) {
+        sess.asked
+            .fetch_max(n, std::sync::atomic::Ordering::Relaxed);
+    }
     let dir = sess.dir.clone();
     let ty = if file.ends_with(".m3u8") {
         "application/vnd.apple.mpegurl"
@@ -654,6 +670,47 @@ async fn end(State(app): State<Arc<App>>, Path(id): Path<String>) -> StatusCode 
             StatusCode::NO_CONTENT
         }
         None => StatusCode::NOT_FOUND,
+    }
+}
+
+/// a segment's number from its name, "00042.ts"
+fn segment(file: &str) -> Option<u64> {
+    file.strip_suffix(".ts")?.parse().ok()
+}
+
+/// Keep a session to its window: segments more than BEHIND the player
+/// go, and ffmpeg waits while it is more than AHEAD of it.
+async fn keep_window(s: &Session) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let asked = s.asked.load(Relaxed);
+    let mut made = 0;
+    if let Ok(mut rd) = tokio::fs::read_dir(&s.dir).await {
+        while let Ok(Some(e)) = rd.next_entry().await {
+            let name = e.file_name();
+            let Some(n) = name.to_str().and_then(segment) else {
+                continue;
+            };
+            made = made.max(n);
+            if n + BEHIND < asked {
+                let _ = tokio::fs::remove_file(e.path()).await;
+            }
+        }
+    }
+    let Some(pid) = s.child.lock().await.as_ref().and_then(|c| c.id()) else {
+        return;
+    };
+    let pause = made > asked + AHEAD;
+    let resume = made <= asked + AHEAD / 2;
+    if pause && !s.paused.load(Relaxed) || resume && s.paused.load(Relaxed) {
+        let sig = if pause { "-STOP" } else { "-CONT" };
+        if tokio::process::Command::new("kill")
+            .args([sig, &pid.to_string()])
+            .status()
+            .await
+            .is_ok_and(|st| st.success())
+        {
+            s.paused.store(pause, Relaxed);
+        }
     }
 }
 
@@ -744,6 +801,16 @@ async fn main() -> Result<()> {
             .filter(|d| !d.is_empty())
             .map(PathBuf::from),
         sessions: Mutex::new(HashMap::new()),
+    });
+    let windows = app.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let all: Vec<Arc<Session>> = windows.sessions.lock().await.values().cloned().collect();
+            for s in all {
+                keep_window(&s).await;
+            }
+        }
     });
     let sweeper = app.clone();
     tokio::spawn(async move {
