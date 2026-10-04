@@ -9,7 +9,9 @@
 # and half.pub, half.priv. They open nothing outside this TPM, and files
 # put in their place could only make a key that opens nothing.
 #
-# From the unit: BOX, URL, OUT (a directory).
+# From the unit: BOX, URL, OUT (a directory), and how long to wait:
+# ENROL_WAIT (s, for the boot partition), WAIT_WAITING (s, while a member
+# has not let it in), WAIT_REFUSED (s, while it is marked stolen).
 set -u
 umask 077
 mkdir -p "$OUT"
@@ -36,7 +38,7 @@ esp() {
 tries=0
 until esp; do
   tries=$((tries + 1))
-  if [ "$tries" -ge 30 ]; then
+  if [ "$tries" -ge "$ENROL_WAIT" ]; then
     echo "dd-unlock: no enrolment on the boot partition; the pools stay locked"
     exit 0
   fi
@@ -70,7 +72,7 @@ sign() {
 
 say() { echo "$*" >/dev/console 2>/dev/null || true; echo "$*"; }
 
-wait=5
+wait=2
 share=
 while [ -z "$share" ]; do
   mac=$(router)
@@ -85,18 +87,18 @@ while [ -z "$share" ]; do
       --data "{\"box\":\"$BOX\",\"at\":$at,\"mac\":\"$mac\",\"sig\":\"$sig\"}" 2>"$w/err") || code=000
     case "$code" in
       200) share=$(jq -r '.share // empty' "$w/answer") ;;
-      202) say "dd-unlock: this box started somewhere new; a member can let it in from their boxes page"; wait=30 ;;
-      403) say "dd-unlock: refused: $(jq -r '.error // empty' "$w/answer" 2>/dev/null)"; wait=300 ;;
+      202) say "dd-unlock: this box started somewhere new; a member can let it in from their boxes page"; wait=$WAIT_WAITING ;;
+      403) say "dd-unlock: refused: $(jq -r '.error // empty' "$w/answer" 2>/dev/null)"; wait=$WAIT_REFUSED ;;
       # nothing kept for this box: asking again changes nothing. Its pools
       # stay locked; the paper key opens them (dd disk recover)
       404) say "dd-unlock: the unlock service keeps no half for $BOX; the pools stay locked"; exit 0 ;;
-      000) say "dd-unlock: no network yet ($(head -c 120 "$w/err"))" ;;
-      *) say "dd-unlock: the unlock service said $code" ;;
+      # no answer at all: back off, up to half a minute
+      000) say "dd-unlock: no network yet ($(head -c 120 "$w/err"))"; wait=$((wait < 15 ? wait * 2 : 30)) ;;
+      *) say "dd-unlock: the unlock service said $code"; wait=$((wait < 15 ? wait * 2 : 30)) ;;
     esac
   fi
   if [ -z "$share" ]; then
     sleep "$wait"
-    [ "$wait" -lt 30 ] && wait=$((wait * 2))
   fi
 done
 

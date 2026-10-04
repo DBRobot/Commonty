@@ -39,6 +39,9 @@ let
       BOX = box;
       URL = cfg.url;
       OUT = "/run/dd";
+      ENROL_WAIT = cfg.waits.enrolment;
+      WAIT_WAITING = cfg.waits.waiting;
+      WAIT_REFUSED = cfg.waits.refused;
     }
   );
   # the same, on the running box, as root: the keys in /run/dd again, for
@@ -50,6 +53,9 @@ let
       BOX = box;
       URL = cfg.url;
       OUT = "/run/dd";
+      ENROL_WAIT = 1;
+      WAIT_WAITING = cfg.waits.waiting;
+      WAIT_REFUSED = cfg.waits.refused;
     };
   };
   enrol = pkgs.writeShellApplication {
@@ -78,6 +84,24 @@ in
       description = "the owner's paper key, as an ssh-ed25519 public key line: what the disk keys' copies in /boot/dd are encrypted to";
     };
     enable = lib.mkEnableOption "making the disks' key in the initrd at every boot (the box enrolled, its pools encrypted)";
+    # how long the initrd waits between tries; the test shortens them
+    waits = {
+      enrolment = lib.mkOption {
+        type = lib.types.int;
+        default = 30;
+        description = "seconds to look for the enrolment on the boot partition before going on without it";
+      };
+      waiting = lib.mkOption {
+        type = lib.types.int;
+        default = 30;
+        description = "seconds between asks while a member has not let the box in";
+      };
+      refused = lib.mkOption {
+        type = lib.types.int;
+        default = 60;
+        description = "seconds between asks while the box is marked stolen";
+      };
+    };
     pools = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ "tank" ];

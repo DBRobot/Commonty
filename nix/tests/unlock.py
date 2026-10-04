@@ -37,25 +37,22 @@ box.succeed("zfs get -H -o value keystatus data/enc | grep -q available")
 box.wait_until_succeeds("test ! -e /run/dd/disk.key")
 box.succeed("journalctl -b -o cat | grep -q 'dd-unlock: unlocked'")
 
-# 2. somewhere new: it waits, and a member lets it in
+# 2. somewhere new, and marked stolen: refused until unmarked, then it waits
+# for a member, who lets it in - one boot
 post("/test/away", {"box": "box"})
+post("/test/stolen", {"box": "box", "stolen": True})
+asked = state()["asked"]
 box.shutdown()
 box.start()
-worker.wait_until_succeeds("curl -s http://127.0.0.1:8000/state | grep -q '\"pending\": {\"box\"'", timeout=300)
+# refused more than once: it keeps asking, and is never let through
+worker.wait_until_succeeds(f"test $(curl -s http://127.0.0.1:8000/state | jq .asked) -gt {asked + 1}", timeout=300)
+now = state()
+assert "box" not in now["pending"], f"a stolen box was put on the waiting list: {now}"
+post("/test/stolen", {"box": "box", "stolen": False})
+worker.wait_until_succeeds("curl -s http://127.0.0.1:8000/state | grep -q '\"pending\": {\"box\"'", timeout=120)
 # (the box is in its initrd, waiting: nothing on it answers yet)
 post("/test/approve", {"box": "box"})
 box.wait_for_unit("multi-user.target", timeout=300)
-box.succeed("grep -q kept /data/proof")
-
-# 3. marked stolen: it stays locked, even at home
-post("/test/stolen", {"box": "box", "stolen": True})
-box.shutdown()
-box.start()
-worker.wait_until_succeeds("curl -s http://127.0.0.1:8000/state | grep -q '\"asked\": [1-9]'", timeout=300)
-asked = state()["asked"]
-worker.wait_until_succeeds(f"test $(curl -s http://127.0.0.1:8000/state | jq .asked) -gt {asked}", timeout=400)
-post("/test/stolen", {"box": "box", "stolen": False})
-box.wait_for_unit("multi-user.target", timeout=600)
 box.succeed("grep -q kept /data/proof")
 
 # 4. under another boot state (PCR 7 moved) the TPM neither signs nor unseals

@@ -28,6 +28,12 @@ in
             enable = true;
             url = "http://192.168.1.2:8000";
             pools = [ "data" ];
+            # seconds, not the minutes a real box waits
+            waits = {
+              enrolment = 3;
+              waiting = 2;
+              refused = 2;
+            };
             recovery = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpKbGPinFIKvvVQexMuxfmVR3auvr57kkIe6mkURtIs test-paper-key";
           };
           virtualisation = {
@@ -36,6 +42,7 @@ in
             useEFIBoot = true;
             emptyDiskImages = [ 1024 ];
             memorySize = 1536;
+            cores = 2;
           };
           boot.loader.systemd-boot.enable = true;
           boot.loader.efi.canTouchEfiVariables = true;
