@@ -32,6 +32,12 @@ in
     dd.box.plaintext = [ "transcode (a file in memory while it plays)" ];
 
     systemd.services.dd-transcode = {
+
+      # kill: ffmpeg is paused while it is far ahead of the player (main.rs,
+
+      # keep_window)
+
+      path = [ pkgs.coreutils ];
       description = "Transcode one encrypted file for one viewer, in memory";
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
