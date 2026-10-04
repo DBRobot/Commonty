@@ -1,8 +1,9 @@
 //! `dd storage-ledger`: one allowance per member, across every service.
 //! Counted on the box every hour, by a unit of its own that holds a
 //! Photos admin login the gate never sees: each member's Photos (museum's
-//! admin api), their libraries (the gate lists the bucket), Code (the
-//! forge's repository sizes) and Passwords (attachments). Written down for
+//! admin api), their libraries (the gate lists the bucket), Code and
+//! Passwords from what the forge and the vault count themselves
+//! (nix/modules/storage/usage.nix): no database here. Written down for
 //! the gate, which shows it and holds uploads to it, and each member's
 //! Photos limit set to what the rest leaves of their allowance.
 
@@ -20,22 +21,20 @@ pub struct Ledger {
     pub vault_suffix: String,
     pub password_file: PathBuf,
     pub budget: u64,
+    /// what a service counted, by the name the ledger keeps it under
+    pub usage: Vec<(String, PathBuf)>,
     pub out: PathBuf,
 }
 
-/// name -> bytes, from a query whose rows are "<key>\t<bytes>"
-fn psql(db: &str, query: &str) -> Result<BTreeMap<String, u64>> {
-    let o = std::process::Command::new("psql")
-        .args(["-X", "-tA", "-F", "\t", "-d", db, "-c", query])
-        .output()
-        .with_context(|| format!("psql {db}"))?;
-    if !o.status.success() {
-        return Err(anyhow!(
-            "psql {db}: {}",
-            String::from_utf8_lossy(&o.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&o.stdout)
+/// name -> bytes, from a service's count, rows "<member>\t<bytes>". A
+/// service not on this box has no file: it counts nothing.
+fn counted(file: &std::path::Path) -> Result<BTreeMap<String, u64>> {
+    let text = match std::fs::read_to_string(file) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(e) => return Err(anyhow!("{}: {e}", file.display())),
+    };
+    Ok(text
         .lines()
         .filter_map(|l| {
             let (k, v) = l.split_once('\t')?;
@@ -67,16 +66,13 @@ pub async fn run(l: Ledger) -> Result<()> {
         .json()
         .await
         .context("the gate's list of members")?;
-    let code = psql(
-        "forgejo",
-        "select owner_name, coalesce(sum(size + lfs_size), 0) from repository group by owner_name",
-    )?;
-    let passwords = psql(
-        "vaultwarden",
-        "select u.email, coalesce(sum(a.file_size), 0) from attachments a \
-         join ciphers c on c.uuid = a.cipher_uuid join users u on u.uuid = c.user_uuid \
-         group by u.email",
-    )?;
+    let mut usage = BTreeMap::new();
+    for (name, file) in &l.usage {
+        usage.insert(name.as_str(), counted(file)?);
+    }
+    let none = BTreeMap::new();
+    let code = usage.get("code").unwrap_or(&none);
+    let passwords = usage.get("passwords").unwrap_or(&none);
 
     let password = std::fs::read_to_string(&l.password_file)
         .context("the ledger's photo password")?

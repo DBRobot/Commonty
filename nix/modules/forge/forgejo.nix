@@ -157,6 +157,13 @@ in
     # first thing to write there and tmpfiles may have run before the dataset
     # existed (it did, on the activation that created it), so it makes its
     # own directory as root before dropping to forgejo.
+    # each owner's repositories, counted by the forge itself (storage/usage.nix)
+    dd.usage.forgejo = {
+      user = "forgejo";
+      database = "forgejo";
+      query = "select owner_name, coalesce(sum(size + lfs_size), 0) from repository group by owner_name";
+    };
+
     systemd.services.forgejo-secrets = {
       after = [ "zfs-datasets.service" ];
       requires = [ "zfs-datasets.service" ];

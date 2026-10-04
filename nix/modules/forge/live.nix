@@ -44,6 +44,13 @@ let
     DROP TRIGGER IF EXISTS dd_forge_notify ON commit_status;
     CREATE TRIGGER dd_forge_notify AFTER INSERT OR UPDATE ON commit_status
       FOR EACH ROW EXECUTE FUNCTION dd_forge_status();
+    -- the gate listens and reads no table; the database admits nobody by
+    -- default (storage/postgres-isolation.nix)
+    DO $g$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dd-verify') THEN
+        GRANT CONNECT ON DATABASE "${db}" TO "dd-verify";
+      END IF;
+    END $g$;
   '';
 in
 {

@@ -239,6 +239,10 @@ enum Command {
         /// a member's Passwords address is their name and this: @<domain>
         #[arg(long)]
         vault_suffix: String,
+        /// a service's own count, name=file (rows "<member>\t<bytes>"); code
+        /// and passwords are the ones it adds up
+        #[arg(long = "usage", value_parser = parse_usage)]
+        usage: Vec<(String, std::path::PathBuf)>,
         /// the ledger's own photo account's password (secrets:
         /// ente-storage-password); the account is storage+ledger<photos-suffix>
         #[arg(long)]
@@ -1614,6 +1618,7 @@ async fn main() -> Result<()> {
             ente_origin,
             photos_suffix,
             vault_suffix,
+            usage,
             password_file,
             budget_gb,
             out,
@@ -1624,6 +1629,7 @@ async fn main() -> Result<()> {
                 photos_suffix,
                 vault_suffix,
                 password_file,
+                usage,
                 budget: budget_gb * 1_000_000_000,
                 out,
             })
@@ -1790,4 +1796,10 @@ fn which(bin: &str) -> bool {
     std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).is_file()))
         .unwrap_or(false)
+}
+
+/// --usage name=file
+fn parse_usage(s: &str) -> Result<(String, std::path::PathBuf), String> {
+    let (n, f) = s.split_once('=').ok_or("name=file")?;
+    Ok((n.to_string(), f.into()))
 }

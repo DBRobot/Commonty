@@ -23,6 +23,8 @@ in
     ../modules/gate/verify.nix
     ../modules/observe/metrics.nix
     ../modules/box/zfs-datasets.nix
+    ../modules/storage/usage.nix
+    ../modules/storage/postgres-isolation.nix
     ../modules/storage/backup.nix
     ../modules/box/agent.nix
     ../modules/observe/thanos.nix

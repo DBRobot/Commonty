@@ -180,6 +180,13 @@ in
           };
         };
 
+        # each member's attachments, counted by the vault itself (storage/usage.nix)
+        dd.usage.vaultwarden = {
+          user = "vaultwarden";
+          database = "vaultwarden";
+          query = "select u.email, coalesce(sum(a.file_size), 0) from attachments a join ciphers c on c.uuid = a.cipher_uuid join users u on u.uuid = c.user_uuid group by u.email";
+        };
+
         systemd.services.vaultwarden = {
           path = [ config.services.postgresql.package ];
           # the refresh tokens made before the patch, hashed once
