@@ -1,7 +1,5 @@
 {
   ddScript,
-  vmTests,
-  boxNames,
   config,
   pkgs,
   lib,
@@ -9,9 +7,25 @@
 }:
 let
   attachable = lib.concatStringsSep "," [
-    ".png" ".jpg" ".jpeg" ".gif" ".webp" ".avif"
-    ".pdf" ".txt" ".log" ".md" ".csv" ".json" ".patch"
-    ".zip" ".gz" ".tgz" ".mp4" ".webm" ".mov"
+    ".png"
+    ".jpg"
+    ".jpeg"
+    ".gif"
+    ".webp"
+    ".avif"
+    ".pdf"
+    ".txt"
+    ".log"
+    ".md"
+    ".csv"
+    ".json"
+    ".patch"
+    ".zip"
+    ".gz"
+    ".tgz"
+    ".mp4"
+    ".webm"
+    ".mov"
   ];
   base = config.dd.domain;
   host = "git.${base}";
@@ -207,9 +221,11 @@ in
         pkgs.jq
       ];
       serviceConfig.Type = "oneshot";
-      # the rule main is held to: every ci job, from the same lists the
-      # flake runs (vmTests, the boxes), so a new test is required the
-      # moment it exists
+      # the rule main is held to: ci_ok, the job that waits on every other
+      # (.forgejo/workflows/entry_point.yml), so the rule names one check
+      # that always exists and no job can fail without blocking the merge;
+      # and the branch up to date with main, so what merges is the tree ci
+      # ran on, not a green branch on an old base
       script = ddScript ./forgejo-setup.sh {
         ADMIN = cfg.admin;
         REPO = config.dd.repo;
@@ -221,19 +237,8 @@ in
           enable_push_whitelist = true;
           push_whitelist_usernames = [ cfg.admin ];
           enable_status_check = true;
-          status_check_contexts = map (j: "entry_point / ${j} (pull_request)") (
-            [
-              "flake_check"
-              "build_client"
-            ]
-            ++ map (b: "build_host (${b})") boxNames
-            ++ [
-              "lint"
-              "test"
-            ]
-            ++ map (t: "vm_tests (${t})") vmTests
-          );
-          block_on_outdated_branch = false;
+          status_check_contexts = [ "entry_point / ci_ok (pull_request)" ];
+          block_on_outdated_branch = true;
           required_approvals = 0;
         };
       };
@@ -258,6 +263,33 @@ in
         ADMIN = cfg.admin;
         REPO = config.dd.repo;
         LISTEN = toString cancelPort;
+      };
+    };
+
+    # a run killed from outside (the forge or a runner restarting under it)
+    # is run again, once: ci-resume.py, every few minutes
+    systemd.services.dd-ci-resume = {
+      description = "Run again a ci run that a restart killed";
+      after = [ "forgejo.service" ];
+      serviceConfig = {
+        Type = "oneshot";
+        DynamicUser = true;
+        SupplementaryGroups = [ "forgejo" ]; # to open forgejo's socket
+        StateDirectory = "dd-ci-resume";
+        ExecStart = "${pkgs.python3}/bin/python3 ${./ci-resume.py}";
+      };
+      environment = {
+        FORGE = sock;
+        ADMIN = cfg.admin;
+        REPO = config.dd.repo;
+        STATE = "/var/lib/dd-ci-resume";
+      };
+    };
+    systemd.timers.dd-ci-resume = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "5min";
+        OnUnitActiveSec = "3min";
       };
     };
 
@@ -290,7 +322,8 @@ in
       };
       # the forge's own: its API, git over https, raw files and archives,
       # a job's log, avatars, and its account pages
-      locations."~ ^/(api|assets|avatars|repo-avatars|attachments|user|login|-|\\.well-known)(/|$)" = toForge;
+      locations."~ ^/(api|assets|avatars|repo-avatars|attachments|user|login|-|\\.well-known)(/|$)" =
+        toForge;
       locations."~ ^/[^/]+/[^/]+\\.git(/|$)" = toForge;
       locations."~ ^/[^/]+/[^/]+/(info/refs|info/lfs|git-upload-pack|git-receive-pack)" = toForge;
       locations."~ ^/[^/]+/[^/]+/(raw|archive|media|releases/download|attachments)/" = toForge;

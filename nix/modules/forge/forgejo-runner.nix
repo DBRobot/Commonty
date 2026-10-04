@@ -42,7 +42,7 @@ in
         # stranger's box, when there is one, gets a runner without the second
         # label, a read-only cache key, and jobs whose verdicts are advisory.
         # and the box's own name, for a job that must run on this box and
-        # no other: each box building every box's system (nix_checks.yml),
+        # no other: each box building every box's system (entry_point.yml, build_host),
         # so that what it later vouches for it has built itself
         labels = [
           "nix:host"

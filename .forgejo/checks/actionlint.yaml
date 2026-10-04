@@ -1,0 +1,9 @@
+# the labels our runners carry (nix/modules/forge/forgejo-runner.nix), so
+# actionlint knows them as self-hosted runners and not typos
+self-hosted-runner:
+  labels:
+    - nix
+    - gating
+    - node1
+    - node2
+    - members

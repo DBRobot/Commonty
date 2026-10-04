@@ -40,7 +40,7 @@
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       # every vm test, by name: nix/tests/<name>.nix + .py. Also what the ci
-      # matrix runs and what main requires (nix/modules/forge/forgejo.nix)
+      # matrix runs (nix/tests/ci.nix holds the two to one list)
       vmTests = [
         "console"
         "directory"
@@ -559,6 +559,24 @@
         {
           # a package must be a derivation (flake check), not a source path
           pages = pkgs.runCommandLocal "dd-pages" { } "cp -r ${pages} $out";
+          # what ci's style and lint jobs run (.forgejo/checks), pinned with
+          # everything else
+          ci-tools = pkgs.buildEnv {
+            name = "ci-tools";
+            paths = with pkgs; [
+              python3
+              gitMinimal
+              yq-go
+              nixfmt
+              ruff
+              shellcheck
+              actionlint
+              biome
+              gitleaks
+              typos
+              cargo-audit
+            ];
+          };
           # the cli, and `git remote add origin dd::...`, which dd repo calls too
           # `dd media` mounts libraries with rclone; the binary knows where it is
           dd = pkgs.symlinkJoin {
@@ -665,7 +683,9 @@
           dd-control = control.dd-control;
           control-config = control.configFile;
           # every service's needs, typed (nix/lib/needs.nix): what placement reads
-          needs = pkgs.writeText "needs.json" (builtins.toJSON (import ./nix/lib/needs.nix { lib = nixpkgs.lib; }));
+          needs = pkgs.writeText "needs.json" (
+            builtins.toJSON (import ./nix/lib/needs.nix { lib = nixpkgs.lib; })
+          );
           # The mail Worker (client/mail): what `dd release publish` uploads
           # to Cloudflare, file for file, and what the boxes compare the
           # deployed Worker with. The checks are the boxes' own Rust in wasm;

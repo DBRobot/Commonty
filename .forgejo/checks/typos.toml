@@ -1,0 +1,3 @@
+# the spelling check (warnings only): words that are ours, not mistakes
+[default.extend-words]
+ente = "ente"

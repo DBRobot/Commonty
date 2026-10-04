@@ -382,6 +382,10 @@ fn publish(
             "== the mail Worker did not go up: {e:#}\n   `dd mail deploy --ref {ref}` when it can"
         );
     }
+    // the forge's page for it, with what it brings, by kind
+    if let Err(e) = forge_release(&root, url, &rev, counter, keys) {
+        eprintln!("== the forge's release page was not made: {e:#}");
+    }
     Ok(())
 }
 
@@ -699,29 +703,12 @@ fn recorded_builds(
     names: &[String],
     keys: &auth::Store,
 ) -> Result<Option<BTreeMap<String, String>>> {
-    // https://forge/owner/repo/raw/... -> https://forge/api/v1/repos/owner/repo
-    let Some((repo_url, _)) = url.split_once("/raw/") else {
+    let Some(api) = forge_api(url) else {
         return Ok(None);
     };
-    let Some(slash) = repo_url
-        .find("://")
-        .map(|i| i + 3)
-        .and_then(|i| repo_url[i..].find('/').map(|j| i + j))
-    else {
-        return Ok(None);
-    };
-    let api = format!(
-        "{}/api/v1/repos/{}",
-        &repo_url[..slash],
-        &repo_url[slash + 1..]
-    );
     let tree = git(root, &["rev-parse", &format!("{rev}^{{tree}}")])?;
-    let token = match auth::device::load(keys)? {
-        Some(kp) => match keys.get(crate::USER)? {
-            Some(user) => auth::device::mint(&kp, &user, std::time::Duration::from_secs(600))?,
-            None => return Ok(None),
-        },
-        None => return Ok(None),
+    let Some(token) = forge_token(keys)? else {
+        return Ok(None);
     };
     for cand in [rev.to_owned(), format!("{rev}^2"), format!("{rev}^1")] {
         let Ok(sha) = git(root, &["rev-parse", "--verify", "--quiet", &cand]) else {
@@ -730,30 +717,29 @@ fn recorded_builds(
         if git(root, &["rev-parse", &format!("{sha}^{{tree}}")])? != tree {
             continue;
         }
-        // the header on stdin, not the command line: an argument is readable
-        // by every process on this machine while curl runs
-        let out = {
-            use std::io::Write as _;
-            let mut c = Command::new("curl")
-                .args([
-                    "-sf",
-                    "-H",
-                    "@-",
-                    &format!("{api}/commits/{sha}/statuses?limit=50"),
-                ])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()?;
-            c.stdin
-                .take()
-                .context("curl's stdin")?
-                .write_all(format!("Authorization: Bearer {token}\n").as_bytes())?;
-            c.wait_with_output()?
-        };
-        if !out.status.success() {
+        // every page: a run posts well over fifty statuses, and the paths
+        // were once near enough the end of the first page to fall off it
+        let mut statuses: Vec<serde_json::Value> = Vec::new();
+        let mut read = true;
+        for page in 1.. {
+            let Some(body) = forge_get(
+                &format!("{api}/commits/{sha}/statuses?limit=50&page={page}"),
+                &token,
+            )?
+            else {
+                read = false;
+                break;
+            };
+            let got: Vec<serde_json::Value> = serde_json::from_slice(&body)?;
+            let last = got.len() < 50;
+            statuses.extend(got);
+            if last {
+                break;
+            }
+        }
+        if !read {
             continue;
         }
-        let statuses: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)?;
         let mut paths = BTreeMap::new();
         // newest first; the first success per context wins
         for st in &statuses {
@@ -779,6 +765,192 @@ fn recorded_builds(
         }
     }
     Ok(None)
+}
+
+/// https://forge/owner/repo/raw/... -> https://forge/api/v1/repos/owner/repo
+fn forge_api(url: &str) -> Option<String> {
+    let (repo_url, _) = url.split_once("/raw/")?;
+    let slash = repo_url
+        .find("://")
+        .map(|i| i + 3)
+        .and_then(|i| repo_url[i..].find('/').map(|j| i + j))?;
+    Some(format!(
+        "{}/api/v1/repos/{}",
+        &repo_url[..slash],
+        &repo_url[slash + 1..]
+    ))
+}
+
+/// a ten-minute token for the forge, as this device; None without one
+fn forge_token(keys: &auth::Store) -> Result<Option<String>> {
+    let Some(kp) = auth::device::load(keys)? else {
+        return Ok(None);
+    };
+    let Some(user) = keys.get(crate::USER)? else {
+        return Ok(None);
+    };
+    Ok(Some(auth::device::mint(
+        &kp,
+        &user,
+        std::time::Duration::from_secs(600),
+    )?))
+}
+
+/// The forge's api: the answer's body, or None when it said no. The token
+/// goes on curl's stdin, not its command line, which every process on this
+/// machine can read while curl runs.
+fn forge_call(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<Option<Vec<u8>>> {
+    use std::io::Write as _;
+    let mut args = vec!["-sf", "-X", method, "-H", "@-"];
+    if let Some(b) = body {
+        args.extend(["-H", "content-type: application/json", "--data-binary", b]);
+    }
+    args.push(url);
+    let mut c = Command::new("curl")
+        .args(&args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+    c.stdin
+        .take()
+        .context("curl's stdin")?
+        .write_all(format!("Authorization: Bearer {token}\n").as_bytes())?;
+    let out = c.wait_with_output()?;
+    Ok(out.status.success().then_some(out.stdout))
+}
+
+fn forge_get(url: &str, token: &str) -> Result<Option<Vec<u8>>> {
+    forge_call("GET", url, token, None)
+}
+
+/// The kinds a pull request's title starts with, in the order release notes
+/// list them (.forgejo/checks/style.py holds titles to these)
+const KINDS: &[(&str, &str)] = &[
+    ("security", "Security"),
+    ("fix", "Fixes"),
+    ("feature", "Features"),
+    ("service", "Services"),
+    ("ci", "CI"),
+    ("docs", "Docs"),
+    ("refactor", "Refactors"),
+    ("deps", "Dependencies"),
+    ("chore", "Chores"),
+];
+
+/// A pull request's title as its kind and its words: `release: fix: x`
+/// is ("fix", "x"); a title from before the kinds is ("", the title)
+fn kind_of(title: &str) -> (&'static str, String) {
+    let mut t = title.trim();
+    for p in ["WIP: ", "release: "] {
+        t = t.strip_prefix(p).unwrap_or(t);
+    }
+    for (k, _) in KINDS {
+        if let Some(rest) = t.strip_prefix(&format!("{k}: ")) {
+            return (k, rest.to_owned());
+        }
+    }
+    ("", t.to_owned())
+}
+
+/// A release's name and notes from the pull requests it merged, newest
+/// first as git lists them: (title, number)
+fn release_notes(counter: u64, merged: &[(String, String)]) -> (String, String) {
+    let all: Vec<(&str, String, &str)> = merged
+        .iter()
+        .map(|(t, n)| {
+            let (k, words) = kind_of(t);
+            (k, words, n.as_str())
+        })
+        .collect();
+    let name = match all.as_slice() {
+        [(_, words, _)] => format!("{counter} · {words}"),
+        [] => format!("{counter}"),
+        many => format!("{counter} · {} changes", many.len()),
+    };
+    let mut body = format!("Release {counter}, signed on the laptop and pulled by the boxes.\n");
+    let heads = KINDS.iter().copied().chain([("", "Other")]);
+    for (k, head) in heads {
+        let these: Vec<_> = all.iter().filter(|(kk, _, _)| *kk == k).collect();
+        if these.is_empty() {
+            continue;
+        }
+        body.push_str(&format!("\n### {head}\n"));
+        for (_, words, n) in these {
+            body.push_str(&format!("- {words} (#{n})\n"));
+        }
+    }
+    (name, body)
+}
+
+/// The forge's release page for this release, tagged r<counter> at the
+/// commit, with notes from the pull requests merged since the last one
+fn forge_release(
+    root: &Path,
+    url: &str,
+    rev: &str,
+    counter: u64,
+    keys: &auth::Store,
+) -> Result<()> {
+    let api = forge_api(url).context("the release url is not the forge's")?;
+    let token = forge_token(keys)?.context("no device key for the forge")?;
+    let tag = format!("r{counter}");
+    if forge_get(&format!("{api}/releases/tags/{tag}"), &token)?.is_some() {
+        return Ok(());
+    }
+    // the release before this one, by number: some were made afterwards,
+    // so the newest page is not the last release
+    let since = forge_get(&format!("{api}/releases?limit=50"), &token)?
+        .and_then(|b| serde_json::from_slice::<Vec<serde_json::Value>>(&b).ok())
+        .and_then(|all| {
+            all.iter()
+                .filter_map(|r| {
+                    r["tag_name"]
+                        .as_str()?
+                        .strip_prefix('r')?
+                        .parse::<u64>()
+                        .ok()
+                })
+                .filter(|n| *n < counter)
+                .max()
+        })
+        .map(|n| format!("r{n}"))
+        .and_then(|t| forge_get(&format!("{api}/tags/{t}"), &token).ok().flatten())
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|v| v["commit"]["sha"].as_str().map(str::to_owned))
+        .filter(|sha| git(root, &["merge-base", "--is-ancestor", sha, rev]).is_ok());
+    let range = match &since {
+        Some(sha) => format!("{sha}..{rev}"),
+        None => format!("{rev}^..{rev}"),
+    };
+    let log = git(
+        root,
+        &["log", "--first-parent", "--merges", "--format=%s", &range],
+    )?;
+    let merged: Vec<(String, String)> = log
+        .lines()
+        .filter_map(|l| {
+            let rest = l.strip_prefix("Merge pull request '")?;
+            let (title, rest) = rest.rsplit_once("' (#")?;
+            let (n, _) = rest.split_once(')')?;
+            Some((title.to_owned(), n.to_owned()))
+        })
+        .collect();
+    let (name, body) = release_notes(counter, &merged);
+    let req = serde_json::json!({
+        "tag_name": tag,
+        "target_commitish": rev,
+        "name": name,
+        "body": body,
+    });
+    forge_call(
+        "POST",
+        &format!("{api}/releases"),
+        &token,
+        Some(&req.to_string()),
+    )?
+    .context("the forge refused the release")?;
+    eprintln!("   the forge's release {tag}: {name}");
+    Ok(())
 }
 
 /// The key that writes the cache bucket: in the private half of the fleet
@@ -1060,6 +1232,35 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_notes_group_pull_requests_by_kind() {
+        assert_eq!(
+            kind_of("release: fix: awk on the path"),
+            ("fix", "awk on the path".into())
+        );
+        assert_eq!(
+            kind_of("WIP: release: ci: one gate"),
+            ("ci", "one gate".into())
+        );
+        assert_eq!(kind_of("Boxes as data"), ("", "Boxes as data".into()));
+        let (name, body) = release_notes(
+            186,
+            &[
+                ("release: feature: docs at /docs".into(), "217".into()),
+                ("release: fix: awk on the path".into(), "220".into()),
+                ("Boxes as data".into(), "213".into()),
+            ],
+        );
+        assert_eq!(name, "186 · 3 changes");
+        let fixes = body.find("### Fixes").unwrap();
+        let features = body.find("### Features").unwrap();
+        let other = body.find("### Other").unwrap();
+        assert!(fixes < features && features < other, "{body}");
+        assert!(body.contains("- docs at /docs (#217)"), "{body}");
+        let (one, _) = release_notes(187, &[("release: docs: the ci page".into(), "230".into())]);
+        assert_eq!(one, "187 · the ci page");
+    }
 
     fn keygen(dir: &Path, name: &str) -> (PathBuf, String) {
         let k = dir.join(name);

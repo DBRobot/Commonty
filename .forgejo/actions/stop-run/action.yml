@@ -2,6 +2,7 @@
 # forge's api cannot cancel a run; the forge box can (modules/forge/ci-cancel.py),
 # once the forge has this job down as failed. No secret: nothing to leak.
 name: stop the run on failure
+description: if the job failed, ask the forge to cancel the rest of its run
 runs:
   using: composite
   steps:

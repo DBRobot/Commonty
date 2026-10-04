@@ -1,0 +1,15 @@
+# The secret scan (blocks a merge): gitleaks' own rules, minus the files
+# whose decoys are public on purpose. Real secrets live in secrets/,
+# sops-encrypted, and the style check refuses one there in the clear.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "public by design: lockfile checksums, the fleet's public keys and signed reports, test fixtures, the demo library's open key"
+paths = [
+  '''^Cargo\.lock$''',
+  '''^fleet/''',
+  '''^nix/tests/''',
+  '''^data/games/catalogue\.json$''',
+  '''^nix/modules/library/libraries\.nix$''',
+]
