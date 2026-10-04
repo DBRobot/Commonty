@@ -15,14 +15,24 @@ import (
 
 // Config is the signed part: who is who and the rules, from the release.
 type Config struct {
-	// box name -> its house and its TPM-held key (SPKI, base64)
+	// box name -> its house, its address on the relay and its TPM-held key
+	// (SPKI, base64)
 	Boxes map[string]Box `json:"boxes"`
-	Rules Rules          `json:"rules"`
+	// who votes: one per house, and the witnesses
+	Validators []Validator `json:"validators"`
+	Rules      Rules       `json:"rules"`
 }
 
 type Box struct {
+	ID    uint64 `json:"id"`
 	House string `json:"house"`
 	Key   string `json:"key"`
+}
+
+type Validator struct {
+	ID   uint64 `json:"id"`
+	Name string `json:"name"` // a box's name, or a witness's
+	Key  string `json:"key"`  // ed25519, base64: what signs its votes
 }
 
 type Rules struct {
