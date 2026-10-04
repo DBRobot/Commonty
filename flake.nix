@@ -939,6 +939,8 @@
           nginx = import ./nix/tests/nginx.nix args;
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
+          # the control plane: relay, witness and three validators, offline
+          control = import ./nix/tests/control.nix args;
           # the app carries the site's signed-in pages, their scripts, the
           # stylesheet and the fonts at the site's paths (app/carried
           # lists them, scripts/sync-app-web copies them); two copies, kept
