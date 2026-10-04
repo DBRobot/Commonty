@@ -299,6 +299,28 @@ in
       };
     };
 
+    # each game's real memory, from its worlds as they run (games-measure.sh)
+    systemd.services.dd-games-measure = {
+      description = "Record what each running game takes";
+      path = [
+        pkgs.jq
+        pkgs.gawk
+        pkgs.systemd
+      ];
+      environment.DIR = dir;
+      serviceConfig = {
+        Type = "oneshot";
+        User = "dd-games";
+        Group = "dd-games";
+      };
+      script = "exec bash ${./games-measure.sh}";
+    };
+    systemd.timers.dd-games-measure = {
+      wantedBy = [ "timers.target" ];
+      timerConfig.OnUnitActiveSec = "5min";
+      timerConfig.OnBootSec = "5min";
+    };
+
     systemd.services."dd-game@" = {
       description = "Game server %i";
       # a deploy is not a reason for a game to go down

@@ -89,7 +89,8 @@
    "port_defaults": {
     "TELNET_PORT": "8081"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 17607545324
   },
   {
    "id": "abiotic-factor",
@@ -178,7 +179,8 @@
    "port_defaults": {
     "QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 3014954555
   },
   {
    "id": "american-truck-simulator",
@@ -248,7 +250,8 @@
    "port_defaults": {
     "QUERY_PORT": "27016"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1396570108
   },
   {
    "id": "ark-survival-ascended",
@@ -382,7 +385,8 @@
    "port_defaults": {
     "RCON_PORT": "37015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 12222927781
   },
   {
    "id": "ark-survival-evolved",
@@ -509,7 +513,8 @@
     "RCON_PORT": "27020",
     "QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 22942306343
   },
   {
    "id": "arma-reforger",
@@ -668,7 +673,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 10278170614
   },
   {
    "id": "assetto-corsa",
@@ -938,7 +944,8 @@
    "port_defaults": {
     "SERVER_QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 355394062
   },
   {
    "id": "astroneer",
@@ -1052,7 +1059,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2665758135
   },
   {
    "id": "avorion",
@@ -1219,7 +1227,8 @@
     "STEAM_QUERY_PORT": "27020",
     "QUERY_PORT": "27003"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 191405119
   },
   {
    "id": "barotrauma",
@@ -1260,7 +1269,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 267535983
   },
   {
    "id": "battalion-legacy",
@@ -1321,7 +1331,8 @@
    "port_defaults": {
     "QUERY_PORT": "27016"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2002003243
   },
   {
    "id": "black-mesa",
@@ -1399,7 +1410,8 @@
    "port_defaults": {
     "SRCDS_CPORT": "27005"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 30945428986
   },
   {
    "id": "brickadia",
@@ -1481,7 +1493,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 788155146
   },
   {
    "id": "citadel-forged-with-fire",
@@ -1542,7 +1555,8 @@
    "port_defaults": {
     "QPORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2191066486
   },
   {
    "id": "colony-survival",
@@ -1613,7 +1627,8 @@
    "port_defaults": {
     "SERVER_STEAMPORT": "27005"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 251798620
   },
   {
    "id": "core-keeper",
@@ -1728,7 +1743,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 591725710
   },
   {
    "id": "counter-strike-2",
@@ -1856,7 +1872,8 @@
    "port_defaults": {
     "TV_PORT": "27020"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 75652631978
   },
   {
    "id": "counter-strike-source",
@@ -1914,7 +1931,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2395331145
   },
   {
    "id": "cryofall",
@@ -1955,7 +1973,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 647861942
   },
   {
    "id": "custom-hlds-engine-game",
@@ -2052,7 +2071,8 @@
    "port_defaults": {
     "VAC_PORT": "26900"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 147867421
   },
   {
    "id": "custom-rehlds-engine-game",
@@ -2165,7 +2185,8 @@
    "port_defaults": {
     "VAC_PORT": "26900"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 147867421
   },
   {
    "id": "ddnet",
@@ -2275,7 +2296,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 145686644
   },
   {
    "id": "dead-matter",
@@ -2339,7 +2361,8 @@
    "port_defaults": {
     "QUERY_PORT": "7002"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 6567415176
   },
   {
    "id": "don-t-starve-together",
@@ -2463,7 +2486,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 4490782099
   },
   {
    "id": "eco",
@@ -2667,7 +2691,8 @@
     "WEB_PORT": "",
     "RCON_PORT": ""
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 566463984
   },
   {
    "id": "empyrion-galactic-survival",
@@ -2804,7 +2829,8 @@
    "port_defaults": {
     "TELNET_PORT": "30004"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 18969621154
   },
   {
    "id": "enshrouded",
@@ -2901,7 +2927,8 @@
    "port_defaults": {
     "QUERY_PORT": ""
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 8824614826
   },
   {
    "id": "euro-truck-simulator-2",
@@ -2971,7 +2998,8 @@
    "port_defaults": {
     "QUERY_PORT": "27016"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1343127998
   },
   {
    "id": "fof",
@@ -3029,7 +3057,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 3250095983
   },
   {
    "id": "foundry",
@@ -3211,7 +3240,8 @@
    "port_defaults": {
     "QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2504451070
   },
   {
    "id": "frozen-flame",
@@ -3297,7 +3327,8 @@
     "QUERY_PORT": "25575",
     "RCON_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2672874133
   },
   {
    "id": "ground-branch",
@@ -3411,7 +3442,8 @@
    "port_defaults": {
     "QUERY_PORT": ""
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1842270020
   },
   {
    "id": "holdfast-naw",
@@ -3530,7 +3562,8 @@
     "SERVER_COMM_PORT": "",
     "SERVER_QUERY_PORT": ""
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 10317424429
   },
   {
    "id": "humanitz",
@@ -4026,7 +4059,8 @@
    "port_defaults": {
     "QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1428683197
   },
   {
    "id": "hurtworld",
@@ -4104,7 +4138,8 @@
    "port_defaults": {
     "QUERY_PORT": "13871"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 3963803971
   },
   {
    "id": "insurgency-sandstorm",
@@ -4203,7 +4238,8 @@
    "port_defaults": {
     "QUERY_PORT": "27131"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 4968712561
   },
   {
    "id": "iosoccer",
@@ -4286,7 +4322,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 4968325555
   },
   {
    "id": "killing-floor-2",
@@ -4430,7 +4467,8 @@
     "QUERY_PORT": "27015",
     "WEB_ADMIN_PORT": "8089"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 32089020909
   },
   {
    "id": "left-4-dead",
@@ -4480,7 +4518,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 8756194936
   },
   {
    "id": "left-4-dead-2",
@@ -4530,7 +4569,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 9792573129
   },
   {
    "id": "longvinter",
@@ -4681,7 +4721,8 @@
    "port_defaults": {
     "QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 111284048
   },
   {
    "id": "midnight-ghost-hunt",
@@ -4793,7 +4834,8 @@
     "QUERY_PORT": "27015",
     "BEACON_PORT": "7787"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2011927531
   },
   {
    "id": "modiverse",
@@ -4855,7 +4897,8 @@
    "port_defaults": {
     "QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 342474797
   },
   {
    "id": "mordhau",
@@ -4952,7 +4995,8 @@
     "QUERY_PORT": "27015",
     "BEACON_PORT": "15000"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 5520679746
   },
   {
    "id": "mount-blade-ii-bannerlord",
@@ -5041,7 +5085,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2927062714
   },
   {
    "id": "myth-of-empires",
@@ -5184,7 +5229,8 @@
     "QUERY_PORT": "12888",
     "RCON_PORT": "13888"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 8305553130
   },
   {
    "id": "necesse",
@@ -5267,7 +5313,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 302086297
   },
   {
    "id": "neosvr",
@@ -5357,7 +5404,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 242143944
   },
   {
    "id": "night-of-the-dead",
@@ -5536,7 +5584,8 @@
    "port_defaults": {
     "QUERY_PORT": "27016"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 7332570707
   },
   {
    "id": "nmrih",
@@ -5594,7 +5643,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 6075846986
   },
   {
    "id": "no-love-lost",
@@ -5655,7 +5705,8 @@
    "port_defaults": {
     "QUERY_PORT": "27016"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 4510413209
   },
   {
    "id": "no-one-survived",
@@ -5856,7 +5907,8 @@
    "port_defaults": {
     "QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 12914111931
   },
   {
    "id": "nova-life-amboise",
@@ -5922,7 +5974,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 8094043598
   },
   {
    "id": "onset",
@@ -5981,7 +6034,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 291721219
   },
   {
    "id": "open-fortress",
@@ -6040,7 +6094,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 804660757
   },
   {
    "id": "operation-harsh-doorstop",
@@ -6128,7 +6183,8 @@
     "QUERY_PORT": "27005",
     "RCON_PORT": "7779"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 7006652612
   },
   {
    "id": "palworld",
@@ -6242,7 +6298,8 @@
    "port_defaults": {
     "RCON_PORT": "25575"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 4932070576
   },
   {
    "id": "pavlov-vr",
@@ -6322,7 +6379,8 @@
    "port_defaults": {
     "RCON_PORT": "8188"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 8747200689
   },
   {
    "id": "pixark",
@@ -6441,7 +6499,8 @@
     "RCPORT": "",
     "CUBEPORT": ""
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2398338420
   },
   {
    "id": "portal-knights",
@@ -6600,7 +6659,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 11030638396
   },
   {
    "id": "post-scriptum",
@@ -6760,7 +6820,8 @@
     "QUERY_PORT": "10037",
     "RCON_PORT": "21114"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 34891674187
   },
   {
    "id": "project-zomboid",
@@ -6843,7 +6904,8 @@
    "port_defaults": {
     "STEAM_PORT": "16262"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 7206115414
   },
   {
    "id": "puck",
@@ -6914,7 +6976,8 @@
    "port_defaults": {
     "PING_PORT": ""
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 215545436
   },
   {
    "id": "qanga",
@@ -6975,7 +7038,8 @@
    "port_defaults": {
     "QUERY_PORT": "27016"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2822975828
   },
   {
    "id": "quake-live",
@@ -7058,7 +7122,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1078681421
   },
   {
    "id": "resonite",
@@ -7148,7 +7213,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2647939019
   },
   {
    "id": "rising-world-java-legacy",
@@ -7241,7 +7307,8 @@
    "port_defaults": {
     "RCON_PORT": "4253"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2688976470
   },
   {
    "id": "rising-world-unity",
@@ -7371,7 +7438,8 @@
    "port_defaults": {
     "RCON_PORT": "4253"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2688976470
   },
   {
    "id": "risk-of-rain-2",
@@ -7625,7 +7693,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 5484001507
   },
   {
    "id": "rust",
@@ -7807,7 +7876,8 @@
     "RCON_PORT": "28016",
     "APP_PORT": "28082"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 6111734811
   },
   {
    "id": "rust-autowipe",
@@ -7995,7 +8065,8 @@
     "QUERY_PORT": "28017",
     "APP_PORT": "28082"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 6111734811
   },
   {
    "id": "rust-staging",
@@ -8152,7 +8223,8 @@
     "RCON_PORT": "28016",
     "APP_PORT": "28082"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 6111734811
   },
   {
    "id": "satisfactory",
@@ -8268,7 +8340,8 @@
    "fixed_ports": {
     "SERVER_PORT": 7777,
     "RELIABLE_PORT": 8888
-   }
+   },
+   "disk_bytes": 2887563617
   },
   {
    "id": "scp-sl",
@@ -8333,7 +8406,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 598947615
   },
   {
    "id": "smalland-survive-the-wilds",
@@ -8480,7 +8554,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1772542681
   },
   {
    "id": "solace-crafting",
@@ -8518,7 +8593,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 909946660
   },
   {
    "id": "soldat",
@@ -8596,7 +8672,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 56582868
   },
   {
    "id": "sons-of-the-forest",
@@ -8751,7 +8828,8 @@
     "QUERY_PORT": "27016",
     "BLOBSYNC_PORT": "9700"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 3493150490
   },
   {
    "id": "soulmask",
@@ -8856,7 +8934,8 @@
     "QUERY_PORT": "27015",
     "ECHO_PORT": "18888"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2191424807
   },
   {
    "id": "sourcecoop",
@@ -9090,7 +9169,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 30945428986
   },
   {
    "id": "space-engineers",
@@ -9324,7 +9404,8 @@
     "STEAM_PORT": "8766",
     "REMOTEAPI_PORT": "8081"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 8435077888
   },
   {
    "id": "space-engineers-torch",
@@ -9500,7 +9581,8 @@
     "STEAM_PORT": "8766",
     "REMOTEAPI_PORT": "8081"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 8435077888
   },
   {
    "id": "squad",
@@ -9629,7 +9711,8 @@
     "QUERY_PORT": "27165",
     "BEACON_PORT": "15000"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 14605813115
   },
   {
    "id": "starbound",
@@ -9706,7 +9789,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1126979394
   },
   {
    "id": "stationeers",
@@ -9843,7 +9927,8 @@
    "port_defaults": {
     "UPDATE_PORT": "27014"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 5010173733
   },
   {
    "id": "stationeers-bepinex",
@@ -9980,7 +10065,8 @@
    "port_defaults": {
     "UPDATE_PORT": "27014"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 5010173733
   },
   {
    "id": "stormworks-build-and-rescue",
@@ -10026,7 +10112,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 67889760
   },
   {
    "id": "subnautica",
@@ -10273,7 +10360,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2789156061
   },
   {
    "id": "swords-n-magic-and-stuff",
@@ -10398,7 +10486,8 @@
    "port_defaults": {
     "QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1548257104
   },
   {
    "id": "team-fortress-2-classic",
@@ -10468,7 +10557,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 804660757
   },
   {
    "id": "terratech-worlds",
@@ -10547,7 +10637,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 6293476103
   },
   {
    "id": "the-bus",
@@ -10658,7 +10749,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 3831419879
   },
   {
    "id": "the-forest",
@@ -10820,7 +10912,8 @@
     "STEAM_PORT": "8766",
     "QUERY_PORT": "27016"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1765492913
   },
   {
    "id": "the-front",
@@ -11019,7 +11112,8 @@
     "QUERY_PORT": "27017",
     "SHUTDOWN_PORT": "27017"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 3371538269
   },
   {
    "id": "the-isle",
@@ -11316,7 +11410,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 4297015751
   },
   {
    "id": "the-ship-murder-party",
@@ -11410,7 +11505,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1493067988
   },
   {
    "id": "tower-unite",
@@ -11531,7 +11627,8 @@
    "port_defaults": {
     "QUERY_PORT": "27016"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 4267631548
   },
   {
    "id": "unturned",
@@ -11613,7 +11710,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 1902472307
   },
   {
    "id": "v-rising",
@@ -11928,7 +12026,8 @@
     "VR_QUERY_PORT": "9877",
     "VR_RCON_PORT": "25575"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2024504069
   },
   {
    "id": "v-rising-bepinex",
@@ -12225,7 +12324,8 @@
     "QUERY_PORT": "9877",
     "RCON_PORT": "25575"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2024504069
   },
   {
    "id": "valheim",
@@ -12370,7 +12470,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2186649264
   },
   {
    "id": "valheim-bepinex",
@@ -12531,7 +12632,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2186649264
   },
   {
    "id": "valheim-plus-mod",
@@ -12708,7 +12810,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2186649264
   },
   {
    "id": "vein",
@@ -12803,7 +12906,8 @@
    "port_defaults": {
     "QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 9669982385
   },
   {
    "id": "wreckfest-2",
@@ -12890,7 +12994,8 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2039045025
   },
   {
    "id": "wurm-unlimited",
@@ -13031,7 +13136,8 @@
    "port_defaults": {
     "QUERY_PORT": ""
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 782405418
   },
   {
    "id": "zombie-survival-game-online",
@@ -13199,7 +13305,8 @@
    "port_defaults": {
     "QUERY_PORT": "27015"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "disk_bytes": 2179422123
   }
  ]
 }

@@ -11,8 +11,16 @@ let
         # wine servers want more; nothing in an egg says
         memory.fixed = if g.wine or false then "8G" else "6G";
         threads = 4;
-        # installs are several GB; not measured per game yet
-        disk.size.min = "15G";
+        # its install as Steam lists it (data/games/sizes.py), half again for
+        # updates and saves, and at least 2G; 15G where Steam does not say
+        disk.size.min =
+          if g ? disk_bytes then
+            let
+              gib = g.disk_bytes * 3 / 2 / (1024 * 1024 * 1024) + 1;
+            in
+            "${toString (if gib < 2 then 2 else gib)}G"
+          else
+            "15G";
       };
     };
   };
