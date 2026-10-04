@@ -1,6 +1,6 @@
 # The control plane on this box (box/control, docs/control-plane.md):
 # dd-control heartbeats what the box has and runs, signed by its TPM, and
-# keeps the agreed state at http://127.0.0.1:4190/state, checked against the
+# keeps the agreed state at http://127.0.0.1:4195/state, checked against the
 # validators' signatures. A box named as its house's validator in
 # fleet/control.json also votes. It dials out to the relay at
 # control.<domain> and nothing dials in. Nothing acts on the state yet.
@@ -48,7 +48,7 @@ in
           "-relay ${cfg.relay}"
           "-state /var/lib/dd-control"
           "-tpm-keys /boot/dd/unlock"
-          "-listen 127.0.0.1:4190"
+          "-listen 127.0.0.1:4195"
           (lib.optionalString (roles != "") "-roles ${roles}")
         ];
         StateDirectory = "dd-control";
