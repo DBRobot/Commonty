@@ -105,6 +105,14 @@
 }
 .docs-btn:hover, .contents-btn:hover { background: var(--sunk); color: var(--ink); text-decoration: none; }
 .docs-wait { padding: 28px 44px; color: var(--ink-2); }
+/* the page's shape before its first draw */
+.docs-skel span { display: block; height: 12px; margin: 0 0 14px; border-radius: 2px; background: var(--line-2); }
+.docs-skel span.h { height: 26px; width: 55%; margin-bottom: 24px; }
+.docs-skel span.short { width: 70%; }
+@media (prefers-reduced-motion: no-preference) {
+  .docs-skel span { animation: docs-skel 1.4s ease-in-out infinite alternate; }
+  @keyframes docs-skel { to { opacity: .45; } }
+}
 
 /* the page itself */
 .docs-md { max-width: 820px; padding: 28px 44px 36px; overflow-wrap: anywhere; }

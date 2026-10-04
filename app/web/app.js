@@ -3,8 +3,9 @@
 // and then the site's own pages, which the app carries, take over. The
 // admit page polls until another device of the account approves this one.
 
+import { $, load } from '/_dd/static/kit.js';
+
 const invoke = window.__TAURI__.core.invoke;
-const $ = (id) => document.getElementById(id);
 let timer = null;
 // the digits a code from another device gave, while waiting to be approved
 let digits = null;
@@ -53,14 +54,17 @@ async function net(st) {
     $("net-text").textContent = String(e);
     return;
   }
-  const text = $("net-text");
-  if (st.running) {
-    text.textContent = "Connected to your boxes.";
-  } else if (st.joined) {
-    text.textContent = st.error ? `Not connected: ${st.error}` : "Connecting to your boxes…";
-  } else {
-    text.textContent = "Not connected to your boxes yet.";
-  }
+  // a state word and what it means (docs/ui.md)
+  const [state, word, text] = st.running
+    ? ["ok", "Connected", "Your boxes are reached directly from here."]
+    : st.error
+      ? ["broken", "Not connected", st.error]
+      : st.joined
+        ? ["working", "Connecting", "Reaching your boxes…"]
+        : ["off", "Not connected", "This device has not joined your boxes' network yet."];
+  $("net-state").dataset.state = state;
+  $("net-state").textContent = word;
+  $("net-text").textContent = text;
   $("to-site").hidden = !st.running;
   $("net-join").hidden = st.running;
   $("net-join").textContent = st.joined ? "Reconnect" : "Connect";
@@ -96,11 +100,12 @@ $("passkey-add").addEventListener("click", async () => {
   b.disabled = false;
 });
 
+// What this device showed last time draws at once, the answer from the
+// directories when it comes (kit.js load): the screen never waits on them.
 async function refresh() {
+  clearTimeout(timer);
   try {
-    const st = await invoke("status");
-    render(st);
-    clearTimeout(timer);
+    const st = await load(() => invoke("status"), render, { key: "app:status" });
     if (st.name && !st.admitted) timer = setTimeout(refresh, 5000);
   } catch (e) {
     $("error-text").textContent = String(e);
@@ -173,8 +178,15 @@ $("recovery-done").addEventListener("click", () => {
   // on the network from the first minute
   invoke("net_join").then((st) => net(st)).catch(() => {});
 });
-$("admit-back").addEventListener("click", async () => { await invoke("forget"); refresh(); });
-$("home-forget").addEventListener("click", async () => { await invoke("forget"); refresh(); });
+// signing out: the remembered screen goes with the name, or it would draw
+// the signed-in one again for a moment
+async function signOut() {
+  await invoke("forget");
+  try { localStorage.removeItem("app:status"); } catch { /* nothing kept */ }
+  refresh();
+}
+$("admit-back").addEventListener("click", signOut);
+$("home-forget").addEventListener("click", signOut);
 $("error-retry").addEventListener("click", refresh);
 
 refresh();

@@ -39,7 +39,12 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5"/></svg>Source
         </a>
       </div>
-      <div id="docs-body" aria-live="polite"><p class="docs-wait">Loading…</p></div>
+      <div id="docs-body" aria-live="polite">
+        <!-- the shape of a page, until the first one draws (docs/ui.md: no "Loading…") -->
+        <div class="docs-md docs-skel" aria-busy="true" aria-label="Loading the page">
+          <span class="h"></span><span></span><span></span><span class="short"></span><span></span><span class="short"></span>
+        </div>
+      </div>
       <div class="docs-pager" id="docs-pager"></div>
     </article>
     <aside class="docs-toc" id="docs-toc" aria-label="On this page"></aside>

@@ -353,6 +353,8 @@ const STATIC: &[(&str, &str, &str)] = &[
         "box/web/shell.js",
         "text/javascript; charset=utf-8",
     ),
+    // what every page shares (docs/ui.md)
+    ("kit.js", "box/web/kit.js", "text/javascript; charset=utf-8"),
     (
         "docs.js",
         "box/docs/web/docs.js",

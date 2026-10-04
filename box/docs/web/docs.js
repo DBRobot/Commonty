@@ -4,19 +4,7 @@
 // Anyone may read them; a member also gets the way to the source.
 
 import { me, slug, docsPath } from './shell.js';
-
-const $ = (id) => document.getElementById(id);
-function el(tag, props = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (v === undefined || v === null || v === false) continue;
-    if (k === 'class') e.className = v;
-    else if (k === 'text') e.textContent = v;
-    else e.setAttribute(k, v);
-  }
-  e.append(...kids);
-  return e;
-}
+import { $, el, load, prefetch } from './kit.js';
 
 // where the pages are: /docs on the bare name, or the gate's own address
 // for them anywhere else (a box's own name, a test)
@@ -27,40 +15,11 @@ const fileAt = (pathname) => {
 };
 const addressOf = (file) => base + docsPath(file);
 
-// ---- what the gate holds, kept so a page opened again draws at once
+// ---- what the gate holds: drawn from what this browser kept, then fresh
+// (kit.js load), so a page opened again is there at once
 
-const store = (() => {
-  try { return window.localStorage; } catch { return null; }
-})();
-function kept(key) {
-  try { return JSON.parse(store?.getItem(key) || 'null'); } catch { return null; }
-}
-function keep(key, v) {
-  try { store?.setItem(key, JSON.stringify(v)); } catch { /* full or refused: drawn from the box next time */ }
-}
-
-let index = kept('dd-docs-index');
-const fresh = fetch('/_dd/docs/index.json').then((r) => {
-  if (!r.ok) throw new Error(`the box said ${r.status}`);
-  return r.json();
-});
-
-const sources = new Map();
-function source(file) {
-  if (!sources.has(file)) {
-    sources.set(file, fetch('/_dd/docs/raw/' + file.split('/').map(encodeURIComponent).join('/')).then((r) => {
-      if (!r.ok) throw new Error(`the box said ${r.status}`);
-      return r.text();
-    }).then((text) => {
-      keep('dd-docs-page:' + file, text);
-      return text;
-    }).catch((e) => {
-      sources.delete(file);
-      throw e;
-    }));
-  }
-  return sources.get(file);
-}
+let index = null;
+const rawUrl = (file) => '/_dd/docs/raw/' + file.split('/').map(encodeURIComponent).join('/');
 
 let marked = null;
 const markedReady = import('/_dd/web/marked.js').then((m) => { marked = m.marked; });
@@ -190,15 +149,21 @@ async function drawBody() {
     body.replaceChildren(frontList());
     return;
   }
-  let text = kept('dd-docs-page:' + want);
-  const got = source(want);
-  if (text == null) text = await got.catch(() => null);
-  else got.then((t) => { if (t !== text && file === want) drawBody(); }).catch(() => {});
-  if (file !== want) return;
-  if (text == null) {
-    body.replaceChildren(el('p', { class: 'docs-wait', text: 'This page did not load. Try again in a moment.' }));
-    return;
-  }
+  // the page's markdown: kept, at once; the box's, when it differs
+  let shown = false;
+  load(rawUrl(want), (text) => {
+    if (file !== want) return;
+    shown = true;
+    drawText(want, text);
+  }, { as: 'text' }).catch(() => {
+    if (file === want && !shown) {
+      body.replaceChildren(el('p', { class: 'docs-wait', text: 'This page did not load. Try again in a moment.' }));
+    }
+  });
+}
+
+async function drawText(want, text) {
+  const body = $('docs-body');
   if (view === 'md') {
     body.replaceChildren(el('pre', { class: 'docs-raw', text }));
     drawToc(null);
@@ -304,7 +269,7 @@ document.addEventListener('pointerover', (e) => {
   const u = new URL(a.href, location.href);
   if (u.origin !== location.origin || !u.pathname.startsWith(base)) return;
   const f = resolve(u.pathname);
-  if (f) source(f).catch(() => {});
+  if (f) prefetch(rawUrl(f), { as: 'text' });
 });
 
 $('view-page').onclick = () => { view = 'page'; drawHead(); drawPager(); drawBody(); };
@@ -325,12 +290,9 @@ addEventListener('scroll', spy, { passive: true });
 
 // ---- start: what was kept draws now, the box's answer when it comes
 
-if (index) draw();
-fresh.then((i) => {
-  const changed = JSON.stringify(i) !== JSON.stringify(index);
+load('/_dd/docs/index.json', (i) => {
   index = i;
-  keep('dd-docs-index', i);
-  if (changed) draw();
+  draw();
 }).catch((e) => {
   if (!index) $('docs-body').replaceChildren(el('p', { class: 'docs-wait', text: `The docs did not load (${e.message}). Try again in a moment.` }));
 });
