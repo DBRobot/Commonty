@@ -3,6 +3,6 @@
   "bootDisk": "/dev/disk/by-id/nvme-Micron_2450_MTFDKBA512TFK_2311403FB25B",
   "wired": "00:E0:4C:3A:46:58",
   "wifi": "wlp2s0",
-  "gpu": null,
+  "gpu": { "driver": "amdgpu", "render": "/dev/dri/renderD128" },
   "usbNic": true
 }

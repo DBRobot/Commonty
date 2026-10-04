@@ -936,6 +936,7 @@
           placement = import ./nix/tests/placement.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;
+          box-reports = import ./nix/tests/box-reports.nix args;
           nginx = import ./nix/tests/nginx.nix args;
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
@@ -1056,6 +1057,7 @@
                 ./nix/modules/box/disk-unlock.nix
                 ./nix/modules/box/control.nix
                 ./nix/modules/box/ports.nix
+                ./nix/modules/box/report.nix
                 {
                   dd.control.enable = true;
                   dd.control.roles = box.roles;
