@@ -7,7 +7,7 @@
 // reverse-proxy header from the same sign-in as every other service).
 // The page is one file; the address says which view to draw.
 
-import { me } from './shell.js';
+import { me, searchFrom } from './shell.js';
 
 export const $ = (id) => document.getElementById(id);
 // replaceChildren that takes lists and skips what is not there (a bare
@@ -396,10 +396,17 @@ document.addEventListener('click', (e) => {
 });
 addEventListener('popstate', render);
 
-$('git-search')?.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const v = new FormData(e.target).get('q');
-  if (v) go(`/search${q({ q: v })}`);
+// the bar's search: repositories first, and all of the forge's results a
+// click away
+searchFrom({
+  name: 'Repositories',
+  find: (text) => api(`/repos/search${q({ q: text, limit: 5 })}`).then((r) => (r.data || []).map((x) => ({
+    title: x.full_name,
+    sub: x.description || undefined,
+    href: `/${x.full_name}`,
+    icon: ICONS.repo,
+  }))),
+  more: (text) => `/search${q({ q: text })}`,
 });
 
 // the bell: unread notifications, looked at now and every two minutes

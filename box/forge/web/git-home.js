@@ -202,7 +202,7 @@ route(/^\/search$/, async ({ params, current }) => {
   const text = params.get('q') || '';
   let kind = params.get('type');
   setTitle(`Search: ${text}`);
-  const input = document.querySelector('#git-search input');
+  const input = document.querySelector('.dd-search input');
   if (input) input.value = text;
   const [repos, pulls, issues] = await Promise.all([
     api(`/repos/search${q({ q: text, limit: 30 })}`).then((r) => r.data || []),

@@ -1,0 +1,161 @@
+/* The docs: the contents on the left, the page in the middle, its headings
+   on the right. Colours are home.css's (the blue that marks where you are
+   is its --member); these add the few a long read needs on top. */
+
+:root {
+  --sunk: #F6F8F9;
+  --ink-3: #6E7671;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sunk: #13171C;
+    --ink-3: #87909A;
+  }
+}
+:root[data-theme="dark"] {
+  --sunk: #13171C;
+  --ink-3: #87909A;
+}
+
+.docspage { font-size: 15px; line-height: 1.6; }
+.docspage .dd-bar { position: sticky; top: 0; z-index: 10; }
+.docspage a { text-decoration: none; }
+.docspage a:hover { text-decoration: underline; }
+/* home.css sizes a button for a sign-in form; here they sit in rows */
+.docspage main button, .docs button { height: auto; margin: 0; align-self: auto; }
+.docs svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+.docs {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 24px 24px 64px;
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 220px;
+  gap: 28px;
+  align-items: start;
+}
+.docs-nav, .docs-toc {
+  position: sticky;
+  top: 88px;
+  max-height: calc(100vh - 112px);
+  overflow: auto;
+  font-size: 14px;
+}
+.docs-nav h3, .docs-toc h3 {
+  margin: 18px 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--ink-3);
+}
+.docs-nav h3:first-child, .docs-toc h3:first-child { margin-top: 0; }
+.docs-nav a {
+  display: block;
+  padding: 4px 10px;
+  border-left: 2px solid transparent;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+.docs-nav a:hover { color: var(--ink); background: var(--line-2); text-decoration: none; }
+.docs-nav a[aria-current="page"] { color: var(--member); border-left-color: var(--member); background: var(--member-bg); font-weight: 600; }
+.docs-nav .front { margin-bottom: 4px; color: var(--ink); font-weight: 600; }
+.docs-toc a { display: block; padding: 3px 0 3px 12px; border-left: 1px solid var(--line); color: var(--ink-2); }
+.docs-toc a.h3 { padding-left: 24px; font-size: 13px; }
+.docs-toc a:hover { color: var(--ink); text-decoration: none; }
+.docs-toc a.on { padding-left: 11px; border-left: 2px solid var(--member); color: var(--member); font-weight: 600; }
+.docs-toc a.h3.on { padding-left: 23px; }
+.docs-toc .docs-meta { display: grid; gap: 6px; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; }
+.docs-toc .docs-meta:empty { display: none; }
+.docs-toc .docs-meta a { display: flex; align-items: center; gap: 6px; padding: 0; border: 0; color: var(--link); }
+
+.docs-page { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.docs-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line-2); font-size: 13.5px; }
+.docs-crumb { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--ink-3); font: 12.5px var(--mono); overflow-wrap: anywhere; }
+.docs-seg { display: inline-flex; margin-left: auto; }
+.docs-seg button {
+  padding: 4px 11px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  cursor: pointer;
+}
+.docs-seg button:hover { background: var(--sunk); }
+.docs-seg button:first-child { border-radius: 4px 0 0 4px; }
+.docs-seg button + button { border-left: 0; }
+.docs-seg button:last-child { border-radius: 0 4px 4px 0; }
+.docs-seg button[aria-pressed="true"] { background: var(--line-2); font-weight: 600; }
+.docs-btn, .contents-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.docs-btn:hover, .contents-btn:hover { background: var(--sunk); color: var(--ink); text-decoration: none; }
+.docs-wait { padding: 28px 44px; color: var(--ink-2); }
+
+/* the page itself */
+.docs-md { max-width: 820px; padding: 28px 44px 36px; overflow-wrap: anywhere; }
+.docs-md > :first-child { margin-top: 0; }
+.docs-md h1 { margin: 0 0 16px; font-size: 30px; line-height: 1.25; text-wrap: balance; }
+.docs-md h2 { margin: 36px 0 10px; padding-bottom: 6px; font-size: 21px; border-bottom: 1px solid var(--line-2); text-wrap: balance; }
+.docs-md h3 { margin: 26px 0 8px; font-size: 16.5px; }
+.docs-md h4 { margin: 20px 0 6px; font-size: 15px; }
+.docs-md :is(h2, h3, h4) { position: relative; scroll-margin-top: 84px; }
+.docs-md .anchor { position: absolute; left: -22px; color: var(--ink-3); font-weight: 400; opacity: 0; }
+.docs-md :is(h2, h3, h4):hover .anchor, .docs-md .anchor:focus-visible { opacity: 1; text-decoration: none; }
+.docs-md p, .docs-md ul, .docs-md ol, .docs-md blockquote { margin: 0 0 14px; }
+.docs-md li { margin: 3px 0; }
+.docs-md li > p { margin: 0; }
+.docs-md blockquote { padding: 2px 16px; color: var(--ink-2); border-left: 3px solid var(--line); }
+.docs-md pre { margin: 0 0 16px; padding: 14px 16px; overflow-x: auto; font: 13px/1.5 var(--mono); background: var(--code); border-radius: 4px; }
+.docs-md :not(pre) > code { padding: 1px 5px; font: 13.5px var(--mono); background: var(--code); border-radius: 3px; }
+.docs-md .table { margin: 0 0 16px; overflow-x: auto; }
+.docs-md table { border-collapse: collapse; font-size: 14px; }
+.docs-md th { text-align: left; font-weight: 600; background: var(--sunk); }
+.docs-md td, .docs-md th { padding: 6px 12px; vertical-align: top; border: 1px solid var(--line); }
+.docs-md img { max-width: 100%; }
+.docs-md hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
+.docs-md a.code { font: 13.5px var(--mono); }
+.docs-md a.code::before { content: "‹›"; margin-right: 3px; font-size: 11px; opacity: .7; }
+.docs-md a.missing { color: var(--ink-3); text-decoration: underline dotted; }
+.docs-md .lead { font-size: 17px; color: var(--ink-2); }
+.docs-md .index { list-style: none; padding: 0; columns: 2 220px; }
+.docs-raw { margin: 0; padding: 24px 28px; font: 13px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+
+.docs-pager { max-width: 820px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 44px 28px; }
+.docs-pager:empty { display: none; }
+.docs-pager a { display: block; padding: 10px 14px; border: 1px solid var(--line); border-radius: 4px; }
+.docs-pager a:hover { border-color: var(--link); text-decoration: none; }
+.docs-pager small { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+.docs-pager b { font-weight: 600; color: var(--ink); }
+.docs-pager .next { grid-column: 2; text-align: right; }
+
+.contents-btn { display: none; }
+@media (max-width: 1120px) {
+  .docs { grid-template-columns: 230px minmax(0, 1fr); }
+  .docs-toc { display: none; }
+}
+@media (max-width: 860px) {
+  .docs { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px 16px 48px; }
+  .contents-btn { display: inline-flex; justify-self: start; }
+  .docs-nav { position: static; max-height: none; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
+  .docs-nav:not(.open) { display: none; }
+  .docs-md { padding: 20px 18px 28px; }
+  .docs-md h1 { font-size: 25px; }
+  .docs-pager { grid-template-columns: 1fr; padding: 0 18px 20px; }
+  .docs-pager .next { grid-column: 1; }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }

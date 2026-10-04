@@ -4,6 +4,15 @@ let
   canReadWorker = lib.hasInfix "\ncloudflare-workers-read:" (
     "\n" + builtins.readFile (../../secrets + "/${config.networking.hostName}.yaml")
   );
+  # a gate path on the bare name, under the same flood limits as on home
+  docsGate = {
+    proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";
+    extraConfig = ''
+      limit_req zone=dd_user burst=300 nodelay;
+      limit_req zone=dd_visitor burst=500 nodelay;
+      limit_req_status 429;
+    '';
+  };
 in
 {
   # A box with a public name: certificates, nginx and the browser login.
@@ -82,6 +91,15 @@ in
     # the app itself is on home, where sign-in and join already point
     locations."= /download".return = "301 https://home.${config.dd.domain}/_dd/download";
     locations."/".return = "301 https://home.${config.dd.domain}$request_uri";
+    # the docs, for anyone (box/verify/src/docs.rs), and the few gate paths
+    # their page needs: its files, the bar's who-is-looking, the index and
+    # the markdown. Nothing else of the gate answers on this name.
+    locations."= /docs".proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/docs/page";
+    locations."/docs/".proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/docs/page/";
+    locations."~ ^/_dd/(static|web|docs)/" = docsGate;
+    locations."= /_dd/me" = docsGate;
+    locations."= /_dd/config" = docsGate;
+    locations."= /_dd/csp" = docsGate;
   };
 
   # garage's public face: ente's browser uploads and any other s3 client

@@ -14,6 +14,7 @@ pub mod adblock;
 mod adddevice;
 mod demo_photos;
 mod directory;
+mod docs;
 pub mod fleet;
 mod forge_events;
 mod friends;
@@ -1557,6 +1558,36 @@ pub(crate) fn page(name: &str) -> Response {
     }
 }
 
+/// The docs' index: the nav, and every page's title, headings and words.
+/// Anyone may read it, as anyone may read the docs.
+async fn docs_index(headers: HeaderMap) -> Response {
+    let (index, tag) = docs::index();
+    tagged(
+        &headers,
+        "application/json",
+        "no-cache",
+        tag,
+        axum::body::Bytes::from(index.to_string()),
+    )
+}
+
+/// One page of the docs, as the markdown it is in the repository
+async fn docs_raw(
+    headers: HeaderMap,
+    axum::extract::Path(path): axum::extract::Path<String>,
+) -> Response {
+    match docs::raw(&path) {
+        Some(b) => tagged(
+            &headers,
+            "text/markdown; charset=utf-8",
+            "no-cache",
+            &pages::tag_of(b),
+            axum::body::Bytes::from_static(b),
+        ),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 /// Who is looking, their menu and their services: what every signed-in
 /// page fills itself from. A browser's session or a device's token.
 async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
@@ -2201,6 +2232,10 @@ pub async fn start(
             get(|| async { Redirect::to("/_dd/settings#network") }),
         )
         .route("/_dd/download", get(download_page))
+        .route("/_dd/docs/page", get(|| async { page("docs") }))
+        .route("/_dd/docs/page/{*rest}", get(|| async { page("docs") }))
+        .route("/_dd/docs/index.json", get(docs_index))
+        .route("/_dd/docs/raw/{*path}", get(docs_raw))
         .route("/_dd/fleet.json", get(fleet_json))
         .route("/_dd/me", get(me))
         .route("/_dd/photos", get(photos::page))

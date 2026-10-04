@@ -265,3 +265,117 @@
 .dd-bar .menu nav .switch:disabled { opacity: .5; cursor: default; }
 .dd-bar .menu nav .switch:focus-visible { outline: 3px solid var(--bar-focus); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .dd-bar .menu nav .switch, .dd-bar .menu nav .switch::after { transition: none; } }
+
+/* right of the services: the docs, and the search over every page's own
+   results, the services and the docs (shell.js) */
+.dd-bar .bar > .docs-link {
+  margin-left: auto;
+  margin-right: -8px;
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 4px;
+  color: var(--bar-ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.dd-bar .bar > .docs-link:hover, .dd-bar .bar > .docs-link[aria-current="page"] { background: rgba(255, 255, 255, .14); color: var(--bar-ink); }
+.dd-bar .dd-search { position: relative; flex: 0 1 320px; }
+/* by its id: the pages size their own fields (home.css, git.css), never this one */
+.dd-bar #dd-q {
+  width: 100%;
+  height: 38px;
+  margin: 0;
+  padding: 0 34px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--bar-ink);
+  background: rgba(255, 255, 255, .12);
+  border: 1px solid var(--bar-edge);
+  border-radius: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.dd-bar #dd-q::placeholder { color: rgba(255, 255, 255, .72); opacity: 1; }
+.dd-bar #dd-q:focus { outline: none; background: rgba(255, 255, 255, .2); border-color: rgba(255, 255, 255, .6); }
+.dd-bar #dd-q::-webkit-search-cancel-button { display: none; }
+.dd-bar .dd-search .glass { position: absolute; left: 11px; top: 11px; width: 16px; height: 16px; pointer-events: none; }
+.dd-bar .dd-search svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+.dd-bar .dd-search .glass { color: rgba(255, 255, 255, .8); }
+.dd-bar .dd-search kbd {
+  position: absolute;
+  right: 9px;
+  top: 9px;
+  padding: 0 5px;
+  font: 12px/18px ui-monospace, Consolas, monospace;
+  color: rgba(255, 255, 255, .75);
+  border: 1px solid var(--bar-edge);
+  border-radius: 3px;
+}
+.dd-bar #dd-q:focus ~ kbd { display: none; }
+.dd-bar .dd-search .open-search { display: none; }
+.dd-bar .found {
+  position: absolute;
+  z-index: 1400;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(440px, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow: auto;
+  padding: 6px;
+  background: var(--bar-menu);
+  color: var(--bar-menu-ink);
+  border: 1px solid var(--bar-menu-line);
+  border-radius: 6px;
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, .45);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.dd-bar .found h4 { margin: 8px 10px 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; opacity: .6; }
+.dd-bar .found a {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 7px 10px;
+  border-radius: 4px;
+  color: var(--bar-menu-ink);
+  text-decoration: none;
+}
+.dd-bar .found a:hover, .dd-bar .found a.on { background: var(--bar-menu-hover); color: var(--bar-menu-ink); }
+.dd-bar .found .ic { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 5px; background: var(--c, var(--bar-menu-rule)); }
+.dd-bar .found .ic svg { width: 16px; height: 16px; fill: none; stroke: var(--ic, #fff); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.dd-bar .found .plain .ic { --ic: var(--bar-menu-ink); }
+.dd-bar .found b { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.dd-bar .found small { display: block; font-size: 13px; opacity: .7; overflow-wrap: anywhere; }
+.dd-bar .found mark { background: none; color: inherit; text-decoration: underline 2px var(--bar-focus); text-underline-offset: 2px; }
+.dd-bar .found .more { display: block; padding: 7px 10px; font-size: 13.5px; opacity: .8; }
+.dd-bar .found p { margin: 8px 10px; opacity: .75; }
+.dd-bar .me > .sign-in { color: var(--bar-ink); font-size: 15px; font-weight: 600; text-decoration: none; padding: 0 4px; }
+.dd-bar .me > .sign-in:hover { text-decoration: underline; color: var(--bar-ink); }
+@media (max-width: 760px) {
+  .dd-bar .dd-search { flex: none; }
+  .dd-bar .dd-search:not(.open) :is(input, kbd, .glass) { display: none; }
+  .dd-bar .dd-search .open-search {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    margin: 0;
+    padding: 0;
+    color: var(--bar-ink);
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .dd-bar .dd-search .open-search:hover { background: rgba(255, 255, 255, .14); }
+  .dd-bar .dd-search .open-search svg { width: 18px; height: 18px; }
+  .dd-bar .dd-search.open { position: fixed; z-index: 1400; left: 0; right: 0; top: 56px; padding: 8px 16px 10px; background: var(--bar); }
+  .dd-bar .dd-search.open .open-search, .dd-bar .dd-search.open kbd { display: none; }
+  .dd-bar .dd-search.open .glass { left: 27px; top: 19px; }
+  .dd-bar .dd-search.open .found { left: 16px; right: 16px; width: auto; }
+}

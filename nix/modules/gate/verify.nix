@@ -314,6 +314,8 @@ in
         # the browser login: passkeys scoped to the whole domain, so one login
         # covers every service on this box and the session cookie rides along
         VERIFY_DOMAIN = base;
+        # where the docs live on the forge, for a member's edit and history links
+        VERIFY_REPO = config.dd.repo;
         # the hosts whose pages may ask for a passkey here (box/verify own_hosts)
         VERIFY_HOSTS = lib.concatStringsSep "," cfg.hosts;
         VERIFY_MEMBERS = builtins.toJSON config.dd.members;

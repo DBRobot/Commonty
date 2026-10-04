@@ -91,7 +91,7 @@ pub fn load(dir: &std::path::Path) -> anyhow::Result<()> {
 }
 
 /// the tree itself, where the gate runs from a checkout (its tests)
-fn tree() -> std::path::PathBuf {
+pub(crate) fn tree() -> std::path::PathBuf {
     std::env::var_os("VERIFY_PAGES_DIR")
         .map(Into::into)
         .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
@@ -353,6 +353,16 @@ const STATIC: &[(&str, &str, &str)] = &[
         "box/web/shell.js",
         "text/javascript; charset=utf-8",
     ),
+    (
+        "docs.js",
+        "box/docs/web/docs.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "docs.css",
+        "box/docs/web/docs.css",
+        "text/css; charset=utf-8",
+    ),
 ];
 
 /// the stylesheet, the scripts, the fonts and the pictures, by the name
@@ -460,6 +470,8 @@ const PAGES: &[(&str, &str)] = &[
     ("send", "box/vault/web/pages/send.html"),
     // not signed in: the new device a QR code was scanned on (adddevice.rs)
     ("add", "box/web/pages/add.html"),
+    // not signed in: anyone, at <domain>/docs (docs.rs)
+    ("docs", "box/docs/web/pages/docs.html"),
 ];
 
 pub fn page(name: &str) -> Option<&'static str> {
@@ -799,7 +811,9 @@ mod tests {
         for page in [login("commonty.org"), enrol(), join("commonty.org")] {
             assert!(page.starts_with("<!doctype html>"));
             assert!(page.trim_end().ends_with("</html>"));
-            assert_eq!(page.matches("<script").count(), 1);
+            // the page's own script, and the bar's (its docs and search)
+            assert_eq!(page.matches("<script").count(), 2);
+            assert!(page.contains("/_dd/static/shell.js"));
             assert_eq!(page.matches("</header>").count(), 1);
             assert!(page.contains("/_dd/static/home.css"));
         }
