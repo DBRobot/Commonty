@@ -730,30 +730,45 @@ fn recorded_builds(
         if git(root, &["rev-parse", &format!("{sha}^{{tree}}")])? != tree {
             continue;
         }
-        // the header on stdin, not the command line: an argument is readable
-        // by every process on this machine while curl runs
-        let out = {
-            use std::io::Write as _;
-            let mut c = Command::new("curl")
-                .args([
-                    "-sf",
-                    "-H",
-                    "@-",
-                    &format!("{api}/commits/{sha}/statuses?limit=50"),
-                ])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()?;
-            c.stdin
-                .take()
-                .context("curl's stdin")?
-                .write_all(format!("Authorization: Bearer {token}\n").as_bytes())?;
-            c.wait_with_output()?
-        };
-        if !out.status.success() {
+        // every page: a run posts well over fifty statuses, and the paths
+        // were once near enough the end of the first page to fall off it
+        let mut statuses: Vec<serde_json::Value> = Vec::new();
+        let mut read = true;
+        for page in 1.. {
+            // the header on stdin, not the command line: an argument is
+            // readable by every process on this machine while curl runs
+            let out = {
+                use std::io::Write as _;
+                let mut c = Command::new("curl")
+                    .args([
+                        "-sf",
+                        "-H",
+                        "@-",
+                        &format!("{api}/commits/{sha}/statuses?limit=50&page={page}"),
+                    ])
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .spawn()?;
+                c.stdin
+                    .take()
+                    .context("curl's stdin")?
+                    .write_all(format!("Authorization: Bearer {token}\n").as_bytes())?;
+                c.wait_with_output()?
+            };
+            if !out.status.success() {
+                read = false;
+                break;
+            }
+            let got: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)?;
+            let last = got.len() < 50;
+            statuses.extend(got);
+            if last {
+                break;
+            }
+        }
+        if !read {
             continue;
         }
-        let statuses: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)?;
         let mut paths = BTreeMap::new();
         // newest first; the first success per context wins
         for st in &statuses {

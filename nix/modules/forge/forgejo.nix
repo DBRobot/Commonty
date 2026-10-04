@@ -1,7 +1,5 @@
 {
   ddScript,
-  vmTests,
-  boxNames,
   config,
   pkgs,
   lib,
@@ -207,9 +205,11 @@ in
         pkgs.jq
       ];
       serviceConfig.Type = "oneshot";
-      # the rule main is held to: every ci job, from the same lists the
-      # flake runs (vmTests, the boxes), so a new test is required the
-      # moment it exists
+      # the rule main is held to: ci_ok, the job that waits on every other
+      # (.forgejo/workflows/entry_point.yml), so the rule names one check
+      # that always exists and no job can fail without blocking the merge;
+      # and the branch up to date with main, so what merges is the tree ci
+      # ran on, not a green branch on an old base
       script = ddScript ./forgejo-setup.sh {
         ADMIN = cfg.admin;
         REPO = config.dd.repo;
@@ -221,19 +221,8 @@ in
           enable_push_whitelist = true;
           push_whitelist_usernames = [ cfg.admin ];
           enable_status_check = true;
-          status_check_contexts = map (j: "entry_point / ${j} (pull_request)") (
-            [
-              "flake_check"
-              "build_client"
-            ]
-            ++ map (b: "build_host (${b})") boxNames
-            ++ [
-              "lint"
-              "test"
-            ]
-            ++ map (t: "vm_tests (${t})") vmTests
-          );
-          block_on_outdated_branch = false;
+          status_check_contexts = [ "entry_point / ci_ok (pull_request)" ];
+          block_on_outdated_branch = true;
           required_approvals = 0;
         };
       };

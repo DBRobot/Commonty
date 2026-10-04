@@ -40,7 +40,7 @@
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       # every vm test, by name: nix/tests/<name>.nix + .py. Also what the ci
-      # matrix runs and what main requires (nix/modules/forge/forgejo.nix)
+      # matrix runs (nix/tests/ci.nix holds the two to one list)
       vmTests = [
         "console"
         "directory"
