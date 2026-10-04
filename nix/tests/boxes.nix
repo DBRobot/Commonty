@@ -70,6 +70,14 @@ let
       ) boxes
     )
   );
+  # two services on one port fail the build (modules/box/ports.nix): a
+  # box made to claim the transcoder's port for something else does not
+  clash =
+    (builtins.tryEval
+      (cfgs.node1.extendModules { modules = [ { dd.ports.impostor = [ 4190 ]; } ]; })
+      .config.system.build.toplevel.drvPath
+    ).success;
 in
 assert ok;
+assert !clash;
 pkgs.runCommand "box-list" { } "echo ok > $out"
