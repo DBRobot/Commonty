@@ -52,11 +52,11 @@
     base = {
       # 80G a copy, and a refresh builds the next beside it
       requires.disk.size.min = "170G";
-      # the weekly fetch: curl, 64 transfers at once; not yet measured
+      # node1, 2026-10-04: a whole fetch, curl with 64 transfers at once,
+      # 6 hours, 77G in
       uses = {
-        memory = "256M";
+        memory = "5.3G";
         storage = "80G";
-        estimated = true;
       };
       network = {
         outbound = [ "api.pwnedpasswords.com" ];
