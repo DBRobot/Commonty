@@ -15,9 +15,9 @@ let
   # without AVX-512 (GitHub runners are a mix). ALL_VARIANTS builds every
   # microarchitecture as a loadable backend and picks the best at runtime, so
   # the build is portable and node1 still gets the icelake path.
-  # With Vulkan as well: on a box with an Intel GPU (dd.box.vaapi) the
-  # prompt is read there, several times faster than the CPU reads it; with
-  # none, the Vulkan backend finds no device and everything stays on the CPU.
+  # With Vulkan as well: on a box with a GPU of any make the prompt is read
+  # there, several times faster than the CPU reads it; with none, the Vulkan
+  # backend finds no device and everything stays on the CPU.
   llamaCppTuned = (pkgs.llama-cpp.override { vulkanSupport = true; }).overrideAttrs (o: {
     cmakeFlags = (o.cmakeFlags or [ ]) ++ [
       "-DGGML_NATIVE=OFF"
@@ -28,7 +28,7 @@ let
   server = lib.getExe' llamaCppTuned "llama-server";
   # Where each part of the work runs when there is a GPU: the flags below
   # are what measured fastest on node1's Iris Xe (see the note at `split`).
-  gpu = config.dd.box.vaapi != null;
+  gpu = cfg.gpuOffload == "auto" && config.dd.box.gpus != [ ];
 
   dir = "/tank/models";
   file = m: "${dir}/${m.localName}";
@@ -73,7 +73,7 @@ let
         split = lib.mkOption {
           type = lib.types.listOf lib.types.str;
           default = [ ];
-          description = "flags that place the work between the CPU and a GPU, used only on a box that has one (dd.box.vaapi)";
+          description = "flags that place the work between the CPU and a GPU, used only on a box that has one (dd.box.gpus)";
         };
         idle = lib.mkOption {
           type = lib.types.int;
@@ -90,6 +90,30 @@ let
   );
 in
 {
+  # the tuning (needs.nix says what it needs; these say how it runs here)
+  options.dd.llm.threads = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = config.dd.box.threads;
+    description = "threads a model server uses: all of the box's, from its report";
+  };
+  options.dd.llm.gpuOffload = lib.mkOption {
+    type = lib.types.enum [
+      "auto"
+      "off"
+    ];
+    default = "auto";
+    description = "auto: the model's split flags on a box with any GPU";
+  };
+  options.dd.llm.memoryHigh = lib.mkOption {
+    type = lib.types.strMatching "[0-9]+[KMGT]";
+    default = "28G";
+    description = "where the box starts reclaiming from the model servers; to be worked out from the model and context once the KV cache per 1000 tokens is measured";
+  };
+  options.dd.llm.memoryMax = lib.mkOption {
+    type = lib.types.strMatching "[0-9]+[KMGT]";
+    default = "32G";
+    description = "the model servers' hard memory limit";
+  };
   options.dd.llm.models = lib.mkOption {
     type = lib.types.attrsOf model;
     description = "The models this box offers, by the id a request names. Each is fetched once, pinned by revision and hash, and started when first asked for; one at a time, since one fills the machine.";
@@ -182,8 +206,8 @@ in
             # the weights stay resident (--mlock), which needs the limit
             # raised; there is no capability to lock memory otherwise
             LimitMEMLOCK = "infinity";
-            MemoryHigh = "28G";
-            MemoryMax = "32G";
+            MemoryHigh = cfg.memoryHigh;
+            MemoryMax = cfg.memoryMax;
             ReadOnlyPaths = [ dir ];
             # the GPU's compiled shaders, kept between model loads: without
             # it every load compiles them again
@@ -271,7 +295,7 @@ in
               "-m ${file m}"
               "--no-mmap"
               "--mlock" # weights resident; ARC is capped to 8G to leave room
-              "-t 8" # llama-bench: 5.00 vs 4.82 tok/s at 4 threads
+              "-t ${toString cfg.threads}" # llama-bench on node1: 5.00 tok/s at 8 vs 4.82 at 4
               "-c ${toString m.context}"
               # thinking is asked for per request (chat_template_kwargs
               # enable_thinking): measured 0.8s vs 16.5s for the same answer

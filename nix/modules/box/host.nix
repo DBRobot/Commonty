@@ -27,15 +27,29 @@ in
   ];
 
   config = lib.mkMerge [
-    (lib.mkIf (hw.gpu != null && hw.gpu.driver == "intel") {
-      # Quick Sync: decodes H.264/HEVC/VP9/AV1 and encodes H.264/HEVC for a
-      # small part of what the cores take
-      hardware.graphics = {
-        enable = true;
-        extraPackages = [ pkgs.intel-media-driver ];
-      };
-      dd.box.vaapi = hw.gpu.render;
+    {
+      dd.box.threads = hw.cpu.threads;
+      dd.box.gpus = map (g: { inherit (g) render driver encode; }) hw.gpus;
+    }
+    # Any GPU, whoever made it: Mesa's Vulkan drivers (Intel's, AMD's, and
+    # NVK for NVIDIA from the GTX 16 series on) come with graphics on. Video
+    # encoding: Intel's needs its media driver; AMD's is in Mesa.
+    (lib.mkIf (hw.gpus != [ ]) {
+      hardware.graphics.enable = true;
+      hardware.graphics.extraPackages = lib.optional (lib.any (
+        g: builtins.elem g.driver [
+          "i915"
+          "xe"
+        ]
+      ) hw.gpus) pkgs.intel-media-driver;
     })
+    # the first GPU the report found encoding H.264: transcode works there
+    (
+      let
+        h264 = lib.filter (g: lib.any (lib.hasPrefix "H264") g.encode) hw.gpus;
+      in
+      lib.mkIf (h264 != [ ]) { dd.box.vaapi = (lib.head h264).render; }
+    )
     {
       # the disks' key made in the initrd at every boot, from this box's TPM
       # and the unlock Worker (modules/box/disk-unlock.nix)
