@@ -24,6 +24,8 @@ let
   cfg = config.dd.adblock;
   tailnet = config.dd.box.tailnet;
   api = "127.0.0.1:8053";
+  # the house network, from this box's fixed address on it (192.168.1.20/24)
+  house = config.dd.home.address;
   # Unbound on the box: Pi-hole's only upstream, over TLS from here on
   unbound = "127.0.0.1#5335";
 in
@@ -170,10 +172,12 @@ in
           # Pi-hole may be writing the file right now: wait for it, not fail
           sqlite3 ${db} <<'SQL'
           .timeout 30000
-          ${lib.concatMapStrings (
-            l:
-            "INSERT OR IGNORE INTO adlist (address, enabled, comment, type) VALUES ('${sq l.url}', 1, '${sq (l.description or "")}', 0);\n"
-          ) cfg.lists}DELETE FROM adlist WHERE type = 0 AND address NOT IN (${addresses});
+          ${
+            lib.concatMapStrings (
+              l:
+              "INSERT OR IGNORE INTO adlist (address, enabled, comment, type) VALUES ('${sq l.url}', 1, '${sq (l.description or "")}', 0);\n"
+            ) cfg.lists
+          }DELETE FROM adlist WHERE type = 0 AND address NOT IN (${addresses});
           SQL
           ${pihole} -g
         '';
@@ -186,8 +190,19 @@ in
         Persistent = true;
       };
     };
-    networking.firewall.allowedUDPPorts = [ 53 ];
-    networking.firewall.allowedTCPPorts = [ 53 ];
+    # The house's own devices and the owner's own tailnet, and nobody else:
+    # not the Commonty network, where other households are. From the house
+    # network by its address; never on commonty0, whatever the source says.
+    networking.firewall.interfaces.tailscale0 = {
+      allowedUDPPorts = [ 53 ];
+      allowedTCPPorts = [ 53 ];
+    };
+    networking.firewall.extraCommands = ''
+      for proto in udp tcp; do
+        iptables -D nixos-fw ! -i commonty0 -s ${house} -p $proto --dport 53 -j nixos-fw-accept 2>/dev/null || true
+        iptables -A nixos-fw ! -i commonty0 -s ${house} -p $proto --dport 53 -j nixos-fw-accept
+      done
+    '';
 
     systemd.services.dd-verify = lib.mkIf config.dd.verify.enable {
       environment = {
