@@ -1,4 +1,9 @@
-{ config, ... }:
+{
+  config,
+  lib,
+  options,
+  ...
+}:
 {
   # A CI runner for the forge, registered under this box's name with the
   # nix label. Stateless: any box can run one, jobs land on whichever is
@@ -12,27 +17,37 @@
     ../modules/storage/cache.nix
   ];
 
-  # the members' runner registers for every repo; its token is global
-  sops.secrets.forgejo-members-runner-token = { };
-  sops.templates."forgejo-members-runner.env".content = ''
-    TOKEN=${config.sops.placeholder.forgejo-members-runner-token}
-  '';
-  dd.membersRunner.tokenFile = config.sops.templates."forgejo-members-runner.env".path;
-  sops.secrets.nix-cache-signing-key = { };
-  dd.cache.signingKeyFile = config.sops.secrets.nix-cache-signing-key.path;
-  # the box's cache key, as nix reads credentials; write is granted below
-  sops.templates."aws-credentials" = {
-    path = "/root/.aws/credentials";
-    mode = "0600";
-    content = ''
-      [default]
-      aws_access_key_id = ${config.sops.placeholder.cache-key-id}
-      aws_secret_access_key = ${config.sops.placeholder.cache-key-secret}
-    '';
-  };
-  # a runner writes the cache it reads: the storage role's key, more rights
-  dd.garage.buckets.nix-cache.allow = [
-    "read"
-    "write"
+  config = lib.mkMerge [
+    {
+      # the members' runner registers for every repo; its token is global
+      sops.secrets.forgejo-members-runner-token = { };
+      sops.templates."forgejo-members-runner.env".content = ''
+        TOKEN=${config.sops.placeholder.forgejo-members-runner-token}
+      '';
+      dd.membersRunner.tokenFile = config.sops.templates."forgejo-members-runner.env".path;
+      sops.secrets.nix-cache-signing-key = { };
+      dd.cache.signingKeyFile = config.sops.secrets.nix-cache-signing-key.path;
+      # the box's cache key, as nix reads credentials; write is granted below
+      sops.templates."aws-credentials" = {
+        path = "/root/.aws/credentials";
+        mode = "0600";
+        content = ''
+          [default]
+          aws_access_key_id = ${config.sops.placeholder.cache-key-id}
+          aws_secret_access_key = ${config.sops.placeholder.cache-key-secret}
+        '';
+      };
+      # the box's own cache key, whether or not it stores anything itself
+      sops.secrets.cache-key-id = { };
+      sops.secrets.cache-key-secret = { };
+    }
+    (lib.optionalAttrs (options.dd ? garage) {
+      # a runner writes the cache it reads: where this box runs garage, its key
+      # gets write as well as read
+      dd.garage.buckets.nix-cache.allow = [
+        "read"
+        "write"
+      ];
+    })
   ];
 }

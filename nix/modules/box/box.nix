@@ -57,6 +57,11 @@
     default = null;
     description = "whose box it is (box.json owner): services the policy keeps on the fleet owner's own hardware go only here";
   };
+  options.dd.box.memoryBytes = lib.mkOption {
+    type = lib.types.ints.unsigned;
+    default = 0;
+    description = "RAM, from the report: what sizes itself by memory starts here";
+  };
   options.dd.box.threads = lib.mkOption {
     type = lib.types.ints.positive;
     default = 1;

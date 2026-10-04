@@ -31,6 +31,7 @@ in
       dd.box.bulkPool = (box.pools or { }).bulk or "tank";
       dd.box.owner = box.owner or null;
       dd.box.threads = hw.cpu.threads;
+      dd.box.memoryBytes = hw.memoryBytes;
       dd.box.gpus = map (g: { inherit (g) render driver encode; }) hw.gpus;
     }
     # Any GPU, whoever made it: Mesa's Vulkan drivers (Intel's, AMD's, and

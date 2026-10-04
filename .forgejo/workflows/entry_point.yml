@@ -34,10 +34,33 @@ jobs:
       app: ${{ steps.detect.outputs.app }}
       draft: ${{ steps.detect.outputs.draft }}
       proven: ${{ steps.detect.outputs.proven }}
+      # every box's system is built (hosts), on every box that runs CI
+      # (builders): both from fleet/boxes.json, so a box that joins is built
+      # and builds without this file changing
+      hosts: ${{ steps.boxes.outputs.hosts }}
+      builders: ${{ steps.boxes.outputs.builders }}
+      hosts_list: ${{ steps.boxes.outputs.hosts_list }}
+      builders_list: ${{ steps.boxes.outputs.builders_list }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
         with:
           fetch-depth: 0 # the diff against the base needs history
+
+      - name: the boxes
+        id: boxes
+        run: |
+          node - <<'EOF'
+          const b = require("./fleet/boxes.json");
+          const hosts = Object.keys(b).sort();
+          const builders = hosts.filter((h) => (b[h].roles || []).includes("runner"));
+          require("fs").appendFileSync(process.env.GITHUB_OUTPUT, [
+            `hosts=${JSON.stringify(hosts)}`,
+            `builders=${JSON.stringify(builders)}`,
+            `hosts_list=${hosts.join(" ")}`,
+            `builders_list=${builders.join(" ")}`,
+          ].join("\n") + "\n");
+          console.log("hosts:", hosts.join(" "), " builders:", builders.join(" "));
+          EOF
 
       # Allowlists, not denylists: a new directory should not silently cost
       # a system build until someone remembers to exclude it. A wrong list
@@ -176,8 +199,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: [node1, node2]
-        on: [node1, node2]
+        host: ${{ fromJSON(needs.files_modified.outputs.hosts) }}
+        on: ${{ fromJSON(needs.files_modified.outputs.builders) }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: build ${{ matrix.host }} on ${{ matrix.on }}
@@ -209,8 +232,8 @@ jobs:
           API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}
-          HOSTS: node1 node2
-          BUILDERS: node1 node2
+          HOSTS: ${{ needs.files_modified.outputs.hosts_list }}
+          BUILDERS: ${{ needs.files_modified.outputs.builders_list }}
         run: |
           node --input-type=module - <<'EOF'
           const { TOKEN, API, SHA, RUN, HOSTS, BUILDERS } = process.env;

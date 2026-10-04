@@ -20,6 +20,26 @@ let
   subnet = "172.30.0.0/24";
 in
 {
+  # one member's job, and how many of them this box holds at once
+  options.dd.membersRunner.jobThreads = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = lib.min 4 config.dd.box.threads; # docker refuses more cpus than the box has
+  };
+  options.dd.membersRunner.jobMemoryGiB = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = 4;
+  };
+  options.dd.membersRunner.capacity = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = lib.max 1 (
+      lib.min 2 (
+        lib.min (config.dd.box.threads / cfg.jobThreads) (
+          config.dd.box.memoryBytes / (1024 * 1024 * 1024) / cfg.jobMemoryGiB
+        )
+      )
+    );
+    description = "members' jobs at once: what the box's threads and memory hold, at most two";
+  };
   options.dd.membersRunner.tokenFile = lib.mkOption {
     type = lib.types.nullOr lib.types.str;
     default = null;
@@ -57,7 +77,7 @@ in
       labels = [ "members:docker://ghcr.io/catthehacker/ubuntu:act-22.04" ];
       settings = {
         runner = {
-          capacity = 2;
+          inherit (cfg) capacity;
           timeout = "1h";
         };
         container = {
@@ -66,7 +86,7 @@ in
           # nothing of the host mounted; no socket handed in
           valid_volumes = [ ];
           docker_host = "-";
-          options = "--cpus=4 --memory=4g --pids-limit=1024 --security-opt=no-new-privileges";
+          options = "--cpus=${toString cfg.jobThreads} --memory=${toString cfg.jobMemoryGiB}g --pids-limit=1024 --security-opt=no-new-privileges";
           force_pull = false;
         };
         cache.enabled = false;

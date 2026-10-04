@@ -6,14 +6,18 @@
 }:
 let
   cfg = config.dd.cache;
-  url = "s3://nix-cache?endpoint=127.0.0.1:3900&scheme=http&region=us-east-1";
+  # the storage pool at this box's address for it: its own garage, or a
+  # storage box's over the tailnet (dd.box.s3)
+  url = "s3://nix-cache?endpoint=${lib.removePrefix "http://" config.dd.box.s3}&scheme=http&region=us-east-1";
   # Only the laptop's. A box's nix installs whatever it substitutes, so a
   # key in this list is a machine allowed to decide what every box that
   # reads the cache runs - and node2 is meant to sit in someone else's
   # house. Boxes still upload what they build, signed with their own key;
   # nobody has to believe them for the cache to be useful, because the
   # agent checks the release's hashes and the whole closure under them.
-  all = lib.filter (k: k != "") (lib.splitString "\n" (lib.fileContents ../../../fleet/cache-keys.pub));
+  all = lib.filter (k: k != "") (
+    lib.splitString "\n" (lib.fileContents ../../../fleet/cache-keys.pub)
+  );
   keys = lib.filter (k: lib.hasPrefix "dd-cache-laptop-" k) all;
 in
 {

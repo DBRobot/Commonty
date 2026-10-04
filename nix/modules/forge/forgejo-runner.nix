@@ -10,10 +10,26 @@ let
   name = config.networking.hostName;
 in
 {
+  # what one job takes: the biggest VM test is three VMs of 1.5G, and a
+  # build takes every thread it is given
+  options.dd.runner.jobThreads = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = 4;
+  };
+  options.dd.runner.jobMemoryGiB = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = 6;
+  };
   options.dd.runner.capacity = lib.mkOption {
-    type = lib.types.int;
-    default = 2;
-    description = "Jobs this box runs at once. A vm test is a few vms of 1-2G each; the 14G box takes two, a 62G box more.";
+    type = lib.types.ints.positive;
+    default =
+      let
+        gib = config.dd.box.memoryBytes / (1024 * 1024 * 1024);
+      in
+      lib.max 1 (
+        lib.min (config.dd.box.threads / config.dd.runner.jobThreads) (gib / config.dd.runner.jobMemoryGiB)
+      );
+    description = "Jobs this box runs at once: as many as its threads and memory hold (box.json runnerCapacity overrides)";
   };
 
   config = {
