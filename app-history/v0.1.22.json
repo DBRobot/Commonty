@@ -1,0 +1,38 @@
+{
+  "payload": {
+    "commit": "a0628fe71701cd60b07d55fcc80dc39baa09a81e",
+    "files": {
+      "commonty-setup.exe": {
+        "sha256": "1699338509bf1d59aae21c878c0d0f6a31ffb7075eada698f8fa5b8ad04d1b32",
+        "size": 4101051,
+        "url": "https://github.com/DBRobot/Commonty/releases/download/v0.1.22/commonty-setup.exe"
+      },
+      "commonty.apk": {
+        "sha256": "5a3c40dd4dbcafa0a1fcb4812e3ac45172c87bd1d2b4b09f0ad44ea70b61ecdb",
+        "size": 95258600,
+        "url": "https://github.com/DBRobot/Commonty/releases/download/v0.1.22/commonty-signed.apk"
+      },
+      "commonty_0.1.22_amd64.AppImage": {
+        "sha256": "c79e9356d1ef005e2fd61ba36d0e0bbcfa984987cd6644fd0037d7c6378e5150",
+        "size": 163383800,
+        "url": "https://github.com/DBRobot/Commonty/releases/download/v0.1.22/commonty_0.1.22_amd64.AppImage"
+      },
+      "commonty_0.1.22_amd64.deb": {
+        "sha256": "57b86056d60a6aa331ac0e6549d3da2077f1a37a4b78ea4ced3656d8758d150d",
+        "size": 16803144,
+        "url": "https://github.com/DBRobot/Commonty/releases/download/v0.1.22/commonty_0.1.22_amd64.deb"
+      },
+      "dd.exe": {
+        "sha256": "3349568c54e4ed7fc6b6e63bb77d4909f543bf7eaff13c28fb0e18db52ab44ce",
+        "size": 17893376,
+        "url": "https://github.com/DBRobot/Commonty/releases/download/v0.1.22/dd.exe"
+      }
+    },
+    "from": "DBRobot/Commonty",
+    "issued": 1791155141,
+    "kind": "app",
+    "tag": "v0.1.22"
+  },
+  "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
+  "signature": "WNk7ZWm9GiunkWXTLLXfbw4YCCUT9uAHj+REwscAudHuuJXbM4M1KGWeLFzgBXWuVTHFJOSEvBhlXvRDldTnDw=="
+}
