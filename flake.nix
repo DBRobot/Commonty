@@ -574,6 +574,7 @@
               biome
               gitleaks
               typos
+              cargo-audit
             ];
           };
           # the cli, and `git remote add origin dd::...`, which dd repo calls too

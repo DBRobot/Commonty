@@ -4,12 +4,14 @@
 # style, spelling, a likely slip - is a warning: listed here, and counted in
 # a yellow lint/warnings status on the commit that blocks nothing.
 #
-# Environment: BASE, HEAD (commits); and, to post the warnings status,
-# TOKEN, API (the repository's api), SHA, RUN (this run's page).
+# Environment: BASE, HEAD (commits), TITLE (the pull request's); and, to
+# post the warnings status, TOKEN, API (the repository's api), SHA, RUN.
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -109,8 +111,13 @@ def biome(paths):
         faults.append(f"biome: could not read its report: {(err or out)[-300:]}")
         return
     for d in report.get("diagnostics", []):
-        where = d.get("location", {}).get("path", {}).get("file", "?")
-        line = f"biome: {where}: {d.get('category', '?')}: {d.get('description', '')}"
+        loc = d.get("location") or {}
+        path = loc.get("path")
+        where = path if isinstance(path, str) else (path or {}).get("file", "?")
+        if isinstance(loc.get("start"), dict) and "line" in loc["start"]:
+            where += f":{loc['start']['line']}"
+        what = d.get("message") or d.get("description", "")
+        line = f"biome: {where}: {d.get('category', '?')}: {what}"
         (faults if d.get("severity") in ("error", "fatal") else warnings).append(line)
 
 
@@ -153,6 +160,164 @@ def spelling(paths):
         ["typos", "--format", "brief", "--config", f"{HERE}/typos.toml", *paths]
     )
     warnings.extend(f"spelling: {ln}" for ln in lines(out))
+
+
+def pinned():
+    # an action by a full commit hash or from this repository, never by a
+    # tag or a branch, which whoever holds the action's repository can move
+    files = [
+        os.path.join(".forgejo/workflows", f) for f in os.listdir(".forgejo/workflows")
+    ]
+    for root, _, names in os.walk(".forgejo/actions"):
+        files += [os.path.join(root, n) for n in names if n.endswith((".yml", ".yaml"))]
+    for f in sorted(files):
+        for n, line in enumerate(open(f), 1):
+            m = re.match(r"\s*(?:-\s*)?uses:\s*([^\s#]+)", line)
+            if not m or m.group(1).startswith("./"):
+                continue
+            if not re.search(r"@[0-9a-f]{40}$", m.group(1)):
+                faults.append(
+                    f"pinned: {f}:{n}: {m.group(1)} is not pinned to a full commit hash"
+                )
+
+
+def advisories(base, head):
+    # RustSec's advisories against Cargo.lock: a crate this pull request
+    # brings in or moves to a version with one blocks; one already there
+    # is a warning, for a deps: pull request to take up
+    if not os.path.isfile("Cargo.lock"):
+        return
+    added = set()
+    diff = subprocess.run(
+        ["git", "diff", f"{base}...{head}", "--", "Cargo.lock"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    name = None
+    for line in diff.splitlines():
+        m = re.match(r'^[ +]name = "(.+)"', line)
+        if m:
+            name = m.group(1)
+        m = re.match(r'^\+version = "(.+)"', line)
+        if m and name:
+            added.add((name, m.group(1)))
+    db = os.path.join(os.environ.get("HOME", "/tmp"), ".cache", "advisory-db")
+    code, out, err = run(
+        ["cargo-audit", "audit", "--db", db, "--file", "Cargo.lock", "--json"]
+    )
+    try:
+        report = json.loads(out)
+    except ValueError:
+        warnings.append(
+            f"advisories: the advisory database was not read: {err.strip()[-200:]}"
+        )
+        return
+    for v in report.get("vulnerabilities", {}).get("list", []):
+        pkg, adv = v["package"], v["advisory"]
+        line = f"advisory: {pkg['name']} {pkg['version']}: {adv['id']} {adv.get('title', '')}"
+        (faults if (pkg["name"], pkg["version"]) in added else warnings).append(line)
+    for kind, items in (report.get("warnings") or {}).items():
+        for w in items:
+            pkg = w.get("package", {})
+            adv = w.get("advisory") or {}
+            warnings.append(
+                f"advisory ({kind}): {pkg.get('name')} {pkg.get('version')}: {adv.get('id', '')} {adv.get('title', '')}".rstrip()
+            )
+
+
+def stale_inputs(days=90):
+    # the flake's inputs, by how long since each was last moved
+    try:
+        nodes = json.load(open("flake.lock"))["nodes"]
+    except (OSError, ValueError, KeyError):
+        return
+    root = nodes.get("root", {}).get("inputs", {})
+    for name, ref in sorted(root.items()):
+        node = nodes.get(ref if isinstance(ref, str) else "", {})
+        when = node.get("locked", {}).get("lastModified")
+        if when and time.time() - when > days * 86400:
+            age = int((time.time() - when) // 86400)
+            warnings.append(f"flake.lock: {name} was last moved {age} days ago")
+
+
+# a title's kind against what it touches: a likely mislabel, never a block
+DOCS_ONLY = re.compile(r"^(docs/|.*\.md$|LICENSE$)")
+LOCKS = re.compile(
+    r"^(flake\.lock|Cargo\.(lock|nix)|crate-hashes\.json|.*go\.(sum|mod))$"
+)
+CODE = re.compile(r"^(box|client|app)/.*\.(rs|go|js|py|sh)$")
+
+
+def kind_matches(files):
+    m = re.match(r"^(?:WIP: )?(?:release: )?([a-z]+): ", os.environ.get("TITLE", ""))
+    if not m or not files:
+        return
+    kind = m.group(1)
+    if kind == "docs" and not all(DOCS_ONLY.match(p) for p in files):
+        warnings.append("title: a docs: pull request that changes more than docs")
+    if kind == "deps" and not any(LOCKS.match(p) for p in files):
+        warnings.append("title: a deps: pull request that changes no lockfile")
+    if kind == "chore" and any(CODE.match(p) for p in files):
+        warnings.append(
+            "title: a chore: pull request that changes a program; a fix: or a feature:?"
+        )
+
+
+def slug(text):
+    # as the docs page and the bar's search make it (box/web/shell.js)
+    text = re.sub(r"[^\w\s-]", "", text.lower())
+    return re.sub(r"\s+", "-", text.strip())
+
+
+def docs_links():
+    # every link in docs/ goes somewhere: a page and its heading, or a file
+    # in the repository. And every page is reachable from docs/README.md's
+    # list, when there is one - else nobody finds it.
+    if not os.path.isdir("docs"):
+        return
+    pages = {}
+    for root, _, names in os.walk("docs"):
+        for n in names:
+            if n.endswith(".md"):
+                p = os.path.join(root, n)
+                pages[p] = open(p, encoding="utf-8").read()
+    anchors = {}
+    for p, text in pages.items():
+        found, fenced = set(), False
+        for line in text.splitlines():
+            if line.lstrip().startswith(("```", "~~~")):
+                fenced = not fenced
+            elif not fenced and (h := re.match(r"^#{1,6}\s+(.+?)\s*#*$", line)):
+                found.add(
+                    slug(re.sub(r"[`*_]|\[([^\]]*)\]\([^)]*\)", r"\1", h.group(1)))
+                )
+        anchors[p] = found
+    linked = set()
+    for p, text in pages.items():
+        here = os.path.dirname(p)
+        text = re.sub(r"```.*?```", "", text, flags=re.S)
+        for n, line in enumerate(text.splitlines(), 1):
+            for target in re.findall(r"\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)", line):
+                if re.match(r"^[a-z][a-z0-9+.-]*:", target) or target.startswith("//"):
+                    continue
+                path, _, anchor = target.partition("#")
+                dest = os.path.normpath(os.path.join(here, path)) if path else p
+                if path and not os.path.exists(dest):
+                    faults.append(f"docs: {p}:{n}: {target} goes nowhere")
+                    continue
+                if dest in pages:
+                    linked.add(dest)
+                    if anchor and anchor not in anchors[dest]:
+                        faults.append(
+                            f"docs: {p}:{n}: {target} names a heading {dest} does not have"
+                        )
+    readme = os.path.join("docs", "README.md")
+    if readme in pages:
+        for p in sorted(pages):
+            if p != readme and p not in linked:
+                warnings.append(
+                    f"docs: {p} is not linked from any page; the nav will list it under More"
+                )
 
 
 def post(state, description):
@@ -198,6 +363,11 @@ def main():
         ]
     )
     secrets(base, head)
+    pinned()
+    advisories(base, head)
+    stale_inputs()
+    kind_matches(files)
+    docs_links()
     spelling(files)
     for w in warnings:
         print(f"warning  {w}")

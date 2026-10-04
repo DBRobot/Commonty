@@ -266,6 +266,33 @@ in
       };
     };
 
+    # a run killed from outside (the forge or a runner restarting under it)
+    # is run again, once: ci-resume.py, every few minutes
+    systemd.services.dd-ci-resume = {
+      description = "Run again a ci run that a restart killed";
+      after = [ "forgejo.service" ];
+      serviceConfig = {
+        Type = "oneshot";
+        DynamicUser = true;
+        SupplementaryGroups = [ "forgejo" ]; # to open forgejo's socket
+        StateDirectory = "dd-ci-resume";
+        ExecStart = "${pkgs.python3}/bin/python3 ${./ci-resume.py}";
+      };
+      environment = {
+        FORGE = sock;
+        ADMIN = cfg.admin;
+        REPO = config.dd.repo;
+        STATE = "/var/lib/dd-ci-resume";
+      };
+    };
+    systemd.timers.dd-ci-resume = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "5min";
+        OnUnitActiveSec = "3min";
+      };
+    };
+
     services.nginx.appendHttpConfig = ''
       map $auth_user $forge_user {
         default $auth_user;

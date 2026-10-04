@@ -296,6 +296,7 @@ jobs:
           fetch-depth: 0
       - name: faults and warnings
         env:
+          TITLE: ${{ github.event.pull_request.title }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
