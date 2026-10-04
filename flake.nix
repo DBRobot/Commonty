@@ -813,6 +813,7 @@
             pkgs.fuse3 # the cli's mount
             pkgs.sops # `dd secret run -- ...` runs this
             pkgs.age
+            pkgs.age-plugin-tpm # sops encrypts to the boxes' TPM keys through it
             pkgs.cargo-tauri # `cargo tauri dev` in app/
           ]
           ++ [
@@ -895,7 +896,12 @@
           # fleet's age key goes into that process's environment, so it is
           # this repo's pinned nixpkgs and not whatever unstable is serving
           # at the moment of use.
-          inherit (pkgs) sops;
+          # (with the plugin that encrypts to the boxes' TPM keys)
+          sops = pkgs.writeShellApplication {
+            name = "sops";
+            runtimeInputs = [ pkgs.age-plugin-tpm ];
+            text = ''exec ${pkgs.sops}/bin/sops "$@"'';
+          };
           # `dd release app` checks a build's provenance with this; the
           # distribution's gh is often too old to have `attestation`
           inherit (pkgs) gh;

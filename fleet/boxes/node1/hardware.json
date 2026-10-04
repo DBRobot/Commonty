@@ -4,5 +4,6 @@
   "wired": "44:ED:57:10:00:40",
   "wifi": "wlo1",
   "gpu": { "driver": "intel", "render": "/dev/dri/renderD128" },
-  "usbNic": true
+  "usbNic": true,
+  "secretsKey": "age1tpm1qwa2gztkdup8mr7hvmymm7utnlx888j6klgq0peyxpt2q2qzgwhjxcvu44k"
 }
