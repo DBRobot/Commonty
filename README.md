@@ -58,6 +58,15 @@ silently redeploy the previous revision.
   there are four houses, the witnesses retire, the Cloudflare one last. A
   house that joins changes the validator list in a signed release, never on
   its own say.
+- **Nothing readable by Cloudflare.** The tunnel ends TLS at Cloudflare, so
+  today it sees and could change every page and request at the front door.
+  For now that is accepted, and the password vault's web page is served from
+  a Worker, not a box, so a box with root cannot swap it (the app and the
+  Bitwarden clients carry their own code and need neither). The way out:
+  TLS that ends on the box (a pass-through relay, or members over the
+  tailnet), with Cloudflare left carrying only what is end-to-end encrypted.
+  A page any server hands a browser can be changed by that server; the
+  vault page's lasting answer is the app.
 
 ## License
 
