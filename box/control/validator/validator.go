@@ -42,6 +42,8 @@ type Options struct {
 	Transport Transport
 	Logger    api.Logger
 	WAL       api.WriteAheadLog
+	// what the log held from a previous run, replayed at start
+	WALEntries [][]byte
 	// a saved state and the decision that led to it, from a previous run
 	Saved *Saved
 	// called after every decision with the new state, for a box to keep
@@ -120,7 +122,7 @@ func New(o Options) (*Validator, error) {
 		Scheduler:         time.NewTicker(250 * time.Millisecond).C,
 		Comm:              v, Signer: v, MembershipNotifier: v, Verifier: v,
 		Application: v, Assembler: v, RequestInspector: v, Synchronizer: v,
-		WAL: o.WAL, Metadata: &smartbftprotos.ViewMetadata{},
+		WAL: o.WAL, WALInitialContent: o.WALEntries, Metadata: &smartbftprotos.ViewMetadata{},
 	}
 	if o.Saved != nil && len(o.Saved.Proposal.Header) > 0 {
 		if err := v.adopt(*o.Saved); err != nil {

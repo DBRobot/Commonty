@@ -2,13 +2,23 @@
 // one node or to many, from one node. The relay reads only the address.
 package wire
 
-import "encoding/binary"
-
-// Addresses: a validator's id, or one of these.
-const (
-	ToValidators uint64 = 1 << 62
-	ToAll        uint64 = 1<<62 + 1
+import (
+	"encoding/binary"
+	"fmt"
 )
+
+// Addresses: a validator's or box's id, or one of these. Kept under 2^53,
+// where a JavaScript number (the relay) still holds them exactly.
+const (
+	ToValidators uint64 = 1 << 50
+	ToAll        uint64 = 1<<50 + 1
+)
+
+// Hello is what a connection signs to say who it is: its address and the
+// time, so a recorded one is soon worthless.
+func Hello(id uint64, at int64) []byte {
+	return []byte(fmt.Sprintf("commonty relay v1\x00%d\x00%d", id, at))
+}
 
 // Kinds of frame.
 const (

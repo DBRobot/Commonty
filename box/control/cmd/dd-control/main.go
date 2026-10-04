@@ -8,8 +8,11 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -49,8 +52,10 @@ func (logger) Panicf(f string, a ...any) { log.Panicf(f, a...) }
 type relay struct {
 	url  string
 	self uint64
-	mu   sync.Mutex
-	conn *websocket.Conn
+	// signs the hello that says who this connection is
+	hello func(msg []byte) (string, error)
+	mu    sync.Mutex
+	conn  *websocket.Conn
 }
 
 func (r *relay) Send(to uint64, kind byte, p []byte) {
@@ -68,7 +73,15 @@ func (r *relay) Send(to uint64, kind byte, p []byte) {
 func (r *relay) run(receive func(from uint64, kind byte, p []byte), connected func()) {
 	wait := time.Second
 	for {
-		c, _, err := websocket.Dial(context.Background(), fmt.Sprintf("%s?id=%d", r.url, r.self), nil)
+		at := time.Now().Unix()
+		sig, err := r.hello(wire.Hello(r.self, at))
+		if err != nil {
+			log.Printf("relay: signing the hello: %v; again in %s", err, wait)
+			time.Sleep(wait)
+			wait = min(wait*2, 30*time.Second)
+			continue
+		}
+		c, _, err := websocket.Dial(context.Background(), fmt.Sprintf("%s?id=%d&at=%d&sig=%s", r.url, r.self, at, sig), nil)
 		if err != nil {
 			log.Printf("relay: %v; again in %s", err, wait)
 			time.Sleep(wait)
@@ -205,6 +218,7 @@ func main() {
 	roles := flag.String("roles", "", "roles this box runs, comma separated")
 	every := flag.Duration("heartbeat", 30*time.Second, "how often to heartbeat")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
+	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -239,7 +253,11 @@ func main() {
 	if mine != nil {
 		self = mine.ID // a voting box is addressed as its validator
 	}
-	r := &relay{url: *relayURL, self: self}
+	sign := func(m []byte) (string, error) { return tpmSign(*tpmKeys, m) }
+	if *softKey != "" {
+		sign = softSigner(*softKey)
+	}
+	r := &relay{url: *relayURL, self: self, hello: sign}
 
 	var n node
 	var ask func()
@@ -251,7 +269,8 @@ func main() {
 		if base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey)) != mine.Key {
 			log.Fatalf("this box's validator key is not the one the config names")
 		}
-		w, err := wal.Create(logger{}, filepath.Join(*dir, "wal"), &wal.Options{Metrics: wal.NewMetrics(&disabled.Provider{}, "control")})
+		// made the first time, reopened and replayed after a restart
+		w, walEntries, err := wal.InitializeAndReadAll(logger{}, filepath.Join(*dir, "wal"), &wal.Options{Metrics: wal.NewMetrics(&disabled.Provider{}, "control")})
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -263,7 +282,7 @@ func main() {
 			}
 		}
 		v, err := validator.New(validator.Options{
-			Config: cfg, ID: mine.ID, Key: key, Transport: r, Logger: logger{}, WAL: w, Saved: saved,
+			Config: cfg, ID: mine.ID, Key: key, Transport: r, Logger: logger{}, WAL: w, WALEntries: walEntries, Saved: saved,
 			Persist: func(s validator.Saved) {
 				b, _ := json.Marshal(s)
 				tmp := filepath.Join(*dir, "saved.json.tmp")
@@ -277,6 +296,9 @@ func main() {
 		}
 		n = v
 		ask = func() {}
+		r.hello = func(m []byte) (string, error) {
+			return base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, m)), nil
+		}
 		go func() {
 			// start once the relay is up, so the first catch-up is heard
 			for {
@@ -310,7 +332,7 @@ func main() {
 			seq++
 			body, _ := json.Marshal(state.Heartbeat{Facts: facts(), Roles: splitRoles(*roles)})
 			q := state.Request{Kind: "heartbeat", Box: *box, Seq: seq, Body: body}
-			if sig, err := tpmSign(*tpmKeys, q.Bytes()); err != nil {
+			if sig, err := sign(q.Bytes()); err != nil {
 				log.Printf("heartbeat: %v", err)
 			} else {
 				q.Sig = sig
@@ -343,4 +365,28 @@ func splitRoles(s string) []string {
 		}
 	}
 	return out
+}
+
+// softSigner: for tests on machines without this box's TPM
+func softSigner(path string) func([]byte) (string, error) {
+	return func(m []byte) (string, error) {
+		der, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		k, err := x509.ParsePKCS8PrivateKey(der)
+		if err != nil {
+			return "", err
+		}
+		ek, ok := k.(*ecdsa.PrivateKey)
+		if !ok {
+			return "", errors.New("not a P-256 key")
+		}
+		h := sha256.Sum256(m)
+		sig, err := ecdsa.SignASN1(rand.Reader, ek, h[:])
+		if err != nil {
+			return "", err
+		}
+		return base64.RawURLEncoding.EncodeToString(sig), nil
+	}
 }
