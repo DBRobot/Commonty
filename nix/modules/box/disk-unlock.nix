@@ -15,6 +15,7 @@
   config,
   lib,
   pkgs,
+  utils,
   ddScript,
   ...
 }:
@@ -44,6 +45,16 @@ let
       WAIT_REFUSED = cfg.waits.refused;
     }
   );
+  # the pools are this box's own before anything on them runs (disk-check.sh)
+  check = pkgs.writeShellScript "dd-disk-check" (builtins.readFile ./disk-check.sh);
+  # the pools the initrd imports (root's) and the ones imported after it
+  poolOf = d: builtins.head (lib.splitString "/" d);
+  early = lib.unique (
+    map (fs: poolOf fs.device) (
+      lib.filter (fs: fs.fsType == "zfs" && utils.fsNeededForBoot fs) (lib.attrValues config.fileSystems)
+    )
+  );
+  late = lib.filter (p: !(builtins.elem p early)) config.boot.zfs.extraPools;
   # the same, on the running box, as root: the keys in /run/dd again, for
   # making or opening a dataset by hand (shredded at the next boot's end)
   now = pkgs.writeShellApplication {
@@ -146,6 +157,7 @@ in
       # the TPM library finds its device driver at run time: carried whole
       boot.initrd.systemd.storePaths = [
         boot
+        check
         pkgs.tpm2-tss
       ];
       boot.initrd.systemd.contents."/etc/ssl/certs/ca-certificates.crt".source =
@@ -173,6 +185,39 @@ in
           Environment = "TPM2TOOLS_TCTI=device:/dev/tpmrm0";
         };
       };
+      # Before root is mounted, and before the later pools' datasets are:
+      # each pool is the one our key opened, or the keys go and boot stops
+      boot.initrd.systemd.services.dd-disk-check = lib.mkIf (early != [ ]) {
+        description = "Check the root pool is this box's own before booting it";
+        requiredBy = [ "sysroot.mount" ];
+        before = [ "sysroot.mount" ];
+        after = map (p: "zfs-import-${p}.service") early;
+        requires = map (p: "zfs-import-${p}.service") early;
+        unitConfig.DefaultDependencies = false;
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = "${check} ${lib.concatStringsSep " " early}";
+          StandardOutput = "journal+console";
+          StandardError = "journal+console";
+          Environment = "TPM2TOOLS_TCTI=device:/dev/tpmrm0";
+        };
+      };
+      systemd.services.dd-disk-check = lib.mkIf (late != [ ]) {
+        description = "Check the later pools are this box's own before mounting them";
+        requiredBy = [ "zfs-mount.service" ];
+        before = [ "zfs-mount.service" ];
+        after = map (p: "zfs-import-${p}.service") late;
+        unitConfig.DefaultDependencies = false;
+        path = tools ++ [ config.boot.zfs.package ];
+        environment.TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = "${check} ${lib.concatStringsSep " " late}";
+        };
+      };
+
       # the keys leave memory once every pool has them
       systemd.services.dd-disk-key-forget = {
         description = "Forget the disks' key once the pools are open";

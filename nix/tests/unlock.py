@@ -74,3 +74,19 @@ worker.succeed(f"printf '%s\\n' '{nix['paper']}' | script -qc 'dd disk recover /
 key = worker.succeed("base64 -w0 /root/recovered.key").strip()
 box.succeed(f"echo {key} | base64 -d > /root/recovered.key && chmod 400 /root/recovered.key")
 box.succeed("zfs unmount data/enc && zfs unload-key data/enc && zfs load-key -L file:///root/recovered.key data/enc && zfs mount data/enc && grep -q kept /data/proof")
+
+# 5. a swapped disk: a pool with the same name, its "enc" not encrypted at
+# all. The box unlocks at home as always, then refuses the pool before
+# mounting anything on it: the keys are gone and the TPM signs nothing more
+# this boot (disk-check.sh)
+box.succeed("zfs unmount -a; zpool destroy data")
+box.succeed("zpool create -f -O mountpoint=none data /dev/vdb")
+box.succeed("zfs create -o mountpoint=/data data/enc && echo planted > /data/proof && zfs unmount data/enc")
+box.shutdown()
+box.start()
+box.wait_for_unit("multi-user.target")
+box.succeed("journalctl -b -o cat | grep -q 'dd-unlock: unlocked'")
+box.succeed("journalctl -b -o cat | grep -q 'data/enc is not under data/enc\\|not this box'")
+box.fail("grep -q planted /data/proof")
+box.succeed("test ! -e /run/dd/disk.key && test ! -e /run/dd/vault.key")
+box.fail((sign + " && echo hi > m && tpm2_sign -Q -c k.ctx -g sha256 -s ecdsa -f plain -p session:s.ctx -o sig m").format("sig"))
