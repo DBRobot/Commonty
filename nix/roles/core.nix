@@ -8,7 +8,9 @@ let
   );
   # the other boxes in this house
   housePeers = lib.mapAttrsToList (_: b: b.tailnet) (
-    lib.filterAttrs (n: b: n != config.networking.hostName && (b.siteId or null) == (me.siteId or "")) boxes
+    lib.filterAttrs (
+      n: b: n != config.networking.hostName && (b.siteId or null) == (me.siteId or "")
+    ) boxes
   );
   # the channels between boxes that are still here, each waiting on the
   # change that ends it (README: no box talks to another box)
