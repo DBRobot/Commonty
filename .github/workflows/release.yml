@@ -6,6 +6,13 @@
 # the client, and only the client.
 name: release
 
+# What it builds with is pinned, as the fleet's builds are: the same Rust
+# the flake compiles with (nix/tests/ci.nix holds the two together), one
+# tauri-cli, and every download checked against its hash. A tag rebuilt
+# next month makes what it made today.
+env:
+  TAURI_CLI: "2.12.1"
+
 on:
   push:
     tags: ["v*"]
@@ -34,6 +41,23 @@ jobs:
           sudo apt-get install -y gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good gstreamer1.0-libav
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with: { toolchain: "1.95.0" }
+      # the dependencies, built once per Cargo.lock and toolchain, as the
+      # fleet's own builds keep them apart from our code: a tag compiles
+      # only what changed since the last one
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { key: "${{ github.job }}" }
+      # tauri-cli, built once per version rather than on every run
+      - id: tauri-cli
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-tauri
+            ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-${{ env.TAURI_CLI }}-${{ runner.os }}-rust-1.95.0
+      - if: steps.tauri-cli.outputs.cache-hit != 'true'
+        shell: bash
+        run: cargo install tauri-cli --version "=$TAURI_CLI" --locked
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with: { go-version-file: app/net/go.mod, cache-dependency-path: app/net/go.sum }
       - name: the engine the app links
@@ -46,7 +70,6 @@ jobs:
         env:
           COMMONTY_NET_LIB_DIR: ${{ runner.temp }}/netlib
         run: |
-          cargo install tauri-cli --version '^2' --locked
           cd app && cargo tauri build --bundles deb,appimage
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -70,7 +93,24 @@ jobs:
         run: (yes || true) | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
+          toolchain: "1.95.0"
           targets: aarch64-linux-android,x86_64-linux-android
+      # the dependencies, built once per Cargo.lock and toolchain, as the
+      # fleet's own builds keep them apart from our code: a tag compiles
+      # only what changed since the last one
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { key: "${{ github.job }}" }
+      # tauri-cli, built once per version rather than on every run
+      - id: tauri-cli
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-tauri
+            ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-${{ env.TAURI_CLI }}-${{ runner.os }}-rust-1.95.0
+      - if: steps.tauri-cli.outputs.cache-hit != 'true'
+        shell: bash
+        run: cargo install tauri-cli --version "=$TAURI_CLI" --locked
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         # the Go the flake builds with: "stable" moved to 1.27, which the
         # json package tailscale pins does not build under
@@ -89,7 +129,6 @@ jobs:
         env:
           COMMONTY_NET_LIB_DIR: ${{ runner.temp }}/jni
         run: |
-          cargo install tauri-cli --version '^2' --locked
           mkdir -p app/gen/android/app/src/main/jniLibs
           cp -r "$RUNNER_TEMP/jni/." app/gen/android/app/src/main/jniLibs/
           # the two abis the engine is built for; tauri would build all four
@@ -108,6 +147,23 @@ jobs:
         # would otherwise build the default branch under the tag's name
         with: { ref: "${{ github.event.inputs.tag || github.ref }}" }
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with: { toolchain: "1.95.0" }
+      # the dependencies, built once per Cargo.lock and toolchain, as the
+      # fleet's own builds keep them apart from our code: a tag compiles
+      # only what changed since the last one
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { key: "${{ github.job }}" }
+      # tauri-cli, built once per version rather than on every run
+      - id: tauri-cli
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-tauri
+            ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-${{ env.TAURI_CLI }}-${{ runner.os }}-rust-1.95.0
+      - if: steps.tauri-cli.outputs.cache-hit != 'true'
+        shell: bash
+        run: cargo install tauri-cli --version "=$TAURI_CLI" --locked
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         # the Go the flake builds with: "stable" moved to 1.27, which the
         # json package tailscale pins does not build under
@@ -128,8 +184,14 @@ jobs:
           ls -la "$RUNNER_TEMP/netlib"
       - name: rclone, which the drive needs
         shell: bash
+        env:
+          RCLONE: v1.75.1
+          RCLONE_SHA256: 200eb602c126d82aa38b51e0f6b9ae837473ff99b51278d3f6f837574c494d6e
         run: |
-          curl -sSLo rclone.zip https://downloads.rclone.org/rclone-current-windows-amd64.zip
+          # one version, checked: "current" would be whatever rclone put
+          # there that day, and the attestation would vouch for it all the same
+          curl -sSLo rclone.zip "https://downloads.rclone.org/$RCLONE/rclone-$RCLONE-windows-amd64.zip"
+          echo "$RCLONE_SHA256  rclone.zip" | sha256sum -c -
           7z x rclone.zip -orclone-out >/dev/null
           mkdir -p app/bin
           find rclone-out -name rclone.exe -exec cp {} app/bin/ \;
@@ -141,8 +203,10 @@ jobs:
           # The credit it asks for is on the downloads page and in the
           # README: WinFsp - Windows File System Proxy, (C) Bill Zissimopoulos
           curl -sSLo app/bin/winfsp.msi "$WINFSP_URL"
+          echo "$WINFSP_SHA256  app/bin/winfsp.msi" | sha256sum -c -
         env:
           WINFSP_URL: https://github.com/winfsp/winfsp/releases/download/v2.0/winfsp-2.0.23075.msi
+          WINFSP_SHA256: 6324dc81194a6a08f97b6aeca303cf5c2325c53ede153bae9fc4378f0838c101
       - name: the cli, which needs none of the gui
         shell: bash
         run: cargo build --release -p dd
@@ -151,7 +215,6 @@ jobs:
         env:
           COMMONTY_NET_LIB_DIR: ${{ runner.temp }}/netlib
         run: |
-          cargo install tauri-cli --version '^2' --locked
           cd app && cargo tauri build --bundles nsis
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -187,6 +250,11 @@ jobs:
           find out/windows -path '*nsis*' -name '*.exe' | head -1 | xargs -I{} cp {} rel/commonty-setup.exe
           find out/windows -name 'dd.exe' | head -1 | xargs -I{} cp {} rel/dd.exe
           ls -la rel/
+          # all five, or no release: one gone missing would ship as a
+          # greyed-out download instead of a failed build anyone sees
+          for f in "commonty_${v}_amd64.deb" "commonty_${v}_amd64.AppImage" commonty.apk commonty-setup.exe dd.exe; do
+            [ -s "rel/$f" ] || { echo "missing: $f"; exit 1; }
+          done
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: rel/*

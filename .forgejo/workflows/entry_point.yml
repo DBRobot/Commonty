@@ -99,8 +99,9 @@ jobs:
           nix=false; rust=false; vm=false; app=false
           # the rust is built by the flake too, so a rust change is a nix
           # change; and docs/ is in every box's pages (box/verify docs.rs),
-          # so it is built, though nothing in a vm or a test reads it
-          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|secrets/|data/|docs/|box/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/)' && nix=true
+          # so it is built, though nothing in a vm or a test reads it; and
+          # the app's release build is held to the flake's Rust (ci.nix)
+          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|secrets/|data/|docs/|box/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/|\.github/)' && nix=true
           echo "$changed" | grep -qE '^(box/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/)' && rust=true
           # boxes booted as vms: only when what a box runs changed, not for
           # every client or host tweak. Minutes, so spent where it counts.
