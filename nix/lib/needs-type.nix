@@ -5,7 +5,9 @@
 { lib }:
 let
   t = lib.types;
+  # sizes are binary: 1G is 1024^3 bytes, as du and systemd count them
   size = t.strMatching "[0-9]+(\\.[0-9]+)?[KMGT]";
+  size0 = t.strMatching "0|[0-9]+(\\.[0-9]+)?[KMGT]";
   want = t.submodule {
     options = {
       arch = lib.mkOption {
@@ -52,15 +54,42 @@ let
       };
       kvm = lib.mkOption { type = t.bool; default = false; };
       nestedKvm = lib.mkOption { type = t.bool; default = false; };
+    };
+  };
+  # where it talks, which is not hardware but still decides where it can
+  # go (a box on a filtered line) and, later, what its firewall lets out
+  network = t.submodule {
+    options = {
       outbound = lib.mkOption {
-        type = t.listOf t.str;
-        default = [ ];
-        description = "hosts it has to reach on the internet";
+        type = t.either (t.enum [ "none" "internet" ]) (t.listOf t.str);
+        description = "none; internet (no fixed hosts, like search); or the hosts it reaches";
+      };
+      inbound = lib.mkOption {
+        type = t.enum [ "localhost" "tailnet" "public" ];
+        description = "who reaches it: only this box; the Commonty network; anyone";
       };
     };
   };
-  part = t.submodule {
+  # what it costs to run, measured where it runs (systemd's peak, du of its
+  # state); every service says, so placement can pack boxes
+  uses = t.submodule {
     options = {
+      memory = lib.mkOption { type = size0; };
+      storage = lib.mkOption { type = size0; };
+      estimated = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "true where it runs nowhere yet to be measured";
+      };
+    };
+  };
+  # a variant adds to the base; only the base must say everything
+  part =
+    full:
+    t.submodule {
+      options = {
+        uses = lib.mkOption ({ type = if full then uses else t.nullOr uses; } // lib.optionalAttrs (!full) { default = null; });
+        network = lib.mkOption ({ type = if full then network else t.nullOr network; } // lib.optionalAttrs (!full) { default = null; });
       requires = lib.mkOption { type = want; default = { }; description = "it does not run without these"; };
       faster = lib.mkOption { type = want; default = { }; description = "it runs without these, slower"; };
       "with" = lib.mkOption {
@@ -74,14 +103,14 @@ let
         description = "what of people's data it can read; null: as the base says";
       };
     };
-  };
+    };
 in
 t.attrsOf (t.submodule {
   options = {
     what = lib.mkOption { type = t.str; };
-    base = lib.mkOption { type = part; default = { }; };
+    base = lib.mkOption { type = part true; };
     variants = lib.mkOption {
-      type = t.attrsOf part;
+      type = t.attrsOf (part false);
       default = { };
       description = "what it can run, each with its own needs on top of the base (a model, a game)";
     };
