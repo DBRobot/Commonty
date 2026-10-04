@@ -107,8 +107,8 @@ in
     };
     memoryMiB = lib.mkOption {
       type = lib.types.int;
-      default = 16384;
-      description = "memory every running guest on this box may have together";
+      default = lib.max 4096 (config.dd.box.memoryBytes / (1024 * 1024) / 3);
+      description = "memory every running guest and its qemu on this box may have together: a third of the box's (box.json can say otherwise)";
     };
     portBase = lib.mkOption {
       type = lib.types.port;
@@ -118,7 +118,7 @@ in
     portCount = lib.mkOption {
       type = lib.types.ints.positive;
       default = 200;
-      description = "how many ports from portBase instances may be handed; the firewall opens exactly these on both tunnels";
+      description = "how many ports from portBase instances may be handed (a game's fixed ports are its own, data/games/catalogue.json)";
     };
     kvm = lib.mkOption {
       type = lib.types.bool;
@@ -134,18 +134,20 @@ in
 
   config = lib.mkIf cfg.enable {
     # A server's ports are open to the people invited to it and to no one
-    # else. Game traffic from the fleet's network goes through a chain of its
-    # own, one rule per invited device and port; empty, it lets nothing
-    # through and the packet goes on to the firewall's refusal. Nothing else
-    # opens these ports, on any interface. games-access fills the chain.
+    # else, on the Commonty network only (never the owner's tailnet). All of
+    # that network's traffic passes through a chain of its own, one rule per
+    # invited device and port, the pool's and a game's fixed ones alike; a
+    # packet no rule takes comes back to the firewall as it was. Nothing
+    # else opens these ports, on any interface. games-access fills the chain.
     networking.firewall.extraCommands = ''
       for ipt in iptables ip6tables; do
         $ipt -N dd-games 2>/dev/null || true
         $ipt -F dd-games
         for proto in tcp udp; do
           $ipt -D nixos-fw -i commonty0 -p $proto --dport ${range} -j dd-games 2>/dev/null || true
-          $ipt -I nixos-fw 1 -i commonty0 -p $proto --dport ${range} -j dd-games
         done
+        $ipt -D nixos-fw -i commonty0 -j dd-games 2>/dev/null || true
+        $ipt -I nixos-fw 1 -i commonty0 -j dd-games
       done
     '';
     networking.firewall.extraStopCommands = ''

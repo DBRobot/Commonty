@@ -37,9 +37,9 @@ box.fail("journalctl -u llama-swap --no-pager | grep -q 'Once upon a time'")
 # and may not reach inside the house or the tailnet. (No internet here, so
 # the engines come back empty; the shape is what is checked.)
 box.wait_for_unit("searx.service")
-box.wait_until_succeeds("curl -sf 'http://127.0.0.1:8888/search?q=test&format=json' | grep -q '\"results\"'", timeout=120)
-listen = box.succeed("ss -Hltn 'sport = :8888'")
+box.wait_until_succeeds("curl -sf 'http://127.0.0.1:4196/search?q=test&format=json' | grep -q '\"results\"'", timeout=120)
+listen = box.succeed("ss -Hltn 'sport = :4196'")
 # the local address of every listening socket on the port: loopback alone
-assert [l.split()[3] for l in listen.splitlines()] == ["127.0.0.1:8888"], listen
+assert [l.split()[3] for l in listen.splitlines()] == ["127.0.0.1:4196"], listen
 deny = box.succeed("systemctl show -p IPAddressDeny searx.service")
 assert "192.168.0.0/16" in deny and "100.64.0.0/10" in deny, deny

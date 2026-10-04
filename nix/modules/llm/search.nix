@@ -5,7 +5,9 @@
   ...
 }:
 let
-  port = 8888;
+  # ours, beside the other dd ports: game servers have fixed ports of their
+  # own (satisfactory insists on 8888), and the registry reserves them
+  port = 4196;
   run = "/run/dd-search";
 in
 {

@@ -55,9 +55,18 @@ pub struct Game {
     /// variables that are ports: each gets one from the pool
     #[serde(default)]
     pub ports: Vec<String>,
+    /// the egg's own defaults: what it would choose, not what it needs
     #[serde(default)]
     pub port_defaults: BTreeMap<String, String>,
+    /// ports the game tells its clients and will not move: that number on
+    /// the box, or no server of it here. Curated (data/games/resolve.py
+    /// FIXED_PORTS); every other port comes from the pool
+    #[serde(default)]
+    pub fixed_ports: BTreeMap<String, u16>,
 }
+/// MiB a guest's qemu takes on the box beyond the guest's own memory
+pub const QEMU_OVERHEAD_MIB: u64 = 512;
+
 fn ctrl_c() -> String {
     "^C".into()
 }
@@ -509,11 +518,7 @@ impl Manager {
         for var in &spec.ports {
             // a port the game insists on (it tells clients that number) is
             // that number or nothing; the rest come from the pool
-            let port = match spec
-                .port_defaults
-                .get(var)
-                .and_then(|d| d.parse::<u16>().ok())
-            {
+            let port = match spec.fixed_ports.get(var).copied() {
                 Some(fixed) => {
                     if used.contains(&fixed) {
                         bail!(
@@ -621,12 +626,13 @@ impl Manager {
     }
 
     fn room_for(&self, all: &[Instance], more: u64) -> Result<()> {
+        // each guest's memory, and what its qemu takes beside it
         let up: u64 = all
             .iter()
             .filter(|i| i.desired == "running")
-            .map(|i| i.memory)
+            .map(|i| i.memory + QEMU_OVERHEAD_MIB)
             .sum();
-        if up + more > self.cfg.memory_budget {
+        if up + more + QEMU_OVERHEAD_MIB > self.cfg.memory_budget {
             bail!("this box is full of games right now; try again when one stops");
         }
         Ok(())
@@ -1073,9 +1079,19 @@ mod tests {
                     },
                 ],
                 ports: vec!["SERVER_PORT".into(), "QUERY_PORT".into()],
-                port_defaults: BTreeMap::new(),
+                // valheim's egg would pick 2456: only a default
+                port_defaults: BTreeMap::from([("SERVER_PORT".into(), "2456".into())]),
+                fixed_ports: BTreeMap::new(),
             },
         );
+        // a game that tells its clients its own ports: they cannot move
+        let mut satisfactory = catalogue["valheim"].clone();
+        satisfactory.id = "satisfactory".into();
+        satisfactory.name = "Satisfactory".into();
+        satisfactory.ports = vec!["RELIABLE_PORT".into(), "SERVER_PORT".into()];
+        satisfactory.fixed_ports =
+            BTreeMap::from([("SERVER_PORT".into(), 7777), ("RELIABLE_PORT".into(), 8888)]);
+        catalogue.insert("satisfactory".to_string(), satisfactory);
         let fake = Arc::new(Fake::default());
         let m = Manager::new(
             Config {
@@ -1262,8 +1278,33 @@ mod tests {
     }
 
     #[test]
+    fn only_a_game_that_insists_keeps_its_own_port() {
+        let (m, _) = manager(5, 1 << 20);
+        // satisfactory tells its clients 7777 and 8888: those, host and guest
+        let s = m.create("a", "satisfactory", &BTreeMap::new()).unwrap();
+        let mut got: Vec<u16> = s.ports.iter().map(|p| p.port).collect();
+        got.sort();
+        assert_eq!(got, vec![7777, 8888]);
+        // one of it per box
+        let e = m
+            .create("b", "satisfactory", &BTreeMap::new())
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("needs port"), "{e}");
+        // an egg's default (valheim's 2456) is only what it would pick: the
+        // pool's instead
+        let v = m.create("c", "valheim", &BTreeMap::new()).unwrap();
+        assert!(
+            v.ports.iter().all(|p| (27000..27200).contains(&p.port)),
+            "{:?}",
+            v.ports
+        );
+    }
+
+    #[test]
     fn the_box_has_so_much_memory_and_so_many_ports() {
-        let (m, _) = manager(5, 12288);
+        // two worlds of 6144 and each qemu's share: room for two, not three
+        let (m, _) = manager(5, 2 * (6144 + QEMU_OVERHEAD_MIB));
         m.create("a", "valheim", &BTreeMap::new()).unwrap();
         m.create("b", "valheim", &BTreeMap::new()).unwrap();
         let e = m

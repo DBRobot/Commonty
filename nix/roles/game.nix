@@ -7,8 +7,6 @@
   imports = [ ../modules/games/games.nix ];
 
   dd.games.enable = true;
-  # node1's 62G has room for a couple of worlds beside everything else
-  dd.games.memoryMiB = 20480;
 
   dd.home.services = [
     {
