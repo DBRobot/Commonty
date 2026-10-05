@@ -4,9 +4,33 @@
 #   scripts/laptop-setup
 #
 # - /dev/kvm usable by nix's build users, so VM tests run at full speed
+# - the fleet's own network (below)
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 sudo install -m 0644 "$here/nix/laptop/60-kvm.rules" /etc/udev/rules.d/60-kvm.rules
 sudo udevadm control --reload
 sudo udevadm trigger --name-match=kvm
 ls -l /dev/kvm
+
+# - the fleet's own network, as the owner's device: a second tailscaled and
+#   the bridge to its control server, joined with a key the gate hands this
+#   laptop's identity (dd token). The owner's devices reach ssh, dns and the
+#   cache on the owner's boxes there (nix/modules/net/headscale.nix).
+bridge=$(nix build --no-link --print-out-paths "$here#netbridge")
+# a profile: a garbage collection root the unit can read
+sudo "$(command -v nix-env)" --profile /nix/var/nix/profiles/commonty-netbridge --set "$bridge"
+sudo install -m 0644 "$here/nix/laptop/commonty-net.service" /etc/systemd/system/commonty-net.service
+sudo install -m 0644 "$here/nix/laptop/commonty-net-bridge.service" /etc/systemd/system/commonty-net-bridge.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now commonty-net.service commonty-net-bridge.service
+sock=/run/commonty-net/tailscaled.sock
+if ! sudo tailscale --socket "$sock" status --json | jq -e '.BackendState == "Running"' >/dev/null; then
+  token=$(dd token)
+  key=$(curl -fsS -X POST -H "Authorization: Bearer $token" https://home.commonty.org/_dd/network/join | jq -r .key)
+  printf '%s' "$key" | sudo tee /run/commonty-net/join.key >/dev/null
+  sudo tailscale --socket "$sock" up --login-server=http://127.0.0.1:41643 \
+    --auth-key=file:/run/commonty-net/join.key --hostname="$(hostname)" \
+    --accept-dns=false --accept-routes=false --timeout=60s
+  sudo rm -f /run/commonty-net/join.key
+fi
+echo "on the fleet's network as $(sudo tailscale --socket "$sock" ip -4)"

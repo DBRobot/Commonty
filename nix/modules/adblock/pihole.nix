@@ -93,6 +93,10 @@ in
         misc.dnsmasq_lines = [
           "listen-address=${cfg.lan}"
           "listen-address=${tailnet}"
+        ]
+        # the owner's devices away from home, on the fleet's network
+        ++ lib.optional (config.dd.box.net != "") "listen-address=${config.dd.box.net}"
+        ++ [
           # the box itself: Pi-hole's own list update checks it answers here
           "listen-address=127.0.0.1"
           "bind-dynamic"
@@ -190,9 +194,11 @@ in
         Persistent = true;
       };
     };
-    # The house's own devices and the owner's own tailnet, and nobody else:
-    # not the Commonty network, where other households are. From the house
-    # network by its address; never on commonty0, whatever the source says.
+    # The house's own devices and the owner's own devices, and nobody else:
+    # not the rest of the Commonty network, where other households are.
+    # From the house network by its address, never on commonty0 whatever
+    # the source says; on commonty0 the owner's devices alone (roles/core.nix,
+    # the dd-owner set).
     networking.firewall.interfaces.tailscale0 = {
       allowedUDPPorts = [ 53 ];
       allowedTCPPorts = [ 53 ];

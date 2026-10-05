@@ -68,7 +68,7 @@ got = json.loads(
         f"curl -sf -X POST -H 'Authorization: Bearer {token}' http://127.0.0.1:4181/_dd/network/join"
     )
 )
-assert got["control_url"] == "http://127.0.0.1:8085", got
+assert got["control_url"] == "http://box:8085", got
 assert got["user"] == "sarah", got
 assert len(got["key"]) > 20, got
 # in headscale: sarah exists, with a key that is hers alone and once (a
@@ -140,3 +140,32 @@ tagged = [k for k in keys if "tag:box" in (k.get("aclTags") or k.get("acl_tags")
 assert tagged and all(not k.get("reusable") for k in tagged), keys
 # the same request again, copied off the wire: nothing more
 assert box.succeed(f"{post} < /root/ask.json").strip() == "429"
+
+# The owner's devices administer the box; another member's do not. sarah
+# owns it (dd.box.owner); kim is a member with a device of her own.
+box.succeed("headscale users create kim")
+kim_id = box.succeed(
+    "headscale users list -o json | jq -r '.[] | select(.name == \"kim\") | .id'"
+).strip()
+kim_key = box.succeed(
+    f"headscale preauthkeys create --user {kim_id} --expiration 10m"
+).strip()
+for vm, k in ((laptop, got["key"]), (other, kim_key)):
+    vm.wait_for_unit("tailscaled.service")
+    vm.succeed(
+        f"tailscale up --login-server http://box:8085 --auth-key {k} --accept-dns=false --timeout=60s"
+    )
+box_ip = ip
+laptop_ip = laptop.succeed("tailscale ip -4").strip()
+# the box's own view of whose each device is, into the set the firewall reads
+box.wait_until_succeeds(
+    "tailscale --socket /run/commonty-net/tailscaled.sock status --json | jq -e '.Peer | length >= 2'",
+    timeout=60,
+)
+box.succeed("systemctl start dd-owner-devices.service")
+members = box.succeed("ipset list dd-owner")
+assert laptop_ip in members, members
+assert other.succeed("tailscale ip -4").strip() not in members, members
+# sarah's laptop reaches ssh on the box; kim's does not
+laptop.wait_until_succeeds(f"nc -z -w 5 {box_ip} 22", timeout=60)
+other.fail(f"nc -z -w 5 {box_ip} 22")

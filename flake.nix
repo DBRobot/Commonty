@@ -1009,7 +1009,7 @@
             if box.public then
               "https://files.commonty.org/_dd/directory"
             else
-              "http://${box.tailnet}:4181/_dd/directory";
+              "http://${box.net}:4181/_dd/directory";
           # a role that declares secrets imports roles/_sops.nix; the sops
           # module has to be present for it. Roles are files; look inside.
           needsSops =
@@ -1021,14 +1021,14 @@
             dd.garage = {
               zone = box.regionId;
               inherit (box.garage) capacity dataDir;
-              publicAddr = "${box.tailnet}:3901";
-              peers = lib.mapAttrsToList (_: b: "${b.garage.id}@${b.tailnet}:3901") (
+              publicAddr = "${box.net}:3901";
+              peers = lib.mapAttrsToList (_: b: "${b.garage.id}@${b.net}:3901") (
                 lib.filterAttrs (n: b: n != name && b.garage ? id) storage
               );
             };
           };
           # closures come from the nix-cache bucket in the garage cluster:
-          # through the box's own garage, or a storage box's over the tailnet
+          # through the box's own garage, or a storage box's over the fleet's network
           cacheOf =
             name: box:
             let
@@ -1036,17 +1036,17 @@
                 if builtins.elem "storage" box.roles then
                   "127.0.0.1"
                 else
-                  (builtins.head (builtins.attrValues storage)).tailnet;
+                  (builtins.head (builtins.attrValues storage)).net;
             in
             {
               dd.agent.cache = "s3://nix-cache?endpoint=${host}:3900&scheme=http&region=us-east-1";
               dd.box.s3 = "http://${host}:3900";
             };
-          # a box without garage backs up to a storage box over the tailnet
+          # a box without garage backs up to a storage box over the fleet's network
           backupEndpoint =
             name: box:
             lib.optionalAttrs (!(builtins.elem "storage" box.roles)) {
-              dd.backup.endpoint = "http://${(builtins.head (builtins.attrValues storage)).tailnet}:3900";
+              dd.backup.endpoint = "http://${(builtins.head (builtins.attrValues storage)).net}:3900";
             };
           # what a member's device may reach for games, on any box: each
           # games box's range and every port a game insists on
@@ -1080,6 +1080,7 @@
                 {
                   networking.hostName = name;
                   dd.box.tailnet = box.tailnet;
+                  dd.box.net = box.net;
                   dd.box.site = box.siteId;
                   dd.box.region = box.regionId;
                   dd.verify.peers = lib.mapAttrsToList directoryOf (lib.filterAttrs (n: _: n != name) boxes);
@@ -1088,11 +1089,16 @@
                     lib.filterAttrs (n: b: n != name && b.siteId == box.siteId) boxes
                   );
                   # itself included: Settings' Network tab is the whole fleet
-                  dd.verify.fleet = lib.mapAttrs (_: b: b.tailnet) boxes;
+                  dd.verify.fleet = lib.mapAttrs (_: b: b.net) boxes;
                   # the other boxes, as the agent checks a release did not
                   # cost this box its way off itself
-                  dd.agent.reach = lib.mapAttrsToList (_: b: "${b.tailnet}:22") (
-                    lib.filterAttrs (n: _: n != name) boxes
+                  # both networks while the owner's tailnet is still up: either one
+                  # answering is reach
+                  dd.agent.reach = lib.concatLists (
+                    lib.mapAttrsToList (_: b: [
+                      "${b.tailnet}:22"
+                      "${b.net}:443"
+                    ]) (lib.filterAttrs (n: _: n != name) boxes)
                   );
                   # the control box's tailnet address: boxes pin the control
                   # server's name to it (modules/net/box.nix)
@@ -1100,6 +1106,9 @@
                 }
                 (lib.optionalAttrs (builtins.elem "gateway" box.roles) {
                   dd.headscale.gamePorts = fleetGamePorts;
+                  dd.headscale.owners = lib.mapAttrs' (
+                    n: b: lib.nameValuePair b.net (lib.importJSON ./fleet/boxes/${n}/box.json).owner
+                  ) (lib.filterAttrs (n: b: b ? net && builtins.pathExists ./fleet/boxes/${n}/box.json) boxes);
                   # every box may ask for its own key, signed and sealed by its TPM
                   dd.headscale.boxes =
                     lib.mapAttrs

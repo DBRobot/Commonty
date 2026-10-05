@@ -14,12 +14,21 @@
       ./box.nix
       ../modules/net/headscale.nix
       ../modules/net/box.nix
+      ../modules/net/owner.nix
     ];
+    # the owner's ports are the firewall's to keep
+    networking.firewall.enable = pkgs.lib.mkForce true;
+    networking.firewall.allowedTCPPorts = [ 8085 ];
+    services.headscale.address = pkgs.lib.mkForce "0.0.0.0";
+    services.openssh.enable = true;
+    dd.box.owner = "sarah";
     dd.verify.role = pkgs.lib.mkForce "full";
     dd.headscale = {
       enable = true;
-      url = "http://127.0.0.1:8085";
+      url = "http://box:8085";
       behindNginx = false;
+      # an owner rule in the policy headscale has to load
+      owners."100.64.0.1" = "sarah";
     };
     dd.net.enable = true;
     dd.net.controlAddress = "127.0.0.1";
@@ -52,6 +61,17 @@
       pkgs.openssl
       pkgs.age
     ];
+  };
+  # the owner's laptop and another member's, each on the network as a person
+  nodes.laptop = {
+    services.tailscale.enable = true;
+    virtualisation.memorySize = pkgs.lib.mkForce 1024;
+    environment.systemPackages = [ pkgs.netcat ];
+  };
+  nodes.other = {
+    services.tailscale.enable = true;
+    virtualisation.memorySize = pkgs.lib.mkForce 1024;
+    environment.systemPackages = [ pkgs.netcat ];
   };
   scriptEnv = {
     dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
