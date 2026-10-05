@@ -2,6 +2,9 @@
 let
   boxes = builtins.fromJSON (builtins.readFile ../../fleet/boxes.json);
   me = boxes.${config.networking.hostName} or { };
+  policy = lib.importJSON ../../fleet/policy.json;
+  # whose box this is, and their keys (fleet/policy.json people)
+  owner = policy.people.${config.dd.box.owner};
   # the other boxes, by the address they reach this one from
   peers = lib.mapAttrsToList (_: b: b.tailnet) (
     lib.filterAttrs (n: _: n != config.networking.hostName) boxes
@@ -75,11 +78,11 @@ in
   # the write-ahead log of a running prometheus does not restore (segments
   # out of order); the blocks do, at the cost of the last two hours
   dd.backup.exclude = [ "/var/lib/prometheus2/data/wal" ];
-  dd.domain = "commonty.org";
-  dd.repo = "david/commonty";
-  # the owner's paper key (david's entry, recovery): every box's disk keys
+  dd.domain = policy.domain;
+  dd.repo = policy.repo;
+  # the box owner's paper key (their entry's recovery key): the box's disk keys
   # have a copy encrypted to it in /boot/dd, for a dead TPM
-  dd.unlock.recovery = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL/mxoTUtKHXC9Agc7bupMcFzsalpVweep3E76AhudEC david-paper-key";
+  dd.unlock.recovery = owner.paperKey;
   # every box holds a directory replica; the gateway role turns this into
   # the full verifier with the browser login
   dd.verify.role = lib.mkDefault "directory";
@@ -120,9 +123,8 @@ in
     isNormalUser = true;
     hashedPasswordFile = config.sops.secrets.console-password-hash.path;
     extraGroups = [ "wheel" ];
-    openssh.authorizedKeys.keys = [
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKOR0kI8YSFB9JwqTJJMB+h4EJCSscpdnnGGGaBNRqXj david-bascom@david-bascom-Legion-Pro-5-16ADR10"
-    ];
+    # the box's owner (box.json) logs in as admin
+    openssh.authorizedKeys.keys = owner.ssh;
   };
 
   services.tailscale = {

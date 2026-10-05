@@ -5,10 +5,13 @@
 let
   files = [
     ../modules/adblock/needs.nix
+    ../modules/box/needs.nix
     ../modules/forge/needs.nix
     ../modules/games/needs.nix
+    ../modules/gate/needs.nix
     ../modules/library/needs.nix
     ../modules/llm/needs.nix
+    ../modules/net/needs.nix
     ../modules/photos/needs.nix
     ../modules/storage/needs.nix
     ../modules/vault/needs.nix

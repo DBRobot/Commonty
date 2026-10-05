@@ -112,6 +112,11 @@ let
         type = t.bool;
         default = false;
       };
+      tpm = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "a TPM 2.0 with P-256 keys (its report's tpm), for what signs as the box or unseals with it";
+      };
       nestedKvm = lib.mkOption {
         type = t.bool;
         default = false;
