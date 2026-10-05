@@ -128,6 +128,49 @@ bytes every time:
 - A build that turns out not to reproduce shows up as the boxes
   disagreeing, and nothing is signed. Check one with
   `nix build --rebuild "$d^*"`.
+- **One machine agreeing with itself is not enough.** A rebuild on the same
+  box shares its disk, its directory order and its core count; only a
+  second box shows what depends on those. v0.1.25 stopped on exactly that:
+  the `.deb`'s checksum list came in each disk's directory order, the same
+  on every rebuild of one box and different between node1 and node2. To
+  check a fix, build it on two boxes and compare (below).
+
+## The record
+
+- **v0.1.25** (release 214, 2026-10-05): the first build order. node1 and
+  node2 agreed on the apk, `dd.exe` and the AppImage, and not on the
+  `.deb` (its checksum list in each disk's order). Nothing was signed;
+  the tag stays unsigned.
+- **v0.1.26** (release 216, 2026-10-05): the first app released by the
+  fleet. All four builds agreed bit for bit on node1 and node2 (apart 0
+  of 3: one owner, one house); the apk signed on the laptop; every file
+  served at `commonty.org/download/v0.1.26/` with the hash the release key
+  signed.
+
+## Following a release
+
+```
+~/.cache/dd/app-release.log            the laptop: tag, order, each answer, upload
+releases branch: build-order.json      the order the boxes are working on
+journalctl -u dd-build    (on a box)   that box's builds, rebuilds and its answer
+curl 127.0.0.1:4195/built (on a box)   the agreed log of answers
+```
+
+A box takes up an order within two minutes; each download takes it the
+better part of an hour the first time (most of it rebuilding what it
+fetched, to compare), much less once it has checked those. The laptop
+stops at the first disagreement or failure with the download's name, and
+nothing is signed; the tag stays unsigned and the next change makes the
+next tag. Nothing is ever re-tagged.
+
+To compare a download on two boxes by hand, from a pushed branch:
+
+    d=$(nix eval --raw 'git+https://git.<domain>/<repo>?ref=<branch>&rev=<sha>#legacyPackages.x86_64-linux.appRelease' \
+          --apply 'r: (r "0.0.1").linux.drvPath')
+    nix build --no-link --print-out-paths "$d^*" | xargs -I{} sh -c 'sha256sum {}/*'
+
+on each box (with `git` on the path: `nix shell nixpkgs#git -c ...`), and
+compare the sums.
 
 ## The nightly check
 
@@ -171,6 +214,16 @@ not ready rather than a file no phone can install.
 Each download is built with its tag's version (`COMMONTY_VERSION`): the app
 says it in the Devices tab, the installers carry it, and Android's version
 code rises with it, so each release installs as an update.
+
+## Known gaps
+
+- **Separation.** Every box today has one owner, in one house and region,
+  so builders are "apart 0 of 3" and the manifest says so. The rule is met
+  once a second household's box joins.
+- **The Linux download's closure** names several hundred store paths
+  (build paths left in the binary's strings), so a box accounts for far
+  more than two files. Harmless to the files themselves; trimming it makes
+  a release faster.
 
 ## Changing it
 

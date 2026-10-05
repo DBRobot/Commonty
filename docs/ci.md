@@ -167,6 +167,25 @@ Taking a check out needs the same care in reverse: say in the pull request
 what it was catching and why that is no longer needed, or what catches it
 now.
 
+## When a release does not land
+
+A box switches to a release and keeps it only if it comes up healthy. A
+unit that fails while the switch is running fails the switch, and the box
+goes back to what it ran before. So a unit that runs on a timer must never
+fail during a switch:
+
+- its first run is a few minutes after its timer starts (`OnActiveSec`,
+  not `OnBootSec`, which fires at once on the switch that adds it);
+- a switch does not restart it (`restartIfChanged = false`);
+- something it needs not answering yet (the forge restarting under the
+  same switch, a file not published yet) is "next time", exit 0, never a
+  failure.
+
+Releases 212 and 213 rolled back for exactly this (`dd-build`,
+`dd-ci-resume`). When a box stays on an old release, its
+`journalctl -u dd-agent` names the switch that failed, and
+`journalctl --since <then> | grep "Failed to start"` names the unit.
+
 ## When a run is red
 
 - **Read the first failure.** The run stops at the first failed job, so the
