@@ -57,6 +57,12 @@ if [ -r $cls/tpm/tpm0/tpm_version_major ]; then
   [ -r $cls/tpm/tpm0/ppi/version ] && ppi="\"$(cat $cls/tpm/tpm0/ppi/version)\""
   tpm2_getcap ecc-curves 2>/dev/null | grep -q NIST_P256 && ecc=true
 fi
+# a Windows license in the firmware (ACPI MSDM, OEM activation): whether
+# there is one, never the key - this report is public, and the key is a
+# license anyone who read it could use. A service that needs it reads it on
+# this box when it does.
+winkey=false
+[ -e /sys/firmware/acpi/tables/MSDM ] && winkey=true
 # BIOS settings Linux can change (think-lmi, dell-wmi-sysman, hp-bioscfg),
 # and which of them it offers
 settings=$(for d in $cls/firmware-attributes/*/attributes; do [ -d "$d" ] && ls "$d"; done 2>/dev/null | grep -v '^pending_reboot$' | jq -R . | jq -s .)
@@ -137,6 +143,7 @@ jq -n \
   --argjson uefi $uefi --arg sb "$sb" --arg setup "$setup" \
   --argjson tpm "$tpmv" --argjson ecc $ecc --argjson ppi "$ppi" \
   --argjson settingsBy "$settingsby" --argjson settings "$settings" \
+  --argjson winkey $winkey \
   --arg arch "$(uname -m)" --arg vendor "$vendor" --arg model "$model" \
   --argjson threads "$(nproc)" --argjson flags "$flags" \
   --argjson kvm $kvm --argjson nested $nested --argjson mem "$mem" \
@@ -149,7 +156,8 @@ jq -n \
     uefi: $uefi,
     secureBoot: ($sb == "1"), setupMode: ($setup == "1"),
     tpm: (if $tpm == null then null else { version: $tpm, p256: $ecc, ppi: $ppi } end),
-    settingsFromLinux: (if $settingsBy == [] then null else { by: $settingsBy, offers: $settings } end)
+    settingsFromLinux: (if $settingsBy == [] then null else { by: $settingsBy, offers: $settings } end),
+    windowsKey: $winkey
   },
   cpu: { arch: $arch, vendor: $vendor, model: $model, threads: $threads, flags: $flags },
   memoryBytes: $mem,

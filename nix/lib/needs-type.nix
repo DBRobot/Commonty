@@ -103,6 +103,11 @@ let
         default = 0;
         description = "at least this many CPU threads";
       };
+      windowsLicense = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "a Windows license in the box's firmware (its report's firmware.windowsKey), for a service that runs Windows";
+      };
       kvm = lib.mkOption {
         type = t.bool;
         default = false;
