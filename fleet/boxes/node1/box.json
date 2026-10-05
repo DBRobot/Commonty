@@ -24,20 +24,6 @@
       "recordsize": "1M",
       "com.sun:auto-snapshot": "true"
     },
-    "vault/enc/media": {
-      "note": "all re-rippable, so no snapshots (one is the size of the library). lz4 early-aborts on what is already compressed",
-      "mountpoint": "/vault/media",
-      "recordsize": "1M",
-      "compression": "lz4",
-      "com.sun:auto-snapshot": "false"
-    },
-    "vault/enc/images": {
-      "note": "archives of old computers, encrypted on the client; written once, so no snapshots",
-      "mountpoint": "/srv/images",
-      "recordsize": "1M",
-      "compression": "lz4",
-      "com.sun:auto-snapshot": "false"
-    },
     "tank/enc/games": {
       "note": "members' game servers: each one's record, saves and guest disk",
       "mountpoint": "/var/lib/dd-games"
