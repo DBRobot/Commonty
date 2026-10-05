@@ -113,6 +113,9 @@ pkgs.vmTools.runInLinuxImage (
       # disk lists them; Ubuntu's dpkg-deb packs it again sorted, every
       # time clamped to SOURCE_DATE_EPOCH
       dpkg-deb -R /work/src/target/release/bundle/deb/*.deb /work/deb
+      # and its checksum list in the disk's order too, which differs from
+      # one machine to the next (v0.1.25: node1 and node2 disagreed on it)
+      LC_ALL=C sort -k2 -o /work/deb/DEBIAN/md5sums /work/deb/DEBIAN/md5sums
       dpkg-deb --root-owner-group -Zxz --build /work/deb $out/commonty_${version}_amd64.deb
       cp /work/src/target/release/bundle/appimage/*.AppImage $out/commonty_${version}_amd64.AppImage
     '';
