@@ -87,6 +87,7 @@ in
     ./pwned.nix
     ../member-mail.nix
     ../storage/usage.nix
+    ../storage/postgres-backup.nix
   ];
 
   options.dd.vault = {
@@ -260,9 +261,6 @@ in
           serviceConfig.LoadCredential = [ "oidc-secret:${cfg.oidcSecretFile}" ];
           serviceConfig.ReadWritePaths = [ "/run/dd-ended" ];
         };
-
-        # the vault's records, in the hourly dumps the backups ship
-        services.postgresqlBackup.databases = [ "vaultwarden" ];
 
         # Only on the Commonty network - apps reach it through the phone's or
         # laptop's tailnet - except what a Send needs: someone outside opening a

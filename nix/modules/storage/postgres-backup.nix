@@ -1,11 +1,23 @@
+# The databases on this box, dumped hourly onto this box's own disk, by the
+# box that runs them: no other role reaches into another service's
+# database for it (storage/postgres-isolation.nix). Wherever postgres runs
+# (roles import this through core), every database it holds is dumped.
 {
   config,
+  options,
   pkgs,
   lib,
   ...
 }:
 let
-  dir = "/vault/backups/postgres";
+  cfg = config.dd.dumps;
+  dir = "${cfg.dir}/postgres";
+  dbs = config.services.postgresql.ensureDatabases;
+  # ente's dump is restored weekly to prove it: its key hierarchy is the one
+  # thing without which the photos cannot be decrypted by anyone
+  ente = builtins.elem "ente" dbs;
+  mail = config.programs.msmtp.enable or false;
+  box = config.networking.hostName;
   # services.postgresqlBackup writes <db>.sql.zstd and keeps one .prev. History
   # beyond that comes from zfs snapshots on the dataset, which is a mechanism
   # already trusted with the photos.
@@ -49,85 +61,110 @@ let
         set -eu
         unit="$1"
         ${pkgs.msmtp}/bin/msmtp --from=distributed.datacenter@gmail.com alerts <<EOF
-    From: node1 <distributed.datacenter@gmail.com>
+    From: ${box} <distributed.datacenter@gmail.com>
     To: alerts
-    Subject: node1: $unit FAILED
+    Subject: ${box}: $unit FAILED
 
-    $unit failed on node1.
+    $unit failed on ${box}.
 
       journalctl -u $unit -n 50
 
-    These dumps are the only copy of the ente key hierarchy. Without them the
-    photo blobs on vault cannot be decrypted by anyone, recovery key included.
+    These dumps are the only copy of what is in this box's databases, ente's
+    key hierarchy among them: without it the photos cannot be decrypted by
+    anyone, recovery key included.
     EOF
   '';
 in
 {
-  # The dump itself is upstream's, not ours. It writes atomically via an
-  # .in-progress file and runs as the postgres user.
-  services.postgresqlBackup = {
-    enable = true;
-    databases = [
-      "ente"
-      "forgejo"
-    ];
-    location = dir;
-    # NOT the default "-C". That emits CREATE DATABASE + \connect ente, so
-    # restoring the dump into a scratch database would follow the \connect and
-    # replay it into the LIVE one. Without -C the dump is portable and lands
-    # wherever psql is pointed.
-    pgdumpOptions = "--no-owner --no-privileges";
-    compression = "zstd";
-    compressionLevel = 6;
-    startAt = "hourly";
+  options.dd.dumps.dir = lib.mkOption {
+    type = lib.types.str;
+    default = "/vault/backups";
+    description = "where this box's database dumps go: the mountpoint of <bulk pool>/enc/backups, and in its restic backup";
   };
 
-  # the role the restore check runs as: it may log in and own the scratch
-  # database, and nothing else. The check itself runs as postgres, so the
-  # postgres OS user is allowed to be it, for that database alone.
-  services.postgresql = {
-    ensureUsers = [ { name = "ente_restore"; } ];
-    identMap = ''
-      restore postgres ente_restore
-    '';
-    authentication = ''
-      local ente_restore_test ente_restore peer map=restore
-    '';
-  };
-
-  systemd.services =
-    lib.genAttrs [ "postgresqlBackup-ente" "postgresqlBackup-forgejo" ] (unit: {
-      onFailure = [ "postgres-backup-alert@${unit}.service" ];
-      unitConfig.RequiresMountsFor = "/vault";
-      serviceConfig.ExecStartPre = [
-        # "+" runs as root despite User=postgres, so it can create the directory
-        # inside the root-owned dataset mountpoint. Doing it here rather than via
-        # tmpfiles avoids racing zfs-datasets on first boot.
-        "+${pkgs.coreutils}/bin/install -d -o postgres -g postgres -m 0700 ${dir}"
-      ];
-    })
-    // {
-      postgres-backup-verify = {
-        description = "Restore the newest dump into a scratch database and check it";
-        after = [ "postgresql.service" ];
-        requires = [ "postgresql.service" ];
-        onFailure = [ "postgres-backup-alert@postgres-backup-verify.service" ];
-        # not on the hour: the hourly dump is being rewritten then, and the
-        # check found no file (2026-09-14)
-        startAt = "Mon *-*-* 00:30:00";
-        serviceConfig = {
-          Type = "oneshot";
-          User = "postgres";
-          ExecStart = verify;
+  config = lib.mkIf config.services.postgresql.enable (
+    lib.mkMerge [
+      # its own dataset in the bulk pool, snapshotted, under the encrypted root
+      (lib.optionalAttrs (options.dd ? zfs && options.dd ? box) {
+        dd.zfs.datasets."${config.dd.box.bulkPool}/enc/backups" = {
+          mountpoint = cfg.dir;
+          recordsize = "128K"; # small compressible dumps, not media
+          compression = "zstd";
+          "com.sun:auto-snapshot" = "true";
         };
-      };
-
-      "postgres-backup-alert@" = {
-        description = "Mail out a backup failure for %i";
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${alert} %i";
+      })
+      (lib.optionalAttrs (options.dd ? backup) { dd.backup.paths = [ cfg.dir ]; })
+      {
+        # The dump itself is upstream's, not ours. It writes atomically via an
+        # .in-progress file and runs as the postgres user.
+        services.postgresqlBackup = {
+          enable = true;
+          databases = dbs;
+          location = dir;
+          # NOT the default "-C". That emits CREATE DATABASE + \connect <db>, so
+          # restoring the dump into a scratch database would follow the \connect
+          # and replay it into the LIVE one. Without -C the dump is portable and
+          # lands wherever psql is pointed.
+          pgdumpOptions = "--no-owner --no-privileges";
+          compression = "zstd";
+          compressionLevel = 6;
+          startAt = "hourly";
         };
-      };
-    };
+
+        systemd.services = lib.genAttrs (map (d: "postgresqlBackup-${d}") dbs) (_: {
+          unitConfig.RequiresMountsFor = cfg.dir;
+          serviceConfig.ExecStartPre = [
+            # "+" runs as root despite User=postgres, so it can create the
+            # directory inside the root-owned dataset mountpoint. Doing it here
+            # rather than via tmpfiles avoids racing zfs-datasets on first boot.
+            "+${pkgs.coreutils}/bin/install -d -o postgres -g postgres -m 0700 ${dir}"
+          ];
+        });
+      }
+      # a box that can send mail says when a dump fails
+      (lib.mkIf mail {
+        systemd.services =
+          lib.genAttrs (map (d: "postgresqlBackup-${d}") dbs) (unit: {
+            onFailure = [ "postgres-backup-alert@${unit}.service" ];
+          })
+          // {
+            "postgres-backup-alert@" = {
+              description = "Mail out a backup failure for %i";
+              serviceConfig = {
+                Type = "oneshot";
+                ExecStart = "${alert} %i";
+              };
+            };
+          };
+      })
+      (lib.mkIf ente {
+        # the role the restore check runs as: it may log in and own the scratch
+        # database, and nothing else. The check itself runs as postgres, so the
+        # postgres OS user is allowed to be it, for that database alone.
+        services.postgresql = {
+          ensureUsers = [ { name = "ente_restore"; } ];
+          identMap = ''
+            restore postgres ente_restore
+          '';
+          authentication = ''
+            local ente_restore_test ente_restore peer map=restore
+          '';
+        };
+        systemd.services.postgres-backup-verify = {
+          description = "Restore the newest dump into a scratch database and check it";
+          after = [ "postgresql.service" ];
+          requires = [ "postgresql.service" ];
+          onFailure = lib.optional mail "postgres-backup-alert@postgres-backup-verify.service";
+          # not on the hour: the hourly dump is being rewritten then, and the
+          # check found no file (2026-09-14)
+          startAt = "Mon *-*-* 00:30:00";
+          serviceConfig = {
+            Type = "oneshot";
+            User = "postgres";
+            ExecStart = verify;
+          };
+        };
+      })
+    ]
+  );
 }

@@ -1102,10 +1102,9 @@
               ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops
               ++ [ disko.nixosModules.disko ]
               ++ lib.optional (builtins.elem "observe" box.roles) {
-                # every box's sidecar, for the fleet-wide query
-                dd.thanos.sidecars = lib.mapAttrsToList (
-                  n: b: if n == name then "127.0.0.1:10901" else "${b.tailnet}:10901"
-                ) boxes;
+                # this box's own sidecar; the others' history is read from the
+                # bucket, never from them (README: no box talks to another)
+                dd.thanos.sidecars = [ "127.0.0.1:10901" ];
               };
             };
         in

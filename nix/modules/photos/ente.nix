@@ -32,6 +32,9 @@ let
   };
 in
 {
+  # its database is dumped where it lives (storage/postgres-backup.nix)
+  imports = [ ../storage/postgres-backup.nix ];
+
   options.dd.photos.ledger = lib.mkOption {
     type = lib.types.nullOr lib.types.int;
     default = null;
@@ -199,7 +202,10 @@ in
           # instead of a mail nobody would receive. Museum honours it because
           # the nixos module runs it as ENVIRONMENT=local.
           # who may call museum's admin api (dd photos-demo sets the demo's quota)
-          internal.admins = [ config.dd.photos.admin ] ++ lib.optional (config.dd.photos.ledger != null) config.dd.photos.ledger;
+          internal.admins = [
+            config.dd.photos.admin
+          ]
+          ++ lib.optional (config.dd.photos.ledger != null) config.dd.photos.ledger;
           internal.hardcoded-ott = {
             local-domain-suffix = "@users.${base}";
             local-domain-value._secret = config.sops.secrets.ente-ott.path;

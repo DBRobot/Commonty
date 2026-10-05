@@ -89,6 +89,8 @@ struct App {
     app_seen: Mutex<Option<(Instant, Option<SignedApp>)>>,
     fleet: fleet::Fleet,
     thanos: Option<String>,
+    /// this box's dd-control: the agreed state the fleet pages read
+    control: Option<String>,
     /// Ad blocking at home: Pi-hole's api on this box, and its household
     adblock: Option<adblock::Adblock>,
     /// the forge's changes as they happen (forge_events.rs)
@@ -1782,7 +1784,8 @@ async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Re
 async fn fleet_json(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     match app.identify(&headers, "access") {
         Some(user) if app.member(&user) && user != pages::DEMO_USER => {
-            Json(fleet::look(&app.fleet, app.thanos.as_deref()).await).into_response()
+            Json(fleet::look(&app.fleet, app.thanos.as_deref(), app.control.as_deref()).await)
+                .into_response()
         }
         _ => StatusCode::FORBIDDEN.into_response(),
     }
@@ -2153,6 +2156,7 @@ pub async fn start(
         app_seen: Mutex::new(None),
         fleet: cfg.fleet,
         thanos: cfg.thanos,
+        control: cfg.control.as_ref().map(|(c, _, _)| c.clone()),
         adblock: cfg.adblock,
         forge_events: cfg.forge_events.map(forge_events::ForgeEvents::start),
         demo_photos: Default::default(),

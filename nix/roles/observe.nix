@@ -1,13 +1,13 @@
 { config, pkgs, ... }:
 {
   # Looking at the fleet: our Metrics page over every box's own prometheus, alerts,
-  # the mail they go out by, and the database dumps.
+  # and the mail they go out by. Database dumps are each postgres box's own
+  # (storage/postgres-backup.nix, through core).
   imports = [
     ./_sops.nix
     ../modules/observe/metrics-ui.nix
     ../modules/observe/alerting.nix
     ../modules/mail.nix
-    ../modules/storage/postgres-backup.nix
   ];
   dd.home.services = [
     {
@@ -25,9 +25,6 @@
     }
   ];
 
-  dd.backup.paths = [
-    "/vault/backups" # the postgres dumps: the ente key hierarchy lives there
-  ];
   environment.systemPackages = with pkgs; [
     vim
     git

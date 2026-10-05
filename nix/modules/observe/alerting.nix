@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ config, pkgs, ... }:
 let
   # Not an address: an msmtp alias, expanded from sops at send time by
   # modules/mail.nix. This repo is public and a real address here is a real
@@ -29,9 +29,7 @@ in
       mailer = "${pkgs.msmtp}/bin/msmtp";
     };
     defaults.monitored = "-a -o on -S on -s (S/../.././02|L/../../6/03)";
-    devices = [
-      { device = "/dev/disk/by-id/ata-WDC_WD40EFZZ-68CPAN0_WD-WX42D46N1PEJ"; } # vault
-      { device = "/dev/nvme0n1"; } # root + postgres
-    ];
+    # every disk the box reported (fleet/boxes/<box>/hardware.json)
+    devices = map (d: { device = d; }) config.dd.box.disks;
   };
 }

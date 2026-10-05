@@ -203,7 +203,53 @@ func facts() map[string]float64 {
 	if hottest > 0 {
 		f["temp_c"] = hottest
 	}
+	// what the fleet pages show of a box, from what the box's own units
+	// write (/var/lib/dd-facts): the release it runs, how its agent's last
+	// run ended, its last good backup. Here, a box's word reaches the
+	// fleet without any box reading another (box/verify/src/fleet.rs).
+	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom") {
+		f[name] = v
+	}
 	return f
+}
+
+// promFacts reads the few samples the heartbeat carries from text-format
+// metric files: release (dd_agent_counter), agent_ok (dd_agent_info's
+// result: 1 ok, 0 refused) and backup_last (dd_backup_last_success_seconds)
+func promFacts(files ...string) map[string]float64 {
+	out := map[string]float64{}
+	for _, file := range files {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(l, "#") {
+				continue
+			}
+			fs := strings.Fields(l)
+			if len(fs) < 2 {
+				continue
+			}
+			v, err := strconv.ParseFloat(fs[len(fs)-1], 64)
+			if err != nil {
+				continue
+			}
+			switch name := strings.SplitN(fs[0], "{", 2)[0]; name {
+			case "dd_agent_counter":
+				out["release"] = v
+			case "dd_backup_last_success_seconds":
+				out["backup_last"] = v
+			case "dd_agent_info":
+				if strings.Contains(l, `result="ok"`) {
+					out["agent_ok"] = 1
+				} else {
+					out["agent_ok"] = 0
+				}
+			}
+		}
+	}
+	return out
 }
 
 // the validator's own key for its votes: made once, kept on the encrypted disk

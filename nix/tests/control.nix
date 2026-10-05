@@ -22,7 +22,7 @@ pkgs.runCommand "control-e2e"
     # dd-control compiles only its command
     cp -r ${../../box/control} src && chmod -R u+w src
     cp -r ${self.packages.${sys}.dd-control.goModules} src/vendor
-    (cd src && GOFLAGS=-mod=vendor GOCACHE=$TMPDIR/go-cache CGO_ENABLED=0 go test ./state/ ./validator/)
+    (cd src && GOFLAGS=-mod=vendor GOCACHE=$TMPDIR/go-cache CGO_ENABLED=0 go test ./state/ ./validator/ ./cmd/dd-control/)
     mkdir w && cp ${self.packages.${sys}.control-worker}/{worker.js,wasm_exec.js,witness.wasm} w/
     cp ${self.packages.${sys}.dd-control}/bin/dd-control . && chmod u+w w/*
     # each box's gate, for the directory over the agreed log

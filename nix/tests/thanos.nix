@@ -57,6 +57,9 @@ in
   name = "thanos";
   node.specialArgs = { inherit self; };
   defaults.virtualisation.memorySize = 2048;
+  # blocks every minute, so b's history is in the bucket within a few
+  # minutes rather than two hours
+  defaults.dd.thanos.blockDuration = "1m";
   defaults.virtualisation.cores = 2; # services start in parallel instead of queueing on one thread
   defaults.virtualisation.diskSize = 4096;
   nodes = {
@@ -64,12 +67,9 @@ in
       imports = [
         (box "a")
         {
-          # by address, as the fleet does (tailnet ips): the test net has
-          # no dns, and grpc's resolver never settles on a bare hostname
-          dd.thanos.sidecars = [
-            "192.168.1.1:10901"
-            "192.168.1.2:10901"
-          ];
+          # its own sidecar; b's history reaches it through the bucket
+          dd.thanos.sidecars = [ "127.0.0.1:10901" ];
+          dd.thanos.storeSync = "15s";
           dd.verify.role = pkgs.lib.mkForce "full";
           # the fleet the gate shows; the addresses are not asked
           dd.verify.fleet = {

@@ -60,6 +60,7 @@ in
   imports = [
     ./live.nix
     ../storage/usage.nix
+    ../storage/postgres-backup.nix
   ];
 
   # The one account that administers the forge. Every other account is made
