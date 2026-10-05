@@ -30,7 +30,13 @@ if ! sudo tailscale --socket "$sock" status --json | jq -e '.BackendState == "Ru
   printf '%s' "$key" | sudo tee /run/commonty-net/join.key >/dev/null
   sudo tailscale --socket "$sock" up --login-server=http://127.0.0.1:41643 \
     --auth-key=file:/run/commonty-net/join.key --hostname="$(hostname)" \
-    --accept-dns=false --accept-routes=false --timeout=60s
+    --accept-dns=false --accept-routes=false --netfilter-mode=off --timeout=60s
   sudo rm -f /run/commonty-net/join.key
 fi
+# Two tailscaleds each install a rule dropping 100.64.0.0/10 that did not
+# arrive on their own interface, which drops the other one's traffic (the
+# owner's MagicDNS answers, the boxes' replies). Neither keeps netfilter;
+# ufw, if on, still stands.
+sudo tailscale --socket "$sock" set --netfilter-mode=off
+if systemctl is-active -q tailscaled; then sudo tailscale set --netfilter-mode=off; fi
 echo "on the fleet's network as $(sudo tailscale --socket "$sock" ip -4)"
