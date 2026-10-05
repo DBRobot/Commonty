@@ -37,7 +37,6 @@
     }
   ];
 
-  dd.backup.paths = [
-    "/srv/images" # archives of old computers, already ciphertext
-  ];
+  # The archives of old computers are in the bucket (two copies, on two
+  # boxes): no backup of /srv/images, which only held them before
 }

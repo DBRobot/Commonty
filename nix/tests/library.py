@@ -4,8 +4,12 @@ import json
 box.wait_for_unit("garage.service")
 box.wait_for_open_port(3901)
 box.succeed("systemctl restart garage-setup.service")
-box.wait_until_succeeds(f"set -a; . {nix['rpc']}; garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l")
-box.succeed("systemctl restart garage-setup.service")  # buckets and keys, now that the layout exists
+box.wait_until_succeeds(
+    f"set -a; . {nix['rpc']}; garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l"
+)
+box.succeed(
+    "systemctl restart garage-setup.service"
+)  # buckets and keys, now that the layout exists
 box.wait_for_open_port(4181)
 
 # a member with a library, made on this box with dd (the root is here)
@@ -21,7 +25,7 @@ box.succeed(f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs}")
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
 box.succeed(
     "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "
-    "\"$(jq -c . /root/fleet/fleet/members.json)\" "
+    '"$(jq -c . /root/fleet/fleet/members.json)" '
     "> /run/systemd/system/dd-verify.service.d/members.conf"
 )
 box.succeed("systemctl daemon-reload && systemctl restart dd-verify.service")
@@ -60,17 +64,25 @@ EOF""")
 rc = "rclone --config /root/rclone.conf"
 
 # in, listed, back
-box.succeed("mkdir -p /root/src/Movies/Big\\ Buck\\ Bunny\\ \\(2008\\) && head -c 3000000 /dev/urandom > '/root/src/Movies/Big Buck Bunny (2008)/film.mkv' && echo 'a note' > /root/src/Files/note.txt 2>/dev/null || (mkdir -p /root/src/Files && echo 'a note' > /root/src/Files/note.txt)")
+box.succeed(
+    "mkdir -p /root/src/Movies/Big\\ Buck\\ Bunny\\ \\(2008\\) && head -c 3000000 /dev/urandom > '/root/src/Movies/Big Buck Bunny (2008)/film.mkv' && echo 'a note' > /root/src/Files/note.txt 2>/dev/null || (mkdir -p /root/src/Files && echo 'a note' > /root/src/Files/note.txt)"
+)
 box.succeed(f"{rc} copy /root/src lib:")
 listed = box.succeed(f"{rc} lsf -R lib:")
-assert "Movies/Big Buck Bunny (2008)/film.mkv" in listed and "Files/note.txt" in listed, listed
+assert (
+    "Movies/Big Buck Bunny (2008)/film.mkv" in listed and "Files/note.txt" in listed
+), listed
 box.succeed(f"{rc} copy lib:Movies /root/back")
-box.succeed("cmp '/root/src/Movies/Big Buck Bunny (2008)/film.mkv' '/root/back/Big Buck Bunny (2008)/film.mkv'")
+box.succeed(
+    "cmp '/root/src/Movies/Big Buck Bunny (2008)/film.mkv' '/root/back/Big Buck Bunny (2008)/film.mkv'"
+)
 assert box.succeed(f"{rc} cat lib:Files/note.txt").strip() == "a note"
 
 # dd reads what rclone wrote, and the other way
 assert "Files/note.txt" in box.succeed(f"{env} {nix['dd']} library ls {lib} {dirs}")
-box.succeed(f"echo 'from dd' > /root/dd.txt && {env} {nix['dd']} library put {lib} /root/dd.txt --as Files/dd.txt {dirs}")
+box.succeed(
+    f"echo 'from dd' > /root/dd.txt && {env} {nix['dd']} library put {lib} /root/dd.txt --as Files/dd.txt {dirs}"
+)
 assert box.succeed(f"{rc} cat lib:Files/dd.txt").strip() == "from dd"
 
 # the bucket: ciphertext under names nobody reads, nothing plain
@@ -104,14 +116,30 @@ assert any(k.startswith(f"{lib}/trash/") for k in kept), kept
 # before sending; the gate only ever moves bytes).
 at = f"http://127.0.0.1:4181/_dd/dav/{lib}/Files/pieces.bin"
 auth = f"-H 'authorization: Bearer {token}'"
-box.succeed("head -c 6000000 /dev/urandom > /root/p1 && head -c 1234567 /dev/urandom > /root/p2 && cat /root/p1 /root/p2 > /root/whole")
-up = json.loads(box.succeed(f"curl -sf -X POST {auth} -H 'x-dd-upload: start' {at}"))["upload"]
-e1 = json.loads(box.succeed(f"curl -sf -X PUT {auth} -H 'x-dd-upload: {up}' -H 'x-dd-part: 1' --data-binary @/root/p1 {at}"))["etag"]
-e2 = json.loads(box.succeed(f"curl -sf -X PUT {auth} -H 'x-dd-upload: {up}' -H 'x-dd-part: 2' --data-binary @/root/p2 {at}"))["etag"]
-box.succeed(f"curl -sf -X POST {auth} -H 'x-dd-upload: {up}' -H 'content-type: application/json' -d '{json.dumps({'parts': [e1, e2]})}' {at}")
+box.succeed(
+    "head -c 6000000 /dev/urandom > /root/p1 && head -c 1234567 /dev/urandom > /root/p2 && cat /root/p1 /root/p2 > /root/whole"
+)
+up = json.loads(box.succeed(f"curl -sf -X POST {auth} -H 'x-dd-upload: start' {at}"))[
+    "upload"
+]
+e1 = json.loads(
+    box.succeed(
+        f"curl -sf -X PUT {auth} -H 'x-dd-upload: {up}' -H 'x-dd-part: 1' --data-binary @/root/p1 {at}"
+    )
+)["etag"]
+e2 = json.loads(
+    box.succeed(
+        f"curl -sf -X PUT {auth} -H 'x-dd-upload: {up}' -H 'x-dd-part: 2' --data-binary @/root/p2 {at}"
+    )
+)["etag"]
+box.succeed(
+    f"curl -sf -X POST {auth} -H 'x-dd-upload: {up}' -H 'content-type: application/json' -d '{json.dumps({'parts': [e1, e2]})}' {at}"
+)
 box.succeed(f"curl -sf {auth} {at} -o /root/joined && cmp /root/whole /root/joined")
 # an upload id is not a path into anything
-box.fail(f"curl -sf -X PUT {auth} -H 'x-dd-upload: ../x' -H 'x-dd-part: 1' --data-binary @/root/p2 {at}")
+box.fail(
+    f"curl -sf -X PUT {auth} -H 'x-dd-upload: ../x' -H 'x-dd-part: 1' --data-binary @/root/p2 {at}"
+)
 
 # A browser has a cookie and no device token, and the gate takes it:
 # without this the Files and Movies pages could not read a single name.
@@ -130,26 +158,42 @@ as_demo = f"-H 'Cookie: {jar}'"
 cfg = json.loads(box.succeed(f"curl -s {as_demo} http://127.0.0.1:4181/_dd/config"))
 assert cfg["demoLibrary"]["id"] == demo_lib, cfg
 # its own library opens with that cookie
-box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{demo_lib}/ | grep -q 207")
+box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{demo_lib}/ | grep -q 207"
+)
 # a member's does not
-box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403")
+box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403"
+)
 # and the demo writes nothing, even in its own
-box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X MKCOL http://127.0.0.1:4181/_dd/dav/{demo_lib}/x | grep -q 403")
+box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X MKCOL http://127.0.0.1:4181/_dd/dav/{demo_lib}/x | grep -q 403"
+)
 # the config says nothing about a library to anyone who is not the demo
-assert "demoLibrary" not in json.loads(box.succeed("curl -s http://127.0.0.1:4181/_dd/config"))
+assert "demoLibrary" not in json.loads(
+    box.succeed("curl -s http://127.0.0.1:4181/_dd/config")
+)
 
 # a stranger's token opens nothing; no token, nothing
-box.succeed(f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} identity new --name tom {dirs}")
+box.succeed(
+    f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} identity new --name tom {dirs}"
+)
 tom = box.succeed(f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} token").strip()
-box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -X PROPFIND -H 'Authorization: Bearer {tom}' http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403")
-box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 401")
+box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' -X PROPFIND -H 'Authorization: Bearer {tom}' http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403"
+)
+box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 401"
+)
 
 # ...and a stranger who claims her library id in his own entry opens nothing
 # either. Library ids are public - they ride in entries anyone may read - so
 # the claim itself has to fail, and the gate has to refuse even if one got in.
 as_tom = f"-H 'Authorization: Bearer {tom}'"
 keys = "/var/lib/dd-verify/keys"
-claim = f'.entry.libraries = [{{"id": "{lib}", "keys": [], "readers": [], "created": 1}}]'
+claim = (
+    f'.entry.libraries = [{{"id": "{lib}", "keys": [], "readers": [], "created": 1}}]'
+)
 # through the front door it never even reaches the claim rule: the entry is
 # not his to edit, so the signature settles it. The claim rule itself - one
 # entry may not name a library another already claims - is covered by the
@@ -165,12 +209,87 @@ assert "signature" in box.succeed("cat /root/claim.out")
 # is checked because the store is only ever written through that rule, the
 # gate still says no
 box.succeed(f"cp /root/claim.json {keys}/tom.json")
-box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403")
-box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X PUT --data x http://127.0.0.1:4181/_dd/dav/{lib}/wreck | grep -q 403")
-box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X DELETE http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403")
+box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403"
+)
+box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X PUT --data x http://127.0.0.1:4181/_dd/dav/{lib}/wreck | grep -q 403"
+)
+box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X DELETE http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403"
+)
 # nor may a member claim the demo's library, whose id and key are both in
 # this box's configuration in the open
 greedy = f'.entry.libraries += [{{"id": "{demo_lib}", "keys": [], "readers": [], "created": 1}}]'
 box.succeed(f"jq '{greedy}' {keys}/sarah.json > /root/greedy.json")
 box.succeed(f"cp /root/greedy.json {keys}/sarah.json")
-box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Authorization: Bearer {token}' -X PUT --data x http://127.0.0.1:4181/_dd/dav/{demo_lib}/wreck | grep -q 403")
+box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Authorization: Bearer {token}' -X PUT --data x http://127.0.0.1:4181/_dd/dav/{demo_lib}/wreck | grep -q 403"
+)
+
+# A member's disk images, in the bucket under images-<name>: what `dd image`
+# (restic's layout over webdav, box/archive) reads and writes through
+# files.<domain>/images/, which nginx sends to /_dd/images/.
+img = "http://127.0.0.1:4181/_dd/images"
+as_sarah = f"-H 'Authorization: Bearer {token}'"
+box.succeed(f"curl -sf {as_sarah} -X PUT --data restic-config {img}/config")
+box.succeed(f"curl -sf {as_sarah} -X PUT --data pack {img}/data/ab/ab12")
+assert box.succeed(f"curl -sf {as_sarah} {img}/config") == "restic-config"
+# a folder is its listing as json, the shape nginx's autoindex had
+top = json.loads(box.succeed(f"curl -sf {as_sarah} {img}/"))
+assert {"name": "data", "type": "directory", "mtime": ""} in top, top
+assert any(
+    e["name"] == "config" and e["type"] == "file" and e["size"] == 13 for e in top
+), top
+sub = json.loads(box.succeed(f"curl -sf {as_sarah} {img}/data/ab/"))
+assert [e["name"] for e in sub] == ["ab12"], sub
+# a type folder nothing was written to yet is no folder: restic reads it as empty
+assert (
+    box.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' {as_sarah} {img}/locks/"
+    ).strip()
+    == "404"
+)
+# in the bucket beside the libraries, ciphertext as sent
+box.succeed(f"set -a; . {nix['rpc']}; garage bucket info libraries >/dev/null")
+# another member sees his own (empty) images, never hers
+assert box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} {img}/config"
+).strip() in ("403", "404")
+# a delete is a move into the trash, not gone
+box.succeed(f"curl -sf {as_sarah} -X DELETE {img}/data/ab/ab12")
+assert (
+    box.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' {as_sarah} {img}/data/ab/ab12"
+    ).strip()
+    == "404"
+)
+names = [e["name"] for e in json.loads(box.succeed(f"curl -sf {as_sarah} {img}/"))]
+assert "trash" not in names, names
+# nobody at all: no images
+assert (
+    box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {img}/config").strip()
+    == "401"
+)
+# a browser signed in, without the passkey just now, reads and changes nothing
+box.succeed(
+    f"curl -s -D /root/signin.h -o /dev/null -X POST --data-urlencode token={token} http://127.0.0.1:4181/_dd/app/signin"
+)
+cookie = box.succeed(
+    "grep -i '^set-cookie:' /root/signin.h | head -1 | sed 's/^[^:]*: //; s/;.*//'"
+).strip()
+assert cookie, box.succeed("cat /root/signin.h")
+as_page = f"-H 'Cookie: {cookie}'"
+assert box.succeed(f"curl -sf {as_page} {img}/config") == "restic-config"
+assert (
+    box.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' {as_page} -X DELETE {img}/config"
+    ).strip()
+    == "403"
+)
+assert (
+    box.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' {as_page} -X PUT --data x {img}/data/zz"
+    ).strip()
+    == "403"
+)
