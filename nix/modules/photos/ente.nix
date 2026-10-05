@@ -178,6 +178,17 @@ in
       };
       api = {
         enable = true;
+        # Museum listens on every address, its api and its metrics both, with
+        # no setting to say otherwise: on loopback here, where nginx and
+        # prometheus reach it. The firewall already stood in front of both;
+        # this makes the box's own port list say what is true.
+        package = pkgs.museum.overrideAttrs (o: {
+          postPatch = (o.postPatch or "") + ''
+            substituteInPlace cmd/museum/main.go \
+              --replace-fail 'http.ListenAndServe(":2112", nil)' 'http.ListenAndServe("127.0.0.1:2112", nil)' \
+              --replace-fail 'server.Run(fmt.Sprintf(":%d", port))' 'server.Run(fmt.Sprintf("127.0.0.1:%d", port))'
+          '';
+        });
         nginx.enable = true;
         enableLocalDB = true; # peer auth over a socket, so no db password exists
         domain = d "api";
