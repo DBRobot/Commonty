@@ -48,9 +48,13 @@
       pkgs.curl
       pkgs.jq
       pkgs.tailscale
+      pkgs.sqlite
+      pkgs.openssl
+      pkgs.age
     ];
   };
   scriptEnv = {
     dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
+    control = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd-control}/bin/dd-control";
   };
 }

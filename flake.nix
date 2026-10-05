@@ -1048,6 +1048,24 @@
             lib.optionalAttrs (!(builtins.elem "storage" box.roles)) {
               dd.backup.endpoint = "http://${(builtins.head (builtins.attrValues storage)).tailnet}:3900";
             };
+          # what a member's device may reach for games, on any box: each
+          # games box's range and every port a game insists on
+          fleetGamePorts = lib.unique (
+            map (
+              n:
+              let
+                g = self.nixosConfigurations.${n}.config.dd.games;
+              in
+              "${toString g.portBase}-${toString (g.portBase + g.portCount - 1)}"
+            ) (builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "game" b.roles) boxes))
+            ++ map toString (
+              lib.unique (
+                lib.concatMap (
+                  g: lib.attrValues (g.fixed_ports or { })
+                ) (lib.importJSON ./data/games/catalogue.json).games
+              )
+            )
+          );
           mkBox =
             name: box:
             lib.nixosSystem {
@@ -1080,6 +1098,19 @@
                   # server's name to it (modules/net/box.nix)
                   dd.net.controlAddress = (lib.findFirst (b: b.public) box (builtins.attrValues boxes)).tailnet;
                 }
+                (lib.optionalAttrs (builtins.elem "gateway" box.roles) {
+                  dd.headscale.gamePorts = fleetGamePorts;
+                  # every box may ask for its own key, signed and sealed by its TPM
+                  dd.headscale.boxes =
+                    lib.mapAttrs
+                      (n: b: {
+                        key = b.unlockKey;
+                        recipient = (lib.importJSON ./fleet/boxes/${n}/hardware.json).secretsKey;
+                      })
+                      (
+                        lib.filterAttrs (n: b: b ? unlockKey && builtins.pathExists ./fleet/boxes/${n}/hardware.json) boxes
+                      );
+                })
               ]
               ++ map (r: ./nix/roles/${r}.nix) box.roles
               ++ lib.optional (builtins.elem "storage" box.roles) (garageOf name box)

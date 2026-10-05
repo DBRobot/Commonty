@@ -86,8 +86,5 @@
       "household"
     ],
     "why": "it answers the house's DNS: the box has to be in the house, with who lives there"
-  },
-  "net": {
-    "why": "a second tailscaled; /dev/net/tun is everywhere"
   }
 }

@@ -2333,6 +2333,8 @@ pub async fn start(
         .route("/_dd/app/signin", post(photos::app_signin))
         // the network's door: a join key for an admitted device
         .route("/_dd/network/join", post(network::join))
+        // a box's own: signed by its TPM, answered sealed to it
+        .route("/_dd/network/box", post(network::box_join))
         .route("/_dd/chat", get(chat_page))
         .route("/_dd/git", get(git_page))
         .route("/_dd/git/events", get(forge_events::events))

@@ -170,6 +170,12 @@ func reportMessage(box, dir string) ([]byte, error) {
 	return []byte(m), nil
 }
 
+// joinMessage is what a box signs to ask its gate for a key to the fleet's
+// network; the gate checks the same bytes (box/verify/src/network.rs)
+func joinMessage(box string, now int64) []byte {
+	return []byte(fmt.Sprintf("commonty box join v1\x00%s\x00%d", box, now))
+}
+
 // facts: what this box has, as the placement rules will read them
 func facts() map[string]float64 {
 	f := map[string]float64{"cores": float64(runtime.NumCPU())}
@@ -286,6 +292,7 @@ func main() {
 	submitSock := flag.String("submit", "", "a unix socket where this box's gate hands in directory items (POST /submit); empty: none")
 	submitGroup := flag.String("submit-group", "", "the group that may open -submit (the gate's)")
 	report := flag.String("sign-report", "", "sign the box's report in this directory (hardware.json, hardware-configuration.nix) as -box, into report.sig, and exit")
+	join := flag.Bool("sign-join", false, "print a request for a join key to the fleet's network, signed as -box now, and exit")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -295,6 +302,20 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println(base64.StdEncoding.EncodeToString(k.Public().(ed25519.PublicKey)))
+		return
+	}
+
+	if *join {
+		now := time.Now().Unix()
+		sign := func(m []byte) (string, error) { return tpmSign(*tpmKeys, m) }
+		if *softKey != "" {
+			sign = softSigner(*softKey)
+		}
+		sig, err := sign(joinMessage(*box, now))
+		if err != nil {
+			log.Fatal(err)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"box": *box, "time": now, "sig": sig})
 		return
 	}
 
