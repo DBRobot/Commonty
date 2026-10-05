@@ -87,6 +87,7 @@ in
     ./pwned.nix
     ../member-mail.nix
     ../storage/usage.nix
+    ../storage/postgres-backup.nix
   ];
 
   options.dd.vault = {
