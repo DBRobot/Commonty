@@ -22,7 +22,6 @@
 }:
 let
   cfg = config.dd.adblock;
-  tailnet = config.dd.box.tailnet;
   api = "127.0.0.1:8053";
   # the house network, from this box's fixed address on it (192.168.1.20/24)
   house = config.dd.home.address;
@@ -92,7 +91,6 @@ in
         misc.readOnly = false;
         misc.dnsmasq_lines = [
           "listen-address=${cfg.lan}"
-          "listen-address=${tailnet}"
         ]
         # the owner's devices away from home, on the fleet's network
         ++ lib.optional (config.dd.box.net != "") "listen-address=${config.dd.box.net}"
@@ -101,10 +99,10 @@ in
           "listen-address=127.0.0.1"
           "bind-dynamic"
           # The fleet's own names are answered as the world answers them, not
-          # here: the box takes web traffic from the tailnet and the tunnel,
+          # here: the box takes web traffic from the fleet's network and the tunnel,
           # never the house network, so a house address for them was a page
           # that never loaded. Public ones go through the tunnel; the rest
-          # name the box's tailnet address, reached with the app's network on.
+          # name the box's address on the fleet's network, reached with the app's network on.
         ];
       };
     };
@@ -199,10 +197,6 @@ in
     # From the house network by its address, never on commonty0 whatever
     # the source says; on commonty0 the owner's devices alone (roles/core.nix,
     # the dd-owner set).
-    networking.firewall.interfaces.tailscale0 = {
-      allowedUDPPorts = [ 53 ];
-      allowedTCPPorts = [ 53 ];
-    };
     networking.firewall.extraCommands = ''
       for proto in udp tcp; do
         iptables -D nixos-fw ! -i commonty0 -s ${house} -p $proto --dport 53 -j nixos-fw-accept 2>/dev/null || true

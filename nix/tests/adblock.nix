@@ -23,7 +23,7 @@ in
     dd.verify.role = pkgs.lib.mkForce "full";
     # vlan 2 stands in for the Commonty network. The test numbers machines
     # by name, so this box (away, box, house) is .2 on both
-    dd.box.tailnet = "192.168.2.2";
+    dd.box.net = "192.168.2.2";
     dd.adblock = {
       enable = true;
       lan = "192.168.1.2";

@@ -1079,7 +1079,6 @@
                 (import ./nix/modules/box/host.nix ./fleet/boxes/${name})
                 {
                   networking.hostName = name;
-                  dd.box.tailnet = box.tailnet;
                   dd.box.net = box.net;
                   dd.box.site = box.siteId;
                   dd.box.region = box.regionId;
@@ -1092,17 +1091,9 @@
                   dd.verify.fleet = lib.mapAttrs (_: b: b.net) boxes;
                   # the other boxes, as the agent checks a release did not
                   # cost this box its way off itself
-                  # both networks while the owner's tailnet is still up: either one
-                  # answering is reach
-                  dd.agent.reach = lib.concatLists (
-                    lib.mapAttrsToList (_: b: [
-                      "${b.tailnet}:22"
-                      "${b.net}:443"
-                    ]) (lib.filterAttrs (n: _: n != name) boxes)
+                  dd.agent.reach = lib.mapAttrsToList (_: b: "${b.net}:443") (
+                    lib.filterAttrs (n: _: n != name) boxes
                   );
-                  # the control box's tailnet address: boxes pin the control
-                  # server's name to it (modules/net/box.nix)
-                  dd.net.controlAddress = (lib.findFirst (b: b.public) box (builtins.attrValues boxes)).tailnet;
                 }
                 (lib.optionalAttrs (builtins.elem "gateway" box.roles) {
                   dd.headscale.gamePorts = fleetGamePorts;

@@ -9,7 +9,7 @@
 set -eu
 box=$1
 here=$(cd "$(dirname "$0")/.." && pwd)
-addr=${2:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]]["tailnet"])' "$here/fleet/boxes.json" "$box")}
+addr=${2:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]]["net"])' "$here/fleet/boxes.json" "$box")}
 dir="$here/fleet/boxes/$box"
 mkdir -p "$dir"
 for f in hardware-configuration.nix hardware.json report.sig; do

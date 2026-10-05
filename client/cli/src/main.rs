@@ -33,7 +33,7 @@ const DEFAULT_IMAGES: &str = "https://files.commonty.org/images/";
 const DEFAULT_ENROL: &str = "https://home.commonty.org/_dd/enrol";
 /// Where a person's signed entry lives. Any box can hold one; a client that
 /// names several sees whether they agree. node2 has no public name yet, so
-/// its copy is reachable on the tailnet only.
+/// its copy is reachable on the fleet's network only.
 const DEFAULT_DIRECTORIES: [&str; 1] = directory::DEFAULT;
 /// keyring account holding the name the device key signs for
 const USER: &str = "user";
@@ -1159,9 +1159,9 @@ async fn main() -> Result<()> {
                 let path = std::path::Path::new(&repo).join("fleet/boxes.json");
                 let boxes: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
                 let b = boxes.get(&name).with_context(|| format!("no box {name}"))?;
-                let addr = b["tailnet"]
+                let addr = b["net"]
                     .as_str()
-                    .context("box has no tailnet address")?;
+                    .context("box has no address on the fleet's network")?;
                 // on the box: what the world sees, and what the router thinks
                 let probe = concat!(
                     "seen=$(curl -fsS -4 --max-time 10 https://api.ipify.org || echo none); ",
@@ -1232,19 +1232,19 @@ async fn main() -> Result<()> {
                         .map(|a| a.iter().filter_map(|r| r.as_str()).collect())
                         .unwrap_or_default();
                     println!(
-                        "{name}  {} {}  tailnet {}  {}",
+                        "{name}  {} {}  net {}  {}",
                         b["siteId"].as_str().unwrap_or("-"),
                         b["regionId"].as_str().unwrap_or("-"),
-                        b["tailnet"].as_str().unwrap_or("-"),
+                        b["net"].as_str().unwrap_or("-"),
                         if b["public"].as_bool().unwrap_or(false) {
                             "public"
                         } else {
-                            "tailnet only"
+                            "network only"
                         },
                     );
                     println!("  roles: {}", roles.join(" "));
-                    // what the box itself says, from its own metrics over the tailnet
-                    if let Some(tailnet) = b["tailnet"].as_str() {
+                    // what the box itself says, from its own metrics over the fleet's network
+                    if let Some(net) = b["net"].as_str() {
                         let out = std::process::Command::new("curl")
                             .args([
                                 "-sf",
@@ -1254,7 +1254,7 @@ async fn main() -> Result<()> {
                                 "--data-urlencode",
                                 "query=dd_box_location",
                             ])
-                            .arg(format!("http://{tailnet}:9090/api/v1/query"))
+                            .arg(format!("http://{net}:9090/api/v1/query"))
                             .output();
                         let seen = out
                             .ok()

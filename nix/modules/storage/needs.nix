@@ -37,7 +37,7 @@
       };
       network = {
         outbound = "none";
-        inbound = "tailnet"; # S3 for the boxes, RPC between storage boxes
+        inbound = "network"; # S3 for the boxes, RPC between storage boxes
       };
       depends = { };
       privacy = "none"; # what it holds is encrypted before it arrives

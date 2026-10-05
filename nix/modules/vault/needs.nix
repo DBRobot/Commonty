@@ -14,7 +14,7 @@
       };
       network = {
         outbound = [ "smtp.gmail.com" ];
-        inbound = "tailnet";
+        inbound = "network";
       };
       depends = {
         postgresql.local = true;

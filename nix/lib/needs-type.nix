@@ -139,10 +139,10 @@ let
           "none"
           "localhost"
           "lan"
-          "tailnet"
+          "network"
           "public"
         ];
-        description = "who reaches it: nobody (it only calls out); only this box; the household's own network and its owner's tailnet; the Commonty network; anyone";
+        description = "who reaches it: nobody (it only calls out); only this box; the household's own network (and its owner's devices); the Commonty network; anyone";
       };
     };
   };

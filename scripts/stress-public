@@ -2,13 +2,13 @@
 # The public face, attacked from wherever this runs: what a stranger on the
 # internet can do to the front door, and what they cannot. Every check says
 # PASS or FAIL; the script fails if any does. Run it from outside the
-# tailnet (a phone's hotspot, a vps) after every change to the public face.
+# fleet's network (a phone's hotspot, a vps) after every change to the public face.
 #
 #   scripts/stress-public [domain] [address]
 #
-# The address is what the name says unless given: a tailnet member's
-# resolver answers with the tailnet address, so from one of those give the
-# public address and every request goes there by name.
+# The address is what the name says unless given: the wildcard answers with
+# the gateway's address on the fleet's network, so give the public address
+# and every request goes there by name.
 set -u
 B=${1:-commonty.org}
 ip=${2:-$(dig +short home.$B A | tail -1)}
@@ -72,7 +72,7 @@ fi
 # 8. the demo: works for a stranger, and cannot write
 jar=$(mktemp); curl -s -m 10 $(at https://home.$B/) -c "$jar" -o /dev/null -L https://home.$B/_dd/demo
 [ "$(code https://home.$B/_dd/home 10 -b "$jar")" = 200 ] && pass "the demo signs in" || fail "the demo does not sign in"
-c=$(code https://games.$B/create/valheim 8 -b "$jar" -X POST); [ "$c" = 000 ] || [ "$c" = 403 ] && pass "the demo cannot reach games from outside (tailnet-only)" || fail "demo reached games from outside: $c"
+c=$(code https://games.$B/create/valheim 8 -b "$jar" -X POST); [ "$c" = 000 ] || [ "$c" = 403 ] && pass "the demo cannot reach games from outside (network-only)" || fail "demo reached games from outside: $c"
 rm -f "$jar"
 
 echo; [ $fails = 0 ] && echo "all passed" || echo "$fails FAILED"

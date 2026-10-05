@@ -16,17 +16,17 @@ set -euo pipefail
 
 host=${1:?host}
 ref=${2:-main}
-# Where the box is: its tailnet address from the fleet's own list, or
-# DD_ADDR when the tailnet is the thing that is broken (the house LAN, say:
+# Where the box is: its address on the fleet's network from the fleet's own
+# list, or DD_ADDR when that network is the thing that is broken (the house LAN, say:
 # DD_ADDR=admin@192.168.1.20). This used to name a direct cable that no
 # longer exists, which left the one way in for when releases fail pointing
 # at nothing.
 repo=$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)
 addr=${DD_ADDR:-}
 if [ -z "$addr" ]; then
-  tailnet=$(jq -er --arg b "$host" '.[$b].tailnet' "$repo/fleet/boxes.json") \
+  net=$(jq -er --arg b "$host" '.[$b].net' "$repo/fleet/boxes.json") \
     || { echo "no box $host in fleet/boxes.json" >&2; exit 1; }
-  addr=admin@$tailnet
+  addr=admin@$net
 fi
 
 if ! git -C "$repo" rev-parse --verify -q "refs/heads/$ref" >/dev/null; then

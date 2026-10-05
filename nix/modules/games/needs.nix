@@ -43,7 +43,7 @@ in
       };
       network = {
         outbound = "internet"; # steam's CDN, GitHub, from inside the guests
-        inbound = "tailnet"; # players, over the Commonty network only
+        inbound = "network"; # players, over the Commonty network only
       };
       depends = {
         nginx.local = true;

@@ -51,7 +51,7 @@
     # a guest inside this guest: needs a builder with kvm, like every VM test
     # here, and nesting on (the kernel default)
     dd.games.portBase = 27015;
-    dd.box.tailnet = "100.64.0.9";
+    dd.box.net = "100.64.0.9";
     # the test framework leaves the switch script out of a test box
     system.switch.enable = true;
     environment.systemPackages = [

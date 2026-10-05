@@ -1,9 +1,8 @@
 # A box on the fleet's own network: a second tailscaled beside the one on
 # the owner's Tailscale account, against the fleet's Headscale, with its
-# own state, socket, port and interface. Both run until the fleet's names
-# and every address have moved over and the old one is retired by hand.
-# Names on this network come from Headscale; the box keeps its own
-# resolver and takes none from here (accept-dns off).
+# own state, socket, port and interface. Names on this network come from
+# Headscale; the box keeps its own resolver and takes none from here
+# (accept-dns off).
 #
 # How a box reaches the control server. Not by the control box's tailnet
 # address: a tailscaled steers its own control traffic around every
@@ -49,10 +48,6 @@ in
       type = lib.types.str;
       default = "/run/commonty-net/tailscaled.sock";
       readOnly = true;
-    };
-    controlAddress = lib.mkOption {
-      type = lib.types.str;
-      description = "the control box's tailnet address: on the control box itself, where the control server's name resolves to. Other boxes go through the front door.";
     };
     afterJoin = lib.mkOption {
       type = lib.types.lines;
@@ -196,8 +191,9 @@ in
       '';
     };
 
-    # the control box reaches its own control server by name
-    networking.hosts = lib.mkIf (!bridged) { ${cfg.controlAddress} = [ "headscale.${base}" ]; };
+    # the control box reaches its own control server by name, on itself:
+    # nginx answers the name on every address, loopback included
+    networking.hosts = lib.mkIf (!bridged) { "127.0.0.1" = [ "headscale.${base}" ]; };
 
     networking.firewall.allowedUDPPorts = [ 41642 ];
     # The Commonty network reaches this box's services and nothing past it:
