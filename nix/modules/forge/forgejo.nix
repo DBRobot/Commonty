@@ -308,6 +308,9 @@ in
       systemd.services.dd-ci-resume = {
         description = "Run again a ci run that a restart killed";
         after = [ "forgejo.service" ];
+        # never part of whether a switch came up: 213 rolled back on node1
+        # because this ran while the forge was restarting under the switch
+        restartIfChanged = false;
         serviceConfig = {
           Type = "oneshot";
           DynamicUser = true;
@@ -324,8 +327,9 @@ in
       };
       systemd.timers.dd-ci-resume = {
         wantedBy = [ "timers.target" ];
+        # five minutes after the timer starts, boot or switch: never inside one
         timerConfig = {
-          OnBootSec = "5min";
+          OnActiveSec = "5min";
           OnUnitActiveSec = "3min";
         };
       };
