@@ -55,7 +55,8 @@ struct Args {
 
 /// Can this box still reach the fleet? None of these is a health check of
 /// the other box; the question is only whether this box's own network
-/// still carries a connection off itself.
+/// still carries a connection off itself. A refusal counts: it came back
+/// from the other box, so the way there works, whatever listens on the port.
 fn reaches_any(reach: &str) -> bool {
     let targets: Vec<&str> = reach.split_whitespace().collect();
     if targets.is_empty() {
@@ -63,11 +64,12 @@ fn reaches_any(reach: &str) -> bool {
     }
     targets.iter().any(|t| {
         use std::net::ToSocketAddrs as _;
-        t.to_socket_addrs()
-            .ok()
-            .into_iter()
-            .flatten()
-            .any(|a| std::net::TcpStream::connect_timeout(&a, Duration::from_secs(4)).is_ok())
+        t.to_socket_addrs().ok().into_iter().flatten().any(|a| {
+            match std::net::TcpStream::connect_timeout(&a, Duration::from_secs(4)) {
+                Ok(_) => true,
+                Err(e) => e.kind() == std::io::ErrorKind::ConnectionRefused,
+            }
+        })
     })
 }
 
@@ -460,4 +462,23 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reaches_any;
+
+    #[test]
+    fn a_refusal_is_reach_and_silence_is_not() {
+        let open = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        assert!(reaches_any(&open.local_addr().unwrap().to_string()));
+        // a port nothing listens on: the box answered, so the way is there
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = closed.local_addr().unwrap().to_string();
+        drop(closed);
+        assert!(reaches_any(&addr));
+        // documentation's own address: nothing answers, nothing refuses
+        assert!(!reaches_any("192.0.2.1:9"));
+        assert!(reaches_any(""));
+    }
 }
