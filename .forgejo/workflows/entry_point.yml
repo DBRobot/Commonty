@@ -363,7 +363,7 @@ jobs:
       # its lint, its tests, and its network engine's vet and tests: one
       # job, on the app's own cached dependency build
       - name: the app's lint and tests, and its engine's
-        run: nix build --no-link -L .#checks.x86_64-linux.clippy-app .#checks.x86_64-linux.tests-app .#checks.x86_64-linux.net-check .#checks.x86_64-linux.app-release
+        run: nix build --no-link -L .#checks.x86_64-linux.clippy-app .#checks.x86_64-linux.tests-app .#checks.x86_64-linux.net-check .#legacyPackages.x86_64-linux.appReleaseEvaluates
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 

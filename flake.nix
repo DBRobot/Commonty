@@ -670,7 +670,7 @@
           appRelease =
             version:
             let
-              cargoVendor = craneLib.vendorCargoDeps { src = sources.app; };
+              cargoVendor = craneLib.vendorCargoDeps { cargoLock = ./Cargo.lock; };
               toolchain =
                 targets:
                 # the Rust the rest of the flake compiles with, plus the targets
@@ -1047,7 +1047,28 @@
         };
 
       # the downloads for a version: `(appRelease "1.2.3").linux`
-      legacyPackages.${system}.appRelease = rust.appRelease;
+      legacyPackages.${system} = {
+        inherit (rust) appRelease;
+        # The four downloads still evaluate: their recipes only, never a build
+        # of them (that is the boxes', after a release). Not one of `checks`:
+        # the Linux image's package list and the web bundle are made by a
+        # build and read back (import from derivation), which `nix flake
+        # check` (no builds) cannot do once a store has been cleaned. The
+        # app's CI job builds this instead.
+        appReleaseEvaluates = pkgs.writeText "app-release-evaluates" (
+          toString (
+            map (d: builtins.unsafeDiscardOutputDependency d.drvPath) (
+              with rust.appRelease "0.0.0";
+              [
+                linux
+                windows
+                dd-windows
+                android
+              ]
+            )
+          )
+        );
+      };
 
       # Boxes booted as vms and driven through the failure cases, so the
       # modules the real hosts import are proven before a host sees them.
@@ -1083,21 +1104,6 @@
             net-check
             tests
             ;
-          # the app's downloads still evaluate: their recipes only, never a
-          # build of them (that is the boxes', after a release)
-          app-release = pkgs.writeText "app-release-evaluates" (
-            toString (
-              map (d: builtins.unsafeDiscardOutputDependency d.drvPath) (
-                with rust.appRelease "0.0.0";
-                [
-                  linux
-                  windows
-                  dd-windows
-                  android
-                ]
-              )
-            )
-          );
           placement = import ./nix/tests/placement.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;

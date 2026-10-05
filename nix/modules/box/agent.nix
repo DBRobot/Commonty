@@ -114,6 +114,10 @@ in
     # dd-control. Beside the release file, fetched the same way.
     systemd.services.dd-build = {
       description = "Build what a signed build order asks of this box";
+      # a build in progress is not stopped or restarted by a switch, and is
+      # not part of whether a switch came up
+      restartIfChanged = false;
+      stopIfChanged = false;
       after = [
         "network-online.target"
         "dd-control.service"
@@ -141,8 +145,10 @@ in
     };
     systemd.timers.dd-build = {
       wantedBy = [ "timers.target" ];
+      # never inside a switch: its first run is three minutes after the
+      # timer starts, whether that is boot or the switch that brought it
       timerConfig = {
-        OnBootSec = "3m";
+        OnActiveSec = "3m";
         OnUnitInactiveSec = "2m";
       };
     };

@@ -232,10 +232,14 @@ fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
     let me = hostname()?;
     let trusted = release::decode_public(fs::read_to_string(key_file)?.trim())
         .map_err(|e| anyhow::anyhow!("{key_file}: {e}"))?;
+    // No order, or none to be had right now (the forge down, or switching
+    // under us): nothing to do, and nothing wrong. The next run looks again.
     let raw = match ureq::get(url).call() {
         Ok(mut r) => r.body_mut().read_to_string()?,
-        Err(ureq::Error::StatusCode(404)) => return Ok(()),
-        Err(e) => bail!("fetching {url}: {e}"),
+        Err(e) => {
+            eprintln!("{url}: no order read ({e}); looking again on the next run");
+            return Ok(());
+        }
     };
     let o = release::verify_doc(&raw, "build-order", &trusted)
         .map_err(|e| anyhow::anyhow!("the build order does not verify: {e}"))?;
