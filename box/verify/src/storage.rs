@@ -52,6 +52,16 @@ pub struct Ledger {
     read: Mutex<Option<(std::time::SystemTime, Arc<Counted>)>>,
     /// bytes uploaded to a member's libraries since the ledger's count
     since: Mutex<HashMap<String, (u64, u64)>>,
+    /// room promised to uploads still under way, per member, so two at once
+    /// cannot each be told the same room is free
+    held: Mutex<HashMap<String, u64>>,
+}
+
+/// Room set aside for one upload: at most `limit` bytes (None: no allowance
+/// on this box). Given back with `Ledger::done`.
+pub struct Held {
+    user: String,
+    pub limit: Option<u64>,
 }
 
 impl Ledger {
@@ -88,7 +98,9 @@ impl Ledger {
 
     /// Room for `more` bytes in this member's libraries? With no ledger (a
     /// box without one, or before its first count) there is no allowance to
-    /// hold to, and uploads go ahead.
+    /// hold to, and uploads go ahead. (Uploads ask `hold`, which sets the room
+    /// aside; this only asks.)
+    #[cfg(test)]
     pub fn room(&self, user: &str, more: u64) -> bool {
         let Some(c) = self.counted() else {
             return true;
@@ -96,9 +108,51 @@ impl Ledger {
         if c.budget == 0 {
             return true;
         }
-        let used =
-            c.members.get(user).map(Usage::total).unwrap_or(0) + self.uploaded(user, c.updated);
+        let used = c.members.get(user).map(Usage::total).unwrap_or(0)
+            + self.uploaded(user, c.updated)
+            + self.held.lock().unwrap().get(user).copied().unwrap_or(0);
         used.saturating_add(more) <= c.budget
+    }
+
+    /// Set aside room for an upload: what it says it is (`want`), or, when
+    /// it does not say, everything that is left. None: no room for it.
+    pub fn hold(&self, user: &str, want: Option<u64>) -> Option<Held> {
+        let Some(c) = self.counted().filter(|c| c.budget > 0) else {
+            return Some(Held {
+                user: user.to_string(),
+                limit: None,
+            });
+        };
+        let mut held = self.held.lock().unwrap();
+        let busy = held.get(user).copied().unwrap_or(0);
+        let used = c.members.get(user).map(Usage::total).unwrap_or(0)
+            + self.uploaded(user, c.updated)
+            + busy;
+        let left = c.budget.saturating_sub(used);
+        let take = match want {
+            Some(w) if w <= left => w,
+            Some(_) => return None,
+            None if left > 0 => left,
+            None => return None,
+        };
+        held.insert(user.to_string(), busy + take);
+        Some(Held {
+            user: user.to_string(),
+            limit: Some(take),
+        })
+    }
+
+    /// The upload is over: its room is given back, and what landed counted.
+    pub fn done(&self, h: Held, landed: u64) {
+        if let Some(n) = h.limit {
+            let mut held = self.held.lock().unwrap();
+            if let Some(b) = held.get_mut(&h.user) {
+                *b = b.saturating_sub(n);
+            }
+        }
+        if landed > 0 {
+            self.landed(&h.user, landed);
+        }
     }
 
     /// an upload landed: count it until the ledger next does
@@ -197,7 +251,10 @@ mod tests {
     fn ledger(json: &str) -> (Ledger, PathBuf) {
         let dir = std::env::temp_dir().join(format!("dd-storage-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join(format!("{}.json", json.len()));
+        // one file a test: tests run at once, and each removes its own
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let p = dir.join(format!("{n}.json"));
         std::fs::write(&p, json).unwrap();
         (Ledger::new(Some(p.clone())), p)
     }
@@ -221,9 +278,35 @@ mod tests {
         std::fs::remove_file(p).unwrap();
     }
 
+    /// Room is set aside while an upload streams: two at once cannot both
+    /// have the same room, one that says no size gets what is left and no
+    /// more, and what comes back is what landed.
+    #[test]
+    fn an_upload_holds_its_room_until_it_is_done() {
+        let (l, p) = ledger(
+            r#"{"updated": 100, "budget": 1000,
+                "members": {"tom": {"photos": 600, "libraries": 200, "code": 50, "passwords": 0}}}"#,
+        );
+        let a = l.hold("tom", Some(100)).expect("100 of the 150 left");
+        assert_eq!(a.limit, Some(100));
+        assert!(l.hold("tom", Some(51)).is_none(), "the 100 is spoken for");
+        let b = l.hold("tom", None).expect("no size: the 50 that is left");
+        assert_eq!(b.limit, Some(50));
+        assert!(l.hold("tom", None).is_none(), "nothing left at all");
+        // b was cut off before it landed anything; a landed 80 of its 100
+        l.done(b, 0);
+        l.done(a, 80);
+        // 850 + 80 used: 70 left
+        assert!(l.room("tom", 70));
+        assert!(!l.room("tom", 71));
+        assert_eq!(l.hold("tom", None).unwrap().limit, Some(70));
+        std::fs::remove_file(p).unwrap();
+    }
+
     #[test]
     fn no_ledger_no_allowance() {
         assert!(Ledger::new(None).room("tom", u64::MAX));
+        assert_eq!(Ledger::new(None).hold("tom", None).unwrap().limit, None);
         let (l, p) = ledger(r#"{"updated": 1, "budget": 0, "members": {}}"#);
         assert!(l.room("tom", 1 << 40));
         std::fs::remove_file(p).unwrap();

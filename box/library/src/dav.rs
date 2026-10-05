@@ -373,6 +373,27 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
     }
 }
 
+/// What a COPY from `raw` would add to the bucket: the object's size, or
+/// everything under the folder. None: not a path.
+pub async fn bytes_at(g: &Gate, lib: &str, raw: &str) -> Result<Option<u64>> {
+    let Some(path) = clean(raw) else {
+        return Ok(None);
+    };
+    if !path.is_empty()
+        && let Some((size, _)) = g.stat(&key(lib, &path)).await?
+    {
+        return Ok(Some(size));
+    }
+    let prefix = if path.is_empty() {
+        key(lib, "")
+    } else {
+        format!("{}/", key(lib, &path))
+    };
+    Ok(Some(
+        g.list_all(&prefix).await?.iter().map(|e| e.size).sum(),
+    ))
+}
+
 /// one folder, one level: [{name, type, mtime, size}], as nginx's autoindex
 /// json has it; nothing under a folder is no folder (404), and the trash is
 /// not listed
