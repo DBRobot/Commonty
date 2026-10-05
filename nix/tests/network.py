@@ -152,8 +152,12 @@ kim_key = box.succeed(
 ).strip()
 for vm, k in ((laptop, got["key"]), (other, kim_key)):
     vm.wait_for_unit("tailscaled.service")
-    vm.succeed(
+    # once the key is taken a retry needs none: the node is registered
+    vm.execute(
         f"tailscale up --login-server http://box:8085 --auth-key {k} --accept-dns=false --timeout=60s"
+    )
+    vm.wait_until_succeeds(
+        "tailscale status --json | jq -e '.BackendState == \"Running\"'", timeout=180
     )
 box_ip = ip
 laptop_ip = laptop.succeed("tailscale ip -4").strip()

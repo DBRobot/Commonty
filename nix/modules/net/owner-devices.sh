@@ -2,11 +2,12 @@
 # The owner's devices' addresses on the fleet's network, into the sets the
 # firewall lets in on the admin ports (roles/core.nix). From this box's own
 # view of the network: each peer and the user it belongs to. Swapped in
-# whole, so a device that left is out by the next run.
+# whole, so a device that left is out by the next run. The owner's name is
+# matched whole: a member called "david@else" is not david.
 set -eu
 st=$(tailscale --socket "$SOCK" status --json)
 ids=$(jq -r --arg o "$OWNER" '.User // {} | to_entries[]
-  | select(.value.LoginName == $o or (.value.LoginName | startswith($o + "@"))) | .key' <<<"$st")
+  | select(.value.LoginName == $o or .value.LoginName == ($o + "@")) | .key' <<<"$st")
 fill() {
   ipset create "$1-new" hash:ip family "$2" -exist
   ipset flush "$1-new"

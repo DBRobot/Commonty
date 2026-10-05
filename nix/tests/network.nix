@@ -66,12 +66,24 @@
   nodes.laptop = {
     services.tailscale.enable = true;
     virtualisation.memorySize = pkgs.lib.mkForce 1024;
-    environment.systemPackages = [ pkgs.netcat ];
+    # the test network only: dhcp on the qemu nic hands out a default route
+    # mid-join, and tailscaled drops its control connection on that change
+    networking.useDHCP = false;
+    environment.systemPackages = [
+      pkgs.netcat
+      pkgs.jq
+    ];
   };
   nodes.other = {
     services.tailscale.enable = true;
     virtualisation.memorySize = pkgs.lib.mkForce 1024;
-    environment.systemPackages = [ pkgs.netcat ];
+    # the test network only: dhcp on the qemu nic hands out a default route
+    # mid-join, and tailscaled drops its control connection on that change
+    networking.useDHCP = false;
+    environment.systemPackages = [
+      pkgs.netcat
+      pkgs.jq
+    ];
   };
   scriptEnv = {
     dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
