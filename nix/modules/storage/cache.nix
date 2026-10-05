@@ -67,5 +67,49 @@ in
     # the daemon substitutes as root; its credentials live at the usual place
     systemd.services.nix-daemon.environment.AWS_SHARED_CREDENTIALS_FILE = cfg.credentialsFile;
     systemd.services.nix-daemon.environment.HOME = "/root";
+
+    # The cache is held to what is still wanted, or it grows for good (95G
+    # in its first two weeks): the closures of the last ten releases, and
+    # anything a week old or newer. Run where the forge is, which has the
+    # releases branch to say what each release was.
+    systemd.services.dd-cache-gc = lib.mkIf config.services.forgejo.enable {
+      description = "Let go of what no recent release wants from the nix cache";
+      path = [
+        config.nix.package
+        pkgs.awscli2
+        pkgs.jq
+        pkgs.gitMinimal
+        pkgs.coreutils
+        pkgs.gawk
+      ];
+      environment = {
+        HOME = "/root";
+        AWS_SHARED_CREDENTIALS_FILE = cfg.credentialsFile;
+        AWS_DEFAULT_REGION = "us-east-1";
+        REPO = "${config.services.forgejo.repositoryRoot}/${config.dd.repo}.git";
+        KEEP = "10";
+        AGE = "7";
+        CACHE = url;
+        BUCKET = "nix-cache";
+        ENDPOINT = config.dd.box.s3;
+      };
+      serviceConfig = {
+        Type = "oneshot";
+        PrivateTmp = true;
+      };
+      script = ''
+        TMP=$(mktemp -d)
+        export TMP
+        exec ${pkgs.bash}/bin/bash ${./cache-gc.sh}
+      '';
+    };
+    systemd.timers.dd-cache-gc = lib.mkIf config.services.forgejo.enable {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "daily";
+        RandomizedDelaySec = "2h";
+        Persistent = true;
+      };
+    };
   };
 }

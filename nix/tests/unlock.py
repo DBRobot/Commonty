@@ -37,6 +37,15 @@ box.succeed("zfs get -H -o value keystatus data/enc | grep -q available")
 box.wait_until_succeeds("test ! -e /run/dd/disk.key")
 box.succeed("journalctl -b -o cat | grep -q 'dd-unlock: unlocked'")
 
+# a cap by mountpoint lands on whichever dataset is mounted there, and is
+# never set below what a dataset already holds
+box.succeed("zfs create -o mountpoint=/big data/big && head -c 3M /dev/urandom > /big/blob && sync")
+box.succeed("systemctl restart zfs-datasets.service")
+assert box.succeed("zfs get -H -o value quota data/enc").strip() == "100M"
+assert box.succeed("zfs get -H -o value quota data/big").strip() == "none"
+box.succeed("journalctl -u zfs-datasets -o cat | grep -q 'not capping data/big'")
+box.succeed("zfs destroy data/big")
+
 # 2. marked stolen, at its own home: refused, again and again. Then, while
 # it waits in its initrd, it is unmarked and found somewhere new: it waits
 # for a member, who lets it in. One boot for both.

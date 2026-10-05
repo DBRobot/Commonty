@@ -24,7 +24,9 @@ in
     port = 9090;
     # this box only: thanos's sidecar beside it is how the fleet reads it
     listenAddress = "127.0.0.1";
-    retentionTime = "180d"; # a few hundred MB; enough to answer "when did this start"
+    # the history is the bucket's (thanos, 180 days and more); here only
+    # until the sidecar has it, with weeks to spare
+    retentionTime = "30d";
 
     exporters.node = {
       enable = true;

@@ -165,6 +165,19 @@ in
   services.logind.settings.Login.HandleLidSwitch = "ignore";
   services.logind.settings.Login.HandleLidSwitchExternalPower = "ignore";
 
+  # The store is cleaned, or it fills the disk: CI builds on a runner box
+  # pile up for good otherwise (node2's reached 97G and, with garage on the
+  # same pool, took the box's last byte). Weekly, the systems of the last two
+  # weeks kept (a rollback is to one of them), and whenever a build finds
+  # less than 10G free.
+  nix.gc = {
+    automatic = true;
+    dates = "weekly";
+    options = "--delete-older-than 14d";
+    randomizedDelaySec = "6h";
+  };
+  nix.settings.min-free = 10 * 1024 * 1024 * 1024;
+  nix.settings.max-free = 30 * 1024 * 1024 * 1024;
   nix.settings.experimental-features = [
     "nix-command"
     "flakes"
