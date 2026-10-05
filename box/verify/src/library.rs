@@ -111,28 +111,91 @@ async fn serve(app: Arc<App>, lib: String, raw: String, req: Request) -> Respons
         Ok(r) => r,
         Err(r) => return r,
     };
-    // An upload counts against its owner's allowance, across every service
-    // (storage.rs). A file whose size is not said up front is let in while
-    // there is any room, and counted when it lands.
-    let upload = req.method() == Method::PUT && matches!(role, Role::Owner);
-    let size = req
+    if !matches!(role, Role::Owner) {
+        return library_gate::dav::serve(g, lib, raw, role, req).await;
+    }
+    metered(&app, g, &user, lib, raw, role, req).await
+}
+
+/// Past your allowance, as a person reads it.
+fn no_room() -> Response {
+    (
+        StatusCode::INSUFFICIENT_STORAGE,
+        "this would go past your storage allowance: make room first (Settings, Storage shows what uses it)",
+    )
+        .into_response()
+}
+
+/// A write, held to its owner's allowance across every service (storage.rs),
+/// by what it carries rather than what it says. Room is set aside first: the
+/// size it declares, or all that is left when it declares none. The body is
+/// counted as it streams and cut off past that room, so the store never
+/// takes the object; what did land is counted until the ledger next looks.
+/// A COPY adds what it copies, measured in the bucket before it is made.
+async fn metered(
+    app: &App,
+    g: &Gate,
+    user: &str,
+    lib: String,
+    raw: String,
+    role: Role,
+    req: Request,
+) -> Response {
+    use futures_util::StreamExt as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let method = req.method().as_str().to_string();
+    let piece = req.headers().contains_key("x-dd-upload");
+    if method == "COPY" {
+        let size = match library_gate::dav::bytes_at(g, &lib, &raw).await {
+            Ok(Some(n)) => n,
+            Ok(None) => return (StatusCode::BAD_REQUEST, "not a path").into_response(),
+            Err(e) => return (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+        };
+        let Some(held) = app.storage.hold(user, Some(size)) else {
+            return no_room();
+        };
+        let r = library_gate::dav::serve(g, lib, raw, role, req).await;
+        let landed = if r.status().is_success() { size } else { 0 };
+        app.storage.done(held, landed);
+        return r;
+    }
+    if method != "PUT" && !piece {
+        return library_gate::dav::serve(g, lib, raw, role, req).await;
+    }
+    let declared = req
         .headers()
         .get(axum::http::header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
-    if upload && !app.storage.room(&user, size.max(1)) {
-        return (
-            StatusCode::INSUFFICIENT_STORAGE,
-            "this would go past your storage allowance: make room first (Settings, Storage shows what uses it)",
-        )
-            .into_response();
-    }
+        .and_then(|v| v.parse::<u64>().ok());
+    let Some(held) = app.storage.hold(user, declared) else {
+        return no_room();
+    };
+    let limit = held.limit;
+    let seen = Arc::new(AtomicU64::new(0));
+    let counter = seen.clone();
+    let (parts, body) = req.into_parts();
+    let body = body.into_data_stream().map(move |chunk| {
+        let chunk = chunk.map_err(std::io::Error::other)?;
+        let n = counter.fetch_add(chunk.len() as u64, Ordering::Relaxed) + chunk.len() as u64;
+        if limit.is_some_and(|l| n > l) {
+            return Err(std::io::Error::other("past the storage allowance"));
+        }
+        Ok(chunk)
+    });
+    let req = Request::from_parts(parts, axum::body::Body::from_stream(body));
     let r = library_gate::dav::serve(g, lib, raw, role, req).await;
-    if upload && r.status().is_success() {
-        app.storage.landed(&user, size);
-    }
-    r
+    let carried = seen.load(Ordering::Relaxed);
+    let over = limit.is_some_and(|l| carried > l);
+    app.storage.done(
+        held,
+        if r.status().is_success() && !over {
+            carried
+        } else {
+            0
+        },
+    );
+    if over { no_room() } else { r }
 }
 
 /// Every method under /images/..., a member's disk images: restic's layout,
@@ -197,27 +260,8 @@ async fn images(app: Arc<App>, raw: String, req: Request) -> Response {
         }
     }
     // the images count against their owner's allowance like a library's
-    // files (storage.rs counts the prefix too): checked against what the
-    // request says, and the ledger's recount of the bucket settles what landed
-    let upload =
-        matches!(req.method().as_str(), "PUT" | "COPY") || headers.contains_key("x-dd-upload");
-    let size = headers
-        .get(axum::http::header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
-    if upload && !app.storage.room(&user, size.max(1)) {
-        return (
-            StatusCode::INSUFFICIENT_STORAGE,
-            "this would go past your storage allowance: make room first (Settings, Storage shows what uses it)",
-        )
-            .into_response();
-    }
-    let r = library_gate::dav::serve(g, images_prefix(&user), raw, Role::Owner, req).await;
-    if upload && r.status().is_success() {
-        app.storage.landed(&user, size);
-    }
-    r
+    // files (storage.rs counts the prefix too)
+    metered(&app, g, &user, images_prefix(&user), raw, Role::Owner, req).await
 }
 
 /// where a member's disk images are in the bucket: a top-level prefix, as a

@@ -300,3 +300,43 @@ assert (
     ).strip()
     == "403"
 )
+
+# The allowance holds by what an upload carries, not what it says. sarah's
+# ledger leaves her 1000 bytes; the gate reads it where the ledger writes.
+box.succeed("mkdir -p /run/dd-test && chmod 755 /run/dd-test")
+box.succeed(
+    "jq -n '{updated: 1, budget: 1000000, members: {sarah: {photos: 999000, libraries: 0, code: 0, passwords: 0}}}' "
+    "> /run/dd-test/ledger.json && chmod 644 /run/dd-test/ledger.json"
+)
+box.succeed(
+    "printf \"[Service]\\nEnvironment='VERIFY_STORAGE_LEDGER=/run/dd-test/ledger.json'\\n\" "
+    "> /run/systemd/system/dd-verify.service.d/ledger.conf"
+)
+box.succeed("systemctl daemon-reload && systemctl restart dd-verify.service")
+box.wait_for_open_port(4181)
+box.succeed(
+    "head -c 600 /dev/urandom > /root/small && head -c 2000 /dev/urandom > /root/big"
+)
+code = lambda args: box.succeed(
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_sarah} {args}"
+).strip()
+# said too big: refused before a byte moves
+assert code(f"-X PUT --data-binary @/root/big {img}/data/big1") == "507"
+# said nothing (chunked): let in, then cut off at the room there is, and never kept
+assert (
+    code(
+        f"-X PUT -H 'Transfer-Encoding: chunked' --data-binary @/root/big {img}/data/big2"
+    )
+    == "507"
+)
+assert code(f"{img}/data/big2") == "404"
+# what fits lands, and then counts: 600 of 1000 used, 400 left
+assert code(f"-X PUT --data-binary @/root/small {img}/data/small") == "201"
+assert code(f"-X PUT --data-binary @/root/small {img}/data/small2") == "507"
+# a copy adds what it copies
+assert (
+    code(
+        f"-X COPY -H 'Destination: http://127.0.0.1:4181/_dd/dav/images-sarah/data/copy' {img}/data/small"
+    )
+    == "507"
+)
