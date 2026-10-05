@@ -65,6 +65,8 @@ silently redeploy the previous revision.
   Cloudflare left carrying only what is end-to-end encrypted. Passwords is
   already there: tailnet only, TLS on the box, and Cloudflare sees none of
   it; its page stays on the box, and the box's keys move into its TPM.
+  The directory's log items (names, public keys, passkey ids) pass through
+  the relay too: encrypt them to the boxes' TPM keys (docs/control-plane.md).
 
 ## License
 

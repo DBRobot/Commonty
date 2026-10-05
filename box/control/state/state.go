@@ -48,7 +48,7 @@ type LeaseRule struct {
 
 // Request is what a box asks for, signed by its TPM-held key over Bytes().
 type Request struct {
-	Kind string          `json:"kind"` // heartbeat | lease
+	Kind string          `json:"kind"` // heartbeat | lease | directory
 	Box  string          `json:"box"`
 	Seq  uint64          `json:"seq"` // strictly increasing per box
 	Body json.RawMessage `json:"body"`
@@ -79,7 +79,32 @@ type BoxState struct {
 	LastSeen int64              `json:"lastSeen"`
 	Facts    map[string]float64 `json:"facts,omitempty"`
 	Roles    []string           `json:"roles,omitempty"`
+	// directory items this box sent in the minute from DirWindow (agreed ms)
+	DirWindow int64 `json:"dirWindow,omitempty"`
+	DirCount  int   `json:"dirCount,omitempty"`
 }
+
+// DirItem is one thing a box's gate put in the directory log: an entry
+// signed by its member, an invite signed by the release key, or the gate's
+// acknowledgement of a first claim. The validators order them and judge
+// none; every gate replays the log through the same rules
+// (box/verify/src/directory.rs), so every box ends at the same directory.
+type DirItem struct {
+	Height uint64 `json:"height"`
+	// the agreed time it was ordered at, ms: what a gate checks an invite's
+	// window and a guest's expiry against, so every gate decides alike
+	Time int64           `json:"time"`
+	Box  string          `json:"box"`
+	Item json.RawMessage `json:"item"`
+}
+
+const (
+	// MaxDirItem bounds one item: an entry with its devices and passkeys
+	MaxDirItem = 64 << 10
+	// DirPerMinute bounds what one box adds in a minute, so a box gone bad
+	// can fill the log only slowly
+	DirPerMinute = 60
+)
 
 type Lease struct {
 	Holder  string `json:"holder"`
@@ -95,6 +120,8 @@ type State struct {
 	// the highest epoch ever granted per role, even after a lease is gone:
 	// a new holder always gets a higher one
 	Epochs map[string]uint64 `json:"epochs"`
+	// the directory log, in agreed order (DirItem)
+	Directory []DirItem `json:"directory,omitempty"`
 }
 
 func New() *State {
@@ -132,6 +159,17 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 			return err
 		}
 		return s.checkLease(cfg, r.Box, op, now)
+	case "directory":
+		if len(r.Body) > MaxDirItem {
+			return fmt.Errorf("a directory item of %d bytes; at most %d", len(r.Body), MaxDirItem)
+		}
+		if !json.Valid(r.Body) {
+			return errors.New("a directory item is json")
+		}
+		if b := s.Boxes[r.Box]; b != nil && now-b.DirWindow < 60_000 && b.DirCount >= DirPerMinute {
+			return fmt.Errorf("%s has sent %d directory items this minute", r.Box, b.DirCount)
+		}
+		return nil
 	}
 	return fmt.Errorf("no such request: %q", r.Kind)
 }
@@ -197,6 +235,12 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 		case "release":
 			delete(s.Leases, op.Role)
 		}
+	case "directory":
+		if now-b.DirWindow >= 60_000 {
+			b.DirWindow, b.DirCount = now, 0
+		}
+		b.DirCount++
+		s.Directory = append(s.Directory, DirItem{Height: s.Height, Time: now, Box: r.Box, Item: append(json.RawMessage(nil), r.Body...)})
 	}
 }
 

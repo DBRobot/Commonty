@@ -35,7 +35,23 @@ async fn main() -> Result<()> {
             .filter(|p| !p.is_empty())
             .map(str::to_string)
             .collect(),
+        house_peers: env_or("VERIFY_HOUSE_PEERS", &env_or("VERIFY_PEERS", ""))
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect(),
         sync_secs: env_or("VERIFY_SYNC_SECS", "300").parse()?,
+        control: std::env::var("VERIFY_CONTROL")
+            .ok()
+            .filter(|c| !c.is_empty())
+            .map(|c| {
+                (
+                    c,
+                    env_or("VERIFY_CONTROL_SUBMIT", "/run/dd-control/submit.sock").into(),
+                    env_or("VERIFY_CONTROL_CONFIG", "/etc/dd-control/config.json").into(),
+                )
+            }),
         domain: if full {
             Some(env("VERIFY_DOMAIN")?)
         } else {

@@ -114,6 +114,8 @@ impl Box_ {
             dir: dir.clone(),
             peers,
             sync_secs,
+            control: None,
+            house_peers: vec![],
             domain: full.then(|| "localhost".to_string()),
         })
         .await
@@ -1421,6 +1423,8 @@ async fn start_at(
         dir: dir.clone(),
         peers,
         sync_secs,
+        control: None,
+        house_peers: vec![],
         domain: full.then(|| "localhost".to_string()),
     })
     .await?;
@@ -1503,6 +1507,8 @@ async fn download_page_of(release_pub: String, manifest_url: String) -> (u16, St
         dir: scratch("box").join("keys"),
         peers: vec![],
         sync_secs: 300,
+        control: None,
+        house_peers: vec![],
         domain: Some("localhost".to_string()),
     })
     .await
@@ -1906,6 +1912,8 @@ async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
         dir,
         peers: vec![a.directory()],
         sync_secs: 1,
+        control: None,
+        house_peers: vec![],
         domain: Some("localhost".to_string()),
     })
     .await
@@ -2142,6 +2150,8 @@ async fn gate_for(
         dir: scratch(scratch_name).join("keys"),
         peers: vec![a.directory()],
         sync_secs: 1,
+        control: None,
+        house_peers: vec![],
         domain: Some("localhost".to_string()),
     })
     .await
@@ -2390,6 +2400,8 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
         dir: scratch("house-dir").join("keys"),
         peers: vec![],
         sync_secs: 1,
+        control: None,
+        house_peers: vec![],
         domain: None,
     })
     .await

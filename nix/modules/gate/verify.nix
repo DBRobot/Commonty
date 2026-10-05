@@ -14,7 +14,13 @@ let
   user = "dd-verify";
   # a tile's service by its host: https://git.<domain>/ is "git"
   tileHost =
-    t: lib.removeSuffix ".${config.dd.domain}" (lib.head (lib.splitString "/" (lib.removePrefix "https://" t.url)));
+    t:
+    lib.removeSuffix ".${config.dd.domain}" (
+      lib.head (lib.splitString "/" (lib.removePrefix "https://" t.url))
+    );
+  # the directory is the control plane's agreed log wherever the control
+  # plane runs (box/verify/src/directory.rs, Agreed)
+  agreed = options.dd ? control && config.dd.control.enable;
   demoDoors = if options.dd ? public then config.dd.public.demoDoors else [ ];
 in
 {
@@ -66,6 +72,11 @@ in
     type = lib.types.int;
     default = 300;
     description = "How often a box pulls its peers' directories. Tests set it low.";
+  };
+  options.dd.verify.housePeers = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    description = "the other boxes in this house (same site), as directory urls: a Wi-Fi change is relayed to them";
   };
   options.dd.verify.peers = lib.mkOption {
     type = lib.types.listOf lib.types.str;
@@ -262,23 +273,39 @@ in
       description = "Verify user-signed tokens and this box's passkey sessions";
       after = [
         "network-online.target"
-      ];
-      wants = [ "network-online.target" ];
+      ]
+      ++ lib.optional agreed "dd-control.service";
+      wants = [ "network-online.target" ] ++ lib.optional agreed "dd-control.service";
       wantedBy = [ "multi-user.target" ];
       environment = {
         VERIFY_ROLE = cfg.role;
         # full sits behind nginx on localhost. directory has no nginx and no
         # public name yet, so it listens on every interface and the firewall
         # lets only the tailnet in: 4181 is not in allowedTCPPorts.
-        VERIFY_BIND = if full then "127.0.0.1:${toString port}" else "0.0.0.0:${toString port}";
+        # With the agreed log (the control plane) nobody pulls this box's
+        # directory; a box that is not the front door still takes its
+        # house's Wi-Fi relay, and the firewall lets in only that house's
+        # boxes (roles/core.nix)
+        VERIFY_BIND =
+          if full || (agreed && cfg.housePeers == [ ]) then
+            "127.0.0.1:${toString port}"
+          else
+            "0.0.0.0:${toString port}";
         VERIFY_DIR = "/var/lib/dd-verify/keys";
-        VERIFY_PEERS = lib.concatStringsSep "," cfg.peers;
+        VERIFY_PEERS = lib.optionalString (!agreed) (lib.concatStringsSep "," cfg.peers);
+        # the house's own boxes, for its Wi-Fi and its page; never the fleet
+        VERIFY_HOUSE_PEERS = lib.concatStringsSep "," cfg.housePeers;
         VERIFY_FLEET = builtins.toJSON cfg.fleet;
         # every box's facts, from thanos on this box (box/verify/src/fleet.rs)
-        VERIFY_THANOS = lib.optionalString (
-          config.services.thanos.query.enable or false
+        VERIFY_THANOS = lib.optionalString (config.services.thanos.query.enable or false
         ) "http://${config.services.thanos.query.http-address}";
         VERIFY_SYNC_SECS = toString cfg.syncSeconds;
+      }
+      # the directory as the control plane's agreed log
+      // lib.optionalAttrs agreed {
+        VERIFY_CONTROL = "http://127.0.0.1:4195";
+        VERIFY_CONTROL_SUBMIT = "/run/dd-control/submit.sock";
+        VERIFY_CONTROL_CONFIG = "/etc/dd-control/config.json";
       }
       // lib.optionalAttrs (full && cfg.appManifest != null) {
         VERIFY_APP_MANIFEST = cfg.appManifest;
@@ -369,7 +396,8 @@ in
         RestrictAddressFamilies = [
           "AF_INET"
           "AF_INET6"
-        ];
+        ]
+        ++ lib.optional agreed "AF_UNIX"; # dd-control's submit socket
         RestrictNamespaces = true;
         LockPersonality = true;
         MemoryDenyWriteExecute = true;

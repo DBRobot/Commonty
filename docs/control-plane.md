@@ -1,6 +1,8 @@
 # The control plane
 
-Status: design, for review. Nothing here is built yet.
+Status: running on node1 and node2 with the Cloudflare witness (since
+release 176). Boxes heartbeat into it; the gates keep the directory in it
+(below). Nothing places roles from it yet.
 
 ## What it is for
 
@@ -52,6 +54,7 @@ only if it passes the rule, run identically by every validator:
 | lease renew {role, box, epoch} | signed by the current holder, before expiry |
 | lease release {role, box, epoch} | signed by the holder |
 | membership {add/remove house, box, witness} | signed by the owner key(s): today the release key, later k of n house owners |
+| directory {an entry, an invite, or an ack} | signed by a box of the fleet; at most 64K; at most 60 a minute per box. Its content is the gates' to judge, not the validators' |
 
 Rules, copy counts and role requirements come from the signed release, not
 from the log.
@@ -63,6 +66,34 @@ Lease expiry uses this agreed time, so no single clock can end a lease early.
 **Fencing.** Each lease grant raises the role's epoch. The holder stamps its
 epoch on what it writes (WAL segments, for example), and readers ignore
 anything from a lower epoch. A writer that wakes up confused can't win.
+
+## The directory
+
+Who people are (box/verify/src/directory.rs) lives in the agreed log, not in
+copies the boxes pull from each other. No box talks to another for it.
+
+- A write (a new person, a device added, a passkey changed, an invite) is
+  checked by the gate it reaches, then handed to that box's dd-control on a
+  socket only the gate can open, and goes into the log as that box's
+  request.
+- The validators order directory items and judge none. Every gate replays
+  the log through the same rules (identity::accept, the invite and library
+  checks), at each item's agreed time, so every box ends at the same
+  directory. One implementation of the rules, in the gates.
+- An update is the owner's own signature and lands as soon as it is in the
+  log.
+- A name nobody holds yet is a claim. It is the claimant's only once the
+  gate of every voting box has acknowledged that very claim in the log. While
+  there are three voters (not yet Byzantine-safe, see the README), a lying
+  voter can only stall a new name, and never give it to two people.
+- While agreement is down, nobody signs up or changes a device. Signing in,
+  and every service, keep working from each box's copy.
+- Each item is visible to the relay, Cloudflare included: names, public
+  keys, passkey ids. It was before too, through the tunnel. Encrypting the
+  items to the boxes' TPM keys is in the README's Cloudflare TODO.
+- A house's Wi-Fi relay still goes box to box inside that house, on 4181
+  and to that house's boxes alone. It moves to the log once house items
+  can be encrypted to the house's boxes.
 
 ## Timing
 
