@@ -146,7 +146,9 @@ async fn metered(
 
     let method = req.method().as_str().to_string();
     let piece = req.headers().contains_key("x-dd-upload");
-    if method == "COPY" {
+    // the upload header makes dav::serve take the body as a piece whatever
+    // the method, so it is metered as one, never as the copy it may claim
+    if method == "COPY" && !piece {
         let size = match library_gate::dav::bytes_at(g, &lib, &raw).await {
             Ok(Some(n)) => n,
             Ok(None) => return (StatusCode::BAD_REQUEST, "not a path").into_response(),
