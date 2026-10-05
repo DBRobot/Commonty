@@ -1,0 +1,68 @@
+{
+  "payload": {
+    "built": {
+      "android": {
+        "apart": 0,
+        "by": [
+          "node1",
+          "node2"
+        ]
+      },
+      "dd-windows": {
+        "apart": 0,
+        "by": [
+          "node2",
+          "node1"
+        ]
+      },
+      "linux": {
+        "apart": 0,
+        "by": [
+          "node1",
+          "node2"
+        ]
+      },
+      "windows": {
+        "apart": 0,
+        "by": [
+          "node2",
+          "node1"
+        ]
+      }
+    },
+    "commit": "978a30170daea6d63646f01a6fc816f365374f04",
+    "files": {
+      "commonty-setup.exe": {
+        "sha256": "8f37afff901f3c220f8258fa9fe434fbbabaeb629722b9006749a0a1fe15d306",
+        "size": 11231170,
+        "url": "https://commonty.org/download/v0.1.26/commonty-setup.exe"
+      },
+      "commonty.apk": {
+        "sha256": "170e43ba325a6db760c7cfbbc0e47b7e618c51e004029a9d9c35bafe26e359ba",
+        "size": 95033320,
+        "url": "https://commonty.org/download/v0.1.26/commonty.apk"
+      },
+      "commonty_0.1.26_amd64.AppImage": {
+        "sha256": "17c1bb0b8ec4693d09b8fd453e9fc16a06e16d47f9276cdde9e0c742c0a224d2",
+        "size": 162335224,
+        "url": "https://commonty.org/download/v0.1.26/commonty_0.1.26_amd64.AppImage"
+      },
+      "commonty_0.1.26_amd64.deb": {
+        "sha256": "d4c2a534aaaa661dc713823f53629eee6faff24c2a5a55d0c6106e9342942bbd",
+        "size": 12695200,
+        "url": "https://commonty.org/download/v0.1.26/commonty_0.1.26_amd64.deb"
+      },
+      "dd.exe": {
+        "sha256": "4ba837ceb320801c40085f66be0e65bfd4bf196e8f8a77aef82446bf309e1717",
+        "size": 18168832,
+        "url": "https://commonty.org/download/v0.1.26/dd.exe"
+      }
+    },
+    "from": "https://git.commonty.org/david/commonty",
+    "issued": 1791199070,
+    "kind": "app",
+    "tag": "v0.1.26"
+  },
+  "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
+  "signature": "hXWuoiYbIvBI2ApSs2heQfeitLB71xqORgF7a3aiPwkDSUDDvJzoRNVKDyX6XdB3oMHXxNk4HUdT1UJ8/wXbAw=="
+}
