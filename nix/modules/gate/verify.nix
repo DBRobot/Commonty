@@ -160,6 +160,24 @@ in
             type = lib.types.str;
             description = "file holding headscale's api key for the gate";
           };
+          boxes = lib.mkOption {
+            type = lib.types.attrsOf (
+              lib.types.submodule {
+                options = {
+                  key = lib.mkOption {
+                    type = lib.types.str;
+                    description = "the P-256 key in the box's TPM it signs with (base64 SPKI, boxes.json unlockKey)";
+                  };
+                  recipient = lib.mkOption {
+                    type = lib.types.str;
+                    description = "the age recipient of the box's TPM secrets key (its signed hardware.json, secretsKey)";
+                  };
+                };
+              }
+            );
+            default = { };
+            description = "boxes that may ask for a key of their own (POST /_dd/network/box), answered sealed to them";
+          };
         };
       }
     );
@@ -325,6 +343,11 @@ in
         VERIFY_HEADSCALE_API = cfg.network.api;
         VERIFY_HEADSCALE_URL = cfg.network.url;
         VERIFY_HEADSCALE_KEY_FILE = cfg.network.keyFile;
+        VERIFY_NETWORK_BOXES = "${pkgs.writeText "network-boxes.json" (builtins.toJSON cfg.network.boxes)}";
+        # the boxes' recipients are TPM keys: age needs the plugin to seal to one
+        VERIFY_AGE = "${pkgs.writeShellScript "age-for-boxes" ''
+          PATH=${lib.makeBinPath [ pkgs.age-plugin-tpm ]}:$PATH exec ${pkgs.age}/bin/age "$@"
+        ''}";
       }
       // lib.optionalAttrs (full && cfg.photos != null) {
         VERIFY_PHOTOS_API = cfg.photos.api;

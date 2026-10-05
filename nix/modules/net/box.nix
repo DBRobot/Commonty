@@ -26,13 +26,19 @@ let
   base = config.dd.domain;
   bridged = !config.services.headscale.enable;
   bridgeAt = "127.0.0.1:41643";
+  control = self.packages.${pkgs.stdenv.hostPlatform.system}.dd-control;
 in
 {
   options.dd.net = {
     enable = lib.mkEnableOption "this box on the fleet's own network";
-    keyFile = lib.mkOption {
+    getKey = lib.mkOption {
+      type = lib.types.lines;
+      description = "shell that writes a single-use join key to $key. A box asks its gate, signed by its TPM, and the answer comes sealed to its TPM; the control box mints its own (modules/net/headscale.nix).";
+    };
+    door = lib.mkOption {
       type = lib.types.str;
-      description = "file holding the boxes' join key (made by headscale-seed on the control box; carried to the others through sops)";
+      default = "https://home.${base}/_dd/network/box";
+      description = "where a box asks for its key";
     };
     controlUrl = lib.mkOption {
       type = lib.types.str;
@@ -56,6 +62,13 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # asked of the gate: the time, signed in this box's TPM; the answer
+    # opens only with the secrets key in the same TPM
+    dd.net.getKey = lib.mkDefault ''
+      ${control}/bin/dd-control -box ${config.networking.hostName} -sign-join \
+        | curl -fsS --max-time 60 -H 'content-type: application/json' --data-binary @- ${cfg.door} \
+        | age -d -i /var/lib/dd/secrets-key.txt > "$key"
+    '';
     systemd.services.commonty-net = {
       description = "The fleet's own network: tailscaled against the fleet's Headscale";
       wantedBy = [ "multi-user.target" ];
@@ -123,6 +136,11 @@ in
       path = [
         pkgs.tailscale
         pkgs.jq
+        pkgs.curl
+        pkgs.age
+        pkgs.age-plugin-tpm
+        pkgs.tpm2-tools
+        pkgs.coreutils
       ];
       serviceConfig = {
         Type = "simple";
@@ -138,19 +156,27 @@ in
         done
         wait=30
         until tailscale --socket "$sock" status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null; do
-          if [ ! -s ${cfg.keyFile} ]; then
-            echo "no key at ${cfg.keyFile} yet"
-            sleep 30
+          # a key for this one try: single use, ten minutes, never kept
+          key=/run/commonty-net/join.key
+          rm -f "$key"
+          if ! { ${cfg.getKey}
+          } || [ ! -s "$key" ]; then
+            rm -f "$key"
+            echo "no key to join with; next try in $wait s"
+            sleep $wait
+            wait=$(( wait * 2 ))
+            [ $wait -gt 3600 ] && wait=3600
             continue
           fi
           tailscale --socket "$sock" up \
             --login-server=${if bridged then "http://${bridgeAt}" else cfg.controlUrl} \
-            --auth-key=file:${cfg.keyFile} \
+            --auth-key=file:"$key" \
             --hostname=${config.networking.hostName} \
             --accept-dns=false \
             --accept-routes=false \
             --netfilter-mode=off \
-            --timeout=60s && continue
+            --timeout=60s && { rm -f "$key"; continue; }
+          rm -f "$key"
           # Every `up` rewrites routing table 52, which the box's other
           # tailscaled shares. Retrying one that fails, every thirty
           # seconds, is what took node2 off the network for eight hours.

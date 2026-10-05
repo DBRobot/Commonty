@@ -11,6 +11,7 @@
 # never through Cloudflare.
 {
   config,
+  options,
   pkgs,
   lib,
   ...
@@ -18,18 +19,6 @@
 let
   cfg = config.dd.headscale;
   base = config.dd.domain;
-  # the range the games manager hands out, where this box runs one
-  gamePorts =
-    if config.dd ? games then
-      {
-        from = config.dd.games.portBase;
-        to = config.dd.games.portBase + config.dd.games.portCount - 1;
-      }
-    else
-      {
-        from = 27000;
-        to = 27199;
-      };
   host = "headscale.${base}";
   port = 8085;
   state = "/var/lib/headscale";
@@ -47,10 +36,7 @@ let
         {
           action = "accept";
           src = [ "autogroup:member" ];
-          dst = [
-            "tag:box:443"
-            "tag:box:${toString gamePorts.from}-${toString gamePorts.to}"
-          ];
+          dst = [ "tag:box:443" ] ++ map (p: "tag:box:${p}") cfg.gamePorts;
         }
       ];
     }
@@ -72,10 +58,28 @@ in
       default = "/var/lib/dd-verify/headscale-api.key";
       readOnly = true;
     };
-    boxKeyFile = lib.mkOption {
-      type = lib.types.str;
-      default = "${state}/box.key";
-      readOnly = true;
+    gamePorts = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = lib.optionals (config.dd ? games) (
+        [
+          "${toString config.dd.games.portBase}-${
+            toString (config.dd.games.portBase + config.dd.games.portCount - 1)
+          }"
+        ]
+        ++ map toString (
+          lib.unique (
+            lib.concatMap (
+              g: lib.attrValues (g.fixed_ports or { })
+            ) (lib.importJSON ../../../data/games/catalogue.json).games
+          )
+        )
+      );
+      description = "the ports a member's device may reach on a box for games: every games box's range, and every port a game insists on (the flake gives the fleet's; alone, this box's own)";
+    };
+    boxes = lib.mkOption {
+      type = (lib.types.attrsOf lib.types.attrs);
+      default = { };
+      description = "the boxes that may ask the gate for a key of their own, and what they sign and are sealed to (dd.verify.network.boxes)";
     };
     url = lib.mkOption {
       type = lib.types.str;
@@ -89,135 +93,167 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    services.headscale = {
-      enable = true;
-      address = "127.0.0.1";
-      inherit port;
-      settings = {
-        server_url = cfg.url;
-        # Tailscale's public relays, until the fleet has a public box
-        derp = {
-          urls = [ "https://controlplane.tailscale.com/derpmap/default" ];
-          server.enabled = false;
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge [
+      (lib.optionalAttrs (options.dd ? backup) { dd.backup.paths = [ "${state}/snapshot" ]; })
+      {
+        services.headscale = {
+          enable = true;
+          address = "127.0.0.1";
+          inherit port;
+          settings = {
+            server_url = cfg.url;
+            # Tailscale's public relays, until the fleet has a public box
+            derp = {
+              urls = [ "https://controlplane.tailscale.com/derpmap/default" ];
+              server.enabled = false;
+            };
+            dns = {
+              magic_dns = true;
+              base_domain = "net.${base}";
+              # Quad9's unfiltered pair, nothing blocked: the same answers as
+              # before, from a resolver that is not the front door's company
+              nameservers.global = [
+                "9.9.9.10"
+                "149.112.112.10"
+                "2620:fe::10"
+                "2620:fe::fe:10"
+              ];
+              extra_records_path = "${state}/extra-records.json";
+            };
+            policy = {
+              mode = "file";
+              path = "${policy}";
+            };
+            # nodes stay until removed; a laptop off for a month is still yours
+            ephemeral_node_inactivity_timeout = "30m";
+          };
         };
-        dns = {
-          magic_dns = true;
-          base_domain = "net.${base}";
-          nameservers.global = [
-            "1.1.1.1"
-            "9.9.9.9"
+
+        # Who is on the network lives in its database: lost, every device of
+        # every member joins again. A copy made with sqlite's own backup (the
+        # live file is mid-write), with the server's key, before each backup.
+        systemd.services.headscale-snapshot = {
+          description = "Copy the network's database for the backup";
+          before = [ "restic-backups-dd.service" ];
+          wantedBy = [ "restic-backups-dd.service" ];
+          serviceConfig = {
+            Type = "oneshot";
+            User = "headscale";
+            Group = "headscale";
+          };
+          script = ''
+            umask 077
+            mkdir -p ${state}/snapshot
+            ${pkgs.sqlite}/bin/sqlite3 ${state}/db.sqlite ".backup ${state}/snapshot/db.sqlite.new"
+            mv ${state}/snapshot/db.sqlite.new ${state}/snapshot/db.sqlite
+            cp ${state}/noise_private.key ${state}/snapshot/noise_private.key
+          '';
+        };
+
+        # the names file exists before the first start (empty) and is filled
+        # once this box has joined
+        systemd.tmpfiles.rules = [ "f ${state}/extra-records.json 0644 headscale headscale - []" ];
+
+        # made once: the boxes' user and the verifier's api key. A file, not a
+        # secret in sops, because this box makes it for itself. A box's key to
+        # join is never kept: each is made when it is wanted (dd.net.getKey).
+        systemd.services.headscale-seed = {
+          description = "Seed the network: the boxes' user, the verifier's api key";
+          after = [ "headscale.service" ];
+          requires = [ "headscale.service" ];
+          wantedBy = [ "multi-user.target" ];
+          path = [
+            config.services.headscale.package
+            pkgs.jq
+            pkgs.coreutils
           ];
-          extra_records_path = "${state}/extra-records.json";
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            set -eu
+            for _ in $(seq 1 60); do headscale users list >/dev/null 2>&1 && break; sleep 1; done
+            # an empty list is json null here
+            who='(. // []) | .[] | select(.name == "boxes") | .id'
+            id=$(headscale users list -o json | jq -r "$who")
+            if [ -z "$id" ]; then
+              headscale users create boxes >/dev/null
+              id=$(headscale users list -o json | jq -r "$who")
+            fi
+            if [ ! -s ${cfg.apiKeyFile} ]; then
+              mkdir -p "$(dirname ${cfg.apiKeyFile})"
+              headscale apikeys create --expiration 3650d > ${cfg.apiKeyFile}.tmp
+              chown root:dd-verify ${cfg.apiKeyFile}.tmp
+              chmod 0440 ${cfg.apiKeyFile}.tmp
+              mv ${cfg.apiKeyFile}.tmp ${cfg.apiKeyFile}
+            fi
+          '';
         };
-        policy = {
-          mode = "file";
-          path = "${policy}";
-        };
-        # nodes stay until removed; a laptop off for a month is still yours
-        ephemeral_node_inactivity_timeout = "30m";
-      };
-    };
 
-    # the names file exists before the first start (empty) and is filled
-    # once this box has joined
-    systemd.tmpfiles.rules = [ "f ${state}/extra-records.json 0644 headscale headscale - []" ];
-
-    # made once: the boxes' user and their join key, and the verifier's api
-    # key. Files, not secrets in sops, because this box makes them for
-    # itself; node2's copy of the box key travels through sops by hand.
-    systemd.services.headscale-seed = {
-      description = "Seed the network: the boxes' user and key, the verifier's api key";
-      after = [ "headscale.service" ];
-      requires = [ "headscale.service" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [
-        config.services.headscale.package
-        pkgs.jq
-        pkgs.coreutils
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      script = ''
-        set -eu
-        for _ in $(seq 1 60); do headscale users list >/dev/null 2>&1 && break; sleep 1; done
-        # an empty list is json null here
-        who='(. // []) | .[] | select(.name == "boxes") | .id'
-        id=$(headscale users list -o json | jq -r "$who")
-        if [ -z "$id" ]; then
-          headscale users create boxes >/dev/null
-          id=$(headscale users list -o json | jq -r "$who")
-        fi
-        if [ ! -s ${cfg.boxKeyFile} ]; then
-          headscale preauthkeys create --user "$id" --reusable --expiration 3650d --tags tag:box > ${cfg.boxKeyFile}.tmp
-          chmod 0400 ${cfg.boxKeyFile}.tmp
-          mv ${cfg.boxKeyFile}.tmp ${cfg.boxKeyFile}
-        fi
-        if [ ! -s ${cfg.apiKeyFile} ]; then
-          mkdir -p "$(dirname ${cfg.apiKeyFile})"
-          headscale apikeys create --expiration 3650d > ${cfg.apiKeyFile}.tmp
-          chown root:dd-verify ${cfg.apiKeyFile}.tmp
-          chmod 0440 ${cfg.apiKeyFile}.tmp
-          mv ${cfg.apiKeyFile}.tmp ${cfg.apiKeyFile}
-        fi
-      '';
-    };
-
-    # the names, once this box is on its own network and has an address
-    # there (run by the join keeper). Headscale watches the file.
-    dd.net.afterJoin = ''
-      ip=$(tailscale --socket ${config.dd.net.socket} ip -4)
-      jq -n --arg ip "$ip" '[${
-        lib.concatMapStringsSep ", " (n: ''{"name": "${n}", "type": "A", "value": $ip}'') names
-      }]' > ${state}/extra-records.json.tmp
-      chown headscale:headscale ${state}/extra-records.json.tmp
-      mv ${state}/extra-records.json.tmp ${state}/extra-records.json
-      echo "the fleet's names answer with $ip on the network"
-    '';
-
-    # the gate hands admitted devices their join keys through headscale's api
-    dd.verify.network = {
-      api = "http://127.0.0.1:${toString port}";
-      url = cfg.url;
-      keyFile = cfg.apiKeyFile;
-    };
-    # the verifier starts after the key exists
-    systemd.services.dd-verify.after = [ "headscale-seed.service" ];
-    systemd.services.dd-verify.wants = [ "headscale-seed.service" ];
-
-    # this box joins its own network with the key it just made: a member's
-    # device reaching the fleet arrives here, so this end has to be on it
-    dd.net.enable = true;
-    dd.net.keyFile = cfg.boxKeyFile;
-    dd.net.controlUrl = cfg.url;
-    systemd.services.commonty-net-up.after = [ "headscale-seed.service" ];
-    systemd.services.commonty-net-up.wants = [ "headscale-seed.service" ];
-
-    # Reached from outside through the front door (the gateway role lists
-    # the host as public) and from the boxes by the pinned name. The
-    # control protocol is an http upgrade that is not websocket, and the
-    # door's proxy strips it: the app carries it over a real websocket
-    # (its bridge, app/net/bridge.go), which the server takes as well; a
-    # box's stock tailscaled reaches this box directly. Both upgrades pass
-    # nginx the same way.
-    services.nginx.virtualHosts.${host} = lib.mkIf cfg.behindNginx {
-      useACMEHost = base;
-      forceSSL = true;
-      locations."/" = {
-        proxyPass = "http://127.0.0.1:${toString port}";
-        proxyWebsockets = true;
-        extraConfig = ''
-          proxy_buffering off;
-          proxy_read_timeout 1h;
+        # the names, once this box is on its own network and has an address
+        # there (run by the join keeper). Headscale watches the file.
+        dd.net.afterJoin = ''
+          ip=$(tailscale --socket ${config.dd.net.socket} ip -4)
+          jq -n --arg ip "$ip" '[${
+            lib.concatMapStringsSep ", " (n: ''{"name": "${n}", "type": "A", "value": $ip}'') names
+          }]' > ${state}/extra-records.json.tmp
+          chown headscale:headscale ${state}/extra-records.json.tmp
+          mv ${state}/extra-records.json.tmp ${state}/extra-records.json
+          echo "the fleet's names answer with $ip on the network"
         '';
-      };
-      # the admin api and its docs are for the verifier, which asks on
-      # 127.0.0.1; through the door they are one stolen key from the
-      # whole network
-      locations."/api/".return = "404";
-      locations."/swagger".return = "404";
-    };
-  };
+
+        # the gate hands admitted devices their join keys through headscale's api
+        dd.verify.network = {
+          api = "http://127.0.0.1:${toString port}";
+          url = cfg.url;
+          keyFile = cfg.apiKeyFile;
+          inherit (cfg) boxes;
+        };
+        # the verifier starts after the key exists
+        systemd.services.dd-verify.after = [ "headscale-seed.service" ];
+        systemd.services.dd-verify.wants = [ "headscale-seed.service" ];
+
+        # this box joins its own network with the key it just made: a member's
+        # device reaching the fleet arrives here, so this end has to be on it
+        dd.net.enable = true;
+        # its own key, made here: one use, ten minutes
+        dd.net.getKey = ''
+          id=$(${config.services.headscale.package}/bin/headscale users list -o json \
+            | jq -r '(. // []) | .[] | select(.name == "boxes") | .id')
+          ${config.services.headscale.package}/bin/headscale preauthkeys create \
+            --user "$id" --expiration 10m --tags tag:box > "$key"
+        '';
+        dd.net.controlUrl = cfg.url;
+        systemd.services.commonty-net-up.after = [ "headscale-seed.service" ];
+        systemd.services.commonty-net-up.wants = [ "headscale-seed.service" ];
+
+        # Reached from outside through the front door (the gateway role lists
+        # the host as public) and from the boxes by the pinned name. The
+        # control protocol is an http upgrade that is not websocket, and the
+        # door's proxy strips it: the app carries it over a real websocket
+        # (its bridge, app/net/bridge.go), which the server takes as well; a
+        # box's stock tailscaled reaches this box directly. Both upgrades pass
+        # nginx the same way.
+        services.nginx.virtualHosts.${host} = lib.mkIf cfg.behindNginx {
+          useACMEHost = base;
+          forceSSL = true;
+          locations."/" = {
+            proxyPass = "http://127.0.0.1:${toString port}";
+            proxyWebsockets = true;
+            extraConfig = ''
+              proxy_buffering off;
+              proxy_read_timeout 1h;
+            '';
+          };
+          # the admin api and its docs are for the verifier, which asks on
+          # 127.0.0.1; through the door they are one stolen key from the
+          # whole network
+          locations."/api/".return = "404";
+          locations."/swagger".return = "404";
+        };
+      }
+    ]
+  );
 }

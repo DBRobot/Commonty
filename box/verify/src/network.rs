@@ -11,6 +11,12 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+use p256::pkcs8::DecodePublicKey;
+
 use crate::App;
 
 /// how long a join key is good for: long enough to hand it over, no more
@@ -23,7 +29,25 @@ pub struct Door {
     control_url: String,
     key: String,
     http: reqwest::Client,
+    /// the boxes that may ask for a key of their own: the key each signs
+    /// with (in its TPM) and the age recipient the answer is sealed to (its
+    /// secrets key, also in its TPM)
+    boxes: HashMap<String, BoxKeys>,
+    /// age, with whatever plugin the recipients need on its path
+    age: String,
+    /// when each box last had a key, and the time it signed for it
+    asked: Mutex<HashMap<String, (u64, u64)>>,
 }
+
+pub struct BoxKeys {
+    signs: VerifyingKey,
+    recipient: String,
+}
+
+/// how far a box's clock may be from this one's
+const SKEW: u64 = 120;
+/// one key a box a minute
+const EVERY: u64 = 60;
 
 pub fn from_env() -> Result<Option<Door>> {
     let Ok(api) = std::env::var("VERIFY_HEADSCALE_API") else {
@@ -40,7 +64,46 @@ pub fn from_env() -> Result<Option<Door>> {
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?,
+        boxes: match std::env::var("VERIFY_NETWORK_BOXES") {
+            Ok(f) => boxes_from(&std::fs::read_to_string(&f).with_context(|| f.clone())?)?,
+            Err(_) => HashMap::new(),
+        },
+        age: std::env::var("VERIFY_AGE").unwrap_or_else(|_| "age".into()),
+        asked: Mutex::default(),
     }))
+}
+
+/// {"node2": {"key": "<base64 SPKI P-256>", "recipient": "age1..."}}
+fn boxes_from(json: &str) -> Result<HashMap<String, BoxKeys>> {
+    use base64::Engine;
+    let v: HashMap<String, serde_json::Value> = serde_json::from_str(json)?;
+    v.into_iter()
+        .map(|(name, b)| {
+            let der = base64::engine::general_purpose::STANDARD
+                .decode(b["key"].as_str().context("key")?)
+                .with_context(|| format!("{name}'s key"))?;
+            let signs = VerifyingKey::from_public_key_der(&der)
+                .map_err(|e| anyhow::anyhow!("{name}'s key: {e}"))?;
+            let recipient = b["recipient"].as_str().context("recipient")?.to_string();
+            Ok((name, BoxKeys { signs, recipient }))
+        })
+        .collect()
+}
+
+/// what a box signs (box/control/cmd/dd-control, joinMessage)
+fn join_message(name: &str, time: u64) -> Vec<u8> {
+    format!("commonty box join v1\0{name}\0{time}").into_bytes()
+}
+
+/// a TPM signs plain r||s, a test's soft key DER: either will do
+fn signature(b64: &str) -> Option<Signature> {
+    use base64::Engine;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(b64.trim_end_matches('='))
+        .ok()?;
+    Signature::from_slice(&raw)
+        .or_else(|_| Signature::from_der(&raw))
+        .ok()
 }
 
 impl Door {
@@ -163,6 +226,10 @@ impl Door {
 
     /// one key, one device, ten minutes
     pub async fn join_key(&self, name: &str) -> Result<(String, u64)> {
+        self.mint(name, &[]).await
+    }
+
+    async fn mint(&self, name: &str, tags: &[&str]) -> Result<(String, u64)> {
         let user = self.user_id(name).await?;
         let expires = SystemTime::now() + TTL;
         let stamp = humantime(expires);
@@ -174,7 +241,8 @@ impl Door {
                     "user": user,
                     "reusable": false,
                     "ephemeral": false,
-                    "expiration": stamp
+                    "expiration": stamp,
+                    "aclTags": tags
                 })),
             )
             .await?;
@@ -190,6 +258,70 @@ impl Door {
                 .unwrap_or(0),
         ))
     }
+}
+
+/// A box's own key to the network, sealed to the box.
+///
+/// The box signs the time with the key in its TPM; the answer is a
+/// single-use key, tagged a box, encrypted to the secrets key in that same
+/// TPM. Whoever carries the answer (the front door, Cloudflare) holds
+/// ciphertext only, and a copied request gets nothing a second time.
+pub(crate) async fn box_key(
+    door: &Door,
+    name: &str,
+    time: u64,
+    sig: &str,
+    now: u64,
+) -> Result<String, (StatusCode, String)> {
+    let keys = door
+        .boxes
+        .get(name)
+        .ok_or((StatusCode::FORBIDDEN, "not a box of this fleet".into()))?;
+    if time.abs_diff(now) > SKEW {
+        return Err((StatusCode::FORBIDDEN, "the time is off".into()));
+    }
+    let sig = signature(sig).ok_or((StatusCode::BAD_REQUEST, "no signature".into()))?;
+    keys.signs
+        .verify(&join_message(name, time), &sig)
+        .map_err(|_| (StatusCode::FORBIDDEN, "not signed by that box".into()))?;
+    {
+        // once a minute, and each signed time once: a request copied off
+        // the wire is refused for good, not just for the minute
+        let mut asked = door.asked.lock().unwrap();
+        if let Some(&(at, signed)) = asked.get(name) {
+            if now < at + EVERY {
+                return Err((StatusCode::TOO_MANY_REQUESTS, "one a minute".into()));
+            }
+            if time <= signed {
+                return Err((StatusCode::FORBIDDEN, "that request was used".into()));
+            }
+        }
+        asked.insert(name.to_string(), (now, time));
+    }
+    let bad = |e: anyhow::Error| (StatusCode::BAD_GATEWAY, format!("{e:#}"));
+    let (key, _) = door.mint("boxes", &["tag:box"]).await.map_err(bad)?;
+    seal(&door.age, &keys.recipient, &key).map_err(bad)
+}
+
+/// armoured age, to one recipient
+fn seal(age: &str, recipient: &str, plain: &str) -> Result<String> {
+    use std::io::Write;
+    let mut c = std::process::Command::new(age)
+        .args(["-a", "-r", recipient])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("running age")?;
+    c.stdin
+        .take()
+        .context("age's stdin")?
+        .write_all(plain.as_bytes())?;
+    let out = c.wait_with_output()?;
+    if !out.status.success() {
+        bail!("age: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(String::from_utf8(out.stdout)?)
 }
 
 /// headscale gives ids as strings in json
@@ -269,6 +401,29 @@ pub(crate) async fn join(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
     }
 }
 
+#[derive(serde::Deserialize)]
+pub(crate) struct BoxAsk {
+    #[serde(rename = "box")]
+    name: String,
+    time: u64,
+    sig: String,
+}
+
+/// POST /_dd/network/box, {box, time, sig} -> the key, sealed to that box
+pub(crate) async fn box_join(State(app): State<Arc<App>>, Json(ask): Json<BoxAsk>) -> Response {
+    let Some(door) = app.network.as_ref() else {
+        return (StatusCode::NOT_FOUND, "this box has no network door").into_response();
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match box_key(door, &ask.name, ask.time, &ask.sig, now).await {
+        Ok(sealed) => sealed.into_response(),
+        Err((code, why)) => (code, why).into_response(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,10 +469,137 @@ mod tests {
             control_url: String::new(),
             key: "k".into(),
             http: reqwest::Client::new(),
+            boxes: HashMap::new(),
+            age: "age".into(),
+            asked: Mutex::default(),
         };
         let gone = door.reap(|u| u == "david").await.unwrap();
         assert_eq!(gone, 1);
         assert_eq!(*deleted.lock().unwrap(), vec!["3".to_string()]);
+    }
+
+    /// A box's key: only for a box of the fleet, signed by that box, now,
+    /// and once a minute; what comes back went through age to the box.
+    #[tokio::test]
+    async fn a_box_gets_a_key_sealed_to_it() {
+        use axum::{
+            Json, Router,
+            routing::{get, post},
+        };
+        use base64::Engine;
+        use p256::ecdsa::{SigningKey, signature::Signer};
+
+        let app = Router::new()
+            .route(
+                "/api/v1/user",
+                get(|| async {
+                    Json(serde_json::json!({ "users": [{ "id": "7", "name": "boxes" }] }))
+                }),
+            )
+            .route(
+                "/api/v1/preauthkey",
+                post(|Json(b): Json<serde_json::Value>| async move {
+                    assert_eq!(b["aclTags"], serde_json::json!(["tag:box"]));
+                    assert_eq!(b["reusable"], false);
+                    Json(serde_json::json!({ "preAuthKey": { "key": "the-key" } }))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        // age that only marks what it was given, and to whom
+        let dir = std::env::temp_dir().join(format!("box-join-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let age = dir.join("age");
+        std::fs::write(&age, "#!/bin/sh\nprintf 'sealed to %s: ' \"$3\"; cat\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&age, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let node2 = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let stranger = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let mut boxes = HashMap::new();
+        boxes.insert(
+            "node2".to_string(),
+            BoxKeys {
+                signs: *node2.verifying_key(),
+                recipient: "age1node2".into(),
+            },
+        );
+        let door = Door {
+            api: format!("http://{addr}"),
+            control_url: String::new(),
+            key: "k".into(),
+            http: reqwest::Client::new(),
+            boxes,
+            age: age.display().to_string(),
+            asked: Mutex::default(),
+        };
+        let sign = |k: &SigningKey, name: &str, t: u64| {
+            let s: Signature = k.sign(&join_message(name, t));
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s.to_bytes())
+        };
+        let now = 1_790_000_000;
+        let refused = |r: Result<String, (StatusCode, String)>| r.unwrap_err().0;
+
+        assert_eq!(
+            refused(box_key(&door, "node9", now, &sign(&node2, "node9", now), now).await),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            refused(box_key(&door, "node2", now, &sign(&stranger, "node2", now), now).await),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            refused(
+                box_key(
+                    &door,
+                    "node2",
+                    now - 600,
+                    &sign(&node2, "node2", now - 600),
+                    now
+                )
+                .await
+            ),
+            StatusCode::FORBIDDEN
+        );
+        // signed for another time than it claims
+        assert_eq!(
+            refused(box_key(&door, "node2", now, &sign(&node2, "node2", now - 1), now).await),
+            StatusCode::FORBIDDEN
+        );
+
+        let sealed = box_key(&door, "node2", now, &sign(&node2, "node2", now), now)
+            .await
+            .unwrap();
+        assert_eq!(sealed, "sealed to age1node2: the-key");
+        assert_eq!(
+            refused(
+                box_key(
+                    &door,
+                    "node2",
+                    now + 5,
+                    &sign(&node2, "node2", now + 5),
+                    now + 5
+                )
+                .await
+            ),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        // the same request a minute later still gets nothing
+        assert_eq!(
+            refused(box_key(&door, "node2", now, &sign(&node2, "node2", now), now + 61).await),
+            StatusCode::FORBIDDEN
+        );
+        // the DER a soft key writes is taken too
+        let der: Signature = node2.sign(&join_message("node2", now + 61));
+        let der = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(der.to_der().as_bytes());
+        assert!(
+            box_key(&door, "node2", now + 61, &der, now + 61)
+                .await
+                .is_ok()
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
