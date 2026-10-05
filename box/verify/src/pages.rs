@@ -740,7 +740,13 @@ pub fn download(
     ];
     render(Download {
         domain,
-        source: format!("https://github.com/{from}/tree/{commit}"),
+        // the forge the app was released from; a manifest from before
+        // names its GitHub repository instead
+        source: if from.starts_with("https://") {
+            format!("{from}/src/commit/{commit}")
+        } else {
+            format!("https://github.com/{from}/tree/{commit}")
+        },
         tag,
         manifest,
         groups,
@@ -846,7 +852,7 @@ mod tests {
     #[test]
     fn the_downloads_page_asks_for_nothing_and_points_at_the_release() {
         let at = |n: &str| AppFile {
-            url: format!("https://github.com/x/y/releases/download/v0.2.0/{n}"),
+            url: format!("https://commonty.org/download/v0.2.0/{n}"),
             sha256: "ab".repeat(32),
         };
         let mut signed = std::collections::BTreeMap::new();
@@ -860,15 +866,15 @@ mod tests {
         }
         let html = download(
             "commonty.org",
-            "x/y",
+            "https://git.commonty.org/david/commonty",
             "abc123",
             "v0.2.0",
             "https://m/app.json",
             &signed,
         );
-        assert!(html.contains("https://github.com/x/y/releases/download/v0.2.0/commonty.apk"));
+        assert!(html.contains("https://commonty.org/download/v0.2.0/commonty.apk"));
         // the source at the commit that was signed, and the manifest itself
-        assert!(html.contains("https://github.com/x/y/tree/abc123"));
+        assert!(html.contains("https://git.commonty.org/david/commonty/src/commit/abc123"));
         assert!(html.contains("https://m/app.json"));
         assert!(html.contains("commonty_0.2.0_amd64.deb"));
         assert!(html.contains("commonty_0.2.0_amd64.AppImage"));
@@ -900,7 +906,7 @@ mod tests {
         signed.remove("commonty.apk");
         let html = download(
             "commonty.org",
-            "x/y",
+            "https://git.commonty.org/david/commonty",
             "abc123",
             "v0.2.0",
             "https://m/app.json",
@@ -908,6 +914,16 @@ mod tests {
         );
         assert!(!html.contains("commonty.apk"));
         assert_eq!(html.matches("class=\"os off\"").count(), 3);
+        // a manifest from the GitHub days names its repository, not a url
+        let old = download(
+            "commonty.org",
+            "x/y",
+            "abc123",
+            "v0.2.0",
+            "https://m/app.json",
+            &signed,
+        );
+        assert!(old.contains("https://github.com/x/y/tree/abc123"));
         assert!(html.contains("Nothing signed yet"));
     }
 

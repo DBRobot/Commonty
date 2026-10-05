@@ -330,7 +330,23 @@
               abiVersions = [ "x86_64" ];
               cmdLineToolsVersion = "11.0";
             }).androidsdk;
-          androidHome = "${androidSdk}/libexec/android-sdk";
+          # the same, without the emulator and its system images: what a
+          # build needs, and all a box fetches to build the apk
+          androidBuildSdk =
+            (androidPkgs.androidenv.composeAndroidPackages {
+              platformVersions = [
+                "34"
+                "36"
+              ];
+              buildToolsVersions = [
+                "34.0.0"
+                "35.0.0"
+              ];
+              includeNDK = true;
+              ndkVersions = [ "26.1.10909125" ];
+              cmdLineToolsVersion = "11.0";
+            }).androidsdk;
+          androidHome = "${androidBuildSdk}/libexec/android-sdk";
           androidNdk = "${androidHome}/ndk/26.1.10909125";
           appNetAndroid = pkgs.buildGoModule {
             pname = "commonty-net-android";
@@ -647,6 +663,81 @@
                 chmod +x $out/bin/commonty
               '';
           });
+          # What a stranger downloads, for one release's version: every
+          # file built the same way on each box that builds it, so the boxes
+          # can compare and the laptop signs what they agree on
+          # (docs/app-release.md). `dd release app` asks for these by version.
+          appRelease =
+            version:
+            let
+              cargoVendor = craneLib.vendorCargoDeps { src = sources.app; };
+              toolchain =
+                targets:
+                # the Rust the rest of the flake compiles with, plus the targets
+                # nixpkgs' rustc has no std for
+                (pkgs.extend rust-overlay.overlays.default).rust-bin.stable.${pkgs.rustc.version}.minimal.override {
+                  inherit targets;
+                };
+              linux = import ./nix/app-release/linux.nix {
+                inherit
+                  pkgs
+                  version
+                  webDist
+                  cargoVendor
+                  ;
+                src = sources.app;
+                netSrc = ./app/net;
+                netVendor = appNet.goModules;
+              };
+              windows = import ./nix/app-release/windows.nix {
+                inherit
+                  pkgs
+                  version
+                  webDist
+                  cargoVendor
+                  ;
+                rustToolchain = toolchain [ "x86_64-pc-windows-msvc" ];
+                appSrc = sources.app;
+                ddSrc = sources.dd;
+                netSrc = ./app/net;
+                netVendor = appNet.goModules;
+              };
+              # What each build needs of the box that runs it: build orders
+              # go only to boxes that have it (client/cli/src/build_order.rs).
+              # The Linux build boots a VM of 6 GB.
+              need = n: d: d // { needs = n; };
+            in
+            {
+              linux = need {
+                kvm = true;
+                ramGB = 12;
+              } linux;
+              windows = need { ramGB = 8; } windows.installer;
+              dd-windows = need { ramGB = 6; } windows.dd;
+              android = need { ramGB = 8; } (
+                import ./nix/app-release/android.nix {
+                  inherit
+                    pkgs
+                    version
+                    cargoVendor
+                    ;
+                  androidSdk = androidBuildSdk;
+                  rustToolchain = toolchain [
+                    "aarch64-linux-android"
+                    "x86_64-linux-android"
+                  ];
+                  src = sources.app;
+                  netAndroid = appNetAndroid;
+                }
+              );
+              # the proof each starts where a stranger would run it
+              tests.linux = import ./nix/app-release/test-linux.nix { inherit pkgs linux; };
+              tests.windows = import ./nix/app-release/test-windows.nix {
+                inherit pkgs;
+                installer = windows.installer;
+                dd = windows.dd;
+              };
+            };
           # the app's network engine (app/net): `nix build .#net` for the archive
           net = appNet;
           # the engine's bridge on its own, for a box's stock tailscaled
@@ -940,6 +1031,7 @@
           "tests-app"
           "net-check"
           "android-sdk"
+          "appRelease"
         ]
         // {
           # `dd secret run` falls back to this when sops is not on PATH. The
@@ -952,10 +1044,10 @@
             runtimeInputs = [ pkgs.age-plugin-tpm ];
             text = ''exec ${pkgs.sops}/bin/sops "$@"'';
           };
-          # `dd release app` checks a build's provenance with this; the
-          # distribution's gh is often too old to have `attestation`
-          inherit (pkgs) gh;
         };
+
+      # the downloads for a version: `(appRelease "1.2.3").linux`
+      legacyPackages.${system}.appRelease = rust.appRelease;
 
       # Boxes booted as vms and driven through the failure cases, so the
       # modules the real hosts import are proven before a host sees them.
@@ -991,6 +1083,21 @@
             net-check
             tests
             ;
+          # the app's downloads still evaluate: their recipes only, never a
+          # build of them (that is the boxes', after a release)
+          app-release = pkgs.writeText "app-release-evaluates" (
+            toString (
+              map (d: builtins.unsafeDiscardOutputDependency d.drvPath) (
+                with rust.appRelease "0.0.0";
+                [
+                  linux
+                  windows
+                  dd-windows
+                  android
+                ]
+              )
+            )
+          );
           placement = import ./nix/tests/placement.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;

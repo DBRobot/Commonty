@@ -86,9 +86,9 @@ builds and the copied libraries are not. An emulator:
     adb install -r gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 
 CI runs the app's tests and the engine's vet and tests (`checks.tests-app`,
-`checks.net-check`); the phone and Windows builds are GitHub's, after each
-release that changes the app (docs/github.md), and the apk is signed on the
-laptop. Proven 2026-09-24 on the emulator:
+`checks.net-check`); the downloads for every platform are built by two
+boxes after a release that changes the app (docs/app-release.md), and the
+apk is signed on the laptop. Proven 2026-09-24 on the emulator:
 recovery of an account, sign-in, joining the network through the bridge,
 node1 as a peer.
 
@@ -100,15 +100,13 @@ take the other's archive; a dll is loaded by name and the question does
 not arise. The drive is rclone over WinFsp instead of FUSE, and killing
 rclone is enough to tear it down, so there is no `fusermount` there.
 
-The installer is built by `.github/workflows/release.yml` on a tag and
-carries the app, `rclone.exe`, and WinFsp's own unmodified installer.
-WebView2 is **not** bundled: the installer fetches it from Microsoft if
-the machine lacks it, because embedding it would mean shipping
-proprietary software beside WinFsp, which its FLOSS exception forbids.
+The installer is cross-built on Linux (`nix/app-release/windows.nix`)
+and carries the app and its engine's dll. It does not carry `rclone.exe`
+or WinFsp: the app has no drive on Windows yet (that is `dd.exe`'s, which
+finds rclone on PATH). The GitHub build downloaded both but never put them
+in the installer. WebView2 is **not** bundled: the installer fetches it from Microsoft
+if the machine lacks it.
 
-WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos,
-<https://github.com/winfsp/winfsp>. Bundled under the exception it grants
-to software under an OSI licence; Commonty is AGPL-3.0-or-later.
 
 ### Cross-building Windows from Linux, and what it proves
 
@@ -117,12 +115,11 @@ identity, signs the entry, publishes it to a box over tls and mints a
 device token, and the box verifies that signature. The whole client
 stack works on Windows and is not a guess.
 
-The app cross-compiles too, but only with `crate-type = ["lib"]`. With
-the `cdylib` that Android needs, `ld.bfd` fails with `export ordinal too
-large` - a limit of the GNU linker, not of the code. GitHub builds on
-real Windows with msvc, which has no such limit, so leave the crate
-types alone; if that build ever fails the same way, this is why and
-dropping cdylib for the desktop target is the fix.
+The app is cross-built for msvc, not mingw: with the `cdylib` Android
+needs, mingw's `ld.bfd` fails with `export ordinal too large`, a limit of
+the GNU linker that lld-link does not have. The release build installs
+under wine: the installer puts `commonty.exe` and `commontynet.dll` in
+the user's AppData.
 
 The window itself cannot be tested here at all. Tauri renders through
 WebView2, wine has none, and the app starts and then waits with a blank

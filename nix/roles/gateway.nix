@@ -31,8 +31,13 @@ in
   # writes fleet/mail.json; the read token is in sops once someone adds it)
   dd.mailWorker = {
     enable = true;
-    account = if builtins.pathExists mailSetup then (builtins.fromJSON (builtins.readFile mailSetup)).account else "";
-    readTokenFile = if canReadWorker then config.sops.templates."cloudflare-workers-read.env".path else null;
+    account =
+      if builtins.pathExists mailSetup then
+        (builtins.fromJSON (builtins.readFile mailSetup)).account
+      else
+        "";
+    readTokenFile =
+      if canReadWorker then config.sops.templates."cloudflare-workers-read.env".path else null;
   };
   sops.secrets.cloudflare-workers-read = lib.mkIf canReadWorker { };
   sops.templates."cloudflare-workers-read.env" = lib.mkIf canReadWorker {
@@ -56,7 +61,13 @@ in
     # them: it is Ente's own app, talking to Ente's server, and neither is
     # something to open to the internet.
     demoDoors = lib.unique (
-      map (t: lib.removeSuffix ".${config.dd.domain}" (lib.head (lib.splitString "/" (lib.removePrefix "https://" t.url))))
+      map
+        (
+          t:
+          lib.removeSuffix ".${config.dd.domain}" (
+            lib.head (lib.splitString "/" (lib.removePrefix "https://" t.url))
+          )
+        )
         (lib.filter (t: t.demo != null && !(lib.hasPrefix "https://photos." t.url)) config.dd.home.services)
     );
     # commonty.org itself: what people type. It sends them to home and
@@ -91,6 +102,22 @@ in
     # the app itself is on home, where sign-in and join already point
     locations."= /download".return = "301 https://home.${config.dd.domain}/_dd/download";
     locations."/".return = "301 https://home.${config.dd.domain}$request_uri";
+    # the files the downloads page links, from the forge's release of that
+    # tag: as nobody, so this name reaches only what a stranger may fetch
+    # from a public repository, and only a release's files
+    locations."~ ^/download/v[0-9]+\\.[0-9]+\\.[0-9]+/[A-Za-z0-9._-]+$" =
+      lib.mkIf config.services.forgejo.enable
+        {
+          proxyPass = "http://unix:/run/forgejo/forgejo.sock:";
+          extraConfig = ''
+            rewrite ^/download/([^/]+)/([^/]+)$ /${config.dd.repo}/releases/download/$1/$2 break;
+            proxy_set_header X-WEBAUTH-USER "";
+            proxy_set_header Cookie "";
+            proxy_set_header Authorization "";
+            proxy_max_temp_file_size 0;
+            limit_req zone=dd_visitor burst=20 nodelay;
+          '';
+        };
     # the docs, for anyone (box/verify/src/docs.rs), and the few gate paths
     # their page needs: its files, the bar's who-is-looking, the index and
     # the markdown. Nothing else of the gate answers on this name.

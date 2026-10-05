@@ -88,12 +88,12 @@ The same steps for everyone, a person or an agent:
    and waiting until every box runs the new release.
 5. **Publish with the dd built from what merged**, not an older build, and
    read the release's number from what `dd release publish` prints. When
-   the app's sources changed since its last tag, publish also starts
-   `dd release app-next` in the background: it tags the next `v*`, waits
-   for GitHub to build it ([`.github/workflows/release.yml`](../.github/workflows/release.yml)),
-   and signs it for the downloads page. The boxes never wait for it; its
-   log is `~/.cache/dd/app-release.log`. The GitHub side is
-   [its own page](github.md).
+   the app would come out different from its last tag, publish also
+   starts `dd release app-next` in the background: it tags the next `v*`,
+   has two boxes build the downloads and vouch for them, and signs them
+   for the downloads page. The boxes' release never waits for it; its log
+   is `~/.cache/dd/app-release.log`. The whole of it is
+   [its own page](app-release.md).
 6. **Wait on `ci_ok`**, not on every status being green: a failure anywhere
    is final, since the run stops at the first one.
 
