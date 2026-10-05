@@ -176,6 +176,24 @@ in
     options = "--delete-older-than 14d";
     randomizedDelaySec = "6h";
   };
+  # Builds are held to their share of the box's memory, so a big one is
+  # what gets killed, not garage or the gate: node2 (14G) ran out entirely
+  # building node1's system while garage resynced. Above 60% builds are
+  # slowed, at 75% killed; and one build at a time per 6G, at most one per
+  # four threads.
+  systemd.services.nix-daemon.serviceConfig =
+    let
+      mib = config.dd.box.memoryBytes / (1024 * 1024);
+    in
+    lib.mkIf (config.dd.box.memoryBytes > 0) {
+      MemoryHigh = "${toString (mib * 60 / 100)}M";
+      MemoryMax = "${toString (mib * 75 / 100)}M";
+    };
+  nix.settings.max-jobs = lib.mkIf (config.dd.box.memoryBytes > 0) (
+    lib.max 1 (
+      lib.min (config.dd.box.memoryBytes / (6 * 1024 * 1024 * 1024)) (config.dd.box.threads / 4)
+    )
+  );
   nix.settings.min-free = 10 * 1024 * 1024 * 1024;
   nix.settings.max-free = 30 * 1024 * 1024 * 1024;
   nix.settings.experimental-features = [
