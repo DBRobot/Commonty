@@ -1,0 +1,18 @@
+# The control server through the front door, which strips the control
+# protocol's upgrade; the bridge carries it over a websocket (cmd/netbridge).
+[Unit]
+Description=The fleet's control server, through the front door
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/nix/var/nix/profiles/commonty-netbridge/bin/netbridge -listen 127.0.0.1:41643 -control https://headscale.commonty.org
+DynamicUser=true
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

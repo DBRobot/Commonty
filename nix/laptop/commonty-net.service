@@ -1,0 +1,17 @@
+# The fleet's own network on the laptop, beside the owner's tailscaled:
+# its own state, socket, port and interface, like a box's (nix/modules/net/box.nix).
+[Unit]
+Description=The fleet's own network: tailscaled against the fleet's Headscale
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/sbin/tailscaled --state=/var/lib/commonty-net/tailscaled.state --socket=/run/commonty-net/tailscaled.sock --port=41642 --tun=commonty0 --no-logs-no-support
+StateDirectory=commonty-net
+StateDirectoryMode=0700
+RuntimeDirectory=commonty-net
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

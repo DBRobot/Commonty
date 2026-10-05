@@ -22,25 +22,49 @@ let
   host = "headscale.${base}";
   port = 8085;
   state = "/var/lib/headscale";
-  # who may reach what: everyone on the network reaches every box, boxes
-  # reach each other; members' devices do not see one another
+  # who may reach what
+  adminPorts = [
+    "22"
+    "53"
+    "80"
+    "443"
+    "3900"
+  ];
   policy = pkgs.writeText "headscale-policy.json" (
     builtins.toJSON {
       tagOwners."tag:box" = [ "boxes@" ];
-      # A person's devices reach a box's front door and its game servers,
-      # and that is the whole policy. No rule has a box as its source, so a
-      # box reaches nothing here; no rule has a person's device as its
-      # destination, so devices do not see one another. Everything else a
-      # box runs is reached through the gate on 443 or not at all.
+      # A person's devices reach a box's front door and its game servers.
+      # A box's owner's devices reach that box, and only that box, for what
+      # an admin needs: ssh, its dns, the cache push. Boxes reach each other
+      # on the channels still between them (roles/core.nix lists them; each
+      # box's firewall narrows them again to its peers' addresses). No rule
+      # has a person's device as its destination, so devices do not see one
+      # another.
       acls = [
         {
           action = "accept";
           src = [ "autogroup:member" ];
           dst = [ "tag:box:443" ] ++ map (p: "tag:box:${p}") cfg.gamePorts;
         }
-      ];
+        {
+          action = "accept";
+          src = [ "tag:box" ];
+          dst = map (p: "tag:box:${p}") boxPorts;
+        }
+      ]
+      ++ lib.mapAttrsToList (addr: owner: {
+        action = "accept";
+        src = [ "${owner}@" ];
+        dst = map (p: "${addr}:${p}") adminPorts;
+      }) cfg.owners;
     }
   );
+  boxPorts = [
+    "443"
+    "3900"
+    "3901"
+    "4181"
+  ];
   # every name nginx serves on this box, answered on the network with this
   # box's network address (written by the join keeper, dd.net.afterJoin)
   names = lib.filter (n: lib.hasSuffix ".${base}" n || n == base) (
@@ -75,6 +99,11 @@ in
         )
       );
       description = "the ports a member's device may reach on a box for games: every games box's range, and every port a game insists on (the flake gives the fleet's; alone, this box's own)";
+    };
+    owners = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      description = "each box's address on the network -> its owner's name: whose devices administer it (the flake gives every box's)";
     };
     boxes = lib.mkOption {
       type = (lib.types.attrsOf lib.types.attrs);

@@ -6,6 +6,14 @@ let
   peers = lib.mapAttrsToList (_: b: b.tailnet) (
     lib.filterAttrs (n: _: n != config.networking.hostName) boxes
   );
+  peersNet = lib.mapAttrsToList (_: b: b.net) (
+    lib.filterAttrs (n: b: n != config.networking.hostName && b ? net) boxes
+  );
+  housePeersNet = lib.mapAttrsToList (_: b: b.net) (
+    lib.filterAttrs (
+      n: b: n != config.networking.hostName && b ? net && (b.siteId or null) == (me.siteId or "")
+    ) boxes
+  );
   # the other boxes in this house
   housePeers = lib.mapAttrsToList (_: b: b.tailnet) (
     lib.filterAttrs (
@@ -14,11 +22,13 @@ let
   );
   # the channels between boxes that are still here, each waiting on the
   # change that ends it (README: no box talks to another box)
+  #   3900  garage S3, for a box with no garage of its own (its backups,
+  #         the nix cache) - until there is one per box
   #   3901  garage RPC - one cluster, until there is one per box
   # and, between the boxes of one house only:
   #   4181  the house's Wi-Fi relay and page (the directory itself is the
   #         control plane's agreed log now, pulled by nobody)
-  boxPorts = "3901";
+  boxPorts = "3900,3901";
 in
 {
   # What every box is, before any role: its identity in the directory, a
@@ -38,6 +48,7 @@ in
     ../modules/observe/thanos.nix
     ../modules/box/locate.nix
     ../modules/net/box.nix
+    ../modules/net/owner.nix
   ];
 
   # the box moves itself to the signed release; the key that signs lives on
@@ -154,13 +165,22 @@ in
     allowedUDPPorts = [ 53 ];
   };
   networking.firewall.interfaces.commonty0.allowedTCPPorts = [ 443 ];
+  # On the fleet's network the same channels, from the other boxes'
+  # addresses there; the owner's ports from the owner's devices alone
+  # (modules/net/owner.nix).
   networking.firewall.extraCommands =
     lib.concatMapStrings (a: ''
       iptables -A nixos-fw -i tailscale0 -s ${a} -p tcp -m multiport --dports ${boxPorts} -j nixos-fw-accept
     '') peers
     + lib.concatMapStrings (a: ''
       iptables -A nixos-fw -i tailscale0 -s ${a} -p tcp --dport 4181 -j nixos-fw-accept
-    '') housePeers;
+    '') housePeers
+    + lib.concatMapStrings (a: ''
+      iptables -A nixos-fw -i commonty0 -s ${a} -p tcp -m multiport --dports ${boxPorts} -j nixos-fw-accept
+    '') peersNet
+    + lib.concatMapStrings (a: ''
+      iptables -A nixos-fw -i commonty0 -s ${a} -p tcp --dport 4181 -j nixos-fw-accept
+    '') housePeersNet;
   networking.networkmanager.enable = true;
   # never invent a "Wired connection 1": on a first boot NetworkManager can
   # see the cable before the declared profile exists, make a dhcp profile

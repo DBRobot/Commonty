@@ -25,7 +25,9 @@ let
             builtins.length cfgs.${name}.config.dd.verify.peers
             == builtins.length (builtins.attrNames boxes) - 1
           )
-          (builtins.all (p: !lib.hasInfix box.tailnet p) cfgs.${name}.config.dd.verify.peers)
+          (builtins.all (p: !lib.hasInfix box.net p) cfgs.${name}.config.dd.verify.peers)
+          # every box has its address on the fleet's network recorded
+          (box ? net && cfgs.${name}.config.dd.box.net == box.net)
           # the keyboard way in: a hash nixos will actually write. With
           # mutable users it writes one only for a user it is creating, so
           # the two go together or the console password is decoration
@@ -35,8 +37,8 @@ let
         ++ [ (cfgs.${name}.config.services.prometheus.listenAddress == "127.0.0.1") ]
         ++ lib.optionals (builtins.elem "storage" box.roles) [
           # garage: this box's own address is public, its peers never include itself
-          (cfgs.${name}.config.dd.garage.publicAddr == "${box.tailnet}:3901")
-          (builtins.all (p: !lib.hasInfix box.tailnet p) cfgs.${name}.config.dd.garage.peers)
+          (cfgs.${name}.config.dd.garage.publicAddr == "${box.net}:3901")
+          (builtins.all (p: !lib.hasInfix box.net p) cfgs.${name}.config.dd.garage.peers)
           (cfgs.${name}.config.dd.garage.zone == box.regionId)
           (lib.hasPrefix "127.0.0.1:" cfgs.${name}.config.services.thanos.sidecar.grpc-address)
         ]

@@ -2,6 +2,7 @@
   "node1": {
     "hostKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIWdTYyE4+LtV7xankOOhW3T6JHTtVIiJMw/jxWARECN",
     "tailnet": "100.95.31.105",
+    "net": "100.64.0.2",
     "public": true,
     "siteId": "s-c844d9db",
     "regionId": "r-696be5ea",
@@ -30,6 +31,7 @@
   "node2": {
     "hostKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILfEIFrBL+MqJGR0hMv1BKCCgxxRJzImHFpkgv37x1Qz",
     "tailnet": "100.95.10.10",
+    "net": "100.64.0.5",
     "public": false,
     "siteId": "s-c844d9db",
     "regionId": "r-696be5ea",

@@ -14,12 +14,21 @@
       ./box.nix
       ../modules/net/headscale.nix
       ../modules/net/box.nix
+      ../modules/net/owner.nix
     ];
+    # the owner's ports are the firewall's to keep
+    networking.firewall.enable = pkgs.lib.mkForce true;
+    networking.firewall.allowedTCPPorts = [ 8085 ];
+    services.headscale.address = pkgs.lib.mkForce "0.0.0.0";
+    services.openssh.enable = true;
+    dd.box.owner = "sarah";
     dd.verify.role = pkgs.lib.mkForce "full";
     dd.headscale = {
       enable = true;
-      url = "http://127.0.0.1:8085";
+      url = "http://box:8085";
       behindNginx = false;
+      # an owner rule in the policy headscale has to load
+      owners."100.64.0.1" = "sarah";
     };
     dd.net.enable = true;
     dd.net.controlAddress = "127.0.0.1";
@@ -51,6 +60,29 @@
       pkgs.sqlite
       pkgs.openssl
       pkgs.age
+    ];
+  };
+  # the owner's laptop and another member's, each on the network as a person
+  nodes.laptop = {
+    services.tailscale.enable = true;
+    virtualisation.memorySize = pkgs.lib.mkForce 1024;
+    # the test network only: dhcp on the qemu nic hands out a default route
+    # mid-join, and tailscaled drops its control connection on that change
+    networking.useDHCP = false;
+    environment.systemPackages = [
+      pkgs.netcat
+      pkgs.jq
+    ];
+  };
+  nodes.other = {
+    services.tailscale.enable = true;
+    virtualisation.memorySize = pkgs.lib.mkForce 1024;
+    # the test network only: dhcp on the qemu nic hands out a default route
+    # mid-join, and tailscaled drops its control connection on that change
+    networking.useDHCP = false;
+    environment.systemPackages = [
+      pkgs.netcat
+      pkgs.jq
     ];
   };
   scriptEnv = {

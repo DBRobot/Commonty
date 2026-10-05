@@ -12,6 +12,11 @@
   };
   # where the box is, at the two grains placement cares about; from
   # fleet/boxes.json, published as labels so a dashboard can group by them
+  options.dd.box.net = lib.mkOption {
+    type = lib.types.str;
+    default = "";
+    description = "This box's address on the fleet's own network, from fleet/boxes.json (headscale keeps a node's address for good; a box that joins again as a new node gets a new one, and this changes with it).";
+  };
   options.dd.box.tailnet = lib.mkOption {
     type = lib.types.str;
     default = "";
