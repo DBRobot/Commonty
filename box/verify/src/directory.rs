@@ -238,7 +238,14 @@ impl Directory {
         grant: impl FnOnce(Option<&identity::SignedEntry>) -> std::result::Result<(), String>,
     ) -> std::result::Result<(), (StatusCode, String)> {
         let _w = self.writing.lock().unwrap_or_else(|p| p.into_inner());
-        let current = self.entry(&signed.entry.name).map_err(|e| {
+        // with the agreed log, what the log has given the name, never the
+        // copy from before the log (that would refuse the very entry being
+        // migrated as not newer than itself)
+        let current = match &self.agreed {
+            Some(_) => Ok(self.agreed_entry(&signed.entry.name, identity::now())),
+            None => self.entry(&signed.entry.name),
+        }
+        .map_err(|e| {
             eprintln!("directory: {e:#}");
             (StatusCode::INTERNAL_SERVER_ERROR, String::new())
         })?;
@@ -1607,5 +1614,33 @@ mod tests {
         assert!(boxes[0].agreed_entry("bob", 20).is_some());
         assert!(boxes[0].agreed_entry("ann", 20).is_none());
         assert!(boxes[1].agreed_entry("ann", 20).is_none());
+    }
+    #[test]
+    fn an_entry_from_before_the_log_is_taken_into_it_as_it_was() {
+        let d = agreed_box("agreed-migrate", "node1");
+        let ann = generate();
+        let before = sign(entry("ann", &ann, &[], 7), &ann).unwrap();
+        // what this box held before the log, served until the log has it
+        let a = d.agreed.as_ref().unwrap();
+        std::fs::write(
+            a.legacy.join("ann.json"),
+            serde_json::to_vec(&before).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            d.entry("ann").unwrap().unwrap().entry.version,
+            7,
+            "served from before the log"
+        );
+        let (hash, _) = feed(&d, "node1", Item::Entry(Box::new(before)), 10);
+        for v in ["node1", "node2"] {
+            feed(&d, v, Item::Ack(hash.clone()), 11);
+        }
+        assert_eq!(
+            outcome(&d, &hash),
+            Some(Ok(())),
+            "the same entry, version 7, taken as it was"
+        );
+        assert_eq!(d.agreed_entry("ann", 12).unwrap().entry.version, 7);
     }
 }
