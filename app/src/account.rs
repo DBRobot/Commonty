@@ -13,35 +13,13 @@ pub const USER: &str = "user";
 
 pub struct Keys(pub auth::Store);
 
-#[derive(Serialize)]
-pub struct DeviceView {
-    pub fingerprint: String,
-    pub added: u64,
-    pub this: bool,
-}
-
-#[derive(Serialize)]
-pub struct EntryView {
-    pub version: u64,
-    pub updated: u64,
-    pub devices: Vec<DeviceView>,
-    pub passkeys: usize,
-    pub libraries: usize,
-}
-
+/// Which of the app's own screens applies: no name yet, a name whose entry
+/// does not list this device (waiting to be approved), or signed in, when
+/// the site's own pages take over.
 #[derive(Serialize)]
 pub struct Status {
     pub name: Option<String>,
-    pub fingerprint: String,
-    pub public_key: String,
-    /// what each directory answered, for the page to say which is behind
-    pub directories: Vec<(String, String)>,
-    pub entry: Option<EntryView>,
     pub admitted: bool,
-    /// the gate's answer to a token signed by this device, once admitted
-    pub gate: Option<String>,
-    /// this device holds the root: it made the account, it can admit others
-    pub root: bool,
 }
 
 /// the directories this app asks: the front door's, by name
@@ -84,16 +62,10 @@ fn gate_base() -> String {
         .unwrap_or_default()
 }
 
-/// the library gate, which answers only on the network (files.<domain>)
-fn files_base() -> String {
-    media::gate::files_base(&dirs()).unwrap_or_default()
-}
-
 #[tauri::command]
 pub async fn status(keys: State<'_, Keys>) -> Result<Status, String> {
     let (kp, _fresh) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
-    let public_key = auth::device::public_b64(&kp);
-    let fingerprint = identity::fingerprint(&public_key);
+    let fingerprint = identity::fingerprint(&auth::device::public_b64(&kp));
     let name = keys
         .0
         .get(USER)
@@ -101,92 +73,22 @@ pub async fn status(keys: State<'_, Keys>) -> Result<Status, String> {
         .map(|s| s.to_string());
     let mut st = Status {
         name: name.clone(),
-        fingerprint: fingerprint.clone(),
-        public_key,
-        directories: Vec::new(),
-        entry: None,
         admitted: false,
-        gate: None,
-        root: keys
-            .0
-            .get(account::ROOT)
-            .map(|r| r.is_some())
-            .unwrap_or(false),
     };
     let Some(name) = name else { return Ok(st) };
     let found = directory::fetch(&dirs(), &name).await;
-    for (d, r) in &found {
-        st.directories.push((
-            d.clone(),
-            match r {
-                Ok(Some(e)) => format!("version {}", e.entry.version),
-                Ok(None) => "no such name".to_string(),
-                Err(e) => format!("unreachable: {e:#}"),
-            },
-        ));
-    }
     let Some(signed) = directory::newest(&found) else {
         return Ok(st);
     };
     if let Err(e) = identity::verify(&signed) {
         return Err(format!("the entry for {name} does not verify: {e}"));
     }
-    let e = &signed.entry;
-    st.admitted = e.devices.iter().any(|d| d.fingerprint == fingerprint);
-    st.entry = Some(EntryView {
-        version: e.version,
-        updated: e.updated,
-        devices: e
-            .devices
-            .iter()
-            .map(|d| DeviceView {
-                fingerprint: d.fingerprint.clone(),
-                added: d.added,
-                this: d.fingerprint == fingerprint,
-            })
-            .collect(),
-        passkeys: e.passkeys.len(),
-        libraries: e.libraries.len(),
-    });
-    if st.admitted {
-        // a token this device signs, shown to the gate: the proof that
-        // admission means something to a box, not only to a page
-        st.gate = Some(match check_gate(&kp, &name, e).await {
-            Ok(s) => s,
-            Err(e) => format!("refused: {e}"),
-        });
-    }
+    st.admitted = signed
+        .entry
+        .devices
+        .iter()
+        .any(|d| d.fingerprint == fingerprint);
     Ok(st)
-}
-
-async fn check_gate(
-    kp: &auth::device::KeyPair,
-    name: &str,
-    entry: &identity::Entry,
-) -> anyhow::Result<String> {
-    let token = auth::device::mint(kp, name, Duration::from_secs(300))?;
-    // the first library's top folder is the cheapest gated thing there is;
-    // without a library, a library that is nobody's: the gate answers 403
-    // to a token it accepts and 401 to one it does not
-    let (url, own) = match entry.libraries.first() {
-        Some(l) => (format!("{}/_dd/dav/{}/", files_base(), l.id), true),
-        None => (
-            format!("{}/_dd/dav/{}/", files_base(), "0".repeat(32)),
-            false,
-        ),
-    };
-    let r = directory::http()?
-        .request(reqwest::Method::from_bytes(b"PROPFIND")?, &url)
-        .header("depth", "0")
-        .bearer_auth(token)
-        .send()
-        .await?;
-    let s = r.status();
-    if s.is_success() || (!own && s == reqwest::StatusCode::FORBIDDEN) {
-        Ok("accepted this device's token".to_string())
-    } else {
-        anyhow::bail!("{s}")
-    }
 }
 
 #[tauri::command]
@@ -300,27 +202,8 @@ fn name_here(keys: &Keys) -> Result<String, String> {
         .ok_or_else(|| "no name on this device".to_string())
 }
 
-/// Add a device: its public key, as its own admit page shows it, signed
-/// into the entry by the root here; every library key is sealed to it
 #[tauri::command]
-pub async fn admit_device(keys: State<'_, Keys>, public_key: String) -> Result<Status, String> {
-    let root = root_here(&keys)?;
-    let name = name_here(&keys)?;
-    let pk = public_key.trim();
-    // a whole "dd device admit <key>" line pasted is fine too
-    let pk = pk.rsplit(' ').next().unwrap_or(pk);
-    account::admit(&dirs(), &name, &root, pk)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    status(keys).await
-}
-
-/// A passkey for a browser, so the website signs this account in: the link
-/// `dd enrol` prints, signed by this device for ten minutes and opened in
-/// the device's own browser. The page makes the passkey; this waits for
-/// it and signs it into the entry with the root held here.
-#[tauri::command]
-pub async fn passkey_add(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<Status, String> {
+pub async fn passkey_add(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt as _;
     let root = root_here(&keys)?;
     let name = name_here(&keys)?;
@@ -358,27 +241,9 @@ pub async fn passkey_add(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result
     account::admit_passkey(&dirs(), &name, &root, cred)
         .await
         .map_err(|e| format!("{e:#}"))?;
-    status(keys).await
+    Ok(())
 }
 
-/// Remove a device by its fingerprint; not this one
-#[tauri::command]
-pub async fn remove_device(keys: State<'_, Keys>, fingerprint: String) -> Result<Status, String> {
-    let root = root_here(&keys)?;
-    let name = name_here(&keys)?;
-    let (kp, _) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
-    if identity::fingerprint(&auth::device::public_b64(&kp)) == fingerprint {
-        return Err("not this device: sign out instead".to_string());
-    }
-    account::remove_device(&dirs(), &name, &root, &fingerprint)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    status(keys).await
-}
-
-/// Every device lost: the recovery key installs a new root and a new
-/// recovery key, and this device becomes the only one. Returns the new
-/// recovery key, once.
 #[tauri::command]
 pub async fn recover(
     keys: State<'_, Keys>,

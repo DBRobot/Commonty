@@ -1,6 +1,7 @@
-// The app's pages. One command, `status`, says which page applies: no name
-// yet, a name whose entry does not list this device, or signed in. The
-// admit page polls until the laptop has added this device.
+// The app's own few screens. One command, `status`, says which applies: no
+// name yet, a name whose entry does not list this device, or signed in -
+// and then the site's own pages, which the app carries, take over. The
+// admit page polls until another device of the account approves this one.
 
 const invoke = window.__TAURI__.core.invoke;
 const $ = (id) => document.getElementById(id);
@@ -10,10 +11,6 @@ let digits = null;
 
 function show(page) {
   for (const p of document.querySelectorAll(".page")) p.hidden = p.id !== "page-" + page;
-}
-
-function when(t) {
-  return t ? new Date(t * 1000).toLocaleString() : "";
 }
 
 function render(st) {
@@ -30,42 +27,9 @@ function render(st) {
   if (!st.admitted) {
     $("admit-match").hidden = !digits;
     $("admit-digits").textContent = digits || "";
-    $("admit-fp").textContent = st.fingerprint;
-    $("admit-dirs").textContent = st.directories.map(([d, s]) => `${d.replace(/^https?:\/\//, "").replace(/\/_dd\/directory$/, "")}: ${s}`).join(" · ");
     return show("admit");
   }
-  const e = st.entry;
   $("home-name").textContent = st.name;
-  $("home-entry").textContent = `version ${e.version}, updated ${when(e.updated)}`;
-  $("home-libraries").textContent = e.libraries;
-  $("home-passkeys").textContent = e.passkeys;
-  const gate = $("home-gate");
-  gate.textContent = st.gate || "";
-  gate.className = st.gate && st.gate.startsWith("accepted") ? "ok" : "error";
-  const ul = $("home-devices");
-  ul.replaceChildren(...e.devices.map((d) => {
-    const li = document.createElement("li");
-    li.className = d.this ? "this" : "";
-    li.append(d.fingerprint);
-    const tag = document.createElement("span");
-    tag.className = "tag";
-    tag.textContent = d.this ? "this device" : `added ${when(d.added)}`;
-    if (st.root && !d.this) {
-      const rm = document.createElement("button");
-      rm.className = "quiet inline";
-      rm.textContent = "Remove";
-      rm.addEventListener("click", async () => {
-        rm.disabled = true;
-        try { render(await invoke("remove_device", { fingerprint: d.fingerprint })); }
-        catch (err) { alert(String(err)); rm.disabled = false; }
-      });
-      tag.append(rm);
-    }
-    li.append(tag);
-    return li;
-  }));
-  $("add-device").hidden = !st.root;
-  $("no-root").hidden = st.root;
   show("home");
   net().then(goToSite);
 }
@@ -81,7 +45,7 @@ function goToSite(st) {
   location.replace(site);
 }
 
-// the fleet's own network: this device on it, the boxes it can see
+// the fleet's own network: this device on it
 async function net(st) {
   try {
     st = st || await invoke("net_status");
@@ -91,24 +55,15 @@ async function net(st) {
   }
   const text = $("net-text");
   if (st.running) {
-    text.textContent = `On the network as ${st.name} (${st.ip}). Boxes are reached directly from here.`;
+    text.textContent = "Connected to your boxes.";
   } else if (st.joined) {
-    text.textContent = `Joined before; the engine is ${st.state}${st.error ? ": " + st.error : ""}.`;
+    text.textContent = st.error ? `Not connected: ${st.error}` : "Connecting to your boxes…";
   } else {
-    text.textContent = "This device is not on the network yet. Joining asks the gate for a key in your name; from then on boxes are reached directly, not through the public door.";
+    text.textContent = "Not connected to your boxes yet.";
   }
+  $("to-site").hidden = !st.running;
   $("net-join").hidden = st.running;
-  $("net-join").textContent = st.joined ? "Reconnect" : "Join";
-  const ul = $("net-peers");
-  ul.replaceChildren(...(st.peers || []).map((p) => {
-    const li = document.createElement("li");
-    li.append(`${p.name}  ${p.ip}`);
-    const tag = document.createElement("span");
-    tag.className = "tag";
-    tag.textContent = p.online ? "online" : "offline";
-    li.append(tag);
-    return li;
-  }));
+  $("net-join").textContent = st.joined ? "Reconnect" : "Connect";
   return st;
 }
 
@@ -133,7 +88,7 @@ $("passkey-add").addEventListener("click", async () => {
   t.hidden = false;
   t.textContent = "Finish in the browser that just opened…";
   try {
-    render(await invoke("passkey_add"));
+    await invoke("passkey_add");
     t.textContent = "Done: the browser can sign in now.";
   } catch (e) {
     t.textContent = String(e);
@@ -194,17 +149,6 @@ $("recover-form").addEventListener("submit", async (ev) => {
   } catch (e) {
     $("recover-error").textContent = String(e);
     $("recover-error").hidden = false;
-  }
-});
-$("admit-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  $("admit-error").hidden = true;
-  try {
-    render(await invoke("admit_device", { publicKey: $("admit-key").value }));
-    $("admit-key").value = "";
-  } catch (e) {
-    $("admit-error").textContent = String(e);
-    $("admit-error").hidden = false;
   }
 });
 $("signup-back").addEventListener("click", () => show("name"));

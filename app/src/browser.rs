@@ -9,13 +9,29 @@
 //! Linux: GNOME's proxy setting, which Chrome and Firefox follow.
 //! Android has no such setting; the phone gets a VPN instead.
 
-/// the address earlier versions set: the engine's own, which is gone
-/// whenever the app is
-const EARLIER: &str = "http://127.0.0.1:41650/proxy.pac";
-
-/// a setting this app made, now or before
+/// a setting this app made, now or before: this run's rules, or the
+/// engine's own address from any run (its port is picked at each start,
+/// and was 41650 before that)
 fn ours(url: &str, pac: &str) -> bool {
-    url == pac || url == EARLIER
+    url == pac
+        || url
+            .strip_prefix("http://127.0.0.1:")
+            .and_then(|r| r.strip_suffix("/proxy.pac"))
+            .is_some_and(|port| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_apps_own_rules_from_any_run() {
+        let now = "http://127.0.0.1:51234/proxy.pac";
+        assert!(super::ours(now, now));
+        assert!(super::ours("http://127.0.0.1:41650/proxy.pac", now));
+        assert!(super::ours("http://127.0.0.1:39001/proxy.pac", now));
+        assert!(!super::ours("http://proxy.example.com/proxy.pac", now));
+        assert!(!super::ours("http://127.0.0.1:8080/wpad.dat", now));
+        assert!(!super::ours("http://127.0.0.1:/proxy.pac", now));
+    }
 }
 
 /// Some(message) when the browser could not be pointed here by itself

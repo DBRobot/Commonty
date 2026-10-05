@@ -33,7 +33,8 @@ dd release publish (the boxes' release) ─► returns; the boxes never wait
                       linux (deb, AppImage) · android (apk) · windows (installer, dd.exe)
                       └─ publish: GitHub attests every file, attaches them to a release
                dd release app: checks each file's attestation and commit,
-               signs app.json ─► the downloads page offers it
+               signs the apk with the Android key, uploads it as
+               commonty-signed.apk, signs app.json ─► the downloads page
 ```
 
 - **It follows every release on its own.** A release whose merges touched
@@ -47,6 +48,31 @@ dd release publish (the boxes' release) ─► returns; the boxes never wait
   built, and `dd release app-next` does the whole round from wherever
   `main` is.
 
+## Android's key
+
+A phone installs only a signed apk, and takes an update only when it is
+signed by the same key as the version it has. GitHub's build is unsigned:
+`dd release app` signs it, on the machine that holds the release key, with
+an Android key kept beside it in that machine's keystore, and uploads the
+result to the same GitHub release as `commonty-signed.apk`. The downloads
+page offers that file. Without the key, the apk is left out of the
+manifest and the page shows Android as not ready, rather than offering a
+file no phone can install.
+
+- `dd release android-init` makes the key, once. It prints the
+  certificate's SHA-256, which is how a phone, or anyone, recognises the
+  app's signer.
+- Losing it means every phone must uninstall and reinstall to take the
+  next version, and making a new one has the same effect, so the command
+  refuses while one exists. Keep it as safe as the release key.
+
+## The version
+
+Each bundle is built with its tag's version (`COMMONTY_VERSION`, set by
+`release.yml`): the app says it in the Devices tab, the installers carry
+it, and Android's version code rises with it, so each release installs as
+an update.
+
 ## What GitHub is trusted with
 
 The boxes trust no single builder: every box rebuilds a release and checks
@@ -55,7 +81,8 @@ built once, on GitHub's machines, and trusted because GitHub attests that
 they came out of
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) at that
 tag's commit; `dd release app` checks that statement before the release key
-signs anything. A Tauri bundle is not reproducible enough to rebuild and
+signs anything. The Android key never leaves the laptop: GitHub could not
+sign an update to the app on anyone's phone. A Tauri bundle is not reproducible enough to rebuild and
 compare, so this is the trust the app runs on, and it is named here so it is
 a choice and not an accident.
 

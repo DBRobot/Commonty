@@ -151,21 +151,6 @@ fn state_dir() -> Result<PathBuf, String> {
     Ok(crate::paths::data().join("net"))
 }
 
-fn hostname() -> String {
-    #[cfg(target_os = "android")]
-    {
-        "phone".to_string()
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        std::fs::read_to_string("/etc/hostname")
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "device".to_string())
-    }
-}
-
 /// bring the engine up, from the state on disk or with a fresh key, and
 /// point every client at its proxy
 fn start(control: &str, key: &str, tunfd: i32) -> Result<Started, String> {
@@ -177,7 +162,7 @@ fn start(control: &str, key: &str, tunfd: i32) -> Result<Started, String> {
         c(&dir.to_string_lossy())?,
         c(control)?,
         c(key)?,
-        c(&hostname())?,
+        c(&crate::paths::device_name())?,
     );
     let out = take(unsafe {
         commonty_net_start(

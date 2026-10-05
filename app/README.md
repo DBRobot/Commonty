@@ -1,5 +1,8 @@
 # The Commonty app
 
+What it is and how it is kept safe: [docs/app.md](../docs/app.md). This file
+is how to build and run it.
+
 The same crates as `dd`, behind a window: Tauri 2, Rust core, plain pages in
 `web/`. The device key lives in the OS keystore under the service
 `commonty-app`, so the app beside `dd` on one machine is a device of its own.
@@ -46,7 +49,14 @@ shows a new recovery key.
 
 The engine's proxy is our own SOCKS5 (`app/net/socks.go`, `socks5h` from
 the Rust side): its dialer resolves names through the network's DNS first,
-where the fleet's names live. `COMMONTY_NET_DEBUG=1` turns the engine's
+where the fleet's names live. The browser's own way in (`app/net/browser.go`)
+takes no password, so it answers only the account running the app
+(`app/net/owner*.go`: the kernel's or Windows' table of connections says who
+opened each one), on ports chosen at each start.
+
+State lives in `~/.local/share/commonty` on Linux and in the platform's own
+app data folder elsewhere (AppData on Windows). A device joins the network
+under its machine's name, or `phone-xxxx` where there is none. `COMMONTY_NET_DEBUG=1` turns the engine's
 log on and prints the proxy credential for `curl -x socks5h://tsnet:…`.
 
 ## Android
@@ -75,7 +85,10 @@ builds and the copied libraries are not. An emulator:
     emulator -avd probe -no-window -gpu swiftshader_indirect &
     adb install -r gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 
-Not in ci: a phone build is made here. Proven 2026-09-24 on the emulator:
+CI runs the app's tests and the engine's vet and tests (`checks.tests-app`,
+`checks.net-check`); the phone and Windows builds are GitHub's, after each
+release that changes the app (docs/github.md), and the apk is signed on the
+laptop. Proven 2026-09-24 on the emulator:
 recovery of an account, sign-in, joining the network through the bridge,
 node1 as a peer.
 
