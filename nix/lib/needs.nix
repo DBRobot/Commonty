@@ -12,6 +12,7 @@ let
     ../modules/library/needs.nix
     ../modules/llm/needs.nix
     ../modules/net/needs.nix
+    ../modules/observe/needs.nix
     ../modules/photos/needs.nix
     ../modules/storage/needs.nix
     ../modules/vault/needs.nix

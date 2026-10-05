@@ -2,6 +2,7 @@
 {
   dd-control = {
     what = "the control plane: heartbeats, leases and the directory, agreed by the voting boxes and a witness";
+    everyBox = true;
     base = {
       # signs with the key in the TPM; its disk unlock already needs one
       requires.tpm = true;
@@ -21,6 +22,7 @@
 
   dd-agent = {
     what = "moves the box to the signed release, and back if the box comes up worse";
+    everyBox = true;
     base = {
       uses = {
         memory = "70M";
@@ -31,6 +33,84 @@
           "git"
           "s3"
         ]; # the release on the forge, closures from the cache
+        inbound = "none";
+      };
+      depends = { };
+      privacy = "none";
+    };
+  };
+
+  dd-box-report = {
+    what = "what this box is (detect.sh), signed by its TPM: the report its config is built from";
+    everyBox = true;
+    base = {
+      requires.tpm = true;
+      # node1, node2, 2026-10-04: peak
+      uses = {
+        memory = "20M";
+        storage = "0";
+      };
+      network = {
+        outbound = "none";
+        inbound = "none";
+      };
+      depends = { };
+      privacy = "none"; # hardware, never data
+    };
+  };
+
+  dd-secrets-key = {
+    what = "the box's secrets key, made in its TPM: what opens its own sops file and nothing else";
+    everyBox = true;
+    base = {
+      requires.tpm = true;
+      # node1, 2026-10-04: peak
+      uses = {
+        memory = "6M";
+        storage = "0";
+      };
+      network = {
+        outbound = "none";
+        inbound = "none";
+      };
+      depends = { };
+      privacy = "none";
+    };
+  };
+
+  disk-unlock = {
+    what = "the encrypted pools open at boot from the TPM, under the signed boot it measures; over the network from the owner's paper key when it cannot";
+    everyBox = true;
+    base = {
+      requires = {
+        tpm = true;
+        uefi = true;
+        wiredInitrd = true;
+      };
+      uses = {
+        memory = "0";
+        storage = "0";
+      }; # the initrd's, gone by the time the box is up
+      network = {
+        outbound = "none";
+        inbound = "lan"; # ssh in the initrd, for the paper key
+      };
+      depends = { };
+      privacy = "none";
+    };
+  };
+
+  zfs-datasets = {
+    what = "the datasets the box's services ask for, made and set on its pools (never destroyed)";
+    everyBox = true;
+    base = {
+      # node1, 2026-10-04: peak
+      uses = {
+        memory = "3M";
+        storage = "0";
+      };
+      network = {
+        outbound = "none";
         inbound = "none";
       };
       depends = { };

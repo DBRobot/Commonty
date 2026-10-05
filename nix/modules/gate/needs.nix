@@ -22,6 +22,7 @@
 
   dd-verify = {
     what = "the gate: sign-in, who may reach what, the directory's replica, settings pages";
+    everyBox = true;
     base = {
       # node1, node2, 2026-10-04: peak; its state (sessions, replay, keys)
       uses = {

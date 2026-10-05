@@ -1,4 +1,10 @@
-{ config, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ddScript,
+  ...
+}:
 let
   # Not an address: an msmtp alias, expanded from sops at send time by
   # modules/mail.nix. This repo is public and a real address here is a real
@@ -20,16 +26,41 @@ in
     };
   };
 
-  services.smartd = {
-    enable = true;
-    notifications.mail = {
-      enable = true;
-      sender = "distributed.datacenter@gmail.com";
-      recipient = to;
-      mailer = "${pkgs.msmtp}/bin/msmtp";
+  # Every box's disks and pools, and every box's backups, from the fleet
+  # view: each box writes its own facts (observe/disks.nix, storage/backup.nix)
+  # and this, the box that can mail, reads them all and mails what is new.
+  # Up to a block's length late for another box (thanos.blockDuration); that
+  # is the price of no box telling another anything.
+  systemd.services.dd-fleet-alerts = {
+    description = "Mail what is wrong on any box, from the fleet view";
+    after = [ "thanos-query.service" ];
+    path = [
+      pkgs.curl
+      pkgs.jq
+      pkgs.coreutils
+      pkgs.msmtp
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      StateDirectory = "dd-fleet-alerts";
     };
-    defaults.monitored = "-a -o on -S on -s (S/../.././02|L/../../6/03)";
-    # every disk the box reported (fleet/boxes/<box>/hardware.json)
-    devices = map (d: { device = d; }) config.dd.box.disks;
+    script = ddScript ./fleet-alerts.sh {
+      QUERY = "http://127.0.0.1:10903/api/v1/query";
+      STATE = "/var/lib/dd-fleet-alerts/sent.json";
+      TO = to;
+      # a block's length and an hour: every box's newest numbers are in it
+      WINDOW =
+        let
+          b = config.dd.thanos.blockDuration;
+        in
+        if lib.hasSuffix "h" b then "${toString (lib.toInt (lib.removeSuffix "h" b) + 1)}h" else "3h";
+    };
+  };
+  systemd.timers.dd-fleet-alerts = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "5min";
+      OnUnitActiveSec = "15min";
+    };
   };
 }
