@@ -11,6 +11,8 @@ rebuilt from it, so a change here reaches real machines.
 - **Git, pull requests, CI and releases: [`docs/ci.md`](docs/ci.md),**
   loaded below. Follow it for every branch, commit, pull request, merge and
   release.
+- **The app (`app/`): [`docs/app.md`](docs/app.md).** Read it before
+  changing the app, the pages it carries, or anything that touches its keys.
 - **The app's build and release on GitHub, and the mirror:
   [`docs/github.md`](docs/github.md).** Read it before changing
   `.github/`, the app's release, or anything it pins.

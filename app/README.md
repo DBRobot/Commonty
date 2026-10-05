@@ -1,5 +1,8 @@
 # The Commonty app
 
+What it is and how it is kept safe: [docs/app.md](../docs/app.md). This file
+is how to build and run it.
+
 The same crates as `dd`, behind a window: Tauri 2, Rust core, plain pages in
 `web/`. The device key lives in the OS keystore under the service
 `commonty-app`, so the app beside `dd` on one machine is a device of its own.
