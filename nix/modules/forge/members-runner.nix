@@ -59,6 +59,15 @@ in
 
     virtualisation.docker = {
       enable = true;
+      # what members' jobs leave behind goes, weekly
+      autoPrune = {
+        enable = true;
+        flags = [
+          "--all"
+          "--filter"
+          "until=168h"
+        ];
+      };
       daemon.settings = {
         runtimes.runsc.path = "${pkgs.gvisor}/bin/runsc";
         default-runtime = "runsc";

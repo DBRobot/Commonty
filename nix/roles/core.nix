@@ -165,6 +165,37 @@ in
   services.logind.settings.Login.HandleLidSwitch = "ignore";
   services.logind.settings.Login.HandleLidSwitchExternalPower = "ignore";
 
+  # The store is cleaned, or it fills the disk: CI builds on a runner box
+  # pile up for good otherwise (node2's reached 97G and, with garage on the
+  # same pool, took the box's last byte). Weekly, the systems of the last two
+  # weeks kept (a rollback is to one of them), and whenever a build finds
+  # less than 10G free.
+  nix.gc = {
+    automatic = true;
+    dates = "weekly";
+    options = "--delete-older-than 14d";
+    randomizedDelaySec = "6h";
+  };
+  # Builds are held to their share of the box's memory, so a big one is
+  # what gets killed, not garage or the gate: node2 (14G) ran out entirely
+  # building node1's system while garage resynced. Above 60% builds are
+  # slowed, at 75% killed; and one build at a time per 6G, at most one per
+  # four threads.
+  systemd.services.nix-daemon.serviceConfig =
+    let
+      mib = config.dd.box.memoryBytes / (1024 * 1024);
+    in
+    lib.mkIf (config.dd.box.memoryBytes > 0) {
+      MemoryHigh = "${toString (mib * 60 / 100)}M";
+      MemoryMax = "${toString (mib * 75 / 100)}M";
+    };
+  nix.settings.max-jobs = lib.mkIf (config.dd.box.memoryBytes > 0) (
+    lib.max 1 (
+      lib.min (config.dd.box.memoryBytes / (6 * 1024 * 1024 * 1024)) (config.dd.box.threads / 4)
+    )
+  );
+  nix.settings.min-free = 10 * 1024 * 1024 * 1024;
+  nix.settings.max-free = 30 * 1024 * 1024 * 1024;
   nix.settings.experimental-features = [
     "nix-command"
     "flakes"

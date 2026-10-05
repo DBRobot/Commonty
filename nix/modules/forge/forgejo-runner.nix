@@ -95,6 +95,14 @@ in
       home = "/var/lib/gitea-runner";
     };
     users.groups.forgejo-runner = { };
+    # Caches the jobs keep, which nothing let go of (7.6G on node1): the
+    # checkouts and actions, nix's eval cache, and cargo's shared target
+    # dir. What sits untouched for two weeks goes; the next job rebuilds it.
+    systemd.tmpfiles.rules = [
+      "e /var/lib/gitea-runner/*/.cache/act - - - 14d"
+      "e /var/lib/gitea-runner/*/.cache/nix - - - 14d"
+      "e /var/lib/gitea-runner/cargo-target - - - 14d"
+    ];
     # (the nixos module registers again by itself when the token or the
     # labels change, so a new scope reaches the forge on the next start; a
     # changed address is ours to notice, runner-address.sh)

@@ -13,7 +13,10 @@ in
     box =
       { lib, ... }:
       {
-        imports = [ ../modules/box/disk-unlock.nix ];
+        imports = [
+          ../modules/box/disk-unlock.nix
+          ../modules/box/zfs-datasets.nix
+        ];
         # what home-network.nix gives a real box: the cable, the address, the router
         options.dd.home = lib.mkOption { type = lib.types.attrs; };
         options.dd.domain = lib.mkOption { type = lib.types.str; };
@@ -23,6 +26,12 @@ in
             wired = "52:54:00:12:01:01";
             address = "192.168.1.1/24";
             gateway = "192.168.1.2";
+          };
+          # caps by mountpoint (storage/garage.nix sets one): one that fits,
+          # one smaller than what the dataset already holds
+          dd.zfs.atMountpoint = {
+            "/data".quota = "100M";
+            "/big".quota = "1M";
           };
           dd.unlock = {
             enable = true;

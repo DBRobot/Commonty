@@ -1,6 +1,7 @@
 {
   ddScript,
   config,
+  options,
   pkgs,
   lib,
   ...
@@ -105,141 +106,150 @@ in
     };
   };
 
-  config = {
-    services.garage = {
-      enable = true;
-      package = pkgs.garage; # no default; nixpkgs ships several majors
-      environmentFile = cfg.envFile;
-      settings = {
-        metadata_dir = meta;
-        data_dir = cfg.dataDir;
-        db_engine = "lmdb";
-        replication_factor = cfg.replicationFactor;
-        consistency_mode = "consistent";
-        # a daily copy of the metadata db, in ${meta}/snapshots; the backup
-        # module ships it, so a cluster whose metadata is gone is rebuilt
-        # from the last snapshot plus the blocks
-        metadata_auto_snapshot_interval = "1d";
-        # rpc on every interface; the firewall admits the tailnet and nothing
-        # else, and the rpc is authenticated by the shared secret regardless
-        rpc_bind_addr = "[::]:3901";
-        rpc_public_addr = cfg.publicAddr;
-        bootstrap_peers = cfg.peers;
-        s3_api = {
-          s3_region = "us-east-1"; # ente requires this string regardless of reality
-          # every interface, so a box without garage can back up to this one
-          # over the tailnet; the gateway proxies the public name to it
-          api_bind_addr = "[::]:3900";
-          root_domain = ".s3.${config.dd.domain}";
+  config = lib.mkMerge [
+    # the blocks are held to the capacity the pool counts on, so on a box
+    # whose system shares the disk they can never take the room it needs
+    (lib.optionalAttrs (options.dd ? zfs) {
+      dd.zfs.atMountpoint.${cfg.dataDir} = {
+        quota = cfg.capacity;
+      };
+    })
+    {
+      services.garage = {
+        enable = true;
+        package = pkgs.garage; # no default; nixpkgs ships several majors
+        environmentFile = cfg.envFile;
+        settings = {
+          metadata_dir = meta;
+          data_dir = cfg.dataDir;
+          db_engine = "lmdb";
+          replication_factor = cfg.replicationFactor;
+          consistency_mode = "consistent";
+          # a daily copy of the metadata db, in ${meta}/snapshots; the backup
+          # module ships it, so a cluster whose metadata is gone is rebuilt
+          # from the last snapshot plus the blocks
+          metadata_auto_snapshot_interval = "1d";
+          # rpc on every interface; the firewall admits the tailnet and nothing
+          # else, and the rpc is authenticated by the shared secret regardless
+          rpc_bind_addr = "[::]:3901";
+          rpc_public_addr = cfg.publicAddr;
+          bootstrap_peers = cfg.peers;
+          s3_api = {
+            s3_region = "us-east-1"; # ente requires this string regardless of reality
+            # every interface, so a box without garage can back up to this one
+            # over the tailnet; the gateway proxies the public name to it
+            api_bind_addr = "[::]:3900";
+            root_domain = ".s3.${config.dd.domain}";
+          };
+          # its figures, for this box's prometheus: on loopback, and without
+          # an admin token nothing else on this port answers
+          admin.api_bind_addr = "127.0.0.1:3903";
         };
-        # its figures, for this box's prometheus: on loopback, and without
-        # an admin token nothing else on this port answers
-        admin.api_bind_addr = "127.0.0.1:3903";
       };
-    };
 
-    # The module defaults to DynamicUser, which allocates a UID at runtime - so
-    # there is no stable owner for data on the pool, and garage cannot write
-    # there. A static user is the normal answer for persistent data.
-    users.users.garage = {
-      isSystemUser = true;
-      group = "garage";
-      home = "/var/lib/garage";
-    };
-    users.groups.garage = { };
-
-    systemd.services.garage = {
-      serviceConfig = {
-        DynamicUser = false;
-        User = "garage";
-        Group = "garage";
+      # The module defaults to DynamicUser, which allocates a UID at runtime - so
+      # there is no stable owner for data on the pool, and garage cannot write
+      # there. A static user is the normal answer for persistent data.
+      users.users.garage = {
+        isSystemUser = true;
+        group = "garage";
+        home = "/var/lib/garage";
       };
-      # the data dir is a dataset; do not start on an empty mountpoint, and
-      # own it here rather than in tmpfiles, which runs before the dataset
-      # is mounted and owns the directory underneath it
-      unitConfig.RequiresMountsFor = [ cfg.dataDir ];
-      after = [ "zfs-datasets.service" ];
-      wants = [ "zfs-datasets.service" ];
-      # the node key a reinstall carries in arrives owned by root
-      serviceConfig.ExecStartPre = [
-        "+${pkgs.coreutils}/bin/install -d -o garage -g garage -m 0750 ${cfg.dataDir}"
-        "+${pkgs.coreutils}/bin/chown -R garage:garage /var/lib/garage"
+      users.groups.garage = { };
+
+      systemd.services.garage = {
+        serviceConfig = {
+          DynamicUser = false;
+          User = "garage";
+          Group = "garage";
+        };
+        # the data dir is a dataset; do not start on an empty mountpoint, and
+        # own it here rather than in tmpfiles, which runs before the dataset
+        # is mounted and owns the directory underneath it
+        unitConfig.RequiresMountsFor = [ cfg.dataDir ];
+        after = [ "zfs-datasets.service" ];
+        wants = [ "zfs-datasets.service" ];
+        # the node key a reinstall carries in arrives owned by root
+        serviceConfig.ExecStartPre = [
+          "+${pkgs.coreutils}/bin/install -d -o garage -g garage -m 0750 ${cfg.dataDir}"
+          "+${pkgs.coreutils}/bin/chown -R garage:garage /var/lib/garage"
+        ];
+      };
+
+      systemd.tmpfiles.rules = [
+        # the data dir must exist before the unit's mount namespace is set up;
+        # ExecStartPre above fixes its owner once a dataset is mounted there
+        "d ${cfg.dataDir} 0750 garage garage -"
+        "d /var/lib/garage 0750 garage garage -"
+        "d ${meta} 0700 garage garage -"
       ];
-    };
 
-    systemd.tmpfiles.rules = [
-      # the data dir must exist before the unit's mount namespace is set up;
-      # ExecStartPre above fixes its owner once a dataset is mounted there
-      "d ${cfg.dataDir} 0750 garage garage -"
-      "d /var/lib/garage 0750 garage garage -"
-      "d ${meta} 0700 garage garage -"
-    ];
-
-    # Converging, like zfs-datasets: safe to re-run on every rebuild and on a
-    # timer, because the layout needs every box before it applies and the
-    # other box may join later.
-    systemd.services.garage-setup = {
-      description = "Converge garage layout, buckets and keys";
-      after = [ "garage.service" ];
-      requires = [ "garage.service" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [
-        config.services.garage.package
-        pkgs.awscli2
-        pkgs.coreutils
-        pkgs.gnugrep
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        EnvironmentFile = [ cfg.envFile ] ++ cfg.setupEnvFiles;
+      # Converging, like zfs-datasets: safe to re-run on every rebuild and on a
+      # timer, because the layout needs every box before it applies and the
+      # other box may join later.
+      systemd.services.garage-setup = {
+        description = "Converge garage layout, buckets and keys";
+        after = [ "garage.service" ];
+        requires = [ "garage.service" ];
+        wantedBy = [ "multi-user.target" ];
+        path = [
+          config.services.garage.package
+          pkgs.awscli2
+          pkgs.coreutils
+          pkgs.gnugrep
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          EnvironmentFile = [ cfg.envFile ] ++ cfg.setupEnvFiles;
+        };
+        # the buckets and keys, from data: one block per bucket
+        script =
+          ddScript ./garage-setup.sh {
+            CAPACITY = cfg.capacity;
+            ZONE = cfg.zone;
+          }
+          + "\n"
+          + lib.concatStrings (
+            lib.mapAttrsToList (
+              name: b:
+              let
+                q = lib.escapeShellArg name;
+                allow = lib.concatMapStringsSep " " (a: "--${a}") (lib.unique b.allow);
+                id = if b.key == null then "" else "\"$" + b.key.envPrefix + "_ID\"";
+                secret = if b.key == null then "" else "\"$" + b.key.envPrefix + "_SECRET\"";
+              in
+              ''
+                garage bucket create ${q} 2>/dev/null || true
+              ''
+              + lib.optionalString (b.key != null) ''
+                # The secret goes in argv, and /proc/<pid>/cmdline is readable
+                # by anyone on the box. Once, when the key is new, is a moment;
+                # every ten minutes for the life of the fleet is a place to
+                # come and look. The bucket grant takes the key id, which is
+                # not a secret, so it stays where it was.
+                case "$(garage key list 2>/dev/null || true)" in
+                  *${lib.escapeShellArg b.key.name}*) ;;
+                  *) garage key import ${id} ${secret} --yes -n ${lib.escapeShellArg b.key.name} 2>/dev/null || true ;;
+                esac
+                garage bucket allow ${allow} ${q} --key ${id} 2>/dev/null || true
+              ''
+              + lib.optionalString (b.cors != null && b.key != null) ''
+                # garage has no cli for cors: an s3 api call with the bucket's key
+                AWS_ACCESS_KEY_ID=${id} AWS_SECRET_ACCESS_KEY=${secret} AWS_DEFAULT_REGION=us-east-1 \
+                  aws --endpoint-url http://127.0.0.1:3900 s3api put-bucket-cors --bucket ${q} \
+                  --cors-configuration ${lib.escapeShellArg (builtins.toJSON b.cors)} || true
+              ''
+            ) cfg.buckets
+          );
       };
-      # the buckets and keys, from data: one block per bucket
-      script =
-        ddScript ./garage-setup.sh {
-          CAPACITY = cfg.capacity;
-          ZONE = cfg.zone;
-        }
-        + "\n"
-        + lib.concatStrings (
-          lib.mapAttrsToList (
-            name: b:
-            let
-              q = lib.escapeShellArg name;
-              allow = lib.concatMapStringsSep " " (a: "--${a}") (lib.unique b.allow);
-              id = if b.key == null then "" else "\"$" + b.key.envPrefix + "_ID\"";
-              secret = if b.key == null then "" else "\"$" + b.key.envPrefix + "_SECRET\"";
-            in
-            ''
-              garage bucket create ${q} 2>/dev/null || true
-            ''
-            + lib.optionalString (b.key != null) ''
-              # The secret goes in argv, and /proc/<pid>/cmdline is readable
-              # by anyone on the box. Once, when the key is new, is a moment;
-              # every ten minutes for the life of the fleet is a place to
-              # come and look. The bucket grant takes the key id, which is
-              # not a secret, so it stays where it was.
-              case "$(garage key list 2>/dev/null || true)" in
-                *${lib.escapeShellArg b.key.name}*) ;;
-                *) garage key import ${id} ${secret} --yes -n ${lib.escapeShellArg b.key.name} 2>/dev/null || true ;;
-              esac
-              garage bucket allow ${allow} ${q} --key ${id} 2>/dev/null || true
-            ''
-            + lib.optionalString (b.cors != null && b.key != null) ''
-              # garage has no cli for cors: an s3 api call with the bucket's key
-              AWS_ACCESS_KEY_ID=${id} AWS_SECRET_ACCESS_KEY=${secret} AWS_DEFAULT_REGION=us-east-1 \
-                aws --endpoint-url http://127.0.0.1:3900 s3api put-bucket-cors --bucket ${q} \
-                --cors-configuration ${lib.escapeShellArg (builtins.toJSON b.cors)} || true
-            ''
-          ) cfg.buckets
-        );
-    };
-    systemd.timers.garage-setup = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "10m";
-        OnUnitActiveSec = "10m";
-        RandomizedDelaySec = "1m";
+      systemd.timers.garage-setup = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnBootSec = "10m";
+          OnUnitActiveSec = "10m";
+          RandomizedDelaySec = "1m";
+        };
       };
-    };
-  };
+    }
+  ];
 }
