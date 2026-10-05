@@ -1,0 +1,57 @@
+{
+  "payload": {
+    "flake": "git+https://git.commonty.org/david/commonty",
+    "id": "v0.1.25-1-1791190802",
+    "issued": 1791190802,
+    "jobs": [
+      {
+        "attr": "legacyPackages.x86_64-linux.appRelease",
+        "builders": [
+          "node1",
+          "node2"
+        ],
+        "name": "android",
+        "part": "android",
+        "path": "/nix/store/5bkgcqxpffarlpjldxfd530qkwpm5ng2-commonty-android-0.1.25",
+        "version": "0.1.25"
+      },
+      {
+        "attr": "legacyPackages.x86_64-linux.appRelease",
+        "builders": [
+          "node1",
+          "node2"
+        ],
+        "name": "dd-windows",
+        "part": "dd-windows",
+        "path": "/nix/store/yakfy6g6lg6plvscbk5wdqhg0dpisjhm-dd-windows-0.1.25",
+        "version": "0.1.25"
+      },
+      {
+        "attr": "legacyPackages.x86_64-linux.appRelease",
+        "builders": [
+          "node2",
+          "node1"
+        ],
+        "name": "linux",
+        "part": "linux",
+        "path": "/nix/store/wcl1sbhhcpza8zxj0z3cc3wx3js8ci8s-commonty-linux-0.1.25",
+        "version": "0.1.25"
+      },
+      {
+        "attr": "legacyPackages.x86_64-linux.appRelease",
+        "builders": [
+          "node1",
+          "node2"
+        ],
+        "name": "windows",
+        "part": "windows",
+        "path": "/nix/store/hd481iaawcp59v56r2ylmlbz50i8wyg8-commonty-windows-0.1.25",
+        "version": "0.1.25"
+      }
+    ],
+    "kind": "build-order",
+    "rev": "f7b65bb34dfa8ea8c8ad25431395b086e61734df"
+  },
+  "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
+  "signature": "8/ZA0JceWKHfH2MWRXV4boFiezBqSnOHh0IkqVS/nr2RSwpAcGJZzLEKL5a3XaAGUHrFSLbXXhbGUs4PhnGVBQ=="
+}
