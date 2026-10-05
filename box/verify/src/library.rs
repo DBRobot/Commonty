@@ -145,7 +145,7 @@ async fn metered(
     use std::sync::atomic::{AtomicU64, Ordering};
 
     let method = req.method().as_str().to_string();
-    let piece = req.headers().contains_key("x-dd-upload");
+    let piece = library_gate::dav::piece(req.headers()).is_some();
     // the upload header makes dav::serve take the body as a piece whatever
     // the method, so it is metered as one, never as the copy it may claim
     if method == "COPY" && !piece {
@@ -250,7 +250,7 @@ async fn images(app: Arc<App>, raw: String, req: Request) -> Response {
     let reads = matches!(
         req.method().as_str(),
         "GET" | "HEAD" | "OPTIONS" | "PROPFIND"
-    ) && !headers.contains_key("x-dd-upload");
+    ) && library_gate::dav::piece(headers).is_none();
     if !reads && crate::bearer(headers).is_none() {
         let session = app
             .sessions

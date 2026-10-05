@@ -339,7 +339,7 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
     if writes && role != Role::Owner {
         return (StatusCode::FORBIDDEN, "a reader does not write").into_response();
     }
-    if let Some(upload) = headers.get("x-dd-upload").and_then(|v| v.to_str().ok()) {
+    if let Some(upload) = piece(&headers) {
         let out = in_pieces(g, &lib, &path, upload.to_string(), req).await;
         return match out {
             Ok(r) => r,
@@ -371,6 +371,13 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
         Ok(r) => r,
         Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
     }
+}
+
+/// The upload header, as `serve` reads it: a request with one is a piece of
+/// an upload whatever its method. Callers that meter or guard writes ask
+/// this, so they and `serve` cannot read the header two ways.
+pub fn piece(headers: &HeaderMap) -> Option<&str> {
+    headers.get("x-dd-upload").and_then(|v| v.to_str().ok())
 }
 
 /// What a COPY from `raw` would add to the bucket: the object's size, or
