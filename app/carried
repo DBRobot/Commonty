@@ -5,6 +5,7 @@
 box/web/home.css                  static/home.css
 box/web/bar.css                   static/bar.css
 box/web/shell.js                  static/shell.js
+box/web/kit.js                    static/kit.js
 box/web/library.js                static/library.js
 box/web/webauthn.js               static/webauthn.js
 box/web/fonts/public-sans.woff2   static/public-sans.woff2

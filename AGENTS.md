@@ -8,6 +8,10 @@ rebuilt from it, so a change here reaches real machines.
   system; read the one for the area you are changing before you change it.
   When you change how something works, change its page in the same pull
   request. The same pages are at `<domain>/docs`.
+- **Any page, screen or style: [`docs/ui.md`](docs/ui.md).** Read it before
+  changing anything a person sees - the site, the app's own screens, Git,
+  Docs, Games. Fast first, then cohesive, then quality; the shared pieces
+  are in `box/web/kit.js` and `box/web/home.css`.
 - **Git, pull requests, CI and releases: [`docs/ci.md`](docs/ci.md),**
   loaded below. Follow it for every branch, commit, pull request, merge and
   release.

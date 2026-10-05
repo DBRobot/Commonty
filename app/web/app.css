@@ -3,7 +3,6 @@
 
 main.app { padding-top: 48px; }
 main.app > .card { max-width: 440px; }
-main.app > .wide-page { max-width: 760px; }
 
 .who { gap: 10px; font-weight: 600; }
 
@@ -29,44 +28,19 @@ button.link {
 button.link:hover { background: none; color: var(--link-hover); }
 #page-name .ways { margin-top: 36px; border-top: 1px solid var(--line); }
 
-/* the signed-in screen: one panel per thing this device does */
-.panel {
-  margin-bottom: 20px;
-  padding: 24px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-.panel-head { margin-bottom: 8px; }
-.panel .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.panel .row button { margin-top: 0; }
-.panel .rows { margin-top: 16px; }
-.panel form.row input { flex: 1; min-width: 200px; }
-.panel > button.quiet { margin-top: 20px; }
-
-.devices li { font-family: var(--mono); font-size: 14px; }
-.devices li .tag { font-family: var(--font); margin-left: auto; }
-.devices li.this { font-weight: 500; }
-.rows li .tag button { margin-left: 10px; }
-
-.facts {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 8px 20px;
-  margin: 0;
-  font-size: 15px;
-}
-.facts dt { color: var(--ink-2); }
-.facts dd { margin: 0; }
-
 @media (max-width: 860px) {
   main.app { padding-top: 32px; }
-  .panel { padding: 18px; }
 }
 
-main.app > .wide-page h1 { font-size: 34px; }
-.panel .rows li .tag { margin-left: auto; }
-#add-device { margin-top: 16px; }
+/* the signed-in screen: what only the app does, in one card */
+#page-home h2 { margin: 28px 0 6px; font-size: 17px; }
+#page-home .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0 4px; }
+#page-home .row > * { margin-top: 0; margin-bottom: 0; }
+
+/* the shape of a screen, until the first one draws (docs/ui.md) */
+.skel span { display: block; height: 12px; margin: 0 0 14px; border-radius: 2px; background: var(--line-2); }
+.skel span.h { height: 26px; width: 60%; margin-bottom: 22px; }
+.skel span.short { width: 45%; }
 
 /* the four digits both screens show while a device is added by code */
 .digits { font-family: var(--mono, monospace); font-size: 40px; letter-spacing: .18em; font-weight: 600; margin: 4px 0 8px; }
