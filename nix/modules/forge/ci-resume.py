@@ -94,10 +94,17 @@ def main():
         retried = set(json.load(open(state)))
     except (OSError, ValueError):
         retried = set()
-    status, body = ask("GET", "/api/v1/repos/%s/actions/runs?limit=50" % repo)
+    # the forge down or restarting (a switch, say) is not a failure of
+    # this: there is nothing to rerun until it answers, and the next run
+    # looks again
+    try:
+        status, body = ask("GET", "/api/v1/repos/%s/actions/runs?limit=50" % repo)
+    except (OSError, http.client.HTTPException) as e:
+        print("the forge is not answering (%s); next time" % e)
+        return 0
     if status != 200:
-        print("the forge did not list its runs: http %s" % status)
-        return 1
+        print("the forge did not list its runs: http %s; next time" % status)
+        return 0
     runs = json.loads(body).get("workflow_runs") or []
     now = time.time()
     newest = {}  # the latest run per pull request
