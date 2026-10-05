@@ -1,8 +1,8 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "v0.1.25-1-1791190802",
-    "issued": 1791190802,
+    "id": "v0.1.26-1-1791196748",
+    "issued": 1791196748,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -12,19 +12,8 @@
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/5bkgcqxpffarlpjldxfd530qkwpm5ng2-commonty-android-0.1.25",
-        "version": "0.1.25"
-      },
-      {
-        "attr": "legacyPackages.x86_64-linux.appRelease",
-        "builders": [
-          "node1",
-          "node2"
-        ],
-        "name": "dd-windows",
-        "part": "dd-windows",
-        "path": "/nix/store/yakfy6g6lg6plvscbk5wdqhg0dpisjhm-dd-windows-0.1.25",
-        "version": "0.1.25"
+        "path": "/nix/store/ab6yf6kp3d96px7vlqlgc281w8k2c00g-commonty-android-0.1.26",
+        "version": "0.1.26"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -32,10 +21,10 @@
           "node2",
           "node1"
         ],
-        "name": "linux",
-        "part": "linux",
-        "path": "/nix/store/wcl1sbhhcpza8zxj0z3cc3wx3js8ci8s-commonty-linux-0.1.25",
-        "version": "0.1.25"
+        "name": "dd-windows",
+        "part": "dd-windows",
+        "path": "/nix/store/g1b23kp2p4fmq8f1mgfp94qfs6iw7ik7-dd-windows-0.1.26",
+        "version": "0.1.26"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -43,15 +32,26 @@
           "node1",
           "node2"
         ],
+        "name": "linux",
+        "part": "linux",
+        "path": "/nix/store/av3ccdyyyc2qmbshsf8y0wp8js8qq2gf-commonty-linux-0.1.26",
+        "version": "0.1.26"
+      },
+      {
+        "attr": "legacyPackages.x86_64-linux.appRelease",
+        "builders": [
+          "node2",
+          "node1"
+        ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/hd481iaawcp59v56r2ylmlbz50i8wyg8-commonty-windows-0.1.25",
-        "version": "0.1.25"
+        "path": "/nix/store/xkkqj0wwfg1bxj7qm6glm88mfd3sakb3-commonty-windows-0.1.26",
+        "version": "0.1.26"
       }
     ],
     "kind": "build-order",
-    "rev": "f7b65bb34dfa8ea8c8ad25431395b086e61734df"
+    "rev": "978a30170daea6d63646f01a6fc816f365374f04"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "8/ZA0JceWKHfH2MWRXV4boFiezBqSnOHh0IkqVS/nr2RSwpAcGJZzLEKL5a3XaAGUHrFSLbXXhbGUs4PhnGVBQ=="
+  "signature": "/xRZEK8s8LquqPX8YCRUeZ/fAVTpFoqcLo3jeDw9muni1njPJTydIwa/Muw4SnWxQgXCySmPGlOEh+4OdfLsDg=="
 }
