@@ -1,6 +1,16 @@
 {
-  "_": "Where the fleet's owner wants things. ownHardware: services that run and serve only on boxes the owner owns (box.json owner), because their box hands people the code that handles their secrets (needs servesCode). Checked by nix/tests/role-fit.nix. forgeMirrors: the forge's push mirrors (repo defaults to the fleet's own; the token is sops github-mirror-token).",
+  "_": "Where the fleet's owner wants things. ownHardware: services that run and serve only on boxes the owner owns (box.json owner), because their box hands people the code that handles their secrets (needs servesCode). Checked by nix/tests/role-fit.nix. forgeMirrors: the forge's push mirrors (repo defaults to the fleet's own; the token is sops github-mirror-token). domain and repo: the fleet's name and its repository on its forge. people: each box owner's keys - their ssh keys are the box's admin login, their paper key gets a copy of the box's disk keys (box.json owner picks whose).",
   "owner": "david",
+  "domain": "commonty.org",
+  "repo": "david/commonty",
+  "people": {
+    "david": {
+      "ssh": [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKOR0kI8YSFB9JwqTJJMB+h4EJCSscpdnnGGGaBNRqXj david-bascom@david-bascom-Legion-Pro-5-16ADR10"
+      ],
+      "paperKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL/mxoTUtKHXC9Agc7bupMcFzsalpVweep3E76AhudEC david-paper-key"
+    }
+  },
   "ownHardware": [
     "vaultwarden",
     "vaultwarden-send"

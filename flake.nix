@@ -1007,7 +1007,7 @@
           directoryOf =
             name: box:
             if box.public then
-              "https://files.commonty.org/_dd/directory"
+              "https://files.${(lib.importJSON ./fleet/policy.json).domain}/_dd/directory"
             else
               "http://${box.net}:4181/_dd/directory";
           # a role that declares secrets imports roles/_sops.nix; the sops
