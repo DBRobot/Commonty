@@ -1232,8 +1232,16 @@
                   dd.verify.fleet = lib.mapAttrs (_: b: b.net) boxes;
                   # the other boxes, as the agent checks a release did not
                   # cost this box its way off itself
-                  dd.agent.reach = lib.mapAttrsToList (_: b: "${b.net}:443") (
-                    lib.filterAttrs (n: _: n != name) boxes
+                  # a port each other box listens on, or refuses from: the gate's
+                  # (in the house it answers; out of it the firewall is silent)
+                  # and the front door's. Either answering is reach. An agent
+                  # from before refusals counted needs the first: that is what
+                  # took release 211 back on node1, where node2 has no 443.
+                  dd.agent.reach = lib.concatLists (
+                    lib.mapAttrsToList (_: b: [
+                      "${b.net}:4181"
+                      "${b.net}:443"
+                    ]) (lib.filterAttrs (n: _: n != name) boxes)
                   );
                 }
                 (lib.optionalAttrs (builtins.elem "gateway" box.roles) {
