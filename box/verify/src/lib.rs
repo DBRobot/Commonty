@@ -1784,7 +1784,8 @@ async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Re
 async fn fleet_json(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     match app.identify(&headers, "access") {
         Some(user) if app.member(&user) && user != pages::DEMO_USER => {
-            Json(fleet::look(&app.fleet, app.thanos.as_deref(), app.control.as_deref()).await).into_response()
+            Json(fleet::look(&app.fleet, app.thanos.as_deref(), app.control.as_deref()).await)
+                .into_response()
         }
         _ => StatusCode::FORBIDDEN.into_response(),
     }
