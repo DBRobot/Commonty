@@ -22,11 +22,13 @@ let
   );
   # the channels between boxes that are still here, each waiting on the
   # change that ends it (README: no box talks to another box)
+  #   3900  garage S3, for a box with no garage of its own (its backups,
+  #         the nix cache) - until there is one per box
   #   3901  garage RPC - one cluster, until there is one per box
   # and, between the boxes of one house only:
   #   4181  the house's Wi-Fi relay and page (the directory itself is the
   #         control plane's agreed log now, pulled by nobody)
-  boxPorts = "3901";
+  boxPorts = "3900,3901";
 in
 {
   # What every box is, before any role: its identity in the directory, a
