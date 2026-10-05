@@ -34,29 +34,64 @@ const HOST_KEY: &str = "/etc/ssh/ssh_host_ed25519_key";
 #[derive(Parser)]
 struct Args {
     /// the repository, git+https://host/owner/name; the rev is pinned here
-    #[arg(long)]
-    flake: String,
+    #[arg(long, required_unless_present = "order")]
+    flake: Option<String>,
     /// the commit, 40 hex
-    #[arg(long)]
-    rev: String,
+    #[arg(long, required_unless_present = "order")]
+    rev: Option<String>,
     /// name=path: a box of the release and the toplevel CI built for it
-    #[arg(long = "box", required = true)]
+    #[arg(long = "box", required_unless_present = "order")]
     boxes: Vec<String>,
+    /// Instead: the build order at this url (signed by the release key).
+    /// Every job that names this box is built, accounted for by the same
+    /// rules, and its signed result handed to dd-control for the agreed
+    /// log. Run on a timer; a job is done once.
+    /// Given more than once, each is read: a release's order and a check's.
+    #[arg(long, conflicts_with_all = ["flake", "rev", "boxes"])]
+    order: Vec<String>,
+    /// the release key's public half, base64
+    #[arg(long, default_value = "/etc/dd/release.pub")]
+    key_file: String,
+    /// where dd-control takes build results
+    #[arg(long, default_value = "/run/dd-control/built.sock")]
+    submit: String,
+}
+
+fn hostname() -> Result<String> {
+    Ok(fs::read_to_string("/proc/sys/kernel/hostname")?
+        .trim()
+        .to_string())
+}
+
+fn check_flake(flake: &str, rev: &str) -> Result<()> {
+    ensure!(
+        rev.len() == 40 && rev.bytes().all(|b| b.is_ascii_hexdigit()),
+        "rev: 40 hex"
+    );
+    ensure!(
+        flake.starts_with("git+https://") && !flake.contains(['?', '#', ' ', '\'', '"']),
+        "flake: git+https://host/owner/name, nothing after it"
+    );
+    Ok(())
 }
 
 fn main() -> Result<()> {
     let a = Args::parse();
-    ensure!(
-        a.rev.len() == 40 && a.rev.bytes().all(|b| b.is_ascii_hexdigit()),
-        "rev: 40 hex"
-    );
-    ensure!(
-        a.flake.starts_with("git+https://") && !a.flake.contains(['?', '#', ' ', '\'']),
-        "flake: git+https://host/owner/name, nothing after it"
-    );
-    let attester = fs::read_to_string("/proc/sys/kernel/hostname")?
-        .trim()
-        .to_string();
+    if !a.order.is_empty() {
+        // each on its own: one that cannot be read does not hold up another
+        let mut failed = 0;
+        for url in &a.order {
+            if let Err(e) = order(url, &a.key_file, &a.submit) {
+                eprintln!("{url}: {e:#}");
+                failed += 1;
+            }
+        }
+        ensure!(failed == 0, "{failed} order(s) not done");
+        return Ok(());
+    }
+    let (flake, rev) = (a.flake.unwrap_or_default(), a.rev.unwrap_or_default());
+    check_flake(&flake, &rev)?;
+    let attester = hostname()?;
     let _lock = lock()?;
     let mut checked = read_checked();
 
@@ -67,10 +102,8 @@ fn main() -> Result<()> {
             name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'),
             "box name"
         );
-        let attr = format!(
-            "{}?rev={}#nixosConfigurations.{name}.config.system.build.toplevel",
-            a.flake, a.rev
-        );
+        let attr =
+            format!("{flake}?rev={rev}#nixosConfigurations.{name}.config.system.build.toplevel");
         let drv = sh("nix", &["eval", "--raw", &format!("{attr}.drvPath")])?
             .trim()
             .to_string();
@@ -80,7 +113,7 @@ fn main() -> Result<()> {
         ensure!(
             path == want,
             "{name}: {} evaluates here to {path}, not {want}",
-            &a.rev[..12]
+            &rev[..12]
         );
         eprintln!("== {name}: {path}");
         // present, however it gets here: substituted only where a trusted
@@ -96,14 +129,217 @@ fn main() -> Result<()> {
     let statement = serde_json::to_string(&serde_json::json!({
         "v": 1,
         "attester": attester,
-        "flake": a.flake,
-        "rev": a.rev,
+        "flake": flake,
+        "rev": rev,
         "boxes": out,
     }))?;
     let signature = sign(&statement)?;
     println!(
         "{}",
         serde_json::json!({ "statement": statement, "signature": signature })
+    );
+    Ok(())
+}
+
+/// orders older than this are not acted on: a build order is for one release
+const ORDER_TTL_SECS: u64 = 7 * 24 * 3600;
+/// what this box has finished: "<order id> <job>", one a line
+const DONE: &str = "/var/lib/dd-attest/done";
+
+/// a name in an attribute path, a job's name, a part: nothing nix or a
+/// shell would read as more than a name
+fn plain(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
+        && !s.starts_with('.')
+        && !s.ends_with('.')
+}
+
+fn version_ok(v: &str) -> bool {
+    v.split('.').count() == 3
+        && v.split('.')
+            .all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// One job of an order, as the order states it.
+struct Job {
+    name: String,
+    attr: String,
+    version: Option<String>,
+    part: Option<String>,
+    path: String,
+}
+
+fn jobs_for(order: &serde_json::Value, me: &str) -> Result<Vec<Job>> {
+    let mut out = Vec::new();
+    for j in order["jobs"].as_array().context("an order has jobs")? {
+        let named = j["builders"]
+            .as_array()
+            .is_some_and(|b| b.iter().any(|x| x.as_str() == Some(me)));
+        if !named {
+            continue;
+        }
+        let field = |k: &str| j[k].as_str().map(str::to_string);
+        let job = Job {
+            name: field("name").context("a job has a name")?,
+            attr: field("attr").context("a job has an attr")?,
+            version: field("version"),
+            part: field("part"),
+            path: field("path").context("a job has a path")?,
+        };
+        ensure!(
+            plain(&job.name) && plain(&job.attr),
+            "job {}: a plain name and attr",
+            job.name
+        );
+        ensure!(
+            job.version.as_deref().is_none_or(version_ok),
+            "job {}: version X.Y.Z",
+            job.name
+        );
+        ensure!(
+            job.part.as_deref().is_none_or(plain),
+            "job {}: a plain part",
+            job.name
+        );
+        ensure!(
+            job.path.strip_prefix("/nix/store/").is_some_and(plain),
+            "job {}: a store path",
+            job.name
+        );
+        out.push(job);
+    }
+    Ok(out)
+}
+
+/// The installable a job names, and the --apply that reaches its output:
+/// `<attr>` itself, or `<attr> "<version>"` and then `.part`
+fn eval_job(flake: &str, rev: &str, job: &Job, field: &str) -> Result<String> {
+    let at = format!("{flake}?rev={rev}#{}", job.attr);
+    let apply = match (&job.version, &job.part) {
+        (Some(v), Some(p)) => format!("r: (r \"{v}\").{p}.{field}"),
+        (Some(v), None) => format!("r: (r \"{v}\").{field}"),
+        (None, Some(p)) => format!("r: r.{p}.{field}"),
+        (None, None) => format!("r: r.{field}"),
+    };
+    Ok(sh("nix", &["eval", "--raw", &at, "--apply", &apply])?
+        .trim()
+        .to_string())
+}
+
+fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
+    let me = hostname()?;
+    let trusted = release::decode_public(fs::read_to_string(key_file)?.trim())
+        .map_err(|e| anyhow::anyhow!("{key_file}: {e}"))?;
+    let raw = match ureq::get(url).call() {
+        Ok(mut r) => r.body_mut().read_to_string()?,
+        Err(ureq::Error::StatusCode(404)) => return Ok(()),
+        Err(e) => bail!("fetching {url}: {e}"),
+    };
+    let o = release::verify_doc(&raw, "build-order", &trusted)
+        .map_err(|e| anyhow::anyhow!("the build order does not verify: {e}"))?;
+    let id = o["id"].as_str().context("an order has an id")?.to_string();
+    ensure!(plain(&id), "order id");
+    let issued = o["issued"].as_u64().unwrap_or_default();
+    if release::now().saturating_sub(issued) > ORDER_TTL_SECS {
+        return Ok(());
+    }
+    let flake = o["flake"].as_str().context("an order names a flake")?;
+    let rev = o["rev"].as_str().context("an order names a commit")?;
+    check_flake(flake, rev)?;
+    let jobs = jobs_for(&o, &me)?;
+    let done = fs::read_to_string(DONE).unwrap_or_default();
+    let todo: Vec<Job> = jobs
+        .into_iter()
+        .filter(|j| !done.lines().any(|l| l == format!("{id} {}", j.name)))
+        .collect();
+    if todo.is_empty() {
+        return Ok(());
+    }
+    let _lock = lock()?;
+    let mut checked = read_checked();
+    for job in todo {
+        eprintln!("== order {id}: {}", job.name);
+        // Built, or the reason it was not: either way the laptop hears it
+        // in the log, rather than waiting out a box that will never answer
+        let mut said = serde_json::json!({
+            "v": 2,
+            "kind": "built",
+            "attester": me,
+            "flake": flake,
+            "rev": rev,
+            "order": id,
+            "job": job.name,
+            "path": job.path,
+        });
+        let built = (|| -> Result<(String, String)> {
+            let drv = eval_job(flake, rev, &job, "drvPath")?;
+            let path = eval_job(flake, rev, &job, "outPath")?;
+            ensure!(
+                path == job.path,
+                "{} evaluates here to {path}, not {}",
+                &rev[..12],
+                job.path
+            );
+            sh("nix-store", &["--realise", &drv])?;
+            let closure = attest(&drv, &path, &mut checked)?;
+            let nar = release::nar_hash_from_path_info(
+                &sh("nix", &["path-info", "--json", &path])?,
+                &path,
+            )
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok((closure, nar))
+        })();
+        match built {
+            Ok((closure, nar)) => {
+                said["closure"] = closure.into();
+                said["narHash"] = nar.into();
+            }
+            Err(e) => {
+                eprintln!("   {}: {e:#}", job.name);
+                said["error"] = format!("{e:#}")
+                    .chars()
+                    .take(2000)
+                    .collect::<String>()
+                    .into();
+            }
+        }
+        let statement = serde_json::to_string(&said)?;
+        let signature = sign(&statement)?;
+        post(
+            submit,
+            &serde_json::to_string(&serde_json::json!({
+                "statement": statement,
+                "signature": signature,
+            }))?,
+        )?;
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(DONE)?;
+        writeln!(f, "{id} {}", job.name)?;
+    }
+    Ok(())
+}
+
+/// one result to dd-control over its socket: a plain HTTP/1.0 POST
+fn post(sock: &str, body: &str) -> Result<()> {
+    use std::io::Read as _;
+    let mut c = std::os::unix::net::UnixStream::connect(sock)
+        .with_context(|| format!("dd-control at {sock}"))?;
+    write!(
+        c,
+        "POST /built HTTP/1.0\r\nHost: dd-control\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )?;
+    let mut answer = String::new();
+    c.read_to_string(&mut answer)?;
+    let status = answer.split_whitespace().nth(1).unwrap_or_default();
+    ensure!(
+        status == "202",
+        "dd-control said {}",
+        answer.lines().next().unwrap_or_default()
     );
     Ok(())
 }
@@ -263,4 +499,54 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
         bail!("{bin} {} failed", args.first().copied().unwrap_or_default());
     }
     Ok(String::from_utf8(o.stdout)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn order() -> serde_json::Value {
+        serde_json::json!({
+            "id": "o1",
+            "jobs": [
+                { "name": "app-linux", "attr": "legacyPackages.x86_64-linux.appRelease",
+                  "version": "1.2.3", "part": "linux",
+                  "path": "/nix/store/aaaa-commonty-linux-1.2.3", "builders": ["node1", "node3"] },
+                { "name": "app-android", "attr": "legacyPackages.x86_64-linux.appRelease",
+                  "version": "1.2.3", "part": "android",
+                  "path": "/nix/store/bbbb-commonty-android-1.2.3", "builders": ["node2", "node3"] },
+            ],
+        })
+    }
+
+    #[test]
+    fn a_box_takes_only_the_jobs_that_name_it() {
+        let names = |me| {
+            jobs_for(&order(), me)
+                .unwrap()
+                .into_iter()
+                .map(|j| j.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names("node1"), ["app-linux"]);
+        assert_eq!(names("node3"), ["app-linux", "app-android"]);
+        assert!(names("node9").is_empty());
+    }
+
+    #[test]
+    fn an_order_cannot_smuggle_nix_or_shell() {
+        for (k, v) in [
+            ("attr", "x; rm -rf /"),
+            ("attr", r"a.b\"),
+            ("part", "linux.drvPath)"),
+            ("version", r#"1.2.3" + builtins.exec"#),
+            ("path", "/nix/store/a/../../etc"),
+            ("path", "/etc/passwd"),
+            ("name", "a b"),
+        ] {
+            let mut o = order();
+            o["jobs"][0][k] = v.into();
+            assert!(jobs_for(&o, "node1").is_err(), "{k}={v} was taken");
+        }
+    }
 }

@@ -209,6 +209,10 @@ func facts() map[string]float64 {
 	if hottest > 0 {
 		f["temp_c"] = hottest
 	}
+	// whether builds that boot a VM can run here (a build order's needs)
+	if _, err := os.Stat("/dev/kvm"); err == nil {
+		f["kvm"] = 1
+	}
 	// what the fleet pages show of a box, from what the box's own units
 	// write (/var/lib/dd-facts): the release it runs, how its agent's last
 	// run ended, its last good backup. Here, a box's word reaches the
@@ -291,6 +295,7 @@ func main() {
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
 	submitSock := flag.String("submit", "", "a unix socket where this box's gate hands in directory items (POST /submit); empty: none")
 	submitGroup := flag.String("submit-group", "", "the group that may open -submit (the gate's)")
+	builtSock := flag.String("builds", "", "a unix socket, root's alone, where dd-attest hands in build results (POST /built); empty: none")
 	report := flag.String("sign-report", "", "sign the box's report in this directory (hardware.json, hardware-configuration.nix) as -box, into report.sig, and exit")
 	join := flag.Bool("sign-join", false, "print a request for a join key to the fleet's network, signed as -box now, and exit")
 	flag.Parse()
@@ -510,6 +515,39 @@ func main() {
 		}()
 	}
 
+	// dd-attest's way in: what this box built for a build order, signed by
+	// its host key inside, sent as this box's request. Root's alone: only
+	// what runs as root here holds the host key anyway.
+	if *builtSock != "" {
+		_ = os.Remove(*builtSock)
+		l, err := net.Listen("unix", *builtSock)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := os.Chmod(*builtSock, 0o600); err != nil {
+			log.Fatal(err)
+		}
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /built", func(w http.ResponseWriter, req *http.Request) {
+			body, err := io.ReadAll(io.LimitReader(req.Body, state.MaxBuilt+1))
+			if err != nil || len(body) > state.MaxBuilt || !json.Valid(body) {
+				http.Error(w, "a build result: json, at most 16K", http.StatusBadRequest)
+				return
+			}
+			if err := submit("built", body); err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+		})
+		go func() {
+			s := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+			if err := s.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatal(err)
+			}
+		}()
+	}
+
 	http.HandleFunc("/state", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(n.State())
@@ -524,6 +562,17 @@ func main() {
 		}
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "next": len(s.Directory), "height": s.Height})
+	})
+	// the build results from item `since` on, the same way
+	http.HandleFunc("/built", func(w http.ResponseWriter, req *http.Request) {
+		since, _ := strconv.Atoi(req.URL.Query().Get("since"))
+		s := n.State()
+		items := []state.BuiltItem{}
+		if since >= 0 && since < len(s.Built) {
+			items = s.Built[since:]
+		}
+		w.Header().Set("content-type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "next": len(s.Built), "height": s.Height, "time": s.Time})
 	})
 	srv := &http.Server{Addr: *listen, ReadHeaderTimeout: 5 * time.Second}
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

@@ -107,7 +107,7 @@ jobs:
           # every client or host tweak. Minutes, so spent where it counts.
           echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|data/|box/|client/(identity|auth)/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/)' && vm=true
           # the app, and the crates and toolchain it builds on
-          echo "$changed" | grep -qE '^(app/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|\.forgejo/)' && app=true
+          echo "$changed" | grep -qE '^(app/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|nix/app-release/|\.forgejo/)' && app=true
           echo "nix=$nix" >> "$GITHUB_OUTPUT"
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
           echo "vm=$vm" >> "$GITHUB_OUTPUT"
@@ -351,9 +351,9 @@ jobs:
 
   # The app on its own: its dependency tree (tauri, webkit) is most of
   # any compile, so the workspace checks leave it out and this runs only
-  # when the app or what it builds on changed. Its Android and Windows
-  # builds are GitHub's (.github/workflows/release.yml), after each release
-  # that changes the app (dd release app-next).
+  # when the app or what it builds on changed. Its downloads are built
+  # after a release, not here: two boxes build them when one changes the
+  # app (dd release app-next, docs/app-release.md).
   app_lint:
     needs: files_modified
     if: ${{ needs.files_modified.outputs.app == 'true' }}
@@ -363,7 +363,7 @@ jobs:
       # its lint, its tests, and its network engine's vet and tests: one
       # job, on the app's own cached dependency build
       - name: the app's lint and tests, and its engine's
-        run: nix build --no-link -L .#checks.x86_64-linux.clippy-app .#checks.x86_64-linux.tests-app .#checks.x86_64-linux.net-check
+        run: nix build --no-link -L .#checks.x86_64-linux.clippy-app .#checks.x86_64-linux.tests-app .#checks.x86_64-linux.net-check .#checks.x86_64-linux.app-release
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 

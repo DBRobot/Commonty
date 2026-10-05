@@ -59,7 +59,9 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    environment.etc."dd/release.pub" = lib.mkIf (cfg.publicKey != null) { text = cfg.publicKey + "\n"; };
+    environment.etc."dd/release.pub" = lib.mkIf (cfg.publicKey != null) {
+      text = cfg.publicKey + "\n";
+    };
 
     # this box's word on a release before it is signed: `dd release
     # publish` runs it over ssh with sudo (box/release/src/bin/dd-attest.rs)
@@ -106,6 +108,45 @@ in
         EnvironmentFile = lib.optional (cfg.cacheEnvFile != null) cfg.cacheEnvFile;
       };
     };
+    # Build orders (docs/app-release.md): the release key names which boxes
+    # build what; a box named builds it, rebuilds what it did not build
+    # itself, and puts its signed word in the agreed log through
+    # dd-control. Beside the release file, fetched the same way.
+    systemd.services.dd-build = {
+      description = "Build what a signed build order asks of this box";
+      after = [
+        "network-online.target"
+        "dd-control.service"
+      ];
+      wants = [ "network-online.target" ];
+      path = [
+        config.nix.package
+        pkgs.git
+        pkgs.openssh
+        pkgs.coreutils
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = lib.concatStringsSep " " [
+          "${agent}/bin/dd-attest"
+          # a release's order, and the nightly check's
+          "--order ${lib.removeSuffix "current.json" cfg.url}build-order.json"
+          "--order ${lib.removeSuffix "current.json" cfg.url}build-check.json"
+          "--key-file ${cfg.publicKeyFile}"
+        ];
+        StateDirectory = "dd-attest";
+        # an hour's build is normal; a box that has gone quiet in one is not
+        TimeoutStartSec = "6h";
+      };
+    };
+    systemd.timers.dd-build = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "3m";
+        OnUnitInactiveSec = "2m";
+      };
+    };
+
     systemd.timers.dd-agent = {
       wantedBy = [ "timers.target" ];
       timerConfig = {

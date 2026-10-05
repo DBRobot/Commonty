@@ -17,8 +17,9 @@ rebuilt from it, so a change here reaches real machines.
   release.
 - **The app (`app/`): [`docs/app.md`](docs/app.md).** Read it before
   changing the app, the pages it carries, or anything that touches its keys.
-- **The app's build and release on GitHub, and the mirror:
-  [`docs/github.md`](docs/github.md).** Read it before changing
-  `.github/`, the app's release, or anything it pins.
+- **The app's downloads, how they are built and released:
+  [`docs/app-release.md`](docs/app-release.md).** Read it before changing
+  `nix/app-release/`, `dd release app`, or anything they pin. The GitHub
+  mirror is [`docs/github.md`](docs/github.md).
 
 @docs/ci.md

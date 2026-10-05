@@ -55,6 +55,8 @@ in
           (lib.optionalString (roles != "") "-roles ${roles}")
           # the gate hands in directory items here (box/verify/src/directory.rs)
           (lib.optionalString config.dd.verify.enable "-submit /run/dd-control/submit.sock -submit-group dd-verify")
+          # dd-attest hands in what it built for a build order here
+          "-builds /run/dd-control/built.sock"
         ];
         StateDirectory = "dd-control";
         StateDirectoryMode = "0700";
