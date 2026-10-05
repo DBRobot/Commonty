@@ -197,8 +197,10 @@ async fn images(app: Arc<App>, raw: String, req: Request) -> Response {
         }
     }
     // the images count against their owner's allowance like a library's
-    // files (storage.rs counts the prefix too)
-    let upload = req.method() == Method::PUT || headers.contains_key("x-dd-upload");
+    // files (storage.rs counts the prefix too): checked against what the
+    // request says, and the ledger's recount of the bucket settles what landed
+    let upload =
+        matches!(req.method().as_str(), "PUT" | "COPY") || headers.contains_key("x-dd-upload");
     let size = headers
         .get(axum::http::header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
