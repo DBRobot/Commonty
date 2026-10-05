@@ -112,6 +112,16 @@ let
         type = t.bool;
         default = false;
       };
+      uefi = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "boots by UEFI (its report's firmware.uefi): the signed boot the disk unlock's TPM policy measures";
+      };
+      wiredInitrd = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "a wired network the initrd has a driver for (its report's nics), to unlock the disks over the network when the TPM cannot";
+      };
       tpm = lib.mkOption {
         type = t.bool;
         default = false;
@@ -230,6 +240,11 @@ t.attrsOf (
         type = t.bool;
         default = false;
         description = "the box hands people the code that handles their secrets (a page a master password is typed into): whoever has root there could change it. fleet/policy.json can keep such a service on the fleet owner's own hardware";
+      };
+      everyBox = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "runs on every box, whatever its roles: what makes a box one of the fleet (placement does not choose it)";
       };
       perHouse = lib.mkOption {
         type = t.nullOr t.ints.positive;

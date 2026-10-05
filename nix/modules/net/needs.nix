@@ -26,6 +26,7 @@
 
   commonty-net = {
     what = "this box on the fleet's network";
+    everyBox = true;
     base = {
       # node1, node2, 2026-10-04: peak
       uses = {
@@ -55,6 +56,24 @@
       };
       depends.headscale.local = false;
       privacy = "none"; # the control protocol is encrypted end to end
+    };
+  };
+
+  owner-devices = {
+    what = "the box's owner's devices on the fleet's network, for the firewall's admin ports";
+    everyBox = true;
+    base = {
+      # node1, node2, 2026-10-04: peak
+      uses = {
+        memory = "7M";
+        storage = "0";
+      };
+      network = {
+        outbound = "none";
+        inbound = "none";
+      };
+      depends.commonty-net.local = true;
+      privacy = "metadata"; # whose device has which address
     };
   };
 }

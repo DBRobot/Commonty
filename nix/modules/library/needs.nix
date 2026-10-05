@@ -1,7 +1,46 @@
-# What playing films needs of a box (types: nix/lib/needs-type.nix). The
-# libraries themselves are part of the gate (dd-verify); their files are
-# the storage pool's.
+# What the libraries need of a box (types: nix/lib/needs-type.nix)
 {
+  libraries = {
+    what = "members' files, films and shows over WebDAV, ciphertext made on their devices, kept in the storage pool";
+    base = {
+      # the files are the pool's; the gate moves them
+      uses = {
+        memory = "0";
+        storage = "0";
+      };
+      network = {
+        outbound = [ "s3" ];
+        inbound = "network";
+      };
+      depends = {
+        dd-verify.local = true;
+        nginx.local = true;
+        garage.local = false;
+      };
+      privacy = "none"; # names and bytes encrypted on the device
+    };
+  };
+
+  disk-images = {
+    what = "members' archives of old computers (`dd image`), restic's layout, encrypted on the device, kept in the storage pool";
+    base = {
+      uses = {
+        memory = "0";
+        storage = "0";
+      }; # the gate's and the pool's
+      network = {
+        outbound = [ "s3" ];
+        inbound = "network";
+      };
+      depends = {
+        dd-verify.local = true;
+        nginx.local = true;
+        garage.local = false;
+      };
+      privacy = "none";
+    };
+  };
+
   dd-transcode = {
     what = "plays a film a member's device cannot, decrypting it in memory only";
     base = {

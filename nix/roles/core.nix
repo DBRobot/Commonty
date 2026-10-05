@@ -34,6 +34,7 @@ in
     ../modules/box/box.nix
     ../modules/gate/verify.nix
     ../modules/observe/metrics.nix
+    ../modules/observe/disks.nix
     ../modules/box/zfs-datasets.nix
     ../modules/storage/usage.nix
     ../modules/storage/postgres-isolation.nix

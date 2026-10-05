@@ -23,4 +23,26 @@
       privacy = "metadata";
     };
   };
+
+  ente-web = {
+    what = "Ente's own web apps (photos, albums, accounts, cast, locker), with our patches, served as files";
+    # the photos app is where a member types their password: whoever has
+    # root on the box that serves it could change it
+    servesCode = true;
+    base = {
+      uses = {
+        memory = "0";
+        storage = "0";
+      }; # nginx's; the apps are in the nix store
+      network = {
+        outbound = "none";
+        inbound = "network";
+      };
+      depends = {
+        nginx.local = true;
+        ente-museum.local = false; # the apps call api.<domain>
+      };
+      privacy = "none"; # the pages; what they show is decrypted in the browser
+    };
+  };
 }
