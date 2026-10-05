@@ -10,7 +10,7 @@
       };
       network = {
         outbound = "none";
-        inbound = "tailnet"; # and the tunnel, on loopback
+        inbound = "network"; # and the tunnel, on loopback
       };
       depends = {
         dd-verify.local = true;

@@ -49,9 +49,11 @@ in
       specialisation.stranded.configuration = {
         environment.etc."dd-marker".text = "release 4\n";
         networking.firewall.enable = pkgs.lib.mkForce true;
+        # cut off: nothing comes back, as when the network is gone. (A
+        # refusal would be an answer - the agent counts one as reach.)
         networking.firewall.extraCommands = ''
-          iptables -I OUTPUT -p tcp --dport 80 -j REJECT
-          ip6tables -I OUTPUT -p tcp --dport 80 -j REJECT
+          iptables -I OUTPUT -p tcp --dport 80 -j DROP
+          ip6tables -I OUTPUT -p tcp --dport 80 -j DROP
         '';
       };
     };

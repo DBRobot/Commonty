@@ -53,7 +53,7 @@ if [ "$(git -C "$repo" rev-parse "refs/remotes/forge/$ref" 2>/dev/null || true)"
   echo "local $ref ($rev) is not what the forge has - push it first" >&2; exit 1
 fi
 want_key=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]]["hostKey"])' "$repo/fleet/boxes.json" "$box")
-want_tailnet=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]]["tailnet"])' "$repo/fleet/boxes.json" "$box")
+want_net=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]].get("net", ""))' "$repo/fleet/boxes.json" "$box")
 
 echo "== build $box from $ref ($rev)"
 flake="git+file://$repo?ref=$ref#nixosConfigurations.$box.config.system.build"
@@ -169,12 +169,14 @@ check "root fs" zfs "$(ssh "${ssh_opts[@]}" "admin@$lan" findmnt -no FSTYPE /)"
 check "dir modes" "755 755 755 755" "$(ssh "${ssh_opts[@]}" "admin@$lan" stat -c %a /etc /etc/ssh /var /var/lib | xargs)"
 check "host key owner" "root 600" "$(ssh "${ssh_opts[@]}" "admin@$lan" "sudo stat -c '%U %a' /etc/ssh/ssh_host_ed25519_key")"
 check "pool" "all pools are healthy" "$(ssh "${ssh_opts[@]}" "admin@$lan" sudo zpool status -x)"
-tailnet=
-for _ in $(seq 1 12); do # tailscale needs a moment after boot
-  tailnet=$(ssh "${ssh_opts[@]}" "admin@$lan" tailscale ip -4 2>/dev/null || true)
-  [ -n "$tailnet" ] && break; sleep 5
+net=
+for _ in $(seq 1 24); do # joining the fleet's network takes a moment after boot
+  net=$(ssh "${ssh_opts[@]}" "admin@$lan" cat /run/commonty-net-address 2>/dev/null || true)
+  [ -n "$net" ] && break; sleep 5
 done
-check "tailnet" "$want_tailnet" "$tailnet"
+# a box that rejoined as a new node has a new address: fleet/boxes.json
+# takes it (headscale keeps a node's address for good)
+if [ -n "$want_net" ]; then check "fleet network" "$want_net" "$net"; else echo "   new  fleet network address $net: put it in fleet/boxes.json"; fi
 check "failed units" "" "$(ssh "${ssh_opts[@]}" "admin@$lan" systemctl --failed --no-legend --plain | awk '{print $1}' | xargs)"
 if [ $fail != 0 ]; then echo "== $box is up but not right" >&2; exit 1; fi
 echo "== $box reinstalled"

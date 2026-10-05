@@ -31,9 +31,11 @@ silently redeploy the previous revision.
 - **No box talks to another box.** A box is reached by people and by
   services through its front door, the way any client reaches it, and never
   through a channel that exists because the other end is also a box. Today
-  three such channels remain, all over the owner's tailnet and fenced to the
-  peer's address: garage RPC (3901), the directory pull (4181), and the
-  thanos sidecar (10901). Each goes when the change it waits on lands.
+  these remain, all on the fleet's own network, open in its rules to boxes
+  alone and fenced again by each box's firewall to its peers' addresses:
+  garage S3 and RPC (3900, 3901), and, inside one house, the Wi-Fi relay
+  (4181). Each goes when the change it waits on lands: one store per box
+  for garage, the agreed log for the Wi-Fi.
 - **One Garage per box, or per trust domain, not one cluster.** A Garage
   cluster shares one RPC secret and every member of it is an admin, so a box
   in someone else's house cannot be a peer. What replaces the cluster has to
@@ -61,9 +63,9 @@ silently redeploy the previous revision.
 - **Nothing readable by Cloudflare.** The tunnel ends TLS at Cloudflare, so
   today it sees and could change every page and request that comes in
   through the public front door. Accepted for now. The way out: TLS that
-  ends on the box (a pass-through relay, or members over the tailnet), with
+  ends on the box (a pass-through relay, or members over the fleet's network), with
   Cloudflare left carrying only what is end-to-end encrypted. Passwords is
-  already there: tailnet only, TLS on the box, and Cloudflare sees none of
+  already there: the fleet's network only, TLS on the box, and Cloudflare sees none of
   it; its page stays on the box, and the box's keys move into its TPM.
   The directory's log items (names, public keys, passkey ids) pass through
   the relay too: encrypt them to the boxes' TPM keys (docs/control-plane.md).

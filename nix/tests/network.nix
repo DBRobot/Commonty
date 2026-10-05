@@ -31,7 +31,6 @@
       owners."100.64.0.1" = "sarah";
     };
     dd.net.enable = true;
-    dd.net.controlAddress = "127.0.0.1";
     # no internet in here: one made-up relay that is never used, from a
     # file, because headscale refuses to start with none
     services.headscale.settings.derp = {

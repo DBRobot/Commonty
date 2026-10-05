@@ -5,22 +5,14 @@ let
   policy = lib.importJSON ../../fleet/policy.json;
   # whose box this is, and their keys (fleet/policy.json people)
   owner = policy.people.${config.dd.box.owner};
-  # the other boxes, by the address they reach this one from
-  peers = lib.mapAttrsToList (_: b: b.tailnet) (
-    lib.filterAttrs (n: _: n != config.networking.hostName) boxes
-  );
+  # the other boxes, by their address on the fleet's network
   peersNet = lib.mapAttrsToList (_: b: b.net) (
     lib.filterAttrs (n: b: n != config.networking.hostName && b ? net) boxes
   );
+  # the other boxes in this house
   housePeersNet = lib.mapAttrsToList (_: b: b.net) (
     lib.filterAttrs (
       n: b: n != config.networking.hostName && b ? net && (b.siteId or null) == (me.siteId or "")
-    ) boxes
-  );
-  # the other boxes in this house
-  housePeers = lib.mapAttrsToList (_: b: b.tailnet) (
-    lib.filterAttrs (
-      n: b: n != config.networking.hostName && (b.siteId or null) == (me.siteId or "")
     ) boxes
   );
   # the channels between boxes that are still here, each waiting on the
@@ -127,62 +119,21 @@ in
     openssh.authorizedKeys.keys = owner.ssh;
   };
 
-  services.tailscale = {
-    enable = true;
-    openFirewall = true;
-    # Its own firewall rules drop anything from 100.64.0.0/10 that did not
-    # come in on tailscale0 - which is every packet on the fleet's network
-    # (commonty0), so box to box there never got past the SYN. The box's
-    # own firewall already says what tailscale0 may reach (below).
-    extraSetFlags = [ "--netfilter-mode=off" ];
-  };
-  # Every box is on the fleet's own network. Two tailscaleds on one box
-  # share routing table 52 and the same policy rules, and the second one
-  # rewrites that table every time it reconfigures: on node2 a keeper that
-  # could not join looped all night doing exactly that and took the box
-  # off the network while every link stayed up. What made that harmful was
-  # the retry, not the coexistence - the control box has run both for days
-  # - so the keeper backs off now instead of reconfiguring every thirty
-  # seconds, and a release that costs a box the fleet rolls itself back
-  # (box/release: the agent's reach check). The owner's tailscale stays
-  # until every address has moved to this network; then it is the one
-  # tailscaled a box runs, not a second.
+  # Every box is on the fleet's own network, and on no other: the owner's
+  # Tailscale account is retired (its login was a GitHub account the
+  # fleet does not control). One tailscaled, the fleet's.
   dd.net.enable = true;
-  # Neither tunnel is trusted wholesale. Trusting an interface opens every
+  # The network is not trusted wholesale. Trusting an interface opens every
   # port on it to everything that can reach it, which on the fleet's network
   # meant any member's device could talk to postgres, garage and prometheus
-  # on every box. What is open is what a person needs:
-  #
-  #   the owner's tailnet  ssh, the gate, and dns for the fleet's names; the
-  #                        s3 port too, because a release is pushed to the
-  #                        cache from the laptop (it wants a key regardless)
-  #   the fleet's network  the gate, and nothing else
-  #
-  # and between boxes only the channels still listed above, only from the
-  # other boxes' addresses. Cable and wifi are untouched: ssh from the LAN
-  # is the way in if any of this is ever wrong.
-  networking.firewall.interfaces.tailscale0 = {
-    allowedTCPPorts = [
-      22
-      53
-      80
-      443
-      3900
-    ];
-    allowedUDPPorts = [ 53 ];
-  };
+  # on every box. What is open is what a person needs: the gate to every
+  # member; ssh, dns and the cache push to the box's owner's devices
+  # (modules/net/owner.nix); between boxes only the channels listed above,
+  # only from the other boxes' addresses. Cable and wifi are untouched: ssh
+  # from the LAN is the way in if any of this is ever wrong.
   networking.firewall.interfaces.commonty0.allowedTCPPorts = [ 443 ];
-  # On the fleet's network the same channels, from the other boxes'
-  # addresses there; the owner's ports from the owner's devices alone
-  # (modules/net/owner.nix).
   networking.firewall.extraCommands =
     lib.concatMapStrings (a: ''
-      iptables -A nixos-fw -i tailscale0 -s ${a} -p tcp -m multiport --dports ${boxPorts} -j nixos-fw-accept
-    '') peers
-    + lib.concatMapStrings (a: ''
-      iptables -A nixos-fw -i tailscale0 -s ${a} -p tcp --dport 4181 -j nixos-fw-accept
-    '') housePeers
-    + lib.concatMapStrings (a: ''
       iptables -A nixos-fw -i commonty0 -s ${a} -p tcp -m multiport --dports ${boxPorts} -j nixos-fw-accept
     '') peersNet
     + lib.concatMapStrings (a: ''
@@ -196,10 +147,10 @@ in
   # declares and nothing else
   networking.networkmanager.settings.main.no-auto-default = "*";
   # tailscaled owns its tunnel: when NetworkManager restarted mid-release
-  # it took tailscale0 as its own, dropped the address, and the box fell
-  # off the tailnet until tailscaled was restarted. Same for docker's
+  # it took the owner's tailscale0 as its own, dropped the address, and the
+  # box fell off until tailscaled was restarted (commonty0: modules/net/box.nix).
+  # Same for docker's
   networking.networkmanager.unmanaged = [
-    "interface-name:tailscale0"
     "interface-name:docker0"
     "interface-name:veth*"
   ];

@@ -89,7 +89,7 @@ in
   options.dd.verify.fleet = lib.mkOption {
     type = lib.types.attrsOf lib.types.str;
     default = { };
-    description = "Box name -> the address its prometheus answers on, e.g. node1 = \"100.95.31.105\".";
+    description = "Box name -> the address its prometheus answers on, e.g. node1 = \"100.64.0.2\".";
   };
   # the front door: one tile per service this box offers, declared by the
   # roles that run them, shown at home.<domain> to whoever is signed in

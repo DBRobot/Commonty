@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # The fleet's names at Cloudflare, converged: `*` points at the gateway's
-# tailnet address, and each public host is a proxied CNAME to the tunnel
+# address on the fleet's network, and each public host is a proxied CNAME to the tunnel
 # while the door is open; the bare name is one of them when BARE is set,
-# and the tailnet address otherwise. Only records this script names are
+# and that address otherwise. Only records this script names are
 # touched; anything else in the zone is left alone. Environment: the token,
-# ZONE, TAILNET, TUNNEL, HOSTS (space separated), PUBLIC and BARE (true/false).
+# ZONE, ADDRESS, TUNNEL, HOSTS (space separated), PUBLIC and BARE (true/false).
 import json
 import os
 import sys
@@ -13,7 +13,7 @@ import urllib.request
 API = "https://api.cloudflare.com/client/v4"
 token = os.environ["CF_DNS_API_TOKEN"]
 zone = os.environ["ZONE"]
-tailnet = os.environ["TAILNET"]
+address = os.environ["ADDRESS"]
 tunnel = os.environ["TUNNEL"]
 hosts = os.environ["HOSTS"].split()
 public = os.environ["PUBLIC"] == "true"
@@ -26,7 +26,10 @@ def call(method, path, body=None):
         API + path,
         method=method,
         data=json.dumps(body).encode() if body is not None else None,
-        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+        headers={
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+        },
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         d = json.load(r)
@@ -41,8 +44,10 @@ for r in call("GET", "/zones/%s/dns_records?per_page=500" % zone_id):
     have.setdefault(r["name"], []).append(r)
 
 want = {
-    zone: ("CNAME", tunnel + ".cfargotunnel.com", True) if bare else ("A", tailnet, False),
-    "*." + zone: ("A", tailnet, False),
+    zone: ("CNAME", tunnel + ".cfargotunnel.com", True)
+    if bare
+    else ("A", address, False),
+    "*." + zone: ("A", address, False),
 }
 for h in hosts:
     if public:
@@ -54,9 +59,9 @@ ours = tunnel + ".cfargotunnel.com"
 
 
 def mine(r):
-    """a record this script made: the tailnet A, or a CNAME to this tunnel.
+    """a record this script made: the A at our address, or a CNAME to this tunnel.
     Mail, TXT, CAA, another tunnel's names: never touched."""
-    return (r["type"] == "A" and r["content"] == tailnet) or (
+    return (r["type"] == "A" and r["content"] == address) or (
         r["type"] == "CNAME" and r["content"] == ours
     )
 
@@ -67,7 +72,7 @@ def delete(name, r, why):
 
 
 # a name that was public and no longer is: its proxied record goes, so the
-# wildcard answers with the tailnet address again
+# wildcard answers with our address again
 for name, records in have.items():
     if name in want:
         continue
@@ -94,7 +99,12 @@ for name, spec in want.items():
         if r["type"] != typ and (typ == "CNAME" or r["type"] == "CNAME")
     ]
     if any(not mine(r) for r in clash):
-        print("left", name, "alone: it has records this script did not make", file=sys.stderr)
+        print(
+            "left",
+            name,
+            "alone: it has records this script did not make",
+            file=sys.stderr,
+        )
         continue
     for r in clash:
         delete(name, r, "replaced by " + typ)
@@ -107,4 +117,4 @@ for name, spec in want.items():
             continue
         call("PUT", "/zones/%s/dns_records/%s" % (zone_id, match[0]["id"]), body)
         print("updated", name, typ, content)
-print("%s: %s" % (zone, "the door is open" if public else "tailnet only"))
+print("%s: %s" % (zone, "the door is open" if public else "the fleet's network only"))

@@ -18,9 +18,9 @@ use clap::Subcommand;
 const ACCOUNT: &str = "release-key";
 pub const DEFAULT_URL: &str =
     "https://git.commonty.org/david/commonty/raw/branch/releases/current.json";
-/// the nix-cache bucket, through node1's garage over the tailnet
-const DEFAULT_CACHE: &str =
-    "s3://nix-cache?endpoint=100.95.31.105:3900&scheme=http&region=us-east-1";
+/// the nix-cache bucket, through node1's garage over the fleet's network
+/// (the owner's devices reach 3900 on the owner's boxes)
+const DEFAULT_CACHE: &str = "s3://nix-cache?endpoint=100.64.0.2:3900&scheme=http&region=us-east-1";
 
 #[derive(Subcommand)]
 pub enum ReleaseCmd {
@@ -87,7 +87,7 @@ pub enum ReleaseCmd {
         url: String,
     },
     /// What every box says it runs, from each box's own metrics over the
-    /// tailnet, next to what the current release says it should.
+    /// fleet's network, next to what the current release says it should.
     Status {
         #[arg(long, default_value = DEFAULT_URL)]
         url: String,
@@ -584,10 +584,10 @@ fn nudge(boxes: &serde_json::Value) {
     let asks: Vec<_> = boxes
         .iter()
         .map(|(name, b)| {
-            let tailnet = b["tailnet"].as_str().unwrap_or_default().to_string();
+            let net = b["net"].as_str().unwrap_or_default().to_string();
             let c = Command::new("ssh")
                 .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
-                .arg(format!("admin@{tailnet}"))
+                .arg(format!("admin@{net}"))
                 .args([
                     "sudo",
                     "systemctl",
@@ -646,7 +646,7 @@ fn attest(
     eprintln!("== asking {} box(es) to vouch", boxes.len());
     let mut asks = Vec::new();
     for (name, b) in boxes {
-        let tailnet = b["tailnet"].as_str().unwrap_or_default().to_string();
+        let net = b["net"].as_str().unwrap_or_default().to_string();
         let mut c = Command::new("ssh");
         c.args([
             "-o",
@@ -656,7 +656,7 @@ fn attest(
             "-o",
             "ServerAliveInterval=30",
         ])
-        .arg(format!("admin@{tailnet}"))
+        .arg(format!("admin@{net}"))
         .args([
             "sudo",
             "/run/current-system/sw/bin/dd-attest",
@@ -787,13 +787,13 @@ fn status(repo: &str, url: &str) -> Result<()> {
         None => println!("no release published yet"),
     }
     for (name, b) in boxes.as_object().context("boxes.json is not an object")? {
-        let tailnet = b["tailnet"].as_str().unwrap_or("-");
+        let net = b["net"].as_str().unwrap_or("-");
         // a box's prometheus answers on its own loopback only; the owner
         // reaches it the way he reaches the box
         let q = |expr: &str| -> Option<serde_json::Value> {
             let out = Command::new("ssh")
                 .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"])
-                .arg(format!("admin@{tailnet}"))
+                .arg(format!("admin@{net}"))
                 .arg(format!(
                     "curl -sf -m 5 --get --data-urlencode 'query={expr}' http://127.0.0.1:9090/api/v1/query"
                 ))

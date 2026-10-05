@@ -17,11 +17,6 @@
     default = "";
     description = "This box's address on the fleet's own network, from fleet/boxes.json (headscale keeps a node's address for good; a box that joins again as a new node gets a new one, and this changes with it).";
   };
-  options.dd.box.tailnet = lib.mkOption {
-    type = lib.types.str;
-    default = "";
-    description = "This box's tailnet address, from fleet/boxes.json: what a person types to reach something on it.";
-  };
   options.dd.box.site = lib.mkOption {
     type = lib.types.str;
     default = "";
@@ -50,7 +45,7 @@
   options.dd.box.s3 = lib.mkOption {
     type = lib.types.str;
     default = "http://127.0.0.1:3900";
-    description = "the storage pool's S3 address for this box: its own garage, or a storage box's over the tailnet (flake.nix)";
+    description = "the storage pool's S3 address for this box: its own garage, or a storage box's over the fleet's network (flake.nix)";
   };
   options.dd.box.bulkPool = lib.mkOption {
     type = lib.types.str;

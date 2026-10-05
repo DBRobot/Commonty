@@ -241,7 +241,7 @@ in
         DD_GAMES_PORT_COUNT = toString cfg.portCount;
         DD_GAMES_PER_MEMBER = toString cfg.perMember;
         DD_GAMES_MEMORY_MIB = toString cfg.memoryMiB;
-        DD_GAMES_ADDRESS = config.dd.box.tailnet;
+        DD_GAMES_ADDRESS = config.dd.box.net;
         # this box on the fleet's network, where the players it lets in are
         DD_GAMES_ADDRESS_FILE = "/run/commonty-net-address";
         # what games-access reads

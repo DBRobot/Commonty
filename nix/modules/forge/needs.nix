@@ -14,7 +14,7 @@
       };
       network = {
         outbound = [ "github.com" ]; # the actions CI checks out
-        inbound = "tailnet"; # signing in and pushing
+        inbound = "network"; # signing in and pushing
       };
       depends = {
         postgresql.local = true;

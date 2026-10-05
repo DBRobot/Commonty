@@ -11,7 +11,7 @@
       };
       network = {
         outbound = [ "smtp.gmail.com" ]; # sign-up and login codes
-        inbound = "tailnet";
+        inbound = "network";
       };
       depends = {
         postgresql.local = true; # its database, on the local socket
