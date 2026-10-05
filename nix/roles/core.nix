@@ -128,6 +128,11 @@ in
   services.tailscale = {
     enable = true;
     openFirewall = true;
+    # Its own firewall rules drop anything from 100.64.0.0/10 that did not
+    # come in on tailscale0 - which is every packet on the fleet's network
+    # (commonty0), so box to box there never got past the SYN. The box's
+    # own firewall already says what tailscale0 may reach (below).
+    extraSetFlags = [ "--netfilter-mode=off" ];
   };
   # Every box is on the fleet's own network. Two tailscaleds on one box
   # share routing table 52 and the same policy rules, and the second one
