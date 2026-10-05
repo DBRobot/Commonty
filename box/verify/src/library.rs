@@ -180,10 +180,12 @@ async fn images(app: Arc<App>, raw: String, req: Request) -> Response {
     {
         return StatusCode::FORBIDDEN.into_response();
     }
+    // a read is a read method and nothing more: the upload header turns any
+    // method into a write (box/library, in_pieces)
     let reads = matches!(
         req.method().as_str(),
         "GET" | "HEAD" | "OPTIONS" | "PROPFIND"
-    );
+    ) && !headers.contains_key("x-dd-upload");
     if !reads && crate::bearer(headers).is_none() {
         let session = app
             .sessions
@@ -194,7 +196,26 @@ async fn images(app: Arc<App>, raw: String, req: Request) -> Response {
             return StatusCode::FORBIDDEN.into_response();
         }
     }
-    library_gate::dav::serve(g, images_prefix(&user), raw, Role::Owner, req).await
+    // the images count against their owner's allowance like a library's
+    // files (storage.rs counts the prefix too)
+    let upload = req.method() == Method::PUT || headers.contains_key("x-dd-upload");
+    let size = headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    if upload && !app.storage.room(&user, size.max(1)) {
+        return (
+            StatusCode::INSUFFICIENT_STORAGE,
+            "this would go past your storage allowance: make room first (Settings, Storage shows what uses it)",
+        )
+            .into_response();
+    }
+    let r = library_gate::dav::serve(g, images_prefix(&user), raw, Role::Owner, req).await;
+    if upload && r.status().is_success() {
+        app.storage.landed(&user, size);
+    }
+    r
 }
 
 /// where a member's disk images are in the bucket: a top-level prefix, as a

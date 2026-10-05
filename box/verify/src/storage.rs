@@ -115,7 +115,7 @@ impl Ledger {
 
 /// GET /internal/storage/members: for the ledger, on this box alone (nginx
 /// passes /_dd/ and nothing else): every member, and what their libraries
-/// hold in the bucket, trash included until it is emptied
+/// and disk images hold in the bucket, trash included until it is emptied
 pub(crate) async fn members(State(app): State<Arc<App>>) -> Response {
     let Ok(listed) = app.directory.list() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -140,7 +140,11 @@ pub(crate) async fn members(State(app): State<Arc<App>>) -> Response {
             .unwrap_or_default();
         let mut bytes = 0u64;
         if let Some(g) = app.library.as_ref() {
-            for id in libs {
+            // their libraries, and their disk images beside them
+            let prefixes = libs
+                .into_iter()
+                .chain([crate::library::images_prefix(&l.name)]);
+            for id in prefixes {
                 match g.list_all(&format!("{id}/")).await {
                     Ok(objects) => bytes += objects.iter().map(|o| o.size).sum::<u64>(),
                     Err(e) => {

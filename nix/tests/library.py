@@ -293,3 +293,10 @@ assert (
     ).strip()
     == "403"
 )
+# nor by dressing a write as a read: the upload header makes any method one
+assert (
+    box.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' {as_page} -H 'x-dd-upload: start' {img}/data/zz"
+    ).strip()
+    == "403"
+)
