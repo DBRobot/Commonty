@@ -35,8 +35,8 @@ pub struct Door {
     boxes: HashMap<String, BoxKeys>,
     /// age, with whatever plugin the recipients need on its path
     age: String,
-    /// when each box last had a key, so a stolen signature mints one at most
-    asked: Mutex<HashMap<String, u64>>,
+    /// when each box last had a key, and the time it signed for it
+    asked: Mutex<HashMap<String, (u64, u64)>>,
 }
 
 pub struct BoxKeys {
@@ -285,11 +285,18 @@ pub(crate) async fn box_key(
         .verify(&join_message(name, time), &sig)
         .map_err(|_| (StatusCode::FORBIDDEN, "not signed by that box".into()))?;
     {
+        // once a minute, and each signed time once: a request copied off
+        // the wire is refused for good, not just for the minute
         let mut asked = door.asked.lock().unwrap();
-        if asked.get(name).is_some_and(|t| now < t + EVERY) {
-            return Err((StatusCode::TOO_MANY_REQUESTS, "one a minute".into()));
+        if let Some(&(at, signed)) = asked.get(name) {
+            if now < at + EVERY {
+                return Err((StatusCode::TOO_MANY_REQUESTS, "one a minute".into()));
+            }
+            if time <= signed {
+                return Err((StatusCode::FORBIDDEN, "that request was used".into()));
+            }
         }
-        asked.insert(name.to_string(), now);
+        asked.insert(name.to_string(), (now, time));
     }
     let bad = |e: anyhow::Error| (StatusCode::BAD_GATEWAY, format!("{e:#}"));
     let (key, _) = door.mint("boxes", &["tag:box"]).await.map_err(bad)?;
@@ -578,6 +585,11 @@ mod tests {
                 .await
             ),
             StatusCode::TOO_MANY_REQUESTS
+        );
+        // the same request a minute later still gets nothing
+        assert_eq!(
+            refused(box_key(&door, "node2", now, &sign(&node2, "node2", now), now + 61).await),
+            StatusCode::FORBIDDEN
         );
         // the DER a soft key writes is taken too
         let der: Signature = node2.sign(&join_message("node2", now + 61));
