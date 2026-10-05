@@ -38,13 +38,13 @@ let
           (cfgs.${name}.config.dd.garage.publicAddr == "${box.tailnet}:3901")
           (builtins.all (p: !lib.hasInfix box.tailnet p) cfgs.${name}.config.dd.garage.peers)
           (cfgs.${name}.config.dd.garage.zone == box.regionId)
+          (lib.hasPrefix "127.0.0.1:" cfgs.${name}.config.services.thanos.sidecar.grpc-address)
         ]
         ++ lib.optionals (builtins.elem "observe" box.roles) [
-          # the fleet view is thanos on this box; no box's prometheus is
-          # reachable from another
-          (
-            builtins.length cfgs.${name}.config.dd.thanos.sidecars == builtins.length (builtins.attrNames boxes)
-          )
+          # the fleet view is thanos on this box: its own sidecar and the
+          # bucket, never another box's sidecar (README: no box talks to
+          # another), and every sidecar answers its own box alone
+          (cfgs.${name}.config.dd.thanos.sidecars == [ "127.0.0.1:10901" ])
           # Metrics is our page over Thanos now; grafana, which believed a
           # header from whoever reached it, is gone. Thanos answers reads
           # only, on loopback, and nginx passes it only the query calls.
