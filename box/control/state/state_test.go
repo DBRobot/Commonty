@@ -191,3 +191,37 @@ func TestTheDirectoryLogKeepsOrderAndBoundsEachBox(t *testing.T) {
 		t.Fatal("a new minute takes items again")
 	}
 }
+
+func TestBuildResultsAreLoggedInOrderAndBounded(t *testing.T) {
+	f := newFleet(t)
+	res := map[string]any{"statement": "{}", "signature": "s"}
+	if got := f.block(1_000, f.req("node1", "built", res), f.req("node3", "built", res)); got != 2 {
+		t.Fatalf("applied %d of 2", got)
+	}
+	b := f.s.Built
+	if len(b) != 2 || b[0].Box != "node1" || b[1].Box != "node3" || b[0].Time != 1_000 {
+		t.Fatalf("log: %+v", b)
+	}
+	// results and directory items are separate logs
+	if len(f.s.Directory) != 0 {
+		t.Fatal("a build result went into the directory")
+	}
+	big := f.req("node1", "built", strings.Repeat("x", MaxBuilt))
+	bad := f.req("node1", "built", nil)
+	bad.Body = []byte("{nope")
+	if got := f.block(2_000, big, bad); got != 0 {
+		t.Fatalf("applied %d bad results", got)
+	}
+	var many []Request
+	for i := 0; i < BuiltPerMinute+5; i++ {
+		many = append(many, f.req("node2", "built", res))
+	}
+	if got := f.block(3_000, many...); got != BuiltPerMinute {
+		t.Fatalf("applied %d in a minute; want %d", got, BuiltPerMinute)
+	}
+	// a box outside the fleet cannot add one
+	stranger := Request{Kind: "built", Box: "nodeX", Seq: 1, Body: []byte(`{}`), Sig: "ok:kx"}
+	if got := f.block(4_000, stranger); got != 0 {
+		t.Fatal("a stranger's result was logged")
+	}
+}

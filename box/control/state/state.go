@@ -48,7 +48,7 @@ type LeaseRule struct {
 
 // Request is what a box asks for, signed by its TPM-held key over Bytes().
 type Request struct {
-	Kind string          `json:"kind"` // heartbeat | lease | directory
+	Kind string          `json:"kind"` // heartbeat | lease | directory | built
 	Box  string          `json:"box"`
 	Seq  uint64          `json:"seq"` // strictly increasing per box
 	Body json.RawMessage `json:"body"`
@@ -82,6 +82,9 @@ type BoxState struct {
 	// directory items this box sent in the minute from DirWindow (agreed ms)
 	DirWindow int64 `json:"dirWindow,omitempty"`
 	DirCount  int   `json:"dirCount,omitempty"`
+	// the same for its build results
+	BuiltWindow int64 `json:"builtWindow,omitempty"`
+	BuiltCount  int   `json:"builtCount,omitempty"`
 }
 
 // DirItem is one thing a box's gate put in the directory log: an entry
@@ -97,6 +100,25 @@ type DirItem struct {
 	Box  string          `json:"box"`
 	Item json.RawMessage `json:"item"`
 }
+
+// BuiltItem is a box's word on one job of a build order: what it built
+// from the order's commit and the bytes it got, signed by the box's host
+// key inside (dd-attest). The validators order these and judge none; the
+// laptop that signed the order reads them, checks each signature, and signs
+// a release only where two boxes apart agree (docs/app-release.md).
+type BuiltItem struct {
+	Height uint64          `json:"height"`
+	Time   int64           `json:"time"`
+	Box    string          `json:"box"`
+	Item   json.RawMessage `json:"item"`
+}
+
+const (
+	// MaxBuilt bounds one result: a signed statement about one output
+	MaxBuilt = 16 << 10
+	// BuiltPerMinute bounds what one box adds in a minute
+	BuiltPerMinute = 20
+)
 
 const (
 	// MaxDirItem bounds one item: an entry with its devices and passkeys
@@ -122,6 +144,8 @@ type State struct {
 	Epochs map[string]uint64 `json:"epochs"`
 	// the directory log, in agreed order (DirItem)
 	Directory []DirItem `json:"directory,omitempty"`
+	// the build results, in agreed order (BuiltItem)
+	Built []BuiltItem `json:"built,omitempty"`
 }
 
 func New() *State {
@@ -168,6 +192,17 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 		}
 		if b := s.Boxes[r.Box]; b != nil && now-b.DirWindow < 60_000 && b.DirCount >= DirPerMinute {
 			return fmt.Errorf("%s has sent %d directory items this minute", r.Box, b.DirCount)
+		}
+		return nil
+	case "built":
+		if len(r.Body) > MaxBuilt {
+			return fmt.Errorf("a build result of %d bytes; at most %d", len(r.Body), MaxBuilt)
+		}
+		if !json.Valid(r.Body) {
+			return errors.New("a build result is json")
+		}
+		if b := s.Boxes[r.Box]; b != nil && now-b.BuiltWindow < 60_000 && b.BuiltCount >= BuiltPerMinute {
+			return fmt.Errorf("%s has sent %d build results this minute", r.Box, b.BuiltCount)
 		}
 		return nil
 	}
@@ -241,6 +276,12 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 		}
 		b.DirCount++
 		s.Directory = append(s.Directory, DirItem{Height: s.Height, Time: now, Box: r.Box, Item: append(json.RawMessage(nil), r.Body...)})
+	case "built":
+		if now-b.BuiltWindow >= 60_000 {
+			b.BuiltWindow, b.BuiltCount = now, 0
+		}
+		b.BuiltCount++
+		s.Built = append(s.Built, BuiltItem{Height: s.Height, Time: now, Box: r.Box, Item: append(json.RawMessage(nil), r.Body...)})
 	}
 }
 

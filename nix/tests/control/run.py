@@ -51,6 +51,8 @@ def run(i):
             f"{T}/s{i}.sock",
             "-submit-group",
             GROUP,
+            "-builds",
+            f"{T}/b{i}.sock",
         ],
         stdout=open(f"{T}/n{i}.log", "a"),
         stderr=subprocess.STDOUT,
@@ -246,6 +248,56 @@ ok(
 eve = ed.Ed25519PrivateKey.generate()
 c, _ = http("PUT", "http://127.0.0.1:4283/_dd/directory/ann", signed("ann", eve, 3))
 ok(c in (403, 409), f"someone else's update to ann is refused ({c})")
+
+# ---- build results: handed in on one box's socket, in the agreed log on all
+
+
+def built_post(i, body):
+    import socket
+
+    c = socket.socket(socket.AF_UNIX)
+    c.connect(f"{T}/b{i}.sock")
+    c.sendall(
+        b"POST /built HTTP/1.0\r\nContent-Type: application/json\r\n"
+        + f"Content-Length: {len(body)}\r\n\r\n".encode()
+        + body
+    )
+    answer = b""
+    while chunk := c.recv(4096):
+        answer += chunk
+    return int(answer.split()[1])
+
+
+def built(i):
+    try:
+        return json.load(
+            urllib.request.urlopen(f"http://127.0.0.1:419{i}/built?since=0", timeout=3)
+        )["items"]
+    except Exception:
+        return []
+
+
+result = json.dumps(
+    {"statement": '{"order":"o1","job":"linux"}', "signature": "s"}
+).encode()
+ok(built_post(2, result) == 202, "a build result is taken on the box's socket")
+ok(built_post(2, b"{nope") == 400, "and anything that is not json is not")
+until(
+    "the result is in every box's log",
+    lambda: all(
+        [(x["box"], x["item"]["statement"]) for x in built(i)]
+        == [("node2", '{"order":"o1","job":"linux"}')]
+        for i in (1, 2, 3)
+    ),
+)
+ok(
+    all(len(built(i)) == 1 and built(i)[0]["box"] == "node2" for i in (1, 2, 3)),
+    "a build result reaches the agreed log on every box, as the box that sent it",
+)
+ok(
+    all(x["boxes"]["node2"]["facts"].get("cores", 0) > 0 for x in [state(1)]),
+    "heartbeats still carry the box's facts",
+)
 
 # a voting box's gate down: a new name waits, it is nobody's, and when the
 # gate is back it is agreed

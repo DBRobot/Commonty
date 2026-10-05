@@ -1,3 +1,4 @@
+mod build_order;
 mod control_worker;
 mod derive;
 mod diskcmd;

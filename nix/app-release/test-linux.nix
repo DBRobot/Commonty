@@ -79,6 +79,20 @@ in
           "libxcb1"
           "libxext6"
           "libxrender1"
+          # the rest of what it does not carry (readelf over the AppImage):
+          # all on every Ubuntu desktop
+          "libasound2t64"
+          "libdrm2"
+          "libexpat1"
+          "libfribidi0"
+          "libusb-1.0-0"
+          "libx11-xcb1"
+          "libstdc++6"
+          # what WebKit opens by name as it starts, and Mesa's drivers to
+          # draw with no GPU (every desktop has a GL)
+          "libgles2"
+          "libegl-mesa0"
+          "libgl1-mesa-dri"
         ];
       })
       ''

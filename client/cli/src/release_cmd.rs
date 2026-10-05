@@ -14,6 +14,8 @@ use anyhow::{Context, Result, bail, ensure};
 use auth::KeyStore as _;
 use clap::Subcommand;
 
+use crate::build_order;
+
 /// keyring account holding the release key, base64
 const ACCOUNT: &str = "release-key";
 pub const DEFAULT_URL: &str =
@@ -50,19 +52,18 @@ pub enum ReleaseCmd {
         #[arg(long)]
         out: PathBuf,
     },
-    /// Sign the app a tag built: fetch every file of the GitHub release,
-    /// check GitHub's attestation that it was built from that tag in that
-    /// repository, hash each one, and publish a manifest signed with the
+    /// Sign the app at a tag: two boxes build every download from that
+    /// commit and vouch for the bytes (dd-attest), this machine fetches
+    /// them from a box and checks them against what was vouched for,
+    /// signs the apk with the Android key, puts the files on the forge's
+    /// release of the tag, and publishes a manifest signed with the
     /// release key beside the box releases. The download page offers only
     /// what a signed manifest names.
     App {
         /// the release tag, e.g. v0.1.0
         #[arg(long)]
         tag: String,
-        /// the GitHub repository it was built in
-        #[arg(long, default_value = "DBRobot/Commonty")]
-        from: String,
-        /// sign and print the manifest, push nothing
+        /// sign and print the manifest, upload and push nothing
         #[arg(long)]
         dry_run: bool,
     },
@@ -71,20 +72,25 @@ pub enum ReleaseCmd {
     /// installs only a signed apk, and takes an update only from the same
     /// key, so it is made once and kept.
     AndroidInit,
-    /// The next app, when what it is built from changed since the last:
-    /// tag it, wait for GitHub to build it, and sign it as `app` does.
+    /// The next app, when its downloads would come out different from the
+    /// last tag's: tag it on the forge and sign it as `app` does.
     /// `publish` starts this on its own, in the background; it never holds
     /// a release of the boxes up.
     AppNext {
         /// the branch the release came from
         #[arg(long, default_value = "main")]
         r#ref: String,
-        /// the GitHub repository the mirror builds in
-        #[arg(long, default_value = "DBRobot/Commonty")]
-        from: String,
-        /// how long to wait for GitHub's build before giving up
-        #[arg(long, default_value_t = 120)]
-        wait_mins: u64,
+    },
+    /// Whether the app at a branch still builds the same on two boxes: run
+    /// nightly, it catches a change that makes the downloads differ from
+    /// build to build long before a release would stop on it. Does nothing
+    /// when nothing the app is made of changed since the last check passed.
+    AppCheck {
+        #[arg(long, default_value = "main")]
+        r#ref: String,
+        /// set up the nightly run on this machine (a user timer) and stop
+        #[arg(long)]
+        install: bool,
     },
     /// The release the boxes see.
     Show {
@@ -131,13 +137,16 @@ pub fn run(cmd: ReleaseCmd, repo: &str, keys: &auth::Store) -> Result<()> {
             print(&signed);
         }
         ReleaseCmd::Status { url } => status(repo, &url)?,
-        ReleaseCmd::App { tag, from, dry_run } => app(repo, keys, &tag, &from, dry_run)?,
+        ReleaseCmd::App { tag, dry_run } => app(repo, keys, &tag, dry_run)?,
         ReleaseCmd::AndroidInit => android_init(repo, keys)?,
-        ReleaseCmd::AppNext {
-            r#ref,
-            from,
-            wait_mins,
-        } => app_next(repo, keys, &r#ref, &from, wait_mins)?,
+        ReleaseCmd::AppNext { r#ref } => app_next(repo, keys, &r#ref)?,
+        ReleaseCmd::AppCheck { r#ref, install } => {
+            if install {
+                app_check_install(repo)?
+            } else {
+                app_check(repo, keys, &r#ref)?
+            }
+        }
         ReleaseCmd::Publish {
             r#ref,
             cache,
@@ -416,8 +425,8 @@ fn publish(
     Ok(())
 }
 
-/// The app follows the release on its own time: GitHub's build takes the
-/// better part of half an hour, and the boxes do not wait for it. A process
+/// The app follows the release on its own time: the boxes' builds of it
+/// take the better part of an hour, and the release does not wait for them. A process
 /// of its own, in a session of its own, so the end of this one (or of the
 /// terminal that ran it) does not take it along - and holding nothing this
 /// one had open.
@@ -487,20 +496,129 @@ fn dirs_cache() -> PathBuf {
         .join("dd")
 }
 
-/// What the app is built from: its own tree, the client crates it uses, the
-/// workspace's manifest and lockfile, and the workflow that builds it. The
-/// site's pages it carries are copied into app/ by the same pull request
-/// (the stylesheet check), so they count through app/.
-fn app_input(path: &str) -> bool {
-    path.starts_with("app/")
-        || path.starts_with("client/")
-        || matches!(path, "Cargo.toml" | "Cargo.lock")
-        || path == ".github/workflows/release.yml"
+/// The app's downloads, as the flake names them (legacyPackages.appRelease)
+const APP_BUILDS: &[&str] = &["linux", "windows", "dd-windows", "android"];
+
+/// Where each download of `version` lands when built from `rev`: what two
+/// boxes are asked to build, and, at a fixed version, what says whether
+/// anything the app is made of changed between two commits.
+fn app_paths(root: &Path, rev: &str, version: &str) -> Result<BTreeMap<String, String>> {
+    let names = APP_BUILDS
+        .iter()
+        .map(|n| format!("\"{n}\""))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let out = sh(
+        "nix",
+        &[
+            "eval",
+            "--json",
+            &format!(
+                "git+file://{}?rev={rev}#legacyPackages.x86_64-linux.appRelease",
+                root.display()
+            ),
+            "--apply",
+            &format!(
+                "r: let a = r \"{version}\"; in builtins.listToAttrs (map (n: {{ name = n; value = a.${{n}}.outPath; }}) [ {names} ])"
+            ),
+        ],
+    )?;
+    Ok(serde_json::from_str(&out)?)
+}
+
+/// What each download needs of the box that builds it (`passthru.needs`)
+fn app_needs(root: &Path, rev: &str) -> Result<BTreeMap<String, build_order::Need>> {
+    let names = APP_BUILDS
+        .iter()
+        .map(|n| format!("\"{n}\""))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let out = sh(
+        "nix",
+        &[
+            "eval",
+            "--json",
+            &format!(
+                "git+file://{}?rev={rev}#legacyPackages.x86_64-linux.appRelease",
+                root.display()
+            ),
+            "--apply",
+            &format!(
+                "r: let a = r \"0.0.0\"; in builtins.listToAttrs (map (n: {{ name = n; value = a.${{n}}.needs or {{ }}; }}) [ {names} ])"
+            ),
+        ],
+    )?;
+    let v: BTreeMap<String, serde_json::Value> = serde_json::from_str(&out)?;
+    Ok(v.iter()
+        .map(|(k, n)| (k.clone(), build_order::Need::from_json(n)))
+        .collect())
+}
+
+/// a command on a box of this machine's owner, over ssh: its output
+fn on_box(addr: &str, cmd: &str) -> Result<String> {
+    let out = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(format!("admin@{addr}"))
+        .arg(cmd)
+        .stdin(std::process::Stdio::null())
+        .output()?;
+    ensure!(
+        out.status.success(),
+        "on {addr}: {cmd}: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
+    Ok(String::from_utf8(out.stdout)?)
+}
+
+/// Each box's owner, from its own file (fleet/boxes/<box>/box.json)
+fn box_owners(root: &Path, boxes: &serde_json::Value) -> BTreeMap<String, String> {
+    boxes
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, _)| {
+            let f = std::fs::read(root.join("fleet/boxes").join(name).join("box.json")).ok()?;
+            let v: serde_json::Value = serde_json::from_slice(&f).ok()?;
+            Some((name.clone(), v["owner"].as_str()?.to_string()))
+        })
+        .collect()
+}
+
+/// One of the owner's own boxes, reachable from here: what the agreed log
+/// is read through and the bytes are fetched from. Neither is trusted for
+/// it - the results carry their builders' signatures, the bytes are checked
+/// against the hash the builders agreed on.
+fn own_box(
+    boxes: &serde_json::Value,
+    owners: &BTreeMap<String, String>,
+    owner: &str,
+) -> Result<String> {
+    for (name, b) in boxes.as_object().into_iter().flatten() {
+        if owners.get(name).map(String::as_str) == Some(owner)
+            && let Some(t) = b["net"].as_str()
+            // an address, and nothing ssh could take for an option
+            && t.parse::<std::net::IpAddr>().is_ok()
+            && on_box(t, "true").is_ok()
+        {
+            return Ok(t.to_string());
+        }
+    }
+    bail!("none of {owner}'s boxes answers over ssh")
+}
+
+/// X.Y.Z, numbers only: the version goes into nix expressions and a box's
+/// shell, so nothing else may get that far
+fn version_of(tag: &str) -> Option<&str> {
+    let v = tag.strip_prefix('v')?;
+    let ok = v.split('.').count() == 3
+        && v.split('.')
+            .all(|n| !n.is_empty() && n.len() <= 9 && n.bytes().all(|b| b.is_ascii_digit()));
+    ok.then_some(v)
 }
 
 /// v0.1.21 -> v0.1.22
 fn next_tag(prev: &str) -> Option<String> {
-    let v = prev.strip_prefix('v')?;
+    let v = version_of(prev)?;
     let (head, patch) = v.rsplit_once('.')?;
     Some(format!("v{head}.{}", patch.parse::<u64>().ok()? + 1))
 }
@@ -509,8 +627,8 @@ fn next_tag(prev: &str) -> Option<String> {
 /// both base64 DER (PKCS#8, X.509)
 const ANDROID_KEY: &str = "android-key";
 const ANDROID_CERT: &str = "android-cert";
-/// what the signed apk is called among the release's files
-const SIGNED_APK: &str = "commonty-signed.apk";
+/// the apk among the release's files: only ever the signed one
+const SIGNED_APK: &str = "commonty.apk";
 
 /// a tool from the flake's own nixpkgs, as every other this command runs
 fn pinned(root: &Path, pkg: &str, bin: &str) -> Command {
@@ -544,8 +662,7 @@ fn android_init(repo: &str, keys: &auth::Store) -> Result<()> {
         );
     }
     let root = repo_root(repo)?;
-    let dir = std::env::temp_dir().join(format!("dd-android-{}", std::process::id()));
-    std::fs::create_dir_all(&dir)?;
+    let dir = private_dir("dd-android")?;
     let made = (|| -> Result<(Vec<u8>, Vec<u8>)> {
         let pem = dir.join("key.pem");
         let mut c = pinned(&root, "openssl", "openssl");
@@ -618,17 +735,17 @@ fn android_key(keys: &auth::Store) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
 /// the attested apk, signed with the Android key (v2 and v3 schemes); the key
 /// touches the disk only inside `dir`, which `app` removes
 fn sign_apk(root: &Path, dir: &Path, apk: &Path, key: &[u8], cert: &[u8]) -> Result<PathBuf> {
-    use std::os::unix::fs::OpenOptionsExt as _;
     let k = dir.join("android.key.der");
     let c = dir.join("android.cert.der");
     for (path, bytes) in [(&k, key), (&c, cert)] {
         use std::io::Write as _;
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)?
-            .write_all(bytes)?;
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        // readable by this user alone; on Windows the profile's own
+        // permissions already say that
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        o.open(path)?.write_all(bytes)?;
     }
     let out = dir.join(SIGNED_APK);
     let mut s = pinned(root, "apksigner", "apksigner");
@@ -649,47 +766,75 @@ fn sign_apk(root: &Path, dir: &Path, apk: &Path, key: &[u8], cert: &[u8]) -> Res
     Ok(out)
 }
 
-/// the signed apk onto the release GitHub built, beside what it built
-fn upload_asset(root: &Path, from: &str, tag: &str, file: &Path) -> Result<()> {
-    let mut gh = Command::new("nix");
-    gh.current_dir(root)
-        .args([
-            "run",
-            ".#gh",
-            "--",
-            "release",
-            "upload",
-            tag,
-            "--clobber",
-            "--repo",
-            from,
-        ])
-        .arg(file);
-    if let Some(t) = Command::new("gh")
-        .args(["auth", "token"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-    {
-        gh.env("GH_TOKEN", t);
+/// What each build holds, by the name the downloads page asks for
+fn app_files(build: &str, version: &str) -> Vec<String> {
+    match build {
+        "linux" => vec![
+            format!("commonty_{version}_amd64.deb"),
+            format!("commonty_{version}_amd64.AppImage"),
+        ],
+        "windows" => vec!["commonty-setup.exe".into()],
+        "dd-windows" => vec!["dd.exe".into()],
+        "android" => vec!["commonty-unsigned.apk".into()],
+        _ => vec![],
     }
-    run_ok(gh, "uploading the signed apk")
 }
 
-/// the files the release workflow publishes, by name (.github/workflows/release.yml)
-fn app_files(tag: &str) -> Vec<String> {
-    let v = tag.trim_start_matches('v');
-    vec![
-        format!("commonty_{v}_amd64.deb"),
-        format!("commonty_{v}_amd64.AppImage"),
-        "commonty.apk".into(),
-        "commonty-setup.exe".into(),
-        "dd.exe".into(),
-    ]
+/// the forge's release of `tag`, made if it is not there yet: its id
+fn forge_app_release(api: &str, token: &str, tag: &str, rev: &str) -> Result<u64> {
+    let id = |b: Vec<u8>| -> Result<u64> {
+        serde_json::from_slice::<serde_json::Value>(&b)?["id"]
+            .as_u64()
+            .context("the forge's release has no id")
+    };
+    if let Some(b) = forge_get(&format!("{api}/releases/tags/{tag}"), token)? {
+        return id(b);
+    }
+    let req = serde_json::json!({
+        "tag_name": tag,
+        "target_commitish": rev,
+        "name": format!("Commonty {tag}"),
+        "body": "The app, for every platform it is built for. What the downloads page offers is what the release key signed (app.json on the releases branch); these files are the same bytes.",
+    });
+    id(forge_call(
+        "POST",
+        &format!("{api}/releases"),
+        token,
+        Some(&req.to_string()),
+    )?
+    .context("the forge refused the release")?)
 }
 
-fn app_next(repo: &str, keys: &auth::Store, r#ref: &str, from: &str, wait_mins: u64) -> Result<()> {
+/// one file onto the forge's release, in place of one by that name
+fn forge_upload(api: &str, token: &str, release: u64, file: &Path, name: &str) -> Result<()> {
+    use std::io::Write as _;
+    let assets = format!("{api}/releases/{release}/assets");
+    if let Some(b) = forge_get(&assets, token)? {
+        for a in serde_json::from_slice::<Vec<serde_json::Value>>(&b)? {
+            if a["name"] == name
+                && let Some(aid) = a["id"].as_u64()
+            {
+                forge_call("DELETE", &format!("{assets}/{aid}"), token, None)?
+                    .with_context(|| format!("the forge kept the old {name}"))?;
+            }
+        }
+    }
+    let mut c = Command::new("curl")
+        .args(["-sf", "-X", "POST", "-H", "@-", "-F"])
+        .arg(format!("attachment=@{};filename={name}", file.display()))
+        .arg(format!("{assets}?name={name}"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()?;
+    c.stdin
+        .take()
+        .context("curl's stdin")?
+        .write_all(format!("Authorization: Bearer {token}\n").as_bytes())?;
+    ensure!(c.wait()?.success(), "the forge refused {name}");
+    Ok(())
+}
+
+fn app_next(repo: &str, keys: &auth::Store, r#ref: &str) -> Result<()> {
     let root = repo_root(repo)?;
     let stamp = || {
         std::time::SystemTime::now()
@@ -704,23 +849,21 @@ fn app_next(repo: &str, keys: &auth::Store, r#ref: &str, from: &str, wait_mins: 
         &["describe", "--tags", "--abbrev=0", "--match", "v*", &rev],
     )
     .context("no app tag before this one")?;
-    let changed: Vec<String> = git(&root, &["diff", "--name-only", &format!("{prev}..{rev}")])?
-        .lines()
-        .filter(|p| app_input(p))
-        .map(str::to_owned)
-        .collect();
-    if changed.is_empty() {
+    let prev_rev = git(&root, &["rev-parse", &format!("{prev}^{{commit}}")])?;
+    // the same version on both sides, so only what the app is made of can
+    // differ; a tag from before the flake built the app always differs
+    let now = app_paths(&root, &rev, "0.0.0")?;
+    if app_paths(&root, &prev_rev, "0.0.0").ok().as_ref() == Some(&now) {
         println!(
-            "[{}] the app: nothing it is built from changed since {prev}",
+            "[{}] the app: nothing it is made of changed since {prev}",
             stamp()
         );
         return Ok(());
     }
     let tag = next_tag(&prev).with_context(|| format!("{prev} is not vX.Y.Z"))?;
     println!(
-        "[{}] the app: {} of its files changed since {prev}; {tag} at {}",
+        "[{}] the app: it changed since {prev}; {tag} at {}",
         stamp(),
-        changed.len(),
         &rev[..12]
     );
     // a tag someone else made first is theirs to finish
@@ -729,51 +872,7 @@ fn app_next(repo: &str, keys: &auth::Store, r#ref: &str, from: &str, wait_mins: 
         let _ = git(&root, &["tag", "-d", &tag]);
         bail!("{tag} was not pushed (made elsewhere first?): {e:#}");
     }
-    // the mirror carries the tag to GitHub too, but its token may not push
-    // a commit that changes a workflow; over ssh it goes either way
-    if let Err(e) = git(
-        &root,
-        &["push", "-q", &format!("git@github.com:{from}.git"), &tag],
-    ) {
-        println!(
-            "[{}] the app: {tag} not pushed to GitHub directly ({e:#}); the mirror will",
-            stamp()
-        );
-    }
-    // GitHub builds and attests it
-    let want = app_files(&tag);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait_mins * 60);
-    loop {
-        if let Ok(files) = github_assets(from, &tag)
-            && want.iter().all(|w| files.iter().any(|(n, _)| n == w))
-        {
-            break;
-        }
-        // a build that failed is not worth waiting out
-        let runs = ureq_get(&format!(
-            "https://api.github.com/repos/{from}/actions/runs?branch={tag}&per_page=1"
-        ))
-        .ok()
-        .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok());
-        if let Some(run) = runs.as_ref().and_then(|r| r["workflow_runs"].get(0))
-            && run["status"] == "completed"
-            && run["conclusion"] != "success"
-        {
-            bail!(
-                "GitHub's build of {tag} ended {}: {}",
-                run["conclusion"],
-                run["html_url"].as_str().unwrap_or_default()
-            );
-        }
-        ensure!(
-            std::time::Instant::now() < deadline,
-            "GitHub has not built {tag} in {wait_mins} minutes; `dd release app --tag {tag}` once it has"
-        );
-        // three minutes: GitHub answers sixty unsigned questions an hour
-        std::thread::sleep(std::time::Duration::from_secs(180));
-    }
-    println!("[{}] the app: GitHub built {tag}; signing it", stamp());
-    app(repo, keys, &tag, from, false)?;
+    app(repo, keys, &tag, false)?;
     println!(
         "[{}] the app: {tag} is what the downloads page offers",
         stamp()
@@ -935,12 +1034,75 @@ fn vouched(
     flake: &str,
     rev: &str,
 ) -> Result<BTreeMap<String, (String, String)>> {
+    let st = statement(attester, host_key, answer, flake, rev)?;
+    let mut out = BTreeMap::new();
+    for (name, b) in st["boxes"].as_object().context("no boxes")? {
+        out.insert(
+            name.clone(),
+            (
+                b["path"].as_str().unwrap_or_default().to_string(),
+                b["closure"].as_str().unwrap_or_default().to_string(),
+            ),
+        );
+    }
+    Ok(out)
+}
+
+/// one box's answer, taken only if its host key signed it, in the attest
+/// namespace, about this commit of this repository
+fn statement(
+    attester: &str,
+    host_key: &str,
+    answer: &str,
+    flake: &str,
+    rev: &str,
+) -> Result<serde_json::Value> {
     let v: serde_json::Value =
         serde_json::from_str(answer.lines().last().unwrap_or_default()).context("the answer")?;
     let statement = v["statement"].as_str().context("no statement")?;
     let signature = v["signature"].as_str().context("no signature")?;
-    let dir = std::env::temp_dir().join(format!("dd-attest-{}-{attester}", std::process::id()));
-    std::fs::create_dir_all(&dir)?;
+    host_signed(attester, host_key, statement, signature)?;
+    let st: serde_json::Value = serde_json::from_str(statement)?;
+    ensure!(
+        st["v"] == 1 && st["attester"] == attester && st["rev"] == rev && st["flake"] == flake,
+        "the statement is about something else"
+    );
+    Ok(st)
+}
+
+/// A new directory only this user can enter, at a name nobody else chose:
+/// what is checked or signed in it cannot be swapped by another user of
+/// the machine, as it could in a shared /tmp at a name known in advance
+fn private_dir(prefix: &str) -> Result<PathBuf> {
+    use sha2::Digest as _;
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    for _ in 0..8 {
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut seed = [0u8; 16];
+        getrandom::fill(&mut seed).map_err(|e| anyhow::anyhow!("randomness: {e}"))?;
+        let tag = sha2::Sha256::digest([&seed[..], &n.to_le_bytes()].concat());
+        let dir = base.join(format!(
+            "{prefix}-{:x}",
+            u128::from_le_bytes(tag[..16].try_into()?)
+        ));
+        let mut b = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+        match b.create(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    bail!("no fresh directory for {prefix}")
+}
+
+/// `statement` signed by `attester`'s ssh host key, in the attest namespace
+fn host_signed(attester: &str, host_key: &str, statement: &str, signature: &str) -> Result<()> {
+    let dir = private_dir("dd-attest")?;
     let allowed = dir.join("allowed");
     let sig = dir.join("sig");
     std::fs::write(
@@ -961,22 +1123,92 @@ fn vouched(
     let ok = c.wait()?.success();
     let _ = std::fs::remove_dir_all(&dir);
     ensure!(ok, "the signature is not {attester}'s host key");
-    let st: serde_json::Value = serde_json::from_str(statement)?;
+    Ok(())
+}
+
+/// A file of an unpacked download, and only that: the download a real
+/// directory, the file a plain file in it. A link would have this machine
+/// read whatever it points at - a key, say - and publish it, and two boxes
+/// agreeing on a link is no help.
+fn plain_file(dir: &Path, name: &str) -> Result<PathBuf> {
     ensure!(
-        st["v"] == 1 && st["attester"] == attester && st["rev"] == rev && st["flake"] == flake,
-        "the statement is about something else"
+        !name.is_empty() && !name.contains('/') && name != "." && name != "..",
+        "{name}: not a file name"
     );
-    let mut out = BTreeMap::new();
-    for (name, b) in st["boxes"].as_object().context("no boxes")? {
-        out.insert(
-            name.clone(),
-            (
-                b["path"].as_str().unwrap_or_default().to_string(),
-                b["closure"].as_str().unwrap_or_default().to_string(),
-            ),
-        );
+    ensure!(
+        std::fs::symlink_metadata(dir)?.file_type().is_dir(),
+        "{} is not a directory",
+        dir.display()
+    );
+    let file = dir.join(name);
+    ensure!(
+        std::fs::symlink_metadata(&file)
+            .with_context(|| format!("no {name}"))?
+            .file_type()
+            .is_file(),
+        "{name} is not a plain file"
+    );
+    Ok(file)
+}
+
+/// A vouched-for output from a box, as its NAR, checked against the hash
+/// the boxes agreed on before a byte of it is unpacked into `dir`
+fn fetch_vouched(addr: &str, path: &str, nar_hash: &str, dir: &Path) -> Result<()> {
+    use sha2::Digest as _;
+    let nar = dir.with_extension("nar");
+    let mut c = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        .arg(format!("admin@{addr}"))
+        .args(["nix-store", "--dump", path])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+    let mut from = c.stdout.take().context("ssh's stdout")?;
+    // read back for the unpacking through this same handle, never by name
+    let mut to = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&nar)?;
+    let mut h = sha2::Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = std::io::Read::read(&mut from, &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+        std::io::Write::write_all(&mut to, &buf[..n])?;
     }
-    Ok(out)
+    ensure!(c.wait()?.success(), "{addr} did not hand over {path}");
+    let got = format!("sha256:{:x}", h.finalize());
+    let want = sh(
+        "nix",
+        &[
+            "hash",
+            "convert",
+            "--hash-algo",
+            "sha256",
+            "--to",
+            "base16",
+            nar_hash,
+        ],
+    )?;
+    ensure!(
+        got == format!("sha256:{}", want.trim().trim_start_matches("sha256:")),
+        "{path} from {addr} is not the bytes the boxes vouched for"
+    );
+    let st = Command::new("nix-store")
+        .arg("--restore")
+        .arg(dir)
+        .stdin({
+            std::io::Seek::rewind(&mut to)?;
+            to
+        })
+        .status()?;
+    let _ = std::fs::remove_file(&nar);
+    ensure!(st.success(), "unpacking {path}");
+    Ok(())
 }
 
 /// Each box answers for itself: its prometheus holds what its agent last
@@ -1457,151 +1689,407 @@ fn to_releases(root: &std::path::Path, files: &[(String, String)], message: &str
     result
 }
 
-/// The files of a GitHub release: name and download url.
-fn github_assets(from: &str, tag: &str) -> Result<Vec<(String, String)>> {
-    let body = ureq_get(&format!(
-        "https://api.github.com/repos/{from}/releases/tags/{tag}"
-    ))
-    .map_err(|_| anyhow::anyhow!("no release {tag} in {from}"))?;
-    let v: serde_json::Value = serde_json::from_str(&body)?;
-    let out: Vec<(String, String)> = v["assets"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|a| {
-            Some((
-                a["name"].as_str()?.to_string(),
-                a["browser_download_url"].as_str()?.to_string(),
-            ))
-        })
-        .collect();
-    if out.is_empty() {
-        bail!("release {tag} in {from} has no files");
-    }
-    Ok(out)
+/// what the builders of an order agreed on, and who they were
+struct Built {
+    /// build -> (closure, nar hash)
+    agreed: BTreeMap<String, (String, String)>,
+    /// build -> (builders, how far apart)
+    by: BTreeMap<String, (Vec<String>, u8)>,
 }
 
-fn app(repo: &str, keys: &auth::Store, tag: &str, from: &str, dry_run: bool) -> Result<()> {
+/// how long builders have to answer before the order goes to others
+const BUILD_WAIT_SECS: u64 = 4 * 3600;
+
+/// The app's builds, each by two boxes chosen apart, through a signed build
+/// order and the agreed log; a builder that stays silent is passed over and
+/// the order made again, once.
+#[allow(clippy::too_many_arguments)]
+fn order_builds(
+    root: &Path,
+    key: &ed25519_dalek::SigningKey,
+    boxes: &serde_json::Value,
+    owners: &BTreeMap<String, String>,
+    home: &str,
+    flake: &str,
+    rev: &str,
+    tag: &str,
+    version: &str,
+    want: &BTreeMap<String, String>,
+    needs: &BTreeMap<String, build_order::Need>,
+    // where the order goes on the releases branch: a release's, or a check's
+    // (each box reads both; a check never takes the place of a release)
+    file: &str,
+) -> Result<Built> {
+    let read = |since: u64| -> Result<(Vec<serde_json::Value>, u64)> {
+        let v: serde_json::Value = serde_json::from_str(&on_box(
+            home,
+            &format!("curl -sf http://127.0.0.1:4195/built?since={since}"),
+        )?)?;
+        Ok((
+            v["items"].as_array().cloned().unwrap_or_default(),
+            v["next"].as_u64().unwrap_or(since),
+        ))
+    };
+    let mut exclude: Vec<String> = Vec::new();
+    for round in 1..=2 {
+        let state: serde_json::Value =
+            serde_json::from_str(&on_box(home, "curl -sf http://127.0.0.1:4195/state")?)?;
+        let fleet = build_order::candidates(boxes, owners, &state);
+        let mut jobs = Vec::new();
+        let mut by = BTreeMap::new();
+        for (name, path) in want {
+            let need = needs.get(name).cloned().unwrap_or_default();
+            let (builders, apart) =
+                build_order::pick(path, &need, &fleet, build_order::BUILDERS, &exclude)?;
+            eprintln!("   {name}: {} (apart {apart} of 3)", builders.join(", "));
+            by.insert(name.clone(), (builders.clone(), apart));
+            jobs.push(build_order::Job {
+                name: name.clone(),
+                attr: "legacyPackages.x86_64-linux.appRelease".into(),
+                version: Some(version.into()),
+                part: Some(name.clone()),
+                path: path.clone(),
+                builders,
+            });
+        }
+        let id = format!("{tag}-{round}-{}", release::now());
+        // the log from here on: an answer to this order cannot come before it
+        let (_, mut since) = read(0)?;
+        let order = release::sign_doc(
+            "build-order",
+            build_order::order_payload(&id, flake, rev, &jobs),
+            key,
+        )?;
+        to_releases(
+            root,
+            &[(file.into(), serde_json::to_string_pretty(&order)?)],
+            &format!("build order {id}"),
+        )?;
+        eprintln!("== build order {id}: waiting for the builders");
+        let verify = |attester: &str, statement: &str, signature: &str| -> Result<()> {
+            let hk = boxes[attester]["hostKey"]
+                .as_str()
+                .with_context(|| format!("no hostKey for {attester}"))?;
+            host_signed(attester, hk, statement, signature)
+        };
+        let mut said = BTreeMap::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(BUILD_WAIT_SECS);
+        loop {
+            let (items, next) = read(since)?;
+            since = next;
+            for item in &items {
+                match build_order::read_item(item, &id, flake, rev, &jobs, &verify) {
+                    Ok(Some((job, from, s))) => {
+                        eprintln!("   {job}: {from} answered");
+                        said.insert((job, from), s);
+                    }
+                    Ok(None) => {}
+                    Err(e) => eprintln!("   a result refused: {e:#}"),
+                }
+            }
+            match build_order::standing(&jobs, &said)? {
+                build_order::Standing::Agreed(agreed) => return Ok(Built { agreed, by }),
+                build_order::Standing::Waiting(w) if std::time::Instant::now() >= deadline => {
+                    // whoever has not answered is passed over next time
+                    for line in &w {
+                        if let Some((_, b)) = line.rsplit_once(" on ")
+                            && !exclude.iter().any(|x| x == b)
+                        {
+                            exclude.push(b.to_string());
+                        }
+                    }
+                    eprintln!("   no answer in time from: {}", w.join(", "));
+                    break;
+                }
+                build_order::Standing::Waiting(_) => {
+                    std::thread::sleep(std::time::Duration::from_secs(120))
+                }
+            }
+        }
+    }
+    bail!(
+        "the builders did not answer; passed over: {}",
+        exclude.join(", ")
+    )
+}
+
+/// realise one download on a box, from the commit: built there or
+/// substituted, whatever that box's own nix allows
+fn realise_cmd(flake: &str, rev: &str, version: &str, build: &str) -> String {
+    format!(
+        "nix-store --realise \"$(nix eval --raw '{flake}?rev={rev}#legacyPackages.x86_64-linux.appRelease' --apply 'r: (r \"{version}\").{build}.drvPath')\" >/dev/null"
+    )
+}
+
+/// what the last nightly check of the app found: the paths it checked, and
+/// whether two boxes agreed on them
+fn app_check_state() -> PathBuf {
+    dirs_cache().join("app-check.json")
+}
+
+fn app_check(repo: &str, keys: &auth::Store, r#ref: &str) -> Result<()> {
+    let root = repo_root(repo)?;
+    let key = load(keys)?;
+    git(&root, &["fetch", "-q", "forge"])?;
+    let rev = git(&root, &["rev-parse", &format!("refs/remotes/forge/{ref}")])?;
+    let version = "0.0.0";
+    let want = app_paths(&root, &rev, version)?;
+    let last: Option<serde_json::Value> = std::fs::read(app_check_state())
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok());
+    if last
+        .as_ref()
+        .is_some_and(|l| l["ok"] == true && l["paths"] == serde_json::json!(want))
+    {
+        println!("the app: nothing it is made of changed since the last check passed");
+        return Ok(());
+    }
+    let needs = app_needs(&root, &rev)?;
+    let boxes: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("fleet/boxes.json"))?)?;
+    let repo_url = DEFAULT_URL
+        .split("/raw/")
+        .next()
+        .context("the release url is not a forge raw url")?;
+    let owner = keys
+        .get(crate::USER)?
+        .context("no member name here (`dd login`)")?;
+    let owners = box_owners(&root, &boxes);
+    let home = own_box(&boxes, &owners, &owner)?;
+    eprintln!(
+        "== the app at {} ({}): two boxes build it",
+        &rev[..12],
+        r#ref
+    );
+    let result = order_builds(
+        &root,
+        &key,
+        &boxes,
+        &owners,
+        &home,
+        &format!("git+{repo_url}"),
+        &rev,
+        "check",
+        version,
+        &want,
+        &needs,
+        "build-check.json",
+    );
+    let ok = result.is_ok();
+    std::fs::create_dir_all(dirs_cache())?;
+    std::fs::write(
+        app_check_state(),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "rev": rev,
+            "paths": want,
+            "ok": ok,
+            "at": release::now(),
+            "why": result.as_ref().err().map(|e| format!("{e:#}")),
+        }))?,
+    )?;
+    match result {
+        Ok(_) => {
+            println!(
+                "the app at {}: built the same on two boxes; the next release will sign",
+                &rev[..12]
+            );
+            Ok(())
+        }
+        Err(e) => {
+            // said where it is seen: the desktop, and the timer's failure
+            let _ = Command::new("notify-send")
+                .args([
+                    "--urgency=critical",
+                    "Commonty: the app no longer builds the same twice",
+                    &format!("{e:#}"),
+                ])
+                .status();
+            Err(e.context(format!(
+                "the app at {}: a release would stop here",
+                &rev[..12]
+            )))
+        }
+    }
+}
+
+/// The nightly run: a user timer on this machine, which holds the release
+/// key the check order is signed with
+fn app_check_install(repo: &str) -> Result<()> {
+    let root = repo_root(repo)?;
+    // the dd on PATH by the name it has there (a profile's link), so the
+    // timer runs whatever dd this machine has then, not this build of it
+    let dd = std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
+        .map(|d| d.join("dd"))
+        .find(|p| p.is_file())
+        .map_or_else(std::env::current_exe, Ok)?;
+    let home = std::env::var("HOME").context("HOME")?;
+    let units = PathBuf::from(&home).join(".config/systemd/user");
+    std::fs::create_dir_all(&units)?;
+    std::fs::write(
+        units.join("dd-app-check.service"),
+        format!(
+            "[Unit]\nDescription=Does the Commonty app still build the same on two boxes\n\n\
+             [Service]\nType=oneshot\nWorkingDirectory={}\nExecStart={} release app-check\n",
+            root.display(),
+            dd.display()
+        ),
+    )?;
+    std::fs::write(
+        units.join("dd-app-check.timer"),
+        "[Unit]\nDescription=Nightly: does the Commonty app still build the same twice\n\n\
+         [Timer]\nOnCalendar=*-*-* 03:00\nPersistent=true\nRandomizedDelaySec=30m\n\n\
+         [Install]\nWantedBy=timers.target\n",
+    )?;
+    run_ok(
+        {
+            let mut c = Command::new("systemctl");
+            c.args(["--user", "daemon-reload"]);
+            c
+        },
+        "systemctl --user daemon-reload",
+    )?;
+    run_ok(
+        {
+            let mut c = Command::new("systemctl");
+            c.args(["--user", "enable", "--now", "dd-app-check.timer"]);
+            c
+        },
+        "enabling the timer",
+    )?;
+    println!(
+        "nightly at 03:00 (or on waking, if asleep then): `journalctl --user -u dd-app-check` for what it found"
+    );
+    Ok(())
+}
+
+fn app(repo: &str, keys: &auth::Store, tag: &str, dry_run: bool) -> Result<()> {
     use sha2::Digest as _;
     let root = repo_root(repo)?;
     let key = load(keys)?;
-    // The release key vouches for bytes it has seen, built from source it
-    // can name. `gh attestation verify` checks GitHub's signed statement
-    // that this file came out of a workflow run in `from` - and the run's
-    // commit is then checked to be what `tag` points at here, so a file
-    // built from some other commit, or uploaded by hand, is refused.
-    let want = git(&root, &["rev-parse", &format!("{tag}^{{commit}}")])
+    let version = version_of(tag).with_context(|| format!("{tag} is not vX.Y.Z"))?;
+    let rev = git(&root, &["rev-parse", &format!("{tag}^{{commit}}")])
         .with_context(|| format!("no tag {tag} here; fetch the forge's tags"))?;
-    let want = want.trim().to_string();
-    let dir = std::env::temp_dir().join(format!("dd-app-{}", std::process::id()));
-    std::fs::create_dir_all(&dir)?;
-    let result = (|| -> Result<serde_json::Value> {
+    let boxes: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("fleet/boxes.json"))?)?;
+    // what this commit's downloads must be, worked out here; the builders
+    // must land on exactly these
+    let want = app_paths(&root, &rev, version)?;
+    let needs = app_needs(&root, &rev)?;
+    let repo_url = DEFAULT_URL
+        .split("/raw/")
+        .next()
+        .context("the release url is not a forge raw url")?;
+    let flake = format!("git+{repo_url}");
+    let owner = keys
+        .get(crate::USER)?
+        .context("no member name here (`dd login`)")?;
+    let owners = box_owners(&root, &boxes);
+    let home = own_box(&boxes, &owners, &owner)?;
+    let built = order_builds(
+        &root,
+        &key,
+        &boxes,
+        &owners,
+        &home,
+        &flake,
+        &rev,
+        tag,
+        version,
+        &want,
+        &needs,
+        "build-order.json",
+    )?;
+    // the domain the downloads are served from: the forge's, less git.
+    let site = repo_url
+        .trim_start_matches("https://")
+        .split('/')
+        .next()
+        .and_then(|h| h.strip_prefix("git."))
+        .context("the forge is not at git.<domain>")?;
+    let dir = private_dir("dd-app")?;
+    let result = (|| -> Result<(serde_json::Value, Vec<(PathBuf, String)>)> {
         let mut files = serde_json::Map::new();
-        for (name, url) in github_assets(from, tag)? {
-            // the signed apk is ours, made below from the attested one
-            if name == SIGNED_APK {
-                continue;
-            }
-            let path = dir.join(&name);
-            let st = Command::new("curl")
-                .args(["-sfL", "-o"])
-                .arg(&path)
-                .arg(&url)
-                .status()?;
-            if !st.success() {
-                bail!("downloading {name}");
-            }
-            // this repo's pinned gh, and only a signature made by the
-            // release workflow counts - not any workflow in the repository
-            let workflow = format!("{from}/.github/workflows/release.yml");
-            let token = Command::new("gh")
-                .args(["auth", "token"])
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-            let mut gh = Command::new("nix");
-            gh.current_dir(&root)
-                .args([
-                    "run",
-                    ".#gh",
-                    "--",
-                    "attestation",
-                    "verify",
-                    "--format",
-                    "json",
-                ])
-                .args(["--repo", from, "--signer-workflow", &workflow])
-                .arg(&path);
-            if let Some(t) = token {
-                gh.env("GH_TOKEN", t);
-            }
-            let att = gh
-                .output()
-                .context("running gh: it checks the build's provenance")?;
-            if !att.status.success() {
-                bail!(
-                    "{name}: no attestation from {from} verifies it:\n{}",
-                    String::from_utf8_lossy(&att.stderr)
-                );
-            }
-            let built_from = serde_json::from_slice::<serde_json::Value>(&att.stdout)?
-                .as_array()
-                .and_then(|a| a.first())
-                .and_then(|a| {
-                    a.pointer("/verificationResult/statement/predicate/buildDefinition/resolvedDependencies/0/digest/gitCommit")
-                        .and_then(|c| c.as_str())
-                        .map(str::to_string)
-                })
-                .context("the attestation names no commit")?;
-            if built_from != want {
-                bail!("{name} was built from {built_from}, and {tag} is {want}");
-            }
-            // The apk GitHub builds is unsigned, and no phone installs that.
-            // Signed here, with the Android key beside the release key, and
-            // offered from the release as a file of its own; without the key,
-            // left out, so the downloads page shows Android as not ready
-            // rather than offering a file that cannot install.
-            let (path, url) = if name == "commonty.apk" {
-                match android_key(keys)? {
-                    Some((k, c)) => {
-                        let signed = sign_apk(&root, &dir, &path, &k, &c)?;
-                        if !dry_run {
-                            upload_asset(&root, from, tag, &signed)?;
+        let mut upload = Vec::new();
+        for (build, (_, nar)) in &built.agreed {
+            let out = dir.join(build);
+            let path = &want[build];
+            eprintln!("== {build}: fetching it through {home}");
+            // present on the owner's box however it gets there: the hash
+            // the builders agreed on is what the bytes are held to
+            on_box(&home, &realise_cmd(&flake, &rev, version, build))?;
+            fetch_vouched(&home, path, nar, &out)?;
+            for name in app_files(build, version) {
+                let mut file = plain_file(&out, &name)
+                    .with_context(|| format!("{build}: nothing is published"))?;
+                let mut name = name;
+                // The apk is built unsigned, and no phone installs that.
+                // Signed here, with the Android key beside the release key;
+                // without the key, left out, so the downloads page shows
+                // Android as not ready rather than a file that cannot install.
+                if build == "android" {
+                    match android_key(keys)? {
+                        Some((k, c)) => {
+                            file = sign_apk(&root, &dir, &file, &k, &c)?;
+                            name = SIGNED_APK.into();
                         }
-                        let url = format!(
-                            "https://github.com/{from}/releases/download/{tag}/{SIGNED_APK}"
-                        );
-                        (signed, url)
-                    }
-                    None => {
-                        eprintln!(
-                            "   {name}: left out - no Android key here (`dd release android-init`), and a phone installs only a signed apk"
-                        );
-                        continue;
+                        None => {
+                            eprintln!(
+                                "   the apk: left out - no Android key here (`dd release android-init`), and a phone installs only a signed apk"
+                            );
+                            continue;
+                        }
                     }
                 }
-            } else {
-                (path, url)
-            };
-            let bytes = std::fs::read(&path)?;
-            let sha = format!("{:x}", sha2::Sha256::digest(&bytes));
-            eprintln!("   {name}  {sha}");
-            files.insert(
-                name,
-                serde_json::json!({ "sha256": sha, "size": bytes.len(), "url": url }),
-            );
+                let bytes = std::fs::read(&file)?;
+                let sha = format!("{:x}", sha2::Sha256::digest(&bytes));
+                eprintln!("   {name}  {sha}");
+                files.insert(
+                    name.clone(),
+                    serde_json::json!({
+                        "sha256": sha,
+                        "size": bytes.len(),
+                        "url": format!("https://{site}/download/{tag}/{name}"),
+                    }),
+                );
+                upload.push((file, name));
+            }
         }
-        Ok(serde_json::json!({
-            "tag": tag,
-            "commit": want,
-            "from": from,
-            "issued": release::now(),
-            "files": files,
-        }))
+        Ok((
+            serde_json::json!({
+                "tag": tag,
+                "commit": rev,
+                "from": repo_url,
+                "issued": release::now(),
+                "files": files,
+                // who built each, and how far apart they were (3: owner,
+                // house and region all different)
+                "built": built.by.iter().map(|(n, (who, apart))| {
+                    (n.clone(), serde_json::json!({ "by": who, "apart": apart }))
+                }).collect::<serde_json::Map<_, _>>(),
+            }),
+            upload,
+        ))
     })();
+    let published = result.and_then(|(manifest, upload)| {
+        if dry_run {
+            return Ok(manifest);
+        }
+        // the files first: a manifest naming files the forge does not have
+        // would send people to nothing
+        let api = forge_api(DEFAULT_URL).context("the release url is not the forge's")?;
+        for (file, name) in &upload {
+            // a token per file: ten minutes each, and the biggest is slow
+            let token = forge_token(keys)?.context("no device key for the forge")?;
+            let id = forge_app_release(&api, &token, tag, &rev)?;
+            eprintln!("   uploading {name}");
+            forge_upload(&api, &token, id, file, name)?;
+        }
+        Ok(manifest)
+    });
     let _ = std::fs::remove_dir_all(&dir);
-    let signed = release::sign_doc("app", result?, &key)?;
+    let signed = release::sign_doc("app", published?, &key)?;
     let body = serde_json::to_string_pretty(&signed)?;
     if dry_run {
         println!("{body}");
@@ -1686,23 +2174,64 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
-    fn the_app_follows_what_it_is_built_from() {
-        assert!(app_input("app/src/main.rs"));
-        assert!(app_input("app/web/_dd/static/shell.js"));
-        assert!(app_input("client/library/src/lib.rs"));
-        assert!(app_input("Cargo.lock"));
-        assert!(app_input(".github/workflows/release.yml"));
-        assert!(
-            !app_input("box/web/shell.js"),
-            "counted through its copy in app/"
-        );
-        assert!(!app_input("nix/modules/forge/forgejo.nix"));
-        assert!(!app_input("docs/ci.md"));
+    fn secrets_and_checks_go_where_no_one_else_can_reach() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let a = private_dir("dd-test").unwrap();
+        let b = private_dir("dd-test").unwrap();
+        assert_ne!(a, b, "a fresh name every time");
+        let mode = std::fs::metadata(&a).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "this user's alone");
+        std::fs::remove_dir(&a).unwrap();
+        std::fs::remove_dir(&b).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_download_is_published_only_as_plain_files() {
+        let t = std::env::temp_dir().join(format!("dd-plain-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let out = t.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(t.join("secret"), "key").unwrap();
+        std::fs::write(out.join("dd.exe"), "MZ").unwrap();
+        assert!(plain_file(&out, "dd.exe").is_ok());
+        // a link to anything on this machine is refused
+        std::os::unix::fs::symlink(t.join("secret"), out.join("commonty.apk")).unwrap();
+        assert!(plain_file(&out, "commonty.apk").is_err());
+        // and so is a download that is itself a link to a directory
+        std::os::unix::fs::symlink(&out, t.join("linked")).unwrap();
+        assert!(plain_file(&t.join("linked"), "dd.exe").is_err());
+        assert!(plain_file(&out, "../secret").is_err());
+        assert!(plain_file(&out, "missing").is_err());
+        std::fs::remove_dir_all(&t).unwrap();
+    }
+
+    #[test]
+    fn the_app_is_named_as_the_downloads_page_asks() {
         assert_eq!(next_tag("v0.1.21").as_deref(), Some("v0.1.22"));
-        assert_eq!(next_tag("v1.9").as_deref(), Some("v1.10"));
+        assert_eq!(next_tag("v1.2.9").as_deref(), Some("v1.2.10"));
         assert_eq!(next_tag("0.1.2"), None);
-        assert_eq!(app_files("v0.1.22")[0], "commonty_0.1.22_amd64.deb");
+        // a tag carries nothing into a box's shell or a nix expression
+        for bad in [
+            "v1.2.3;id",
+            "v1;id.2.3",
+            "v1.2",
+            "v1.2.3.4",
+            "v1..3",
+            "v1.2.x",
+            "v1.2.3 ",
+        ] {
+            assert_eq!(version_of(bad), None, "{bad}");
+            assert_eq!(next_tag(bad), None, "{bad}");
+        }
+        assert_eq!(version_of("v10.0.7"), Some("10.0.7"));
+        assert_eq!(app_files("linux", "0.1.22")[0], "commonty_0.1.22_amd64.deb");
+        assert_eq!(app_files("windows", "0.1.22"), ["commonty-setup.exe"]);
+        // every build has files; a name the flake does not make has none
+        assert!(APP_BUILDS.iter().all(|b| !app_files(b, "1.0.0").is_empty()));
+        assert!(app_files("macos", "1.0.0").is_empty());
     }
 
     #[test]

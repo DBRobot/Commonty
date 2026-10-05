@@ -55,6 +55,7 @@ only if it passes the rule, run identically by every validator:
 | lease release {role, box, epoch} | signed by the holder |
 | membership {add/remove house, box, witness} | signed by the owner key(s): today the release key, later k of n house owners |
 | directory {an entry, an invite, or an ack} | signed by a box of the fleet; at most 64K; at most 60 a minute per box. Its content is the gates' to judge, not the validators' |
+| built {a build result} | signed by a box of the fleet; at most 16K; at most 20 a minute per box. Its content (what the box built for a build order, signed by its host key) is the laptop's to judge, not the validators' |
 
 Rules, copy counts and role requirements come from the signed release, not
 from the log.
@@ -137,7 +138,11 @@ about $5.50/month.
 ## Not in scope
 
 The control plane doesn't run commands, push configuration, hold secrets or
-move data. Placement and stateful replication build on it and come after.
+move data. Build orders are not an exception: the order is a file the
+release key signs, beside the release, and a box builds because the order
+names it, as it moves to a release because the release names it. The log
+carries only what each box says it built ([the app's
+releases](app-release.md)); the bytes never pass through it. Placement and stateful replication build on it and come after.
 
 ## Build order
 
