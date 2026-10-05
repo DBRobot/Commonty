@@ -19,7 +19,10 @@ rebuilt from it, so a change here reaches real machines.
   changing the app, the pages it carries, or anything that touches its keys.
 - **The app's downloads, how they are built and released:
   [`docs/app-release.md`](docs/app-release.md).** Read it before changing
-  `nix/app-release/`, `dd release app`, or anything they pin. The GitHub
-  mirror is [`docs/github.md`](docs/github.md).
+  `nix/app-release/`, `dd release app`, or anything they pin. A change to
+  how any download is built is checked on two boxes, not one (it says
+  how). The GitHub mirror is [`docs/github.md`](docs/github.md).
+- **A unit on a box that runs on a timer** must never fail a switch:
+  [`docs/ci.md`](docs/ci.md#when-a-release-does-not-land).
 
 @docs/ci.md
