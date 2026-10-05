@@ -134,3 +134,72 @@ async fn serve(app: Arc<App>, lib: String, raw: String, req: Request) -> Respons
     }
     r
 }
+
+/// Every method under /images/..., a member's disk images: restic's layout,
+/// ciphertext made on the device (`dd image`), in the bucket under
+/// `images-<name>` beside the libraries, so the pool keeps the copies (two,
+/// on two boxes) and no box disk holds a third. Only the member's own; a
+/// browser changes nothing here without a fresh passkey (Backups, in
+/// Settings), as the box always held it to.
+pub(crate) async fn images_path(
+    State(app): State<Arc<App>>,
+    Path(raw): Path<String>,
+    req: Request,
+) -> Response {
+    images(app, raw, req).await
+}
+
+pub(crate) async fn images_root(State(app): State<Arc<App>>, req: Request) -> Response {
+    images(app, String::new(), req).await
+}
+
+async fn images(app: Arc<App>, raw: String, req: Request) -> Response {
+    let g = match gate(&app) {
+        Ok(g) => g,
+        Err(r) => return r,
+    };
+    if req.method() == Method::OPTIONS {
+        return library_gate::dav::options();
+    }
+    let headers = req.headers();
+    let Some(user) = app.identify(headers, "access") else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "a device token or a signed-in browser is required",
+        )
+            .into_response();
+    };
+    if app.role(&user) != Some(crate::pages::Role::Member) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    // a name that is a folder name and nothing more
+    if user.is_empty()
+        || !user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let reads = matches!(
+        req.method().as_str(),
+        "GET" | "HEAD" | "OPTIONS" | "PROPFIND"
+    );
+    if !reads && crate::bearer(headers).is_none() {
+        let session = app
+            .sessions
+            .session(headers.get("cookie").and_then(|v| v.to_str().ok()))
+            .map(|s| s.1)
+            .unwrap_or_default();
+        if !app.passkey_fresh(&session) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+    }
+    library_gate::dav::serve(g, images_prefix(&user), raw, Role::Owner, req).await
+}
+
+/// where a member's disk images are in the bucket: a top-level prefix, as a
+/// library's is, so the trash is let go of the same way; never 32 hex
+/// characters, so never a library's
+pub(crate) fn images_prefix(user: &str) -> String {
+    format!("images-{user}")
+}

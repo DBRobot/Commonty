@@ -2377,6 +2377,14 @@ pub async fn start(
         .route("/internal/games/access", post(friends::game_access))
         .route("/internal/games/friends/{user}", get(friends::game_friends))
         // the encrypted libraries' gate: WebDAV over each library's prefix
+        // a member's disk images, in the bucket (library.rs); nginx sends
+        // files.<domain>/images/ here
+        .route("/_dd/images", axum::routing::any(library::images_root))
+        .route("/_dd/images/", axum::routing::any(library::images_root))
+        .route(
+            "/_dd/images/{*path}",
+            axum::routing::any(library::images_path),
+        )
         .route("/_dd/dav/{lib}", axum::routing::any(library::handle_root))
         .route("/_dd/dav/{lib}/", axum::routing::any(library::handle_root))
         .route(

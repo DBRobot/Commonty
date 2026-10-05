@@ -346,6 +346,14 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
             Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
         };
     }
+    // a folder asked for with GET: its listing as json, the shape nginx's
+    // autoindex gives, which the disk images' clients read (box/archive)
+    if method == Method::GET && (path.is_empty() || raw.ends_with('/')) {
+        return match listing(g, &lib, &path).await {
+            Ok(r) => r,
+            Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+        };
+    }
     let out = match method.as_str() {
         "PROPFIND" => propfind(g, &lib, &path, &headers).await,
         "HEAD" | "GET" => get(g, &lib, &path, &headers, method == Method::HEAD).await,
@@ -363,6 +371,42 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
         Ok(r) => r,
         Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
     }
+}
+
+/// one folder, one level: [{name, type, mtime, size}], as nginx's autoindex
+/// json has it; nothing under a folder is no folder (404), and the trash is
+/// not listed
+async fn listing(g: &Gate, lib: &str, path: &str) -> Result<Response> {
+    let prefix = if path.is_empty() {
+        key(lib, "")
+    } else {
+        format!("{}/", key(lib, path))
+    };
+    let (files, dirs) = g.list_level(&prefix).await?;
+    if !path.is_empty() && files.is_empty() && dirs.is_empty() {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    }
+    let mut out = Vec::new();
+    for d in dirs {
+        let rel = d.trim_start_matches(&prefix).trim_end_matches('/');
+        if rel.is_empty() || (path.is_empty() && rel == TRASH) {
+            continue;
+        }
+        out.push(serde_json::json!({ "name": rel, "type": "directory", "mtime": "" }));
+    }
+    for f in files {
+        let rel = f.key.trim_start_matches(&prefix);
+        if rel.is_empty() {
+            continue;
+        }
+        out.push(serde_json::json!({
+            "name": rel,
+            "type": "file",
+            "mtime": dav_date(&f.modified),
+            "size": f.size,
+        }));
+    }
+    Ok(axum::Json(out).into_response())
 }
 
 async fn propfind(g: &Gate, lib: &str, path: &str, headers: &HeaderMap) -> Result<Response> {
