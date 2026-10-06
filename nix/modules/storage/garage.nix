@@ -112,6 +112,16 @@ in
     (lib.optionalAttrs (options.dd ? zfs) {
       dd.zfs.atMountpoint.${cfg.dataDir} = {
         quota = cfg.capacity;
+        # A week to undo a mistake (a bucket emptied by hand, a bad
+        # release), no more: snapshots every 15 minutes, hourly and daily,
+        # never weekly or monthly, which kept every deleted block for a
+        # month or a year. The cluster's two copies are what survives a
+        # lost disk; this is for the cluster itself being told to forget.
+        # The metadata snapshots that make these blocks objects again are
+        # kept as long (backup.nix).
+        "com.sun:auto-snapshot" = "true";
+        "com.sun:auto-snapshot:weekly" = "false";
+        "com.sun:auto-snapshot:monthly" = "false";
       };
     })
     {

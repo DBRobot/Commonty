@@ -9,10 +9,10 @@
   "neverSleep": true,
   "datasets": {
     "tank/enc/garage": {
-      "note": "garage's blocks, content-addressed ciphertext: nothing to gain from snapshots",
+      "note": "garage's blocks, content-addressed ciphertext; a week of snapshots, set by the garage module (storage/garage.nix)",
       "mountpoint": "/srv/garage",
       "recordsize": "1M",
-      "com.sun:auto-snapshot": "false"
+      "com.sun:auto-snapshot": "true"
     }
   }
 }

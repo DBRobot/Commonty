@@ -117,8 +117,8 @@ in
         };
         script = ''
           garage meta snapshot
-          # three days of them: the db is small, its snapshots are not free
-          find /var/lib/garage/meta/snapshots -mindepth 1 -maxdepth 1 -mtime +3 -exec rm -rf {} +
+          # a week of them, as long as the blocks' own snapshots (garage.nix)
+          find /var/lib/garage/meta/snapshots -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} +
         '';
       };
     }

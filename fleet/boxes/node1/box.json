@@ -19,7 +19,7 @@
   "neverSleep": false,
   "datasets": {
     "vault/enc/photos": {
-      "note": "garage's blocks: ente's and the media tier's ciphertext. Snapshots are cheap on immutable files and save you from rm -rf",
+      "note": "garage's blocks: ente's and the media tier's ciphertext; a week of snapshots, set by the garage module (storage/garage.nix)",
       "mountpoint": "/vault/photos",
       "recordsize": "1M",
       "com.sun:auto-snapshot": "true"
