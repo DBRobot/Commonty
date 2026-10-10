@@ -211,7 +211,7 @@ async fn photos<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Respons
     }
     // Ente's own files: a page by its name, its name with .html, or the app
     // shell (as nginx served them, try_files $uri $uri.html /index.html)
-    file(site.root.as_deref(), path, true).await
+    client(site, "photos", path, true).await
 }
 
 async fn vault<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Response {
@@ -232,7 +232,7 @@ async fn vault<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Response
         let base = format!("https://vault.{}", crate::account::domain());
         return forward(&base, None, req, true).await;
     }
-    file(site.root.as_deref(), path, false).await
+    client(site, "vault", path, false).await
 }
 
 /// One of the app's own files (web/), served as the app carries it
@@ -266,6 +266,49 @@ fn mime(p: &Path) -> &'static str {
         "webmanifest" => "application/manifest+json",
         _ => "application/octet-stream",
     }
+}
+
+/// A file of a client's: from the copy built into the app (web/_clients/<name>,
+/// the same on every platform - Android has no nix store to read from), or
+/// from a folder for a development run that names one (COMMONTY_PHOTOS_WEB,
+/// COMMONTY_VAULT_WEB).
+async fn client<R: Runtime>(site: &Site<R>, name: &str, path: &str, shell: bool) -> Response {
+    if site.root.is_some() {
+        return file(site.root.as_deref(), path, shell).await;
+    }
+    let rel = path.trim_start_matches('/');
+    if rel
+        .split('/')
+        .any(|s| s == ".." || s.starts_with('.') || s.contains('\\'))
+    {
+        return plain(StatusCode::NOT_FOUND, "no such file");
+    }
+    let mut tries = vec![if rel.is_empty() || rel.ends_with('/') {
+        format!("_clients/{name}/{rel}index.html")
+    } else {
+        format!("_clients/{name}/{rel}")
+    }];
+    if shell {
+        tries.push(format!("_clients/{name}/{rel}.html"));
+        tries.push(format!("_clients/{name}/index.html"));
+    }
+    for t in tries {
+        if let Some(a) = site.app.asset_resolver().get(t.clone()) {
+            // the resolver's own guess at a type is by the asset's name;
+            // ours for the few it would get wrong (wasm, maps)
+            let kind = match Path::new(&t).extension().and_then(|e| e.to_str()) {
+                Some("wasm" | "map" | "mjs") => mime(Path::new(&t)).to_string(),
+                _ => a.mime_type,
+            };
+            return Response::builder()
+                .header(header::CONTENT_TYPE, kind)
+                .header(header::CACHE_CONTROL, "no-cache")
+                .header("x-content-type-options", "nosniff")
+                .body(Body::from(a.bytes))
+                .unwrap_or_default();
+        }
+    }
+    plain(StatusCode::NOT_FOUND, "no such file")
 }
 
 /// A file of the client's, never outside its root: no `..`, no hidden names.

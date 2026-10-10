@@ -1,2 +1,3 @@
-# the web bundle, copied in at build time (flake.nix app, scripts/sync-app-web)
+# the web bundle and the Photos and Passwords clients, copied in at build time (flake.nix appWeb, scripts/sync-app-web)
 /web/_dd/web/
+/web/_clients/

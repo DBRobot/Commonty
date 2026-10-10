@@ -11,6 +11,7 @@
   cargoVendor,
   androidSdk,
   netAndroid,
+  appWeb,
 }:
 let
   androidHome = "${androidSdk}/libexec/android-sdk";
@@ -85,6 +86,8 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
     cd ../../..
     export CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=$NIX_BUILD_CORES
     export COMMONTY_VERSION=${version}
+    # what the window shows, carried in the apk (flake.nix appWeb)
+    cp -r ${appWeb}/. app/web/ && chmod -R u+w app/web
     # the engine's libraries, where build.rs links them and the apk carries them
     mkdir -p app/gen/android/app/src/main/jniLibs
     cp -r ${netAndroid}/. app/gen/android/app/src/main/jniLibs/

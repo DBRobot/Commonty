@@ -12,7 +12,7 @@
   cargoVendor,
   netSrc,
   netVendor,
-  webDist,
+  appWeb,
 }:
 let
   lib = pkgs.lib;
@@ -100,8 +100,7 @@ in
   inherit msvc net;
   installer = build "commonty-windows-${version}" appSrc ''
     install -Dm644 ${nsisUtils} $XDG_CACHE_HOME/tauri/NSIS/Plugins/x86-unicode/additional/nsis_tauri_utils.dll
-    mkdir -p app/web/_dd/web
-    cp ${webDist}/* app/web/_dd/web/
+    cp -r ${appWeb}/. app/web/ && chmod -R u+w app/web
     cd app
     # the engine goes beside the exe, where Windows looks for a dll first;
     # the hooks keep file times out of the installer
