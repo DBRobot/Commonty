@@ -1361,9 +1361,11 @@ dependencies = [
  "account",
  "anyhow",
  "auth",
+ "axum",
  "base64 0.22.1",
  "directory",
  "ed25519-dalek",
+ "futures-util",
  "getrandom 0.3.4",
  "gtk",
  "identity",
@@ -1376,6 +1378,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

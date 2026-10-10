@@ -81,6 +81,8 @@ function here(url) {
     const u = new URL(url, location.href);
     if (carried.includes(u.pathname)) return appPages + u.pathname;
     if (u.pathname === '/_dd/photos') return appPages + '/_dd/app/photos';
+    // Passwords too: the app serves the vault's code itself (app/src/local.rs)
+    if (u.hostname.startsWith('vault.')) return appPages + '/_dd/app/vault';
     // in the app's window already (Photos): the window may go there itself
     if (appOrigin) return url;
     if (u.origin !== location.origin) return '/_dd/app/open?url=' + encodeURIComponent(u.href);
