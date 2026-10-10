@@ -96,11 +96,12 @@ in
     };
     users.groups.forgejo-runner = { };
     # Caches the jobs keep, which nothing let go of (7.6G on node1): the
-    # checkouts and actions, nix's eval cache, and cargo's shared target
-    # dir. What sits untouched for two weeks goes; the next job rebuilds it.
+    # checkouts and actions, and cargo's shared target dir. What sits
+    # untouched for two weeks goes; the next job rebuilds it. Not nix's
+    # cache: aging its files left its git fetch cache as empty directories,
+    # which nix reads as broken repositories and fails on.
     systemd.tmpfiles.rules = [
       "e /var/lib/gitea-runner/*/.cache/act - - - 14d"
-      "e /var/lib/gitea-runner/*/.cache/nix - - - 14d"
       "e /var/lib/gitea-runner/cargo-target - - - 14d"
     ];
     # (the nixos module registers again by itself when the token or the
