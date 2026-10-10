@@ -163,7 +163,13 @@ in
       };
 
       systemd.services.restic-backups-dd = {
-        after = [ "network-online.target" ] ++ lib.optionals garage [ "garage-setup.service" "garage-meta-snapshot.service" ];
+        after = [
+          "network-online.target"
+        ]
+        ++ lib.optionals garage [
+          "garage-setup.service"
+          "garage-meta-snapshot.service"
+        ];
         wants = [ "network-online.target" ];
         requires = lib.optionals garage [ "garage-meta-snapshot.service" ];
         # samples, not events: the box dashboard shows the age of the last
