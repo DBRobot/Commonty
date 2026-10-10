@@ -618,51 +618,78 @@
           # one file, one viewer, in memory: the compute side of the
           # encrypted libraries (modules/library/transcode.nix)
           transcode = perCrate "transcode";
+          # The clients the app serves its own windows (app/src/local.rs):
+          # the very builds the boxes would serve, Ente's photos client and
+          # the web vault, taken from the boxes that run each - so the code
+          # that holds a person's keys comes with the app's signed release
+          # and never from a box
           # The app: the same crates as dd behind a window (app/). Wrapped
           # so the webview finds its schemas and gio modules; the dmabuf
           # renderer is off because on nvidia it draws a blank window.
-          app = (crateWith appCommon "commonty" sources.app "-p commonty").overrideAttrs (old: {
-            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.wrapGAppsHook3 ];
-            # the page code that runs in the app's window comes with the
-            # app, never from a box: the wasm bundle and the players too
-            # (app/src/site.rs serves them from here)
-            preBuild = (old.preBuild or "") + ''
-              mkdir -p app/web/_dd/web
-              cp ${webDist}/* app/web/_dd/web/
-            '';
-            # glib-networking for https; GStreamer is how WebKit plays media,
-            # and without its plugins nothing played in the app ("appsink not
-            # found"): base and good for the pipeline, bad for the streaming
-            # (MSE) that the players use, libav to decode H.264 and AAC
-            buildInputs = (old.buildInputs or [ ]) ++ [
-              pkgs.glib-networking
-              pkgs.gst_all_1.gstreamer
-              pkgs.gst_all_1.gst-plugins-base
-              pkgs.gst_all_1.gst-plugins-good
-              pkgs.gst_all_1.gst-plugins-bad
-              pkgs.gst_all_1.gst-libav
-            ];
-            postFixup =
-              (old.postFixup or "")
-              + "\n"
-              + ''
-                wrapProgram $out/bin/commonty \
-                  --set WEBKIT_DISABLE_DMABUF_RENDERER 1
-                # On NVIDIA's own driver off NixOS the webview found no GL it
-                # could load and drew in software: scrolling Photos lagged
-                # behind the browser. nixglhost hands it the machine's driver.
-                # Anywhere else it starts as it always did.
-                mv $out/bin/commonty $out/bin/.commonty-gpu
-                cat > $out/bin/commonty <<EOF
-                #!${pkgs.runtimeShell}
-                if [ -e /proc/driver/nvidia/version ] && [ ! -e /etc/NIXOS ]; then
-                  exec ${nix-gl-host.packages.${system}.default}/bin/nixglhost $out/bin/.commonty-gpu "\$@"
-                fi
-                exec $out/bin/.commonty-gpu "\$@"
-                EOF
-                chmod +x $out/bin/commonty
+          app =
+            let
+              appClients =
+                let
+                  boxes = builtins.fromJSON (builtins.readFile ./fleet/boxes.json);
+                  withRole =
+                    r:
+                    self.nixosConfigurations.${
+                      nixpkgs.lib.findFirst (n: builtins.elem r boxes.${n}.roles) (throw "no ${r} box") (
+                        builtins.attrNames boxes
+                      )
+                    }.config;
+                  photos = withRole "photos";
+                  vault = withRole "vault";
+                in
+                {
+                  photos = photos.services.nginx.virtualHosts."photos.${photos.dd.domain}".locations."/".root;
+                  vault = vault.services.vaultwarden.webVaultPackage;
+                };
+            in
+            (crateWith appCommon "commonty" sources.app "-p commonty").overrideAttrs (old: {
+              nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.wrapGAppsHook3 ];
+              # the page code that runs in the app's window comes with the
+              # app, never from a box: the wasm bundle and the players too
+              # (app/src/site.rs serves them from here)
+              preBuild = (old.preBuild or "") + ''
+                mkdir -p app/web/_dd/web
+                cp ${webDist}/* app/web/_dd/web/
               '';
-          });
+              # glib-networking for https; GStreamer is how WebKit plays media,
+              # and without its plugins nothing played in the app ("appsink not
+              # found"): base and good for the pipeline, bad for the streaming
+              # (MSE) that the players use, libav to decode H.264 and AAC
+              buildInputs = (old.buildInputs or [ ]) ++ [
+                pkgs.glib-networking
+                pkgs.gst_all_1.gstreamer
+                pkgs.gst_all_1.gst-plugins-base
+                pkgs.gst_all_1.gst-plugins-good
+                pkgs.gst_all_1.gst-plugins-bad
+                pkgs.gst_all_1.gst-libav
+              ];
+              postFixup =
+                (old.postFixup or "")
+                + "\n"
+                + ''
+                  wrapProgram $out/bin/commonty \
+                    --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
+                    --set COMMONTY_PHOTOS_WEB ${appClients.photos} \
+                    --set COMMONTY_VAULT_WEB ${appClients.vault}
+                  # On NVIDIA's own driver off NixOS the webview found no GL it
+                  # could load and drew in software: scrolling Photos lagged
+                  # behind the browser. nixglhost hands it the machine's driver.
+                  # Anywhere else it starts as it always did.
+                  mv $out/bin/commonty $out/bin/.commonty-gpu
+                  cat > $out/bin/commonty <<EOF
+                  #!${pkgs.runtimeShell}
+                  if [ -e /proc/driver/nvidia/version ] && [ ! -e /etc/NIXOS ]; then
+                    exec ${nix-gl-host.packages.${system}.default}/bin/nixglhost $out/bin/.commonty-gpu "\$@"
+                  fi
+                  exec $out/bin/.commonty-gpu "\$@"
+                  EOF
+                  chmod +x $out/bin/commonty
+                '';
+            });
           # What a stranger downloads, for one release's version: every
           # file built the same way on each box that builds it, so the boxes
           # can compare and the laptop signs what they agree on

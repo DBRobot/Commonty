@@ -9,7 +9,6 @@
 //! the part no server is ever sent.
 
 use std::sync::Mutex;
-use std::time::Duration;
 
 use auth::KeyStore as _;
 use base64::Engine as _;
@@ -91,32 +90,17 @@ pub async fn state<R: Runtime>(app: &AppHandle<R>) -> Result<Response<Vec<u8>>, 
     }
 }
 
-/// what the app's page posts to sign its window in, and the address after
-fn ready<R: Runtime>(app: &AppHandle<R>, pw: &str) -> Result<Response<Vec<u8>>, String> {
-    let keys = app.state::<crate::account::Keys>();
-    let kp = auth::device::load(&keys.0)
-        .map_err(|e| e.to_string())?
-        .ok_or("no device key here")?;
-    let user = keys
-        .0
-        .get("user")
-        .map_err(|e| e.to_string())?
-        .ok_or("no name on this device")?;
-    let host = photos_host();
-    // five minutes, the Photos site alone: it passes through a form
-    let token = auth::device::mint_at(
-        &kp,
-        &user,
-        Duration::from_secs(300),
-        Some("access"),
-        Some(&host),
-    )
-    .map_err(|e| e.to_string())?;
+/// Where the window goes: the app's own copy of Photos (local.rs), through
+/// its door, the password after the # of the page that opens the account.
+fn ready<R: Runtime>(_app: &AppHandle<R>, pw: &str) -> Result<Response<Vec<u8>>, String> {
     json(serde_json::json!({
         "ready": true,
-        "action": format!("https://{host}/_dd/app/signin"),
-        "token": token,
-        "hash": format!("app={}&pw={}", enc(crate::site::origin()), enc(pw)),
+        "url": format!(
+            "{}#app={}&pw={}",
+            crate::local::door(false, "/_dd/photos"),
+            enc(crate::site::origin()),
+            enc(pw)
+        ),
     }))
 }
 

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Passwords</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+</head>
+<body>
+  <main class="auth">
+    <div class="card">
+      <h1>Passwords</h1>
+      <p class="lead" id="msg">Opening your passwords…</p>
+    </div>
+  </main>
+  <!-- the window signs in at the gate as this device, and comes back here -->
+  <form id="signin" method="post" hidden>
+    <input type="hidden" name="token" id="token">
+    <input type="hidden" name="then" value="vault">
+  </form>
+  <script src="/_dd/app/vault.js"></script>
+</body>
+</html>

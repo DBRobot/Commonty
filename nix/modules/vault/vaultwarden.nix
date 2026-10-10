@@ -23,7 +23,11 @@ let
       "vaultwarden is ${pkgs.vaultwarden.version} in nixpkgs, pinned to ${version}: check the release notes, then update modules/vault/vaultwarden.nix";
     (pkgs.vaultwarden.override { dbBackend = "postgresql"; }).overrideAttrs (o: {
       # refresh tokens kept as sha256: a copy of the database renews nobody
-      patches = (o.patches or [ ]) ++ [ ../../../box/vault/vaultwarden-hash-refresh.patch ];
+      patches = (o.patches or [ ]) ++ [
+        ../../../box/vault/vaultwarden-hash-refresh.patch
+        # the Commonty app's web vault signs in on this computer's loopback
+        ../../../box/vault/vaultwarden-app-loopback.patch
+      ];
       # files (attachments, sends) in garage, not on this laptop's disk.
       # buildRustPackage turns buildFeatures into these when the package is
       # made, so an override has to set them directly
