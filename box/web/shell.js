@@ -81,6 +81,8 @@ function here(url) {
     const u = new URL(url, location.href);
     if (carried.includes(u.pathname)) return appPages + u.pathname;
     if (u.pathname === '/_dd/photos') return appPages + '/_dd/app/photos';
+    // Passwords too: the app serves the vault's code itself (app/src/local.rs)
+    if (u.hostname.startsWith('vault.')) return appPages + '/_dd/app/vault';
     // in the app's window already (Photos): the window may go there itself
     if (appOrigin) return url;
     if (u.origin !== location.origin) return '/_dd/app/open?url=' + encodeURIComponent(u.href);
@@ -181,7 +183,7 @@ function bar(m, slot) {
   else if (brand) brand.setAttribute('href', homeLink(m, '/_dd/home'));
   const menu = el('details', { class: 'menu' }, summary, nav);
   menu.addEventListener('toggle', () => {
-    if (menu.open) nav.querySelectorAll('.toggle').forEach((t) => t.read());
+    if (menu.open) for (const t of nav.querySelectorAll('.toggle')) t.read();
   });
   slot.replaceChildren(menu);
   // a menu closes when you are done with it: a click anywhere else, or Escape

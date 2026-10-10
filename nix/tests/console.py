@@ -17,5 +17,5 @@ with subtest("the passphrase logs you in and wheel still works"):
     box.send_chars("console-test-passphrase\n")
     box.wait_until_tty_matches("1", "admin@box")
     box.send_chars("sudo id -u > /tmp/who\n")
-    box.wait_for_file("/tmp/who")
-    assert box.succeed("cat /tmp/who").strip() == "0"
+    # the shell makes the file before sudo writes to it: wait for what it says
+    box.wait_until_succeeds("grep -qx 0 /tmp/who")

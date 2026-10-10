@@ -1,9 +1,16 @@
 # What each member keeps in a service, counted by the service itself: a
 # query it runs as its own database user against its own database, every
 # hour, into /var/lib/dd-usage/<service>/usage.tsv ("<member>\t<bytes>").
-# The storage ledger reads those files and no database: no service's login
-# reaches another's tables (ledger.nix).
-{ config, lib, ... }:
+# Each count also goes into this box's facts (/var/lib/dd-facts), so its
+# heartbeat carries it and every box's gate adds the fleet's up
+# (storage/view.nix): no service's login reaches another's tables, and no
+# box reads another.
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   cfg = config.dd.usage;
 in
@@ -20,6 +27,18 @@ in
           query = lib.mkOption {
             type = lib.types.str;
             description = "rows of member and bytes";
+          };
+          counts = lib.mkOption {
+            type = lib.types.enum [
+              "code"
+              "passwords"
+            ];
+            description = "what of a member's allowance it is";
+          };
+          memberSuffix = lib.mkOption {
+            type = lib.types.str;
+            default = "";
+            description = "what the service adds to a member's name in its rows (an address's @<domain>), taken off";
           };
         };
       }
@@ -49,6 +68,15 @@ in
           ProtectSystem = "strict";
           ProtectHome = true;
           PrivateTmp = true;
+          # into the heartbeat: as root, where node-exporter's facts are
+          ExecStartPost = "+${pkgs.writeShellScript "dd-usage-${name}-facts" ''
+            ${pkgs.gawk}/bin/awk -F '\t' -v svc=${u.counts} -v suffix=${lib.escapeShellArg u.memberSuffix} '
+              { m = $1; if (suffix != "" && substr(m, length(m) - length(suffix) + 1) == suffix) m = substr(m, 1, length(m) - length(suffix)) }
+              m ~ /^[A-Za-z0-9._-]+$/ && $2 ~ /^[0-9]+$/ { printf "dd_usage{service=\"%s\",member=\"%s\"} %s\n", svc, m, $2 }
+            ' /var/lib/dd-usage/${name}/usage.tsv > /var/lib/dd-facts/usage-${u.counts}.prom.tmp
+            chmod 0644 /var/lib/dd-facts/usage-${u.counts}.prom.tmp
+            mv /var/lib/dd-facts/usage-${u.counts}.prom.tmp /var/lib/dd-facts/usage-${u.counts}.prom
+          ''}";
         };
         script = ''
           out=/var/lib/dd-usage/${name}/usage.tsv

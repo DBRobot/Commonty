@@ -1,0 +1,15 @@
+--- a/src/sso.rs
++++ b/src/sso.rs
+@@ -194,6 +194,12 @@
+     conn: DbConn,
+ ) -> ApiResult<Url> {
+     let redirect_uri = match client_id {
++        // The Commonty app serves the web vault to its own window from this
++        // computer's loopback (app/src/local.rs), so the sign-in comes back
++        // there: the one loopback address it uses, and nothing else.
++        "web" | "browser" if raw_redirect_uri == "http://127.0.0.1:41662/sso-connector.html" => {
++            raw_redirect_uri.to_owned()
++        }
+         "web" | "browser" => format!("{}/sso-connector.html", CONFIG.domain()),
+         "desktop" | "mobile" => "bitwarden://sso-callback".to_owned(),
+         "cli" => {

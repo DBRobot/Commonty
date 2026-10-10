@@ -339,9 +339,17 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
     if writes && role != Role::Owner {
         return (StatusCode::FORBIDDEN, "a reader does not write").into_response();
     }
-    if let Some(upload) = headers.get("x-dd-upload").and_then(|v| v.to_str().ok()) {
+    if let Some(upload) = piece(&headers) {
         let out = in_pieces(g, &lib, &path, upload.to_string(), req).await;
         return match out {
+            Ok(r) => r,
+            Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+        };
+    }
+    // a folder asked for with GET: its listing as json, the shape nginx's
+    // autoindex gives, which the disk images' clients read (box/archive)
+    if method == Method::GET && (path.is_empty() || raw.ends_with('/')) {
+        return match listing(g, &lib, &path).await {
             Ok(r) => r,
             Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
         };
@@ -363,6 +371,70 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
         Ok(r) => r,
         Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
     }
+}
+
+/// The upload header, as `serve` reads it: a request with one is a piece of
+/// an upload whatever its method. Callers that meter or guard writes ask
+/// this, so they and `serve` cannot read the header two ways.
+pub fn piece(headers: &HeaderMap) -> Option<&str> {
+    headers.get("x-dd-upload").and_then(|v| v.to_str().ok())
+}
+
+/// What a COPY from `raw` would add to the bucket: the object's size, or
+/// everything under the folder. None: not a path.
+pub async fn bytes_at(g: &Gate, lib: &str, raw: &str) -> Result<Option<u64>> {
+    let Some(path) = clean(raw) else {
+        return Ok(None);
+    };
+    if !path.is_empty()
+        && let Some((size, _)) = g.stat(&key(lib, &path)).await?
+    {
+        return Ok(Some(size));
+    }
+    let prefix = if path.is_empty() {
+        key(lib, "")
+    } else {
+        format!("{}/", key(lib, &path))
+    };
+    Ok(Some(
+        g.list_all(&prefix).await?.iter().map(|e| e.size).sum(),
+    ))
+}
+
+/// one folder, one level: [{name, type, mtime, size}], as nginx's autoindex
+/// json has it; nothing under a folder is no folder (404), and the trash is
+/// not listed
+async fn listing(g: &Gate, lib: &str, path: &str) -> Result<Response> {
+    let prefix = if path.is_empty() {
+        key(lib, "")
+    } else {
+        format!("{}/", key(lib, path))
+    };
+    let (files, dirs) = g.list_level(&prefix).await?;
+    if !path.is_empty() && files.is_empty() && dirs.is_empty() {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    }
+    let mut out = Vec::new();
+    for d in dirs {
+        let rel = d.trim_start_matches(&prefix).trim_end_matches('/');
+        if rel.is_empty() || (path.is_empty() && rel == TRASH) {
+            continue;
+        }
+        out.push(serde_json::json!({ "name": rel, "type": "directory", "mtime": "" }));
+    }
+    for f in files {
+        let rel = f.key.trim_start_matches(&prefix);
+        if rel.is_empty() {
+            continue;
+        }
+        out.push(serde_json::json!({
+            "name": rel,
+            "type": "file",
+            "mtime": dav_date(&f.modified),
+            "size": f.size,
+        }));
+    }
+    Ok(axum::Json(out).into_response())
 }
 
 async fn propfind(g: &Gate, lib: &str, path: &str, headers: &HeaderMap) -> Result<Response> {

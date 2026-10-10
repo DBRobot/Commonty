@@ -64,8 +64,9 @@ pub(crate) async fn page(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
 /// address, this person's address there, the passkey relying party, and the
 /// verification code museum takes for addresses of ours.
 pub(crate) async fn config(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let Some(user) = app.signed_in(cookie) else {
+    // a browser's session, or a device's token: the app's own copy of
+    // Photos asks with the device's (app/src/local.rs)
+    let Some(user) = app.identify(&headers, "access") else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !app.member(&user) {
@@ -282,6 +283,9 @@ pub(crate) async fn handoff_take(
 #[derive(Deserialize)]
 pub(crate) struct AppSignin {
     token: String,
+    /// where the window goes after: Photos (the default), or the app's own
+    /// Passwords page, which then opens the vault the app serves itself
+    then: Option<String>,
 }
 
 /// The app's window signed in as the person the app's device signs for: its
@@ -308,9 +312,21 @@ pub(crate) async fn app_signin(
     if !app.member(&user) || user == pages::DEMO_USER {
         return StatusCode::FORBIDDEN.into_response();
     }
-    // on to the Photos step; the browser keeps the fragment the app's page
-    // put on this address, which is where the password rides, never here
-    let mut r = Redirect::to("/_dd/photos").into_response();
+    // On to the Photos step; the browser keeps the fragment the app's page
+    // put on this address, which is where the password rides, never here.
+    // Or back into the app, to its Passwords page: the vault's sign-in comes
+    // to this gate and wants the session this just made. Only the app's own
+    // two addresses, as the form came from one of them.
+    let mut r = match f.then.as_deref() {
+        Some("vault") => {
+            let app_origin = match origin {
+                Some("http://commonty.localhost") => "http://commonty.localhost",
+                _ => "commonty://localhost",
+            };
+            Redirect::to(&format!("{app_origin}/_dd/app/vault?signed=1")).into_response()
+        }
+        _ => Redirect::to("/_dd/photos").into_response(),
+    };
     // the app's session belongs to the device that signed it in: removing
     // the device ends it (signins.rs)
     let (set, id, exp) = app.sessions.issue_noted(&user);

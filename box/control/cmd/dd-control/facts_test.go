@@ -17,3 +17,13 @@ func TestTheHeartbeatCarriesWhatTheFleetPagesShow(t *testing.T) {
 		t.Fatalf("facts: %v", f)
 	}
 }
+
+func TestUsageFactsAreNamedAndBounded(t *testing.T) {
+	d := t.TempDir()
+	u := filepath.Join(d, "usage-code.prom")
+	_ = os.WriteFile(u, []byte("dd_usage{service=\"code\",member=\"tom\"} 2048\ndd_usage{service=\"code\",member=\"bad name\"} 1\ndd_usage{service=\"../x\",member=\"tom\"} 1\n"), 0o644)
+	f := promFacts(u)
+	if f["usage/code/tom"] != 2048 || len(f) != 1 {
+		t.Fatalf("facts: %v", f)
+	}
+}

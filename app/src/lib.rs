@@ -5,6 +5,7 @@
 
 mod account;
 mod browser;
+mod local;
 mod net;
 mod paths;
 mod photos;
@@ -54,6 +55,9 @@ pub fn run() {
         ])
         .setup(|app| {
             paths::init(app.handle());
+            // Photos and Passwords, served to the app's windows from its
+            // own release (local.rs)
+            local::start(app.handle());
             // GTK draws the title bar itself on Wayland, with the buttons its
             // settings name. Built with Nix, the app brings GNOME's own
             // default - a close button alone - and never sees the one the

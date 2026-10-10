@@ -117,8 +117,8 @@ in
         };
         script = ''
           garage meta snapshot
-          # three days of them: the db is small, its snapshots are not free
-          find /var/lib/garage/meta/snapshots -mindepth 1 -maxdepth 1 -mtime +3 -exec rm -rf {} +
+          # a week of them, as long as the blocks' own snapshots (garage.nix)
+          find /var/lib/garage/meta/snapshots -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} +
         '';
       };
     }
@@ -163,7 +163,13 @@ in
       };
 
       systemd.services.restic-backups-dd = {
-        after = [ "network-online.target" ] ++ lib.optionals garage [ "garage-setup.service" "garage-meta-snapshot.service" ];
+        after = [
+          "network-online.target"
+        ]
+        ++ lib.optionals garage [
+          "garage-setup.service"
+          "garage-meta-snapshot.service"
+        ];
         wants = [ "network-online.target" ];
         requires = lib.optionals garage [ "garage-meta-snapshot.service" ];
         # samples, not events: the box dashboard shows the age of the last

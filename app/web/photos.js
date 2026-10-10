@@ -11,12 +11,10 @@ async function state() {
   return r.json();
 }
 
+// the app's own copy of Photos, on this computer; the password rides after
+// the #, which no server is sent
 function go(s) {
-  const f = $('signin');
-  // the fragment rides the redirect to the Photos page; no server sees it
-  f.action = `${s.action}#${s.hash}`;
-  $('token').value = s.token;
-  f.submit();
+  location.replace(s.url);
 }
 
 async function poll() {

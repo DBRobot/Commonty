@@ -62,7 +62,7 @@ fn plain(status: StatusCode, text: &str) -> Response<Vec<u8>> {
 /// and asked of every request to the app's own routes (/_dd/app/...): what
 /// speaks for the device's keys is a page the app wrote, and nothing a box
 /// or a link could put in front of it.
-fn launch_secret() -> &'static str {
+pub(crate) fn launch_secret() -> &'static str {
     static S: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     S.get_or_init(|| {
         let mut b = [0u8; 24];
@@ -149,7 +149,11 @@ async fn serve<R: Runtime>(
     if path.starts_with("/_dd/app/")
         && !matches!(
             path.as_str(),
-            "/_dd/app/photos" | "/_dd/app/photos.js" | "/_dd/app/open"
+            "/_dd/app/photos"
+                | "/_dd/app/photos.js"
+                | "/_dd/app/open"
+                | "/_dd/app/vault"
+                | "/_dd/app/vault.js"
         )
         && !has_secret(&req)
     {
@@ -185,6 +189,17 @@ async fn serve<R: Runtime>(
     // its script: without this route the page never got past "Opening"
     if path == "/_dd/app/photos.js" {
         return Ok(asset(app, "photos.js"));
+    }
+    // Passwords in this window (local.rs): the page, its script, and what
+    // it asks
+    if path == "/_dd/app/vault" {
+        return Ok(page_asset(app, "vault.html"));
+    }
+    if path == "/_dd/app/vault.js" {
+        return Ok(asset(app, "vault.js"));
+    }
+    if path == "/_dd/app/vault/state" {
+        return crate::local::vault_state(app);
     }
     if path == "/_dd/app/photos/state" {
         return crate::photos::state(app).await;
@@ -416,7 +431,7 @@ async fn library<R: Runtime>(app: &AppHandle<R>) -> Result<Response<Vec<u8>>, St
 }
 
 /// a query value as encodeURIComponent wrote it
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
