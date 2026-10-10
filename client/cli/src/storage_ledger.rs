@@ -169,16 +169,27 @@ pub async fn view(
     let roles: BTreeMap<String, Vec<String>> =
         serde_json::from_slice(&std::fs::read(roles).with_context(|| roles.display().to_string())?)
             .context("the boxes' roles")?;
-    let s: Value = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()?
-        .get(format!("{}/state", control.trim_end_matches('/')))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
-        .context("the control plane's state")?;
+    let asked = async {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?
+            .get(format!("{}/state", control.trim_end_matches('/')))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Value>()
+            .await
+            .context("the control plane's state")
+    };
+    // the control plane not answering (restarting under a switch) is next
+    // time: the last count stands, and a failure here would fail the switch
+    let s = match asked.await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("the control plane did not answer ({e:#}); counting next time");
+            return Ok(());
+        }
+    };
     let doc = sum(&s, budget, &roles)?;
     // whole or not at all: the gate reads it while this writes
     let tmp = out.with_extension("tmp");

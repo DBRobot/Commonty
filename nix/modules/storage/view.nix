@@ -34,6 +34,9 @@ in
     systemd.services.dd-storage-view = {
       description = "Add up what each member keeps, from every box's heartbeat";
       after = [ "dd-control.service" ];
+      # a switch never runs it: the control plane restarts under the same
+      # switch, and a failure here would roll the release back (docs/ci.md)
+      restartIfChanged = false;
       serviceConfig = {
         Type = "oneshot";
         User = user;
@@ -65,7 +68,9 @@ in
     systemd.timers.dd-storage-view = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = "2min";
+        # from the timer starting, not boot: a switch that adds it starts it
+        # long after boot, and OnBootSec would fire at once (release 224)
+        OnActiveSec = "2min";
         OnUnitActiveSec = "10min";
       };
     };
