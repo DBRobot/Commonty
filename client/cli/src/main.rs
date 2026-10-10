@@ -260,6 +260,10 @@ enum Command {
         /// each member's allowance, in GB
         #[arg(long)]
         budget_gb: u64,
+        /// the release's boxes and their roles ({"node1": ["photos", ...]}):
+        /// which box may count what
+        #[arg(long)]
+        roles: std::path::PathBuf,
         #[arg(long)]
         out: std::path::PathBuf,
     },
@@ -1636,7 +1640,7 @@ async fn main() -> Result<()> {
                 ente_origin,
                 password_file,
                 photos_suffix,
-                budget: budget_gb * 1_000_000_000,
+                budget: budget_gb.saturating_mul(1_000_000_000),
                 view,
                 facts_out,
             })
@@ -1645,9 +1649,16 @@ async fn main() -> Result<()> {
         Command::StorageView {
             control,
             budget_gb,
+            roles,
             out,
         } => {
-            storage_ledger::view(&control, budget_gb * 1_000_000_000, &out).await?;
+            storage_ledger::view(
+                &control,
+                budget_gb.saturating_mul(1_000_000_000),
+                &roles,
+                &out,
+            )
+            .await?;
         }
 
         Command::PhotosDemo {

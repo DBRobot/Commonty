@@ -50,6 +50,13 @@ in
           "storage-view"
           "--budget-gb"
           (toString cfg.budgetGb)
+          # which box may count what: the release's list, not a box's word
+          "--roles"
+          (toString (
+            pkgs.writeText "box-roles.json" (
+              builtins.toJSON (lib.mapAttrs (_: b: b.roles) (lib.importJSON ../../../fleet/boxes.json))
+            )
+          ))
           "--out"
           "${dir}/ledger.json"
         ];
