@@ -1169,6 +1169,9 @@
       # the downloads for a version: `(appRelease "1.2.3").linux`
       legacyPackages.${system} = {
         inherit (rust) appRelease;
+        # which runner boxes can take each of the runner's variants, from its
+        # needs and the boxes' reports: CI places its jobs by this
+        ciRunners = import ./nix/lib/ci-runners.nix { lib = nixpkgs.lib; };
         # The four downloads still evaluate: their recipes only, never a build
         # of them (that is the boxes', after a release). Not one of `checks`:
         # the Linux image's package list and the web bundle are made by a

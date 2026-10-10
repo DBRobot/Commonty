@@ -41,6 +41,9 @@ jobs:
       builders: ${{ steps.boxes.outputs.builders }}
       hosts_list: ${{ steps.boxes.outputs.hosts_list }}
       builders_list: ${{ steps.boxes.outputs.builders_list }}
+      # the box flake_check runs on: one with room for it (the runner's
+      # needs, nix/lib/ci-runners.nix); any runner when none has
+      flake_check_on: ${{ steps.boxes.outputs.flake_check_on }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
         with:
@@ -61,6 +64,10 @@ jobs:
           ].join("\n") + "\n");
           console.log("hosts:", hosts.join(" "), " builders:", builders.join(" "));
           EOF
+          fits=$(nix eval --json .#legacyPackages.x86_64-linux.ciRunners --apply 'r: r.flake-check')
+          on=$(node -e 'const f = JSON.parse(process.argv[1]); console.log(f.length ? f[0] : "nix")' "$fits")
+          echo "flake_check_on=$on" >> "$GITHUB_OUTPUT"
+          echo "flake check on: $on (fits: $fits)"
 
       # Allowlists, not denylists: a new directory should not silently cost
       # a system build until someone remembers to exclude it. A wrong list
@@ -119,9 +126,7 @@ jobs:
   flake_check:
     needs: files_modified
     if: ${{ needs.files_modified.outputs.nix == 'true' }}
-    # evaluating the flake takes ~11G: not on a box with less beside a vm
-    # test (node2 ran out under it). Placement by memory replaces this.
-    runs-on: node1
+    runs-on: ${{ needs.files_modified.outputs.flake_check_on }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       # evaluate everything, build nothing: the vm tests are built by their
