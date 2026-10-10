@@ -36,9 +36,6 @@
   # the storage ledger's account, made for it once (its password: sops
   # ente-storage-password)
   dd.photos.ledger = 1580559962386440;
-  # each member's allowance across every service; the ledger runs where
-  # Photos does, since holding Photos to it is most of its work
-  dd.storage.budgetGb = 200;
 
   dd.home.services = [
     {

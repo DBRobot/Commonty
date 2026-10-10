@@ -1,9 +1,8 @@
-# One allowance per member across every service (box/verify/src/storage.rs,
-# client/cli/src/storage_ledger.rs). A unit of its own counts, every
-# hour: it holds a Photos admin login, which the gate - the box's front
-# door - never does, and reads no database: each service counts
-# its own (storage/usage.nix). The gate reads
-# what it writes, to show it and to hold library uploads to it.
+# The box with Photos counts what each member keeps in Photos and in the
+# libraries, into its heartbeat (client/cli/src/storage_ledger.rs), and
+# holds each member's Photos to what the rest of their allowance leaves,
+# from the fleet's count (storage/view.nix). A unit of its own: it holds a
+# Photos admin login, which the gate - the box's front door - never does.
 {
   config,
   lib,
@@ -19,20 +18,7 @@ let
   dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
 in
 {
-  options.dd.storage.budgetGb = lib.mkOption {
-    type = lib.types.nullOr lib.types.int;
-    default = null;
-    description = "each member's allowance across every service, in GB; null: no ledger and no allowance";
-  };
-
   config = lib.mkIf (cfg.budgetGb != null) {
-    users.users.${user} = {
-      isSystemUser = true;
-      group = user;
-      # the services' own counts (storage/usage.nix)
-      extraGroups = [ "dd-usage" ];
-    };
-    users.groups.${user} = { };
     sops.secrets.ente-storage-password.owner = user;
 
     # It once had a database login with grants on the forge's and the
@@ -63,8 +49,7 @@ in
       description = "Count what each member keeps, and hold Photos to what is left";
       after = [
         "dd-verify.service"
-        "dd-usage-forgejo.service"
-        "dd-usage-vaultwarden.service"
+        "dd-storage-view.service"
       ];
       serviceConfig = {
         Type = "oneshot";
@@ -84,19 +69,17 @@ in
           "https://api.${base}"
           "--photos-suffix"
           "@users.${base}"
-          "--vault-suffix"
-          "@${base}"
           "--password-file"
           config.sops.secrets.ente-storage-password.path
-          "--usage"
-          "code=/var/lib/dd-usage/forgejo/usage.tsv"
-          "--usage"
-          "passwords=/var/lib/dd-usage/vaultwarden/usage.tsv"
           "--budget-gb"
           (toString cfg.budgetGb)
-          "--out"
+          "--view"
           "${dir}/ledger.json"
+          "--facts-out"
+          "${dir}/usage.prom"
         ];
+        # into this box's heartbeat: as root, where the facts are
+        ExecStartPost = "+${pkgs.coreutils}/bin/install -m 0644 ${dir}/usage.prom /var/lib/dd-facts/usage-ledger.prom";
       };
     };
     systemd.timers.dd-storage-ledger = {
@@ -107,8 +90,5 @@ in
       };
     };
 
-    # the gate reads the count: the page, and uploads held to it
-    users.users.dd-verify.extraGroups = [ user ];
-    systemd.services.dd-verify.environment.VERIFY_STORAGE_LEDGER = "${dir}/ledger.json";
   };
 }

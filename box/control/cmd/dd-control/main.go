@@ -217,7 +217,8 @@ func facts() map[string]float64 {
 	// write (/var/lib/dd-facts): the release it runs, how its agent's last
 	// run ended, its last good backup. Here, a box's word reaches the
 	// fleet without any box reading another (box/verify/src/fleet.rs).
-	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom") {
+	usage, _ := filepath.Glob("/var/lib/dd-facts/usage-*.prom")
+	for name, v := range promFacts(append([]string{"/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom"}, usage...)...) {
 		f[name] = v
 	}
 	return f
@@ -226,6 +227,39 @@ func facts() map[string]float64 {
 // promFacts reads the few samples the heartbeat carries from text-format
 // metric files: release (dd_agent_counter), agent_ok (dd_agent_info's
 // result: 1 ok, 0 refused) and backup_last (dd_backup_last_success_seconds)
+// maxFacts bounds what one heartbeat carries, members and services and all
+const maxFacts = 512
+
+// usageKey turns dd_usage{service="code",member="tom"} into "usage/code/tom",
+// names of letters, digits, '.', '_' and '-' only
+func usageKey(metric string) (string, bool) {
+	labels := map[string]string{}
+	inner := strings.TrimSuffix(strings.TrimPrefix(metric, "dd_usage{"), "}")
+	for _, kv := range strings.Split(inner, ",") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			return "", false
+		}
+		labels[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"`)
+	}
+	svc, member := labels["service"], labels["member"]
+	ok := func(s string) bool {
+		if s == "" || len(s) > 64 {
+			return false
+		}
+		for _, c := range s {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
+				return false
+			}
+		}
+		return true
+	}
+	if !ok(svc) || !ok(member) {
+		return "", false
+	}
+	return "usage/" + svc + "/" + member, true
+}
+
 func promFacts(files ...string) map[string]float64 {
 	out := map[string]float64{}
 	for _, file := range files {
@@ -243,6 +277,21 @@ func promFacts(files ...string) map[string]float64 {
 			}
 			v, err := strconv.ParseFloat(fs[len(fs)-1], 64)
 			if err != nil {
+				continue
+			}
+			// what a member keeps in a service on this box, as the service
+			// counted it (nix/modules/storage/usage.nix, the ledger): every
+			// box's gate adds these up across the fleet for the allowance
+			if strings.HasPrefix(l, "dd_usage{") {
+				// the labels whole, up to their closing brace: a value with
+				// a space in it is not split into a shorter, valid name
+				end := strings.Index(l, "}")
+				if end < 0 || strings.TrimSpace(l[end+1:]) != fs[len(fs)-1] {
+					continue
+				}
+				if k, ok := usageKey(l[:end+1]); ok && len(out) < maxFacts {
+					out[k] = v
+				}
 				continue
 			}
 			switch name := strings.SplitN(fs[0], "{", 2)[0]; name {

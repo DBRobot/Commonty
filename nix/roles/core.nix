@@ -37,6 +37,7 @@ in
     ../modules/observe/disks.nix
     ../modules/box/zfs-datasets.nix
     ../modules/storage/usage.nix
+    ../modules/storage/view.nix
     ../modules/storage/postgres-isolation.nix
     ../modules/storage/postgres-backup.nix
     ../modules/storage/backup.nix
