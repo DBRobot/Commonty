@@ -181,7 +181,7 @@ signed), but an hour into the builds and with the release held up. So the
 laptop checks every night:
 
 ```
-dd release app-check            the app at main, at version 0.0.0
+dd release app-check            the app at main, at version 0.0.1
   the same paths as the last check that passed?  ─► nothing to do (seconds)
   otherwise: a check order (build-check.json, never in the way of a
   release's build-order.json), two boxes build it and vouch, as a release
@@ -234,7 +234,7 @@ code rises with it, so each release installs as an update.
   lock (it runs the real build behind a recording proxy, about twenty
   minutes):
 
-      nix build --impure --expr '((builtins.getFlake "git+file://'$PWD'").legacyPackages.x86_64-linux.appRelease "0.0.0").android.mitmCache.updateScript'
+      nix build --impure --expr '((builtins.getFlake "git+file://'$PWD'").legacyPackages.x86_64-linux.appRelease "0.0.1").android.mitmCache.updateScript'
       ./result
 
 - **A pinned download** (AppImage tools, runtime, NSIS plugin, Microsoft's
