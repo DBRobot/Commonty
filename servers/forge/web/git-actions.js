@@ -75,11 +75,17 @@ route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
 // ---- one run
 
 // the run by its number: the forge asks by id, which runs a fixed distance
-// ahead of the number on this forge; check, and look further if not
+// ahead of the number on this forge; check, and look further if not. The
+// newest run says how far: asked with a page, or the forge ignores the
+// limit and sends every run there has ever been
+const gap = new Map();
 async function runByIndex(r, index) {
-  const { workflow_runs: first = [] } = await api(`/repos/${r.full_name}/actions/runs${q({ limit: 1 })}`);
-  if (first[0]) {
-    const guess = await api(`/repos/${r.full_name}/actions/runs/${index + first[0].id - first[0].index_in_repo}`).catch(() => null);
+  if (!gap.has(r.id)) {
+    const { workflow_runs: first = [] } = await api(`/repos/${r.full_name}/actions/runs${q({ page: 1, limit: 1 })}`);
+    if (first[0]) gap.set(r.id, first[0].id - first[0].index_in_repo);
+  }
+  if (gap.has(r.id)) {
+    const guess = await api(`/repos/${r.full_name}/actions/runs/${index + gap.get(r.id)}`).catch(() => null);
     if (guess?.index_in_repo === index) return guess;
   }
   for (let page = 1; page <= 20; page++) {
@@ -100,21 +106,33 @@ async function jobsOf(r, run, fresh = false) {
     all.push(...s);
     if (s.length < 50) break;
   }
+  // by name: a run started again posts every job's statuses again, and the
+  // newest says where each job is
   const jobs = new Map();
   for (const s of all.sort((a, b) => a.id - b.id)) {
     const m = (s.target_url || '').match(/\/actions\/runs\/(\d+)\/jobs\/(\d+)/);
     if (!m || Number(m[1]) !== run.index_in_repo) continue;
     const name = s.context.replace(/ \((pull_request|push|schedule|workflow_dispatch)\)$/, '');
-    const prev = jobs.get(Number(m[2]));
-    // when it began and ended, from the statuses the forge posted as it went
-    const started = /started running/i.test(s.description || '') ? s.created_at : prev?.started;
-    const ended = s.status !== 'pending' ? s.created_at : null;
+    const prev = jobs.get(name);
     // the forge says pending for waiting, blocked and running alike: its
     // words tell them apart, and only a job a runner has picked up is running
-    const state = s.status !== 'pending' ? s.status
-      : /started running/i.test(s.description || '') ? 'running'
-      : /blocked/i.test(s.description || '') ? 'blocked' : 'waiting';
-    jobs.set(Number(m[2]), { index: Number(m[2]), name, leaf: name.split(' / ').pop(), state, description: s.description, started, ended });
+    const running = /started running/i.test(s.description || '');
+    const state = s.status !== 'pending' ? s.status : running ? 'running' : /blocked/i.test(s.description || '') ? 'blocked' : 'waiting';
+    // when it began and ended, from the statuses the forge posted as it
+    // went; waiting again is a new attempt, and the last one's times go
+    const started = running ? s.created_at : state === 'waiting' || state === 'blocked' ? null : prev?.started;
+    const ended = s.status !== 'pending' ? s.created_at : null;
+    jobs.set(name, { index: Number(m[2]), name, leaf: name.split(' / ').pop(), state, description: s.description, started, ended });
+  }
+  // a run that has stopped leaves nothing running: what never said it
+  // finished was cancelled with it
+  if (DONE.includes(run.status)) {
+    const at = run.stopped && new Date(run.stopped) >= new Date(run.started) ? run.stopped : run.updated;
+    for (const j of jobs.values()) {
+      if (DONE.includes(j.state) || j.state === 'error') continue;
+      j.state = 'cancelled';
+      if (j.started) j.ended = at;
+    }
   }
   return [...jobs.values()].sort((a, b) => a.index - b.index);
 }
@@ -189,6 +207,20 @@ async function graph(r, run) {
     return inner.filter((id) => !edges.some(([a, b]) => a === id && inner.includes(b)));
   };
   await expand(top.src, top.dir, '', []);
+  // a line only where nothing else already says it: a job that waits on
+  // every other one (ci_ok) draws from the last ones, not from all of them
+  const after = (a) => edges.filter(([x]) => x === a).map(([, y]) => y);
+  const reaches = (from, to, skip) => {
+    const seen = new Set(), todo = after(from).filter((y) => y !== skip);
+    while (todo.length) {
+      const y = todo.pop();
+      if (y === to) return true;
+      if (!seen.has(y)) { seen.add(y); todo.push(...after(y)); }
+    }
+    return false;
+  };
+  const direct = edges.filter(([a, b]) => !reaches(a, b, b));
+  edges.splice(0, edges.length, ...direct);
   // depth: the longest line of waiting before a job
   const depth = new Map();
   const d = (id, seen = new Set()) => {
@@ -236,27 +268,68 @@ function drawGraph(r, run, g, jobs) {
     return el('div', { class: cls, 'data-id': n.id }, head,
       ...(js.length > 1 || (js.length === 1 && !one) ? js.map((j) => el('a', { class: 'sub', href: `/${r.full_name}/actions/runs/${run.index_in_repo}${q({ job: j.index })}` }, statusDot(j.state), el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: j.leaf.replace(`${n.id} `, '') || j.leaf }), el('small', {}, took(j))) ) : []));
   };
-  const colEls = [...cols.keys()].sort((a, b) => a - b).map((k) => {
+  const order = [...cols.keys()].sort((a, b) => a - b);
+  const colEls = order.map((k) => {
     const groups = [...new Set(cols.get(k).map((n) => n.group))];
     return el('div', { class: 'col' }, ...groups.flatMap((gname) => [gname && groups.length > 0 ? el('div', { class: 'grp', text: gname }) : null, ...cols.get(k).filter((n) => n.group === gname).map(card)]));
   });
-  dag.append(edgesSvg, el('div', { class: 'cols' }, ...colEls));
+  const colsEl = el('div', { class: 'cols' }, ...colEls);
+  dag.append(edgesSvg, colsEl);
+  // A line from a job to one that waits on it. One that crosses columns
+  // goes through the space between the cards there, never under one.
   const drawEdges = () => {
     if (!dag.isConnected) return;
     const box = dag.getBoundingClientRect();
-    const at = (id) => dag.querySelector(`[data-id="${CSS.escape(id)}"]`)?.getBoundingClientRect();
+    const X = (x) => x - box.left + dag.scrollLeft, Y = (y) => y - box.top + dag.scrollTop;
+    const rect = (id) => dag.querySelector(`[data-id="${CSS.escape(id)}"]`)?.getBoundingClientRect();
+    const colOf = new Map();
+    const spans = colEls.map((c, i) => {
+      const cards = [...c.querySelectorAll(':scope > .job')];
+      for (const j of cards) colOf.set(j.dataset.id, i);
+      const r = c.getBoundingClientRect();
+      return { left: X(r.left), right: X(r.right), cards: cards.map((j) => { const b = j.getBoundingClientRect(); return [Y(b.top), Y(b.bottom)]; }) };
+    });
+    // the nearest place at about this height where the column has no card
+    const clear = (span, y) => {
+      const pad = 7;
+      const hit = span.cards.find(([t, b]) => y > t - pad && y < b + pad);
+      if (!hit) return y;
+      const spots = [span.cards[0][0] - pad * 2, span.cards[span.cards.length - 1][1] + pad * 2];
+      for (let i = 1; i < span.cards.length; i++) spots.push((span.cards[i - 1][1] + span.cards[i][0]) / 2);
+      return spots.reduce((a, b) => (Math.abs(b - y) < Math.abs(a - y) ? b : a));
+    };
+    const curve = (x1, y1, x2, y2) => { const m = (x1 + x2) / 2; return `C${m},${y1} ${m},${y2} ${x2},${y2}`; };
     edgesSvg.innerHTML = g.edges.map(([a, b]) => {
-      const p = at(a), qb = at(b);
+      const p = rect(a), qb = rect(b);
       if (!p || !qb) return '';
-      const x1 = p.right - box.left + dag.scrollLeft, y1 = p.top + 18 - box.top;
-      const x2 = qb.left - box.left + dag.scrollLeft, y2 = qb.top + 18 - box.top, mid = (x1 + x2) / 2;
+      let x = X(p.right), y = Y(p.top) + 18;
+      const x2 = X(qb.left), y2 = Y(qb.top) + 18;
+      let d = `M${x},${y}`;
+      for (let c = colOf.get(a) + 1; c < colOf.get(b); c++) {
+        const s = spans[c];
+        const want = y + ((y2 - y) * (s.left - x)) / Math.max(1, x2 - x);
+        const yc = clear(s, want);
+        d += ` ${curve(x, y, s.left, yc)} L${s.right},${yc}`;
+        x = s.right;
+        y = yc;
+      }
+      d += ` ${curve(x, y, x2, y2)}`;
       const live = dag.querySelector(`[data-id="${CSS.escape(b)}"]`)?.classList.contains('working');
-      return `<path class="${live ? 'live' : ''}" d="M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}"/>`;
+      return `<path class="${live ? 'live' : ''}" d="${d}"/>`;
     }).join('');
   };
-  requestAnimationFrame(drawEdges);
-  const onResize = () => (dag.isConnected ? drawEdges() : removeEventListener('resize', onResize));
-  addEventListener('resize', onResize);
+  // again whenever a card changes size (a job's rows, a time growing, the
+  // window): lines drawn once drift away from the cards they join
+  let queued = false;
+  const soon = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; drawEdges(); }); } };
+  if (typeof ResizeObserver !== 'undefined') {
+    const watcher = new ResizeObserver(() => (dag.isConnected ? soon() : watcher.disconnect()));
+    watcher.observe(colsEl);
+    for (const c of colEls) watcher.observe(c);
+    watcher.observe(dag);
+    dag.stop = () => watcher.disconnect();
+  }
+  soon();
   return dag;
 }
 
@@ -271,16 +344,6 @@ function logLines(src) {
   });
 }
 
-async function attemptOf(r, run, job) {
-  let a = 1;
-  for (let n = 2; n <= 5; n++) {
-    const ok = await fetch(`/${r.full_name}/actions/runs/${run.index_in_repo}/jobs/${job}/attempt/${n}/logs`, { method: 'HEAD', credentials: 'same-origin' }).then((x) => x.ok).catch(() => false);
-    if (!ok) break;
-    a = n;
-  }
-  return a;
-}
-
 route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m, params, current }) => {
   const r = await repo(m[1], m[2]);
   if (!current()) return;
@@ -291,8 +354,9 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
   let run = await runByIndex(r, index);
   if (!current()) return;
   setTitle(`Run ${index}`, r.full_name);
-  let jobs = await jobsOf(r, run);
-  const g = await graph(r, run).catch(() => null);
+  // the graph only in its own view, and asked for alongside the jobs
+  // the log view asks the forge now: whether to keep reading the log hangs on it
+  let [jobs, g] = await Promise.all([jobsOf(r, run, view === 'log'), view === 'graph' ? graph(r, run).catch(() => null) : null]);
   const pane = el('div');
   const summary = el('div', { class: 'box gap' });
   const drawSummary = () => summary.replaceChildren(el('div', { class: 'hrow', style: 'padding:10px 14px;gap:22px' },
@@ -317,6 +381,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
     const draw = () => {
       const was = pane.querySelector('.dag');
       const x = was?.scrollLeft || 0;
+      was?.stop?.();
       pane.replaceChildren(el('div', { class: 'box' },
       el('header', {}, el('b', { text: run.workflow_id }), el('span', { class: 'small muted', text: `on: ${run.event}` }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: 'a job starts when every job before it has passed' })),
       g ? drawGraph(r, run, g, jobs) : el('div', { class: 'empty', text: 'The workflow file could not be read; the jobs are under Jobs and logs.' })));
@@ -339,31 +404,68 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
 
   // jobs and a log
   const job = Number(jobParam);
-  const current_ = jobs.find((j) => j.index === job);
-  const side = el('aside', { class: 'jobs box', style: 'padding:8px' }, ...jobs.map((j) => el('a', { href: `/${r.full_name}/actions/runs/${index}${q({ job: j.index })}`, 'aria-current': j.index === job ? 'page' : null }, statusDot(j.state), el('span', { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: j.leaf }), el('small', { class: 'muted' }, took(j)))));
   const log = el('div', { class: 'log' }, ghost(4));
   const follow = el('input', { type: 'checkbox', checked: true });
-  const attempt = await attemptOf(r, run, job);
-  const url = `/${r.full_name}/actions/runs/${index}/jobs/${job}/attempt/${attempt}/logs`;
-  pane.replaceChildren(el('div', { class: 'two left', style: 'grid-template-columns:280px minmax(0,1fr)' }, side,
-    el('div', { class: 'box', style: 'min-width:0' },
-      el('header', {}, statusDot(current_?.state), el('b', { text: current_?.leaf || `Job ${job}` }), el('span', { class: 'muted small' }, current_?.started ? took(current_) : current_?.description || ''), el('span', { class: 'spacer' }), el('label', { class: 'small hrow', style: 'gap:4px' }, follow, 'Follow'), el('a', { class: 'btn plain', href: url, target: '_blank', rel: 'noopener', text: 'Raw' })),
-      log)));
-  let shown = 0;
-  const pull = async () => {
-    if (!alive()) return;
-    const src = await text(url).catch((e) => (e.status === 404 ? null : ''));
-    if (src === null) {
-      log.replaceChildren(el('div', { class: 't', text: 'No log yet: the job is waiting for a runner, or for the jobs before it.' }));
-    } else if (src.length !== shown) {
-      if (!shown) log.replaceChildren();
-      log.append(...logLines(src.slice(shown)));
-      shown = src.length;
-      if (follow.checked) log.scrollTop = log.scrollHeight;
-    }
-    jobs = await jobsOf(r, run, true);
+  const side = el('aside', { class: 'jobs box', style: 'padding:8px' });
+  const head = el('header');
+  const raw = el('a', { class: 'btn plain', target: '_blank', rel: 'noopener', text: 'Raw' });
+  const drawJobs = () => {
     const me = jobs.find((j) => j.index === job);
-    if (me && !DONE.includes(me.state)) timer = setTimeout(pull, 3000);
+    side.replaceChildren(...jobs.map((j) => el('a', { href: `/${r.full_name}/actions/runs/${index}${q({ job: j.index })}`, 'aria-current': j.index === job ? 'page' : null }, statusDot(j.state), el('span', { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: j.leaf }), el('small', { class: 'muted' }, took(j)))));
+    head.replaceChildren(statusDot(me?.state), el('b', { text: me?.leaf || `Job ${job}` }), el('span', { class: 'muted small' }, me?.started ? took(me) : me?.description || ''), el('span', { class: 'spacer' }), el('label', { class: 'small hrow', style: 'gap:4px' }, follow, 'Follow'), raw);
+  };
+  drawJobs();
+  pane.replaceChildren(el('div', { class: 'two left', style: 'grid-template-columns:280px minmax(0,1fr)' }, side,
+    el('div', { class: 'box', style: 'min-width:0' }, head, log)));
+  // the forge's changes move the list; the log is asked for while the job runs
+  watch(r.id, alive, async (changes) => {
+    if (!changes.some((c) => c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) return;
+    try {
+      [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`, { fresh: true }), jobsOf(r, run, true)]);
+      if (!alive()) return;
+      drawSummary();
+      drawJobs();
+      if (!timer && pull) pull();
+    } catch { /* the next change asks again */ }
+  });
+  // the latest attempt: each one the forge has a log for, asked all at once
+  const tries = await Promise.all([2, 3, 4, 5].map((n) => fetch(`/${r.full_name}/actions/runs/${index}/jobs/${job}/attempt/${n}/logs`, { method: 'HEAD', credentials: 'same-origin' }).then((x) => x.ok).catch(() => false)));
+  if (!alive()) return;
+  const attempt = tries.lastIndexOf(true) + 2 || 1;
+  const url = `/${r.full_name}/actions/runs/${index}/jobs/${job}/attempt/${attempt}/logs`;
+  raw.href = url;
+  // only what is new each time: the forge answers a range
+  let bytes = 0, pending = '', asking = false;
+  const utf8 = new TextDecoder();
+  const pull = async () => {
+    timer = null;
+    if (!alive() || asking) return;
+    asking = true;
+    const res = await fetch(url, { credentials: 'same-origin', headers: bytes ? { range: `bytes=${bytes}-` } : {} }).catch(() => null);
+    asking = false;
+    if (!alive()) return;
+    if (res?.status === 404 && !bytes) {
+      log.replaceChildren(el('div', { class: 't', text: 'No log yet: the job is waiting for a runner, or for the jobs before it.' }));
+    } else if (res && (res.status === 200 || res.status === 206)) {
+      const chunk = new Uint8Array(await res.arrayBuffer());
+      // the whole log again (the forge ignored the range): drawn afresh
+      if (res.status === 200 && bytes) { bytes = 0; pending = ''; }
+      if (chunk.length) {
+        if (!bytes) log.replaceChildren();
+        bytes += chunk.length;
+        // a line is drawn once it is whole
+        pending += utf8.decode(chunk, { stream: true });
+        const cut = pending.lastIndexOf('\n') + 1;
+        if (cut) {
+          log.append(...logLines(pending.slice(0, cut)));
+          pending = pending.slice(cut);
+          if (follow.checked) log.scrollTop = log.scrollHeight;
+        }
+      }
+    }
+    const me = jobs.find((j) => j.index === job);
+    if (!me || !DONE.includes(me.state)) timer = setTimeout(pull, 3000);
+    else if (pending) { log.append(...logLines(pending)); pending = ''; }
   };
   pull();
 });

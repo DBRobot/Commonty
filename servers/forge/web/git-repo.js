@@ -559,7 +559,18 @@ route(/^\/([^/]+)\/([^/]+)\/activity$/, async ({ m, params, current }) => {
   api(`/repos/${r.full_name}/tags${q({ limit: 50 })}`).then((tags) => {
     if (live()) sTags.textContent = String(tags.filter((t) => t.commit?.created && inSpan(t.commit.created)).length || '—');
   }).catch(() => { sTags.textContent = '—'; });
-  (r.has_actions ? api(`/repos/${r.full_name}/actions/runs${q({ limit: 50 })}`).then((x) => x.workflow_runs || []) : Promise.resolve([])).then((runs) => {
+  // the runs in the span, newest first, a page at a time: without a page
+  // the forge ignores the limit and sends every run there has ever been
+  const runsInSpan = async () => {
+    const all = [];
+    for (let page = 1; page <= 20; page++) {
+      const { workflow_runs: runs = [] } = await api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 50 })}`);
+      all.push(...runs);
+      if (runs.length < 50 || !inSpan(runs[runs.length - 1].created)) break;
+    }
+    return all;
+  };
+  (r.has_actions ? runsInSpan() : Promise.resolve([])).then((runs) => {
     if (!live()) return;
     const done = runs.filter((x) => inSpan(x.created) && ['success', 'failure', 'cancelled'].includes(x.status));
     sRuns.textContent = done.length ? `${Math.round((done.filter((x) => x.status === 'success').length / done.length) * 100)}%` : '—';
