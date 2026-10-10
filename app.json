@@ -11,58 +11,58 @@
       "dd-windows": {
         "apart": 0,
         "by": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ]
       },
       "linux": {
         "apart": 0,
         "by": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ]
       },
       "windows": {
         "apart": 0,
         "by": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ]
       }
     },
-    "commit": "978a30170daea6d63646f01a6fc816f365374f04",
+    "commit": "04c8c118e5c23149420cb084b3f80da01247902a",
     "files": {
       "commonty-setup.exe": {
-        "sha256": "8f37afff901f3c220f8258fa9fe434fbbabaeb629722b9006749a0a1fe15d306",
-        "size": 11231170,
-        "url": "https://commonty.org/download/v0.1.26/commonty-setup.exe"
+        "sha256": "0aea0cfae6e2c7373ff973136bd4601106f25bfc68099b394eee6ac055be996f",
+        "size": 11232524,
+        "url": "https://commonty.org/download/v0.1.27/commonty-setup.exe"
       },
       "commonty.apk": {
-        "sha256": "170e43ba325a6db760c7cfbbc0e47b7e618c51e004029a9d9c35bafe26e359ba",
+        "sha256": "830aab27acb2ef9eb13c9a2a43d5aa0c01e7244179def7ba87dc41fda6e42c7e",
         "size": 95033320,
-        "url": "https://commonty.org/download/v0.1.26/commonty.apk"
+        "url": "https://commonty.org/download/v0.1.27/commonty.apk"
       },
-      "commonty_0.1.26_amd64.AppImage": {
-        "sha256": "17c1bb0b8ec4693d09b8fd453e9fc16a06e16d47f9276cdde9e0c742c0a224d2",
+      "commonty_0.1.27_amd64.AppImage": {
+        "sha256": "96d6d08e80ed33eb1b0186a1e2d552c74dd77f95855dea1baf702f09de5da460",
         "size": 162335224,
-        "url": "https://commonty.org/download/v0.1.26/commonty_0.1.26_amd64.AppImage"
+        "url": "https://commonty.org/download/v0.1.27/commonty_0.1.27_amd64.AppImage"
       },
-      "commonty_0.1.26_amd64.deb": {
-        "sha256": "d4c2a534aaaa661dc713823f53629eee6faff24c2a5a55d0c6106e9342942bbd",
-        "size": 12695200,
-        "url": "https://commonty.org/download/v0.1.26/commonty_0.1.26_amd64.deb"
+      "commonty_0.1.27_amd64.deb": {
+        "sha256": "2e7d7c56331133ccd96bf57a2c68d9b44e1bc992606b454ca8aa06c4388ad8c8",
+        "size": 12698936,
+        "url": "https://commonty.org/download/v0.1.27/commonty_0.1.27_amd64.deb"
       },
       "dd.exe": {
-        "sha256": "4ba837ceb320801c40085f66be0e65bfd4bf196e8f8a77aef82446bf309e1717",
-        "size": 18168832,
-        "url": "https://commonty.org/download/v0.1.26/dd.exe"
+        "sha256": "371fb83403bf35d7bfcb0c3bf300db9d5055a4523f1a5b2aeb245cf8348961ac",
+        "size": 18173440,
+        "url": "https://commonty.org/download/v0.1.27/dd.exe"
       }
     },
     "from": "https://git.commonty.org/david/commonty",
-    "issued": 1791199070,
+    "issued": 1791666584,
     "kind": "app",
-    "tag": "v0.1.26"
+    "tag": "v0.1.27"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "hXWuoiYbIvBI2ApSs2heQfeitLB71xqORgF7a3aiPwkDSUDDvJzoRNVKDyX6XdB3oMHXxNk4HUdT1UJ8/wXbAw=="
+  "signature": "1bFB/YlU04YMLy7PqfJsuqo40d/fKun1xvd8XpfD3Xjt2271jZm6k9A2em+80hz5PNvUTe/Zn1TNd7DxQxiUBg=="
 }

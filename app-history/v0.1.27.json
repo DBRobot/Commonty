@@ -1,0 +1,68 @@
+{
+  "payload": {
+    "built": {
+      "android": {
+        "apart": 0,
+        "by": [
+          "node1",
+          "node2"
+        ]
+      },
+      "dd-windows": {
+        "apart": 0,
+        "by": [
+          "node1",
+          "node2"
+        ]
+      },
+      "linux": {
+        "apart": 0,
+        "by": [
+          "node2",
+          "node1"
+        ]
+      },
+      "windows": {
+        "apart": 0,
+        "by": [
+          "node1",
+          "node2"
+        ]
+      }
+    },
+    "commit": "04c8c118e5c23149420cb084b3f80da01247902a",
+    "files": {
+      "commonty-setup.exe": {
+        "sha256": "0aea0cfae6e2c7373ff973136bd4601106f25bfc68099b394eee6ac055be996f",
+        "size": 11232524,
+        "url": "https://commonty.org/download/v0.1.27/commonty-setup.exe"
+      },
+      "commonty.apk": {
+        "sha256": "830aab27acb2ef9eb13c9a2a43d5aa0c01e7244179def7ba87dc41fda6e42c7e",
+        "size": 95033320,
+        "url": "https://commonty.org/download/v0.1.27/commonty.apk"
+      },
+      "commonty_0.1.27_amd64.AppImage": {
+        "sha256": "96d6d08e80ed33eb1b0186a1e2d552c74dd77f95855dea1baf702f09de5da460",
+        "size": 162335224,
+        "url": "https://commonty.org/download/v0.1.27/commonty_0.1.27_amd64.AppImage"
+      },
+      "commonty_0.1.27_amd64.deb": {
+        "sha256": "2e7d7c56331133ccd96bf57a2c68d9b44e1bc992606b454ca8aa06c4388ad8c8",
+        "size": 12698936,
+        "url": "https://commonty.org/download/v0.1.27/commonty_0.1.27_amd64.deb"
+      },
+      "dd.exe": {
+        "sha256": "371fb83403bf35d7bfcb0c3bf300db9d5055a4523f1a5b2aeb245cf8348961ac",
+        "size": 18173440,
+        "url": "https://commonty.org/download/v0.1.27/dd.exe"
+      }
+    },
+    "from": "https://git.commonty.org/david/commonty",
+    "issued": 1791666584,
+    "kind": "app",
+    "tag": "v0.1.27"
+  },
+  "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
+  "signature": "1bFB/YlU04YMLy7PqfJsuqo40d/fKun1xvd8XpfD3Xjt2271jZm6k9A2em+80hz5PNvUTe/Zn1TNd7DxQxiUBg=="
+}
