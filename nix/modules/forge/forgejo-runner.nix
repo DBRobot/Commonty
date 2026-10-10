@@ -95,12 +95,12 @@ in
       home = "/var/lib/gitea-runner";
     };
     users.groups.forgejo-runner = { };
-    # Caches the jobs keep, which nothing let go of (7.6G on node1): the
-    # checkouts and actions, nix's eval cache, and cargo's shared target
-    # dir. What sits untouched for two weeks goes; the next job rebuilds it.
+    # cargo's shared target dir, which nothing let go of (5.5G on node1):
+    # what sits untouched for two weeks goes, and cargo rebuilds an output
+    # it finds missing. Not the git caches beside it (act's actions, nix's
+    # fetches): aging files inside a git directory leaves it a broken
+    # repository, which failed CI on node2.
     systemd.tmpfiles.rules = [
-      "e /var/lib/gitea-runner/*/.cache/act - - - 14d"
-      "e /var/lib/gitea-runner/*/.cache/nix - - - 14d"
       "e /var/lib/gitea-runner/cargo-target - - - 14d"
     ];
     # (the nixos module registers again by itself when the token or the
