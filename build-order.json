@@ -1,8 +1,8 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "v0.1.27-1-1791663997",
-    "issued": 1791663998,
+    "id": "v0.1.28-1-1791674375",
+    "issued": 1791674375,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -12,19 +12,8 @@
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/frncjiigpsf751zhkfvj9pdiqc3qn7aw-commonty-android-0.1.27",
-        "version": "0.1.27"
-      },
-      {
-        "attr": "legacyPackages.x86_64-linux.appRelease",
-        "builders": [
-          "node1",
-          "node2"
-        ],
-        "name": "dd-windows",
-        "part": "dd-windows",
-        "path": "/nix/store/g81i485hwg8qla1wkry5ix9fm81bs560-dd-windows-0.1.27",
-        "version": "0.1.27"
+        "path": "/nix/store/ha8dav1r5awx457ckh9sazkrq5bb5b3s-commonty-android-0.1.28",
+        "version": "0.1.28"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -32,10 +21,21 @@
           "node2",
           "node1"
         ],
+        "name": "dd-windows",
+        "part": "dd-windows",
+        "path": "/nix/store/y2vi69kvmrfs0fvp2xmcvlijji6myw7i-dd-windows-0.1.28",
+        "version": "0.1.28"
+      },
+      {
+        "attr": "legacyPackages.x86_64-linux.appRelease",
+        "builders": [
+          "node1",
+          "node2"
+        ],
         "name": "linux",
         "part": "linux",
-        "path": "/nix/store/y4v19xmm0xdky50kxsjlc8nnqa4fk2m8-commonty-linux-0.1.27",
-        "version": "0.1.27"
+        "path": "/nix/store/iz9l1vwy49wppz4s6ngsz1lxm9mfp1zn-commonty-linux-0.1.28",
+        "version": "0.1.28"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -45,13 +45,13 @@
         ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/4wwq5yzbjxwxsql86jk9wb6mp3gql42c-commonty-windows-0.1.27",
-        "version": "0.1.27"
+        "path": "/nix/store/cmr7mh2c06kmzm5b5ls1by490issd971-commonty-windows-0.1.28",
+        "version": "0.1.28"
       }
     ],
     "kind": "build-order",
-    "rev": "04c8c118e5c23149420cb084b3f80da01247902a"
+    "rev": "a46e45ce9cda7e84afaa8f17efa3849d74babf68"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "3AQrNDDxD9XioSt+x0eT54qyFIme9nz1uc1hrtDbHSf419STvWff7OuZ9WpeVaQkrUX/QH8rKrkg98GM3VdtDg=="
+  "signature": "xAmorDMM96vfGjDVWHM3Aw7OVbIRa+kHLw8JwSGy5uDEwmdoOTU3qR5IJi0qxId+F4UmAPpy/smts0uOJ9RgDg=="
 }
