@@ -278,6 +278,11 @@ const STATIC: &[(&str, &str, &str)] = &[
     ),
     ("add.js", "box/web/add.js", "text/javascript; charset=utf-8"),
     (
+        "use-app.js",
+        "box/web/use-app.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "demo-photos.js",
         "box/photos/web/demo-photos.js",
         "text/javascript; charset=utf-8",
@@ -472,6 +477,9 @@ const PAGES: &[(&str, &str)] = &[
     ("send", "box/vault/web/pages/send.html"),
     // not signed in: the new device a QR code was scanned on (adddevice.rs)
     ("add", "box/web/pages/add.html"),
+    // not signed in: photos.<domain> and vault.<domain> in a browser, whose
+    // clients come with the app (modules/photos, modules/vault)
+    ("use-app", "box/web/pages/use-app.html"),
     // not signed in: anyone, at <domain>/docs (docs.rs)
     ("docs", "box/docs/web/pages/docs.html"),
 ];

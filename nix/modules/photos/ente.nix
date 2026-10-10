@@ -252,6 +252,18 @@ in
           useACMEHost = base;
           forceSSL = true;
           locations = {
+            # Ente's client holds a person's keys, so it comes with the app
+            # (app/src/local.rs) and is never served from here: a browser is
+            # told to open Photos in the app. The root stays set, as the
+            # app's build takes the client from it (flake.nix appWeb).
+            "/".extraConfig = ''
+              error_page 418 = @use-app;
+              return 418;
+            '';
+            "@use-app" = {
+              proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";
+              extraConfig = "rewrite ^ /_dd/use-app break;";
+            };
             "/_dd/museum/".proxyPass = "http://127.0.0.1:${toString museumPort}/";
             "~ ^/_dd/museum/users/(verify-email|change-email)$".proxyPass =
               "http://127.0.0.1:${toString config.dd.verify.port}/_dd/photos/museum/$1";

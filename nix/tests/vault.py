@@ -64,6 +64,11 @@ page = box.succeed("curl -sf http://127.0.0.1:4181/_dd/send")
 assert "send.js" in page, page
 box.succeed("curl -sf http://127.0.0.1:4181/_dd/static/send.js | grep -q bitwarden-send")
 box.succeed("curl -sf http://127.0.0.1:4181/_dd/static/vault-bar.js -o /dev/null")
+# the web vault is the app's now: a browser here is told so, and the same
+# page starts a Bitwarden app's sign-in
+page = box.succeed("curl -sf http://127.0.0.1:4181/_dd/use-app")
+assert "use-app.js" in page, page
+box.succeed("curl -sf http://127.0.0.1:4181/_dd/static/use-app.js | grep -q prevalidate")
 
 # the breach list is fetched on a timer, from the internet this test has not
 box.succeed("systemctl list-timers dd-pwned.timer | grep -q dd-pwned")

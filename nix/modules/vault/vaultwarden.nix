@@ -290,20 +290,35 @@ in
               uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
             in
             {
-              # inside: the web vault, with the Commonty bar added to its page;
-              # outside: the Send page and nothing else of it
-              "/" = toVault (
-                lib.optionalString public ''
-                  error_page 418 = @send;
-                  if ($dd_inside = 0) { return 418; }
-                ''
-                + ''
-                  proxy_set_header Accept-Encoding "";
-                  sub_filter_once on;
-                  sub_filter_types text/html;
-                  sub_filter '</head>' '<link rel="stylesheet" href="/_dd/static/bar.css"><link rel="stylesheet" href="/_dd/static/vault-bar.css"><script type="module" src="/_dd/static/vault-bar.js"></script></head>';
-                ''
-              );
+              # The web vault holds a person's keys, so it comes with the app
+              # (app/src/local.rs) and is never served from here. Inside, a
+              # browser is told to open Passwords in the app; the same page
+              # starts a Bitwarden app's sign-in and opens a Send (use-app.js).
+              # Outside: the Send page and nothing else.
+              "/" = {
+                extraConfig =
+                  lib.optionalString public ''
+                    error_page 418 = @send;
+                    if ($dd_inside = 0) { return 418; }
+                  ''
+                  + ''
+                    error_page 419 = @use-app;
+                    return 419;
+                  '';
+              };
+              "@use-app" = {
+                proxyPass = gate;
+                extraConfig = ''
+                  rewrite ^ /_dd/use-app break;
+                '';
+              };
+              # a Send opened from inside: use-app.js sends it here
+              "= /send" = {
+                proxyPass = gate;
+                extraConfig = ''
+                  rewrite ^ /_dd/send break;
+                '';
+              };
               "@send" = {
                 proxyPass = gate;
                 extraConfig = ''
@@ -318,6 +333,10 @@ in
               );
               "/identity/" = toVault inside;
               "/notifications/" = toVault inside;
+              # what the app's own web vault asks besides (app/src/local.rs);
+              # "/" no longer reaches Vaultwarden
+              "/events/" = toVault inside;
+              "= /alive" = toVault inside;
               # what a Send link needs from outside: open it, ask for its file,
               # fetch the file (ciphertext; the key is in the link's #, which
               # never reaches a server)

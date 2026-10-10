@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open it in the Commonty app</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <script type="module" src="/_dd/static/use-app.js"></script>
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" id="home" href="/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+    </div>
+  </header>
+  <main class="auth">
+    <section class="add-device" id="use-app">
+      <h1><span id="what">This</span> opens in the Commonty app</h1>
+      <p class="lead">It holds your keys, so its code comes with the app you installed, never from a server. Open <span id="what-2">it</span> from the app on this device.</p>
+      <p><a class="button" id="download" href="/_dd/download">Get the Commonty app</a></p>
+    </section>
+    <section class="add-device" id="signed-in" hidden>
+      <h1>Signed in</h1>
+      <p class="lead">Go back to Bitwarden. You can close this tab.</p>
+    </section>
+    <section class="add-device" id="sso" hidden>
+      <h1>Signing in…</h1>
+      <p class="lead" id="sso-why"></p>
+    </section>
+  </main>
+</body>
+</html>
