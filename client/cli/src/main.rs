@@ -237,13 +237,6 @@ enum Command {
         /// a member's photo address is their name and this: @users.<domain>
         #[arg(long)]
         photos_suffix: String,
-        /// a member's Passwords address is their name and this: @<domain>
-        #[arg(long)]
-        vault_suffix: String,
-        /// a service's own count, name=file (rows "<member>\t<bytes>"); code
-        /// and passwords are the ones it adds up
-        #[arg(long = "usage", value_parser = parse_usage)]
-        usage: Vec<(String, std::path::PathBuf)>,
         /// the ledger's own photo account's password (secrets:
         /// ente-storage-password); the account is storage+ledger<photos-suffix>
         #[arg(long)]
@@ -251,7 +244,22 @@ enum Command {
         /// each member's allowance, in GB
         #[arg(long)]
         budget_gb: u64,
-        /// where the count is written, for the gate
+        /// the fleet's count (storage-view's), for what members keep elsewhere
+        #[arg(long)]
+        view: std::path::PathBuf,
+        /// where this box's own counts go, for its heartbeat
+        #[arg(long)]
+        facts_out: std::path::PathBuf,
+    },
+    /// The fleet's count of what each member keeps, added up from every
+    /// box's heartbeat (the control plane's agreed state), for this box's
+    /// gate. Every box runs it.
+    StorageView {
+        #[arg(long, default_value = "http://127.0.0.1:4195")]
+        control: String,
+        /// each member's allowance, in GB
+        #[arg(long)]
+        budget_gb: u64,
         #[arg(long)]
         out: std::path::PathBuf,
     },
@@ -1618,23 +1626,28 @@ async fn main() -> Result<()> {
             gate,
             ente_origin,
             photos_suffix,
-            vault_suffix,
-            usage,
             password_file,
             budget_gb,
-            out,
+            view,
+            facts_out,
         } => {
             storage_ledger::run(storage_ledger::Ledger {
                 gate,
                 ente_origin,
-                photos_suffix,
-                vault_suffix,
                 password_file,
-                usage,
+                photos_suffix,
                 budget: budget_gb * 1_000_000_000,
-                out,
+                view,
+                facts_out,
             })
             .await?;
+        }
+        Command::StorageView {
+            control,
+            budget_gb,
+            out,
+        } => {
+            storage_ledger::view(&control, budget_gb * 1_000_000_000, &out).await?;
         }
 
         Command::PhotosDemo {
@@ -1797,10 +1810,4 @@ fn which(bin: &str) -> bool {
     std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).is_file()))
         .unwrap_or(false)
-}
-
-/// --usage name=file
-fn parse_usage(s: &str) -> Result<(String, std::path::PathBuf), String> {
-    let (n, f) = s.split_once('=').ok_or("name=file")?;
-    Ok((n.to_string(), f.into()))
 }

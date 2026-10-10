@@ -196,6 +196,8 @@ in
           user = "vaultwarden";
           database = "vaultwarden";
           query = "select u.email, coalesce(sum(a.file_size), 0) from attachments a join ciphers c on c.uuid = a.cipher_uuid join users u on u.uuid = c.user_uuid group by u.email";
+          counts = "passwords";
+          memberSuffix = "@${config.dd.domain}";
         };
 
         systemd.services.vaultwarden = {

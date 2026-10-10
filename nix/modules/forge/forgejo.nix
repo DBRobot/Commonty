@@ -192,6 +192,7 @@ in
         user = "forgejo";
         database = "forgejo";
         query = "select owner_name, coalesce(sum(size + lfs_size), 0) from repository group by owner_name";
+        counts = "code";
       };
 
       systemd.services.forgejo-secrets = {
