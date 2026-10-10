@@ -97,7 +97,7 @@ fn ready<R: Runtime>(_app: &AppHandle<R>, pw: &str) -> Result<Response<Vec<u8>>,
         "ready": true,
         "url": format!(
             "{}#app={}&pw={}",
-            crate::local::door(false, "/_dd/photos"),
+            crate::local::door(false, "/_dd/photos")?,
             enc(crate::site::origin()),
             enc(pw)
         ),

@@ -30,6 +30,13 @@ pub const VAULT_PORT: u16 = 41662;
 
 const COOKIE: &str = "dd_local";
 
+/// Whether this app holds each port. A window is only ever sent to a port
+/// this app is serving: if something else had one first, it would be
+/// handed the door's secret and the password after the page's #, so the
+/// window is not sent at all.
+static PHOTOS_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static VAULT_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Clone, Copy, PartialEq)]
 enum Which {
     Photos,
@@ -50,16 +57,23 @@ pub fn url(which_vault: bool, path: &str) -> String {
 }
 
 /// where a window starts: the door, with this launch's secret, and the page
-/// after it
-pub fn door(which_vault: bool, then: &str) -> String {
-    url(
+/// after it; only while this app holds the port
+pub fn door(which_vault: bool, then: &str) -> Result<String, String> {
+    let up = if which_vault { &VAULT_UP } else { &PHOTOS_UP };
+    if !up.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(format!(
+            "something else on this computer holds port {}, so this app will not open its page there",
+            if which_vault { VAULT_PORT } else { PHOTOS_PORT }
+        ));
+    }
+    Ok(url(
         which_vault,
         &format!(
             "/_dd/app/enter?k={}&to={}",
             crate::site::launch_secret(),
             enc(then)
         ),
-    )
+    ))
 }
 
 fn enc(s: &str) -> String {
@@ -87,7 +101,15 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
         });
         tauri::async_runtime::spawn(async move {
             let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
-                Ok(l) => l,
+                Ok(l) => {
+                    let up = if which == Which::Vault {
+                        &VAULT_UP
+                    } else {
+                        &PHOTOS_UP
+                    };
+                    up.store(true, std::sync::atomic::Ordering::SeqCst);
+                    l
+                }
                 Err(e) => {
                     eprintln!("local: 127.0.0.1:{port}: {e}");
                     return;
@@ -420,7 +442,7 @@ pub fn vault_state<R: Runtime>(
     let v = serde_json::json!({
         "action": format!("https://{host}/_dd/app/signin"),
         "token": token,
-        "door": door(true, "/"),
+        "door": door(true, "/")?,
     });
     tauri::http::Response::builder()
         .header("content-type", "application/json")
