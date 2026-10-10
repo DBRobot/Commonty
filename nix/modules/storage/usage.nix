@@ -57,6 +57,8 @@ in
           "${name}.service"
         ];
         path = [ config.services.postgresql.package ];
+        # never run by a switch: a failure there rolls the release back
+        restartIfChanged = false;
         serviceConfig = {
           Type = "oneshot";
           User = u.user;
@@ -70,6 +72,7 @@ in
           PrivateTmp = true;
           # into the heartbeat: as root, where node-exporter's facts are
           ExecStartPost = "+${pkgs.writeShellScript "dd-usage-${name}-facts" ''
+            [ -f /var/lib/dd-usage/${name}/usage.tsv ] || exit 0
             ${pkgs.gawk}/bin/awk -F '\t' -v svc=${u.counts} -v suffix=${lib.escapeShellArg u.memberSuffix} '
               { m = $1; if (suffix != "" && substr(m, length(m) - length(suffix) + 1) == suffix) m = substr(m, 1, length(m) - length(suffix)) }
               m ~ /^[A-Za-z0-9._-]+$/ && $2 ~ /^[0-9]+$/ { printf "dd_usage{service=\"%s\",member=\"%s\"} %s\n", svc, m, $2 }
@@ -80,7 +83,13 @@ in
         };
         script = ''
           out=/var/lib/dd-usage/${name}/usage.tsv
-          psql -X -tA -F "$(printf '\t')" -v ON_ERROR_STOP=1 -d ${u.database} -c ${lib.escapeShellArg u.query} > "$out.new"
+          # postgres not answering yet (restarting under a switch) is next
+          # time: the last count stands
+          if ! psql -X -tA -F "$(printf '\t')" -v ON_ERROR_STOP=1 -d ${u.database} -c ${lib.escapeShellArg u.query} > "$out.new"; then
+            echo "the database did not answer; counting next time"
+            rm -f "$out.new"
+            exit 0
+          fi
           mv "$out.new" "$out"
         '';
       }
@@ -90,7 +99,9 @@ in
       lib.nameValuePair "dd-usage-${name}" {
         wantedBy = [ "timers.target" ];
         timerConfig = {
-          OnBootSec = "90s";
+          # from the timer starting, not boot: a switch that adds it starts
+          # it long after boot, and OnBootSec would fire at once
+          OnActiveSec = "90s";
           OnUnitActiveSec = "1h";
         };
       }
