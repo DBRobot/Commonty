@@ -183,7 +183,7 @@ function bar(m, slot) {
   else if (brand) brand.setAttribute('href', homeLink(m, '/_dd/home'));
   const menu = el('details', { class: 'menu' }, summary, nav);
   menu.addEventListener('toggle', () => {
-    if (menu.open) nav.querySelectorAll('.toggle').forEach((t) => t.read());
+    if (menu.open) for (const t of nav.querySelectorAll('.toggle')) t.read();
   });
   slot.replaceChildren(menu);
   // a menu closes when you are done with it: a click anywhere else, or Escape
