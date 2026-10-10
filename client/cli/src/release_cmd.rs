@@ -1830,9 +1830,25 @@ fn app_check_state() -> PathBuf {
 fn app_check(repo: &str, keys: &auth::Store, r#ref: &str) -> Result<()> {
     let root = repo_root(repo)?;
     let key = load(keys)?;
-    git(&root, &["fetch", "-q", "forge"])?;
+    // run on waking, the network can be a minute behind the timer
+    let mut fetched = git(&root, &["fetch", "-q", "forge"]);
+    for _ in 0..5 {
+        if fetched.is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        fetched = git(&root, &["fetch", "-q", "forge"]);
+    }
+    if let Err(e) = fetched {
+        check_notice(
+            "Commonty: the nightly app check did not run",
+            &format!("the forge could not be reached: {e:#}"),
+        );
+        return Err(e.context("the forge could not be reached; nothing was checked"));
+    }
     let rev = git(&root, &["rev-parse", &format!("refs/remotes/forge/{ref}")])?;
-    let version = "0.0.0";
+    // a real version's shape: Android refuses to package 0.0.0
+    let version = CHECK_VERSION;
     let want = app_paths(&root, &rev, version)?;
     let last: Option<serde_json::Value> = std::fs::read(app_check_state())
         .ok()
@@ -1896,20 +1912,34 @@ fn app_check(repo: &str, keys: &auth::Store, r#ref: &str) -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            // said where it is seen: the desktop, and the timer's failure
-            let _ = Command::new("notify-send")
-                .args([
-                    "--urgency=critical",
-                    "Commonty: the app no longer builds the same twice",
-                    &format!("{e:#}"),
-                ])
-                .status();
+            // said where it is seen: the desktop, and the timer's failure;
+            // and said for what it is - two builds that differ is not the
+            // same news as one that did not build
+            let why = format!("{e:#}");
+            let title = if why.contains("different bytes") {
+                "Commonty: the app no longer builds the same on two boxes"
+            } else if why.contains("could not build") {
+                "Commonty: a box could not build the app"
+            } else {
+                "Commonty: the nightly app check failed"
+            };
+            check_notice(title, &why);
             Err(e.context(format!(
                 "the app at {}: a release would stop here",
                 &rev[..12]
             )))
         }
     }
+}
+
+/// what the nightly check builds as: any version with a real shape
+const CHECK_VERSION: &str = "0.0.1";
+
+/// the desktop's notice, where the check's news is seen
+fn check_notice(title: &str, body: &str) {
+    let _ = Command::new("notify-send")
+        .args(["--urgency=critical", title, body])
+        .status();
 }
 
 /// The nightly run: a user timer on this machine, which holds the release

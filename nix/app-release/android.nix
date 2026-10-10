@@ -2,7 +2,7 @@
 # signs it: `dd release app`). Tauri drives the build as it does on a
 # desktop, but gradle runs offline against deps.json - every maven file it
 # fetched once, by hash. After changing a gradle file or a tauri version:
-#   nix build --impure --expr '((builtins.getFlake "git+file://'$PWD'").legacyPackages.x86_64-linux.appRelease "0.0.0").android.mitmCache.updateScript' && ./result
+#   nix build --impure --expr '((builtins.getFlake "git+file://'$PWD'").legacyPackages.x86_64-linux.appRelease "0.0.1").android.mitmCache.updateScript' && ./result
 {
   pkgs,
   version,
