@@ -387,6 +387,8 @@ in
         VERIFY_REPO = config.dd.repo;
         # the hosts whose pages may ask for a passkey here (servers/gate own_hosts)
         VERIFY_HOSTS = lib.concatStringsSep "," cfg.hosts;
+        # sign-in at the id Worker, when it is set up (sso.rs)
+        VERIFY_ID = config.dd.idWorker;
         VERIFY_MEMBERS = builtins.toJSON config.dd.members;
         # our Rust for the browser, next to the pages that use it
         VERIFY_WEB_DIR = "${self.packages.${pkgs.stdenv.hostPlatform.system}.web}";

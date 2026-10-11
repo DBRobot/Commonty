@@ -2,6 +2,7 @@
 let
   mailSetup = ../../fleet/mail.json;
   dnsSetup = ../../fleet/dns-worker.json;
+  idSetup = ../../fleet/id-worker.json;
   # the gateway holds a token for the zone only until the DNS Worker does
   byToken = config.dd.dnsWorker == "";
   canReadWorker = lib.hasInfix "\ncloudflare-workers-read:" (
@@ -45,6 +46,8 @@ in
         (builtins.fromJSON (builtins.readFile dnsSetup)).account
       else
         "";
+    idAccount =
+      if builtins.pathExists idSetup then (builtins.fromJSON (builtins.readFile idSetup)).account else "";
     readTokenFile =
       if canReadWorker then config.sops.templates."cloudflare-workers-read.env".path else null;
   };

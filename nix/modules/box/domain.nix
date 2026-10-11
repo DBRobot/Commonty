@@ -27,4 +27,13 @@
         "";
     description = "the DNS Worker's address; empty: the gateway's own token keeps the zone";
   };
+  # Sign-in, once for every box, at the id Worker (servers/system/id) once
+  # `dd id setup` has written fleet/id-worker.json: each box's sessions are
+  # then for each of its names alone (servers/gate/src/sso.rs)
+  options.dd.idWorker = lib.mkOption {
+    type = lib.types.str;
+    default =
+      if builtins.pathExists ../../../fleet/id-worker.json then "https://id.${config.dd.domain}" else "";
+    description = "the id Worker's address; empty: each gate's own sign-in page";
+  };
 }

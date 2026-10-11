@@ -112,6 +112,7 @@
     units = [
       "dd-mail-worker-check"
       "dd-dns-worker-check"
+      "dd-id-worker-check"
     ];
     base = {
       uses = {
