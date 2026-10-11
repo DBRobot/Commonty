@@ -404,6 +404,17 @@ fn publish(
         &format!("release {counter}: {}", &rev[..12]),
     )?;
     print(&signed, None);
+    // the DNS Worker this release carries, with the names each box now
+    // serves: up before the boxes are told, so a box that switches and asks
+    // for a new name finds it there
+    let dns = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(crate::dns_worker::deploy(&root, keys, r#ref))
+    });
+    if let Err(e) = dns {
+        eprintln!(
+            "== the DNS Worker did not go up: {e:#}\n   `dd dns deploy --ref {ref}` when it can"
+        );
+    }
     nudge(&boxes);
     // the control plane's relay this release carries
     let relayed = tokio::task::block_in_place(|| {
