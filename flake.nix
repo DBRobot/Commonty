@@ -251,6 +251,20 @@
               verify = _: {
                 postUnpack = "mkdir -p $NIX_BUILD_TOP/photos && cp -r ${./box/photos/templates} $NIX_BUILD_TOP/photos/templates";
               };
+              # dd's tests: e2e.rs reads the mail Worker's tester from beside
+              # the cli, and repo.rs runs git with git-remote-dd from beside
+              # dd, naming cargo only to build one that is not there. An
+              # override cannot tell a test build from the boxes' (buildTests
+              # is set after it), so the copy waits for the test binaries
+              dd = _: {
+                postUnpack = "mkdir -p $NIX_BUILD_TOP/mail && cp -r ${./client/mail/tests} $NIX_BUILD_TOP/mail/tests";
+                postInstall = ''
+                  if [ -d $out/tests ]; then
+                    cp ${perCrate "git-remote-dd"}/bin/git-remote-dd $out/bin/
+                  fi
+                '';
+                CARGO = "cargo";
+              };
               # fl! wrote a message's arguments in hash-map order, so age's
               # library differed on every build and a box rebuilding dd to
               # vouch for it never matched what CI had built
@@ -258,6 +272,24 @@
             };
           };
           perCrate = n: cargoNix.workspaceMembers.${n}.build;
+          # One crate's tests, built and run from the same per-crate builds
+          # the boxes' programs use: a crate whose code and dependencies did
+          # not change is a cache hit, and so are its tests. The gate's tests
+          # (and dd's, which run a gate) read the pages from the tree; the
+          # library's are checked against rclone itself; dd's run git and ssh
+          crateTest =
+            n:
+            (cargoNix.workspaceMembers.${n}.build.override {
+              runTests = true;
+              testInputs = [
+                pkgs.gitMinimal
+                pkgs.openssh
+                pkgs.rclone
+              ];
+              testPreRun = "export HOME=$TMPDIR VERIFY_PAGES_DIR=${pages}";
+            }).test;
+          # every crate but the app, whose tests are its own check (tests-app)
+          testedCrates = pkgs.lib.filter (n: n != "commonty") (builtins.attrNames cargoNix.workspaceMembers);
           sources = {
             dd = crateSrc "dd" [
               "client/cli"
@@ -425,28 +457,11 @@
             buildInputs = [ pkgs.fuse3 ] ++ appLibs;
             COMMONTY_NET_LIB_DIR = "${appNet}/lib";
           };
-          # The workspace but the app, for the checks (clippy, tests): the
+          # The workspace but the app, for clippy: the
           # app's dependency tree (tauri, webkit) is most of the compile,
           # and nothing else in the workspace uses it. The app is checked
           # on its own (checks.clippy-app), only when it changed.
           workspaceArgs = "--locked --workspace --exclude commonty";
-          # The tests build unoptimised and without debug info: a release
-          # build of every dependency cost most of the test job, only to run
-          # them once. Only the tests use this cache; binaries stay release.
-          testProfile = {
-            CARGO_PROFILE = "dev";
-            CARGO_PROFILE_DEV_DEBUG = "false";
-          };
-          cargoArtifacts = craneLib.buildDepsOnly (
-            common
-            // {
-              pname = "dd-deps";
-              dummySrc = depsSrc;
-              version = "0.1.0";
-              cargoExtraArgs = workspaceArgs;
-              inherit (testProfile) CARGO_PROFILE CARGO_PROFILE_DEV_DEBUG;
-            }
-          );
           # and one dependency build per binary, with that binary's own
           # `-p`: cargo unifies features per package set, so a cache built
           # for the whole workspace does not match `-p dd` and every run
@@ -940,35 +955,14 @@
               runHook postCheck
             '';
           });
-          tests = craneLib.cargoTest (
-            common
-            // {
-              inherit cargoArtifacts;
-              inherit (testProfile) CARGO_PROFILE CARGO_PROFILE_DEV_DEBUG;
-              # common turns checks off for the packages; from 2026-09-23
-              # until this line the tests check inherited that and ran none
-              doCheck = true;
-              # repo.rs runs git with git-remote-dd, another package's binary
-              # that cargo test never rebuilds: without this it found the
-              # dependency build's stand-in. That one alone: the rest the
-              # tests start (dd) cargo test builds itself
-              preCheck = "cargoWithProfile build --locked -p git-remote-dd";
-              # the answer is that they passed: keeping the target dir (718M)
-              # made the cache upload after the tests take longer than them
-              doInstallCargoArtifacts = false;
-              pname = "dd";
-              version = "0.1.0";
-              cargoExtraArgs = workspaceArgs;
-              # the e2e tests spawn verifiers on localhost and run git; the
-              # library's format is checked against rclone itself; a box's
-              # attestation is an ssh signature
-              nativeBuildInputs = [
-                pkgs.pkg-config
-                pkgs.gitMinimal
-                pkgs.openssh
-              ];
-              RCLONE = "${pkgs.rclone}/bin/rclone";
-            }
+          # every crate's tests, each its own build: one link to them all,
+          # so CI asks for one check and gets every crate's answer, cached
+          # crate by crate
+          tests = pkgs.linkFarm "tests" (
+            map (n: {
+              name = n;
+              path = crateTest n;
+            }) testedCrates
           );
         };
     in
