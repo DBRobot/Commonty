@@ -87,9 +87,11 @@ in
         options zfs zfs_arc_max=${toString box.arcMaxBytes}
       '';
     })
-    (lib.mkIf box.neverSleep {
-      # no suspend on close, on battery or not, and no idle action: a box
-      # that sleeps is a box that is gone
+    {
+      # No box sleeps, whatever it is (David, 2026-10-11): no suspend on close,
+      # on battery or not, and no idle action. A box that sleeps is a box that
+      # is gone - garage's second copy, the front door, a game - until there is
+      # a sleep that hands its work on first
       services.logind.settings.Login = {
         HandleLidSwitchDocked = "ignore";
         HandlePowerKey = "ignore";
@@ -101,7 +103,7 @@ in
         AllowHybridSleep = "no";
         AllowSuspendThenHibernate = "no";
       };
-    })
+    }
     { networking.hostId = hw.hostId; }
     # a usb ethernet adapter must never autosuspend: it is the wired link
     (lib.mkIf hw.usbNic { boot.kernelParams = [ "usbcore.autosuspend=-1" ]; })

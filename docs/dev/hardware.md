@@ -171,8 +171,6 @@ reached over the fleet's network:
   the 8G ARC, node1 can overcommit.
 - **transcode** keeps a whole film's HLS segments in tmpfs and never deletes
   them, so one long, high-bitrate film can hit MemoryMax 4G or fill /run.
-- **node1 may suspend** (`neverSleep` false). That would stop garage writes
-  (rf=2 needs both boxes), games, the LLM and the front door.
 - **AMD GPUs are ignored**: node2's Radeon goes unused for both VAAPI and
   Vulkan.
 - **Ambiguity with several NICs.** detect.sh keeps the last wired NIC it
