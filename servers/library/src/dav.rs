@@ -1182,7 +1182,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn one_librarys_trash_never_waits_on_anothers() {
+    async fn no_library_trash_waits_on_another_library() {
         let (a, b) = (
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
