@@ -2,6 +2,12 @@
 {
   libraries = {
     what = "members' files, films and shows over WebDAV, ciphertext made on their devices, kept in the storage pool";
+    # ciphertext: members' libraries, read and written through the gate
+    traffic = {
+      class = "high";
+      upMbps = 25;
+    };
+    alwaysOn = true;
     base = {
       # the files are the pool's; the gate moves them
       uses = {
@@ -23,6 +29,11 @@
 
   disk-images = {
     what = "members' archives of old computers (`dd image`), restic's layout, encrypted on the device, kept in the storage pool";
+    # ciphertext: members' disk images
+    traffic = {
+      class = "high";
+      upMbps = 20;
+    };
     base = {
       uses = {
         memory = "0";
@@ -43,6 +54,12 @@
 
   dd-transcode = {
     what = "plays a film a member's device cannot, decrypting it in memory only";
+    # it decrypts the film it transcodes, for any member
+    trust = "owner";
+    traffic = {
+      class = "high";
+      upMbps = 25;
+    };
     base = {
       # four sessions of 256M decrypted pieces each, and each one's
       # segments: twelve minutes, at most 384M (main.rs: BEHIND, AHEAD,

@@ -256,6 +256,63 @@ t.attrsOf (
         default = null;
         description = "at most this many in one house (a house's DNS is one box)";
       };
+      trust = lib.mkOption {
+        type = t.enum [
+          "owner"
+          "household"
+          "any"
+        ];
+        default = "any";
+        description = "whose boxes may run it: the fleet owner's only (it holds the keys to everything, or hands people the code that holds theirs); the owner's or a box of a household it serves (it reads that household's own data); any box";
+      };
+      traffic = lib.mkOption {
+        type = t.submodule {
+          options = {
+            class = lib.mkOption {
+              type = t.enum [
+                "high"
+                "medium"
+                "low"
+              ];
+              default = "low";
+              description = "how much of a line it uses: high never goes on a metered line; medium is scored down there";
+            };
+            upMbps = lib.mkOption {
+              type = t.ints.unsigned;
+              default = 0;
+              description = "the upload it wants to serve well; less still runs, scored down";
+            };
+            downMbps = lib.mkOption {
+              type = t.ints.unsigned;
+              default = 0;
+              description = "the download it wants";
+            };
+          };
+        };
+        default = { };
+      };
+      alwaysOn = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "people expect it to answer at any hour: a box's uptime and power weigh in";
+      };
+      spread = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "on as many boxes, in as many houses, as can hold it (the storage pool), not a set number";
+      };
+      grows = lib.mkOption {
+        type = t.listOf (
+          t.enum [
+            "photos"
+            "libraries"
+            "code"
+            "passwords"
+          ]
+        );
+        default = [ ];
+        description = "what its size follows: the members' usage of these kinds (the fleet's count, storage/view.nix); uses.storage is then only its floor";
+      };
       instances = lib.mkOption {
         type = t.nullOr t.ints.positive;
         default = null;

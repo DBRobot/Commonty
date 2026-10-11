@@ -2,6 +2,8 @@
 {
   postgresql = {
     what = "the databases of the services on this box";
+    # who may run it follows the services whose databases it holds
+    alwaysOn = true;
     units = [ "dd-postgres-isolation" ];
     # one writer: a second copy is a standby (replication), not another postgres
     instances = 1;
@@ -27,6 +29,19 @@
 
   garage = {
     what = "the storage pool: buckets of ciphertext, kept on two boxes";
+    # one cluster today, whose shared secret makes every peer its admin: only the owner's boxes until each box keeps its own store (box isolation)
+    trust = "owner";
+    traffic = {
+      class = "high";
+      upMbps = 50;
+      downMbps = 50;
+    };
+    alwaysOn = true;
+    spread = true;
+    grows = [
+      "photos"
+      "libraries"
+    ];
     units = [ "garage-setup" ];
     base = {
       # below this a storage box adds little; with two copies of everything
@@ -96,6 +111,10 @@
 
   nix-cache = {
     what = "the fleet's built closures, in the bucket, for every box's releases";
+    traffic = {
+      class = "high";
+      downMbps = 100;
+    };
     units = [
       "dd-cache-gc"
     ];
@@ -117,6 +136,8 @@
 
   storage-ledger = {
     what = "what each member keeps across every service, against their allowance";
+    # it holds a Photos admin login, which can set anyone's limit
+    trust = "owner";
     units = [
       "dd-storage-ledger"
       "dd-storage-forget-login"

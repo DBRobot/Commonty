@@ -2,6 +2,9 @@
 {
   pihole = {
     what = "ad and tracker blocking for a household's own devices, and its owner's set to ask it on the Commonty network; lookups sent out encrypted";
+    # a house's own DNS: on a box of that household, or the owner's
+    trust = "household";
+    alwaysOn = true;
     units = [
       "pihole-ftl"
       "dd-pihole-lists"

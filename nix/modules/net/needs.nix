@@ -2,6 +2,9 @@
 {
   headscale = {
     what = "the network's control server: who is on it and what each may reach";
+    # it admits devices to the fleet's network
+    trust = "owner";
+    alwaysOn = true;
     units = [
       "headscale-seed"
       "headscale-snapshot"

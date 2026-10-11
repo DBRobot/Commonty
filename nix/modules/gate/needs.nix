@@ -2,6 +2,8 @@
 {
   nginx = {
     what = "every page's TLS and routing on a box, each request asked of the gate first";
+    # who may run it follows the services it fronts
+    alwaysOn = true;
     base = {
       # node1, 2026-10-04: peak
       uses = {
@@ -50,6 +52,14 @@
 
   cloudflared = {
     what = "the front door on the open internet: a tunnel this box opens outward";
+    # every public request passes it in the clear
+    trust = "owner";
+    traffic = {
+      class = "high";
+      upMbps = 50;
+      downMbps = 50;
+    };
+    alwaysOn = true;
     units = [ "cloudflared-tunnel-*" ];
     # one public front door; dd-dns points the names at it
     instances = 1;
@@ -71,6 +81,8 @@
   acme = {
     what = "the box's certificate from Let's Encrypt, for the names it serves; the DNS Worker writes its challenges";
     units = [ "dd-acme@" ]; # the helper that asks the Worker, one per challenge
+    # any box's: it asks the DNS Worker for its own names alone
+    alwaysOn = true;
     base = {
       # node1, 2026-10-04: peak of a renewal; the account and certificate
       uses = {
@@ -91,6 +103,9 @@
 
   dd-dns = {
     what = "the fleet's names at Cloudflare, converged at every switch";
+    # where every name of the fleet points
+    trust = "owner";
+    alwaysOn = true;
     instances = 1;
     base = {
       uses = {

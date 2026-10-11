@@ -79,6 +79,7 @@
 
   thanos-query = {
     what = "the fleet view: this box's own sidecar and the bucket, as one";
+    alwaysOn = true;
     base = {
       # node1, 2026-10-04: peak
       uses = {
@@ -120,6 +121,7 @@
 
   metrics-page = {
     what = "metrics.<domain>: our pages over the fleet view, members only";
+    alwaysOn = true;
     base = {
       uses = {
         memory = "0";
@@ -162,6 +164,8 @@
 
   fleet-alerts = {
     what = "mails what is wrong on any box (disks, pools, backups), read from the fleet view";
+    # a box that is down cannot say so: this has to stay up
+    alwaysOn = true;
     units = [ "dd-fleet-alerts" ];
     instances = 1; # one mail, not one a box
     base = {

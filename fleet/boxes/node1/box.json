@@ -35,5 +35,8 @@
       "primarycache": "metadata",
       "com.sun:auto-snapshot": "false"
     }
+  },
+  "internet": {
+    "metered": false
   }
 }

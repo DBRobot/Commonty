@@ -4,6 +4,12 @@
 {
   llama-swap = {
     what = "runs one language model at a time, for the chat page and the API";
+    # every member's chats, in the clear
+    trust = "owner";
+    traffic = {
+      class = "medium";
+      downMbps = 50;
+    };
     units = [
       "llm-proxy"
       "fetch-model-*"
@@ -56,6 +62,12 @@
 
   searxng = {
     what = "web search for members, and the chat's search";
+    # what members search for
+    trust = "owner";
+    traffic = {
+      class = "medium";
+      downMbps = 10;
+    };
     units = [
       "searx"
       "searx-init"

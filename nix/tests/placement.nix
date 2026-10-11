@@ -1,9 +1,10 @@
-# fleet/boxes.json against the needs (nix/lib/place.nix): every box can
-# carry what its roles bring, by what it reported of itself and what its
-# owner said, with room for it; and fleet/roles.json says truly what each
-# role brings - every service a box runs comes with one of its roles (a
-# service with units is found by them, nix/lib/needs-type.nix `units`).
-# Fails while the flake is evaluated, naming each problem.
+# What every box can run (nix/lib/capability.nix), from the needs, its
+# signed report and its owner's box.json, against fleet/boxes.json: every
+# box joins (it can run what every box runs), every service its roles bring
+# is one it can run, and fleet/roles.json says truly what each role brings
+# (a service with units is found on a box by them). Fails while the flake is
+# evaluated, naming each problem; built, it is the whole table as JSON - what
+# the control plane chooses from.
 {
   pkgs,
   lib,
@@ -11,11 +12,23 @@
   ...
 }:
 let
-  place = import ../lib/place.nix { inherit lib; };
   needs = import ../lib/needs.nix { inherit lib; };
+  list = lib.importJSON ../../fleet/boxes.json;
+  roles = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ../../fleet/roles.json);
+  capability = import ../lib/capability.nix {
+    inherit lib needs;
+    policy = lib.importJSON ../../fleet/policy.json;
+    boxes = lib.mapAttrs (n: b: {
+      hw = lib.importJSON ../../fleet/boxes/${n}/hardware.json;
+      own = lib.importJSON ../../fleet/boxes/${n}/box.json;
+      site = b.siteId or n;
+      region = b.regionId or n;
+    }) list;
+  };
+  every = lib.attrNames (lib.filterAttrs (_: n: n.everyBox) needs);
+  brought = box: lib.unique (lib.concatMap (r: roles.${r}.services or [ ]) list.${box}.roles);
   claims = s: [ s ] ++ needs.${s}.units;
   matches = u: c: if lib.hasSuffix "*" c then lib.hasPrefix (lib.removeSuffix "*" c) u else c == u;
-  # the services a box really runs: those with a unit there
   running =
     box:
     let
@@ -25,15 +38,21 @@ let
     lib.filter (s: builtins.any (u: builtins.any (matches u) (claims s)) units) (
       builtins.attrNames needs
     );
-  unlisted = lib.concatMap (
+  problems = lib.concatMap (
     box:
-    map (s: "${box}: runs ${s}, which none of its roles brings (fleet/roles.json services)") (
-      lib.filter (s: !(builtins.elem s place.boxes.${box}.services)) (running box)
+    let
+      t = capability.boxes.${box};
+    in
+    map (w: "${box}: cannot join the fleet: ${w}") t.why
+    ++ lib.concatMap (
+      s: map (w: "${box}: its roles bring ${s}, which it cannot run: ${w}") (t.cannot.${s} or [ ])
+    ) (brought box)
+    ++ map (s: "${box}: runs ${s}, which none of its roles brings (fleet/roles.json services)") (
+      lib.filter (s: !(builtins.elem s (brought box ++ every))) (running box)
     )
-  ) (builtins.attrNames place.boxes);
-  problems = place.problems ++ unlisted;
+  ) (builtins.attrNames list);
 in
 if problems == [ ] then
-  pkgs.writeText "placement.json" (builtins.toJSON place)
+  pkgs.writeText "placement.json" (builtins.toJSON capability)
 else
   throw ("\n" + lib.concatStringsSep "\n" problems)

@@ -2,6 +2,12 @@
 {
   ente-museum = {
     what = "the photos server: people's encrypted photos and the albums' records";
+    # photos are encrypted on the device; it holds them and their metadata
+    traffic = {
+      class = "medium";
+      upMbps = 10;
+    };
+    alwaysOn = true;
     units = [
       "ente"
       "ente-health"
@@ -30,6 +36,9 @@
 
   ente-web = {
     what = "Ente's own web apps (photos, albums, accounts, cast, locker), with our patches, served as files";
+    # it hands browsers the code that holds people's photo keys
+    trust = "owner";
+    alwaysOn = true;
     # the photos app is where a member types their password: whoever has
     # root on the box that serves it could change it
     servesCode = true;

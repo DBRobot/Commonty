@@ -1322,6 +1322,8 @@
           # every box can carry what its roles bring, by the needs; and the
           # roles say truly what they bring (nix/lib/place.nix)
           placement = import ./nix/tests/placement.nix args;
+          # capability on every kind of computer, held to answers that make sense
+          placement-fleet = import ./nix/tests/placement-fleet.nix args;
           nginx = import ./nix/tests/nginx.nix args;
           # no member's figures in the fleet's metrics: usage is heartbeat
           # lines, never a Prometheus sample (storage/usage.nix)

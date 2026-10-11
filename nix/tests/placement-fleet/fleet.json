@@ -1,0 +1,734 @@
+{
+ "n100-minipc": {
+  "note": "Intel N100 mini PC, 16G, 512G NVMe, QuickSync, 2.5GbE",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 4
+   },
+   "memoryBytes": 17179869184,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 511101108224
+    }
+   ],
+   "disks": [
+    {
+     "kind": "nvme"
+    }
+   ],
+   "gpus": [
+    {
+     "render": "/dev/dri/renderD128",
+     "encode": [
+      "H264ConstrainedBaseline",
+      "H264Main",
+      "H264High",
+      "HEVCMain"
+     ]
+    }
+   ],
+   "virt": {
+    "kvm": true,
+    "nested": true
+   },
+   "firmware": {
+    "uefi": true,
+    "tpm": {
+     "version": 2,
+     "p256": true
+    }
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": false
+   }
+  },
+  "own": {
+   "owner": "david",
+   "internet": {
+    "metered": false
+   },
+   "house": {
+    "household": [
+     "david"
+    ]
+   }
+  }
+ },
+ "diy-nas": {
+  "note": "friend's DIY NAS: Celeron J4125, 8G, 2x16T HDD mirror, no SSD",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 4
+   },
+   "memoryBytes": 8589934592,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 15998753177600
+    }
+   ],
+   "disks": [
+    {
+     "kind": "hdd"
+    },
+    {
+     "kind": "hdd"
+    }
+   ],
+   "gpus": [
+    {
+     "render": "/dev/dri/renderD128",
+     "encode": [
+      "H264ConstrainedBaseline",
+      "H264Main",
+      "H264High",
+      "HEVCMain"
+     ]
+    }
+   ],
+   "virt": {
+    "kvm": true,
+    "nested": false
+   },
+   "firmware": {
+    "uefi": true,
+    "tpm": {
+     "version": 2,
+     "p256": true
+    }
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": false
+   }
+  },
+  "own": {
+   "owner": "friend",
+   "internet": {
+    "metered": false
+   },
+   "house": {
+    "household": [
+     "friend"
+    ]
+   }
+  }
+ },
+ "synology": {
+  "note": "Synology DS220+: no TPM, no UEFI",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 4
+   },
+   "memoryBytes": 4294967296,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 7945689497600
+    }
+   ],
+   "disks": [
+    {
+     "kind": "hdd"
+    },
+    {
+     "kind": "hdd"
+    }
+   ],
+   "gpus": [],
+   "virt": {
+    "kvm": true,
+    "nested": true
+   },
+   "firmware": {
+    "uefi": false,
+    "tpm": null
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": false
+   }
+  },
+  "own": {
+   "owner": "friend",
+   "internet": {
+    "metered": false
+   },
+   "house": {
+    "household": [
+     "friend"
+    ]
+   }
+  }
+ },
+ "xeon-r740": {
+  "note": "Dell R740: 2x Xeon Silver, 256G ECC, SSD mirror + 4x8T raidz, TPM 2.0, no GPU, owner's",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 48
+   },
+   "memoryBytes": 274877906944,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 1932735283200
+    },
+    {
+     "name": "p1",
+     "bytes": 23407571763200
+    }
+   ],
+   "disks": [
+    {
+     "kind": "ssd"
+    },
+    {
+     "kind": "ssd"
+    },
+    {
+     "kind": "hdd"
+    },
+    {
+     "kind": "hdd"
+    },
+    {
+     "kind": "hdd"
+    },
+    {
+     "kind": "hdd"
+    }
+   ],
+   "gpus": [],
+   "virt": {
+    "kvm": true,
+    "nested": true
+   },
+   "firmware": {
+    "uefi": true,
+    "tpm": {
+     "version": 2,
+     "p256": true
+    }
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": false
+   }
+  },
+  "own": {
+   "owner": "david",
+   "internet": {
+    "metered": false
+   },
+   "house": {
+    "household": []
+   }
+  }
+ },
+ "xeon-r720": {
+  "note": "Dell R720: TPM 1.2 only",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 32
+   },
+   "memoryBytes": 137438953472,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 966367641600
+    },
+    {
+     "name": "p1",
+     "bytes": 11703785881600
+    }
+   ],
+   "disks": [
+    {
+     "kind": "ssd"
+    },
+    {
+     "kind": "hdd"
+    }
+   ],
+   "gpus": [],
+   "virt": {
+    "kvm": true,
+    "nested": true
+   },
+   "firmware": {
+    "uefi": true,
+    "tpm": null
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": false
+   }
+  },
+  "own": {
+   "owner": "david",
+   "internet": {
+    "metered": false
+   },
+   "house": {
+    "household": []
+   }
+  }
+ },
+ "gaming-pc": {
+  "note": "brother's gaming PC: 7800X3D, 64G, 2T NVMe, RTX 4080 (no VA-API encode)",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 16
+   },
+   "memoryBytes": 68719476736,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 1997159792640
+    }
+   ],
+   "disks": [
+    {
+     "kind": "nvme"
+    }
+   ],
+   "gpus": [
+    {
+     "render": "/dev/dri/renderD128",
+     "encode": []
+    }
+   ],
+   "virt": {
+    "kvm": true,
+    "nested": true
+   },
+   "firmware": {
+    "uefi": true,
+    "tpm": {
+     "version": 2,
+     "p256": true
+    }
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": false
+   }
+  },
+  "own": {
+   "owner": "brother",
+   "internet": {
+    "metered": false
+   },
+   "house": {
+    "household": [
+     "mom",
+     "brother"
+    ]
+   }
+  }
+ },
+ "sister-laptop": {
+  "note": "sister's laptop on mobile data, Wi-Fi only",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 8
+   },
+   "memoryBytes": 17179869184,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 511101108224
+    }
+   ],
+   "disks": [
+    {
+     "kind": "nvme"
+    }
+   ],
+   "gpus": [
+    {
+     "render": "/dev/dri/renderD128",
+     "encode": [
+      "H264ConstrainedBaseline",
+      "H264Main",
+      "H264High",
+      "HEVCMain"
+     ]
+    }
+   ],
+   "virt": {
+    "kvm": true,
+    "nested": true
+   },
+   "firmware": {
+    "uefi": true,
+    "tpm": {
+     "version": 2,
+     "p256": true
+    }
+   },
+   "nics": [
+    {
+     "wireless": true,
+     "initrd": false
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": true
+   }
+  },
+  "own": {
+   "owner": "sister",
+   "internet": {
+    "metered": true
+   },
+   "house": {
+    "household": [
+     "sister"
+    ]
+   }
+  }
+ },
+ "rpi5": {
+  "note": "Raspberry Pi 5, 8G, USB SSD",
+  "hw": {
+   "cpu": {
+    "arch": "aarch64",
+    "threads": 4
+   },
+   "memoryBytes": 8589934592,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 999653638144
+    }
+   ],
+   "disks": [
+    {
+     "kind": "nvme"
+    }
+   ],
+   "gpus": [],
+   "virt": {
+    "kvm": false,
+    "nested": false
+   },
+   "firmware": {
+    "uefi": false,
+    "tpm": null
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": false
+   }
+  },
+  "own": {
+   "owner": "david",
+   "internet": {
+    "metered": false
+   },
+   "house": {
+    "household": [
+     "david"
+    ]
+   }
+  }
+ },
+ "vps": {
+  "note": "cloud VPS: 2 vCPU, 4G, no TPM",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 2
+   },
+   "memoryBytes": 4294967296,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 40802189312
+    }
+   ],
+   "disks": [
+    {
+     "kind": "nvme"
+    }
+   ],
+   "gpus": [],
+   "virt": {
+    "kvm": true,
+    "nested": false
+   },
+   "firmware": {
+    "uefi": false,
+    "tpm": null
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": false
+   }
+  },
+  "own": {
+   "owner": "david",
+   "internet": {
+    "metered": false
+   }
+  }
+ },
+ "office-desktop": {
+  "note": "mom's old office PC: i5-6500, 16G, 256G SSD + 2T HDD",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 4
+   },
+   "memoryBytes": 17179869184,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 255550554112
+    },
+    {
+     "name": "p1",
+     "bytes": 1997159792640
+    }
+   ],
+   "disks": [
+    {
+     "kind": "ssd"
+    },
+    {
+     "kind": "hdd"
+    }
+   ],
+   "gpus": [
+    {
+     "render": "/dev/dri/renderD128",
+     "encode": [
+      "H264ConstrainedBaseline",
+      "H264Main",
+      "H264High",
+      "HEVCMain"
+     ]
+    }
+   ],
+   "virt": {
+    "kvm": true,
+    "nested": true
+   },
+   "firmware": {
+    "uefi": true,
+    "tpm": {
+     "version": 2,
+     "p256": true
+    }
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": false
+   }
+  },
+  "own": {
+   "owner": "mom",
+   "internet": {
+    "metered": false
+   },
+   "house": {
+    "household": [
+     "mom"
+    ]
+   }
+  }
+ },
+ "thin-client": {
+  "note": "Wyse 5070 thin client: J5005, 8G, 64G eMMC",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 4
+   },
+   "memoryBytes": 8589934592,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 62277025792
+    }
+   ],
+   "disks": [
+    {
+     "kind": "ssd"
+    }
+   ],
+   "gpus": [
+    {
+     "render": "/dev/dri/renderD128",
+     "encode": [
+      "H264ConstrainedBaseline",
+      "H264Main",
+      "H264High",
+      "HEVCMain"
+     ]
+    }
+   ],
+   "virt": {
+    "kvm": true,
+    "nested": true
+   },
+   "firmware": {
+    "uefi": true,
+    "tpm": {
+     "version": 2,
+     "p256": true
+    }
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": false
+   }
+  },
+  "own": {
+   "owner": "mom",
+   "internet": {
+    "metered": false
+   },
+   "house": {
+    "household": [
+     "mom"
+    ]
+   }
+  }
+ },
+ "david-laptop": {
+  "note": "your laptop: 16 threads, 32G, RTX, on its charger",
+  "hw": {
+   "cpu": {
+    "arch": "x86_64",
+    "threads": 16
+   },
+   "memoryBytes": 34359738368,
+   "pools": [
+    {
+     "name": "p0",
+     "bytes": 1997159792640
+    }
+   ],
+   "disks": [
+    {
+     "kind": "nvme"
+    }
+   ],
+   "gpus": [
+    {
+     "render": "/dev/dri/renderD128",
+     "encode": [
+      "H264ConstrainedBaseline",
+      "H264Main",
+      "H264High",
+      "HEVCMain"
+     ]
+    }
+   ],
+   "virt": {
+    "kvm": true,
+    "nested": true
+   },
+   "firmware": {
+    "uefi": true,
+    "tpm": {
+     "version": 2,
+     "p256": true
+    }
+   },
+   "nics": [
+    {
+     "wireless": false,
+     "initrd": true
+    }
+   ],
+   "power": {
+    "mains": true,
+    "battery": true
+   }
+  },
+  "own": {
+   "owner": "david",
+   "internet": {
+    "metered": false
+   },
+   "house": {
+    "household": [
+     "david"
+    ]
+   }
+  }
+ }
+}

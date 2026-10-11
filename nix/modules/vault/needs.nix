@@ -2,6 +2,10 @@
 {
   vaultwarden = {
     what = "passwords: everyone's vault, encrypted on their own devices";
+    # it serves the page master passwords are typed into
+    trust = "owner";
+    alwaysOn = true;
+    grows = [ "passwords" ];
     units = [
       "dd-vault-end"
       "dd-usage-vaultwarden"
@@ -39,6 +43,9 @@
 
   vaultwarden-send = {
     what = "Send links: one thing shared with anyone, opened without an account";
+    # it serves the page a Send is decrypted in
+    trust = "owner";
+    alwaysOn = true;
     servesCode = true; # the Send page decrypts in the visitor's browser
     base = {
       uses = {
@@ -59,6 +66,11 @@
 
   pwned-list = {
     what = "the breach list, so checking a password never leaves the box";
+    # the public breach list, about 90G fetched on a timer
+    traffic = {
+      class = "high";
+      downMbps = 100;
+    };
     units = [
       "dd-pwned"
       "dd-pwned-first"

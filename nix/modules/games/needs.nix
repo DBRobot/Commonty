@@ -28,6 +28,11 @@ in
 {
   dd-games = {
     what = "game servers members start for themselves, each in its own VM";
+    # players connect to it; a world runs when someone starts it
+    traffic = {
+      class = "high";
+      upMbps = 10;
+    };
     units = [
       "dd-game@*"
       "dd-games-measure"

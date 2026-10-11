@@ -2,6 +2,13 @@
 {
   forgejo = {
     what = "git: repositories, issues, pull requests, CI runs, releases";
+    # public repositories only, which members push and clone
+    traffic = {
+      class = "medium";
+      upMbps = 5;
+    };
+    alwaysOn = true;
+    grows = [ "code" ];
     units = [
       "forgejo-admin"
       "forgejo-protection"
@@ -39,6 +46,7 @@
 
   forgejo-public = {
     what = "the public repositories' pages, to anyone";
+    alwaysOn = true;
     base = {
       uses = {
         memory = "0";
@@ -58,6 +66,12 @@
 
   forgejo-mirror = {
     what = "pushes the fleet's chosen repositories to their GitHub copies (fleet/policy.json)";
+    # it holds the token that pushes to the mirrors
+    trust = "owner";
+    traffic = {
+      class = "medium";
+      upMbps = 5;
+    };
     units = [ "forgejo-mirrors" ];
     base = {
       uses = {
@@ -76,6 +90,12 @@
 
   forgejo-runner = {
     what = "runs the fleet's own CI: builds, checks, VM tests";
+    # its results gate what merges into the fleet's own repository
+    trust = "owner";
+    traffic = {
+      class = "high";
+      downMbps = 100;
+    };
     units = [ "gitea-runner-*" ];
     base = {
       requires = {
@@ -121,6 +141,11 @@
 
   members-runner = {
     what = "runs members' own CI, sandboxed (Docker and gVisor), with no way into the fleet";
+    # members' own jobs, sandboxed, with no way into the fleet
+    traffic = {
+      class = "high";
+      downMbps = 50;
+    };
     units = [ "gitea-runner-members*" ];
     base = {
       requires.threads = 4; # a job's --cpus; docker refuses more than the box has

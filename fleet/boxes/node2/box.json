@@ -13,5 +13,8 @@
       "recordsize": "1M",
       "com.sun:auto-snapshot": "true"
     }
+  },
+  "internet": {
+    "metered": false
   }
 }
