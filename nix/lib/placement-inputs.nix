@@ -24,9 +24,9 @@ let
       in
       v == true || (builtins.isList v && v != [ ])
     );
-  brought = lib.unique (lib.concatMap (b: lib.concatMap (r: roles.${r}.services or [ ]) b.roles) (
-    builtins.attrValues list
-  ));
+  brought = lib.unique (
+    lib.concatMap (b: lib.concatMap (r: roles.${r}.services or [ ]) b.roles) (builtins.attrValues list)
+  );
 in
 {
   boxes = lib.mapAttrs (n: b: {

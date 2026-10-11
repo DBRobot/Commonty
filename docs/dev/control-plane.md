@@ -2,7 +2,8 @@
 
 Status: running on node1 and node2 with the Cloudflare witness (since
 release 176). Boxes heartbeat into it; the gates keep the directory in it
-(below). Nothing places roles from it yet.
+(below). It plans placement as a dry run at `/plan`; nothing acts on the
+plan yet.
 
 ## What it is for
 
@@ -134,6 +135,36 @@ about $5.50/month.
   it has.
 - Witnesses are validators listed in the membership with no boxes behind
   them. They are removed once four houses exist.
+
+## Placement
+
+Every box computes the same plan from the same agreed state
+([`place`](../../servers/system/control/place/place.go)), from the
+release's placement inputs ([servers](servers.md#needs-and-placement)) and
+what the heartbeats say: who is alive, each line as measured, memory, what
+each service holds, the roles each box runs. It is greedy, not optimal:
+
+- What every box runs comes first.
+- Then the service the fewest live boxes can run, and so on. What a
+  service needs on its own box is decided before it, so the service it
+  needs goes where that suits best and the dependent follows.
+- A `spread` service (the storage pool) goes on every live box that can
+  hold it; a `perHouse` one on that many boxes in each house; the rest on
+  their count, one if unsaid.
+- A box is ranked by its score, by its line against the traffic the
+  service wants, by what already sits beside it, and only as it fills past
+  60% of its memory, by room. Spreading load is not the aim.
+- A service that needs one already at its count goes where that one is:
+  one vault and its send page together, one postgres for all its users.
+- Memory is what a box measured the service holding, never below what it
+  keeps aside (the largest model), and the needs' estimate until measured.
+- What runs stays unless another box is better by a margin: 0.3, plus
+  0.01 for each GiB the move would carry. 100G of game worlds moves for a
+  much better box; a stateless page moves for a clearly better one.
+
+`dd-control -placement` serves the plan at `127.0.0.1:4195/plan`, each
+choice with why. It is a dry run: no box starts or stops anything by it
+yet.
 
 ## Not in scope
 

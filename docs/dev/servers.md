@@ -284,7 +284,11 @@ typed in [`nix/lib/needs-type.nix`](../../nix/lib/needs-type.nix), so a
 needs file that says something unknown fails to evaluate:
 
 ```
-per service      what, units, instances, perHouse, everyBox, servesCode, base/variants
+per service      what, units, instances, perHouse, everyBox, servesCode, when,
+                 trust, traffic, alwaysOn, spread, grows, base/variants
+trust            owner, household or any
+traffic          class (high, medium, low), upMbps, downMbps
+grows            photos, libraries, code, passwords
 requires/faster  arch, gpu, memory, disk, place, threads, windowsLicense, kvm,
                  nestedKvm, uefi, wiredInitrd, tpm
 uses             memory, storage, estimated
@@ -304,24 +308,51 @@ box belongs to some service, and no timer of ours counts from boot:
 [`nix/tests/needs-units.nix`](../../nix/tests/needs-units.nix) fails the
 flake otherwise.
 
-Each role in [`fleet/roles.json`](../../fleet/roles.json) lists the
-services it brings. [`nix/lib/place.nix`](../../nix/lib/place.nix) holds
-every box to the needs of what its roles bring: what each service requires
-of the box (from its signed report and its owner's box.json), what must
-share the box with it (`depends.<svc>.local`), `instances` and `perHouse`,
-and whether the services' memory and storage fit. `checks.placement`
-([`nix/tests/placement.nix`](../../nix/tests/placement.nix)) fails on any
-of it, and on a box running a service none of its roles lists; its output
-is the whole answer as JSON, per box (what it carries and how full it is)
-and per role (the boxes it could be added to as things stand). Roles are
-still assigned by hand in `fleet/boxes.json`; a placer will choose from
-that answer.
+Placement has two halves. What a box *can* run is decided in the release;
+what it *does* run is decided by the control plane.
 
-Placement is still the list in `fleet/boxes.json`, written by hand and
-held honest by `role-fit`. Nothing places roles from the needs yet: they
-are what placement will read
-([what each service needs from a box](hardware.md),
-[the control plane](control-plane.md)).
+**Can.** [`nix/lib/capability.nix`](../../nix/lib/capability.nix) judges
+every box against every service, one service at a time, and never by load.
+A box can run a service when it has what the service requires (from its
+signed report and its owner's box.json), when the service's memory and
+storage floor fit, when the box is one its `trust` allows (the owner's
+boxes; or a box of a household it serves; or any), when its line is not
+metered for `high` traffic, and when everything the service needs on the
+same box can run there too. A box that cannot run what every box runs
+(`everyBox`) cannot join. For each service it can run, the box gets a
+score from what is known before anything runs: what makes the service
+faster, memory to spare, mains power for what must always answer, threads,
+room for the pool. A line no box.json calls flat (`internet.metered:
+false`) counts as metered. The owner's own boxes usually come out able to
+run nearly everything; that is the point. Whether they do is the control
+plane's call.
+
+`checks.placement` ([`nix/tests/placement.nix`](../../nix/tests/placement.nix))
+fails when a box cannot join, when its roles bring a service it cannot
+run, or when it runs a service none of its roles lists.
+`checks.placement-fleet` holds the same rules to a dozen made-up computers
+(a mini PC, NASes, Xeon servers, a gaming PC, laptops, a Pi, a VPS, a thin
+client, an office PC, in
+[`placement-fleet/fleet.json`](../../nix/tests/placement-fleet/fleet.json))
+and to answers a person would give: no TPM, no joining; postgres wants an
+SSD; the biggest pool ranks first for storage. A change that makes those
+answers stop making sense fails there, by name.
+
+**Does.** `.#placement-inputs`
+([`nix/lib/placement-inputs.nix`](../../nix/lib/placement-inputs.nix)) is
+the table the control plane places from: each box's scores, and per
+service whether the fleet wants it (some box's roles bring it, and the
+policy setting in its `when` is on), how many, spread or by house, the line
+it wants, its memory and what moving it carries. Roles stay a convenient
+bundle of services, and still what a box's config installs. How the
+control plane chooses is in [the control plane](control-plane.md#placement).
+
+Each box measures what it can tell only by running: its line, once a day
+against Cloudflare's speed endpoints, unless it is metered
+([`netspeed.nix`](../../nix/modules/box/netspeed.nix)); and what each
+service's units hold in memory at most, every 5 minutes
+([`service-memory.nix`](../../nix/modules/box/service-memory.nix)). Both
+go into its heartbeat.
 
 ### Ports
 
