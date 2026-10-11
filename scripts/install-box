@@ -6,14 +6,14 @@
 #   scripts/install-box node2 branch   # a branch
 #
 # 1. build the box and its disko script here, from git, never the tree
-# 2. take the box's identity (ssh host key, tailscale state) into a tree
+# 2. take the box's identity (ssh host key, its node on the fleet's network) into a tree
 #    whose directory modes are what sshd demands; check the host key is
 #    the one in fleet/boxes.json before wiping anything
 # 3. kexec the box into the installer; find the installer by the box's
 #    MAC because it may come up on another address
 # 4. format, install, reboot
 # 5. wait for the box on its own address and check: same host key, root on
-#    zfs, sane modes, the built closure, tailscale, nothing failed
+#    zfs, sane modes, the built closure, the same network address, nothing failed
 #
 # node2's first reinstall needed the console twice: the installer's host
 # id on the root pool (core forces the import now) and group-writable
@@ -65,20 +65,25 @@ echo "== take $box's identity"
 tree=$work/extra
 mkdir -p "$tree"
 # what makes the box itself, none of it restorable from a backup: the ssh
-# host key (fleet/boxes.json names it), tailscale's node identity, garage's
+# host key (fleet/boxes.json names it), its node on the fleet's network
+# (commonty-net's tailscaled state: the same node, the same address), garage's
 # node key (the layout names it), the uid map (files on its other pools
 # are owned by those numbers), the verifier's keys, certificates it holds,
 # its secrets key (a handle into this box's TPM: without it the box cannot
 # read secrets/<box>.yaml at first boot) and its control-plane vote key
-identity="etc/ssh/ssh_host_ed25519_key etc/ssh/ssh_host_ed25519_key.pub var/lib/tailscale var/lib/tailscale-certs \
+identity="etc/ssh/ssh_host_ed25519_key etc/ssh/ssh_host_ed25519_key.pub var/lib/commonty-net \
   var/lib/garage/meta/node_key var/lib/garage/meta/node_key.pub var/lib/nixos var/lib/dd-verify var/lib/acme \
   var/lib/dd/secrets-key.txt var/lib/dd-control/validator.key"
 # shellcheck disable=SC2029 # the list expands here on purpose
 ssh "${ssh_opts[@]}" "admin@$lan" "sudo sh -c 'for p in $identity; do [ -e /\$p ] && echo \$p; done | tar czf - -C / -T -'" \
   | (umask 022; tar xzf - -C "$tree" --no-same-owner --no-same-permissions)
-chmod 700 "$tree/var/lib/tailscale"
-[ -d "$tree/var/lib/garage/meta" ] && chmod 700 "$tree/var/lib/garage/meta"
-[ -d "$tree/var/lib/dd-verify" ] && chmod 700 "$tree/var/lib/dd-verify"
+# a box need not have each (no garage on a box without storage)
+for d in var/lib/commonty-net var/lib/garage/meta var/lib/dd-verify; do
+  [ ! -d "$tree/$d" ] || chmod 700 "$tree/$d"
+done
+if [ ! -s "$tree/var/lib/commonty-net/tailscaled.state" ]; then
+  echo "   no network state on $box: it will join as a new node, with a new address" >&2
+fi
 find "$tree" -mindepth 1 | sed "s|$tree/|   |"
 have_key=$(awk '{print $1" "$2}' "$tree/etc/ssh/ssh_host_ed25519_key.pub")
 if [ "$have_key" != "$want_key" ]; then
