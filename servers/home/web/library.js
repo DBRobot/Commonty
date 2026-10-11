@@ -14,7 +14,20 @@ import { inApp, servedByApp, appFetch, pageConfig } from './shell.js';
 /// not the app's, which alone holds the key. A library comes with the role
 /// this viewer has in it: a reader looks and does not touch.
 export async function unlock() {
-  await init();
+  const { wasm, key } = begin();
+  const [r] = await Promise.all([key, wasm]);
+  return r;
+}
+
+let opening = null;
+/// The wasm and the library's key, asked for together rather than one
+/// after the other; a page that opens a library calls this first thing.
+export function begin() {
+  opening ??= { wasm: init(), key: whose() };
+  return opening;
+}
+
+async function whose() {
   // the app's window, or a browser the app let in: the app opens the
   // library with this device's own keys and hands the page its key
   if (inApp || servedByApp) {

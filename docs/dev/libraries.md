@@ -358,6 +358,15 @@ anything else   { app: true }: the page says it opens through the app; a
                 box serves a member the page that hands over to it instead
 ```
 
+The page links the wasm and its modules to preload them, and `begin()`
+asks for the wasm and the key together, beside `/_dd/me`, not one after
+the other. The `/_dd/static/` and `/_dd/web/` files keep fixed names, so
+they are served `no-cache` with an etag (a 304 each visit), not cached
+for good.
+
+Movies & TV looks up four titles at a time on TMDB, each title's two
+pictures together.
+
 Then every name is encrypted to ask the gate and decrypted from its
 answer in the tab. scrypt runs once per library per tab: the wasm keeps
 the last four ciphers.
