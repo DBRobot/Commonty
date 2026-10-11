@@ -1,4 +1,4 @@
-# The mirror
+# The GitHub mirror
 
 The forge is where everything happens: pull requests, CI, merges, the
 fleet's releases and the app's. GitHub only ever held a mirror of the

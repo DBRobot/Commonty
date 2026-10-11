@@ -1,4 +1,4 @@
-# The fleet
+# The fleet of boxes
 
 `fleet/` is what the fleet is, as data: the boxes and the roles each one
 runs, what each box reported about its own hardware, what its owner chose

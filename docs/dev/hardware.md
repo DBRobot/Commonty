@@ -1,4 +1,4 @@
-# What each service needs from a box
+# What each service needs
 
 Status: audit, 2026-10-04, for review. Every hardware and placement
 requirement found in the repo, so the discovery script reports all of them

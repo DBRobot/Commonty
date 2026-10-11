@@ -1,4 +1,4 @@
-# Game servers
+# Game servers and guests
 
 A member picks a game on the Games page, presses Start, and a dedicated
 server for it comes up on a box, reachable by the friends they invite. This

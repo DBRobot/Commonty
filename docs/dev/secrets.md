@@ -1,4 +1,4 @@
-# Secrets
+# Secrets and keys
 
 `secrets/` holds the fleet's secrets, encrypted with
 [sops](https://github.com/getsops/sops) to age keys and committed. The

@@ -1,4 +1,4 @@
-# CI
+# CI and pull requests
 
 Every change to `main` arrives as a pull request, and every pull request is
 checked by the forge's CI before it can merge. This page is what CI is for,

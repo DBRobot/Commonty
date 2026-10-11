@@ -1,4 +1,4 @@
-# Data
+# Data the services use
 
 `data/` is data the services are built with: files that are made once,
 by a script run by hand, and committed, so a build never reaches out for

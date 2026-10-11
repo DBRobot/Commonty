@@ -1,4 +1,4 @@
-# Packaged programs
+# Packaged upstream programs
 
 Some of what Commonty offers is someone else's program: Ente for Photos,
 Vaultwarden for Passwords, Pi-hole for ad blocking, llama.cpp for Chat,

@@ -1,4 +1,4 @@
-# The app
+# The Commonty app
 
 The Commonty app is what a member installs: a window onto their boxes for
 Linux, Windows and Android. It is the same Rust crates `dd` is made of

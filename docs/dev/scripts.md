@@ -1,4 +1,4 @@
-# Scripts
+# Box scripts
 
 `scripts/` is the shell a person runs from a checkout on their own
 machine: copying a box's report into the repo, putting a box back

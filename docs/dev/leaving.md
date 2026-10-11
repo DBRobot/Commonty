@@ -1,4 +1,4 @@
-# Leaving
+# Leaving and deleting
 
 A member can take everything out and leave, or be removed by the fleet's
 owner. Either way every way in ends at once, everything of theirs is kept

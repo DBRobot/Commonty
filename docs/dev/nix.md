@@ -1,4 +1,4 @@
-# Nix
+# Nix modules and tests
 
 `nix/` is what a box is made of. The flake at the top of the tree builds
 one NixOS system per box from three things: the box's folder in

@@ -1,4 +1,4 @@
-# The forge
+# The forge for Git
 
 The forge is where the fleet's code lives: its repositories, pull
 requests, issues, CI runs and releases, and members' own repositories

@@ -1,4 +1,4 @@
-# Security
+# Security and reporting
 
 Security is what makes Commonty's privacy real. A promise that nobody can
 read your data is only as good as the locks behind it, so Commonty is built

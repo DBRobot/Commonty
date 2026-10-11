@@ -1,4 +1,4 @@
-# The gate
+# The gate and sign-in
 
 Every box runs the gate. On the gateway box it is the front door: nginx
 asks it about every request to a protected service, and it serves the

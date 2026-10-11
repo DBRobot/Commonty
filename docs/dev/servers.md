@@ -1,4 +1,4 @@
-# Servers
+# Servers and their layout
 
 `servers/` is everything that runs on a box: our own programs, the pages
 the gate serves, and the patches to the upstream programs we package. This

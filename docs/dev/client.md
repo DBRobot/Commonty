@@ -1,4 +1,4 @@
-# The client
+# The dd client
 
 `client/` is the code that runs on people's devices, and the code that
 holds their keys: the `dd` command, the encrypted git remote, the crates
