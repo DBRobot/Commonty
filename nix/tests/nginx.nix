@@ -23,6 +23,11 @@ let
       python3 ${./nginx-t.py} "$conf" ${nginx} "$tmp"
       # the fleet's metrics never answer outsiders (roles/observe.nix)
       if grep -q 'demo-metrics\.' "$conf"; then echo "${name}: a demo door to Metrics"; exit 1; fi
+    ''
+    # the bare domain's security.txt: served, and saying what RFC 9116 asks
+    + lib.optionalString (c.config.dd ? securityTxt) ''
+      grep -q 'location = /.well-known/security.txt' "$conf"
+      python3 ${./security-txt.py} ${c.config.dd.securityTxt} ${c.config.dd.domain}
     '';
 in
 pkgs.runCommand "nginx-configs-parse"
