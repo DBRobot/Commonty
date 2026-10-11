@@ -1,13 +1,13 @@
 {
   "payload": {
-    "counter": 236,
-    "rev": "f99d4da9458867fcd40a138c03d3616c4bd30f25",
-    "issued": 1791703162,
+    "counter": 237,
+    "rev": "0cb23e59a602d01220028d79e89ba1f15a50dece",
+    "issued": 1791704218,
     "boxes": {
       "node1": {
-        "path": "/nix/store/26jl7hafjbh4pkccj0ajvnjni4mv225l-nixos-system-node1-26.05.20260822.a9e6d84",
-        "nar_hash": "sha256-fNgx9KCHbhR3XxyMi17pkKiD64VOBFjCvJMynBppa5g=",
-        "closure": "074bd131920fe871496ae6fafec02e183ef0c53501f813c1df3c7e5195b11765"
+        "path": "/nix/store/gf4ckn8r7sd31la7pdgdx8i2hsm5f8qc-nixos-system-node1-26.05.20260822.a9e6d84",
+        "nar_hash": "sha256-BoUHN2gP9RenT6252xB2MXC/VpbMAMif+zTcOGgPVWE=",
+        "closure": "afc20ca96b71bdcdae9ae2406c4b4777eb0e4f4321422857311b0f1c8bf202a7"
       },
       "node2": {
         "path": "/nix/store/g5aq1gpj7s28wz80ih288l68bizi76l1-nixos-system-node2-26.05.20260822.a9e6d84",
@@ -17,5 +17,5 @@
     }
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "qWf//6KmxRUzPFmMsATXhotch+JcvoPBrNZ6vN3eVH6MBgnVB1pCA3OvwpV0ZnGcBDSFdZdvVsF5v+5lOAwvCg=="
+  "signature": "FfoSueCA1AKxrAN8EdVGkaVu+fBEhwSUeG0bj5Flm99A36iknSRE2TenDqFHRLaCbjxLEtmvMXGQTceDaZ8BAg=="
 }
