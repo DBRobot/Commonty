@@ -177,6 +177,9 @@ func joinMessage(box string, now int64) []byte {
 	return []byte(fmt.Sprintf("commonty box join v1\x00%s\x00%d", box, now))
 }
 
+// how old agreement may be and still switch anything here
+const freshFor = 30 * time.Second
+
 // facts: what this box has, as the placement rules will read them
 func facts() map[string]float64 {
 	f := map[string]float64{"cores": float64(runtime.NumCPU())}
@@ -361,6 +364,8 @@ func main() {
 	roles := flag.String("roles", "", "roles this box runs, comma separated")
 	placement := flag.String("placement", "", "what each box can run and what the fleet wants (the release's placement-inputs.json); empty: no /plan")
 	every := flag.Duration("heartbeat", 30*time.Second, "how often to heartbeat")
+	placedCarries := flag.String("placed-carries", "", "the placed services this box carries and their units (nix/modules/box/placed.nix); empty: none, and nothing is switched")
+	placedDir := flag.String("placed-dir", "/run/dd-placed", "where a placed service's flag is, the condition its units start on")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
 	submitSock := flag.String("submit", "", "a unix socket where this box's gate hands in directory items (POST /submit); empty: none")
@@ -529,10 +534,21 @@ func main() {
 		return nil
 	}
 
+	// the placed services this box carries, switched by the plan below
+	carried, err := loadCarries(*placedCarries)
+	if err != nil {
+		log.Fatalf("%s: %v", *placedCarries, err)
+	}
+	placed := &placer{box: *box, dir: *placedDir, carries: carried, run: systemctl}
+
 	// heartbeats; a reader also asks for the latest each time
 	go func() {
 		for {
-			body, _ := json.Marshal(state.Heartbeat{Facts: facts(), Roles: splitRoles(*roles)})
+			f := facts()
+			for k, v := range placed.facts() {
+				f[k] = v
+			}
+			body, _ := json.Marshal(state.Heartbeat{Facts: f, Roles: splitRoles(*roles)})
 			if err := submit("heartbeat", body); err != nil {
 				log.Printf("heartbeat: %v", err)
 			}
@@ -637,6 +653,20 @@ func main() {
 			w.Header().Set("content-type", "application/json")
 			_ = json.NewEncoder(w).Encode(place.Decide(in, n.State(), cfg.Rules.GoneAfter))
 		})
+		// and carried out here, for what this box carries: only from a plan
+		// made of agreement still fresh. Without it, what runs keeps running
+		if len(carried) > 0 {
+			go func() {
+				for {
+					time.Sleep(10 * time.Second)
+					s := n.State()
+					if time.Now().UnixMilli()-s.Time > freshFor.Milliseconds() {
+						continue
+					}
+					placed.reconcile(place.Decide(in, s, cfg.Rules.GoneAfter))
+				}
+			}()
+		}
 	}
 	// the directory log from item `since` on, and where the next will be
 	http.HandleFunc("/directory", func(w http.ResponseWriter, req *http.Request) {

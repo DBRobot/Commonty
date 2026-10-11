@@ -256,6 +256,11 @@ t.attrsOf (
         default = false;
         description = "runs on every box, whatever its roles: what makes a box one of the fleet (placement does not choose it)";
       };
+      placed = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "the control plane switches it on and off: its units start only where the plan puts it, among the boxes that carry it (box/placed.nix); a role still decides where it is built in";
+      };
       perHouse = lib.mkOption {
         type = t.nullOr t.ints.positive;
         default = null;

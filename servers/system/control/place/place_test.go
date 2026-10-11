@@ -227,3 +227,42 @@ func TestOneDatabaseItsUsersFollow(t *testing.T) {
 		t.Fatalf("a second postgres: %+v", p.Boxes["nas"])
 	}
 }
+
+func TestAPlacedServiceGoesOnlyWhereItIsCarried(t *testing.T) {
+	in, s := fleet()
+	sv := in.Services["photos"]
+	sv.Placed = true
+	in.Services["photos"] = sv
+	// big suits it, but has not got it
+	if p := Decide(in, s, 90_000); runs(p, "big", "photos") {
+		t.Fatalf("photos placed where it is not carried: %+v", p)
+	}
+	s.Boxes["big"].Facts["carries/photos"] = 1
+	if p := Decide(in, s, 90_000); !runs(p, "big", "photos") {
+		t.Fatalf("photos not placed where it is carried: %+v", p)
+	}
+}
+
+func TestAPlacedServiceRunsWhereItsBoxSaysItDoes(t *testing.T) {
+	in, s := fleet()
+	in.Boxes["small"].Can["web"] = 0.5
+	in.Boxes["nas"].Can["web"] = 1
+	in.Services["web"] = Service{Enabled: true, Instances: 1, Class: "low", Placed: true}
+	for _, b := range []string{"small", "nas"} {
+		s.Boxes[b].Facts["carries/web"] = 1
+	}
+	// small already runs it: the damping keeps it there over a small gain
+	in.Damping = Damping{Base: 1}
+	s.Boxes["small"].Facts["runs/web"] = 1
+	p := Decide(in, s, 90_000)
+	if !runs(p, "small", "web") || runs(p, "nas", "web") {
+		t.Fatalf("web moved off the box running it: %+v", p)
+	}
+	// and a role naming it does not count: only the box's own report
+	s.Boxes["small"].Facts["runs/web"] = 0
+	in.Roles["web"] = []string{"web"}
+	s.Boxes["small"].Roles = []string{"web"}
+	if p := Decide(in, s, 90_000); !runs(p, "nas", "web") {
+		t.Fatalf("web stayed by a role: %+v", p)
+	}
+}
