@@ -1595,8 +1595,15 @@ mod tests {
         let got: Vec<(&str, u16)> = v.ports.iter().map(|p| (p.var.as_str(), p.port)).collect();
         assert_eq!(got, [("SERVER_PORT", 27001), ("QUERY_PORT", 27002)]);
         // forwarded and opened like any other of its ports
-        let ports = &m.access()["servers"][1]["ports"];
-        assert_eq!(*ports, serde_json::json!([27001, 27002]));
+        // the list is in no set order: find it by its id
+        let access = m.access();
+        let mine = access["servers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == v.id.as_str())
+            .unwrap();
+        assert_eq!(mine["ports"], serde_json::json!([27001, 27002]));
         // one port left: enough for "one", not for a port and the next
         let e = m
             .create("c", "valheim-plain", &BTreeMap::new())
