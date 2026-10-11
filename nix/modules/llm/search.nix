@@ -88,6 +88,8 @@ in
       ProtectSystem = "strict";
       ProtectHome = true;
       PrivateTmp = true;
+      # searx logs a failed engine's address, and the address holds the search
+      LogLevelMax = "notice";
     };
   };
 

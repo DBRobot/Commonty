@@ -199,7 +199,7 @@ in
             EMERGENCY_ACCESS_ALLOWED = true;
             SENDS_ALLOWED = true;
             ORG_EVENTS_ENABLED = true;
-            PASSWORD_HINTS_ALLOWED = true;
+            PASSWORD_HINTS_ALLOWED = false;
             SHOW_PASSWORD_HINT = false;
 
             # no site icons: fetching them would tell the box which sites are in

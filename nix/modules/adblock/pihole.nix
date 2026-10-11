@@ -65,6 +65,8 @@ in
     services.pihole-ftl = {
       enable = true;
       privacyLevel = 3;
+      # no record of which names a device looked up, not even dnsmasq's log
+      settings.dns.queryLogging = false;
       # the lists are loaded by dd-pihole-lists below, not the module's own
       # setup: that one adds them through the api every time, and the second
       # time Pi-hole answers "database_error" (the list is already there)
@@ -136,8 +138,6 @@ in
             forward-addr = [
               "9.9.9.9@853#dns.quad9.net"
               "149.112.112.112@853#dns.quad9.net"
-              "1.1.1.1@853#cloudflare-dns.com"
-              "1.0.0.1@853#cloudflare-dns.com"
             ];
           }
         ];

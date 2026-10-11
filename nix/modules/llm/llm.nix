@@ -66,6 +66,7 @@ in
         limit_req zone=dd_model burst=20 nodelay;
         limit_req_status 429;
         proxy_buffering off; # streamed completions
+        proxy_request_buffering off; # a long prompt never goes to a temp file
         proxy_read_timeout 600s; # cpu generation is slow
         client_max_body_size 0;
       '';

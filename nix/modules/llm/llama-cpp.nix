@@ -353,6 +353,7 @@ in
               # enable_thinking): measured 0.8s vs 16.5s for the same answer
               "--reasoning off"
               "--no-slots" # /slots would show one person's requests to another
+              "--cache-ram 0" # no past prompt kept in memory once answered
               "--no-webui" # the chat page is ours (servers/chat)
             ]
             ++ lib.optionals gpu m.split

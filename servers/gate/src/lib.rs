@@ -1902,7 +1902,9 @@ async fn chat_search(
     let v = match got {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("verify: search: {e:#}");
+            // never the error itself: its URL carries what was searched for
+            let status = e.downcast_ref::<reqwest::Error>().and_then(|r| r.status());
+            eprintln!("verify: search did not answer ({status:?})");
             return (StatusCode::BAD_GATEWAY, "the search did not answer").into_response();
         }
     };

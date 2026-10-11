@@ -149,7 +149,10 @@ in
           '';
         };
         # and it is kept three weeks, not the half year logrotate would
-        services.logrotate.settings.nginx.rotate = lib.mkForce 3;
+        services.logrotate.settings.nginx = {
+          frequency = lib.mkForce "daily";
+          rotate = lib.mkForce 20;
+        };
       }
     ]
   );
