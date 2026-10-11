@@ -148,7 +148,8 @@ hardware.json
   hostId          ZFS's host id                 networking.hostId
   bootDisk        /dev/disk/by-id/...           layout.nix's device
   wired, wifi     the wired NIC's MAC, the wifi interface   dd.home
-  usbNic          the wired link is USB          usbcore.autosuspend=-1
+  usbNic          the wired link is USB          (nothing now: every box has
+                                                 USB power saving off)
   secretsKey      age1tpm1...: the TPM key secrets/<box>.yaml is
                   encrypted to; also headscale's recipient for the box
   firmware        uefi, secureBoot, setupMode, tpm {version, p256, ppi},
@@ -168,7 +169,27 @@ hardware.json
 report into the box's NixOS settings: the hardware configuration, the
 disk layout on `bootDisk`, `dd.box.threads`, `memoryBytes`, `disks` and
 `gpus`, graphics drivers for what was found, and `dd.box.vaapi` for the
-first GPU that encodes H.264.
+first GPU that encodes H.264. Every box has USB power saving off,
+whatever it reported: `usbcore.autosuspend=-1`, and a udev rule that keeps
+each USB device's `power/control` on and its USB3 link power states (U1,
+U2) off where the kernel offers them.
+
+A box with both `wired` and `wifi` has both house profiles up, the cable at
+route metric 10 and the wifi at 20
+([home-network.nix](../../nix/modules/box/home-network.nix)). A USB adapter
+can come back from a reset with its carrier up and nothing getting
+through; NetworkManager then sees nothing wrong and the wifi waits behind a
+dead route (node2, 2026-10-11). `dd-wired-watch`
+([wired-watch.sh](../../nix/modules/box/wired-watch.sh)) asks the router
+over the cable every 30 s (`ping -I`). After 90 s without an answer it
+resets the adapter if it is USB (its `authorized` 0 then 1), and if the
+cable still does not answer it takes `house-wired` down so the wifi carries
+everything. While on wifi it listens for the router on the cable with an
+ARP probe (no address, so no route moves), and every 10 minutes brings the
+profile up to try it outright; `house-wired` comes back the moment the
+router answers over it. It never reboots, and writes `dd_wired_state`
+(0 ok, 1 failing, 2 on wifi), `dd_wired_since_seconds`, `dd_wired_resets`
+and `dd_wired_last_reset_seconds` to the box's facts.
 
 **The owner's choices**: `box.json`. It is written by hand, and it is the
 only file in the folder that is.
