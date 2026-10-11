@@ -82,6 +82,7 @@
         "site-journeys"
         "rollout"
         "placed"
+        "wired-watch"
       ];
       rust =
         let
