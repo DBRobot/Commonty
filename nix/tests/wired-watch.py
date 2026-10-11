@@ -7,7 +7,9 @@ def active():
 
 
 def facts(line):
-    box.wait_until_succeeds(f"grep -x '{line}' /var/lib/dd-facts/wired.prom", timeout=120)
+    box.wait_until_succeeds(
+        f"grep -x '{line}' /var/lib/dd-facts/wired.prom", timeout=120
+    )
 
 
 def logged(text, timeout):
