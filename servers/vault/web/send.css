@@ -27,6 +27,7 @@
     --bad: #F08A8A;
   }
 }
+html { scrollbar-gutter: stable; }
 * { box-sizing: border-box; }
 body {
   margin: 0;

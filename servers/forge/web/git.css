@@ -83,8 +83,18 @@ main.git { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
 .state.open { background: var(--accent); color: var(--accent-ink); }
 .state.merged { background: var(--working); color: var(--surface); }
 .state.closed { background: var(--broken); color: var(--surface); }
-.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; background: var(--line); }
-.dot.ok { background: var(--ok); } .dot.working { background: var(--working); } .dot.attention { background: var(--attention); } .dot.broken { background: var(--broken); } .dot.off { background: var(--off); }
+.dot { position: relative; width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; background: var(--line); }
+/* each state its own shape, not a colour alone: passed is filled, failed
+   carries a cross, waiting a dashed ring (running is the spinning one),
+   skipped a ring with a dash */
+.dot.ok { background: var(--ok); }
+.dot.attention { background: var(--attention); }
+.dot.working { background: transparent; border: 1.5px dashed var(--working); }
+.dot.off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--off); }
+.dot.off::after { content: ""; position: absolute; left: 2.5px; right: 2.5px; top: 4.25px; height: 1.5px; background: var(--off); }
+.dot.broken { background: var(--broken); }
+.dot.broken::before, .dot.broken::after { content: ""; position: absolute; left: 2px; right: 2px; top: 4.25px; height: 1.5px; background: var(--surface); transform: rotate(45deg); }
+.dot.broken::after { transform: rotate(-45deg); }
 .spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--working); border-right-color: transparent; animation: git-sp 1s linear infinite; flex: none; display: inline-block; }
 @keyframes git-sp { to { transform: rotate(360deg); } }
 .chip { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 1px 8px; background: var(--line-2); color: var(--ink-2); white-space: nowrap; }

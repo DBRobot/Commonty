@@ -104,6 +104,10 @@
   --off-bg: #1C2127;
 }
 
+/* the scrollbar's room is kept whether or not the page needs one: a
+   page that grows past the window keeps its width */
+html { scrollbar-gutter: stable; }
+
 * { box-sizing: border-box; }
 /* the pages show and hide with the attribute; no rule below outranks it */
 [hidden] { display: none !important; }

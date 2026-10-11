@@ -395,6 +395,9 @@ document.addEventListener('click', (e) => {
   if (u.origin !== location.origin || u.pathname.startsWith('/_dd/') || FORGE.test(u.pathname)) return;
   if (u.pathname === location.pathname && u.search === location.search && u.hash) return;
   e.preventDefault();
+  // already on its way there (the press went to it, or a click did and the
+  // page is still coming): another click would only start it over
+  if (u.pathname === location.pathname && u.search === location.search && document.body.classList.contains('loading')) return;
   follow(a, u);
 });
 addEventListener('popstate', render);

@@ -1,4 +1,7 @@
 /* the change-email pages and the email line on Settings */
+html { scrollbar-gutter: stable; }
+/* in Settings' frame the page never scrolls: no room kept */
+html:has(body.row-frame) { scrollbar-gutter: auto; }
 body { background: var(--bg); }
 .fl { max-width: 520px; margin: 0 auto; padding: 40px 16px 64px; display: grid; gap: 18px; }
 .fl-back { color: var(--ink-2); text-decoration: none; font-size: 14px; font-weight: 600; }
