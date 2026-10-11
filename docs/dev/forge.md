@@ -422,7 +422,7 @@ no build step.
 ```
 pages/git.html     the bar, the bell, #rhead (a repository's header), #app; purify.js, git.js, shell.js
 git.js             imports every view, asks who is looking, starts the bell, draws
-git-core.js        $ and el (from kit.js), put/ic, api(), the cache, the router, watch(), the bell, the bar's search
+git-core.js        $ and el (from kit.js), put/ic, api(), once(), the router, watch(), the bell, the bar's search
 git-home.js        /, /new, /notifications, /search, /settings (tokens, keys, profile), /<owner>
 git-repo.js        a repository: header and tabs, code and files, commits, a commit,
                    branches, releases, activity; "Running now" on the fleet's repository
@@ -460,23 +460,35 @@ says which repository the boxes are built from, and on that repository
 only, `/_dd/fleet.json` (the gate) fills the "Running now" list with each
 box and its release.
 
-**Caching**, as [ui.md](ui.md) asks:
+**Fast, from live data.** Nothing is kept between views: no cache of the
+forge's answers, no copy of a page drawn while the next one comes, nothing
+fetched ahead of a click. Every view draws from what the forge says now,
+and is fast by asking little and asking in parallel:
 
-- `api()` keeps every read for a minute, and two views asking the same
-  thing share one request. Any write clears it all; a view that must see
-  now passes `fresh: true`.
-- The router keeps what the last 40 addresses looked like. Going back to
-  one shows it at once, and the view then draws it again from what the
-  forge says now.
-- A repository is asked once per visit (`repo()` in `git-repo.js`), its
-  branches and tags once.
-- A tab with the most to fetch (pull requests, issues, actions, releases,
-  activity) starts fetching when the pointer reaches it (`warmers`).
+- `api()` is one request, every time. What several parts of one view ask
+  alike (the repository, its branches and tags, the fleet's files) is
+  asked once while that view is drawn (`once()` in `git-core.js`), and
+  asked again by the next view.
+- The code and commits views ask for their list alongside the
+  repository, taking the address's first part as the ref, and ask again
+  only if the refs say otherwise. A file's page asks for every open
+  folder of the tree beside it at once.
 - A repository row's check dot, the languages and "Running now" fill in
-  after the page is drawn, never before.
+  after the page is drawn, never before. What a list asks for each row (a
+  commit's or a pull request's checks, a branch's "ahead · behind") is
+  asked only once the row is near the window (`whenSeen`). Ahead and
+  behind are two commit lists of one, counted by the forge
+  (`commits?sha=<tip>&not=<base>`), not compares. The pull requests list
+  takes every open one's head from one list, not one call each.
+- Activity reads its year of commits and its runs by the page: the first
+  page says how far back a page reaches, and the pages that get to the
+  span are asked together.
+- `git.html` preloads every module, so the page's scripts arrive at once
+  rather than each after the one that imports it.
+- Links are followed on pointer-down, not on release.
 
-The page fires `git:shown` (drawn from the kept copy) and `git:drawn`
-(drawn fresh) with the time each took, for measuring click-to-paint.
+The page fires `git:drawn` when a view is drawn, with the time it took,
+for measuring click-to-paint.
 
 **Live updates.** Forgejo has no webhook for a run or a job starting, and
 a webhook to its own box is refused on purpose, so the database says
@@ -664,8 +676,8 @@ It is one job in CI's `vm_tests` matrix.
   both to `nginx-door.py`.
 - **A new view** is a `route()` in the module it belongs to, using
   `api()`, `current()` and the shared pieces in `git-core.js`. Follow
-  [ui.md](ui.md): draw from the kept copy first, ask in parallel, warm the
-  tab, every state drawn. Measure with `git:shown`/`git:drawn`.
+  [ui.md](ui.md): draw from live data, ask in parallel, every state
+  drawn. Measure with `git:drawn`.
 - **Something new to watch live** is another trigger in `live.nix` (ids
   and a state only, never content) and a `watch()` in the view. The forge
   VM test should see it arrive.

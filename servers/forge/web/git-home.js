@@ -3,7 +3,7 @@
 // settings (API tokens, keys, profile).
 
 import {
-  put, $, app, el, ic, api, q, ago, when, plural, avatar, route, go, who, whoami, statusDot,
+  put, $, app, el, ic, api, q, ago, when, plural, avatar, route, go, who, whoami, statusDot, whenSeen,
   markdown, toast, copy, setTitle, firstLine, short, fail, bell, open,
 } from './git-core.js';
 import { docsUrl } from './shell.js';
@@ -24,10 +24,10 @@ async function repoRow(r) {
       r.description ? el('div', { class: 'sub', text: r.description }) : null,
       el('div', { class: 'sub hrow', style: 'gap:6px' }, dot, r.language ? el('span', { text: r.language }) : null, el('span', {}, 'updated ', when(r.updated_at)))),
     r.open_pr_counter && !open ? el('a', { class: 'chip', href: `/${r.full_name}/pulls`, text: plural(r.open_pr_counter, 'open pull request') }) : null);
-  api(`/repos/${r.full_name}/commits/${encodeURIComponent(r.default_branch)}/status`)
+  // its checks, asked when the row comes into sight
+  return whenSeen(row, () => api(`/repos/${r.full_name}/commits/${encodeURIComponent(r.default_branch)}/status`)
     .then((s) => { if (s?.total_count) dot.replaceWith(statusDot(s.state)); })
-    .catch(() => {});
-  return row;
+    .catch(() => {}));
 }
 
 // contributions by day, from the forge's own count
@@ -98,6 +98,7 @@ route(/^\/$/, async ({ params, current }) => {
   setTitle('Your repositories');
   const w = await whoami();
   const user = w.forge?.login || w.name;
+  const yearP = year(user);
   const [repos, reviews, assigned, feed] = await Promise.all([
     api(`/user/repos${q({ limit: 50 })}`),
     api(`/repos/issues/search${q({ type: 'pulls', state: 'open', review_requested: true, limit: 10 })}`).catch(() => []),
@@ -118,7 +119,7 @@ route(/^\/$/, async ({ params, current }) => {
     el('div', {},
       el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Your repositories' }), el('span', { class: 'spacer' }), filter, el('a', { class: 'btn go', href: '/new', 'data-guide': 'new-repo' }, ic('plus'), 'New')),
       list,
-      await year(user)),
+      await yearP),
     el('aside', { class: 'side' },
       el('section', {}, el('h2', { text: 'Waiting on you' }),
         waiting.length ? waiting.map((i) => el('p', {},
@@ -345,6 +346,7 @@ route(/^\/([^/]+)$/, async ({ m, current }) => {
   noHead();
   const user = m[1];
   // on the public door: their public repositories, and nothing about them
+  const yearP = open ? null : year(user);
   const [u, repos] = await Promise.all([open ? { login: user } : api(`/users/${encodeURIComponent(user)}`), api(`/users/${encodeURIComponent(user)}/repos${q({ limit: 50 })}`)]);
   if (!current()) return;
   setTitle(u.login);
@@ -354,7 +356,7 @@ route(/^\/([^/]+)$/, async ({ m, current }) => {
     el('div', {},
       el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: `${u.login}'s repositories` })),
       el('div', { class: 'box list gap' }, ...(repos.length ? await Promise.all(repos.map(repoRow)) : [el('div', { class: 'empty', text: 'Nothing you may see.' })])),
-      open ? null : await year(u.login)),
+      await yearP),
     open ? null : el('aside', { class: 'side' }, el('section', {}, avatar(u, 'avatar l'), el('h2', { style: 'margin-top:8px', text: u.full_name || u.login }), el('p', { class: 'small muted', text: `here since ${new Date(u.created).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}` })))));
 }, true);
 

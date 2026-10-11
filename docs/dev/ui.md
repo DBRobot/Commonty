@@ -21,11 +21,10 @@ request to start the next.
   from the cache straight away and replaced when the fresh answer lands. A
   view that waits on the network to show what it showed a minute ago is a
   bug. Use the shared fetch in [`servers/web-shared/kit.js`](../../servers/web-shared/kit.js); don't
-  write another. The one exception is the Git pages' `api()`: the
-  forge's answers are per person and its status codes steer the page
-  (sign in, not found), so it keeps a minute's copy in memory, never in
-  the browser's storage, and the router draws an address's last copy at
-  once ([forge.md](forge.md#the-git-pages)).
+  write another. The one exception is the Git pages: for now they keep
+  nothing and fetch nothing ahead of the click. Every view draws from what
+  the forge says now, and is made fast by asking less and asking in
+  parallel ([forge.md](forge.md#the-git-pages)).
 - **Ask in parallel.** Requests that don't need each other's answers go out
   together. A chain of awaits is a waterfall, and the page is as slow as the
   sum of it.

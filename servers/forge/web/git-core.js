@@ -92,27 +92,21 @@ export class ApiError extends Error {
 }
 
 // One call, as the person looking. The answer and, for lists, how many
-// there are in all (the forge says so in a header).
-// Reads are kept for a minute, so going back to a page asks nothing again,
-// and two views asking the same thing share one request. Any change made
-// from these pages forgets them all; a view that must see now passes fresh.
-const kept = new Map();
-const KEEP_MS = 60000;
-export function api(path, opts = {}) {
-  const read = (opts.method || 'GET') === 'GET' && opts.body === undefined;
-  if (!read) kept.clear();
-  if (!read || opts.fresh) return request(path, opts);
-  const key = `${opts.withTotal ? 't' : ''}${path}`;
-  const hit = kept.get(key);
-  if (hit && performance.now() - hit.at < KEEP_MS) return hit.p;
-  const p = request(path, opts);
-  kept.set(key, { at: performance.now(), p });
-  p.catch(() => kept.delete(key));
-  return p;
-}
+// there are in all (the forge says so in a header). Nothing is kept: every
+// view draws from what the forge says now.
+export const api = (path, opts = {}) => request(path, opts);
 
-// a change made outside the API (a run cancelled by its web route) forgets them too
-export const forget = () => kept.clear();
+// What several parts of one view ask alike (the repository, its refs) is
+// asked once while that view is drawn, and asked again by the next.
+let asked = new Map();
+export function once(key, ask) {
+  if (!asked.has(key)) {
+    const p = ask();
+    asked.set(key, p);
+    p.catch(() => { if (asked.get(key) === p) asked.delete(key); });
+  }
+  return asked.get(key);
+}
 
 async function request(path, opts = {}) {
   const init = { method: opts.method || 'GET', headers: { accept: 'application/json' }, credentials: 'same-origin' };
@@ -255,6 +249,24 @@ export function statusDot(state) {
   return el('span', { class: `dot ${s}`, title: state || 'no checks' });
 }
 
+// `fill()` once the element is near the window, and not before: what each
+// row of a long list asks for is asked only for the rows someone sees
+const nearby = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((seen) => {
+  for (const e of seen) {
+    if (!e.isIntersecting) continue;
+    nearby.unobserve(e.target);
+    fills.get(e.target)?.();
+    fills.delete(e.target);
+  }
+}, { rootMargin: '300px 0px' });
+const fills = new WeakMap();
+export function whenSeen(node, fill) {
+  if (!nearby) { fill(); return node; }
+  fills.set(node, fill);
+  nearby.observe(node);
+  return node;
+}
+
 export function pop(button, build) {
   const wrap = el('span', { class: 'pop' });
   const menu = el('div', { class: 'menu' });
@@ -292,10 +304,6 @@ export function fail(e) {
 export function setTitle(...parts) {
   document.title = [...parts.filter(Boolean), 'Git'].join(' · ');
 }
-
-// what a tab needs, by the tab's name, asked for when the pointer reaches
-// it (git-repo.js header) so the click finds it already here
-export const warmers = {};
 
 // ---- live: the forge's changes as they happen (servers/gate/src/forge_events.rs)
 
@@ -367,19 +375,12 @@ export function go(href, replace = false) {
   render();
 }
 
-// What each address last looked like: going back to it shows that at once,
-// and the view then draws it again from what the forge says now.
-const seen = new Map();
-const here = () => location.pathname + location.search;
-function keep() {
-  seen.delete(here());
-  seen.set(here(), { main: [...app().childNodes], head: [...$('rhead').childNodes], title: document.title, y: scrollY });
-  if (seen.size > 40) seen.delete(seen.keys().next().value);
-}
-
 let drawing = 0;
 export async function render() {
   const mine = ++drawing;
+  // rows the last view was waiting to see are not coming back
+  nearby?.disconnect();
+  asked = new Map();
   const path = decodeURIComponent(location.pathname).replace(/\/+$/, '') || '/';
   const params = new URLSearchParams(location.search);
   for (const [pattern, view] of routes) {
@@ -387,20 +388,10 @@ export async function render() {
     if (!m) continue;
     const main = app();
     const t0 = performance.now();
-    const before = seen.get(here());
-    if (before) {
-      main.replaceChildren(...before.main);
-      $('rhead').replaceChildren(...before.head);
-      document.title = before.title;
-      dispatchEvent(new CustomEvent('git:shown', { detail: { path, ms: Math.round(performance.now() - t0) } }));
-    }
     document.body.classList.add('loading');
     try {
       await view({ m, params, path, current: () => mine === drawing });
-      if (mine === drawing) {
-        keep();
-        dispatchEvent(new CustomEvent('git:drawn', { detail: { path, ms: Math.round(performance.now() - t0) } }));
-      }
+      if (mine === drawing) dispatchEvent(new CustomEvent('git:drawn', { detail: { path, ms: Math.round(performance.now() - t0) } }));
     } catch (e) {
       if (mine !== drawing) return;
       console.error(e);
@@ -472,7 +463,7 @@ searchFrom({
 async function bell() {
   if (open) return;
   try {
-    const { new: n } = await api('/notifications/new', { fresh: true });
+    const { new: n } = await api('/notifications/new');
     $('git-bell').hidden = false;
     $('git-bell-n').hidden = !n;
     $('git-bell-n').textContent = n > 99 ? '99+' : String(n);

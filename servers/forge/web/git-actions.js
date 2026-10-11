@@ -1,7 +1,7 @@
 // Actions: the runs, and one run as a graph of its jobs - read from the
 // workflow files' `needs:` - or as its jobs and their logs, both live.
 
-import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, stateOf, ghost, setTitle, short, pager, warmers, watch, open, forget } from './git-core.js';
+import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, stateOf, ghost, setTitle, short, pager, watch, open } from './git-core.js';
 import { repo, header } from './git-repo.js';
 
 const main = () => app();
@@ -14,7 +14,6 @@ const LIVE = ['waiting', 'running', 'blocked'];
 // no; the run's new state comes as every other change does.
 async function cancel(r, index) {
   const res = await fetch(`/${r.full_name}/actions/runs/${index}/cancel`, { method: 'POST', credentials: 'same-origin', redirect: 'manual' }).catch(() => null);
-  forget();
   if (res?.ok) return;
   const s = res?.status;
   throw new Error(s === 401 ? 'Signed out: sign in again to cancel.' : s === 403 || s === 404 ? 'You may not cancel runs here.' : s === 429 ? 'Too many at once: try again in a moment.' : `The run was not cancelled${s ? ` (the forge said ${s})` : ''}.`);
@@ -58,14 +57,13 @@ const ns = (d) => (d > 1e9 ? d / 1e6 : d); // the forge gives nanoseconds
 
 // ---- the runs
 
-const runsData = (r, page = 1, fresh = false) => api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 25 })}`, { fresh });
-warmers.actions = (r) => runsData(r);
+const runsData = (r, page = 1) => api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 25 })}`);
 
 // the newest run, for a link that cannot know its number (the assistant's)
 route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/latest$/, async ({ m, current }) => {
   const r = await repo(m[1], m[2]);
   if (!current()) return;
-  const { workflow_runs: runs = [] } = await runsData(r, 1, true);
+  const { workflow_runs: runs = [] } = await runsData(r, 1);
   if (!current()) return;
   go(runs[0] ? `/${r.full_name}/actions/runs/${runs[0].index_in_repo}` : `/${r.full_name}/actions`, true);
 });
@@ -112,7 +110,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
   // list is asked again then, and only then
   async function refresh() {
     try {
-      ({ workflow_runs: runs = [], total_count: total = 0 } = await runsData(r, page, true));
+      ({ workflow_runs: runs = [], total_count: total = 0 } = await runsData(r, page));
       if (current() && list.isConnected) draw();
     } catch { /* the next change asks again */ }
   }
@@ -148,10 +146,10 @@ async function runByIndex(r, index) {
 
 // the jobs of the run, from the statuses it posted on its commit: each
 // names its job and links to it by position
-async function jobsOf(r, run, fresh = false) {
+async function jobsOf(r, run) {
   const all = [];
   for (let page = 1; page <= 4; page++) {
-    const s = await api(`/repos/${r.full_name}/commits/${run.commit_sha}/statuses${q({ page, limit: 50 })}`, { fresh }).catch(() => []);
+    const s = await api(`/repos/${r.full_name}/commits/${run.commit_sha}/statuses${q({ page, limit: 50 })}`).catch(() => []);
     all.push(...s);
     if (s.length < 50) break;
   }
@@ -519,7 +517,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
     // this run's jobs moving, as the forge records them
     refresh = async () => {
       try {
-        [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`, { fresh: true }), jobsOf(r, run, true)]);
+        [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`), jobsOf(r, run)]);
         if (!alive()) return;
         drawSummary();
         dag?.update(jobs);
@@ -550,7 +548,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
   // the forge's changes move the list; the log is asked for while the job runs
   refresh = async () => {
     try {
-      [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`, { fresh: true }), jobsOf(r, run, true)]);
+      [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`), jobsOf(r, run)]);
       if (!alive()) return;
       drawSummary();
       drawJobs();

@@ -3,7 +3,7 @@
 
 import {
   put, $, app, el, ic, api, text, q, enc, ago, when, plural, bytes, avatar, route, go, statusDot,
-  markdown, toast, copy, setTitle, firstLine, short, pop, pager, whoami, warmers, ghost, open, local } from './git-core.js';
+  markdown, toast, copy, setTitle, firstLine, short, pop, pager, whoami, ghost, open, local, whenSeen, once } from './git-core.js';
 import { heatmap, lineChart, languages, dayKey } from './git-charts.js';
 import * as diff from './git-diff.js';
 import { feedLine } from './git-home.js';
@@ -11,30 +11,20 @@ import { webUrl } from './kit.js';
 
 const main = () => app();
 
-// ---- the repository, asked once per visit and kept
+// ---- the repository and its refs, asked once by each view
 
-const repos = new Map();
-export async function repo(owner, name, fresh = false) {
-  const k = `${owner}/${name}`.toLowerCase();
-  if (fresh || !repos.has(k)) repos.set(k, api(`/repos/${enc(owner)}/${enc(name)}`));
-  try { return await repos.get(k); } catch (e) { repos.delete(k); throw e; }
-}
-export const forget = (r) => repos.delete(r.full_name.toLowerCase());
-const refsOf = new Map();
-async function refs(r) {
-  if (!refsOf.has(r.full_name)) {
-    refsOf.set(r.full_name, Promise.all([
-      api(`/repos/${r.full_name}/branches${q({ limit: 100 })}`).catch(() => []),
-      api(`/repos/${r.full_name}/tags${q({ limit: 100 })}`).catch(() => []),
-    ]).then(([branches, tags]) => ({ branches, tags })));
-  }
-  return refsOf.get(r.full_name);
-}
+export const repo = (owner, name) => once(`repo ${owner}/${name}`.toLowerCase(), () => api(`/repos/${enc(owner)}/${enc(name)}`));
+const refs = (r) => once(`refs ${r.full_name}`, () => Promise.all([
+  api(`/repos/${r.full_name}/branches${q({ limit: 100 })}`).catch(() => []),
+  api(`/repos/${r.full_name}/tags${q({ limit: 100 })}`).catch(() => []),
+]).then(([branches, tags]) => ({ branches, tags })));
 
 // "main/src/lib.rs" or "feature/x/src/lib.rs": the longest branch or tag
 // name the path starts with is the ref
 async function split(r, rest) {
   if (!rest) return { ref: r.default_branch, path: '' };
+  // one part: whatever the refs are, it is the ref
+  if (!rest.includes('/')) return { ref: rest, path: '' };
   const { branches, tags } = await refs(r);
   const names = [...branches.map((b) => b.name), ...tags.map((t) => t.name)].sort((a, b) => b.length - a.length);
   const hit = names.find((n) => rest === n || rest.startsWith(`${n}/`));
@@ -45,15 +35,19 @@ async function split(r, rest) {
 
 // ---- the header: name, then the sections as tabs
 
-// the tabs with the most to fetch start fetching when the pointer arrives
-const warm = (a, fetchIt) => { a.addEventListener('pointerenter', () => { fetchIt().catch(() => {}); }, { once: true }); return a; };
+// What a view asks first, asked before the repository and its refs have
+// answered: the ref is taken to be the address's first part (or the default
+// branch when there is none), and the answer is used only if the refs agree.
+function early(m, ask) {
+  const [ref, ...p] = (m[3] || '').split('/');
+  const guess = { ref, path: p.join('/') };
+  const answer = ask(`${m[1]}/${m[2]}`, guess.ref || undefined, guess.path).catch(() => null);
+  return async (r, ref, path) => (ref === (guess.ref || r.default_branch) && path === guess.path ? answer : null);
+}
 
 export function header(r, tab) {
   const [owner, name] = r.full_name.split('/');
-  const t = (key, href, icon, label, n) => {
-    const a = el('a', { href, 'aria-current': tab === key ? 'page' : null }, ic(icon), label, n ? el('span', { class: 'n', text: String(n) }) : null);
-    return warmers[key] ? warm(a, () => warmers[key](r)) : a;
-  };
+  const t = (key, href, icon, label, n) => el('a', { href, 'aria-current': tab === key ? 'page' : null }, ic(icon), label, n ? el('span', { class: 'n', text: String(n) }) : null);
   $('rhead').replaceChildren(el('div', { class: 'rhead' }, el('div', { class: 'in' },
     el('h1', { class: 'crumb' }, ic(r.private ? 'lock' : 'repo'), el('a', { href: `/${owner}`, text: owner }), el('span', { class: 'muted', text: '/' }), el('b', {}, el('a', { href: `/${r.full_name}`, text: name })),
       el('span', { class: 'pill', text: r.archived ? 'Archived' : r.private ? 'Private' : 'Public' }),
@@ -100,15 +94,10 @@ function cloneBox(r) {
 }
 
 // the repository the boxes are built from: only its pages show what they run
-let fleetRepo = null;
-let fleetBoxes = null;
-let fleetAt = 0;
-export const fleetRepoName = () => (fleetRepo ??= fetch('/fleet-repo.json').then((x) => (x.ok ? x.json() : {})).then((x) => x.repo || '').catch(() => ''));
+export const fleetRepoName = () => once('fleet-repo', () => fetch('/fleet-repo.json').then((x) => (x.ok ? x.json() : {})).then((x) => x.repo || '').catch(() => ''));
 const fleet = async (r) => {
   if (open || (await fleetRepoName()) !== r.full_name) return [];
-  if (!fleetBoxes || performance.now() - fleetAt > 60000) { fleetAt = performance.now(); fleetBoxes = null; }
-  fleetBoxes ??= fetch('/_dd/fleet.json').then((x) => (x.ok ? x.json() : [])).catch(() => []);
-  const boxes = await fleetBoxes;
+  const boxes = await once('fleet', () => fetch('/_dd/fleet.json').then((x) => (x.ok ? x.json() : [])).catch(() => []));
   // nothing known of any box: say nothing rather than a row of question marks
   return boxes.some((b) => b.release !== null && b.release !== undefined) ? boxes : [];
 };
@@ -119,15 +108,22 @@ const rawUrl = (r, ref, path) => `/api/v1/repos/${r.full_name}/raw/${enc(path)}$
 
 const RENDERED = /^readme(\.(md|markdown|txt))?$/i;
 
+const contents = (full, ref, path) => api(`/repos/${full}/contents${path ? `/${enc(path)}` : ''}${q({ ref })}`);
+
 route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
+  const guessed = early(m, contents);
   const r = await repo(m[1], m[2]);
   if (!current()) return;
   header(r, 'code');
   setTitle(r.full_name);
   if (r.empty) { put(main(), emptyRepo(r)); return; }
   const { ref, path } = await split(r, m[3]);
-  const at = path ? `/${enc(path)}` : '';
-  const listing = await api(`/repos/${r.full_name}/contents${at}${q({ ref })}`);
+  const lastP = api(`/repos/${r.full_name}/commits${q({ sha: ref, path, limit: 1, stat: false, verification: false, files: false })}`, { withTotal: true });
+  const langsP = api(`/repos/${r.full_name}/languages`);
+  // asked alongside the files, drawn after them
+  lastP.catch(() => {});
+  langsP.catch(() => {});
+  const listing = await guessed(r, ref, path) || await contents(r.full_name, ref, path);
   if (!current()) return;
   if (!Array.isArray(listing)) { go(`/${r.full_name}/blob/${ref}/${path}`, true); return; }
   listing.sort((a, b) => (b.type === 'dir') - (a.type === 'dir') || a.name.localeCompare(b.name));
@@ -148,7 +144,7 @@ route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
 
   const crumbs = path ? el('span', { class: 'words' }, el('a', { href: `/${r.full_name}/tree/${ref}`, text: r.name }), ...path.split('/').flatMap((p, i, a) => [' / ', i === a.length - 1 ? el('b', { text: p }) : el('a', { href: `/${r.full_name}/tree/${ref}/${a.slice(0, i + 1).join('/')}`, text: p })])) : null;
   const last = el('div', { class: 'lastc' }, ghost(1));
-  api(`/repos/${r.full_name}/commits${q({ sha: ref, path, limit: 1, stat: false, verification: false, files: false })}`, { withTotal: true }).then(async ({ data, total }) => {
+  lastP.then(async ({ data, total }) => {
     const c = data[0];
     if (!c) return;
     const dot = el('span');
@@ -186,7 +182,7 @@ route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
       el('p', { class: 'small muted' }, ic(r.private ? 'lock' : 'repo', 'i s'), r.private ? ' Only the people it is shared with can see it' : ' Anyone can see it')),
     cloneBox(r));
   const langs = el('section', {}, el('h2', { text: 'Languages' }));
-  api(`/repos/${r.full_name}/languages`).then((l) => { if (Object.keys(l).length) langs.append(...languages(l)); else langs.remove(); }).catch(() => langs.remove());
+  langsP.then((l) => { if (Object.keys(l).length) langs.append(...languages(l)); else langs.remove(); }).catch(() => langs.remove());
   const rel = el('section', {}, el('h2', { text: 'Running now' }));
   fleet(r).then((boxes) => {
     if (!boxes.length) { rel.remove(); return; }
@@ -228,6 +224,8 @@ async function tree(r, ref, path) {
     if (!dirs.has(dir)) dirs.set(dir, api(`/repos/${r.full_name}/contents${dir ? `/${enc(dir)}` : ''}${q({ ref })}`).then((l) => l.sort((a, b) => (b.type === 'dir') - (a.type === 'dir') || a.name.localeCompare(b.name))));
     return dirs.get(dir);
   };
+  // every open folder asked at once, not each after the one above it
+  for (const d of open) load(d).catch(() => {});
   const draw = async (dir, depth, into) => {
     for (const e of await load(dir)) {
       const pad = `padding-left:${6 + depth * 14}px`;
@@ -271,6 +269,8 @@ route(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/, async ({ m, current }) => {
   header(r, 'code');
   const { ref, path } = await split(r, m[3]);
   setTitle(path.split('/').pop(), r.full_name);
+  const treeP = tree(r, ref, path);
+  treeP.catch(() => {});
   const meta = await api(`/repos/${r.full_name}/contents/${enc(path)}${q({ ref })}`);
   if (!current()) return;
   if (Array.isArray(meta)) { go(`/${r.full_name}/tree/${ref}/${path}`, true); return; }
@@ -301,8 +301,10 @@ route(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/, async ({ m, current }) => {
   cp.onclick = () => copy(src, cp);
   const crumbs = el('span', { class: 'words' }, el('a', { href: `/${r.full_name}/tree/${ref}`, text: r.name }), ...path.split('/').flatMap((p, i, a) => [' / ', i === a.length - 1 ? el('b', { text: p }) : el('a', { href: `/${r.full_name}/tree/${ref}/${a.slice(0, i + 1).join('/')}`, text: p })]));
   if (!current()) return;
+  const side = await treeP;
+  if (!current()) return;
   put(main(), el('div', { class: 'withtree' },
-    await tree(r, ref, path),
+    side,
     el('div', { style: 'min-width:0' },
       el('div', { class: 'hrow gap' }, refPicker(r, ref, (n) => `/${r.full_name}/blob/${n}/${path}`), crumbs),
       el('div', { class: 'box' }, last,
@@ -313,13 +315,15 @@ route(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/, async ({ m, current }) => {
 // ---- commits
 
 route(/^\/([^/]+)\/([^/]+)\/commits(?:\/(.+))?$/, async ({ m, params, current }) => {
+  const page = Number(params.get('page') || 1);
+  const commits = (full, ref, path) => api(`/repos/${full}/commits${q({ sha: ref, path, page, limit: 30, stat: false, verification: false, files: false })}`, { withTotal: true });
+  const guessed = early(m, commits);
   const r = await repo(m[1], m[2]);
   if (!current()) return;
   header(r, 'code');
   const { ref, path } = await split(r, m[3]);
-  const page = Number(params.get('page') || 1);
   setTitle('Commits', r.full_name);
-  const { data, total } = await api(`/repos/${r.full_name}/commits${q({ sha: ref, path, page, limit: 30, stat: false, verification: false, files: false })}`, { withTotal: true });
+  const { data, total } = await guessed(r, ref, path) || await commits(r.full_name, ref, path);
   if (!current()) return;
   const days = new Map();
   for (const c of data) {
@@ -329,13 +333,14 @@ route(/^\/([^/]+)\/([^/]+)\/commits(?:\/(.+))?$/, async ({ m, params, current })
   }
   const row = (c) => {
     const dot = el('span');
-    api(`/repos/${r.full_name}/commits/${c.sha}/status`).then((s) => { if (s?.total_count) dot.replaceWith(statusDot(s.state)); }).catch(() => {});
     const cp = el('button', { class: 'btn plain', style: 'padding:4px 8px', 'aria-label': 'Copy the full hash' }, ic('copy', 'i s'));
     cp.onclick = () => copy(c.sha, cp);
-    return el('div', { class: 'item' },
+    // each commit's checks are a question of their own: asked for the rows in sight
+    return whenSeen(el('div', { class: 'item' },
       el('div', { style: 'flex:1;min-width:0' }, el('a', { class: 't', href: `/${r.full_name}/commit/${c.sha}`, text: firstLine(c.commit.message) }),
         el('div', { class: 'sub hrow', style: 'gap:6px' }, avatar(c.author), el('b', { text: c.author?.login || c.commit.author.name }), 'committed ', when(c.commit.committer.date))),
-      dot, el('a', { class: 'btn mono plain', href: `/${r.full_name}/commit/${c.sha}`, text: short(c.sha) }), cp, el('a', { class: 'btn plain', style: 'padding:4px 8px', href: `/${r.full_name}/tree/${c.sha}`, title: 'Browse the files at this commit' }, ic('code', 'i s')));
+      dot, el('a', { class: 'btn mono plain', href: `/${r.full_name}/commit/${c.sha}`, text: short(c.sha) }), cp, el('a', { class: 'btn plain', style: 'padding:4px 8px', href: `/${r.full_name}/tree/${c.sha}`, title: 'Browse the files at this commit' }, ic('code', 'i s'))),
+    () => api(`/repos/${r.full_name}/commits/${c.sha}/status`).then((s) => { if (s?.total_count) dot.replaceWith(statusDot(s.state)); }).catch(() => {}));
   };
   if (!current()) return;
   put(main(),
@@ -379,24 +384,24 @@ route(/^\/([^/]+)\/([^/]+)\/commit\/([0-9a-f]{4,64})$/, async ({ m, current }) =
 // ---- branches
 
 route(/^\/([^/]+)\/([^/]+)\/branches$/, async ({ m, current }) => {
-  const r = await repo(m[1], m[2], true);
+  const r = await repo(m[1], m[2]);
   if (!current()) return;
   header(r, 'code');
   setTitle('Branches', r.full_name);
-  refsOf.delete(r.full_name);
   const none = Promise.resolve([]);
   const [{ branches }, pulls, rules] = await Promise.all([refs(r), open ? none : api(`/repos/${r.full_name}/pulls${q({ state: 'open', limit: 50 })}`).catch(() => []), open ? none : api(`/repos/${r.full_name}/branch_protections`).catch(() => [])]);
   if (!current()) return;
   branches.sort((a, b) => (b.name === r.default_branch) - (a.name === r.default_branch) || new Date(b.commit.timestamp) - new Date(a.commit.timestamp));
+  const base = branches.find((b) => b.name === r.default_branch)?.commit.id;
+  // how many commits one has that the other has not: the forge counts them
+  // for a list of one, and between two commits the count never changes
+  const only = (sha, not) => api(`/repos/${r.full_name}/commits${q({ sha, not, limit: 1, stat: false, verification: false, files: false })}`, { withTotal: true }).then((x) => x.total);
   const rows = branches.map((b) => {
     const pr = pulls.find((p) => p.head.ref === b.name && p.head.repo?.full_name === r.full_name);
     const counts = el('span', { class: 'small muted' });
-    if (b.name !== r.default_branch) {
-      Promise.all([
-        api(`/repos/${r.full_name}/compare/${encodeURIComponent(r.default_branch)}...${encodeURIComponent(b.name)}`),
-        api(`/repos/${r.full_name}/compare/${encodeURIComponent(b.name)}...${encodeURIComponent(r.default_branch)}`),
-      ]).then(([ahead, behind]) => { counts.textContent = `${ahead.total_commits} ahead · ${behind.total_commits} behind`; }).catch(() => {});
-    }
+    const tip = b.commit.id;
+    const count = () => Promise.all([only(tip, base), only(base, tip)])
+      .then(([ahead, behind]) => { counts.textContent = `${ahead} ahead · ${behind} behind`; }).catch(() => {});
     const del = r.permissions?.push && b.name !== r.default_branch && !b.protected ? el('button', { class: 'btn plain', 'aria-label': `Delete ${b.name}` }, ic('x')) : null;
     const row = el('div', {}, ic('branch'), el('a', { href: `/${r.full_name}/tree/${b.name}`, text: b.name }),
       b.name === r.default_branch ? el('span', { class: 'chip', text: 'default' }) : null,
@@ -404,11 +409,11 @@ route(/^\/([^/]+)\/([^/]+)\/branches$/, async ({ m, current }) => {
       counts, el('span', { class: 'spacer' }), el('span', { class: 'small muted' }, 'updated ', when(b.commit.timestamp)),
       pr ? el('a', { class: 'chip', href: `/${r.full_name}/pull/${pr.number}`, text: `#${pr.number}` }) : b.name !== r.default_branch && r.permissions?.push ? el('a', { class: 'btn plain', href: `/${r.full_name}/compare/${r.default_branch}...${b.name}`, text: 'New pull request' }) : null,
       del);
+    if (b.name !== r.default_branch && base && tip) whenSeen(row, count);
     if (del) del.onclick = async () => {
       if (!confirm(`Delete the branch ${b.name}? Its commits stay only if another branch or a pull request has them.`)) return;
       await api(`/repos/${r.full_name}/branches/${encodeURIComponent(b.name)}`, { method: 'DELETE' });
       row.remove();
-      refsOf.delete(r.full_name);
     };
     return row;
   });
@@ -454,50 +459,45 @@ route(/^\/([^/]+)\/([^/]+)\/releases(?:\/tag\/(.+))?$/, async ({ m, current }) =
 
 // ---- activity: the week's lines, the year's squares, what happened
 
-warmers.releases = (r) => releaseData(r);
-warmers.activity = (r) => yearOf(r);
 const releaseData = (r) => Promise.all([
   api(`/repos/${r.full_name}/releases${q({ limit: 50 })}`).catch(() => []),
   api(`/repos/${r.full_name}/tags${q({ limit: 50 })}`).catch(() => []),
 ]);
 
-// A year of commits on the default branch, by day: fetched eight pages at
-// a time, and kept in this browser until the branch moves.
-const years = new Map();
-function yearOf(r) {
-  if (years.has(r.full_name)) return years.get(r.full_name);
-  const p = (async () => {
-    const since = Date.now() - 365 * 86400e3;
-    const url = (page) => `/repos/${r.full_name}/commits${q({ sha: r.default_branch, page, limit: 50, stat: false, verification: false, files: false })}`;
-    const first = await api(url(1), { withTotal: true });
-    const key = `git-year:${r.full_name}`;
-    const head = first.data[0]?.sha;
-    try {
-      const c = JSON.parse(localStorage.getItem(key) || 'null');
-      if (c && c.head === head) return c.byDay;
-    } catch { /* counted again */ }
-    const byDay = {};
-    const add = (cs) => {
-      let older = false;
-      for (const c of cs) {
-        const t = new Date(c.commit.committer.date).getTime();
-        if (t >= since) byDay[dayKey(t)] = (byDay[dayKey(t)] || 0) + 1;
-        else older = true;
-      }
-      return older;
-    };
-    // the forge sends no total for commits: pages until one reaches back a year
-    let done = add(first.data) || first.data.length < 50;
-    for (let n = 2; n <= 40 && !done; n += 8) {
-      const batch = await Promise.all([...Array(Math.min(8, 41 - n))].map((_, i) => api(url(n + i)).catch(() => [])));
-      for (const cs of batch) if (add(cs) || cs.length < 50) done = true;
-    }
-    try { localStorage.setItem(key, JSON.stringify({ head, byDay })); } catch { /* kept for this visit only */ }
-    return byDay;
-  })();
-  years.set(r.full_name, p);
-  p.catch(() => years.delete(r.full_name));
-  return p;
+// A list the forge sends newest first, fifty to a page, read back to
+// `since`: how far the first page reaches says about how many pages get
+// there, and those are asked together, `step` at most at a time. Every
+// page asked, `first` too, up to `last`.
+async function backTo(since, first, ask, when, last, step) {
+  const pages = [first];
+  const done = (xs) => xs.length < 50 || when(xs[xs.length - 1]) < since;
+  if (done(first) || last < 2) return pages;
+  const per = Math.max(Date.now() - when(first[first.length - 1]), 1);
+  let next = 2;
+  let upto = Math.min(last, 1 + Math.min(step, Math.ceil((Date.now() - since) / per)));
+  for (;;) {
+    const got = await Promise.all([...Array(upto - next + 1)].map((_, i) => ask(next + i).catch(() => [])));
+    pages.push(...got);
+    if (got.some(done) || upto >= last) return pages;
+    next = upto + 1;
+    upto = Math.min(last, upto + step);
+  }
+}
+
+// A year of commits on the default branch, by day: the pages that reach
+// back a year asked together.
+async function yearOf(r) {
+  const since = Date.now() - 365 * 86400e3;
+  const url = (page) => `/repos/${r.full_name}/commits${q({ sha: r.default_branch, page, limit: 50, stat: false, verification: false, files: false })}`;
+  const first = await api(url(1), { withTotal: true });
+  const last = Math.min(40, Math.ceil(first.total / 50) || 40);
+  const pages = await backTo(since, first.data, (n) => api(url(n)), (c) => new Date(c.commit.committer.date).getTime(), last, 8);
+  const byDay = {};
+  for (const c of pages.flat()) {
+    const t = new Date(c.commit.committer.date).getTime();
+    if (t >= since) byDay[dayKey(t)] = (byDay[dayKey(t)] || 0) + 1;
+  }
+  return byDay;
 }
 
 route(/^\/([^/]+)\/([^/]+)\/activity$/, async ({ m, params, current }) => {
@@ -564,16 +564,14 @@ route(/^\/([^/]+)\/([^/]+)\/activity$/, async ({ m, params, current }) => {
   api(`/repos/${r.full_name}/tags${q({ limit: 50 })}`).then((tags) => {
     if (live()) sTags.textContent = String(tags.filter((t) => t.commit?.created && inSpan(t.commit.created)).length || '—');
   }).catch(() => { sTags.textContent = '—'; });
-  // the runs in the span, newest first, a page at a time: without a page
-  // the forge ignores the limit and sends every run there has ever been
+  // the runs in the span, newest first, by the page: without a page the
+  // forge ignores the limit and sends every run there has ever been
   const runsInSpan = async () => {
-    const all = [];
-    for (let page = 1; page <= 20; page++) {
-      const { workflow_runs: runs = [] } = await api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 50 })}`);
-      all.push(...runs);
-      if (runs.length < 50 || !inSpan(runs[runs.length - 1].created)) break;
-    }
-    return all;
+    const page = (n) => api(`/repos/${r.full_name}/actions/runs${q({ page: n, limit: 50 })}`);
+    const first = await page(1);
+    const last = Math.min(20, Math.ceil((first.total_count || 0) / 50) || 20);
+    const pages = await backTo(start.getTime(), first.workflow_runs || [], (n) => page(n).then((x) => x.workflow_runs || []), (x) => new Date(x.created).getTime(), last, 2);
+    return pages.flat();
   };
   (r.has_actions ? runsInSpan() : Promise.resolve([])).then((runs) => {
     if (!live()) return;

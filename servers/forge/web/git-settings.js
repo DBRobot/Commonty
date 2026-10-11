@@ -3,7 +3,7 @@
 // keys, labels and milestones, its mirror, and the careful things.
 
 import { put, app, el, ic, api, q, when, ago, plural, avatar, route, go, toast, setTitle, pop } from './git-core.js';
-import { repo, header, forget, fleetRepoName } from './git-repo.js';
+import { repo, header, fleetRepoName } from './git-repo.js';
 
 const main = () => app();
 const PANES = [
@@ -23,7 +23,7 @@ const delBtn = (what, fn) => {
 };
 
 route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m, current }) => {
-  const r = await repo(m[1], m[2], true);
+  const r = await repo(m[1], m[2]);
   if (!current()) return;
   header(r, 'settings');
   const pane = m[3] || 'general';
@@ -35,7 +35,7 @@ route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m, current }) =>
     el('nav', {}, ...PANES.map(([k, t]) => el('a', { href: `/${r.full_name}/settings/${k}`, 'aria-current': pane === k ? 'page' : null, style: k === 'careful' ? 'color:var(--broken)' : null, text: t }))),
     body));
   const A = `/repos/${r.full_name}`;
-  const reload = () => { forget(r); go(location.pathname, true); };
+  const reload = () => go(location.pathname, true);
 
   if (pane === 'general') {
     const name = el('input', { id: 's-name', value: r.name });
@@ -59,7 +59,6 @@ route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m, current }) =>
       try {
         const x = await api(A, { method: 'PATCH', body: { name: name.value, description: desc.value, website: site.value, default_branch: branch.value, has_issues: issues.checked, has_pull_requests: pulls.checked, has_actions: actions.checked, has_wiki: wiki.checked, default_delete_branch_after_merge: drop.checked, ...Object.fromEntries(styles.map(([k, cb]) => [k, cb.checked])) } });
         toast('Saved');
-        forget(r);
         go(`/${x.full_name}/settings/general`, true);
       } catch (err) { toast(err.message); }
     };
@@ -260,7 +259,6 @@ route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m, current }) =>
       const typed = prompt(`This deletes ${r.full_name}, its history, pull requests and issues, and cannot be undone. Type its name to go on.`);
       if (typed !== r.name) { if (typed !== null) toast('The name did not match; nothing was deleted'); return; }
       await api(A, { method: 'DELETE' });
-      forget(r);
       go('/');
     };
     body.append(el('h2', { class: 'ph', style: 'color:var(--broken)', text: 'Careful' }),
