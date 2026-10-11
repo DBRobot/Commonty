@@ -36,7 +36,8 @@ in
   }) list;
   services = lib.mapAttrs (s: n: {
     enabled = n.everyBox || (builtins.elem s brought && on n);
-    inherit (n) everyBox spread placed;
+    inherit (n) everyBox spread lease;
+    placed = n.placed || n.lease;
     perHouse = if n.perHouse == null then 0 else n.perHouse;
     instances = if n.instances == null then 0 else n.instances;
     inherit (n.traffic) class upMbps downMbps;

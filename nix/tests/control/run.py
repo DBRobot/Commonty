@@ -6,7 +6,8 @@
 # its claimant's once every voting box's gate has acknowledged it, and not
 # before; an update by its owner reaches every box. Last, a placed
 # service: on one of the two boxes that carry it, and on the other once
-# that one is gone.
+# that one is gone. And a writer, which only the lease's holder runs, and
+# another box only once that lease has lapsed.
 import json, os, subprocess, sys, time, urllib.request, base64
 
 T = os.getcwd()
@@ -35,11 +36,18 @@ def state(i):
 json.dump(
     {
         "boxes": {
-            f"node{i}": {"site": f"h{i}", "region": "r", "can": {"web": 1}}
+            f"node{i}": {"site": f"h{i}", "region": "r", "can": {"web": 1, "db": 1}}
             for i in (1, 2, 3)
         },
         "services": {
-            "web": {"enabled": True, "instances": 1, "class": "low", "placed": True}
+            "web": {"enabled": True, "instances": 1, "class": "low", "placed": True},
+            "db": {
+                "enabled": True,
+                "instances": 1,
+                "class": "low",
+                "placed": True,
+                "lease": True,
+            },
         },
         "roles": {},
         "damping": {"base": 0.3, "perGiB": 0.01},
@@ -47,7 +55,10 @@ json.dump(
     open(f"{T}/placement.json", "w"),
 )
 for i in (2, 3):
-    json.dump({"web": ["web.service"]}, open(f"{T}/carries{i}.json", "w"))
+    json.dump(
+        {"web": ["web.service"], "db": ["db.service"]},
+        open(f"{T}/carries{i}.json", "w"),
+    )
 os.makedirs(f"{T}/bin", exist_ok=True)
 with open(f"{T}/bin/systemctl", "w") as f:
     f.write('#!/bin/sh\necho "$@" >> "$SYSTEMCTL_LOG"\n')
@@ -373,7 +384,7 @@ ok(placed(2) != placed(3) and not placed(1), "web runs on one box that carries i
 first = 2 if placed(2) else 3
 other = 5 - first
 ok(
-    open(f"{T}/systemctl{first}.log").read() == "start --no-block web.service\n",
+    "start --no-block web.service\n" in open(f"{T}/systemctl{first}.log").readlines(),
     "its box started its units",
 )
 ok(
@@ -387,6 +398,38 @@ procs[first].terminate()
 procs[first].wait()
 until("web moves", lambda: placed(other), 60)
 ok(placed(other), f"node{first} gone, web runs on node{other}")
+
+# the writer: placed where it was, it runs only where the lease is
+procs[first] = run(first)
+writer = lambda i: os.path.exists(f"{T}/placed{i}/db")
+flag = lambda i: json.load(open(f"{T}/placed{i}/db"))
+
+
+def holding():
+    for i in (2, 3):
+        lease = state(i).get("leases", {}).get("svc/db", {})
+        if lease.get("holder") == f"node{i}" and writer(i):
+            if flag(i).get("epoch") == lease["epoch"]:
+                return i, lease
+    return None, {}
+
+
+until("db held and running", lambda: holding()[0], 90)
+holder, lease = holding()
+ok(holder is not None, f"db runs on the lease's holder, at its epoch ({lease})")
+holder = holder or 2
+ok(not writer(5 - holder), "and nowhere else")
+gone = flag(holder)
+procs[holder].terminate()
+procs[holder].wait()
+other = 5 - holder
+until("db moves", lambda: writer(other), 90)
+ok(writer(other), f"node{holder} gone, db runs on node{other}")
+ok(
+    float(open("/proc/uptime").read().split()[0]) * 1000 >= gone["until"]
+    and flag(other)["epoch"] > gone["epoch"],
+    "only after the lease it had could have lapsed, at a higher epoch",
+)
 
 for p in procs.values():
     p.terminate()

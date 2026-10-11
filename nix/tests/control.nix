@@ -32,7 +32,7 @@ pkgs.runCommand "control-e2e"
     import json, base64, os, subprocess
     from cryptography.hazmat.primitives.asymmetric import ec, ed25519
     from cryptography.hazmat.primitives import serialization as S
-    cfg = {"boxes": {}, "validators": [], "rules": {"leaseTtlMs": 15000, "goneAfterMs": 10000, "leases": {}}}
+    cfg = {"boxes": {}, "validators": [], "rules": {"leaseTtlMs": 15000, "goneAfterMs": 10000, "leases": {"svc/db": {"eligible": ["node2", "node3"]}}}}
     for i, n in enumerate(["node1", "node2", "node3"], start=1):
         k = ec.generate_private_key(ec.SECP256R1())
         open(f"{n}.p8", "wb").write(k.private_bytes(S.Encoding.DER, S.PrivateFormat.PKCS8, S.NoEncryption()))
