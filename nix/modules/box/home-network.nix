@@ -7,10 +7,13 @@
   config,
   lib,
   pkgs,
+  ddScript,
   ...
 }:
 let
   cfg = config.dd.home;
+  # a box with both links: the wifi is what the cable falls back on
+  watch = cfg.wired != null && cfg.wifi != null;
 in
 {
   options.dd.home = {
@@ -165,6 +168,49 @@ in
         };
     };
     networking.networkmanager.wifi.powersave = false;
+    # A cable whose adapter passes nothing with its carrier up is a link
+    # NetworkManager never sees go down, and the wifi waits behind it while
+    # the box is unreachable (node2, 85 minutes, 2026-10-11). The router is
+    # asked over the cable every 30 s; no answer is a reset of the adapter,
+    # then the wired profile down until the cable answers again
+    # (wired-watch.sh). Never a reboot
+    systemd.services.dd-wired-watch = lib.mkIf watch {
+      description = "Check the cable to the router passes traffic, and fall back to the wifi when not";
+      after = [ "NetworkManager.service" ];
+      # a switch never waits on it or restarts it mid-reset
+      restartIfChanged = false;
+      path = [
+        pkgs.networkmanager
+        pkgs.iputils
+        pkgs.iproute2
+        pkgs.coreutils
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        RuntimeDirectory = "dd-wired-watch";
+        RuntimeDirectoryPreserve = "yes";
+        TimeoutStartSec = "5min";
+      };
+      script = ddScript ./wired-watch.sh {
+        MAC = cfg.wired;
+        GATEWAY = cfg.gateway;
+        PROFILE = "house-wired";
+        DIR = "/run/dd-wired-watch";
+        FACTS = "/var/lib/dd-facts";
+        GRACE = 90;
+        RETRY = 600;
+      };
+    };
+    systemd.timers.dd-wired-watch = lib.mkIf watch {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        # from the timer starting, not boot: a switch that adds it starts it
+        # long after boot (release 224)
+        OnActiveSec = "30s";
+        OnUnitActiveSec = "30s";
+        AccuracySec = "1s";
+      };
+    };
     # Two interfaces on one subnet: by default Linux answers ARP for the
     # wired address from the wifi card too, so the router learns the wifi
     # mac for it, traffic leaves by cable and returns by wifi, and every
