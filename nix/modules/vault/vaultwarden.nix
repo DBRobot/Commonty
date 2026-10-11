@@ -322,7 +322,9 @@ in
             Type = "oneshot";
             PrivateTmp = true;
           };
+          # a service not answering is next time, never a failed unit
           script = ''
+            set +e
             gate=http://127.0.0.1:${toString config.dd.verify.port}
             vw=http://127.0.0.1:${toString port}
             list=$(curl -fsS "$gate/internal/leaving") || { echo "the gate is not answering; next time"; exit 0; }

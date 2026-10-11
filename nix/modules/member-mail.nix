@@ -81,7 +81,7 @@ in
     systemd.timers.dd-announce = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnActiveSec = "1min";
+        OnActiveSec = "5min";
         OnUnitActiveSec = "5min";
       };
     };
@@ -98,8 +98,10 @@ in
         LoadCredential = cfg.credentials;
         PrivateTmp = true;
       };
+      # whatever goes wrong is said and tried again, never a failed unit
       script = ''
-        cd /var/lib/dd-announce
+        set +e
+        cd /var/lib/dd-announce || exit 0
         soonest=$(date -u -d '+30 days' +%F)
         for f in outbox/*.json; do
           [ -e "$f" ] || continue
