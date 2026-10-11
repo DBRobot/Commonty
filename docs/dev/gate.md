@@ -209,6 +209,20 @@ the box (sso.rs)
      secret, carrying the sign-in's id; ─► rd
 ```
 
+The box's own id for the session is made from the person and the
+sign-in's id (`sso::session_id`), never the browser's choice alone. With
+sessions per name, only `__Host-dd` is read: the domain-wide `dd_session`
+from before is not, since any name of the domain can set one in a browser
+(its owner's own session, to sign the browser in as them). Signing out
+clears both.
+
+**Metrics** are a box's owner's (`box.json` owner, `VERIFY_OWNER`) and the
+admin's (`policy.json` owner, `VERIFY_ADMIN`): `metrics.<domain>` and a
+box's own `metrics.<box>.<domain>` answer nobody else. **A box that
+serves its own pages alone** runs the gate as role `box`: `/verify` for its
+owner and the admin, the sign-in hand-off, `/_dd/back`, and the directory
+and house routes - no member pages, sign-up or demo.
+
 What a box receives works nowhere else: the hand-off names its host and
 its challenge, and the cookie is this box's and this name's. That is why
 sessions are per name with sign-in at the Worker: a cookie for the whole

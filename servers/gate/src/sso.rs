@@ -158,7 +158,7 @@ pub(crate) async fn finish(
         .and_then(|e| check_delegation(&e.entry, &d, id, now).map_err(|e| e.to_string()))
         .and_then(|()| check_handoff(&d, &host, &b.nonce, &b.sig).map_err(|e| e.to_string()))
         .and_then(|()| {
-            (!app.signins.is_ended(&d.sid))
+            (!app.signins.is_ended(&session_id(&d.user, &d.sid)))
                 .then_some(())
                 .ok_or_else(|| "signed out".into())
         });
@@ -177,16 +177,27 @@ pub(crate) async fn finish(
     app.signins
         .used(&d.user, &format!("passkey:{}", d.passkey), agent);
     let exp = d.exp.min(now + session::TTL);
-    let set = app.sessions.issue_as(&d.user, &d.sid, exp);
-    app.signins.saw(&d.user, &d.sid, exp, agent, None);
+    // the browser chose the sign-in's id; this box's own is made from it and
+    // the person, so nobody's sign-in can take the id of anyone else's here
+    let id = session_id(&d.user, &d.sid);
+    let set = app.sessions.issue_as(&d.user, &id, exp);
+    app.signins.saw(&d.user, &id, exp, agent, None);
     // the passkey was shown just now, not hours ago from a kept sign-in
     if now.saturating_sub(d.iat) < 300 {
-        app.saw_passkey(&d.sid);
+        app.saw_passkey(&id);
     }
     let mut r = Redirect::to(&w.rd).into_response();
     r.headers_mut()
         .insert("set-cookie", HeaderValue::from_str(&set).unwrap());
     r
+}
+
+/// This box's id for a person's fleet sign-in: the same on every box for
+/// the same sign-in (so ending it can reach them all), and nobody else's.
+pub(crate) fn session_id(user: &str, sid: &str) -> String {
+    use sha2::Digest as _;
+    let h = sha2::Sha256::digest(format!("commonty session id v1\0{user}\0{sid}"));
+    B64_URL.encode(&h[..18])
 }
 
 /// A challenge gone stale or used: ask again, from where the browser was going.
@@ -197,6 +208,18 @@ fn start_over(rd: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::local_path;
+
+    #[test]
+    fn a_sign_in_id_is_the_persons_own() {
+        use super::session_id;
+        assert_eq!(session_id("tom", "abc"), session_id("tom", "abc"));
+        assert_ne!(
+            session_id("tom", "abc"),
+            session_id("ann", "abc"),
+            "another's sign-in, another id"
+        );
+        assert_ne!(session_id("tom", "abc"), session_id("tom", "abd"));
+    }
 
     #[test]
     fn only_a_path_on_this_name() {

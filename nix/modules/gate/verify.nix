@@ -58,6 +58,11 @@ in
     default = true;
     description = "Run the verifier. Every box does; a VM test of something the gate plays no part in turns it off, so a change to the gate does not rerun it.";
   };
+  options.dd.verify.admin = lib.mkOption {
+    type = lib.types.str;
+    default = "";
+    description = "the fleet's admin (fleet/policy.json owner): sees every box's metrics. A box's own owner sees that box's";
+  };
   options.dd.verify.role = lib.mkOption {
 
     type = lib.types.enum [
@@ -329,6 +334,10 @@ in
         ) "http://${config.services.thanos.query.http-address}";
         VERIFY_DIRECTORY_READERS = lib.concatStringsSep "," cfg.directoryReaders;
         VERIFY_NAMES = lib.concatStringsSep "," cfg.names;
+        # who sees this box as a whole (its metrics): its owner, and the admin
+        # who sees every box's
+        VERIFY_OWNER = lib.optionalString (config.dd.box.owner or null != null) config.dd.box.owner;
+        VERIFY_ADMIN = cfg.admin;
       }
       # the directory as the control plane's agreed log
       // lib.optionalAttrs agreed {

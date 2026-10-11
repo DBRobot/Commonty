@@ -86,6 +86,7 @@ in
   # every box holds a directory replica; the gateway role turns this into
   # the full verifier with the browser login
   dd.verify.role = lib.mkDefault "directory";
+  dd.verify.admin = policy.owner;
 
   # The logs name members, their addresses and where they connected from:
   # two weeks is enough to look into a problem, and no more is kept

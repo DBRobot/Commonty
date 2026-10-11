@@ -82,6 +82,9 @@ struct App {
     handoffs: Mutex<HashMap<String, photos::Handoff>>,
     /// where sign-in is, when it is the id Worker's (sso.rs)
     id_origin: Option<String>,
+    /// this box's owner and the fleet's admin (Config)
+    owner: Option<String>,
+    admin: Option<String>,
     /// challenges given to the id page, waiting for its answer (sso.rs)
     sso: Mutex<HashMap<String, sso::Waiting>>,
     /// the encrypted libraries' gate (library.rs), on a box with the bucket
@@ -217,6 +220,15 @@ pub struct Config {
     /// for every box, and this box's sessions are for each of its names
     /// alone (sso.rs). None: this box's own sign-in page, as before.
     pub id_origin: Option<String>,
+    /// A box that serves its own pages and no one else's (role "box"):
+    /// sign-in by the id Worker, and its pages for its owner and the admin
+    /// alone. No member pages, no sign-up, no demo.
+    pub box_only: bool,
+    /// Whose box this is (box.json owner), and the fleet's admin
+    /// (policy.json owner): who sees this box's metrics. The admin sees
+    /// every box's.
+    pub owner: Option<String>,
+    pub admin: Option<String>,
 }
 
 /// What the photos page needs to make or open an ente account for a person:
@@ -500,6 +512,14 @@ impl App {
         let mut f = self.fresh.lock().unwrap();
         f.retain(|_, until| *until > now);
         f.insert(session.to_string(), now + 300);
+    }
+
+    /// May this person see this box as a whole (its metrics): its owner,
+    /// or the fleet's admin. Nobody, where neither is known.
+    fn sees_box(&self, user: &str) -> bool {
+        [&self.owner, &self.admin]
+            .iter()
+            .any(|w| w.as_deref() == Some(user))
     }
 
     fn passkey_fresh(&self, session: &str) -> bool {
@@ -866,6 +886,12 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let Some(role) = role else {
         return StatusCode::FORBIDDEN.into_response();
     };
+    // a box's metrics are its owner's and the admin's; this box's Thanos
+    // holds every box's, which is the admin's alone (or this box's owner's,
+    // who is the admin on the box that gathers them)
+    if is_metrics_host(&app.domain, &asked_host(&headers)) && !app.sees_box(&user) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     // A disk image goes from Backups in Settings only after the passkey, and
     // the box holds the page to that: a tab left signed in is not enough.
     // `dd image delete` signs with the device's own key and asks itself; any
@@ -1849,7 +1875,7 @@ async fn git_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
 async fn metrics_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.signed_in(cookie) {
-        Some(u) if u == pages::DEMO_USER || !app.member(&u) => {
+        Some(u) if u == pages::DEMO_USER || !app.member(&u) || !app.sees_box(&u) => {
             StatusCode::FORBIDDEN.into_response()
         }
         _ => signed_in_page(&app, &headers, "metrics"),
@@ -2252,14 +2278,53 @@ async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
         to = format!("{id}/out?then={}", urlencode(&then));
     }
     let mut r = Redirect::to(&to).into_response();
-    r.headers_mut().insert(
-        "set-cookie",
-        HeaderValue::from_str(&app.sessions.clear()).unwrap(),
-    );
+    for c in app.sessions.clear_all() {
+        r.headers_mut()
+            .append("set-cookie", HeaderValue::from_str(&c).unwrap());
+    }
     r
 }
 
 /// one of this fleet's own names, and nothing that could carry more
+/// metrics.<domain>, or a box's own metrics.<box>.<domain>
+fn is_metrics_host(domain: &str, host: &str) -> bool {
+    host.strip_suffix(&format!(".{domain}"))
+        .is_some_and(|sub| sub == "metrics" || sub.starts_with("metrics."))
+}
+
+/// GET /_dd/back?to=: on to another of the fleet's names, after a box's
+/// own sign-in (the metrics page goes through each box once, and back).
+/// Only https, only a name of this fleet, nothing else.
+async fn back(State(app): State<Arc<App>>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let to = q.get("to").map(String::as_str).unwrap_or_default();
+    let ok = Url::parse(to).ok().filter(|u| {
+        u.scheme() == "https"
+            && u.port().is_none()
+            && u.username().is_empty()
+            && u.password().is_none()
+            && u.host_str().is_some_and(|h| fleet_host(&app.domain, h))
+    });
+    match ok {
+        Some(u) => Redirect::to(u.as_str()).into_response(),
+        None => Redirect::to("/").into_response(),
+    }
+}
+
+/// auth_request on a box that serves its own pages alone: its owner and
+/// the admin, and nobody else, whatever else they are
+async fn verify_box(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let Some(user) = app.identify(&headers, "access") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if !app.sees_box(&user) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let mut r = StatusCode::OK.into_response();
+    let v = HeaderValue::from_str(&user).unwrap();
+    r.headers_mut().insert("X-Auth-Request-User", v);
+    r
+}
+
 pub(crate) fn fleet_host(domain: &str, host: &str) -> bool {
     host.bytes()
         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
@@ -2551,6 +2616,8 @@ pub async fn start(
         demo_rate: Mutex::new(HashMap::new()),
         handoffs: Mutex::new(HashMap::new()),
         id_origin: cfg.id_origin.clone(),
+        owner: cfg.owner.clone(),
+        admin: cfg.admin.clone(),
         sso: Mutex::new(HashMap::new()),
         library: cfg.library,
         library_owners: Mutex::new(HashMap::new()),
@@ -2650,8 +2717,55 @@ pub async fn start(
             }
         });
     }
+    if cfg.box_only {
+        let house = Arc::new(home::DirHouse {
+            home: home::Home::new(
+                std::env::var("VERIFY_HOUSE")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .map(PathBuf::from),
+                &[],
+            ),
+            directory: directory.clone(),
+            members: app.members.clone(),
+        });
+        let router = Router::new()
+            .route("/verify", get(verify_box))
+            .route("/health", get(|| async { "ok" }))
+            .route(
+                "/_dd/login",
+                get(|State(a): State<Arc<App>>, Query(q): Query<HashMap<String, String>>| async move {
+                    let rd = q.get("rd").map(String::as_str).unwrap_or("/");
+                    match a.id_origin {
+                        Some(_) => Redirect::to(&format!("/_dd/sso/start?rd={}", urlencode(&sso::local_path(rd)))).into_response(),
+                        None => StatusCode::NOT_FOUND.into_response(),
+                    }
+                }),
+            )
+            .route("/_dd/sso/start", get(sso::start))
+            .route("/_dd/sso/creds", get(sso::creds))
+            .route("/_dd/sso", post(sso::finish))
+            .route("/_dd/back", get(back))
+            .route("/_dd/logout", post(logout))
+            .with_state(app)
+            .merge(home::dir_router(house))
+            .merge(leaving::router(leave.clone()))
+            .merge(leaving::internal_router(leave).route_layer(axum::middleware::from_fn(this_box_only)))
+            .merge(directory::router(directory));
+        eprintln!("verify (this box's pages) listening on {addr}");
+        let task = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .map_err(Into::into)
+        });
+        return Ok((addr, task));
+    }
     let router = Router::new()
         .route("/verify", get(verify))
+        .route("/_dd/back", get(back))
         .route("/health", get(|| async { "ok" }))
         // the browser side, served under /_dd/ on every vhost
         .route(
@@ -3109,6 +3223,10 @@ mod tests {
             tmdb: None,
             search: None,
             id_origin: None,
+            box_only: false,
+            owner: None,
+            // the fleet's admin, who sees every box's metrics
+            admin: Some("tom".into()),
         })
         .await
         .unwrap();

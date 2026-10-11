@@ -89,6 +89,19 @@ impl Sessions {
         }
     }
 
+    /// Set-Cookie values that end this browser's session here: with
+    /// sessions for each name, the domain-wide one from before goes too.
+    pub fn clear_all(&self) -> Vec<String> {
+        let mut v = vec![self.clear()];
+        if self.host_only {
+            v.push(format!(
+                "{COOKIE}=; Domain={}; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
+                self.domain
+            ));
+        }
+        v
+    }
+
     pub fn clear(&self) -> String {
         if self.host_only {
             format!("{HOST_COOKIE}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax")
@@ -103,8 +116,10 @@ impl Sessions {
     /// The user a Cookie header names, if the session is ours and unexpired.
     /// The user, the session's own id ("" for one from before ids) and when
     /// it runs out - of a cookie this box made and that has not.
-    /// With sessions for each name, the domain-wide cookie from before is
-    /// still read until it runs out: this box made it too.
+    /// With sessions for each name, only the __Host- cookie counts. The
+    /// domain-wide one from before is not read: any name of the domain - a
+    /// box someone else runs - can set one of those in a browser, its owner's
+    /// own session included, and sign the browser in as them.
     pub fn session(&self, cookie_header: Option<&str>) -> Option<(String, String, u64)> {
         let header = cookie_header?;
         let named = |name: &str| {
@@ -115,7 +130,7 @@ impl Sessions {
                 .filter(|v| !v.is_empty())
         };
         let raw = if self.host_only {
-            named(HOST_COOKIE).or_else(|| named(COOKIE))
+            named(HOST_COOKIE)
         } else {
             named(COOKIE)
         }?;
@@ -219,17 +234,13 @@ mod tests {
         assert!(!set.contains("Domain="), "for this name alone: {set}");
         let (user, id, _) = s.session(Some(&value(&set))).unwrap();
         assert_eq!((user.as_str(), id.as_str()), ("tom", "sid-sid-sid-sid-1"));
-        // the domain-wide cookie from before still reads, until it runs out
+        // the domain-wide cookie is not read: any name of the domain can set one
         let old = Sessions {
             host_only: false,
             ..s.clone_for_test()
         };
-        assert_eq!(
-            s.session(Some(&value(&old.issue("tom"))))
-                .map(|x| x.0)
-                .as_deref(),
-            Some("tom")
-        );
+        assert!(s.session(Some(&value(&old.issue("tom")))).is_none());
+        assert_eq!(s.clear_all().len(), 2, "and logging out clears it as well");
         // and another box's (another secret) is nobody here
         let other = Sessions {
             secret: vec![8; 32],

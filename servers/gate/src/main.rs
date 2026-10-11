@@ -9,7 +9,8 @@ fn env_or(k: &str, d: &str) -> String {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let full = env_or("VERIFY_ROLE", "full") != "directory";
+    let role = env_or("VERIFY_ROLE", "full");
+    let full = role != "directory";
     // the pages the full gate serves, all read now: a release missing one
     // does not come up at all (pages::load)
     if full {
@@ -154,6 +155,9 @@ async fn main() -> Result<()> {
             .ok()
             .filter(|s| !s.is_empty()),
         // sign-in at the id Worker (sso.rs): https://id.<domain>
+        box_only: role == "box",
+        owner: std::env::var("VERIFY_OWNER").ok().filter(|s| !s.is_empty()),
+        admin: std::env::var("VERIFY_ADMIN").ok().filter(|s| !s.is_empty()),
         id_origin: std::env::var("VERIFY_ID")
             .ok()
             .map(|s| s.trim().trim_end_matches('/').to_string())
