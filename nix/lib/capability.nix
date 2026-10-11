@@ -9,7 +9,8 @@
 #   boxes.<name> = { hw = hardware.json; own = box.json; site = siteId; region = regionId; }
 #
 # Returns { boxes.<name> = { joins; why; can.<svc> = { score; for }; cannot.<svc> = [ why ]; };
-#           services.<svc> = [ { box; score; } ] best first; }
+#           services.<svc> = [ { box; score; } ] best first;
+#           sizes.<svc> = { memory; floor; } in GiB, as judged here }
 {
   lib,
   needs,
@@ -241,6 +242,10 @@ let
 in
 {
   boxes = table;
+  sizes = lib.mapAttrs (s: _: {
+    memory = memoryOf s;
+    floor = floorOf s;
+  }) needs;
   services = lib.genAttrs (lib.filter (s: !(builtins.elem s every)) (builtins.attrNames needs)) (
     s:
     lib.sort (a: b: a.score > b.score || (a.score == b.score && a.box < b.box)) (

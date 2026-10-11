@@ -36,7 +36,10 @@ in
     systemd.services.dd-control = {
       # the voters are in the config; a new list read only at start would sit
       # unread (176 did: no votes until a hand restart)
-      restartTriggers = [ pkg.control-config ];
+      restartTriggers = [
+        pkg.control-config
+        pkg.placement-inputs
+      ];
       description = "The control plane: heartbeats and the agreed state";
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
@@ -53,6 +56,8 @@ in
           "-tpm-keys /boot/dd/unlock"
           "-listen 127.0.0.1:4195"
           (lib.optionalString (roles != "") "-roles ${roles}")
+          # what the fleet would run, at /plan; nothing acts on it yet
+          "-placement ${pkg.placement-inputs}"
           # the gate hands in directory items here (servers/gate/src/directory.rs)
           (lib.optionalString config.dd.verify.enable "-submit /run/dd-control/submit.sock -submit-group dd-verify")
           # dd-attest hands in what it built for a build order here

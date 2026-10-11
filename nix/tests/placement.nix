@@ -12,19 +12,12 @@
   ...
 }:
 let
-  needs = import ../lib/needs.nix { inherit lib; };
-  list = lib.importJSON ../../fleet/boxes.json;
-  roles = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ../../fleet/roles.json);
-  capability = import ../lib/capability.nix {
-    inherit lib needs;
-    policy = lib.importJSON ../../fleet/policy.json;
-    boxes = lib.mapAttrs (n: b: {
-      hw = lib.importJSON ../../fleet/boxes/${n}/hardware.json;
-      own = lib.importJSON ../../fleet/boxes/${n}/box.json;
-      site = b.siteId or n;
-      region = b.regionId or n;
-    }) list;
-  };
+  inherit (import ../lib/fleet-placement.nix { inherit lib; })
+    needs
+    list
+    roles
+    capability
+    ;
   every = lib.attrNames (lib.filterAttrs (_: n: n.everyBox) needs);
   brought = box: lib.unique (lib.concatMap (r: roles.${r}.services or [ ]) list.${box}.roles);
   claims = s: [ s ] ++ needs.${s}.units;

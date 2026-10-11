@@ -650,6 +650,7 @@
                 fileset = pkgs.lib.fileset.unions [
                   ./servers/system/control/go.mod
                   ./servers/system/control/go.sum
+                  ./servers/system/control/place
                   ./servers/system/control/state
                   ./servers/system/control/validator
                   ./servers/system/control/wire
@@ -662,6 +663,13 @@
                 inherit src;
                 vendorHash = "sha256-sYPGMtJetj/Ou1Q52s2tfRJkNcaiPlhuqIiq/H/1UjY=";
                 subPackages = [ "cmd/dd-control" ];
+                # every package's tests, not only the program's (state,
+                # validator and place went untested by the build)
+                checkPhase = ''
+                  runHook preCheck
+                  go test ./...
+                  runHook postCheck
+                '';
               };
             in
             {
@@ -917,9 +925,13 @@
           '';
           dd-control = control.dd-control;
           control-config = control.configFile;
+          # what the control plane places from: each box's capability and
+          # what the fleet wants of each service (nix/lib/placement-inputs.nix)
+          placement-inputs = pkgs.writeText "placement-inputs.json" (
+            builtins.toJSON (import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; }).inputs
+          );
           # every service's needs, typed (nix/lib/needs.nix): what placement
-          # will read, with fleet/roles.json. Nothing places roles yet;
-          # fleet/boxes.json is written by hand and checked by role-fit
+          # reads, with fleet/roles.json
           needs = pkgs.writeText "needs.json" (
             builtins.toJSON (import ./nix/lib/needs.nix { lib = nixpkgs.lib; })
           );
@@ -1320,7 +1332,7 @@
           # timer of ours counts from boot
           needs-units = import ./nix/tests/needs-units.nix args;
           # every box can carry what its roles bring, by the needs; and the
-          # roles say truly what they bring (nix/lib/place.nix)
+          # roles say truly what they bring (nix/lib/capability.nix)
           placement = import ./nix/tests/placement.nix args;
           # capability on every kind of computer, held to answers that make sense
           placement-fleet = import ./nix/tests/placement-fleet.nix args;

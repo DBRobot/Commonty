@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"commonty/control/place"
 	"commonty/control/state"
 	"commonty/control/validator"
 	"commonty/control/wire"
@@ -350,6 +351,7 @@ func main() {
 	tpmKeys := flag.String("tpm-keys", "/boot/dd/unlock", "the TPM-held key's files")
 	listen := flag.String("listen", "127.0.0.1:4195", "the agreed state, for this box")
 	roles := flag.String("roles", "", "roles this box runs, comma separated")
+	placement := flag.String("placement", "", "what each box can run and what the fleet wants (the release's placement-inputs.json); empty: no /plan")
 	every := flag.Duration("heartbeat", 30*time.Second, "how often to heartbeat")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
@@ -612,6 +614,22 @@ func main() {
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(n.State())
 	})
+	// what the fleet would run, from the agreed state now; a dry run - no
+	// box acts on it yet
+	if *placement != "" {
+		raw, err := os.ReadFile(*placement)
+		if err != nil {
+			log.Fatal(err)
+		}
+		in := place.Inputs{}
+		if err := json.Unmarshal(raw, &in); err != nil {
+			log.Fatalf("%s: %v", *placement, err)
+		}
+		http.HandleFunc("/plan", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("content-type", "application/json")
+			_ = json.NewEncoder(w).Encode(place.Decide(in, n.State(), cfg.Rules.GoneAfter))
+		})
+	}
 	// the directory log from item `since` on, and where the next will be
 	http.HandleFunc("/directory", func(w http.ResponseWriter, req *http.Request) {
 		since, _ := strconv.Atoi(req.URL.Query().Get("since"))
