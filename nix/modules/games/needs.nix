@@ -32,7 +32,6 @@ in
       "dd-game@*"
       "dd-games-measure"
       "games-access"
-      "firewall"
     ];
     base = {
       requires = {

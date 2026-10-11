@@ -37,16 +37,17 @@ let
     box: kind:
     let
       c = self.nixosConfigurations.${box};
+      defs = c.options.systemd.${kind}.definitionsWithLocations;
+      from =
+        keep:
+        lib.unique (
+          lib.concatMap (d: names d.value) (lib.filter (d: keep (lib.hasPrefix root (toString d.file))) defs)
+        );
+      # an upstream unit we only add settings to (the firewall, nix-daemon)
+      # is the module's that makes it, not a service of ours
+      upstream = from (x: !x);
     in
-    lib.filter (n: c.config.systemd.${kind} ? ${n}) (
-      lib.unique (
-        lib.concatMap (d: names d.value) (
-          lib.filter (
-            d: lib.hasPrefix root (toString d.file)
-          ) c.options.systemd.${kind}.definitionsWithLocations
-        )
-      )
-    );
+    lib.filter (n: c.config.systemd.${kind} ? ${n} && !(builtins.elem n upstream)) (from (x: x));
   claims = lib.unique (
     builtins.attrNames needs ++ lib.concatMap (n: n.units) (builtins.attrValues needs)
   );

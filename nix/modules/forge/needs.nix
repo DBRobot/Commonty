@@ -86,9 +86,12 @@
           size.min = "200G";
         };
       };
-      # node1, 2026-10-04: peak with its VMs; the store and its own state
+      # one job's room (dd.runner.jobMemoryGiB): it takes as many jobs as the
+      # box's memory holds (dd.runner.capacity), so one is what it needs to
+      # run at all (node1, 2026-10-04: 11G at its peak, with its VMs); the
+      # store and its own state
       uses = {
-        memory = "11G";
+        memory = "6G";
         storage = "98G";
       };
       network = {
@@ -121,9 +124,10 @@
     units = [ "gitea-runner-members*" ];
     base = {
       requires.threads = 4; # a job's --cpus; docker refuses more than the box has
-      # two jobs at their limit; the job image
+      # one job at its limit (dd.membersRunner.jobMemoryGiB), more where the
+      # box holds them; the job image
       uses = {
-        memory = "8G";
+        memory = "4G";
         storage = "1.2G";
       };
       network = {

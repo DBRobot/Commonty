@@ -1,5 +1,5 @@
 {
-  "_": "What each role needs from a box (docs/dev/hardware.md has the evidence). requires: against the box's signed report (fleet/boxes/<box>/hardware.json); box: against its owner's box.json; with: roles that must be on the same box, because the code reaches them on localhost; perFleet: exactly that many boxes run it. nix/tests/role-fit.nix fails when fleet/boxes.json breaks any of it. Nothing places roles yet: placement will read this file with each service's needs (.#needs, nix/lib/needs.nix).",
+  "_": "What each role needs from a box (docs/dev/hardware.md has the evidence). requires: against the box's signed report (fleet/boxes/<box>/hardware.json); box: against its owner's box.json; with: roles that must be on the same box, because the code reaches them on localhost; perFleet: exactly that many boxes run it. nix/tests/role-fit.nix fails when fleet/boxes.json breaks any of it. services: what the role brings, by the names in the needs (.#needs, nix/lib/needs.nix); a service may come with several roles. nix/lib/place.nix holds each box to the needs of every service its roles bring, and checks this list against what the box really runs (nix/tests/placement.nix).",
   "core": {
     "requires": {
       "arch": "x86_64",
@@ -7,23 +7,61 @@
       "tpmP256": true,
       "wiredInitrd": true
     },
-    "why": "every box: the disk unlock needs the TPM and a cable its initrd has the driver for"
+    "why": "every box: the disk unlock needs the TPM and a cable its initrd has the driver for",
+    "services": [
+      "dd-agent",
+      "dd-box-report",
+      "dd-control",
+      "dd-secrets-key",
+      "dd-verify",
+      "disk-unlock",
+      "disk-watch",
+      "home-network",
+      "commonty-net",
+      "netbridge",
+      "owner-devices",
+      "prometheus",
+      "prometheus-node-exporter",
+      "thanos-sidecar",
+      "restic-backup",
+      "storage-view",
+      "zfs-datasets"
+    ]
   },
   "gateway": {
     "perFleet": 1,
     "with": [
       "storage"
     ],
-    "why": "one public front door (dd-dns points *.domain at it); s3.<domain> proxies its own garage"
+    "why": "one public front door (dd-dns points *.domain at it); s3.<domain> proxies its own garage",
+    "services": [
+      "nginx",
+      "acme",
+      "cloudflared",
+      "dd-dns",
+      "headscale",
+      "mail-worker-check"
+    ]
   },
   "storage": {
-    "why": "garage: a dataset for blocks; rf=2, so the smallest box caps the usable space"
+    "why": "garage: a dataset for blocks; rf=2, so the smallest box caps the usable space",
+    "services": [
+      "garage"
+    ]
   },
   "photos": {
     "with": [
       "gateway"
     ],
-    "why": "photos.<domain> and the gate; its database is its own (the ledger reads counts, not databases)"
+    "why": "photos.<domain> and the gate; its database is its own (the ledger reads counts, not databases)",
+    "services": [
+      "ente-museum",
+      "ente-web",
+      "storage-ledger",
+      "postgresql",
+      "postgres-dumps",
+      "nginx"
+    ]
   },
   "vault": {
     "with": [
@@ -33,39 +71,67 @@
     "services": [
       "vaultwarden",
       "vaultwarden-send",
-      "pwned-list"
+      "pwned-list",
+      "postgresql",
+      "postgres-dumps",
+      "nginx"
     ]
   },
   "media": {
     "with": [
       "gateway"
     ],
-    "why": "files.<domain>: Files, Movies & TV and the disk images, through the gate"
+    "why": "files.<domain>: Files, Movies & TV and the disk images, through the gate",
+    "services": [
+      "disk-images",
+      "nginx"
+    ]
   },
   "library": {
     "prefers": {
       "gpuEncode": "H264"
     },
-    "why": "transcode: H.264 encode on a GPU (Intel only today), else every core"
+    "why": "transcode: H.264 encode on a GPU (Intel only today), else every core",
+    "services": [
+      "libraries",
+      "dd-transcode"
+    ]
   },
   "llm": {
     "requires": {
       "memoryGiB": 48
     },
-    "why": "a 22G model held in RAM beside the rest; any GPU, any SIMD (nix/modules/llm/needs.nix)"
+    "why": "a 22G model held in RAM beside the rest; any GPU, any SIMD (nix/modules/llm/needs.nix)",
+    "services": [
+      "llama-swap",
+      "searxng",
+      "nginx"
+    ]
   },
   "game": {
     "requires": {
       "kvm": true,
       "memoryGiB": 24
     },
-    "why": "every world is a KVM guest of 6-8G; the budget is 20G"
+    "why": "every world is a KVM guest of 6-8G; the budget is 20G",
+    "services": [
+      "dd-games"
+    ]
   },
   "forge": {
     "with": [
       "gateway"
     ],
-    "why": "git.<domain>, and postgres shared with photos and vault"
+    "why": "git.<domain>, and postgres shared with photos and vault",
+    "services": [
+      "forgejo",
+      "forgejo-mirror",
+      "forgejo-public",
+      "postgresql",
+      "postgres-dumps",
+      "nginx",
+      "nix-cache"
+    ]
   },
   "runner": {
     "requires": {
@@ -74,7 +140,11 @@
       "threads": 4,
       "memoryGiB": 12
     },
-    "why": "VM tests (games nests one) and members' jobs; the nix cache at the storage pool's address (nix/modules/forge/needs.nix)"
+    "why": "VM tests (games nests one) and members' jobs; the nix cache at the storage pool's address (nix/modules/forge/needs.nix)",
+    "services": [
+      "forgejo-runner",
+      "members-runner"
+    ]
   },
   "observe": {
     "with": [
@@ -82,12 +152,23 @@
       "photos",
       "forge"
     ],
-    "why": "thanos keeps to local garage; the dumps take ente's and forgejo's databases"
+    "why": "thanos keeps to local garage; the dumps take ente's and forgejo's databases",
+    "services": [
+      "fleet-alerts",
+      "thanos-query",
+      "thanos-store",
+      "thanos-compact",
+      "metrics-page",
+      "prometheus"
+    ]
   },
   "adblock": {
     "box": [
       "household"
     ],
-    "why": "it answers the house's DNS: the box has to be in the house, with who lives there"
+    "why": "it answers the house's DNS: the box has to be in the house, with who lives there",
+    "services": [
+      "pihole"
+    ]
   }
 }

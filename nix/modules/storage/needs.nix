@@ -97,7 +97,6 @@
   nix-cache = {
     what = "the fleet's built closures, in the bucket, for every box's releases";
     units = [
-      "nix-daemon"
       "dd-cache-gc"
     ];
     instances = 1;
