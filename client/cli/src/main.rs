@@ -7,6 +7,7 @@ mod librarycmd;
 mod mail_worker;
 mod mediacmd;
 mod member;
+mod policy;
 mod release_cmd;
 mod storage_ledger;
 mod ui;
@@ -148,6 +149,12 @@ enum Command {
         photos_suffix: String,
         #[arg(long)]
         password_file: std::path::PathBuf,
+    },
+    /// The fleet's policies: a change is mailed to every member 30 days or
+    /// more before it takes effect.
+    Policy {
+        #[command(subcommand)]
+        cmd: PolicyCmd,
     },
     /// The browser passkeys in your entry.
     Passkey {
@@ -393,6 +400,25 @@ enum PasskeyCmd {
     /// Sign in a credential record from a file - the one a box used to keep
     /// in <name>.passkeys.json before passkeys lived in the entry.
     Add { file: String },
+}
+
+#[derive(Subcommand)]
+enum PolicyCmd {
+    /// Mail the change in FILE to every member's <name>@<domain>, and add
+    /// it to docs/policies/changes.md. Refuses a date under 30 days away.
+    Announce {
+        file: std::path::PathBuf,
+        /// YYYY-MM-DD, at least 30 days from today
+        #[arg(long)]
+        takes_effect: String,
+        #[arg(long, default_value = ".")]
+        repo: String,
+        /// who would be told, and what; nothing is sent
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES)]
+        directories: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1015,6 +1041,25 @@ async fn main() -> Result<()> {
             token,
         } => mediacmd::run(&keys, &directories, at, token).await?,
 
+        Command::Policy {
+            cmd:
+                PolicyCmd::Announce {
+                    file,
+                    takes_effect,
+                    repo,
+                    dry_run,
+                    directories,
+                },
+        } => {
+            policy::announce(policy::Announce {
+                repo: &repo,
+                file: &file,
+                takes_effect: &takes_effect,
+                dirs: &directories,
+                dry_run,
+            })
+            .await?;
+        }
         Command::Leave { back, directories } => {
             let root = who::load_root(&keys)?.context("no root key on this machine")?;
             let name = keys.get(USER)?.context("no name here")?.to_string();

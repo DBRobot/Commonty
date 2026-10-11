@@ -140,7 +140,7 @@ pub async fn list(repo: &str, dirs: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn date(t: u64) -> String {
+pub(crate) fn date(t: u64) -> String {
     // days since the epoch to y-m-d, no calendar crate for one line
     let days = (t / 86400) as i64;
     let z = days + 719468;
