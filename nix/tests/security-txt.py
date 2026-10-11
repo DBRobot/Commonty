@@ -12,7 +12,7 @@ want = {
     "Contact": f"mailto:security@{domain}",
     "Preferred-Languages": "en",
     "Canonical": f"https://{domain}/.well-known/security.txt",
-    "Policy": f"https://{domain}/docs/policies/privacy",
+    "Policy": f"https://{domain}/docs/policies/security",
 }
 for k, v in want.items():
     assert fields.get(k) == v, f"{k}: {fields.get(k)!r}, wanted {v!r}"

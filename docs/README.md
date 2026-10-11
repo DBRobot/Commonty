@@ -41,4 +41,5 @@ Coming as each part of Commonty gets its page.
 ## Policies
 
 - [Terms of use](policies/terms.md)
+- [Security](policies/security.md): how Commonty is built, and how to report a problem
 - [Changes to the policies](policies/changes.md): each announced to every member 30 days ahead

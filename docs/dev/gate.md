@@ -671,10 +671,10 @@ with only the gate paths their page needs: `/_dd/static/`, `/_dd/web/`,
 It also serves `/.well-known/security.txt` (RFC 9116,
 [security-txt.nix](../../nix/modules/gate/security-txt.nix)): Contact
 `mailto:security@<domain>`, Preferred-Languages `en`, Canonical its own
-URL, Policy `https://<domain>/docs/policies/privacy`, and Expires a year
-after the commit the release is built from (`self.lastModified`), so a
-fleet that stops releasing lets it lapse. nix/tests/nginx.nix checks the
-location is served and the fields and the expiry (security-txt.py).
+URL, Policy `https://<domain>/docs/policies/security`, and Expires
+`dd.securityTxtExpires`, a fixed date moved on by hand: CI fails 60 days
+before it, or if it is over a year out. nix/tests/nginx.nix checks the
+location is served and the fields (security-txt.py).
 
 **Mail** is the mail Worker at Cloudflare (client/mail/worker), not the
 gate. It reads a member's entry from `home.<domain>/_dd/directory/<name>`

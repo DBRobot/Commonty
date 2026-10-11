@@ -16,7 +16,7 @@ let
     Expires: ${config.dd.securityTxtExpires}
     Preferred-Languages: en
     Canonical: ${url}
-    Policy: https://${domain}/docs/policies/privacy
+    Policy: https://${domain}/docs/policies/security
     EOF
     sed -i 's/^ *//' $out
   '';
