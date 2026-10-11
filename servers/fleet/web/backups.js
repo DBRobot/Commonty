@@ -295,8 +295,8 @@ async function download(s, ui) {
 function ask(s, ui) {
   $('ask-h').textContent = `Delete ${s.label || s.id.slice(0, 8)}?`;
   $('ask-size').textContent = size(s) !== undefined
-    ? `This removes the ${human(size(s))} image from Commonty for good.`
-    : 'This removes the image from Commonty for good.';
+    ? `The ${human(size(s))} image goes to the trash, and is gone for good 30 days later.`
+    : 'The image goes to the trash, and is gone for good 30 days later.';
   $('ask-msg').hidden = true;
   $('ask-yes').disabled = false;
   $('ask-no').onclick = () => $('ask').close();
