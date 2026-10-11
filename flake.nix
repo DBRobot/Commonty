@@ -898,6 +898,9 @@
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;
               cargoClippyExtraArgs = "--all-targets -- -D warnings";
+              # the answer is that it passed: no target dir kept, so nothing
+              # big goes up to the cache after it (tests below)
+              doInstallCargoArtifacts = false;
             }
           );
           clippy-app = craneLib.cargoClippy (
@@ -909,6 +912,7 @@
               version = "0.1.0";
               cargoExtraArgs = "-p commonty";
               cargoClippyExtraArgs = "--all-targets -- -D warnings";
+              doInstallCargoArtifacts = false;
             }
           );
           # the app's own tests, on the app's cached dependency build: the
@@ -922,6 +926,7 @@
               version = "0.1.0";
               cargoExtraArgs = "-p commonty";
               doCheck = true;
+              doInstallCargoArtifacts = false;
             }
           );
           # the app's network engine: go vet, and its tests (app/net/*_test.go)
@@ -945,8 +950,12 @@
               doCheck = true;
               # repo.rs runs git with git-remote-dd, another package's binary
               # that cargo test never rebuilds: without this it found the
-              # dependency build's stand-in
-              preCheck = "cargoWithProfile build ${workspaceArgs}";
+              # dependency build's stand-in. That one alone: the rest the
+              # tests start (dd) cargo test builds itself
+              preCheck = "cargoWithProfile build --locked -p git-remote-dd";
+              # the answer is that they passed: keeping the target dir (718M)
+              # made the cache upload after the tests take longer than them
+              doInstallCargoArtifacts = false;
               pname = "dd";
               version = "0.1.0";
               cargoExtraArgs = workspaceArgs;
