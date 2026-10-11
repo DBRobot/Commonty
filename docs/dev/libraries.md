@@ -622,9 +622,8 @@ the member's machine) are in the `libraries` bucket under the prefix
 - The archive password is sealed to the member's passkeys beside the
   archives (`dd-passkeys.json`), so Backups in Settings opens them
   ([client/web/src/archive.rs](../../client/web/src/archive.rs)).
-- `/srv/images` and the old nginx WebDAV are retired. restic no longer
-  backs them up; the dataset is kept, untouched, until its owner lets it
-  go.
+- `/srv/images` and the old nginx WebDAV are gone: the copy into the
+  bucket was checked member by member, and the dataset was destroyed.
 
 ## Configuration and state
 

@@ -102,9 +102,8 @@ vault     -                                          postgres; garage local     
                                                      (DATA_FOLDER 127.0.0.1:3900);   smtp out                           (hardcoded), the gate, postgres
                                                      pwned list ~90G, peak ~180G,
                                                      1M files, under /vault
-media     -                                          /srv/images (node1: vault/enc   tailnet; unlimited upload          the gate
-                                                     /images, HDD), backed up into
-                                                     garage (twice)
+media     -                                          - (disk images are in the       tailnet; unlimited upload          the gate
+                                                     libraries bucket)
 library   -                                          garage bucket via s3.<domain>   -                                  the gate (runs inside it)
 transcode GPU with VAAPI H.264 encode (Intel only    none: RAM (tmpfs), 256M per     127.0.0.1:4190/4191; out to         the gate, nginx
           today; AMD ignored), else all cores;       session, 4 sessions; MemoryMax  s3.<domain>
@@ -145,7 +144,7 @@ net       /dev/net/tun                               -                          
 4. **observe needs a mail secret only photos or vault declares**
    (mail.nix:18).
 5. **The vault pool**: /vault/backups, /vault/forgejo, /vault/pwned,
-   /srv/images and node1's garage all assume node1's second pool.
+   and node1's garage all assume node1's second pool.
 6. **One gateway, one first-storage-box**: controlAddress, dd-dns, the
    directory, and the cache/backup fallback all pick a single box
    (flake.nix:1013-1023,1051).

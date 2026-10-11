@@ -389,11 +389,6 @@ next, and when, is [leaving.md](leaving.md).
 ### Who reads it on the box
 
 - The gate, on every request (entries are cached by file time and size).
-- `user-accounts` on the media box
-  ([user-accounts.nix](../../nix/modules/gate/user-accounts.nix)) reads
-  `/var/lib/dd-verify/keys` to keep per-user folders in `/srv/images`,
-  where disk images were before they moved to the bucket. It goes when
-  that dataset does.
 
 ## Pages
 
@@ -1083,6 +1078,6 @@ nginx.nix       every box's nginx config through `nginx -t`
   is closed to outsiders, whatever the gate would answer.
 - **Rename debt.** The crate, unit, user and variables are still `verify`.
   Renaming the unit or user moves `/var/lib/dd-verify`, which is in the
-  backup and is what `user-accounts` reads; do it as its own change.
+  backup; do it as its own change.
 - Test with the unit tests and `client/cli/tests/e2e.rs` first; they start
   gates in seconds. Then the VM test for the part you touched.
