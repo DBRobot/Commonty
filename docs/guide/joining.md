@@ -32,11 +32,11 @@ with the same key that signs what the boxes run.
    Your name is how others see you, and it cannot be changed.
 3. Enter your month and year of birth. You must be at least 13. If you
    are 13 to 17, a parent or guardian has to agree. Your answer is only
-   checked, never kept.
-   <!-- coming: month and year of birth; under 13 refused; 13-17 need a parent's or guardian's OK; never stored -->
+   checked, never kept. If you are under 13, the app says so and will
+   not make an account on that device.
 4. Tick **I agree to the Terms of use and the Privacy policy**. It starts
-   unticked.
-   <!-- coming: unticked "I agree to the Terms of use and the Privacy policy" box -->
+   unticked. Your account records which version of the terms you agreed
+   to.
 5. Enter your invite code and press **Create my account**.
 
 Your account's keys are made on this device and stay there. The invite
@@ -67,7 +67,8 @@ Press **Open your services** in the app to start.
 
 ## Signing up in a browser instead
 
-The website has its own **Create your account** page. It makes an
+The website has its own **Create your account** page. It asks the same
+month and year of birth, and the same **I agree** box, then makes an
 account with a passkey and nothing else:
 
 - It cannot take an invite code. Codes go only into the app.

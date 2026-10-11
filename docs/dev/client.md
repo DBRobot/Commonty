@@ -326,6 +326,9 @@ box marked stolen is never answered.
 a member, on their device
   signup --username --email        identity and the Photos account, from nothing
   identity new|show|publish|recover|export|import
+                                   new asks month and year of birth and
+                                   the terms (--born, --guardian-agrees,
+                                   --agree-terms off a terminal)
   device show|admit <key>|remove <fp>
   enrol                            a link that puts a passkey in your entry
   passkey list|link|remove|add

@@ -76,9 +76,21 @@
       <form id="signup-form">
         <label for="signup-name">Name</label>
         <input id="signup-name" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="lowercase letters, digits, - _ .">
+        <!-- the age question is only checked here, never sent (age.js) -->
+        <fieldset class="consent">
+          <legend>Month and year of birth</legend>
+          <div class="born">
+            <div><label for="born-month">Month</label><select id="born-month" autocomplete="off"><option value="">Choose</option></select></div>
+            <div><label for="born-year">Year</label><select id="born-year" autocomplete="off"><option value="">Choose</option></select></div>
+          </div>
+          <p class="hint">Only checked here, never kept. You must be at least 13.</p>
+        </fieldset>
+        <p class="refused" id="age-refused" role="alert" tabindex="-1" hidden>Commonty is only for people aged 13 or over, so this account cannot be made.</p>
+        <label class="check" id="guardian-row" hidden><input type="checkbox" id="guardian"> A parent or guardian agrees to me using Commonty</label>
+        <label class="check"><input type="checkbox" id="agree"> I agree to the <a href="#" data-policy="terms">Terms of use</a> and the <a href="#" data-policy="privacy">Privacy policy</a></label>
         <label for="signup-code">Invite code</label>
         <input id="signup-code" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="xxxxx-xxxxx">
-        <button type="submit">Create my account</button>
+        <button type="submit" id="signup-go" disabled>Create my account</button>
       </form>
       <p id="signup-error" class="error" hidden></p>
       <button id="signup-back" class="quiet">I already have an account</button>

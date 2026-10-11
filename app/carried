@@ -8,6 +8,7 @@ servers/web-shared/shell.js                  static/shell.js
 servers/web-shared/kit.js                    static/kit.js
 servers/home/web/library.js                static/library.js
 servers/web-shared/webauthn.js               static/webauthn.js
+servers/web-shared/age.js                    static/age.js
 servers/web-shared/fonts/public-sans.woff2   static/public-sans.woff2
 servers/web-shared/fonts/plex-mono-400.woff2 static/plex-mono-400.woff2
 servers/web-shared/fonts/plex-mono-500.woff2 static/plex-mono-500.woff2

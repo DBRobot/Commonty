@@ -2,16 +2,24 @@
 // directory entry by that same passkey. It signs in and holds no keys: a
 // friend's guest, or someone waiting to be let in. A member's account, with
 // an invite code, is made in the Commonty app, on the member's own device.
+// The age question is answered here and never leaves the page; the box is
+// told only that the terms were agreed to, and the entry records which.
 
 import { creationOptions, requestOptions, attestation, assertion, post, say, safeRd } from './webauthn.js';
+import { consent } from './age.js';
+
+const button = document.getElementById('go');
+const ready = await consent(button);
 
 async function go() {
+  if (!ready()) return;
+  button.disabled = true;
   say('…');
   try {
     const username = document.getElementById('u').value.trim().toLowerCase();
 
     // the passkey
-    const start = await post('/_dd/join/start', { username });
+    const start = await post('/_dd/join/start', { username, agree: true });
     const { publicKey, ceremony } = await start.json();
     const cred = await navigator.credentials.create({ publicKey: creationOptions(publicKey) });
     const finish = await post('/_dd/join/finish', attestation(cred), { 'x-dd-ceremony': ceremony });
@@ -26,7 +34,8 @@ async function go() {
     location.href = new URL(safeRd(new URLSearchParams(location.search).get('rd') || '/_dd/home'), location.href).href;
   } catch (e) {
     say('Could not create the account: ' + e.message);
+    button.disabled = !ready();
   }
 }
 
-document.getElementById('go').onclick = go;
+button.onclick = go;

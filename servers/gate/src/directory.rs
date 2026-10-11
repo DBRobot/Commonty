@@ -338,6 +338,8 @@ impl Directory {
         if let Err(e) = identity::accept(None, signed) {
             return Err((StatusCode::FORBIDDEN, format!("refused: {e}")));
         }
+        identity::agreed_terms(&signed.entry)
+            .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
         no_passkey_keys(signed).map_err(|e| (StatusCode::FORBIDDEN, e))?;
         let taken = || (StatusCode::CONFLICT, "that name is taken".to_string());
         if self.entry(name).ok().flatten().is_some() {
@@ -606,6 +608,13 @@ async fn put_entry(
         return (StatusCode::BAD_REQUEST, "name in path and entry differ").into_response();
     }
     let version = signed.entry.version;
+    // a name this box has never seen is a sign-up, which says what it
+    // agreed to; an update, or an entry from before that was asked, need not
+    if matches!(d.entry(&name), Ok(None))
+        && let Err(e) = identity::agreed_terms(&signed.entry)
+    {
+        return (StatusCode::FORBIDDEN, format!("refused: {e}")).into_response();
+    }
     match d.admit(signed).await {
         Ok(()) => Json(serde_json::json!({ "accepted": true, "version": version })).into_response(),
         Err((status, why)) => (status, why).into_response(),
@@ -1295,6 +1304,7 @@ mod tests {
                     created: 1,
                 })
                 .collect(),
+            terms: Some(identity::TERMS.into()),
             version,
             updated: identity::now(),
         }

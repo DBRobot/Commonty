@@ -90,6 +90,9 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         &[
             "identity",
             "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
             "--name",
             "sarah",
             "--directory",

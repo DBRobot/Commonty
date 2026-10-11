@@ -150,6 +150,9 @@ async fn encrypted_remote_end_to_end() {
         &[
             "identity",
             "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
             "--name",
             "sarah",
             "--directory",
@@ -475,6 +478,9 @@ async fn a_forge_cannot_pass_one_repository_off_as_another() {
         &[
             "identity",
             "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
             "--name",
             "sarah",
             "--directory",

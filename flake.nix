@@ -1346,6 +1346,20 @@
               grep -qF '"${boxes.node1.net}"' ${src}
               touch $out
             '';
+          # the Terms of use a sign-up agrees to (identity::TERMS, kept in
+          # each new entry) are the ones the page says last changed then
+          terms-version =
+            let
+              flat = f: builtins.replaceStrings [ "\n" ] [ " " ] (builtins.readFile f);
+              m = builtins.match ''.*pub const TERMS: &str = "([0-9-]+)";.*'' (flat ./client/identity/src/lib.rs);
+              said = "These terms last changed on ${builtins.head m}.";
+            in
+            pkgs.runCommand "terms-version" { } (
+              if m != null && nixpkgs.lib.hasInfix said (flat ./docs/policies/terms.md) then
+                "touch $out"
+              else
+                "echo 'identity::TERMS and docs/policies/terms.md (\"These terms last changed on ...\") disagree' >&2; exit 1"
+            );
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
           safe-rd = import ./nix/tests/safe-rd.nix args;

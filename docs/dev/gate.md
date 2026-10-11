@@ -256,8 +256,10 @@ sign in      POST /_dd/login/start {username}
                → checked; the old session in this browser is ended;
                  a new cookie; the passkey is "fresh" for 5 minutes
 
-a browser   POST /_dd/join/start {username}       name free, not "demo",
-account                                             not guest* (unless x-dd-probe)
+a browser   POST /_dd/join/start {username, agree} name free, not "demo",
+account                                             not guest* (unless x-dd-probe);
+                                                    400 unless agree: the page's
+                                                    "I agree" to the terms
              POST /_dd/join/finish (new credential)
                → an entry with that passkey as root; the browser is asked
                  to sign the entry's hash with the same passkey. 400 for an
@@ -290,6 +292,21 @@ the app      POST /_dd/app/signin (form: token)    Origin must be absent,
                                                     (the origin the form came
                                                     from), else /_dd/home
 ```
+
+**Every sign-up agrees to the terms.** A new entry carries `terms`, the
+date of the Terms of use it agreed to (`identity::TERMS`, which
+`checks.terms-version` holds to what docs/policies/terms.md says), signed
+with the rest: by the root on a device, or by the passkey's assertion in a
+browser, where the gate puts it in the entry the person signs.
+`PUT /_dd/directory/{name}` for a name this box has never seen, and a held
+sign-up, refuse an entry made since sign-ups were asked
+(`identity::TERMS_ASKED_FROM`) without it (`identity::agreed_terms`).
+Updates, and entries from before, need none; the log's replay never asks.
+The age question (month and year of birth; under 13 refused and the
+refusal kept on that device; 13 to 17 with a parent's or guardian's
+agreement) is the page's or `dd`'s alone ([age.js](../../servers/web-shared/age.js),
+[consent.rs](../../client/cli/src/consent.rs)): the birth date never
+reaches a box.
 
 **A passkey signs in, and holds no keys.** Any page under the relying
 party - any box's - can ask a passkey for its PRF secret, with any salt,

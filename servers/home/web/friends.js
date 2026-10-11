@@ -142,7 +142,7 @@ async function linkPage() {
   if (!d.me) {
     const rd = encodeURIComponent(here);
     card.replaceChildren(head,
-      el('p', { class: 'lead', text: `Friends on Commonty play on each other's game servers. If you have no account, making one takes a name and a passkey; you come in as ${d.by}'s guest.` }),
+      el('p', { class: 'lead', text: `Friends on Commonty play on each other's game servers. If you have no account, making one takes a name, your month and year of birth (checked, never kept), your agreement to the terms, and a passkey; you come in as ${d.by}'s guest.` }),
       el('div', { class: 'row' },
         el('a', { class: 'button', href: `/_dd/join?rd=${rd}`, text: 'Create an account' }),
         el('a', { class: 'button quiet', href: `/_dd/login?rd=${rd}`, text: 'I have an account' })));

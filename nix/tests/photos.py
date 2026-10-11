@@ -43,7 +43,7 @@ dirs = "--directory http://127.0.0.1:4181/_dd/directory"
 box.succeed("mkdir -p /root/fleet/fleet")
 for who in ("sarah", "tom"):
     box.succeed(
-        f"DD_KEYRING_FILE=/root/{who}.json {nix['dd']} identity new --name {who} {dirs}"
+        f"DD_KEYRING_FILE=/root/{who}.json {nix['dd']} identity new --born 1990-01 --agree-terms --name {who} {dirs}"
     )
     box.succeed(
         f"DD_KEYRING_FILE=/root/{who}.json {nix['dd']} member add {who} --repo /root/fleet {dirs}"

@@ -9,7 +9,7 @@ for m in (a, b):
 env = "DD_KEYRING_FILE=/root/laptop.json"
 for box in ("a", "b"):
     client.succeed(
-        f"{env}-{box} {nix['dd']} identity new --name sarah --directory http://{box}:4181/_dd/directory"
+        f"{env}-{box} {nix['dd']} identity new --born 1990-01 --agree-terms --name sarah --directory http://{box}:4181/_dd/directory"
     )
 
 # the list is members': a stranger is refused it, sarah's device is not

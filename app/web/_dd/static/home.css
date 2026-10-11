@@ -328,6 +328,29 @@ input {
   border-radius: var(--radius);
 }
 input:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
+select {
+  height: 48px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--field);
+  border-radius: var(--radius);
+}
+select:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* a sign-up's questions (age.js): birth month and year, then the boxes */
+fieldset.consent { margin: 20px 0 0; padding: 0; border: 0; min-width: 0; }
+fieldset.consent legend { padding: 0; margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+.consent .born { display: flex; gap: 12px; flex-wrap: wrap; }
+.consent .born > div { flex: 1 1 140px; }
+.consent .born label { font-weight: 400; color: var(--ink-2); font-size: 14px; margin-bottom: 4px; }
+.consent .born select { width: 100%; }
+label.check { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0 0; font-weight: 400; line-height: 1.45; }
+label.check[hidden] { display: none; }
+label.check input { width: 20px; height: 20px; flex: none; margin: 1px 0 0; accent-color: var(--accent); }
+.refused { margin: 16px 0 0; color: var(--broken); font-weight: 600; }
+.refused:focus { outline: none; }
 input::placeholder { color: var(--ink-2); opacity: .7; }
 
 button {

@@ -271,7 +271,18 @@ async fn a_closed_directory_still_signs_up_admits_recovers_and_signs_in() {
     let a = Box_::start_closed(true, None).await;
     let d = dirs([&a]);
     let laptop = Device::new();
-    let out = laptop.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    let out = laptop.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "tom",
+        ],
+        &d,
+    ));
     let paper = recovery_key(&out);
     assert_eq!(anonymous(&a, "").await, 401);
     assert_eq!(anonymous(&a, "/tom").await, 401);
@@ -279,7 +290,18 @@ async fn a_closed_directory_still_signs_up_admits_recovers_and_signs_in() {
 
     // the name is taken: the publish says so, not a read
     Device::new().dd_fails(
-        &args(&["identity", "new", "--name", "tom"], &d),
+        &args(
+            &[
+                "identity",
+                "new",
+                "--born",
+                "1990-01",
+                "--agree-terms",
+                "--name",
+                "tom",
+            ],
+            &d,
+        ),
         "already an entry for tom",
     );
 
@@ -343,7 +365,18 @@ async fn identity_devices_tokens_and_recovery() {
     let stranger = Device::new();
 
     // birth: published to both, recovery key printed once
-    let out = laptop.dd_ok(&args(&["identity", "new", "--name", "sarah"], &d));
+    let out = laptop.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "sarah",
+        ],
+        &d,
+    ));
     let paper = recovery_key(&out);
     assert_eq!(entry(&a, "sarah").await.unwrap()["entry"]["version"], 1);
     assert_eq!(entry(&b, "sarah").await.unwrap()["entry"]["version"], 1);
@@ -458,7 +491,18 @@ async fn enrol_links_and_access_tokens_do_not_swap() {
     let a = Box_::start(true).await;
     let d = dirs([&a]);
     let dev = Device::new();
-    dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    dev.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "tom",
+        ],
+        &d,
+    ));
     let access = dev.token();
     // dd enrol prints the link then waits; take the link and stop it
     let enrol = enrol_token(&dev, &a);
@@ -498,7 +542,18 @@ async fn membership_gates_the_services_not_the_account() {
     let a = Box_::start_members(true, Some(vec![])).await;
     let d = dirs([&a]);
     let dev = Device::new();
-    dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    dev.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "tom",
+        ],
+        &d,
+    ));
     let access = dev.token();
     assert_eq!(
         verify_status(&a, &access).await,
@@ -572,7 +627,7 @@ async fn join_with_code(
     let http = reqwest::Client::new();
     let r = http
         .post(b.url("/_dd/join/start"))
-        .json(&serde_json::json!({ "username": name }))
+        .json(&serde_json::json!({ "username": name, "agree": true }))
         .send()
         .await
         .unwrap();
@@ -778,6 +833,145 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     assert!(file.contains(&id), "{file}");
 }
 
+/// Every sign-up asks age and agreement first: `dd` from its flags (or at a
+/// terminal), the browser's join from the page. Under 13 is refused and
+/// stays refused on that device; 13 to 17 needs a parent's or guardian's
+/// agreement; the entry records which terms were agreed to, and a box
+/// refuses a new one that says none.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sign_up_asks_age_and_agreement_and_records_the_terms() {
+    let a = Box_::start(true).await;
+    let d = dirs([&a]);
+    // a year that is surely this one's, give or take the new year
+    let year = 1970 + identity::now() / 31_556_952;
+    let child = format!("{}-06", year - 5);
+    let teen = format!("{}-06", year - 15);
+
+    let kid = Device::new();
+    kid.dd_fails(&args(&["identity", "new", "--name", "kid"], &d), "--born");
+    kid.dd_fails(
+        &args(
+            &[
+                "identity",
+                "new",
+                "--born",
+                &child,
+                "--agree-terms",
+                "--name",
+                "kid",
+            ],
+            &d,
+        ),
+        "13 or over",
+    );
+    // and going back to answer again changes nothing on this device
+    kid.dd_fails(
+        &args(
+            &[
+                "identity",
+                "new",
+                "--born",
+                "1990-01",
+                "--agree-terms",
+                "--name",
+                "kid",
+            ],
+            &d,
+        ),
+        "13 or over",
+    );
+    assert!(entry(&a, "kid").await.is_none());
+
+    let ted = Device::new();
+    ted.dd_fails(
+        &args(
+            &[
+                "identity",
+                "new",
+                "--born",
+                &teen,
+                "--agree-terms",
+                "--name",
+                "ted",
+            ],
+            &d,
+        ),
+        "parent or guardian",
+    );
+    ted.dd_fails(
+        &args(
+            &[
+                "identity",
+                "new",
+                "--born",
+                &teen,
+                "--guardian-agrees",
+                "--name",
+                "ted",
+            ],
+            &d,
+        ),
+        "--agree-terms",
+    );
+    ted.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            &teen,
+            "--guardian-agrees",
+            "--agree-terms",
+            "--name",
+            "ted",
+        ],
+        &d,
+    ));
+    let e = entry(&a, "ted").await.unwrap();
+    assert_eq!(e["entry"]["terms"], identity::TERMS);
+    let raw = serde_json::to_string(&e).unwrap();
+    assert!(!raw.contains(&teen), "the birth date went to the box");
+
+    // a new entry that agreed to nothing is refused, made by hand
+    let k = identity::generate();
+    let p = identity::encode_public(&identity::generate().verifying_key());
+    let bare = identity::Entry {
+        name: "bare".into(),
+        root: identity::encode_public(&k.verifying_key()),
+        recovery: identity::encode_public(&identity::generate().verifying_key()),
+        devices: vec![identity::Device {
+            fingerprint: identity::fingerprint(&p),
+            public_key: p,
+            added: identity::now(),
+        }],
+        passkeys: vec![],
+        grant: None,
+        libraries: vec![],
+        terms: None,
+        version: 1,
+        updated: identity::now(),
+    };
+    let signed = identity::sign(bare, &k).unwrap();
+    let (st, body) = put_raw(&a, "bare", &serde_json::to_value(&signed).unwrap()).await;
+    assert_eq!(st, 403, "{body}");
+    assert!(body.contains("Terms of use"), "{body}");
+
+    // the browser's join: not without the box ticked, and its entry says
+    // what was agreed, under the passkey's own signature
+    let r = reqwest::Client::new()
+        .post(a.url("/_dd/join/start"))
+        .json(&serde_json::json!({ "username": "eve" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    let mut eve = SoftPasskey::new(true);
+    assert_eq!(join_in_browser(&a, &mut eve, "eve").await.0, 200);
+    let held = a.dir.parent().unwrap().join("held").join("eve.json");
+    let e: identity::SignedEntry = serde_json::from_slice(&std::fs::read(&held).unwrap()).unwrap();
+    assert_eq!(e.entry.terms.as_deref(), Some(identity::TERMS));
+    identity::accept(None, &e).unwrap();
+}
+
 /// An account whose root is on a device leaves by that root: what the
 /// app's Settings asks of it (`account::leave`, behind `/_dd/app/leaving`)
 /// is what `dd leave` does. The tab reads where it stands with the device's
@@ -786,7 +980,18 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
 async fn an_account_with_its_root_on_a_device_leaves_by_it_and_comes_back() {
     let a = Box_::start_members(true, Some(vec![])).await;
     let sam = Device::new();
-    sam.dd_ok(&args(&["identity", "new", "--name", "sam"], &dirs([&a])));
+    sam.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "sam",
+        ],
+        &dirs([&a]),
+    ));
     let e = entry(&a, "sam").await.unwrap();
     let id = identity::member_id(e["entry"]["root"].as_str().unwrap());
     let b = Box_::start_on(
@@ -962,7 +1167,17 @@ async fn an_invite_code_lets_one_person_in_once() {
     // the code is typed on her own device and never into a box's page
     let eve = Device::new();
     eve.dd_ok(&args(
-        &["identity", "new", "--name", "eve", "--code", &code],
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "eve",
+            "--code",
+            &code,
+        ],
         &d,
     ));
     assert_eq!(verify_status(&a, &eve.token()).await, 200);
@@ -973,7 +1188,17 @@ async fn an_invite_code_lets_one_person_in_once() {
     let mallory = Device::new();
     mallory.dd_fails(
         &args(
-            &["identity", "new", "--name", "mallory", "--code", &code],
+            &[
+                "identity",
+                "new",
+                "--born",
+                "1990-01",
+                "--agree-terms",
+                "--name",
+                "mallory",
+                "--code",
+                &code,
+            ],
             &d,
         ),
         "already been used",
@@ -984,6 +1209,9 @@ async fn an_invite_code_lets_one_person_in_once() {
             &[
                 "identity",
                 "new",
+                "--born",
+                "1990-01",
+                "--agree-terms",
                 "--name",
                 "mallory",
                 "--code",
@@ -1021,7 +1249,17 @@ async fn an_invite_code_lets_one_person_in_once() {
     // the code is still good, on a device
     let fay2 = Device::new();
     fay2.dd_ok(&args(
-        &["identity", "new", "--name", "fay2", "--code", &code2],
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "fay2",
+            "--code",
+            &code2,
+        ],
         &d,
     ));
 
@@ -1035,7 +1273,17 @@ async fn an_invite_code_lets_one_person_in_once() {
         .trim()
         .to_string();
     owner.dd_ok(&args(
-        &["identity", "new", "--name", "owner", "--code", &own],
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "owner",
+            "--code",
+            &own,
+        ],
         &d,
     ));
     // and can shut one out again: revoked beats a grant
@@ -1090,7 +1338,17 @@ async fn an_invite_code_lets_one_person_in_once() {
     tokio::time::sleep(Duration::from_millis(2500)).await;
     mallory.dd_fails(
         &args(
-            &["identity", "new", "--name", "mallory", "--code", &code3],
+            &[
+                "identity",
+                "new",
+                "--born",
+                "1990-01",
+                "--agree-terms",
+                "--name",
+                "mallory",
+                "--code",
+                &code3,
+            ],
             &d,
         ),
         "expired",
@@ -1287,7 +1545,18 @@ async fn passkey_made_in_a_browser_is_signed_into_the_entry_and_logs_in() {
     let a = Box_::start(true).await;
     let d = dirs([&a]);
     let dev = Device::new();
-    dev.dd_ok(&args(&["identity", "new", "--name", "amy"], &d));
+    dev.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "amy",
+        ],
+        &d,
+    ));
 
     // dd enrol runs for real this time: it prints the link, waits for the
     // credential, signs it in, publishes
@@ -1509,6 +1778,9 @@ async fn publish_brings_a_lagging_box_up() {
     dev.dd_ok(&[
         "identity",
         "new",
+        "--born",
+        "1990-01",
+        "--agree-terms",
         "--name",
         "kim",
         "--directory",
@@ -1892,7 +2164,18 @@ async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
     let a = Box_::start(true).await;
     let d = dirs([&a]);
     let dev = Device::new();
-    dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    dev.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "tom",
+        ],
+        &d,
+    ));
     let show = dev.dd_ok(&args(&["identity", "show"], &d));
     let id = show
         .lines()
@@ -2067,7 +2350,18 @@ async fn a_demo_door_lets_in_the_demo_alone() {
     let a = Box_::start(true).await;
     let d = dirs([&a]);
     let dev = Device::new();
-    dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    dev.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "tom",
+        ],
+        &d,
+    ));
     let show = dev.dd_ok(&args(&["identity", "show"], &d));
     let id = show
         .lines()
@@ -2240,7 +2534,18 @@ async fn deleting_an_image_wants_the_passkey_just_now() {
     let a = Box_::start(true).await;
     let d = dirs([&a]);
     let dev = Device::new();
-    dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    dev.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "tom",
+        ],
+        &d,
+    ));
     let id = dev
         .dd_ok(&args(&["identity", "show"], &d))
         .lines()
@@ -2310,7 +2615,18 @@ async fn sessions_are_listed_and_end_when_their_device_goes() {
     let d = dirs([&a]);
     let laptop = Device::new();
     let phone = Device::new();
-    laptop.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    laptop.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "tom",
+        ],
+        &d,
+    ));
     laptop.dd_ok(&args(&["device", "admit", &phone.public_key()], &d));
     // the phone signs as tom too (it is handed the root, as in the test above)
     let root = laptop.dd_ok(&["identity", "export"]);
@@ -2612,7 +2928,18 @@ async fn a_device_is_offered_by_code_and_seen_by_its_owner_alone() {
     let a = Box_::start(true).await;
     let d = dirs([&a]);
     let laptop = Device::new();
-    laptop.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    laptop.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "tom",
+        ],
+        &d,
+    ));
     let id = laptop
         .dd_ok(&args(&["identity", "show"], &d))
         .lines()

@@ -9,8 +9,9 @@
       <p class="lead">Pick a name and make a passkey. It signs you in, here and on your other devices, to what a friend invited you to. No password, and nothing here can sign as you.</p>
       <label for="u">Name</label>
       <input id="u" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="lowercase letters, digits, - _ .">
-      <button id="go">Create passkey</button>
-      <div id="msg"></div>
+      {% include "consent.html" %}
+      <button id="go" disabled>Create passkey</button>
+      <div id="msg" role="status"></div>
     </section>
     <aside>
       <div class="ways">

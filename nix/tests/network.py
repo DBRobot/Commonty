@@ -47,7 +47,7 @@ assert all(r["value"] == ip for r in records), records
 env = "DD_KEYRING_FILE=/root/keys.json"
 box.wait_for_open_port(4181)
 dirs = "--directory http://127.0.0.1:4181/_dd/directory"
-box.succeed(f"{env} {nix['dd']} identity new --name sarah {dirs}")
+box.succeed(f"{env} {nix['dd']} identity new --born 1990-01 --agree-terms --name sarah {dirs}")
 
 # a key on this network is for members. The list starts empty, so sarah has
 # to be in it before the door opens for her at all.
@@ -86,7 +86,7 @@ box.fail(
 # and a stranger who signed up is not a member: a real key, a real entry, a
 # real token, and no way onto the network the boxes trust
 box.succeed(
-    f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} identity new --name tom {dirs}"
+    f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} identity new --born 1990-01 --agree-terms --name tom {dirs}"
 )
 tom = box.succeed(f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} token").strip()
 code = box.succeed(

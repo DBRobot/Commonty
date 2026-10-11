@@ -15,7 +15,7 @@ box.wait_for_open_port(4181)
 # a member with a library, made on this box with dd (the root is here)
 env = "DD_KEYRING_FILE=/root/keys.json"
 dirs = "--directory http://127.0.0.1:4181/_dd/directory"
-box.succeed(f"{env} {nix['dd']} identity new --name sarah {dirs}")
+box.succeed(f"{env} {nix['dd']} identity new --born 1990-01 --agree-terms --name sarah {dirs}")
 
 # The gate asks the release's member list who belongs here, not the person's
 # own entry: an entry is a document you write about yourself. The list starts
@@ -190,7 +190,7 @@ assert "demoLibrary" not in json.loads(
 
 # a stranger's token opens nothing; no token, nothing
 box.succeed(
-    f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} identity new --name tom {dirs}"
+    f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} identity new --born 1990-01 --agree-terms --name tom {dirs}"
 )
 tom = box.succeed(f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} token").strip()
 box.succeed(

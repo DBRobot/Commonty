@@ -191,6 +191,8 @@ def signed(name, key, version):
                 "added": 1,
             }
         ],
+        # the terms agreed to at sign-up, in the entry's own order
+        "terms": "2026-10-11",
         "version": version,
         "updated": int(time.time()),
     }

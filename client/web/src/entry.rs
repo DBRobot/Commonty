@@ -163,6 +163,7 @@ mod tests {
             passkeys: vec![],
             grant: None,
             libraries: vec![],
+            terms: None,
             version: 1,
             updated: 1,
         };
@@ -206,6 +207,7 @@ mod tests {
             passkeys: vec![],
             grant: None,
             libraries: vec![],
+            terms: None,
             version: 4,
             updated: 4,
         };
@@ -244,6 +246,7 @@ mod tests {
                 readers: vec![],
                 created: 1,
             }],
+            terms: None,
             version: 4,
             updated: 4,
         };

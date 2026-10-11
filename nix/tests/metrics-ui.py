@@ -32,7 +32,7 @@ box.succeed("test ! -e /tmp/thanos.log")
 # a member, with a session as the app's browser has
 dirs = "--directory http://127.0.0.1:4181/_dd/directory"
 box.succeed(
-    f"DD_KEYRING_FILE=/root/sarah.json {nix['dd']} identity new --name sarah {dirs}"
+    f"DD_KEYRING_FILE=/root/sarah.json {nix['dd']} identity new --born 1990-01 --agree-terms --name sarah {dirs}"
 )
 box.succeed("mkdir -p /root/fleet/fleet")
 box.succeed(

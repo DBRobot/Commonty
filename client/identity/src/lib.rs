@@ -68,6 +68,11 @@ pub struct Entry {
     /// In the entry so the keys are where the identity is and nowhere else.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub libraries: Vec<Library>,
+    /// The version of the Terms of use (and the Privacy policy with them)
+    /// this person agreed to at sign-up (`TERMS`), signed like the rest.
+    /// Absent on entries made before it was asked, which stay valid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terms: Option<String>,
     /// strictly increasing; a box never accepts an older or equal one
     pub version: u64,
     pub updated: u64,
@@ -144,6 +149,38 @@ pub struct SignedEntry {
     /// was on file before. The box that holds the previous entry checks it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery_signature: Option<String>,
+}
+
+/// The Terms of use a sign-up agrees to: the date docs/policies/terms.md
+/// last changed, which that page states (checks.terms-version holds the two
+/// to each other). Change both when the terms change.
+pub const TERMS: &str = "2026-10-11";
+/// Sign-ups from this time on are asked (2026-10-11 UTC): an entry first
+/// seen without `terms` and made since is refused (`agreed_terms`), and one
+/// made before stays as valid as it always was.
+pub const TERMS_ASKED_FROM: u64 = 1_791_676_800;
+
+/// What a box asks of a new sign-up: the terms it agreed to, a date. An
+/// entry from before sign-ups were asked needs none.
+pub fn agreed_terms(entry: &Entry) -> Result<()> {
+    match &entry.terms {
+        Some(t) if is_date(t) => Ok(()),
+        Some(_) => Err(Error::Rejected("the terms agreed to are not a date".into())),
+        None if entry.updated < TERMS_ASKED_FROM => Ok(()),
+        None => Err(Error::Rejected(
+            "a new account agrees to the Terms of use and the Privacy policy".into(),
+        )),
+    }
+}
+
+/// YYYY-MM-DD
+fn is_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b.iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            _ => c.is_ascii_digit(),
+        })
 }
 
 pub fn generate() -> SigningKey {
@@ -923,6 +960,7 @@ mod tests {
                 redeemed: 200,
                 proof: prove(&ck, &inv.invite.public_key, root, 200),
             }),
+            terms: None,
             version: 1,
             updated: 200,
         };
@@ -939,6 +977,51 @@ mod tests {
     }
 
     #[test]
+    fn a_new_sign_up_carries_the_terms_it_agreed_to_and_an_old_entry_needs_none() {
+        let root = generate();
+        let mut e = Entry {
+            name: "tom".into(),
+            root: encode_public(&root.verifying_key()),
+            recovery: String::new(),
+            devices: vec![Device {
+                fingerprint: "f".into(),
+                public_key: encode_public(&generate().verifying_key()),
+                added: 1,
+            }],
+            passkeys: vec![],
+            libraries: vec![],
+            grant: None,
+            terms: None,
+            version: 1,
+            updated: TERMS_ASKED_FROM - 1,
+        };
+        // from before: as it was, byte for byte, and still good
+        let old = sign(e.clone(), &root).unwrap();
+        assert!(
+            !String::from_utf8(canonical(&e).unwrap())
+                .unwrap()
+                .contains("terms")
+        );
+        verify(&old).unwrap();
+        agreed_terms(&e).unwrap();
+        // made since: refused without the terms, taken with them, signed in
+        e.updated = TERMS_ASKED_FROM;
+        assert!(agreed_terms(&e).is_err());
+        e.terms = Some(TERMS.into());
+        agreed_terms(&e).unwrap();
+        let new = sign(e.clone(), &root).unwrap();
+        verify(&new).unwrap();
+        let mut changed = new.clone();
+        changed.entry.terms = Some("2020-01-01".into());
+        assert!(
+            verify(&changed).is_err(),
+            "the terms are signed with the rest"
+        );
+        e.terms = Some("yes".into());
+        assert!(agreed_terms(&e).is_err());
+    }
+
+    #[test]
     fn leaving_is_said_by_the_root_on_file_and_nobody_else() {
         let root = generate();
         let entry = Entry {
@@ -949,6 +1032,7 @@ mod tests {
             passkeys: vec![],
             libraries: vec![],
             grant: None,
+            terms: None,
             version: 1,
             updated: 1,
         };
@@ -1017,6 +1101,7 @@ mod tests {
                 passkeys: vec![pk],
                 grant: None,
                 libraries: vec![],
+                terms: None,
                 version,
                 updated: version,
             },
@@ -1152,6 +1237,7 @@ mod tests {
                 root: encode_public(&root.verifying_key()),
                 recovery: encode_public(&generate().verifying_key()),
                 devices: vec![dev(&generate())],
+                terms: None,
                 version: 1,
                 updated: 1,
             };
@@ -1192,6 +1278,7 @@ mod tests {
             root: encode_public(&root.verifying_key()),
             recovery: encode_public(&recovery.verifying_key()),
             devices: vec![dev(&d1)],
+            terms: None,
             version: 1,
             updated: 1,
         };
@@ -1287,6 +1374,7 @@ mod tests {
                 }],
                 created: 1,
             }],
+            terms: None,
             version: 1,
             updated: 1,
         };

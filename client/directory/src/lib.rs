@@ -320,6 +320,7 @@ mod tests {
                 passkeys: vec![],
                 grant: None,
                 libraries: vec![],
+                terms: None,
                 version,
                 updated: 1,
             },

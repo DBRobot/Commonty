@@ -169,10 +169,23 @@ pub async fn join_with_code(keys: State<'_, Keys>, code: String) -> Result<Strin
 
 /// A new member, from a code: the invite it derives is fetched from the
 /// directory, a root and a recovery key are made here, the entry with its
-/// grant is published, the root goes into the keystore. The recovery key
-/// comes back once, for the page to show and never keep.
+/// grant and the terms agreed to is published, the root goes into the
+/// keystore. The recovery key comes back once, for the page to show and
+/// never keep. The page asked the age question itself; the birth date never
+/// reaches here, only that the terms were agreed to.
 #[tauri::command]
-pub async fn sign_up(keys: State<'_, Keys>, name: String, code: String) -> Result<String, String> {
+pub async fn sign_up(
+    keys: State<'_, Keys>,
+    name: String,
+    code: String,
+    agreed: bool,
+) -> Result<String, String> {
+    if age_refused_here(&keys) {
+        return Err(AGE_REFUSED_TEXT.to_string());
+    }
+    if !agreed {
+        return Err("agree to the Terms of use and the Privacy policy first".to_string());
+    }
     let name = name.trim().to_string();
     if !identity::valid_name(&name) {
         return Err("a name is lowercase letters, digits and dashes".to_string());
@@ -181,11 +194,60 @@ pub async fn sign_up(keys: State<'_, Keys>, name: String, code: String) -> Resul
         return Err("the invite code is what lets you in".to_string());
     }
     let (kp, _) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
-    let recovery = account::create(&keys.0, &dirs(), &name, &kp, Some(code.trim()))
-        .await
-        .map_err(|e| format!("{e:#}"))?;
+    let recovery = account::create(
+        &keys.0,
+        &dirs(),
+        &name,
+        &kp,
+        Some(code.trim()),
+        identity::TERMS,
+    )
+    .await
+    .map_err(|e| format!("{e:#}"))?;
     keys.0.set(USER, &name).map_err(|e| e.to_string())?;
     Ok(recovery.to_string())
+}
+
+/// what the store keeps once the age question was answered under 13 on
+/// this device: that alone, never the answer
+const AGE_REFUSED: &str = "age-refused";
+const AGE_REFUSED_TEXT: &str = "Commonty is only for people aged 13 or over.";
+
+fn age_refused_here(keys: &Keys) -> bool {
+    keys.0.get(AGE_REFUSED).ok().flatten().is_some()
+}
+
+/// The sign-up's age question said under 13 on this device: kept, so going
+/// back and answering again changes nothing
+#[tauri::command]
+pub fn age_refused(keys: State<'_, Keys>) -> bool {
+    age_refused_here(&keys)
+}
+
+#[tauri::command]
+pub fn refuse_age(keys: State<'_, Keys>) -> Result<(), String> {
+    keys.0.set(AGE_REFUSED, "1").map_err(|e| e.to_string())
+}
+
+/// The Terms of use or the Privacy policy, from the sign-up's "I agree",
+/// in the system's browser: the window keeps the sign-up
+#[tauri::command]
+pub fn open_policy<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    which: String,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt as _;
+    let page = match which.as_str() {
+        "terms" => "terms",
+        "privacy" => "privacy",
+        _ => return Err("no such page".into()),
+    };
+    app.opener()
+        .open_url(
+            format!("https://{}/docs/policies/{page}", domain()),
+            None::<&str>,
+        )
+        .map_err(|e| e.to_string())
 }
 
 fn root_here(keys: &Keys) -> Result<ed25519_dalek::SigningKey, String> {

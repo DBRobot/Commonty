@@ -1226,11 +1226,28 @@ fn user_uuid(user: &str) -> Uuid {
 /// the root; the entry naming it is signed by that passkey's assertion over
 /// the entry's hash. This box assembles the bytes and asks; it holds no key
 /// that could sign them, and every box checks the result the same way.
+/// A browser sign-up: the name, and that the person ticked "I agree to the
+/// Terms of use and the Privacy policy". The age question is the page's
+/// alone: the answer never comes here.
+#[derive(Deserialize)]
+struct JoinStart {
+    username: String,
+    #[serde(default)]
+    agree: bool,
+}
+
 async fn join_start(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
-    Json(q): Json<LoginStart>,
+    Json(q): Json<JoinStart>,
 ) -> Response {
+    if !q.agree {
+        return (
+            StatusCode::BAD_REQUEST,
+            "agree to the Terms of use and the Privacy policy first",
+        )
+            .into_response();
+    }
     let user = q.username.trim().to_lowercase();
     if !valid_user(&user) {
         return (
@@ -1334,6 +1351,8 @@ async fn join_finish(
         }],
         grant: None,
         libraries: vec![],
+        // what they agreed to, signed by their passkey with the rest
+        terms: Some(identity::TERMS.to_string()),
         version: 1,
         updated: now,
     };
@@ -3483,6 +3502,7 @@ mod tests {
                     passkeys: vec![],
                     grant: None,
                     libraries: vec![],
+                    terms: Some(identity::TERMS.into()),
                     version: 1,
                     updated: identity::now(),
                 },

@@ -1,4 +1,5 @@
 mod build_order;
+mod consent;
 mod control_worker;
 mod derive;
 mod diskcmd;
@@ -118,6 +119,8 @@ enum Command {
         /// Read the photo password from stdin instead of prompting.
         #[arg(long)]
         password_stdin: bool,
+        #[command(flatten)]
+        consent: consent::Consent,
     },
     /// A browser login: prints a link, signed by this device and good for ten
     /// minutes, that sets up a passkey in the browser that opens it. Waits
@@ -382,6 +385,8 @@ enum IdentityCmd {
         /// the invite code someone gave you (`dd invite` on their side)
         #[arg(long)]
         code: Option<String>,
+        #[command(flatten)]
+        consent: consent::Consent,
     },
     /// What every directory has for you, and whether it is yours.
     Show,
@@ -951,9 +956,11 @@ async fn main() -> Result<()> {
             ente_origin,
             skip_photos,
             password_stdin,
+            consent,
         } => {
+            let terms = consent.check(&keys, &consent::site_of(&directories))?;
             let (kp, _) = auth::device::load_or_create(&keys)?;
-            let recovery = who::create(&keys, &directories, &username, &kp, None).await?;
+            let recovery = who::create(&keys, &directories, &username, &kp, None, terms).await?;
             keys.set(USER, &username)?;
             println!(
                 "identity {username} published; device {} is its first",
@@ -1209,14 +1216,19 @@ async fn main() -> Result<()> {
         }
 
         Command::Identity { cmd, directories } => match cmd {
-            IdentityCmd::New { name, code } => {
+            IdentityCmd::New {
+                name,
+                code,
+                consent,
+            } => {
                 let name = match name.or(keys.get(USER)?.map(|z| z.to_string())) {
                     Some(n) => n,
                     None => anyhow::bail!("no name: pass --name"),
                 };
+                let terms = consent.check(&keys, &consent::site_of(&directories))?;
                 let (kp, _) = auth::device::load_or_create(&keys)?;
                 let recovery =
-                    who::create(&keys, &directories, &name, &kp, code.as_deref()).await?;
+                    who::create(&keys, &directories, &name, &kp, code.as_deref(), terms).await?;
                 keys.set(USER, &name)?;
                 println!(
                     "identity {name} published; device {} is its first",

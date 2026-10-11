@@ -4,6 +4,7 @@
 // admit page polls until another device of the account approves this one.
 
 import { $, load } from '/_dd/static/kit.js';
+import { consent } from '/_dd/static/age.js';
 
 const invoke = window.__TAURI__.core.invoke;
 let timer = null;
@@ -157,20 +158,33 @@ $("recover-form").addEventListener("submit", async (ev) => {
   }
 });
 $("signup-back").addEventListener("click", () => show("name"));
+// the age question and "I agree" (age.js): a refusal under 13 is kept in
+// the app's store, and the answer itself never leaves this page
+const signupReady = consent($("signup-go"), {
+  remembered: () => invoke("age_refused"),
+  remember: () => invoke("refuse_age"),
+});
+for (const a of document.querySelectorAll("[data-policy]")) {
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    invoke("open_policy", { which: a.dataset.policy }).catch(() => {});
+  });
+}
 $("signup-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const b = ev.submitter || $("signup-form").querySelector("button");
+  const b = $("signup-go");
+  if (!(await signupReady)()) return;
   $("signup-error").hidden = true;
   b.disabled = true;
   try {
-    const recovery = await invoke("sign_up", { name: $("signup-name").value, code: $("signup-code").value });
+    const recovery = await invoke("sign_up", { name: $("signup-name").value, code: $("signup-code").value, agreed: true });
     $("recovery-key").textContent = recovery;
     show("recovery");
   } catch (e) {
     $("signup-error").textContent = String(e);
     $("signup-error").hidden = false;
   }
-  b.disabled = false;
+  b.disabled = !(await signupReady)();
 });
 $("recovery-done").addEventListener("click", () => {
   $("recovery-key").textContent = "";

@@ -52,6 +52,7 @@ impl Tester {
             }],
             grant: None,
             libraries: vec![],
+            terms: None,
             version,
             updated: version,
         };

@@ -149,6 +149,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "age.js",
+        "servers/web-shared/age.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "invite.js",
         "servers/gate/web/invite.js",
         "text/javascript; charset=utf-8",
@@ -887,6 +892,37 @@ mod tests {
         }
         assert!(static_file("redeem.js").is_none());
         assert!(static_file("nope").is_none());
+    }
+
+    /// The browser's sign-up asks month and year of birth, nothing chosen,
+    /// and an unticked "I agree" to both policies; the answer to the age
+    /// question stays in the page.
+    #[test]
+    fn the_sign_up_asks_age_and_agreement_and_sends_neither_date() {
+        let page = join("commonty.org");
+        for id in [
+            "born-month",
+            "born-year",
+            "guardian",
+            "agree",
+            "age-refused",
+        ] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "{id}");
+        }
+        assert!(
+            !page.contains("checked>") && !page.contains("checked="),
+            "a box ticked for them"
+        );
+        assert!(!page.contains("selected"), "an answer chosen for them");
+        assert!(page.contains("https://commonty.org/docs/policies/terms"));
+        assert!(page.contains("https://commonty.org/docs/policies/privacy"));
+        assert!(page.contains("<button id=\"go\" disabled>"));
+        let js = text("join.js");
+        assert!(js.contains("from './age.js'"));
+        assert!(!js.contains("born"), "the birth date is sent");
+        assert!(static_file("age.js").is_some());
+        assert!(text("age.js").contains("localStorage"));
+        assert!(text("age.js").contains("document.cookie"));
     }
 
     /// Every file a box serves to a browser (servers/**/web), read for the

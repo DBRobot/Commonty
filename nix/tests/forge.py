@@ -135,7 +135,7 @@ box.wait_for_unit("dd-forge-notify.service")
 env = "DD_KEYRING_FILE=/root/keys.json"
 dirs = "--directory http://127.0.0.1:4181/_dd/directory"
 box.wait_for_open_port(4181)
-box.succeed(f"{env} {nix['dd']} identity new --name sarah {dirs}")
+box.succeed(f"{env} {nix['dd']} identity new --born 1990-01 --agree-terms --name sarah {dirs}")
 box.succeed("mkdir -p /root/fleet/fleet")
 box.succeed(f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs}")
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")

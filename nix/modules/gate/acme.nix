@@ -148,7 +148,7 @@ in
             access_log /var/log/nginx/access.log dd_path;
           '';
         };
-        # and it is kept three weeks, not the half year logrotate would
+        # and it is kept 20 days, a day at a time, not the half year logrotate would
         services.logrotate.settings.nginx = {
           frequency = lib.mkForce "daily";
           rotate = lib.mkForce 20;

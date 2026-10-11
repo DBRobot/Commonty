@@ -77,7 +77,7 @@ async fn a_guest_walks_every_tile() {
     let r = http
         .post(format!("{home}/_dd/join/start"))
         .header("x-dd-probe", "1")
-        .json(&serde_json::json!({ "username": name }))
+        .json(&serde_json::json!({ "username": name, "agree": true }))
         .send()
         .await
         .unwrap();

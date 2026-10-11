@@ -83,3 +83,5 @@ before it takes effect.
 ## Law
 
 These terms are governed by the laws of Massachusetts, USA.
+
+These terms last changed on 2026-10-11.

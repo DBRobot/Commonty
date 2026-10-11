@@ -9,8 +9,11 @@ They join as your **guests**.
 2. Copy the link and send it however you like. It works once, for a day.
    You can have up to 20 waiting at a time.
 3. Your friend opens it. If they have no account, it signs them up first:
-   they pick a name and make a passkey in their browser. No invite code,
-   no app needed for that step.
+   they pick a name, give their month and year of birth (checked, never
+   kept; at least 13, and from 13 to 17 a parent or guardian agrees),
+   tick **I agree to the Terms of use and the Privacy policy**, and make
+   a passkey in their browser. No invite code, no app needed for that
+   step.
 4. On your game server's page, tick your friend under who plays.
 
 A link opened by someone who is already a member makes you friends, and

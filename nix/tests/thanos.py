@@ -49,7 +49,7 @@ import json
 env = "DD_KEYRING_FILE=/root/keys.json"
 dirs = "--directory http://127.0.0.1:4181/_dd/directory"
 a.wait_for_open_port(4181)
-a.succeed(f"{env} {nix['dd']} identity new --name sarah {dirs}")
+a.succeed(f"{env} {nix['dd']} identity new --born 1990-01 --agree-terms --name sarah {dirs}")
 a.succeed("mkdir -p /root/fleet/fleet")
 a.succeed(f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs}")
 a.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")

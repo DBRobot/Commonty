@@ -366,14 +366,16 @@ pub fn device_of(kp: &auth::device::KeyPair) -> Device {
 }
 
 /// A brand new identity: root and recovery generated here, this device the
-/// first and only one, version 1, signed by the root. Returns the recovery
-/// secret exactly once, for paper.
+/// first and only one, version 1, signed by the root. `terms` is the version
+/// of the Terms of use the person agreed to (identity::TERMS); asking them is
+/// the caller's. Returns the recovery secret exactly once, for paper.
 pub async fn create(
     keys: &impl KeyStore,
     dirs: &[String],
     name: &str,
     kp: &auth::device::KeyPair,
     code: Option<&str>,
+    terms: &str,
 ) -> Result<zeroize::Zeroizing<String>> {
     if keys.get(ROOT)?.is_some() {
         bail!("this machine already holds an identity - `dd identity show`");
@@ -413,6 +415,7 @@ pub async fn create(
         passkeys: vec![],
         grant,
         libraries: vec![],
+        terms: Some(terms.to_string()),
         version: 1,
         updated: identity::now(),
     };
@@ -635,6 +638,7 @@ pub async fn recover(
         // a grant proves a root; this one is new. `dd invite` again
         grant: None,
         libraries: vec![],
+        terms: cur.entry.terms.clone(),
         version: cur.entry.version + 1,
         updated: identity::now(),
     };
@@ -736,6 +740,7 @@ mod tests {
             }],
             grant: None,
             libraries: vec![],
+            terms: None,
             version: 1,
             updated: 1,
         }
