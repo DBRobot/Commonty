@@ -46,6 +46,7 @@ in
     script = ddScript ./fleet-alerts.sh {
       QUERY = "http://127.0.0.1:10903/api/v1/query";
       STATE = "/var/lib/dd-fleet-alerts/sent.json";
+      WIRED = "/var/lib/dd-fleet-alerts/wired.json";
       TO = to;
       SENDMAIL = config.dd.mail.sendmail;
       # a block's length and an hour: every box's newest numbers are in it
