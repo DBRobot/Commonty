@@ -119,7 +119,9 @@ jobs:
   flake_check:
     needs: files_modified
     if: ${{ needs.files_modified.outputs.nix == 'true' }}
-    runs-on: nix
+    # evaluating the flake takes ~11G: not on a box with less beside a vm
+    # test (node2 ran out under it). Placement by memory replaces this.
+    runs-on: node1
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       # evaluate everything, build nothing: the vm tests are built by their
