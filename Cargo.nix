@@ -4494,6 +4494,10 @@ rec {
             packageId = "auth";
           }
           {
+            name = "axum";
+            packageId = "axum";
+          }
+          {
             name = "base64";
             packageId = "base64 0.22.1";
           }
@@ -4504,6 +4508,10 @@ rec {
           {
             name = "ed25519-dalek";
             packageId = "ed25519-dalek";
+          }
+          {
+            name = "futures-util";
+            packageId = "futures-util";
           }
           {
             name = "getrandom";
@@ -4530,7 +4538,7 @@ rec {
             name = "reqwest";
             packageId = "reqwest 0.12.28";
             usesDefaultFeatures = false;
-            features = [ "rustls-tls" "json" ];
+            features = [ "rustls-tls" "json" "stream" ];
           }
           {
             name = "serde";
@@ -4552,7 +4560,12 @@ rec {
           {
             name = "tokio";
             packageId = "tokio";
-            features = [ "sync" "time" ];
+            features = [ "sync" "time" "net" "fs" "io-util" ];
+          }
+          {
+            name = "tokio-util";
+            packageId = "tokio-util";
+            features = [ "io" ];
           }
         ];
         buildDependencies = [
@@ -12247,6 +12260,10 @@ rec {
           {
             name = "getrandom";
             packageId = "getrandom 0.3.4";
+          }
+          {
+            name = "p256";
+            packageId = "p256";
           }
           {
             name = "serde";

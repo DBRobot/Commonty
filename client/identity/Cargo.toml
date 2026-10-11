@@ -20,3 +20,5 @@ sha2 = "0.10"
 # assertion whose challenge is the entry's hash. The cose key types and
 # their signature check; no ceremony code
 webauthn-rs-core = "0.6.1-dev"
+# the browser's own key in a fleet sign-in (session.rs): P-256, as WebCrypto makes it
+p256 = "0.13"

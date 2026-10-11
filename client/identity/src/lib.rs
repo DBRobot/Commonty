@@ -19,6 +19,7 @@
 //! asked.
 
 pub mod fleet;
+pub mod session;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
