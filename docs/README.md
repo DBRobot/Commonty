@@ -8,7 +8,7 @@ These pages are in three parts:
 
 - **Develop**: how the code works and how to change it.
 - **Guide**: using Commonty, for the people who do.
-- **Policies**: privacy, terms, and what ships under which licence.
+- **Policies**: privacy, security and the terms of use.
 
 ## Develop
 
@@ -40,6 +40,8 @@ Coming as each part of Commonty gets its page.
 
 ## Policies
 
+- [Privacy](policies/privacy.md): what each part of Commonty can see, and who else can
 - [Terms of use](policies/terms.md)
 - [Security](policies/security.md): how Commonty is built, and how to report a problem
 - [Changes to the policies](policies/changes.md): each announced to every member 30 days ahead
+- [Licence](policies/licence.md): Commonty's code is free software, under the GNU AGPL 3.0
