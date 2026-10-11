@@ -137,7 +137,9 @@ in
     useACMEHost = config.dd.domain;
     forceSSL = true;
     locations."/" = {
-      proxyPass = "http://127.0.0.1:3900";
+      # the pool at this box's address for it: its own garage, or a storage
+      # box's over the fleet's network when the gateway keeps none
+      proxyPass = config.dd.box.s3;
       extraConfig = ''
         client_max_body_size 0;
         proxy_request_buffering off;

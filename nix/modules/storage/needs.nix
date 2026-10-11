@@ -136,9 +136,8 @@
       };
       depends = {
         dd-verify.local = true; # the members and their libraries; it reads the ledger back
-        # each service's own count, read off this box's disk
-        forgejo.local = true;
-        vaultwarden.local = true;
+        storage-view.local = true; # the fleet's count, which it holds Photos to
+        ente-museum.local = false; # Photos' counts, from museum's api; the other services' come in their own boxes' heartbeats
       };
       privacy = "metadata"; # bytes per member, never contents
     };

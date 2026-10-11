@@ -78,8 +78,8 @@ in
     };
     endpoint = lib.mkOption {
       type = lib.types.str;
-      default = "http://127.0.0.1:3900";
-      description = "S3 endpoint: garage on this box, or a storage box over the tailnet.";
+      default = config.dd.box.s3;
+      description = "S3 endpoint: the storage pool at this box's address for it (dd.box.s3): its own garage, or a storage box's over the fleet's network";
     };
     envFile = lib.mkOption {
       type = lib.types.path;

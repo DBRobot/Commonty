@@ -95,11 +95,10 @@ storage   ZFS                                        a dataset for garage blocks
           (garage)                                   meta on SSD (LMDB); capacity
                                                      string per box; rf=2 means the
                                                      smallest box caps usable space
-photos    -  (build: 5 Next.js apps + wasm,           postgres on tank; blobs in      api/s3 through the gateway;        postgres shared with forge and
-          heavy for attesters)                       garage                          smtp out                           vault (ledger reads all three);
-                                                                                                                         the gate
-vault     -                                          postgres; garage local          tailnet only (Send public);        garage on the same box
-                                                     (DATA_FOLDER 127.0.0.1:3900);   smtp out                           (hardcoded), the gate, postgres
+photos    -  (build: 5 Next.js apps + wasm,           postgres on tank; blobs in      api/s3 through the gateway;        postgres on its own box, its
+          heavy for attesters)                       garage                          smtp out                           dumps there; the gate
+vault     -                                          postgres; the pool at dd.box.s3 tailnet only (Send public);        the pool (dd.box.s3),
+                                                     (DATA_FOLDER);                  smtp out                           the gate, postgres
                                                      pwned list ~90G, peak ~180G,
                                                      1M files, under /vault
 media     -                                          - (disk images are in the       tailnet; unlimited upload          the gate
@@ -123,31 +122,40 @@ runner    /dev/kvm (VM tests); nested KVM (games     /nix/store grows (every box
           test); 2 jobs; >=4 CPUs, 8G for            closure built on every box);    git.<domain>                       127.0.0.1:3900 + storage's keys)
           members' 2 jobs; docker + gVisor;          1.5G VM images; /var/lib/docker
           iptables backend
-observe   SMART-readable disks (smartd list is       /vault/backups (dumps),         smtp out                           storage (thanos objstore is local
-          node1's, hardcoded)                        /var/lib/thanos-*                                                  garage), postgres with ente +
-                                                                                                                         forgejo, the gate, gateway (ACME)
+observe   SMART-readable disks (each box's           /vault/backups (dumps),         smtp out                           storage (thanos objstore is local
+          reported disks)                            /var/lib/thanos-*                                                  garage), the gate, gateway (ACME)
 adblock   -                                          -                               :53 tcp/udp on every interface;    the gate; the box must be in the
                                                                                      the house LAN address; DoT out     house whose router hands it out
 net       /dev/net/tun                               -                               udp 41642 all ifs; headscale out   -
 ```
 
-## 4. Co-location the code assumes (placement must respect, or the code changes)
+## 4. Co-location, and where it is said
 
-1. **One postgres for photos, forge, vault**: the ledger reads all three
-   databases and fails if any is missing (ledger.nix:54-62); observe's dumps
-   take ente and forgejo (postgres-backup.nix:70-73).
-2. **Garage on localhost** for vault (vaultwarden.nix:141), the runner's
-   cache (cache.nix:9), observe's thanos store, the gateway's s3. proxy
-   (gateway.nix:89-98), backup by default.
-3. **The gate (dd-verify) local** to photos, vault, media, library,
-   transcode, adblock, forge, metrics-ui, the ledger.
-4. **observe needs a mail secret only photos or vault declares**
-   (mail.nix:18).
-5. **The vault pool**: /vault/backups, /vault/forgejo, /vault/pwned,
-   and node1's garage all assume node1's second pool.
-6. **One gateway, one first-storage-box**: controlAddress, dd-dns, the
-   directory, and the cache/backup fallback all pick a single box
-   (flake.nix:1013-1023,1051).
+Nothing in the code assumes a particular box any more. What has to share a
+box is said in the needs (`depends.<svc>.local`), and what does not is
+reached over the fleet's network:
+
+1. **Databases stay with their service.** Each box dumps the databases its
+   own postgres holds, onto its own pool (storage/postgres-backup.nix). The
+   storage ledger reads no other service's database: the forge and the vault
+   count their members' bytes into their own boxes' heartbeats
+   (storage/usage.nix), and every box adds those up (storage/view.nix).
+2. **The storage pool by address, not localhost.** `dd.box.s3` is the pool
+   at this box's address for it: its own garage, or a storage box's over the
+   fleet's network - one in the same house when there is one, then any
+   (flake.nix, `poolFor`). The vault's files, the nix cache, backups and the
+   gateway's `s3.` all use it. Only what lives with garage (its own setup,
+   the storage role's Thanos store) names 127.0.0.1.
+3. **The gate is on every box** (`everyBox`), and every service that asks it
+   about a request says `depends.dd-verify.local`.
+4. **Alerts mail on their own secret** (mail.nix, `alert-smtp-password`), so
+   observe needs neither Photos nor the vault beside it.
+5. **Datasets in the box's own pool.** Each service's dataset is made in
+   `dd.box.bulkPool`, from the box's report; `/vault/...` is only the name
+   of the mountpoint, and works on any pool.
+6. **One gateway, by role.** The front door is the `gateway` role in
+   `fleet/boxes.json`; control.<domain>, the fleet's names (dd-dns) and the
+   directory follow that role, never a box's name.
 
 ## 5. Things the audit found wrong (separate fixes)
 
@@ -165,17 +173,9 @@ net       /dev/net/tun                               -                          
   them, so one long, high-bitrate film can hit MemoryMax 4G or fill /run.
 - **node1 may suspend** (`neverSleep` false). That would stop garage writes
   (rf=2 needs both boxes), games, the LLM and the front door.
-- **/vault/pwned** (about 90G) sits on the vault pool's unencrypted root on
-  purpose: the list is public. It isn't declared anywhere, though, so a new
-  box gets it on its root disk.
 - **AMD GPUs are ignored**: node2's Radeon goes unused for both VAAPI and
   Vulkan.
 - **Ambiguity with several NICs.** detect.sh keeps the last wired NIC it
   sees.
 - **The "port forward" comment in home-network.nix.** It contradicts the
   CGNAT note in public.nix.
-- **Smaller bugs:**
-  - The postgres-backup alert hardcodes "node1".
-  - smartd's device list is node1's.
-  - The ledger's header says it runs every 10 minutes; it runs hourly.
-  - /srv/upload-tmp is created but nginx never uses it.

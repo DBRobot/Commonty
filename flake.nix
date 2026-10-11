@@ -1335,26 +1335,31 @@
               );
             };
           };
-          # closures come from the nix-cache bucket in the garage cluster:
-          # through the box's own garage, or a storage box's over the fleet's network
+          # The storage pool, for a box: its own garage, or a storage box's
+          # over the fleet's network - one in the same house when there is
+          # one, then any - each serves the whole cluster. Closures (the
+          # nix-cache bucket), backups, the vault's files and the gateway's
+          # s3. all go there (dd.box.s3).
+          poolFor =
+            box:
+            if builtins.elem "storage" box.roles then
+              "127.0.0.1"
+            else
+              let
+                order = lib.sort (a: b: a.name < b.name) (
+                  lib.mapAttrsToList (name: b: b // { inherit name; }) storage
+                );
+                near = lib.filter (b: b.siteId == box.siteId) order;
+              in
+              (builtins.head (if near != [ ] then near else order)).net;
           cacheOf =
             name: box:
             let
-              host =
-                if builtins.elem "storage" box.roles then
-                  "127.0.0.1"
-                else
-                  (builtins.head (builtins.attrValues storage)).net;
+              host = poolFor box;
             in
             {
               dd.agent.cache = "s3://nix-cache?endpoint=${host}:3900&scheme=http&region=us-east-1";
               dd.box.s3 = "http://${host}:3900";
-            };
-          # a box without garage backs up to a storage box over the fleet's network
-          backupEndpoint =
-            name: box:
-            lib.optionalAttrs (!(builtins.elem "storage" box.roles)) {
-              dd.backup.endpoint = "http://${(builtins.head (builtins.attrValues storage)).net}:3900";
             };
           # what a member's device may reach for games, on any box: each
           # games box's own list (dd.games.reach: its range and every port
@@ -1419,10 +1424,7 @@
               ]
               ++ map (r: ./nix/roles/${r}.nix) box.roles
               ++ lib.optional (builtins.elem "storage" box.roles) (garageOf name box)
-              ++ [
-                (backupEndpoint name box)
-                (cacheOf name box)
-              ]
+              ++ [ (cacheOf name box) ]
               ++ [
                 lanzaboote.nixosModules.lanzaboote
                 ./nix/modules/box/secure-boot.nix
