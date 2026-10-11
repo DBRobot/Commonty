@@ -1,34 +1,32 @@
 # /.well-known/security.txt on the bare domain (RFC 9116): where to report
-# a hole. Expires is a year after the commit the release is built from, so
-# a fleet that stops releasing lets it lapse rather than vouch for it.
+# a hole. Expires is a fixed date: one taken from the commit made a merge
+# commit's system differ from the one CI built. CI fails 60 days before it.
 {
   config,
   lib,
   pkgs,
-  self,
   ...
 }:
 let
   domain = config.dd.domain;
   url = "https://${domain}/.well-known/security.txt";
-  file =
-    pkgs.runCommand "security.txt"
-      {
-        nativeBuildInputs = [ pkgs.coreutils ];
-      }
-      ''
-        expires=$(date -u -d @$(( ${toString self.lastModified} + 365 * 24 * 3600 )) +%Y-%m-%dT%H:%M:%SZ)
-        cat > $out <<EOF
-        Contact: mailto:security@${domain}
-        Expires: $expires
-        Preferred-Languages: en
-        Canonical: ${url}
-        Policy: https://${domain}/docs/policies/privacy
-        EOF
-        sed -i 's/^ *//' $out
-      '';
+  file = pkgs.runCommand "security.txt" { } ''
+    cat > $out <<EOF
+    Contact: mailto:security@${domain}
+    Expires: ${config.dd.securityTxtExpires}
+    Preferred-Languages: en
+    Canonical: ${url}
+    Policy: https://${domain}/docs/policies/privacy
+    EOF
+    sed -i 's/^ *//' $out
+  '';
 in
 {
+  options.dd.securityTxtExpires = lib.mkOption {
+    type = lib.types.strMatching "[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z";
+    default = "2027-10-01T00:00:00Z";
+    description = "When security.txt stops vouching for itself; moved on by hand, at most a year out (CI warns 60 days before).";
+  };
   options.dd.securityTxt = lib.mkOption {
     type = lib.types.package;
     readOnly = true;
