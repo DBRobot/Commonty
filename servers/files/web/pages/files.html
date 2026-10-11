@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Files</title>
   <link rel="stylesheet" href="/_dd/static/home.css">
+  <!-- what the page runs on, asked for at once rather than as each import is found -->
+  <link rel="modulepreload" href="/_dd/static/library.js">
+  <link rel="modulepreload" href="/_dd/static/shell.js">
+  <link rel="modulepreload" href="/_dd/static/kit.js">
+  <link rel="modulepreload" href="/_dd/static/footer.js">
+  <link rel="modulepreload" href="/_dd/web/dd_web.js">
+  <link rel="preload" href="/_dd/web/dd_web_bg.wasm" as="fetch" type="application/wasm" crossorigin>
 </head>
 <body>
   <header class="dd-bar">

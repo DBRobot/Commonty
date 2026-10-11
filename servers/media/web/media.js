@@ -5,11 +5,12 @@
 // about each title beyond its name is kept, sealed, in the library too
 // (shelf.js).
 
-import { unlock, list, fetchPlain, save, put, trash, mkdir, transcode, stopTranscode, playsPlaylists, playlistPlayer, human } from './library.js';
+import { begin, unlock, list, fetchPlain, save, put, trash, mkdir, transcode, stopTranscode, playsPlaylists, playlistPlayer, human } from './library.js';
 import { parse, open, lookUp, lookUpSeason, frame, stillFromFile, thisDevice } from './shelf.js';
 import { me, inApp } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
+begin();
 const { user, tmdb } = await me();
 // A film too big for the tab plays through the box; a small file that the
 // box cannot take plays from the tab itself.
@@ -204,16 +205,32 @@ async function load() {
 // this tab (shelf.js keep).
 async function fillIn() {
   if (!tmdb) return;
+  const todo = [...films, ...shows];
+  let refused = false;
   // lookUp passes over what it asked recently, and asks again what is due
-  for (const it of [...films, ...shows]) {
-    try {
-      if (await lookUp(store, tmdb, it.path, it.parsed, it.kind) && !show) render();
-    } catch (e) {
-      // TMDB unreachable or the key refused: the drawn cards stay, and the
-      // next visit tries again
-      if (/401|403/.test(e.message)) return;
+  const one = async () => {
+    for (let it = todo.shift(); it && !refused; it = todo.shift()) {
+      try {
+        if (await lookUp(store, tmdb, it.path, it.parsed, it.kind) && !show) redraw();
+      } catch (e) {
+        // TMDB unreachable or the key refused: the drawn cards stay, and the
+        // next visit tries again
+        if (/401|403/.test(e.message)) refused = true;
+      }
     }
-  }
+  };
+  await Promise.all([one(), one(), one(), one()]);
+}
+
+// posters landing together are drawn once
+let redrawing = false;
+function redraw() {
+  if (redrawing) return;
+  redrawing = true;
+  requestAnimationFrame(() => {
+    redrawing = false;
+    if (!show) render();
+  });
 }
 
 // ---- a title, opened
