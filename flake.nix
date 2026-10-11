@@ -42,6 +42,7 @@
       # every vm test, by name: nix/tests/<name>.nix + .py. Also what the ci
       # matrix runs (nix/tests/ci.nix holds the two to one list)
       vmTests = [
+        "acme"
         "console"
         "directory"
         "metrics"
@@ -914,6 +915,41 @@
           needs = pkgs.writeText "needs.json" (
             builtins.toJSON (import ./nix/lib/needs.nix { lib = nixpkgs.lib; })
           );
+          # The DNS Worker (servers/system/dns): what `dd release publish`
+          # uploads as dns.<domain>. Each box's TPM-held key, and the names
+          # its own nginx serves over https - all it may have a challenge for;
+          # and the fleet's names as the gateway's config has them
+          dns-worker =
+            let
+              boxList = builtins.fromJSON (builtins.readFile ./fleet/boxes.json);
+              withKeys = nixpkgs.lib.filterAttrs (_: b: b ? unlockKey) boxList;
+              gateways = builtins.filter (n: self.nixosConfigurations.${n}.config.dd ? public) (
+                builtins.attrNames boxList
+              );
+              fleet = {
+                RECORDS =
+                  assert nixpkgs.lib.assertMsg (
+                    builtins.length gateways <= 1
+                  ) "the DNS Worker keeps one gateway's names; these are all gateways: ${toString gateways}";
+                  if gateways == [ ] then
+                    null
+                  else
+                    import ./nix/lib/fleet-names.nix self.nixosConfigurations.${builtins.head gateways}.config;
+                BOXES = nixpkgs.lib.mapAttrs (_: b: b.unlockKey) withKeys;
+                NAMES = nixpkgs.lib.mapAttrs (
+                  n: _: import ./nix/lib/https-names.nix nixpkgs.lib self.nixosConfigurations.${n}.config
+                ) withKeys;
+              };
+            in
+            pkgs.runCommand "dd-dns-worker" { } ''
+              mkdir -p $out
+              cp ${./servers/system/dns/worker.js} $out/worker.js
+              cp ${pkgs.writeText "fleet.js" ''
+                export const BOXES = ${builtins.toJSON fleet.BOXES};
+                export const NAMES = ${builtins.toJSON fleet.NAMES};
+                export const RECORDS = ${builtins.toJSON fleet.RECORDS};
+              ''} $out/fleet.js
+            '';
           # The mail Worker (client/mail): what `dd release publish` uploads
           # to Cloudflare, file for file, and what the boxes compare the
           # deployed Worker with. The checks are the boxes' own Rust in wasm;
@@ -1282,6 +1318,7 @@
             '';
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
+          dns-worker = import ./nix/tests/dns-worker.nix args;
           # the control plane: relay, witness and three validators, offline
           control = import ./nix/tests/control.nix args;
           # the app carries the site's signed-in pages, their scripts, the

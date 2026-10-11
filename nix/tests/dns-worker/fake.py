@@ -1,0 +1,131 @@
+# A stand-in for Cloudflare's DNS API, for the DNS Worker's check: one
+# zone, records in memory, the token checked. GET /records shows them,
+# GET /writes counts what was changed, POST /seed puts records in as if
+# someone else had made them. With
+# CHALLTESTSRV (the acme vm test), a TXT is also served by pebble's DNS.
+import json
+import os
+import sys
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+ZONE, TOKEN = "zone1", "dns-token"
+PREFIX = "/client/v4/zones/%s/dns_records" % ZONE
+records = {}
+n = [0]
+writes = [0]
+DNS = os.environ.get("CHALLTESTSRV")
+
+
+def served(what, host, value=None):
+    if DNS:
+        body = {"host": host + "."} | ({"value": value} if value is not None else {})
+        urllib.request.urlopen(
+            urllib.request.Request(DNS + what, data=json.dumps(body).encode()),
+            timeout=10,
+        )
+
+
+class H(BaseHTTPRequestHandler):
+    # workerd keeps its connection open, as the mail Worker's fake learned
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *a):
+        sys.stderr.write("%s %s\n" % (self.command, self.path))
+
+    def reply(self, code, v):
+        b = json.dumps(v).encode()
+        self.send_response(code)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def ok(self, result):
+        self.reply(200, {"success": True, "errors": [], "result": result})
+
+    def authed(self):
+        if self.headers.get("authorization") != "Bearer " + TOKEN:
+            self.reply(403, {"success": False, "errors": [{"message": "bad token"}]})
+            return False
+        return True
+
+    def do_GET(self):
+        u = urlparse(self.path)
+        if u.path == "/records":
+            return self.reply(200, sorted(records.values(), key=lambda r: r["id"]))
+        if u.path == "/writes":
+            return self.reply(200, writes[0])
+        if u.path != PREFIX:
+            return self.reply(404, {"success": False})
+        if not self.authed():
+            return
+        q = parse_qs(u.query)
+        out = [
+            r
+            for r in records.values()
+            if r["type"] == q.get("type", [r["type"]])[0]
+            and r["name"] == q.get("name", [r["name"]])[0]
+        ]
+        self.ok(out)
+
+    def do_POST(self):
+        # read whatever comes: the connection is kept for the next request
+        raw = self.rfile.read(int(self.headers.get("content-length") or 0))
+        if self.path == "/seed":
+            for r in json.loads(raw):
+                n[0] += 1
+                records["r%d" % n[0]] = dict(r, id="r%d" % n[0])
+            return self.reply(200, {"ok": True})
+        if self.path != PREFIX:
+            return self.reply(404, {"success": False})
+        if not self.authed():
+            return
+        body = json.loads(raw)
+        n[0] += 1
+        writes[0] += 1
+        r = dict(body, id="r%d" % n[0])
+        # as Cloudflare does now: a TXT comes back in quotes
+        if body["type"] == "TXT":
+            r["content"] = '"%s"' % body["content"]
+        records[r["id"]] = r
+        served("/set-txt", body["name"], body["content"])
+        self.ok(r)
+
+    def do_PUT(self):
+        raw = self.rfile.read(int(self.headers.get("content-length") or 0))
+        if not self.path.startswith(PREFIX + "/"):
+            return self.reply(404, {"success": False})
+        if not self.authed():
+            return
+        rid = self.path[len(PREFIX) + 1 :]
+        if rid not in records:
+            return self.reply(
+                404, {"success": False, "errors": [{"message": "no such record"}]}
+            )
+        writes[0] += 1
+        records[rid] = dict(json.loads(raw), id=rid)
+        self.ok(records[rid])
+
+    def do_DELETE(self):
+        if not self.path.startswith(PREFIX + "/"):
+            return self.reply(404, {"success": False})
+        if not self.authed():
+            return
+        rid = self.path[len(PREFIX) + 1 :]
+        r = records.pop(rid, None)
+        writes[0] += r is not None
+        if r is None:
+            return self.reply(
+                404, {"success": False, "errors": [{"message": "no such record"}]}
+            )
+        # challtestsrv clears every TXT at a name; put back the others
+        served("/clear-txt", r["name"])
+        for o in records.values():
+            if o["name"] == r["name"]:
+                served("/set-txt", o["name"], o["content"].strip('"'))
+        self.ok({"id": rid})
+
+
+ThreadingHTTPServer(("127.0.0.1", 8899), H).serve_forever()

@@ -559,8 +559,7 @@ in
           }) cfg.hosts
         ))
         # the front door itself: home.<domain> is the verifier's page and
-        # nothing else. The bare domain cannot carry it (the certificate is
-        # the wildcard alone), so the gateway sends it here.
+        # nothing else. The bare domain sends people here (gateway.nix).
         {
           "home.${base}" = {
             useACMEHost = base;

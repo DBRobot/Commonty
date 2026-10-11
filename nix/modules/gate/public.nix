@@ -58,8 +58,9 @@ in
       description = "cloudflared's credentials json for the tunnel (AccountTag, TunnelSecret, TunnelID)";
     };
     tokenFile = lib.mkOption {
-      type = lib.types.path;
-      description = "file holding CF_DNS_API_TOKEN: dns edit and zone read on the fleet's zone, tunnel edit on the account";
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "file holding CF_DNS_API_TOKEN: dns edit and zone read on the fleet's zone; only until the DNS Worker keeps the zone (dd.dnsWorker)";
     };
   };
 
@@ -67,8 +68,9 @@ in
     # the names follow the switch: `*` and the bare name always point at
     # this box's address on the fleet's network, the public hosts are proxied names at
     # Cloudflare while the door is open. Converged at boot and at every
-    # switch; nothing here changes on its own, so no timer.
-    systemd.services.dd-dns = {
+    # switch; nothing here changes on its own, so no timer. Only until the
+    # DNS Worker keeps them, from the release (nix/lib/fleet-names.nix)
+    systemd.services.dd-dns = lib.mkIf (config.dd.dnsWorker == "") {
       description = "Converge the fleet's names at Cloudflare";
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
@@ -79,14 +81,18 @@ in
         DynamicUser = true;
         ExecStart = "${pkgs.python3}/bin/python3 ${./dns.py}";
       };
-      environment = {
-        ZONE = base;
-        ADDRESS = config.dd.box.net;
-        TUNNEL = cfg.tunnel;
-        HOSTS = lib.concatStringsSep " " (cfg.hosts ++ map (h: "demo-${h}") cfg.demoDoors);
-        PUBLIC = lib.boolToString cfg.enable;
-        BARE = lib.boolToString cfg.bare;
-      };
+      environment =
+        let
+          names = import ../../lib/fleet-names.nix config;
+        in
+        {
+          ZONE = names.zone;
+          ADDRESS = names.address;
+          TUNNEL = names.tunnel;
+          HOSTS = lib.concatStringsSep " " names.hosts;
+          PUBLIC = lib.boolToString names.open;
+          BARE = lib.boolToString names.bare;
+        };
     };
 
     # the door itself: an outbound tunnel, not an open port. Each public host

@@ -69,7 +69,8 @@
   };
 
   acme = {
-    what = "the fleet's certificate: a wildcard from Let's Encrypt, by DNS";
+    what = "the box's certificate from Let's Encrypt, for the names it serves; the DNS Worker writes its challenges";
+    units = [ "dd-acme@" ]; # the helper that asks the Worker, one per challenge
     base = {
       # node1, 2026-10-04: peak of a renewal; the account and certificate
       uses = {
@@ -79,7 +80,7 @@
       network = {
         outbound = [
           "acme-v02.api.letsencrypt.org"
-          "api.cloudflare.com"
+          "cloudflare" # dns.<domain>; before `dd dns setup`, the DNS API itself
         ];
         inbound = "none";
       };
@@ -107,8 +108,11 @@
   };
 
   mail-worker-check = {
-    what = "checks hourly that the mail Worker Cloudflare runs is exactly the one this release carries";
-    units = [ "dd-mail-worker-check" ];
+    what = "checks hourly that the mail and DNS Workers Cloudflare runs are exactly the ones this release carries";
+    units = [
+      "dd-mail-worker-check"
+      "dd-dns-worker-check"
+    ];
     base = {
       uses = {
         memory = "16M";

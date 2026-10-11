@@ -13,6 +13,7 @@
 let
   cfg = config.dd.mailWorker;
   bundle = self.packages.${pkgs.stdenv.hostPlatform.system}.mail-worker;
+  dnsBundle = self.packages.${pkgs.stdenv.hostPlatform.system}.dns-worker;
 in
 {
   options.dd.mailWorker = {
@@ -26,6 +27,11 @@ in
       type = lib.types.str;
       default = "commonty-mail";
       description = "the Worker's name at Cloudflare";
+    };
+    dnsAccount = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      description = "the account the DNS Worker is in (fleet/dns-worker.json, written by `dd dns setup`); empty: not checked";
     };
     readTokenFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
@@ -59,6 +65,45 @@ in
         ProtectHome = true;
         PrivateTmp = true;
         ReadWritePaths = [ "/var/lib/dd-facts" ];
+      };
+    };
+
+    # the DNS Worker the same way: the one place a challenge for any of the
+    # fleet's names can be written, so what runs there must be this release's
+    systemd.services.dd-dns-worker-check =
+      lib.mkIf (cfg.readTokenFile != null && cfg.dnsAccount != "")
+        {
+          description = "Check the DNS Worker at Cloudflare is this release's";
+          after = [ "network-online.target" ];
+          wants = [ "network-online.target" ];
+          restartIfChanged = false;
+          environment = {
+            WORKER = "dns";
+            DOWN_OK = "1";
+            ACCOUNT = cfg.dnsAccount;
+            SCRIPT = "commonty-dns";
+            BUNDLE = "${dnsBundle}";
+            FACTS = "/var/lib/dd-facts";
+          };
+          serviceConfig = {
+            Type = "oneshot";
+            User = "node-exporter";
+            Group = "node-exporter";
+            EnvironmentFile = cfg.readTokenFile;
+            ExecStart = "${pkgs.python3}/bin/python3 ${./mail-worker-check.py}";
+            NoNewPrivileges = true;
+            ProtectSystem = "strict";
+            ProtectHome = true;
+            PrivateTmp = true;
+            ReadWritePaths = [ "/var/lib/dd-facts" ];
+          };
+        };
+    systemd.timers.dd-dns-worker-check = lib.mkIf (cfg.readTokenFile != null && cfg.dnsAccount != "") {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "10min";
+        OnUnitActiveSec = "1h";
+        RandomizedDelaySec = "5min";
       };
     };
   };

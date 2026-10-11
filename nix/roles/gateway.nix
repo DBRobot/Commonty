@@ -1,6 +1,9 @@
 { config, lib, ... }:
 let
   mailSetup = ../../fleet/mail.json;
+  dnsSetup = ../../fleet/dns-worker.json;
+  # the gateway holds a token for the zone only until the DNS Worker does
+  byToken = config.dd.dnsWorker == "";
   canReadWorker = lib.hasInfix "\ncloudflare-workers-read:" (
     "\n" + builtins.readFile (../../secrets + "/${config.networking.hostName}.yaml")
   );
@@ -35,6 +38,11 @@ in
     account =
       if builtins.pathExists mailSetup then
         (builtins.fromJSON (builtins.readFile mailSetup)).account
+      else
+        "";
+    dnsAccount =
+      if builtins.pathExists dnsSetup then
+        (builtins.fromJSON (builtins.readFile dnsSetup)).account
       else
         "";
     readTokenFile =
@@ -76,20 +84,23 @@ in
     bare = true;
     tunnel = "d0534bff-f478-48ab-a949-65e2e3c14c39";
     credentialsFile = config.sops.secrets.cloudflared-credentials.path;
-    tokenFile = config.sops.templates."cloudflare.env".path;
+    # the zone's token: until the DNS Worker holds it, not after
+    tokenFile = if byToken then config.sops.templates."cloudflare.env".path else null;
   };
   dd.verify.role = "full";
   services.tailscale.permitCertUid = "nginx"; # so nginx can fetch *.ts.net certs without root
 
-  sops.secrets.cloudflare-token = { };
+  sops.secrets.cloudflare-token = lib.mkIf byToken { };
   sops.secrets.cloudflared-credentials = { }; # systemd hands it to cloudflared as a credential
   # TMDB's read token, for posters on Movies & TV: handed to signed-in
   # pages, which look titles up from the member's own device
   sops.secrets.tmdb-token.owner = "dd-verify";
   dd.verify.tmdbKeyFile = config.sops.secrets.tmdb-token.path;
-  sops.templates."cloudflare.env".content = ''
-    CF_DNS_API_TOKEN=${config.sops.placeholder.cloudflare-token}
-  '';
+  sops.templates."cloudflare.env" = lib.mkIf byToken {
+    content = ''
+      CF_DNS_API_TOKEN=${config.sops.placeholder.cloudflare-token}
+    '';
+  };
 
   # the bare domain: what people type to find the site, open to the web
   # through the tunnel (dd.public.bare). It sends them to home.<domain> and

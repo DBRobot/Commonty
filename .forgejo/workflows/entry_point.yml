@@ -189,6 +189,9 @@ jobs:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: the mail Worker, in a browser
         run: nix build --no-link -L .#checks.x86_64-linux.mail-worker
+      # and the DNS Worker at its API, with the box's helper (nix/tests/dns-worker)
+      - name: the DNS Worker
+        run: nix build --no-link -L .#checks.x86_64-linux.dns-worker
       # and the control plane's relay, witness and validators (nix/tests/control)
       - name: the control plane, end to end
         run: nix build --no-link -L .#checks.x86_64-linux.control
@@ -316,7 +319,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [console, directory, metrics, metrics-ui, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, photos, llm, vault, adblock, unlock, leaving]
+        test: [acme, console, directory, metrics, metrics-ui, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, photos, llm, vault, adblock, unlock, leaving]
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: ${{ matrix.test }}
