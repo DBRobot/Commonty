@@ -65,7 +65,14 @@ in
           # signs nobody in. Newer museum does this itself (its migrations
           # 134+), from the plain tokens: a bump has to carry these hashes
           # into its token_hash column by hand, not hash them again
-          patches = (o.patches or [ ]) ++ [ ../../../servers/photos/museum-hash-tokens.patch ];
+          patches = (o.patches or [ ]) ++ [
+            ../../../servers/photos/museum-hash-tokens.patch
+            # deleted means deleted: a file's objects go at the next run
+            # once its trash is emptied, and an account's data when its
+            # deletion is asked for, not 45 and 7 days on (checks.retention
+            # reads both from the patched source)
+            ../../../servers/photos/museum-delete-now.patch
+          ];
         });
         ente-web = prev.ente-web.overrideAttrs (
           o:

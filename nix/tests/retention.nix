@@ -1,5 +1,5 @@
 # Anything deleted is gone from every box and every backup within 90 days:
-# the first place's window (a trash, someone who left), then the backups,
+# the first place's window (a trash, someone removed), then the backups,
 # then the snapshots under them, summed (docs/dev/servers.md, Retention)
 {
   pkgs,
@@ -194,9 +194,11 @@ let
         lib.optional (over (r.rotate * per)) "${name}: nginx's log keeps ${days (r.rotate * per)} days"
     );
 
-  # museum has no setting for either: its trash empties after a constant
-  # 30 days and a deleted file's objects go 45 days after that; read from
-  # the source each box runs
+  # museum has no setting for these: its trash empties after a constant 30
+  # days, a deleted file's objects go when the queue's delay says (45 days
+  # upstream, at once with museum-delete-now.patch), and a deleted account's
+  # data when its cleanup is scheduled (7 days upstream, at once patched);
+  # read from the patched source each box runs
   ente = lib.filterAttrs (
     _: sys: sys.config.services.ente.api.enable or false
   ) self.nixosConfigurations;
@@ -204,19 +206,26 @@ let
     lib.mapAttrsToList (name: sys: ''
       snap=${toString (snapshotsKeep sys.config / minutes.daily)}
       left=${toString (leftDays sys.config)}
-      src=${sys.config.services.ente.api.package.src}/server
+      src=${sys.pkgs.srcOnly sys.config.services.ente.api.package}
       trash=$(sed -n 's/^\s*TrashDurationInDays = \([0-9]*\)$/\1/p' $src/pkg/repo/trash.go)
       queue=$(sed -n 's|^\s*DeleteObjectQueue: *\([0-9]*\) \* 24 \* 60,.*|\1|p' $src/pkg/repo/queue.go)
+      # the table's default (the migration), unless the insert sets its own time
       account=$(sed -n 's|.*stage_schedule_time .*now_utc_micro_seconds() + (\([0-9]*\) \* 24::BIGINT.*|\1|p' $src/migrations/59_delete_data.up.sql)
+      case "$(grep -o 'INSERT INTO data_cleanup([^`]*' $src/pkg/repo/datacleanup/repository.go)" in
+        *"data_cleanup(user_id) VALUES"*) ;;
+        *"data_cleanup(user_id, stage_schedule_time) VALUES (\$1, now_utc_micro_seconds())"*) account=0 ;;
+        *) account= ;;
+      esac
       if [ -z "$trash" ] || [ -z "$queue" ] || [ -z "$account" ]; then
         echo "${name}: museum's trash, account or object-deletion delay is no longer where this check reads it" >&2; bad=1
       else
         if [ $((trash + queue + snap)) -gt 90 ]; then
           echo "${name}: museum keeps a deleted photo $trash + $queue days, then snapshots $snap" >&2; bad=1
         fi
-        # someone who left: the window and its hour, then museum's account delay
+        # someone removed (leaving by one's own word has no window): the
+        # window and its hour, then museum's account delay
         if [ $((left + 1 + account + queue + snap)) -gt 90 ]; then
-          echo "${name}: the Photos of someone who left go after $left + 1 + $account + $queue + $snap days" >&2; bad=1
+          echo "${name}: the Photos of someone removed go after $left + 1 + $account + $queue + $snap days" >&2; bad=1
         fi
       fi
     '') ente
@@ -237,7 +246,7 @@ let
     let
       first = {
         "the library trash" = libraryTrash;
-        "someone who left" = leftMinutes c;
+        "someone removed" = leftMinutes c;
         "Passwords" = vaultwardenDays c;
       };
       after = resticLongest c + snapshotsKeep c;
