@@ -33,11 +33,12 @@ pkgs.runCommand "mail-worker-e2e"
     tester=${../../client/mail/tests/tester.json}
     mkdir w
     cp -rL --no-preserve=mode ${bundle}/. w/
-    # the made-up member is the only one on the list
-    # and its aliases: security to it, and two the Worker must refuse (a
+    # the made-up member is the only one on the list, and the release key is
+    # RFC 8032's first test key: the Worker decodes it, and grants nothing by it;
+    # its aliases: security to it, and two the Worker must refuse (a
     # member's address already, "other", and one that is no alias) - fake.py
     # starts with a rule for a dropped one, "old", and other's own
-    printf 'export const MEMBERS = %s;\nexport const RELEASE = "unused";\nexport const BOXES = {"testbox": %s};\nexport const ALIASES = {"security": "tester", "other": "tester", "Bad.One": "tester"};\nexport const OWNER = "tester";\n' \
+    printf 'export const MEMBERS = %s;\nexport const RELEASE = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";\nexport const BOXES = {"testbox": %s};\nexport const ALIASES = {"security": "tester", "other": "tester", "Bad.One": "tester"};\nexport const OWNER = "tester";\n' \
       "$(jq -c '.members' $tester)" "$(jq -c '.box_spki' $tester)" > w/fleet.js
     cat > w/wrangler.toml <<'TOML'
     name = "mail-e2e"
