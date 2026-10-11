@@ -242,51 +242,103 @@
           # crane rebuilt every dependency at once. After changing
           # Cargo.lock: nix run nixpkgs#crate2nix -- generate
           cargoNix = pkgs.callPackage ./Cargo.nix {
-            # cargo's release default: sixteen pieces of each crate compiled
-            # at once. buildRustCrate's is one, which made the first build of
-            # every crate - all ~800 of them - several times slower.
-            buildRustCrateForPkgs = pkgs: pkgs.buildRustCrate.override { defaultCodegenUnits = 16; };
-            defaultCrateOverrides = pkgs.defaultCrateOverrides // {
-              # askama finds the Photos pages' templates beside the gate's
-              verify = _: {
-                postUnpack = "mkdir -p $NIX_BUILD_TOP/photos && cp -r ${./box/photos/templates} $NIX_BUILD_TOP/photos/templates";
-              };
-              # dd's tests: e2e.rs reads the mail Worker's tester from beside
-              # the cli, and repo.rs runs git with git-remote-dd from beside
-              # dd, naming cargo only to build one that is not there. An
-              # override cannot tell a test build from the boxes' (buildTests
-              # is set after it), so the copy waits for the test binaries
-              dd = _: {
-                postUnpack = "mkdir -p $NIX_BUILD_TOP/mail && cp -r ${./client/mail/tests} $NIX_BUILD_TOP/mail/tests";
-                postInstall = ''
-                  if [ -d $out/tests ]; then
-                    cp ${perCrate "git-remote-dd"}/bin/git-remote-dd $out/bin/
-                  fi
-                '';
-                CARGO = "cargo";
-              };
-              # fl! wrote a message's arguments in hash-map order, so age's
-              # library differed on every build and a box rebuilding dd to
-              # vouch for it never matched what CI had built
-              i18n-embed-fl = _: { patches = [ ./nix/patches/i18n-embed-fl-args-in-order.patch ]; };
+            inherit buildRustCrateForPkgs;
+            defaultCrateOverrides = crateOverrides;
+          };
+          # cargo's release default: sixteen pieces of each crate compiled
+          # at once. buildRustCrate's is one, which made the first build of
+          # every crate - all ~800 of them - several times slower.
+          buildRustCrateForPkgs = pkgs: pkgs.buildRustCrate.override { defaultCodegenUnits = 16; };
+          crateOverrides = pkgs.defaultCrateOverrides // {
+            # askama finds the Photos pages' templates beside the gate's
+            verify = _: {
+              postUnpack = "mkdir -p $NIX_BUILD_TOP/photos && cp -r ${./box/photos/templates} $NIX_BUILD_TOP/photos/templates";
             };
+            # dd's tests: e2e.rs reads the mail Worker's tester from beside
+            # the cli, and repo.rs runs git with git-remote-dd from beside
+            # dd, naming cargo only to build one that is not there. An
+            # override cannot tell a test build from the boxes' (buildTests
+            # is set after it), so the copy waits for the test binaries
+            dd = _: {
+              postUnpack = "mkdir -p $NIX_BUILD_TOP/mail && cp -r ${./client/mail/tests} $NIX_BUILD_TOP/mail/tests";
+              postInstall = ''
+                if [ -d $out/tests ]; then
+                  cp ${perCrate "git-remote-dd"}/bin/git-remote-dd $out/bin/
+                fi
+              '';
+              CARGO = "cargo";
+            };
+            # fl! wrote a message's arguments in hash-map order, so age's
+            # library differed on every build and a box rebuilding dd to
+            # vouch for it never matched what CI had built
+            i18n-embed-fl = _: { patches = [ ./nix/patches/i18n-embed-fl-args-in-order.patch ]; };
           };
           perCrate = n: cargoNix.workspaceMembers.${n}.build;
-          # One crate's tests, built and run from the same per-crate builds
-          # the boxes' programs use: a crate whose code and dependencies did
-          # not change is a cache hit, and so are its tests. The gate's tests
-          # (and dd's, which run a gate) read the pages from the tree; the
-          # library's are checked against rclone itself; dd's run git and ssh
+          # One crate's tests, built and run from the very builds the boxes'
+          # programs use. A crate's features are what the program that
+          # carries it asks for; tested on its own it resolved its own, and
+          # every dependency it shares came out a different build (660 of
+          # them, PR 264). So each crate is tested inside the first box
+          # program whose graph holds it, against that program's own
+          # dependency builds, cached already: a crate whose code and
+          # dependencies did not change is a cache hit, its tests too. A
+          # crate with dev-dependencies is tested as its own root, which is
+          # the only way they come in (dd is a box program itself; the mail
+          # Worker's crate is only ever built for its tests here).
+          testHosts = [
+            "dd"
+            "verify"
+            "release"
+            "games"
+            "transcode"
+            "git-remote-dd"
+          ];
+          graphOf =
+            root: runTests:
+            (cargoNix.internal.builtRustCratesWithFeatures {
+              packageId = root;
+              features = [ "default" ];
+              inherit runTests;
+              buildRustCrateForPkgsFunc =
+                p: (buildRustCrateForPkgs p).override { defaultCrateOverrides = crateOverrides; };
+            }).crates;
+          hostGraphs = pkgs.lib.genAttrs testHosts (h: graphOf h false);
+          withDevDeps = n: (cargoNix.internal.crates.${n}.devDependencies or [ ]) != [ ];
+          # the graph a crate's tests are built in
+          testGraph =
+            n:
+            if withDevDeps n then
+              graphOf n true
+            else
+              let
+                # a graph lists every crate; the program's own build says which
+                # of them it is really built from
+                holds =
+                  h:
+                  h == n
+                  || builtins.any (d: d.drvPath == hostGraphs.${h}.${n}.drvPath) hostGraphs.${h}.${h}.completeDeps;
+                host = pkgs.lib.findFirst holds null testHosts;
+              in
+              if host == null then graphOf n true else hostGraphs.${host};
+          # The gate's tests (and dd's, which run a gate) read the pages from
+          # the tree; the library's are checked against rclone itself; dd's
+          # run git and ssh
           crateTest =
             n:
-            (cargoNix.workspaceMembers.${n}.build.override {
-              runTests = true;
+            let
+              g = testGraph n;
+            in
+            (cargoNix.internal.crateWithTest {
+              crate = g.${n};
+              testCrate = g.${n};
+              testCrateFlags = [ ];
               testInputs = [
                 pkgs.gitMinimal
                 pkgs.openssh
                 pkgs.rclone
               ];
               testPreRun = "export HOME=$TMPDIR VERIFY_PAGES_DIR=${pages}";
+              testPostRun = "";
             }).test;
           # every crate but the app, whose tests are its own check (tests-app)
           testedCrates = pkgs.lib.filter (n: n != "commonty") (builtins.attrNames cargoNix.workspaceMembers);
