@@ -18,6 +18,9 @@ fleet/     what the fleet is: the boxes, their roles, the members, and the
 data/      data the services are built with (data/games/catalogue.json)
 ```
 
+`client/`, `fleet/` and `data/` have pages of their own:
+[the client](client.md), [the fleet](fleet.md) and [data](data.md).
+
 The Rust is one cargo workspace ([`Cargo.toml`](../../Cargo.toml)); its
 members are the crates in `servers/`, `client/` and `app/`. The one Go
 program on a box is the control plane, in `servers/system/control`.
