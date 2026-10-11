@@ -924,8 +924,7 @@ mod tests {
     fn every_page_ends_with_the_one_footer() {
         assert!(text("shell.js").contains("import './footer.js';"));
         assert!(static_file("footer.js").is_some());
-        let base =
-            std::fs::read_to_string(tree().join("servers/gate/templates/base.html")).unwrap();
+        let base = include_str!("../templates/base.html");
         assert!(base.contains("/_dd/static/shell.js"));
         for (name, _) in PAGES {
             let html = page(name).unwrap();
