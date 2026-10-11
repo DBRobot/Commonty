@@ -89,7 +89,14 @@ impl Gate {
         let mut n = 0;
         for lib in libs {
             let id = lib.trim_end_matches('/');
-            if !identity::valid_library_id(id) {
+            // a library, or a member's disk images (images-<name>, the gate's
+            // /_dd/images): both keep a trash, and both let it go
+            let images = id.strip_prefix("images-").is_some_and(|n| {
+                !n.is_empty()
+                    && n.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            });
+            if !identity::valid_library_id(id) && !images {
                 continue;
             }
             let (_, stamps) = self.list_level(&format!("{id}/{TRASH}/")).await?;
