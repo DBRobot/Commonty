@@ -246,6 +246,11 @@ t.attrsOf (
         default = false;
         description = "the box hands people the code that handles their secrets (a page a master password is typed into): whoever has root there could change it. fleet/policy.json can keep such a service on the fleet owner's own hardware";
       };
+      when = lib.mkOption {
+        type = t.nullOr t.str;
+        default = null;
+        description = "a fleet/policy.json setting that must be on (true, or a list with something in it) for the fleet to want it at all: the fleet's own CI only where the fleet develops Commonty (develops), mirrors only where it names some (forgeMirrors)";
+      };
       everyBox = lib.mkOption {
         type = t.bool;
         default = false;

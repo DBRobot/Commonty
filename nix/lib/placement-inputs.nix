@@ -1,6 +1,7 @@
 # What the control plane places from (servers/system/control/place): each
 # box's capability, scored (capability.nix), and what the fleet wants of
-# each service - wanted when some box's roles in fleet/boxes.json bring it,
+# each service - wanted when some box's roles in fleet/boxes.json bring it
+# and the policy setting it waits on (needs when) is on,
 # how many, spread or by house, the line it wants, its memory, what moving
 # it carries, what must share its box - with fleet/roles.json to read what a
 # box runs from the roles its heartbeat names. Ships as the release's
@@ -11,8 +12,18 @@
   capability,
   list,
   roles,
+  policy,
 }:
 let
+  on =
+    n:
+    n.when == null
+    || (
+      let
+        v = policy.${n.when} or false;
+      in
+      v == true || (builtins.isList v && v != [ ])
+    );
   brought = lib.unique (lib.concatMap (b: lib.concatMap (r: roles.${r}.services or [ ]) b.roles) (
     builtins.attrValues list
   ));
@@ -24,7 +35,7 @@ in
     can = lib.mapAttrs (_: c: c.score) capability.boxes.${n}.can;
   }) list;
   services = lib.mapAttrs (s: n: {
-    enabled = n.everyBox || builtins.elem s brought;
+    enabled = n.everyBox || (builtins.elem s brought && on n);
     inherit (n) everyBox spread;
     perHouse = if n.perHouse == null then 0 else n.perHouse;
     instances = if n.instances == null then 0 else n.instances;

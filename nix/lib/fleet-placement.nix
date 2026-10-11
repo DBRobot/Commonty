@@ -7,9 +7,9 @@ let
   needs = import ./needs.nix { inherit lib; };
   list = lib.importJSON ../../fleet/boxes.json;
   roles = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ../../fleet/roles.json);
+  policy = lib.importJSON ../../fleet/policy.json;
   capability = import ./capability.nix {
-    inherit lib needs;
-    policy = lib.importJSON ../../fleet/policy.json;
+    inherit lib needs policy;
     boxes = lib.mapAttrs (n: b: {
       hw = lib.importJSON ../../fleet/boxes/${n}/hardware.json;
       own = lib.importJSON ../../fleet/boxes/${n}/box.json;
@@ -32,6 +32,7 @@ in
       capability
       list
       roles
+      policy
       ;
   };
 }
