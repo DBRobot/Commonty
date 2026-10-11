@@ -18,6 +18,7 @@ These pages are in three parts:
 - [The forge](dev/forge.md)
 - [Game servers](dev/games.md)
 - [Encrypted libraries](dev/libraries.md)
+- [Leaving, and announcing a change](dev/leaving.md)
 - [Programs we package](dev/packaged.md)
 - [Pull requests, CI and releases](dev/ci.md)
 - [UI guidelines](dev/ui.md)

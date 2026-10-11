@@ -379,6 +379,13 @@ gone: the agreed log is the only way an entry reaches another box, and a
 box without `VERIFY_CONTROL` (tests, a box on its own) holds just what
 was published to it.
 
+### Leaving
+
+A member's own signed statement that they leave, or come back, is a
+directory item too (`Item::Leave`), replayed at its agreed time into
+`leaving.json`; someone who left is no member from then on. What happens
+next, and when, is [leaving.md](leaving.md).
+
 ### Who reads it on the box
 
 - The gate, on every request (entries are cached by file time and size).
@@ -854,6 +861,15 @@ path                                        method   what                       
 /_dd/friend/{secret}/about                  GET      whose link, who is looking                anyone with the link
 /internal/games/access                      POST     who may play, and their addresses         local (games manager)
 /internal/games/friends/{user}              GET      who they may invite                       local
+-- leaving (leaving.rs, leaving.md)
+/_dd/leave                                  GET      where the signed-in person stands         session
+/_dd/leave/start                            POST     a statement for the root passkey          session; member to leave,
+                                                                                               someone who left to come back
+/_dd/leave/sign                             POST     the passkey's answer, into the log        session + the ceremony
+/_dd/leaving/{name}                         GET      the newest signed statement               anyone (the mail Worker)
+/_dd/leaving/{name}                         PUT      a statement `dd leave` signed             the root's signature
+/internal/leaving                           GET      who left, when, due, done by whom         local (the deleting units)
+/internal/leaving/done                      POST     a service deleted its share               local
 -- the rest
 /_dd/fleet.json                             GET      boxes' release, agent, backup             member (session or token)
 /_dd/git/events                             GET      forge changes (SSE)                       member (session or token)
@@ -869,7 +885,8 @@ path                                        method   what                       
 ```
 
 A directory-only box serves `/health`, the directory routes,
-`/_dd/house/here` and `/_dd/house/wifi/relay`, and nothing else.
+`/_dd/house/here`, `/_dd/house/wifi/relay`, `/_dd/leaving/{name}` and
+`/internal/leaving`, and nothing else.
 
 ## Configuration
 
@@ -962,6 +979,8 @@ VERIFY_OIDC_ISSUER, _CLIENT_ID, Passwords' issuer (vault/vaultwarden.nix)
   signins.json               sessions, ended sessions, key uses
   oidc.key                   Passwords' issuer signing key
   friends.json               links (hashed), friend pairs, guests
+  leaving.json               who left by their own word (the signed statement, when
+                             agreed), and what this box has done for each leaving
   names/<user>.bin           device names, sealed in the browser
   notes/<lib>/shelf.bin      Movies & TV's shelf, sealed in the browser
   notes/<lib>/progress/<user>.bin   each viewer's place, sealed in the browser
@@ -984,6 +1003,8 @@ directory follow       every 1 s (agreed mode): replay, ack, migrate
 held sign-ups          every 300 s: publish those the member list now names
 network reap           every 300 s: remove non-members' devices from Headscale
 library trash          daily (hourly after a failure): empty three-month-old trash
+leaving                every 60 s: end the ways in of whoever left; past 90 days,
+                           delete this gate's share of them (leaving.md)
 forge events           LISTEN, reconnecting every 5 s
 ad blocking            at start: put the household's last on/off back
 ```
