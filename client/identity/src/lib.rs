@@ -144,11 +144,8 @@ pub struct SignedEntry {
 }
 
 pub fn generate() -> SigningKey {
-    use std::io::Read;
     let mut b = Zeroizing::new([0u8; 32]);
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut *b))
-        .expect("/dev/urandom");
+    getrandom::fill(&mut *b).expect("randomness");
     SigningKey::from_bytes(&b)
 }
 
@@ -304,11 +301,8 @@ const CODE_ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
 
 /// Ten characters, two groups, no ambiguous letters: 50 bits.
 pub fn new_code() -> String {
-    use std::io::Read;
     let mut b = [0u8; 10];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut b))
-        .expect("/dev/urandom");
+    getrandom::fill(&mut b).expect("randomness");
     let s: String = b
         .iter()
         .map(|x| CODE_ALPHABET[(*x as usize) % CODE_ALPHABET.len()] as char)

@@ -12245,6 +12245,10 @@ rec {
             packageId = "ed25519-dalek";
           }
           {
+            name = "getrandom";
+            packageId = "getrandom 0.3.4";
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
