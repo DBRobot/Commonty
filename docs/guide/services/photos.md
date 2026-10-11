@@ -13,7 +13,6 @@ sign-in.
 - **In a browser:** open Photos, press **Open**, and allow the browser in
   the app ([Using a browser](../browser.md)).
 - **On a phone:** use the Android app. There is no app for iPhone yet.
-  <!-- coming: no Mac or iPhone app yet -->
 
 Then use it as Ente: upload photos, make albums, and hide photos and
 albums. **Confirm it's you** in Ente's menu is
@@ -26,7 +25,7 @@ with your device's keys, and passes it, locked, to your other devices.
 
 | The box | Outside |
 | --- | --- |
-| 🔏 **Locked, labelled** | ✉️ **Envelope seen** |
+| 🔏 **Locked, labelled** | 🏠 **Stays home** |
 
 - **What the box keeps:** every photo, its details and your albums,
   locked on your device. The box cannot see the pictures, where or when
@@ -60,13 +59,14 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
 
 ## Deleting and keeping
 
-- **Trash:** Ente's trash keeps a deleted photo **30 days**. Ente then
-  removes its stored file 45 days later, and the storage's week of
-  snapshots follows. A deleted photo is gone from every box within
-  **90 days**.
-- **Leaving:** your account is kept for 30 days in case you come back,
-  then deleted, and its files are gone within 90 days. See
-  [Leaving](../leaving.md).
+- **Trash:** Ente's trash keeps a deleted photo **30 days**. Deleting it
+  permanently from the trash, or emptying the trash, deletes it at once.
+  Either way its stored file is removed at the box's next run, and the
+  storage's week of snapshots follows. A deleted photo is gone from every
+  box within **90 days**.
+- **Leaving:** your account and every photo are deleted at once when you
+  leave (30 days after, if you are removed), and gone from every backup
+  within 90 days. See [Leaving](../leaving.md).
 - **Taking it with you:** download an album or a selection from Photos.
   The Leave tab in Settings downloads every photo and video as one zip,
   through the app, in a folder for each album.

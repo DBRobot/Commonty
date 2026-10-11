@@ -58,7 +58,6 @@ On Android, use the app. Its window has every page.
 There is no Commonty app for Mac or iPhone yet. On those, you can use
 everything under [What opens directly](#what-opens-directly), and nothing
 that holds a key:
-<!-- coming: no Mac or iPhone app yet -->
 
 - no Files, Movies & TV, Chat, Photos or Passwords;
 - in Settings, no Backups and no device names;

@@ -68,8 +68,8 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
 - **Deleting** a repository removes it from the forge at once.
 - **Backups:** the box's nightly backups keep it up to five weeks, and
   their snapshots a week. It is gone from every box within **90 days**.
-- **Leaving:** 30 days after you leave, your own repositories and your
-  account are deleted. Work you gave to other people's repositories
+- **Leaving:** when you leave, your own repositories and your account are
+  deleted at once (30 days after, if you are removed). Work you gave to other people's repositories
   stays there, as on any open-source project. If you are the last owner
   of an organisation, hand it on, or the deletion waits. See
   [Leaving](../leaving.md).

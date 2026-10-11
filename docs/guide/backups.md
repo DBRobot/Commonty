@@ -26,8 +26,9 @@ from a box cannot open your images.
 - **Your disk images** lists each one with its size and when it was
   saved.
 - **Download** saves one to this computer, with progress shown.
-- **Delete** asks you to confirm, then removes the image and frees its
-  space.
+- **Delete** asks you to confirm, then moves the image to the trash.
+  Tick **Delete it forever now** to delete it, and anything else in the
+  trash, at once and free its space.
 
 If the list says your images do not open on this device yet, save one
 again from the computer that made them.
@@ -63,10 +64,12 @@ Every service's ratings are in the [Privacy policy](../policies/privacy.md); how
 ### Deleting and keeping
 
 - A deleted image's pieces go to a trash for **30 days**, then they are
-  deleted, and they are gone from every box within **90 days**.
+  deleted, and they are gone from every box within **90 days**. To delete
+  at once, tick **Delete it forever now** when you delete, or press
+  **Empty trash** under the list; both ask first and cannot be undone.
 - Images count against your storage allowance.
-- **Leaving:** your images are kept 30 days in case you come back, then
-  deleted ([Leaving](leaving.md)).
+- **Leaving:** your images are deleted at once when you leave (30 days
+  after, if you are removed) ([Leaving](leaving.md)).
   The Leave tab in Settings lists every disk image, each with its own
   Download.
 
@@ -96,7 +99,6 @@ anything, and you cannot restore from them yourself.
 
 - Making a disk image needs the command-line client; the app cannot do
   it yet. There is no app for Mac or iPhone.
-  <!-- coming: no Mac or iPhone app yet -->
 - Restoring a disk image onto a computer is done with the command-line
   client too.
 - Today the boxes are in one house, so a fire or flood there could take

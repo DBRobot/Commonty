@@ -12,7 +12,6 @@ locked on your device before they leave it, so no box can read them.
   Commonty app; press **Open** and allow the browser in the app
   ([Using a browser](../browser.md)).
 - **On a phone:** use the Android app. There is no app for iPhone yet.
-  <!-- coming: no Mac or iPhone app yet -->
 
 Then:
 
@@ -24,7 +23,9 @@ Then:
   **Download**.
 - **Rename and move:** from a file's menu, or **Move** for a selection.
 - **Delete:** **Move to trash**. Open **Trash** to see what is there and
-  **Restore** it.
+  **Restore** it, or **Delete forever** to delete it at once. **Empty
+  trash** deletes everything in it at once. Both ask first, since they
+  cannot be undone.
 
 Files and [Movies & TV](movies.md) are one library: films and shows are
 in its `Movies` and `Shows` folders, and [Chat](chat.md) keeps your
@@ -64,12 +65,14 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
 
 - **Trash:** a deleted file stays in the trash **30 days**, then the box
   deletes it. Saving over a file puts the old version in the trash too.
-  There is no "delete now"; the trash empties itself.
+  **Delete forever** and **Empty trash** delete at once, and give the
+  room back to your allowance straight away.
 - **Backups:** the storage keeps a week of snapshots, so a deleted file
   is gone from every box within about 37 days, and always within
   **90 days**.
-- **Leaving:** everything is kept, locked, for 30 days in case you come
-  back, then deleted. See [Leaving](../leaving.md).
+- **Leaving:** everything is deleted at once when you leave. If you are
+  removed, it is kept, locked, for 30 days, then deleted. See
+  [Leaving](../leaving.md).
 - **Taking it with you:** download files from the page.
   The Leave tab in Settings downloads Files and Movies & TV as one zip.
 

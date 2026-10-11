@@ -1,12 +1,14 @@
 # Leaving
 
-You can leave whenever you like. Everything of yours is kept, still
-locked, for 30 days in case you change your mind. Within 90 days it is
-gone from every box and every backup.
+You can leave whenever you like. When you do, everything of yours is
+deleted from every box straight away, and it cannot be undone. Copies in
+the boxes' backups expire on their own: within 90 days nothing is left
+anywhere.
 
 ## Taking your things with you
 
-Do this first: once you leave, your services no longer open.
+Do this first: once you leave, your services no longer open and
+everything in them is deleted.
 
 In Settings, open the **Leave** tab. Under **Take your things with you**,
 each one downloads straight from there:
@@ -35,11 +37,15 @@ Files, Photos or Backups as usual.
 
 ## Pressing Leave
 
-1. In Settings, **Leave** tab, press **Leave Commonty**.
-2. Confirm with your passkey, or in the app if your account's main key is
+1. In Settings, **Leave** tab, take your things with you first: the
+   downloads are right above the button.
+2. Press **Leave and delete everything**. The box that opens says
+   plainly that everything is deleted now and cannot be undone.
+3. Confirm with your passkey, or in the app if your account's main key is
    on a device. An account whose main key is a passkey leaves from the
    website, signed in with it; one whose key is on a device leaves from
-   the app, or a browser you let in from it.
+   the app's own window (not a browser you let in from it, since this
+   cannot be undone).
 
 ## Every sign-in ends at once
 
@@ -51,26 +57,20 @@ From that moment, on every box:
 - friend links you sent stop working;
 - your game servers stop.
 
-## 30 days to come back
+## Everything is deleted at once
 
-For 30 days, nothing is deleted. Sign in and Settings shows only the
-**Leave** tab, with the date you left and the date your things will be
-deleted. Press **Come back** and everything is as you left it. Your
-devices sign in again and rejoin the network.
+There is no waiting time and no coming back. Within minutes each box
+deletes what it holds of yours: your files, films and disk images (trash
+included), photos, passwords vault, your own repositories and Git
+account, game servers and their worlds, your email address here, where
+you stopped watching, friendships and sign-in history. If you sign in
+again, Settings shows only the **Leave** tab, with the date you left.
 
-After 30 days you can still come back with the same name, but to an
-empty account.
+## Gone from backups within 90 days
 
-## Gone everywhere within 90 days
-
-After 30 days, each box deletes what it holds of yours: your files,
-films and disk images (trash included), photos, passwords vault, your
-own repositories and Git account, game servers and their worlds, your
-email address here, where you stopped watching, friendships and
-sign-in history.
-
-Copies in backups and snapshots run out on their own. Within 90 days of
-leaving, nothing of yours is left on any box or in any backup.
+Copies in the boxes' backups and snapshots cannot be picked out and
+deleted; they run out on their own. Within 90 days of leaving, nothing
+of yours is left on any box or in any backup.
 
 ## What stays
 
@@ -89,20 +89,19 @@ leaving, nothing of yours is left on any box or in any backup.
 
 Anyone can leave, not only members. A friend's guest, and an account made
 on the website that is still waiting to be let in, leave the same way:
-Settings, **Leave** tab, **Leave Commonty**, confirmed with the passkey.
+Settings, **Leave** tab, **Leave and delete everything**, confirmed with
+the passkey.
 (An account still waiting sees only that tab, and its waiting page links
 to it.)
 
 - Every sign-in ends at once, the guest's devices leave the network, and
   the game servers they were invited to close to them.
-- Within 30 days they can sign in and press **Come back**.
-- After that their account is deleted, with their friendships, their
-  guest access and any game servers of theirs. Nothing of anyone else's
-  is touched: a member they were friends with keeps everything, other
-  guests included.
-- An account still waiting is kept on one box only, and is deleted once
-  30 days are up, or sooner if it would have lapsed anyway (a week after
-  it was made). Its name is then free again.
+- Their account is deleted straight away, with their friendships, their
+  guest access and any game servers of theirs. There is no coming back.
+  Nothing of anyone else's is touched: a member they were friends with
+  keeps everything, other guests included.
+- An account still waiting is kept on one box only, and is deleted
+  straight away. Its name is then free again.
 
 ## Being removed
 
@@ -116,10 +115,11 @@ If you are removed:
 
 - every sign-in ends at once, as above;
 - Settings tells you that you were removed by the person who runs
-  Commonty, and there is no **Come back** button: only David can let you
+  Commonty, and until when your things are kept: only David can let you
   back in;
-- your things are kept 30 days, then deleted the same way, and gone from
-  every box and backup within 90 days.
+- because it was not your own request, and a mistake can be undone, your
+  things are kept, still locked, for 30 days, then deleted the same way,
+  and gone from every box and backup within 90 days.
 
 ## More
 

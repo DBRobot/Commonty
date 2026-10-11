@@ -34,8 +34,8 @@ You cannot send mail from this address. It only forwards.
   those rules. No box can read your address.
 - **Cloudflare can read every email** it forwards, and sees your own
   address (📖 **Read outside**).
-- **Mail Commonty sends you** leaves through Google's mail service, which
-  can read it too.
+- **Mail Commonty sends you** is handed to the same Worker and sent on by
+  Cloudflare, which can read it too. No box holds a mail account.
 - **Your own email provider** reads what arrives, as it does all your
   mail.
 
@@ -53,8 +53,8 @@ Every service's ratings are in the [Privacy policy](../policies/privacy.md); how
 
 ## Deleting and keeping
 
-When you leave, your address is kept 30 days in case you come back. Then
-the Worker removes your forwarding rule, and your own address too when
+When you leave, the Worker removes your forwarding rule at once (30 days
+after, if you are removed), and your own address too when
 no other rule uses it. It does so only on proof it checks itself: your
 own signed statement that you left, or your removal in the signed member
 list. See [Leaving](leaving.md).

@@ -27,20 +27,22 @@ one of Commonty's boxes.
 
 | The box | Outside |
 | --- | --- |
-| 🔏 **Locked, labelled** | 📦 **Passes sealed** |
+| 👁 **Open to the box** | ✉️ **Envelope seen** |
 
-- **What the box running the network keeps:** which devices you have,
-  each one's name on the network (your computer's own name, or
-  `phone-xxxx`), its network address, and when it was last online.
+- **What the box running the network keeps, and can read:** which
+  devices you have, each one's name on the network (your computer's own
+  name, or `phone-xxxx`), its network address, and when it was last
+  online.
 - **Traffic is sealed end to end** between your device and the box. When
   the two cannot reach each other directly, Tailscale's public relays
-  carry it, sealed. They see the two internet addresses talking, not
-  what is said.
-- **Joining** goes through Commonty's front door, which passes through
-  Cloudflare. What passes is sealed by the network's own encryption.
+  carry it, sealed. They see your devices' internet addresses talking,
+  not what is said.
+- **Joining and connecting** go through Commonty's front door, which
+  passes through Cloudflare. What passes is sealed by the network's own
+  encryption, but Cloudflare sees when your devices connect.
 - **Name lookups on a phone:** with the VPN on, the phone's lookups for
-  other sites go to Quad9, unfiltered, through the network's resolver.
-  Quad9 sees each name looked up.
+  other sites go to Quad9, unfiltered, through the network's resolver,
+  encrypted on the way. Quad9 sees every name looked up.
 
 Every service's ratings are in the [Privacy policy](../policies/privacy.md); how Commonty is protected is in [Security](../policies/security.md).
 
@@ -107,6 +109,5 @@ If your house has a box with ad blocking, its switch is here too. See
 
 - There is no app for Mac or iPhone yet, so those cannot join Commonty's
   network.
-  <!-- coming: no Mac or iPhone app yet -->
 - Relays are Tailscale's until Commonty has a public box of its own.
 - Only boxes in your own house appear under **Network**.

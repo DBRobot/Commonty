@@ -26,7 +26,7 @@ network.
 
 | The box | Outside |
 | --- | --- |
-| 🔏 **Locked, labelled** | 🏠 **Stays home** |
+| 👁 **Open to the box** | 📖 **Read outside** |
 
 - **What the boxes keep:** figures about themselves: load, memory,
   temperatures, disks, network traffic, which services are running, and
@@ -38,9 +38,11 @@ network.
 - **Where a box is** shows only as random-looking ids. To work them out,
   each box asks ipinfo.io every hour, which sees the house's internet
   address.
-- **Outside companies:** none for the figures. When a drive or a storage
-  pool is in trouble, the box emails its owner through Google's mail
-  service, naming the box and the problem.
+- **Outside companies:** none for the figures, and nothing about any
+  member. When a drive or a storage pool is in trouble, the box emails
+  its owner through Cloudflare, which can read the email: it names the
+  box and the problem. ipinfo.io sees each box's internet address, as
+  above.
 
 Every service's ratings are in the [Privacy policy](../../policies/privacy.md); how Commonty is protected is in [Security](../../policies/security.md).
 

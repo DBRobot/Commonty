@@ -11,7 +11,6 @@ each. They live in the same locked library as [Files](files.md).
 - **In a browser:** open Movies & TV, press **Open**, and allow the
   browser in the app ([Using a browser](../browser.md)).
 - **On a phone:** use the Android app. There is no app for iPhone yet.
-  <!-- coming: no Mac or iPhone app yet -->
 
 Then:
 
@@ -28,7 +27,7 @@ Then:
 
 | The box | Outside |
 | --- | --- |
-| 🔒 **Locked** | ✉️ **Envelope seen** |
+| 🔒 **Locked** | 📖 **Read outside** |
 
 - **What the box keeps:** your films, the shelf's details and where you
   stopped, all locked. It sees sizes, dates and when you watch.
@@ -41,8 +40,8 @@ Then:
 - **If the box cannot play it,** a film up to 256 MiB opens whole on your
   device instead. Larger ones can be saved and played on your device.
 - **TMDB:** your device asks TMDB for a poster with only the title and
-  year. TMDB sees that title and your device's internet address, not
-  your library. A title TMDB does not know gets a still from the film
+  year. TMDB reads that title, sent from your own internet address, but
+  nothing else of your library. A title TMDB does not know gets a still from the film
   itself. Posters are refreshed after five months and dropped after six,
   as TMDB's terms ask.
 
@@ -61,8 +60,9 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
 ## Deleting and keeping
 
 As for [Files](files.md#deleting-and-keeping): the trash keeps a removed
-film **30 days**, and everything is gone from every box within **90
-days**. Where you stopped in each film is replaced at each save, not
+film **30 days**, unless you delete it forever from the trash in Files,
+which deletes it at once, and everything is gone from every box within
+**90 days**. Where you stopped in each film is replaced at each save, not
 kept in the trash.
 
 The Leave tab in Settings downloads Files and Movies & TV as one zip.

@@ -26,7 +26,6 @@ reachable on Commonty's own network:
 
 1. Install the app on the computer or phone they play on (Linux, Windows
    or Android; there is no Mac or iPhone app yet).
-   <!-- coming: no Mac or iPhone app yet -->
 2. Add it as a device: in the browser, Settings, Devices, **Add a
    device**; in the app, **Have a code?**, then approve with the passkey
    ([Your devices](devices.md)).
@@ -74,5 +73,6 @@ wrong, it is handled as it is for anyone.
 A game server has to read its world to run it. Worlds, saves and logs are
 👁 **Open to the box** and 🏠 **Stays home**. A game's log can hold what
 players type, so only the server's owner sees it. Guests' sign-ins are
-like members': 🔏 **Locked, labelled** and 📖 **Read outside**. See the
+like members': 👁 **Open to the box** and 📖 **Read outside**, with
+nothing secret in them. See the
 [Privacy policy](../policies/privacy.md).

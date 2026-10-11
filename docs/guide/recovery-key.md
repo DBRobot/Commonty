@@ -44,10 +44,11 @@ What happens:
 
 Then set up a passkey again from the app ([Signing in](signing-in.md)).
 
-After recovering, your account has a new main key. If you joined with an
-invite code, the code was for the old key, so David has to let the new
-one in before your services open again. Until he does, you see the
-waiting page.
+After recovering, your account has a new main key, and you are still a
+member: the new key is vouched for by your recovery key, so every box
+lets it in as you, whether you joined with an invite code or David added
+you. Nobody without your recovery key can do the same. If David removed
+you, recovering does not undo that.
 
 ## Nobody can recover your data without it
 
@@ -69,5 +70,4 @@ either, with or without the recovery key.
   and read your locked data. Keep it as you would a house key.
 - Do not keep it in Commonty: you would need it to get in.
 - If you think someone has seen it, recover your account yourself to get
-  a new one. Be aware this removes your other devices, and David has to
-  let the new key in.
+  a new one. Be aware this removes your other devices and passkeys.

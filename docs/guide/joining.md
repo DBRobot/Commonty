@@ -16,7 +16,6 @@ games](guests.md)). The full rules are in the [Terms of use](../policies/terms.m
 
 Download the Commonty app from the **Get the app** page. It is there for
 Linux, Windows and Android. There is no app for Mac or iPhone yet.
-<!-- coming: no Mac or iPhone app yet -->
 
 - On Linux, the AppImage needs no install: make it executable and run it.
 - On Android, your phone asks once to allow installing from outside its

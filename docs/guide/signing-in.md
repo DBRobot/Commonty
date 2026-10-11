@@ -60,10 +60,10 @@ several, and remove one in Settings, under Devices.
 
 ## Privacy
 
-Your account is 🔏 **Locked, labelled** and 📖 **Read outside**. The box
-keeps your name, your devices' and passkeys' public keys, and a list of
-where you are signed in: what kind of browser, and when it was first and
-last used. Sign-in pages pass through Cloudflare, which can read them.
+Your account is 👁 **Open to the box** and 📖 **Read outside**, with
+nothing secret in it. The box keeps your name, your devices' and
+passkeys' public keys, and a list of where you are signed in: what kind
+of browser, and when it was first and last used. Sign-in pages pass through Cloudflare, which can read them.
 More in the [Privacy policy](../policies/privacy.md).
 
 ## Limits
@@ -72,4 +72,3 @@ More in the [Privacy policy](../policies/privacy.md).
   copied passkey that way.
 - Pages that hold keys need the app on the same computer. There is no
   Mac or iPhone app yet.
-  <!-- coming: no Mac or iPhone app yet -->

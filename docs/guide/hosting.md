@@ -40,13 +40,14 @@ devices. What a box keeps for others falls into three kinds, using the
 
 - 🔒 **Locked:** Files, Movies & TV, disk images, chat history and device
   names. The box keeps them but cannot read them, not even file names.
-- 🔏 **Locked, labelled:** Passwords, Photos, accounts, the network,
-  storage counts and metrics. The contents are locked, but the box sees
-  who they belong to, when they changed and how big they are.
-- 👁 **Open to the box:** game worlds and logs, Git repositories (public
-  anyway), a chat message while it is answered, a web search, ad
-  blocking's look-ups, a film being converted for a phone, and the front
-  door's request logs.
+- 🔏 **Locked, labelled:** Passwords and Photos. The contents are locked,
+  but the box sees who they belong to, when they changed and how big
+  they are.
+- 👁 **Open to the box:** accounts (names and public keys, nothing
+  secret), the network's list of devices, storage counts, metrics, game
+  worlds and logs, Git repositories (public anyway), a chat message while it is answered, a web search, ad
+  blocking's look-ups, a film being played, and the front door's request
+  logs.
 
 Whoever looks after a box, or breaks into it, can see what the box can
 see. That includes you, so the terms ask you never to look.

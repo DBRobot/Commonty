@@ -16,7 +16,6 @@ your device with your master password.
   once with your passkey, and you unlock the vault with your master
   password.
 - **On a phone:** use the Android app. There is no app for iPhone yet.
-  <!-- coming: no Mac or iPhone app yet -->
 - **Bitwarden's own apps and browser extension** can sign in too, while
   your device is on Commonty's network: choose a self-hosted server at
   `vault.<domain>`, then single sign-on. The sign-in passes through the
@@ -34,7 +33,7 @@ outside Commonty.
 
 | The box | Outside |
 | --- | --- |
-| 🔏 **Locked, labelled** | ✉️ **Envelope seen** |
+| 🔏 **Locked, labelled** | 📖 **Read outside** |
 
 - **What the box keeps:** your vault, locked with your master password on
   your device. It cannot read your items.
@@ -45,9 +44,9 @@ outside Commonty.
   sites are in your vault. Breach checks for a password ask a copy of
   the breach list kept on the box, not an outside service.
 - **Email:** sign-in codes and notices (such as emergency access and
-  invitations) are sent to `<name>@<domain>`. They leave through
-  Google's mail service and Cloudflare forwards them to your own address
-  ([Your email address](../email.md)). Both see each email.
+  invitations) are sent to `<name>@<domain>`. Cloudflare carries them and
+  forwards them to your own address ([Your email address](../email.md)),
+  and can read each one.
 - **Send links:** someone outside opening a Send reaches it through
   Cloudflare. What passes is locked; the key is in the part of the link
   after `#`, which never reaches a server.
@@ -75,14 +74,15 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
 
 ## Deleting and keeping
 
-- **Trash:** a deleted item stays in the vault's trash **30 days**. The
-  vault's event log is kept 30 days too.
+- **Trash:** a deleted item stays in the vault's trash **30 days**, unless
+  you delete it permanently from the trash (or empty it), which deletes
+  it at once. The vault's event log is kept 30 days.
 - **Backups:** the box's nightly backups keep a deleted item up to five
   more weeks, and their snapshots a week. It is gone from every box
   within **90 days**.
-- **Leaving:** your vault is kept 30 days in case you come back, then
-  your account is deleted. If you are the last owner of a shared
-  organisation, hand it to someone first, or the deletion waits.
+- **Leaving:** your account and vault are deleted at once when you leave
+  (30 days after, if you are removed). If you are the last owner of a
+  shared organisation, hand it to someone first, or the deletion waits.
   See [Leaving](../leaving.md).
 - **Taking it with you:** use **Export vault** in the vault's Tools.
   The Leave tab in Settings opens the vault's own Export screen, where you

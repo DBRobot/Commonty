@@ -12,7 +12,6 @@ kept locked in your library.
 - **In a browser:** open Chat, press **Open**, and allow the browser in
   the app ([Using a browser](../browser.md)).
 - **On a phone:** use the Android app. There is no app for iPhone yet.
-  <!-- coming: no Mac or iPhone app yet -->
 
 Then:
 
@@ -73,10 +72,12 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
 
 ## Deleting and keeping
 
-- A deleted chat goes to your library's trash for **30 days**, then it
-  is gone from every box within **90 days**, as for
+- A deleted chat goes to your library's trash for **30 days** (or less,
+  if you delete it forever from the trash in Files), then it is gone
+  from every box within **90 days**, as for
   [Files](files.md#deleting-and-keeping).
-- Chats go with your library when you leave ([Leaving](../leaving.md)).
+- Chats go with your library when you leave, at once
+  ([Leaving](../leaving.md)).
 
 ## Limits
 

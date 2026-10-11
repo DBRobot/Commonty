@@ -91,8 +91,8 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
 - **Backups:** servers, worlds and invitations are in the box's nightly
   backup, kept up to five weeks, then its snapshots a week. Something you
   delete is gone from every box within **90 days**.
-- **Leaving:** your servers stop at once. Thirty days later every server
-  and saved world of yours is deleted. See [Leaving](../leaving.md).
+- **Leaving:** your servers stop, and every server and saved world of
+  yours is deleted, at once (30 days after, if you are removed). See [Leaving](../leaving.md).
 
 ## Limits
 
@@ -105,4 +105,3 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
   **Start** tries again.
 - Players need the Commonty app's network. There is no app for Mac or
   iPhone yet, so players on those cannot join.
-  <!-- coming: no Mac or iPhone app yet -->

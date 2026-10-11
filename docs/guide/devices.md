@@ -60,7 +60,8 @@ still open data it could get some other way.
 
 Device names are 🔒 **Locked** and 🏠 **Stays home**. Your account (which
 devices you have, as public keys, and when each was last used) is
-🔏 **Locked, labelled** and 📖 **Read outside**. More in the [Privacy
+👁 **Open to the box** and 📖 **Read outside**, with nothing secret in
+it. More in the [Privacy
 policy](../policies/privacy.md).
 
 ## Limits
@@ -69,4 +70,3 @@ policy](../policies/privacy.md).
   the main key to another device is not built, except by starting over
   with your recovery key.
 - There is no app for Mac or iPhone yet, so those cannot be devices.
-  <!-- coming: no Mac or iPhone app yet -->
