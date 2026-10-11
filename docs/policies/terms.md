@@ -1,7 +1,5 @@
 # Terms of use
 
-<!-- DRAFT. David is reviewing this page. -->
-
 Commonty is run by David Bascom, together with the members who host its
 boxes. These terms are between you and David. By using Commonty you
 agree to them.
