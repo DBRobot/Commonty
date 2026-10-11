@@ -698,22 +698,12 @@ async fn site_pages<R: Runtime>(site: &Site<R>, req: Request, path: &str, via: &
                 "your disk images do not open on this device yet",
             );
         }
-        // leaving is undone within its window, so a browser let in may ask
-        // it too, with the key this device holds
-        "/_dd/app/leaving" if req.method() == "POST" => {
-            let Ok(body) = axum::body::to_bytes(req.into_body(), 4096).await else {
-                return plain(StatusCode::BAD_REQUEST, "too much");
-            };
-            return match crate::site::leave(&site.app, &body).await {
-                Ok(v) => json(StatusCode::OK, v),
-                Err((st, why)) => plain(st, &why),
-            };
-        }
         // taking everything out, from the Leave tab: this browser's own
         // downloads (export.rs)
         p if p.starts_with("/_dd/app/export") => return export_route(site, via, req, p).await,
-        // a device is added or removed with the account's main key, from the
-        // app's own window only (site.rs)
+        // a device is added or removed, and the account left (which deletes
+        // everything at once), with the account's main key, from the app's
+        // own window only (site.rs)
         p if p.starts_with("/_dd/app/") => {
             return plain(StatusCode::NOT_FOUND, "in the app's window");
         }

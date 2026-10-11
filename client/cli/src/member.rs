@@ -57,23 +57,31 @@ fn is_id(s: &str) -> bool {
 
 /// A member id, or a name looked up in the directories.
 pub async fn resolve(who: &str, dirs: &[String]) -> Result<String> {
+    Ok(resolve_all(who, dirs).await?.remove(0))
+}
+
+/// Every member id the person has had, the current root's first: a
+/// revocation of any of them shuts out the whole identity
+/// (identity::is_member), so letting them back in clears them all.
+async fn resolve_all(who: &str, dirs: &[String]) -> Result<Vec<String>> {
     if is_id(who) {
-        return Ok(who.to_string());
+        return Ok(vec![who.to_string()]);
     }
     let found = crate::who::fetch(dirs, who).await;
     // this id is about to be written into fleet/members.json and released
     // to every box: a directory that made it up would be naming who joins
     let e = directory::resolve(&found, directory::Anchor::FirstSight)
         .with_context(|| format!("no usable entry for {who}"))?;
-    Ok(identity::member_id(&e.entry.root))
+    Ok(identity::member_ids(&e.entry))
 }
 
 pub async fn add(repo: &str, who: &str, dirs: &[String]) -> Result<()> {
-    let id = resolve(who, dirs).await?;
+    let ids = resolve_all(who, dirs).await?;
+    let id = ids[0].clone();
     let mut m = read(repo)?;
-    m.revoked.retain(|x| *x != id);
+    m.revoked.retain(|x| !ids.contains(x));
     // back within 30 days of being removed: nothing of theirs was deleted
-    m.removed.remove(&id);
+    m.removed.retain(|x, _| !ids.contains(x));
     if m.members.contains(&id) {
         println!("already a member: {id}");
     } else {

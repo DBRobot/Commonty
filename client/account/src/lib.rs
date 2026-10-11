@@ -291,21 +291,16 @@ pub fn open_for_device(
     library::open_library(&lib, Some(device), root).context("no key of this device opens it")
 }
 
-/// Leaving, or coming back (`dd leave`, the app's Settings): the statement,
-/// signed with the root here, to every directory given; the first that
-/// takes it puts it in the fleet's log.
-pub async fn leave(
-    dirs: &[String],
-    name: &str,
-    root: &ed25519_dalek::SigningKey,
-    back: bool,
-) -> Result<()> {
+/// Leaving (`dd leave`, the app's Settings): the statement, signed with the
+/// root here, to every directory given; the first that takes it puts it in
+/// the fleet's log, and every box deletes what is theirs at once.
+pub async fn leave(dirs: &[String], name: &str, root: &ed25519_dalek::SigningKey) -> Result<()> {
     let s = identity::sign_leave(
         identity::Leave {
             name: name.to_string(),
             root: identity::encode_public(&root.verifying_key()),
             at: identity::now(),
-            back,
+            back: false,
         },
         root,
     )?;
@@ -411,6 +406,7 @@ pub async fn create(
         name: name.to_string(),
         root: root_public,
         recovery: identity::encode_public(&recovery.verifying_key()),
+        recovered_from: vec![],
         devices: vec![device_of(kp)],
         passkeys: vec![],
         grant,
@@ -606,7 +602,8 @@ pub async fn reseal(
 }
 
 /// Recovery: the paper key installs a new root and a new recovery key, and
-/// the device list starts over with this device alone. Everything a lost or
+/// the device list starts over with this device alone. Membership stays:
+/// the old root goes into `recovered_from`, and the invite with it. Everything a lost or
 /// stolen device could sign is dead the moment a directory takes this.
 pub async fn recover(
     keys: &impl KeyStore,
@@ -633,10 +630,18 @@ pub async fn recover(
         name: name.to_string(),
         root: identity::encode_public(&root.verifying_key()),
         recovery: identity::encode_public(&next_recovery.verifying_key()),
+        // the root this replaces joins the earlier ones, so membership and
+        // the invite it was let in by come along (identity::is_member)
+        recovered_from: cur
+            .entry
+            .recovered_from
+            .iter()
+            .cloned()
+            .chain([cur.entry.root.clone()])
+            .collect(),
         devices: vec![device_of(kp)],
         passkeys: vec![],
-        // a grant proves a root; this one is new. `dd invite` again
-        grant: None,
+        grant: cur.entry.grant.clone(),
         libraries: vec![],
         terms: cur.entry.terms.clone(),
         version: cur.entry.version + 1,
@@ -728,6 +733,7 @@ mod tests {
             name: "amy".into(),
             root,
             recovery,
+            recovered_from: vec![],
             devices,
             passkeys: vec![identity::Passkey {
                 id: "p1".into(),

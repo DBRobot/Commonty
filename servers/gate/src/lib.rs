@@ -567,19 +567,10 @@ impl App {
         let Some(e) = self.entry(user).ok().flatten() else {
             return false;
         };
-        let id = identity::member_id(&e.entry.root);
-        if m.revoked.contains(&id) || self.directory.leaving.has_left(user) {
-            return false;
-        }
-        if m.members.contains(&id) {
-            return true;
-        }
-        // an invite the owner signed, redeemed by this root
-        e.entry.grant.is_some()
-            && self
-                .directory
-                .release()
-                .is_some_and(|r| identity::verify_grant(&e.entry, r).is_ok())
+        // a root on the list, or an invite the owner signed, followed across
+        // recoveries (the directory replayed each one)
+        !self.directory.leaving.has_left(user)
+            && identity::is_member(&e.entry, &m.members, &m.revoked, self.directory.release())
     }
 
     /// Someone who came in through a friend link and is not a member: let
@@ -1342,6 +1333,7 @@ async fn join_finish(
         name: user,
         root,
         recovery: String::new(),
+        recovered_from: vec![],
         devices: vec![],
         passkeys: vec![identity::Passkey {
             id: id.clone(),
@@ -1966,7 +1958,7 @@ async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Re
         // the game servers they are invited to: Settings shows them their
         // Profile and Devices
         Some(user) if name == "settings" && app.guest(&user) => page(name),
-        // someone who left sees where they stand, and may come back
+        // someone who left sees where they stand
         Some(user) if app.directory.leaving.has_left(&user) => {
             if name == "settings" {
                 page(name)
@@ -3507,6 +3499,7 @@ mod tests {
                     name: self.name.into(),
                     root: identity::encode_public(&self.root.verifying_key()),
                     recovery: identity::encode_public(&self.recovery.verifying_key()),
+                    recovered_from: vec![],
                     devices: vec![identity::Device {
                         fingerprint: identity::fingerprint(&device),
                         public_key: device,

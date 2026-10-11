@@ -1,8 +1,9 @@
 // Leave Commonty, a tab of Settings: everything taken out first, then the
 // button. Leaving is a statement the account's root signs, agreed by every
 // box (servers/gate/src/leaving.rs): their passkey for an account made in a
-// browser, the app for one whose root is on a device. Within 30 days, the
-// same tab brings them back with nothing lost.
+// browser, the app's own window for one whose root is on a device. Every
+// box deletes what is theirs at once, so there is no coming back; the
+// downloads come first, above the button.
 //
 // Taking things out happens here, where the app serves this page (its
 // window, or a browser it let in): the library is zipped in this page with
@@ -38,18 +39,18 @@ const byApp = inApp || servedByApp;
 const ask = (url, init) => (inApp ? appFetch(url, init) : fetch(url, init));
 
 // the root signs the statement; the box puts it in the fleet's log
-async function say(back) {
+async function say() {
   if (!state.passkey) {
     const init = {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ back }),
+      body: JSON.stringify({}),
     };
     const r = await ask('/_dd/app/leaving', init);
     if (!r.ok) throw new Error(await r.text());
     return;
   }
-  const start = await post('/_dd/leave/start', { back });
+  const start = await post('/_dd/leave/start', { back: false });
   const { publicKey, ceremony } = await start.json();
   const cred = await navigator.credentials.get({ publicKey: requestOptions(publicKey) });
   await post('/_dd/leave/sign', assertion(cred), { 'x-dd-ceremony': ceremony });
@@ -63,42 +64,38 @@ function show(s) {
   for (const r of ['member', 'guest', 'waiting']) $(`lv-as-${r}`).hidden = role !== r;
   $('lv-left').hidden = !s.left;
   if (s.left) {
-    $('lv-since').textContent = day(s.left);
-    $('lv-until').textContent = day(s.until);
-    // the owner's removal is undone by the owner, not here
-    $('lv-back').hidden = s.removed;
+    // their own word deleted everything; the owner's removal keeps it a while
+    $('lv-self').hidden = s.removed;
     $('lv-removed').hidden = !s.removed;
+    $('lv-since').textContent = day(s.left);
+    $('lv-removed-on').textContent = day(s.left);
+    $('lv-until').textContent = day(s.until);
   }
   if (!s.passkey) {
     $('lv-ask-how').hidden = true;
-    $('lv-ask-yes').textContent = 'Leave';
+    $('lv-ask-yes').textContent = 'Delete everything';
   }
-  // a root on a device signs only through the app that holds it, and a
+  // a root on a device signs only in the window of the app that holds it
+  // (leaving cannot be undone, so not from a browser it let in), and a
   // passkey only on the website, where it was made
-  const elsewhere = s.passkey ? byApp : !byApp;
+  const elsewhere = s.passkey ? byApp : !inApp;
   if (elsewhere) {
     $('lv-go').hidden = true;
-    $('lv-back').hidden = true;
     $(s.passkey ? 'lv-passkey' : 'lv-device').hidden = false;
   }
   if (role === 'member' && !s.left) take();
 }
 
-async function act(back, button) {
+async function act(button) {
   button.disabled = true;
-  const msg = $(back ? 'lv-msg' : 'lv-ask-msg');
+  const msg = $('lv-ask-msg');
   msg.textContent = '';
   try {
-    await say(back);
-    if (back) {
-      location.href = '/_dd/settings';
-      return;
-    }
+    await say();
     // this browser is signed out now: what it shows is the last it knew
     const t = Math.floor(Date.now() / 1000);
     $('lv-ask').close();
-    show({ ...state, left: t, until: t + state.window });
-    $('lv-back').hidden = true;
+    show({ ...state, left: t, until: t, removed: false });
     $('lv-left-h').focus();
   } catch (e) {
     button.disabled = false;
@@ -409,13 +406,12 @@ function take() {
 
 let wired = false;
 export async function start() {
-  $('lv-docs').href = docsUrl('/dev/leaving');
+  $('lv-docs').href = docsUrl('/guide/leaving');
   if (!wired) {
     wired = true;
     $('lv-go').onclick = () => { $('lv-ask-msg').textContent = ''; $('lv-ask').showModal(); };
     $('lv-ask-no').onclick = () => $('lv-ask').close();
-    $('lv-ask-yes').onclick = (e) => act(false, e.currentTarget);
-    $('lv-back').onclick = (e) => act(true, e.currentTarget);
+    $('lv-ask-yes').onclick = (e) => act(e.currentTarget);
   }
   try {
     show(await where());

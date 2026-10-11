@@ -478,13 +478,9 @@ pub(crate) async fn accept(
         )
             .into_response();
     }
-    // someone who left takes nothing new until they come back
+    // someone who left takes nothing new
     if app.directory.leaving.has_left(&user) {
-        return (
-            StatusCode::FORBIDDEN,
-            "you have left Commonty: come back first, in Settings",
-        )
-            .into_response();
+        return (StatusCode::FORBIDDEN, "you have left Commonty").into_response();
     }
     // the maker has to still be a member for the link to bring anyone in
     match app.friends.link(&secret) {

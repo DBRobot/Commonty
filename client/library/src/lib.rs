@@ -239,6 +239,7 @@ mod tests {
             name: "amy".into(),
             root: identity::encode_public(&root.verifying_key()),
             recovery: String::new(),
+            recovered_from: vec![],
             devices: devices
                 .iter()
                 .map(|d| identity::Device {

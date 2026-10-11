@@ -66,15 +66,7 @@ pub fn recipients(
         .iter()
         .filter(|e| identity::valid_name(&e.entry.name) && !e.entry.name.starts_with("guest"))
         .filter(|e| !left.contains(&e.entry.name))
-        .filter(|e| {
-            let id = identity::member_id(&e.entry.root);
-            if members.revoked.contains(&id) {
-                return false;
-            }
-            members.members.contains(&id)
-                || (e.entry.grant.is_some()
-                    && release.is_some_and(|r| identity::verify_grant(&e.entry, r).is_ok()))
-        })
+        .filter(|e| identity::is_member(&e.entry, &members.members, &members.revoked, release))
         .map(|e| e.entry.name.clone())
         .collect();
     out.sort();
@@ -280,6 +272,7 @@ mod tests {
                 name: name.into(),
                 root: public.clone(),
                 recovery: String::new(),
+                recovered_from: vec![],
                 devices: vec![identity::Device {
                     fingerprint: "f".into(),
                     public_key: public,

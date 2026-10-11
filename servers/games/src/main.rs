@@ -404,8 +404,9 @@ async fn main() -> Result<()> {
             .redirect(reqwest::redirect::Policy::none())
             .build()?,
     });
-    // someone who left: their servers stop, and after 30 days go, with their
-    // worlds (docs/dev/leaving.md); the gate on this box says who
+    // someone who left: their servers stop, and once due (at once, or 30
+    // days after a removal) go, with their worlds (docs/dev/leaving.md); the
+    // gate on this box says who
     let leaving = app.clone();
     tokio::spawn(async move {
         loop {

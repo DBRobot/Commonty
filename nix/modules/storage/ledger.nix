@@ -87,10 +87,10 @@ in
         ];
       };
     };
-    # Photos' share of deleting whoever left 30 days ago, with the same
+    # Photos' share of deleting whoever left (docs/dev/leaving.md), with the same
     # admin login (docs/dev/leaving.md)
     systemd.services.dd-forget-photos = {
-      description = "Delete the Photos accounts of members who left 30 days ago";
+      description = "Delete the Photos accounts of members who left";
       after = [
         "dd-verify.service"
         "ente.service"
@@ -118,14 +118,15 @@ in
             "--password-file"
             config.sops.secrets.ente-storage-password.path
           ]
-        } || echo "not this time; again within the hour"
+        } || echo "not this time; again in a few minutes"
       '';
     };
     systemd.timers.dd-forget-photos = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnActiveSec = "5min";
-        OnUnitActiveSec = "1h";
+        # often: someone who leaves is due at once
+        OnUnitActiveSec = "5min";
       };
     };
 

@@ -1,7 +1,8 @@
 # Leaving (docs/dev/leaving.md): a member leaves with their root's signed
-# word, every way in ends at once, and once the (shortened) window is out
-# the gate deletes their libraries, disk images, notes and names, while
-# another member's library and someone who came back keep everything.
+# word, every way in ends at once and the gate deletes their libraries, disk
+# images, notes and names straight away; a member the owner removes keeps
+# everything for the (shortened) window, then loses it the same way; another
+# member's things are never touched.
 { pkgs, self, ... }:
 let
   rpc = pkgs.writeText "garage.env" "GARAGE_RPC_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n";
@@ -23,7 +24,7 @@ in
       ../modules/library/libraries.nix
     ];
     dd.verify.role = pkgs.lib.mkForce "full";
-    # two minutes, not 30 days
+    # a removal keeps things two minutes, not 30 days
     dd.verify.leaveWindowSeconds = 120;
     dd.garage = {
       zone = "r-test";

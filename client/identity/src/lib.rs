@@ -52,6 +52,12 @@ pub struct Entry {
     /// base64 ed25519 public key that may install a new root; empty for a
     /// passkey root, which cannot be replaced
     pub recovery: String,
+    /// The roots this person had before, oldest first: one more each time
+    /// the recovery key on file installs a new root (`accept` holds it to
+    /// exactly that, and a first sight carries none), so membership follows
+    /// the person across a recovery. Absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovered_from: Vec<String>,
     pub devices: Vec<Device>,
     /// Browser passkeys, as the box that enrolled them serialised the
     /// credential. In the entry rather than on a box, so no box can add one
@@ -238,6 +244,34 @@ pub fn member_id(root: &str) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+/// Every member id this person has had: the root's, then those of the
+/// roots recovered from, newest first
+pub fn member_ids(entry: &Entry) -> Vec<String> {
+    std::iter::once(&entry.root)
+        .chain(entry.recovered_from.iter().rev())
+        .map(|r| member_id(r))
+        .collect()
+}
+
+/// Let in by the release: some root this person has had is on `members`
+/// and none is on `revoked` (a recovery escapes neither), or else an invite
+/// the release key signed. Only as sound as the entry's `recovered_from`:
+/// the directory's, which replays every recovery, or one held to an entry
+/// pinned earlier.
+pub fn is_member(
+    entry: &Entry,
+    members: &[String],
+    revoked: &[String],
+    release: Option<&VerifyingKey>,
+) -> bool {
+    let ids = member_ids(entry);
+    if ids.iter().any(|id| revoked.contains(id)) {
+        return false;
+    }
+    ids.iter().any(|id| members.contains(id))
+        || (entry.grant.is_some() && release.is_some_and(|r| verify_grant(entry, r).is_ok()))
 }
 
 pub fn canonical(entry: &Entry) -> Result<Vec<u8>> {
@@ -445,8 +479,16 @@ pub fn verify_grant(entry: &Entry, release: &VerifyingKey) -> Result<()> {
     let key = decode_public(&inv.public_key)?;
     let sig = B64.decode(&g.proof).map_err(|_| Error::Signature)?;
     let sig = Signature::from_slice(&sig).map_err(|_| Error::Signature)?;
-    key.verify(&proof_bytes(&inv.public_key, &entry.root, g.redeemed), &sig)
-        .map_err(|_| Error::Signature)
+    // proved by the root that redeemed it, which a recovery since may have
+    // replaced
+    std::iter::once(&entry.root)
+        .chain(&entry.recovered_from)
+        .any(|root| {
+            key.verify(&proof_bytes(&inv.public_key, root, g.redeemed), &sig)
+                .is_ok()
+        })
+        .then_some(())
+        .ok_or(Error::Signature)
 }
 
 /// The signature a passkey root makes: the three parts of a webauthn
@@ -642,7 +684,11 @@ pub fn accept(existing: Option<&SignedEntry>, new: &SignedEntry) -> Result<()> {
     }
     let Some(old) = existing else {
         // a first sight: there is nothing on file to check against, which
-        // is why a box takes one only under the agreement rule
+        // is why a box takes one only under the agreement rule. Earlier
+        // roots are added one recovery at a time, never claimed.
+        if !new.entry.recovered_from.is_empty() {
+            return Err(Error::Rejected("a first entry has no earlier roots".into()));
+        }
         verify(new)?;
         return Ok(());
     };
@@ -677,6 +723,17 @@ pub fn accept(existing: Option<&SignedEntry>, new: &SignedEntry) -> Result<()> {
             new.entry.version, old.entry.version
         )));
     }
+    // the earlier roots are the ones on file, and the root on file joins
+    // them when, and only when, the recovery key below replaces it
+    let mut earlier = old.entry.recovered_from.clone();
+    if new.entry.root != old.entry.root {
+        earlier.push(old.entry.root.clone());
+    }
+    if new.entry.recovered_from != earlier {
+        return Err(Error::Rejected(
+            "the earlier roots are not the ones on file".into(),
+        ));
+    }
     // the paper key is the one thing a stolen root cannot take: only the
     // recovery key on file may name a different one (a first one, where
     // there was none, is the root's to set)
@@ -701,9 +758,10 @@ pub fn accept(existing: Option<&SignedEntry>, new: &SignedEntry) -> Result<()> {
     check(rs, &new.entry, &decode_public(&old.entry.recovery)?)
 }
 
-/// A person leaving the fleet, or coming back, in their own root's words
-/// (docs/dev/leaving.md). Not part of the entry: the entry stays as it was,
-/// so coming back within the window finds every library key where it was.
+/// A person leaving the fleet, in their own root's words
+/// (docs/dev/leaving.md). Not part of the entry: the entry stays, so the
+/// name stays theirs. A coming back is no longer taken; one already in the
+/// fleet's log still reads.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Leave {
     pub name: String,
@@ -724,7 +782,7 @@ pub struct SignedLeave {
     pub signature: String,
 }
 
-/// What a root signs to leave or come back: the statement under a label of
+/// What a root signs to leave: the statement under a label of
 /// its own, so no signature over an entry or a sign-in counts as one.
 pub fn leave_challenge(l: &Leave) -> Result<Vec<u8>> {
     use sha2::Digest as _;
@@ -952,6 +1010,7 @@ mod tests {
             name: "tom".into(),
             root: root.into(),
             recovery: String::new(),
+            recovered_from: vec![],
             devices: vec![],
             passkeys: vec![],
             libraries: vec![],
@@ -983,6 +1042,7 @@ mod tests {
             name: "tom".into(),
             root: encode_public(&root.verifying_key()),
             recovery: String::new(),
+            recovered_from: vec![],
             devices: vec![Device {
                 fingerprint: "f".into(),
                 public_key: encode_public(&generate().verifying_key()),
@@ -1028,6 +1088,7 @@ mod tests {
             name: "tom".into(),
             root: encode_public(&root.verifying_key()),
             recovery: String::new(),
+            recovered_from: vec![],
             devices: vec![],
             passkeys: vec![],
             libraries: vec![],
@@ -1097,6 +1158,7 @@ mod tests {
                 name: "alice".into(),
                 root: root.clone(),
                 recovery: String::new(),
+                recovered_from: vec![],
                 devices: vec![],
                 passkeys: vec![pk],
                 grant: None,
@@ -1236,6 +1298,7 @@ mod tests {
                 name: "sarah".into(),
                 root: encode_public(&root.verifying_key()),
                 recovery: encode_public(&generate().verifying_key()),
+                recovered_from: vec![],
                 devices: vec![dev(&generate())],
                 terms: None,
                 version: 1,
@@ -1277,6 +1340,7 @@ mod tests {
             name: "sarah".into(),
             root: encode_public(&root.verifying_key()),
             recovery: encode_public(&recovery.verifying_key()),
+            recovered_from: vec![],
             devices: vec![dev(&d1)],
             terms: None,
             version: 1,
@@ -1318,6 +1382,7 @@ mod tests {
         let mut e3 = e2.clone();
         e3.version = 3;
         e3.root = encode_public(&stranger.verifying_key());
+        e3.recovered_from = vec![e2.root.clone()];
         assert!(accept(Some(&s2), &sign(e3.clone(), &stranger).unwrap()).is_err());
         // co-signed by the recovery key on file it is recovery
         let s3 = sign_recovery(e3.clone(), &stranger, &recovery).unwrap();
@@ -1337,13 +1402,122 @@ mod tests {
         assert!(accept(Some(&s3), &sign(e4, &stranger).unwrap()).is_ok());
         // a box seeing the name for the first time takes any version that
         // stands on its own - the peer check is the box's job, not this one's
-        accept(None, &s3).unwrap();
+        // - but for one that claims earlier roots, which it cannot check
+        accept(None, &s2).unwrap();
+        assert!(accept(None, &s3).is_err());
         // but never an entry whose signature is not by the root it names
         let mut e0 = e1.clone();
         e0.root = encode_public(&stranger.verifying_key());
         let mut bad = sign(e0, &stranger).unwrap();
         bad.signature = s1.signature.clone();
         assert!(accept(None, &bad).is_err());
+    }
+
+    #[test]
+    fn membership_and_its_revocation_follow_a_recovery_and_nothing_else() {
+        let (root, recovery, next) = (generate(), generate(), generate());
+        let release = generate();
+        let ck = code_key("abcde-fghij");
+        let inv = sign_invite(
+            Invite {
+                public_key: encode_public(&ck.verifying_key()),
+                issued: 100,
+                expires: 400,
+            },
+            &release,
+        )
+        .unwrap();
+        let old = encode_public(&root.verifying_key());
+        let e1 = Entry {
+            name: "sarah".into(),
+            root: old.clone(),
+            recovery: encode_public(&recovery.verifying_key()),
+            recovered_from: vec![],
+            devices: vec![dev(&generate())],
+            passkeys: vec![],
+            grant: Some(Grant {
+                invite: inv.clone(),
+                redeemed: 200,
+                proof: prove(&ck, &inv.invite.public_key, &old, 200),
+            }),
+            libraries: vec![],
+            terms: None,
+            version: 1,
+            updated: 1,
+        };
+        let s1 = sign(e1.clone(), &root).unwrap();
+        let mut e2 = e1.clone();
+        e2.version = 2;
+        e2.root = encode_public(&next.verifying_key());
+        e2.recovery = encode_public(&generate().verifying_key());
+        // the root on file must join the earlier ones, exactly
+        e2.recovered_from = vec![];
+        assert!(
+            accept(
+                Some(&s1),
+                &sign_recovery(e2.clone(), &next, &recovery).unwrap()
+            )
+            .is_err()
+        );
+        e2.recovered_from = vec![old.clone(), "someone else's root".into()];
+        assert!(
+            accept(
+                Some(&s1),
+                &sign_recovery(e2.clone(), &next, &recovery).unwrap()
+            )
+            .is_err()
+        );
+        e2.recovered_from = vec![old.clone()];
+        let s2 = sign_recovery(e2.clone(), &next, &recovery).unwrap();
+        accept(Some(&s1), &s2).unwrap();
+        // a later update keeps them, and cannot add one without a recovery
+        let mut e3 = e2.clone();
+        e3.version = 3;
+        assert!(accept(Some(&s2), &sign(e3.clone(), &next).unwrap()).is_ok());
+        e3.recovered_from
+            .push(encode_public(&generate().verifying_key()));
+        assert!(accept(Some(&s2), &sign(e3, &next).unwrap()).is_err());
+        // a first sight may not claim another's root to borrow its membership
+        let thief = generate();
+        let mut t = e1.clone();
+        t.name = "mallory".into();
+        t.root = encode_public(&thief.verifying_key());
+        t.recovery = String::new();
+        t.recovered_from = vec![old.clone()];
+        assert!(accept(None, &sign(t, &thief).unwrap()).is_err());
+
+        let (old_id, new_id) = (member_id(&old), member_id(&e2.root));
+        assert_eq!(member_ids(&e2), vec![new_id.clone(), old_id.clone()]);
+        let r = release.verifying_key();
+        // on the list by the old root: still a member once recovered
+        assert!(is_member(&e2, std::slice::from_ref(&old_id), &[], None));
+        // the owner's removal of the old root holds across the recovery
+        assert!(!is_member(
+            &e2,
+            std::slice::from_ref(&old_id),
+            std::slice::from_ref(&old_id),
+            Some(&r)
+        ));
+        assert!(!is_member(
+            &e2,
+            std::slice::from_ref(&new_id),
+            std::slice::from_ref(&old_id),
+            Some(&r)
+        ));
+        assert!(!is_member(
+            &e2,
+            std::slice::from_ref(&old_id),
+            std::slice::from_ref(&new_id),
+            Some(&r)
+        ));
+        // the invite the old root redeemed comes along, and a revocation
+        // still beats it
+        verify_grant(&e2, &r).unwrap();
+        assert!(is_member(&e2, &[], &[], Some(&r)));
+        assert!(!is_member(&e2, &[], &[old_id], Some(&r)));
+        let mut lifted = e2.clone();
+        lifted.recovered_from = vec![];
+        assert!(verify_grant(&lifted, &r).is_err());
     }
 
     #[test]
@@ -1356,6 +1530,7 @@ mod tests {
             name: "amy".into(),
             root: "r".into(),
             recovery: String::new(),
+            recovered_from: vec![],
             devices: vec![],
             passkeys: vec![Passkey {
                 id: "p1".into(),

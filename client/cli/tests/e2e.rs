@@ -460,6 +460,143 @@ async fn identity_devices_tokens_and_recovery() {
     laptop.dd_fails(&args(&["device", "admit", &pk], &d), "different root");
 }
 
+/// The paper key keeps a member a member: the recovered entry names the
+/// root it replaces, signed by the paper key the entry on file named, and
+/// the gate follows that, so the member lands on their home page and not
+/// the waiting one. A recovery signed by any other key moves nothing, and
+/// one by the right key escapes no removal.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recovered_member_stays_a_member_and_a_forged_recovery_moves_nothing() {
+    let a = Box_::start_members(true, Some(vec![])).await;
+    let laptop = Device::new();
+    let out = laptop.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "sam",
+        ],
+        &dirs([&a]),
+    ));
+    let paper = recovery_key(&out);
+    let e = entry(&a, "sam").await.unwrap();
+    let old_root = e["entry"]["root"].as_str().unwrap().to_string();
+    let id = identity::member_id(&old_root);
+    let b = Box_::start_on(
+        a.dir.clone(),
+        true,
+        Some(verify::Members::list(vec![id.clone()])),
+        None,
+        vec![],
+    )
+    .await;
+    let removed = Box_::start_on(
+        a.dir.clone(),
+        true,
+        Some(verify::Members {
+            members: vec![id.clone()],
+            revoked: vec![id.clone()],
+            ..Default::default()
+        }),
+        None,
+        vec![],
+    )
+    .await;
+    let d = dirs([&b]);
+    assert_eq!(verify_status(&b, &laptop.token()).await, 200);
+    assert_eq!(verify_status(&removed, &laptop.token()).await, 403);
+
+    // the laptop is lost; the paper key, on a new machine
+    let bare = Device::new();
+    bare.dd_ok(&["device", "show"]);
+    let out = run_with_stdin(
+        &bare,
+        &args(&["identity", "recover", "--name", "sam", "--key-stdin"], &d),
+        &format!("{paper}\n"),
+        true,
+    );
+    let next_paper = recovery_key(&out);
+    let now = entry(&b, "sam").await.unwrap();
+    assert_ne!(now["entry"]["root"], old_root.as_str());
+    assert_eq!(
+        now["entry"]["recovered_from"],
+        serde_json::json!([old_root])
+    );
+    assert_eq!(
+        verify_status(&b, &bare.token()).await,
+        200,
+        "still a member"
+    );
+    assert_eq!(verify_status(&b, &laptop.token()).await, 401);
+    // signed in, the home page is a member's, not the waiting one
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let r = http
+        .post(b.url("/_dd/app/signin"))
+        .form(&[("token", bare.token().as_str())])
+        .send()
+        .await
+        .unwrap();
+    let cookie = r
+        .headers()
+        .get("set-cookie")
+        .map(|c| c.to_str().unwrap().split(';').next().unwrap().to_string())
+        .expect("signed in");
+    let (st, home) = get_with_cookie(&b, "/_dd/home", &cookie).await;
+    assert_eq!(st, 200);
+    assert!(
+        home.contains("id=\"services\"") && !home.contains("Your account is made"),
+        "{home}"
+    );
+    assert_eq!(get_with_cookie(&b, "/_dd/me", &cookie).await.0, 200);
+    // the owner removed the old root: the recovery does not undo that
+    assert_eq!(verify_status(&removed, &bare.token()).await, 403);
+
+    // a recovery to a root of someone else's choosing: refused, whether
+    // co-signed by a key of theirs, by the old paper key (no longer on
+    // file), or by the right one with the earlier roots made up
+    let cur: identity::SignedEntry = serde_json::from_value(now.clone()).unwrap();
+    let thief = identity::generate();
+    let forged = |recovery: &ed25519_dalek::SigningKey, earlier: Vec<String>| {
+        let mut e = cur.entry.clone();
+        e.root = identity::encode_public(&thief.verifying_key());
+        e.recovery = identity::encode_public(&identity::generate().verifying_key());
+        e.recovered_from = earlier;
+        e.devices = vec![identity::Device {
+            fingerprint: "thief".into(),
+            public_key: identity::encode_public(&thief.verifying_key()),
+            added: 1,
+        }];
+        e.version += 1;
+        serde_json::to_value(identity::sign_recovery(e, &thief, recovery).unwrap()).unwrap()
+    };
+    let chain = || {
+        cur.entry
+            .recovered_from
+            .iter()
+            .cloned()
+            .chain([cur.entry.root.clone()])
+            .collect::<Vec<_>>()
+    };
+    let old_paper = identity::decode_secret(&paper).unwrap();
+    let new_paper = identity::decode_secret(&next_paper).unwrap();
+    for (why, body) in [
+        ("a stranger's key", forged(&identity::generate(), chain())),
+        ("the old paper key", forged(&old_paper, chain())),
+        ("made-up earlier roots", forged(&new_paper, vec![])),
+    ] {
+        let (st, said) = put_raw(&b, "sam", &body).await;
+        assert_eq!(st, 403, "{why}: {said}");
+    }
+    assert_eq!(entry(&b, "sam").await.unwrap(), now, "nothing moved");
+    assert_eq!(verify_status(&b, &bare.token()).await, 200);
+}
+
 fn run_with_stdin(dev: &Device, a: &[&str], stdin: &str, want_ok: bool) -> String {
     use std::io::Write as _;
     let mut c = Command::new(env!("CARGO_BIN_EXE_dd"))
@@ -807,9 +944,10 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     assert_eq!(s["member"], true);
     assert_eq!(s["passkey"], true);
     assert!(s["left"].is_null());
-    leave_in_browser(&b, &mut eve, &cookie_b, false).await;
+    leave_in_browser(&b, &mut eve, &cookie_b).await;
     assert_ne!(get_with_cookie(&b, "/verify", &cookie_b).await.0, 200);
-    // signed in again, she sees where she stands, and comes back
+    // signed in again, she sees where she stands: left, everything due to
+    // go at once, and no coming back
     let (st, cookie_b) = login_in_browser(&b, &mut eve, "eve").await;
     assert_eq!(st, 200);
     assert_ne!(get_with_cookie(&b, "/verify", &cookie_b).await.0, 200);
@@ -817,10 +955,11 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     let (_, s) = get_with_cookie(&b, "/_dd/leave", &cookie_b).await;
     let s: serde_json::Value = serde_json::from_str(&s).unwrap();
     assert!(s["left"].is_u64(), "{s}");
-    // a statement is by the second, and the next must be newer
+    assert_eq!(s["deleted"], true, "{s}");
+    assert_eq!(s["until"], s["left"], "nothing is kept: {s}");
     tokio::time::sleep(Duration::from_millis(1100)).await;
-    leave_in_browser(&b, &mut eve, &cookie_b, true).await;
-    assert_eq!(get_with_cookie(&b, "/verify", &cookie_b).await.0, 200);
+    come_back_refused(&b, &cookie_b).await;
+    assert_ne!(get_with_cookie(&b, "/verify", &cookie_b).await.0, 200);
 
     // dd member add, by name, finds the same id
     let repo = scratch("repo");
@@ -940,6 +1079,7 @@ async fn a_sign_up_asks_age_and_agreement_and_records_the_terms() {
         name: "bare".into(),
         root: identity::encode_public(&k.verifying_key()),
         recovery: identity::encode_public(&identity::generate().verifying_key()),
+        recovered_from: vec![],
         devices: vec![identity::Device {
             fingerprint: identity::fingerprint(&p),
             public_key: p,
@@ -977,9 +1117,9 @@ async fn a_sign_up_asks_age_and_agreement_and_records_the_terms() {
 /// An account whose root is on a device leaves by that root: what the
 /// app's Settings asks of it (`account::leave`, behind `/_dd/app/leaving`)
 /// is what `dd leave` does. The tab reads where it stands with the device's
-/// token, and comes back the same way.
+/// token. Leaving deletes at once, so `dd` asks for --yes first.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_account_with_its_root_on_a_device_leaves_by_it_and_comes_back() {
+async fn an_account_with_its_root_on_a_device_leaves_by_it_for_good() {
     let a = Box_::start_members(true, Some(vec![])).await;
     let sam = Device::new();
     sam.dd_ok(&args(
@@ -1022,23 +1162,40 @@ async fn an_account_with_its_root_on_a_device_leaves_by_it_and_comes_back() {
     assert_eq!(s["passkey"], false);
     assert!(s["left"].is_null());
 
-    sam.dd_ok(&args(&["leave"], &d));
+    sam.dd_fails(&args(&["leave"], &d), "cannot be undone");
+    assert_eq!(
+        verify_status(&b, &sam.token()).await,
+        200,
+        "asked, not left"
+    );
+    sam.dd_ok(&args(&["leave", "--yes"], &d));
     assert_ne!(verify_status(&b, &sam.token()).await, 200);
-    assert!(mine(sam.token()).await["left"].is_u64());
-    tokio::time::sleep(Duration::from_millis(1100)).await;
-    sam.dd_ok(&args(&["leave", "--back"], &d));
-    assert_eq!(verify_status(&b, &sam.token()).await, 200);
-    assert!(mine(sam.token()).await["left"].is_null());
+    let s = mine(sam.token()).await;
+    assert!(s["left"].is_u64());
+    assert_eq!(s["deleted"], true);
+    sam.dd_fails(&args(&["leave", "--yes"], &d), "left already");
 }
 
-/// Settings' Leave (or Come back), as its page does it: the box hands the
-/// statement over, the root passkey signs it
-async fn leave_in_browser(b: &Box_, authenticator: &mut SoftPasskey, cookie: &str, back: bool) {
+/// Coming back is gone: leaving deleted everything at once
+async fn come_back_refused(b: &Box_, cookie: &str) {
+    let r = reqwest::Client::new()
+        .post(b.url("/_dd/leave/start"))
+        .header("cookie", cookie)
+        .json(&serde_json::json!({ "back": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 409, "{}", r.text().await.unwrap_or_default());
+}
+
+/// Settings' Leave, as its page does it: the box hands the statement over,
+/// the root passkey signs it
+async fn leave_in_browser(b: &Box_, authenticator: &mut SoftPasskey, cookie: &str) {
     let http = reqwest::Client::new();
     let r = http
         .post(b.url("/_dd/leave/start"))
         .header("cookie", cookie)
-        .json(&serde_json::json!({ "back": back }))
+        .json(&serde_json::json!({ "back": false }))
         .send()
         .await
         .unwrap();
@@ -2105,9 +2262,9 @@ async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
 
 /// Anyone may leave, not only members: a friend's guest and an account
 /// still waiting leave with their passkey, every way in ends at once, and
-/// they can come back within the window. Nothing of anyone else's moves.
+/// there is no coming back. Nothing of anyone else's moves.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_guest_and_a_waiting_account_leave_and_come_back() {
+async fn a_guest_and_a_waiting_account_leave_for_good() {
     let tile = |name: &str| verify::pages::Service {
         name: name.into(),
         url: format!("https://{name}.localhost/"),
@@ -2193,7 +2350,7 @@ async fn a_guest_and_a_waiting_account_leave_and_come_back() {
     let s = stands(&tom_c).await;
     assert_eq!(s["role"], "guest");
     assert!(s["left"].is_null());
-    leave_in_browser(&b, &mut tom, &tom_c, false).await;
+    leave_in_browser(&b, &mut tom, &tom_c).await;
     assert_ne!(games(&tom_c).await, 200, "the session they left in ended");
     let (st, tom_c) = login_in_browser(&b, &mut tom, "tom").await;
     assert_eq!(st, 200);
@@ -2215,13 +2372,11 @@ async fn a_guest_and_a_waiting_account_leave_and_come_back() {
             .0,
         200
     );
-    let (_, list) = get_with_cookie(&b, "/_dd/friends/list", &david_c).await;
-    assert!(list.contains("\"tom\""), "kept for the window: {list}");
 
-    // and tom comes back, a guest again
+    // and tom cannot come back
     tokio::time::sleep(Duration::from_millis(1100)).await;
-    leave_in_browser(&b, &mut tom, &tom_c, true).await;
-    assert_eq!(games(&tom_c).await, 200);
+    come_back_refused(&b, &tom_c).await;
+    assert_eq!(games(&tom_c).await, 403);
 
     // sarah signed up and is still waiting: no member list names her, no
     // friend link brought her in. She leaves too.
@@ -2232,7 +2387,7 @@ async fn a_guest_and_a_waiting_account_leave_and_come_back() {
     assert!(home.contains("/_dd/settings#leave"), "{home}");
     let s = stands(&sarah_c).await;
     assert_eq!(s["role"], "waiting");
-    leave_in_browser(&b, &mut sarah, &sarah_c, false).await;
+    leave_in_browser(&b, &mut sarah, &sarah_c).await;
     assert!(
         entry(&b, "sarah").await.is_none(),
         "her word stays on this box"
@@ -2257,8 +2412,7 @@ async fn a_guest_and_a_waiting_account_leave_and_come_back() {
     assert_eq!(games(&sarah_c).await, 403);
     assert!(entry(&b, "sarah").await.is_none());
     tokio::time::sleep(Duration::from_millis(1100)).await;
-    leave_in_browser(&b, &mut sarah, &sarah_c, true).await;
-    assert!(stands(&sarah_c).await["left"].is_null());
+    come_back_refused(&b, &sarah_c).await;
 
     // and david was never touched
     assert_eq!(verify_status_cookie(&b, &david_c).await, 200);

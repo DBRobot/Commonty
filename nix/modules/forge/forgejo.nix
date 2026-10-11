@@ -350,9 +350,9 @@ in
         };
       };
 
-      # the forge's share of deleting whoever left 30 days ago
+      # the forge's share of deleting whoever left (docs/dev/leaving.md)
       systemd.services.dd-forget-forge = {
-        description = "Delete the repositories and forge accounts of members who left 30 days ago";
+        description = "Delete the repositories and forge accounts of members who left";
         after = [
           "forgejo.service"
           "dd-verify.service"
@@ -373,7 +373,8 @@ in
         wantedBy = [ "timers.target" ];
         timerConfig = {
           OnActiveSec = "5min";
-          OnUnitActiveSec = "1h";
+          # often: someone who leaves is due at once
+          OnUnitActiveSec = "5min";
         };
       };
 

@@ -1,5 +1,5 @@
-# The leaving test: out at once by one's own word, everything gone after
-# the window, and nothing of anyone else's with it.
+# The leaving test: out and deleted at once by one's own word; removed by the
+# owner, kept for the window and then deleted; nothing of anyone else's.
 import json
 
 box.wait_for_unit("garage.service")
@@ -20,20 +20,27 @@ def as_(who):
     return f"DD_KEYRING_FILE=/root/{who}.json {dd}"
 
 
-# three members, each with a library; sarah leaves, ann leaves and comes
-# back, tom stays
+# three members, each with a library; sarah leaves, the owner removes ann,
+# tom stays
 box.succeed("mkdir -p /root/fleet/fleet")
 for who in ["sarah", "ann", "tom"]:
     box.succeed(f"{as_(who)} identity new --born 1990-01 --agree-terms --name {who} {dirs}")
     box.succeed(f"{as_(who)} member add {who} --repo /root/fleet {dirs}")
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
-box.succeed(
-    "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "
-    '"$(jq -c . /root/fleet/fleet/members.json)" '
-    "> /run/systemd/system/dd-verify.service.d/members.conf"
-)
-box.succeed("systemctl daemon-reload && systemctl restart dd-verify.service")
-box.wait_for_open_port(4181)
+
+
+# the release's member list, as the gate is started with it
+def release_members():
+    box.succeed(
+        "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "
+        '"$(jq -c . /root/fleet/fleet/members.json)" '
+        "> /run/systemd/system/dd-verify.service.d/members.conf"
+    )
+    box.succeed("systemctl daemon-reload && systemctl restart dd-verify.service")
+    box.wait_for_open_port(4181)
+
+
+release_members()
 
 libs = {}
 for who in ["sarah", "ann", "tom"]:
@@ -97,6 +104,7 @@ def me(token=None, cookie=None):
 
 sarah_token, sarah_cookie = signed_in("sarah")
 ann_token, ann_cookie = signed_in("ann")
+tom_token, _ = signed_in("tom")
 assert me(cookie=sarah_cookie) == "200" and me(token=sarah_token) == "200"
 
 # nothing is due yet, so no service may say it deleted anything
@@ -105,8 +113,12 @@ assert (
     box.succeed(f'{done} -d \'{{"name":"sarah","service":"photos"}}\'').strip() == "409"
 )
 
-# sarah leaves: at once, nothing of hers opens
-box.succeed(f"{as_('sarah')} leave {dirs}")
+# leaving asks first, since it cannot be undone
+box.fail(f"{as_('sarah')} leave {dirs}")
+assert me(token=sarah_token) == "200"
+
+# sarah leaves: at once nothing of hers opens, and it is all due to go
+box.succeed(f"{as_('sarah')} leave --yes {dirs}")
 box.wait_until_succeeds(
     f"curl -sf {gate}/_dd/leaving/sarah | jq -e '.statement.leave.back | not'"
 )
@@ -114,20 +126,17 @@ assert me(cookie=sarah_cookie) != "200", "her session still opens"
 assert me(token=sarah_token) != "200", "her device still opens"
 listed = json.loads(box.succeed(f"curl -sf {gate}/internal/leaving"))
 sarah = [m for m in listed["members"] if m["name"] == "sarah"]
-assert sarah and not sarah[0]["due"], listed
-# kept through the window
-assert keys(libs["sarah"]) and keys("images-sarah")
-box.succeed(f"test -e {state}/names/sarah.bin")
-box.wait_until_succeeds(
-    "journalctl -u dd-verify | grep -q 'leaving: member .* is out'", timeout=90
-)
+assert sarah and sarah[0]["due"], listed
+# and there is no coming back, nor a second leaving to put it off
+box.fail(f"{as_('sarah')} leave --yes {dirs}")
 
-# ann leaves and comes back inside the window: nothing of hers goes
-box.succeed(f"{as_('ann')} leave {dirs}")
-assert me(token=ann_token) != "200"
-box.succeed("sleep 2")
-box.succeed(f"{as_('ann')} leave --back {dirs}")
-assert me(token=ann_token) == "200", "back, and let in again"
+# the owner removes ann: out at once, everything kept for the window
+box.succeed(f"{as_('tom')} member remove ann --repo /root/fleet {dirs}")
+release_members()
+assert me(token=ann_token) != "200", "removed, and still let in"
+listed = json.loads(box.succeed(f"curl -sf {gate}/internal/leaving"))
+ann = [m for m in listed["members"] if m["name"] == "ann"]
+assert ann and not ann[0]["due"], listed
 
 # a statement from someone else's root is refused
 forged = box.succeed(
@@ -140,10 +149,10 @@ assert (
     != "204"
 )
 
-# the window (two minutes) runs out: her libraries, images, notes and names go
+# within the gate's next minute her libraries, images, notes and names go
 box.wait_until_succeeds(
     f'curl -sf {gate}/internal/leaving | jq -e \'.members[] | select(.name == "sarah") | .due and (.done | index("gate")) and (.done | index("libraries"))\'',
-    timeout=300,
+    timeout=150,
 )
 assert keys(libs["sarah"]) == [], keys(libs["sarah"])
 assert keys("images-sarah") == []
@@ -158,12 +167,20 @@ box.succeed(
     f'curl -sf {gate}/internal/leaving | jq -e \'.members[] | select(.name == "sarah") | .done | index("photos")\''
 )
 
-# nobody else's: tom's library, notes and names, ann's library
-assert keys(libs["tom"]) and keys(libs["ann"])
+# ann's library is kept until her window (two minutes) runs out, then goes
+assert keys(libs["ann"]), "a removal keeps things for the window"
+box.wait_until_succeeds(
+    f'curl -sf {gate}/internal/leaving | jq -e \'.members[] | select(.name == "ann") | .due and (.done | index("libraries"))\'',
+    timeout=300,
+)
+assert keys(libs["ann"]) == []
+
+# nobody else's: tom's library, notes and names
+assert keys(libs["tom"])
 box.succeed(f"test -e {state}/names/tom.bin")
 box.succeed(f"test -e {state}/notes/{libs['tom']}/shelf.bin")
 box.succeed(f"test -e {state}/notes/{libs['tom']}/progress/tom.bin")
-assert me(token=ann_token) == "200"
+assert me(token=tom_token) == "200"
 # the log names nobody: member ids, not names
 logs = box.succeed("journalctl -u dd-verify | grep 'leaving:'")
 assert "sarah" not in logs, logs

@@ -174,28 +174,27 @@
       </section>
       <section class="se-box" aria-labelledby="lv-h" id="lv-member" hidden>
         <header><h2 id="lv-h">Leave Commonty</h2></header>
-        <p class="se-hint" id="lv-as-member" hidden>You are signed out everywhere at once, and your devices leave the network. Everything of yours is kept for 30 days, in case you change your mind; then it is deleted, and within 90 days it is gone from every box and every backup: files, photos, passwords, code, game servers, your email address here. <a id="lv-docs">What happens when</a></p>
-        <p class="se-hint" id="lv-as-guest" hidden>You are signed out everywhere at once, your devices leave the network, and the game servers you were invited to close to you. Your account, your friends and your devices are kept for 30 days, in case you change your mind; then they are deleted.</p>
-        <p class="se-hint" id="lv-as-waiting" hidden>You are signed out at once, and this account is deleted, so its name is free again. Until it is, you can sign in and come back.</p>
-        <p class="se-hint" id="lv-device" hidden>Your account's key is on a device, not a passkey: leave from Settings in the Commonty app there.</p>
+        <p class="se-hint" id="lv-as-member" hidden>You are signed out everywhere and your devices leave the network. Everything of yours is deleted from every box straight away: files, photos, passwords, code, game servers, your email address here. It cannot be undone, so take your things with you first, above. Copies in the boxes' backups expire on their own within 90 days. <a id="lv-docs">What happens when</a></p>
+        <p class="se-hint" id="lv-as-guest" hidden>You are signed out everywhere, your devices leave the network, and the game servers you were invited to close to you. Your account, your friends and your devices are deleted straight away. It cannot be undone.</p>
+        <p class="se-hint" id="lv-as-waiting" hidden>You are signed out, and this account is deleted straight away, so its name is free again. It cannot be undone.</p>
+        <p class="se-hint" id="lv-device" hidden>Your account's key is on a device, not a passkey: leave from Settings in the Commonty app's own window there.</p>
         <p class="se-hint" id="lv-passkey" hidden>Your account's key is a passkey: leave from Settings on the website, signed in with it.</p>
-        <footer><button class="danger" id="lv-go">Leave Commonty</button></footer>
+        <footer><button class="danger" id="lv-go">Leave and delete everything</button></footer>
       </section>
       <section class="se-box" aria-labelledby="lv-left-h" id="lv-left" hidden>
         <header><h2 id="lv-left-h" tabindex="-1">You have left</h2></header>
-        <p class="se-hint">You left on <span id="lv-since"></span>. Everything of yours is kept until <span id="lv-until"></span>, then deleted from every box.</p>
-        <p class="se-hint" id="lv-removed" hidden>You were removed by the person who runs this Commonty; only they can let you back in.</p>
-        <footer><button id="lv-back">Come back</button></footer>
+        <p class="se-hint" id="lv-self" hidden>You left on <span id="lv-since"></span>, and everything of yours was deleted from every box then. Copies in the boxes' backups expire on their own within 90 days of that.</p>
+        <p class="se-hint" id="lv-removed" hidden>You were removed by the person who runs this Commonty on <span id="lv-removed-on"></span>; only they can let you back in. Everything of yours is kept, still locked, until <span id="lv-until"></span>, then deleted from every box.</p>
       </section>
       <p class="se-msg" id="lv-msg" role="status"></p>
     </div>
   </main>
   <dialog class="bk-dialog" id="lv-ask" aria-labelledby="lv-ask-h">
-    <h3 id="lv-ask-h">Leave Commonty?</h3>
-    <p>Every sign-in ends now. In 30 days everything of yours is deleted, and that cannot be undone.</p>
+    <h3 id="lv-ask-h">Leave and delete everything?</h3>
+    <p>Every sign-in ends, and everything of yours is deleted from every box now. This cannot be undone, and nobody can bring it back.</p>
     <p id="lv-ask-how">Confirm with your passkey.</p>
     <p class="bad" id="lv-ask-msg" role="alert"></p>
-    <div class="row"><button class="quiet" id="lv-ask-no">Cancel</button><button class="danger" id="lv-ask-yes">Leave with passkey</button></div>
+    <div class="row"><button class="quiet" id="lv-ask-no">Cancel</button><button class="danger" id="lv-ask-yes">Delete everything with passkey</button></div>
   </dialog>
   <dialog class="bk-dialog" id="ask" aria-labelledby="ask-h">
     <h3 id="ask-h"></h3>

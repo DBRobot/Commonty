@@ -38,6 +38,7 @@ impl Tester {
             name: "tester".into(),
             root: public.clone(),
             recovery: String::new(),
+            recovered_from: vec![],
             devices: vec![Device {
                 fingerprint: "test".into(),
                 public_key: public,

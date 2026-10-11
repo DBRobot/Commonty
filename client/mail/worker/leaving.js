@@ -1,4 +1,4 @@
-// Someone left 30 days ago (docs/dev/leaving.md): their <name>@<domain>
+// Someone left, or was removed 30 days ago (docs/dev/leaving.md): their <name>@<domain>
 // rule goes, the address it forwarded to if no other rule uses it, and what
 // this Worker pinned for them. Anyone may ask; what decides is the
 // member's own signed statement, checked here against the entry pinned for
@@ -16,8 +16,11 @@ export async function forgetApi(req, env, body, json, h) {
   const headers = env.DIRECTORY_KEY ? { 'x-dd-key-proof': h.readProof(env.DIRECTORY_KEY, name, Math.floor(Date.now() / 1000)) } : {};
   const r = await fetch(`https://home.${env.DOMAIN}/_dd/leaving/${encodeURIComponent(name)}`, { headers });
   const said = r.ok ? await r.text() : undefined;
+  // a recovery since pinning: the new root signs the statement
+  const e = await fetch(`${env.DIRECTORY || `https://home.${env.DOMAIN}/_dd/directory/`}${encodeURIComponent(name)}`, { headers });
+  const fresh = e.ok ? await e.text() : undefined;
   try {
-    h.forgetDue(name, pinned, said, h.MEMBERS, Math.floor(Date.now() / 1000));
+    h.forgetDue(name, pinned, fresh, said, h.MEMBERS, Math.floor(Date.now() / 1000));
   } catch (err) {
     return json({ error: String(err.message || err) }, 403);
   }

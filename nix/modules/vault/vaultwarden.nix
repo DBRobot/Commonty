@@ -287,7 +287,7 @@ in
           '';
         };
 
-        # Deleting the account of someone who left 30 days ago is upstream's
+        # Deleting the account of someone who left is upstream's
         # own admin delete (sends, attachments in the bucket, everything), on
         # loopback only: nginx never passes /admin, and the token is made at
         # boot, kept in /run, readable by root alone (docs/dev/leaving.md)
@@ -309,7 +309,7 @@ in
           '';
         };
         systemd.services.dd-forget-passwords = {
-          description = "Delete the Passwords accounts of members who left 30 days ago";
+          description = "Delete the Passwords accounts of members who left";
           after = [
             "vaultwarden.service"
             "dd-verify.service"
@@ -363,7 +363,8 @@ in
           wantedBy = [ "timers.target" ];
           timerConfig = {
             OnActiveSec = "5min";
-            OnUnitActiveSec = "1h";
+            # often: someone who leaves is due at once
+            OnUnitActiveSec = "5min";
           };
         };
 

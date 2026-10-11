@@ -1,4 +1,5 @@
-//! Photos' share of the deleting after 30 days (`dd forget-photos`, on the
+//! Photos' share of the deleting once someone is due, at once for their
+//! own leaving or 30 days after a removal (`dd forget-photos`, on the
 //! Photos box). docs/dev/leaving.md.
 
 use std::time::Duration;

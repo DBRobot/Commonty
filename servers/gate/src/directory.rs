@@ -449,15 +449,7 @@ impl Directory {
         let Some(m) = &self.members else {
             return true;
         };
-        let id = identity::member_id(&e.entry.root);
-        if m.revoked.contains(&id) {
-            return false;
-        }
-        m.members.contains(&id)
-            || (e.entry.grant.is_some()
-                && self
-                    .release()
-                    .is_some_and(|r| identity::verify_grant(&e.entry, r).is_ok()))
+        identity::is_member(&e.entry, &m.members, &m.revoked, self.release())
     }
 
     fn identify(&self, headers: &HeaderMap) -> Option<String> {
@@ -939,12 +931,19 @@ impl Directory {
         }
     }
 
-    /// Leaving, or coming back: through the log like any write, so every
-    /// box holds the same date; without the control plane, this box's own
+    /// Leaving: through the log like any write, so every box holds the
+    /// same date; without the control plane, this box's own. A coming back
+    /// is not taken any more: leaving deletes everything at once.
     pub(crate) async fn say_leave(
         &self,
         s: identity::SignedLeave,
     ) -> std::result::Result<(), (StatusCode, String)> {
+        if s.leave.back {
+            return Err((StatusCode::CONFLICT, crate::leaving::NO_COMING_BACK.into()));
+        }
+        if self.leaving.has_left(&s.leave.name) {
+            return Err((StatusCode::CONFLICT, "you have left already".into()));
+        }
         let on_file = self.entry(&s.leave.name).ok().flatten();
         let Some(e) = on_file else {
             // a sign-up still waiting is this box's alone, and so is its word
@@ -1292,6 +1291,7 @@ mod tests {
                 let seed: [u8; 32] = sha2::Sha256::digest(key.to_bytes()).into();
                 encode_public(&ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key())
             },
+            recovered_from: vec![],
             devices: vec![{
                 let p = encode_public(&generate().verifying_key());
                 Device {
@@ -1354,9 +1354,66 @@ mod tests {
         assert!(lost_a_key(&added, &fewer));
     }
 
+    /// Recovering with the paper key keeps a member a member, and an
+    /// owner's removal of any root they have had keeps them out: only the
+    /// recovery key the entry on file named moves membership on.
+    #[tokio::test]
+    async fn a_recovery_keeps_membership_and_never_undoes_a_removal() {
+        use sha2::Digest as _;
+        let old = generate();
+        let old_id = identity::member_id(&encode_public(&old.verifying_key()));
+        let paper =
+            ed25519_dalek::SigningKey::from_bytes(&sha2::Sha256::digest(old.to_bytes()).into());
+        let next = generate();
+        let mut recovered = entry("sarah", &next, &[], 2);
+        recovered.recovery = encode_public(&generate().verifying_key());
+        recovered.recovered_from = vec![encode_public(&old.verifying_key())];
+        let open = |m: crate::Members| {
+            Directory::open(scratch("recover").join("keys"), None)
+                .unwrap()
+                .with_members(Some(m))
+        };
+
+        let d = open(crate::Members::list(vec![old_id.clone()]));
+        d.admit(sign(entry("sarah", &old, &[], 1), &old).unwrap())
+            .await
+            .unwrap();
+        assert!(d.member("sarah"));
+        // a recovery the paper key on file did not sign moves nothing
+        let forged = identity::sign_recovery(recovered.clone(), &next, &generate()).unwrap();
+        assert!(d.admit(forged).await.is_err());
+        let mut stolen = recovered.clone();
+        stolen.recovered_from = vec![];
+        assert!(
+            d.admit(identity::sign_recovery(stolen, &next, &paper).unwrap())
+                .await
+                .is_err(),
+            "the root it replaces must join the earlier ones"
+        );
+        let good = identity::sign_recovery(recovered.clone(), &next, &paper).unwrap();
+        d.admit(good.clone()).await.unwrap();
+        assert!(
+            d.member("sarah"),
+            "still a member, by the root recovered from"
+        );
+
+        // removed by the owner, then recovered: still out
+        let d = open(crate::Members {
+            members: vec![old_id.clone()],
+            revoked: vec![old_id.clone()],
+            ..Default::default()
+        });
+        d.admit(sign(entry("sarah", &old, &[], 1), &old).unwrap())
+            .await
+            .unwrap();
+        assert!(!d.member("sarah"));
+        d.admit(good).await.unwrap();
+        assert!(!d.member("sarah"), "a recovery escapes no removal");
+    }
+
     /// A sign-up still waiting leaves by its own word, on this box alone:
-    /// out at once, back within its time, and once it is due or its hold has
-    /// lapsed, gone, statement and all, so the name's next holder starts clean.
+    /// out and due at once, with no coming back, and then gone, statement and
+    /// all, so the name's next holder starts clean.
     #[tokio::test]
     async fn a_waiting_sign_up_leaves_here_and_its_name_comes_free() {
         // its own parent: what is held sits beside the directory
@@ -1380,12 +1437,11 @@ mod tests {
         d.say_leave(say(false)).await.unwrap();
         assert!(d.leaving.has_left("eve"));
         assert!(d.entry("eve").unwrap().is_none(), "still not published");
-        let now = identity::now();
-        let window = 30 * 24 * 3600;
-        let out = crate::leaving::held_leavers(&d, now, window);
-        assert_eq!(out.len(), 1);
-        assert!(!out[0].2, "kept within the window");
-        assert!(crate::leaving::held_leavers(&d, now + window, window)[0].2);
+        assert_eq!(crate::leaving::held_leavers(&d).len(), 1, "due at once");
+        assert!(
+            d.say_leave(say(true)).await.is_err(),
+            "nothing to come back to"
+        );
         // someone else's word for her is nothing
         let mallory = generate();
         let forged = identity::sign_leave(
@@ -1401,15 +1457,15 @@ mod tests {
         assert!(d.say_leave(forged).await.is_err());
         assert!(d.leaving.has_left("eve"));
 
-        // the hold gone (lapsed, or deleted when due): due at once, and the
-        // next person to take the name has not left
+        // the hold gone (lapsed, or deleted): still due, and the next person
+        // to take the name has not left
         d.unhold("eve");
-        assert!(crate::leaving::held_leavers(&d, now, window)[0].2);
+        assert_eq!(crate::leaving::held_leavers(&d).len(), 1);
         let ann = generate();
         d.hold(&sign(entry("eve", &ann, &[], 1), &ann).unwrap())
             .unwrap();
         assert!(!d.leaving.has_left("eve"));
-        assert!(crate::leaving::held_leavers(&d, now, window).is_empty());
+        assert!(crate::leaving::held_leavers(&d).is_empty());
     }
 
     /// A sign-up without a code stays here: not served, not listed, not a

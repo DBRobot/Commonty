@@ -312,6 +312,7 @@ mod tests {
                 name: name.into(),
                 root: encode_public(&k.verifying_key()),
                 recovery: encode_public(&generate().verifying_key()),
+                recovered_from: vec![],
                 devices: vec![Device {
                     fingerprint: fingerprint(&p),
                     public_key: p,

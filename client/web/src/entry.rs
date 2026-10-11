@@ -155,6 +155,7 @@ mod tests {
             name: "tom".into(),
             root: public.clone(),
             recovery: String::new(),
+            recovered_from: vec![],
             devices: vec![identity::Device {
                 fingerprint: "f1".into(),
                 public_key: public,
@@ -203,6 +204,7 @@ mod tests {
             name: "tom".into(),
             root: format!("{}pk1:digest", identity::WEBAUTHN_ROOT),
             recovery: String::new(),
+            recovered_from: vec![],
             devices: vec![],
             passkeys: vec![],
             grant: None,
@@ -228,6 +230,7 @@ mod tests {
             name: "tom".into(),
             root: format!("{}pk1:digest", identity::WEBAUTHN_ROOT),
             recovery: String::new(),
+            recovered_from: vec![],
             devices: vec![],
             passkeys: vec![identity::Passkey {
                 id: "pk1".into(),

@@ -414,7 +414,8 @@ export default {
       const sent = req.method === 'GET' ? '' : await req.text().catch(() => '');
       // a box at boot: signed by its TPM, from no page at all
       if (path === '/api/unlock' || path.startsWith('/api/unlock/')) return boxApi(req, env, path, parse(sent), json);
-      // someone who left 30 days ago: their own statement decides (leaving.js)
+      // someone who left, or was removed 30 days ago: their own statement, or
+      // the release, decides (leaving.js)
       if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, readProof, MEMBERS, ALIASES, aliasOf, zone, lists, stateIn, cf });
       if (req.method !== 'GET' && origin !== (env.ORIGIN || `https://mail.${env.DOMAIN}`)) {
         return json({ error: 'not from here' }, 403);

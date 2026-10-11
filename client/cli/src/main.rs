@@ -151,17 +151,18 @@ enum Command {
         #[arg(long, hide = true)]
         token: bool,
     },
-    /// Leave Commonty: every sign-in ends now, and in 30 days everything of
-    /// yours is deleted from every box. For an account whose root is on
-    /// this machine; a passkey account leaves in Settings.
+    /// Leave Commonty: every sign-in ends now, and everything of yours is
+    /// deleted from every box straight away. It cannot be undone. For an
+    /// account whose root is on this machine; a passkey account leaves in
+    /// Settings.
     Leave {
-        /// come back, within the 30 days: nothing was deleted yet
+        /// that you mean it: everything is deleted at once
         #[arg(long)]
-        back: bool,
+        yes: bool,
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES)]
         directories: Vec<String>,
     },
-    /// Photos' share of deleting whoever left 30 days ago: their account,
+    /// Photos' share of deleting whoever left, or was removed 30 days ago: their account,
     /// through museum's admin api. On the Photos box, by its timer.
     #[command(hide = true)]
     ForgetPhotos {
@@ -1111,17 +1112,18 @@ async fn main() -> Result<()> {
             })
             .await?;
         }
-        Command::Leave { back, directories } => {
+        Command::Leave { yes, directories } => {
             let root = who::load_root(&keys)?.context("no root key on this machine")?;
             let name = keys.get(USER)?.context("no name here")?.to_string();
-            account::leave(&directories, &name, &root, back).await?;
-            if back {
-                println!("welcome back, {name}: everything of yours is as you left it");
-            } else {
-                println!(
-                    "{name} has left: every sign-in has ended. Everything of yours is kept 30 days, then deleted from every box; `dd leave --back` before then undoes it"
+            if !yes {
+                anyhow::bail!(
+                    "leaving deletes everything of yours from every box at once, and cannot be undone: take your things out first, then run `dd leave --yes`"
                 );
             }
+            account::leave(&directories, &name, &root).await?;
+            println!(
+                "{name} has left: every sign-in has ended, and every box is deleting everything of yours now. Backups expire on their own within 90 days."
+            );
         }
         Command::ForgetPhotos {
             gate,

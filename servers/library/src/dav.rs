@@ -129,7 +129,8 @@ impl Gate {
     }
 
     /// A library, or a member's disk images, gone for good, trash and all:
-    /// someone left 30 days ago (the gate's leaving.rs). Safe to run again.
+    /// someone who left, or was removed 30 days ago (the gate's leaving.rs).
+    /// Safe to run again.
     pub async fn forget(&self, id: &str) -> Result<usize> {
         anyhow::ensure!(top_prefix(id), "not a library or a member's images");
         let mut n = 0;

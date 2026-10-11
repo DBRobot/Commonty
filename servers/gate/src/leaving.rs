@@ -1,5 +1,7 @@
 //! Leaving Commonty: a member's own signed word or the owner's removal, the
-//! same answer on every box, and what goes when (docs/dev/leaving.md).
+//! same answer on every box, and what goes when (docs/dev/leaving.md). Their
+//! own word deletes everything at once; the owner's removal keeps it for the
+//! window, since that was not their request and the owner can undo it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -19,6 +21,7 @@ use webauthn_rs::prelude::PublicKeyCredential;
 use crate::App;
 use crate::directory::Directory;
 
+/// how long the owner's removal keeps everything, in case it was a mistake
 pub const WINDOW: u64 = 30 * 24 * 3600;
 /// how far a statement's own time may run ahead of, or behind, its agreeing
 const AHEAD: u64 = 300;
@@ -35,34 +38,52 @@ pub fn window() -> u64 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     Member,
-    /// out, everything of theirs kept until `until`
+    /// removed by the owner, everything of theirs kept until `until`
     Left {
         since: u64,
         until: u64,
     },
-    /// out past the window: everything of theirs goes
+    /// out, and everything of theirs goes now
     Due {
         since: u64,
     },
 }
 
-/// When someone left: by their own word (a leave, not a coming back), or by
-/// the owner's removal, whichever came first.
-pub fn left_at(said: Option<&Said>, removed: Option<u64>) -> Option<u64> {
-    let own = said.filter(|s| !s.statement.leave.back).map(|s| s.agreed);
-    match (own, removed) {
-        (Some(a), Some(b)) => Some(a.min(b)),
+/// Someone out of the fleet: since when, and when what is theirs goes
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Out {
+    pub since: u64,
+    pub due: u64,
+}
+
+/// When someone left and when their things go: their own word (a leave,
+/// not an old coming back) at once, the owner's removal the window after;
+/// whichever came first.
+pub fn out_at(said: Option<&Said>, removed: Option<u64>, window: u64) -> Option<Out> {
+    let own = said.filter(|s| !s.statement.leave.back).map(|s| Out {
+        since: s.agreed,
+        due: s.agreed,
+    });
+    let by_owner = removed.map(|r| Out {
+        since: r,
+        due: r.saturating_add(window),
+    });
+    match (own, by_owner) {
+        (Some(a), Some(b)) => Some(Out {
+            since: a.since.min(b.since),
+            due: a.due.min(b.due),
+        }),
         (a, b) => a.or(b),
     }
 }
 
-pub fn phase(left: Option<u64>, now: u64, window: u64) -> Phase {
-    match left {
+pub fn phase(out: Option<Out>, now: u64) -> Phase {
+    match out {
         None => Phase::Member,
-        Some(since) if now >= since.saturating_add(window) => Phase::Due { since },
-        Some(since) => Phase::Left {
-            since,
-            until: since.saturating_add(window),
+        Some(o) if now >= o.due => Phase::Due { since: o.since },
+        Some(o) => Phase::Left {
+            since: o.since,
+            until: o.due,
         },
     }
 }
@@ -291,12 +312,21 @@ pub fn deletable(
 
 /// The removal date counts only for an id the list also shuts out:
 /// `dd member add` takes both away together.
-pub fn removed_at(m: &crate::Members, id: &str) -> Option<u64> {
+pub fn removed_id(m: &crate::Members, id: &str) -> Option<u64> {
     m.revoked
         .iter()
         .any(|r| r == id)
         .then(|| m.removed.get(id).copied())
         .flatten()
+}
+
+/// When the owner removed this person, by any root of theirs: a recovery
+/// does not undo a removal
+pub fn removed_at(m: &crate::Members, e: &identity::Entry) -> Option<u64> {
+    identity::member_ids(e)
+        .iter()
+        .filter_map(|id| removed_id(m, id))
+        .min()
 }
 
 /// Everyone out of the fleet by their word or the owner's, as this box's
@@ -323,21 +353,25 @@ pub fn leavers(
                 .insert(name.clone());
         }
     }
-    let mut out = Vec::new();
+    let mut found = Vec::new();
     for (name, e) in entries {
         if crate::directory::is_guest(&name) {
             continue;
         }
         let id = identity::member_id(&e.entry.root);
-        let left = left_at(d.leaving.said(&name).as_ref(), removed_at(m, &id));
-        let (left, due) = match phase(left, now, window) {
+        let out = out_at(
+            d.leaving.said(&name).as_ref(),
+            removed_at(m, &e.entry),
+            window,
+        );
+        let (left, due) = match phase(out, now) {
             Phase::Member => continue,
             Phase::Left { since, .. } => (since, false),
             Phase::Due { since } => (since, true),
         };
         let ids: Vec<String> = e.entry.libraries.iter().map(|l| l.id.clone()).collect();
         let (libraries, kept) = deletable(&name, &ids, &holders, demo);
-        out.push(Leaver {
+        found.push(Leaver {
             name,
             id: id[..8].to_string(),
             left,
@@ -346,14 +380,13 @@ pub fn leavers(
             kept,
         });
     }
-    out
+    found
 }
 
 /// Sign-ups still waiting (held on this box, not yet in the directory) who
-/// left by their own word: what they have is on this box alone. When the
-/// held account is gone already (unfollowed sign-ups lapse after a week),
-/// they are due at once.
-pub fn held_leavers(d: &Directory, now: u64, window: u64) -> Vec<(String, u64, bool)> {
+/// left by their own word: what they have is on this box alone, and goes
+/// at once.
+pub fn held_leavers(d: &Directory) -> Vec<(String, u64)> {
     let mut out = Vec::new();
     for name in d.leaving.said_names() {
         if d.entry(&name).ok().flatten().is_some() {
@@ -370,15 +403,14 @@ pub fn held_leavers(d: &Directory, now: u64, window: u64) -> Vec<(String, u64, b
         {
             continue;
         }
-        let due =
-            held.is_none() || matches!(phase(Some(said.agreed), now, window), Phase::Due { .. });
-        out.push((name, said.agreed, due));
+        out.push((name, said.agreed));
     }
     out
 }
 
-/// The gate's own share, every minute: at once, every way in ends; past
-/// the window, what this box holds of theirs goes. The other services do
+/// The gate's own share, every minute: at once, every way in ends; once
+/// due (at once for their own word, past the window for a removal), what
+/// this box holds of theirs goes. The other services do
 /// theirs on their own boxes and report back here (`done`).
 pub(crate) async fn tick(app: &App) {
     let Some(m) = &app.members else { return };
@@ -464,24 +496,18 @@ pub(crate) async fn tick(app: &App) {
         }
     }
     // a sign-up still waiting: everything of theirs is on this box
-    for (name, left, due) in held_leavers(&app.directory, identity::now(), window()) {
-        let w = app.directory.leaving.work(&name, left);
-        if !w.ended {
-            app.signins.forget(&name);
-            app.directory.end_elsewhere(&name);
-            app.directory.leaving.mark(&name, left, |w| w.ended = true);
-            eprintln!("leaving: a waiting sign-up is out: its sessions ended");
+    for (name, left) in held_leavers(&app.directory) {
+        app.signins.forget(&name);
+        app.directory.end_elsewhere(&name);
+        app.directory.leaving.mark(&name, left, |w| w.ended = true);
+        if let Err(e) = app.friends.forget(&name) {
+            eprintln!("leaving: a waiting sign-up: {e:#}");
+            continue;
         }
-        if due {
-            if let Err(e) = app.friends.forget(&name) {
-                eprintln!("leaving: a waiting sign-up: {e:#}");
-                continue;
-            }
-            app.signins.forget(&name);
-            app.directory.unhold(&name);
-            app.directory.leaving.forget_said(&name);
-            eprintln!("leaving: a waiting sign-up's account is gone");
-        }
+        app.signins.forget(&name);
+        app.directory.unhold(&name);
+        app.directory.leaving.forget_said(&name);
+        eprintln!("leaving: a waiting sign-up is out and its account is gone");
     }
     if reap
         && let Some(door) = &app.network
@@ -660,16 +686,10 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
     let Some(e) = app.entry(&user).ok().flatten() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let removed = app
-        .members
-        .as_ref()
-        .and_then(|m| removed_at(m, &identity::member_id(&e.entry.root)));
+    let removed = app.members.as_ref().and_then(|m| removed_at(m, &e.entry));
     let said = app.directory.leaving.said(&user);
-    let (left, until) = match phase(left_at(said.as_ref(), removed), identity::now(), window()) {
-        Phase::Member => (None, None),
-        Phase::Left { since, until } => (Some(since), Some(until)),
-        Phase::Due { since } => (Some(since), Some(since + window())),
-    };
+    let out = out_at(said.as_ref(), removed, window());
+    let (left, until) = (out.map(|o| o.since), out.map(|o| o.due));
     // anyone may leave: a member, a guest, or an account still waiting
     let role = if app.member(&user) {
         "member"
@@ -685,11 +705,17 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
         "left": left,
         "until": until,
         "removed": removed.is_some(),
+        "deleted": out.is_some_and(|o| o.due <= identity::now()),
         "window": window(),
         "passkey": e.entry.root.starts_with(identity::WEBAUTHN_ROOT),
     }))
     .into_response()
 }
+
+/// Leaving deletes everything at once, so there is nothing to come back to.
+/// A coming back already in the log still replays as it was (`record`).
+pub(crate) const NO_COMING_BACK: &str =
+    "leaving deleted everything at once: there is no coming back";
 
 #[derive(Deserialize)]
 pub(crate) struct Start {
@@ -715,26 +741,20 @@ pub(crate) async fn start(
     let Some(e) = app.entry(&user).ok().flatten() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let out = app.directory.leaving.has_left(&user);
-    if q.back != out {
-        return (
-            StatusCode::CONFLICT,
-            if q.back {
-                "you have not left"
-            } else {
-                "you have left already"
-            },
-        )
-            .into_response();
+    if q.back {
+        return (StatusCode::CONFLICT, NO_COMING_BACK).into_response();
+    }
+    if app.directory.leaving.has_left(&user) {
+        return (StatusCode::CONFLICT, "you have left already").into_response();
     }
     // anyone may leave - a member, a guest, an account still waiting - but
     // someone the owner removed is out already, and only the owner undoes it
-    let removed = app
+    if app
         .members
         .as_ref()
-        .and_then(|m| removed_at(m, &identity::member_id(&e.entry.root)))
-        .is_some();
-    if !q.back && removed {
+        .and_then(|m| removed_at(m, &e.entry))
+        .is_some()
+    {
         return StatusCode::FORBIDDEN.into_response();
     }
     if !e.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
@@ -748,7 +768,7 @@ pub(crate) async fn start(
         name: user,
         root: e.entry.root.clone(),
         at: identity::now(),
-        back: q.back,
+        back: false,
     };
     let Ok(challenge) = identity::leave_challenge(&leave) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -807,7 +827,6 @@ pub(crate) async fn sign(
     let Ok(sig) = serde_json::to_vec(&assertion) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let back = leave.back;
     let s = identity::SignedLeave {
         leave,
         signature: B64.encode(sig),
@@ -815,11 +834,9 @@ pub(crate) async fn sign(
     if let Err((st, why)) = app.directory.say_leave(s).await {
         return (st, why).into_response();
     }
-    if !back {
-        app.signins.forget(&user);
-        app.directory.end_elsewhere(&user);
-    }
-    Json(serde_json::json!({ "back": back })).into_response()
+    app.signins.forget(&user);
+    app.directory.end_elsewhere(&user);
+    Json(serde_json::json!({ "back": false })).into_response()
 }
 
 #[cfg(test)]
@@ -844,40 +861,45 @@ mod tests {
     }
 
     #[test]
-    fn the_window_runs_from_the_first_word_that_they_are_out() {
-        assert_eq!(left_at(None, None), None);
+    fn their_own_word_is_due_at_once_and_a_removal_after_the_window() {
+        let w = 30 * DAY;
+        let o = |since, due| Some(Out { since, due });
+        assert_eq!(out_at(None, None, w), None);
         assert_eq!(
-            left_at(Some(&said(10, 12, false)), None),
-            Some(12),
-            "the agreed time, not the claimed one"
+            out_at(Some(&said(10, 12, false)), None, w),
+            o(12, 12),
+            "the agreed time, not the claimed one, and nothing kept"
         );
-        assert_eq!(left_at(None, Some(50)), Some(50));
-        assert_eq!(left_at(Some(&said(10, 12, false)), Some(50)), Some(12));
-        assert_eq!(left_at(Some(&said(60, 61, false)), Some(50)), Some(50));
-        // coming back undoes their own leaving, never the owner's removal
-        assert_eq!(left_at(Some(&said(70, 71, true)), None), None);
-        assert_eq!(left_at(Some(&said(70, 71, true)), Some(50)), Some(50));
+        assert_eq!(out_at(None, Some(50), w), o(50, 50 + w));
+        assert_eq!(out_at(Some(&said(10, 12, false)), Some(50), w), o(12, 12));
+        assert_eq!(
+            out_at(Some(&said(60, 61, false)), Some(50), w),
+            o(50, 61),
+            "removed, then their own word: it goes at once"
+        );
+        // an old coming back in the log undoes their leaving, never a removal
+        assert_eq!(out_at(Some(&said(70, 71, true)), None, w), None);
+        assert_eq!(
+            out_at(Some(&said(70, 71, true)), Some(50), w),
+            o(50, 50 + w)
+        );
     }
 
     #[test]
-    fn everything_is_kept_for_the_window_and_then_due() {
+    fn a_removal_is_kept_for_the_window_and_then_due() {
         let w = 30 * DAY;
-        assert_eq!(phase(None, 1000, w), Phase::Member);
+        assert_eq!(phase(None, 1000), Phase::Member);
+        let removed = out_at(None, Some(1000), w);
         assert_eq!(
-            phase(Some(1000), 1000, w),
+            phase(removed, 1000 + w - 1),
             Phase::Left {
                 since: 1000,
                 until: 1000 + w
             }
         );
-        assert_eq!(
-            phase(Some(1000), 1000 + w - 1, w),
-            Phase::Left {
-                since: 1000,
-                until: 1000 + w
-            }
-        );
-        assert_eq!(phase(Some(1000), 1000 + w, w), Phase::Due { since: 1000 });
+        assert_eq!(phase(removed, 1000 + w), Phase::Due { since: 1000 });
+        let own = out_at(Some(&said(1000, 1000, false)), None, w);
+        assert_eq!(phase(own, 1000), Phase::Due { since: 1000 });
         assert_eq!(WINDOW, 30 * DAY);
     }
 
@@ -949,12 +971,12 @@ mod tests {
     fn a_removal_date_counts_only_while_the_list_shuts_them_out() {
         let mut m = crate::Members::default();
         m.removed.insert("abc".into(), 7);
-        assert_eq!(removed_at(&m, "abc"), None);
+        assert_eq!(removed_id(&m, "abc"), None);
         m.revoked.push("abc".into());
-        assert_eq!(removed_at(&m, "abc"), Some(7));
+        assert_eq!(removed_id(&m, "abc"), Some(7));
         m.revoked.push("def".into());
         assert_eq!(
-            removed_at(&m, "def"),
+            removed_id(&m, "def"),
             None,
             "revoked before dates were kept: not scheduled"
         );
@@ -969,6 +991,7 @@ mod tests {
             name: "tom".into(),
             root: identity::encode_public(&root.verifying_key()),
             recovery: String::new(),
+            recovered_from: vec![],
             devices: vec![],
             passkeys: vec![],
             grant: None,

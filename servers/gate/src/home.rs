@@ -127,16 +127,8 @@ impl Vouch for DirHouse {
         let (Some(m), Some(e)) = (&self.members, self.entry_of(user)) else {
             return false;
         };
-        let id = identity::member_id(&e.entry.root);
-        if m.revoked.contains(&id) || self.directory.leaving.has_left(user) {
-            return false;
-        }
-        m.members.contains(&id)
-            || (e.entry.grant.is_some()
-                && self
-                    .directory
-                    .release()
-                    .is_some_and(|r| identity::verify_grant(&e.entry, r).is_ok()))
+        !self.directory.leaving.has_left(user)
+            && identity::is_member(&e.entry, &m.members, &m.revoked, self.directory.release())
     }
     fn house(&self) -> &Home {
         &self.home

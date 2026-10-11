@@ -480,7 +480,12 @@ pub(crate) async fn leave<R: Runtime>(
 ) -> Result<serde_json::Value, (StatusCode, String)> {
     let keys = app.state::<crate::account::Keys>();
     let v: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
-    let back = v["back"].as_bool().unwrap_or(false);
+    if v["back"].as_bool() == Some(true) {
+        return Err((
+            StatusCode::CONFLICT,
+            "leaving deleted everything at once: there is no coming back".into(),
+        ));
+    }
     let bad = |e: String| (StatusCode::BAD_GATEWAY, e);
     let Some(root) = account::load_root(&keys.0).map_err(|e| bad(e.to_string()))? else {
         return Err((
@@ -494,10 +499,10 @@ pub(crate) async fn leave<R: Runtime>(
         .get(crate::account::USER)
         .map_err(|e| bad(e.to_string()))?
         .ok_or_else(|| bad("no name on this device".into()))?;
-    account::leave(&crate::account::dirs(), &name, &root, back)
+    account::leave(&crate::account::dirs(), &name, &root)
         .await
         .map_err(|e| bad(format!("{e:#}")))?;
-    Ok(serde_json::json!({ "back": back }))
+    Ok(serde_json::json!({ "back": false }))
 }
 
 /// A device or a passkey out of the account, signed by the main key here.
