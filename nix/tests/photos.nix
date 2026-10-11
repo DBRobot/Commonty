@@ -81,6 +81,18 @@ in
       };
       dd.photos.admin = 1;
       services.ente.web.enable = lib.mkForce false;
+      # what the web module sets for museum when it is on
+      services.ente.api.settings = {
+        apps = {
+          accounts = "https://accounts.test.invalid";
+          cast = "https://cast.test.invalid";
+          public-albums = "https://albums.test.invalid";
+        };
+        webauthn = {
+          rpid = "accounts.test.invalid";
+          rporigins = [ "https://accounts.test.invalid" ];
+        };
+      };
       services.nginx.virtualHosts = lib.mkMerge [
         (lib.genAttrs
           (map (h: "${h}.test.invalid") (
