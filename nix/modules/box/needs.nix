@@ -176,6 +176,7 @@
       "dd-wifi-apply"
       "dd-wifi-status"
       "dd-wifi-unseal"
+      "dd-wired-watch"
     ];
     everyBox = true;
     base = {
