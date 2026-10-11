@@ -174,7 +174,7 @@ games/     games.nix (the manager), game-guest.nix (the VM a world runs in),
            game-run.py, games-access.sh, games-measure.sh
 gate/      verify.nix (the gate's unit, nginx's sign-in check, dd.verify.*,
            dd.home.services), acme.nix, public.nix (the tunnel, dd.public.*),
-           headers.nix, strip-cookie.nix, mail-worker.nix, user-accounts.nix, dns.py
+           headers.nix, strip-cookie.nix, mail-worker.nix, dns.py
 library/   libraries.nix (the bucket behind the gate), transcode.nix
 llm/       llama-cpp.nix, llm.nix (the Chat page), search.nix (SearXNG)
 media/     webdav-media.nix

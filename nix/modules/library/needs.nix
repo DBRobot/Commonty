@@ -23,7 +23,6 @@
 
   disk-images = {
     what = "members' archives of old computers (`dd image`), restic's layout, encrypted on the device, kept in the storage pool";
-    units = [ "user-accounts" ];
     base = {
       uses = {
         memory = "0";
