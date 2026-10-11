@@ -1326,6 +1326,7 @@
             '';
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
+          safe-rd = import ./nix/tests/safe-rd.nix args;
           dns-worker = import ./nix/tests/dns-worker.nix args;
           # the control plane: relay, witness and three validators, offline
           control = import ./nix/tests/control.nix args;

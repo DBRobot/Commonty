@@ -309,6 +309,7 @@ ci               the CI matrix names exactly the flake's vmTests; ci_ok waits
                  on every job and runs with if: always()
 control          the control plane offline (control/run.py)
 mail-worker      the mail Worker in a browser against a fake Cloudflare
+safe-rd          where the sign-in pages send you afterwards stays on the site (safeRd)
 dns-worker       the DNS Worker against a fake Cloudflare, and the box's helper
 ```
 

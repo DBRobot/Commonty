@@ -18,7 +18,9 @@ export function safeRd(raw) {
   let u;
   try { u = new URL(raw || '/', location.origin); } catch { return '/'; }
   if (u.origin !== location.origin || !String(raw || '/').trim().startsWith('/')) return '/';
-  return u.pathname + u.search + u.hash;
+  // and once more after it is made a path: "/.//evil" is on this origin as
+  // given, but its path is "//evil", which the browser follows off it
+  return '/' + (u.pathname + u.search + u.hash).replace(/^[/\\]+/, '');
 }
 
 // the options the verifier sends, with their byte fields decoded

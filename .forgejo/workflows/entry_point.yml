@@ -174,7 +174,7 @@ jobs:
           [ "$left" -ge 60 ] || { echo "move dd.securityTxtExpires on (nix/modules/gate/security-txt.nix), at most a year out"; exit 1; }
           [ "$left" -le 366 ] || { echo "RFC 9116 wants Expires under a year away"; exit 1; }
       - name: plaintext labels, box list, and this file
-        run: nix build --no-link .#checks.x86_64-linux.plaintext-label .#checks.x86_64-linux.boxes .#checks.x86_64-linux.box-reports .#checks.x86_64-linux.ci .#checks.x86_64-linux.stylesheet .#checks.x86_64-linux.cargo-nix .#checks.x86_64-linux.nginx .#checks.x86_64-linux.usage-facts .#checks.x86_64-linux.fleet-defaults .#checks.x86_64-linux.retention .#checks.x86_64-linux.needs-units .#checks.x86_64-linux.placement
+        run: nix build --no-link .#checks.x86_64-linux.plaintext-label .#checks.x86_64-linux.boxes .#checks.x86_64-linux.box-reports .#checks.x86_64-linux.ci .#checks.x86_64-linux.stylesheet .#checks.x86_64-linux.cargo-nix .#checks.x86_64-linux.nginx .#checks.x86_64-linux.usage-facts .#checks.x86_64-linux.fleet-defaults .#checks.x86_64-linux.retention .#checks.x86_64-linux.needs-units .#checks.x86_64-linux.placement .#checks.x86_64-linux.safe-rd
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
