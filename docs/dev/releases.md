@@ -31,7 +31,8 @@ dd release publish            the laptop, with the dd built from what merged
   built here? copy the closures to the cache bucket
   releases branch: current.json + history/<counter>.json, pushed
   nudge: ssh each box, `systemctl start --no-block dd-agent`
-  the control relay Worker, the mail Worker, the forge page r<counter>
+  the DNS Worker (before the nudge), the control relay Worker, the mail
+  Worker, the forge page r<counter>
   dd release app-next in the background (app-release.md)
 │
 each box: dd-agent, nudged or on its timer (every 5 min)
@@ -226,6 +227,9 @@ do it by hand):
 - **nudge**: every box is told over ssh to start `dd-agent` now. It changes
   when a box looks, not what it accepts. A box not reached looks on its
   timer.
+- **the DNS Worker** this release carries is deployed before the nudge,
+  so a box given a new name finds it there when it asks
+  (`dd dns deploy --ref <ref>`; [gate.md](gate.md#the-zone-names-and-certificates)).
 - **the control relay Worker** and **the mail Worker** this release
   carries are deployed (`dd control deploy --ref <ref>`,
   `dd mail deploy --ref <ref>`).

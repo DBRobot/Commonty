@@ -514,8 +514,8 @@ service that keeps deleted things for a time adds its setting there.
   `nginx -t`), `stylesheet` (the app's copies), `cargo-nix`, `ci`,
   `plaintext-label` (a module that reads plaintext labels itself),
   `box-reports`, `net-check` (the app's network engine: go vet and its
-  tests), `control` (the control plane, offline) and `mail-worker` (the
-  mail Worker in a browser). `clippy-app` and `tests-app` are the app's
+  tests), `control` (the control plane, offline), `mail-worker` (the
+  mail Worker in a browser) and `dns-worker` (the DNS Worker at its API). `clippy-app` and `tests-app` are the app's
   lint and tests.
 
 A VM test is listed twice: in `vmTests` in `flake.nix`, and in the

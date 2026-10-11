@@ -553,7 +553,7 @@ With `VERIFY_HEADSCALE_API` set (the gateway, `dd.verify.network`):
 - A box's owner reaches that box through headscale's ACL plus a per-box
   ipset, `dd-owner` ([owner.nix](../../nix/modules/net/owner.nix)).
 - The fleet's names resolve publicly to the gateway's fleet address,
-  100.64.0.2 (dd-dns's `ADDRESS`).
+  100.64.0.2 (`address` in [fleet-names.nix](../../nix/lib/fleet-names.nix)).
 - Every 300 s, devices of people who are no longer members or guests are
   deleted from Headscale. Tagged nodes (boxes) are left alone, and so is
   everything when the member list is empty (a broken release, not
@@ -645,6 +645,68 @@ sends a challenge. The email it vouches for is `<user>@<domain>`.
 key names (`VERIFY_APP_MANIFEST`, the releases branch's `app.json`), with
 their hashes. A good manifest is kept 10 minutes, the lack of one 1
 minute. Anything that does not verify is as good as absent.
+
+## The zone: names and certificates
+
+No box holds a token for the fleet's zone at Cloudflare. The token is a
+secret of the DNS Worker
+([servers/system/dns/worker.js](../../servers/system/dns/worker.js)), at
+`dns.<domain>`, and nowhere else, so no box can point a name anywhere. The
+Worker does two things, both from what the release says.
+
+**The fleet's names.** `*` and the bare name at the gateway's address on
+the fleet's network; each public host (and demo door) a proxied CNAME to
+the tunnel while the door is open, and the bare name too when it is public
+([fleet-names.nix](../../nix/lib/fleet-names.nix), from the gateway's own
+config, built into the Worker as `RECORDS`). Every five minutes (a cron
+trigger `dd dns deploy` sets) the zone is put in step: a name no longer
+public loses its CNAME so the wildcard answers again. Only an A at the
+gateway's address or a CNAME to the fleet's tunnel is ever changed or
+removed; mail, TXT, CAA, another tunnel's names are never touched, and a
+name with someone else's record is left alone. At the zone's own name,
+mail's records stay beside the flattened CNAME. A name Cloudflare refuses
+is reported and the rest go on. dd-dns did this from the gateway, with the
+gateway's own token, until the Worker took over.
+
+**Certificates.** A box's certificate is for the names its own nginx serves and no others
+([https-names.nix](../../nix/lib/https-names.nix): every host on the
+certificate and its aliases, under the domain). Let's Encrypt asks for a
+TXT record at `_acme-challenge.<name>`, which only the Worker writes.
+
+```
+lego (acme-order-renew-<domain>, user acme)
+  └─ exec: acme-exec.sh ─► /run/dd-acme.sock (acme's alone)
+       └─ dd-acme@ (root): a name this box serves? ─► sign with the TPM
+            └─ POST dns.<domain>/api/challenge {box, at, op, name, value, sig}
+                 └─ Worker: signed by that box's key (BOXES), the name is
+                    one the release says it serves (NAMES), within 5 min,
+                    the value is a challenge ─► one TXT, written or removed
+```
+
+The message signed is `commonty acme v1\0<box>\0<at>\0<op>\0<name>\0<value>`
+by the box's TPM key under its signed boot, as dd-control signs. The
+Worker's `fleet.js` is built from the release (`.#dns-worker`): each
+box's key from boxes.json and its names from its own evaluated nginx, so a
+box gets a certificate for a new name only in the release that gives it
+that name, and `dd release publish` uploads the Worker before it nudges
+the boxes. A box that asks for anything else, or a box that is not in the
+fleet, gets nothing written. What a box can do with its key is get a
+certificate for the names it already serves.
+
+**The switch** is `dd.dnsWorker` ([domain.nix](../../nix/modules/box/domain.nix)),
+set when fleet/dns-worker.json exists. Until `dd dns setup` writes it, the
+gateway keeps the names (dd-dns) and its wildcard with its own token
+(`cloudflare-token`). With it, there is no dd-dns, the gateway is given no
+zone token at all, each box asks for its own names, and node1's
+certificate lists its 21. Then that token is deleted at Cloudflare.
+Hourly, the gateway checks the Worker at Cloudflare is this release's
+(`dd-dns-worker-check`, the mail Worker's check with `WORKER=dns`).
+
+Checked by `checks.dns-worker` (the Worker against a fake Cloudflare: two
+boxes' keys and the box's helper, refused and accepted; the names with the
+door open and shut, beside someone else's records, and nothing written
+once in step) and the `acme` VM test (pebble issues a box's certificate
+through the whole path).
 
 ## Public names, the bare domain and the demo
 

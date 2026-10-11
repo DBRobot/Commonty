@@ -90,7 +90,7 @@ role      hardware                                   storage                    
 gateway   -                                          -                               the public front door: cloudflared  headscale, the gate, nginx,
                                                                                      tunnel (CGNAT-safe), 80/443,       garage (s3. proxies 127.0.0.1:3900)
                                                                                      dnsmasq :53 on tailscale0; ONE
-                                                                                     per fleet (dd-dns rewrites *.domain)
+                                                                                     per fleet (*.domain points at it)
 storage   ZFS                                        a dataset for garage blocks;    3900 all ifs, 3901 tailnet peers   -
           (garage)                                   meta on SSD (LMDB); capacity
                                                      string per box; rf=2 means the
@@ -154,7 +154,7 @@ reached over the fleet's network:
    `dd.box.bulkPool`, from the box's report; `/vault/...` is only the name
    of the mountpoint, and works on any pool.
 6. **One gateway, by role.** The front door is the `gateway` role in
-   `fleet/boxes.json`; control.<domain>, the fleet's names (dd-dns) and the
+   `fleet/boxes.json`; control.<domain>, the fleet's names (fleet-names.nix) and the
    directory follow that role, never a box's name.
 
 ## 5. Things the audit found wrong (separate fixes)

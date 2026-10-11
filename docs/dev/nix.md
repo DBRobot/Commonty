@@ -37,7 +37,7 @@ nix/
     box.nix              the smallest box a VM test builds on
     ci.nix, boxes.nix, role-fit.nix, nginx.nix, plaintext-label.nix,
     box-reports.nix      evaluation checks (no VM)
-    control/, mail-worker/, unlock/, box-reports/   helpers for one test
+    control/, mail-worker/, dns-worker/, unlock/, box-reports/   helpers for one test
   app-release/           the app's downloads: Linux, Windows, Android, and their tests
   overlays/fhsenv.nix    nixpkgs' FHS builder made deterministic (games)
   patches/               patches to crates the flake builds
@@ -173,7 +173,8 @@ forge/     forgejo.nix, forgejo-runner.nix, members-runner.nix,
 games/     games.nix (the manager), game-guest.nix (the VM a world runs in),
            game-run.py, games-access.sh, games-measure.sh
 gate/      verify.nix (the gate's unit, nginx's sign-in check, dd.verify.*,
-           dd.home.services), acme.nix, public.nix (the tunnel, dd.public.*),
+           dd.home.services), acme.nix (and acme-ask.sh, acme-exec.sh: a
+           challenge asked of the DNS Worker), public.nix (the tunnel, dd.public.*),
            headers.nix, strip-cookie.nix, mail-worker.nix, dns.py
 library/   libraries.nix (the bucket behind the gate), transcode.nix
 llm/       llama-cpp.nix, llm.nix (the Chat page), search.nix (SearXNG)
@@ -308,6 +309,7 @@ ci               the CI matrix names exactly the flake's vmTests; ci_ok waits
                  on every job and runs with if: always()
 control          the control plane offline (control/run.py)
 mail-worker      the mail Worker in a browser against a fake Cloudflare
+dns-worker       the DNS Worker against a fake Cloudflare, and the box's helper
 ```
 
 ### VM tests

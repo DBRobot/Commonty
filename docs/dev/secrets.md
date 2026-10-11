@@ -67,9 +67,11 @@ storage     garage-rpc-secret            garage's cluster secret, shared by stor
 runner      forgejo-runner-token         forge/forgejo-runner.nix
             forgejo-members-runner-token the members' runner
             nix-cache-signing-key        signs what this box uploads to the cache
-gateway     cloudflare-token             DNS and the ACME challenge
+gateway     cloudflare-token             the zone's names (dd-dns) and the ACME challenge,
+                                         only until `dd dns setup`: then unused,
+                                         deleted at Cloudflare and from this file
             cloudflared-credentials      the tunnel
-            cloudflare-workers-read      the mail Worker check (when configured)
+            cloudflare-workers-read      the mail and DNS Worker checks (when configured)
             tmdb-token                   the gate's Movies & TV lookups
 photos      ente-key-encryption, ente-key-hash, ente-jwt-secret, ente-ott,
             ente-demo-password, ente-smtp-password, ente-storage-password,
