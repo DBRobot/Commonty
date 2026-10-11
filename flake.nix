@@ -923,6 +923,16 @@
           needs = pkgs.writeText "needs.json" (
             builtins.toJSON (import ./nix/lib/needs.nix { lib = nixpkgs.lib; })
           );
+          # The id Worker (servers/system/id): sign-in for every box, at
+          # id.<domain>. Static: the page, its script, the site's styles
+          id-worker = pkgs.runCommand "dd-id-worker" { } ''
+            mkdir -p $out
+            cp ${./servers/system/id}/* $out/
+            cp ${./servers/web-shared/home.css} $out/home.css
+            cp ${./servers/web-shared/bar.css} $out/bar.css
+            cp ${./servers/web-shared/favicon.svg} $out/favicon.svg
+            cp ${./servers/web-shared/fonts}/*.woff2 $out/
+          '';
           # The DNS Worker (servers/system/dns): what `dd release publish`
           # uploads as dns.<domain>. Each box's TPM-held key, and the names
           # its own nginx serves over https - all it may have a challenge for;
@@ -1327,6 +1337,7 @@
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
           safe-rd = import ./nix/tests/safe-rd.nix args;
+          sso = import ./nix/tests/sso.nix args;
           dns-worker = import ./nix/tests/dns-worker.nix args;
           # the control plane: relay, witness and three validators, offline
           control = import ./nix/tests/control.nix args;

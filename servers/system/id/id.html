@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in</title>
+  <link rel="icon" type="image/svg+xml" href="/_dd/static/favicon.svg">
+  <link rel="stylesheet" href="/_dd/static/home.css">
+</head>
+<body>
+  <header class="dd-bar" data-public>
+    <div class="bar">
+      <a class="brand" id="brand" href="/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <a id="app" href="/">Get the app</a>
+    </div>
+  </header>
+  <main class="auth">
+    <div class="auth-grid">
+      <section id="signin" hidden>
+        <h1>Sign in</h1>
+        <p class="lead">Use the passkey you made for this network. Only a signature leaves your device.</p>
+        <label for="u">Username</label>
+        <input id="u" autocomplete="username webauthn" autocapitalize="none" spellcheck="false">
+        <button id="go">Sign in with passkey</button>
+        <div id="msg"></div>
+      </section>
+      <section id="busy" hidden>
+        <h1>Signing you in</h1>
+        <p class="lead">One moment.</p>
+      </section>
+      <section id="done" hidden>
+        <h1>Signed in</h1>
+        <p class="lead">You are signed in as <b id="who"></b> in this browser.</p>
+        <a class="btn" id="home" href="/">Go home</a>
+        <button id="out" class="plain">Sign out</button>
+      </section>
+      <section id="gone" hidden>
+        <h1>Signed out</h1>
+        <p class="lead">This browser is signed out. <a id="again" href="/">Sign in again</a></p>
+      </section>
+      <aside id="ways" hidden>
+        <div class="ways">
+          <h2>Other ways in</h2>
+          <div class="way">
+            <span class="what">Someone invited you</span>
+            <p>Make an account with the code they gave you. <a id="join" href="/">Create an account</a></p>
+          </div>
+          <div class="way">
+            <span class="what">You want to look first</span>
+            <p>The demo shows what a member sees, without the keys. <a id="demo" href="/">View the demo</a></p>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <script type="module" src="/_dd/static/id.js"></script>
+</body>
+</html>

@@ -192,6 +192,9 @@ jobs:
       # and the DNS Worker at its API, with the box's helper (nix/tests/dns-worker)
       - name: the DNS Worker
         run: nix build --no-link -L .#checks.x86_64-linux.dns-worker
+      # sign-in once for every box: the gate and the id Worker in a browser (nix/tests/sso)
+      - name: sign-in, once for every box
+        run: nix build --no-link -L .#checks.x86_64-linux.sso
       # and the control plane's relay, witness and validators (nix/tests/control)
       - name: the control plane, end to end
         run: nix build --no-link -L .#checks.x86_64-linux.control
