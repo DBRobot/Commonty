@@ -53,6 +53,12 @@ in
   # who may use the services: comes with the release, checked by every box
   dd.members = builtins.fromJSON (builtins.readFile ../../fleet/members.json);
   dd.verify.releasePublicKey = lib.fileContents ../../fleet/release.pub;
+  # the mail Worker's read key, once `dd mail reader-key` has made one
+  dd.verify.directoryReaders =
+    let
+      mail = lib.importJSON ../../fleet/mail.json;
+    in
+    lib.optional (mail ? reader) mail.reader;
   dd.agent = {
     enable = true;
     url = "https://git.${config.dd.domain}/${config.dd.repo}/raw/branch/releases/current.json";

@@ -117,6 +117,8 @@ struct Remote {
     device: crypto::Device,
     user: String,
     directories: Vec<String>,
+    /// this device's key, for a token per directory: read by members only
+    kp: biscuit_auth::KeyPair,
 }
 
 /// A git command against one git directory. git launched us with GIT_DIR
@@ -206,6 +208,7 @@ impl Remote {
             local_path: base.join("local.json"),
             git_dir,
             device: crypto::Device::from_biscuit(&kp)?,
+            kp,
             user,
             directories,
         })
@@ -287,10 +290,20 @@ impl Remote {
             .build()?;
         let mut best: Option<identity::SignedEntry> = None;
         for d in &self.directories {
-            let Ok(r) = http
-                .get(format!("{}/{}", d.trim_end_matches('/'), self.owner))
-                .send()
-            else {
+            let url = format!("{}/{}", d.trim_end_matches('/'), self.owner);
+            // for directory reads at this host alone
+            let host = reqwest::Url::parse(&url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_lowercase))
+                .unwrap_or_default();
+            let token = auth::device::mint_at(
+                &self.kp,
+                &self.user,
+                std::time::Duration::from_secs(300),
+                Some(identity::DIRECTORY_READ),
+                Some(&host),
+            )?;
+            let Ok(r) = http.get(&url).bearer_auth(token).send() else {
                 continue;
             };
             if !r.status().is_success() {

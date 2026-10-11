@@ -29,19 +29,27 @@ async fn main() -> Result<()> {
     let cfg = verify::Config {
         bind: env_or("VERIFY_BIND", "127.0.0.1:4181").parse()?,
         dir: env("VERIFY_DIR")?.into(),
-        peers: env_or("VERIFY_PEERS", "")
+        house_peers: env_or("VERIFY_HOUSE_PEERS", "")
             .split(',')
             .map(str::trim)
             .filter(|p| !p.is_empty())
             .map(str::to_string)
             .collect(),
-        house_peers: env_or("VERIFY_HOUSE_PEERS", &env_or("VERIFY_PEERS", ""))
+        // what else this box is asked under (its fleet address): a token's
+        // audience must be one of its own names
+        names: env_or("VERIFY_NAMES", "")
             .split(',')
             .map(str::trim)
-            .filter(|p| !p.is_empty())
+            .filter(|n| !n.is_empty())
             .map(str::to_string)
             .collect(),
-        sync_secs: env_or("VERIFY_SYNC_SECS", "300").parse()?,
+        // the mail Worker's key (fleet/mail.json): single entries, never the list
+        directory_readers: env_or("VERIFY_DIRECTORY_READERS", "")
+            .split(',')
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_string)
+            .collect(),
         control: std::env::var("VERIFY_CONTROL")
             .ok()
             .filter(|c| !c.is_empty())

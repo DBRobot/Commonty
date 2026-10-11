@@ -917,7 +917,21 @@
                   );
                 }
               );
+              # fleet/policy.json mailAliases: <alias>@<domain> to a member.
+              # An alias is lowercase a-z, 0-9 and -, never a person's name
+              policy = nixpkgs.lib.importJSON ./fleet/policy.json;
+              aliases = policy.mailAliases or { };
+              people = [ policy.owner ] ++ builtins.attrNames (policy.people or { });
+              badAlias =
+                a: m:
+                builtins.match "[a-z0-9-]{1,64}" a == null
+                || builtins.match "[a-z0-9][a-z0-9._-]{0,63}" m == null
+                || builtins.elem a people
+                || a == m;
+              bad = builtins.attrNames (nixpkgs.lib.filterAttrs badAlias aliases);
             in
+            assert nixpkgs.lib.assertMsg (bad == [ ])
+              "fleet/policy.json mailAliases: not an alias here: ${builtins.concatStringsSep ", " bad}";
             pkgs.runCommand "dd-mail-worker"
               {
                 nativeBuildInputs = [
@@ -935,6 +949,7 @@
                 {
                   echo "export const MEMBERS = $(jq -c . ${./fleet/members.json} | jq -R .);"
                   echo "export const RELEASE = $(tr -d '[:space:]' < ${./fleet/release.pub} | jq -R .);"
+                  echo "export const ALIASES = $(jq -c '.mailAliases // {}' ${./fleet/policy.json});"
                   # each box's TPM-held unlock key, where it has one (unlock.js)
                   echo "export const BOXES = $(jq -c 'with_entries(select(.value.unlockKey) | .value = .value.unlockKey)' ${./fleet/boxes.json});"
                 } > $out/fleet.js
@@ -1341,7 +1356,6 @@
                   dd.box.net = box.net;
                   dd.box.site = box.siteId;
                   dd.box.region = box.regionId;
-                  dd.verify.peers = lib.mapAttrsToList directoryOf (lib.filterAttrs (n: _: n != name) boxes);
                   # the same house's boxes alone: its Wi-Fi and its page
                   dd.verify.housePeers = lib.mapAttrsToList directoryOf (
                     lib.filterAttrs (n: b: n != name && b.siteId == box.siteId) boxes

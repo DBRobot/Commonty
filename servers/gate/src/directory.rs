@@ -4,12 +4,8 @@
 //! already on file, so a box running only this has nothing to lose but the
 //! copies, and a box that wants to lie can only withhold or replay.
 //!
-//! Boxes share it. Each pulls its peers on a timer and runs what arrives
-//! through the same rule a client's PUT gets, so a peer cannot push a
-//! forgery either. The one moment the rule has nothing to check against is a
-//! name this box has never seen, and that is where the peers come in: a
-//! first sight from the network is taken only once this box has pulled every
-//! peer at least once, and only if no peer knows the name under another root.
+//! Boxes share it through the control plane's agreed log; none pulls
+//! another. Reading it takes a credential (docs/dev/gate.md, the directory).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,7 +16,7 @@ use anyhow::{Context, Result};
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -35,12 +31,18 @@ pub struct Directory {
     /// the release key: what signs an invite. None: grants cannot be
     /// checked here and are refused
     release: Option<ed25519_dalek::VerifyingKey>,
-    /// the other boxes' directory urls, e.g. https://files.example/_dd/directory
-    peers: Vec<String>,
     http: reqwest::Client,
-    /// every peer answered a full pull at least once; until then no first
-    /// sight from the network is taken
-    synced: AtomicBool,
+    /// the release's member list; None: everyone with an entry counts
+    members: Option<crate::Members>,
+    /// keys that may read any one entry, never the list: the mail Worker's.
+    /// None configured: single entries are anyone's, as before
+    readers: Vec<String>,
+    /// who a request's credential says it is: the full gate's sessions and
+    /// device tokens. Unset: device tokens alone (identify_token)
+    caller: std::sync::OnceLock<Caller>,
+    /// the names this box answers to, from its configuration: a token for
+    /// any other audience is no token here, whatever Host a request says
+    names: Vec<String>,
     /// held by every write of an entry, from its last check to its rename
     writing: std::sync::Mutex<()>,
     /// where a member's name is dropped when their sessions in the other
@@ -66,11 +68,7 @@ pub struct Listed {
 }
 
 impl Directory {
-    pub fn open(
-        dir: PathBuf,
-        peers: Vec<String>,
-        release: Option<ed25519_dalek::VerifyingKey>,
-    ) -> Result<Self> {
+    pub fn open(dir: PathBuf, release: Option<ed25519_dalek::VerifyingKey>) -> Result<Self> {
         std::fs::create_dir_all(&dir)?;
         let invites = dir
             .parent()
@@ -82,7 +80,6 @@ impl Directory {
             .map(|p| p.join("held"))
             .unwrap_or_else(|| dir.join("held"));
         std::fs::create_dir_all(&held)?;
-        let synced = AtomicBool::new(peers.is_empty());
         Ok(Self {
             ended: std::env::var_os("VERIFY_ENDED").map(PathBuf::from),
             read: Default::default(),
@@ -90,19 +87,20 @@ impl Directory {
             invites,
             held,
             release,
-            peers,
+            members: None,
+            readers: vec![],
+            caller: Default::default(),
+            names: vec![],
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
-            synced,
             writing: std::sync::Mutex::new(()),
             agreed: None,
         })
     }
 
-    /// The directory as the control plane's agreed log has it: no peers,
-    /// no pulls. `control` is dd-control's address on this box, `submit` its
+    /// The directory as the control plane's agreed log has it. `control` is dd-control's address on this box, `submit` its
     /// socket for this box's items, `voters` the boxes whose gates must all
     /// acknowledge a new name before it is anyone's, `me` this box.
     pub fn agreed(
@@ -132,8 +130,6 @@ impl Directory {
             std::fs::rename(&self.dir, &legacy)?;
             std::fs::create_dir_all(&self.dir)?;
         }
-        self.peers.clear();
-        self.synced.store(true, Ordering::Relaxed);
         let migrated = AtomicBool::new(replay.migrated);
         self.agreed = Some(Agreed {
             control,
@@ -394,154 +390,116 @@ impl Directory {
             .filter(|n| self.held(n).is_some())
             .collect()
     }
+}
 
-    /// A first sight from the network: may this box take it? Every peer has
-    /// to answer, and none may hold the name under a different root. A peer
-    /// that holds it under the same root is fine - the client publishes to
-    /// all of them in turn, so that is the normal case.
-    async fn first_sight_allowed(
-        &self,
-        new: &identity::SignedEntry,
-    ) -> std::result::Result<(), (StatusCode, String)> {
-        if !self.synced.load(Ordering::Relaxed) {
-            return Err((
-                StatusCode::SERVICE_UNAVAILABLE,
-                "this box has not yet pulled every peer; new names wait".into(),
-            ));
-        }
-        for p in &self.peers {
-            let url = format!("{}/{}", p.trim_end_matches('/'), new.entry.name);
-            let r = self.http.get(&url).send().await;
-            match r {
-                Ok(r) if r.status() == StatusCode::NOT_FOUND => {}
-                Ok(r) if r.status().is_success() => {
-                    let theirs: identity::SignedEntry = r
-                        .json()
-                        .await
-                        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("peer {p}: {e}")))?;
-                    if theirs.entry.root != new.entry.root {
-                        return Err((
-                            StatusCode::CONFLICT,
-                            format!("{} is already taken (known to {p})", new.entry.name),
-                        ));
-                    }
-                }
-                Ok(r) => {
-                    return Err((
-                        StatusCode::BAD_GATEWAY,
-                        format!("peer {p} answered {}", r.status()),
-                    ));
-                }
-                Err(e) => {
-                    return Err((
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        format!("cannot confirm the name is free: peer {p} unreachable ({e})"),
-                    ));
-                }
-            }
-        }
-        Ok(())
+/// who a request's credential names, if it names anyone this box believes
+pub type Caller = Box<dyn Fn(&HeaderMap) -> Option<String> + Send + Sync>;
+
+impl Directory {
+    pub fn with_members(mut self, members: Option<crate::Members>) -> Self {
+        self.members = members;
+        self
     }
 
-    /// One pull of one peer: everything it has that is newer than ours,
-    /// through the accept rule.
-    async fn pull(&self, peer: &str) -> Result<usize> {
-        let base = peer.trim_end_matches('/');
-        let listed: Vec<Listed> = self
-            .http
-            .get(base)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await
-            .context("listing")?;
-        let mut taken = 0;
-        for l in listed {
-            if !identity::valid_name(&l.name) {
-                continue;
-            }
-            let ours = self.entry(&l.name)?;
-            if ours.as_ref().is_some_and(|o| o.entry.version >= l.version) {
-                continue;
-            }
-            let theirs: identity::SignedEntry = self
-                .http
-                .get(format!("{base}/{}", l.name))
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-            if theirs.entry.name != l.name || guest_expired(&theirs.entry) {
-                continue;
-            }
-            if let Some(g) = &theirs.entry.grant {
-                let ok = self
-                    .release
-                    .as_ref()
-                    .is_some_and(|r| identity::verify_grant(&theirs.entry, r).is_ok())
-                    && !self.grant_taken(&g.invite.invite.public_key, &theirs.entry.root);
-                if !ok {
-                    eprintln!("directory: refused {} from {peer}: grant", l.name);
-                    continue;
-                }
-            }
-            if let Err(e) = self.claims_free(&theirs) {
-                eprintln!("directory: refused {} from {peer}: {e}", l.name);
-                continue;
-            }
-            // A name this box has never seen, on one peer's word: the same
-            // agreement a sign-up gets - every peer answers, and none holds
-            // the name under another root. Without it a peer that lies can
-            // seed a new box with `david` under its own root before an
-            // honest peer is asked, and the accept rule then refuses the
-            // real one for good, because by then it is a different root.
-            if ours.is_none()
-                && let Err((_, why)) = self.first_sight_allowed(&theirs).await
-            {
-                eprintln!("directory: not yet taking {} from {peer}: {why}", l.name);
-                continue;
-            }
-            match identity::accept(ours.as_ref(), &theirs)
-                .map_err(|e| e.to_string())
-                .and_then(|()| self.commit(&theirs, |_| Ok(())).map_err(|(_, why)| why))
-            {
-                Ok(()) => {
-                    taken += 1;
-                    eprintln!(
-                        "directory: {} version {} from {peer}",
-                        theirs.entry.name, theirs.entry.version
-                    );
-                }
-                Err(e) => eprintln!("directory: refused {} from {peer}: {e}", l.name),
-            }
-        }
-        Ok(taken)
+    pub fn with_readers(mut self, readers: Vec<String>) -> Self {
+        self.readers = readers;
+        self
     }
 
-    /// Forever: pull every peer, every `every` seconds. The first time every
-    /// peer has answered, the box starts taking new names from the network.
-    pub async fn sync_forever(self: Arc<Self>, every: u64) {
-        if self.peers.is_empty() {
-            return;
+    pub fn with_names(mut self, names: Vec<String>) -> Self {
+        self.names = names;
+        self
+    }
+
+    /// Where a token is being used, for its audience check: the name the
+    /// request was asked under when that is one of this box's own, and
+    /// otherwise none, which no audience matches. The header picks among
+    /// the configured names; it never adds one.
+    pub fn here(&self, headers: &HeaderMap) -> String {
+        let asked = crate::asked_host(headers);
+        if self.names.iter().any(|n| *n == asked) {
+            asked
+        } else {
+            String::new()
         }
-        let mut ok = vec![false; self.peers.len()];
-        loop {
-            for (i, p) in self.peers.iter().enumerate() {
-                match self.pull(p).await {
-                    Ok(_) => ok[i] = true,
-                    Err(e) => eprintln!("directory: pull from {p} failed: {e:#}"),
-                }
-            }
-            if ok.iter().all(|b| *b) && !self.synced.swap(true, Ordering::Relaxed) {
-                eprintln!("directory: every peer pulled once; new names accepted from now");
-                // the names this round had to leave, now that they can be
-                // checked: at once, not a whole interval later
-                continue;
-            }
-            tokio::time::sleep(Duration::from_secs(every)).await;
+    }
+
+    /// the full gate's way of telling who a request is (App::identify_how)
+    pub fn set_caller(&self, c: Caller) {
+        let _ = self.caller.set(c);
+    }
+
+    /// On the release's list (or let in by a code the owner signed), and not
+    /// revoked. With no list, anyone with an entry.
+    pub fn member(&self, name: &str) -> bool {
+        let Some(e) = self.entry(name).ok().flatten() else {
+            return false;
+        };
+        let Some(m) = &self.members else {
+            return true;
+        };
+        let id = identity::member_id(&e.entry.root);
+        if m.revoked.contains(&id) {
+            return false;
         }
+        m.members.contains(&id)
+            || (e.entry.grant.is_some()
+                && self
+                    .release()
+                    .is_some_and(|r| identity::verify_grant(&e.entry, r).is_ok()))
+    }
+
+    fn identify(&self, headers: &HeaderMap) -> Option<String> {
+        match self.caller.get() {
+            Some(c) => c(headers),
+            None => {
+                let tok = crate::bearer(headers)?;
+                crate::verify_device_token(
+                    |u| self.entry(u),
+                    tok,
+                    crate::read_operation(tok),
+                    &self.here(headers),
+                )
+                .ok()
+                .map(|(u, _)| u)
+            }
+        }
+    }
+
+    /// May this request read the list (`name` None) or one entry? The list
+    /// is members'. An entry is a member's to read, its owner's, a holder's
+    /// of a key in it (root, paper key, a device), or a reader key's; and
+    /// anyone's while no reader key is configured.
+    pub fn may_read(&self, headers: &HeaderMap, name: Option<&str>) -> bool {
+        if let Some(u) = self.identify(headers)
+            && (name == Some(u.as_str()) || self.member(&u))
+        {
+            return true;
+        }
+        let Some(name) = name else { return false };
+        if self.readers.is_empty() {
+            return true;
+        }
+        let now = identity::now();
+        let proven: Vec<String> = headers
+            .get_all(identity::READ_PROOF_HEADER)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .filter_map(|v| identity::check_read_proof(v, name, now))
+            .collect();
+        if proven.is_empty() {
+            return false;
+        }
+        if proven.iter().any(|k| self.readers.contains(k)) {
+            return true;
+        }
+        let Some(e) = self.entry(name).ok().flatten() else {
+            return false;
+        };
+        let e = &e.entry;
+        proven.iter().any(|k| {
+            *k == e.root || *k == e.recovery || e.devices.iter().any(|d| d.public_key == *k)
+        })
     }
 }
 
@@ -553,7 +511,15 @@ pub fn router(d: Arc<Directory>) -> Router {
         .with_state(d)
 }
 
-async fn list(State(d): State<Arc<Directory>>) -> Response {
+/// 401 whether or not the name exists: a refusal says nothing about it
+fn refused() -> Response {
+    (StatusCode::UNAUTHORIZED, "the directory is for members").into_response()
+}
+
+async fn list(State(d): State<Arc<Directory>>, headers: HeaderMap) -> Response {
+    if !d.may_read(&headers, None) {
+        return refused();
+    }
     match d.list() {
         Ok(l) => Json(l).into_response(),
         Err(e) => {
@@ -563,10 +529,16 @@ async fn list(State(d): State<Arc<Directory>>) -> Response {
     }
 }
 
-/// Public: an entry holds only public keys.
-async fn get_entry(State(d): State<Arc<Directory>>, Path(name): Path<String>) -> Response {
+async fn get_entry(
+    State(d): State<Arc<Directory>>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Response {
     if !identity::valid_name(&name) {
         return StatusCode::BAD_REQUEST.into_response();
+    }
+    if !d.may_read(&headers, Some(&name)) {
+        return refused();
     }
     match d.entry(&name) {
         Ok(Some(e)) => Json(e).into_response(),
@@ -775,8 +747,7 @@ impl Directory {
         Ok(())
     }
 
-    /// The one way in: the accept rule, then the peers for a new name,
-    /// then the store. Used by the PUT from `dd` and by the browser join.
+    /// The one way in: the accept rule, then the store (or the log). Used by the PUT from `dd` and by the browser join.
     pub(crate) async fn admit(
         &self,
         signed: identity::SignedEntry,
@@ -797,12 +768,6 @@ impl Directory {
         if let Err(e) = self.claims_free(&signed) {
             eprintln!("directory: refused update for {name}: {e}");
             return Err((StatusCode::CONFLICT, e));
-        }
-        if existing.is_none()
-            && let Err((status, why)) = self.first_sight_allowed(&signed).await
-        {
-            eprintln!("directory: refused new name {name}: {why}");
-            return Err((status, why));
         }
         if self.agreed.is_some() {
             return self.through_the_log(Item::Entry(Box::new(signed))).await;
@@ -1281,7 +1246,7 @@ mod tests {
     #[test]
     fn an_entry_changed_on_disk_is_read_again() {
         let dir = scratch("cache");
-        let d = Directory::open(dir.clone(), vec![], None).unwrap();
+        let d = Directory::open(dir.clone(), None).unwrap();
         let k = generate();
         let write = |v| {
             let e = sign(entry("ann", &k, &[], v), &k).unwrap();
@@ -1320,7 +1285,7 @@ mod tests {
     #[tokio::test]
     async fn a_sign_up_without_a_code_is_held_and_not_published() {
         let dir = scratch("held");
-        let d = Directory::open(dir.clone(), vec![], None).unwrap();
+        let d = Directory::open(dir.clone(), None).unwrap();
         let eve = generate();
         let held = sign(entry("eve", &eve, &[], 1), &eve).unwrap();
 
@@ -1369,7 +1334,7 @@ mod tests {
     #[tokio::test]
     async fn a_library_belongs_to_whoever_claimed_it_first() {
         let dir = scratch("claims");
-        let d = Directory::open(dir.clone(), vec![], None).unwrap();
+        let d = Directory::open(dir.clone(), None).unwrap();
         let hers = "a996a28ca51c9cf1d3f8e2038c8339c8";
         let his = "b0071e4bd2c34aa19d5e6f7081c2d3e4";
 
@@ -1407,7 +1372,7 @@ mod tests {
     #[tokio::test]
     async fn a_write_follows_what_landed_while_it_waited() {
         let dir = scratch("race");
-        let d = Directory::open(dir.clone(), vec![], None).unwrap();
+        let d = Directory::open(dir.clone(), None).unwrap();
         let sarah = generate();
         d.admit(sign(entry("sarah", &sarah, &[], 1), &sarah).unwrap())
             .await
@@ -1433,7 +1398,7 @@ mod tests {
     /// a gate in agreed mode, its log fed by hand
     fn agreed_box(what: &str, me: &str) -> Directory {
         let dir = scratch(what);
-        Directory::open(dir.join("directory"), vec![], None)
+        Directory::open(dir.join("directory"), None)
             .unwrap()
             .agreed(
                 "http://127.0.0.1:1".into(),

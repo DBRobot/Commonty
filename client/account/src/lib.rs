@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result, bail};
 use auth::KeyStore;
-use directory::{Took, fetch, newest};
+use directory::{Took, fetch, fetch_proven, newest};
 use identity::{Device, Entry, SignedEntry};
 
 /// keyring account holding the name the device key signs for
@@ -81,6 +81,30 @@ pub async fn redeem(dirs: &[String], code: &str, root_public: &str) -> Result<id
     })
 }
 
+/// This device's token for reading the directory at `host`, if it has a
+/// name and a key: good for directory reads there and nothing else, for
+/// five minutes, so one sent to the wrong host opens nothing.
+pub fn read_token(keys: &impl KeyStore, host: &str) -> Option<String> {
+    let user = keys.get(USER).ok()??;
+    let kp = auth::device::load(keys).ok()??;
+    auth::device::mint_at(
+        &kp,
+        &user,
+        std::time::Duration::from_secs(300),
+        Some(identity::DIRECTORY_READ),
+        Some(host),
+    )
+    .ok()
+}
+
+/// every directory read from here on carries this device's read token: the
+/// directory is members' to read, and each member's own
+pub fn read_as_device<S: KeyStore + 'static>(open: impl Fn() -> S + Send + Sync + 'static) {
+    directory::read_with(Some(std::sync::Arc::new(move |host: &str| {
+        read_token(&open(), host)
+    })));
+}
+
 pub fn load_root(keys: &impl KeyStore) -> Result<Option<ed25519_dalek::SigningKey>> {
     match keys.get(ROOT)? {
         Some(s) => Ok(Some(identity::decode_secret(&s)?)),
@@ -130,14 +154,20 @@ pub async fn create(
     if !identity::valid_name(name) {
         bail!("{name:?} is not a valid name: lowercase letters, digits, - _ .");
     }
+    let taken = || {
+        format!(
+            "there is already an entry for {name}. If it is yours, `dd identity import` \
+             the root here or `dd identity recover` with the paper key."
+        )
+    };
+    // a directory that does not show strangers its entries cannot say; the
+    // publish below is refused for a name someone holds
     let found = fetch(dirs, name).await;
     for (d, r) in &found {
         match r {
-            Ok(Some(_)) => bail!(
-                "{d} already has an entry for {name}. If it is yours, `dd identity import` \
-                 the root here or `dd identity recover` with the paper key."
-            ),
+            Ok(Some(_)) => bail!("{d}: {}", taken()),
             Ok(None) => {}
+            Err(e) if e.to_string().starts_with("401") => {}
             Err(e) => bail!("{d}: {e} - not creating an identity blind"),
         }
     }
@@ -160,7 +190,14 @@ pub async fn create(
         updated: identity::now(),
     };
     let signed = identity::sign(entry, &root)?;
-    publish(dirs, &signed).await?;
+    publish(dirs, &signed).await.map_err(|e| {
+        let why = format!("{e:#}");
+        if why.contains("refused") || why.contains("taken") {
+            anyhow::anyhow!("{why}\n{}", taken())
+        } else {
+            e
+        }
+    })?;
     keys.set(ROOT, &identity::encode_secret(&root))?;
     Ok(identity::encode_secret(&recovery))
 }
@@ -173,7 +210,7 @@ pub async fn ours(
     name: &str,
     root: &ed25519_dalek::SigningKey,
 ) -> Result<SignedEntry> {
-    let found = fetch(dirs, name).await;
+    let found = fetch_proven(dirs, name, &[root]).await;
     // verified, and the directories have to agree - but not that the root
     // is the one in hand. After a recovery run elsewhere this machine's
     // root is legitimately the old one, and finding that out is part of
@@ -330,7 +367,7 @@ pub async fn recover(
     kp: &auth::device::KeyPair,
 ) -> Result<zeroize::Zeroizing<String>> {
     let recovery = identity::decode_secret(recovery_secret).context("bad recovery key")?;
-    let found = fetch(dirs, name).await;
+    let found = fetch_proven(dirs, name, &[&recovery]).await;
     // Verified, and every directory asked has to agree about whose root
     // this name has. What follows reseals library keys out of this entry
     // and co-signs the result with the real recovery key, so a made-up one

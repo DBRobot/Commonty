@@ -62,7 +62,8 @@ async function go() {
     for (let i = 0; i < 90; i++) {
       await new Promise(res => setTimeout(res, 2000));
       try {
-        const e = await fetch('/_dd/directory/' + encodeURIComponent(user));
+        // the enrol link's token reads its own entry; nobody else's
+        const e = await fetch('/_dd/directory/' + encodeURIComponent(user), { headers: auth });
         if (!e.ok) continue;
         const entry = (await e.json()).entry;
         if ((entry.passkeys || []).some(p => p.id === id)) {

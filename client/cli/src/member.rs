@@ -103,14 +103,10 @@ pub async fn list(repo: &str, dirs: &[String]) -> Result<()> {
     let mut names = std::collections::HashMap::new();
     let mut invited = Vec::new();
     if let Some(d) = dirs.first()
-        && let Ok(h) = crate::who::http()
-        && let Ok(r) = h.get(d.trim_end_matches('/')).send().await
-        && let Ok(listed) = r.json::<Vec<serde_json::Value>>().await
+        && let Ok(listed) = directory::names(d.trim_end_matches('/')).await
     {
-        for l in listed {
-            if let Some(n) = l["name"].as_str()
-                && let Some(e) = crate::who::newest(&crate::who::fetch(&dirs[..1], n).await)
-            {
+        for n in &listed {
+            if let Some(e) = crate::who::newest(&crate::who::fetch(&dirs[..1], n).await) {
                 let id = identity::member_id(&e.entry.root);
                 names.insert(id.clone(), n.to_string());
                 if let Some(g) = &e.entry.grant {

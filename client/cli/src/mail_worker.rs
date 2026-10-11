@@ -31,6 +31,10 @@ pub struct Setup {
     pub zone: String,
     pub kv: String,
     pub script: String,
+    /// the public half of the Worker's directory read key (`dd mail
+    /// reader-key`): boxes show single entries to it and to no stranger
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reader: Option<String>,
 }
 
 pub(crate) fn token(keys: &impl auth::KeyStore) -> Result<String> {
@@ -153,6 +157,45 @@ async fn upload(http: &reqwest::Client, token: &str, s: &Setup, dir: &Path) -> R
     Ok(names.len())
 }
 
+/// A fresh read key: the secret straight to the Worker as DIRECTORY_KEY,
+/// kept nowhere else; the public half back, for fleet/mail.json.
+async fn put_reader_key(http: &reqwest::Client, token: &str, account: &str) -> Result<String> {
+    let key = identity::generate();
+    call(
+        http,
+        token,
+        reqwest::Method::PUT,
+        &format!("/accounts/{account}/workers/scripts/{SCRIPT}/secrets"),
+        Some(serde_json::json!({
+            "name": "DIRECTORY_KEY",
+            "text": identity::encode_secret(&key).as_str(),
+            "type": "secret_text",
+        })),
+    )
+    .await?;
+    Ok(identity::encode_public(&key.verifying_key()))
+}
+
+/// `dd mail reader-key`: a new read key for the Worker that is set up
+/// already. The old one stops at the release that names the new one.
+pub async fn reader_key(root: &Path, keys: &impl auth::KeyStore) -> Result<()> {
+    let Some(mut s) = read_setup(root)? else {
+        bail!("no mail Worker set up yet - `dd mail setup`");
+    };
+    let token = token(keys)?;
+    s.reader = Some(put_reader_key(&reqwest::Client::new(), &token, &s.account).await?);
+    std::fs::write(
+        root.join("fleet/mail.json"),
+        serde_json::to_string_pretty(&s)? + "\n",
+    )?;
+    eprintln!(
+        "== the Worker signs its directory reads with the new key; fleet/mail.json names it.\n\
+         Commit it and publish a release: from then on the boxes show an entry to\n\
+         members, its own keys and the Worker, and to nobody else."
+    );
+    Ok(())
+}
+
 /// Upload the Worker the release at `ref` carries. Nothing to do before
 /// `dd mail setup` has been run.
 pub async fn deploy(root: &Path, keys: &impl auth::KeyStore, r#ref: &str) -> Result<()> {
@@ -233,6 +276,7 @@ pub async fn setup(
         zone: zone_id.clone(),
         kv,
         script: SCRIPT.to_string(),
+        reader: None,
     };
     std::fs::write(
         root.join("fleet/mail.json"),
@@ -277,6 +321,13 @@ pub async fn setup(
     )
     .await?;
     eprintln!("== the Worker has its secrets");
+    let mut s = s;
+    s.reader = Some(put_reader_key(&http, &token, &account).await?);
+    std::fs::write(
+        root.join("fleet/mail.json"),
+        serde_json::to_string_pretty(&s)? + "\n",
+    )?;
+    eprintln!("== the Worker has its directory read key; fleet/mail.json names it");
 
     call(
         &http,

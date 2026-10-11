@@ -470,6 +470,10 @@ enum MailCmd {
         #[arg(long, default_value = "main")]
         r#ref: String,
     },
+    /// A new key for the Worker's directory reads: the secret to the Worker
+    /// alone, the public half into fleet/mail.json, which a release takes to
+    /// every box. From that release on, no entry is anyone else's to read.
+    ReaderKey,
 }
 
 #[derive(Subcommand)]
@@ -563,6 +567,7 @@ fn seal_for_passkeys(keys: &impl auth::KeyStore, repo: &str, password: &str) -> 
                 "https://home.{domain}/_dd/directory/{}",
                 user.as_str()
             ))
+            .bearer_auth(&token)
             .send()
             .await?
             .error_for_status()?
@@ -841,6 +846,8 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let keys = auth::open(&service());
+    // the directory is members' to read: every read says which device asks
+    account::read_as_device(|| auth::open(&service()));
 
     match cli.command {
         Command::Signup {
@@ -1112,7 +1119,7 @@ async fn main() -> Result<()> {
                 if let Some(m) = &mine {
                     println!("member id:   {}", identity::member_id(m));
                 }
-                for (d, r) in who::fetch(&directories, &name).await {
+                for (d, r) in who::fetch_ours(&keys, &directories, &name).await? {
                     match r {
                         Ok(None) => println!("{d}: no entry"),
                         Err(e) => println!("{d}: unreachable ({e})"),
@@ -1147,7 +1154,7 @@ async fn main() -> Result<()> {
                     .get(USER)?
                     .context("no name here - `dd identity new` or `dd identity import`")?
                     .to_string();
-                let found = who::fetch(&directories, &name).await;
+                let found = who::fetch_ours(&keys, &directories, &name).await?;
                 let newest = directory::resolve(&found, directory::Anchor::FirstSight)
                     .context("no directory has a usable entry")?;
                 let behind: Vec<String> = found
@@ -1205,6 +1212,7 @@ async fn main() -> Result<()> {
                     mail_worker::setup(&root, &keys, &domain, &r#ref).await?
                 }
                 MailCmd::Deploy { r#ref } => mail_worker::deploy(&root, &keys, &r#ref).await?,
+                MailCmd::ReaderKey => mail_worker::reader_key(&root, &keys).await?,
             }
         }
 

@@ -67,24 +67,27 @@ in
     default = "full";
     description = "full: auth_request for the services on this box plus the directory; directory: the directory alone, on the tailnet.";
   };
-  # The other boxes' directories. Pulled every five minutes through the same
-  # accept rule a client's update gets; a new name from the network is taken
-  # only once every peer has been pulled and none knows it under another
-  # root. A box with no peers is on its own and takes new names at once.
-  options.dd.verify.syncSeconds = lib.mkOption {
-    type = lib.types.int;
-    default = 300;
-    description = "How often a box pulls its peers' directories. Tests set it low.";
+  # The mail Worker's directory read key (fleet/mail.json reader): single
+  # entries are shown to it; to nobody else without a credential. Empty: a
+  # single entry is anyone's, until the Worker has its key.
+  options.dd.verify.directoryReaders = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    description = "Base64 ed25519 public keys that may read any one directory entry, never the list (the mail Worker's).";
+  };
+  # What a token's audience may name here, besides the domain's own hosts:
+  # the box's address on the fleet's network, where `dd` asks a directory
+  # box. A Host header adds nothing to it (servers/gate directory.rs here).
+  options.dd.verify.names = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = lib.optional (config.dd.box.net or "" != "") config.dd.box.net;
+    defaultText = lib.literalExpression "[ config.dd.box.net ]";
+    description = "Extra names this box answers to, for device tokens' audience (VERIFY_NAMES).";
   };
   options.dd.verify.housePeers = lib.mkOption {
     type = lib.types.listOf lib.types.str;
     default = [ ];
     description = "the other boxes in this house (same site), as directory urls: a Wi-Fi change is relayed to them";
-  };
-  options.dd.verify.peers = lib.mkOption {
-    type = lib.types.listOf lib.types.str;
-    default = [ ];
-    description = "Directory urls of the other boxes, e.g. https://files.example/_dd/directory.";
   };
   # Every box in the fleet. Settings' Network tab and the Git page show each one's
   # facts as thanos on this box gathered them; no box is asked by another
@@ -313,14 +316,14 @@ in
           else
             "0.0.0.0:${toString port}";
         VERIFY_DIR = "/var/lib/dd-verify/keys";
-        VERIFY_PEERS = lib.optionalString (!agreed) (lib.concatStringsSep "," cfg.peers);
         # the house's own boxes, for its Wi-Fi and its page; never the fleet
         VERIFY_HOUSE_PEERS = lib.concatStringsSep "," cfg.housePeers;
         VERIFY_FLEET = builtins.toJSON cfg.fleet;
         # every box's facts, from thanos on this box (servers/gate/src/fleet.rs)
         VERIFY_THANOS = lib.optionalString (config.services.thanos.query.enable or false
         ) "http://${config.services.thanos.query.http-address}";
-        VERIFY_SYNC_SECS = toString cfg.syncSeconds;
+        VERIFY_DIRECTORY_READERS = lib.concatStringsSep "," cfg.directoryReaders;
+        VERIFY_NAMES = lib.concatStringsSep "," cfg.names;
       }
       # the directory as the control plane's agreed log
       // lib.optionalAttrs agreed {
@@ -527,9 +530,9 @@ in
                   proxy_set_header Content-Length "";
                   proxy_set_header X-Original-URI $request_uri;
                   # the demo's leash is held in the verifier: it needs the
-                  # method and, via Host, where the request was going
+                  # method and, via X-Original-Host (strip-cookie.nix sets it
+                  # on every gate location), where the request was going
                   proxy_set_header X-Original-Method $request_method;
-                  proxy_set_header X-Original-Host $host;
                   # The subrequest inherits nothing from the location that
                   # made it, so it ran with nginx's default 1m body limit.
                   # When a large PUT was still arriving as the auth phase ran,

@@ -51,6 +51,17 @@ with sync_playwright() as p:
     ok(any(r['actions'][0]['value'] == ['first@example.com'] and r['matchers'][0]['value'] == 'tester@commonty.test' for r in st['rules'].values()), 'rule forwards tester@ to it')
     fake('/verify', {'email': 'first@example.com'})
     pg.wait_for_url('**/_dd/settings?email=changed', timeout=15000); ok(True, 'moved on by itself once opened -> ' + pg.url)
+    # the aliases, kept in step by that same look: security@ to the confirmed
+    # address; the dropped one gone; a member's own rule and refused aliases untouched
+    def rules_to(addr):
+        return [r for r in fake('/state')['rules'].values() if r['matchers'][0]['value'] == addr]
+    sec = rules_to('security@commonty.test')
+    ok(len(sec) == 1 and sec[0]['actions'][0]['value'] == ['first@example.com'] and sec[0]['name'] == 'Commonty alias security', f'security@ forwards to the confirmed address {sec}')
+    ok(not rules_to('old@commonty.test'), 'a dropped alias loses its rule')
+    other = rules_to('other@commonty.test')
+    ok(len(other) == 1 and other[0]['actions'][0]['value'] == ['other@example.com'], 'a member\'s own rule is never touched')
+    ok(all(r['name'].startswith('Commonty member') for r in rules_to('tester@commonty.test')), 'an alias that is a member\'s name is refused')
+    ok(not rules_to('Bad.One@commonty.test'), 'an alias that is no alias is refused')
     # the email line, signed in here already
     pg.goto(f'{W}/row?name=tester&back={back}'); settled(pg)
     ok(pg.inner_text('#addr') == 'first@example.com' and pg.inner_text('#status') == 'Confirmed', 'email line shows address: ' + pg.inner_text('.er'))
@@ -91,6 +102,11 @@ with sync_playwright() as p:
     s, _, ck = call('/api/login', {'token': c['token'], 'id': 'cGsx', 'assertion': sign(c['challenge'])}); ok(s == 200 and ck, 'a right answer signs in')
     sess = ck.split(';')[0]
     ok(call('/api/me', cookie=sess)[1].get('email') == 'second@example.com', 'session reads the address')
+    # second@ is not confirmed yet: security@ forwards nowhere rather than to the old one
+    ok(not rules_to('security@commonty.test'), 'an unconfirmed address takes no alias')
+    fake('/verify', {'email': 'second@example.com'}); call('/api/me', cookie=sess)
+    sec = rules_to('security@commonty.test')
+    ok(len(sec) == 1 and sec[0]['actions'][0]['value'] == ['second@example.com'], f'confirmed, security@ follows it {sec}')
     forged = sess[:-2] + ('AA' if not sess.endswith('AA') else 'BB')
     ok(call('/api/me', cookie=forged)[0] == 401, 'forged session: refused')
     # a box replaying an old entry after a newer one was seen

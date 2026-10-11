@@ -5,13 +5,17 @@
 // their passkey, checked against their own signed entry (dd_mail.wasm, the
 // boxes' code) and the member list the release was signed with (fleet.js).
 //
+// It also keeps the release's aliases (fleet/policy.json mailAliases, in
+// fleet.js): <alias>@<domain> forwards to that member's confirmed address.
+//
 // Bindings: CF_TOKEN (secret: Email Routing, this zone), SESSION_KEY
-// (secret), PINNED (KV: the newest entry accepted per name), DOMAIN. A
+// (secret), DIRECTORY_KEY (secret: the directory's read key, `dd mail
+// reader-key`), PINNED (KV: the newest entry accepted per name), DOMAIN. A
 // local test also sets CF_API, DIRECTORY and ORIGIN; deployed, they are unset.
 
-import { initSync, admit, login } from './dd_mail.js';
+import { initSync, admit, login, readProof } from './dd_mail.js';
 import wasm from './dd_mail_bg.wasm';
-import { MEMBERS, RELEASE } from './fleet.js';
+import { MEMBERS, RELEASE, ALIASES } from './fleet.js';
 import { boxApi, memberApi } from './unlock.js';
 import boxesHtml from './boxes.html';
 import boxesJs from './boxes.js';
@@ -131,7 +135,9 @@ const opened = async (env, v) => {
 // The member's entry, as the directory has it, held to the newest this
 // Worker has accepted. Throws for a name that is not a member.
 async function entry(env, name) {
-  const r = await fetch(`${env.DIRECTORY || `https://home.${env.DOMAIN}/_dd/directory/`}${encodeURIComponent(name)}`);
+  // the boxes show an entry to the key the release names (fleet/mail.json)
+  const headers = env.DIRECTORY_KEY ? { 'x-dd-key-proof': readProof(env.DIRECTORY_KEY, name, now()) } : {};
+  const r = await fetch(`${env.DIRECTORY || `https://home.${env.DOMAIN}/_dd/directory/`}${encodeURIComponent(name)}`, { headers });
   if (!r.ok) throw new Error('no such member');
   const pinned = await env.PINNED.get(`entry:${name}`);
   const take = admit(name, await r.text(), pinned ?? undefined, MEMBERS, RELEASE);
@@ -197,12 +203,70 @@ async function state(env, name) {
 const SHARED = 60 * 1000;
 let shared = null;
 async function sharedState(env, name) {
-  if (!shared || Date.now() - shared.at > SHARED) shared = { at: Date.now(), ...(await lists(env)) };
+  if (!shared || Date.now() - shared.at > SHARED) {
+    shared = { at: Date.now(), ...(await lists(env)) };
+    await keepAliases(env, shared);
+  }
   const s = stateIn(shared, env, name);
   return { forwarding: !!s.rule, confirmed: s.confirmed };
 }
 
+// An alias's rule is named so, and only rules named so are an alias's: a
+// member's own rule ("Commonty member <name>") is never touched here.
+const ALIAS = /^[a-z0-9-]{1,64}$/;
+const ALIAS_RULE = 'Commonty alias ';
+const aliasOf = (r) => (r.name || '').startsWith(ALIAS_RULE) ? r.name.slice(ALIAS_RULE.length) : null;
+const isAlias = (name) => Object.prototype.hasOwnProperty.call(ALIASES || {}, name);
+
+// a name that is a member's: one this Worker has pinned an entry for, or
+// with a member's rule of its own
+async function memberName(env, l, name) {
+  if (await env.PINNED.get(`entry:${name}`)) return true;
+  return l.rules.some((r) => (r.name || '') === `Commonty member ${name}`);
+}
+
+// Every alias the release names forwards to its member's confirmed address,
+// and no other alias rule is left. `l`: lists already read.
+async function syncAliases(env, l) {
+  const z = await zone(env);
+  const want = {};
+  for (const [alias, member] of Object.entries(ALIASES || {})) {
+    if (!ALIAS.test(alias) || !NAME.test(member || '') || alias === member) continue;
+    if (await memberName(env, l, alias)) continue;
+    const s = stateIn(l, env, member);
+    if (s.confirmed && s.email) want[alias] = s.email;
+  }
+  for (const r of l.rules) {
+    const a = aliasOf(r);
+    if (a === null) continue;
+    const to = want[a];
+    const right = to && (r.matchers || []).some((m) => m.field === 'to' && m.value === `${a}@${env.DOMAIN}`) && same(target(r), to);
+    if (right) { delete want[a]; continue; }
+    if (to) {
+      await cf(env, 'PUT', `/zones/${z.id}/email/routing/rules/${r.id}`, aliasRule(env, a, to));
+      delete want[a];
+    } else {
+      await cf(env, 'DELETE', `/zones/${z.id}/email/routing/rules/${r.id}`);
+    }
+  }
+  for (const [a, to] of Object.entries(want)) {
+    await cf(env, 'POST', `/zones/${z.id}/email/routing/rules`, aliasRule(env, a, to));
+  }
+}
+const aliasRule = (env, alias, to) => ({
+  name: `${ALIAS_RULE}${alias}`,
+  enabled: true,
+  matchers: [{ type: 'literal', field: 'to', value: `${alias}@${env.DOMAIN}` }],
+  actions: [{ type: 'forward', value: [to] }],
+});
+// kept in step on reads already made; a failure waits for the next one
+async function keepAliases(env, l) {
+  try { await syncAliases(env, l); } catch (err) { console.log(`aliases: ${err.message || err}`); }
+}
+
 async function setEmail(env, name, email) {
+  // an alias's address is the alias's, not a member's of that name
+  if (isAlias(name)) throw new Error('that name is an alias of the fleet\'s; it has no address of its own');
   const z = await zone(env);
   const l = await lists(env);
   const before = stateIn(l, env, name);
@@ -290,7 +354,9 @@ async function api(req, env, path, sent) {
   const me = await session(req, env);
   if (!me) return json({ error: 'confirm it is you first' }, 401);
   if (req.method === 'GET' && path === '/api/me') {
-    const s = await state(env, me.n);
+    const l = await lists(env);
+    const s = stateIn(l, env, me.n);
+    await keepAliases(env, l);
     return json({ name: me.n, email: s.email, confirmed: s.confirmed, fresh: now() - (me.p || 0) < FRESH });
   }
   // the boxes' disks: which are waiting to be let in, and the stolen switch

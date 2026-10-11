@@ -715,8 +715,62 @@ pub fn now() -> u64 {
         .unwrap_or(0)
 }
 
+/// the purpose of a device token minted for directory reads alone: no other
+/// route takes it, and it names the one host it is for
+pub const DIRECTORY_READ: &str = "directory-read";
+
+/// the header a directory read carries a key's proof in (docs/dev/gate.md)
+pub const READ_PROOF_HEADER: &str = "x-dd-key-proof";
+/// how far a proof's time may be from the box's clock, either way
+pub const READ_PROOF_SKEW: u64 = 300;
+
+fn read_proof_bytes(name: &str, at: u64) -> Vec<u8> {
+    format!("dd-directory-read\n{name}\n{at}").into_bytes()
+}
+
+/// `<public key>.<at>.<signature>`: this key asks for `name`'s entry at `at`
+pub fn read_proof(key: &SigningKey, name: &str, at: u64) -> String {
+    let sig: Signature = key.sign(&read_proof_bytes(name, at));
+    format!(
+        "{}.{at}.{}",
+        encode_public(&key.verifying_key()),
+        B64.encode(sig.to_bytes())
+    )
+}
+
+/// The public key that made `proof` for `name`, if it did and `now` is
+/// within the skew of when it says it did.
+pub fn check_read_proof(proof: &str, name: &str, now: u64) -> Option<String> {
+    let mut parts = proof.trim().split('.');
+    let (public, at, sig) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    let at: u64 = at.parse().ok()?;
+    if at.abs_diff(now) > READ_PROOF_SKEW {
+        return None;
+    }
+    let key = decode_public(public).ok()?;
+    let sig = Signature::from_slice(&B64.decode(sig).ok()?).ok()?;
+    key.verify(&read_proof_bytes(name, at), &sig).ok()?;
+    Some(public.to_string())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_read_proof_is_for_one_name_and_a_short_while() {
+        let k = super::generate();
+        let me = super::encode_public(&k.verifying_key());
+        let p = super::read_proof(&k, "sarah", 1000);
+        assert_eq!(super::check_read_proof(&p, "sarah", 1100), Some(me));
+        assert_eq!(super::check_read_proof(&p, "tom", 1100), None);
+        assert_eq!(super::check_read_proof(&p, "sarah", 1000 + 301), None);
+        let forged = p.replace(".1000.", ".1001.");
+        assert_eq!(super::check_read_proof(&forged, "sarah", 1000), None);
+        assert_eq!(super::check_read_proof("x.y", "sarah", 1000), None);
+    }
+
     #[test]
     fn pairing_sums_are_the_browsers() {
         // the same sums as servers/fleet/web/devices.js makes with SubtleCrypto

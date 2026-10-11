@@ -83,6 +83,19 @@ pub fn login(entry: &str, id: &str, assertion: &str, challenge: &str, origin: &s
     identity::check_login(&e.entry, id, &a, &c, &[origin.to_string()]).map_err(|e| e.to_string())
 }
 
+/// The Worker's proof for a directory read of `name` at `at`: its read key
+/// (DIRECTORY_KEY, made by `dd mail reader-key`), whose public half the
+/// release names (fleet/mail.json), so the boxes show it single entries.
+pub fn read_proof(secret: &str, name: &str, at: u64) -> R<String> {
+    let key = identity::decode_secret(secret).map_err(|e| format!("DIRECTORY_KEY: {e}"))?;
+    Ok(identity::read_proof(&key, name, at))
+}
+
+#[wasm_bindgen(js_name = readProof)]
+pub fn read_proof_js(secret: &str, name: &str, at: f64) -> Result<String, JsValue> {
+    read_proof(secret, name, at as u64).map_err(|e| JsValue::from_str(&e))
+}
+
 #[wasm_bindgen(js_name = admit)]
 pub fn admit_js(
     name: &str,
@@ -191,6 +204,21 @@ mod tests {
 
     const RELEASE: &str = "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=";
     const NOBODY: &str = r#"{"members":[],"revoked":[]}"#;
+
+    /// What the Worker sends with a read is what a box takes from the key
+    /// the release names, for that name only.
+    #[test]
+    fn the_workers_read_proof_is_the_boxes_kind() {
+        let k = ed25519_dalek::SigningKey::from_bytes(&[5; 32]);
+        let secret = identity::encode_secret(&k);
+        let p = read_proof(&secret, "tester", 1000).unwrap();
+        assert_eq!(
+            identity::check_read_proof(&p, "tester", 1010),
+            Some(identity::encode_public(&k.verifying_key()))
+        );
+        assert_eq!(identity::check_read_proof(&p, "other", 1010), None);
+        assert!(read_proof("not a key", "tester", 1000).is_err());
+    }
 
     #[test]
     fn a_member_is_admitted_and_nobody_else() {

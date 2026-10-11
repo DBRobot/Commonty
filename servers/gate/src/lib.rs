@@ -142,15 +142,19 @@ enum Ceremony {
 pub struct Config {
     pub bind: std::net::SocketAddr,
     pub dir: PathBuf,
-    /// the other boxes' directory urls
-    pub peers: Vec<String>,
     /// the other boxes in this house, which a Wi-Fi change is relayed to
     /// and the house page asks after; not the rest of the fleet
     pub house_peers: Vec<String>,
-    pub sync_secs: u64,
-    /// the directory as the control plane's agreed log, not pulled from
-    /// peers: dd-control's address, its submit socket, and its config (the
-    /// voting boxes); None: the peers as before
+    /// keys that may read any one entry and never the list (the mail
+    /// Worker's, fleet/mail.json). Empty: single entries stay anyone's
+    pub directory_readers: Vec<String>,
+    /// names this box answers to besides its domain's own (home.<domain>
+    /// and VERIFY_HOSTS): a directory box's address on the fleet's network.
+    /// A token naming any other audience is refused here
+    pub names: Vec<String>,
+    /// the directory as the control plane's agreed log: dd-control's
+    /// address, its submit socket, and its config (the voting boxes);
+    /// None: this box's directory alone
     pub control: Option<(String, PathBuf, PathBuf)>,
     /// None: the directory alone. Some(domain): the full verifier, with the
     /// browser login scoped to that domain.
@@ -235,7 +239,7 @@ fn demo_allowance(home: &[pages::Service], host: &str) -> Option<String> {
 /// Which name this request came in under: the vhost nginx was asked for,
 /// not the address the verifier happens to listen on. A token that names
 /// its audience names one of these.
-fn asked_host(headers: &HeaderMap) -> String {
+pub(crate) fn asked_host(headers: &HeaderMap) -> String {
     headers
         .get("x-original-host")
         .or_else(|| headers.get("host"))
@@ -597,78 +601,88 @@ impl App {
         operation: &str,
         here: &str,
     ) -> Result<(String, String)> {
-        let unverified = UnverifiedBiscuit::from_base64(token).context("not a biscuit")?;
-        // the user is named in the authority block; it has to be read before the
-        // signature can be checked, because the key to check with depends on it
-        let source = unverified
-            .print_block_source(0)
-            .context("unreadable authority block")?;
-        let user = peek_user(&source).context("no user fact")?;
-        anyhow::ensure!(valid_user(&user), "bad user in token");
-        let signed = self
-            .entry(&user)?
-            .context("no identity published for that name")?;
-        let mut verified: Option<Biscuit> = None;
-        let mut device = String::new();
-        for k in &signed.entry.devices {
-            let pk = match B64
-                .decode(&k.public_key)
-                .ok()
-                .and_then(|b| PublicKey::from_bytes(&b, Algorithm::Ed25519).ok())
-            {
-                Some(pk) => pk,
-                None => continue,
-            };
-            if let Ok(b) = unverified.clone().verify(|_| Ok(pk)) {
-                verified = Some(b);
-                device = k.fingerprint.clone();
-                break;
-            }
-        }
-        let biscuit = verified.ok_or_else(|| anyhow!("signature matches no device of {user}"))?;
-
-        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-        let mut authorizer = biscuit_auth::builder::AuthorizerBuilder::new()
-            // the library allows the datalog run 1ms by default, wall clock;
-            // on a loaded box that refused good tokens. The policy here is a
-            // few facts, so a generous cap still ends a runaway token fast
-            .set_limits(biscuit_auth::AuthorizerLimits {
-                max_time: Duration::from_millis(200),
-                ..Default::default()
-            })
-            .fact(format!("time({now})").as_str())
-            .map_err(|e| anyhow!("{e}"))?
-            .fact(format!("operation({operation:?})").as_str())
-            .map_err(|e| anyhow!("{e}"))?
-            .fact(format!("here({here:?})").as_str())
-            .map_err(|e| anyhow!("{e}"))?
-            // A token that says where it is for is only good there. Today
-            // none of them do, and one opens everything its holder owns on
-            // every box for as long as it lives; this is the half that has
-            // to be in place before minting can start saying so, and it
-            // costs nothing until then. Refusing comes first, so a token
-            // meant for another box cannot fall through to the allow below.
-            .policy("deny if audience($a), here($h), $a != $h")
-            .map_err(|e| anyhow!("{e}"))?
-            // access takes any token of the user's; anything else demands a
-            // token minted for exactly that, so an hour-long access token in
-            // a script cannot enrol a passkey that outlives it
-            .policy(
-                if operation == "access" {
-                    format!("allow if user({user:?})")
-                } else {
-                    format!("allow if user({user:?}), purpose({operation:?})")
-                }
-                .as_str(),
-            )
-            .map_err(|e| anyhow!("{e}"))?
-            .build(&biscuit)
-            .map_err(|e| anyhow!("{e}"))?;
-        authorizer
-            .authorize()
-            .map_err(|e| anyhow!("refused: {e}"))?;
-        Ok((user, device))
+        verify_device_token(|u| self.entry(u), token, operation, here)
     }
+}
+
+/// A device's biscuit: the user it names, signed by one of that user's
+/// devices in `entry_of`, good for `operation` at `here`. The user and
+/// that device's fingerprint.
+pub(crate) fn verify_device_token(
+    entry_of: impl Fn(&str) -> Result<Option<identity::SignedEntry>>,
+    token: &str,
+    operation: &str,
+    here: &str,
+) -> Result<(String, String)> {
+    let unverified = UnverifiedBiscuit::from_base64(token).context("not a biscuit")?;
+    // the user is named in the authority block; it has to be read before the
+    // signature can be checked, because the key to check with depends on it
+    let source = unverified
+        .print_block_source(0)
+        .context("unreadable authority block")?;
+    let user = peek_user(&source).context("no user fact")?;
+    anyhow::ensure!(valid_user(&user), "bad user in token");
+    let signed = entry_of(&user)?.context("no identity published for that name")?;
+    let mut verified: Option<Biscuit> = None;
+    let mut device = String::new();
+    for k in &signed.entry.devices {
+        let pk = match B64
+            .decode(&k.public_key)
+            .ok()
+            .and_then(|b| PublicKey::from_bytes(&b, Algorithm::Ed25519).ok())
+        {
+            Some(pk) => pk,
+            None => continue,
+        };
+        if let Ok(b) = unverified.clone().verify(|_| Ok(pk)) {
+            verified = Some(b);
+            device = k.fingerprint.clone();
+            break;
+        }
+    }
+    let biscuit = verified.ok_or_else(|| anyhow!("signature matches no device of {user}"))?;
+
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    let mut authorizer = biscuit_auth::builder::AuthorizerBuilder::new()
+        // the library allows the datalog run 1ms by default, wall clock;
+        // on a loaded box that refused good tokens. The policy here is a
+        // few facts, so a generous cap still ends a runaway token fast
+        .set_limits(biscuit_auth::AuthorizerLimits {
+            max_time: Duration::from_millis(200),
+            ..Default::default()
+        })
+        .fact(format!("time({now})").as_str())
+        .map_err(|e| anyhow!("{e}"))?
+        .fact(format!("operation({operation:?})").as_str())
+        .map_err(|e| anyhow!("{e}"))?
+        .fact(format!("here({here:?})").as_str())
+        .map_err(|e| anyhow!("{e}"))?
+        // A token that says where it is for is only good there. Today
+        // none of them do, and one opens everything its holder owns on
+        // every box for as long as it lives; this is the half that has
+        // to be in place before minting can start saying so, and it
+        // costs nothing until then. Refusing comes first, so a token
+        // meant for another box cannot fall through to the allow below.
+        .policy("deny if audience($a), here($h), $a != $h")
+        .map_err(|e| anyhow!("{e}"))?
+        // access takes any token of the user's; anything else demands a
+        // token minted for exactly that, so an hour-long access token in
+        // a script cannot enrol a passkey that outlives it
+        .policy(
+            if operation == "access" {
+                format!("allow if user({user:?})")
+            } else {
+                format!("allow if user({user:?}), purpose({operation:?})")
+            }
+            .as_str(),
+        )
+        .map_err(|e| anyhow!("{e}"))?
+        .build(&biscuit)
+        .map_err(|e| anyhow!("{e}"))?;
+    authorizer
+        .authorize()
+        .map_err(|e| anyhow!("refused: {e}"))?;
+    Ok((user, device))
 }
 
 impl App {
@@ -701,7 +715,7 @@ impl App {
         if let Some(tok) = bearer(headers)
             && UnverifiedBiscuit::from_base64(tok).is_ok()
         {
-            return match self.verify_biscuit_device(tok, operation, &asked_host(headers)) {
+            return match self.verify_biscuit_device(tok, operation, &self.directory.here(headers)) {
                 Ok((u, device)) => {
                     self.signins.used(&u, &device, agent);
                     Some((u, true))
@@ -753,6 +767,23 @@ impl App {
 }
 
 /// `user("david")` out of a block's datalog source, without a parser.
+/// What a directory read asks a token for: the purpose it was minted with,
+/// where that is one a read takes (its own, or an enrol link's, for the
+/// enrol page watching its own entry); else what any token is good for.
+pub(crate) fn read_operation(token: &str) -> &'static str {
+    let source = UnverifiedBiscuit::from_base64(token)
+        .ok()
+        .and_then(|b| b.print_block_source(0).ok())
+        .unwrap_or_default();
+    if source.contains(&format!("purpose({:?})", identity::DIRECTORY_READ)) {
+        identity::DIRECTORY_READ
+    } else if source.contains("purpose(\"enrol\")") {
+        "enrol"
+    } else {
+        "access"
+    }
+}
+
 fn peek_user(source: &str) -> Option<String> {
     let i = source.find("user(\"")? + 6;
     let rest = &source[i..];
@@ -840,6 +871,24 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
 
 /// The pages this gate serves, as origins: "https://<host>.<domain>" for each
 /// of VERIFY_HOSTS, and home. Nothing else may ask for a passkey here.
+/// every name a token may be for on this box: the configured extras, and
+/// with a domain, the domain, home.<domain> and each of VERIFY_HOSTS
+fn box_names(extra: &[String], domain: Option<&str>) -> Vec<String> {
+    let mut names: Vec<String> = extra.iter().map(|n| n.to_lowercase()).collect();
+    if let Some(d) = domain {
+        names.push(d.to_lowercase());
+        names.extend(
+            own_hosts(d)
+                .iter()
+                .filter_map(|h| h.strip_prefix("https://"))
+                .map(str::to_lowercase),
+        );
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
 fn own_hosts(domain: &str) -> Vec<String> {
     let mut hosts: Vec<String> = std::env::var("VERIFY_HOSTS")
         .unwrap_or_default()
@@ -2314,7 +2363,10 @@ pub async fn start(
         Some(k) => Some(identity::decode_public(k).map_err(|e| anyhow!("release key: {e}"))?),
         None => None,
     };
-    let mut directory = directory::Directory::open(cfg.dir.clone(), cfg.peers.clone(), release)?;
+    let mut directory = directory::Directory::open(cfg.dir.clone(), release)?
+        .with_members(cfg.members.clone())
+        .with_readers(cfg.directory_readers.clone())
+        .with_names(box_names(&cfg.names, cfg.domain.as_deref()));
     if let Some((control, submit, config)) = &cfg.control {
         // the boxes that vote: every one of their gates acknowledges a new
         // name before it is anyone's (the witness has no gate and no say)
@@ -2352,8 +2404,6 @@ pub async fn start(
     let directory = Arc::new(directory);
     if cfg.control.is_some() {
         tokio::spawn(directory.clone().follow());
-    } else {
-        tokio::spawn(directory.clone().sync_forever(cfg.sync_secs));
     }
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
     let addr = listener.local_addr()?;
@@ -2449,6 +2499,12 @@ pub async fn start(
         fresh: Mutex::new(HashMap::new()),
         friends: friends::Store::open(&state_dir)?,
     });
+    // the directory's reads ask who this is the way every route does
+    let weak = Arc::downgrade(&app);
+    directory.set_caller(Box::new(move |h| {
+        let op = bearer(h).map(read_operation).unwrap_or("access");
+        weak.upgrade()?.identify(h, op)
+    }));
     // A held sign-up follows through when the member list names it: then it
     // is published like any entry, and the hold goes. (The other way, a code
     // redeemed on the waiting page, publishes it there and then.) Reading
@@ -2912,15 +2968,25 @@ mod tests {
         members: Option<Members>,
         home: Vec<pages::Service>,
     ) -> (String, session::Sessions) {
+        gate_with(what, members, home, vec![]).await
+    }
+
+    /// the same, with the keys that may read single entries
+    async fn gate_with(
+        what: &str,
+        members: Option<Members>,
+        home: Vec<pages::Service>,
+        directory_readers: Vec<String>,
+    ) -> (String, session::Sessions) {
         let d = std::env::temp_dir().join(format!("dd-gate-{what}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         let (addr, _) = start(Config {
             bind: "127.0.0.1:0".parse().unwrap(),
             dir: d.join("keys"),
-            peers: vec![],
             house_peers: vec![],
-            sync_secs: 3600,
+            directory_readers,
+            names: vec!["127.0.0.1".into()],
             control: None,
             domain: Some(DOMAIN.into()),
             oidc: None,
@@ -3181,6 +3247,221 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.status(), 404);
+    }
+
+    /// a person: a root, a paper key and one device
+    struct Person {
+        name: &'static str,
+        root: identity::SigningKey,
+        recovery: identity::SigningKey,
+        device: biscuit_auth::KeyPair,
+    }
+
+    impl Person {
+        fn new(name: &'static str) -> Self {
+            Person {
+                name,
+                root: identity::generate(),
+                recovery: identity::generate(),
+                device: biscuit_auth::KeyPair::new_with_algorithm(Algorithm::Ed25519),
+            }
+        }
+        async fn publish(&self, url: &str) {
+            let device = B64.encode(self.device.public().to_bytes());
+            let signed = identity::sign(
+                identity::Entry {
+                    name: self.name.into(),
+                    root: identity::encode_public(&self.root.verifying_key()),
+                    recovery: identity::encode_public(&self.recovery.verifying_key()),
+                    devices: vec![identity::Device {
+                        fingerprint: identity::fingerprint(&device),
+                        public_key: device,
+                        added: 1,
+                    }],
+                    passkeys: vec![],
+                    grant: None,
+                    libraries: vec![],
+                    version: 1,
+                    updated: identity::now(),
+                },
+                &self.root,
+            )
+            .unwrap();
+            let r = client()
+                .put(format!("{url}/_dd/directory/{}", self.name))
+                .json(&signed)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+        }
+        fn id(&self) -> String {
+            identity::member_id(&identity::encode_public(&self.root.verifying_key()))
+        }
+        fn token(&self) -> String {
+            Biscuit::builder()
+                .fact(format!("user({:?})", self.name).as_str())
+                .unwrap()
+                .build(&self.device)
+                .unwrap()
+                .to_base64()
+                .unwrap()
+        }
+        /// as account::read_token mints it: directory reads, at `host`
+        fn read_token(&self, host: &str) -> String {
+            let op = identity::DIRECTORY_READ;
+            Biscuit::builder()
+                .fact(format!("user({:?})", self.name).as_str())
+                .unwrap()
+                .fact(format!("audience({host:?})").as_str())
+                .unwrap()
+                .check(format!("check if here({host:?})").as_str())
+                .unwrap()
+                .fact(format!("purpose({op:?})").as_str())
+                .unwrap()
+                .check(format!("check if operation({op:?})").as_str())
+                .unwrap()
+                .build(&self.device)
+                .unwrap()
+                .to_base64()
+                .unwrap()
+        }
+    }
+
+    enum Ask {
+        Nobody,
+        Cookie(String),
+        Bearer(String),
+        Proof(String),
+    }
+
+    async fn read(url: &str, path: &str, ask: Ask) -> u16 {
+        let r = client().get(format!("{url}/_dd/directory{path}"));
+        let r = match ask {
+            Ask::Nobody => r,
+            Ask::Cookie(c) => r.header("cookie", c),
+            Ask::Bearer(t) => r.bearer_auth(t),
+            Ask::Proof(p) => r.header(identity::READ_PROOF_HEADER, p),
+        };
+        r.send().await.unwrap().status().as_u16()
+    }
+
+    #[tokio::test]
+    async fn the_directory_is_read_by_members_owners_and_the_mail_key() {
+        let mail = identity::generate();
+        let mail_pub = identity::encode_public(&mail.verifying_key());
+        let (sarah, tom) = (Person::new("sarah"), Person::new("tom"));
+        // sarah is on the list; tom signed up and is not
+        let (url, s) = gate_with(
+            "dir-read",
+            Some(Members::list(vec![sarah.id()])),
+            vec![],
+            vec![mail_pub],
+        )
+        .await;
+        sarah.publish(&url).await;
+        tom.publish(&url).await;
+        let now = identity::now();
+
+        // nobody: a 401 whether the name is there or not
+        assert_eq!(read(&url, "", Ask::Nobody).await, 401);
+        assert_eq!(read(&url, "/sarah", Ask::Nobody).await, 401);
+        assert_eq!(read(&url, "/nobody", Ask::Nobody).await, 401);
+        let stray = identity::read_proof(&identity::generate(), "sarah", now);
+        assert_eq!(read(&url, "/sarah", Ask::Proof(stray)).await, 401);
+        assert_eq!(
+            read(&url, "", Ask::Cookie("dd_session=x".into())).await,
+            401
+        );
+
+        // a member, by cookie or device token: the list and anyone's entry
+        let hers = || Ask::Cookie(cookie(&s.issue("sarah")));
+        assert_eq!(read(&url, "", hers()).await, 200);
+        assert_eq!(read(&url, "/tom", hers()).await, 200);
+        assert_eq!(read(&url, "/nobody", hers()).await, 404);
+        assert_eq!(read(&url, "", Ask::Bearer(sarah.token())).await, 200);
+        assert_eq!(read(&url, "/tom", Ask::Bearer(sarah.token())).await, 200);
+
+        // not a member: their own entry and nothing else
+        let his = || Ask::Cookie(cookie(&s.issue("tom")));
+        assert_eq!(read(&url, "/tom", his()).await, 200);
+        assert_eq!(read(&url, "/sarah", his()).await, 401);
+        assert_eq!(read(&url, "", his()).await, 401);
+        assert_eq!(read(&url, "/tom", Ask::Bearer(tom.token())).await, 200);
+        assert_eq!(read(&url, "", Ask::Bearer(tom.token())).await, 401);
+
+        // her own keys read her own entry with no device signed in: the
+        // paper key and the root
+        let paper = identity::read_proof(&sarah.recovery, "sarah", now);
+        assert_eq!(read(&url, "/sarah", Ask::Proof(paper.clone())).await, 200);
+        let root = identity::read_proof(&sarah.root, "sarah", now);
+        assert_eq!(read(&url, "/sarah", Ask::Proof(root)).await, 200);
+        let hers_for_tom = identity::read_proof(&sarah.recovery, "tom", now);
+        assert_eq!(read(&url, "/tom", Ask::Proof(hers_for_tom)).await, 401);
+        assert_eq!(read(&url, "", Ask::Proof(paper)).await, 401);
+
+        // a token minted for directory reads at this host: reads here, and
+        // nothing else anywhere
+        let here = sarah.read_token("127.0.0.1");
+        assert_eq!(read(&url, "", Ask::Bearer(here.clone())).await, 200);
+        assert_eq!(read(&url, "/tom", Ask::Bearer(here.clone())).await, 200);
+        let elsewhere = sarah.read_token("files.example.org");
+        assert_eq!(read(&url, "", Ask::Bearer(elsewhere.clone())).await, 401);
+        assert_eq!(read(&url, "/sarah", Ask::Bearer(elsewhere)).await, 401);
+        // the audience is checked against this box's own names: a Host or
+        // X-Original-Host a request makes up does not add one
+        let made_up = sarah.read_token("evil.example");
+        for h in ["host", "x-original-host"] {
+            let r = client()
+                .get(format!("{url}/_dd/directory"))
+                .header(h, "evil.example")
+                .bearer_auth(&made_up)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status(), 401, "{h}: evil.example");
+        }
+        // a token for another of its names is refused on this one, and
+        // taken when the request is asked under that name
+        let home = sarah.read_token(&format!("home.{DOMAIN}"));
+        assert_eq!(read(&url, "", Ask::Bearer(home.clone())).await, 401);
+        let r = client()
+            .get(format!("{url}/_dd/directory"))
+            .header("x-original-host", format!("home.{DOMAIN}"))
+            .bearer_auth(&home)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+        for route in ["/_dd/me", "/verify", "/_dd/storage/mine"] {
+            let r = client()
+                .get(format!("{url}{route}"))
+                .bearer_auth(&here)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status(), 401, "{route}");
+        }
+
+        // the mail Worker's key: any one entry, never the list, never stale
+        let m = identity::read_proof(&mail, "tom", now);
+        assert_eq!(read(&url, "/tom", Ask::Proof(m.clone())).await, 200);
+        assert_eq!(read(&url, "", Ask::Proof(m)).await, 401);
+        let stale = identity::read_proof(&mail, "tom", now - 3600);
+        assert_eq!(read(&url, "/tom", Ask::Proof(stale)).await, 401);
+    }
+
+    /// Until the release names the mail Worker's key, single entries stay
+    /// open (the Worker reads them with nothing); the list is closed now.
+    #[tokio::test]
+    async fn without_a_reader_key_single_entries_stay_open_and_the_list_does_not() {
+        let sarah = Person::new("sarah");
+        let (url, _) = gate("dir-open", Some(Members::list(vec![sarah.id()])), vec![]).await;
+        sarah.publish(&url).await;
+        assert_eq!(read(&url, "/sarah", Ask::Nobody).await, 200);
+        assert_eq!(read(&url, "/nobody", Ask::Nobody).await, 404);
+        assert_eq!(read(&url, "", Ask::Nobody).await, 401);
+        assert_eq!(read(&url, "", Ask::Bearer(sarah.token())).await, 200);
     }
 
     #[tokio::test]

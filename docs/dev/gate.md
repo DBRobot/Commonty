@@ -102,8 +102,13 @@ place a request becomes a name:
 - **A biscuit** in `Authorization: Bearer`. The user is read from the
   token's authority block (`user("…")`, `peek_user`), the user's entry is
   looked up, and the token is checked against each device key in it.
-  The authorizer gets `time`, `operation` and `here` (the host nginx was
-  asked for) as facts, and two policies: deny if the token names an
+  The authorizer gets `time`, `operation` and `here` as facts. `here` is
+  the name the request was asked under (`X-Original-Host`, else `Host`)
+  only when that is one of the box's own names (`Directory::here`: the
+  domain, `home.<domain>`, `VERIFY_HOSTS`, `VERIFY_NAMES`), and empty
+  otherwise: a header picks among the configured names and never adds
+  one. nginx sets `X-Original-Host $host` on every gate location
+  (strip-cookie.nix). Two policies: deny if the token names an
   `audience` other than `here`, then allow if the user matches and, for
   any operation but `access`, the token's `purpose` is that operation.
   So an enrol link cannot read a file and an access token cannot enrol a
@@ -255,8 +260,53 @@ button; the bar's menu posts straight away (shell.js `posting`).
 [directory.rs](../../servers/gate/src/directory.rs). One signed entry per
 person (`identity::SignedEntry`: name, root, recovery key, devices,
 passkeys, an optional grant, libraries, version), stored as
-`keys/<name>.json`. Entries hold only public keys and are served to
-anyone.
+`keys/<name>.json`. Entries hold only public keys, but together they
+are who the members are, so reading them takes a credential.
+
+### Who may read it
+
+`Directory::may_read`:
+
+```
+GET /_dd/directory          a member (session cookie or device token). Nobody else.
+GET /_dd/directory/{name}   a member; the person themselves (their session, even
+                            before they are a member; their token; an enrol
+                            link's token); a key in that entry, by a read proof
+                            (its root, its paper key, one of its devices); a
+                            reader key (the mail Worker's)
+everyone else               401, whether or not the name exists
+```
+
+- **Device tokens for reads** are minted by `account::read_token`
+  (`dd`, the app, git-remote-dd) with `purpose("directory-read")` and
+  `audience(<the directory url's host>)`, for five minutes. No other
+  route takes that purpose, and no other box takes that audience. The
+  gate accepts an `access` or `enrol` token on these routes too (the
+  app's pages, the enrol page watching its own entry); `read_operation`
+  picks which by the token's purpose.
+- **A read proof** is `x-dd-key-proof: <public key>.<unix time>.<sig>`,
+  ed25519 over `dd-directory-read\n<name>\n<time>`, good for one name and
+  five minutes either way (`identity::read_proof`). `dd` sends one by the
+  root for its own entry, and recovery sends one by the paper key, so a
+  machine that is no device yet still reads its own entry.
+- **Reader keys** (`VERIFY_DIRECTORY_READERS`, verify.nix
+  `directoryReaders`, from `reader` in fleet/mail.json): any single entry,
+  never the list. The mail Worker is the one; it signs a read proof with
+  `DIRECTORY_KEY` (`dd mail reader-key`).
+- **Until a reader key is configured** a single entry is still anyone's
+  (the Worker reads with nothing until it has its key); the list is
+  members' from the start. The release that carries fleet/mail.json's
+  `reader` closes single entries too.
+- **Sign-in needs no entry in the browser**: `/_dd/login/start` reads the
+  passkeys on the box and sends their ids with the challenge. That, the
+  sign-up's "that name is taken" and a PUT's refusal say whether a name
+  exists, as any sign-in by typed name must. nginx counts the directory
+  and the ceremonies by address for a request with no credential
+  (`dd_directory`, `dd_ceremony`: a second each, ten in hand).
+- **Still readable by Cloudflare**: the tunnel ends TLS there, so it sees
+  every entry a member's device reads, and the control plane's relay
+  carries every directory item (names, public keys, passkey ids) in
+  plaintext. README's TODO, "Nothing readable by Cloudflare".
 
 ### The rules
 
@@ -270,7 +320,6 @@ check_grant        a grant: signed by the release key, proved by the root,
                    inside its window at the time it is judged, and not
                    already used by another root (one code, one person)
 claims_free        a library id belongs to the first entry that named it
-first sight        a name never seen here (peer mode only, below)
 ```
 
 Invites (`identity::SignedInvite`) are kept in `invites/`, by their
@@ -323,16 +372,12 @@ the log has them; `follow` submits each one (and every live invite) once.
 When none is missing, `migrated` is set and the old copy is no longer
 read.
 
-### Peer mode
+### No peers
 
-Without `VERIFY_CONTROL` the gate uses the older scheme: it pulls every
-peer in `VERIFY_PEERS` every `VERIFY_SYNC_SECS` (default 300), through the
-same rules. A name it has never seen is taken from the network, or from a
-client, only once every peer has answered a full pull at least once, and
-only if no peer holds the name under another root. Until then new names
-get 503. No real box runs this way now (verify.nix leaves `VERIFY_PEERS`
-empty when the control plane is on), but the code, its unit tests and
-the `directory` VM test remain.
+Boxes used to pull each other's directories (`VERIFY_PEERS`). That is
+gone: the agreed log is the only way an entry reaches another box, and a
+box without `VERIFY_CONTROL` (tests, a box on its own) holds just what
+was published to it.
 
 ### Who reads it on the box
 
@@ -611,13 +656,40 @@ not on the fleet network.
 
 On a public gated host, the ceremonies a stranger may start
 (`/_dd/(join|login|enrol|redeem|network|add)/`) are limited to one a
-second per address, ten in hand.
+second per address, ten in hand; so are `/_dd/directory` and
+`/_dd/invite` for a request that carries no credential at all (no
+session, no token, no read proof).
 
 **The bare domain** sends `/` to `https://home.<domain>`, `/download` to
 the downloads page, serves release files from the forge as nobody under
 `/download/vX.Y.Z/<file>`, and serves the docs (`/docs`, `/docs/...`)
 with only the gate paths their page needs: `/_dd/static/`, `/_dd/web/`,
 `/_dd/docs/`, `/_dd/me`, `/_dd/config`, `/_dd/csp`.
+
+It also serves `/.well-known/security.txt` (RFC 9116,
+[security-txt.nix](../../nix/modules/gate/security-txt.nix)): Contact
+`mailto:security@<domain>`, Preferred-Languages `en`, Canonical its own
+URL, Policy `https://<domain>/docs/policies/privacy`, and Expires a year
+after the commit the release is built from (`self.lastModified`), so a
+fleet that stops releasing lets it lapse. nix/tests/nginx.nix checks the
+location is served and the fields and the expiry (security-txt.py).
+
+**Mail** is the mail Worker at Cloudflare (client/mail/worker), not the
+gate. It reads a member's entry from `home.<domain>/_dd/directory/<name>`
+with a read proof by its `DIRECTORY_KEY` (`dd mail reader-key`), whose
+public half is `reader` in fleet/mail.json and so a reader key on every
+box. Besides each member's `<name>@<domain>` rule it keeps the release's
+aliases, `mailAliases` in fleet/policy.json (`{"security": "david"}`):
+`<alias>@<domain>` forwards to that member's confirmed address (no rule
+while it is unconfirmed), and a rule for an alias no longer listed is
+removed. An alias's rule is named `Commonty alias <alias>`; only those
+are touched, never a `Commonty member <name>` rule. An alias is
+lowercase `a-z0-9-` and never a person's name: the build refuses one that
+is the owner's or a person's in policy.json, and the Worker skips one
+that is a member's (an entry it has pinned, or a member rule) and gives
+no member an address under an alias's name. It keeps them in step on the
+lists it reads anyway: a member's `/api/me` and the shared state each
+minute.
 
 **The demo** is one account, `demo`, that anyone can be:
 `GET /_dd/demo` gives a fresh session (each click is its own session id)
@@ -735,8 +807,8 @@ path                                        method   what                       
 /_dd/csp                                    POST     CSP report, logged                        anyone
 /_dd/player-error                           POST     Movies & TV's player error, logged        anyone
 -- directory
-/_dd/directory                              GET      names and versions                        anyone
-/_dd/directory/{name}                       GET      an entry                                  anyone
+/_dd/directory                              GET      names and versions                        member (cookie or token); else 401
+/_dd/directory/{name}                       GET      an entry                                  member; the person; a key in it; a reader key; else 401 (anyone until a reader key is set)
 /_dd/directory/{name}                       PUT      publish an entry                          anyone; the signature decides
 /_dd/invite/{key}                           GET      an invite                                 anyone
 /_dd/invite/{key}                           PUT      keep an invite                            anyone; release key must sign it
@@ -810,10 +882,10 @@ dd.verify.role            "full" | "directory" (core.nix: directory; gateway.nix
 dd.verify.port            4181
 dd.verify.hosts           the subdomains it stands in front of:
                           files llm metrics git home photos games
-dd.verify.peers           directory urls of the other boxes (flake.nix; unused with the control plane)
+dd.verify.names           extra names a token's audience may be (default: dd.box.net)
+dd.verify.directoryReaders  keys that read single entries: fleet/mail.json reader (core.nix)
 dd.verify.housePeers      the same house's boxes (flake.nix)
 dd.verify.fleet           box name -> fleet-network address (flake.nix)
-dd.verify.syncSeconds     peer pull interval, 300
 dd.verify.releasePublicKey  fleet/release.pub (core.nix)
 dd.members                fleet/members.json (core.nix)
 dd.home.services          the home tiles, from each role
@@ -846,9 +918,9 @@ VERIFY_CONTROL                 dd-control's address (http://127.0.0.1:4195): agr
 VERIFY_CONTROL_SUBMIT          its submit socket, /run/dd-control/submit.sock
 VERIFY_CONTROL_CONFIG          /etc/dd-control/config.json (the voters)
 VERIFY_BOX                     this box's name, if not the hostname (tests)
-VERIFY_PEERS                   peer mode: other boxes' directory urls
-VERIFY_HOUSE_PEERS             the house's boxes (defaults to VERIFY_PEERS)
-VERIFY_SYNC_SECS               peer pull interval
+VERIFY_HOUSE_PEERS             the house's boxes
+VERIFY_NAMES                   names besides the domain's a token may be for (the box's fleet address)
+VERIFY_DIRECTORY_READERS       keys that may read one entry, never the list (the mail Worker's)
 VERIFY_FLEET                   box -> address, json
 VERIFY_THANOS                  Thanos query, when there is no control plane
 VERIFY_HOUSE                   /run/dd-wifi (home-network.nix; home.rs)
@@ -908,7 +980,6 @@ The unit runs as `dd-verify` with `ProtectSystem=strict`,
 
 ```
 directory follow       every 1 s (agreed mode): replay, ack, migrate
-directory sync         every VERIFY_SYNC_SECS (peer mode)
 held sign-ups          every 300 s: publish those the member list now names
 network reap           every 300 s: remove non-members' devices from Headscale
 library trash          daily (hourly after a failure): empty three-month-old trash
@@ -923,7 +994,9 @@ and forging (session.rs), the directory's cache, held sign-ups, library
 claims, a write racing a write, and the agreed log (a new name needs
 every voter, two claims to one name, an owner's update lands at once,
 every box replaying one log ends the same, migration) in directory.rs;
-the demo's allowance by door, image deletion paths, usernames (lib.rs);
+the demo's allowance by door, image deletion paths, usernames, who may
+read the directory (members, owners, keys, the reader key, read tokens and
+their audience) (lib.rs);
 the pages and the downloads page (pages.rs); docs indexing (docs.rs);
 friends (friends.rs); reaping and box keys against a fake Headscale
 (network.rs); user agents in words and ended sessions (signins.rs); OIDC
@@ -933,7 +1006,8 @@ friends (friends.rs); reaping and box keys against a fake Headscale
 [client/cli/tests/e2e.rs](../../client/cli/tests/e2e.rs) runs real gates
 with `verify::start` on localhost and drives them with `dd` and a soft
 passkey: tokens and recovery, enrol links vs access tokens, membership,
-browser sign-up and waiting, invite codes, the demo's permission set, the
+browser sign-up and waiting, invite codes, a closed directory (sign-up,
+admitting, recovery and sign-in with no anonymous reads), the demo's permission set, the
 download page, friend links and guests, the photos code, demo doors,
 deleting an image, sessions ending with their device, Wi-Fi changes and
 adding a device. Both run in CI's `test` job
@@ -943,8 +1017,8 @@ adding a device. Both run in CI's `test` job
 [nix/tests](../../nix/tests):
 
 ```
-directory.nix   three boxes in peer mode: publish, catch up, a squat refused,
-                a box that never pulled takes no new names
+directory.nix   two boxes: publish, admit a device, a restart; the list refused to
+                a stranger; single entries refused once a reader key is set
 control.nix     the agreed log end to end: relay, three validators, a gate
                 per box in directory role (control/run.py)
 library.nix     full gate + garage: rclone over the gate's WebDAV; disk images

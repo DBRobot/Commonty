@@ -1,15 +1,13 @@
-# Two boxes share the directory; a client publishes to one and the other
-# catches up; a squat on the second box is refused; a box whose peer is gone
-# takes no new names. The same rules the in-process tests prove, now across
-# real boots and a real network.
+# One box's directory across a real boot: a client publishes, admits a
+# device, and the entry survives a restart. The list is members' on both
+# boxes; once the release names a reader key (b), nobody reads a single
+# entry without a credential either. Boxes share the directory through the
+# control plane's agreed log (nix/tests/control); none pulls another.
 {
   pkgs,
   self,
   ...
 }:
-let
-  dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
-in
 {
   name = "directory";
   node.specialArgs = { inherit self; };
@@ -17,20 +15,17 @@ in
   defaults.virtualisation.cores = 2; # services start in parallel instead of queueing on one thread
   defaults.virtualisation.diskSize = 2048;
   nodes = {
+    # no reader key yet: a single entry is anyone's, the list is not
     a = {
       imports = [ ./box.nix ];
-      dd.verify.peers = [ "http://b:4181/_dd/directory" ];
+      # the client asks it by this name: its tokens are for it
+      dd.verify.names = [ "a" ];
     };
+    # the release names the mail Worker's key: nothing without a credential
     b = {
       imports = [ ./box.nix ];
-      dd.verify.peers = [ "http://a:4181/_dd/directory" ];
-    };
-    # a peer that will never answer: c may serve what it has but takes no new names
-    c = {
-      imports = [ ./box.nix ];
-      # TEST-NET-1: routable nowhere, so the pull fails instead of - as a
-      # loopback alias did - answering from c itself
-      dd.verify.peers = [ "http://192.0.2.1:4181/_dd/directory" ];
+      dd.verify.names = [ "b" ];
+      dd.verify.directoryReaders = [ "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU=" ];
     };
     client = {
       environment.systemPackages = [ pkgs.curl ];
