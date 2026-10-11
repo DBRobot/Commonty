@@ -345,11 +345,11 @@ impl Directory {
         if self.entry(name).ok().flatten().is_some() {
             return Err(taken());
         }
-        if self
-            .held(name)
-            .is_some_and(|h| h.entry.root != signed.entry.root)
-        {
-            return Err(taken());
+        match self.held(name) {
+            Some(h) if h.entry.root != signed.entry.root => return Err(taken()),
+            Some(_) => {}
+            // a name free again: whatever an earlier holder said is not this one's
+            None => self.leaving.forget_said(name),
         }
         let write = || -> Result<()> {
             let tmp = self.held.join(format!(".{name}.tmp"));
@@ -947,6 +947,13 @@ impl Directory {
     ) -> std::result::Result<(), (StatusCode, String)> {
         let on_file = self.entry(&s.leave.name).ok().flatten();
         let Some(e) = on_file else {
+            // a sign-up still waiting is this box's alone, and so is its word
+            if let Some(h) = self.held(&s.leave.name) {
+                return self
+                    .leaving
+                    .record(s, Some(&h.entry), identity::now())
+                    .map_err(|e| (StatusCode::CONFLICT, e));
+            }
             return Err((StatusCode::NOT_FOUND, "no entry by that name".into()));
         };
         identity::verify_leave(&s, &e.entry)
@@ -1345,6 +1352,64 @@ mod tests {
         let mut fewer = added.clone();
         fewer.devices.remove(0);
         assert!(lost_a_key(&added, &fewer));
+    }
+
+    /// A sign-up still waiting leaves by its own word, on this box alone:
+    /// out at once, back within its time, and once it is due or its hold has
+    /// lapsed, gone, statement and all, so the name's next holder starts clean.
+    #[tokio::test]
+    async fn a_waiting_sign_up_leaves_here_and_its_name_comes_free() {
+        // its own parent: what is held sits beside the directory
+        let dir = scratch("held-leaves").join("keys");
+        let d = Directory::open(dir.clone(), None).unwrap();
+        let eve = generate();
+        d.hold(&sign(entry("eve", &eve, &[], 1), &eve).unwrap())
+            .unwrap();
+        let say = |back: bool| {
+            identity::sign_leave(
+                identity::Leave {
+                    name: "eve".into(),
+                    root: encode_public(&eve.verifying_key()),
+                    at: identity::now(),
+                    back,
+                },
+                &eve,
+            )
+            .unwrap()
+        };
+        d.say_leave(say(false)).await.unwrap();
+        assert!(d.leaving.has_left("eve"));
+        assert!(d.entry("eve").unwrap().is_none(), "still not published");
+        let now = identity::now();
+        let window = 30 * 24 * 3600;
+        let out = crate::leaving::held_leavers(&d, now, window);
+        assert_eq!(out.len(), 1);
+        assert!(!out[0].2, "kept within the window");
+        assert!(crate::leaving::held_leavers(&d, now + window, window)[0].2);
+        // someone else's word for her is nothing
+        let mallory = generate();
+        let forged = identity::sign_leave(
+            identity::Leave {
+                name: "eve".into(),
+                root: encode_public(&mallory.verifying_key()),
+                at: identity::now(),
+                back: true,
+            },
+            &mallory,
+        )
+        .unwrap();
+        assert!(d.say_leave(forged).await.is_err());
+        assert!(d.leaving.has_left("eve"));
+
+        // the hold gone (lapsed, or deleted when due): due at once, and the
+        // next person to take the name has not left
+        d.unhold("eve");
+        assert!(crate::leaving::held_leavers(&d, now, window)[0].2);
+        let ann = generate();
+        d.hold(&sign(entry("eve", &ann, &[], 1), &ann).unwrap())
+            .unwrap();
+        assert!(!d.leaving.has_left("eve"));
+        assert!(crate::leaving::held_leavers(&d, now, window).is_empty());
     }
 
     /// A sign-up without a code stays here: not served, not listed, not a

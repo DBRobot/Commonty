@@ -478,6 +478,14 @@ pub(crate) async fn accept(
         )
             .into_response();
     }
+    // someone who left takes nothing new until they come back
+    if app.directory.leaving.has_left(&user) {
+        return (
+            StatusCode::FORBIDDEN,
+            "you have left Commonty: come back first, in Settings",
+        )
+            .into_response();
+    }
     // the maker has to still be a member for the link to bring anyone in
     match app.friends.link(&secret) {
         Some(l) if app.role(&l.by) == Some(Role::Member) => {}
@@ -643,6 +651,34 @@ mod tests {
         assert!(s.friends_of("david").is_empty());
         // still there for the person it was meant for
         assert!(s.link(&secret).is_some());
+    }
+
+    /// A guest who left, at the end of their window: their friendships,
+    /// their guest record and any link of theirs go; everyone else's stay,
+    /// a guest the same member brought in among them
+    #[test]
+    fn a_guest_forgotten_takes_only_what_is_theirs() {
+        let s = scratch("guest-gone");
+        let (one, _) = s.make_link("david").unwrap();
+        let (two, _) = s.make_link("david").unwrap();
+        let (three, _) = s.make_link("lingyun").unwrap();
+        s.accept(&one, "tom", true).unwrap().unwrap();
+        s.accept(&two, "sarah", true).unwrap().unwrap();
+        s.accept(&three, "tom", true).unwrap().unwrap();
+        s.accept(&s.make_link("david").unwrap().0, "lingyun", false)
+            .unwrap()
+            .unwrap();
+        let (waiting, _) = s.make_link("david").unwrap();
+
+        s.forget("tom").unwrap();
+        assert!(s.guest("tom").is_none());
+        assert!(s.friends_of("tom").is_empty());
+        assert!(!s.are_friends("david", "tom") && !s.are_friends("lingyun", "tom"));
+        // nobody else's
+        assert_eq!(s.guest("sarah").unwrap().by, "david");
+        assert!(s.are_friends("david", "sarah"));
+        assert!(s.are_friends("david", "lingyun"));
+        assert!(s.link(&waiting).is_some(), "david's own link is his");
     }
 
     #[test]

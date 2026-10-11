@@ -52,7 +52,11 @@ async function say(back) {
 }
 
 function show(s) {
-  $('lv-member').hidden = !s.member;
+  // anyone may leave: a member, a guest, or an account still waiting
+  const role = s.role || (s.member ? 'member' : 'waiting');
+  $('lv-member').hidden = !!s.left;
+  $('lv-take-box').hidden = role !== 'member' || !!s.left;
+  for (const r of ['member', 'guest', 'waiting']) $(`lv-as-${r}`).hidden = role !== r;
   $('lv-left').hidden = !s.left;
   if (s.left) {
     $('lv-since').textContent = day(s.left);
@@ -86,7 +90,7 @@ async function act(back, button) {
     // this browser is signed out now: what it shows is the last it knew
     const t = Math.floor(Date.now() / 1000);
     $('lv-ask').close();
-    show({ ...state, member: false, left: t, until: t + state.window });
+    show({ ...state, left: t, until: t + state.window });
     $('lv-back').hidden = true;
   } catch (e) {
     button.disabled = false;

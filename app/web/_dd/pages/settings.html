@@ -131,7 +131,7 @@
     </div>
 
     <div class="se-pane" data-pane="leave" hidden>
-      <section class="se-box" aria-labelledby="lv-take">
+      <section class="se-box" aria-labelledby="lv-take" id="lv-take-box" hidden>
         <header><h2 id="lv-take">Take your things with you</h2></header>
         <dl class="se-rows">
           <div class="se-row se-act"><dt>Files &amp; Movies</dt><dd>Download from Files, a file or a selection at a time<small>or a whole library from a terminal: <a id="lv-files-docs">how</a></small></dd><a class="button quiet" id="lv-files">Files</a></div>
@@ -142,7 +142,9 @@
       </section>
       <section class="se-box" aria-labelledby="lv-h" id="lv-member" hidden>
         <header><h2 id="lv-h">Leave Commonty</h2></header>
-        <p class="se-hint">You are signed out everywhere at once, and your devices leave the network. Everything of yours is kept for 30 days, in case you change your mind; then it is deleted, and within 90 days it is gone from every box and every backup: files, photos, passwords, code, game servers, your email address here. <a id="lv-docs">What happens when</a></p>
+        <p class="se-hint" id="lv-as-member" hidden>You are signed out everywhere at once, and your devices leave the network. Everything of yours is kept for 30 days, in case you change your mind; then it is deleted, and within 90 days it is gone from every box and every backup: files, photos, passwords, code, game servers, your email address here. <a id="lv-docs">What happens when</a></p>
+        <p class="se-hint" id="lv-as-guest" hidden>You are signed out everywhere at once, your devices leave the network, and the game servers you were invited to close to you. Your account, your friends and your devices are kept for 30 days, in case you change your mind; then they are deleted.</p>
+        <p class="se-hint" id="lv-as-waiting" hidden>You are signed out at once, and this account is deleted, so its name is free again. Until it is, you can sign in and come back.</p>
         <p class="se-hint" id="lv-device" hidden>Your account's key is on a device, not a passkey: leave from Settings in the Commonty app there.</p>
         <footer><button class="danger" id="lv-go">Leave Commonty</button></footer>
       </section>

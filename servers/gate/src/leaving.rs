@@ -179,6 +179,20 @@ impl Store {
         Ok(())
     }
 
+    /// A held account's statement, once the account is gone: the name is
+    /// free again, and whoever takes it next has not left
+    pub fn forget_said(&self, name: &str) {
+        let mut f = self.file.lock().unwrap();
+        if f.said.remove(name).is_some() | f.work.remove(name).is_some() {
+            self.save(&f);
+        }
+    }
+
+    /// everyone with a statement on record here
+    pub fn said_names(&self) -> Vec<String> {
+        self.file.lock().unwrap().said.keys().cloned().collect()
+    }
+
     /// what is done for `name` leaving at `left`
     pub fn work(&self, name: &str, left: u64) -> Work {
         match self.file.lock().unwrap().work.get(name) {
@@ -335,6 +349,34 @@ pub fn leavers(
     out
 }
 
+/// Sign-ups still waiting (held on this box, not yet in the directory) who
+/// left by their own word: what they have is on this box alone. When the
+/// held account is gone already (unfollowed sign-ups lapse after a week),
+/// they are due at once.
+pub fn held_leavers(d: &Directory, now: u64, window: u64) -> Vec<(String, u64, bool)> {
+    let mut out = Vec::new();
+    for name in d.leaving.said_names() {
+        if d.entry(&name).ok().flatten().is_some() {
+            continue;
+        }
+        let Some(said) = d.leaving.said(&name).filter(|s| !s.statement.leave.back) else {
+            continue;
+        };
+        let held = d.held(&name);
+        // a statement under another root is someone who had the name before
+        if held
+            .as_ref()
+            .is_some_and(|h| h.entry.root != said.statement.leave.root)
+        {
+            continue;
+        }
+        let due =
+            held.is_none() || matches!(phase(Some(said.agreed), now, window), Phase::Due { .. });
+        out.push((name, said.agreed, due));
+    }
+    out
+}
+
 /// The gate's own share, every minute: at once, every way in ends; past
 /// the window, what this box holds of theirs goes. The other services do
 /// theirs on their own boxes and report back here (`done`).
@@ -419,6 +461,26 @@ pub(crate) async fn tick(app: &App) {
                 }
                 Err(e) => eprintln!("leaving: member {}: mail: {e:#}", l.id),
             }
+        }
+    }
+    // a sign-up still waiting: everything of theirs is on this box
+    for (name, left, due) in held_leavers(&app.directory, identity::now(), window()) {
+        let w = app.directory.leaving.work(&name, left);
+        if !w.ended {
+            app.signins.forget(&name);
+            app.directory.end_elsewhere(&name);
+            app.directory.leaving.mark(&name, left, |w| w.ended = true);
+            eprintln!("leaving: a waiting sign-up is out: its sessions ended");
+        }
+        if due {
+            if let Err(e) = app.friends.forget(&name) {
+                eprintln!("leaving: a waiting sign-up: {e:#}");
+                continue;
+            }
+            app.signins.forget(&name);
+            app.directory.unhold(&name);
+            app.directory.leaving.forget_said(&name);
+            eprintln!("leaving: a waiting sign-up's account is gone");
         }
     }
     if reap
@@ -608,8 +670,17 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
         Phase::Left { since, until } => (Some(since), Some(until)),
         Phase::Due { since } => (Some(since), Some(since + window())),
     };
+    // anyone may leave: a member, a guest, or an account still waiting
+    let role = if app.member(&user) {
+        "member"
+    } else if app.guest(&user) {
+        "guest"
+    } else {
+        "waiting"
+    };
     Json(serde_json::json!({
         "name": user,
+        "role": role,
         "member": app.member(&user),
         "left": left,
         "until": until,
@@ -656,7 +727,14 @@ pub(crate) async fn start(
         )
             .into_response();
     }
-    if !q.back && !app.member(&user) {
+    // anyone may leave - a member, a guest, an account still waiting - but
+    // someone the owner removed is out already, and only the owner undoes it
+    let removed = app
+        .members
+        .as_ref()
+        .and_then(|m| removed_at(m, &identity::member_id(&e.entry.root)))
+        .is_some();
+    if !q.back && removed {
         return StatusCode::FORBIDDEN.into_response();
     }
     if !e.entry.root.starts_with(identity::WEBAUTHN_ROOT) {

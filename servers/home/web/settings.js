@@ -43,7 +43,6 @@ async function profile() {
     $('email').closest('.se-row').hidden = true;
     document.querySelector('[data-tab="backups"]').hidden = true;
     document.querySelector('[data-tab="network"]').hidden = true;
-    document.querySelector('[data-tab="leave"]').hidden = true;
   }
   // from the front door's name, not this page's: the app's copy is on its own
   const domain = new URL(me.home).hostname.split('.').slice(-2).join('.');
@@ -74,11 +73,12 @@ if (q.get('email') === 'changed') {
 }
 $('banner-x').onclick = () => { $('banner').hidden = true; };
 
-// someone who left sees only where they stand, and the way back
+// someone who left sees only where they stand, and the way back; an
+// account still waiting has nothing here but the way out
 let gone = false;
 where()
   .then((s) => {
-    if (!s.left) return;
+    if (!s.left && s.role !== 'waiting') return;
     gone = true;
     for (const a of document.querySelectorAll('.se-nav [data-tab]')) a.hidden = a.dataset.tab !== 'leave';
     tab('leave');

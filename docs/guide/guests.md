@@ -66,6 +66,8 @@ wrong, it is handled as it is for anyone.
 - A guest stays a guest only while a member is still their friend. When
   no member is, they are let in nowhere.
 - A browser sign-up that never becomes a guest is deleted after 7 days.
+- A guest can leave whenever they like, in Settings, **Leave** tab
+  ([Leaving](leaving.md#guests-and-accounts-still-waiting)).
 
 ## Privacy
 

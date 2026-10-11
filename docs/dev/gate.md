@@ -1032,8 +1032,10 @@ path                                        method   what                       
 /internal/games/friends/{user}              GET      who they may invite                       local
 -- leaving (leaving.rs, leaving.md)
 /_dd/leave                                  GET      where the signed-in person stands         session or token
-/_dd/leave/start                            POST     a statement for the root passkey          session; member to leave,
-                                                                                               someone who left to come back
+/_dd/leave/start                            POST     a statement for the root passkey          session; anyone not removed
+                                                                                               to leave (member, guest,
+                                                                                               waiting), someone who left
+                                                                                               to come back
 /_dd/leave/sign                             POST     the passkey's answer, into the log        session + the ceremony
 /_dd/leaving/{name}                         GET      the newest signed statement               as its entry: member; the person; a key in it; a reader key (the mail Worker)
 /_dd/leaving/{name}                         PUT      a statement `dd leave` signed             the root's signature

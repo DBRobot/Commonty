@@ -38,6 +38,24 @@ when they left. A statement dated more than 5 minutes after it is agreed,
 or more than a day before, is refused: it can neither put off the
 deleting nor be kept and played later. The newest statement stands.
 
+**Anyone may leave**, not members alone: a friend's guest, and an account
+made in a browser that is still waiting, leave with their passkey the same
+way (Settings shows a guest the Leave tab, and a waiting account nothing
+else). A guest's statement goes through the log like a member's, and the
+guest is in `leavers` from then on: at once nothing lets them in (`guest()`
+asks `has_left`), their sessions end and their devices are reaped; after
+the window the gate deletes their friendships, their guest record, any
+link of theirs and their sign-ins (`friends::forget` touches nothing of the
+members they were friends with, nor any other guest), the games manager
+their servers, and the other services find nothing of theirs and report
+done. A waiting account is on one box only, held and never in the
+directory, so its statement is that box's alone (`say_leave` records it
+against the held entry). `held_leavers` ends its sessions at once and,
+when its window is out or its hold lapsed first (a week, `HELD_TTL`),
+deletes the hold, its friendships and sign-ins, and the statement with
+them, so the name is free again and whoever takes it next has not left.
+Someone who left accepts no friend link until they come back.
+
 **By the owner.** `dd member remove <name>` moves their id to `revoked` in
 [fleet/members.json](../../fleet/members.json) and writes the time under
 `removed`; the signed release carries both to every box. `dd member add`

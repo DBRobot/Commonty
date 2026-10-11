@@ -72,6 +72,25 @@ leaving, nothing of yours is left on any box or in any backup.
   comments in someone else's repository stay there, as on any
   open-source project, shown under a placeholder account.
 
+## Guests, and accounts still waiting
+
+Anyone can leave, not only members. A friend's guest, and an account made
+on the website that is still waiting to be let in, leave the same way:
+Settings, **Leave** tab, **Leave Commonty**, confirmed with the passkey.
+(An account still waiting sees only that tab, and its waiting page links
+to it.)
+
+- Every sign-in ends at once, the guest's devices leave the network, and
+  the game servers they were invited to close to them.
+- Within 30 days they can sign in and press **Come back**.
+- After that their account is deleted, with their friendships, their
+  guest access and any game servers of theirs. Nothing of anyone else's
+  is touched: a member they were friends with keeps everything, other
+  guests included.
+- An account still waiting is kept on one box only, and is deleted once
+  30 days are up, or sooner if it would have lapsed anyway (a week after
+  it was made). Its name is then free again.
+
 ## Being removed
 
 David can remove a member who breaks the [Terms of

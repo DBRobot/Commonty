@@ -730,11 +730,13 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     assert!(body.contains("Your account is made"), "{body}");
     assert_eq!(get_with_cookie(&a, "/verify", &cookie).await.0, 403);
     assert_eq!(get_with_cookie(&a, "/_dd/me", &cookie).await.0, 403);
-    // and none of a member's own pages open to an account that is not one
-    for page in ["/_dd/files", "/_dd/media", "/_dd/boxes", "/_dd/settings"] {
+    // and none of a member's own pages open to an account that is not one;
+    // Settings does, for its way out
+    for page in ["/_dd/files", "/_dd/media", "/_dd/boxes"] {
         let (st, _) = get_with_cookie(&a, page, &cookie).await;
         assert_eq!(st, 303, "{page} opened to a non-member");
     }
+    assert_eq!(get_with_cookie(&a, "/_dd/settings", &cookie).await.0, 200);
     assert_eq!(get_with_cookie(&a, "/_dd/fleet.json", &cookie).await.0, 403);
 
     // the name is taken now, by a different passkey too
@@ -2099,6 +2101,179 @@ async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
     assert_eq!(r.status().as_u16(), 204);
     assert_eq!(gate(&tom_c, "games.localhost").await.0, 403);
     assert_eq!(get_with_cookie(&b, "/_dd/me", &tom_c).await.0, 403);
+}
+
+/// Anyone may leave, not only members: a friend's guest and an account
+/// still waiting leave with their passkey, every way in ends at once, and
+/// they can come back within the window. Nothing of anyone else's moves.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_guest_and_a_waiting_account_leave_and_come_back() {
+    let tile = |name: &str| verify::pages::Service {
+        name: name.into(),
+        url: format!("https://{name}.localhost/"),
+        icon: "".into(),
+        color: "#000".into(),
+        blurb: String::new(),
+        demo: None,
+        demo_url: None,
+        menu_only: false,
+    };
+    let a = Box_::start_members(true, Some(vec![])).await;
+    let mut david = SoftPasskey::new(true);
+    assert_eq!(join_in_browser(&a, &mut david, "david").await.0, 200);
+    let held = a.dir.parent().unwrap().join("held").join("david.json");
+    let e: serde_json::Value = serde_json::from_slice(&std::fs::read(&held).unwrap()).unwrap();
+    let id = identity::member_id(e["entry"]["root"].as_str().unwrap());
+    let b = Box_::start_on(
+        a.dir.clone(),
+        true,
+        Some(verify::Members::list(vec![id])),
+        None,
+        vec![tile("games")],
+    )
+    .await;
+    wait_for(|| async { entry(&b, "david").await.is_some() }).await;
+    let (_, david_c) = login_in_browser(&b, &mut david, "david").await;
+
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let post_json = |path: &str, cookie: &str| {
+        let r = http
+            .post(b.url(path))
+            .header("cookie", cookie.to_string())
+            .header("content-type", "application/json")
+            .body("{}");
+        async move {
+            let r = r.send().await.unwrap();
+            (r.status().as_u16(), r.text().await.unwrap_or_default())
+        }
+    };
+    let games = |cookie: &str| {
+        let r = http
+            .get(b.url("/verify"))
+            .header("cookie", cookie.to_string())
+            .header("x-original-host", "games.localhost");
+        async move { r.send().await.unwrap().status().as_u16() }
+    };
+    let stands = |cookie: &str| {
+        let r = http
+            .get(b.url("/_dd/leave"))
+            .header("cookie", cookie.to_string());
+        async move {
+            let r = r.send().await.unwrap();
+            assert_eq!(r.status(), 200);
+            r.json::<serde_json::Value>().await.unwrap()
+        }
+    };
+
+    // tom comes in as david's guest
+    let (_, made) = post_json("/_dd/friends/link", &david_c).await;
+    let made: serde_json::Value = serde_json::from_str(&made).unwrap();
+    let secret = made["url"]
+        .as_str()
+        .unwrap()
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .to_string();
+    let mut tom = SoftPasskey::new(true);
+    let (_, tom_c) = join_in_browser(&b, &mut tom, "tom").await;
+    assert_eq!(
+        post_json(&format!("/_dd/friend/{secret}"), &tom_c).await.0,
+        200
+    );
+    assert_eq!(games(&tom_c).await, 200);
+    let (_, still) = post_json("/_dd/friends/link", &david_c).await;
+    let still: serde_json::Value = serde_json::from_str(&still).unwrap();
+
+    // a guest's Settings offers the way out, and the way out works
+    assert_eq!(get_with_cookie(&b, "/_dd/settings", &tom_c).await.0, 200);
+    let s = stands(&tom_c).await;
+    assert_eq!(s["role"], "guest");
+    assert!(s["left"].is_null());
+    leave_in_browser(&b, &mut tom, &tom_c, false).await;
+    assert_ne!(games(&tom_c).await, 200, "the session they left in ended");
+    let (st, tom_c) = login_in_browser(&b, &mut tom, "tom").await;
+    assert_eq!(st, 200);
+    assert_eq!(
+        games(&tom_c).await,
+        403,
+        "a guest who left is let in nowhere"
+    );
+    assert_eq!(get_with_cookie(&b, "/_dd/me", &tom_c).await.0, 403);
+    assert!(stands(&tom_c).await["left"].is_u64());
+    assert_eq!(get_with_cookie(&b, "/_dd/settings", &tom_c).await.0, 200);
+
+    // david's things are his: his access, his other link, his friend list
+    assert_eq!(verify_status_cookie(&b, &david_c).await, 200);
+    let link = still["url"].as_str().unwrap().rsplit('/').next().unwrap();
+    assert_eq!(
+        get_with_cookie(&b, &format!("/_dd/friend/{link}/about"), &tom_c)
+            .await
+            .0,
+        200
+    );
+    let (_, list) = get_with_cookie(&b, "/_dd/friends/list", &david_c).await;
+    assert!(list.contains("\"tom\""), "kept for the window: {list}");
+
+    // and tom comes back, a guest again
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    leave_in_browser(&b, &mut tom, &tom_c, true).await;
+    assert_eq!(games(&tom_c).await, 200);
+
+    // sarah signed up and is still waiting: no member list names her, no
+    // friend link brought her in. She leaves too.
+    let mut sarah = SoftPasskey::new(true);
+    let (_, sarah_c) = join_in_browser(&b, &mut sarah, "sarah").await;
+    assert_eq!(get_with_cookie(&b, "/_dd/settings", &sarah_c).await.0, 200);
+    let (_, home) = get_with_cookie(&b, "/_dd/home", &sarah_c).await;
+    assert!(home.contains("/_dd/settings#leave"), "{home}");
+    let s = stands(&sarah_c).await;
+    assert_eq!(s["role"], "waiting");
+    leave_in_browser(&b, &mut sarah, &sarah_c, false).await;
+    assert!(
+        entry(&b, "sarah").await.is_none(),
+        "her word stays on this box"
+    );
+    let (st, sarah_c) = login_in_browser(&b, &mut sarah, "sarah").await;
+    assert_eq!(st, 200);
+    assert!(stands(&sarah_c).await["left"].is_u64());
+    // a friend link cannot make a guest of someone who left
+    let (_, l2) = post_json("/_dd/friends/link", &david_c).await;
+    let l2: serde_json::Value = serde_json::from_str(&l2).unwrap();
+    let s2 = l2["url"]
+        .as_str()
+        .unwrap()
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        post_json(&format!("/_dd/friend/{s2}"), &sarah_c).await.0,
+        403
+    );
+    assert_eq!(games(&sarah_c).await, 403);
+    assert!(entry(&b, "sarah").await.is_none());
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    leave_in_browser(&b, &mut sarah, &sarah_c, true).await;
+    assert!(stands(&sarah_c).await["left"].is_null());
+
+    // and david was never touched
+    assert_eq!(verify_status_cookie(&b, &david_c).await, 200);
+}
+
+/// /verify for a browser's session
+async fn verify_status_cookie(b: &Box_, cookie: &str) -> u16 {
+    reqwest::Client::new()
+        .get(b.url("/verify"))
+        .header("cookie", cookie)
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .as_u16()
 }
 
 /// A stand-in museum: answers every request 200 with `{}` and keeps the

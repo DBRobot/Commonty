@@ -589,6 +589,7 @@ impl App {
     fn guest(&self, user: &str) -> bool {
         user != pages::DEMO_USER
             && !self.member(user)
+            && !self.directory.leaving.has_left(user)
             && self.friends.guest(user).is_some()
             && self
                 .friends
@@ -1972,6 +1973,14 @@ async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Re
             } else {
                 Redirect::to("/_dd/settings#leave").into_response()
             }
+        }
+        // an account still waiting may leave too: Settings shows it Leave alone
+        Some(user)
+            if name == "settings"
+                && user != pages::DEMO_USER
+                && app.entry(&user).ok().flatten().is_some() =>
+        {
+            page(name)
         }
         Some(_) => Redirect::to("/_dd/home").into_response(),
         None => Redirect::to(&format!("/_dd/login?rd={at}")).into_response(),
