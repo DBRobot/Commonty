@@ -302,7 +302,7 @@ async function propfind(url) {
 }
 
 /// What is in the trash: every file with where it was, when it went there,
-/// and its size. The box lets it go for good 90 days on.
+/// and its size. The box lets it go for good 30 days on.
 export async function trashed(lib) {
   const base = `/_dd/dav/${lib.id}/trash/`;
   const out = [];

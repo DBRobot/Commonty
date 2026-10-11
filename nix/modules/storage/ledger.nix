@@ -87,10 +87,10 @@ in
         ];
       };
     };
-    # Photos' share of deleting whoever left 90 days ago, with the same
+    # Photos' share of deleting whoever left 30 days ago, with the same
     # admin login (docs/dev/leaving.md)
     systemd.services.dd-forget-photos = {
-      description = "Delete the Photos accounts of members who left 90 days ago";
+      description = "Delete the Photos accounts of members who left 30 days ago";
       after = [
         "dd-verify.service"
         "ente.service"

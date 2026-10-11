@@ -97,7 +97,7 @@ pub fn read_proof_js(secret: &str, name: &str, at: f64) -> Result<String, JsValu
 }
 
 /// How long a member's things are kept after they leave (docs/dev/leaving.md)
-pub const LEAVE_WINDOW: u64 = 90 * 24 * 3600;
+pub const LEAVE_WINDOW: u64 = 30 * 24 * 3600;
 
 /// May `name`'s address go? Only for their own leaving, signed by the root
 /// of the entry this Worker pinned and said the window ago or more, and

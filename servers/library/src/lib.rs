@@ -5,7 +5,7 @@
 //! object under that library's prefix through itself with a url it signs
 //! for minutes (or hands a transcoder one, for a film's length). It lists,
 //! copies and moves on the member's behalf, and never deletes at a client's
-//! word: what is deleted or overwritten goes under trash/, purged 90 days
+//! word: what is deleted or overwritten goes under trash/, purged 30 days
 //! on (dav.rs).
 //!
 //! One bucket for every library, a prefix per library id: the box's own key

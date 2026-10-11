@@ -16,7 +16,7 @@ pub struct Members {
     #[serde(default)]
     pub revoked: Vec<String>,
     /// when each revoked id was removed, unix seconds: their things are
-    /// deleted from every box 90 days later (docs/dev/leaving.md)
+    /// deleted from every box 30 days later (docs/dev/leaving.md)
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub removed: std::collections::BTreeMap<String, u64>,
 }
@@ -72,7 +72,7 @@ pub async fn add(repo: &str, who: &str, dirs: &[String]) -> Result<()> {
     let id = resolve(who, dirs).await?;
     let mut m = read(repo)?;
     m.revoked.retain(|x| *x != id);
-    // back within 90 days of being removed: nothing of theirs was deleted
+    // back within 30 days of being removed: nothing of theirs was deleted
     m.removed.remove(&id);
     if m.members.contains(&id) {
         println!("already a member: {id}");
@@ -99,7 +99,7 @@ pub async fn remove(repo: &str, who: &str, dirs: &[String]) -> Result<()> {
     m.removed.entry(id.clone()).or_insert_with(identity::now);
     write(repo, m)?;
     println!(
-        "revoked {id}\ncommit fleet/members.json and release; every box then shuts them out, and deletes what is theirs 90 days after this"
+        "revoked {id}\ncommit fleet/members.json and release; every box then shuts them out, and deletes what is theirs 30 days after this"
     );
     Ok(())
 }

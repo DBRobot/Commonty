@@ -95,7 +95,7 @@ in
   options.dd.verify.leaveWindowSeconds = lib.mkOption {
     type = lib.types.nullOr lib.types.int;
     default = null;
-    description = "how long someone's things are kept after they leave; null: 90 days. A test shortens it.";
+    description = "how long someone's things are kept after they leave; null: 30 days. A test shortens it.";
   };
   options.dd.verify.housePeers = lib.mkOption {
     type = lib.types.listOf lib.types.str;
@@ -403,7 +403,7 @@ in
         VERIFY_LEAVE_WINDOW_SECS = toString cfg.leaveWindowSeconds;
       }
       # the front door's gate asks the mail Worker to delete the address of
-      # whoever left 90 days ago (servers/gate/src/leaving.rs)
+      # whoever left 30 days ago (servers/gate/src/leaving.rs)
       // lib.optionalAttrs (full && options.dd ? public && config.dd.public.enable) {
         VERIFY_MAIL_FORGET = "https://mail.${base}/api/forget";
       }

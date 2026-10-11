@@ -212,10 +212,10 @@ in
             SMTP_FROM = "distributed.datacenter@gmail.com";
             SMTP_FROM_NAME = "Commonty Passwords";
 
-            # nothing deleted lasts past 90 days (nix/tests/retention.nix);
+            # a deleted item is gone everywhere within 90 days (nix/tests/retention.nix);
             # upstream keeps both forever
-            TRASH_AUTO_DELETE_DAYS = 90;
-            EVENTS_DAYS_RETAIN = 90;
+            TRASH_AUTO_DELETE_DAYS = 30;
+            EVENTS_DAYS_RETAIN = 30;
 
             LOG_LEVEL = "warn";
             EXTENDED_LOGGING = true;
@@ -286,7 +286,7 @@ in
           '';
         };
 
-        # Deleting the account of someone who left 90 days ago is upstream's
+        # Deleting the account of someone who left 30 days ago is upstream's
         # own admin delete (sends, attachments in the bucket, everything), on
         # loopback only: nginx never passes /admin, and the token is made at
         # boot, kept in /run, readable by root alone (docs/dev/leaving.md)
@@ -308,7 +308,7 @@ in
           '';
         };
         systemd.services.dd-forget-passwords = {
-          description = "Delete the Passwords accounts of members who left 90 days ago";
+          description = "Delete the Passwords accounts of members who left 30 days ago";
           after = [
             "vaultwarden.service"
             "dd-verify.service"

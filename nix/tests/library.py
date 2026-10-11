@@ -114,10 +114,10 @@ assert (
     == "403"
 )
 
-# and the trash lets go after 90 days: an item trashed 91 days ago goes
+# and the trash lets go after 30 days: an item trashed 31 days ago goes
 # when the gate next empties it (at start, then daily), a fresh one stays
 s3 = aws.split(" s3api ")[0]
-old = f"{lib}/trash/{int(box.succeed('date +%s')) - 91 * 86400}/Files/old.bin"
+old = f"{lib}/trash/{int(box.succeed('date +%s')) - 31 * 86400}/Files/old.bin"
 box.succeed(f"echo x > /tmp/old.bin && {s3} s3 cp /tmp/old.bin s3://libraries/{old}")
 box.succeed("systemctl restart dd-verify.service")
 box.wait_until_succeeds(f"! {aws} | grep -q '{old}'", timeout=60)

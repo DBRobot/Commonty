@@ -26,7 +26,7 @@ This page is how that fits together, and how to change it.
 - **One door.** Every read and write goes through the gate, which decides
   owner, reader or nobody. No S3 key leaves a box.
 - **Nothing is deleted at a client's word.** A delete is a move into the
-  library's trash, which the box empties 90 days on; a write over a name
+  library's trash, which the box empties 30 days on; a write over a name
   already taken puts what was there into the trash first.
 - **Plaintext only in memory, only while working.** A box that plays a
   film for someone decrypts it in RAM for that one viewing and forgets it,
@@ -294,12 +294,12 @@ with those letters and is no part of it); the one move out of it is a
 restore, `trash/<stamp>/...` back into the library.
 
 A write over a name keeps every version: the one before goes to the
-trash for 90 days. So what is rewritten often does not live in the
+trash for 30 days. So what is rewritten often does not live in the
 library: Movies & TV's place in each film and its shelf are notes the
 gate keeps beside it ([Reading a library](#in-a-browser)).
 
 The gate empties the trash itself, once a day (an hour after a failure,
-as at boot before the bucket is up): every `trash/<stamp>/` older than 90
+as at boot before the bucket is up): every `trash/<stamp>/` older than 30
 days is deleted, for every library (`purge_trash`).
 
 ### Allowance
@@ -616,7 +616,7 @@ The demo may start a film: the gate counts a POST to
   ([nix/modules/storage/snapshots.nix](../../nix/modules/storage/snapshots.nix)).
   Garage's metadata snapshots are kept 7 days
   ([nix/modules/storage/backup.nix](../../nix/modules/storage/backup.nix)).
-  What each place keeps, and the check that holds it to 90 days, is in
+  What each place keeps, and the check that holds the sum to 90 days, is in
   [servers.md](servers.md#retention).
 - **What each box says.** Each box puts `usage/<service>/<member>` facts in
   its heartbeat; dd-control reads them from
@@ -672,7 +672,7 @@ the member's machine) are in the `libraries` bucket under the prefix
 - A browser changes nothing there without a passkey shown in the last
   five minutes. A request carrying `x-dd-upload` counts as a change,
   whatever its method. A device token needs no passkey.
-- DELETE moves into the trash, which goes after 90 days like a library's.
+- DELETE moves into the trash, which goes after 30 days like a library's.
 - Images count against the allowance.
 - The archive password is sealed to the member's devices beside the
   archives (`dd-devices.json`, [Where the keys live](#where-the-keys-live)),
@@ -750,7 +750,7 @@ nix/modules/storage/       garage.nix, ledger.nix (the Photos box's count),
   full gate. A member made with `dd`, `dd library new` with its three
   folders, rclone as a crypt remote over the gate copying in and reading
   back, `dd` and rclone reading each other's files, nothing plain in the
-  bucket or on disk, delete into the trash, the trash emptied after 90
+  bucket or on disk, delete into the trash, the trash emptied after 30
   days, an upload in pieces, the demo's cookie reading its own library
   and nothing else, a stranger's token, no token, and a library id
   claimed in someone else's entry. Disk images under `/_dd/images`: put

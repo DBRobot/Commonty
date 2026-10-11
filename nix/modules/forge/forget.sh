@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Whoever left 90 days ago (docs/dev/leaving.md): their own repositories and
+# Whoever left 30 days ago (docs/dev/leaving.md): their own repositories and
 # their account go. What they gave to someone else's repository stays there,
 # under the forge's "Ghost" user.
 set -euo pipefail

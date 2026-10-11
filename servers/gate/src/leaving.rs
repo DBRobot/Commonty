@@ -19,7 +19,7 @@ use webauthn_rs::prelude::PublicKeyCredential;
 use crate::App;
 use crate::directory::Directory;
 
-pub const WINDOW: u64 = 90 * 24 * 3600;
+pub const WINDOW: u64 = 30 * 24 * 3600;
 /// how far a statement's own time may run ahead of, or behind, its agreeing
 const AHEAD: u64 = 300;
 const BEHIND: u64 = 24 * 3600;
@@ -783,7 +783,7 @@ mod tests {
 
     #[test]
     fn everything_is_kept_for_the_window_and_then_due() {
-        let w = 90 * DAY;
+        let w = 30 * DAY;
         assert_eq!(phase(None, 1000, w), Phase::Member);
         assert_eq!(
             phase(Some(1000), 1000, w),
@@ -800,7 +800,7 @@ mod tests {
             }
         );
         assert_eq!(phase(Some(1000), 1000 + w, w), Phase::Due { since: 1000 });
-        assert_eq!(WINDOW, 90 * DAY);
+        assert_eq!(WINDOW, 30 * DAY);
     }
 
     #[test]

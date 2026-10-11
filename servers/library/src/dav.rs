@@ -3,7 +3,7 @@
 //! owner may write and a reader may only read, and nothing is deleted at
 //! once: DELETE, and a PUT or MOVE over a name already taken, put what was
 //! there into `trash/` under the library, and the trash lets go of it after
-//! 90 days. The bytes and names through here are rclone's crypt format,
+//! 30 days. The bytes and names through here are rclone's crypt format,
 //! made and read on the device; this box moves ciphertext.
 //!
 //!   OPTIONS, PROPFIND (depth 0 or 1), HEAD, GET (ranges), PUT, MKCOL,
@@ -32,7 +32,7 @@ fn top_prefix(id: &str) -> bool {
 }
 
 /// how long it stays there before it is gone for good
-pub const TRASH_SECS: u64 = 90 * 24 * 3600;
+pub const TRASH_SECS: u64 = 30 * 24 * 3600;
 
 /// one thing under a prefix, as the bucket lists it
 pub struct Entry {
@@ -129,7 +129,7 @@ impl Gate {
     }
 
     /// A library, or a member's disk images, gone for good, trash and all:
-    /// someone left 90 days ago (the gate's leaving.rs). Safe to run again.
+    /// someone left 30 days ago (the gate's leaving.rs). Safe to run again.
     pub async fn forget(&self, id: &str) -> Result<usize> {
         anyhow::ensure!(top_prefix(id), "not a library or a member's images");
         let mut n = 0;

@@ -1,5 +1,6 @@
-# Nothing deleted lasts past 90 days on any box, wherever a box's config
-# says how long it keeps something (docs/dev/servers.md, Retention)
+# Anything deleted is gone from every box and every backup within 90 days:
+# the first place's window (a trash, someone who left), then the backups,
+# then the snapshots under them, summed (docs/dev/servers.md, Retention)
 {
   pkgs,
   self,
@@ -18,6 +19,42 @@ let
   };
   over = m: m > limitMin;
   days = m: toString (m / (24 * 60));
+  longestOf = l: lib.foldl' lib.max 0 l;
+
+  # a window in the Rust, `<NAME>: u64 = <n> * 24 * 3600`, as minutes
+  rustDays =
+    file: name:
+    let
+      m = builtins.match ".*${name}: u64 = ([0-9]+) \\* 24 \\* 3600;.*" (
+        builtins.replaceStrings [ "\n" ] [ " " ] (builtins.readFile file)
+      );
+    in
+    if m == null then
+      throw "retention: ${name} is no longer where this check reads it in ${toString file}"
+    else
+      lib.toInt (builtins.head m) * minutes.daily;
+  libraryTrash = rustDays ../../servers/library/src/dav.rs "TRASH_SECS";
+  leaveDefault = rustDays ../../servers/gate/src/leaving.rs "pub const WINDOW";
+
+  snapshotsKeep =
+    c:
+    let
+      s = c.services.zfs.autoSnapshot;
+      running = n: c.systemd.timers."zfs-snapshot-${n}".enable or true;
+      levels = builtins.filter running [
+        "frequent"
+        "hourly"
+        "daily"
+        "weekly"
+        "monthly"
+      ];
+    in
+    if s.enable then
+      lib.min ((c.dd.zfs.snapshotMaxDays or 1000) * minutes.daily) (
+        longestOf (map (n: s.${n} * minutes.${n}) levels)
+      )
+    else
+      0;
 
   snapshots =
     name: c:
@@ -41,7 +78,8 @@ let
       ++ lib.optional (over trim) "${name}: dd-snapshot-trim keeps snapshots ${days trim} days"
     );
 
-  # restic's --keep-<unit> N and --keep-within <N>d, as minutes
+  # restic's --keep-<unit> N and --keep-within <N>d, as minutes: N whole
+  # units back, plus the one under way
   resticKeep =
     opt:
     let
@@ -49,11 +87,19 @@ let
       w = builtins.match "--keep-within(-[a-z]+)? ([0-9]+)d" opt;
     in
     if m != null then
-      lib.toInt (builtins.elemAt m 1) * minutes.${builtins.elemAt m 0}
+      (lib.toInt (builtins.elemAt m 1) + 1) * minutes.${builtins.elemAt m 0}
     else if w != null then
       lib.toInt (builtins.elemAt w 1) * minutes.daily
     else
       null;
+  resticLongest =
+    c:
+    longestOf (
+      lib.mapAttrsToList (
+        _: b: longestOf (builtins.filter (k: k != null) (map resticKeep b.pruneOpts))
+      ) c.services.restic.backups
+    );
+
   restic =
     name: c:
     lib.concatLists (
@@ -109,9 +155,19 @@ let
         else if kind == "bad" then
           [ "${name}: vaultwarden ${key} is not a number of days" ]
         else
-          lib.optional (n > 90) "${name}: vaultwarden ${key} is ${toString n} days";
+          [ ];
     in
     lib.optionals v.enable (check "TRASH_AUTO_DELETE_DAYS" ++ check "EVENTS_DAYS_RETAIN");
+  vaultwardenDays =
+    c:
+    let
+      env = c.services.vaultwarden.config;
+      d = k: if builtins.isInt (env.${k} or null) then env.${k} * minutes.daily else 0;
+    in
+    if c.services.vaultwarden.enable then
+      lib.max (d "TRASH_AUTO_DELETE_DAYS") (d "EVENTS_DAYS_RETAIN")
+    else
+      0;
 
   journald =
     name: c:
@@ -146,26 +202,53 @@ let
   ) self.nixosConfigurations;
   enteScript = lib.concatStrings (
     lib.mapAttrsToList (name: sys: ''
-      src=${sys.config.services.ente.api.package.src}/server/pkg/repo
-      trash=$(sed -n 's/^\s*TrashDurationInDays = \([0-9]*\)$/\1/p' $src/trash.go)
-      queue=$(sed -n 's|^\s*DeleteObjectQueue: *\([0-9]*\) \* 24 \* 60,.*|\1|p' $src/queue.go)
-      if [ -z "$trash" ] || [ -z "$queue" ]; then
-        echo "${name}: museum's trash or object-deletion delay is no longer where this check reads it" >&2; bad=1
-      elif [ $((trash + queue)) -gt 90 ]; then
-        echo "${name}: museum keeps a deleted photo $trash + $queue days" >&2; bad=1
+      snap=${toString (snapshotsKeep sys.config / minutes.daily)}
+      left=${toString (leftDays sys.config)}
+      src=${sys.config.services.ente.api.package.src}/server
+      trash=$(sed -n 's/^\s*TrashDurationInDays = \([0-9]*\)$/\1/p' $src/pkg/repo/trash.go)
+      queue=$(sed -n 's|^\s*DeleteObjectQueue: *\([0-9]*\) \* 24 \* 60,.*|\1|p' $src/pkg/repo/queue.go)
+      account=$(sed -n 's|.*stage_schedule_time .*now_utc_micro_seconds() + (\([0-9]*\) \* 24::BIGINT.*|\1|p' $src/migrations/59_delete_data.up.sql)
+      if [ -z "$trash" ] || [ -z "$queue" ] || [ -z "$account" ]; then
+        echo "${name}: museum's trash, account or object-deletion delay is no longer where this check reads it" >&2; bad=1
+      else
+        if [ $((trash + queue + snap)) -gt 90 ]; then
+          echo "${name}: museum keeps a deleted photo $trash + $queue days, then snapshots $snap" >&2; bad=1
+        fi
+        # someone who left: the window and its hour, then museum's account delay
+        if [ $((left + 1 + account + queue + snap)) -gt 90 ]; then
+          echo "${name}: the Photos of someone who left go after $left + 1 + $account + $queue + $snap days" >&2; bad=1
+        fi
       fi
     '') ente
   );
 
-  # what someone who left keeps until it is deleted (servers/gate/src/leaving.rs)
-  leaving =
-    name: c:
+  leftMinutes =
+    c:
     let
       w = c.dd.verify.leaveWindowSeconds or null;
     in
-    lib.optional (
-      w != null && w > limitMin * 60
-    ) "${name}: someone who left keeps their things ${toString (w / 86400)} days";
+    if w == null then leaveDefault else w / 60;
+  leftDays = c: (leftMinutes c + minutes.daily - 1) / minutes.daily;
+
+  # the first window, then a backup of the last copy, then a snapshot of
+  # that backup
+  chain =
+    name: c:
+    let
+      first = {
+        "the library trash" = libraryTrash;
+        "someone who left" = leftMinutes c;
+        "Passwords" = vaultwardenDays c;
+      };
+      after = resticLongest c + snapshotsKeep c;
+    in
+    lib.concatLists (
+      lib.mapAttrsToList (
+        what: m:
+        lib.optional (over (m + after))
+          "${name}: ${what} keeps ${days m} days, then backups and snapshots ${days after}: ${days (m + after)} days"
+      ) first
+    );
 
   problems = lib.concatLists (
     lib.mapAttrsToList (
@@ -178,7 +261,7 @@ let
       ++ vaultwarden name c
       ++ journald name c
       ++ nginxLog name c
-      ++ leaving name c
+      ++ chain name c
     ) self.nixosConfigurations
   );
 in
@@ -192,7 +275,7 @@ pkgs.runCommand "retention-90-days" { } (
   + enteScript
   + ''
     [ $bad = 0 ] || exit 1
-    echo 'nothing on any box is kept past 90 days'
+    echo 'anything deleted is gone from every box and backup within 90 days'
     touch $out
   ''
 )

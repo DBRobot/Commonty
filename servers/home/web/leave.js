@@ -1,7 +1,7 @@
 // Leave Commonty, a tab of Settings: how to take everything out, and the
 // button. Leaving is a statement the member's root signs, agreed by every
 // box (servers/gate/src/leaving.rs): their passkey for an account made in a
-// browser, the app for one whose root is on a device. Within 90 days, the
+// browser, the app for one whose root is on a device. Within 30 days, the
 // same tab brings them back with nothing lost.
 import { requestOptions, assertion, post } from './webauthn.js';
 import { docsUrl, inApp, servedByApp, appFetch } from './shell.js';

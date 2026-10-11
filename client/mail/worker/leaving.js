@@ -1,4 +1,4 @@
-// Someone left 90 days ago (docs/dev/leaving.md): their <name>@<domain>
+// Someone left 30 days ago (docs/dev/leaving.md): their <name>@<domain>
 // rule goes, the address it forwarded to if no other rule uses it, and what
 // this Worker pinned for them. Anyone may ask; what decides is the
 // member's own signed statement, checked here against the entry pinned for

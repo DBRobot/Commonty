@@ -418,7 +418,7 @@ in [fleet/roles.json](../../fleet/roles.json) asks for KVM and 24 GiB.
 ## Someone who left
 
 The manager asks its gate who left every minute (`/internal/leaving`):
-their servers stop at once, and 90 days later every server and kept world
+their servers stop at once, and 30 days later every server and kept world
 of theirs is deleted (`Manager::forget`, [leaving.md](leaving.md)).
 
 ## Friends and guests

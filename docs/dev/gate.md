@@ -603,8 +603,8 @@ decides who: the id must be 32 hex characters; the caller (device token
 or session) must be a member; the **owner** has it in their entry, a
 **reader** is named in some owner's entry for it. The demo reads only the
 box's demo library (`VERIFY_DEMO_LIBRARY_ID`), and nobody's entry may
-claim that one. A daily task empties what has been in the trash for three
-months (an hour later if the bucket is not up).
+claim that one. A daily task empties what has been in the trash for 30
+days (an hour later if the bucket is not up).
 
 `/_dd/library/{lib}/notes/{kind}` (GET, PUT) keeps what Movies & TV knows
 about a library outside it, so a place saved every half minute does not
@@ -1154,8 +1154,8 @@ The unit runs as `dd-verify` with `ProtectSystem=strict`,
 directory follow       every 1 s (agreed mode): replay, ack, migrate
 held sign-ups          every 300 s: publish those the member list now names
 network reap           every 300 s: remove non-members' devices from Headscale
-library trash          daily (hourly after a failure): empty three-month-old trash
-leaving                every 60 s: end the ways in of whoever left; past 90 days,
+library trash          daily (hourly after a failure): empty 30-day-old trash
+leaving                every 60 s: end the ways in of whoever left; past 30 days,
                            delete this gate's share of them (leaving.md)
 forge events           LISTEN, reconnecting every 5 s
 ad blocking            at start: put the household's last on/off back

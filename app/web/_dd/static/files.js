@@ -167,8 +167,8 @@ function render() {
   for (const b of document.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === view));
   for (const b of document.querySelectorAll('[data-place]')) b.setAttribute('aria-current', String(b.dataset.place === place));
   $('empty').hidden = list.length > 0;
-  $('empty').textContent = trashy ? 'The trash is empty. Things put here go for good after 90 days.' : ($('search').value ? 'Nothing here by that name.' : 'Nothing here yet. Drop files anywhere on the page, or use Upload.');
-  $('foot').textContent = trashy ? 'Trashed files stay for 90 days, then the box lets them go for good.' : 'Names and contents are encrypted in this tab. Drop files anywhere on the page to upload them here.';
+  $('empty').textContent = trashy ? 'The trash is empty. Things put here go for good after 30 days.' : ($('search').value ? 'Nothing here by that name.' : 'Nothing here yet. Drop files anywhere on the page, or use Upload.');
+  $('foot').textContent = trashy ? 'Trashed files stay for 30 days, then the box lets them go for good.' : 'Names and contents are encrypted in this tab. Drop files anywhere on the page to upload them here.';
   $('all').hidden = trashy || lib.reader;
   selection();
 }

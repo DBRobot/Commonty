@@ -1312,7 +1312,7 @@
           boxes = import ./nix/tests/boxes.nix args;
           box-reports = import ./nix/tests/box-reports.nix args;
           role-fit = import ./nix/tests/role-fit.nix args;
-          # nothing deleted lasts past 90 days, where config says how long
+          # anything deleted is gone from every box and backup within 90 days
           retention = import ./nix/tests/retention.nix args;
           # every unit our modules define is in some service's needs, and no
           # timer of ours counts from boot

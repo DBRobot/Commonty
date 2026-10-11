@@ -23,7 +23,7 @@ in
       ../modules/library/libraries.nix
     ];
     dd.verify.role = pkgs.lib.mkForce "full";
-    # two minutes, not 90 days
+    # two minutes, not 30 days
     dd.verify.leaveWindowSeconds = 120;
     dd.garage = {
       zone = "r-test";

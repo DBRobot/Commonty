@@ -7,7 +7,7 @@
 }:
 let
   zfs = "${pkgs.zfs}/bin/zfs";
-  maxDays = 8;
+  maxDays = 7;
 in
 {
   options.dd.zfs.snapshotMaxDays = lib.mkOption {

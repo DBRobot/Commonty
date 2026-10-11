@@ -151,12 +151,11 @@ in
           RandomizedDelaySec = "1h";
           Persistent = true; # a box that was off at 03:00 backs up when it wakes
         };
-        # forget --prune after every backup; at most about 62 days back, so
-        # nothing deleted outlives 90 days here (nix/tests/retention.nix)
+        # forget --prune after every backup; at most about 5 weeks back
+        # (nix/tests/retention.nix)
         pruneOpts = [
           "--keep-daily 7"
           "--keep-weekly 4"
-          "--keep-monthly 2"
         ];
         # read a slice of the data back every run: a repository that lists
         # fine and restores nothing is the common failure

@@ -341,9 +341,9 @@ in
         };
       };
 
-      # the forge's share of deleting whoever left 90 days ago
+      # the forge's share of deleting whoever left 30 days ago
       systemd.services.dd-forget-forge = {
-        description = "Delete the repositories and forge accounts of members who left 90 days ago";
+        description = "Delete the repositories and forge accounts of members who left 30 days ago";
         after = [
           "forgejo.service"
           "dd-verify.service"

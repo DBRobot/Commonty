@@ -148,17 +148,17 @@ enum Command {
         #[arg(long, hide = true)]
         token: bool,
     },
-    /// Leave Commonty: every sign-in ends now, and in 90 days everything of
+    /// Leave Commonty: every sign-in ends now, and in 30 days everything of
     /// yours is deleted from every box. For an account whose root is on
     /// this machine; a passkey account leaves in Settings.
     Leave {
-        /// come back, within the 90 days: nothing was deleted yet
+        /// come back, within the 30 days: nothing was deleted yet
         #[arg(long)]
         back: bool,
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES)]
         directories: Vec<String>,
     },
-    /// Photos' share of deleting whoever left 90 days ago: their account,
+    /// Photos' share of deleting whoever left 30 days ago: their account,
     /// through museum's admin api. On the Photos box, by its timer.
     #[command(hide = true)]
     ForgetPhotos {
@@ -1112,7 +1112,7 @@ async fn main() -> Result<()> {
                 println!("welcome back, {name}: everything of yours is as you left it");
             } else {
                 println!(
-                    "{name} has left: every sign-in has ended. Everything of yours is kept 90 days, then deleted from every box; `dd leave --back` before then undoes it"
+                    "{name} has left: every sign-in has ended. Everything of yours is kept 30 days, then deleted from every box; `dd leave --back` before then undoes it"
                 );
             }
         }

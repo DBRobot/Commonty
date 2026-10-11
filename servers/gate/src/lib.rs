@@ -2681,7 +2681,7 @@ pub async fn start(
             }
         });
     }
-    // what was trashed three months ago is gone for good; daily
+    // what was trashed 30 days ago is gone for good; daily
     if app.library.is_some() {
         let a = app.clone();
         tokio::spawn(async move {
