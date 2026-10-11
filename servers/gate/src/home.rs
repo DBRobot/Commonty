@@ -128,7 +128,7 @@ impl Vouch for DirHouse {
             return false;
         };
         let id = identity::member_id(&e.entry.root);
-        if m.revoked.contains(&id) {
+        if m.revoked.contains(&id) || self.directory.leaving.has_left(user) {
             return false;
         }
         m.members.contains(&id)

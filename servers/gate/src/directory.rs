@@ -59,6 +59,8 @@ pub struct Directory {
     read: std::sync::Mutex<
         std::collections::HashMap<String, (std::time::SystemTime, u64, identity::SignedEntry)>,
     >,
+    /// who has left by their own word, and what this box did about it
+    pub leaving: crate::leaving::Store,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -80,7 +82,13 @@ impl Directory {
             .map(|p| p.join("held"))
             .unwrap_or_else(|| dir.join("held"));
         std::fs::create_dir_all(&held)?;
+        let leaving = crate::leaving::Store::open(Some(
+            dir.parent()
+                .map(|p| p.join("leaving.json"))
+                .unwrap_or_else(|| dir.join("leaving.json")),
+        ));
         Ok(Self {
+            leaving,
             ended: std::env::var_os("VERIFY_ENDED").map(PathBuf::from),
             read: Default::default(),
             dir,
@@ -843,6 +851,8 @@ pub enum Item {
     Entry(Box<identity::SignedEntry>),
     Invite(identity::SignedInvite),
     Ack(String),
+    /// leaving or coming back, signed by the root (leaving.rs)
+    Leave(identity::SignedLeave),
 }
 
 #[derive(Deserialize)]
@@ -898,6 +908,26 @@ impl Directory {
                 ));
             }
         }
+    }
+
+    /// Leaving, or coming back: through the log like any write, so every
+    /// box holds the same date; without the control plane, this box's own
+    pub(crate) async fn say_leave(
+        &self,
+        s: identity::SignedLeave,
+    ) -> std::result::Result<(), (StatusCode, String)> {
+        let on_file = self.entry(&s.leave.name).ok().flatten();
+        let Some(e) = on_file else {
+            return Err((StatusCode::NOT_FOUND, "no entry by that name".into()));
+        };
+        identity::verify_leave(&s, &e.entry)
+            .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
+        if self.agreed.is_some() {
+            return self.through_the_log(Item::Leave(s)).await;
+        }
+        self.leaving
+            .record(s, Some(&e.entry), identity::now())
+            .map_err(|e| (StatusCode::CONFLICT, e))
     }
 
     /// one item to this box's dd-control, over its socket
@@ -1014,6 +1044,13 @@ impl Directory {
         };
         let mut ack = None;
         match item {
+            Item::Leave(s) => {
+                let on_file = self.agreed_entry(&s.leave.name, at);
+                let res = self
+                    .leaving
+                    .record(s, on_file.as_ref().map(|e| &e.entry), at);
+                r.outcome.insert(hash, res);
+            }
             Item::Ack(claim) => {
                 if a.voters.iter().any(|v| v == from) {
                     r.acks.entry(claim).or_default().insert(from.to_string());

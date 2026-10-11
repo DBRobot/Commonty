@@ -240,6 +240,26 @@ impl Store {
         })
     }
 
+    /// someone left: the links they sent go at once (leaving.rs)
+    pub fn drop_links_of(&self, by: &str) -> Result<usize> {
+        self.change(|f| {
+            let before = f.links.len();
+            f.links.retain(|_, l| l.by != by);
+            before - f.links.len()
+        })
+    }
+
+    /// and at the end of their window, every friendship and their own
+    /// guest record; a guest they brought stays one while a member is
+    /// still their friend
+    pub fn forget(&self, user: &str) -> Result<()> {
+        self.change(|f| {
+            f.links.retain(|_, l| l.by != user);
+            f.pairs.retain(|p| pair_of(p, user).is_none());
+            f.guests.remove(user);
+        })
+    }
+
     /// `user`'s friends and since when, oldest first
     pub fn friends_of(&self, user: &str) -> Vec<(String, u64)> {
         let mut v: Vec<(String, u64)> = self.read(|f| {

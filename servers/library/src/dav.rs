@@ -20,6 +20,17 @@ use crate::{Gate, Role, uri_encode};
 /// where a deleted thing goes, under the library
 const TRASH: &str = "trash";
 static TRASH_PLACE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// a library's id, or `images-<name>`: the bucket's top level, and nothing
+/// that could reach past one person's folder
+fn top_prefix(id: &str) -> bool {
+    let images = id.strip_prefix("images-").is_some_and(|n| {
+        !n.is_empty()
+            && n.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    });
+    identity::valid_library_id(id) || images
+}
+
 /// how long it stays there before it is gone for good
 pub const TRASH_SECS: u64 = 90 * 24 * 3600;
 
@@ -92,12 +103,7 @@ impl Gate {
             let id = lib.trim_end_matches('/');
             // a library, or a member's disk images (images-<name>, the gate's
             // /_dd/images): both keep a trash, and both let it go
-            let images = id.strip_prefix("images-").is_some_and(|n| {
-                !n.is_empty()
-                    && n.chars()
-                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-            });
-            if !identity::valid_library_id(id) && !images {
+            if !top_prefix(id) {
                 continue;
             }
             let (_, stamps) = self.list_level(&format!("{id}/{TRASH}/")).await?;
@@ -118,6 +124,18 @@ impl Gate {
                     n += 1;
                 }
             }
+        }
+        Ok(n)
+    }
+
+    /// A library, or a member's disk images, gone for good, trash and all:
+    /// someone left 90 days ago (the gate's leaving.rs). Safe to run again.
+    pub async fn forget(&self, id: &str) -> Result<usize> {
+        anyhow::ensure!(top_prefix(id), "not a library or a member's images");
+        let mut n = 0;
+        for e in self.list_all(&format!("{id}/")).await? {
+            self.delete(&e.key).await?;
+            n += 1;
         }
         Ok(n)
     }
@@ -989,6 +1007,22 @@ fn percent_decode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_one_library_or_one_members_images_can_be_forgotten() {
+        assert!(top_prefix("0123456789abcdef0123456789abcdef"));
+        assert!(top_prefix("images-tom"));
+        for no in [
+            "",
+            "images-",
+            "images-a/b",
+            "0123",
+            "../x",
+            "images-tom/../x",
+        ] {
+            assert!(!top_prefix(no), "{no}");
+        }
+    }
 
     #[test]
     fn paths_are_kept_inside() {

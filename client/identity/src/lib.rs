@@ -663,6 +663,82 @@ pub fn accept(existing: Option<&SignedEntry>, new: &SignedEntry) -> Result<()> {
     check(rs, &new.entry, &decode_public(&old.entry.recovery)?)
 }
 
+/// A person leaving the fleet, or coming back, in their own root's words
+/// (docs/dev/leaving.md). Not part of the entry: the entry stays as it was,
+/// so coming back within the window finds every library key where it was.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Leave {
+    pub name: String,
+    /// the root that signs it, as the entry on file names it
+    pub root: String,
+    /// when they said it; a box takes it only near the time it is agreed
+    pub at: u64,
+    /// true: coming back, which undoes an earlier leaving
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub back: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SignedLeave {
+    pub leave: Leave,
+    /// over `leave_challenge`: an ed25519 signature by a device root, or a
+    /// passkey root's assertion (base64 json, as in `SignedEntry`)
+    pub signature: String,
+}
+
+/// What a root signs to leave or come back: the statement under a label of
+/// its own, so no signature over an entry or a sign-in counts as one.
+pub fn leave_challenge(l: &Leave) -> Result<Vec<u8>> {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(b"commonty leave v1\0");
+    h.update(serde_json::to_vec(l)?);
+    Ok(h.finalize().to_vec())
+}
+
+pub fn sign_leave(leave: Leave, root: &SigningKey) -> Result<SignedLeave> {
+    if leave.root != encode_public(&root.verifying_key()) {
+        return Err(Error::Key(
+            "that is not the root the statement names".into(),
+        ));
+    }
+    let sig: Signature = root.sign(&leave_challenge(&leave)?);
+    Ok(SignedLeave {
+        leave,
+        signature: B64.encode(sig.to_bytes()),
+    })
+}
+
+/// Signed by the root of `on_file`, the entry the fleet holds for the name;
+/// a passkey root's key is taken from that entry, never from the statement.
+pub fn verify_leave(s: &SignedLeave, on_file: &Entry) -> Result<()> {
+    if s.leave.name != on_file.name {
+        return Err(Error::Rejected("that statement is someone else's".into()));
+    }
+    if s.leave.root != on_file.root {
+        return Err(Error::Rejected("not signed by the root on file".into()));
+    }
+    let expected = leave_challenge(&s.leave)?;
+    if on_file.root.starts_with(WEBAUTHN_ROOT) {
+        let (id, digest) = root_parts(&on_file.root)
+            .ok_or_else(|| Error::Key("a passkey root must commit to its key".into()))?;
+        let passkey = on_file
+            .passkeys
+            .iter()
+            .find(|p| p.id == id && cose_digest(&p.cred) == digest)
+            .ok_or_else(|| Error::Key("the entry on file has no root passkey".into()))?;
+        let a: Assertion =
+            serde_json::from_slice(&B64.decode(&s.signature).map_err(|_| Error::Signature)?)
+                .map_err(|_| Error::Signature)?;
+        return assertion_over(passkey, &a, &expected);
+    }
+    let sig = B64.decode(&s.signature).map_err(|_| Error::Signature)?;
+    let sig = Signature::from_slice(&sig).map_err(|_| Error::Signature)?;
+    decode_public(&on_file.root)?
+        .verify(&expected, &sig)
+        .map_err(|_| Error::Signature)
+}
+
 /// A library id: 32 hex characters, and nothing else. It becomes a folder
 /// name, a bucket prefix and a command-line argument on every machine that
 /// opens the library, so it can be nothing that means anything there - no
@@ -831,6 +907,62 @@ mod tests {
         e.grant.as_mut().unwrap().proof = prove(&ck, &inv.invite.public_key, root, 500);
         e.grant.as_mut().unwrap().redeemed = 500;
         assert!(verify_grant(&e, &release.verifying_key()).is_err());
+    }
+
+    #[test]
+    fn leaving_is_said_by_the_root_on_file_and_nobody_else() {
+        let root = generate();
+        let entry = Entry {
+            name: "tom".into(),
+            root: encode_public(&root.verifying_key()),
+            recovery: String::new(),
+            devices: vec![],
+            passkeys: vec![],
+            libraries: vec![],
+            grant: None,
+            version: 1,
+            updated: 1,
+        };
+        let leave = Leave {
+            name: "tom".into(),
+            root: entry.root.clone(),
+            at: 100,
+            back: false,
+        };
+        let s = sign_leave(leave.clone(), &root).unwrap();
+        verify_leave(&s, &entry).unwrap();
+        assert!(!serde_json::to_string(&s).unwrap().contains("back"));
+        let mut changed = s.clone();
+        changed.leave.back = true;
+        assert!(
+            verify_leave(&changed, &entry).is_err(),
+            "a leave is not a coming back"
+        );
+        let other = generate();
+        assert!(sign_leave(leave.clone(), &other).is_err());
+        let forged = SignedLeave {
+            leave: leave.clone(),
+            signature: sign_leave(
+                Leave {
+                    root: encode_public(&other.verifying_key()),
+                    ..leave.clone()
+                },
+                &other,
+            )
+            .unwrap()
+            .signature,
+        };
+        assert!(verify_leave(&forged, &entry).is_err());
+        let mut someone_else = entry.clone();
+        someone_else.name = "ann".into();
+        assert!(verify_leave(&s, &someone_else).is_err());
+        // an entry signature is never a statement
+        let signed = sign(entry.clone(), &root).unwrap();
+        let lifted = SignedLeave {
+            leave,
+            signature: signed.signature,
+        };
+        assert!(verify_leave(&lifted, &entry).is_err());
     }
 
     /// A passkey root is a credential id, and a credential id is public.

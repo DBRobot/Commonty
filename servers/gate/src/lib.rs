@@ -19,6 +19,7 @@ pub mod fleet;
 mod forge_events;
 mod friends;
 mod home;
+mod leaving;
 pub mod library;
 pub mod network;
 mod oidc;
@@ -254,13 +255,15 @@ pub(crate) fn asked_host(headers: &HeaderMap) -> String {
 pub struct Members {
     pub members: Vec<String>,
     pub revoked: Vec<String>,
+    /// when each revoked id was removed (leaving.rs)
+    pub removed: std::collections::BTreeMap<String, u64>,
 }
 
 impl Members {
     pub fn list(members: Vec<String>) -> Self {
         Self {
             members,
-            revoked: vec![],
+            ..Default::default()
         }
     }
     pub fn parse(json: &str) -> Result<Self> {
@@ -273,11 +276,21 @@ impl Members {
                 members: Vec<String>,
                 #[serde(default)]
                 revoked: Vec<String>,
+                #[serde(default)]
+                removed: std::collections::BTreeMap<String, u64>,
             },
         }
         Ok(match serde_json::from_str::<File>(json)? {
             File::List(members) => Self::list(members),
-            File::Full { members, revoked } => Self { members, revoked },
+            File::Full {
+                members,
+                revoked,
+                removed,
+            } => Self {
+                members,
+                revoked,
+                removed,
+            },
         })
     }
 }
@@ -501,7 +514,7 @@ impl App {
             return false;
         };
         let id = identity::member_id(&e.entry.root);
-        if m.revoked.contains(&id) {
+        if m.revoked.contains(&id) || self.directory.leaving.has_left(user) {
             return false;
         }
         if m.members.contains(&id) {
@@ -1926,6 +1939,14 @@ async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Re
         // the game servers they are invited to: Settings shows them their
         // Profile and Devices
         Some(user) if name == "settings" && app.guest(&user) => page(name),
+        // someone who left sees where they stand, and may come back
+        Some(user) if app.directory.leaving.has_left(&user) => {
+            if name == "settings" {
+                page(name)
+            } else {
+                Redirect::to("/_dd/settings#leave").into_response()
+            }
+        }
         Some(_) => Redirect::to("/_dd/home").into_response(),
         None => Redirect::to(&format!("/_dd/login?rd={at}")).into_response(),
     }
@@ -2421,9 +2442,19 @@ pub async fn start(
             directory: directory.clone(),
             members: cfg.members.clone(),
         });
+        let leave = Arc::new(leaving::Ctx {
+            d: directory.clone(),
+            m: cfg.members.clone(),
+            demo: None,
+        });
         let router = Router::new()
             .route("/health", get(|| async { "ok" }))
             .merge(home::dir_router(house))
+            .merge(leaving::router(leave.clone()))
+            .merge(
+                leaving::internal_router(leave)
+                    .route_layer(axum::middleware::from_fn(this_box_only)),
+            )
             .merge(directory::router(directory));
         eprintln!("directory listening on {addr}");
         let task =
@@ -2457,6 +2488,11 @@ pub async fn start(
         )?),
         None => None,
     };
+    let leave = Arc::new(leaving::Ctx {
+        d: directory.clone(),
+        m: cfg.members.clone(),
+        demo: cfg.demo_library.as_ref().map(|(id, _)| id.clone()),
+    });
     let app = Arc::new(App {
         directory: directory.clone(),
         sessions: session::Sessions::open(&state_dir, &domain)?,
@@ -2548,6 +2584,16 @@ pub async fn start(
             }
         });
     }
+    // someone who left: out at once, and their things gone after the window
+    {
+        let a = app.clone();
+        tokio::spawn(async move {
+            loop {
+                leaving::tick(&a).await;
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        });
+    }
     // what was trashed three months ago is gone for good; daily
     if app.library.is_some() {
         let a = app.clone();
@@ -2600,6 +2646,9 @@ pub async fn start(
         .route("/_dd/join/start", post(join_start))
         .route("/_dd/join/finish", post(join_finish))
         .route("/_dd/join/sign", post(join_sign))
+        .route("/_dd/leave", get(leaving::mine))
+        .route("/_dd/leave/start", post(leaving::start))
+        .route("/_dd/leave/sign", post(leaving::sign))
         .route("/_dd/redeem/start", post(redeem_start))
         .route("/_dd/redeem/sign", post(join_sign))
         .route("/_dd/demo", get(demo_page).post(demo_post))
@@ -2772,6 +2821,7 @@ pub async fn start(
         // own, home::dir_router)
         .merge(
             Router::new()
+                .merge(leaving::internal_router(leave.clone()))
                 .route("/internal/storage/members", get(storage::members))
                 .route("/internal/games/access", post(friends::game_access))
                 .route("/internal/games/friends/{user}", get(friends::game_friends))
@@ -2780,6 +2830,7 @@ pub async fn start(
         )
         .layer(axum::middleware::from_fn_with_state(app.clone(), demo_door))
         .with_state(app)
+        .merge(leaving::router(leave))
         .merge(directory::router(directory));
     eprintln!("verify listening on {addr}");
     let task = tokio::spawn(async move {

@@ -155,6 +155,27 @@ impl SignIns {
         self.write(taken);
     }
 
+    /// Someone left: every session of theirs ended, and their keys' uses
+    /// forgotten. Returns how many sessions there were.
+    pub fn forget(&self, user: &str) -> usize {
+        let mut s = self.state.lock().unwrap();
+        let theirs: Vec<(String, u64)> =
+            s.0.sessions
+                .iter()
+                .filter(|(_, v)| v.user == user)
+                .map(|(id, v)| (id.clone(), v.exp))
+                .collect();
+        for (id, exp) in &theirs {
+            s.0.sessions.remove(id);
+            s.0.ended.insert(id.clone(), *exp);
+        }
+        s.0.keys.remove(user);
+        let taken = self.save(&mut s, true);
+        drop(s);
+        self.write(taken);
+        theirs.len()
+    }
+
     pub fn sessions(&self, user: &str) -> Vec<(String, Session)> {
         let s = self.state.lock().unwrap();
         let t = now();

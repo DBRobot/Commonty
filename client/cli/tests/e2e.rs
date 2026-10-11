@@ -945,8 +945,8 @@ async fn an_invite_code_lets_one_person_in_once() {
         b_dir,
         true,
         Some(verify::Members {
-            members: vec![],
             revoked: vec![eve_id],
+            ..Default::default()
         }),
         Some(release_pub.clone()),
         vec![],
