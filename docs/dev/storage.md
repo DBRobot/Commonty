@@ -1,0 +1,57 @@
+# Storage
+
+Status: two kinds side by side. The services still use the garage
+**cluster** that node1 and node2 share. Each box's own **store**
+([`storage/store.nix`](../../nix/modules/storage/store.nix)) is built and
+tested, and is off until it is turned on for a box and the buckets move
+(below).
+
+## Why each box gets its own
+
+The cluster's rpc secret is shared by every box in it. Holding it makes a
+box the cluster's admin: it can read and delete every object. That can't
+hold once a box sits in someone else's house, and "no box holds another
+box's secrets" rules it out anyway.
+
+With two boxes the cluster also refuses every write while either one is
+away. Its two copies or nothing is its consistency rule. So a service that
+fails over to the box still up can read everything, but write nothing,
+until the other is back.
+
+## The store
+
+- **A garage of one** per box, with a secret the box makes on its first
+  start and shares with nobody. Its rpc is on loopback. Its S3 is on
+  `127.0.0.1:3910` for the box's own services, and at
+  `https://store.<box>.<domain>` for the other boxes, a name that exists
+  on the fleet's network alone.
+- **A key per bucket** for the service that uses it, made on the box, in
+  `/var/lib/dd-store/keys/<bucket>.env`. Only that service reads it.
+- **A key per other box**, for the copies it sends here, allowed only on
+  the buckets it copies. It is sealed to that box's secrets key (its TPM)
+  and served at `https://store.<box>.<domain>/_keys/<other>.age`: public,
+  and only the box it is for can open it.
+- **Copies**: every 5 minutes, `dd-store-copy` copies each bucket to the
+  first boxes by name, as many as the bucket's `copies` asks (2 unless
+  said). A copy is added to, never pruned: what is deleted here stays
+  there. Deletes reaching the copies is a decision still to make.
+- **What is stored is ciphertext**: photos, files and films are encrypted
+  on members' devices, backups by restic, the postgres archive by wal-g.
+  A box holding a copy holds nothing it can read.
+- **Failover**: a bucket's copies carry the same name, so a service that
+  moves to a box holding a copy reads it there at once, and writes there.
+  The writes copy back out the same way.
+
+## Turning it on
+
+Both steps need David:
+
+1. **A dataset and a capacity per box** in `fleet/boxes.json`, beside its
+   `garage` block, and `dd.store` set from it in the flake.
+2. **Moving the buckets.** node2 has about 115G free and holds a copy of
+   everything in the cluster (about 276 GiB). The largest bucket is
+   backups-node1 at 88.5 GiB. The buckets can't be copied into the new
+   stores side by side with the cluster's copies. They move one at a time:
+   copy into each box's store, check every object, switch the service,
+   then delete that bucket from the cluster to make room for the next.
+   Each delete needs David's yes.

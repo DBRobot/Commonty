@@ -58,6 +58,7 @@
         "library"
         "pgrestore"
         "pg-follow"
+        "store"
         "photos"
         "llm"
         "vault"
