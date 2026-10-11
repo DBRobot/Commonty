@@ -65,13 +65,20 @@ pull request opened, pushed, or edited
 - **Jobs run where they fit.** A job heavier than a runner's usual one is
   a variant in the runner's needs
   ([`nix/modules/forge/needs.nix`](../../nix/modules/forge/needs.nix)):
-  today `flake-check`, which holds 11G (`nix flake check` peaked at 10.5G and
-  ran node2 out of memory beside a VM test).
+  today `flake-check`, which holds 4G: one evaluation worker at its peak.
   [`nix/lib/ci-runners.nix`](../../nix/lib/ci-runners.nix) fits each
   variant to the runner boxes whose reported memory holds the runner's own
   use and the variant's, and files_modified sends `flake_check` to the first
   of them (`flake_check_on`), or to any runner when none fits. No box is
   named in the workflow.
+- **Everything is evaluated, a check at a time.** `flake_check` runs
+  [nix-eval-jobs](https://github.com/nix-community/nix-eval-jobs) over
+  `legacyPackages.x86_64-linux.ciEval` (every check, package, dev shell
+  and box system), each in a worker that starts afresh past 1.5G, one
+  worker for every 16G the box has (one to four). A single `nix flake
+  check` evaluator grew to 10.5G and took node2 out of memory beside a VM
+  test; one worker peaks near 3G, two near 5G. An attribute that fails to
+  evaluate is named in the job's log.
 - **The tests are cached crate by crate.** `checks.tests` is a linkFarm
   of every workspace crate's test run but the app's (its tests are
   `tests-app`). Each crate's tests are their own build from

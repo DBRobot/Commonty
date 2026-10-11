@@ -139,11 +139,29 @@ jobs:
       - name: instantiate the packages
         run: |
           nix path-info --derivation $(nix eval --raw .#packages.x86_64-linux --apply 'ps: builtins.concatStringsSep " " (map (n: ".#" + n) (builtins.attrNames ps))') .#checks.x86_64-linux.fmt >/dev/null
-      - name: flake check
-        run: nix flake check --no-build --show-trace
+      # Every check, package, dev shell and box system evaluated, each in a
+      # worker of its own that starts afresh past 1.5G (nix-eval-jobs,
+      # legacyPackages ciEval): one evaluator for all of it grew to 10.5G
+      # and took node2 out of memory. A worker for every 16G the box has,
+      # one to four: about 3G at one worker, 5G at two.
+      - name: evaluate everything
+        run: |
+          kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+          workers=$(( kb / 16777216 )); [ "$workers" -ge 1 ] || workers=1; [ "$workers" -le 4 ] || workers=4
+          nix shell .#ci-tools -c nix-eval-jobs --flake .#legacyPackages.x86_64-linux.ciEval --force-recurse \
+            --workers "$workers" --max-memory-size 1536 > "$RUNNER_TEMP/eval.jsonl"
+          nix shell .#ci-tools -c python3 - "$RUNNER_TEMP/eval.jsonl" <<'PY'
+          import json, sys
+          jobs = [json.loads(l) for l in open(sys.argv[1])]
+          bad = [j for j in jobs if "error" in j]
+          for j in bad:
+              print(f"::error::{j['attr']}: {j['error']}")
+          print(f"{len(jobs)} evaluated, {len(bad)} failed")
+          sys.exit(1 if bad or not jobs else 0)
+          PY
       # the checks that are plain evaluation, no vm: seconds
-      # `nix flake check --no-build` evaluates and builds nothing, so a
-      # check whose whole answer is whether it builds says nothing there.
+      # evaluating builds nothing, so a check whose whole answer is whether
+      # it builds says nothing there.
       # ci is one of those: it holds this file to the flake's vm tests and
       # to ci_ok waiting on every job.
       - name: plaintext labels, box list, and this file

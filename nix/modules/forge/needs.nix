@@ -106,11 +106,12 @@
     variants = {
       vm-tests.requires.kvm = true; # all but the games test
       nested-vm-tests.requires.nestedKvm = true; # the games test boots a VM in a VM
-      # nix flake check evaluates every box's system in one process: 7.5G at
-      # its peak on node2, 2026-10-10, where it and a VM test took the box
-      # out of memory; 10.5G by PR 269's run. CI sends it only to a box with room for this beside
-      # the runner's own use (nix/lib/ci-runners.nix)
-      flake-check.requires.memory.fixed = "11G";
+      # flake_check evaluates every check and every box's system: one
+      # worker of nix-eval-jobs at about 3G at its peak (a single evaluator
+      # had grown to 10.5G and took node2 out of memory beside a VM test).
+      # CI sends it to a box with room for this beside the runner's own
+      # use (nix/lib/ci-runners.nix), and gives a bigger box more workers
+      flake-check.requires.memory.fixed = "4G";
     };
   };
 

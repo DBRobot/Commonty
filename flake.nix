@@ -728,6 +728,7 @@
               gitleaks
               typos
               cargo-audit
+              nix-eval-jobs
             ];
           };
           # the cli, and `git remote add origin dd::...`, which dd repo calls too
@@ -1172,6 +1173,16 @@
       # the downloads for a version: `(appRelease "1.2.3").linux`
       legacyPackages.${system} = {
         inherit (rust) appRelease;
+        # What flake_check evaluates, one attribute at a time in its own
+        # worker (nix-eval-jobs): every check, package and dev shell, and
+        # every box's system. One evaluator for all of it grew to 10.5G and
+        # took node2 out of memory beside a VM test.
+        ciEval = {
+          checks = self.checks.${system};
+          packages = self.packages.${system};
+          devShells = self.devShells.${system};
+          systems = nixpkgs.lib.mapAttrs (_: c: c.config.system.build.toplevel) self.nixosConfigurations;
+        };
         # which runner boxes can take each of the runner's variants, from its
         # needs and the boxes' reports: CI places its jobs by this
         ciRunners = import ./nix/lib/ci-runners.nix { lib = nixpkgs.lib; };
