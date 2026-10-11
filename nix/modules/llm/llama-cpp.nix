@@ -283,8 +283,9 @@ in
         lib.nameValuePair "fetch-model-${id}" {
           wantedBy = [ "timers.target" ];
           timerConfig = {
-            OnActiveSec = "5s";
-            OnBootSec = "1min";
+            # minutes after the timer starts, never inside the switch that
+            # starts it (a failed fetch there would roll the release back)
+            OnActiveSec = "3min";
             AccuracySec = "1s";
           };
         }
@@ -296,8 +297,7 @@ in
           wantedBy = [ "timers.target" ];
           restartTriggers = [ current ];
           timerConfig = {
-            OnActiveSec = "1min";
-            OnBootSec = "2min";
+            OnActiveSec = "3min";
           };
         };
       };

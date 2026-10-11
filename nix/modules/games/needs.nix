@@ -28,6 +28,12 @@ in
 {
   dd-games = {
     what = "game servers members start for themselves, each in its own VM";
+    units = [
+      "dd-game@*"
+      "dd-games-measure"
+      "games-access"
+      "firewall"
+    ];
     base = {
       requires = {
         # not overfit: every server in the catalogue is an x86 binary

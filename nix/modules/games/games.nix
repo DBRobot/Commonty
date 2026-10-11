@@ -224,7 +224,7 @@ in
     systemd.timers.games-access = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = "30s";
+        OnActiveSec = "30s";
         OnUnitActiveSec = "15s";
         AccuracySec = "1s";
       };
@@ -370,7 +370,7 @@ in
     systemd.timers.dd-games-measure = {
       wantedBy = [ "timers.target" ];
       timerConfig.OnUnitActiveSec = "5min";
-      timerConfig.OnBootSec = "5min";
+      timerConfig.OnActiveSec = "5min";
     };
 
     systemd.services."dd-game@" = {

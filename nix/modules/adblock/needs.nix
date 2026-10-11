@@ -2,6 +2,10 @@
 {
   pihole = {
     what = "ad and tracker blocking for a household's own devices, and its owner's set to ask it on the Commonty network; lookups sent out encrypted";
+    units = [
+      "pihole-ftl"
+      "dd-pihole-lists"
+    ];
     perHouse = 1;
     base = {
       # on the house's own network, with its household in box.json: only

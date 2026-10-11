@@ -156,7 +156,7 @@ in
     systemd.timers.dd-agent = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = "2m";
+        OnActiveSec = "2m";
         OnUnitActiveSec = cfg.interval;
         RandomizedDelaySec = "30s";
       };

@@ -50,6 +50,7 @@
 
   cloudflared = {
     what = "the front door on the open internet: a tunnel this box opens outward";
+    units = [ "cloudflared-tunnel-*" ];
     # one public front door; dd-dns points the names at it
     instances = 1;
     base = {
@@ -102,6 +103,23 @@
       };
       depends = { };
       privacy = "none";
+    };
+  };
+
+  mail-worker-check = {
+    what = "checks hourly that the mail Worker Cloudflare runs is exactly the one this release carries";
+    units = [ "dd-mail-worker-check" ];
+    base = {
+      uses = {
+        memory = "16M";
+        storage = "0";
+        estimated = true; # one fetch an hour
+      };
+      network = {
+        outbound = [ "api.cloudflare.com" ];
+        inbound = "none";
+      };
+      privacy = "none"; # the Worker's code, never members' mail
     };
   };
 }

@@ -2,6 +2,7 @@
 {
   postgresql = {
     what = "the databases of the services on this box";
+    units = [ "dd-postgres-isolation" ];
     # one writer: a second copy is a standby (replication), not another postgres
     instances = 1;
     base = {
@@ -26,6 +27,7 @@
 
   garage = {
     what = "the storage pool: buckets of ciphertext, kept on two boxes";
+    units = [ "garage-setup" ];
     base = {
       # below this a storage box adds little; with two copies of everything
       # the smallest box caps what the pool can hold
@@ -46,6 +48,12 @@
 
   restic-backup = {
     what = "this box's own state, encrypted here, into its own bucket (two copies, on two boxes)";
+    units = [
+      "restic-backups-*"
+      "dd-backup-stale"
+      "dd-alert@*"
+      "garage-meta-snapshot"
+    ];
     everyBox = true;
     base = {
       # node1, 2026-10-04: peak of a run
@@ -64,6 +72,11 @@
 
   postgres-dumps = {
     what = "every database on this box dumped daily, on the encrypted bulk pool, and backed up";
+    units = [
+      "postgresqlBackup-*"
+      "postgres-backup-verify"
+      "postgres-backup-alert@*"
+    ];
     base = {
       # a week of dumps of every database here, overestimated
       requires.disk.size.min = "10G";
@@ -83,6 +96,10 @@
 
   nix-cache = {
     what = "the fleet's built closures, in the bucket, for every box's releases";
+    units = [
+      "nix-daemon"
+      "dd-cache-gc"
+    ];
     instances = 1;
     base = {
       # node1, 2026-10-04: the nix-cache bucket (its copies are garage's)
@@ -101,6 +118,10 @@
 
   storage-ledger = {
     what = "what each member keeps across every service, against their allowance";
+    units = [
+      "dd-storage-ledger"
+      "dd-storage-forget-login"
+    ];
     instances = 1;
     base = {
       # node1, 2026-10-04: peak
@@ -119,6 +140,25 @@
         vaultwarden.local = true;
       };
       privacy = "metadata"; # bytes per member, never contents
+    };
+  };
+
+  storage-view = {
+    what = "adds up what each member keeps on every box, from the control plane's agreed heartbeats, for this box's gate (storage/view.nix)";
+    units = [ "dd-storage-view" ];
+    everyBox = true;
+    base = {
+      uses = {
+        memory = "16M";
+        storage = "1M";
+        estimated = true; # one dd run every ten minutes, a small json
+      };
+      network = {
+        outbound = "none";
+        inbound = "none";
+      };
+      depends.dd-control.local = true;
+      privacy = "metadata"; # each member's name and byte counts
     };
   };
 }

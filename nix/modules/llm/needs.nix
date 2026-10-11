@@ -4,6 +4,12 @@
 {
   llama-swap = {
     what = "runs one language model at a time, for the chat page and the API";
+    units = [
+      "llm-proxy"
+      "fetch-model-*"
+      "dd-llm-key"
+      "dd-models-prune"
+    ];
     base = {
       requires = {
         # any GPU: the prompt is read there, 2.6 times faster than on
@@ -50,6 +56,11 @@
 
   searxng = {
     what = "web search for members, and the chat's search";
+    units = [
+      "searx"
+      "searx-init"
+      "dd-search-key"
+    ];
     base = {
       # node1, 2026-10-04: peak since its last start; keeps nothing on disk
       uses = {

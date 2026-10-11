@@ -2,6 +2,10 @@
 {
   headscale = {
     what = "the network's control server: who is on it and what each may reach";
+    units = [
+      "headscale-seed"
+      "headscale-snapshot"
+    ];
     # one control server for the fleet; its database is the network
     instances = 1;
     base = {
@@ -26,6 +30,7 @@
 
   commonty-net = {
     what = "this box on the fleet's network";
+    units = [ "commonty-net-up" ];
     everyBox = true;
     base = {
       # node1, node2, 2026-10-04: peak
@@ -44,6 +49,7 @@
 
   netbridge = {
     what = "the control server's protocol through the front door, for a box that is not the control box";
+    units = [ "commonty-net-bridge" ];
     base = {
       # node2, 2026-10-04: peak
       uses = {
@@ -61,6 +67,7 @@
 
   owner-devices = {
     what = "the box's owner's devices on the fleet's network, for the firewall's admin ports";
+    units = [ "dd-owner-devices" ];
     everyBox = true;
     base = {
       # node1, node2, 2026-10-04: peak

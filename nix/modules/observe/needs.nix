@@ -22,6 +22,7 @@
 
   prometheus-node-exporter = {
     what = "the box's own counters, and the facts this repo writes beside them (/var/lib/dd-facts)";
+    units = [ "dd-facts" ];
     everyBox = true;
     base = {
       # node1, 2026-10-04: peak
@@ -139,6 +140,10 @@
 
   disk-watch = {
     what = "smartd's tests of the box's own disks and the pools' health, as facts the fleet view sees";
+    units = [
+      "dd-disk-health"
+      "smartd"
+    ];
     everyBox = true;
     base = {
       # node1, 2026-10-04: smartd's peak
@@ -157,6 +162,7 @@
 
   fleet-alerts = {
     what = "mails what is wrong on any box (disks, pools, backups), read from the fleet view";
+    units = [ "dd-fleet-alerts" ];
     instances = 1; # one mail, not one a box
     base = {
       uses = {

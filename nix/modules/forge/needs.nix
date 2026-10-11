@@ -2,6 +2,15 @@
 {
   forgejo = {
     what = "git: repositories, issues, pull requests, CI runs, releases";
+    units = [
+      "forgejo-admin"
+      "forgejo-protection"
+      "forgejo-secrets"
+      "dd-ci-cancel"
+      "dd-ci-resume"
+      "dd-forge-notify"
+      "dd-usage-forgejo"
+    ];
     # its repositories are on one box's disk, beside its database
     instances = 1;
     base = {
@@ -47,6 +56,7 @@
 
   forgejo-mirror = {
     what = "pushes the fleet's chosen repositories to their GitHub copies (fleet/policy.json)";
+    units = [ "forgejo-mirrors" ];
     base = {
       uses = {
         memory = "64M";
@@ -64,6 +74,7 @@
 
   forgejo-runner = {
     what = "runs the fleet's own CI: builds, checks, VM tests";
+    units = [ "gitea-runner-*" ];
     base = {
       requires = {
         threads = 4;
@@ -104,6 +115,7 @@
 
   members-runner = {
     what = "runs members' own CI, sandboxed (Docker and gVisor), with no way into the fleet";
+    units = [ "gitea-runner-members*" ];
     base = {
       requires.threads = 4; # a job's --cpus; docker refuses more than the box has
       # two jobs at their limit; the job image

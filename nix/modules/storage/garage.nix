@@ -260,7 +260,7 @@ in
       systemd.timers.garage-setup = {
         wantedBy = [ "timers.target" ];
         timerConfig = {
-          OnBootSec = "10m";
+          OnActiveSec = "10m";
           OnUnitActiveSec = "10m";
           RandomizedDelaySec = "1m";
         };

@@ -2,6 +2,10 @@
 {
   ente-museum = {
     what = "the photos server: people's encrypted photos and the albums' records";
+    units = [
+      "ente"
+      "ente-health"
+    ];
     base = {
       requires.disk.size.min = "1G";
       # node1, 2026-10-04: museum's peak since its start; its state dir is 43K

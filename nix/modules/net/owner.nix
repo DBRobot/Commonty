@@ -59,7 +59,7 @@ in
     systemd.timers.dd-owner-devices = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = "1min";
+        OnActiveSec = "1min";
         OnUnitActiveSec = "1min";
       };
     };

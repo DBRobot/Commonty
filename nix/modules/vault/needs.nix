@@ -2,6 +2,10 @@
 {
   vaultwarden = {
     what = "passwords: everyone's vault, encrypted on their own devices";
+    units = [
+      "dd-vault-end"
+      "dd-usage-vaultwarden"
+    ];
     servesCode = true; # the web vault's page, where master passwords are typed
     base = {
       # its own files and room for a great many vaults' records: its
@@ -52,6 +56,10 @@
 
   pwned-list = {
     what = "the breach list, so checking a password never leaves the box";
+    units = [
+      "dd-pwned"
+      "dd-pwned-first"
+    ];
     base = {
       # 80G a copy, and a refresh builds the next beside it
       requires.disk.size.min = "170G";

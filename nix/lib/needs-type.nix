@@ -236,6 +236,11 @@ t.attrsOf (
   t.submodule {
     options = {
       what = lib.mkOption { type = t.str; };
+      units = lib.mkOption {
+        type = t.listOf t.str;
+        default = [ ];
+        description = "the systemd services and timers it is made of, besides one named after it; one ending in * stands for every name that starts so (a template's instances, a name made at build time). Every unit our modules define belongs to some service (tests/needs-units.nix)";
+      };
       servesCode = lib.mkOption {
         type = t.bool;
         default = false;

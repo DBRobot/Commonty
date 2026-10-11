@@ -59,7 +59,7 @@ in
   systemd.timers.dd-fleet-alerts = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
-      OnBootSec = "5min";
+      OnActiveSec = "5min";
       OnUnitActiveSec = "15min";
     };
   };

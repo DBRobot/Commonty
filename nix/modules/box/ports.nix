@@ -148,7 +148,7 @@ in
     systemd.timers.dd-ports-check = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = "15min";
+        OnActiveSec = "15min";
         OnUnitActiveSec = "1h";
       };
     };

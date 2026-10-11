@@ -22,6 +22,7 @@
 
   dd-agent = {
     what = "moves the box to the signed release, and back if the box comes up worse";
+    units = [ "dd-build" ];
     everyBox = true;
     base = {
       uses = {
@@ -42,6 +43,10 @@
 
   dd-box-report = {
     what = "what this box is (detect.sh), signed by its TPM: the report its config is built from";
+    units = [
+      "dd-locate"
+      "dd-ports-check"
+    ];
     everyBox = true;
     base = {
       requires.tpm = true;
@@ -80,6 +85,10 @@
 
   disk-unlock = {
     what = "the encrypted pools open at boot from the TPM, under the signed boot it measures; over the network from the owner's paper key when it cannot";
+    units = [
+      "dd-disk-check"
+      "dd-disk-key-forget"
+    ];
     everyBox = true;
     base = {
       requires = {
@@ -114,6 +123,28 @@
         inbound = "none";
       };
       depends = { };
+      privacy = "none";
+    };
+  };
+
+  home-network = {
+    what = "the box on the house network: by cable when it has one, by wifi when not, at the address the router reserves (box/home-network.nix)";
+    units = [
+      "NetworkManager-ensure-profiles"
+      "dd-wifi-apply"
+      "dd-wifi-status"
+    ];
+    everyBox = true;
+    base = {
+      uses = {
+        memory = "8M";
+        storage = "0";
+        estimated = true;
+      };
+      network = {
+        outbound = "none";
+        inbound = "none";
+      };
       privacy = "none";
     };
   };

@@ -162,7 +162,7 @@ in
     systemd.timers.ente-health = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = "5min";
+        OnActiveSec = "5min";
         OnUnitActiveSec = "3min";
       };
     };
