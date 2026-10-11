@@ -622,9 +622,12 @@ unpatched. Grafana is gone; `grafana.<domain>` redirects.
   `dd_disk_warnings` and `dd_pool_unhealthy`
   ([disks.nix](../../nix/modules/observe/disks.nix)).
 - The observe box's `dd-fleet-alerts` mails any box's disk warnings, an
-  unhealthy pool, a backup older than 26 hours, or a CI runner's or
+  unhealthy pool, a backup older than 26 hours, a CI runner's or
   docker's new config pending over an hour
-  (`dd_runner_restart_pending_seconds`, [forge.md](forge.md)), read from the Thanos
+  (`dd_runner_restart_pending_seconds`, [forge.md](forge.md)), or a box on
+  Wi-Fi for over five minutes because its cable stopped answering (and once
+  more when it is back on the cable; `dd_wired_state` from
+  [wired-watch.sh](../../nix/modules/box/wired-watch.sh)), read from the Thanos
   fleet view, so up to a block's length late
   ([alerting.nix](../../nix/modules/observe/alerting.nix)).
 
