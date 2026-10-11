@@ -181,6 +181,8 @@ mod tests {
             passkeys,
             grant: None,
             libraries: vec![],
+            recovered_from: vec![],
+            terms: None,
             version: 1,
             updated: 0,
         }

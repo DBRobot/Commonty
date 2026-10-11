@@ -74,7 +74,8 @@
       "pwned-list",
       "postgresql",
       "postgres-dumps",
-      "nginx"
+      "nginx",
+      "dd-mail"
     ]
   },
   "media": {
@@ -159,7 +160,8 @@
       "thanos-store",
       "thanos-compact",
       "metrics-page",
-      "prometheus"
+      "prometheus",
+      "dd-mail"
     ]
   },
   "adblock": {

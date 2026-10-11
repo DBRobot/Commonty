@@ -140,7 +140,7 @@ enum Ceremony {
     },
     /// then the entry that names it as root, waiting for that passkey's
     /// assertion over its hash
-    JoinSign { entry: identity::Entry },
+    JoinSign { entry: Box<identity::Entry> },
     Login {
         user: String,
         state: PasskeyAuthentication,
@@ -1356,7 +1356,9 @@ async fn join_finish(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-    let ceremony = app.ceremony_put(Ceremony::JoinSign { entry });
+    let ceremony = app.ceremony_put(Ceremony::JoinSign {
+        entry: Box::new(entry),
+    });
     // the get() options, in the shape the browser and webauthn-rs both read
     Json(serde_json::json!({
         "ceremony": ceremony,
@@ -1383,6 +1385,7 @@ async fn join_sign(
     else {
         return (StatusCode::BAD_REQUEST, "no ceremony").into_response();
     };
+    let entry = *entry;
     let assertion = identity::Assertion {
         authenticator_data: B64_URL.encode(&cred.response.authenticator_data),
         client_data_json: B64_URL.encode(&cred.response.client_data_json),
