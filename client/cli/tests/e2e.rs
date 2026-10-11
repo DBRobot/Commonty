@@ -1996,7 +1996,7 @@ async fn gate_for(
         bind: "127.0.0.1:0".parse().unwrap(),
         dir: {
             let d = scratch(scratch_name).join("keys");
-            copy_entries(&a, &d);
+            copy_entries(a, &d);
             d
         },
         directory_readers: vec![],

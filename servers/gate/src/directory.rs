@@ -417,7 +417,7 @@ impl Directory {
     /// the configured names; it never adds one.
     pub fn here(&self, headers: &HeaderMap) -> String {
         let asked = crate::asked_host(headers);
-        if self.names.iter().any(|n| *n == asked) {
+        if self.names.contains(&asked) {
             asked
         } else {
             String::new()
