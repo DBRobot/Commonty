@@ -222,9 +222,9 @@ impl Gate {
         path: &str,
         objects: &[String],
         copy: bool,
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         if objects.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let mut stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -242,6 +242,7 @@ impl Gate {
                 return Err(anyhow!("no free place in the trash for {path}"));
             }
         }
+        let mut made = Vec::new();
         for o in objects {
             let rel = o.strip_prefix(&format!("{lib}/")).unwrap_or(o);
             let to = format!("{lib}/{TRASH}/{stamp}/{rel}");
@@ -250,8 +251,20 @@ impl Gate {
             } else {
                 self.rename(o, &to).await?;
             }
+            made.push(to);
         }
-        Ok(())
+        Ok(made)
+    }
+
+    /// A write that failed takes back the trash copy it made: the old file
+    /// is still in place, and a copy per failed try would be room the
+    /// allowance never held.
+    async fn untrash(&self, made: &[String]) {
+        for k in made {
+            if let Err(e) = self.delete(k).await {
+                eprintln!("dav: the trash copy of a failed write stays: {e:#}");
+            }
+        }
     }
 }
 
@@ -430,10 +443,13 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
     let Some(path) = clean(&raw) else {
         return (StatusCode::BAD_REQUEST, "not a path").into_response();
     };
-    let writes = matches!(
-        method.as_str(),
-        "PUT" | "POST" | "MKCOL" | "MOVE" | "COPY" | "DELETE" | "PROPPATCH"
-    );
+    // the upload header makes any method a write (in_pieces takes the body
+    // whatever the method), so it is one here too
+    let writes = piece(&headers).is_some()
+        || matches!(
+            method.as_str(),
+            "PUT" | "POST" | "MKCOL" | "MOVE" | "COPY" | "DELETE" | "PROPPATCH"
+        );
     if writes && role != Role::Owner {
         return (StatusCode::FORBIDDEN, "a reader does not write").into_response();
     }
@@ -668,7 +684,7 @@ async fn put(g: &Gate, lib: &str, path: &str, req: Request) -> Result<Response> 
     // what had this name is kept: a copy into the trash, and the PUT then
     // replaces it, so a failed upload leaves the old file where it was
     let old = g.objects_at(lib, path, false).await?;
-    g.keep_in_trash(lib, path, &old, true).await?;
+    let kept = g.keep_in_trash(lib, path, &old, true).await?;
     let len = req
         .headers()
         .get(header::CONTENT_LENGTH)
@@ -682,11 +698,17 @@ async fn put(g: &Gate, lib: &str, path: &str, req: Request) -> Result<Response> 
     if let Some(l) = len {
         r = r.header(header::CONTENT_LENGTH, l);
     }
-    let r = r.send().await?;
-    if !r.status().is_success() {
-        return Err(anyhow!("s3 put {}", r.status()));
+    match r.send().await {
+        Ok(r) if r.status().is_success() => Ok(StatusCode::CREATED.into_response()),
+        Ok(r) => {
+            g.untrash(&kept).await;
+            Err(anyhow!("s3 put {}", r.status()))
+        }
+        Err(e) => {
+            g.untrash(&kept).await;
+            Err(e.into())
+        }
     }
-    Ok(StatusCode::CREATED.into_response())
 }
 
 async fn mkcol(g: &Gate, lib: &str, path: &str) -> Result<Response> {
@@ -803,15 +825,20 @@ async fn in_pieces(
             xml_body.push_str("</CompleteMultipartUpload>");
             // as a whole PUT: what had this name goes to the trash first
             let old = g.objects_at(lib, path, false).await?;
-            g.keep_in_trash(lib, path, &old, true).await?;
-            g.call_with(
-                reqwest::Method::POST,
-                &at,
-                &id_q,
-                &[],
-                xml_body.into_bytes(),
-            )
-            .await?;
+            let kept = g.keep_in_trash(lib, path, &old, true).await?;
+            if let Err(e) = g
+                .call_with(
+                    reqwest::Method::POST,
+                    &at,
+                    &id_q,
+                    &[],
+                    xml_body.into_bytes(),
+                )
+                .await
+            {
+                g.untrash(&kept).await;
+                return Err(e);
+            }
             Ok(StatusCode::CREATED.into_response())
         }
         "DELETE" => {
@@ -1041,6 +1068,10 @@ mod tests {
                         Some(v) => v.clone(),
                         None => return StatusCode::NOT_FOUND.into_response(),
                     },
+                    // a body the store refuses: what an upload cut off looks like to it
+                    None if body.as_ref() == b"refused" => {
+                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                    }
                     None => body.to_vec(),
                 };
                 b.insert(object, v);
@@ -1112,6 +1143,34 @@ mod tests {
         let mut kept = trashed(&b, "a");
         kept.sort();
         assert_eq!(kept, vec![b"one".to_vec(), b"two".to_vec()]);
+    }
+
+    #[tokio::test]
+    async fn a_reader_writes_nothing_dressed_as_a_read() {
+        let (g, b) = bucket().await;
+        for m in ["GET", "HEAD", "PROPFIND", "OPTIONS"] {
+            let req = Request::builder()
+                .method(m)
+                .uri("/_dd/dav/L/a")
+                .header("x-dd-upload", "start")
+                .body(Body::from("x"))
+                .unwrap();
+            let r = serve(&g, "L".into(), "a".into(), Role::Reader, req).await;
+            assert_eq!(r.status(), StatusCode::FORBIDDEN, "{m}");
+        }
+        assert!(b.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_put_that_fails_leaves_no_copy_in_the_trash() {
+        let (g, b) = bucket().await;
+        dav(&g, "PUT", "a", &[], "one").await;
+        // a write the store does not take, as when the allowance cuts one off
+        for _ in 0..3 {
+            assert!(!dav(&g, "PUT", "a", &[], "refused").await.is_success());
+        }
+        assert_eq!(b.lock().unwrap()["L/a"], b"one");
+        assert!(trashed(&b, "a").is_empty(), "no copy per failed try");
     }
 
     #[tokio::test]
