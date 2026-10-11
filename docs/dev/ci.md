@@ -34,7 +34,7 @@ so one job can wait on every other.
 pull request opened, pushed, or edited
 │
 ├─ files_modified ── what changed: nix, rust, vm, app (and: a draft? already passed?)
-│   ├─ flake_check ─── the flake evaluates; plaintext labels, box list, this file
+│   ├─ flake_check ─── the flake evaluates; plaintext labels, box list, needs units, this file
 │   ├─ mail_worker ─── the mail Worker and the control plane, end to end
 │   ├─ build_part ──┬─ build_host (every box's system, built on every box)
 │   │               │    └─ same_build (both builds of a system are one path)
@@ -62,6 +62,16 @@ pull request opened, pushed, or edited
   box's own store. What a run builds is already on the boxes when the
   release goes out, and `dd release publish` signs the paths CI recorded
   instead of building them again.
+- **Jobs run where they fit.** A job heavier than a runner's usual one is
+  a variant in the runner's needs
+  ([`nix/modules/forge/needs.nix`](../../nix/modules/forge/needs.nix)):
+  today `flake-check`, which holds 8G (`nix flake check` peaked at 7.5G and
+  ran node2 out of memory beside a VM test).
+  [`nix/lib/ci-runners.nix`](../../nix/lib/ci-runners.nix) fits each
+  variant to the runner boxes whose reported memory holds the runner's own
+  use and the variant's, and files_modified sends `flake_check` to the first
+  of them (`flake_check_on`), or to any runner when none fits. No box is
+  named in the workflow.
 - **The tests are cached crate by crate.** `checks.tests` is a linkFarm
   of every workspace crate's test run but the app's (its tests are
   `tests-app`). Each crate's tests are their own build from
@@ -70,10 +80,16 @@ pull request opened, pushed, or edited
   against that program's own per-crate builds, so a crate whose code and
   dependencies did not change is a cache hit, its tests too. A crate with
   dev-dependencies is tested as its own root. A change to the cli alone
-  reruns only dd's tests. The checks keep no target dir
-  (`doInstallCargoArtifacts = false` on clippy, clippy-app and
-  tests-app): keeping it made CI upload the tests' 198M target to the
-  cache after every run.
+  reruns only dd's tests. A test build compiles unoptimised, as `cargo
+  test` does; the box programs' own builds it shares stay optimised.
+- **Lint is cached the same way.** `checks.clippy` is every crate's lint:
+  its test build is compiled with clippy standing in for rustc (`-D
+  warnings`, the crate's own code; its dependencies are the shared builds),
+  so lint and tests are one build, and its plain build is linted once more
+  for what only exists outside tests (`cargo clippy --all-targets`, a crate
+  at a time). The app's checks keep no target dir
+  (`doInstallCargoArtifacts = false` on clippy-app and tests-app): keeping
+  it made CI upload a 198M target to the cache after every run.
 - **A run killed from outside** (the forge or a runner restarting under it,
   as a release can) is run again once, by
   [`ci-resume.py`](../../nix/modules/forge/ci-resume.py) on the forge box.
@@ -174,6 +190,11 @@ something real, and it does not make the run slow. Before it merges:
   `VERIFY_PAGES_DIR` (the pages, for the gate's tests and dd's e2e, which
   runs a gate), git, ssh and rclone on PATH, and for dd the mail Worker's
   tests beside the cli, git-remote-dd beside dd, and `CARGO`.
+- **A new unit belongs to a service.** Every systemd service and timer our
+  modules put on a box is named by some service's needs (its name, or one
+  of its `units`); `checks.needs-units`
+  ([`nix/tests/needs-units.nix`](../../nix/tests/needs-units.nix)) fails the
+  flake otherwise, so placement and the fit check see everything a box runs.
 - **It is in `ci_ok`'s list.** `nix/tests/ci.nix` will refuse the change
   otherwise.
 - **It has been timed.** Run it on a warm cache and a cold one and say what
@@ -200,6 +221,9 @@ fail during a switch:
 - something it needs not answering yet (the forge restarting under the
   same switch, a file not published yet) is "next time", exit 0, never a
   failure.
+
+`checks.needs-units` fails the flake on any timer of ours that uses
+`OnBootSec`, so the first of these is held before it merges.
 
 Releases 212, 213 and 224 rolled back for exactly this (`dd-build`,
 `dd-ci-resume`, and `dd-storage-view`, on `OnBootSec`, hitting dd-control

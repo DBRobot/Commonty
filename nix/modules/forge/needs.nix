@@ -10,6 +10,7 @@
       "dd-ci-resume"
       "dd-forge-notify"
       "dd-usage-forgejo"
+      "dd-forge-rules"
     ];
     # its repositories are on one box's disk, beside its database
     instances = 1;

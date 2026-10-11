@@ -265,7 +265,8 @@ and the modules it names):
 
 - `nix.gc` weekly, keeping 14 days, with min-free 10G and max-free 30G;
 - nix-daemon held to `MemoryHigh` 60% and `MemoryMax` 75% of RAM, and
-  max-jobs one per 6G (at most threads/4);
+  max-jobs one per 6G, at most three for every four threads (a crate's
+  build is mostly one thread): node1 6, node2 2;
 - the nix-cache bucket cleaned daily, keeping the last 10 releases'
   closures plus 7 days ([`cache-gc.sh`](../../nix/modules/storage/cache-gc.sh),
   where the forge runs);
@@ -283,7 +284,7 @@ typed in [`nix/lib/needs-type.nix`](../../nix/lib/needs-type.nix), so a
 needs file that says something unknown fails to evaluate:
 
 ```
-per service      what, instances, perHouse, everyBox, servesCode, base/variants
+per service      what, units, instances, perHouse, everyBox, servesCode, base/variants
 requires/faster  arch, gpu, memory, disk, place, threads, windowsLicense, kvm,
                  nestedKvm, uefi, wiredInitrd, tpm
 uses             memory, storage, estimated
@@ -295,6 +296,13 @@ privacy          none, metadata or plaintext
 
 [`nix/lib/needs.nix`](../../nix/lib/needs.nix) lists every file and merges
 them; `.#needs` is the result as JSON.
+
+`units` names the systemd services and timers a service is made of besides
+one named after it (a name ending in `*` covers a template's instances, or
+a name made at build time). Every unit this repository's modules put on a
+box belongs to some service, and no timer of ours counts from boot:
+[`nix/tests/needs-units.nix`](../../nix/tests/needs-units.nix) fails the
+flake otherwise.
 
 Placement is still the list in `fleet/boxes.json`, written by hand and
 held honest by `role-fit`. Nothing places roles from the needs yet: they
@@ -475,8 +483,9 @@ service that keeps deleted things for a time adds its setting there.
 - **Crate tests**: `checks.tests` runs every workspace crate's tests but
   the app's (`checks.tests-app`), each its own build from `Cargo.nix`
   inside the box program that carries it, cached crate by crate
-  ([CI](ci.md#how-a-run-fits-together)). `checks.fmt`, `checks.clippy`
-  and `checks.clippy-app` (`-D warnings`) run beside it. The gate's tests read the
+  ([CI](ci.md#how-a-run-fits-together)). `checks.clippy` lints each crate
+  as its test build is compiled (clippy standing in for rustc, `-D
+  warnings`), and `checks.fmt` and `checks.clippy-app` run beside it. The gate's tests read the
   pages from the tree, so a page that names a script the table does not
   have fails there.
 - **VM tests**: boxes booted and driven. A test is two files,
