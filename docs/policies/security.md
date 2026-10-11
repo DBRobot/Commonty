@@ -12,25 +12,32 @@ keeps what is yours locked, and it never holds the key. Even a box that is
 stolen, broken into, or run by someone with bad intentions can only hand
 over locked data.
 
-**No passwords to steal.** You sign in with a passkey, kept on your own
-device. The boxes only ever see its public half.
+**No passwords to steal at sign-in.** You sign in with a passkey, kept on
+your own device. The boxes only ever see its public half. Passwords, the
+vault, is the one place with a password of its own: your master password
+never leaves your device, and the box keeps only a hash of it, so make it
+a long one.
 
 **Signed, checked releases.** Every box runs only releases built from
-Commonty's public code and signed. Before a release ships, two boxes must
-each build it and get exactly the same result, so one compromised machine
-cannot slip something in. A box that comes up worse after a release goes
+Commonty's public code and signed. Two boxes must each build a release and
+get exactly the same result, and every box checks both of their
+signatures before it runs it, so one compromised machine cannot slip
+something in. A box that does not come up healthy after a release goes
 back to the one before by itself.
 
-**Locked disks.** Every box's disks are encrypted, unlocked by the box's
-own security chip, so a disk pulled out of a box is unreadable.
+**Locked disks.** Every box's disks are encrypted. The key comes in two
+halves: one sealed in the box's own security chip, the other held at
+Cloudflare. A disk pulled out of a box is unreadable, and so is a box
+carried away from its house.
 
 **Open source.** All of Commonty's code is public, and so is every change
-to it. Anyone can read how it works and check that it does what this page
-says.
+to it, at [git.commonty.org](https://git.commonty.org). Anyone can read
+how it works and check that it does what this page says.
 
-**Checked before every change.** Every change is reviewed and tested
-before it reaches a box, including automated security reviews, and the
-boxes are driven through their failure cases before a release goes out.
+**Checked before every change.** Every change is tested before it
+reaches a box: it is built and checked, scanned for libraries with known
+security problems, and the boxes are driven through their failure cases
+before a release goes out.
 
 ## Reporting a problem
 
@@ -50,8 +57,9 @@ Tell us what you found and how to reproduce it.
 If you look for problems in good faith, we will not take action against
 you. That means:
 
-- you stay away from other people's data: use your own account, or the
-  demo;
+- you stay away from other people's data: use your own account, or look
+  around the demo. The demo runs on the real boxes, so look, but do not
+  attack it;
 - you do not try to take Commonty down, or make it slow for others;
 - you tell us privately, and give us time to fix it before telling
   anyone else.
@@ -65,5 +73,5 @@ puts Commonty's members at risk, we still want to hear about it.
 
 ## Past problems
 
-Every security problem we have found or been told about, and what we did
-about it, is listed here once it is fixed.
+From October 2026 on, every security problem we find or are told about,
+and what we did about it, is listed here once it is fixed.
