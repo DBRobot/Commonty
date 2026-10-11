@@ -24,6 +24,7 @@ pub mod network;
 mod oidc;
 pub mod pages;
 mod photos;
+mod private;
 mod session;
 mod signins;
 mod storage;

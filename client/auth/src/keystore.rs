@@ -77,6 +77,22 @@ impl FileStore {
         Self { path: path.into() }
     }
     fn read(&self) -> crate::Result<std::collections::BTreeMap<String, String>> {
+        // the root key, readable by others: refused, as ssh refuses such a key
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            if let Ok(m) = std::fs::metadata(&self.path)
+                && m.permissions().mode() & 0o077 != 0
+            {
+                return Err(crate::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!(
+                        "{} is readable by others: `chmod 600` it, and treat its keys as seen",
+                        self.path.display()
+                    ),
+                )));
+            }
+        }
         match std::fs::read(&self.path) {
             Ok(b) => Ok(serde_json::from_slice(&b).unwrap_or_default()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
@@ -95,10 +111,11 @@ impl FileStore {
         {
             use std::io::Write as _;
             use std::os::unix::fs::OpenOptionsExt as _;
+            // a leftover keeps its own mode: made anew, never reused
+            let _ = std::fs::remove_file(&tmp);
             let mut f = std::fs::OpenOptions::new()
                 .write(true)
-                .create(true)
-                .truncate(true)
+                .create_new(true)
                 .mode(0o600)
                 .open(&tmp)?;
             f.write_all(&serde_json::to_vec_pretty(m).unwrap_or_default())?;
@@ -198,5 +215,31 @@ mod tests {
 
         ks.clear(account).unwrap();
         assert!(ks.get(account).unwrap().is_none(), "clear should remove it");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_store_is_its_owners_alone() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let d = std::env::temp_dir().join(format!("dd-filestore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("keys.json");
+        let s = FileStore::new(&p);
+        // a leftover temp file others could read is not written into
+        let tmp = p.with_extension("tmp");
+        std::fs::write(&tmp, "").unwrap();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644)).unwrap();
+        s.set("user", "tom").unwrap();
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(
+            s.get("user").unwrap().as_deref().map(|x| x.to_string()),
+            Some("tom".into())
+        );
+        // widened by someone: refused, not read
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(s.get("user").is_err());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

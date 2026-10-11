@@ -46,10 +46,7 @@ impl Home {
         if let Some(p) = Self::seen_file(&self.dir)
             && let Ok(b) = serde_json::to_vec(seen)
         {
-            let tmp = p.with_extension("json.tmp");
-            if std::fs::write(&tmp, b).is_ok() {
-                let _ = std::fs::rename(&tmp, &p);
-            }
+            let _ = crate::private::write(&p, &b);
         }
     }
 
@@ -303,9 +300,8 @@ fn hand_over(home: &Home, c: &Change) -> Result<(), (StatusCode, String)> {
         return Err((StatusCode::NOT_FOUND, "this box has no Wi-Fi".into()));
     };
     let body = serde_json::json!({ "ssid": c.ssid, "psk": c.psk, "nonce": c.nonce });
-    let tmp = dir.join("request.tmp");
-    std::fs::write(&tmp, body.to_string())
-        .and_then(|_| std::fs::rename(&tmp, dir.join("request")))
+    // 0600: the folder's group is the gate's, the reader is root
+    crate::private::write(&dir.join("request"), body.to_string().as_bytes())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 

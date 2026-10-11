@@ -96,8 +96,7 @@ impl SignIns {
         if seq <= *last {
             return;
         }
-        let tmp = p.with_extension("json.tmp");
-        if std::fs::write(&tmp, b).is_ok() && std::fs::rename(&tmp, p).is_ok() {
+        if crate::private::write(p, &b).is_ok() {
             *last = seq;
         }
     }
@@ -418,12 +417,10 @@ pub(crate) mod http {
         let Some(p) = names_file(&app, &user) else {
             return StatusCode::BAD_REQUEST.into_response();
         };
-        let tmp = p.with_extension("bin.tmp");
         let ok = p
             .parent()
             .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
-            && std::fs::write(&tmp, &body).is_ok()
-            && std::fs::rename(&tmp, &p).is_ok();
+            && crate::private::write(&p, &body).is_ok();
         if ok {
             StatusCode::NO_CONTENT.into_response()
         } else {

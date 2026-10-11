@@ -111,9 +111,7 @@ impl Store {
 
     /// the whole file, written aside and moved into place
     fn save(&self, f: &File) -> Result<()> {
-        let tmp = self.path.with_extension("tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(f)?)?;
-        std::fs::rename(&tmp, &self.path)?;
+        crate::private::write(&self.path, &serde_json::to_vec_pretty(f)?)?;
         Ok(())
     }
 
