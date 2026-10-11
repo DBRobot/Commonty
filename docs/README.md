@@ -40,6 +40,5 @@ Coming as each part of Commonty gets its page.
 
 ## Policies
 
+- [Terms of use](policies/terms.md)
 - [Changes to the policies](policies/changes.md): each announced to every member 30 days ahead
-
-The policies themselves are coming.
