@@ -1,18 +1,8 @@
-# A box on the fleet's own network: a second tailscaled beside the one on
-# the owner's Tailscale account, against the fleet's Headscale, with its
-# own state, socket, port and interface. Names on this network come from
-# Headscale; the box keeps its own resolver and takes none from here
-# (accept-dns off).
-#
-# How a box reaches the control server. Not by the control box's tailnet
-# address: a tailscaled steers its own control traffic around every
-# tailnet, the owner's included, so on a box already on the owner's
-# tailnet that address has no route and the dial times out - node2 sat
-# logged out for days on exactly that. Through the front door instead,
-# like everything else a box reaches, with the app's bridge in front of
-# the stock daemon: the front door's proxy carries websockets but strips
-# the control protocol's own upgrade, and the bridge turns one into the
-# other. The control box runs the control server, so it talks to itself.
+# A box on the fleet's own network: the box's one tailscaled, against the
+# fleet's Headscale, with its own state, socket, port and interface
+# (commonty0); accept-dns off. It reaches the control server through the
+# front door with the app's bridge in front (the proxy strips the control
+# protocol's upgrade); the control box talks to itself.
 {
   config,
   pkgs,
@@ -96,8 +86,8 @@ in
     # to, so the node asks for none. A keeper, not a oneshot: it tries
     # until the control server answers and then runs what comes after,
     # and a release switch never waits on it or fails because of it (a
-    # box whose control server is down still takes releases). The owner's
-    # tailscale keeps the firewall, this one stays out of netfilter.
+    # box whose control server is down still takes releases). It stays out
+    # of netfilter: the box's own firewall rules are core.nix's.
     systemd.services.commonty-net-bridge = lib.mkIf bridged {
       description = "The fleet's control server, through the front door";
       wantedBy = [ "multi-user.target" ];
@@ -172,11 +162,8 @@ in
             --netfilter-mode=off \
             --timeout=60s && { rm -f "$key"; continue; }
           rm -f "$key"
-          # Every `up` rewrites routing table 52, which the box's other
-          # tailscaled shares. Retrying one that fails, every thirty
-          # seconds, is what took node2 off the network for eight hours.
-          # Back off instead: a box that cannot join is a box to look at,
-          # not one to keep poking.
+          # every `up` rewrites routing table 52; retrying each thirty seconds
+          # once took node2 off the network for eight hours, so back off
           wait=$(( wait * 2 ))
           [ $wait -gt 3600 ] && wait=3600
           echo "could not join; next try in $wait s"
@@ -197,7 +184,7 @@ in
 
     networking.firewall.allowedUDPPorts = [ 41642 ];
     # The Commonty network reaches this box's services and nothing past it:
-    # the box forwards (docker, the owner's tailscaled), and a member who
+    # the box forwards (docker), and a member who
     # sent a packet for a house address (192.168.1.x) to this box would
     # otherwise be let into the house. Nothing is forwarded in or out on
     # commonty0, whatever routes anyone adds.

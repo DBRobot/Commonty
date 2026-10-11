@@ -1,11 +1,7 @@
 use zeroize::Zeroizing;
 
-/// Where the ente key lives between runs.
-///
-/// A trait rather than a concrete type because there is a second
-/// implementation coming: a passkey's PRF/hmac-secret output can unlock the
-/// same value without a password, and unlike the OS keyring it follows a
-/// synced credential across devices instead of being tied to one machine.
+/// Where a device's secrets live between runs: the OS credential store, or
+/// a file (DD_KEYRING_FILE, and the app's private storage on a phone).
 pub trait KeyStore {
     fn get(&self, account: &str) -> crate::Result<Option<Zeroizing<String>>>;
     fn set(&self, account: &str, secret: &str) -> crate::Result<()>;

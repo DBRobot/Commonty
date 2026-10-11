@@ -1,4 +1,4 @@
-# Declared ZFS datasets. A box's hardware file says which pool holds what;
+# Declared ZFS datasets. A box's box.json (datasets) says which pool holds what;
 # the oneshot below creates a dataset if missing and sets any property that
 # differs. It never destroys or remounts anything that is already right, so
 # it is safe to run against live data.

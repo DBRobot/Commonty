@@ -1,7 +1,7 @@
 { config, pkgs, ... }:
 {
-  # Every role that declares a secret imports this. A box with no such role
-  # has no sops at all - node2 is a recipient of nothing.
+  # Every role that declares a secret imports this; core does, so every box
+  # has sops, each reading its own file only.
   sops.defaultSopsFile = ../../secrets + "/${config.networking.hostName}.yaml";
   # The box decrypts with the key in its TPM (modules/box/report.nix makes
   # it): the file is a handle only this box's TPM can use, so a copy of it,

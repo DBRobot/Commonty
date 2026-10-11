@@ -516,14 +516,12 @@
             inherit src;
             strictDeps = true;
             nativeBuildInputs = [ pkgs.pkg-config ];
-            # the cli's mount (dd media) links libfuse
-            buildInputs = [ pkgs.fuse3 ];
             doCheck = false;
           };
           # the app: its window, and its network engine (app/build.rs links
           # it from here)
           appCommon = common // {
-            buildInputs = [ pkgs.fuse3 ] ++ appLibs;
+            buildInputs = appLibs;
             COMMONTY_NET_LIB_DIR = "${appNet}/lib";
           };
           # The workspace but the app, for clippy: the
@@ -869,7 +867,7 @@
           # the Android toolchain, for the dev shell below
           android-sdk = androidSdk;
           # Our Rust in the browser: the ente account for a person whose key
-          # is a passkey (crates/web). The verifier serves this directory.
+          # is a passkey (client/web). The verifier serves this directory.
           # A film is HLS, because that is what the box's transcode makes
           # and what lets a viewer seek. Safari plays a playlist by itself;
           # nothing else does, so the page needs a player. Pinned by hash
@@ -1054,7 +1052,7 @@
             pkgs.clippy # linter that teaches you the language
             pkgs.rustfmt
             pkgs.pkg-config # crates with C dependencies need this to find them
-            pkgs.fuse3 # the cli's mount
+            pkgs.fuse3 # fusermount3, which dd media runs to unmount rclone's mount
             pkgs.sops # `dd secret run -- ...` runs this
             pkgs.age
             pkgs.age-plugin-tpm # sops encrypts to the boxes' TPM keys through it

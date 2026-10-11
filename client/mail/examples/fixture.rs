@@ -9,7 +9,7 @@ use p256::ecdsa::signature::Signer as _;
 use p256::pkcs8::{EncodePrivateKey as _, EncodePublicKey as _};
 use sha2::Digest as _;
 use webauthn_rs_core::proto::{COSEAlgorithm, COSEEC2Key, COSEKey, COSEKeyType, ECDSACurve};
-// a made-up member: a device root, and one passkey on commonty.org
+// a made-up member: a device root, and one passkey on commonty.test
 struct Tester {
     root: ed25519_dalek::SigningKey,
     passkey: p256::ecdsa::SigningKey,
