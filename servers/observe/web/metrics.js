@@ -1,8 +1,10 @@
-// Metrics: how the boxes are doing. Every figure is a Prometheus query
-// over the whole fleet, asked of Thanos through /api/v1 (nginx lets these
-// few read-only calls through, behind the same sign-in as everything
-// else). The fleet, a box, what needs attention, storage and backups, and
-// a place to ask anything else.
+// Metrics: how the boxes are doing. Every figure is a Prometheus query,
+// asked of each place that answers for the boxes this person sees
+// (/_dd/metrics/sources): this box's Thanos, every box's, for the admin;
+// and each box's own metrics.<box>.<domain>, live, for its owner and the
+// admin. The answers are merged, a box's own points over the bucket's older
+// copy. The fleet, a box, what needs attention, storage and backups, and a
+// place to ask anything else.
 
 import './shell.js';
 
@@ -23,12 +25,69 @@ const put = (parent, ...kids) => parent.replaceChildren(...kids.flat(Infinity).f
 
 // ---- asking Prometheus
 
-async function api(path, params) {
-  const r = await fetch(`/api/v1/${path}?${new URLSearchParams(params)}`, { credentials: 'same-origin' });
-  if (r.status === 401) { location.href = `/_dd/login?rd=${encodeURIComponent(location.pathname)}`; throw new Error('signed out'); }
+let sourcesOnce = null;
+// where to ask: this box (here) and the boxes that answer for themselves
+const sources = () => (sourcesOnce ||= fetch('/_dd/metrics/sources', { credentials: 'same-origin' })
+  .then((r) => (r.ok ? r.json() : { here: true, boxes: [] }))
+  .catch(() => ({ here: true, boxes: [] })));
+
+// A box's own name signs the browser in on its own, once: through its
+// sign-in and back here. Not twice in a minute, so a box that will not
+// have this person is left out instead of asked forever.
+function signInAt(url) {
+  const key = `dd-hop:${url}`;
+  let last = 0;
+  try { last = Number(sessionStorage.getItem(key)) || 0; } catch {}
+  if (Date.now() - last < 60000) return false;
+  try { sessionStorage.setItem(key, String(Date.now())); } catch {}
+  const back = `/_dd/back?to=${encodeURIComponent(location.href)}`;
+  location.href = `${url}/_dd/login?rd=${encodeURIComponent(back)}`;
+  return true;
+}
+
+async function ask(base, path, params) {
+  const r = await fetch(`${base}/api/v1/${path}?${new URLSearchParams(params)}`, { credentials: base ? 'include' : 'same-origin' });
+  if (r.status === 401) {
+    if (!base) { location.href = `/_dd/login?rd=${encodeURIComponent(location.pathname)}`; throw new Error('signed out'); }
+    if (signInAt(base)) throw new Error('signing in');
+    return null;
+  }
+  // a box this person does not see, or one not answering: left out
+  if (base && !r.ok) return null;
   const body = await r.json().catch(() => ({}));
   if (!r.ok || body.status !== 'success') throw new Error(body.error || `the query failed (${r.status})`);
   return body.data;
+}
+
+const key = (m) => JSON.stringify(Object.entries(m).sort());
+// one answer from many: a series a box gave of itself wins over the same
+// series from here, and over time the two are joined, the box's own points
+// where it has them
+function merge(answers) {
+  const [first] = answers;
+  if (!first) return { resultType: 'vector', result: [] };
+  const out = new Map();
+  for (const [i, a] of answers.entries()) {
+    for (const r of a.result || []) {
+      const k = key(r.metric);
+      const was = out.get(k);
+      if (!was) { out.set(k, { ...r, from: i }); continue; }
+      if (r.values && was.values) {
+        const at = new Map(was.values.map((p) => [p[0], p]));
+        for (const p of r.values) if (i > was.from || !at.has(p[0])) at.set(p[0], p);
+        out.set(k, { ...was, values: [...at.values()].sort((x, y) => x[0] - y[0]), from: Math.max(i, was.from) });
+      } else if (i > was.from) out.set(k, { ...r, from: i });
+    }
+  }
+  return { resultType: first.resultType, result: [...out.values()].map(({ from, ...r }) => r) };
+}
+
+async function api(path, params) {
+  const s = await sources();
+  const asks = [...(s.here ? [ask('', path, params)] : []), ...s.boxes.map((b) => ask(b.url, path, params).catch(() => null))];
+  const answers = (await Promise.all(asks)).filter(Boolean);
+  if (!answers.length && !s.here && s.boxes.length === 0) throw new Error('no box to show');
+  return merge(answers);
 }
 const now = () => Math.floor(Date.now() / 1000);
 const instant = (query) => api('query', { query }).then((d) => d.result);
