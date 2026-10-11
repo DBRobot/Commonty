@@ -931,8 +931,9 @@
                 || a == m;
               bad = builtins.attrNames (nixpkgs.lib.filterAttrs badAlias aliases);
             in
-            assert nixpkgs.lib.assertMsg (bad == [ ])
-              "fleet/policy.json mailAliases: not an alias here: ${builtins.concatStringsSep ", " bad}";
+            assert nixpkgs.lib.assertMsg (
+              bad == [ ]
+            ) "fleet/policy.json mailAliases: not an alias here: ${builtins.concatStringsSep ", " bad}";
             pkgs.runCommand "dd-mail-worker"
               {
                 nativeBuildInputs = [

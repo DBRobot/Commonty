@@ -16,7 +16,11 @@ want = {
 }
 for k, v in want.items():
     assert fields.get(k) == v, f"{k}: {fields.get(k)!r}, wanted {v!r}"
-expires = datetime.datetime.strptime(fields["Expires"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+expires = datetime.datetime.strptime(fields["Expires"], "%Y-%m-%dT%H:%M:%SZ").replace(
+    tzinfo=datetime.timezone.utc
+)
 now = datetime.datetime.now(datetime.timezone.utc)
-assert now < expires <= now + datetime.timedelta(days=366), f"Expires {expires} is not within a year of {now}"
+assert now < expires <= now + datetime.timedelta(days=366), (
+    f"Expires {expires} is not within a year of {now}"
+)
 print(f"security.txt for {domain}: expires {fields['Expires']}")
