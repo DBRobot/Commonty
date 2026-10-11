@@ -20,7 +20,21 @@ use crate::{Gate, Role, uri_encode};
 
 /// where a deleted thing goes, under the library
 const TRASH: &str = "trash";
-static TRASH_PLACE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// One lock for each library's trash: what goes into it, and what is
+/// deleted from it for good, one at a time there, and no library waits on
+/// another's.
+static TRASH_PLACES: std::sync::Mutex<
+    std::collections::BTreeMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>,
+> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn trash_place(lib: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    TRASH_PLACES
+        .lock()
+        .unwrap()
+        .entry(lib.to_string())
+        .or_default()
+        .clone()
+}
 /// a library's id, or `images-<name>`: the bucket's top level, and nothing
 /// that could reach past one person's folder
 fn top_prefix(id: &str) -> bool {
@@ -249,7 +263,8 @@ impl Gate {
         }
         // one at a time picks a place and fills it: two writes of one name in
         // the same second would otherwise both find trash/<stamp>/ free
-        let _held = TRASH_PLACE.lock().await;
+        let place = trash_place(lib);
+        let _held = place.lock().await;
         let mut stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -562,9 +577,11 @@ pub async fn delete_for_good(g: &Gate, lib: &str, raw: &str) -> Result<(Response
 }
 
 /// one thing in the trash, or with `trash` all of it, gone for good: under
-/// the trash's lock, so a second delete of the same finds nothing to count
+/// this library's trash lock, so a second delete of the same finds nothing
+/// to count, and what is counted is what was there when it ran
 async fn for_good(g: &Gate, lib: &str, path: &str) -> Result<(Response, u64)> {
-    let _held = TRASH_PLACE.lock().await;
+    let place = trash_place(lib);
+    let _held = place.lock().await;
     let at = key(lib, path);
     let mut found: Vec<(String, u64)> = Vec::new();
     if let Some((size, _)) = g.stat(&at).await? {
@@ -1162,6 +1179,37 @@ mod tests {
         );
         let (r, n) = delete_for_good(&g, lib, "Files/b").await.unwrap();
         assert_eq!((r.status().as_u16(), n), (403, 0), "outside the trash");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn one_librarys_trash_never_waits_on_anothers() {
+        let (a, b) = (
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        );
+        let g = fake_bucket(&[(&format!("{b}/trash/1/x"), 9)]);
+        // a long delete under way in a's trash
+        let place = trash_place(a);
+        let busy = place.lock().await;
+        let (r, n) = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            delete_for_good(&g, b, "trash"),
+        )
+        .await
+        .expect("b's trash waited on a's")
+        .unwrap();
+        assert_eq!((r.status().as_u16(), n), (204, 9));
+        // and a's own waits its turn
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(300),
+                delete_for_good(&g, a, "trash"),
+            )
+            .await
+            .is_err()
+        );
+        drop(busy);
+        assert_eq!(delete_for_good(&g, a, "trash").await.unwrap().1, 0);
     }
 
     #[test]
