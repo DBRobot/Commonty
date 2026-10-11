@@ -1,8 +1,8 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "v0.1.38-1-1791744194",
-    "issued": 1791744194,
+    "id": "v0.1.39-1-1791747423",
+    "issued": 1791747424,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -12,8 +12,8 @@
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/m0z3wrpfn0b5p32kdhmx4kbdb2zfvzli-commonty-android-0.1.38",
-        "version": "0.1.38"
+        "path": "/nix/store/k7fy99m1kzc059fz50pri0gzb8z8digw-commonty-android-0.1.39",
+        "version": "0.1.39"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -23,8 +23,8 @@
         ],
         "name": "dd-windows",
         "part": "dd-windows",
-        "path": "/nix/store/8a4frh2vqmh93h7yiz562dwa7l2g8sgr-dd-windows-0.1.38",
-        "version": "0.1.38"
+        "path": "/nix/store/7vqzzkqwcc2jd60f0x6ll4k2xx1kn10y-dd-windows-0.1.39",
+        "version": "0.1.39"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -34,8 +34,8 @@
         ],
         "name": "linux",
         "part": "linux",
-        "path": "/nix/store/hxjq74wp6wm9d5cfzz3cvck5g3n2lnsj-commonty-linux-0.1.38",
-        "version": "0.1.38"
+        "path": "/nix/store/n50bl7l1wa2yx0nhihi9d64bdxr14fn6-commonty-linux-0.1.39",
+        "version": "0.1.39"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -45,13 +45,13 @@
         ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/cq4w0vlcjqylh33gx8vqlz1aaymlw166-commonty-windows-0.1.38",
-        "version": "0.1.38"
+        "path": "/nix/store/qd0nx2mpwchjwcqhr63k5190yx51rawd-commonty-windows-0.1.39",
+        "version": "0.1.39"
       }
     ],
     "kind": "build-order",
-    "rev": "3000bd983c31e56eeb6fbc9b647a7828de4560d4"
+    "rev": "fe70bce3d4c715afd92962cac2380610b5ec6465"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "pEyc6y+EDuDaRgPNr0r9eacjmItUy4iwKkTn3kZm5OdTJieJmle3qeJ7zha/HiiL/gzdsa/ePbNik1n6BnaHBw=="
+  "signature": "uMBZonhKsHPv/8gJ9/5rFpiM+0sdEJABH9FRgKuim5gl09+NlgumRQXVl9tUlL9G1t5nzAbwLauo1nCqxDK4CA=="
 }
