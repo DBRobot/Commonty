@@ -40,7 +40,7 @@
     "with": [
       "gateway"
     ],
-    "why": "files.<domain> and /srv/images"
+    "why": "files.<domain>: Files, Movies & TV and the disk images, through the gate"
   },
   "library": {
     "prefers": {

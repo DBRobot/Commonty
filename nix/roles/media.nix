@@ -5,7 +5,6 @@
   # (servers/media, servers/transcode); the demo's is the demo library.
   imports = [
     ./_sops.nix
-    ../modules/gate/user-accounts.nix
     ../modules/media/webdav-media.nix
   ];
 
@@ -36,7 +35,4 @@
       rank = 30;
     }
   ];
-
-  # The archives of old computers are in the bucket (two copies, on two
-  # boxes): no backup of /srv/images, which only held them before
 }
