@@ -46,7 +46,7 @@ pkgs.runCommand "mail-worker-e2e"
       { type = "Text", globs = ["**/*.html", "**/*.css", "**/change.js", "**/row.js", "**/passkey.js", "**/boxes.js"] },
       { type = "Data", globs = ["**/*.woff2"] },
       { type = "CompiledWasm", globs = ["**/*.wasm"] },
-      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js"] },
+      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js", "**/leaving.js"] },
     ]
     kv_namespaces = [{ binding = "PINNED", id = "local" }]
     [vars]
