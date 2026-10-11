@@ -6,12 +6,14 @@ import { start as backups, FILES } from './backups.js';
 import { start as devices } from './devices.js';
 import { start as network } from './network.js';
 import { start as storage } from './storage.js';
+import { start as leave, where } from './leave.js';
 import { me as whoIsIt, entryOf } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 
 function tab(name) {
-  if (!['profile', 'devices', 'storage', 'network', 'backups'].includes(name)) name = 'profile';
+  if (!['profile', 'devices', 'storage', 'network', 'backups', 'leave'].includes(name)) name = 'profile';
+  if (gone) name = 'leave';
   // the disk images are read from the files site (backups.js)
   if (name === 'backups' && location.protocol === 'https:' && location.hostname !== FILES) {
     location.href = `https://${FILES}/_dd/settings#backups`;
@@ -26,6 +28,7 @@ function tab(name) {
   if (name === 'devices') devices();
   if (name === 'network') network();
   if (name === 'storage') storage();
+  if (name === 'leave') leave();
 }
 
 for (const a of document.querySelectorAll('[data-tab]')) {
@@ -45,6 +48,7 @@ async function profile() {
     $('email').closest('.se-row').hidden = true;
     document.querySelector('[data-tab="backups"]').hidden = true;
     document.querySelector('[data-tab="network"]').hidden = true;
+    document.querySelector('[data-tab="leave"]').hidden = true;
   }
   // from the front door's name, not this page's: the app's copy is on its own
   const domain = new URL(me.home).hostname.split('.').slice(-2).join('.');
@@ -75,5 +79,15 @@ if (q.get('email') === 'changed') {
 }
 $('banner-x').onclick = () => { $('banner').hidden = true; };
 
+// someone who left sees only where they stand, and the way back
+let gone = false;
+where()
+  .then((s) => {
+    if (!s.left) return;
+    gone = true;
+    for (const a of document.querySelectorAll('.se-nav [data-tab]')) a.hidden = a.dataset.tab !== 'leave';
+    tab('leave');
+  })
+  .catch(() => {});
 tab(location.hash.slice(1));
 profile().catch(() => {});

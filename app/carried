@@ -24,6 +24,7 @@ servers/fleet/web/backups.css         static/backups.css
 servers/home/web/settings.js               static/settings.js
 servers/home/web/settings.css              static/settings.css
 servers/home/web/storage.js                static/storage.js
+servers/home/web/leave.js                  static/leave.js
 servers/home/web/storage.css               static/storage.css
 servers/home/web/pages/settings.html       pages/settings.html
 servers/fleet/web/devices.js          static/devices.js

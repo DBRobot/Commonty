@@ -264,6 +264,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "leave.js",
+        "servers/home/web/leave.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "storage.css",
         "servers/home/web/storage.css",
         "text/css; charset=utf-8",
