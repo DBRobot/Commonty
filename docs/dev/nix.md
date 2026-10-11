@@ -183,7 +183,8 @@ box/       what makes a box: host.nix (the box's folder), box.nix (dd.box.*),
            domain.nix (dd.domain, dd.repo), agent.nix (release agent, build
            orders), control.nix, disk-unlock.nix (+ its scripts),
            secure-boot.nix, report.nix (+ report/detect.sh), ports.nix,
-           zfs-datasets.nix, home-network.nix (+ wifi scripts), locate.nix
+           zfs-datasets.nix, home-network.nix (+ wifi scripts and
+           wired-watch.sh), locate.nix
 forge/     forgejo.nix, forgejo-runner.nix, members-runner.nix,
            live.nix (the Git pages' events); ci-cancel.py,
            ci-resume.py, forgejo-setup.sh, runner-address.sh
