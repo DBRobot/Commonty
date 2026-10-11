@@ -373,6 +373,7 @@ fieldset.consent legend { padding: 0; margin: 0 0 8px; font-size: 15px; font-wei
 .consent .born select { width: 100%; }
 label.check { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0 0; font-weight: 400; line-height: 1.45; }
 label.check[hidden] { display: none; }
+label.check a { text-decoration: underline; text-underline-offset: 3px; }
 label.check input { width: 20px; height: 20px; flex: none; margin: 1px 0 0; accent-color: var(--accent); }
 .refused { margin: 16px 0 0; color: var(--broken); font-weight: 600; }
 .refused:focus { outline: none; }

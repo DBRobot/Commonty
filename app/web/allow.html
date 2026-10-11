@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/_dd/static/home.css">
 </head>
 <body>
+  <a class="skip-to" href="#main">Skip to content</a>
   <header class="dd-bar">
     <div class="bar">
       <a class="brand" href="/_dd/home" aria-label="Commonty">
@@ -20,10 +21,10 @@
       </a>
     </div>
   </header>
-  <main class="auth">
+  <main id="main" class="auth">
     <div class="card">
       <h1 id="title">Opening in your browser</h1>
-      <p class="lead" id="msg">Waiting for your browser to ask…</p>
+      <p class="lead" id="msg" role="status">Waiting for your browser to ask…</p>
       <div id="asking" hidden>
         <p class="lead">Your browser should show this code. Allow it only if the codes match.</p>
         <p id="code" style="font: 600 32px/1.2 var(--mono); letter-spacing: .12em; margin: 8px 0 16px"></p>
