@@ -464,9 +464,16 @@ in
       systemd.services.forgejo.serviceConfig.RuntimeDirectoryMode = lib.mkForce "0750";
       # the whole attribute, not just its value: naming users.users.nginx
       # where nginx does not run leaves a user with no group and no kind
-      users.users = lib.mkIf config.services.nginx.enable {
-        nginx.extraGroups = [ "forgejo" ];
-      };
+      users.users = lib.mkMerge [
+        (lib.mkIf config.services.nginx.enable {
+          nginx.extraGroups = [ "forgejo" ];
+        })
+        # Every push over ssh is a login as forgejo, and each one started and
+        # stopped forgejo's own systemd: a release switching while one stopped
+        # failed ("user activation for forgejo failed") and node1 rolled back
+        # 244 and 246. Kept running, there is nothing to catch half-gone.
+        { forgejo.linger = true; }
+      ];
       services.nginx.virtualHosts.${host} = {
         useACMEHost = base;
         forceSSL = true;

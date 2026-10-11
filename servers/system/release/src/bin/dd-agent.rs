@@ -322,14 +322,26 @@ fn run(args: &Args) -> Result<String> {
         "nix-env",
         &["-p", "/nix/var/nix/profiles/system", "--set", &mine.path],
     )?;
-    let switched = sh(
-        &format!("{}/bin/switch-to-configuration", mine.path),
-        &["switch"],
-    );
+    let switch = || {
+        sh(
+            &format!("{}/bin/switch-to-configuration", mine.path),
+            &["switch"],
+        )
+    };
+    let mut switched = switch();
     // why, in the journal: release 244 rolled back on node1 with nothing to
-    // say what the switch had refused
+    // say what the switch had refused. Then once more: what fails a switch
+    // is as often the moment as the release (a user's systemd stopping just
+    // then cost 244 and 246), and a second switch to the same system only
+    // finishes what the first began
     if let Err(e) = &switched {
         eprintln!("release {counter}: the switch failed: {e:#}");
+        std::thread::sleep(Duration::from_secs(10));
+        switched = switch();
+        match &switched {
+            Ok(_) => eprintln!("release {counter}: switched on the second try"),
+            Err(e) => eprintln!("release {counter}: the second switch failed too: {e:#}"),
+        }
     }
 
     let probed =
