@@ -27,14 +27,28 @@ const el = (tag, attrs = {}, ...kids) => {
 
 // Settings sizes the frame to what is drawn; an open dialog needs room
 const dlg = $('dlg');
+const pw = $('pw');
 function tell() {
-  const h = Math.max(document.documentElement.scrollHeight, dlg.open ? 380 : 0);
+  const h = Math.max(document.documentElement.scrollHeight, dlg.open ? 440 : 0, pw.open ? 460 : 0);
   if (parent !== window) parent.postMessage({ aliasesHeight: h }, '*');
 }
 new ResizeObserver(tell).observe(document.body);
 
 const day = (t) => new Date(t * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-const made = (t) => (Date.now() / 1000 - t < 120 ? 'Made just now' : `Made ${day(t)}`);
+const short = (t) => new Date(t * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+const made = (a) => {
+  const when = Date.now() / 1000 - a.made < 120 ? 'just now' : day(a.made);
+  return a.by === 'pw' ? `Made by Passwords, ${when}` : `Made ${when}`;
+};
+const sites = (l) => (l.length > 2 ? `${l.slice(0, 2).join(', ')} and ${l.length - 2} more` : l.join(', '));
+// the row's small print: when it was made, and since, and what came to it
+function meta(a) {
+  const m = [made(a)];
+  if (a.ends) m.push(`turns off ${short(a.ends)}`);
+  if (!a.on && a.off) m.push(a.auto ? `turned off on its own ${short(a.off)}` : `off since ${short(a.off)}`);
+  if (a.from.length) m.push(`mail from ${sites(a.from)}`);
+  return m.join(' · ');
+}
 
 function count() {
   const c = $('count');
@@ -52,15 +66,25 @@ function row(a) {
   const local = a.address.split('@')[0];
   const label = el('span', { class: 'al-label' }, a.label || 'No label');
   if (!a.on) label.append(' ', el('span', { class: 'state-word', 'data-state': 'off', text: 'Off: mail bounces' }));
+  else if (a.fresh.length) label.append(' ', el('span', { class: 'state-word', 'data-state': 'attention', text: 'New sender' }));
   const copy = el('button', { class: 'al-copy', type: 'button', 'aria-label': 'Copy address', title: 'Copy', html: COPY });
   // a narrow screen breaks the address before its @, not inside a word
   const at = a.address.indexOf('@');
   const addr = el('span', { class: 'al-addr-text' }, a.address.slice(0, at), el('wbr'), a.address.slice(at));
   const sw = el('button', { class: 'switch', type: 'button', role: 'switch', 'aria-checked': String(a.on), 'aria-label': `${a.label || a.address} receives mail` });
   const more = el('button', { class: 'quiet al-more', type: 'button', 'aria-label': 'More', 'aria-haspopup': 'menu', 'aria-expanded': 'false', text: '⋯' });
-  const li = el('li', { class: a.on ? '' : 'off', 'data-local': local },
-    el('div', { class: 'al-what' }, label, el('span', { class: 'al-line' }, addr, copy),
-      el('span', { class: 'al-meta', text: a.on || !a.off ? made(a.made) : `${made(a.made)} · off since ${day(a.off)}` })),
+  const what = el('div', { class: 'al-what' }, label, el('span', { class: 'al-line' }, addr, copy), el('span', { class: 'al-meta', text: meta(a) }));
+  // a site new to it: maybe the address was passed on
+  if (a.on && a.fresh.length) {
+    const fine = el('button', { type: 'button', class: 'quiet', text: 'That’s fine' });
+    const off = el('button', { type: 'button', class: 'quiet', text: 'Turn it off' });
+    const was = a.from.length ? `Only ${sites(a.from)} had mailed this address before, so it may have been passed on.` : 'It may have been passed on.';
+    what.append(el('div', { class: 'al-leak', role: 'status' },
+      el('span', {}, el('b', { text: `New sender: ${sites(a.fresh)}.` }), ` ${was}`), el('span', {}, fine, off)));
+    fine.onclick = () => change(a, { fine: true });
+    off.onclick = () => change(a, { on: false });
+  }
+  const li = el('li', { class: a.on ? '' : 'off', 'data-local': local }, what,
     el('div', { class: 'al-act' }, sw, el('span', { class: 'al-menu' }, more)));
   copy.onclick = () => copyOf(a.address, copy);
   sw.onclick = () => change(a, { on: !a.on });
@@ -91,6 +115,7 @@ function broken(text, again) {
   $('state').replaceChildren(el('div', { class: again ? 'al-oops' : 'al-empty' }, text, b));
   $('list').replaceChildren();
   $('new').disabled = true;
+  $('opts').hidden = true;
   b.onclick = async () => {
     b.disabled = true;
     try {
@@ -114,6 +139,51 @@ async function load() {
   aliases = v.aliases;
   max = v.max;
   draw();
+  settings(v);
+}
+
+// Alias settings: Passwords connected or not
+function settings(v) {
+  $('opts').hidden = false;
+  const p = v.passwords;
+  $('pw-off').hidden = !!p;
+  $('pw-on').hidden = !p;
+  if (p) {
+    $('pw-text').textContent = `Connected ${day(p.made)}${p.used ? ` · last made one ${day(p.used)}` : ''}. Its key can only make aliases: it can't read, change or delete them.`;
+  }
+}
+$('pw-connect').onclick = async () => {
+  $('opt-bad').textContent = '';
+  $('pw-connect').disabled = true;
+  try {
+    // a key that makes aliases is one more way in: the passkey, for it
+    const v = await post('/api/aliases/passwords', await confirm(name));
+    $('pw-url').textContent = v.url;
+    $('pw-key').textContent = v.key;
+    pw.showModal();
+    tell();
+    settings(v);
+  } catch (err) {
+    $('opt-bad').textContent = err.message;
+  }
+  $('pw-connect').disabled = false;
+};
+$('pw-done').onclick = () => {
+  $('pw-key').textContent = '';
+  pw.close();
+};
+pw.addEventListener('close', () => { $('pw-key').textContent = ''; tell(); });
+$('pw-disconnect').onclick = async () => {
+  $('opt-bad').textContent = '';
+  try {
+    settings(await post('/api/aliases/passwords/delete', {}));
+  } catch (err) {
+    $('opt-bad').textContent = err.message;
+  }
+};
+for (const b of document.querySelectorAll('[data-copy]')) {
+  b.innerHTML = COPY;
+  b.onclick = () => copyOf($(b.dataset.copy).textContent, b);
 }
 
 async function copyOf(text, button) {
@@ -161,8 +231,19 @@ function menu(a, button) {
   close();
   if (was) return;
   const rename = el('button', { type: 'button', role: 'menuitem', text: 'Rename' });
+  const later = el('button', { type: 'button', role: 'menuitem', text: a.ends ? 'Turn off on another day…' : 'Turn off later…' });
   const del = el('button', { type: 'button', role: 'menuitem', class: 'danger', text: 'Delete…' });
-  const pop = el('div', { class: 'popmenu al-pop', role: 'menu' }, rename, del);
+  const pop = el('div', { class: 'popmenu al-pop', role: 'menu' }, rename, ...(a.on ? [later] : []), del);
+  later.onclick = (e) => {
+    e.stopPropagation();
+    const choices = [[1, 'In a day'], [7, 'In a week'], [30, 'In a month'], ...(a.ends ? [[0, 'Never']] : [])].map(([ttl, text]) => {
+      const b = el('button', { type: 'button', role: 'menuitem', text });
+      b.onclick = () => { close(); change(a, { ttl }); };
+      return b;
+    });
+    pop.replaceChildren(el('div', { class: 'al-sub', text: 'Turn it off' }), ...choices);
+    choices[0].focus();
+  };
   button.parentNode.append(pop);
   button.setAttribute('aria-expanded', 'true');
   open = { pop, button };
@@ -236,6 +317,7 @@ $('new').onclick = () => {
   $('make').hidden = false;
   $('done').hidden = true;
   $('label').value = '';
+  $('ttl').value = '0';
   $('make-bad').textContent = '';
   offer = null;
   $('another').disabled = false;
@@ -253,7 +335,7 @@ $('make').addEventListener('submit', async (e) => {
   $('make-ok').disabled = true;
   $('make-bad').textContent = '';
   try {
-    const v = await post('/api/aliases', { ...offer, label: $('label').value });
+    const v = await post('/api/aliases', { ...offer, label: $('label').value, ttl: Number($('ttl').value) });
     aliases.unshift(v.alias);
     draw();
     $('done-addr').textContent = v.alias.address;

@@ -438,8 +438,17 @@ name, uploaded as a plain binding), on the same minute-old look as the
 release's aliases. In KV (`PINNED`):
 
 ```
-alias:<local>           {m, l, on, t, x}: member, label, on, made, off since
+alias:<local>           {m, l, on, t, x, e, by}: member, label, on, made, off since,
+                        turns off at, made by Passwords
 owner:<member>:<local>  one key per alias: no write rewrites a shared list
+seen:<local>            {a, p}: the sites that have mailed it and are fine, and
+                        the new ones; apart, so mail never writes over a change
+pwkey:<member>          {h, i, t}: the Passwords key's hash, the passkey that
+                        made it, when
+pwtok:<hash>            the member that key is
+pwused:<member>         when it last made one: apart, so a use never writes
+                        back a key just taken away
+pwsite:<member>:<site>  the alias Passwords just made there, for ten minutes
 forgot:<member>         when they left, for a day: their aliases made before it are dead
 alias:<local>           {gone}: deleted, its member forgotten, never given out again
 ```
@@ -462,6 +471,40 @@ the browser's own prompt is the one thing such a page can neither hide nor
 answer. A member's own address is refused under a
 name an alias holds (`setEmail`), so a later member cannot take one over.
 Aliases only receive: nothing is sent as one.
+
+An alias can turn itself off: after a day, a week or a month, chosen in
+New alias or later from its menu (`e`). Past that time it is off as if
+switched off, and the switch either way clears it. The test's day is two
+seconds (`ALIAS_DAY`).
+
+Each mail to an alias notes its sender's site, the domain of its `From`
+cut to the last two labels (three under a country's `co.`, `com.` and the
+like): the first is the alias's own, and a later one is shown as new until
+the member says it is fine. This is a hint, not proof, as anyone can write
+any `From`. At most 20 sites are kept an alias, and nothing else of the
+mail; `seen:` is written only when a site is new, as the free plan allows
+1,000 KV writes a day.
+
+For the owner's own aliases, the Worker logs the names of the headers each
+message came with, and nothing else of it: where Cloudflare's checks of the
+sender (SPF, DKIM, DMARC) can be read from the Worker is not written down,
+and taking trackers out of mail, which sends it on as the alias, must
+first know the sender was who it says.
+
+Passwords (Bitwarden) can make aliases from its username generator, with
+this Worker standing in for a SimpleLogin server:
+`POST /api/alias/random/new?hostname=<site>`, the key in an
+`Authentication` header, answered `201 {alias}`. It is called from the
+browser extension or the vault's page, so it answers any origin (CORS
+`*`) and reads no cookie: the key is all it has. The key is made on the
+Email tab with a passkey answer, as it is one more way in, shown once, and
+kept only as its hash. It holds as a session does: while the passkey that
+made it is still the member's, and until they sign out everywhere. It can
+make aliases and nothing else, from the same ten offers a day and under the
+same 100. Asking again for the same site within ten minutes gives the alias
+just made, as the generator asks again whenever it is opened. Leaving
+deletes the key with the aliases, and an alias made as its member leaves
+is deleted as it is made.
 
 ## The dd commands
 

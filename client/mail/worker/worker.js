@@ -23,7 +23,7 @@ import { MEMBERS, RELEASE, ALIASES } from './fleet.js';
 import { boxApi, memberApi } from './unlock.js';
 import { forgetApi } from './leaving.js';
 import { sendApi } from './send.js';
-import { aliasApi, aliasMail, forgetAliases, aliasHolds, keepCatchAll } from './aliases.js';
+import { aliasApi, aliasMail, forgetAliases, aliasHolds, keepCatchAll, passwordsApi } from './aliases.js';
 import aliasesHtml from './aliases.html';
 import aliasesPageJs from './aliases-page.js';
 import boxesHtml from './boxes.html';
@@ -125,17 +125,23 @@ function cookie(req, name) {
   return '';
 }
 // a session lasts while the passkey that opened it is still the member's,
-// and until they sign out everywhere else (ENDED: the time they last did)
+// and until they sign out everywhere else (ENDED: the time they last did);
+// so does the key Passwords makes aliases with (aliases.js)
+async function holds(env, name, passkey, t) {
+  const ended = Number((await env.PINNED.get(`ended:${name}`)) || 0);
+  // a time that is no number holds nothing
+  if (!Number.isFinite(t) || !Number.isFinite(ended) || t < ended) return false;
+  try {
+    const e = JSON.parse(await entry(env, name));
+    return e.entry.passkeys.some((p) => p.id === passkey);
+  } catch {
+    return false;
+  }
+}
 async function session(req, env) {
   const s = await unseal(env, cookie(req, 'mail_session'), 'session');
   if (!s || !s.i || !s.t) return null;
-  if (s.t < Number((await env.PINNED.get(`ended:${s.n}`)) || 0)) return null;
-  try {
-    const e = JSON.parse(await entry(env, s.n));
-    return e.entry.passkeys.some((p) => p.id === s.i) ? s : null;
-  } catch {
-    return null;
-  }
+  return (await holds(env, s.n, s.i, s.t)) ? s : null;
 }
 const opened = async (env, v) => {
   const s = await seal(env, { k: 'session', ...v, e: now() + SESSION });
@@ -396,7 +402,7 @@ async function api(req, env, path, sent) {
   // member's ends; this one is opened again, after the line
   // their own aliases (aliases.js): the session is enough, no fresh passkey
   if (path === '/api/aliases' || path.startsWith('/api/aliases/')) {
-    return aliasApi(req, env, path, body(), me, json, { ALIASES, memberName, listsShared: sharedLists, now, confirmed: (b) => asserted(env, b, me.n) });
+    return aliasApi(req, env, path, body(), me, json, { ALIASES, memberName, listsShared: sharedLists, now, confirmed: (b) => asserted(env, b, me.n), holds: (n, i, t) => holds(env, n, i, t) });
   }
   if (req.method === 'POST' && path === '/api/end-others') {
     const t = Date.now();
@@ -449,6 +455,8 @@ export default {
       if (path === '/api/unlock' || path.startsWith('/api/unlock/')) return boxApi(req, env, path, parse(sent), json);
       // someone who left, or was removed 30 days ago: their own statement, or
       // the release, decides (leaving.js)
+      // Passwords making an alias: its own key, from any origin (aliases.js)
+      if (path === '/api/alias/random/new') return passwordsApi(req, env, url, { ALIASES, memberName, listsShared: sharedLists, now, holds: (n, i, t) => holds(env, n, i, t) });
       if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, readProof, MEMBERS, ALIASES, aliasOf, zone, lists, stateIn, cf, forgetAliases });
       if (req.method !== 'GET' && origin !== (env.ORIGIN || `https://mail.${env.DOMAIN}`)) {
         return json({ error: 'not from here' }, 403);

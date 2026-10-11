@@ -63,6 +63,9 @@ pkgs.runCommand "mail-worker-e2e"
     ORIGIN = "http://localhost:8787"
     SEND_PER_BOX = "6"
     SEND_PER_RCPT = "4"
+    # a day is two seconds here, so an alias that turns off "after a day" can
+    # be seen to (aliases.js)
+    ALIAS_DAY = "2"
     TOML
     sed -i 's/^    //' w/wrangler.toml
     # the read key: 32 bytes of 5, as the fake directory expects (fake.py)

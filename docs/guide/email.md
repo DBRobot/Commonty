@@ -38,15 +38,41 @@ on as before.
 1. Open Settings, then **Email**, and press **New alias**.
 2. Say what it is for (the site's name, say). **Another** offers a
    different address if you want one.
-3. Press **Make it**, then **Copy address**, and give it to the site.
+3. If you only need it for a while, choose when to **Turn it off**:
+   after a day, a week or a month.
+4. Press **Make it**, then **Copy address**, and give it to the site.
 
 Each alias in the list has a switch that turns it off and on, a copy
-button beside its address, and a **⋯** menu to rename or delete it.
+button beside its address, and a **⋯** menu to rename it, to turn it off
+on a day of your choosing, or to delete it. One that turned itself off
+can be switched back on.
+
+### Who has mailed it
+
+Each alias shows the sites that have mailed it. If a site it has not
+heard from before writes to it, the alias says **New sender**: the site
+you gave it to may have passed it on. Press **That's fine** if you know
+the sender, or **Turn it off**. Anyone can put any sender on an email, so
+treat this as a hint.
+
+### Make aliases from Passwords
+
+Passwords can make an alias for a site as you save its login.
+
+1. In **Alias settings**, press **Connect…** and confirm with your
+   passkey. A key is shown once.
+2. In Passwords, open **Generator**, then **Username**, and choose
+   **Forwarded email alias** with the service **SimpleLogin**.
+3. Paste the **Server URL** and the **API key** shown.
+
+Each username Passwords makes is a new alias, labelled with the site. The
+key can only make aliases, from your ten a day. **Disconnect** stops it
+working.
 
 - The address is made up for you: you cannot choose one.
 - You can have up to 100 aliases. Each day you are offered ten
   addresses to choose from, so you can make up to ten a day.
-- Deleting one asks for your passkey.
+- Deleting one, and connecting Passwords, asks for your passkey.
 - A deleted alias's address is gone for good. Its mail bounces, and no
   one is ever given it again.
 - Aliases only receive mail. You cannot send from one.
@@ -63,8 +89,8 @@ button beside its address, and a **⋯** menu to rename or delete it.
   Cloudflare, which can read it too. No box holds a mail account.
 - **Your own email provider** reads what arrives, as it does all your
   mail.
-- **Which aliases are yours** is kept at Cloudflare, by the same Worker,
-  not on any box. Whoever runs Commonty's Cloudflare account can see it,
+- **Which aliases are yours**, and the sites that have mailed each, are
+  kept at Cloudflare, by the same Worker, not on any box. Whoever runs Commonty's Cloudflare account can see it,
   and Cloudflare reads mail to an alias as it passes it on, as it does for
   your own address.
 - **Every alias ends `@<domain>`**, like every member's address, so a site

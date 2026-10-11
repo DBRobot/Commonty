@@ -24,12 +24,42 @@
     <p class="al-foot">Aliases only receive mail; you can't send from one. Cloudflare reads each message as it passes it on, and whoever runs Commonty's Cloudflare account can see which aliases are yours. <a href="https://{{domain}}/docs/guide/email#aliases" target="_top">About aliases</a></p>
   </section>
 
+  <section class="al-box al-opts" id="opts" aria-labelledby="opt-h" hidden>
+    <header><h2 id="opt-h">Alias settings</h2></header>
+    <div class="al-opt" id="pw-off">
+      <div class="al-opt-text"><b>Make aliases from Passwords</b><span>When you save a new login, Passwords can make an alias for that site, so you don't have to come here. It makes them from the same ten offers a day.</span></div>
+      <button class="quiet" type="button" id="pw-connect">Connect…</button>
+    </div>
+    <div class="al-opt" id="pw-on" hidden>
+      <div class="al-opt-text"><b>Make aliases from Passwords</b><span id="pw-text"></span></div>
+      <button class="quiet" type="button" id="pw-disconnect">Disconnect</button>
+    </div>
+    <p class="al-bad" id="opt-bad" role="alert"></p>
+  </section>
+
+  <dialog id="pw" aria-labelledby="pw-h">
+    <div class="al-pw">
+      <h3 id="pw-h">Connect Passwords</h3>
+      <p class="al-hint">This key is shown once. Paste it into Passwords; nothing else needs it.</p>
+      <ol class="al-steps">
+        <li>In Passwords, open <b>Generator</b>, then <b>Username</b>.</li>
+        <li>Choose <b>Forwarded email alias</b>, then the service <b>SimpleLogin</b>.</li>
+        <li>Server URL: <span class="al-kv"><span id="pw-url"></span><button class="al-copy" type="button" aria-label="Copy the server URL" title="Copy" data-copy="pw-url"></button></span></li>
+        <li>API key: <span class="al-kv"><span id="pw-key"></span><button class="al-copy" type="button" aria-label="Copy the key" title="Copy" data-copy="pw-key"></button></span></li>
+      </ol>
+      <p class="al-hint">Each time Passwords makes a username, it makes an alias, labelled with the site. Asking again for the same site within ten minutes gives the same alias.</p>
+      <div class="al-btns"><button type="button" id="pw-done">Done</button></div>
+    </div>
+  </dialog>
+
   <dialog id="dlg" aria-labelledby="dlg-h">
     <form id="make" method="dialog">
       <h3 id="dlg-h">New alias</h3>
       <label for="label">What is it for?</label>
       <input id="label" type="text" maxlength="60" placeholder="e.g. Airline newsletter" autocomplete="off">
       <div class="al-addr"><span id="next">…</span><button class="al-link" type="button" id="another">Another</button></div>
+      <label for="ttl">Turn it off</label>
+      <select id="ttl"><option value="0">Never</option><option value="1">After a day</option><option value="7">After a week</option><option value="30">After a month</option></select>
       <p class="al-bad" id="make-bad" role="alert"></p>
       <div class="al-btns"><button type="button" class="quiet" id="cancel">Cancel</button><button type="submit" id="make-ok">Make it</button></div>
     </form>
