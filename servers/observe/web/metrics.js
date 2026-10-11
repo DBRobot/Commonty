@@ -84,7 +84,10 @@ function merge(answers) {
 
 async function api(path, params) {
   const s = await sources();
-  const asks = [...(s.here ? [ask('', path, params)] : []), ...s.boxes.map((b) => ask(b.url, path, params).catch(() => null))];
+  // a box answers for itself alone: a series it calls another box's is
+  // dropped, so no box can stand in for another in what the page shows
+  const own = (b) => (d) => d && { ...d, result: (d.result || []).filter((r) => r.metric?.box === b.box) };
+  const asks = [...(s.here ? [ask('', path, params)] : []), ...s.boxes.map((b) => ask(b.url, path, params).then(own(b)).catch(() => null))];
   const answers = (await Promise.all(asks)).filter(Boolean);
   if (!answers.length && !s.here && s.boxes.length === 0) throw new Error('no box to show');
   return merge(answers);
