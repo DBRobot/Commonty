@@ -218,12 +218,10 @@ const ALIAS_RULE = 'Commonty alias ';
 const aliasOf = (r) => (r.name || '').startsWith(ALIAS_RULE) ? r.name.slice(ALIAS_RULE.length) : null;
 const isAlias = (name) => Object.prototype.hasOwnProperty.call(ALIASES || {}, name);
 
-// a name that is a member's: one this Worker has pinned an entry for, or
-// with a member's rule of its own
-async function memberName(env, l, name) {
-  if (await env.PINNED.get(`entry:${name}`)) return true;
-  return l.rules.some((r) => (r.name || '') === `Commonty member ${name}`);
-}
+// a name that is a member's address already: that member keeps it, and the
+// alias is not made. Otherwise the alias holds the name, and no member is
+// given an address under it (setEmail)
+const memberName = (l, name) => l.rules.some((r) => (r.name || '') === `Commonty member ${name}`);
 
 // Every alias the release names forwards to its member's confirmed address,
 // and no other alias rule is left. `l`: lists already read.
@@ -232,7 +230,7 @@ async function syncAliases(env, l) {
   const want = {};
   for (const [alias, member] of Object.entries(ALIASES || {})) {
     if (!ALIAS.test(alias) || !NAME.test(member || '') || alias === member) continue;
-    if (await memberName(env, l, alias)) continue;
+    if (memberName(l, alias)) continue;
     const s = stateIn(l, env, member);
     if (s.confirmed && s.email) want[alias] = s.email;
   }
@@ -265,10 +263,10 @@ async function keepAliases(env, l) {
 }
 
 async function setEmail(env, name, email) {
-  // an alias's address is the alias's, not a member's of that name
-  if (isAlias(name)) throw new Error('that name is an alias of the fleet\'s; it has no address of its own');
   const z = await zone(env);
   const l = await lists(env);
+  // an alias's address is the alias's, unless a member had it first
+  if (isAlias(name) && !memberName(l, name)) throw new Error('that name is an alias of the fleet\'s; it has no address of its own');
   const before = stateIn(l, env, name);
   // Adding an address Cloudflare does not know sends its confirmation; one
   // the account already holds confirmed gets none, and none is waited for

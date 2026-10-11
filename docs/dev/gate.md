@@ -686,8 +686,9 @@ removed. An alias's rule is named `Commonty alias <alias>`; only those
 are touched, never a `Commonty member <name>` rule. An alias is
 lowercase `a-z0-9-` and never a person's name: the build refuses one that
 is the owner's or a person's in policy.json, and the Worker skips one
-that is a member's (an entry it has pinned, or a member rule) and gives
-no member an address under an alias's name. It keeps them in step on the
+that is a member's address already (a `Commonty member <alias>` rule:
+that member keeps it) and otherwise gives no member an address under an
+alias's name. It keeps them in step on the
 lists it reads anyway: a member's `/api/me` and the shared state each
 minute.
 

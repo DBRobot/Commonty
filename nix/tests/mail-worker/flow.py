@@ -59,8 +59,7 @@ with sync_playwright() as p:
     ok(len(sec) == 1 and sec[0]['actions'][0]['value'] == ['first@example.com'] and sec[0]['name'] == 'Commonty alias security', f'security@ forwards to the confirmed address {sec}')
     ok(not rules_to('old@commonty.test'), 'a dropped alias loses its rule')
     other = rules_to('other@commonty.test')
-    ok(len(other) == 1 and other[0]['actions'][0]['value'] == ['other@example.com'], 'a member\'s own rule is never touched')
-    ok(all(r['name'].startswith('Commonty member') for r in rules_to('tester@commonty.test')), 'an alias that is a member\'s name is refused')
+    ok(len(other) == 1 and other[0]['actions'][0]['value'] == ['other@example.com'] and other[0]['name'] == 'Commonty member other', 'an alias that is a member\'s address already is refused, and the member\'s rule untouched')
     ok(not rules_to('Bad.One@commonty.test'), 'an alias that is no alias is refused')
     # the email line, signed in here already
     pg.goto(f'{W}/row?name=tester&back={back}'); settled(pg)

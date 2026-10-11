@@ -33,9 +33,9 @@ pkgs.runCommand "mail-worker-e2e"
     cp -rL --no-preserve=mode ${bundle}/. w/
     # the made-up member is the only one on the list
     # and its aliases: security to it, and two the Worker must refuse (a
-    # member's own name, and one that is no alias) - fake.py starts with a
-    # rule for a dropped one, "old", and a member's own for "other"
-    printf 'export const MEMBERS = %s;\nexport const RELEASE = "unused";\nexport const BOXES = {"testbox": %s};\nexport const ALIASES = {"security": "tester", "tester": "tester", "Bad.One": "tester"};\n' \
+    # member's address already, "other", and one that is no alias) - fake.py
+    # starts with a rule for a dropped one, "old", and other's own
+    printf 'export const MEMBERS = %s;\nexport const RELEASE = "unused";\nexport const BOXES = {"testbox": %s};\nexport const ALIASES = {"security": "tester", "other": "tester", "Bad.One": "tester"};\n' \
       "$(jq -c '.members' $tester)" "$(jq -c '.box_spki' $tester)" > w/fleet.js
     cat > w/wrangler.toml <<'TOML'
     name = "mail-e2e"
