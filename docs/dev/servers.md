@@ -12,14 +12,18 @@ servers/   what runs on a box: programs, pages, patches
 client/    what runs on people's devices: the dd cli, its libraries, the browser wasm
 app/       the app: the same client crates behind a window, and copies of the pages
 nix/       how a box is made of those: modules, roles, tests
+scripts/   what a person runs around a box: reports, reinstall, restore, the laptop
+secrets/   each box's secrets, sops-encrypted
 fleet/     what the fleet is: the boxes, their roles, the members, and the
            owner's policy (policy.json: owner, domain, repo, allowanceGb,
            people.<name>.{ssh,paperKey}, ownHardware, forgeMirrors)
 data/      data the services are built with (data/games/catalogue.json)
 ```
 
-`client/`, `fleet/` and `data/` have pages of their own:
-[the client](client.md), [the fleet](fleet.md) and [data](data.md).
+`client/`, `fleet/`, `data/`, `nix/`, `scripts/` and `secrets/` have pages
+of their own: [the client](client.md), [the fleet](fleet.md),
+[data](data.md), [Nix](nix.md), [scripts](scripts.md) and
+[secrets](secrets.md).
 
 The Rust is one cargo workspace ([`Cargo.toml`](../../Cargo.toml)); its
 members are the crates in `servers/`, `client/` and `app/`. The one Go
@@ -364,7 +368,8 @@ program wants an environment file. Each box's secrets are in
 `secrets/<box>.yaml`, encrypted to that box's TPM key and to the editor's;
 no box can read another's. They are edited with
 `dd secret run -- set secrets/node1.yaml '["name"]' '"value"'`. A box with
-no role that declares a secret has no sops at all.
+no role that declares a secret has no sops at all. [Secrets](secrets.md)
+has the whole of it.
 
 ### Talking to the gate
 

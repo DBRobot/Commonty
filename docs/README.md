@@ -30,6 +30,9 @@ These pages are in three parts:
 - [The control plane](dev/control-plane.md)
 - [What each service needs from a box](dev/hardware.md)
 - [The mirror](dev/mirror.md)
+- [Nix: modules, roles and tests](dev/nix.md)
+- [Scripts](dev/scripts.md)
+- [Secrets](dev/secrets.md)
 
 ## Guide
 
