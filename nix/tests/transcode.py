@@ -195,12 +195,16 @@ def film(name, gop):
     box.succeed(
         "printf '%s' '%s' > /tmp/%s.json" % ("%s", body.replace("'", "'\\''"), name)
     )
-    sid = json.loads(
-        box.succeed(
-            "curl -sf -X POST -H 'content-type: application/json' -d @/tmp/%s.json http://127.0.0.1:4190/session"
-            % name
-        )
-    )["id"]
+    # the box's own answer when it will not start, and its journal
+    answer = box.succeed(
+        "curl -s -w '\\n%%{http_code}' -X POST -H 'content-type: application/json' -d @/tmp/%s.json http://127.0.0.1:4190/session"
+        % name
+    )
+    reply, code = answer.rsplit("\n", 1)
+    if code.strip() != "200":
+        print(box.succeed("journalctl -u dd-transcode.service --no-pager | tail -20"))
+    assert code.strip() == "200", (name, code, reply)
+    sid = json.loads(reply)["id"]
     # the whole minute packed
     box.wait_until_succeeds(
         "curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep -q ENDLIST" % sid,
