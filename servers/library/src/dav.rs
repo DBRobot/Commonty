@@ -19,6 +19,7 @@ use crate::{Gate, Role, uri_encode};
 
 /// where a deleted thing goes, under the library
 const TRASH: &str = "trash";
+static TRASH_PLACE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// how long it stays there before it is gone for good
 pub const TRASH_SECS: u64 = 90 * 24 * 3600;
 
@@ -226,6 +227,9 @@ impl Gate {
         if objects.is_empty() {
             return Ok(Vec::new());
         }
+        // one at a time picks a place and fills it: two writes of one name in
+        // the same second would otherwise both find trash/<stamp>/ free
+        let _held = TRASH_PLACE.lock().await;
         let mut stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -256,10 +260,43 @@ impl Gate {
         Ok(made)
     }
 
-    /// A write that failed takes back the trash copy it made: the old file
-    /// is still in place, and a copy per failed try would be room the
-    /// allowance never held.
-    async fn untrash(&self, made: &[String]) {
+    /// what an object is now, to tell whether a write changed it: its etag,
+    /// size and date as the store gives them, or None when there is none
+    async fn version(&self, object: &str) -> Result<Option<String>> {
+        let r = reqwest::Client::new()
+            .head(self.presign("HEAD", object))
+            .send()
+            .await?;
+        if r.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !r.status().is_success() {
+            return Err(anyhow!("s3 head {}", r.status()));
+        }
+        let h = |n: header::HeaderName| {
+            r.headers()
+                .get(n)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_string()
+        };
+        Ok(Some(format!(
+            "{} {} {}",
+            h(header::ETAG),
+            h(header::CONTENT_LENGTH),
+            h(header::LAST_MODIFIED)
+        )))
+    }
+
+    /// A write that failed takes back the trash copy it made, so failed
+    /// tries are no room the allowance never held - but only when the old
+    /// file is plainly still in place. A write the store took whose answer
+    /// was lost has replaced it, and then the trash copy is all that is
+    /// left of it; when that cannot be told, the copy stays.
+    async fn untrash(&self, object: &str, before: &Option<String>, made: &[String]) {
+        if made.is_empty() || !matches!(self.version(object).await, Ok(now) if now == *before) {
+            return;
+        }
         for k in made {
             if let Err(e) = self.delete(k).await {
                 eprintln!("dav: the trash copy of a failed write stays: {e:#}");
@@ -683,6 +720,7 @@ async fn put(g: &Gate, lib: &str, path: &str, req: Request) -> Result<Response> 
     }
     // what had this name is kept: a copy into the trash, and the PUT then
     // replaces it, so a failed upload leaves the old file where it was
+    let before = g.version(&key(lib, path)).await?;
     let old = g.objects_at(lib, path, false).await?;
     let kept = g.keep_in_trash(lib, path, &old, true).await?;
     let len = req
@@ -701,11 +739,11 @@ async fn put(g: &Gate, lib: &str, path: &str, req: Request) -> Result<Response> 
     match r.send().await {
         Ok(r) if r.status().is_success() => Ok(StatusCode::CREATED.into_response()),
         Ok(r) => {
-            g.untrash(&kept).await;
+            g.untrash(&key(lib, path), &before, &kept).await;
             Err(anyhow!("s3 put {}", r.status()))
         }
         Err(e) => {
-            g.untrash(&kept).await;
+            g.untrash(&key(lib, path), &before, &kept).await;
             Err(e.into())
         }
     }
@@ -824,6 +862,7 @@ async fn in_pieces(
             }
             xml_body.push_str("</CompleteMultipartUpload>");
             // as a whole PUT: what had this name goes to the trash first
+            let before = g.version(&key(lib, path)).await?;
             let old = g.objects_at(lib, path, false).await?;
             let kept = g.keep_in_trash(lib, path, &old, true).await?;
             if let Err(e) = g
@@ -836,7 +875,7 @@ async fn in_pieces(
                 )
                 .await
             {
-                g.untrash(&kept).await;
+                g.untrash(&key(lib, path), &before, &kept).await;
                 return Err(e);
             }
             Ok(StatusCode::CREATED.into_response())
@@ -1074,7 +1113,12 @@ mod tests {
                     }
                     None => body.to_vec(),
                 };
+                // kept, but the answer is lost on the way back
+                let lost = v == b"lost";
                 b.insert(object, v);
+                if lost {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
                 StatusCode::OK.into_response()
             }
             "DELETE" => {
@@ -1171,6 +1215,29 @@ mod tests {
         }
         assert_eq!(b.lock().unwrap()["L/a"], b"one");
         assert!(trashed(&b, "a").is_empty(), "no copy per failed try");
+    }
+
+    #[tokio::test]
+    async fn a_write_whose_answer_was_lost_keeps_the_old_one_in_the_trash() {
+        let (g, b) = bucket().await;
+        dav(&g, "PUT", "a", &[], "one").await;
+        assert!(!dav(&g, "PUT", "a", &[], "lost").await.is_success());
+        assert_eq!(b.lock().unwrap()["L/a"], b"lost");
+        assert_eq!(trashed(&b, "a"), vec![b"one".to_vec()]);
+    }
+
+    #[tokio::test]
+    async fn two_writes_of_one_name_at_once_keep_both_old_ones() {
+        let (g, b) = bucket().await;
+        dav(&g, "PUT", "a", &[], "one").await;
+        dav(&g, "PUT", "a", &[], "two").await;
+        let (x, y) = tokio::join!(
+            dav(&g, "PUT", "a", &[], "three"),
+            dav(&g, "PUT", "a", &[], "four")
+        );
+        assert!(x.is_success() && y.is_success());
+        // one, two, and whichever of three and four landed first
+        assert_eq!(trashed(&b, "a").len(), 3);
     }
 
     #[tokio::test]
