@@ -37,7 +37,7 @@ nix/
     box.nix              the smallest box a VM test builds on
     ci.nix, boxes.nix, role-fit.nix, nginx.nix, plaintext-label.nix,
     box-reports.nix      evaluation checks (no VM)
-    control/, mail-worker/, dns-worker/, unlock/, box-reports/   helpers for one test
+    control/, mail-worker/, dns-worker/, sso/, unlock/, box-reports/   helpers for one test
   app-release/           the app's downloads: Linux, Windows, Android, and their tests
   overlays/fhsenv.nix    nixpkgs' FHS builder made deterministic (games)
   patches/               patches to crates the flake builds
@@ -311,6 +311,7 @@ control          the control plane offline (control/run.py)
 mail-worker      the mail Worker in a browser against a fake Cloudflare
 safe-rd          where the sign-in pages send you afterwards stays on the site (safeRd)
 dns-worker       the DNS Worker against a fake Cloudflare, and the box's helper
+sso              sign-in once for every box: the gate and the id Worker in a browser
 ```
 
 ### VM tests

@@ -31,6 +31,8 @@ fleet/
   mail.json               where the mail Worker is (dd mail setup)
   dns-worker.json         where the DNS Worker is (dd dns setup); with it,
                           the zone is the Worker's: names and certificates
+  id-worker.json          where the id Worker is (dd id setup); with it,
+                          sign-in is there, once for every box
   layout.nix              the one disk layout every box gets
 ```
 
@@ -296,8 +298,8 @@ layout.nix           the disk: a 1G ESP, the rest one ZFS pool (tank) with
                      home; under <pool>/enc when encrypted
 ```
 
-The Cloudflare ids in `control-worker.json`, `mail.json` and
-`dns-worker.json` are not
+The Cloudflare ids in `control-worker.json`, `mail.json`,
+`dns-worker.json` and `id-worker.json` are not
 secret: they name where a Worker is, and the token that can change it
 lives on the laptop's keyring ([client.md](client.md#keys-on-a-device)).
 
@@ -309,6 +311,7 @@ dd release init                      release.pub (refuses if a key exists)
 dd control setup --validator n=k...  control.json validators, control-worker.json
 dd mail setup                        mail.json
 dd dns setup                         dns-worker.json
+dd id setup                          id-worker.json
 scripts/box-report <box> [addr]      boxes/<box>/hardware.json,
                                      hardware-configuration.nix, report.sig
 dd box list [--private]              reads boxes.json (and secrets/fleet.yaml)

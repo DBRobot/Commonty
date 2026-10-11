@@ -227,7 +227,8 @@ do it by hand):
 - **nudge**: every box is told over ssh to start `dd-agent` now. It changes
   when a box looks, not what it accepts. A box not reached looks on its
   timer.
-- **the DNS Worker** this release carries is deployed before the nudge,
+- **the id Worker** (sign-in, `dd id deploy --ref <ref>`) and **the DNS
+  Worker** this release carries are deployed before the nudge,
   so a box given a new name finds it there when it asks
   (`dd dns deploy --ref <ref>`; [gate.md](gate.md#the-zone-names-and-certificates)).
 - **the control relay Worker** and **the mail Worker** this release

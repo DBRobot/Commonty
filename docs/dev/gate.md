@@ -172,6 +172,60 @@ and `X-DD-Role`. Services read the name through
 
 ## Sign-in and sessions
 
+### Once for every box: the id Worker
+
+With `dd id setup` done (fleet/id-worker.json, `dd.idWorker`, `VERIFY_ID`),
+sign-in is not any box's. It is the id Worker's
+([servers/system/id](../../servers/system/id)), at `id.<domain>`: static
+pages from the release, no secret, nothing stored. Whichever box served the
+sign-in page could ask the passkey for a sign-in good on every other box,
+so none does. The identity side is
+[client/identity/src/session.rs](../../client/identity/src/session.rs); the
+gate's is [sso.rs](../../servers/gate/src/sso.rs).
+
+```
+a box, no session for this name
+  /_dd/login?rd= ─► /_dd/sso/start?rd=   a one-off challenge for this name
+  ─► https://id.<domain>/go?host=<this name>&nonce=<challenge>
+
+the id page (id.js)
+  signed in here already? (IndexedDB on id.<domain>: a P-256 key the page
+  cannot read out, and the passkey's delegation to it)
+    no ─► username ─► GET https://<host>/_dd/sso/creds?user= (that box's
+          copy of the passkeys) ─► make the key ─► the passkey signs
+          sha256("commonty session v1\0" user \0 spki \0 sid \0 iat \0 exp)
+          on this page (8 hours)
+  the key signs "commonty handoff v1\0" <host> \0 <nonce>
+  ─► POST https://<host>/_dd/sso {d, sig, nonce}   (to that name, never a
+     place a parameter says)
+
+the box (sso.rs)
+  Origin is the id page; the challenge is one it gave this name, unused,
+  under 5 minutes; the delegation checks against the passkey in ITS OWN
+  copy of the directory (identity::check_login, origin = the id page),
+  unexpired, not longer than 8 hours; the key signed this name and this
+  challenge; the sign-in not ended here
+  ─► __Host-dd: a cookie for this name alone, signed by this box's own
+     secret, carrying the sign-in's id; ─► rd
+```
+
+What a box receives works nowhere else: the hand-off names its host and
+its challenge, and the cookie is this box's and this name's. That is why
+sessions are per name with sign-in at the Worker: a cookie for the whole
+domain is sent to every box's names, and any one of them could replay it.
+Each name of a box makes the trip once, with no prompt. The domain-wide
+`dd_session` from before is still read until it runs out.
+
+A passkey shown to confirm something (the Devices tab, deleting a disk
+image) is still this box's own ceremony below; in a session that is
+already this person's, it marks that session fresh and keeps it. Sign out
+(`/_dd/logout`) ends this box's session and sends the browser to
+`id.<domain>/out`, which forgets the key there. Checked by `checks.sso`:
+the real gate and Worker in a browser at their https names, the passkey
+answered by the test member.
+
+### A box's own sign-in
+
 Passkeys are WebAuthn (webauthn-rs). The relying party is the bare
 domain, so one passkey covers every host. Only this box's own pages may
 run a ceremony: the allowed origins are `https://<h>.<domain>` for each
