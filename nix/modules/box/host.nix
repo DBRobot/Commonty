@@ -156,7 +156,17 @@ in
     (lib.optionalAttrs (options.dd ? headscale) {
       dd.headscale.follow.recipients = lib.mkIf config.dd.failover (lib.genAttrs netAble secretsKey);
     })
-    # a usb ethernet adapter must never autosuspend: it is the wired link
-    (lib.mkIf hw.usbNic { boot.kernelParams = [ "usbcore.autosuspend=-1" ]; })
+    # No USB power saving on any box (David, 2026-10-11): an adapter, a disk
+    # or a dongle that sleeps is one that may not wake (node2's wired link).
+    # No autosuspend, and no USB3 link power states where the kernel offers
+    # them; a device whose driver turns autosuspend on is turned back
+    {
+      boot.kernelParams = [ "usbcore.autosuspend=-1" ];
+      services.udev.extraRules = ''
+        ACTION=="add|bind", SUBSYSTEM=="usb", TEST=="power/control", ATTR{power/control}="on"
+        ACTION=="add|bind", SUBSYSTEM=="usb", TEST=="power/usb3_hardware_lpm_u1", ATTR{power/usb3_hardware_lpm_u1}="0"
+        ACTION=="add|bind", SUBSYSTEM=="usb", TEST=="power/usb3_hardware_lpm_u2", ATTR{power/usb3_hardware_lpm_u2}="0"
+      '';
+    }
   ];
 }
