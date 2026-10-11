@@ -327,10 +327,14 @@ fn run(args: &Args) -> Result<String> {
         &["switch"],
     );
 
-    let healthy = switched.is_ok()
-        && probe_until(args, Duration::from_secs(args.probe_secs), &failed_before)
-        // and it may not have cost this box its way off itself
-        && (!reached_before || reaches_within(&args.reach, Duration::from_secs(args.probe_secs)));
+    let probed =
+        switched.is_ok() && probe_until(args, Duration::from_secs(args.probe_secs), &failed_before);
+    // and it may not have cost this box its way off itself; asked while the
+    // new system runs, since after the switch back the way is there again
+    let stranded = probed
+        && reached_before
+        && !reaches_within(&args.reach, Duration::from_secs(args.probe_secs));
+    let healthy = probed && !stranded;
     // No more firing from here; then, whatever the probes said, it is the
     // system running now that is written down. A guard that went off while
     // they ran has put the old one back, and a pass measured across that is
@@ -389,7 +393,7 @@ fn run(args: &Args) -> Result<String> {
             mine.path,
             if guarded {
                 " (the guard switched back before it was proved)"
-            } else if reached_before && !reaches_any(&args.reach) {
+            } else if stranded {
                 " (it could no longer reach the fleet)"
             } else {
                 ""
