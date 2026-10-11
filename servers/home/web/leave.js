@@ -111,7 +111,7 @@ async function act(back, button) {
 const count = (n) => n.toLocaleString();
 
 function left(secs) {
-  if (!isFinite(secs) || secs <= 0) return '';
+  if (!Number.isFinite(secs) || secs <= 0) return '';
   if (secs < 90) return ' · under 2 min left';
   if (secs < 5400) return ` · about ${Math.round(secs / 60)} min left`;
   return ` · about ${(secs / 3600).toFixed(1)} h left`;

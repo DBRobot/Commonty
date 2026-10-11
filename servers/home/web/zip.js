@@ -35,7 +35,7 @@ class Bytes {
 
 // MS-DOS time, as zip keeps it: local time, two-second steps, from 1980
 function dos(date) {
-  const d = date instanceof Date && !isNaN(date) && date.getFullYear() >= 1980 ? date : new Date(1980, 0, 1);
+  const d = date instanceof Date && !Number.isNaN(date.getTime()) && date.getFullYear() >= 1980 ? date : new Date(1980, 0, 1);
   return {
     time: (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1),
     date: ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(),

@@ -30,7 +30,7 @@ async function go() {
     const a = await navigator.credentials.get({ publicKey: requestOptions(sign.publicKey) });
     await post('/_dd/join/sign', assertion(a), { 'x-dd-ceremony': sign.ceremony });
 
-    try { localStorage.setItem('dd_user', username); } catch (e) {}
+    try { localStorage.setItem('dd_user', username); } catch { /* storage off */ }
     location.href = new URL(safeRd(new URLSearchParams(location.search).get('rd') || '/_dd/home'), location.href).href;
   } catch (e) {
     say('Could not create the account: ' + e.message);

@@ -54,7 +54,7 @@ export async function consent(button, memory = browserMemory) {
   const refused = $('age-refused');
 
   if (month.options.length <= 1) {
-    MONTHS.forEach((m, i) => month.add(new Option(m, String(i + 1))));
+    for (const [i, m] of MONTHS.entries()) month.add(new Option(m, String(i + 1)));
   }
   if (year.options.length <= 1) {
     const now = new Date().getFullYear();
