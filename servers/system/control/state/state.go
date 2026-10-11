@@ -132,6 +132,10 @@ type Lease struct {
 	Holder  string `json:"holder"`
 	Epoch   uint64 `json:"epoch"`
 	Expires int64  `json:"expires"`
+	// the holder's request that set Expires: the holder knows when it sent
+	// it, and the lease cannot end sooner than that plus the TTL, by any
+	// clock that runs at the agreed time's rate
+	Seq uint64 `json:"seq,omitempty"`
 }
 
 type State struct {
@@ -261,12 +265,14 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 		case "acquire":
 			if cur != nil && cur.Expires > now && cur.Holder == r.Box {
 				cur.Expires = now + cfg.Rules.LeaseTTL // asking again while holding is renewing
+				cur.Seq = r.Seq
 				return
 			}
 			s.Epochs[op.Role]++
-			s.Leases[op.Role] = &Lease{Holder: r.Box, Epoch: s.Epochs[op.Role], Expires: now + cfg.Rules.LeaseTTL}
+			s.Leases[op.Role] = &Lease{Holder: r.Box, Epoch: s.Epochs[op.Role], Expires: now + cfg.Rules.LeaseTTL, Seq: r.Seq}
 		case "renew":
 			cur.Expires = now + cfg.Rules.LeaseTTL
+			cur.Seq = r.Seq
 		case "release":
 			delete(s.Leases, op.Role)
 		}

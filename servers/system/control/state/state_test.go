@@ -94,8 +94,13 @@ func TestOneWriterAtATimeWithRisingEpochs(t *testing.T) {
 	if f.block(3000, f.req("node2", "lease", lease("postgres", "acquire", 0))) != 0 {
 		t.Fatal("node2 took a lease node1 holds")
 	}
-	if f.block(10000, f.req("node1", "lease", lease("postgres", "renew", 1))) != 1 || f.s.Leases["postgres"].Expires != 25000 {
+	renew := f.req("node1", "lease", lease("postgres", "renew", 1))
+	if f.block(10000, renew) != 1 || f.s.Leases["postgres"].Expires != 25000 {
 		t.Fatal("the holder could not renew")
+	}
+	// which of its requests set the lease, for the holder to time it by
+	if f.s.Leases["postgres"].Seq != renew.Seq {
+		t.Fatalf("lease seq %d, the renewal was %d", f.s.Leases["postgres"].Seq, renew.Seq)
 	}
 	if f.block(11000, f.req("node2", "lease", lease("postgres", "renew", 1))) != 0 {
 		t.Fatal("a box renewed a lease it does not hold")

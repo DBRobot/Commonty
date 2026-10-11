@@ -188,9 +188,38 @@ A service whose needs say `placed = true` is switched by the plan
   about carrying a service can take it from another box, but only among
   the boxes the signed release already lets run it: availability, never
   access.
-- This is for what may run twice for a moment: two boxes running a
-  stateless page while one hands over is harmless. Something with one
-  writer waits for leases and fencing.
+- Without a lease this is for what may run twice for a moment: two boxes
+  running a stateless page while one hands over is harmless.
+
+### Writers: leases
+
+A service with one writer says `lease = true` in its needs. It is placed,
+and runs only while its box holds the lease `svc/<name>`, which the
+release gives to the boxes able to run it:
+
+- Given the service by the plan, the box asks for the lease. Once the
+  agreed state shows the lease as its own, it waits 3 seconds (a holder
+  before it may still be stopping), then raises the flag and starts.
+- It renews every 5 seconds (the lease lasts 15). The agreed state keeps
+  which of the holder's requests last set the lease. A request can't be
+  agreed before it was sent, so the lease can't end sooner than that
+  request's send time plus 15 seconds. That send time, less 3 seconds, is
+  *until*, kept by the box's clock since boot (suspend included), not its
+  wall clock. The flag holds the epoch and *until*.
+- It stops at *until* unless a renewal is seen agreed, fresh state or
+  not. dd-control does that, and so does `dd-placed-fence`, a 2-second
+  timer that needs nothing but the flag, so a dd-control that crashed or
+  hangs does not leave a writer running.
+- Moved by the plan, it stops its units, waits for them, and only then
+  gives the lease back. Another box is refused the lease until it is
+  given back or has lapsed, by which time the old holder has stopped.
+- No box's wall clock matters. What has to hold is that the agreed clock
+  runs at about the rate of the boxes' own, within the two 3-second
+  margins over a lease. After a dd-control restart, the flag's *until*
+  stands until a renewal the box sent, and has a record of, is agreed.
+- A rule ships in the release that brings it. A box still on the release
+  before skips that lease's requests, and agrees again once its switch
+  restarts dd-control, which replays the log under the new rules.
 
 ## Not in scope
 

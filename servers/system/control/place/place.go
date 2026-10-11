@@ -57,6 +57,9 @@ type Service struct {
 	// says it carries one (carries/<svc>) and runs it (runs/<svc>) in its
 	// heartbeat.
 	Placed bool `json:"placed"`
+	// one writer at a time: a placed service that runs only while its box
+	// holds the lease svc/<name> (cmd/dd-control/placed.go)
+	Lease bool `json:"lease"`
 }
 
 type Damping struct {

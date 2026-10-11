@@ -259,7 +259,12 @@ t.attrsOf (
       placed = lib.mkOption {
         type = t.bool;
         default = false;
-        description = "the control plane switches it on and off: its units start only where the plan puts it, among the boxes that carry it (box/placed.nix); a role still decides where it is built in";
+        description = "the control plane switches it on and off: its units start only where the plan puts it, among the boxes that carry it (box/placed.nix); a role still decides where it is built in. Its units then name every service unit it is, its own name included if that is one";
+      };
+      lease = lib.mkOption {
+        type = t.bool;
+        default = false;
+        description = "one writer at a time: placed, and it runs only while its box holds the control plane's lease svc/<name>, which the boxes able to run it may hold (cmd/dd-control/placed.go)";
       };
       perHouse = lib.mkOption {
         type = t.nullOr t.ints.positive;

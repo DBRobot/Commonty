@@ -180,6 +180,10 @@ func joinMessage(box string, now int64) []byte {
 // how old agreement may be and still switch anything here
 const freshFor = 30 * time.Second
 
+// how often the plan is carried out: a third of a lease, so a writer's
+// lease is renewed twice before its margin
+const placeEvery = 5 * time.Second
+
 // facts: what this box has, as the placement rules will read them
 func facts() map[string]float64 {
 	f := map[string]float64{"cores": float64(runtime.NumCPU())}
@@ -516,14 +520,14 @@ func main() {
 	// rising sequence: a heartbeat and a directory item never share a number
 	var seqMu sync.Mutex
 	seq := uint64(time.Now().UnixMilli()) // above any earlier run's
-	submit := func(kind string, body []byte) error {
+	submit := func(kind string, body []byte) (uint64, error) {
 		seqMu.Lock()
 		seq++
 		q := state.Request{Kind: kind, Box: *box, Seq: seq, Body: body}
 		seqMu.Unlock()
 		sig, err := sign(q.Bytes())
 		if err != nil {
-			return err
+			return 0, err
 		}
 		q.Sig = sig
 		b, _ := json.Marshal(q)
@@ -531,7 +535,7 @@ func main() {
 		if mine != nil {
 			n.Receive(self, wire.Submit, b) // our own validator too
 		}
-		return nil
+		return q.Seq, nil
 	}
 
 	// the placed services this box carries, switched by the plan below
@@ -539,7 +543,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("%s: %v", *placedCarries, err)
 	}
-	placed := &placer{box: *box, dir: *placedDir, carries: carried, run: systemctl}
+	placed := &placer{
+		box: *box, dir: *placedDir, carries: carried, leased: map[string]bool{},
+		run: systemctl, uptime: uptime, ttl: time.Duration(cfg.Rules.LeaseTTL) * time.Millisecond,
+		since: map[string]int64{}, sent: map[string]map[uint64]int64{},
+		ask: func(op state.LeaseOp) (uint64, error) {
+			body, _ := json.Marshal(op)
+			return submit("lease", body)
+		},
+	}
 
 	// heartbeats; a reader also asks for the latest each time
 	go func() {
@@ -549,7 +561,7 @@ func main() {
 				f[k] = v
 			}
 			body, _ := json.Marshal(state.Heartbeat{Facts: f, Roles: splitRoles(*roles)})
-			if err := submit("heartbeat", body); err != nil {
+			if _, err := submit("heartbeat", body); err != nil {
 				log.Printf("heartbeat: %v", err)
 			}
 			ask()
@@ -587,7 +599,7 @@ func main() {
 				http.Error(w, "a directory item: json, at most 64K", http.StatusBadRequest)
 				return
 			}
-			if err := submit("directory", body); err != nil {
+			if _, err := submit("directory", body); err != nil {
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
@@ -620,7 +632,7 @@ func main() {
 				http.Error(w, "a build result: json, at most 16K", http.StatusBadRequest)
 				return
 			}
-			if err := submit("built", body); err != nil {
+			if _, err := submit("built", body); err != nil {
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
@@ -654,16 +666,21 @@ func main() {
 			_ = json.NewEncoder(w).Encode(place.Decide(in, n.State(), cfg.Rules.GoneAfter))
 		})
 		// and carried out here, for what this box carries: only from a plan
-		// made of agreement still fresh. Without it, what runs keeps running
+		// made of agreement still fresh. Without it, what runs keeps running,
+		// but a writer only while its lease may still be this box's
+		for svc := range carried {
+			placed.leased[svc] = in.Services[svc].Lease
+		}
 		if len(carried) > 0 {
 			go func() {
 				for {
-					time.Sleep(10 * time.Second)
+					time.Sleep(placeEvery)
+					placed.fence()
 					s := n.State()
 					if time.Now().UnixMilli()-s.Time > freshFor.Milliseconds() {
 						continue
 					}
-					placed.reconcile(place.Decide(in, s, cfg.Rules.GoneAfter))
+					placed.reconcile(place.Decide(in, s, cfg.Rules.GoneAfter), s)
 				}
 			}()
 		}

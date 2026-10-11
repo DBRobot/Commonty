@@ -3,6 +3,8 @@
   dd-control = {
     what = "the control plane: heartbeats, leases and the directory, agreed by the voting boxes and a witness";
     everyBox = true;
+    # a writer stopped when its lease may have lapsed, without dd-control
+    units = [ "dd-placed-fence" ];
     base = {
       # signs with the key in the TPM; its disk unlock already needs one
       requires.tpm = true;

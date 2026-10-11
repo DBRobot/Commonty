@@ -666,6 +666,22 @@
               names = builtins.sort builtins.lessThan (builtins.attrNames boxList);
               withKeys = builtins.filter (n: boxList.${n} ? unlockKey) names;
               ctl = builtins.fromJSON (builtins.readFile ./fleet/control.json);
+              # a writer's lease (needs lease): held only by a box able to
+              # run it. A rule ships with the release that brings it, so a
+              # box still on the one before skips the lease until its switch
+              # replays the log under the new rules
+              fp = import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; };
+              leases = nixpkgs.lib.mapAttrs' (
+                s: _:
+                nixpkgs.lib.nameValuePair "svc/${s}" {
+                  # none able: nobody, never "any live box"
+                  eligible =
+                    let
+                      able = builtins.filter (b: fp.inputs.boxes.${b}.can ? ${s}) (builtins.attrNames fp.inputs.boxes);
+                    in
+                    if able == [ ] then [ "" ] else able;
+                }
+              ) (nixpkgs.lib.filterAttrs (_: n: n.lease) fp.needs);
               config = {
                 boxes = builtins.listToAttrs (
                   nixpkgs.lib.imap1 (i: n: {
@@ -677,7 +693,10 @@
                     };
                   }) withKeys
                 );
-                inherit (ctl) validators rules;
+                inherit (ctl) validators;
+                rules = ctl.rules // {
+                  leases = (ctl.rules.leases or { }) // leases;
+                };
               };
               src = pkgs.lib.fileset.toSource {
                 root = ./servers/system/control;
