@@ -49,7 +49,9 @@ function split(bytes) {
   return { fields, body: cut < 0 ? bytes : bytes.subarray(cut + skip) };
 }
 
-const clean = (s) => String(s || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim();
+// control characters (CR and LF among them) as spaces: no header is made
+// from another's value
+const clean = (s) => [...String(s || '')].map((c) => (c < ' ' || c === '\x7f' ? ' ' : c)).join('').trim();
 
 function encodeWord(s) {
   if (/^[\x20-\x7e]*$/.test(s)) return s;
