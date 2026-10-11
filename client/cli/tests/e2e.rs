@@ -778,6 +778,52 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     assert!(file.contains(&id), "{file}");
 }
 
+/// An account whose root is on a device leaves by that root: what the
+/// app's Settings asks of it (`account::leave`, behind `/_dd/app/leaving`)
+/// is what `dd leave` does. The tab reads where it stands with the device's
+/// token, and comes back the same way.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_account_with_its_root_on_a_device_leaves_by_it_and_comes_back() {
+    let a = Box_::start_members(true, Some(vec![])).await;
+    let sam = Device::new();
+    sam.dd_ok(&args(&["identity", "new", "--name", "sam"], &dirs([&a])));
+    let e = entry(&a, "sam").await.unwrap();
+    let id = identity::member_id(e["entry"]["root"].as_str().unwrap());
+    let b = Box_::start_on(
+        a.dir.clone(),
+        true,
+        Some(verify::Members::list(vec![id])),
+        None,
+        vec![],
+    )
+    .await;
+    let d = dirs([&b]);
+    assert_eq!(verify_status(&b, &sam.token()).await, 200);
+    let mine = |token: String| {
+        let r = reqwest::Client::new()
+            .get(b.url("/_dd/leave"))
+            .bearer_auth(token)
+            .send();
+        async move {
+            let r = r.await.unwrap();
+            assert_eq!(r.status(), 200);
+            r.json::<serde_json::Value>().await.unwrap()
+        }
+    };
+    let s = mine(sam.token()).await;
+    assert_eq!(s["member"], true);
+    assert_eq!(s["passkey"], false);
+    assert!(s["left"].is_null());
+
+    sam.dd_ok(&args(&["leave"], &d));
+    assert_ne!(verify_status(&b, &sam.token()).await, 200);
+    assert!(mine(sam.token()).await["left"].is_u64());
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    sam.dd_ok(&args(&["leave", "--back"], &d));
+    assert_eq!(verify_status(&b, &sam.token()).await, 200);
+    assert!(mine(sam.token()).await["left"].is_null());
+}
+
 /// Settings' Leave (or Come back), as its page does it: the box hands the
 /// statement over, the root passkey signs it
 async fn leave_in_browser(b: &Box_, authenticator: &mut SoftPasskey, cookie: &str, back: bool) {

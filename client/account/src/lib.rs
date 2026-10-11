@@ -291,6 +291,46 @@ pub fn open_for_device(
     library::open_library(&lib, Some(device), root).context("no key of this device opens it")
 }
 
+/// Leaving, or coming back (`dd leave`, the app's Settings): the statement,
+/// signed with the root here, to every directory given; the first that
+/// takes it puts it in the fleet's log.
+pub async fn leave(
+    dirs: &[String],
+    name: &str,
+    root: &ed25519_dalek::SigningKey,
+    back: bool,
+) -> Result<()> {
+    let s = identity::sign_leave(
+        identity::Leave {
+            name: name.to_string(),
+            root: identity::encode_public(&root.verifying_key()),
+            at: identity::now(),
+            back,
+        },
+        root,
+    )?;
+    let http = directory::http()?;
+    let mut why = Vec::new();
+    for d in dirs {
+        let base = d.trim_end_matches('/');
+        let base = base.strip_suffix("/_dd/directory").unwrap_or(base);
+        match http
+            .put(format!("{base}/_dd/leaving/{name}"))
+            .json(&s)
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => return Ok(()),
+            Ok(r) => {
+                let st = r.status();
+                why.push(format!("{d}: {st} {}", r.text().await.unwrap_or_default()))
+            }
+            Err(e) => why.push(format!("{d}: {e}")),
+        }
+    }
+    bail!("no directory took it:\n  {}", why.join("\n  "))
+}
+
 pub fn load_root(keys: &impl KeyStore) -> Result<Option<ed25519_dalek::SigningKey>> {
     match keys.get(ROOT)? {
         Some(s) => Ok(Some(identity::decode_secret(&s)?)),

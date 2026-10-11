@@ -1,50 +1,10 @@
-//! Leaving Commonty from a device that holds the root (`dd leave`), and
 //! Photos' share of the deleting after 90 days (`dd forget-photos`, on the
 //! Photos box). docs/dev/leaving.md.
 
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde_json::Value;
-
-/// The statement, signed here, to every directory given; the first that
-/// takes it puts it in the fleet's log.
-pub async fn leave(
-    dirs: &[String],
-    name: &str,
-    root: &ed25519_dalek::SigningKey,
-    back: bool,
-) -> Result<()> {
-    let s = identity::sign_leave(
-        identity::Leave {
-            name: name.to_string(),
-            root: identity::encode_public(&root.verifying_key()),
-            at: identity::now(),
-            back,
-        },
-        root,
-    )?;
-    let http = crate::who::http()?;
-    let mut why = Vec::new();
-    for d in dirs {
-        let base = d.trim_end_matches('/');
-        let base = base.strip_suffix("/_dd/directory").unwrap_or(base);
-        match http
-            .put(format!("{base}/_dd/leaving/{name}"))
-            .json(&s)
-            .send()
-            .await
-        {
-            Ok(r) if r.status().is_success() => return Ok(()),
-            Ok(r) => {
-                let st = r.status();
-                why.push(format!("{d}: {st} {}", r.text().await.unwrap_or_default()))
-            }
-            Err(e) => why.push(format!("{d}: {e}")),
-        }
-    }
-    bail!("no directory took it:\n  {}", why.join("\n  "))
-}
 
 pub struct Photos {
     pub gate: String,

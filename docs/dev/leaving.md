@@ -24,10 +24,13 @@ Disk images      Settings, Backups, Download; or `dd image pull`
 
 ## Leaving, and being removed
 
-**By the member.** The Leave button asks the root passkey to sign a
-statement (`identity::Leave {name, root, at, back}`, under its own label
-so no other signature counts as one). `dd leave` signs the same with a
-device root. The gate checks it against the entry on file and puts it in
+**By the member.** The Leave button has the root sign a statement
+(`identity::Leave {name, root, at, back}`, under its own label so no
+other signature counts as one): the passkey, for an account made in a
+browser; the app, for a root on its device (`/_dd/app/leaving`, in its
+window or a browser it let in, `account::leave`). `dd leave` signs the
+same. A plain browser of an account whose root is on a device says to
+leave from the app. The gate checks it against the entry on file and puts it in
 the control plane's agreed log as a directory item (`Item::Leave`), so
 every box replays the same statement at the same agreed time. That time is
 when they left. A statement dated more than 5 minutes after it is agreed,

@@ -205,6 +205,12 @@ async fn serve<R: Runtime>(
     if path == "/_dd/app/remove" && req.method() == "POST" {
         return remove(app, req.body()).await;
     }
+    if path == "/_dd/app/leaving" && req.method() == "POST" {
+        return Ok(match leave(app, req.body()).await {
+            Ok(v) => json_response(&v),
+            Err((st, why)) => plain(st, &why),
+        });
+    }
     // Photos in this window (photos.rs): the page that signs the window in,
     // and what it asks
     if path == "/_dd/app/photos" {
@@ -408,6 +414,35 @@ async fn admit<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<Response<V
         .await
         .map_err(|e| format!("{e:#}"))?;
     Ok(json_response(&serde_json::json!({ "ok": true })))
+}
+
+/// Leaving, or coming back, signed with the main key on this device: what
+/// Settings' Leave tab asks, in this window or a browser let in from it.
+/// An account whose root is a passkey signs with that, on the gate's page.
+pub(crate) async fn leave<R: Runtime>(
+    app: &AppHandle<R>,
+    body: &[u8],
+) -> Result<serde_json::Value, (StatusCode, String)> {
+    let keys = app.state::<crate::account::Keys>();
+    let v: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    let back = v["back"].as_bool().unwrap_or(false);
+    let bad = |e: String| (StatusCode::BAD_GATEWAY, e);
+    let Some(root) = account::load_root(&keys.0).map_err(|e| bad(e.to_string()))? else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "your account's main key is not on this device: leave from the one that holds it"
+                .into(),
+        ));
+    };
+    let name = keys
+        .0
+        .get(crate::account::USER)
+        .map_err(|e| bad(e.to_string()))?
+        .ok_or_else(|| bad("no name on this device".into()))?;
+    account::leave(&crate::account::dirs(), &name, &root, back)
+        .await
+        .map_err(|e| bad(format!("{e:#}")))?;
+    Ok(serde_json::json!({ "back": back }))
 }
 
 /// A device or a passkey out of the account, signed by the main key here.

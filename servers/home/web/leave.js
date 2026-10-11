@@ -1,9 +1,10 @@
 // Leave Commonty, a tab of Settings: how to take everything out, and the
-// button. Leaving is a statement the member's root passkey signs, agreed by
-// every box (servers/gate/src/leaving.rs); within 90 days, the same tab
-// brings them back with nothing lost.
+// button. Leaving is a statement the member's root signs, agreed by every
+// box (servers/gate/src/leaving.rs): their passkey for an account made in a
+// browser, the app for one whose root is on a device. Within 90 days, the
+// same tab brings them back with nothing lost.
 import { requestOptions, assertion, post } from './webauthn.js';
-import { docsUrl } from './shell.js';
+import { docsUrl, inApp, servedByApp, appFetch } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const day = (t) => new Date(t * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
@@ -29,8 +30,21 @@ function links() {
   set('lv-docs', docsUrl('/dev/leaving'));
 }
 
-// the root passkey signs the statement; the box puts it in the fleet's log
+// where the app serves this page, the app signs with the root it holds
+const byApp = inApp || servedByApp;
+
+// the root signs the statement; the box puts it in the fleet's log
 async function say(back) {
+  if (!state.passkey) {
+    const init = {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ back }),
+    };
+    const r = await (inApp ? appFetch('/_dd/app/leaving', init) : fetch('/_dd/app/leaving', init));
+    if (!r.ok) throw new Error(await r.text());
+    return;
+  }
   const start = await post('/_dd/leave/start', { back });
   const { publicKey, ceremony } = await start.json();
   const cred = await navigator.credentials.get({ publicKey: requestOptions(publicKey) });
@@ -47,8 +61,14 @@ function show(s) {
     $('lv-back').hidden = s.removed;
     $('lv-removed').hidden = !s.removed;
   }
-  if (s.member && !s.passkey) {
+  if (!s.passkey) {
+    $('lv-ask-how').hidden = true;
+    $('lv-ask-yes').textContent = 'Leave';
+  }
+  // a root on a device signs only through the app that holds it
+  if (!s.passkey && !byApp) {
     $('lv-go').hidden = true;
+    $('lv-back').hidden = true;
     $('lv-device').hidden = false;
   }
 }

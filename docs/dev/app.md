@@ -109,7 +109,9 @@ and `/_dd/app/archive` answer that browser's session alone (`handoff::admit`:
 the key is behind `Serve`, so behind the session's cookie), every other
 call goes to the boxes with the device's token, Chat's to the model box,
 and nothing a box answers is code. Adding or removing a device with the
-root stays the window's. From one of these pages, Photos and Passwords
+root stays the window's; leaving and coming back (`/_dd/app/leaving`,
+signed with the root here) are undone within their window, so a browser
+let in may ask them too. From one of these pages, Photos and Passwords
 open through `/_dd/app/go`, a session of their own for the same browser,
 without another click.
 

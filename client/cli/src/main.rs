@@ -1107,7 +1107,7 @@ async fn main() -> Result<()> {
         Command::Leave { back, directories } => {
             let root = who::load_root(&keys)?.context("no root key on this machine")?;
             let name = keys.get(USER)?.context("no name here")?.to_string();
-            leaving::leave(&directories, &name, &root, back).await?;
+            account::leave(&directories, &name, &root, back).await?;
             if back {
                 println!("welcome back, {name}: everything of yours is as you left it");
             } else {
