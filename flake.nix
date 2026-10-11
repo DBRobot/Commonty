@@ -61,6 +61,7 @@
         "vault"
         "adblock"
         "unlock"
+        "leaving"
       ];
       rust =
         let
