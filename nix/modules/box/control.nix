@@ -3,7 +3,8 @@
 # keeps the agreed state at http://127.0.0.1:4195/state, checked against the
 # validators' signatures. A box named as its house's validator in
 # fleet/control.json also votes. It dials out to the relay at
-# control.<domain> and nothing dials in. Nothing acts on the state yet.
+# control.<domain> and nothing dials in. It acts on the state for the
+# placed services this box carries (box/placed.nix), and nothing else.
 {
   config,
   lib,
@@ -39,6 +40,7 @@ in
       restartTriggers = [
         pkg.control-config
         pkg.placement-inputs
+        config.environment.etc."dd-placed/carries.json".source
       ];
       description = "The control plane: heartbeats and the agreed state";
       wantedBy = [ "multi-user.target" ];
@@ -56,8 +58,10 @@ in
           "-tpm-keys /boot/dd/unlock"
           "-listen 127.0.0.1:4195"
           (lib.optionalString (roles != "") "-roles ${roles}")
-          # what the fleet would run, at /plan; nothing acts on it yet
+          # what the fleet would run, at /plan; switched here for the placed
+          # services this box carries
           "-placement ${pkg.placement-inputs}"
+          "-placed-carries /etc/dd-placed/carries.json"
           # the gate hands in directory items here (servers/gate/src/directory.rs)
           (lib.optionalString config.dd.verify.enable "-submit /run/dd-control/submit.sock -submit-group dd-verify")
           # dd-attest hands in what it built for a build order here
@@ -69,9 +73,14 @@ in
         RuntimeDirectoryMode = "0755";
         Restart = "always";
         RestartSec = 10;
-        # root for the TPM and the key files on /boot; nothing else is written
+        # root for the TPM, the key files on /boot and starting placed
+        # services; nothing else is written
         ProtectSystem = "strict";
-        ReadWritePaths = [ "/var/lib/dd-control" ];
+        ReadWritePaths = [
+          "/var/lib/dd-control"
+          # made by tmpfiles (box/placed.nix); a switch may start this first
+          "-/run/dd-placed"
+        ];
         ProtectHome = true;
         PrivateTmp = true;
         NoNewPrivileges = true;

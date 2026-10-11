@@ -2,8 +2,9 @@
 
 Status: running on node1 and node2 with the Cloudflare witness (since
 release 176). Boxes heartbeat into it; the gates keep the directory in it
-(below). It plans placement as a dry run at `/plan`; nothing acts on the
-plan yet.
+(below). It plans placement at `/plan`, and switches the placed services
+on and off by it (below); every other service still runs where its roles
+put it.
 
 ## What it is for
 
@@ -163,8 +164,33 @@ each service holds, the roles each box runs. It is greedy, not optimal:
   much better box; a stateless page moves for a clearly better one.
 
 `dd-control -placement` serves the plan at `127.0.0.1:4195/plan`, each
-choice with why. It is a dry run: no box starts or stops anything by it
-yet.
+choice with why.
+
+### Placed services
+
+A service whose needs say `placed = true` is switched by the plan
+([`box/placed.nix`](../../nix/modules/box/placed.nix),
+[`placed.go`](../../servers/system/control/cmd/dd-control/placed.go)):
+
+- Its roles still decide which boxes have it built in: a box *carries* it
+  (`/etc/dd-placed/carries.json`). Its units start only while
+  `/run/dd-placed/<service>` exists; /run is empty at boot, so nothing
+  placed runs until the agreed state puts it somewhere.
+- Each box reports `carries/<service>` and `runs/<service>` in its
+  heartbeat. The plan puts a placed service only on a box that carries it,
+  and counts it running where its box says so (not by roles).
+- Every 10 seconds each box raises the flags the plan gives it and starts
+  their units, and lowers the rest and stops them. Only from agreed state
+  at most 30 seconds old, and only from a plan this box is in: a box cut
+  off keeps what it runs, and one the others count gone changes nothing
+  on its own.
+- A box's reports are its own word, signed by its TPM. A box that lies
+  about carrying a service can take it from another box, but only among
+  the boxes the signed release already lets run it: availability, never
+  access.
+- This is for what may run twice for a moment: two boxes running a
+  stateless page while one hands over is harmless. Something with one
+  writer waits for leases and fencing.
 
 ## Not in scope
 
@@ -173,7 +199,9 @@ move data. Build orders are not an exception: the order is a file the
 release key signs, beside the release, and a box builds because the order
 names it, as it moves to a release because the release names it. The log
 carries only what each box says it built ([the app's
-releases](app-release.md)); the bytes never pass through it. Placement and stateful replication build on it and come after.
+releases](app-release.md)); the bytes never pass through it. Placed
+services are switched on and off, not configured; stateful replication
+builds on it and comes after.
 
 ## Build order
 

@@ -4,7 +4,9 @@
 # catching up from its log; a hello signed by the wrong key refused. Then
 # a gate on each box with the directory as the agreed log: a new name is
 # its claimant's once every voting box's gate has acknowledged it, and not
-# before; an update by its owner reaches every box.
+# before; an update by its owner reaches every box. Last, a placed
+# service: on one of the two boxes that carry it, and on the other once
+# that one is gone.
 import json, os, subprocess, sys, time, urllib.request, base64
 
 T = os.getcwd()
@@ -27,7 +29,37 @@ def state(i):
         return {}
 
 
+# what the fleet wants: one "web", which node2 and node3 carry (their
+# carries file) and node1 does not; systemctl a stand-in that writes down
+# what it was asked
+json.dump(
+    {
+        "boxes": {
+            f"node{i}": {"site": f"h{i}", "region": "r", "can": {"web": 1}}
+            for i in (1, 2, 3)
+        },
+        "services": {
+            "web": {"enabled": True, "instances": 1, "class": "low", "placed": True}
+        },
+        "roles": {},
+        "damping": {"base": 0.3, "perGiB": 0.01},
+    },
+    open(f"{T}/placement.json", "w"),
+)
+for i in (2, 3):
+    json.dump({"web": ["web.service"]}, open(f"{T}/carries{i}.json", "w"))
+os.makedirs(f"{T}/bin", exist_ok=True)
+with open(f"{T}/bin/systemctl", "w") as f:
+    f.write('#!/bin/sh\necho "$@" >> "$SYSTEMCTL_LOG"\n')
+os.chmod(f"{T}/bin/systemctl", 0o755)
+
+
 def run(i):
+    env = dict(
+        os.environ,
+        PATH=f"{T}/bin:" + os.environ["PATH"],
+        SYSTEMCTL_LOG=f"{T}/systemctl{i}.log",
+    )
     return subprocess.Popen(
         [
             f"{T}/dd-control",
@@ -53,7 +85,14 @@ def run(i):
             GROUP,
             "-builds",
             f"{T}/b{i}.sock",
+            "-placement",
+            f"{T}/placement.json",
+            "-placed-carries",
+            f"{T}/carries{i}.json",
+            "-placed-dir",
+            f"{T}/placed{i}",
         ],
+        env=env,
         stdout=open(f"{T}/n{i}.log", "a"),
         stderr=subprocess.STDOUT,
     )
@@ -325,6 +364,29 @@ ok(
 )
 for g in gates.values():
     g.terminate()
+
+# ---- a placed service: switched on where the plan puts it, and moved
+# when that box is gone
+placed = lambda i: os.path.exists(f"{T}/placed{i}/web")
+until("web placed", lambda: placed(2) != placed(3), 60)
+ok(placed(2) != placed(3) and not placed(1), "web runs on one box that carries it")
+first = 2 if placed(2) else 3
+other = 5 - first
+ok(
+    open(f"{T}/systemctl{first}.log").read() == "start --no-block web.service\n",
+    "its box started its units",
+)
+ok(
+    all(
+        state(i)["boxes"][f"node{first}"]["facts"].get("runs/web") == 1
+        for i in (1, 2, 3)
+    ),
+    "and says so in its heartbeat",
+)
+procs[first].terminate()
+procs[first].wait()
+until("web moves", lambda: placed(other), 60)
+ok(placed(other), f"node{first} gone, web runs on node{other}")
 
 for p in procs.values():
     p.terminate()

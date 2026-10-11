@@ -1543,6 +1543,7 @@
                 ./nix/modules/box/secure-boot.nix
                 ./nix/modules/box/disk-unlock.nix
                 ./nix/modules/box/control.nix
+                ./nix/modules/box/placed.nix
                 ./nix/modules/box/ports.nix
                 ./nix/modules/box/report.nix
                 {

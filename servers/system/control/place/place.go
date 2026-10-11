@@ -52,6 +52,11 @@ type Service struct {
 	StorageGiB float64 `json:"storageGiB"`
 	// what must share its box
 	Local []string `json:"local"`
+	// switched by the plan (nix/modules/box/placed.nix): it runs on a box
+	// that carries it and that the plan gives it to, and nowhere else. A box
+	// says it carries one (carries/<svc>) and runs it (runs/<svc>) in its
+	// heartbeat.
+	Placed bool `json:"placed"`
 }
 
 type Damping struct {
@@ -87,17 +92,35 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 	}
 	sort.Strings(live)
 
-	// what runs now, by the roles each heartbeat names
+	// what runs now, by the roles each heartbeat names, and the placed
+	// services each box says it runs
 	now := map[string]map[string]bool{}
+	runs := func(svc, name string) {
+		if now[svc] == nil {
+			now[svc] = map[string]bool{}
+		}
+		now[svc][name] = true
+	}
 	for _, name := range live {
 		for _, r := range s.Boxes[name].Roles {
 			for _, svc := range in.Roles[r] {
-				if now[svc] == nil {
-					now[svc] = map[string]bool{}
+				if !in.Services[svc].Placed {
+					runs(svc, name)
 				}
-				now[svc][name] = true
 			}
 		}
+		for svc, sv := range in.Services {
+			if sv.Placed && s.Boxes[name].Facts["runs/"+svc] > 0 {
+				runs(svc, name)
+			}
+		}
+	}
+	// a placed service can run only on a box that carries it
+	can := func(name, svc string) bool {
+		if _, ok := in.Boxes[name].Can[svc]; !ok {
+			return false
+		}
+		return !in.Services[svc].Placed || s.Boxes[name].Facts["carries/"+svc] > 0
 	}
 
 	// what a service holds: the most any live box measured it holding
@@ -231,7 +254,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 	capable := func(svc string) []string {
 		out := []string{}
 		for _, name := range live {
-			if _, ok := in.Boxes[name].Can[svc]; ok {
+			if can(name, svc) {
 				out = append(out, name)
 			}
 		}
