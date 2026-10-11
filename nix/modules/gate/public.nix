@@ -42,7 +42,7 @@ in
     bare = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "the bare name answers outsiders too, through the tunnel: what people type to find the site. Its server block must offer nothing a stranger may not have (roles/gateway.nix: a redirect to home and the app download).";
+      description = "the bare name answers outsiders too, through the tunnel: what people type to find the site. Its server block must offer nothing a stranger may not have (roles/gateway.nix: the front page, the docs, the app download and a redirect to home).";
     };
     demoDoors = lib.mkOption {
       type = lib.types.listOf lib.types.str;

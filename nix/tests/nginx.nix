@@ -1,5 +1,6 @@
 # Every box's nginx config, through `nginx -t`, before a box ever sees it;
-# and the forge's public door, served and asked (nginx-door.py).
+# and the forge's public door, served and asked (nginx-door.py), and the
+# bare name's front page (nginx-front.py).
 # Building a config checks nothing of its syntax: release 115 went out with
 # a location regex nginx could not read, and node1 rolled back. The
 # certificates and the files a box writes at run time are not here, so this
@@ -31,6 +32,13 @@ let
       python3 ${./nginx-door.py} "$conf" ${nginx} "$tmp" \
         code.${c.config.dd.domain} git.${c.config.dd.domain} ${c.config.dd.repo}
     ''
+    # the bare name's front page served at /, home's / still signing in, and
+    # the docs and the download as they were
+    +
+      lib.optionalString (c.config.dd ? public && c.config.dd.public.enable && c.config.dd.public.bare)
+        ''
+          python3 ${./nginx-front.py} "$conf" ${nginx} "$tmp" ${c.config.dd.domain}
+        ''
     # the bare domain's security.txt: served, and saying what RFC 9116 asks
     + lib.optionalString (c.config.dd ? securityTxt) ''
       grep -q 'location = /.well-known/security.txt' "$conf"

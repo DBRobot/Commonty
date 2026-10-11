@@ -857,8 +857,11 @@ second per address, ten in hand; so are `/_dd/directory` and
 `/_dd/invite` for a request that carries no credential at all (no
 session, no token, no read proof).
 
-**The bare domain** sends `/` to `https://home.<domain>`, `/download` to
-the downloads page, serves release files from the forge as nobody under
+**The bare domain** serves the front page at `/` to anyone, signed in or
+not (`/_dd/landing`, [servers/landing](../../servers/landing/web)), sends
+`/download` to the downloads page and any other address it does not serve
+to the same path on `https://home.<domain>`, serves release files from the
+forge as nobody under
 `/download/vX.Y.Z/<file>`, and serves the docs (`/docs`, `/docs/...`)
 with only the gate paths their page needs: `/_dd/static/`, `/_dd/web/`,
 `/_dd/docs/`, `/_dd/me`, `/_dd/config`, `/_dd/csp`.

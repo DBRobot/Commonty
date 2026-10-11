@@ -5,6 +5,7 @@
 servers/web-shared/home.css                  static/home.css
 servers/web-shared/bar.css                   static/bar.css
 servers/web-shared/shell.js                  static/shell.js
+servers/web-shared/footer.js                 static/footer.js
 servers/web-shared/kit.js                    static/kit.js
 servers/home/web/library.js                static/library.js
 servers/web-shared/webauthn.js               static/webauthn.js

@@ -1014,3 +1014,27 @@ main.home .guest-more p { margin: 0; max-width: 62ch; color: var(--ink-2); }
 .state-word[data-state="attention"] { color: var(--attention); background: var(--attention-bg); }
 .state-word[data-state="broken"] { color: var(--broken); background: var(--broken-bg); }
 .state-word[data-state="off"] { color: var(--off); background: var(--off-bg); }
+
+/* the footer every page ends with (footer.js draws it; docs/dev/ui.md) */
+.dd-foot { --foot-3: #5E6661; border-top: 1px solid var(--line); background: var(--bg); color: var(--ink-2); font-family: var(--font); line-height: 1.6; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .dd-foot { --foot-3: #8F98A2; }
+}
+:root[data-theme="dark"] .dd-foot { --foot-3: #8F98A2; }
+.dd-foot .in { box-sizing: content-box; max-width: 1140px; margin: 0 auto; padding: 48px 24px 60px; display: grid; grid-template-columns: 1.4fr repeat(3, minmax(0, 1fr)); gap: 32px; font-size: 15px; }
+.dd-foot .in > div { min-width: 0; }
+.dd-foot h2 { margin: 0 0 10px; font-size: 13px; line-height: 1.6; text-transform: uppercase; letter-spacing: .08em; color: var(--foot-3); font-weight: 600; }
+.dd-foot ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.dd-foot a { color: var(--ink-2); text-decoration: none; }
+.dd-foot a:hover { color: var(--ink); text-decoration: underline; }
+.dd-foot a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.dd-foot .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 700; font-size: 19px; }
+.dd-foot .brand svg { width: 20px; height: 20px; }
+.dd-foot .lic { color: var(--foot-3); margin: 10px 0 0; }
+.dd-foot .mail { font-family: var(--mono); font-size: 14px; user-select: all; overflow-wrap: anywhere; }
+@media (max-width: 880px) {
+  .dd-foot .in { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-inline: 16px; }
+}
+@media (max-width: 420px) {
+  .dd-foot .in { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+}

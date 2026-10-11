@@ -82,8 +82,8 @@ in
         )
         (lib.filter (t: t.demo != null && !(lib.hasPrefix "https://photos." t.url)) config.dd.home.services)
     );
-    # commonty.org itself: what people type. It sends them to home and
-    # offers the app download, nothing else (its server block below)
+    # commonty.org itself: what people type. The front page, the docs and
+    # the app download, and home for the rest (its server block below)
     bare = true;
     tunnel = "d0534bff-f478-48ab-a949-65e2e3c14c39";
     credentialsFile = config.sops.secrets.cloudflared-credentials.path;
@@ -107,14 +107,20 @@ in
   };
 
   # the bare domain: what people type to find the site, open to the web
-  # through the tunnel (dd.public.bare). It sends them to home.<domain> and
-  # offers the app an invited person needs before they can sign in to
-  # anything; it asks for nothing and serves nothing else.
+  # through the tunnel (dd.public.bare). It shows the front page, the docs
+  # and the app an invited person needs before they can sign in to
+  # anything, and sends everything else to home.<domain>; it asks for
+  # nothing and serves nothing else.
   dd.verify.appManifest = "https://git.${config.dd.domain}/${config.dd.repo}/raw/branch/releases/app.json";
 
   services.nginx.virtualHosts.${config.dd.domain} = {
     forceSSL = true;
     useACMEHost = config.dd.domain;
+    # the front page, for anyone (servers/landing); every other address
+    # that is not below goes on to home
+    locations."= /" = docsGate // {
+      proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/landing";
+    };
     # the app itself is on home, where sign-in and join already point
     locations."= /download".return = "301 https://home.${config.dd.domain}/_dd/download";
     locations."/".return = "301 https://home.${config.dd.domain}$request_uri";

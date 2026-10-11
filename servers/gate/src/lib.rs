@@ -2850,6 +2850,7 @@ pub async fn start(
             get(|| async { Redirect::to("/_dd/settings#network") }),
         )
         .route("/_dd/download", get(download_page))
+        .route("/_dd/landing", get(|| async { page("landing") }))
         .route("/_dd/docs/page", get(|| async { page("docs") }))
         .route("/_dd/docs/page/{*rest}", get(|| async { page("docs") }))
         .route("/_dd/docs/index.json", get(docs_index))
@@ -3285,6 +3286,56 @@ mod tests {
         // and a header that is no device's token changes nothing
         assert_eq!(ask("DELETE", Some("x")).await, 403);
         assert_eq!(ask("PUT", Some("not-a-biscuit")).await, 403);
+    }
+
+    /// The bare name's front page is for anyone, signed in or not, and
+    /// home's own front is still the way in.
+    #[tokio::test]
+    async fn the_front_page_is_for_anyone_and_home_still_signs_in() {
+        let (url, s) = gate("landing", None, vec![]).await;
+        let http = client();
+        let tom = cookie(&s.issue("tom"));
+        for c in [None, Some(tom.clone())] {
+            let mut r = http.get(format!("{url}/_dd/landing"));
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            let r = r.send().await.unwrap();
+            assert_eq!(r.status(), 200);
+            assert!(
+                r.headers()["content-type"]
+                    .to_str()
+                    .unwrap()
+                    .starts_with("text/html")
+            );
+            assert_eq!(r.headers()["cache-control"], "no-cache");
+            let html = r.text().await.unwrap();
+            assert!(html.contains("Keep it <span>yours.</span>"));
+            // its own files, from this site, and no name of ours written in
+            for f in ["landing.css", "landing.js", "footer.js", "home.css"] {
+                assert!(html.contains(&format!("/_dd/static/{f}")), "{f}");
+                let got = http
+                    .get(format!("{url}/_dd/static/{f}"))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(got.status(), 200, "{f}");
+            }
+            assert!(!html.contains("commonty.org"));
+            assert!(!html.contains("<script>") && !html.contains("style=\""));
+            assert!(html.contains("data-home=\"/_dd/demo\""));
+            assert!(html.contains("href=\"#main\""));
+        }
+        let home = http.get(format!("{url}/_dd/home")).send().await.unwrap();
+        assert_eq!(home.status(), 303);
+        assert_eq!(home.headers()["location"], "/_dd/login?rd=/");
+        let home = http
+            .get(format!("{url}/_dd/home"))
+            .header("cookie", tom)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(home.status(), 200);
     }
 
     #[tokio::test]

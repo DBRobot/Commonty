@@ -375,6 +375,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "servers/web-shared/shell.js",
         "text/javascript; charset=utf-8",
     ),
+    (
+        "footer.js",
+        "servers/web-shared/footer.js",
+        "text/javascript; charset=utf-8",
+    ),
     // what every page shares (docs/dev/ui.md)
     (
         "kit.js",
@@ -389,6 +394,16 @@ const STATIC: &[(&str, &str, &str)] = &[
     (
         "docs.css",
         "servers/docs/web/docs.css",
+        "text/css; charset=utf-8",
+    ),
+    (
+        "landing.js",
+        "servers/landing/web/landing.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "landing.css",
+        "servers/landing/web/landing.css",
         "text/css; charset=utf-8",
     ),
 ];
@@ -505,6 +520,8 @@ const PAGES: &[(&str, &str)] = &[
     ("use-app", "servers/home/web/pages/use-app.html"),
     // not signed in: anyone, at <domain>/docs (docs.rs)
     ("docs", "servers/docs/web/pages/docs.html"),
+    // not signed in: anyone, at the bare name's front (roles/gateway.nix)
+    ("landing", "servers/landing/web/pages/landing.html"),
 ];
 
 pub fn page(name: &str) -> Option<&'static str> {
@@ -899,6 +916,41 @@ mod tests {
         }
         assert!(static_file("redeem.js").is_none());
         assert!(static_file("nope").is_none());
+    }
+
+    /// One footer, from one file: every page ends with it, through the
+    /// shell or on its own (docs/dev/ui.md)
+    #[test]
+    fn every_page_ends_with_the_one_footer() {
+        assert!(text("shell.js").contains("import './footer.js';"));
+        assert!(static_file("footer.js").is_some());
+        let base =
+            std::fs::read_to_string(tree().join("servers/gate/templates/base.html")).unwrap();
+        assert!(base.contains("/_dd/static/shell.js"));
+        for (name, _) in PAGES {
+            let html = page(name).unwrap();
+            assert!(
+                html.contains("/_dd/static/shell.js") || html.contains("/_dd/static/footer.js"),
+                "{name} has no footer"
+            );
+            assert!(
+                !html.contains("dd-foot"),
+                "{name} keeps a footer of its own"
+            );
+        }
+        let foot = text("footer.js");
+        for path in [
+            "/docs/policies/privacy",
+            "/docs/policies/terms",
+            "/docs/policies/security",
+            "/docs/guide/joining",
+            "/docs/guide/hosting",
+            "/_dd/demo",
+            "/download",
+        ] {
+            assert!(foot.contains(path), "{path}");
+        }
+        assert!(!foot.contains("commonty.org"));
     }
 
     /// A page's script that imports a sibling the gate does not serve

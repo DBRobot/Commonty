@@ -4,6 +4,8 @@
 // carries its own copy, and both look the same because they are the same.
 
 import { webUrl } from './kit.js';
+// and the footer, after the page
+import './footer.js';
 
 let answer = null;
 

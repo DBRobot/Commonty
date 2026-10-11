@@ -51,6 +51,15 @@ raw value.
   search, and who is signed in ([`servers/web-shared/shell.js`](../../servers/web-shared/shell.js)).
   A page adds to it through the search's sources, never with a bar of its
   own.
+- **The footer** ends every page: the mark and the licence, Use it, Learn,
+  and Policies with the security address
+  ([`servers/web-shared/footer.js`](../../servers/web-shared/footer.js), its
+  look in `home.css` under `.dd-foot`). `shell.js` imports it, so a page
+  with the bar has it; a page without the shell loads `footer.js` itself.
+  It goes after the element that holds `main`, so a page that fills the
+  window (Chat) is scrolled past to reach it, and never into the app's
+  own window. A page never writes a footer of its own; the gate's tests
+  check every page gets this one.
 - **Type**: Public Sans for words, IBM Plex Mono for anything a machine
   produced - numbers, sizes, addresses, names of things on disk. Numbers
   line up (`font-variant-numeric: tabular-nums`) and carry their unit.

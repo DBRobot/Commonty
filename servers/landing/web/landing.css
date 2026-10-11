@@ -1,0 +1,131 @@
+/* The front page at the bare name: the navy bar opens into a navy hero,
+   flat drawings in the site's own colours. On top of home.css, every rule
+   under body.landing so the site's own element rules do not reach in. */
+
+body.landing {
+  --ink-3: #5E6661;
+  --navy: #1D4470;
+  --sky: #9CC3EA;
+  --sky-2: #E3ECF5;
+  --green: #1D5C42;
+  --mint: #DDEEE5;
+  --art-paper: #FFFFFF;
+  --art-ink: #1A1F1C;
+  background: var(--bg);
+  color: var(--ink);
+  font: 17px/1.6 var(--font);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) body.landing {
+    --ink-3: #8F98A2; --navy: #16304F; --sky-2: #1B2838; --mint: #18291F;
+    --art-paper: #1E252D; --art-ink: #E5E9EE;
+    /* the kicker's green, light enough to read on the dark ground */
+    --green: #7CCBA2;
+  }
+}
+:root[data-theme="dark"] body.landing {
+  --ink-3: #8F98A2; --navy: #16304F; --sky-2: #1B2838; --mint: #18291F;
+  --art-paper: #1E252D; --art-ink: #E5E9EE;
+  --green: #7CCBA2;
+}
+
+.landing a { color: var(--link); text-underline-offset: 3px; }
+.landing a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.landing svg { display: block; }
+.landing main:focus { outline: none; }
+
+.landing .wrap { box-sizing: content-box; max-width: 1140px; margin: 0 auto; padding-inline: 24px; }
+
+/* the header: bar and hero are one navy field */
+.landing .top { background: var(--navy); color: #FFFFFF; position: relative; overflow: hidden; }
+.landing .bar { display: flex; align-items: center; gap: 22px; min-height: 64px; flex-wrap: wrap; position: relative; z-index: 1; }
+.landing .top .brand { display: flex; align-items: center; gap: 10px; color: #FFFFFF; text-decoration: none; font-weight: 700; font-size: 19px; }
+.landing .top .brand svg { width: 22px; height: 22px; }
+.landing .bar nav { margin-left: auto; display: flex; align-items: center; gap: 22px; font-weight: 600; font-size: 15px; flex-wrap: wrap; }
+.landing .bar nav a { color: #FFFFFF; text-decoration: none; }
+.landing .bar nav a.u { text-decoration: underline; }
+.landing .opening { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 40px; align-items: center; padding-block: 56px 0; position: relative; z-index: 1; }
+.landing .opening > * { min-width: 0; }
+.landing .opening h1 { margin: 0 0 18px; font-size: clamp(46px, 6.6vw, 84px); line-height: .98; font-weight: 800; letter-spacing: -0.04em; text-wrap: balance; }
+.landing .opening h1 span { color: var(--sky); }
+.landing .opening p { margin: 0 0 30px; font-size: 20px; color: rgba(255, 255, 255, .82); max-width: 25em; }
+.landing .opening .acts { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; padding-bottom: 72px; }
+.landing .opening .art { align-self: center; padding-bottom: 40px; }
+.landing .opening .art svg { width: 100%; height: auto; }
+.landing .grid-bg { position: absolute; inset: 0; z-index: 0; opacity: .5; }
+
+.landing .button { display: inline-flex; align-items: center; height: 52px; margin: 0; padding: 0 26px; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); text-decoration: none; font-weight: 700; font-size: 17px; }
+.landing .button:hover { background: var(--accent-hover); color: var(--accent-ink); }
+.landing .top .button { background: #FFFFFF; color: var(--navy); }
+.landing .top .button:hover { background: var(--sky-2); color: #1D4470; }
+.landing .top .textlink { color: #FFFFFF; font-weight: 600; }
+
+/* one idea per section, a drawing beside it */
+.landing .idea { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 72px; align-items: center; padding-block: 120px 0; }
+.landing .idea.flip .text { order: 2; }
+.landing .idea > * { min-width: 0; }
+.landing .idea .art svg { width: 100%; max-width: 520px; height: auto; margin-inline: auto; }
+.landing .kicker { font: 500 13px var(--mono); color: var(--green); text-transform: uppercase; letter-spacing: .1em; }
+.landing .idea h2 { margin: 10px 0 16px; font-size: clamp(32px, 3.8vw, 46px); line-height: 1.06; font-weight: 800; letter-spacing: -0.03em; text-wrap: balance; }
+.landing .idea p { margin: 0 0 14px; color: var(--ink-2); font-size: 18px; max-width: 30em; }
+
+.landing .why { padding-block: 136px 0; }
+.landing .why h2 { margin: 0 0 52px; font-size: clamp(32px, 3.8vw, 46px); line-height: 1.6; font-weight: 800; letter-spacing: -0.03em; text-align: center; }
+.landing .why .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 52px 44px; }
+.landing .why .grid > div { min-width: 0; }
+.landing .why-ic { width: 52px; height: 52px; }
+.landing .why h3 { margin: 16px 0 6px; font-size: 19px; }
+.landing .why p { margin: 0; color: var(--ink-2); font-size: 16px; }
+
+.landing .cta { margin-top: 136px; background: var(--navy); color: #FFFFFF; text-align: center; }
+.landing .cta .wrap { padding-block: 88px; }
+.landing .cta h2 { margin: 0 0 26px; font-size: clamp(32px, 4vw, 50px); line-height: 1.6; font-weight: 800; letter-spacing: -0.03em; }
+.landing .cta .button { background: #FFFFFF; color: #1D4470; }
+
+/* the footer follows the navy band; elsewhere it carries a rule */
+.landing .dd-foot { border-top: 0; }
+
+/* the drawings: paper and ink follow the theme, the brand colours stay */
+.landing .paper { fill: var(--art-paper); }
+.landing .ink { fill: var(--art-ink); }
+.landing .flow { stroke-dasharray: 4 7; animation: flow 1.6s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -22; } }
+.landing .blink { animation: blink 2.4s steps(1) infinite; }
+.landing .blink.d1 { animation-delay: .7s; }
+.landing .blink.d2 { animation-delay: .8s; }
+.landing .blink.d3 { animation-delay: 1.4s; }
+.landing .blink.d4 { animation-delay: 1.6s; }
+@keyframes blink { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .landing .flow, .landing .blink { animation: none; } }
+
+/* the services: they pass by on their own, and stop when you reach for them */
+.landing .carousel { padding-block: 128px 0; }
+.landing .carousel .head { display: flex; justify-content: space-between; align-items: end; gap: 20px; flex-wrap: wrap; margin-bottom: 28px; }
+.landing .carousel h2 { margin: 10px 0 0; font-size: clamp(32px, 3.8vw, 46px); line-height: 1.06; font-weight: 800; letter-spacing: -0.03em; }
+.landing .carousel .nav { display: flex; gap: 8px; }
+.landing .carousel .nav button { box-sizing: content-box; width: 44px; height: 44px; margin: 0; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: var(--radius); cursor: pointer; }
+.landing .carousel .nav button:hover { border-color: var(--ink-3); background: var(--surface); }
+.landing .carousel .nav svg { width: 18px; height: 18px; }
+.landing .track-wrap { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); }
+.landing .track { list-style: none; margin: 0; padding: 4px 0 8px; display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; }
+.landing .track::-webkit-scrollbar { display: none; }
+.landing .track:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.landing .svc-card { flex: 0 0 260px; }
+.landing .svc-card a { display: grid; gap: 8px; align-content: start; height: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; color: var(--ink); text-decoration: none; }
+.landing .svc-card a:hover { border-color: var(--ink-3); }
+.landing .svc-card a:hover h3 { text-decoration: underline; text-underline-offset: 3px; }
+.landing .svc-pic { width: 100%; height: auto; aspect-ratio: 1 / 1; max-width: 100%; border-radius: 2px; }
+.landing .svc-card h3 { margin: 8px 0 0; font-size: 19px; }
+.landing .svc-card p { margin: 0; color: var(--ink-2); font-size: 15.5px; }
+@media (max-width: 880px) { .landing .carousel { padding-block: 88px 0; } .landing .svc-card { flex-basis: 230px; } }
+
+@media (max-width: 880px) {
+  .landing .wrap { padding-inline: 16px; }
+  .landing .opening { grid-template-columns: minmax(0, 1fr); padding-block: 36px 0; }
+  .landing .opening .acts { padding-bottom: 8px; }
+  .landing .idea { grid-template-columns: minmax(0, 1fr); gap: 32px; padding-block: 80px 0; }
+  .landing .idea.flip .text { order: 0; }
+  .landing .why { padding-block: 88px 0; }
+  .landing .why .grid { grid-template-columns: minmax(0, 1fr); gap: 34px; }
+  .landing .cta { margin-top: 88px; }
+}
