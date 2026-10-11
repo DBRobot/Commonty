@@ -248,8 +248,7 @@ function bar(m, slot) {
       nav.append(el('a', { href: here(homeLink(m, item.url)), text: item.label }));
     }
   });
-  // named for a screen reader too when a phone hides the name
-  const summary = el('summary', { 'aria-label': m.user },
+  const summary = el('summary', {},
     el('span', { class: 'avatar', 'aria-hidden': 'true', text: m.initial }),
     el('span', { text: m.user }),
     el('span', { class: 'chev', 'aria-hidden': 'true' }));

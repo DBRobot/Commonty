@@ -244,7 +244,8 @@
 @media (max-width: 560px) {
   .dd-bar .brand span { display: none; }
   .dd-bar .bar { gap: 6px; }
-  .dd-bar .me summary > span:not(.avatar):not(.chev) { display: none; }
+  /* the name goes from sight, not from a screen reader */
+  .dd-bar .me summary > span:not(.avatar):not(.chev) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .dd-bar .svc-menu { position: fixed; left: 8px; right: 8px; top: 60px; width: auto; }
 }
 

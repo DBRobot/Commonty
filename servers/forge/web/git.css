@@ -110,6 +110,8 @@
 /* lists */
 .list > * { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--line-2); color: var(--ink); }
 .list > :first-child { border-top: 0; }
+/* a row too wide for a phone goes onto a second line, not off the side */
+@media (max-width: 700px) { .list > * { flex-wrap: wrap; } }
 .list > a:hover { background: var(--sunk); text-decoration: none; }
 .item { align-items: flex-start !important; }
 .item .t { font-weight: 600; font-size: 15px; color: var(--ink); }
