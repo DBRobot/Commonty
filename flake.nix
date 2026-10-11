@@ -1741,6 +1741,7 @@
                 (lib.optionalAttrs (builtins.elem "gateway" box.roles) {
                   dd.headscale.gamePorts = fleetGamePorts;
                   dd.headscale.computerPorts = fleetComputerPorts;
+                  dd.headscale.admin = (lib.importJSON ./fleet/policy.json).owner;
                   dd.headscale.owners = lib.mapAttrs' (
                     n: b: lib.nameValuePair b.net (lib.importJSON ./fleet/boxes/${n}/box.json).owner
                   ) (lib.filterAttrs (n: b: b ? net && builtins.pathExists ./fleet/boxes/${n}/box.json) boxes);

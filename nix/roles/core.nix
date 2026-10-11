@@ -137,8 +137,10 @@ in
     isNormalUser = true;
     hashedPasswordFile = config.sops.secrets.console-password-hash.path;
     extraGroups = [ "wheel" ];
-    # the box's owner (box.json) logs in as admin
-    openssh.authorizedKeys.keys = owner.ssh;
+    # the fleet's admin (policy.json owner) logs in as admin, on every box;
+    # the box's host (box.json owner) has no shell on it - a host is not
+    # an admin, and a box holds other people's work
+    openssh.authorizedKeys.keys = policy.people.${policy.owner}.ssh;
   };
 
   # Every box is on the fleet's own network, and on no other: the owner's

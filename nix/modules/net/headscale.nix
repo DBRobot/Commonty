@@ -41,8 +41,10 @@ let
       # its owner's box-admin ports
       tagOwners."tag:computer" = [ "boxes@" ];
       # A person's devices reach a box's front door and its game servers.
-      # A box's owner's devices reach that box, and only that box, for what
-      # an admin needs: ssh, its dns, the cache push. Boxes reach each other
+      # The fleet's admin's devices reach every box for what an admin needs:
+      # ssh, its dns, the cache push. A box's host - whoever has it at home -
+      # is not its admin: their devices reach that box's dns and nothing
+      # more of it. Boxes reach each other
       # on the channels still between them (roles/core.nix lists them; each
       # box's firewall narrows them again to its peers' addresses). No rule
       # has a person's device as its destination, so devices do not see one
@@ -80,10 +82,15 @@ let
           dst = map (p: "tag:box:${p}") boxPorts;
         }
       ]
-      ++ lib.mapAttrsToList (addr: owner: {
+      ++ lib.optional (cfg.admin != "") {
         action = "accept";
-        src = [ "${owner}@" ];
-        dst = map (p: "${addr}:${p}") adminPorts;
+        src = [ "${cfg.admin}@" ];
+        dst = map (p: "tag:box:${p}") adminPorts;
+      }
+      ++ lib.mapAttrsToList (addr: host: {
+        action = "accept";
+        src = [ "${host}@" ];
+        dst = [ "${addr}:53" ];
       }) cfg.owners;
     }
   );
@@ -130,7 +137,12 @@ in
     owners = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
-      description = "each box's address on the network -> its owner's name: whose devices administer it (the flake gives every box's)";
+      description = "each box's address on the network -> its host's name (box.json owner): whose devices may ask it for dns, and nothing more (the flake gives every box's)";
+    };
+    admin = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      description = "the fleet's admin (policy.json owner): whose devices administer every box - ssh, dns, the cache push";
     };
     boxes = lib.mkOption {
       type = (lib.types.attrsOf lib.types.attrs);

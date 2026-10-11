@@ -480,7 +480,7 @@ What we set instead of patching:
   fleet's network (for the owner's own devices, when set to ask it: the
   network hands every device Quad9, unfiltered), and loopback; the
   firewall lets port 53 in from the house network only, and from the
-  owner's devices on `commonty0`
+  host's and the admin's devices on `commonty0`
   ([nix/modules/net/owner.nix](../../nix/modules/net/owner.nix));
 - the lists are written into Pi-hole's `adlist` table by
   `dd-pihole-lists` and not by the module, whose own setup fails the

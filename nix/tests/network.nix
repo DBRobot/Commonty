@@ -16,19 +16,23 @@
       ../modules/net/box.nix
       ../modules/net/owner.nix
     ];
-    # the owner's ports are the firewall's to keep
+    # the admin's and the host's ports are the firewall's to keep
     networking.firewall.enable = pkgs.lib.mkForce true;
     networking.firewall.allowedTCPPorts = [ 8085 ];
     services.headscale.address = pkgs.lib.mkForce "0.0.0.0";
     services.openssh.enable = true;
-    dd.box.owner = "sarah";
+    # kim has the box at home; sarah is the fleet's admin. A host is not an
+    # admin: kim's devices get its dns and nothing more
+    dd.box.owner = "kim";
+    dd.verify.admin = "sarah";
     dd.verify.role = pkgs.lib.mkForce "full";
     dd.headscale = {
       enable = true;
       url = "http://box:8085";
       behindNginx = false;
-      # an owner rule in the policy headscale has to load
-      owners."100.64.0.1" = "sarah";
+      # the rules headscale has to load: the admin's, and the host's
+      admin = "sarah";
+      owners."100.64.0.1" = "kim";
     };
     dd.net.enable = true;
     # no internet in here: one made-up relay that is never used, from a
