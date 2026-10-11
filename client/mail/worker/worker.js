@@ -393,6 +393,9 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const path = url.pathname;
+    // a body sent anywhere but the API is read and dropped before the
+    // answer: one left unread faults the request after it (a 503)
+    if (!path.startsWith('/api/') && req.method !== 'GET' && req.method !== 'HEAD') await req.text().catch(() => '');
     if (STATIC[path]) {
       const [body, type] = STATIC[path];
       return new Response(body, { headers: { 'content-type': type, 'cache-control': 'public, max-age=300', 'x-content-type-options': 'nosniff' } });

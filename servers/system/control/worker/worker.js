@@ -158,7 +158,14 @@ export class Relay {
 }
 
 export default {
-  fetch(req, env) {
+  async fetch(req, env) {
+    // only a WebSocket's hello comes here, with no body; anything sent with
+    // one is read and turned away, as a body left unread faults the request
+    // after it (a 503)
+    if (req.method !== 'GET') {
+      await req.text().catch(() => '');
+      return new Response('not here', { status: 404 });
+    }
     return env.RELAY.get(env.RELAY.idFromName('relay')).fetch(req);
   },
 };
