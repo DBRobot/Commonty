@@ -117,7 +117,9 @@ async function jobsOf(r, run, fresh = false) {
     // the forge says pending for waiting, blocked and running alike: its
     // words tell them apart, and only a job a runner has picked up is running
     const running = /started running/i.test(s.description || '');
-    const state = s.status !== 'pending' ? s.status : running ? 'running' : /blocked/i.test(s.description || '') ? 'blocked' : 'waiting';
+    // and a job skipped is "success, has been skipped": its own state here
+    const state = s.status !== 'pending' ? (/been skipped/i.test(s.description || '') ? 'skipped' : s.status)
+      : running ? 'running' : /blocked/i.test(s.description || '') ? 'blocked' : 'waiting';
     // when it began and ended, from the statuses the forge posted as it
     // went; waiting again is a new attempt, and the last one's times go
     const started = running ? s.created_at : state === 'waiting' || state === 'blocked' ? null : prev?.started;
@@ -242,6 +244,7 @@ function rollup(jobs) {
   if (s.some((x) => x === 'failure' || x === 'error')) return 'failure';
   if (s.some((x) => x === 'running')) return 'running';
   if (s.some((x) => x === 'pending' || x === 'waiting' || x === 'blocked')) return 'waiting';
+  if (s.length && s.every((x) => x === 'skipped')) return 'skipped';
   if (s.length && s.every((x) => x === 'success' || x === 'skipped')) return 'success';
   return s[0] || 'waiting';
 }
