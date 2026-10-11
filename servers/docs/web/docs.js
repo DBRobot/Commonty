@@ -68,10 +68,26 @@ function drawNav() {
   };
   const parts = [link(index.home || '', index.home ? 'Docs home' : 'All pages', 'front')];
   for (const g of index.groups) {
-    if (g.name) parts.push(el('h3', { text: g.name }));
-    for (const f of g.pages) parts.push(link(f, titleOf(f)));
+    const links = g.pages.map((f) => link(f, titleOf(f)));
+    if (!g.name) { parts.push(...links); continue; }
+    // a group stays as the reader left it, and opens for the page on show
+    const box = el('details', { class: 'docs-group' });
+    box.open = !folded().includes(g.name) || g.pages.includes(file);
+    box.append(el('summary', { text: g.name }), ...links);
+    box.addEventListener('toggle', () => fold(g.name, !box.open));
+    parts.push(box);
   }
   nav.replaceChildren(...parts);
+}
+
+const FOLDED = 'docs-folded';
+function folded() {
+  try { return JSON.parse(localStorage.getItem(FOLDED)) || []; } catch { return []; }
+}
+function fold(name, shut) {
+  const now = folded().filter((n) => n !== name);
+  if (shut) now.push(name);
+  try { localStorage.setItem(FOLDED, JSON.stringify(now)); } catch {}
 }
 
 function drawCrumb() {
