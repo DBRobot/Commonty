@@ -129,9 +129,13 @@ box.succeed(
 box.shutdown()
 box.start()
 box.wait_for_unit("multi-user.target")
-box.succeed("journalctl -b -o cat | grep -q 'dd-unlock: unlocked'")
-box.succeed(
-    "journalctl -b -o cat | grep -q 'data/enc is not under data/enc\\|not this box'"
+# the journal from the initrd lands a moment after the target, under load;
+# this boot's alone (-b), read whole into a file and counted, never cut off
+box.wait_until_succeeds(
+    "journalctl -b -o cat > /tmp/boot.log && grep -c 'dd-unlock: unlocked' /tmp/boot.log"
+)
+box.wait_until_succeeds(
+    "journalctl -b -o cat > /tmp/boot.log && grep -c 'data/enc is not under data/enc\\|not this box' /tmp/boot.log"
 )
 box.fail("grep -q planted /data/proof")
 box.succeed("test ! -e /run/dd/disk.key && test ! -e /run/dd/vault.key")
