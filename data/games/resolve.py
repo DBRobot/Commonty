@@ -47,8 +47,8 @@ OURS = {
 RELABEL = {"AUTO_UPDATE": ("Update on start", "0")}
 # games that tell their clients a port of their own and ignore -Port for it:
 # that number on the box, host and guest alike, and one of that game per box.
-# Every other port the manager hands from the pool. Curated: an egg's default
-# is what it would pick, not what it needs.
+# Every other port the manager hands from the pool. By id; curated: an
+# egg's default is what it would pick, not what it needs.
 FIXED_PORTS = {"satisfactory": {"SERVER_PORT": 7777, "RELIABLE_PORT": 8888}}
 # ports a game opens by itself at SERVER_PORT plus an offset, with no egg
 # variable to move them: the manager holds and forwards them with
@@ -241,12 +241,12 @@ for p in sorted(glob.glob(os.path.join(eggs_dir, "**", "egg-*.json"), recursive=
             "port_defaults": {
                 k: vars_[k]["default_value"] for k in vars_ if PORTS.search(k)
             },
-            "fixed_ports": FIXED_PORTS.get(name.lower(), {}),
+            "fixed_ports": FIXED_PORTS.get(slug, {}),
             "implicit_ports": IMPLICIT_PORTS.get(slug, {}),
             "memory_mib": memory(slug, wine),
         }
     )
-# one entry per game: prefer the linux one over the wine one, the plain over the mod
+# one entry per id: the linux egg over the wine one
 seen = {}
 for g in games:
     key = g["id"]
