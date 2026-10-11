@@ -12,7 +12,9 @@ export async function forgetApi(req, env, body, json, h) {
   const pinned = await env.PINNED.get(`entry:${name}`);
   // never pinned: they never set an address here
   if (!pinned) return json({ gone: true });
-  const r = await fetch(`https://home.${env.DOMAIN}/_dd/leaving/${encodeURIComponent(name)}`);
+  // read as the entry is, with the Worker's read key (worker.js entry)
+  const headers = env.DIRECTORY_KEY ? { 'x-dd-key-proof': h.readProof(env.DIRECTORY_KEY, name, Math.floor(Date.now() / 1000)) } : {};
+  const r = await fetch(`https://home.${env.DOMAIN}/_dd/leaving/${encodeURIComponent(name)}`, { headers });
   const said = r.ok ? await r.text() : undefined;
   try {
     h.forgetDue(name, pinned, said, h.MEMBERS, Math.floor(Date.now() / 1000));

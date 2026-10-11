@@ -520,7 +520,7 @@ pub fn router(d: Arc<Directory>) -> Router {
 }
 
 /// 401 whether or not the name exists: a refusal says nothing about it
-fn refused() -> Response {
+pub(crate) fn refused() -> Response {
     (StatusCode::UNAUTHORIZED, "the directory is for members").into_response()
 }
 

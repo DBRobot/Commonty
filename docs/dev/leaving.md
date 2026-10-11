@@ -91,7 +91,8 @@ needs a valid name.
 
 The mail Worker deletes only on evidence it checks itself
 ([lib.rs](../../client/mail/src/lib.rs) `forget_due`): the member's own
-statement, fetched from `home.<domain>/_dd/leaving/<name>` and verified
+statement, fetched from `home.<domain>/_dd/leaving/<name>` with its read
+key (the statement is read as the entry is) and verified
 against the entry the Worker pinned, said 90 days ago or more and not a
 coming back; or the removal date in the member list it was deployed with.
 The front door's gate asks it (`VERIFY_MAIL_FORGET`).

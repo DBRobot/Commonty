@@ -183,25 +183,19 @@ pub async fn announce(a: Announce<'_>) -> Result<()> {
 async fn directory_now(dirs: &[String]) -> Result<(Vec<identity::SignedEntry>, BTreeSet<String>)> {
     let d = dirs.first().context("no directory")?;
     let http = crate::who::http()?;
-    let listed: Vec<serde_json::Value> = http
-        .get(d.trim_end_matches('/'))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    // the list and the statements are members': read as this device
+    let listed = directory::names(d.trim_end_matches('/')).await?;
     let base = d.trim_end_matches('/');
     let base = base.strip_suffix("/_dd/directory").unwrap_or(base);
     let mut entries = Vec::new();
     let mut left = BTreeSet::new();
-    for l in listed {
-        let Some(n) = l["name"].as_str() else {
-            continue;
-        };
+    for n in &listed {
         if let Some(e) = crate::who::newest(&crate::who::fetch(&dirs[..1], n).await) {
             entries.push(e);
         }
-        if let Ok(r) = http.get(format!("{base}/_dd/leaving/{n}")).send().await
+        if let Ok(r) = directory::read(&http, &format!("{base}/_dd/leaving/{n}"))
+            .send()
+            .await
             && r.status().is_success()
             && let Ok(v) = r.json::<serde_json::Value>().await
             && v["statement"]["leave"]["back"].as_bool() != Some(true)

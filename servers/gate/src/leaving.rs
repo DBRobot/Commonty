@@ -553,8 +553,16 @@ async fn done(State(c): State<Arc<Ctx>>, Json(x): Json<Done>) -> Response {
 }
 
 /// GET /_dd/leaving/{name}: the newest statement, signed, for the mail
-/// Worker to check for itself; names and roots are public already
-async fn statement(State(c): State<Arc<Ctx>>, Path(name): Path<String>) -> Response {
+/// Worker to check for itself. It names a member and their root, so it is
+/// read as their entry is: by members, the member, or the Worker's read key
+async fn statement(
+    State(c): State<Arc<Ctx>>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !c.d.may_read(&headers, Some(&name)) {
+        return crate::directory::refused();
+    }
     match c.d.leaving.said(&name) {
         Some(s) => Json(serde_json::json!({ "statement": s.statement, "agreed": s.agreed }))
             .into_response(),

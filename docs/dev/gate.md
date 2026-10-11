@@ -866,7 +866,7 @@ path                                        method   what                       
 /_dd/leave/start                            POST     a statement for the root passkey          session; member to leave,
                                                                                                someone who left to come back
 /_dd/leave/sign                             POST     the passkey's answer, into the log        session + the ceremony
-/_dd/leaving/{name}                         GET      the newest signed statement               anyone (the mail Worker)
+/_dd/leaving/{name}                         GET      the newest signed statement               as its entry: member; the person; a key in it; a reader key (the mail Worker)
 /_dd/leaving/{name}                         PUT      a statement `dd leave` signed             the root's signature
 /internal/leaving                           GET      who left, when, due, done by whom         local (the deleting units)
 /internal/leaving/done                      POST     a service deleted its share               local

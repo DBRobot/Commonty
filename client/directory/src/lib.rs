@@ -250,6 +250,12 @@ pub async fn names(dir: &str) -> Result<Vec<String>> {
         .collect())
 }
 
+/// a GET of something else a directory box keeps for members (its
+/// /_dd/leaving statements): with this device's token, as every read here
+pub fn read(http: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+    read_request(http, url, None, &[])
+}
+
 /// what one directory said to a publish
 pub enum Took {
     Accepted,
