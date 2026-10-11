@@ -205,6 +205,11 @@ async fn serve<R: Runtime>(
     if path == "/_dd/app/remove" && req.method() == "POST" {
         return remove(app, req.body()).await;
     }
+    // the Leave tab's downloads, written to the Downloads folder here
+    // (export.rs): the window's scheme cannot stream a download
+    if path.starts_with("/_dd/app/export") {
+        return Ok(export(app, &req, &path).await);
+    }
     if path == "/_dd/app/leaving" && req.method() == "POST" {
         return Ok(match leave(app, req.body()).await {
             Ok(v) => json_response(&v),
@@ -229,7 +234,12 @@ async fn serve<R: Runtime>(
         return Ok(asset(app, "vault.js"));
     }
     if path == "/_dd/app/vault/state" {
-        return crate::local::vault_state(app);
+        let to = req
+            .uri()
+            .query()
+            .and_then(|q| crate::handoff::query(q, "to"))
+            .map(crate::handoff::dec);
+        return crate::local::vault_state(app, to.as_deref());
     }
     // a browser asking to open Photos or Passwords (local.rs): the page
     // where the member lets it in by the code both show
@@ -280,6 +290,51 @@ async fn serve<R: Runtime>(
         return proxy(app, req).await;
     }
     Ok(plain(StatusCode::NOT_FOUND, "not in the app"))
+}
+
+async fn export<R: Runtime>(
+    app: &AppHandle<R>,
+    req: &Request<Vec<u8>>,
+    path: &str,
+) -> Response<Vec<u8>> {
+    use crate::export::{self as x, Owner};
+    let id = req
+        .uri()
+        .query()
+        .and_then(|q| crate::handoff::query(q, "id"))
+        .map(crate::handoff::dec)
+        .unwrap_or_default();
+    let refused = |(code, why): x::Refused| {
+        plain(
+            StatusCode::from_u16(code).unwrap_or(StatusCode::FORBIDDEN),
+            &why,
+        )
+    };
+    let done = |r: Result<serde_json::Value, x::Refused>| match r {
+        Ok(v) => no_store(&v),
+        Err(e) => refused(e),
+    };
+    let me = Owner::Window;
+    match (req.method().as_str(), path) {
+        ("POST", "/_dd/app/export") => {
+            let v: serde_json::Value = serde_json::from_slice(req.body()).unwrap_or_default();
+            match v["kind"].as_str().and_then(x::Kind::of) {
+                Some(kind) => done(x::start(app, me, kind).await),
+                None => plain(StatusCode::BAD_REQUEST, "photos or files"),
+            }
+        }
+        ("GET", "/_dd/app/export/state") => done(x::state(&me, &id)),
+        ("POST", "/_dd/app/export/chunk") if req.body().len() <= x::MOST => done(
+            x::chunk(&me, &id, req.body().clone())
+                .await
+                .map(|()| serde_json::json!({})),
+        ),
+        ("POST", "/_dd/app/export/end") => done(x::end(&me, &id).await),
+        ("POST", "/_dd/app/export/cancel") => {
+            done(x::cancel(&me, &id).await.map(|()| serde_json::json!({})))
+        }
+        _ => plain(StatusCode::NOT_FOUND, "no such download"),
+    }
 }
 
 /// This device's token for the services, made here and kept for most of

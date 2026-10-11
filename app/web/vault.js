@@ -4,8 +4,22 @@
 // its session - and the gate sends it back here; then on to the vault.
 const secret = () => ({ 'x-dd-app': document.querySelector('meta[name="dd-app"]')?.content || '' });
 
+// where in the vault to land (?to=, the Leave tab's Export), kept across
+// the sign-in at the gate, which comes back with ?signed alone
+function landing() {
+  const asked = new URLSearchParams(location.search).get('to');
+  try {
+    if (asked) sessionStorage.setItem('dd-vault-to', asked);
+    else if (!new URLSearchParams(location.search).get('signed')) sessionStorage.removeItem('dd-vault-to');
+    return asked || sessionStorage.getItem('dd-vault-to') || '';
+  } catch {
+    return asked || '';
+  }
+}
+
 async function go() {
-  const r = await fetch('/_dd/app/vault/state', { headers: secret() });
+  const to = landing();
+  const r = await fetch('/_dd/app/vault/state' + (to ? `?to=${encodeURIComponent(to)}` : ''), { headers: secret() });
   if (!r.ok) throw new Error(await r.text());
   const s = await r.json();
   if (new URLSearchParams(location.search).get('signed')) {

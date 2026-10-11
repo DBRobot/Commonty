@@ -115,3 +115,22 @@
 .ad-ok svg { width: 28px; height: 28px; }
 .ad-dialog .bad { color: var(--bk-bad); margin: 10px 0 0; text-align: center; font-size: 14px; }
 .nw-health .bad { color: var(--bk-bad); font-weight: 600; }
+/* Leave: taking everything out, a row for each kind of thing */
+.lv-take { display: grid; }
+.lv-item { border-bottom: 1px solid var(--line-2); }
+.lv-item:last-child { border-bottom: 0; }
+.lv-row { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 13px 16px; }
+.lv-what h3 { margin: 0; font-size: 15px; }
+.lv-what p { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; }
+.lv-act { display: flex; gap: 8px; }
+.lv-act button { margin: 0; height: 36px; padding: 0 14px; font-size: 14px; }
+.lv-item .bk-list { border-top: 1px solid var(--line-2); }
+.lv-item .bk-note { padding: 0 16px 13px; }
+.lv-progress { padding: 0 16px 14px; }
+.lv-progress[hidden] { display: none; }
+.lv-progress progress { width: 100%; height: 8px; accent-color: var(--accent); }
+.lv-status { margin: 6px 0 0; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.lv-status.bad { color: var(--bk-bad); }
+/* said once at each step for a screen reader, not every second */
+.lv-said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
+@media (max-width: 600px) { .lv-act { width: 100%; } .lv-act button { flex: 1; } }

@@ -21,6 +21,8 @@ pub struct Photo {
     pub kind: i64,
     /// the albums it is in
     pub albums: Vec<i64>,
+    /// its stored size, sealed, when museum says
+    pub size: Option<u64>,
     key: Vec<u8>,
     thumbnail: String,
     file: String,
@@ -38,6 +40,9 @@ pub struct Gallery {
 pub struct Album {
     pub id: i64,
     pub name: String,
+    /// Ente's kind of collection: "album", "folder", "favorites", or
+    /// "uncategorized" for what is in no album
+    pub kind: String,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +59,8 @@ struct Collection {
     name_decryption_nonce: Option<String>,
     #[serde(default)]
     is_deleted: bool,
+    #[serde(default, rename = "type")]
+    kind: String,
 }
 
 #[derive(Deserialize)]
@@ -75,6 +82,15 @@ struct File {
     #[serde(default)]
     is_deleted: bool,
     updation_time: i64,
+    #[serde(default)]
+    info: Option<Info>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Info {
+    #[serde(default)]
+    file_size: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -134,7 +150,29 @@ fn open(sealed: &str, nonce: &str, key: &[u8]) -> Result<Vec<u8>> {
 
 impl Gallery {
     pub async fn sign_in(origin: &str, email: &str, password: &str) -> Result<Self> {
-        let client = crate::client(origin)?;
+        Self::sign_in_with(
+            origin,
+            origin,
+            email,
+            password,
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()?,
+        )
+        .await
+    }
+
+    /// The same, for a caller that reaches museum its own way: the sign-in
+    /// through `login` (an address that leads to museum), and everything
+    /// after with `http`, at `origin`
+    pub async fn sign_in_with(
+        login: &str,
+        origin: &str,
+        email: &str,
+        password: &str,
+        http: reqwest::Client,
+    ) -> Result<Self> {
+        let client = crate::client(login)?;
         let mut ui = NoUi;
         let account = AuthFlow::new(&client, &mut ui)
             .login(LoginParams {
@@ -146,9 +184,7 @@ impl Gallery {
             origin: origin.trim_end_matches('/').to_string(),
             // museum reads the token as url-safe base64, as Ente's apps send it
             token: b64::encode_url_safe(&account.secrets.token),
-            http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()?,
+            http,
             master: Zeroizing::new(account.secrets.master_key.clone()),
         })
     }
@@ -206,7 +242,11 @@ impl Gallery {
                     .unwrap_or_default(),
                 _ => c.name.clone().unwrap_or_default(),
             };
-            albums.push(Album { id: c.id, name });
+            albums.push(Album {
+                id: c.id,
+                name,
+                kind: c.kind.clone(),
+            });
             let mut since = 0i64;
             loop {
                 let d: Diff = self
@@ -252,6 +292,7 @@ impl Gallery {
                     seen.insert(f.id, out.len());
                     out.push(Photo {
                         albums: vec![c.id],
+                        size: f.info.as_ref().and_then(|i| i.file_size),
                         id: f.id,
                         title: meta["title"].as_str().unwrap_or_default().to_string(),
                         taken: meta["creationTime"].as_i64().unwrap_or(f.updation_time),
@@ -309,6 +350,28 @@ impl Gallery {
         .await
     }
 
+    /// Any original - an image, a video, a live photo (Ente keeps that as a
+    /// zip of its two halves) - opened as it comes, a piece at a time
+    pub async fn original_stream(&self, p: &Photo) -> Result<Original> {
+        let resp = self
+            .http
+            .get(format!("{}/files/download/v2/{}", self.origin, p.id))
+            .header("X-Auth-Token", &self.token)
+            .header("X-Client-Package", "org.commonty.client")
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(Original {
+            resp,
+            buf: Vec::new(),
+            dec: crypto::stream::Decryptor::new(
+                &crypto::Header::try_from_slice(&b64::decode(&p.file)?)?,
+                &crypto::Key::try_from_slice(&p.key)?,
+            ),
+            done: false,
+        })
+    }
+
     /// the image itself, for an image only, and up to `cap` bytes
     pub async fn original(&self, p: &Photo, cap: usize) -> Result<Vec<u8>> {
         if p.kind != 0 {
@@ -316,5 +379,69 @@ impl Gallery {
         }
         self.fetch(format!("/files/download/v2/{}", p.id), &p.file, &p.key, cap)
             .await
+    }
+}
+
+impl Photo {
+    /// a photo with no key, for a test of what is done with its name and
+    /// albums
+    #[doc(hidden)]
+    pub fn for_test(id: i64, title: &str, kind: i64, albums: Vec<i64>) -> Photo {
+        Photo {
+            id,
+            title: title.into(),
+            taken: 0,
+            kind,
+            albums,
+            size: None,
+            key: Vec::new(),
+            thumbnail: String::new(),
+            file: String::new(),
+        }
+    }
+}
+
+/// An original as it downloads: `next` hands back its plain bytes a chunk
+/// (4 MiB) at a time, and None at its end
+pub struct Original {
+    resp: reqwest::Response,
+    buf: Vec<u8>,
+    dec: crypto::stream::Decryptor,
+    done: bool,
+}
+
+impl Original {
+    pub async fn next(&mut self) -> Result<Option<Vec<u8>>> {
+        const CHUNK: usize = crypto::stream::DECRYPTION_CHUNK_SIZE;
+        loop {
+            if self.done {
+                return Ok(None);
+            }
+            if self.buf.len() >= CHUNK {
+                let rest = self.buf.split_off(CHUNK);
+                let chunk = std::mem::replace(&mut self.buf, rest);
+                let (plain, last) = self.dec.pull(&chunk).context("decrypting")?;
+                self.done = last;
+                if last && !self.buf.is_empty() {
+                    return Err(anyhow!("more after the end"));
+                }
+                return Ok(Some(plain));
+            }
+            match self.resp.chunk().await? {
+                Some(b) => self.buf.extend_from_slice(&b),
+                None => {
+                    if self.buf.is_empty() {
+                        return Err(anyhow!("cut short"));
+                    }
+                    let chunk = std::mem::take(&mut self.buf);
+                    let (plain, last) = self.dec.pull(&chunk).context("decrypting")?;
+                    if !last {
+                        return Err(anyhow!("cut short"));
+                    }
+                    self.done = true;
+                    return Ok(Some(plain));
+                }
+            }
+        }
     }
 }

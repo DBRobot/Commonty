@@ -10,18 +10,53 @@ effect ([below](#announcing-a-change)).
 ## Taking things out
 
 Settings has a **Leave** tab
-([leave.js](../../servers/home/web/leave.js)) that says how to take each
-thing out, and links here and to [libraries.md](libraries.md) for the
-terminal way. No command is on the page.
+([leave.js](../../servers/home/web/leave.js)) whose **Take your things with
+you** downloads everything from the page itself, where the app serves it
+(its window, or a browser it let in): no links off to the services, and no
+command. A plain browser of a member says they work from the app, or a
+browser let in from it.
 
 ```
-Files & Movies   the Files page's Download, a file or a selection at a time;
-                 a whole library with `dd library get` (libraries.md)
-Photos           Ente's own download, an album or a selection; Ente's desktop
-                 app exports everything at once
-Passwords        the web vault in the app: Tools, Export vault
-Disk images      Settings, Backups, Download; or `dd image pull`
+Files & Movies   one zip of the whole library, made in the page: walked by
+                 PROPFIND, each file read by ranges and opened with the key
+                 the app hands over (/_dd/app/library, library.js pieces), and
+                 written as it goes (zip.js: stored, zip64, a descriptor
+                 after each file)
+Photos           one zip of every original, made by the app (export.rs): it
+                 signs in to Ente with the password it holds, lists with
+                 client/ente's photos(), and opens each original as it
+                 downloads (Original); a folder for each photo's first album
+                 by name, "Not in an album" for the rest
+Disk images      Backups' own list and Download (backups.js `images`), without
+                 Delete
+Passwords        the vault opened on its own Export screen (/#/tools/export):
+                 the member types their master password there; nobody else
+                 ever holds it
 ```
+
+**Where a zip goes.** Never whole in memory. In a browser the app let in,
+the page starts a job (`POST /_dd/app/export {kind}`) and opens its
+download (`GET /_dd/app/export/zip?id=`), which the app streams as the zip
+is made: Photos' by the app, Files' from the page in pieces of about 8 MiB
+(`POST /_dd/app/export/chunk`, then `end`), a few pieces in flight at most,
+so a slow download holds the making back. The app's window cannot stream
+an answer on its scheme, so there the app writes the zip to the Downloads
+folder (site.rs, the same routes behind the launch secret) and the page
+says where. Its window on Android takes no request body, so there the page
+keeps a library's zip as a Blob of pieces; elsewhere without the app,
+a file the person picks (`showSaveFilePicker`) takes it. Progress is the
+page's own count for Files and `GET /_dd/app/export/state` for Photos;
+**Cancel** stops the job (`POST /_dd/app/export/cancel`), breaks the
+download off and removes a half-written file. A job is its starter's alone:
+the window's, or one browser session's (`export::Owner`), behind the same
+guards as `/_dd/app/library`.
+
+**Photos' sign-in.** Ente's sign-in reaches museum with an HTTP client of
+its own, which does not know the fleet's network. For the moment it takes,
+the app passes it on from an address on loopback under a random path, to
+museum alone and carrying none of the device's credentials (`relay`);
+everything after goes through the fleet's network with the app's own
+client, with no overall timeout, since an original can be large.
 
 ## Leaving, and being removed
 

@@ -85,7 +85,6 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
   organisation, hand it to someone first, or the deletion waits.
   See [Leaving](../leaving.md).
 - **Taking it with you:** use **Export vault** in the vault's Tools.
-  <!-- coming: the Leave page opens the vault's own Export screen -->
   The Leave tab in Settings opens the vault's own Export screen, where you
   type your master password.
 

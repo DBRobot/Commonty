@@ -71,7 +71,6 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
 - **Leaving:** everything is kept, locked, for 30 days in case you come
   back, then deleted. See [Leaving](../leaving.md).
 - **Taking it with you:** download files from the page.
-  <!-- coming: the Leave page downloads Files and Movies as one zip -->
   The Leave tab in Settings downloads Files and Movies & TV as one zip.
 
 ## Limits

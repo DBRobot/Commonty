@@ -68,9 +68,8 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
   then deleted, and its files are gone within 90 days. See
   [Leaving](../leaving.md).
 - **Taking it with you:** download an album or a selection from Photos.
-  <!-- coming: every photo as a zip, through the app, from the Leave page -->
-  The Leave tab in Settings downloads every photo as one zip, through the
-  app.
+  The Leave tab in Settings downloads every photo and video as one zip,
+  through the app, in a folder for each album.
 
 ## Limits
 

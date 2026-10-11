@@ -155,17 +155,55 @@ export async function put(lib, path, file, progress) {
   }
 }
 
-async function range(url, from, to) {
-  const r = await fetch(url, { headers: { range: `bytes=${from}-${to}` } });
+async function range(url, from, to, signal) {
+  const r = await fetch(url, { headers: { range: `bytes=${from}-${to}` }, signal });
   if (r.status !== 206 && r.status !== 200) throw new Error(`the gate said ${r.status}`);
   return new Uint8Array(await r.arrayBuffer());
+}
+
+/// A file's plain bytes, a piece at a time (96 blocks, 6 MiB), read by
+/// ranges and opened here: never the whole file in memory. The next piece
+/// is asked for while this one is used.
+export async function* pieces(lib, item, signal) {
+  const url = dav(lib, item.path);
+  if (item.sealed <= HEADER) return;
+  const opener = new Opener(lib.key, lib.id, await range(url, 0, HEADER - 1, signal));
+  try {
+    const step = PIECE_BLOCKS * SEALED_BLOCK;
+    const at = (off) => range(url, off, Math.min(off + step, item.sealed) - 1, signal);
+    let next = at(HEADER);
+    for (let off = HEADER, block = 0; off < item.sealed; off += step, block += PIECE_BLOCKS) {
+      const sealed = await next;
+      if (off + step < item.sealed) {
+        next = at(off + step);
+        next.catch(() => {});
+      }
+      yield opener.open(block, sealed);
+    }
+  } finally {
+    opener.free();
+  }
+}
+
+/// Every file and folder in the library, from `dir` down: folders before
+/// what is in them. `seen(count)` as they are found.
+export async function walk(lib, dir = '', seen) {
+  const out = [];
+  const go = async (d) => {
+    for (const e of await list(lib, d)) {
+      out.push(e);
+      if (e.dir) await go(e.path);
+    }
+    seen?.(out.length);
+  };
+  await go(dir);
+  return out;
 }
 
 /// A file out of the library by ranges, opened a piece at a time: straight
 /// to a file the person picks where the browser allows it, otherwise into
 /// a Blob of pieces, which a browser keeps on disk when it is large.
 export async function download(lib, item, progress) {
-  const url = dav(lib, item.path);
   let sink = null;
   if (window.showSaveFilePicker) {
     try {
@@ -174,23 +212,20 @@ export async function download(lib, item, progress) {
       if (e.name === 'AbortError') return;
     }
   }
-  const opener = new Opener(lib.key, lib.id, await range(url, 0, HEADER - 1));
   try {
-    const step = PIECE_BLOCKS * SEALED_BLOCK;
-    const pieces = [];
-    for (let off = HEADER, block = 0; off < item.sealed; off += step, block += PIECE_BLOCKS) {
-      const plain = opener.open(block, await range(url, off, Math.min(off + step, item.sealed) - 1));
+    const kept = [];
+    let done = 0;
+    for await (const plain of pieces(lib, item)) {
       if (sink) await sink.write(plain);
-      else pieces.push(new Blob([plain]));
-      progress?.(Math.min((block + PIECE_BLOCKS) * BLOCK, item.size), item.size);
+      else kept.push(new Blob([plain]));
+      done += plain.length;
+      progress?.(Math.min(done, item.size), item.size);
     }
     if (sink) await sink.close();
-    else save(new Blob(pieces), item.name);
+    else save(new Blob(kept), item.name);
   } catch (e) {
     if (sink) await sink.abort().catch(() => {});
     throw e;
-  } finally {
-    opener.free();
   }
 }
 

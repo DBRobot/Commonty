@@ -4514,6 +4514,10 @@ rec {
             packageId = "ed25519-dalek";
           }
           {
+            name = "ente";
+            packageId = "ente";
+          }
+          {
             name = "futures-util";
             packageId = "futures-util";
           }

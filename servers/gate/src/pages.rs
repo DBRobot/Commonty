@@ -274,6 +274,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "zip.js",
+        "servers/home/web/zip.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "storage.css",
         "servers/home/web/storage.css",
         "text/css; charset=utf-8",
@@ -892,6 +897,24 @@ mod tests {
         }
         assert!(static_file("redeem.js").is_none());
         assert!(static_file("nope").is_none());
+    }
+
+    /// A page's script that imports a sibling the gate does not serve
+    /// fails whole, and the page with it (leave.js and its zip.js)
+    #[test]
+    fn every_script_a_script_imports_is_served() {
+        for (name, _, kind) in STATIC {
+            if !kind.starts_with("text/javascript") {
+                continue;
+            }
+            let src = text(name);
+            for part in src.split("from './").skip(1) {
+                let Some(dep) = part.split('\'').next() else {
+                    continue;
+                };
+                assert!(static_file(dep).is_some(), "{name} imports {dep}");
+            }
+        }
     }
 
     /// The browser's sign-up asks month and year of birth, nothing chosen,

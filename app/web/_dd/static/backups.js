@@ -14,11 +14,19 @@ const $ = (id) => document.getElementById(id);
 
 const ROOT = '/_dd/images/';
 
+// Where the list is drawn: Backups' own tab, and the Leave tab's "Take your
+// things with you", which lists the same images to download and none to
+// delete. One archive, opened once, behind both.
+const views = [];
+const tab = () => ({ msg: $('msg'), list: $('list'), total: $('total'), delete: true });
+
 function say(text, html) {
-  $('msg').hidden = false;
-  $('list').hidden = true;
-  if (html) $('msg').innerHTML = html;
-  else $('msg').textContent = text;
+  for (const v of views) {
+    v.msg.hidden = false;
+    v.list.hidden = true;
+    if (html) v.msg.innerHTML = html;
+    else v.msg.textContent = text;
+  }
 }
 
 async function listing(dir) {
@@ -117,9 +125,12 @@ let indexed = Promise.resolve();
 let onBox = 0;
 
 function total() {
-  $('total').textContent = snaps.length
-    ? `${snaps.length} ${snaps.length === 1 ? 'image' : 'images'} · ${human(onBox)} on the box`
-    : '';
+  for (const v of views) {
+    if (!v.total) continue;
+    v.total.textContent = snaps.length
+      ? `${snaps.length} ${snaps.length === 1 ? 'image' : 'images'} · ${human(onBox)} on the box`
+      : '';
+  }
 }
 
 function render() {
@@ -128,9 +139,13 @@ function render() {
     say('No disk images yet.');
     return;
   }
-  $('msg').hidden = true;
-  $('list').hidden = false;
-  $('list').replaceChildren(...snaps.map(row));
+  for (const v of views) draw(v);
+}
+
+function draw(v) {
+  v.msg.hidden = true;
+  v.list.hidden = false;
+  v.list.replaceChildren(...snaps.map((s) => row(s, v.delete)));
 }
 
 function el(tag, cls, text) {
@@ -140,8 +155,9 @@ function el(tag, cls, text) {
   return e;
 }
 
-function row(s) {
+function row(s, deletable = true) {
   const li = el('li', 'bk-item');
+  li.dataset.id = s.id;
   const icon = el('span', 'bk-icon');
   icon.innerHTML = DISK;
   const text = el('div');
@@ -153,20 +169,23 @@ function row(s) {
   rest();
   text.append(el('div', 'bk-name', s.label || s.id.slice(0, 8)), meta);
   const actions = el('div', 'bk-actions');
+  const name = s.label || s.id.slice(0, 8);
   const down = el('button', '', 'Download');
-  const del = el('button', 'danger', 'Delete');
-  actions.append(down, del);
+  down.setAttribute('aria-label', `Download ${name}`);
+  const del = deletable ? el('button', 'danger', 'Delete') : null;
+  del?.setAttribute('aria-label', `Delete ${name}`);
+  actions.append(...[down, del].filter(Boolean));
   li.append(icon, text, actions);
   const ui = { li, icon, meta, actions, down, del, rest };
   down.onclick = () => download(s, ui).catch((e) => failRow(ui, e));
-  del.onclick = () => ask(s, ui);
+  if (del) del.onclick = () => ask(s, ui);
   return li;
 }
 
 function failRow(ui, e) {
   ui.icon.className = 'bk-icon';
   ui.icon.innerHTML = DISK;
-  ui.actions.replaceChildren(ui.down, ui.del);
+  ui.actions.replaceChildren(...[ui.down, ui.del].filter(Boolean));
   ui.meta.className = 'bk-meta bad';
   ui.meta.textContent = String(e.message || e);
 }
@@ -272,7 +291,7 @@ async function download(s, ui) {
     }
     ui.icon.className = 'bk-icon';
     ui.icon.innerHTML = DISK;
-    ui.actions.replaceChildren(ui.down, ui.del);
+    ui.actions.replaceChildren(...[ui.down, ui.del].filter(Boolean));
     ui.rest();
   } catch (e) {
     for (const p of pending) p.catch(() => {});
@@ -353,7 +372,7 @@ async function remove(s, ui) {
     const r = await fetch(ROOT + 'snapshots/' + s.id, { method: 'DELETE' });
     await must(r);
     snaps = snaps.filter((x) => x.id !== s.id);
-    ui.li.remove();
+    for (const v of views) v.list.querySelector(`[data-id="${CSS.escape(s.id)}"]`)?.remove();
     if (!snaps.length) render();
 
     // read again: what is on the box now is what counts
@@ -396,7 +415,7 @@ async function remove(s, ui) {
       await del(packPath(id));
       freed += sizes.get(id) || 0;
       n++;
-      if (snaps.length) $('total').textContent = `Freeing space · ${n} of ${packs.length}`;
+      if (snaps.length) for (const v of views) if (v.total) v.total.textContent = `Freeing space · ${n} of ${packs.length}`;
     });
     onBox = Math.max(0, onBox - freed);
     total();
@@ -406,17 +425,32 @@ async function remove(s, ui) {
   }
 }
 
-let started = false;
+let started = null;
+let shown = false;
 
 /// the Backups tab, the first time it is shown
 export async function start() {
-  if (started) return;
-  started = true;
-  try {
-    await show();
-  } catch (e) {
-    say(String(e.message || e));
+  return images(tab());
+}
+
+/// The same images drawn into another place too (`view`: its msg and list
+/// elements, a total if it has one, and whether a row may be deleted)
+export async function images(view) {
+  if (!views.some((v) => v.list === view.list)) {
+    views.push(view);
+    if (shown && snaps.length) draw(view);
+    else if (shown) {
+      view.msg.hidden = false;
+      view.msg.innerHTML = views[0].msg.innerHTML;
+    }
+    total();
   }
+  if (!started) {
+    started = show()
+      .catch((e) => say(String(e.message || e)))
+      .finally(() => { shown = true; });
+  }
+  return started;
 }
 
 async function show() {

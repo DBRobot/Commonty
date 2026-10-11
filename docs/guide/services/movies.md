@@ -65,7 +65,6 @@ film **30 days**, and everything is gone from every box within **90
 days**. Where you stopped in each film is replaced at each save, not
 kept in the trash.
 
-<!-- coming: the Leave page downloads Files and Movies as one zip -->
 The Leave tab in Settings downloads Files and Movies & TV as one zip.
 
 ## Limits

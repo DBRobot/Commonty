@@ -373,7 +373,7 @@ async fn handle<R: Runtime>(State(site): State<Arc<Site<R>>>, req: Request) -> R
     match site.which {
         Which::Photos => photos(&site, req, &path, &via).await,
         Which::Vault => vault(&site, req, &path).await,
-        Which::Site => site_pages(&site, req, &path).await,
+        Which::Site => site_pages(&site, req, &path, &via).await,
     }
 }
 
@@ -657,7 +657,7 @@ async fn photos<R: Runtime>(site: &Site<R>, req: Request, path: &str, via: &Via)
 /// key and the archive password from this device's keys, and every other
 /// call sent on to the boxes with this device's token. What a box answers
 /// is data: `forward` refuses anything a page would run.
-async fn site_pages<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Response {
+async fn site_pages<R: Runtime>(site: &Site<R>, req: Request, path: &str, via: &Via) -> Response {
     if let Some(p) = crate::site::page_for(path) {
         return match site.app.asset_resolver().get(format!("_dd/pages/{p}.html")) {
             Some(a) => Response::builder()
@@ -709,6 +709,9 @@ async fn site_pages<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Res
                 Err((st, why)) => plain(st, &why),
             };
         }
+        // taking everything out, from the Leave tab: this browser's own
+        // downloads (export.rs)
+        p if p.starts_with("/_dd/app/export") => return export_route(site, via, req, p).await,
         // a device is added or removed with the account's main key, from the
         // app's own window only (site.rs)
         p if p.starts_with("/_dd/app/") => {
@@ -733,6 +736,77 @@ async fn site_pages<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Res
         return forward(&base, Some(&token), req, false).await;
     }
     plain(StatusCode::NOT_FOUND, "not in the app")
+}
+
+/// The Leave tab's downloads, for the browser session that started them
+/// (export.rs): start one, open it, follow it, feed the library's zip in,
+/// end or stop it
+async fn export_route<R: Runtime>(site: &Site<R>, via: &Via, req: Request, path: &str) -> Response {
+    let Via::Browser(label) = via else {
+        return plain(StatusCode::FORBIDDEN, "not let in");
+    };
+    let owner = crate::export::Owner::Browser(label.clone());
+    let q = req.uri().query().unwrap_or("").to_string();
+    let id = handoff::query(&q, "id")
+        .map(handoff::dec)
+        .unwrap_or_default();
+    let refused = |(code, why): crate::export::Refused| {
+        plain(
+            StatusCode::from_u16(code).unwrap_or(StatusCode::FORBIDDEN),
+            &why,
+        )
+    };
+    let method = req.method().as_str().to_string();
+    match (method.as_str(), path) {
+        ("POST", "/_dd/app/export") => {
+            let Ok(body) = axum::body::to_bytes(req.into_body(), 4096).await else {
+                return plain(StatusCode::BAD_REQUEST, "too much");
+            };
+            let v: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+            let Some(kind) = v["kind"].as_str().and_then(crate::export::Kind::of) else {
+                return plain(StatusCode::BAD_REQUEST, "photos or files");
+            };
+            match crate::export::start(&site.app, owner, kind).await {
+                Ok(v) => json(StatusCode::OK, v),
+                Err(e) => refused(e),
+            }
+        }
+        ("GET", "/_dd/app/export/zip") => match crate::export::take_download(&owner, &id) {
+            Ok((stream, name)) => Response::builder()
+                .header(header::CONTENT_TYPE, "application/zip")
+                .header(
+                    header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"{name}\""),
+                )
+                .header(header::CACHE_CONTROL, "no-store")
+                .header("x-content-type-options", "nosniff")
+                .body(Body::from_stream(stream))
+                .unwrap_or_default(),
+            Err(e) => refused(e),
+        },
+        ("GET", "/_dd/app/export/state") => match crate::export::state(&owner, &id) {
+            Ok(v) => json(StatusCode::OK, v),
+            Err(e) => refused(e),
+        },
+        ("POST", "/_dd/app/export/chunk") => {
+            let Ok(body) = axum::body::to_bytes(req.into_body(), crate::export::MOST).await else {
+                return plain(StatusCode::PAYLOAD_TOO_LARGE, "too much at once");
+            };
+            match crate::export::chunk(&owner, &id, body.to_vec()).await {
+                Ok(()) => StatusCode::NO_CONTENT.into_response(),
+                Err(e) => refused(e),
+            }
+        }
+        ("POST", "/_dd/app/export/end") => match crate::export::end(&owner, &id).await {
+            Ok(v) => json(StatusCode::OK, v),
+            Err(e) => refused(e),
+        },
+        ("POST", "/_dd/app/export/cancel") => match crate::export::cancel(&owner, &id).await {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(e) => refused(e),
+        },
+        _ => plain(StatusCode::NOT_FOUND, "no such download"),
+    }
 }
 
 async fn vault<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Response {
@@ -878,7 +952,12 @@ async fn file(root: Option<&Path>, path: &str, shell: bool) -> Response {
 /// the gate. `same_site`: the box is the page's own server (Vaultwarden),
 /// so its redirects to itself come back here, and its sign-in's binding
 /// cookie passes both ways.
-async fn forward(base: &str, bearer: Option<&str>, req: Request, same_site: bool) -> Response {
+pub(crate) async fn forward(
+    base: &str,
+    bearer: Option<&str>,
+    req: Request,
+    same_site: bool,
+) -> Response {
     let target = match req.uri().query() {
         Some(q) => format!("{base}{}?{q}", req.uri().path()),
         None => format!("{base}{}", req.uri().path()),
@@ -999,9 +1078,11 @@ async fn forward(base: &str, bearer: Option<&str>, req: Request, same_site: bool
 
 /// Passwords in the app's window: the gate's sign-in for the window (the
 /// vault's own sign-in goes through the gate and wants its session), then
-/// the app's own copy of the vault, through its door.
+/// the app's own copy of the vault, through its door, at `to` (a path of
+/// the vault's own, like its Export screen) or its front.
 pub fn vault_state<R: Runtime>(
     app: &AppHandle<R>,
+    to: Option<&str>,
 ) -> Result<tauri::http::Response<Vec<u8>>, String> {
     use auth::KeyStore as _;
     use tauri::Manager as _;
@@ -1027,7 +1108,12 @@ pub fn vault_state<R: Runtime>(
     let v = serde_json::json!({
         "action": format!("https://{host}/_dd/app/signin"),
         "token": token,
-        "door": door(true, "/")?,
+        "door": door(
+            true,
+            to.and_then(handoff::safe_then)
+                .filter(|t| !t.starts_with("/_dd/"))
+                .unwrap_or("/")
+        )?,
     });
     tauri::http::Response::builder()
         .header("content-type", "application/json")

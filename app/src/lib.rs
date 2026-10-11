@@ -5,6 +5,7 @@
 
 mod account;
 mod browser;
+mod export;
 mod handoff;
 mod local;
 mod net;
@@ -12,6 +13,7 @@ mod paths;
 mod photos;
 mod site;
 mod vpn;
+mod zip;
 
 /// the keystore this app keeps its device key in: its own, so an app beside
 /// `dd` on one machine is a device of its own

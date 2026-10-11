@@ -106,7 +106,9 @@ address the app opens the browser at holds no secret.
 The site's pages there are the very files the window carries
 (`app/carried`), served at `s-<session>.localhost:41660`; `/_dd/app/library`
 and `/_dd/app/archive` answer that browser's session alone (`handoff::admit`:
-the key is behind `Serve`, so behind the session's cookie), every other
+the key is behind `Serve`, so behind the session's cookie), so do the Leave
+tab's downloads (`/_dd/app/export`, each job its own session's;
+[leaving.md](leaving.md#taking-things-out)), every other
 call goes to the boxes with the device's token, Chat's to the model box,
 and nothing a box answers is code, nor any cookie but the vault's
 sign-in binding (`VW_SSO_BINDING`, host-only on the session's
@@ -256,6 +258,9 @@ app/src/      the window and its commands
   handoff.rs    pairing a browser, its sessions and names, links, admit
   account.rs    sign-up, recovery, joining by code, a browser passkey
   photos.rs     Photos' password: made here, shared signed, the move
+  export.rs     the Leave tab's zips: every photo, made here; a library's,
+                made in the page and carried to a download or a file
+  zip.rs        a zip written as it goes
   net.rs        the engine, through four C calls
   browser.rs    the system browser's proxy setting
   vpn.rs        Android's VPN

@@ -67,8 +67,8 @@ Every service's ratings are in the [Privacy policy](../policies/privacy.md); how
 - Images count against your storage allowance.
 - **Leaving:** your images are kept 30 days in case you come back, then
   deleted ([Leaving](leaving.md)).
-  <!-- coming: the Leave page downloads every disk image -->
-  The Leave tab in Settings downloads every disk image.
+  The Leave tab in Settings lists every disk image, each with its own
+  Download.
 
 ## Box backups
 

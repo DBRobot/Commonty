@@ -133,12 +133,44 @@
     <div class="se-pane" data-pane="leave" hidden>
       <section class="se-box" aria-labelledby="lv-take" id="lv-take-box" hidden>
         <header><h2 id="lv-take">Take your things with you</h2></header>
-        <dl class="se-rows">
-          <div class="se-row se-act"><dt>Files &amp; Movies</dt><dd>Download from Files, a file or a selection at a time<small>or a whole library from a terminal: <a id="lv-files-docs">how</a></small></dd><a class="button quiet" id="lv-files">Files</a></div>
-          <div class="se-row se-act"><dt>Photos</dt><dd>Download an album or a selection in Photos<small>Ente's desktop app can export everything at once</small></dd><a class="button quiet" id="lv-photos">Photos</a></div>
-          <div class="se-row"><dt>Passwords</dt><dd>In the Commonty app, open Passwords, then Tools, then Export vault<small>the file holds every password in the clear: keep it safe</small></dd></div>
-          <div class="se-row se-act"><dt>Disk images</dt><dd>Download each from Backups<small>or from a terminal: <a id="lv-images-docs">how</a></small></dd><a class="button quiet" href="#backups" data-tab="backups">Backups</a></div>
-        </dl>
+        <p class="se-hint" id="lv-not-app" hidden>These downloads work from the Commonty app, or from a browser you let in from it.</p>
+        <div class="lv-take">
+          <section class="lv-item" aria-labelledby="lv-files-h">
+            <div class="lv-row">
+              <div class="lv-what"><h3 id="lv-files-h">Files &amp; Movies</h3><p>Your whole library as one zip, with its folders and names.</p></div>
+              <div class="lv-act"><button id="lv-files-go" aria-describedby="lv-files-h">Download everything</button><button class="quiet" id="lv-files-stop" aria-label="Cancel the Files &amp; Movies download" hidden>Cancel</button></div>
+            </div>
+            <div class="lv-progress" id="lv-files-progress" hidden>
+              <progress id="lv-files-bar" max="1" value="0" aria-label="Files &amp; Movies download"></progress>
+              <p class="lv-status" id="lv-files-status"></p>
+              <p class="lv-said" id="lv-files-said" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+          <section class="lv-item" aria-labelledby="lv-photos-h">
+            <div class="lv-row">
+              <div class="lv-what"><h3 id="lv-photos-h">Photos</h3><p>Every photo and video as one zip, in a folder for each album.</p></div>
+              <div class="lv-act"><button id="lv-photos-go" aria-describedby="lv-photos-h">Download all photos</button><button class="quiet" id="lv-photos-stop" aria-label="Cancel the Photos download" hidden>Cancel</button></div>
+            </div>
+            <div class="lv-progress" id="lv-photos-progress" hidden>
+              <progress id="lv-photos-bar" max="1" value="0" aria-label="Photos download"></progress>
+              <p class="lv-status" id="lv-photos-status"></p>
+              <p class="lv-said" id="lv-photos-said" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+          <section class="lv-item" aria-labelledby="lv-images-h">
+            <div class="lv-row">
+              <div class="lv-what"><h3 id="lv-images-h">Disk images</h3><p>Each one, as it is.</p></div>
+            </div>
+            <p class="bk-note" id="lv-images-msg">Looking for your images…</p>
+            <ul class="bk-list" id="lv-images-list" aria-labelledby="lv-images-h" hidden></ul>
+          </section>
+          <section class="lv-item" aria-labelledby="lv-vault-h">
+            <div class="lv-row">
+              <div class="lv-what"><h3 id="lv-vault-h">Passwords</h3><p>Opens your vault's Export screen, where you type your master password.</p></div>
+              <div class="lv-act"><button id="lv-vault" aria-describedby="lv-vault-h">Open Export</button></div>
+            </div>
+          </section>
+        </div>
       </section>
       <section class="se-box" aria-labelledby="lv-h" id="lv-member" hidden>
         <header><h2 id="lv-h">Leave Commonty</h2></header>
@@ -146,10 +178,11 @@
         <p class="se-hint" id="lv-as-guest" hidden>You are signed out everywhere at once, your devices leave the network, and the game servers you were invited to close to you. Your account, your friends and your devices are kept for 30 days, in case you change your mind; then they are deleted.</p>
         <p class="se-hint" id="lv-as-waiting" hidden>You are signed out at once, and this account is deleted, so its name is free again. Until it is, you can sign in and come back.</p>
         <p class="se-hint" id="lv-device" hidden>Your account's key is on a device, not a passkey: leave from Settings in the Commonty app there.</p>
+        <p class="se-hint" id="lv-passkey" hidden>Your account's key is a passkey: leave from Settings on the website, signed in with it.</p>
         <footer><button class="danger" id="lv-go">Leave Commonty</button></footer>
       </section>
       <section class="se-box" aria-labelledby="lv-left-h" id="lv-left" hidden>
-        <header><h2 id="lv-left-h">You have left</h2></header>
+        <header><h2 id="lv-left-h" tabindex="-1">You have left</h2></header>
         <p class="se-hint">You left on <span id="lv-since"></span>. Everything of yours is kept until <span id="lv-until"></span>, then deleted from every box.</p>
         <p class="se-hint" id="lv-removed" hidden>You were removed by the person who runs this Commonty; only they can let you back in.</p>
         <footer><button id="lv-back">Come back</button></footer>

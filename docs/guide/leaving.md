@@ -8,15 +8,27 @@ gone from every box and every backup.
 
 Do this first: once you leave, your services no longer open.
 
-In Settings, open the **Leave** tab. Under **Take your things with you**:
-<!-- coming: the Leave page downloads straight from Settings -->
+In Settings, open the **Leave** tab. Under **Take your things with you**,
+each one downloads straight from there:
 
-- **Files & Movies:** one zip of everything.
-- **Disk images:** each one, as it is.
-- **Photos:** every photo as one zip, through the app.
-- **Passwords:** opens your vault's own **Export** screen. Type your
-  master password to export. The file holds every password in the clear,
-  so keep it safe and delete it when you are done.
+- **Files & Movies:** **Download everything** saves your whole library
+  as one zip, with its folders and names. It is unlocked on your device
+  as it downloads.
+- **Disk images:** each one is listed with its own **Download**, as it
+  is.
+- **Photos:** **Download all photos** saves every photo and video as one
+  zip, through the app, in a folder for each album. A photo in no album
+  is in **Not in an album**; a photo in several albums is in the first of
+  them by name.
+- **Passwords:** **Open Export** opens your vault's own **Export** screen.
+  Type your master password to export. The file holds every password in
+  the clear, so keep it safe and delete it when you are done.
+
+Each download shows how far it has got and about how long is left, and
+**Cancel** stops it. In the app's own window the zips are saved in your
+Downloads folder; in a browser they arrive as ordinary downloads. These
+downloads work from the Commonty app, or from a browser you let in from
+it ([Using a browser](browser.md)).
 
 You can also take things out at any time without leaving: download from
 Files, Photos or Backups as usual.
@@ -25,8 +37,9 @@ Files, Photos or Backups as usual.
 
 1. In Settings, **Leave** tab, press **Leave Commonty**.
 2. Confirm with your passkey, or in the app if your account's main key is
-   on a device.
-   <!-- coming: the Leave button works from the app-served Settings -->
+   on a device. An account whose main key is a passkey leaves from the
+   website, signed in with it; one whose key is on a device leaves from
+   the app, or a browser you let in from it.
 
 ## Every sign-in ends at once
 
