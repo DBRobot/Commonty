@@ -261,7 +261,11 @@ fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
     if todo.is_empty() {
         return Ok(());
     }
-    let _lock = lock()?;
+    // No lock here: a build order is the app's downloads, an hour's build
+    // at times, and holding the release's lock through it kept a box
+    // release waiting behind it (release 231). One order at a time is the
+    // dd-build unit's, which systemd never runs twice; the checked list is
+    // only appended to, a line at a time, and only read whole.
     let mut checked = read_checked();
     for job in todo {
         eprintln!("== order {id}: {}", job.name);
@@ -423,7 +427,9 @@ fn attest(drv: &str, path: &str, checked: &mut BTreeSet<String>) -> Result<Strin
         for (p, e) in &entries {
             if to_check.contains(p) {
                 let line = format!("{p} {}", e["narHash"].as_str().unwrap_or_default());
-                writeln!(f, "{line}")?;
+                // one write a line: a release's attestation and a build
+                // order may append at once, and their lines must not mix
+                f.write_all(format!("{line}\n").as_bytes())?;
                 checked.insert(line);
             }
         }
@@ -470,7 +476,8 @@ fn read_checked() -> BTreeSet<String> {
         .collect()
 }
 
-/// one attestation at a time: two would rebuild the same things twice
+/// one release's attestation at a time: two would rebuild the same
+/// things twice. A build order does not take it (orders)
 fn lock() -> Result<fs::File> {
     fs::create_dir_all(Path::new(CHECKED).parent().unwrap())?;
     let f = fs::File::create("/var/lib/dd-attest/lock")?;
