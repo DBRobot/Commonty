@@ -64,6 +64,7 @@ These pages are in four parts:
 - [The app](dev/app.md)
 - [Releasing the app](dev/app-release.md)
 - [The control plane](dev/control-plane.md)
+- [Storage: each box its own store](dev/storage.md)
 - [What each service needs from a box](dev/hardware.md)
 - [The mirror](dev/mirror.md)
 - [Nix: modules, roles and tests](dev/nix.md)
