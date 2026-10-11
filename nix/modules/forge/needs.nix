@@ -11,6 +11,7 @@
       "dd-forge-notify"
       "dd-usage-forgejo"
       "dd-forge-rules"
+      "dd-forget-forge" # its share of deleting whoever left
     ];
     # its repositories are on one box's disk, beside its database
     instances = 1;

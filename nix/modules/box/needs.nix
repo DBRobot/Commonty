@@ -112,6 +112,11 @@
   zfs-datasets = {
     what = "the datasets the box's services ask for, made and set on its pools (never destroyed)";
     everyBox = true;
+    # snapshots older than deleted data may last (storage/snapshots.nix)
+    units = [
+      "dd-snapshot-trim"
+      "zfs-snapshot-*"
+    ];
     base = {
       # node1, 2026-10-04: peak
       uses = {

@@ -121,6 +121,7 @@
     units = [
       "dd-storage-ledger"
       "dd-storage-forget-login"
+      "dd-forget-photos" # Photos' share of deleting whoever left, with the ledger's admin login
     ];
     instances = 1;
     base = {

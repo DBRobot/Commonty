@@ -5,6 +5,9 @@
     units = [
       "dd-vault-end"
       "dd-usage-vaultwarden"
+      "dd-vault-admin-token"
+      "dd-forget-passwords" # its share of deleting whoever left (docs/dev/leaving.md)
+      "dd-announce" # mail to members (modules/member-mail.nix) comes with the vault
     ];
     servesCode = true; # the web vault's page, where master passwords are typed
     base = {
