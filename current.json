@@ -1,8 +1,8 @@
 {
   "payload": {
-    "counter": 225,
-    "rev": "8c90f2be24330d264b15e87e645ba68db24037f1",
-    "issued": 1791676977,
+    "counter": 226,
+    "rev": "5e15ebc57fffa2fb9a47f62f434c007b4e348849",
+    "issued": 1791679207,
     "boxes": {
       "node1": {
         "path": "/nix/store/h42zfq1dx2zp23m0fj060lxzwx9dl356-nixos-system-node1-26.05.20260822.a9e6d84",
@@ -17,5 +17,5 @@
     }
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "TROs7JhLkK3hfmJp6IQF6iC2czlDqVW8WRZxjHjY34SFAxyauYT4nf7xgiWEvIM3aBOmocffxmeUNk/xjNcnAg=="
+  "signature": "A5zeTR96CxOQiBorKq/UvaX0itkkQQUQT1moWe7th94S2j0FIMU5UO8JuIZFsJHrwjC0stQ5aO6AaBsksA4sCg=="
 }
