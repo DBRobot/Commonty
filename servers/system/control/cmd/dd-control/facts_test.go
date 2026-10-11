@@ -36,3 +36,13 @@ func TestUsageIsNotAMetric(t *testing.T) {
 		t.Fatalf("a metric line became a fact: %v", f)
 	}
 }
+
+func TestTheHeartbeatCarriesTheLine(t *testing.T) {
+	d := t.TempDir()
+	n := filepath.Join(d, "net.prom")
+	_ = os.WriteFile(n, []byte("dd_net_metered 0\ndd_net_down_mbps 119.5\ndd_net_up_mbps 58.4\ndd_net_rtt_ms 4.3\n"), 0o644)
+	f := promFacts(n)
+	if f["net_metered"] != 0 || f["net_down_mbps"] != 119.5 || f["net_up_mbps"] != 58.4 || f["net_rtt_ms"] != 4.3 {
+		t.Fatalf("facts: %v", f)
+	}
+}

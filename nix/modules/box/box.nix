@@ -72,6 +72,11 @@
     default = [ ];
     description = "every disk the box has, by stable id, from its report: what smartd watches";
   };
+  options.dd.box.metered = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = "the house line is metered or capped (box.json internet.metered, the owner's word): nothing measures it, and placement keeps heavy traffic off it";
+  };
   options.dd.box.threads = lib.mkOption {
     type = lib.types.ints.positive;
     default = 1;

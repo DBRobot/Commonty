@@ -217,7 +217,9 @@ func facts() map[string]float64 {
 	// write (/var/lib/dd-facts): the release it runs, how its agent's last
 	// run ended, its last good backup. Here, a box's word reaches the
 	// fleet without any box reading another (servers/gate/src/fleet.rs).
-	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom") {
+	// and its line, measured daily (nix/modules/box/netspeed.nix): what
+	// placement weighs a service's traffic against
+	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom") {
 		f[name] = v
 	}
 	// what members keep here: not .prom, so none of it reaches Prometheus
@@ -300,6 +302,14 @@ func promFacts(files ...string) map[string]float64 {
 				out["release"] = v
 			case "dd_backup_last_success_seconds":
 				out["backup_last"] = v
+			case "dd_net_metered":
+				out["net_metered"] = v
+			case "dd_net_down_mbps":
+				out["net_down_mbps"] = v
+			case "dd_net_up_mbps":
+				out["net_up_mbps"] = v
+			case "dd_net_rtt_ms":
+				out["net_rtt_ms"] = v
 			case "dd_agent_info":
 				if strings.Contains(l, `result="ok"`) {
 					out["agent_ok"] = 1

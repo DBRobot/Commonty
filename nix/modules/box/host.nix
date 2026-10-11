@@ -32,6 +32,8 @@ in
       dd.box.owner = box.owner or null;
       dd.box.threads = hw.cpu.threads;
       dd.box.memoryBytes = hw.memoryBytes;
+      # a line its owner has not said is flat counts as metered
+      dd.box.metered = (box.internet or { }).metered or true;
       dd.box.disks = map (d: d.id) (hw.disks or [ ]);
       dd.box.gpus = map (g: { inherit (g) render driver encode; }) hw.gpus;
     }

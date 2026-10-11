@@ -46,6 +46,7 @@
     units = [
       "dd-locate"
       "dd-ports-check"
+      "dd-netspeed"
     ];
     everyBox = true;
     base = {

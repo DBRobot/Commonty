@@ -49,6 +49,7 @@ in
     ../modules/box/agent.nix
     ../modules/observe/thanos.nix
     ../modules/box/locate.nix
+    ../modules/box/netspeed.nix
     ../modules/net/box.nix
     ../modules/net/owner.nix
   ];
