@@ -65,8 +65,11 @@ fi
 winkey=false
 [ -e /sys/firmware/acpi/tables/MSDM ] && winkey=true
 # BIOS settings Linux can change (think-lmi, dell-wmi-sysman, hp-bioscfg),
-# and which of them it offers
-settings=$(for d in $cls/firmware-attributes/*/attributes; do [ -d "$d" ] && ls "$d"; done 2>/dev/null | grep -v '^pending_reboot$' | jq -R . | jq -s .)
+# and which of them it offers. Names only as a setting is named: HP's
+# firmware lists one called "\x0e", which landed in node1's report
+settings=$(for d in $cls/firmware-attributes/*/attributes; do
+  [ -d "$d" ] && find "$d" -mindepth 1 -maxdepth 1 -printf '%f\n'
+done 2>/dev/null | grep -E '^[A-Za-z0-9][A-Za-z0-9_.-]*$' | grep -vx 'pending_reboot' | sort -u | jq -R . | jq -s .)
 settingsby=$(ls $cls/firmware-attributes 2>/dev/null | jq -R . | jq -s .)
 
 # --- cpu, memory, virtualization ----------------------------------------
