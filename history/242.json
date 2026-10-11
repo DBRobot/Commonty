@@ -1,0 +1,21 @@
+{
+  "payload": {
+    "counter": 242,
+    "rev": "01abcefbd7393a34f577d3cfbe240c9fc0b1a9ea",
+    "issued": 1791739862,
+    "boxes": {
+      "node1": {
+        "path": "/nix/store/p9kgfxwvvdw1i111gpvi87x87jj586rz-nixos-system-node1-26.05.20260822.a9e6d84",
+        "nar_hash": "sha256-7uxro4wUajjMFkPrdksQWF9Ydl+YGV2G8tlKMrvOvn0=",
+        "closure": "e18d2bf7cc547b38e9ac0613dd2d8e0eb46ca700f8a6e96b04bd380f2d7a7e48"
+      },
+      "node2": {
+        "path": "/nix/store/h6xyhivqf4fr2b1q9im2ydj74kf2pjqs-nixos-system-node2-26.05.20260822.a9e6d84",
+        "nar_hash": "sha256-kMgWSloHHwrvLDm2tJC+qtvodbflIyfBvhCDQG4bYnk=",
+        "closure": "120d37c1b68fa914bdc59f8f4ee3ff123e1e48d11706087fc56067ebdf6ba188"
+      }
+    }
+  },
+  "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
+  "signature": "h5tU2+3bGRZN35oTsLib4S4OiL/S89y1bTaGfIOsqLv1lvWE4iWMnEsHMNWURCb5nci75Jk9+sjqEkdeB3N+BA=="
+}
