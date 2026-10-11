@@ -406,7 +406,7 @@ export default {
       // a box at boot: signed by its TPM, from no page at all
       if (path === '/api/unlock' || path.startsWith('/api/unlock/')) return boxApi(req, env, path, parse(sent), json);
       // someone who left 90 days ago: their own statement decides (leaving.js)
-      if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, MEMBERS, zone, lists, stateIn, cf });
+      if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, MEMBERS, ALIASES, aliasOf, zone, lists, stateIn, cf });
       if (req.method !== 'GET' && origin !== (env.ORIGIN || `https://mail.${env.DOMAIN}`)) {
         return json({ error: 'not from here' }, 403);
       }
