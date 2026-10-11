@@ -6,7 +6,7 @@ set -euo pipefail
 api=http://forgejo/api/v1
 as_admin() { curl -fsS --unix-socket "$SOCK" -H "X-WEBAUTH-USER: $ADMIN" "$@"; }
 list=$(curl -fsS "$GATE/internal/leaving") || { echo "the gate is not answering; next time"; exit 0; }
-due=$(echo "$list" | jq -r '.members[] | select(.due and ((.done // []) | index("forge") | not)) | .name')
+due=$(echo "$list" | jq -r '.members[] | select(.due and ((.done // []) | index("forge") | not)) | .name') || { echo "the gate's answer was not a list; next time"; exit 0; }
 for name in $due; do
   case "$name" in *[!a-z0-9._-]* | [!a-z0-9]*) continue ;; esac
   id=$(echo "$list" | jq -r --arg n "$name" '.members[] | select(.name == $n) | .id')

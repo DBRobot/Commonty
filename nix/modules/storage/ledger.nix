@@ -47,6 +47,8 @@ in
 
     systemd.services.dd-storage-ledger = {
       description = "Count what each member keeps, and hold Photos to what is left";
+      # its timer runs it; a switch never does
+      restartIfChanged = false;
       after = [
         "dd-verify.service"
         "dd-storage-view.service"
@@ -130,7 +132,9 @@ in
     systemd.timers.dd-storage-ledger = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = "2min";
+        # from the timer starting, not boot: a switch that adds it starts it
+        # long after boot, and OnBootSec would fire at once
+        OnActiveSec = "2min";
         OnUnitActiveSec = "1h";
       };
     };

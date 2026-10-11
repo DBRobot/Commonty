@@ -292,6 +292,7 @@ in
         # boot, kept in /run, readable by root alone (docs/dev/leaving.md)
         systemd.services.dd-vault-admin-token = {
           description = "A fresh admin token for Vaultwarden, for this boot";
+          restartIfChanged = false;
           before = [ "vaultwarden.service" ];
           requiredBy = [ "vaultwarden.service" ];
           serviceConfig = {
