@@ -195,6 +195,7 @@ in
         MAC = cfg.wired;
         GATEWAY = cfg.gateway;
         PROFILE = "house-wired";
+        WIFI = cfg.wifi;
         DIR = "/run/dd-wired-watch";
         FACTS = "/var/lib/dd-facts";
         GRACE = 90;
