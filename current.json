@@ -1,21 +1,21 @@
 {
   "payload": {
-    "counter": 234,
-    "rev": "e0bcc4ca51f648c1dcf3ced62fe546d4a38266ae",
-    "issued": 1791699771,
+    "counter": 235,
+    "rev": "6ff3f1564a1881719eccf3324226949c18a77ba2",
+    "issued": 1791701781,
     "boxes": {
       "node1": {
-        "path": "/nix/store/23srj7k2m186pnjsr9mllc2i6jf0wi9d-nixos-system-node1-26.05.20260822.a9e6d84",
-        "nar_hash": "sha256-iPDQb1S0gTMda84VjGFQG61mYS8UTGfNOC2r2Zsdefk=",
-        "closure": "32c4089193bdd83c45af03213e21832d61a2ab0eaa6c1bab4c1eaf8a21f2c8c3"
+        "path": "/nix/store/alvnjln04m1s9wx05gb1dgjjcl3mf95q-nixos-system-node1-26.05.20260822.a9e6d84",
+        "nar_hash": "sha256-uPjRHc+pT915KUxHDluXM5+pb9mIeFkQg3iMnOII9o4=",
+        "closure": "b294562ed6b75a30fed2ed333129301e10bf19eb075379dc8a10b720a3070eff"
       },
       "node2": {
-        "path": "/nix/store/1lwm6rab7fr22yrpvwyfnmm9wf8qjhv8-nixos-system-node2-26.05.20260822.a9e6d84",
-        "nar_hash": "sha256-iqNyieaetA/Q9y0E25GcZskOabp/2Fli41l7GbI9y0Y=",
-        "closure": "df29caae6e16de314f96f41f083f2d7e2100fb1deaa8d37651591d5f6acdf6e6"
+        "path": "/nix/store/g5aq1gpj7s28wz80ih288l68bizi76l1-nixos-system-node2-26.05.20260822.a9e6d84",
+        "nar_hash": "sha256-1sLefEOS+kuDwnHfdY4d7dzTMAFD4nAaTlviFO1c8oQ=",
+        "closure": "ea4e0785f762818585cd6ff830065769c44aaa4a29ce87359f2aebdc00965fb2"
       }
     }
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "CInzIqCesj0kxhqG91UI8z0kp7dCPZM/aPJe1rjlrshvoyXYqH2Myg48bdculzzG8yhsTIclG2o6R0afzNUsAA=="
+  "signature": "juzkVApfrj+6D0F/gtWOF+lq9JtgOpMbX6EW4Vs+BREyMi/U2G9zBmfDJ0GexaYtaLIoRVx2UKCJjA/FnmhVAw=="
 }
