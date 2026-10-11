@@ -21,13 +21,22 @@ let nudge = 0;
 let last = performance.now();
 for (const e of ['mouseenter', 'focusin', 'touchstart']) track.addEventListener(e, () => { paused = true; }, { passive: true });
 for (const e of ['mouseleave', 'focusout', 'touchend']) track.addEventListener(e, () => { paused = false; }, { passive: true });
+// a pause that stays, for anyone the motion bothers (WCAG 2.2.2)
+let held = still;
+const hold = document.getElementById('hold');
+const showHold = () => {
+  hold.setAttribute('aria-pressed', String(held));
+  hold.setAttribute('aria-label', held ? 'Play the services' : 'Pause the services');
+};
+showHold();
+hold.addEventListener('click', () => { held = !held; showHold(); });
 document.getElementById('prev').addEventListener('click', () => { nudge -= step(); });
 document.getElementById('next').addEventListener('click', () => { nudge += step(); });
 function frame(now) {
   const dt = Math.min(64, now - last);
   last = now;
   let x = track.scrollLeft;
-  if (!paused && !still && !document.hidden) x += dt * 0.03;
+  if (!paused && !held && !document.hidden) x += dt * 0.03;
   if (nudge) {
     const d = nudge * Math.min(1, dt / 160);
     x += d;
