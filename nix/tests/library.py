@@ -15,7 +15,9 @@ box.wait_for_open_port(4181)
 # a member with a library, made on this box with dd (the root is here)
 env = "DD_KEYRING_FILE=/root/keys.json"
 dirs = "--directory http://127.0.0.1:4181/_dd/directory"
-box.succeed(f"{env} {nix['dd']} identity new --born 1990-01 --agree-terms --name sarah {dirs}")
+box.succeed(
+    f"{env} {nix['dd']} identity new --born 1990-01 --agree-terms --name sarah {dirs}"
+)
 
 # The gate asks the release's member list who belongs here, not the person's
 # own entry: an entry is a document you write about yourself. The list starts
@@ -129,16 +131,22 @@ dav = f"http://127.0.0.1:4181/_dd/dav/{lib}"
 code = "curl -s -o /dev/null -w '%{http_code}'"
 one = next(k for k in kept if k.startswith(f"{lib}/trash/"))[len(lib) + 1 :]
 assert (
-    box.succeed(f"{code} -X DELETE -H 'authorization: Bearer {token}' {dav}/{one}").strip()
+    box.succeed(
+        f"{code} -X DELETE -H 'authorization: Bearer {token}' {dav}/{one}"
+    ).strip()
     == "204"
 )
 assert one not in box.succeed(aws)
 assert (
-    box.succeed(f"{code} -X DELETE -H 'authorization: Bearer {token}' {dav}/{one}").strip()
+    box.succeed(
+        f"{code} -X DELETE -H 'authorization: Bearer {token}' {dav}/{one}"
+    ).strip()
     == "404"
 )
 assert (
-    box.succeed(f"{code} -X DELETE -H 'authorization: Bearer {token}' {dav}/trash").strip()
+    box.succeed(
+        f"{code} -X DELETE -H 'authorization: Bearer {token}' {dav}/trash"
+    ).strip()
     == "204"
 )
 gone = json.loads(box.succeed(aws).strip() or "[]")

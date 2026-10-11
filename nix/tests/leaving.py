@@ -24,7 +24,9 @@ def as_(who):
 # tom stays
 box.succeed("mkdir -p /root/fleet/fleet")
 for who in ["sarah", "ann", "tom"]:
-    box.succeed(f"{as_(who)} identity new --born 1990-01 --agree-terms --name {who} {dirs}")
+    box.succeed(
+        f"{as_(who)} identity new --born 1990-01 --agree-terms --name {who} {dirs}"
+    )
     box.succeed(f"{as_(who)} member add {who} --repo /root/fleet {dirs}")
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
 
