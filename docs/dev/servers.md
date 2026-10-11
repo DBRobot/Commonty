@@ -304,6 +304,19 @@ box belongs to some service, and no timer of ours counts from boot:
 [`nix/tests/needs-units.nix`](../../nix/tests/needs-units.nix) fails the
 flake otherwise.
 
+Each role in [`fleet/roles.json`](../../fleet/roles.json) lists the
+services it brings. [`nix/lib/place.nix`](../../nix/lib/place.nix) holds
+every box to the needs of what its roles bring: what each service requires
+of the box (from its signed report and its owner's box.json), what must
+share the box with it (`depends.<svc>.local`), `instances` and `perHouse`,
+and whether the services' memory and storage fit. `checks.placement`
+([`nix/tests/placement.nix`](../../nix/tests/placement.nix)) fails on any
+of it, and on a box running a service none of its roles lists; its output
+is the whole answer as JSON, per box (what it carries and how full it is)
+and per role (the boxes it could be added to as things stand). Roles are
+still assigned by hand in `fleet/boxes.json`; a placer will choose from
+that answer.
+
 Placement is still the list in `fleet/boxes.json`, written by hand and
 held honest by `role-fit`. Nothing places roles from the needs yet: they
 are what placement will read
