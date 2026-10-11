@@ -15,6 +15,19 @@ use sha2::Digest as _;
 pub const PHOTOS_PORT: u16 = 41661;
 /// Passwords': the vault keeps its settings and the sign-in's state there
 pub const VAULT_PORT: u16 = 41662;
+/// The site's own pages that hold a key (Files, Movies & TV, Chat,
+/// Settings): no box serves them to a member, so the app serves them to
+/// the member's browser, with this device's keys and token behind them
+pub const SITE_PORT: u16 = 41660;
+
+/// the site's pages the app serves a browser, by the path the site has them at
+pub const SITE_PAGES: &[&str] = &[
+    "/_dd/home",
+    "/_dd/files",
+    "/_dd/media",
+    "/_dd/settings",
+    "/_dd/chat",
+];
 
 /// how long after a link a browser may ask to be let in
 pub const PAIR_LIFE: Duration = Duration::from_secs(120);
@@ -33,6 +46,7 @@ pub const BROWSER_COOKIE: &str = "dd_browser";
 pub enum Which {
     Photos,
     Vault,
+    Site,
 }
 
 impl Which {
@@ -40,6 +54,7 @@ impl Which {
         match self {
             Which::Photos => PHOTOS_PORT,
             Which::Vault => VAULT_PORT,
+            Which::Site => SITE_PORT,
         }
     }
 
@@ -47,8 +62,30 @@ impl Which {
         match self {
             Which::Photos => "p",
             Which::Vault => "v",
+            Which::Site => "s",
         }
     }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Which::Photos => "photos",
+            Which::Vault => "vault",
+            Which::Site => "site",
+        }
+    }
+
+    pub fn of(name: &str) -> Option<Which> {
+        [Which::Photos, Which::Vault, Which::Site]
+            .into_iter()
+            .find(|w| w.name() == name)
+    }
+}
+
+/// One of the site's pages the app serves (SITE_PAGES), with whatever query
+/// or fragment follows it
+pub fn site_page(path: &str) -> bool {
+    let base = path.split(['?', '#']).next().unwrap_or_default();
+    SITE_PAGES.contains(&base)
 }
 
 /// which way a request came in, by its Host: the app's window on
@@ -175,6 +212,55 @@ pub fn way_in(w: Which, via: &Via, method: &str, path: &str) -> bool {
         && (path == "/_dd/app/enter" || (w == Which::Vault && path == "/sso-connector.html"))
 }
 
+/// What a server of the app does with a request, before anything is read
+/// or opened for it
+#[derive(Debug, PartialEq, Eq)]
+pub enum Admit {
+    Refuse(u16, &'static str),
+    /// the pairing page and its two asks, and nothing else
+    Pairing,
+    /// a session's door, spent here for its cookie
+    Door,
+    /// a let-in browser, or the app's window: the service's own pages and
+    /// what they ask, keys among them
+    Serve,
+}
+
+/// The one rule every request to the app's servers passes, for each way in
+/// (`via`). `cookie_ok`: the request carries the cookie of this way in -
+/// the window's launch secret, or the browser session's own. A key is only
+/// ever behind `Serve`, so only behind that cookie: a browser the member
+/// let in from the app's window (the pairing), or the window itself.
+#[allow(clippy::too_many_arguments)]
+pub fn admit(
+    w: Which,
+    via: &Via,
+    cookie_ok: bool,
+    method: &str,
+    path: &str,
+    origin: Option<&str>,
+    fetch_site: Option<&str>,
+    own: &str,
+) -> Admit {
+    let way = way_in(w, via, method, path);
+    if !way && !same_origin(method, origin, fetch_site, own, *via == Via::Window) {
+        return Admit::Refuse(403, "not this page's own request");
+    }
+    match via {
+        Via::Pair => Admit::Pairing,
+        // the window has the site's pages on its own scheme (site.rs)
+        Via::Window if w == Which::Site => Admit::Refuse(404, "not here"),
+        _ if path == "/_dd/app/enter" => Admit::Door,
+        _ if cookie_ok => Admit::Serve,
+        Via::Browser(_) if way => Admit::Serve,
+        Via::Window => Admit::Refuse(403, "open this from the Commonty app"),
+        Via::Browser(_) => Admit::Refuse(
+            403,
+            "open this from its page on the site, through the Commonty app",
+        ),
+    }
+}
+
 /// A page to go on to after a door: a path on this origin and nothing else.
 /// No scheme, no //host, no backslash, no character a page's address would
 /// need escaping for (it goes into the door page's meta refresh).
@@ -237,20 +323,19 @@ pub fn parse_link(url: &str) -> Option<Link> {
     let rest = url.strip_prefix("commonty://open")?;
     let rest = rest.strip_prefix('/').unwrap_or(rest);
     let q = rest.strip_prefix('?')?;
-    let which = match query(q, "service")? {
-        "photos" => Which::Photos,
-        "vault" => Which::Vault,
-        _ => return None,
-    };
+    let which = Which::of(query(q, "service")?)?;
     let path = match query(q, "path") {
         None => None,
         Some(p) => Some(safe_then(&dec(p))?.to_string()),
     };
+    if which == Which::Site && !path.as_deref().is_none_or(site_page) {
+        return None;
+    }
     Some(Link { which, path })
 }
 
 /// where the browser goes once it is let in: Photos' opening page (with
-/// the page asked for after it), or the vault's
+/// the page asked for after it), the vault's, or the site's page asked for
 pub fn then_for(link: &Link) -> String {
     match (link.which, link.path.as_deref()) {
         (Which::Photos, Some(p)) if p != "/" && !p.starts_with("/_dd/") => {
@@ -259,6 +344,8 @@ pub fn then_for(link: &Link) -> String {
         (Which::Photos, _) => "/_dd/photos".into(),
         (Which::Vault, Some(p)) if !p.starts_with("/_dd/") => p.into(),
         (Which::Vault, _) => "/".into(),
+        (Which::Site, Some(p)) if site_page(p) => p.into(),
+        (Which::Site, _) => "/_dd/home".into(),
     }
 }
 
@@ -491,6 +578,11 @@ impl Sessions {
             },
         );
         (label, k)
+    }
+
+    /// a browser's own "leave": its name answers nothing from now on
+    pub fn end(&mut self, label: &str) {
+        self.0.remove(label);
     }
 
     pub fn has(&self, which: Which, label: &str) -> bool {
@@ -1005,6 +1097,104 @@ mod tests {
             "/sso-connector.html"
         ));
         assert!(!way_in(Which::Vault, &Via::Pair, "GET", "/_dd/app/enter"));
+    }
+
+    #[test]
+    fn a_link_can_ask_for_the_sites_own_pages_and_nothing_else() {
+        let l = |u: &str| parse_link(u).map(|l| then_for(&l));
+        assert_eq!(
+            l("commonty://open?service=site&path=%2F_dd%2Ffiles").as_deref(),
+            Some("/_dd/files")
+        );
+        assert_eq!(
+            l("commonty://open?service=site&path=%2F_dd%2Fsettings%23backups").as_deref(),
+            Some("/_dd/settings#backups")
+        );
+        assert_eq!(
+            l("commonty://open?service=site").as_deref(),
+            Some("/_dd/home")
+        );
+        for bad in [
+            "commonty://open?service=site&path=%2F_dd%2Fapp%2Flibrary",
+            "commonty://open?service=site&path=%2F",
+            "commonty://open?service=site&path=%2F_dd%2Ffiles%2F..",
+            "commonty://open?service=site&path=https%3A%2F%2Fevil.example",
+        ] {
+            assert_eq!(parse_link(bad), None, "{bad}");
+        }
+    }
+
+    /// The library's key, the archive password and the Photos password are
+    /// behind `Serve`, and so behind the cookie a browser gets only after
+    /// the member let it in from the app's window.
+    #[test]
+    fn keys_are_served_only_to_a_browser_the_member_let_in() {
+        let own = format!("http://s-{LABEL}.localhost:41660");
+        let b = Via::Browser(LABEL.into());
+        let ask = |via: &Via, cookie_ok, method, origin, site| {
+            admit(
+                Which::Site,
+                via,
+                cookie_ok,
+                method,
+                "/_dd/app/library",
+                origin,
+                site,
+                &own,
+            )
+        };
+        assert_eq!(
+            ask(&b, true, "GET", None, Some("same-origin")),
+            Admit::Serve
+        );
+        // the pairing name serves its page and two asks, never this
+        assert_eq!(ask(&Via::Pair, true, "GET", None, None), Admit::Pairing);
+        assert!(matches!(
+            ask(&b, false, "GET", None, Some("same-origin")),
+            Admit::Refuse(403, _)
+        ));
+        assert!(matches!(
+            ask(&b, true, "GET", None, Some("cross-site")),
+            Admit::Refuse(403, _)
+        ));
+        assert!(matches!(
+            ask(&b, true, "POST", Some("http://evil.example"), None),
+            Admit::Refuse(403, _)
+        ));
+        assert!(matches!(
+            ask(&Via::Window, true, "GET", None, None),
+            Admit::Refuse(404, _)
+        ));
+        // its door is open without the cookie, and spends a one-time secret
+        assert_eq!(
+            admit(
+                Which::Site,
+                &b,
+                false,
+                "GET",
+                "/_dd/app/enter",
+                None,
+                None,
+                &own
+            ),
+            Admit::Door
+        );
+        // the window's servers: its cookie, or nothing
+        let w = "http://127.0.0.1:41661";
+        let win = |ok| {
+            admit(
+                Which::Photos,
+                &Via::Window,
+                ok,
+                "POST",
+                "/_dd/app/photos-key",
+                None,
+                None,
+                w,
+            )
+        };
+        assert_eq!(win(true), Admit::Serve);
+        assert!(matches!(win(false), Admit::Refuse(403, _)));
     }
 
     #[test]

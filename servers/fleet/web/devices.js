@@ -7,7 +7,7 @@
 import init, { file_seal, file_open, entry_without, entry_signed, entry_with_device, qr_svg } from '/_dd/web/dd_web.js';
 import { unlock } from './library.js';
 import { requestOptions, assertion, post, b64u, u8b64 } from './webauthn.js';
-import { me, inApp, appFetch, pageConfig, entryOf, forgetEntry } from './shell.js';
+import { me, inApp, servedByApp, appFetch, pageConfig, entryOf, forgetEntry } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const ICON = {
@@ -41,7 +41,7 @@ function el(tag, cls, text) {
 let who = null;
 let entry = null;
 let signins = null;
-let lib = null; // the library, once the passkey has been shown
+let lib = null; // the library, once the app has handed its key
 let names = null; // { key: name }, once opened
 
 // again after a change: the entry is read fresh, not as the page first had it
@@ -138,7 +138,7 @@ function keyRow(k, n) {
   rm.onclick = () => remove(k, names?.[k.key] || fallback);
   // removing is signed by the account's main key: a passkey one here, a
   // device one in the app on the device holding it
-  if (!k.root && (rootHere || entry.entry.root.startsWith('webauthn:'))) actions.append(rm);
+  if (!k.root && (rootHere || (entry.entry.root.startsWith('webauthn:') && !servedByApp))) actions.append(rm);
   li.append(ico, text, actions);
   return li;
 }
@@ -185,7 +185,7 @@ async function openNames() {
     await init();
     if (!lib) {
       const u = await unlock(who.user);
-      if (!u.ok) throw new Error(u.none ? 'names need your library, and this account has none yet' : 'this browser cannot open your library yet');
+      if (!u.ok) throw new Error(u.none ? 'names need your library, and this account has none yet' : 'names open where the Commonty app holds your library: in the app, or in a browser it opens');
       lib = u.ok;
     }
     // none yet is a fresh start; a file that will not open is not, or the
@@ -307,7 +307,8 @@ let rootHere = false;
 let adding = null;
 
 async function canAdd() {
-  if (entry.entry.root.startsWith('webauthn:')) return true;
+  // a passkey signs only on the site's own pages, not on the app's
+  if (entry.entry.root.startsWith('webauthn:')) return !servedByApp;
   if (!inApp) return false;
   const r = await appFetch('/_dd/app/root').catch(() => null);
   const here = !!(r && r.ok && (await r.json()).here);
@@ -396,13 +397,9 @@ async function addApprove() {
       const r = await appFetch('/_dd/app/admit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ public_key: pk }) });
       if (!r.ok) throw new Error(await r.text());
     } else {
-      // a passkey main key: the library is opened to seal its key to the
-      // device, then the new entry is signed with the passkey
-      if (!lib) {
-        const u = await unlock(who.user);
-        if (u.ok) lib = u.ok;
-      }
-      const plan = JSON.parse(entry_with_device(JSON.stringify(entry), pk, lib?.id, lib?.key, BigInt(Math.floor(Date.now() / 1000))));
+      // a passkey main key: the new entry is signed with the passkey; no
+      // key goes with it (an account like this keeps none in its entry)
+      const plan = JSON.parse(entry_with_device(JSON.stringify(entry), pk, BigInt(Math.floor(Date.now() / 1000))));
       const cfg = await pageConfig();
       const a = await navigator.credentials.get({
         publicKey: {

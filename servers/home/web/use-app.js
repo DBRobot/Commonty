@@ -1,13 +1,20 @@
-// photos.<domain> and vault.<domain> in a browser (use-app.html): their
-// clients hold a person's keys, so they come with the app (app/src/local.rs)
-// and never from here. The button hands over to the app (commonty://open),
-// which opens this browser at its own copy. What still has to work here
-// without a client: a Send opened from inside, and a Bitwarden desktop
-// app's or browser extension's sign-in, which starts and ends on the web
-// vault's address.
+// A page whose code would hold a member's keys, in a browser (use-app.html):
+// Photos, Passwords, and the site's Files, Movies & TV, Chat. Their code
+// comes with the member's app (app/src/local.rs) and never from here, and
+// their keys are only ever on the member's devices. The button hands over to
+// the app (commonty://open), which opens this browser at its own copy. What
+// still has to work here without a client: a Send opened from inside, and a
+// Bitwarden desktop app's or browser extension's sign-in, which starts and
+// ends on the web vault's address.
 const vault = location.hostname.startsWith('vault.');
+const photos = location.hostname.startsWith('photos.') || location.pathname.startsWith('/_dd/photos');
 const domain = location.hostname.split('.').slice(1).join('.');
 const home = `https://home.${domain}`;
+// the site's own page this was, by its path (Chat is the model box's front)
+const sitePage = location.hostname.startsWith('llm.') ? '/_dd/chat' : location.pathname;
+const what = vault ? 'Passwords' : photos ? 'Photos' : ({
+  '/_dd/files': 'Files', '/_dd/media': 'Movies & TV', '/_dd/chat': 'Chat',
+})[sitePage] || 'This';
 const show = (id) => {
   for (const s of document.querySelectorAll('main > section'))
     s.hidden = s.id !== id;
@@ -16,14 +23,15 @@ const show = (id) => {
 document.getElementById('home').href = `${home}/_dd/home`;
 document.getElementById('download').href = `${home}/_dd/download`;
 for (const id of ['what', 'what-2', 'what-3']) {
-  document.getElementById(id).textContent = vault ? 'Passwords' : 'Photos';
+  document.getElementById(id).textContent = id === 'what' ? what : what === 'This' ? 'it' : what;
 }
 
 // The page asked for, for the app to open after its door: the vault's
-// own pages are after the #, Photos' are paths.
+// own pages are after the #, Photos' are paths, the site's its own path.
 function asked() {
   if (vault) return location.hash.startsWith('#/') ? `/${location.hash}` : '/';
-  return location.pathname + location.search;
+  if (photos) return location.pathname.startsWith('/_dd/photos') ? '/' : location.pathname + location.search;
+  return sitePage + location.hash;
 }
 
 // A browser says nothing when no app takes the link: if this page is still
@@ -36,7 +44,7 @@ function handOff() {
   };
   window.addEventListener('blur', away, { once: true });
   document.addEventListener('visibilitychange', away, { once: true });
-  const q = new URLSearchParams({ service: vault ? 'vault' : 'photos' });
+  const q = new URLSearchParams({ service: vault ? 'vault' : photos ? 'photos' : 'site' });
   const path = asked();
   if (path !== '/') q.set('path', path);
   location.href = `commonty://open?${q}`;

@@ -3,6 +3,8 @@
 // itself is a plain file: the box serves it to a browser and the app
 // carries its own copy, and both look the same because they are the same.
 
+import { webUrl } from './kit.js';
+
 let answer = null;
 
 // A page anyone may read (the docs) marks its bar so: someone signed out
@@ -57,6 +59,10 @@ const appOrigin = (() => {
   try { return sessionStorage.getItem('dd-app-origin'); } catch { return null; }
 })();
 export const inApp = location.protocol === 'commonty:' || location.hostname === 'commonty.localhost' || !!appOrigin;
+/// Served by the app to a browser it let in (app/src/local.rs): the same
+/// pages, on this computer, under the name the app gave this browser. The
+/// app answers the keys here too, to this browser's own session.
+export const servedByApp = /^s-[0-9a-f]{32}\.localhost$/.test(location.hostname);
 
 /// a request to the app's own routes (/_dd/app/...), with the secret the
 /// app put in this page when it served it: the app answers nothing else
@@ -75,7 +81,35 @@ const deviceScreen = ((appOrigin || location.origin).startsWith('commonty:') ? '
 // copy, Photos opens in the app's window, and any other (games, code)
 // opens in the device's browser
 const carried = ['/_dd/home', '/_dd/files', '/_dd/media', '/_dd/settings'];
-function here(url) {
+// In a browser the app let in: its pages here, Chat too, and Photos and
+// Passwords through the app's own door for this browser (/_dd/app/go)
+function served(url) {
+  try {
+    const u = new URL(url, location.href);
+    if (carried.includes(u.pathname) || u.pathname === '/_dd/chat') return u.pathname + u.hash;
+    if (u.hostname.startsWith('llm.')) return '/_dd/chat';
+    if (u.pathname === '/_dd/photos') return '/_dd/app/go?service=photos';
+    if (u.hostname.startsWith('vault.')) return '/_dd/app/go?service=vault';
+    return url;
+  } catch {
+    return url;
+  }
+}
+// The bar's addresses come from a box (/_dd/me): a path on this page's own
+// origin, or a web address on the fleet's own domain, and nothing else
+// (javascript:, data:, another site). The domain is what the app wrote into
+// a page it serves (never what a box says), or this page's own name's on a box.
+const fleet = document.querySelector('meta[name="dd-domain"]')?.content || location.hostname.split('.').slice(-2).join('.');
+function linkable(url) {
+  if (/^\/(?![/\\])/.test(String(url))) return url;
+  const w = webUrl(url);
+  if (!w) return '#';
+  const h = new URL(w).hostname;
+  return h === fleet || h.endsWith('.' + fleet) ? w : '#';
+}
+function here(raw) {
+  const url = linkable(raw);
+  if (servedByApp) return served(url);
   if (!inApp) return url;
   try {
     const u = new URL(url, location.href);
@@ -180,7 +214,14 @@ function bar(m, slot) {
         continue;
       }
       if (item.url === '/_dd/logout') {
-        nav.append(posting(el('a', { href: homeLink(m, item.url), text: item.label })));
+        const out = posting(el('a', { href: homeLink(m, item.url), text: item.label }));
+        // a browser the app let in leaves the app's session as it signs out
+        if (servedByApp) {
+          out.addEventListener('click', () => {
+            fetch('/_dd/app/leave', { method: 'POST', keepalive: true }).catch(() => {});
+          }, { capture: true });
+        }
+        nav.append(out);
         continue;
       }
       if (item.toggle) {

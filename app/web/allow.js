@@ -1,9 +1,10 @@
-// A browser asking to open Photos or Passwords (src/local.rs): it shows a
-// code made from what only that browser holds; the member lets it in here
-// when the codes match. Two browsers asking at once are both refused.
+// A browser asking to open Photos, Passwords or the site's pages that hold
+// a key (src/local.rs): it shows a code made from what only that browser
+// holds; the member lets it in here when the codes match. Two browsers
+// asking at once are both refused.
 const secret = () => ({ 'x-dd-app': document.querySelector('meta[name="dd-app"]')?.content || '' });
 const $ = (id) => document.getElementById(id);
-const names = { photos: 'Photos', vault: 'Passwords' };
+const names = { photos: 'Photos', vault: 'Passwords', site: 'your files and settings' };
 let shown = null;
 let done = false;
 
@@ -37,9 +38,9 @@ async function poll() {
     const r = await fetch('/_dd/app/pair/state', { headers: secret() });
     if (!r.ok) throw new Error(await r.text());
     const s = await r.json();
-    const service = ['photos', 'vault'].find((k) => s[k] && s[k].state !== 'idle');
+    const service = ['photos', 'vault', 'site'].find((k) => s[k] && s[k].state !== 'idle');
     if (!service) {
-      if (!shown && !done) $('msg').textContent = 'Nothing is asking now. Open Photos or Passwords from the page in your browser.';
+      if (!shown && !done) $('msg').textContent = 'Nothing is asking now. Open it again from its page in your browser.';
       return;
     }
     if (s[service].state === 'waiting' && shown?.allowed) return;

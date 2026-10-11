@@ -13,6 +13,7 @@ dependencies = [
  "ed25519-dalek",
  "identity",
  "library",
+ "serde_json",
  "zeroize",
 ]
 

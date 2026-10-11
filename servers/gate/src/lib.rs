@@ -1114,16 +1114,30 @@ async fn enrol_start(State(app): State<Arc<App>>, headers: HeaderMap) -> Respons
     }
 }
 
-/// what the browser sends when it has finished making a passkey: the
-/// credential, and the public half of the key it derived from that
-/// passkey's own PRF secret, so libraries can be sealed to it
+/// What the browser sends when it has finished making a passkey: the
+/// credential, and nothing else. A key a page made from the passkey's PRF
+/// is refused: any page of the domain can ask a passkey for that secret,
+/// so nothing may ever be sealed to it (docs/dev/libraries.md).
 #[derive(Deserialize)]
 struct Enrolled {
     #[serde(flatten)]
     credential: RegisterPublicKeyCredential,
-    /// base64 ed25519 public key; absent where the browser has no PRF
     #[serde(default)]
-    library_key: Option<String>,
+    library_key: Option<serde_json::Value>,
+}
+
+impl Enrolled {
+    #[allow(clippy::result_large_err)]
+    fn credential(self) -> std::result::Result<RegisterPublicKeyCredential, Response> {
+        match self.library_key {
+            None | Some(serde_json::Value::Null) => Ok(self.credential),
+            Some(_) => Err((
+                StatusCode::BAD_REQUEST,
+                "a passkey holds no keys: sign in with it, and open your things through the app",
+            )
+                .into_response()),
+        }
+    }
 }
 
 async fn enrol_finish(
@@ -1131,15 +1145,10 @@ async fn enrol_finish(
     headers: HeaderMap,
     Json(body): Json<Enrolled>,
 ) -> Response {
-    let Enrolled {
-        credential: reg,
-        library_key,
-    } = body;
-    if let Some(k) = &library_key
-        && identity::decode_public(k).is_err()
-    {
-        return (StatusCode::BAD_REQUEST, "that is not a public key").into_response();
-    }
+    let reg = match body.credential() {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
     let Some(Ceremony::Enrol { user, state }) = headers
         .get("x-dd-ceremony")
         .and_then(|v| v.to_str().ok())
@@ -1177,7 +1186,7 @@ async fn enrol_finish(
                 id: id.clone(),
                 cred,
                 added: identity::now(),
-                library_key: library_key.clone(),
+                library_key: None,
                 // which domain this passkey answers for; an assertion
                 // carries a hash of it, and every box can then tell one
                 // made here from one made somewhere else
@@ -1274,15 +1283,20 @@ async fn join_finish(
     headers: HeaderMap,
     Json(body): Json<Enrolled>,
 ) -> Response {
-    let Enrolled {
-        credential: reg,
-        library_key,
-    } = body;
-    if let Some(k) = &library_key
-        && identity::decode_public(k).is_err()
-    {
-        return (StatusCode::BAD_REQUEST, "that is not a public key").into_response();
+    // An invite code is a secret that makes a member of whoever proves it
+    // first, so it is typed only on the person's own device: the app's
+    // sign-up, or `dd identity new --code`. A box's page never asks for one.
+    if headers.contains_key("x-dd-grant") {
+        return (
+            StatusCode::BAD_REQUEST,
+            "an invite code goes into the Commonty app, which makes your account on your device",
+        )
+            .into_response();
     }
+    let reg = match body.credential() {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
     let Some(Ceremony::Join { user, state }) = headers
         .get("x-dd-ceremony")
         .and_then(|v| v.to_str().ok())
@@ -1306,12 +1320,6 @@ async fn join_finish(
     };
     let now = identity::now();
     let root = identity::passkey_root(&id, &cred);
-    // an invite code typed on the join page: the browser proved it for this
-    // root; the invite itself is looked up here, and checked at admission
-    let grant = match grant_claim(&app, &headers) {
-        Ok(g) => g,
-        Err(r) => return r.into_response(),
-    };
     let entry = identity::Entry {
         name: user,
         root,
@@ -1321,10 +1329,10 @@ async fn join_finish(
             id: id.clone(),
             cred,
             added: now,
-            library_key: library_key.clone(),
+            library_key: None,
             rp_id: Some(app.domain.clone()),
         }],
-        grant,
+        grant: None,
         libraries: vec![],
         version: 1,
         updated: now,
@@ -1345,91 +1353,6 @@ async fn join_finish(
             "timeout": 60000,
             "rpId": app.domain,
             "allowCredentials": [{ "type": "public-key", "id": id }],
-            "userVerification": "preferred",
-        }
-    }))
-    .into_response()
-}
-
-/// What the browser sends for a code: the invite's public key it derived,
-/// and its proof for this root. Base64 json in the x-dd-grant header.
-#[derive(Deserialize)]
-struct GrantClaim {
-    invite_public_key: String,
-    redeemed: u64,
-    proof: String,
-}
-
-fn grant_claim(
-    app: &App,
-    headers: &HeaderMap,
-) -> std::result::Result<Option<identity::Grant>, (StatusCode, &'static str)> {
-    let Some(h) = headers.get("x-dd-grant").and_then(|v| v.to_str().ok()) else {
-        return Ok(None);
-    };
-    let claim: GrantClaim = B64
-        .decode(h)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .ok_or((StatusCode::BAD_REQUEST, "bad invite claim"))?;
-    let invite = app.directory.invite(&claim.invite_public_key).ok_or((
-        StatusCode::NOT_FOUND,
-        "that code is not valid here, or it has expired",
-    ))?;
-    Ok(Some(identity::Grant {
-        invite,
-        redeemed: claim.redeemed,
-        proof: claim.proof,
-    }))
-}
-
-/// A person with an account and a code: their entry gets the grant, signed
-/// by their passkey like any update. Only for a passkey root; a root held
-/// by `dd` redeems there.
-async fn redeem_start(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let Some(user) = app.signed_in(cookie) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    let Some(signed) = app.entry(&user).ok().flatten() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    if !signed.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
-        return (
-            StatusCode::BAD_REQUEST,
-            "this account's key is on a device: run `dd invite redeem` there",
-        )
-            .into_response();
-    }
-    let grant = match grant_claim(&app, &headers) {
-        Ok(Some(g)) => g,
-        Ok(None) => return (StatusCode::BAD_REQUEST, "no code").into_response(),
-        Err(r) => return r.into_response(),
-    };
-    let mut entry = signed.entry;
-    entry.grant = Some(grant);
-    entry.version += 1;
-    entry.updated = identity::now();
-    let challenge = match identity::challenge(&entry) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("redeem: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-    let allow: Vec<serde_json::Value> = entry
-        .passkeys
-        .iter()
-        .map(|p| serde_json::json!({ "type": "public-key", "id": p.id }))
-        .collect();
-    let ceremony = app.ceremony_put(Ceremony::JoinSign { entry });
-    Json(serde_json::json!({
-        "ceremony": ceremony,
-        "publicKey": {
-            "challenge": B64_URL.encode(challenge),
-            "timeout": 60000,
-            "rpId": app.domain,
-            "allowCredentials": allow,
             "userVerification": "preferred",
         }
     }))
@@ -1466,12 +1389,11 @@ async fn join_sign(
         signature,
         recovery_signature: None,
     };
-    // With a code, or already named by the member list, it is an entry and
-    // goes to the directory like any other. Without either it is held on
-    // this box until it follows through - the same page either way, the
-    // same sign-in, the same waiting screen for someone not yet in.
-    // The accept rule checks the assertion in both.
-    let earned = signed.entry.grant.is_some() || app.listed(&signed.entry.root);
+    // Named by the member list already, it is an entry and goes to the
+    // directory like any other. Otherwise it is held on this box until the
+    // list names it - the same sign-in, the same waiting screen for someone
+    // not yet in. The accept rule checks the assertion in both.
+    let earned = app.listed(&signed.entry.root);
     if earned {
         if let Err((status, why)) = app.directory.admit(signed).await {
             return (status, why).into_response();
@@ -1763,30 +1685,39 @@ async fn page_config(State(app): State<Arc<App>>, headers: HeaderMap) -> Respons
     Json(cfg).into_response()
 }
 
-/// Files: a member's library, opened in the browser by their passkey. The
-/// demo has no passkey and no library, so it does not come here.
+/// Files: a member's library. Its key is only ever on the member's devices,
+/// so a member's browser is handed to the app, which serves the page to it
+/// (app/src/local.rs): no box serves a member code that holds a key. The
+/// demo's library holds nothing private, and its page is served here.
 async fn files_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    library_page(&app, &headers, "files", "/_dd/files")
+}
+
+/// Movies & TV: the library's Movies and Shows, the same way as Files.
+async fn media_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    library_page(&app, &headers, "media", "/_dd/media")
+}
+
+fn library_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.signed_in(cookie) {
-        // the demo comes here too when the box keeps a library for it: it
-        // reads that one and nothing else, and the page hides every
-        // control a reader has no use for
-        Some(user) if user == pages::DEMO_USER && app.demo_library.is_some() => page("files"),
-        Some(user) if app.member(&user) && user != pages::DEMO_USER => page("files"),
+        // the demo reads the box's one library for it and nothing else, and
+        // the page hides every control a reader has no use for
+        Some(user) if user == pages::DEMO_USER && app.demo_library.is_some() => page(name),
+        Some(user) if app.member(&user) && user != pages::DEMO_USER => use_app(),
         Some(_) => Redirect::to("/_dd/home").into_response(),
-        None => Redirect::to("/_dd/login?rd=/_dd/files").into_response(),
+        None => Redirect::to(&format!("/_dd/login?rd={at}")).into_response(),
     }
 }
 
-/// Movies & TV: the library's Movies and Shows, opened by the passkey.
-async fn media_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.signed_in(cookie) {
-        Some(user) if user == pages::DEMO_USER && app.demo_library.is_some() => page("media"),
-        Some(user) if app.member(&user) && user != pages::DEMO_USER => page("media"),
-        Some(_) => Redirect::to("/_dd/home").into_response(),
-        None => Redirect::to("/_dd/login?rd=/_dd/media").into_response(),
-    }
+/// The page that hands a browser to the member's app (use-app.js): for a
+/// page whose code would hold a key, which the app serves instead.
+fn use_app() -> Response {
+    (
+        [("cache-control", "no-cache")],
+        Html(pages::page("use-app").unwrap_or_default()),
+    )
+        .into_response()
 }
 
 /// A signed-in page, as the file it is (pages::page): it fills itself in
@@ -1870,19 +1801,14 @@ async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     }
 }
 
-/// Chat (servers/chat): a member's, or the demo's with its counted prompts.
-/// The page is the same for both; what differs is where it keeps chats.
+/// Chat (servers/chat): the demo's, with its counted prompts and nothing
+/// kept, is served here. A member's keeps their chats sealed in their
+/// library, so the member's app serves it to their browser (use_app).
 async fn chat_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.signed_in(cookie) {
-        Some(user)
-            if matches!(
-                app.role(&user),
-                Some(pages::Role::Member | pages::Role::Demo)
-            ) =>
-        {
-            page("chat")
-        }
+        Some(user) if app.role(&user) == Some(pages::Role::Demo) => page("chat"),
+        Some(user) if app.role(&user) == Some(pages::Role::Member) => use_app(),
         Some(_) => Redirect::to("/_dd/home").into_response(),
         None => Redirect::to("/_dd/login?rd=/").into_response(),
     }
@@ -1942,8 +1868,9 @@ async fn chat_search(
     headers: HeaderMap,
     axum::extract::Query(sq): axum::extract::Query<SearchQuery>,
 ) -> Response {
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.signed_in(cookie) {
+    // a browser's session, or the device's token Chat comes with when the
+    // app serves it (app/src/local.rs)
+    match app.identify(&headers, "access") {
         Some(user) if app.role(&user) == Some(pages::Role::Member) => {}
         Some(_) => return StatusCode::FORBIDDEN.into_response(),
         None => return StatusCode::UNAUTHORIZED.into_response(),
@@ -2703,9 +2630,8 @@ pub async fn start(
         weak.upgrade()?.identify(h, op)
     }));
     // A held sign-up follows through when the member list names it: then it
-    // is published like any entry, and the hold goes. (The other way, a code
-    // redeemed on the waiting page, publishes it there and then.) Reading
-    // each one also drops those past their time.
+    // is published like any entry, and the hold goes. Reading each one also
+    // drops those past their time.
     {
         let a = app.clone();
         tokio::spawn(async move {
@@ -2874,8 +2800,6 @@ pub async fn start(
         .route("/_dd/leave", get(leaving::mine))
         .route("/_dd/leave/start", post(leaving::start))
         .route("/_dd/leave/sign", post(leaving::sign))
-        .route("/_dd/redeem/start", post(redeem_start))
-        .route("/_dd/redeem/sign", post(join_sign))
         .route("/_dd/demo", get(demo_page).post(demo_post))
         .route("/_dd/web/{file}", get(web_file))
         .route("/_dd/static/{file}", get(static_file))
@@ -2910,7 +2834,9 @@ pub async fn start(
         .route("/_dd/docs/raw/{*path}", get(docs_raw))
         .route("/_dd/fleet.json", get(fleet_json))
         .route("/_dd/me", get(me))
-        .route("/_dd/photos", get(photos::page))
+        // Ente comes with the app: a browser here is handed to it
+        .route("/_dd/photos", get(|| async { use_app() }))
+        .route("/_dd/photos/move", get(photos::move_page))
         .route("/_dd/photos/config", post(photos::config))
         .route(
             "/_dd/settings",
@@ -2975,15 +2901,7 @@ pub async fn start(
             }),
         )
         // anyone's: Photos' and Passwords' sites say to open them in the app
-        .route(
-            "/_dd/use-app",
-            get(|| async {
-                (
-                    [("cache-control", "no-cache")],
-                    Html(pages::page("use-app").unwrap_or_default()),
-                )
-            }),
-        )
+        .route("/_dd/use-app", get(|| async { use_app() }))
         .route("/_dd/chat/search", get(chat_search))
         .route("/_dd/adblock", get(adblock::page))
         .route("/_dd/adblock/state", get(adblock::state))

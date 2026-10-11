@@ -1,14 +1,18 @@
 // Photos in the app's window or the member's browser, from the app's own
-// copy of Ente's client (src/local.rs): this page asks the app once for
-// this device's photo password (no address carries it, so no history or
-// synced history keeps it). It opens the account with our Rust in the page
+// copy of Ente's client (src/local.rs). This page is handed, once, what it
+// needs from the app (src/photos.rs, `hand`): the password this device
+// keeps, made at random by the app, never by a passkey; and with it, the
+// first time, whether to make the account or move one off the password a
+// passkey used to make. No address carries any of it, so no history or
+// synced history keeps it. It opens the account with our Rust in the page
 // (dd_web) straight against museum, seeds what Ente's client reads to be
 // signed in, and goes to the gallery. The box serves none of this code; it
 // answers museum's calls and keeps the files.
 
-import init, { ente_login } from '/_dd/web/dd_web.js';
+import init, { ente_login, ente_create, ente_rekey } from '/_dd/web/dd_web.js';
 
-const say = (t) => { document.getElementById('msg').textContent = t; };
+const $ = (id) => document.getElementById(id);
+const say = (t) => { $('msg').textContent = t; };
 
 function keptFor() {
   try { return JSON.parse(localStorage.getItem('user') || 'null')?.email || null; } catch { return null; }
@@ -49,10 +53,57 @@ async function seed(s) {
 const to = new URLSearchParams(location.search).get('to');
 const next = to && /^\/(?![/\\])/.test(to) ? to : '/gallery';
 
-// the password, handed once for the door this page came through
-async function key() {
-  const r = await fetch('/_dd/app/photos-key', { method: 'POST' });
-  return r.ok ? (await r.json()).pw : null;
+const post = (path, body) => fetch(path, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(body || {}),
+});
+
+// what the app hands this page, once for the door it came through
+async function hand() {
+  const r = await post('/_dd/app/photos-key');
+  return r.ok ? r.json() : null;
+}
+
+// the password this page was handed is the account's now
+async function keyed(pw) {
+  const r = await post('/_dd/app/photos-keyed', { pw });
+  if (!r.ok) throw new Error(`the app said: ${await r.text()}`);
+}
+
+const message = (err) => String((err && err.message) || err);
+const missing = (err) => /404|not found|user not/i.test(message(err));
+
+// An account a passkey made, and no device here holds its old password:
+// the app asks the member's browser for it once, then this page is let in
+// again and moves it.
+function offerMove() {
+  say('');
+  $('move').hidden = false;
+  $('go').onclick = async () => {
+    $('go').disabled = true;
+    try {
+      const r = await post('/_dd/app/photos-move');
+      if (!r.ok) throw new Error(await r.text());
+      $('move').hidden = true;
+      $('wait').hidden = false;
+      for (;;) {
+        await new Promise((ok) => setTimeout(ok, 2000));
+        const s = await (await fetch('/_dd/app/photos-move')).json();
+        if (s.ready) break;
+        if (!s.waiting) throw new Error('the move did not finish; try again');
+      }
+      const d = await post('/_dd/app/door', { service: 'photos', path: next });
+      if (!d.ok) throw new Error(await d.text());
+      location.replace((await d.json()).go);
+    } catch (e) {
+      $('wait').hidden = true;
+      $('move').hidden = false;
+      say(`Could not move Photos: ${message(e)}`);
+    } finally {
+      $('go').disabled = false;
+    }
+  };
 }
 
 async function go() {
@@ -61,7 +112,7 @@ async function go() {
   // the app's own two addresses
   if (['commonty://localhost', 'http://commonty.localhost'].includes(h.get('app'))) sessionStorage.setItem('dd-app-origin', h.get('app'));
   if (location.hash || location.search) history.replaceState(null, '', location.pathname);
-  const r = await fetch('/_dd/photos/config', { method: 'POST' });
+  const r = await post('/_dd/photos/config');
   if (!r.ok) throw new Error(`the box said ${r.status}`);
   const cfg = await r.json();
   if (keptFor() !== cfg.email) {
@@ -70,11 +121,28 @@ async function go() {
     location.replace(next);
     return;
   }
-  const password = await key();
-  if (!password) throw new Error('open Photos from the Commonty app');
+  const given = await hand();
+  if (!given) throw new Error('open Photos from the Commonty app');
   await init();
   say('Opening your photos…');
-  await seed(JSON.parse(await ente_login(cfg.api, cfg.email, password)));
+  if (given.next) {
+    // the account a passkey made, moved to the app's password before
+    // anything else; the old one opens nothing after this
+    const session = JSON.parse(await ente_rekey(cfg.api, cfg.email, given.pw, given.next));
+    await keyed(given.next);
+    return seed(session);
+  }
+  let session;
+  try {
+    session = JSON.parse(await ente_login(cfg.api, cfg.email, given.pw));
+  } catch (err) {
+    if (!given.fresh) throw err;
+    if (!missing(err)) return offerMove();
+    say('Making your photo account…');
+    session = JSON.parse(await ente_create(location.origin + cfg.accountApi, cfg.email, given.pw, ''));
+  }
+  if (given.fresh) await keyed(given.pw);
+  await seed(session);
 }
 
-go().catch((err) => say(`Could not open Photos: ${err?.message || err}`));
+go().catch((err) => say(`Could not open Photos: ${message(err)}`));

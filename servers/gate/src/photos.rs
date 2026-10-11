@@ -1,8 +1,10 @@
-//! Photos: the step between the site and Ente's own app. The person's
-//! passkey makes the photo account's password in the page (the page's
-//! wasm, web/photos.js), which opens or makes their account and hands Ente's
-//! app a session. Signing out of the site clears what that app keeps in
-//! the browser. The page itself lives with Photos (servers/photos).
+//! Photos, from the gate's side. Ente's client and the photo account's
+//! password are the member's app's (app/src/local.rs, app/src/photos.rs);
+//! this answers what the app's Photos page asks a box: its settings, and
+//! the two museum calls that need the fleet's code. One page is left here:
+//! the move of an account a passkey's PRF used to open, once, to the app
+//! (servers/photos/web/photos-move.js). Signing out of the site clears what
+//! Ente kept in a browser.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,7 +27,7 @@ struct Photos<'a> {
     menu: Menu,
 }
 
-/// Photos: opened by the passkey, or by the demo's password.
+/// The move to the app: what the page says before it asks the passkey.
 fn sheet(user: &str, services: &[Service]) -> String {
     render(Photos {
         user,
@@ -34,27 +36,26 @@ fn sheet(user: &str, services: &[Service]) -> String {
     })
 }
 
-/// Photos, opened with the passkey: the page runs our wasm against ente.
-pub(crate) async fn page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+/// GET /_dd/photos/move?slot=&to=: the one page left that asks a passkey
+/// for its PRF, and only for what it always made (the old photo password),
+/// for the member's app to take the account over and give it a password of
+/// its own. After that the secret it asks opens nothing; until then any
+/// page of the domain could have asked it anyway (docs/dev/app.md).
+pub(crate) async fn move_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.signed_in(cookie) {
-        // the demo has no passkey: the page gets its password from the config
-        Some(user) if user == pages::DEMO_USER => match &app.photos {
-            Some(p) if p.demo_password.is_some() => Html(sheet(&user, &app.home)).into_response(),
-            _ => Redirect::to("/_dd/home").into_response(),
-        },
-        Some(user) if app.member(&user) && app.photos.is_some() => {
+        Some(user) if app.member(&user) && user != pages::DEMO_USER && app.photos.is_some() => {
             Html(sheet(&user, &app.home)).into_response()
         }
         Some(_) => Redirect::to("/_dd/home").into_response(),
-        // back to exactly this after signing in: a handoff link keeps its
-        // slot and the app's key
+        // back to exactly this after signing in: the link keeps its slot
+        // and the app's key
         None => {
             let here = headers
                 .get("x-original-uri")
                 .and_then(|v| v.to_str().ok())
-                .filter(|u| u.starts_with("/_dd/photos"))
-                .unwrap_or("/_dd/photos");
+                .filter(|u| u.starts_with("/_dd/photos/move"))
+                .unwrap_or("/_dd/home");
             Redirect::to(&format!("/_dd/login?rd={}", crate::urlencode(here))).into_response()
         }
     }
@@ -82,7 +83,6 @@ pub(crate) async fn config(State(app): State<Arc<App>>, headers: HeaderMap) -> R
         // come here (museum_verify) and the code never reaches a browser
         "accountApi": "/_dd/museum",
         "email": format!("{user}{}", p.email_suffix),
-        "rpId": app.domain,
     });
     if user == pages::DEMO_USER {
         // the demo has an account already and never makes one
@@ -106,8 +106,9 @@ pub(crate) async fn museum_verify(
     headers: HeaderMap,
     Json(mut body): Json<serde_json::Value>,
 ) -> Response {
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let Some(user) = app.signed_in(cookie) else {
+    // the app's Photos page makes the account, through the app, with the
+    // device's token (app/src/local.rs)
+    let Some(user) = app.identify(&headers, "access") else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if !app.member(&user) || user == pages::DEMO_USER {
@@ -180,13 +181,14 @@ pub(crate) async fn forget(State(app): State<Arc<App>>, Query(q): Query<Forget>)
         .into_response()
 }
 
-// ---- Photos in the app
+// ---- The move to the app
 //
-// The photo account's password is made by the person's passkey, which an
-// app's window cannot use. So the app asks the browser: it opens a slot
-// here, signing as the device it is, and the browser - signed in, with the
-// passkey - fills it with the password sealed to a key only the app holds.
-// The app takes it once. The gate holds what it cannot read, for minutes.
+// An account made before the app held the password was opened with what a
+// passkey's PRF made, and only a browser can ask a passkey. So the app
+// opens a slot here, signing as the device it is, and the move page in the
+// member's browser fills it with that old password sealed to a key only
+// the app holds. The app takes it once and re-keys the account at once.
+// The gate holds what it cannot read, for minutes.
 
 /// how long a slot waits for the browser
 const HANDOFF: Duration = Duration::from_secs(600);
@@ -312,11 +314,9 @@ pub(crate) async fn app_signin(
     if !app.member(&user) || user == pages::DEMO_USER {
         return StatusCode::FORBIDDEN.into_response();
     }
-    // On to the Photos step; the browser keeps the fragment the app's page
-    // put on this address, which is where the password rides, never here.
-    // Or back into the app, to its Passwords page: the vault's sign-in comes
+    // Back into the app, to its Passwords page: the vault's sign-in comes
     // to this gate and wants the session this just made. Only the app's own
-    // two addresses, as the form came from one of them.
+    // two addresses, as the form came from one of them. Otherwise home.
     let mut r = match f.then.as_deref() {
         Some("vault") => {
             let app_origin = match origin {
@@ -325,7 +325,7 @@ pub(crate) async fn app_signin(
             };
             Redirect::to(&format!("{app_origin}/_dd/app/vault?signed=1")).into_response()
         }
-        _ => Redirect::to("/_dd/photos").into_response(),
+        _ => Redirect::to("/_dd/home").into_response(),
     };
     // the app's session belongs to the device that signed it in: removing
     // the device ends it (signins.rs)

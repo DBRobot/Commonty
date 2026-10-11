@@ -1,45 +1,24 @@
-// A member's library in a browser tab: the passkey makes the key, the
+// A member's library in a page: the member's app hands over the key, the
 // gate hands over ciphertext on WebDAV, and every name and every byte is
 // turned over here. Files and Movies & TV are two corners of the same
-// library, so the opening, listing and carrying live here once.
+// library, so the opening, listing and carrying live here once. The key is
+// only ever this device's: the app opens it with its own keys, for its
+// window and for a browser it let in (app/src/local.rs). No box serves
+// this page to a member, and no passkey makes a key.
 
-import init, { library_device_key, library_open, library_blocks_for_box, path_encrypt, path_decrypt, file_open, file_seal, plain_size, Sealer, Opener } from '/_dd/web/dd_web.js';
-import { b64u, u8b64 } from './webauthn.js';
-import { inApp, appFetch, pageConfig, entryText } from './shell.js';
+import init, { library_blocks_for_box, path_encrypt, path_decrypt, file_open, file_seal, plain_size, Sealer, Opener } from '/_dd/web/dd_web.js';
+import { inApp, servedByApp, appFetch, pageConfig } from './shell.js';
 
-// the passkey's own secret, under a label of this page's own
-export async function passkeySecret(cfg, passkeys) {
-  const allow = passkeys.map((p) => ({ type: 'public-key', id: b64u(p.id) }));
-  if (!allow.length) throw new Error('this account has no passkey in a browser yet');
-  const salt = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('dd-library')));
-  const a = await navigator.credentials.get({
-    publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
-      rpId: cfg.rpId,
-      allowCredentials: allow,
-      userVerification: 'preferred',
-      extensions: { prf: { eval: { first: salt } } },
-    },
-  });
-  const prf = a.getClientExtensionResults().prf;
-  const secret = prf && prf.results && prf.results.first;
-  if (!secret) throw new Error('this passkey cannot make a key on this browser; try another');
-  const raw = new Uint8Array(a.rawId);
-  const id = btoa(String.fromCharCode(...raw)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return { secret: u8b64(secret), id };
-}
-
-/// The first library this browser's passkey opens. Returns
-/// `{ ok: lib }`, `{ none: true }` when the account has no library, or
-/// `{ link: 'dd passkey link …' }` when nothing here is sealed to it.
-/// A library comes with the role this viewer has in it: a reader looks
-/// and does not touch.
-export async function unlock(user) {
+/// The library this viewer opens. Returns `{ ok: lib }`, `{ none: true }`
+/// when the account has no library, or `{ app: true }` when this page is
+/// not the app's, which alone holds the key. A library comes with the role
+/// this viewer has in it: a reader looks and does not touch.
+export async function unlock() {
   await init();
-  // in the app the device's own keys open the library; the app hands this
-  // page the key for as long as it is open, and no passkey is asked
-  if (inApp) {
-    const r = await appFetch('/_dd/app/library');
+  // the app's window, or a browser the app let in: the app opens the
+  // library with this device's own keys and hands the page its key
+  if (inApp || servedByApp) {
+    const r = inApp ? await appFetch('/_dd/app/library') : await fetch('/_dd/app/library');
     if (r.status === 404) return { none: true };
     if (!r.ok) throw new Error(`the app said ${r.status}: ${await r.text()}`);
     return { ok: await r.json() };
@@ -49,17 +28,7 @@ export async function unlock(user) {
   if (cfg.demoLibrary) {
     return { ok: { id: cfg.demoLibrary.id, key: cfg.demoLibrary.key, reader: true, demo: true } };
   }
-  const text = await entryText(user);
-  const entry = JSON.parse(text);
-  const { secret, id } = await passkeySecret(cfg, entry.entry.passkeys || []);
-  const libraries = entry.entry.libraries || [];
-  if (!libraries.length) return { none: true };
-  for (const l of libraries) {
-    try {
-      return { ok: { id: l.id, key: library_open(text, l.id, secret) } };
-    } catch { /* the next one, or none */ }
-  }
-  return { link: `dd passkey link ${id} ${library_device_key(secret)}` };
+  return { app: true };
 }
 
 /// the gate's url for a path in the library, under its encrypted name

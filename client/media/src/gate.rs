@@ -15,6 +15,8 @@ pub struct Opener {
     device: (String, ed25519_dalek::SigningKey),
     /// the root key, on a machine that made the identity
     pub root: Option<ed25519_dalek::SigningKey>,
+    /// the root this device pinned its entry under (account::ROOT_PIN)
+    pin: Option<String>,
 }
 
 impl Opener {
@@ -36,11 +38,26 @@ impl Opener {
                     ed25519_dalek::SigningKey::from_bytes(&seed),
                 ),
                 root: load_root(keys)?,
+                pin: keys.get(account::ROOT_PIN)?.map(|s| s.to_string()),
             },
             user,
             token,
         ))
     }
+    /// this device's fingerprint and key, for what is sealed to it
+    pub fn device(&self) -> (&str, &ed25519_dalek::SigningKey) {
+        (&self.device.0, &self.device.1)
+    }
+
+    /// the root the member's own entry must be under: the one held here,
+    /// or the one this device pinned
+    pub fn anchor(&self) -> Option<String> {
+        self.root
+            .as_ref()
+            .map(|r| identity::encode_public(&r.verifying_key()))
+            .or_else(|| self.pin.clone())
+    }
+
     fn open(&self, lib: &Library) -> Result<library::Key> {
         library::open_library(
             lib,
@@ -395,9 +412,18 @@ pub async fn openable(
     let found = directory::fetch(dirs, user).await;
     // the library ids and sealed keys below go straight into rclone mounts
     // and the app, so the entry they come out of has to verify and the
-    // directories have to agree about it
-    let mine = directory::resolve(&found, directory::Anchor::FirstSight)
-        .context("no directory has a usable entry for you")?;
+    // directories have to agree about it, under the root this device holds
+    // or pinned: otherwise a box could hand it a library key of its own
+    // making, sealed to this device's public key, and read what it writes
+    let anchor = opener.anchor();
+    let mine = directory::resolve(
+        &found,
+        match &anchor {
+            Some(r) => directory::Anchor::Root(r),
+            None => directory::Anchor::FirstSight,
+        },
+    )
+    .context("no directory has a usable entry for you")?;
     // every id here is about to be a folder and an argument; a box may have
     // refused a bad one already, and this machine does not take its word
     for lib in mine

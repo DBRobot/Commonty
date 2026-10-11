@@ -24,12 +24,14 @@ pub fn origin() -> &'static str {
     }
 }
 
-/// the pages the app carries, by the path the site serves them at
-fn page_for(path: &str) -> Option<&'static str> {
+/// the pages the app carries, by the path the site serves them at; Chat
+/// too, for a browser (local.rs), whose calls go to the model box
+pub(crate) fn page_for(path: &str) -> Option<&'static str> {
     Some(match path {
         "/" | "/_dd/home" => "home",
         "/_dd/files" => "files",
         "/_dd/media" => "media",
+        "/_dd/chat" => "chat",
         "/_dd/settings" | "/_dd/backups" | "/_dd/devices" | "/_dd/network" | "/_dd/boxes"
         | "/_dd/storage" => "settings",
         _ => return None,
@@ -85,6 +87,16 @@ fn runnable(kind: &str) -> bool {
         .any(|k| kind.contains(k))
 }
 
+/// The fleet's domain as this app knows it, for a page it serves: what the
+/// page's links to the fleet are held to (shell.js), never a box's word
+pub(crate) fn domain_meta() -> String {
+    let d: String = crate::account::domain()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+        .collect();
+    format!("<meta name=\"dd-domain\" content=\"{d}\">")
+}
+
 /// One of the app's own pages, with the launch secret in it
 fn page_asset<R: Runtime>(app: &AppHandle<R>, path: &str) -> Response<Vec<u8>> {
     match app.asset_resolver().get(path.to_string()) {
@@ -92,8 +104,9 @@ fn page_asset<R: Runtime>(app: &AppHandle<R>, path: &str) -> Response<Vec<u8>> {
             let html = String::from_utf8_lossy(&a.bytes).replacen(
                 "</head>",
                 &format!(
-                    "<meta name=\"dd-app\" content=\"{}\"></head>",
-                    launch_secret()
+                    "<meta name=\"dd-app\" content=\"{}\">{}</head>",
+                    launch_secret(),
+                    domain_meta()
                 ),
                 1,
             );
@@ -170,6 +183,15 @@ async fn serve<R: Runtime>(
     if path == "/_dd/app/library" {
         return library(app).await;
     }
+    if path == "/_dd/app/archive" {
+        return Ok(match archive_value(app).await? {
+            Some(v) => no_store(&v),
+            None => plain(
+                StatusCode::NOT_FOUND,
+                "your disk images do not open on this device yet",
+            ),
+        });
+    }
     // Settings > Devices in this window: whether the account's main key is
     // here, and approving a device added by QR code with it
     if path == "/_dd/app/root" {
@@ -226,9 +248,6 @@ async fn serve<R: Runtime>(
     }
     if path == "/_dd/app/photos/state" {
         return crate::photos::state(app).await;
-    }
-    if path == "/_dd/app/photos/start" {
-        return crate::photos::start(app).await;
     }
     // a service that is not one of these pages (photos, games, code):
     // the device's own browser, which reaches it through the app too
@@ -427,30 +446,135 @@ async fn remove<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<Response<
 }
 
 async fn library<R: Runtime>(app: &AppHandle<R>) -> Result<Response<Vec<u8>>, String> {
+    Ok(match library_value(app).await? {
+        Some(v) => no_store(&v),
+        None => plain(StatusCode::NOT_FOUND, "no library opens here"),
+    })
+}
+
+fn no_store(v: &serde_json::Value) -> Response<Vec<u8>> {
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(v.to_string().into_bytes())
+        .unwrap_or_default()
+}
+
+/// The library a page opens, `{ id, key, reader }`: this device's own keys
+/// open the member's library out of the entry this device vouches for, as
+/// the mount and the player do. The member's own first; one shared with
+/// them otherwise, to read. For the app's own pages only: its window, and a
+/// browser it let in (local.rs).
+pub(crate) async fn library_value<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<serde_json::Value>, String> {
     use base64::Engine as _;
     let keys = app.state::<crate::account::Keys>();
     let (opener, user, _) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
     let libs = media::gate::openable(&crate::account::dirs(), &user, &opener)
         .await
         .map_err(|e| format!("{e:#}"))?;
-    // the member's own first; one shared with them otherwise, to read
     let Some((owner, lib, key)) = libs
         .iter()
         .find(|(o, _, _)| *o == user)
         .or_else(|| libs.first())
     else {
-        return Ok(plain(StatusCode::NOT_FOUND, "no library opens here"));
+        return Ok(None);
     };
-    let v = serde_json::json!({
+    Ok(Some(serde_json::json!({
         "id": lib.id,
         "key": base64::engine::general_purpose::STANDARD.encode(&key[..]),
         "reader": *owner != user,
+    })))
+}
+
+/// The archive password for Backups, `{ password }`: `dd image` seals it
+/// to this device's key beside the archives (dd-devices.json), and this
+/// device opens it. For the app's own pages only, as the library is.
+pub(crate) async fn archive_value<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<serde_json::Value>, String> {
+    use base64::Engine as _;
+    let keys = app.state::<crate::account::Keys>();
+    let (opener, _, token) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
+    let base = media::gate::files_base(&crate::account::dirs()).map_err(|e| e.to_string())?;
+    let r = directory::http()
+        .map_err(|e| e.to_string())?
+        .get(format!("{base}/_dd/images/dd-devices.json"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if r.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let v: serde_json::Value = r
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    // signed by a device of the member's own entry, under the root this
+    // device vouches for: a box could seal a password of its own to it
+    let user = keys
+        .0
+        .get(crate::account::USER)
+        .map_err(|e| e.to_string())?
+        .ok_or("no name on this device")?;
+    let entry = account::own_entry(&keys.0, &crate::account::dirs(), &user)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    match account::open_for_device(
+        &v,
+        &entry.entry,
+        "archive",
+        opener.device(),
+        opener.root.as_ref(),
+    ) {
+        Ok(k) => Ok(Some(serde_json::json!({
+            "password": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&k[..]),
+        }))),
+        Err(e) => {
+            eprintln!("archive: the copy beside the disk images is not taken: {e:#}");
+            Ok(None)
+        }
+    }
+}
+
+/// What the app does with its keys at each launch, once it is signed in:
+/// the libraries sealed to its devices, root and paper key alone (where the
+/// root is here: only it signs the entry), and Photos' password shared with
+/// the member's other devices. Best effort, said in the log; the next
+/// launch tries again.
+pub fn at_launch<R: Runtime>(app: &AppHandle<R>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // the network comes up a moment after the window
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let keys = app.state::<crate::account::Keys>();
+        let Ok(Some(user)) = keys.0.get(crate::account::USER) else {
+            return;
+        };
+        let dirs = crate::account::dirs();
+        // pins the root this device vouches for, the first time
+        if let Err(e) = account::own_entry(&keys.0, &dirs, &user).await {
+            eprintln!("keys: {e:#}");
+            return;
+        }
+        if let Ok(Some(root)) = account::load_root(&keys.0) {
+            match account::reseal(&dirs, &user, &root).await {
+                Ok(Some(s)) => eprintln!(
+                    "keys: libraries sealed to devices, root and paper key alone (version {})",
+                    s.entry.version
+                ),
+                Ok(None) => {}
+                Err(e) => eprintln!("keys: reseal: {e:#}"),
+            }
+        }
+        if let Err(e) = crate::photos::settle(&app).await {
+            eprintln!("keys: photos: {e}");
+        }
     });
-    Response::builder()
-        .header(header::CONTENT_TYPE, "application/json")
-        .header(header::CACHE_CONTROL, "no-store")
-        .body(v.to_string().into_bytes())
-        .map_err(|e| e.to_string())
 }
 
 /// a query value as encodeURIComponent wrote it

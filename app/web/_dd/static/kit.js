@@ -71,3 +71,16 @@ export function load(source, draw, { as = 'json', key } = {}) {
 export function prefetch(url, { as = 'json', key = `kit:${url}` } = {}) {
   fetchOnce(url, as).then((fresh) => keep(key, fresh)).catch(() => {});
 }
+
+/// An address from somewhere else (a search result, TMDB, the forge, an
+/// entry) made safe to link or load: an http or https address as the
+/// browser parses it, or null. Anything else - javascript:, data:, a
+/// relative path that would reach this page's own origin - is never a link.
+export function webUrl(u) {
+  try {
+    const x = new URL(String(u));
+    return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : null;
+  } catch {
+    return null;
+  }
+}

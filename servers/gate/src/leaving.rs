@@ -589,9 +589,10 @@ fn signed_in(app: &App, headers: &HeaderMap) -> Option<String> {
     app.signed_in(headers.get("cookie").and_then(|v| v.to_str().ok()))
 }
 
-/// GET /_dd/leave: where the signed-in person stands
+/// GET /_dd/leave: where the signed-in person stands; the app's Settings
+/// asks it with the device's token
 pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let Some(user) = signed_in(&app, &headers) else {
+    let Some(user) = app.identify(&headers, "access") else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(e) = app.entry(&user).ok().flatten() else {

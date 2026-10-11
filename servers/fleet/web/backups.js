@@ -1,21 +1,18 @@
 // Backups: the disks a member has saved with `dd image push`. Each is a
 // snapshot in a restic archive in their own folder on the box, encrypted
 // on the machine that made it. The archive's password is sealed to their
-// passkeys beside it (dd-passkeys.json, `dd image passkey`), so this page
-// opens it here: the box only ever hands over ciphertext.
+// devices beside it (dd-devices.json), and the member's app opens it with
+// this device's key and hands it to this page: the box only ever hands
+// over ciphertext. So the tab works where the app serves Settings - its
+// window, or a browser it let in - and nowhere else.
 
 import init, { Archive } from '/_dd/web/dd_web.js';
-import { passkeySecret, human } from './library.js';
-import { requestOptions, assertion, post } from './webauthn.js';
-import { inApp, me, pageConfig, entryOf } from './shell.js';
+import { human } from './library.js';
+import { inApp, servedByApp, appFetch, me } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 
-// The archives are on the files site, and the Backups tab reads them from
-// there: a page that reached the public side through the tunnel may not ask
-// the private network for anything, so Settings moves there for this tab.
-export const FILES = 'files.' + location.hostname.split('.').slice(-2).join('.');
-const ROOT = '/images/';
+const ROOT = '/_dd/images/';
 
 function say(text, html) {
   $('msg').hidden = false;
@@ -89,22 +86,19 @@ async function readSnapshots() {
   return snaps.sort((a, b) => Date.parse(b.time) - Date.parse(a.time));
 }
 
-async function open(user) {
+async function open() {
   await init();
   const top = await listing('');
   if (!top.some((e) => e.name === 'config')) return false;
-  const sealedText = await (await fetch(ROOT + 'dd-passkeys.json')).text().catch(() => '');
-  let sealed = {};
-  try { sealed = JSON.parse(sealedText); } catch { /* none yet */ }
-  const [cfg, entry] = await Promise.all([pageConfig(), entryOf(user)]);
-  const passkeys = (entry.entry.passkeys || []).filter((p) => sealed[p.id]);
-  if (!passkeys.length) {
-    say('This browser cannot open your images yet.');
+  const r = inApp ? await appFetch('/_dd/app/archive') : await fetch('/_dd/app/archive');
+  if (r.status === 404) {
+    say('Your disk images do not open on this device yet. Save one again from the computer that made them, and they will.');
     return null;
   }
-  const { secret, id } = await passkeySecret(cfg, passkeys);
+  if (!r.ok) throw new Error(`the app said ${r.status}: ${await r.text()}`);
+  const { password } = await r.json();
   const keyFile = (await listing('keys/')).find((e) => e.type === 'file');
-  arch = new Archive(sealedText, id, secret, new TextDecoder().decode(await bytes('keys/' + keyFile.name)));
+  arch = new Archive(password, new TextDecoder().decode(await bytes('keys/' + keyFile.name)));
   // restic files packs under two hex characters of their name; ours are flat
   const data = await listing('data/');
   if (data.some((e) => e.type === 'directory')) packPath = (p) => `data/${p.slice(0, 2)}/${p}`;
@@ -294,9 +288,9 @@ async function download(s, ui) {
   }
 }
 
-// The delete: the passkey first (the box refuses a DELETE under /images/
-// from a browser that has not shown one in five minutes), then the
-// snapshot, then every pack nothing left uses, and the index without them.
+// The delete: the snapshot, then every pack nothing left uses, and the
+// index without them. The app sends it with this device's token, which
+// the box takes without a passkey shown again.
 
 function ask(s, ui) {
   $('ask-h').textContent = `Delete ${s.label || s.id.slice(0, 8)}?`;
@@ -306,20 +300,8 @@ function ask(s, ui) {
   $('ask-msg').hidden = true;
   $('ask-yes').disabled = false;
   $('ask-no').onclick = () => $('ask').close();
-  $('ask-yes').onclick = async () => {
+  $('ask-yes').onclick = () => {
     $('ask-yes').disabled = true;
-    try {
-      const who = await me();
-      const start = await post('/_dd/login/start', { username: who.user });
-      const { publicKey, ceremony } = await start.json();
-      const cred = await navigator.credentials.get({ publicKey: requestOptions(publicKey) });
-      await post('/_dd/login/finish', assertion(cred), { 'x-dd-ceremony': ceremony });
-    } catch (e) {
-      $('ask-msg').textContent = 'Your passkey was not confirmed: ' + (e.message || e);
-      $('ask-msg').hidden = false;
-      $('ask-yes').disabled = false;
-      return;
-    }
     $('ask').close();
     ui.actions.replaceChildren();
     remove(s, ui).catch((e) => failRow(ui, e));
@@ -369,7 +351,6 @@ async function remove(s, ui) {
     ui.meta.className = 'bk-meta';
     ui.meta.textContent = 'Deleting…';
     const r = await fetch(ROOT + 'snapshots/' + s.id, { method: 'DELETE' });
-    if (r.status === 403) throw new Error('the box wants your passkey again; delete once more');
     await must(r);
     snaps = snaps.filter((x) => x.id !== s.id);
     ui.li.remove();
@@ -405,7 +386,7 @@ async function remove(s, ui) {
     const sizes = new Map(onDisk.map((f) => [f.name, f.size || 0]));
     const del = async (path) => {
       const r = await fetch(ROOT + path, { method: 'DELETE' });
-      if (r.status === 403) throw new Error('the box wants your passkey again; delete another image or this page again to finish');
+      if (r.status === 403) throw new Error('the box refused; open this page again from the app to finish');
       await must(r);
     };
     await inParallel(indexes.map((i) => 'index/' + i.id), 4, del);
@@ -439,12 +420,12 @@ export async function start() {
 }
 
 async function show() {
-  if (inApp) {
-    say('', `Your disk images open in a browser, with your passkey: <a href="https://${FILES}/_dd/settings#backups">${FILES}/_dd/settings</a>`);
+  if (!inApp && !servedByApp) {
+    say('', 'Your disk images open through the Commonty app, which holds their key on your device. <a href="commonty://open?service=site&amp;path=%2F_dd%2Fsettings%23backups">Open them in the app</a> · <a href="/_dd/download">Get the app</a>');
     return;
   }
-  const who = await me();
-  const data = await open(who.user);
+  await me();
+  const data = await open();
   if (data === null) return;
   if (data === false) {
     say('No disk images yet.');

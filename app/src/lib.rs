@@ -27,9 +27,10 @@ pub fn version() -> &'static str {
 #[cfg(target_os = "android")]
 use tauri::Manager as _;
 
-/// commonty:// links: Photos' and Passwords' sites in a browser hand over
-/// to the app, which opens that browser at its own copy (local.rs). An
-/// AppImage is installed by no one, so it says it takes them itself.
+/// commonty:// links: the site's pages that hold a key (Files, Movies & TV,
+/// Chat, Settings), Photos and Passwords, in a browser, hand over to the
+/// app, which opens that browser at its own copy (local.rs). An AppImage is
+/// installed by no one, so it says it takes them itself.
 fn links(app: &tauri::AppHandle) {
     #[cfg(target_os = "linux")]
     use tauri::Manager as _;
@@ -95,8 +96,8 @@ pub fn run() {
         ])
         .setup(|app| {
             paths::init(app.handle());
-            // Photos and Passwords, served to the app's windows from its
-            // own release (local.rs)
+            // what holds keys in a page, served to the app's windows and the
+            // member's browser from its own release (local.rs)
             local::start(app.handle());
             links(app.handle());
             // GTK draws the title bar itself on Wayland, with the buttons its
@@ -123,6 +124,8 @@ pub fn run() {
             })));
             // on the network from the start, if this device has joined before
             net::resume(app.handle(), &crate::account::control_url());
+            // the keys this device holds, put where its other devices find them
+            site::at_launch(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

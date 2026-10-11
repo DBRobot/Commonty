@@ -87,11 +87,11 @@ pub struct Passkey {
     /// enrolled before this, which are checked as they always were.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rp_id: Option<String>,
-    /// The public half of a key only this passkey can make: the browser
-    /// derives it from the passkey's own PRF secret, which never leaves
-    /// the tab. Library keys are sealed to it, so any browser holding this
-    /// passkey opens the member's libraries without being admitted as a
-    /// device of its own. Absent on a passkey enrolled before this.
+    /// Retired: the public half of a key a browser once made from this
+    /// passkey's PRF secret. Any page on the domain can ask a passkey for
+    /// that secret, so a passkey holds no keys now (docs/dev/libraries.md).
+    /// Kept so entries signed with it still read and verify; every update
+    /// drops it (`drop_passkey_keys`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library_key: Option<String>,
 }
@@ -748,6 +748,34 @@ pub fn valid_library_id(s: &str) -> bool {
     s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// Key material an entry still keeps for a passkey: a key a browser made
+/// from one, or a library key sealed to it. A passkey answers its PRF to
+/// any page of the domain, so none of it may be published again.
+pub fn holds_passkey_keys(entry: &Entry) -> bool {
+    entry.passkeys.iter().any(|p| p.library_key.is_some())
+        || entry
+            .libraries
+            .iter()
+            .flat_map(|l| l.keys.iter().chain(l.readers.iter().flat_map(|r| &r.keys)))
+            .any(|k| k.to.starts_with("passkey:"))
+}
+
+/// The same entry with all of that gone; true if anything was. What else
+/// opens each library (devices, root, paper) is left as it was.
+pub fn drop_passkey_keys(entry: &mut Entry) -> bool {
+    let had = holds_passkey_keys(entry);
+    for p in &mut entry.passkeys {
+        p.library_key = None;
+    }
+    for l in &mut entry.libraries {
+        l.keys.retain(|k| !k.to.starts_with("passkey:"));
+        for r in &mut l.readers {
+            r.keys.retain(|k| !k.to.starts_with("passkey:"));
+        }
+    }
+    had
+}
+
 pub fn valid_name(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 64
@@ -1229,5 +1257,53 @@ mod tests {
         let mut bad = sign(e0, &stranger).unwrap();
         bad.signature = s1.signature.clone();
         assert!(accept(None, &bad).is_err());
+    }
+
+    #[test]
+    fn passkey_keys_are_found_and_dropped_and_nothing_else_is() {
+        let sealed = |to: &str| SealedKey {
+            to: to.into(),
+            sealed: "x".into(),
+        };
+        let mut e = Entry {
+            name: "amy".into(),
+            root: "r".into(),
+            recovery: String::new(),
+            devices: vec![],
+            passkeys: vec![Passkey {
+                id: "p1".into(),
+                cred: serde_json::json!({}),
+                added: 1,
+                rp_id: None,
+                library_key: None,
+            }],
+            grant: None,
+            libraries: vec![Library {
+                id: "0".repeat(32),
+                keys: vec![sealed("device:f"), sealed("root"), sealed("recovery")],
+                readers: vec![Reader {
+                    name: "bo".into(),
+                    keys: vec![sealed("device:g")],
+                }],
+                created: 1,
+            }],
+            version: 1,
+            updated: 1,
+        };
+        assert!(!holds_passkey_keys(&e));
+        let clean = e.clone();
+        assert!(!drop_passkey_keys(&mut e));
+        assert_eq!(e, clean);
+
+        e.libraries[0].keys.push(sealed("passkey:p1"));
+        assert!(holds_passkey_keys(&e));
+        assert!(drop_passkey_keys(&mut e));
+        assert_eq!(e, clean, "only the passkey's seal went");
+
+        e.libraries[0].readers[0].keys.push(sealed("passkey:q"));
+        e.passkeys[0].library_key = Some("k".into());
+        assert!(holds_passkey_keys(&e));
+        assert!(drop_passkey_keys(&mut e));
+        assert_eq!(e, clean, "the passkey stays, without its key");
     }
 }

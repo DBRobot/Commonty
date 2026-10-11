@@ -2,7 +2,7 @@
 // their entry has it, and their email - which no box holds: the line is a
 // frame from the mail Worker (client/mail), and changing it happens there.
 // Backups is their disk images (servers/fleet/web/backups.js).
-import { start as backups, FILES } from './backups.js';
+import { start as backups } from './backups.js';
 import { start as devices } from './devices.js';
 import { start as network } from './network.js';
 import { start as storage } from './storage.js';
@@ -14,11 +14,6 @@ const $ = (id) => document.getElementById(id);
 function tab(name) {
   if (!['profile', 'devices', 'storage', 'network', 'backups', 'leave'].includes(name)) name = 'profile';
   if (gone) name = 'leave';
-  // the disk images are read from the files site (backups.js)
-  if (name === 'backups' && location.protocol === 'https:' && location.hostname !== FILES) {
-    location.href = `https://${FILES}/_dd/settings#backups`;
-    return;
-  }
   for (const a of document.querySelectorAll('[data-tab]')) {
     if (a.dataset.tab === name) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');

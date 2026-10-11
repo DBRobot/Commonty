@@ -286,6 +286,10 @@ rec {
             packageId = "library";
           }
           {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
             name = "zeroize";
             packageId = "zeroize";
           }

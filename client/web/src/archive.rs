@@ -1,13 +1,13 @@
 //! A member's disk archives in the browser: restic's repository format, as
-//! `dd image` writes it (client/archive). The archive password comes sealed to
-//! the passkey (dd-passkeys.json, written by `dd image passkey`); opened
-//! here it unlocks restic's key file, and the master key opens everything
-//! else - the list of archives, the index, the pieces of a disk. Nothing is
+//! `dd image` writes it (client/archive). The archive password comes from
+//! the app, which opens it with this device's key (dd-devices.json, written
+//! by `dd image devices`); here it unlocks restic's key file, and the
+//! master key opens everything else - the list of archives, the index, the pieces of a disk. Nothing is
 //! readable to the server holding them, and nothing leaves this tab.
 
 use aes::cipher::{BlockEncrypt, KeyInit, KeyIvInit, StreamCipher};
 use base64::Engine as _;
-use base64::engine::general_purpose::{STANDARD as B64, URL_SAFE_NO_PAD};
+use base64::engine::general_purpose::STANDARD as B64;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
@@ -142,22 +142,12 @@ pub struct Archive {
 
 #[wasm_bindgen]
 impl Archive {
-    /// The archive password sealed to this passkey (dd-passkeys.json, by
-    /// the passkey's credential id) and restic's key file: opens both.
+    /// The archive password, as the app hands it to its own pages (it opens
+    /// dd-devices.json with this device's key), and restic's key file.
     /// Slow on purpose: restic's key derivation is what guards the password.
     #[wasm_bindgen(constructor)]
-    pub fn new(
-        sealed_passwords_json: &str,
-        credential_id: &str,
-        prf_secret_b64: &str,
-        key_file_json: &str,
-    ) -> Result<Archive, JsValue> {
-        js(open_archive(
-            sealed_passwords_json,
-            credential_id,
-            prf_secret_b64,
-            key_file_json,
-        ))
+    pub fn new(password: &str, key_file_json: &str) -> Result<Archive, JsValue> {
+        js(with_password(password, key_file_json))
     }
 
     /// a file of the repository (an index, a snapshot, the config), opened
@@ -189,23 +179,6 @@ impl Archive {
             .map(|b| format!("{b:02x}"))
             .collect()
     }
-}
-
-fn open_archive(
-    sealed_passwords_json: &str,
-    credential_id: &str,
-    prf_secret_b64: &str,
-    key_file_json: &str,
-) -> R<Archive> {
-    let sealed: std::collections::HashMap<String, String> =
-        serde_json::from_str(sealed_passwords_json).map_err(err)?;
-    let sealed = sealed
-        .get(credential_id)
-        .ok_or("these archives were not opened to this passkey yet: run `dd image passkey` on the computer that made them")?;
-    let sk = crate::library::keypair_of(prf_secret_b64)?;
-    let raw = library::open_with(&sk, sealed).map_err(err)?;
-    let password = Zeroizing::new(URL_SAFE_NO_PAD.encode(&raw[..]));
-    with_password(&password, key_file_json)
 }
 
 /// restic's key file, opened with the archive password itself

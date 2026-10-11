@@ -29,3 +29,6 @@ servers/home/web/storage.css               static/storage.css
 servers/home/web/pages/settings.html       pages/settings.html
 servers/fleet/web/devices.js          static/devices.js
 servers/fleet/web/network.js          static/network.js
+servers/chat/web/chat.js              static/chat.js
+servers/chat/web/chat.css             static/chat.css
+servers/chat/web/pages/chat.html      pages/chat.html

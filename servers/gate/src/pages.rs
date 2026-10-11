@@ -313,19 +313,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "servers/gate/web/enrol.js",
         "text/javascript; charset=utf-8",
     ),
+    // the one page that asks a passkey's PRF, for the old photo password
+    // the app moves the account off (photos.rs)
     (
-        "redeem.js",
-        "servers/gate/web/redeem.js",
-        "text/javascript; charset=utf-8",
-    ),
-    (
-        "photos.js",
-        "servers/photos/web/photos.js",
-        "text/javascript; charset=utf-8",
-    ),
-    (
-        "photos-passkey.js",
-        "servers/photos/web/photos-passkey.js",
+        "photos-move.js",
+        "servers/photos/web/photos-move.js",
         "text/javascript; charset=utf-8",
     ),
     (
@@ -883,14 +875,88 @@ mod tests {
         }
         assert!(enrol().contains("/_dd/static/enrol.js"));
         assert!(join("commonty.org").contains("/_dd/static/join.js"));
-        for f in ["login.js", "join.js", "enrol.js", "redeem.js", "photos.js"] {
+        for f in ["login.js", "join.js", "enrol.js", "photos-move.js"] {
             assert!(static_file(f).is_some(), "{f}");
         }
         assert!(text("login.js").contains("/_dd/login/start"));
         assert!(text("join.js").contains("/_dd/join/sign"));
         assert!(text("enrol.js").contains("/_dd/enrol/start"));
-        assert!(text("redeem.js").contains("/_dd/redeem/start"));
+        // an invite code is typed into the app, never a box's page
+        for f in ["join.js", "login.js", "enrol.js"] {
+            assert!(!text(f).contains("x-dd-grant"), "{f}");
+        }
+        assert!(static_file("redeem.js").is_none());
         assert!(static_file("nope").is_none());
+    }
+
+    /// Every file a box serves to a browser (servers/**/web), read for the
+    /// passkey PRF extension. A passkey answers it to any page of the
+    /// domain, so no page may make a key of it. One page is let through,
+    /// the move of an old photo account to the app, and only for the label
+    /// that account was made with: what it gets opens nothing once moved.
+    #[test]
+    fn no_box_page_asks_a_passkey_for_a_key() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if matches!(
+                    p.extension().and_then(|x| x.to_str()),
+                    Some("js" | "mjs" | "html")
+                ) {
+                    out.push(p);
+                }
+            }
+        }
+        let root = tree().join("servers");
+        let mut files = Vec::new();
+        for s in std::fs::read_dir(&root).unwrap().flatten() {
+            walk(&s.path().join("web"), &mut files);
+        }
+        walk(&root.join("web-shared"), &mut files);
+        assert!(
+            files.len() > 30,
+            "only {} pages found under {root:?}",
+            files.len()
+        );
+        let asks = |t: &str| {
+            let b = t.as_bytes();
+            (0..b.len().saturating_sub(2)).any(|i| {
+                b[i..i + 3].eq_ignore_ascii_case(b"prf")
+                    && (i == 0 || !b[i - 1].is_ascii_alphanumeric())
+                    && b.get(i + 3).is_none_or(|c| !c.is_ascii_alphanumeric())
+            }) || t.contains("hmac-secret")
+                || t.contains("largeBlob")
+        };
+        let mut found: Vec<String> = files
+            .iter()
+            .filter(|p| asks(&std::fs::read_to_string(p).unwrap_or_default()))
+            .map(|p| p.strip_prefix(&root).unwrap().display().to_string())
+            .collect();
+        found.sort();
+        assert_eq!(found, ["photos/web/photos-move.js"]);
+        // an address a box or a search hands over is linked only once it is
+        // shown to be a web one (kit.js webUrl), on the pages that hold keys
+        assert!(text("kit.js").contains("x.protocol === 'https:' || x.protocol === 'http:'"));
+        for f in ["chat.js", "shell.js"] {
+            assert!(text(f).contains("webUrl("), "{f} links what it is given");
+        }
+        assert!(!text("chat.js").contains("href: r.url"));
+        // and the bar's links to the fleet are held to the domain the app
+        // writes into its pages, not one a box names
+        assert!(text("shell.js").contains("meta[name=\"dd-domain\"]"));
+        let mover = text("photos-move.js");
+        assert!(mover.contains("'dd-photos'"));
+        for other in [
+            "dd-library",
+            "library_",
+            "file_seal",
+            "/_dd/dav",
+            "/_dd/images",
+        ] {
+            assert!(!mover.contains(other), "the move page touches {other}");
+        }
     }
 
     #[test]
@@ -1084,7 +1150,8 @@ mod tests {
         assert!(html.contains("data-user=\"tom\""));
         assert!(html.contains("/_dd/logout"));
         assert!(!html.contains("class=\"service\""));
-        assert!(html.contains("/_dd/static/redeem.js"));
+        // a code goes into the app; nothing here takes one
+        assert!(!html.contains("<input") && html.contains("/_dd/download"));
     }
 
     #[test]

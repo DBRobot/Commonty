@@ -280,6 +280,8 @@ enum Command {
         cmd: ImageCmd,
         #[arg(long, default_value = DEFAULT_IMAGES, global = true)]
         repo: String,
+        #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES, global = true)]
+        directories: Vec<String>,
     },
     /// The storage ledger, on a box (a timer runs it): what each member keeps
     /// across every service, counted and written for the gate, and each
@@ -406,10 +408,6 @@ enum IdentityCmd {
 
 #[derive(Subcommand)]
 enum PasskeyCmd {
-    /// Give a passkey already in your entry the key a browser derived
-    /// from it, so that browser can open your libraries. The browser
-    /// prints the key; this signs it in.
-    Link { id: String, library_key: String },
     /// Every passkey in your entry, by id.
     List,
     /// Drop one; the browser that holds it stops working everywhere at once.
@@ -620,10 +618,10 @@ enum ImageCmd {
     },
     /// Every archive in your repository.
     List,
-    /// Let your passkey open your archives in a browser (Backups in Settings):
-    /// the archive password, sealed to each passkey in your entry, beside
-    /// the archives. `push` does it too.
-    Passkey,
+    /// Let your devices open your archives (Backups in Settings, through
+    /// the app): the archive password sealed to each device, the root and
+    /// the paper key in your entry, beside the archives. `push` does it too.
+    Devices,
     /// Delete archives, by id prefix (from `list`), and give their space
     /// back. Asks first unless --yes.
     Delete {
@@ -643,59 +641,50 @@ enum ImageCmd {
     },
 }
 
-/// The archive password, sealed to every passkey in this person's entry and
-/// put beside the archives as dd-passkeys.json: a browser holding one of
-/// those passkeys opens it the way it opens a library (client/web), and
-/// nothing on the server can. Returns how many passkeys it was sealed to.
-fn seal_for_passkeys(keys: &impl auth::KeyStore, repo: &str, password: &str) -> Result<usize> {
+/// The archive password, sealed to every key of this person's entry that a
+/// device holds (account::seal_for_keys) and put beside the archives as
+/// dd-devices.json: the app opens it for Backups in Settings, and nothing
+/// on the server can. The entry is the one this device vouches for
+/// (account::own_entry), not whatever the box serves. The old
+/// dd-passkeys.json, sealed to keys a passkey's PRF makes, goes. Returns
+/// how many keys it was sealed to.
+fn seal_for_devices(
+    keys: &impl auth::KeyStore,
+    repo: &str,
+    password: &str,
+    dirs: &[String],
+) -> Result<usize> {
     use base64::Engine as _;
-    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(password)
-        .context("the archive password is not the derived kind")?;
+    let raw = Zeroizing::new(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(password)
+            .context("the archive password is not the derived kind")?,
+    );
     let user = keys.get(USER)?.context("no name on this machine")?;
     let kp = auth::device::load(keys)?.context("no device key here - `dd device show`")?;
     let token = auth::device::mint(&kp, user.as_str(), std::time::Duration::from_secs(600))?;
     let base = url::Url::parse(repo)?;
-    let host = base
-        .host_str()
-        .context("no host in the repository's address")?;
-    let domain = host.split_once('.').map(|(_, d)| d).unwrap_or(host);
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     rt.block_on(async {
-        let http = reqwest::Client::new();
-        let entry: serde_json::Value = http
-            .get(format!(
-                "https://home.{domain}/_dd/directory/{}",
-                user.as_str()
-            ))
+        let entry = account::own_entry(keys, dirs, user.as_str()).await?;
+        let (opener, _, _) = media::gate::Opener::load(keys)?;
+        let sealed = account::seal_for_keys(&entry.entry, opener.device().1, "archive", &raw)?;
+        let n = sealed["keys"].as_object().map(|o| o.len()).unwrap_or(0);
+        let http = directory::http()?;
+        http.put(base.join("dd-devices.json")?)
             .bearer_auth(&token)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        let mut sealed = serde_json::Map::new();
-        for p in entry["entry"]["passkeys"].as_array().into_iter().flatten() {
-            if let (Some(id), Some(k)) = (p["id"].as_str(), p["library_key"].as_str()) {
-                sealed.insert(
-                    id.to_string(),
-                    serde_json::Value::String(library::seal_to(k, &raw)?),
-                );
-            }
-        }
-        anyhow::ensure!(
-            !sealed.is_empty(),
-            "no passkey in your entry can open things in a browser yet: `dd enrol` one"
-        );
-        http.put(base.join("dd-passkeys.json")?)
-            .bearer_auth(&token)
-            .json(&serde_json::Value::Object(sealed.clone()))
+            .json(&sealed)
             .send()
             .await?
             .error_for_status()?;
-        Ok(sealed.len())
+        // gone or never there, either is done; the trash keeps it its 90 days
+        http.delete(base.join("dd-passkeys.json")?)
+            .bearer_auth(&token)
+            .send()
+            .await?;
+        Ok(n)
     })
 }
 
@@ -850,7 +839,7 @@ impl Drop for Busy {
     }
 }
 
-fn image(cmd: ImageCmd, repo: String) -> Result<()> {
+fn image(cmd: ImageCmd, repo: String, dirs: Vec<String>) -> Result<()> {
     use archive::{Archive, Source, Stderr, TokenProvider};
     let keys = auth::open(&service());
 
@@ -884,9 +873,9 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
                 name, e.name, e.bytes, e.id
             );
             // so Backups in Settings opens it too; not a reason to fail the push
-            if let Err(err) = seal_for_passkeys(&keys, &repo, &password) {
+            if let Err(err) = seal_for_devices(&keys, &repo, &password, &dirs) {
                 eprintln!(
-                    "(Backups in Settings will not open this until `dd image passkey`: {err:#})"
+                    "(Backups in Settings will not open this until `dd image devices`: {err:#})"
                 );
             }
         }
@@ -894,9 +883,11 @@ fn image(cmd: ImageCmd, repo: String) -> Result<()> {
             archive.repair()?;
             println!("index rebuilt - rerun the push, it will skip what is already there");
         }
-        ImageCmd::Passkey => {
-            let n = seal_for_passkeys(&keys, &repo, &password)?;
-            println!("your archives open with {n} passkey(s) in Backups, in Settings");
+        ImageCmd::Devices => {
+            let n = seal_for_devices(&keys, &repo, &password, &dirs)?;
+            println!(
+                "your archives open with {n} key(s) of yours, in Backups in Settings (through the app)"
+            );
         }
         ImageCmd::Delete { ids, yes } => {
             anyhow::ensure!(!ids.is_empty(), "which archives? ids from `dd image list`");
@@ -1161,16 +1152,6 @@ async fn main() -> Result<()> {
                 let signed = who::remove_passkey(&directories, &name, &root, &id).await?;
                 println!("passkey {id} removed; version {}", signed.entry.version);
             }
-            PasskeyCmd::Link { id, library_key } => {
-                let root = who::load_root(&keys)?.context("no root key on this machine")?;
-                let name = keys.get(USER)?.context("no name here")?.to_string();
-                let signed =
-                    account::link_passkey(&directories, &name, &root, &id, &library_key).await?;
-                println!(
-                    "passkey {id} can open your libraries; version {}",
-                    signed.entry.version
-                );
-            }
             PasskeyCmd::Add { file } => {
                 let root = who::load_root(&keys)?.context("no root key on this machine")?;
                 let name = keys.get(USER)?.context("no name here")?.to_string();
@@ -1185,12 +1166,6 @@ async fn main() -> Result<()> {
                         .and_then(|x| x.as_str())
                         .context("no cred.cred_id in that record")?
                         .to_string();
-                    // a record the browser made carries the key it derived
-                    // from this passkey; one from elsewhere does not
-                    let library_key = cred
-                        .get("library_key")
-                        .and_then(|x| x.as_str())
-                        .map(str::to_string);
                     // the box that ran the ceremony says which domain it
                     // was for; without one the assertion is checked as it
                     // always was
@@ -1206,7 +1181,7 @@ async fn main() -> Result<()> {
                             id: id.clone(),
                             cred,
                             added: identity::now(),
-                            library_key,
+                            library_key: None,
                             rp_id,
                         },
                     )
@@ -1847,8 +1822,12 @@ async fn main() -> Result<()> {
         // rustic_core is synchronous and the token provider blocks on its own
         // small runtime. Neither may run on a tokio worker thread, so the
         // whole command gets a plain thread of its own.
-        Command::Image { cmd, repo } => {
-            return std::thread::spawn(move || image(cmd, repo))
+        Command::Image {
+            cmd,
+            repo,
+            directories,
+        } => {
+            return std::thread::spawn(move || image(cmd, repo, directories))
                 .join()
                 .map_err(|_| anyhow::anyhow!("image command panicked"))?;
         }

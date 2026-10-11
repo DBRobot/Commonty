@@ -1,7 +1,7 @@
 # The photos test: museum up on loopback alone, its sessions kept as
-# hashes, and the gate's Photos sign-in: the page for a member, its
-# settings without the fleet's code, and the code filled in for her own
-# address only.
+# hashes, and the gate's side of Photos: the page that hands a browser
+# to the app, its settings without the fleet's code, and the code filled
+# in for her own address only, by session or by a device's token.
 import hashlib
 import json
 
@@ -33,11 +33,10 @@ box.wait_for_open_port(4181)
 site = "https://photos.test.invalid"
 curl = "curl -sk --resolve photos.test.invalid:443:127.0.0.1"
 
-# nobody signed in is sent to sign in, and back here after
-out = box.succeed(
-    f"{curl} -o /dev/null -w '%{{http_code}} %{{redirect_url}}' {site}/_dd/photos"
-).split()
-assert out[0] in ("302", "303") and "/_dd/login" in out[1], out
+# Ente's client comes with the app: the page here hands a browser to it,
+# signed in or not, and holds no code that opens anything
+page = box.succeed(f"{curl} -f {site}/_dd/photos")
+assert "use-app.js" in page and "dd_web" not in page, page
 
 # sarah and tom, members, each with a session as the app's browser has
 dirs = "--directory http://127.0.0.1:4181/_dd/directory"
@@ -76,9 +75,9 @@ sarah = f"-H 'Cookie: {session('sarah')}'"
 tom = f"-H 'Cookie: {session('tom')}'"
 as_json = "-H 'content-type: application/json'"
 
-# her page, and what it needs: her address at museum, museum on this
+# what the app's Photos page needs: her address at museum, museum on this
 # site's own name, and never the fleet's code
-assert "photos.js" in box.succeed(f"{curl} -f {sarah} {site}/_dd/photos")
+assert "use-app.js" in box.succeed(f"{curl} -f {sarah} {site}/_dd/photos")
 cfg = json.loads(box.succeed(f"{curl} -f -X POST {sarah} {site}/_dd/photos/config"))
 assert cfg["email"] == "sarah@users.test.invalid", cfg
 assert cfg["accountApi"] == "/_dd/museum", cfg
@@ -92,6 +91,13 @@ box.succeed(
 # tom cannot have the gate fill in the code for her address
 code = box.succeed(
     f"{curl} -o /dev/null -w '%{{http_code}}' -X POST {tom} {as_json} "
+    f'-d \'{{"email": "sarah@users.test.invalid"}}\' {site}/_dd/museum/users/verify-email'
+).strip()
+assert code == "403", code
+# nor with his device's token, which is how the app's Photos page asks
+tom_token = box.succeed(f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} token").strip()
+code = box.succeed(
+    f"{curl} -o /dev/null -w '%{{http_code}}' -X POST -H 'Authorization: Bearer {tom_token}' {as_json} "
     f'-d \'{{"email": "sarah@users.test.invalid"}}\' {site}/_dd/museum/users/verify-email'
 ).strip()
 assert code == "403", code

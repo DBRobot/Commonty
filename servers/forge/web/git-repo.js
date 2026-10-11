@@ -7,6 +7,7 @@ import {
 import { heatmap, lineChart, languages, dayKey } from './git-charts.js';
 import * as diff from './git-diff.js';
 import { feedLine } from './git-home.js';
+import { webUrl } from './kit.js';
 
 const main = () => app();
 
@@ -179,7 +180,7 @@ route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
     nTagWord.textContent = ` tag${tags.length === 1 ? '' : 's'}`;
   }).catch(() => {});
   const side = el('aside', { class: 'side' },
-    el('section', {}, el('h3', { text: 'About' }), el('p', { text: r.description || 'No description.' }), r.website ? el('p', {}, el('a', { href: r.website, text: r.website })) : null,
+    el('section', {}, el('h3', { text: 'About' }), el('p', { text: r.description || 'No description.' }), webUrl(r.website) ? el('p', {}, el('a', { href: webUrl(r.website), text: r.website })) : null,
       el('p', { class: 'small muted' }, ic(r.private ? 'lock' : 'repo', 'i s'), r.private ? ' Only the people it is shared with can see it' : ' Anyone can see it')),
     cloneBox(r));
   const langs = el('section', {}, el('h3', { text: 'Languages' }));

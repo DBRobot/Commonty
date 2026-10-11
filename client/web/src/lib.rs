@@ -1,8 +1,9 @@
-//! The browser side of Photos. A person whose key is a passkey has no
-//! password; the passkey's PRF output is the password, and this code, run
-//! in the page, makes or opens their ente account with it. ente's key
-//! derivation, SRP and secret boxes are ente's crates compiled to wasm; the
-//! master key exists in the browser and nowhere else.
+//! The browser side of Photos. Nobody types the photo account's password:
+//! the member's app makes it at random and keeps it with this device's keys
+//! (app/src/photos.rs), and hands it to its own Photos page, where this
+//! code, run in the page, makes, opens or re-keys the ente account with it.
+//! ente's key derivation, SRP and secret boxes are ente's crates compiled
+//! to wasm; the master key exists in the page and nowhere else.
 
 use ente_accounts::client::AccountsClient;
 use ente_accounts::error::{Error, Result};
@@ -150,9 +151,56 @@ pub async fn ente_create(
     session(email, account).map_err(js)
 }
 
+/// The account under a new password: signed in with the one it has, its
+/// master key wrapped again here with the new one. What the app does once
+/// to an account whose password a passkey made: after this that password
+/// opens nothing. The photos and the master key stay as they are.
+#[wasm_bindgen]
+pub async fn ente_rekey(
+    origin: &str,
+    email: &str,
+    password: &str,
+    next: &str,
+) -> std::result::Result<String, JsValue> {
+    let client = client(origin).map_err(js)?;
+    let mut ui = NoUi;
+    let account = {
+        let mut flow = AuthFlow::new(&client, &mut ui);
+        flow.login(LoginParams {
+            email: email.to_string(),
+            password: Zeroizing::new(password.to_string()),
+        })
+        .await
+        .map_err(js)?
+    };
+    client.set_auth_token(Some(b64::encode_url_safe(&account.secrets.token)));
+    let changed = {
+        let flow = AuthFlow::new(&client, &mut ui);
+        flow.change_password(ChangePasswordParams {
+            email: email.to_string(),
+            password: Zeroizing::new(next.to_string()),
+            master_key: crypto::SecretVec::new(account.secrets.master_key.clone()),
+            key_attributes: account.key_attributes.clone(),
+            log_out_other_devices: false,
+        })
+        .await
+        .map_err(js)?
+    };
+    session(
+        email,
+        AuthenticatedAccount {
+            user_id: account.user_id,
+            key_attributes: changed.key_attributes,
+            secrets: account.secrets,
+            recovery_key: None,
+        },
+    )
+    .map_err(js)
+}
+
 /// An account that already exists under another address and password, made
-/// the passkey's: sign in with the old pair once, move it to the fleet's
-/// address, re-key it to the passkey's secret. The photos stay where they
+/// the member's: sign in with the old pair once, move it to the fleet's
+/// address, re-key it to the app's password. The photos stay where they
 /// are; the master key is re-wrapped here, in the browser.
 #[wasm_bindgen]
 pub async fn ente_adopt(

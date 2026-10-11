@@ -246,6 +246,7 @@ pub async fn passkey_add(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result
 
 #[tauri::command]
 pub async fn recover(
+    app: tauri::AppHandle,
     keys: State<'_, Keys>,
     name: String,
     recovery: String,
@@ -255,10 +256,23 @@ pub async fn recover(
         return Err("a name is lowercase letters, digits and dashes".to_string());
     }
     let (kp, _) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
+    // the entry as it was: whose devices signed what was sealed to the
+    // paper key, which account::recover checks the paper key against too
+    let before = directory::resolve(
+        &directory::fetch(&dirs(), &name).await,
+        directory::Anchor::FirstSight,
+    )
+    .ok();
     let next = account::recover(&keys.0, &dirs(), &name, recovery.trim(), &kp)
         .await
         .map_err(|e| format!("{e:#}"))?;
     keys.0.set(USER, &name).map_err(|e| e.to_string())?;
+    // Photos' password, out of its copy sealed to the paper key just used
+    if let (Ok(paper), Some(before)) = (identity::decode_secret(recovery.trim()), before)
+        && let Err(e) = crate::photos::recovered(&app, &paper, &before.entry).await
+    {
+        eprintln!("recover: photos: {e}");
+    }
     Ok(next.to_string())
 }
 
@@ -267,7 +281,10 @@ pub async fn recover(
 #[tauri::command]
 pub fn forget(keys: State<'_, Keys>) -> Result<(), String> {
     crate::net::forget_browser();
-    // the photo password went with the name it was for
-    let _ = keys.0.clear(crate::photos::PASSWORD);
+    // the photo password, and the root this device vouched for, went with
+    // the name they were for
+    let _ = keys.0.clear(crate::photos::KEY);
+    let _ = keys.0.clear(crate::photos::LEGACY);
+    let _ = keys.0.clear(account::ROOT_PIN);
     keys.0.clear(USER).map_err(|e| e.to_string())
 }

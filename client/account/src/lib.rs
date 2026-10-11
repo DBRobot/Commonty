@@ -105,6 +105,192 @@ pub fn read_as_device<S: KeyStore + 'static>(open: impl Fn() -> S + Send + Sync 
     })));
 }
 
+/// keyring account holding the root this device first saw its entry under:
+/// what anything sealed to the entry's keys is checked against
+pub const ROOT_PIN: &str = "entry-root";
+
+/// This member's entry, as this device can vouch for it: under the root it
+/// holds, or the one it pinned the first time it looked (kept from then on).
+/// A box that serves an entry under some other root, listing keys of its
+/// own beside this device's, is refused here rather than sealed to.
+pub async fn own_entry(keys: &impl KeyStore, dirs: &[String], name: &str) -> Result<SignedEntry> {
+    let found = fetch(dirs, name).await;
+    let held = load_root(keys)?.map(|r| identity::encode_public(&r.verifying_key()));
+    let pin = keys.get(ROOT_PIN)?.map(|s| s.to_string());
+    let anchor = held.clone().or(pin.clone());
+    let e = directory::resolve(
+        &found,
+        match &anchor {
+            Some(r) => directory::Anchor::Root(r),
+            None => directory::Anchor::FirstSight,
+        },
+    )
+    .context("your entry is not one this device can vouch for (signed out and in again after a recovery elsewhere?)")?;
+    if pin.as_deref() != Some(e.entry.root.as_str()) {
+        keys.set(ROOT_PIN, &e.entry.root)?;
+    }
+    Ok(e)
+}
+/// A secret a member's devices share (the archive password, the Photos
+/// password), sealed to every key of the entry that a device holds - each
+/// device, a root kept on one, the paper key, the same rule as a library's -
+/// and signed by the device that made it:
+///
+/// ```text
+/// {"for": "<what>", "by": "<signer's fingerprint>",
+///  "keys": {"device:<fp>" | "root" | "recovery": sealed}, "sig": base64}
+/// ```
+///
+/// Sealing needs only a public key, so a box could seal a secret of its own
+/// choosing to a device; the signature, by a device the root-signed entry
+/// names, is what tells the member's copy from that. `what` keeps one
+/// secret from being handed over as another.
+///
+/// An entry whose root is a passkey is signed by an assertion, and a box's
+/// page can have a passkey make one over an entry the box wrote, a device
+/// or a paper key of its own in it. So for one of those it goes to this
+/// device (`me`) alone, and only this device's signature is believed:
+/// nothing else the entry names is this device's to trust. Such a member
+/// has no other copy, the paper key included (docs/dev/app.md).
+pub fn seal_for_keys(
+    entry: &Entry,
+    me: &ed25519_dalek::SigningKey,
+    what: &str,
+    secret: &[u8],
+) -> Result<serde_json::Value> {
+    use base64::Engine as _;
+    use ed25519_dalek::Signer as _;
+    let fp = identity::fingerprint(&identity::encode_public(&me.verifying_key()));
+    let key: library::Key = {
+        let mut k = zeroize::Zeroizing::new([0u8; 32]);
+        anyhow::ensure!(secret.len() == 32, "a shared secret is 32 bytes");
+        k.copy_from_slice(secret);
+        k
+    };
+    let mut entry = entry.clone();
+    if entry.root.starts_with(identity::WEBAUTHN_ROOT) {
+        entry.devices.retain(|d| d.fingerprint == fp);
+        // its paper key too is what the entry says, and the entry is what a
+        // box could have had signed; and a passkey is never sealed to
+        entry.recovery.clear();
+        entry.passkeys.clear();
+    }
+    let mut keys = serde_json::Map::new();
+    for s in library::seal_for_entry(&entry, &key)? {
+        keys.insert(s.to, serde_json::Value::String(s.sealed));
+    }
+    let keys = serde_json::Value::Object(keys);
+    let sig = me.sign(&signed_bytes(what, &fp, &keys)?);
+    Ok(serde_json::json!({
+        "for": what,
+        "by": fp,
+        "keys": keys,
+        "sig": base64::engine::general_purpose::STANDARD.encode(sig.to_bytes()),
+    }))
+}
+
+/// what a shared secret's signature is over: a label, what it is for, who
+/// signed, and the sealed keys (serde_json keeps a map's keys sorted)
+fn signed_bytes(what: &str, by: &str, keys: &serde_json::Value) -> Result<Vec<u8>> {
+    let mut b = b"commonty shared secret v1\0".to_vec();
+    b.extend_from_slice(what.as_bytes());
+    b.push(0);
+    b.extend_from_slice(by.as_bytes());
+    b.push(0);
+    b.extend_from_slice(&serde_json::to_vec(keys)?);
+    Ok(b)
+}
+
+/// The labels a shared secret is sealed to now, by `seal_for_keys`' rule
+/// for this entry and this device: what a copy that lacks one is missing.
+pub fn due_for_keys(entry: &Entry, me: &str) -> Vec<String> {
+    if entry.root.starts_with(identity::WEBAUTHN_ROOT) {
+        return vec![format!("device:{me}")];
+    }
+    let mut want: Vec<String> = entry
+        .devices
+        .iter()
+        .map(|d| format!("device:{}", d.fingerprint))
+        .collect();
+    want.push("root".into());
+    if !entry.recovery.is_empty() {
+        want.push("recovery".into());
+    }
+    want
+}
+
+/// The sealed keys of a shared secret, once its signature is one the
+/// member's own entry vouches for: by a device that entry names (by this
+/// device alone, for a passkey root), for this purpose. `entry` must be the
+/// one this device resolved under its pinned root (`own_entry`).
+pub fn vouched<'a>(
+    doc: &'a serde_json::Value,
+    entry: &Entry,
+    me: &ed25519_dalek::VerifyingKey,
+    what: &str,
+) -> Result<&'a serde_json::Value> {
+    use base64::Engine as _;
+    use ed25519_dalek::Verifier as _;
+    if doc["for"].as_str() != Some(what) {
+        bail!("that copy is not of the {what}");
+    }
+    let by = doc["by"]
+        .as_str()
+        .context("that copy says nobody made it")?;
+    let key = if entry.root.starts_with(identity::WEBAUTHN_ROOT) {
+        // this device's own key as it holds it, not as the entry says
+        if by != identity::fingerprint(&identity::encode_public(me)) {
+            bail!("only this device's own copy is believed for an account a passkey signs");
+        }
+        *me
+    } else {
+        let signer = entry
+            .devices
+            .iter()
+            .find(|d| d.fingerprint == by)
+            .context("that copy was made by no device of this account")?;
+        identity::decode_public(&signer.public_key)?
+    };
+    let sig = base64::engine::general_purpose::STANDARD
+        .decode(doc["sig"].as_str().context("that copy is not signed")?)
+        .ok()
+        .and_then(|b| ed25519_dalek::Signature::from_slice(&b).ok())
+        .context("that copy's signature is not one")?;
+    key.verify(&signed_bytes(what, by, &doc["keys"])?, &sig)
+        .ok()
+        .context("that copy's signature is not its device's")?;
+    Ok(&doc["keys"])
+}
+
+/// A shared secret, vouched for (`vouched`) and opened with this device's
+/// key or the root here
+pub fn open_for_device(
+    doc: &serde_json::Value,
+    entry: &Entry,
+    what: &str,
+    device: (&str, &ed25519_dalek::SigningKey),
+    root: Option<&ed25519_dalek::SigningKey>,
+) -> Result<library::Key> {
+    let keys = vouched(doc, entry, &device.1.verifying_key(), what)?;
+    let lib = identity::Library {
+        id: String::new(),
+        keys: keys
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(to, v)| {
+                Some(identity::SealedKey {
+                    to: to.clone(),
+                    sealed: v.as_str()?.to_string(),
+                })
+            })
+            .collect(),
+        readers: vec![],
+        created: 0,
+    };
+    library::open_library(&lib, Some(device), root).context("no key of this device opens it")
+}
+
 pub fn load_root(keys: &impl KeyStore) -> Result<Option<ed25519_dalek::SigningKey>> {
     match keys.get(ROOT)? {
         Some(s) => Ok(Some(identity::decode_secret(&s)?)),
@@ -122,6 +308,7 @@ pub async fn add_library(
     let cur = ours(dirs, name, root).await?;
     let mut entry = cur.entry.clone();
     entry.libraries.push(lib);
+    identity::drop_passkey_keys(&mut entry);
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
@@ -199,6 +386,7 @@ pub async fn create(
         }
     })?;
     keys.set(ROOT, &identity::encode_secret(&root))?;
+    keys.set(ROOT_PIN, &identity::encode_public(&root.verifying_key()))?;
     Ok(identity::encode_secret(&recovery))
 }
 
@@ -274,6 +462,7 @@ pub async fn admit(
             sealed: library::seal_to(public_key, &key[..])?,
         });
     }
+    identity::drop_passkey_keys(&mut entry);
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
@@ -312,6 +501,7 @@ pub async fn remove_device(
     for lib in &mut entry.libraries {
         lib.keys.retain(|k| k.to != sealed_to);
     }
+    identity::drop_passkey_keys(&mut entry);
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
@@ -319,41 +509,57 @@ pub async fn remove_device(
     Ok(signed)
 }
 
-/// A passkey in the entry gains the key a browser derived from it, and
-/// every library key is sealed to that key as well: from then on any
-/// browser holding that passkey opens the member's libraries.
-pub async fn link_passkey(
+/// Whether a library is sealed to exactly what `seal_for_entry` would seal
+/// it to now: every device, the root, the paper key, and nothing else.
+fn sealed_as_due(entry: &Entry, lib: &identity::Library) -> bool {
+    let mut want: Vec<String> = entry
+        .devices
+        .iter()
+        .map(|d| format!("device:{}", d.fingerprint))
+        .collect();
+    if !entry.root.starts_with(identity::WEBAUTHN_ROOT) {
+        want.push("root".into());
+    }
+    if !entry.recovery.is_empty() {
+        want.push("recovery".into());
+    }
+    let mut have: Vec<String> = lib.keys.iter().map(|k| k.to.clone()).collect();
+    want.sort();
+    have.sort();
+    want == have
+}
+
+/// The move off passkey keys, for an entry this root signs: each library
+/// key opened here and sealed again to the devices, the root and the paper
+/// key alone, every passkey's seal and browser key dropped. Nothing is
+/// published when there is nothing to change (None). The app runs it at
+/// launch and `dd library reseal` by hand; a library key a passkey's PRF
+/// opened stays what it was, so this stops new copies, not old ones
+/// (docs/dev/libraries.md, "Moving off passkey keys").
+pub async fn reseal(
     dirs: &[String],
     name: &str,
     root: &ed25519_dalek::SigningKey,
-    id: &str,
-    library_key: &str,
-) -> Result<SignedEntry> {
-    identity::decode_public(library_key).context("that is not an ed25519 public key")?;
+) -> Result<Option<SignedEntry>> {
     let cur = ours(dirs, name, root).await?;
     let mut entry = cur.entry.clone();
-    let Some(p) = entry.passkeys.iter_mut().find(|p| p.id == id) else {
-        bail!("no passkey {id} in the entry");
-    };
-    if p.library_key.as_deref() == Some(library_key) {
-        bail!("that passkey already has this key");
+    let stale = identity::holds_passkey_keys(&entry)
+        || entry.libraries.iter().any(|l| !sealed_as_due(&entry, l));
+    if !stale {
+        return Ok(None);
     }
-    p.library_key = Some(library_key.to_string());
-    let sealed_to = format!("passkey:{id}");
+    let fresh = entry.clone();
     for lib in &mut entry.libraries {
         let key = library::open_library(lib, None, Some(root))
             .with_context(|| format!("library {}: the root does not open it", lib.id))?;
-        lib.keys.retain(|k| k.to != sealed_to);
-        lib.keys.push(library::SealedKey {
-            to: sealed_to.clone(),
-            sealed: library::seal_to(library_key, &key[..])?,
-        });
+        lib.keys = library::seal_for_entry(&fresh, &key)?;
     }
+    identity::drop_passkey_keys(&mut entry);
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
     publish(dirs, &signed).await?;
-    Ok(signed)
+    Ok(Some(signed))
 }
 
 /// Recovery: the paper key installs a new root and a new recovery key, and
@@ -412,11 +618,13 @@ pub async fn recover(
     let signed = identity::sign_recovery(entry, &root, &recovery)?;
     publish(dirs, &signed).await?;
     keys.set(ROOT, &identity::encode_secret(&root))?;
+    keys.set(ROOT_PIN, &identity::encode_public(&root.verifying_key()))?;
     Ok(identity::encode_secret(&next_recovery))
 }
 
 /// Sign a passkey into the entry. The box that ran the browser ceremony hands
 /// the credential to `dd enrol`; nothing on that box could add it itself.
+/// It signs the member in, and opens nothing: no key is sealed to it.
 pub async fn admit_passkey(
     dirs: &[String],
     name: &str,
@@ -428,23 +636,8 @@ pub async fn admit_passkey(
     if entry.passkeys.iter().any(|p| p.id == pk.id) {
         bail!("that passkey is already in the entry");
     }
-    // The passkey brought the key the Files and Movies pages open with: the
-    // libraries are sealed to it in the same signed step, so the browser
-    // opens them at once and nobody runs `dd passkey link` by hand.
-    if let Some(library_key) = &pk.library_key {
-        identity::decode_public(library_key).context("that is not an ed25519 public key")?;
-        let sealed_to = format!("passkey:{}", pk.id);
-        for lib in &mut entry.libraries {
-            let key = library::open_library(lib, None, Some(root))
-                .with_context(|| format!("library {}: the root does not open it", lib.id))?;
-            lib.keys.retain(|k| k.to != sealed_to);
-            lib.keys.push(library::SealedKey {
-                to: sealed_to.clone(),
-                sealed: library::seal_to(library_key, &key[..])?,
-            });
-        }
-    }
     entry.passkeys.push(pk);
+    identity::drop_passkey_keys(&mut entry);
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
@@ -465,9 +658,151 @@ pub async fn remove_passkey(
     if entry.passkeys.len() == before {
         bail!("no passkey {id} in the entry");
     }
+    identity::drop_passkey_keys(&mut entry);
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
     publish(dirs, &signed).await?;
     Ok(signed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(k: &ed25519_dalek::SigningKey) -> Device {
+        let p = identity::encode_public(&k.verifying_key());
+        Device {
+            fingerprint: identity::fingerprint(&p),
+            public_key: p,
+            added: 1,
+        }
+    }
+
+    fn entry(root: String, devices: Vec<Device>, recovery: String) -> Entry {
+        Entry {
+            name: "amy".into(),
+            root,
+            recovery,
+            devices,
+            passkeys: vec![identity::Passkey {
+                id: "p1".into(),
+                cred: serde_json::json!({}),
+                added: 1,
+                rp_id: None,
+                library_key: Some(identity::encode_public(
+                    &identity::generate().verifying_key(),
+                )),
+            }],
+            grant: None,
+            libraries: vec![],
+            version: 1,
+            updated: 1,
+        }
+    }
+
+    fn labels(doc: &serde_json::Value) -> Vec<String> {
+        let mut k: Vec<String> = doc["keys"].as_object().unwrap().keys().cloned().collect();
+        k.sort();
+        k
+    }
+
+    #[test]
+    fn a_shared_secret_goes_to_the_keys_a_device_can_vouch_for() {
+        let (me, other, root, paper) = (
+            identity::generate(),
+            identity::generate(),
+            identity::generate(),
+            identity::generate(),
+        );
+        let fp = device(&me).fingerprint;
+        let paper_pub = identity::encode_public(&paper.verifying_key());
+        let secret = [7u8; 32];
+
+        // a root a device holds signs the entry: every device, the root,
+        // the paper key; never the passkey
+        let held = entry(
+            identity::encode_public(&root.verifying_key()),
+            vec![device(&me), device(&other)],
+            paper_pub.clone(),
+        );
+        let doc = seal_for_keys(&held, &me, "photos", &secret).unwrap();
+        let mut want = due_for_keys(&held, &fp);
+        want.sort();
+        assert_eq!(labels(&doc), want);
+        assert_eq!(want.len(), 4);
+        assert_eq!(
+            &open_for_device(&doc, &held, "photos", (&fp, &me), None).unwrap()[..],
+            &secret
+        );
+        // made by the other device, it opens here just the same
+        let theirs = seal_for_keys(&held, &other, "photos", &secret).unwrap();
+        assert!(open_for_device(&theirs, &held, "photos", (&fp, &me), None).is_ok());
+        // but not as another secret
+        assert!(open_for_device(&doc, &held, "archive", (&fp, &me), None).is_err());
+
+        // a passkey root: whatever else the entry names - another device, a
+        // paper key - a box may have had signed, so this device alone
+        let passkey = entry(
+            "webauthn:p1:digest".into(),
+            vec![device(&me), device(&other)],
+            paper_pub,
+        );
+        let doc = seal_for_keys(&passkey, &me, "photos", &secret).unwrap();
+        assert_eq!(labels(&doc), [format!("device:{fp}")]);
+        assert_eq!(due_for_keys(&passkey, &fp), [format!("device:{fp}")]);
+        let ofp = device(&other).fingerprint;
+        assert!(open_for_device(&doc, &passkey, "photos", (&ofp, &other), None).is_err());
+        // and the other device's copy is not believed here, signed or not
+        let theirs = seal_for_keys(&passkey, &other, "photos", &secret).unwrap();
+        assert!(open_for_device(&theirs, &passkey, "photos", (&fp, &me), None).is_err());
+    }
+
+    /// Sealing takes only a public key, so a box can seal a password of its
+    /// own to this device. What it cannot do is sign it as a device the
+    /// member's root-signed entry names.
+    #[test]
+    fn a_copy_a_box_made_is_refused() {
+        let (me, root, stranger) = (
+            identity::generate(),
+            identity::generate(),
+            identity::generate(),
+        );
+        let fp = device(&me).fingerprint;
+        let e = entry(
+            identity::encode_public(&root.verifying_key()),
+            vec![device(&me)],
+            String::new(),
+        );
+        // sealed to this device by a key the entry does not name
+        let forged = seal_for_keys(&e, &stranger, "photos", &[9u8; 32]).unwrap();
+        assert!(open_for_device(&forged, &e, "photos", (&fp, &me), None).is_err());
+        // a real copy with its sealed keys swapped for the box's own
+        let mut swapped = seal_for_keys(&e, &me, "photos", &[7u8; 32]).unwrap();
+        swapped["keys"] = forged["keys"].clone();
+        assert!(open_for_device(&swapped, &e, "photos", (&fp, &me), None).is_err());
+        // claiming to be this device, signed by another key
+        let mut claimed = forged.clone();
+        claimed["by"] = serde_json::Value::String(fp.clone());
+        assert!(open_for_device(&claimed, &e, "photos", (&fp, &me), None).is_err());
+        // unsigned
+        let mut bare = seal_for_keys(&e, &me, "photos", &[7u8; 32]).unwrap();
+        bare.as_object_mut().unwrap().remove("sig");
+        assert!(open_for_device(&bare, &e, "photos", (&fp, &me), None).is_err());
+
+        // and the entry it is checked against is one under the pinned root:
+        // a box's entry under its own root, or one that does not verify, is
+        // never what a copy is checked with (own_entry)
+        let mut boxed = e.clone();
+        boxed.root = identity::encode_public(&stranger.verifying_key());
+        let boxed = identity::sign(boxed, &stranger).unwrap();
+        let pin = identity::encode_public(&root.verifying_key());
+        let found = |s: identity::SignedEntry| vec![("d".to_string(), Ok(Some(s)))];
+        assert!(directory::resolve(&found(boxed), directory::Anchor::Root(&pin)).is_err());
+        let mut bent = identity::sign(e.clone(), &root).unwrap();
+        bent.entry.devices.push(device(&stranger));
+        assert!(directory::resolve(&found(bent), directory::Anchor::Root(&pin)).is_err());
+        let good = identity::sign(e, &root).unwrap();
+        assert!(directory::resolve(&found(good), directory::Anchor::Root(&pin)).is_ok());
+    }
 }

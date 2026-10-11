@@ -54,22 +54,17 @@ fn change(
             return Err("no such passkey in the entry".into());
         }
     }
+    identity::drop_passkey_keys(&mut e);
     e.version += 1;
     e.updated = now;
     Ok(e)
 }
 
 /// The entry with a new device in it - the key a QR code's device offered -
-/// and every library key sealed to it as well, and the challenge its root
-/// passkey has to sign: `{ "entry": …, "challenge": base64url }`. The
-/// library is open in this page (its key, base64, from library.js).
-fn with_device(
-    signed: &str,
-    public_key: &str,
-    library_id: Option<String>,
-    library_key: Option<String>,
-    now: u64,
-) -> R<String> {
+/// and the challenge its root passkey has to sign: `{ "entry": …,
+/// "challenge": base64url }`. No key is sealed here: a box page holds none
+/// to seal, and a passkey's account keeps none in its entry.
+fn with_device(signed: &str, public_key: &str, now: u64) -> R<String> {
     let s: SignedEntry = serde_json::from_str(signed).map_err(|e| e.to_string())?;
     if !s.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
         return Err("this entry's root is a device key: it adds devices itself".into());
@@ -79,22 +74,12 @@ fn with_device(
     if e.devices.iter().any(|d| d.public_key == public_key) {
         return Err("that device is in the account already".into());
     }
-    let fp = identity::fingerprint(public_key);
     e.devices.push(identity::Device {
-        fingerprint: fp.clone(),
+        fingerprint: identity::fingerprint(public_key),
         public_key: public_key.to_string(),
         added: now,
     });
-    if let (Some(id), Some(key)) = (library_id, library_key) {
-        let raw = B64.decode(&key).map_err(|e| e.to_string())?;
-        let sealed = library::seal_to(public_key, &raw).map_err(|e| e.to_string())?;
-        if let Some(l) = e.libraries.iter_mut().find(|l| l.id == id) {
-            l.keys.push(identity::SealedKey {
-                to: format!("device:{fp}"),
-                sealed,
-            });
-        }
-    }
+    identity::drop_passkey_keys(&mut e);
     e.version += 1;
     e.updated = now;
     let c = identity::challenge(&e).map_err(|e| e.to_string())?;
@@ -102,16 +87,10 @@ fn with_device(
 }
 
 #[wasm_bindgen]
-pub fn entry_with_device(
-    signed: &str,
-    public_key: &str,
-    library_id: Option<String>,
-    library_key: Option<String>,
-    now: u64,
-) -> Result<String, JsValue> {
+pub fn entry_with_device(signed: &str, public_key: &str, now: u64) -> Result<String, JsValue> {
     let run = || -> R<String> {
         verified(signed)?;
-        with_device(signed, public_key, library_id, library_key, now)
+        with_device(signed, public_key, now)
     };
     run().map_err(|e| JsValue::from_str(&e))
 }
@@ -240,8 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn a_device_joins_with_the_library_sealed_to_it() {
-        use base64::Engine as _;
+    fn a_device_joins_and_no_passkey_key_rides_along() {
         let newcomer = ed25519_dalek::SigningKey::from_bytes(&[4; 32]);
         let pk = identity::encode_public(&newcomer.verifying_key());
         let e = identity::Entry {
@@ -249,11 +227,20 @@ mod tests {
             root: format!("{}pk1:digest", identity::WEBAUTHN_ROOT),
             recovery: String::new(),
             devices: vec![],
-            passkeys: vec![],
+            passkeys: vec![identity::Passkey {
+                id: "pk1".into(),
+                cred: serde_json::json!({}),
+                added: 1,
+                rp_id: None,
+                library_key: Some("an old PRF key".into()),
+            }],
             grant: None,
             libraries: vec![identity::Library {
                 id: "0123456789abcdef0123456789abcdef".into(),
-                keys: vec![],
+                keys: vec![identity::SealedKey {
+                    to: "passkey:pk1".into(),
+                    sealed: "x".into(),
+                }],
                 readers: vec![],
                 created: 1,
             }],
@@ -266,25 +253,11 @@ mod tests {
             recovery_signature: None,
         })
         .unwrap();
-        let key = B64.encode([9u8; 32]);
-        let out: serde_json::Value = serde_json::from_str(
-            &with_device(
-                &signed,
-                &pk,
-                Some("0123456789abcdef0123456789abcdef".into()),
-                Some(key),
-                50,
-            )
-            .unwrap(),
-        )
-        .unwrap();
+        let out: serde_json::Value =
+            serde_json::from_str(&with_device(&signed, &pk, 50).unwrap()).unwrap();
         let e: identity::Entry = serde_json::from_value(out["entry"].clone()).unwrap();
         assert_eq!((e.version, e.devices.len()), (5, 1));
-        let sealed = &e.libraries[0].keys[0];
-        assert_eq!(sealed.to, format!("device:{}", identity::fingerprint(&pk)));
-        // and only the new device opens it, to the same key
-        let opened = library::open_with(&newcomer, &sealed.sealed).unwrap();
-        assert_eq!(&opened[..], &[9u8; 32]);
+        assert!(!identity::holds_passkey_keys(&e), "{e:?}");
         assert!(!out["challenge"].as_str().unwrap().is_empty());
     }
 }

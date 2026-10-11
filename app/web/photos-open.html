@@ -11,6 +11,11 @@
     <div class="card">
       <h1>Photos</h1>
       <p class="lead" id="msg">Opening your photos…</p>
+      <div id="move" hidden>
+        <p class="lead">Your photo account was opened with your passkey until now, and this device does not have its key yet. Move it to the app once: your browser asks your passkey a last time, then the app gives the account a key only your devices hold.</p>
+        <button id="go" type="button">Move Photos to the app</button>
+      </div>
+      <p class="note" id="wait" hidden>Confirm with your passkey in the browser tab that opened, then come back here.</p>
     </div>
   </main>
   <script type="module" src="/_dd/app/photos-open.js"></script>

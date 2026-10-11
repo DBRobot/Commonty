@@ -6,6 +6,7 @@
 // library of its own: its chats stay in the tab.
 
 import { me } from './shell.js';
+import { webUrl } from './kit.js';
 import { unlock, fetchPlain, put, mkdir, trash, save } from './library.js';
 import { marked } from '/_dd/web/marked.js';
 
@@ -284,7 +285,9 @@ function botView(m, last) {
     box.append(el('details', { class: 'sources' },
       el('summary', {}, `${m.sources.length} source${m.sources.length === 1 ? '' : 's'}`, icon('down', 'i small')),
       el('ol', {}, ...m.sources.map((r) => el('li', {},
-        el('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer nofollow', text: r.title || r.url }),
+        webUrl(r.url)
+          ? el('a', { href: webUrl(r.url), target: '_blank', rel: 'noopener noreferrer nofollow', text: r.title || r.url })
+          : el('span', { text: r.title || String(r.url || '') }),
         el('span', { text: hostOf(r.url) }))))));
   }
   if (m.error) box.append(el('p', { class: 'err', text: m.error }));
@@ -352,7 +355,8 @@ async function webResults(q, m, signal) {
   try {
     const r = await fetch(`/search?q=${encodeURIComponent(q.slice(0, 300))}`, { signal });
     if (!r.ok) throw new Error(r.status === 404 ? 'web search is not on this box' : `the search did not answer (${r.status})`);
-    const found = (await r.json()).results || [];
+    // only results with a web address: one that is not is never a link here
+    const found = ((await r.json()).results || []).filter((x) => webUrl(x?.url));
     if (!found.length) {
       m.searchNote = 'The web search found nothing; this answer is from the model alone.';
       return [];

@@ -6,6 +6,7 @@ import {
   setTitle, firstLine, short, pop, pager, whoami, $, warmers } from './git-core.js';
 import { repo, header, refs } from './git-repo.js';
 import * as diff from './git-diff.js';
+import { webUrl } from './kit.js';
 
 const main = () => app();
 
@@ -255,7 +256,7 @@ async function pullHead(r, p, tab) {
 // Forgejo's link to a job, drawn by our run page instead
 const runLink = (url) => {
   const m = (url || '').match(/\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?/);
-  return m ? `/${m[1]}/actions/runs/${m[2]}${m[3] !== undefined ? q({ job: m[3] }) : ''}` : url;
+  return m ? `/${m[1]}/actions/runs/${m[2]}${m[3] !== undefined ? q({ job: m[3] }) : ''}` : webUrl(url);
 };
 const jobName = (ctx) => ctx.replace(/ \((pull_request|push)\)$/, '');
 

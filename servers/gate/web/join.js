@@ -1,26 +1,20 @@
-// Create an account: a name and a new passkey, signed into a directory
-// entry by that same passkey. With an invite code, the grant rides along.
+// An account in a browser: a name and a new passkey, signed into a
+// directory entry by that same passkey. It signs in and holds no keys: a
+// friend's guest, or someone waiting to be let in. A member's account, with
+// an invite code, is made in the Commonty app, on the member's own device.
 
-import { creationOptions, requestOptions, attestation, assertion, post, say, u8b64, safeRd } from './webauthn.js';
-import { checkInvite, claim } from './invite.js';
+import { creationOptions, requestOptions, attestation, assertion, post, say, safeRd } from './webauthn.js';
 
 async function go() {
   say('…');
   try {
     const username = document.getElementById('u').value.trim().toLowerCase();
-    const code = document.getElementById('c').value.trim();
-    if (code) await checkInvite(code);
 
     // the passkey
     const start = await post('/_dd/join/start', { username });
     const { publicKey, ceremony } = await start.json();
     const cred = await navigator.credentials.create({ publicKey: creationOptions(publicKey) });
-
-    const headers = { 'x-dd-ceremony': ceremony };
-    if (code) {
-      headers['x-dd-grant'] = btoa(JSON.stringify(await claim(code, 'webauthn:' + u8b64(cred.rawId))));
-    }
-    const finish = await post('/_dd/join/finish', attestation(cred), headers);
+    const finish = await post('/_dd/join/finish', attestation(cred), { 'x-dd-ceremony': ceremony });
     const sign = await finish.json();
 
     // the entry, signed with it
@@ -29,16 +23,7 @@ async function go() {
     await post('/_dd/join/sign', assertion(a), { 'x-dd-ceremony': sign.ceremony });
 
     try { localStorage.setItem('dd_user', username); } catch (e) {}
-    const onward = new URL(safeRd(new URLSearchParams(location.search).get('rd') || '/_dd/home'), location.href).href;
-    // A member's email is given to the mail Worker and kept there, never on
-    // a box (client/mail): an invite makes a member at once, so on to it.
-    // Someone not let in yet adds theirs from Settings once they are.
-    if (code) {
-      const domain = location.hostname.split('.').slice(-2).join('.');
-      location.href = `https://mail.${domain}/start?name=${encodeURIComponent(username)}&back=${encodeURIComponent(onward)}`;
-    } else {
-      location.href = onward;
-    }
+    location.href = new URL(safeRd(new URLSearchParams(location.search).get('rd') || '/_dd/home'), location.href).href;
   } catch (e) {
     say('Could not create the account: ' + e.message);
   }

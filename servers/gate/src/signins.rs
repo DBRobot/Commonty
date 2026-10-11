@@ -316,27 +316,32 @@ pub(crate) mod http {
 
     use crate::{App, pages};
 
-    /// a member, signed in by session: who, and this session's id
+    /// A member or guest by this box's session cookie, or by a device's
+    /// token (the app's own Settings, in its window or a browser it serves):
+    /// who, the session's id (none for a token), and whether a device said so
     #[allow(clippy::result_large_err)]
-    fn member(app: &App, headers: &HeaderMap) -> Result<(String, String), Response> {
-        let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-        let user = app
-            .signed_in(cookie)
+    fn member(app: &App, headers: &HeaderMap) -> Result<(String, String, bool), Response> {
+        let (user, by_device) = app
+            .identify_how(headers, "access")
             .ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())?;
         // members and guests: anyone with devices of their own
         if user == pages::DEMO_USER || !(app.member(&user) || app.guest(&user)) {
             return Err(StatusCode::FORBIDDEN.into_response());
         }
-        let id = app
-            .sessions
-            .session(cookie)
-            .map(|s| s.1)
-            .unwrap_or_default();
-        Ok((user, id))
+        let id = if by_device {
+            String::new()
+        } else {
+            let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+            app.sessions
+                .session(cookie)
+                .map(|s| s.1)
+                .unwrap_or_default()
+        };
+        Ok((user, id, by_device))
     }
 
     pub(crate) async fn list(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-        let (user, here) = match member(&app, &headers) {
+        let (user, here, _) = match member(&app, &headers) {
             Ok(m) => m,
             Err(r) => return r,
         };
@@ -374,11 +379,12 @@ pub(crate) mod http {
         headers: HeaderMap,
         Json(e): Json<End>,
     ) -> Response {
-        let (user, here) = match member(&app, &headers) {
+        let (user, here, by_device) = match member(&app, &headers) {
             Ok(m) => m,
             Err(r) => return r,
         };
-        if !app.passkey_fresh(&here) {
+        // a device's own token is the member's key itself, not a cookie
+        if !by_device && !app.passkey_fresh(&here) {
             return (
                 StatusCode::FORBIDDEN,
                 "confirm it is you with your passkey first",
@@ -413,7 +419,7 @@ pub(crate) mod http {
     /// The member's names for their devices, locked in their browser with
     /// their library key: this box keeps the bytes and cannot read them.
     pub(crate) async fn names(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-        let (user, _) = match member(&app, &headers) {
+        let (user, _, _) = match member(&app, &headers) {
             Ok(m) => m,
             Err(r) => return r,
         };
@@ -428,7 +434,7 @@ pub(crate) mod http {
         headers: HeaderMap,
         body: Bytes,
     ) -> Response {
-        let (user, _) = match member(&app, &headers) {
+        let (user, _, _) = match member(&app, &headers) {
             Ok(m) => m,
             Err(r) => return r,
         };

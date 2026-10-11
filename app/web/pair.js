@@ -1,4 +1,4 @@
-// The browser's way into the app's own Photos or Passwords (src/local.rs,
+// The browser's way into what the app serves it (src/local.rs,
 // src/handoff.rs). This page's address is no secret, so the proof is made
 // here: a random verifier that never leaves this tab until the member has
 // let it in, and only its hash goes to the app. The app's window and this
@@ -20,7 +20,7 @@ async function go() {
     $('title').textContent = 'Not opened';
     say(why === 'two browsers asked at once'
       ? 'Two browsers asked at once, so neither was let in. Go back to the page and open it again.'
-      : 'Go back to the Photos or Passwords page and open it from there.');
+      : 'Go back to the page you came from and open it from there.');
     return;
   }
   const { code } = await r.json();

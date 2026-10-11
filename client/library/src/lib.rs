@@ -178,7 +178,9 @@ impl crypto_box::aead::rand_core::CryptoRng for Urandom {}
 
 pub use identity::{Library, Reader, SealedKey};
 
-/// the library key sealed to every key an entry names for its owner
+/// The library key sealed to every key an entry names for its owner that
+/// a device holds: its devices, a root kept on one, the paper key. Never a
+/// passkey's: any page of the domain can ask one for its PRF.
 pub fn seal_for_entry(entry: &identity::Entry, key: &Key) -> Result<Vec<SealedKey>> {
     let mut out = Vec::new();
     for d in &entry.devices {
@@ -192,16 +194,6 @@ pub fn seal_for_entry(entry: &identity::Entry, key: &Key) -> Result<Vec<SealedKe
             to: "root".into(),
             sealed: seal_to(&entry.root, &key[..])?,
         });
-    }
-    // a passkey that has published a library key of its own: any browser
-    // holding that passkey can open this library
-    for p in &entry.passkeys {
-        if let Some(pk) = &p.library_key {
-            out.push(SealedKey {
-                to: format!("passkey:{}", p.id),
-                sealed: seal_to(pk, &key[..])?,
-            });
-        }
     }
     if !entry.recovery.is_empty() {
         out.push(SealedKey {
@@ -292,6 +284,33 @@ mod tests {
             open_library(&lib, None, Some(&stranger)),
             Err(Error::Sealed)
         ));
+    }
+
+    #[test]
+    fn a_passkey_is_never_sealed_to() {
+        let root = identity::generate();
+        let phone = identity::generate();
+        let mut e = entry(&[&phone], &root);
+        e.recovery = identity::encode_public(&identity::generate().verifying_key());
+        e.passkeys.push(identity::Passkey {
+            id: "p1".into(),
+            cred: serde_json::json!({}),
+            added: 1,
+            rp_id: None,
+            library_key: Some(identity::encode_public(
+                &identity::generate().verifying_key(),
+            )),
+        });
+        let to: Vec<String> = seal_for_entry(&e, &random_key())
+            .unwrap()
+            .into_iter()
+            .map(|k| k.to)
+            .collect();
+        let fp = identity::fingerprint(&identity::encode_public(&phone.verifying_key()));
+        assert_eq!(
+            to,
+            [format!("device:{fp}"), "root".into(), "recovery".into()]
+        );
     }
 
     #[test]

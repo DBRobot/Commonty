@@ -30,8 +30,8 @@ export function creationOptions(publicKey) {
   if (publicKey.excludeCredentials) {
     publicKey.excludeCredentials = publicKey.excludeCredentials.map(c => ({ ...c, id: b64u(c.id) }));
   }
-  // ask for the PRF extension: Photos derives its key from it
-  publicKey.extensions = { ...(publicKey.extensions || {}), prf: {} };
+  // a passkey signs in and nothing more: no extension is asked of it, and
+  // no key is ever made from one (docs/dev/libraries.md)
   return publicKey;
 }
 

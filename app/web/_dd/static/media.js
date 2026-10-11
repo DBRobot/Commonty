@@ -827,7 +827,7 @@ async function start() {
     $('msg').textContent = 'No library yet.';
     return;
   }
-  if (r.link) {
+  if (r.app) {
     $('msg').hidden = true;
     $('link').hidden = false;
     return;

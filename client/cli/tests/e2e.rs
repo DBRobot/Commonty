@@ -737,6 +737,33 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     assert!(body.contains("id=\"services\""), "{body}");
     let (st, me) = get_with_cookie(&b, "/_dd/me", &cookie_b).await;
     assert_eq!(st, 200, "{me}");
+    // her passkey holds no key, so a page that would is the app's to serve
+    assert_eq!(get_with_cookie(&b, "/_dd/settings", &cookie_b).await.0, 200);
+    let (st, body) = get_with_cookie(&b, "/_dd/files", &cookie_b).await;
+    assert_eq!(st, 200);
+    assert!(body.contains("use-app"), "{body}");
+
+    // and she leaves from that browser, by her passkey: out at once
+    let (st, s) = get_with_cookie(&b, "/_dd/leave", &cookie_b).await;
+    assert_eq!(st, 200, "{s}");
+    let s: serde_json::Value = serde_json::from_str(&s).unwrap();
+    assert_eq!(s["member"], true);
+    assert_eq!(s["passkey"], true);
+    assert!(s["left"].is_null());
+    leave_in_browser(&b, &mut eve, &cookie_b, false).await;
+    assert_ne!(get_with_cookie(&b, "/verify", &cookie_b).await.0, 200);
+    // signed in again, she sees where she stands, and comes back
+    let (st, cookie_b) = login_in_browser(&b, &mut eve, "eve").await;
+    assert_eq!(st, 200);
+    assert_ne!(get_with_cookie(&b, "/verify", &cookie_b).await.0, 200);
+    assert_eq!(get_with_cookie(&b, "/_dd/settings", &cookie_b).await.0, 200);
+    let (_, s) = get_with_cookie(&b, "/_dd/leave", &cookie_b).await;
+    let s: serde_json::Value = serde_json::from_str(&s).unwrap();
+    assert!(s["left"].is_u64(), "{s}");
+    // a statement is by the second, and the next must be newer
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    leave_in_browser(&b, &mut eve, &cookie_b, true).await;
+    assert_eq!(get_with_cookie(&b, "/verify", &cookie_b).await.0, 200);
 
     // dd member add, by name, finds the same id
     let repo = scratch("repo");
@@ -749,6 +776,36 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     ));
     let file = std::fs::read_to_string(format!("{repo}/fleet/members.json")).unwrap();
     assert!(file.contains(&id), "{file}");
+}
+
+/// Settings' Leave (or Come back), as its page does it: the box hands the
+/// statement over, the root passkey signs it
+async fn leave_in_browser(b: &Box_, authenticator: &mut SoftPasskey, cookie: &str, back: bool) {
+    let http = reqwest::Client::new();
+    let r = http
+        .post(b.url("/_dd/leave/start"))
+        .header("cookie", cookie)
+        .json(&serde_json::json!({ "back": back }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap_or_default());
+    let mut j: serde_json::Value = r.json().await.unwrap();
+    let ceremony = j["ceremony"].as_str().unwrap().to_string();
+    j.as_object_mut().unwrap().remove("ceremony");
+    let rcr: RequestChallengeResponse = serde_json::from_value(j).unwrap();
+    let cred = authenticator
+        .do_authentication(Url::parse("https://localhost").unwrap(), rcr)
+        .unwrap();
+    let r = http
+        .post(b.url("/_dd/leave/sign"))
+        .header("cookie", cookie)
+        .header("x-dd-ceremony", &ceremony)
+        .json(&cred)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap_or_default());
 }
 
 /// Sign in on `b` with a passkey already in the entry; the session cookie.
@@ -855,31 +912,44 @@ async fn an_invite_code_lets_one_person_in_once() {
         assert_eq!(r.status(), 403);
     }
 
-    // eve joins with the code: a member at once
-    let mut eve = SoftPasskey::new(true);
-    let (st, cookie) = join_with_code(&a, &mut eve, "eve", Some(&code)).await;
-    assert_eq!(st, 200);
-    assert_eq!(get_with_cookie(&a, "/verify", &cookie).await.0, 200);
-    let (_, body) = get_with_cookie(&a, "/_dd/home", &cookie).await;
-    assert!(body.contains("id=\"services\""), "{body}");
-    assert_eq!(get_with_cookie(&a, "/_dd/me", &cookie).await.0, 200);
+    // eve makes her account with the code, in dd (the app does the same):
+    // the code is typed on her own device and never into a box's page
+    let eve = Device::new();
+    eve.dd_ok(&args(
+        &["identity", "new", "--name", "eve", "--code", &code],
+        &d,
+    ));
+    assert_eq!(verify_status(&a, &eve.token()).await, 200);
     let e = entry(&a, "eve").await.unwrap();
     assert!(e["entry"]["grant"]["proof"].is_string());
 
     // the same code, another person: refused, the code is used up
-    let mut mallory = SoftPasskey::new(true);
-    let (st, why) = join_with_code(&a, &mut mallory, "mallory", Some(&code)).await;
-    assert_eq!(st, 409, "{why}");
-    assert!(why.contains("already been used"), "{why}");
+    let mallory = Device::new();
+    mallory.dd_fails(
+        &args(
+            &["identity", "new", "--name", "mallory", "--code", &code],
+            &d,
+        ),
+        "already been used",
+    );
     // and a code nobody issued
-    let (st, _) = join_with_code(&a, &mut mallory, "mallory", Some("zzzzz-zzzzz")).await;
-    assert_eq!(st, 404);
+    mallory.dd_fails(
+        &args(
+            &[
+                "identity",
+                "new",
+                "--name",
+                "mallory",
+                "--code",
+                "zzzzz-zzzzz",
+            ],
+            &d,
+        ),
+        "not valid",
+    );
 
-    // fay already has an account and is waiting; a second code, typed there
-    let mut fay = SoftPasskey::new(true);
-    let (st, fay_cookie) = join_in_browser(&a, &mut fay, "fay").await;
-    assert_eq!(st, 200);
-    assert_eq!(get_with_cookie(&a, "/verify", &fay_cookie).await.0, 403);
+    // a box's page takes no code: a browser account comes with none, and
+    // one typed there is refused, as is the old way to add one later
     let out = owner.dd_ok(&args(&["invite"], &d));
     let code2 = out
         .lines()
@@ -887,41 +957,27 @@ async fn an_invite_code_lets_one_person_in_once() {
         .unwrap()
         .trim()
         .to_string();
-    // held, not published, until she follows through
-    assert!(entry(&a, "fay").await.is_none());
-    let fay_held = a.dir.parent().unwrap().join("held").join("fay.json");
-    let fay_root = serde_json::from_slice::<serde_json::Value>(&std::fs::read(&fay_held).unwrap())
-        .unwrap()["entry"]["root"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let mut fay = SoftPasskey::new(true);
+    let (st, why) = join_with_code(&a, &mut fay, "fay", Some(&code2)).await;
+    assert_eq!(st, 400, "{why}");
+    assert!(why.contains("app"), "{why}");
+    let (st, fay_cookie) = join_in_browser(&a, &mut fay, "fay").await;
+    assert_eq!(st, 200);
+    assert_eq!(get_with_cookie(&a, "/verify", &fay_cookie).await.0, 403);
     let r = http
         .post(a.url("/_dd/redeem/start"))
         .header("cookie", &fay_cookie)
-        .header("x-dd-grant", grant_header(&code2, &fay_root))
+        .header("x-dd-grant", grant_header(&code2, "webauthn:fay"))
         .send()
         .await
         .unwrap();
-    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap_or_default());
-    let mut j: serde_json::Value = r.json().await.unwrap();
-    let ceremony = j["ceremony"].as_str().unwrap().to_string();
-    j.as_object_mut().unwrap().remove("ceremony");
-    let rcr: RequestChallengeResponse = serde_json::from_value(j).unwrap();
-    let cred = fay
-        .do_authentication(Url::parse("https://localhost").unwrap(), rcr)
-        .unwrap();
-    let r = http
-        .post(a.url("/_dd/redeem/sign"))
-        .header("x-dd-ceremony", &ceremony)
-        .json(&cred)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap_or_default());
-    assert_eq!(get_with_cookie(&a, "/verify", &fay_cookie).await.0, 200);
-    // the code is her follow-through: published now, and the hold is gone
-    assert_eq!(entry(&a, "fay").await.unwrap()["entry"]["version"], 2);
-    assert!(!fay_held.exists());
+    assert!(matches!(r.status().as_u16(), 404 | 405), "{}", r.status());
+    // the code is still good, on a device
+    let fay2 = Device::new();
+    fay2.dd_ok(&args(
+        &["identity", "new", "--name", "fay2", "--code", &code2],
+        &d,
+    ));
 
     // the owner sees them, as a member: the directory's names are members'.
     // They let themselves in with a code of their own
@@ -939,7 +995,7 @@ async fn an_invite_code_lets_one_person_in_once() {
     // and can shut one out again: revoked beats a grant
     let out = owner.dd_ok(&args(&["member", "list", "--repo", &repo], &d));
     assert!(
-        out.contains("eve  invited") && out.contains("fay  invited"),
+        out.contains("eve  invited") && out.contains("fay2  invited"),
         "{out}"
     );
     owner.dd_ok(&args(&["member", "remove", "eve", "--repo", &repo], &d));
@@ -957,23 +1013,19 @@ async fn an_invite_code_lets_one_person_in_once() {
         vec![],
     )
     .await;
-    // a page of another host of the domain is not this box's to ask from
-    let (st, _) = login_in_browser_at(&b, &mut fay, "fay", "https://other.localhost").await;
-    assert_ne!(st, 200, "a sign-in made on another host was taken");
-    let (st, c) = login_in_browser(&b, &mut fay, "fay").await;
-    assert_eq!(st, 200);
     assert_eq!(
-        get_with_cookie(&b, "/verify", &c).await.0,
+        verify_status(&b, &fay2.token()).await,
         200,
-        "fay's grant carries to b"
+        "fay2's grant carries to b"
     );
-    let (st, c) = login_in_browser(&b, &mut eve, "eve").await;
+    assert_eq!(verify_status(&b, &eve.token()).await, 403, "eve is revoked");
+    // a page of another host of the domain is not this box's to ask from
+    let (st, _) = login_in_browser_at(&a, &mut fay, "fay", "https://other.localhost").await;
+    assert_ne!(st, 200, "a sign-in made on another host was taken");
+    // her own page's is, and she waits as before
+    let (st, c) = login_in_browser(&a, &mut fay, "fay").await;
     assert_eq!(st, 200);
-    assert_eq!(
-        get_with_cookie(&b, "/verify", &c).await.0,
-        403,
-        "eve is revoked"
-    );
+    assert_eq!(get_with_cookie(&a, "/verify", &c).await.0, 403);
 
     // guest names are for probes, and a probe's account is dropped in time
     let mut probe = SoftPasskey::new(true);
@@ -990,8 +1042,13 @@ async fn an_invite_code_lets_one_person_in_once() {
         .trim()
         .to_string();
     tokio::time::sleep(Duration::from_millis(2500)).await;
-    let (st, _) = join_with_code(&a, &mut mallory, "mallory", Some(&code3)).await;
-    assert_eq!(st, 404);
+    mallory.dd_fails(
+        &args(
+            &["identity", "new", "--name", "mallory", "--code", &code3],
+            &d,
+        ),
+        "expired",
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1235,6 +1292,21 @@ async fn passkey_made_in_a_browser_is_signed_into_the_entry_and_logs_in() {
     let reg = authenticator
         .do_registration(origin.clone(), ccr)
         .expect("software authenticator registration");
+    // a passkey holds no keys: one sent with a key a page made from its PRF
+    // is refused, and the ceremony still stands for the plain one
+    let mut keyed = serde_json::to_value(&reg).unwrap();
+    keyed["library_key"] = serde_json::Value::String(identity::encode_public(
+        &identity::generate().verifying_key(),
+    ));
+    let r = http
+        .post(a.url("/_dd/enrol/finish"))
+        .bearer_auth(&tok)
+        .header("x-dd-ceremony", &ceremony)
+        .json(&keyed)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
     let r = http
         .post(a.url("/_dd/enrol/finish"))
         .bearer_auth(&tok)
@@ -1256,6 +1328,7 @@ async fn passkey_made_in_a_browser_is_signed_into_the_entry_and_logs_in() {
     let e = entry(&a, "amy").await.unwrap();
     assert_eq!(e["entry"]["version"], 2);
     assert_eq!(e["entry"]["passkeys"].as_array().unwrap().len(), 1);
+    assert!(e["entry"]["passkeys"][0].get("library_key").is_none());
 
     // login with it: the box builds the challenge from the entry
     let r = http
@@ -1302,6 +1375,37 @@ async fn passkey_made_in_a_browser_is_signed_into_the_entry_and_logs_in() {
             .to_str()
             .unwrap(),
         "amy"
+    );
+
+    // One sign-in, and that is all: what the app serves (Settings' Devices,
+    // its library, its Photos) asks the box with the device's token, which
+    // needs no passkey shown again, and the browser's one session opens the
+    // box's own pages
+    let token = dev.token();
+    let r = http
+        .get(a.url("/_dd/signins"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "the app's Devices tab, no cookie");
+    let r = http
+        .post(a.url("/_dd/signins/end"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "others": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        r.status(),
+        200,
+        "a device's token ends sessions without a passkey prompt: {}",
+        r.text().await.unwrap_or_default()
+    );
+    assert_eq!(
+        verify_status(&a, &token).await,
+        200,
+        "the app's token is its own"
     );
 
     // removed from the entry, the passkey is gone everywhere at once
@@ -1653,6 +1757,20 @@ async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
     let who: serde_json::Value = r.json().await.unwrap();
     assert_eq!(who[0]["players"], serde_json::json!([]));
 
+    // a passkey is all a browser account needs: signed in again, tom is at
+    // his games, and sarah, still nobody's guest, waits
+    let (st, tom_c) = login_in_browser(&b, &mut tom, "tom").await;
+    assert_eq!(st, 200);
+    assert_eq!(
+        gate(&tom_c, "games.localhost").await,
+        (200, Some("guest".into()))
+    );
+    let (st, sarah_c) = login_in_browser(&b, &mut sarah, "sarah").await;
+    assert_eq!(st, 200);
+    let (st, body) = get_with_cookie(&b, "/_dd/home", &sarah_c).await;
+    assert_eq!(st, 200);
+    assert!(body.contains("Your account is made"), "{body}");
+
     // david ends it: tom is a guest of no one, and let in nowhere
     let r = http
         .delete(b.url("/_dd/friends/remove/tom"))
@@ -1871,6 +1989,27 @@ async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
         assert!(s.contains("\"ott\":\"424242\""), "{s}");
         assert!(s.contains("\"email\":\"tom@users.localhost\""), "{s}");
     }
+
+    // the app's own Photos page makes the account through the app, which
+    // brings the device's token and no session: the same answer, the same
+    // one address
+    let by_app = |email: &'static str| {
+        let http = http.clone();
+        let b = b.clone();
+        let token = token.clone();
+        async move {
+            http.post(format!("{b}/_dd/photos/museum/verify-email"))
+                .bearer_auth(token)
+                .json(&serde_json::json!({ "email": email }))
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        }
+    };
+    assert_eq!(by_app("sarah@users.localhost").await, 403);
+    assert_eq!(by_app("tom@users.localhost").await, 200);
 }
 
 /// A demo door - demo-<service>.<domain> - is on the open internet so anyone

@@ -1,23 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Photos{% endblock %}
+{% block title %}Move Photos to the app{% endblock %}
 {% block bar %}{% include "me.html" %}{% endblock %}
 {% block main %}
 <main class="auth">
   <div class="card" data-user="{{ user }}">
-    <h1>Photos</h1>
-    <p class="lead">Unlocking with your passkey.</p>
-    <div id="msg">…</div>
-    <div id="link" hidden>
-      <p class="lead" style="margin-top:18px">No photo account for this passkey yet. Made one here before, with an email and a password? Sign in with it once and it becomes this passkey's. Otherwise start fresh.</p>
-      <label for="le">Email</label>
-      <input id="le" autocomplete="email" autocapitalize="none" spellcheck="false">
-      <label for="lp">Password</label>
-      <input id="lp" type="password" autocomplete="current-password">
-      <button id="adopt">Link that account</button>
-      <button id="fresh" class="quiet">Start fresh</button>
-    </div>
-    <p class="note">Your photos are encrypted with a key only your passkey can make. No box holds it; nobody here can look.</p>
+    <h1>Move Photos to the app</h1>
+    <p class="lead">Your photo account was opened with your passkey until now. Confirm with it once more and the Commonty app takes it over: it gives the account a new key that only your devices hold, and your passkey stops opening it.</p>
+    <button id="go">Confirm with your passkey</button>
+    <div id="msg"></div>
+    <p class="note">Once moved, your photos open from the app, on this computer's browser too. Nothing here can open them.</p>
   </div>
 </main>
-<script type="module" src="/_dd/static/photos.js"></script>
+<script type="module" src="/_dd/static/photos-move.js"></script>
 {% endblock %}

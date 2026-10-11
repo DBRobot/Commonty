@@ -57,10 +57,10 @@ n429=0; for i in $(seq 1 25); do [ "$(code https://home.$B/_dd/login/start 5 -X 
 [ $n429 -ge 5 ] && pass "sign-in ceremony rate-limited ($n429/25 refused)" || fail "sign-in ceremony not rate-limited ($n429/25 refused)"
 
 # 6. a stranger cannot make themselves a member: sign-up gives an account
-#    with nothing, and a fake grant is refused
+#    with nothing, and no page takes a code
 r=$(curl -s -m 10 $(at https://home.$B/) -X POST -H 'content-type: application/json' -d '{"username":"stranger-probe"}' https://home.$B/_dd/join/start)
 echo "$r" | grep -q '"publicKey"' && pass "sign-up hands out a ceremony (an account with nothing follows)" || fail "sign-up start: $r"
-c=$(code https://home.$B/_dd/redeem/start 10 -X POST -H 'x-dd-grant: bm9wZQ=='); [ "$c" = 400 ] || [ "$c" = 401 ] || [ "$c" = 403 ] && pass "a fake grant is refused ($c)" || fail "fake grant: $c"
+c=$(code https://home.$B/_dd/redeem/start 10 -X POST -H 'x-dd-grant: bm9wZQ=='); [ "$c" = 401 ] || [ "$c" = 403 ] || [ "$c" = 404 ] || [ "$c" = 405 ] && pass "no page takes a code ($c)" || fail "the old code route: $c"
 
 # 7. bodies and slow clients
 c=$(code https://home.$B/_dd/join/start 20 -X POST -H 'content-type: application/json' --data-binary @<(head -c 2000000 /dev/zero)); [ "$c" = 413 ] && pass "2 MB body refused (413)" || fail "2 MB body: $c"
