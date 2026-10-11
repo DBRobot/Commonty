@@ -29,7 +29,9 @@ sealed = box.succeed("ls /tmp/store | head -1").strip()
 # 200 with the whole file - so the first block came back as the header
 # plus block zero and would not open. rclone serves ranges, as garage
 # does, which is what this is standing in for.
-box.succeed("(rclone serve http --addr 127.0.0.1:8000 /tmp/store >/dev/null 2>&1 &)")
+box.succeed(
+    "(rclone serve http --dir-cache-time 0s --addr 127.0.0.1:8000 /tmp/store >/dev/null 2>&1 &)"
+)
 box.wait_until_succeeds("curl -sf -o /dev/null http://127.0.0.1:8000/", timeout=30)
 assert (
     "206"
