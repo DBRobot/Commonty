@@ -131,8 +131,10 @@ as soon as it is seen.
 `App::role` turns a name into one of three, or none:
 
 ```
-Member  on the member list by member_id(root) and not revoked, or the
-        entry carries a grant (an invite) the release key signed.
+Member  some root the person has had (the root, and those it was
+        recovered from) on the member list by member_id and none revoked,
+        or the entry carries a grant (an invite) the release key signed
+        and none is revoked (identity::is_member).
         With no member list at all (tests), everyone is a member.
 Demo    the account named "demo", when any home tile grants the demo
         something (pages::Service.demo).
@@ -145,6 +147,19 @@ none    signed in but not let in: a held sign-up, a revoked member, a
 `member_id` is the SHA-256 of the root, so the member list
 (`fleet/members.json`, `{"members": [...], "revoked": [...]}` or a bare
 list) carries no names.
+
+**A recovery keeps membership.** Recovering with the paper key installs a
+new root, so the root's id is no longer the one on the list. The entry it
+signs names the roots it replaced (`recovered_from`, oldest first), and
+membership, the invite it was let in by, and a removal all follow every
+root in it. No box can forge one: `identity::accept` takes a new root only
+co-signed by the recovery key the entry on file names, and holds
+`recovered_from` to exactly the earlier list plus the root on file; a
+first sight of a name carries none. Every box replays every entry of the
+agreed log through that rule, so what it holds is the chain the fleet
+agreed. A removal of any of those roots shuts the person out, recovered
+or not. The mail Worker counts earlier roots only as far as it held them
+to the entry it pinned before.
 
 ### The answer to nginx
 
@@ -421,8 +436,10 @@ Every write, from any source, goes through the same checks:
 ```
 identity::accept   signed by the root it names; an update is a strictly
                    newer version by the same root, or a new root co-signed
-                   by the recovery key on file (client/identity)
-check_grant        a grant: signed by the release key, proved by the root,
+                   by the recovery key on file, which adds the root on file
+                   to recovered_from; a first sight has none (client/identity)
+check_grant        a grant: signed by the release key, proved by the root
+                   (or one it was recovered from),
                    inside its window at the time it is judged, and not
                    already used by another root (one code, one person)
 claims_free        a library id belongs to the first entry that named it
@@ -487,9 +504,11 @@ was published to it.
 
 ### Leaving
 
-A member's own signed statement that they leave, or come back, is a
-directory item too (`Item::Leave`), replayed at its agreed time into
-`leaving.json`; someone who left is no member from then on. What happens
+A member's own signed statement that they leave is a directory item too
+(`Item::Leave`), replayed at its agreed time into `leaving.json`; someone
+who left is no member from then on, and everything of theirs is deleted
+at once. A coming back is no longer taken; old ones in the log still
+replay. What happens
 next, and when, is [leaving.md](leaving.md).
 
 ### Who reads it on the box
@@ -1045,9 +1064,8 @@ path                                        method   what                       
 -- leaving (leaving.rs, leaving.md)
 /_dd/leave                                  GET      where the signed-in person stands         session or token
 /_dd/leave/start                            POST     a statement for the root passkey          session; anyone not removed
-                                                                                               to leave (member, guest,
-                                                                                               waiting), someone who left
-                                                                                               to come back
+                                                                                               and not left already
+                                                                                               (member, guest, waiting)
 /_dd/leave/sign                             POST     the passkey's answer, into the log        session + the ceremony
 /_dd/leaving/{name}                         GET      the newest signed statement               as its entry: member; the person; a key in it; a reader key (the mail Worker)
 /_dd/leaving/{name}                         PUT      a statement `dd leave` signed             the root's signature
@@ -1186,8 +1204,9 @@ directory follow       every 1 s (agreed mode): replay, ack, migrate
 held sign-ups          every 300 s: publish those the member list now names
 network reap           every 300 s: remove non-members' devices from Headscale
 library trash          daily (hourly after a failure): empty 30-day-old trash
-leaving                every 60 s: end the ways in of whoever left; past 30 days,
-                           delete this gate's share of them (leaving.md)
+leaving                every 60 s: end the ways in of whoever left or was removed,
+                           and delete this gate's share once due: at once for
+                           their own word, 30 days after a removal (leaving.md)
 forge events           LISTEN, reconnecting every 5 s
 ad blocking            at start: put the household's last on/off back
 ```

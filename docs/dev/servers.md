@@ -442,11 +442,14 @@ restic             --keep-daily 7 --keep-weekly 4, pruned after every
                    nightly backup: under 5 weeks (storage/backup.nix)
 garage metadata    its snapshots 7 days (storage/backup.nix)
 postgres dumps     hourly, one .prev; older ones only in the two above
-library trash      30 days (servers/library/src/dav.rs TRASH_SECS)
+library trash      30 days (servers/library/src/dav.rs TRASH_SECS), or at
+                   once with Delete forever or Empty trash
 Passwords          TRASH_AUTO_DELETE_DAYS=30, EVENTS_DAYS_RETAIN=30
-someone who left   30 days (servers/gate/src/leaving.rs WINDOW)
-Photos             museum's trash: 30 days, then the file's objects 45 days
-                   later (constants in museum, no setting): 75 days
+someone who left   nothing kept: deleted at once (leaving.md)
+someone removed    30 days (servers/gate/src/leaving.rs WINDOW)
+Photos             museum's trash: 30 days (a constant, no setting), or at
+                   once when emptied; then the file's objects at museum's
+                   next run (museum-delete-now.patch; 45 days upstream)
 nginx access log   3 weekly files (gate/acme.nix)
 journald           MaxRetentionSec=14day (roles/core.nix)
 ```
@@ -454,15 +457,15 @@ journald           MaxRetentionSec=14day (roles/core.nix)
 The windows follow one another, so the promise is their sum: something in
 a trash for 30 days can still be in a nightly backup for 5 weeks, and in
 the snapshots of that backup for a week, 72 days in all. A photo goes
-after 30 + 45 + 7 = 82. Leaving has its own sum
+after 30 + 0 + 7 = 37 (82 before museum was patched). Leaving and removal have their own sums
 ([leaving.md](leaving.md#the-guarantee)), 90 at most.
 
 [`nix/tests/retention.nix`](../../nix/tests/retention.nix)
 (`checks.retention`, in CI's flake check job) adds them up for every box
-and fails past 90 days: each first window (the library trash and leaving,
-read from the Rust; Vaultwarden's two settings, where unset is forever;
-museum's trash, account and object delays, read from the source each box
-runs), then the longest restic keep (a backup that is never pruned, or
+and fails past 90 days: each first window (the library trash and a
+removal, read from the Rust; Vaultwarden's two settings, where unset is
+forever; museum's trash, account and object delays, read from the patched
+source each box runs), then the longest restic keep (a backup that is never pruned, or
 keeps a way it cannot read, fails too), then the snapshots. Journald and
 the nginx log are held to 90 days on their own. A new service that keeps
 deleted things for a time adds its setting there.

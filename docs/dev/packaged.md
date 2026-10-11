@@ -132,6 +132,13 @@ Applied in this order (the menu patch builds on the passkey patch):
   token or the hash the list gave out. Sessions made before the patch are
   hashed once by `ente.service`'s `preStart` (a token is never 64 hex
   characters, a hash always is).
+- [museum-delete-now.patch](../../servers/photos/museum-delete-now.patch),
+  on museum. Deleted means deleted: once a file's trash is emptied its
+  objects go at museum's next run, not 45 days on (`DeleteObjectQueue` in
+  `pkg/repo/queue.go`), and a deleted account's data is scheduled for the
+  next run, not 7 days on (the insert in `pkg/repo/datacleanup`, over
+  migration 59's default). `checks.retention` reads both from the patched
+  source, so a bump that drops either fails it.
 - [ente-web-theme.patch](../../servers/photos/ente-web-theme.patch), on every
   app: the site's colours, Public Sans, 4px corners.
 - [ente-web-passkey.patch](../../servers/photos/ente-web-passkey.patch), on

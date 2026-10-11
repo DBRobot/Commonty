@@ -1,9 +1,11 @@
 # Leaving and deleting
 
 A member can take everything out and leave, or be removed by the fleet's
-owner. Either way every way in ends at once, everything of theirs is kept
-30 days in case they come back, and within 90 days it is gone from every
-box and every backup.
+owner. Either way every way in ends at once. Leaving by their own word
+deletes everything of theirs from every box straight away, and there is
+no coming back; a removal keeps it 30 days, since it was not their
+request and the owner can undo a mistake. Within 90 days it is gone from
+every box and every backup.
 Policy changes are announced to every member 30 days before they take
 effect ([below](#announcing-a-change)).
 
@@ -63,43 +65,54 @@ client, with no overall timeout, since an original can be large.
 **By the member.** The Leave button has the root sign a statement
 (`identity::Leave {name, root, at, back}`, under its own label so no
 other signature counts as one): the passkey, for an account made in a
-browser; the app, for a root on its device (`/_dd/app/leaving`, in its
-window or a browser it let in, `account::leave`). `dd leave` signs the
-same. A plain browser of an account whose root is on a device says to
-leave from the app. The gate checks it against the entry on file and puts it in
+browser; the app, for a root on its device (`/_dd/app/leaving`, in its own
+window only, `account::leave`: it cannot be undone, so a browser the app
+let in may not ask it, as it may not remove a device). `dd leave --yes`
+signs the same; without `--yes` it says what it would do and stops. A
+plain browser of an account whose root is on a device says to leave from
+the app's window. The Leave tab puts **Take your things with you** right
+above the button, and its dialog says everything is deleted now and
+cannot be undone. The gate checks it against the entry on file and puts it in
 the control plane's agreed log as a directory item (`Item::Leave`), so
 every box replays the same statement at the same agreed time. That time is
-when they left. A statement dated more than 5 minutes after it is agreed,
-or more than a day before, is refused: it can neither put off the
-deleting nor be kept and played later. The newest statement stands.
+when they left, and when their things are due. A statement dated more
+than 5 minutes after it is agreed, or more than a day before, is refused:
+it can neither put off the deleting nor be kept and played later. A gate
+takes no coming back (`back`) any more, nor a second leaving
+(`say_leave`, `leaving::start`); one already in the log still replays as
+it was, so every box keeps agreeing on history.
 
 **Anyone may leave**, not members alone: a friend's guest, and an account
 made in a browser that is still waiting, leave with their passkey the same
 way (Settings shows a guest the Leave tab, and a waiting account nothing
 else). A guest's statement goes through the log like a member's, and the
 guest is in `leavers` from then on: at once nothing lets them in (`guest()`
-asks `has_left`), their sessions end and their devices are reaped; after
-the window the gate deletes their friendships, their guest record, any
-link of theirs and their sign-ins (`friends::forget` touches nothing of the
+asks `has_left`), their sessions end and their devices are reaped, and the
+gate deletes their friendships, their guest record, any link of theirs
+and their sign-ins (`friends::forget` touches nothing of the
 members they were friends with, nor any other guest), the games manager
 their servers, and the other services find nothing of theirs and report
 done. A waiting account is on one box only, held and never in the
 directory, so its statement is that box's alone (`say_leave` records it
-against the held entry). `held_leavers` ends its sessions at once and,
-when its window is out or its hold lapsed first (a week, `HELD_TTL`),
-deletes the hold, its friendships and sign-ins, and the statement with
+against the held entry). `held_leavers` ends its sessions and deletes
+the hold, its friendships and sign-ins at once, and the statement with
 them, so the name is free again and whoever takes it next has not left.
-Someone who left accepts no friend link until they come back.
+Someone who left accepts no friend link.
 
 **By the owner.** `dd member remove <name>` moves their id to `revoked` in
 [fleet/members.json](../../fleet/members.json) and writes the time under
-`removed`; the signed release carries both to every box. `dd member add`
-takes both away. An id revoked before dates were kept has none and is
-never scheduled for deletion.
+`removed`; the signed release carries both to every box. Everything of
+theirs is kept for the window (`WINDOW`, 30 days;
+`dd.verify.leaveWindowSeconds` shortens it in tests), so `dd member add`,
+which takes both away (for every root they have had), undoes a mistake.
+An id revoked before dates were kept has none and is never scheduled for
+deletion. A removal of any root a person has had counts for the person
+after a recovery ([gate.md](gate.md#roles)).
 
-When someone left is the earlier of the two
-([leaving.rs](../../servers/gate/src/leaving.rs), `left_at`). Both live
-where every box agrees on them, never on one box's disk.
+When someone is out, and when their things are due, is the earlier of the
+two ([leaving.rs](../../servers/gate/src/leaving.rs), `out_at`): their own
+word at once, a removal the window after. Both live where every box
+agrees on them, never on one box's disk.
 
 **At once**, on every box (the gate's `leaving::tick`, every minute, and
 `member()` the moment the statement is replayed):
@@ -113,9 +126,10 @@ where every box agrees on them, never on one box's disk.
 - their game servers stop (the games manager asks its gate every minute;
   the firewall closes them within 15 s anyway).
 
-## Ninety days later
+## Deleting
 
-Each box deletes its own share and reports it. `GET /internal/leaving`
+Once someone is due (at once for their own word, the window after a
+removal), each box deletes its own share and reports it. `GET /internal/leaving`
 on a box's own gate lists who left, when, whether they are due and which
 services have reported; `POST /internal/leaving/done {name, service}`
 reports one. Every deleting step is safe to run again; the logs name a
@@ -129,11 +143,13 @@ libraries          every object under each of their libraries' prefixes
                    and images-<name>, trash and all (the gate that holds
                    the bucket key)                                 dav.rs forget
 photos             their Ente account, through museum's admin delete with
-                   the ledger's admin login, hourly                dd forget-photos
+                   the ledger's admin login, every 5 minutes      dd forget-photos
 passwords          their Vaultwarden account, through upstream's admin
-                   delete on loopback, with a token made at boot   dd-forget-passwords
+                   delete on loopback, with a token made at boot,
+                   every 5 minutes                                dd-forget-passwords
 forge              their own repositories, then their account; what they
-                   gave to others' repositories stays, under Ghost dd-forget-forge
+                   gave to others' repositories stays, under Ghost,
+                   every 5 minutes                                dd-forget-forge
 games              every server and kept world of theirs          games forget
 mail               their <name>@<domain> rule, its destination if no other
                    rule uses it, and what the Worker pinned        mail Worker leaving.js
@@ -149,9 +165,11 @@ needs a valid name.
 The mail Worker deletes only on evidence it checks itself
 ([lib.rs](../../client/mail/src/lib.rs) `forget_due`): the member's own
 statement, fetched from `home.<domain>/_dd/leaving/<name>` with its read
-key (the statement is read as the entry is) and verified
-against the entry the Worker pinned, said 30 days ago or more and not a
-coming back; or the removal date in the member list it was deployed with.
+key (the statement is read as the entry is) and verified against the
+entry the Worker pinned (or the directory's newer one, if it follows from
+the pinned one by the accept rule: a recovery since), said by now and not
+a coming back; or a removal date 30 days ago or more, for any root the
+entry has had, in the member list it was deployed with.
 The front door's gate asks it (`VERIFY_MAIL_FORGET`).
 
 Forgejo's admin account is never deleted this way; the forge says so and
@@ -162,19 +180,21 @@ every hour until someone hands the organization over.
 
 ### The guarantee
 
-From the moment someone leaves or is removed:
+From the moment someone leaves:
 
 - **At once**: nothing opens for them.
-- **By 30 days and an hour**: every live copy is deleted, except Photos'
-  stored files, which museum purges in stages: the account's data 7 days
-  after the delete, and the files' objects 45 days after that (museum's
-  constants, [servers.md](servers.md#retention)).
-- **By 90 days at most**: no copy anywhere. The last nightly backup that
-  held something is at most a day after it was deleted, restic keeps a
-  backup under 5 weeks (it prunes after every nightly run), and the ZFS
-  snapshots of what restic or museum let go are destroyed within 7 days
-  (30 + 1 + 35 + 7 = 73). Photos' objects are gone by
-  30 + 1 + 7 + 45 + 7 = 90 days. `checks.retention` holds both sums.
+- **Within minutes**: every live copy is deleted, as each box's next run
+  comes round (the gate every minute, the other units every 5 minutes;
+  museum purges the account's data and its files' objects over the next
+  hours, `museum-delete-now.patch`, [packaged.md](packaged.md#the-patches)).
+- **By 90 days at most**: no copy anywhere: the backups and snapshots
+  expire on their own (1 + 35 + 7 = 43 days).
+
+From the moment someone is removed: nothing opens at once, every live
+copy is deleted by 30 days and an hour, and no copy is left anywhere by
+30 + 1 + 35 + 7 = 73 days (Photos': 30 + 1 + 0 + 0 + 7 = 38 for the live
+objects). `checks.retention` holds the removal's sums, the longer of the
+two.
 
 What stays: their entry and statement in the control plane's agreed log
 (their name, public keys, and library keys sealed to keys only they hold,
@@ -184,20 +204,21 @@ Headscale keeps a user record by their name with no devices.
 
 ### Coming back
 
-- **Within 30 days, by their own word**: Settings shows someone who left
-  only the Leave tab, with **Come back** (or `dd leave --back`). Nothing
-  was deleted, so everything is as they left it. Devices sign in again and
-  rejoin the network.
-- **Removed**: only the owner can undo it (`dd member add`, then release).
-- **After 30 days**: they can come back, to an empty account.
+- **By their own word**: there is none. Everything was deleted when they
+  left. Settings shows someone who left the date they left and that it is
+  gone; their name stays theirs (below).
+- **Removed**: only the owner can undo it (`dd member add`, then release),
+  and within 30 days nothing was deleted.
 
 ### Testing it
 
 [leaving.nix](../../nix/tests/leaving.nix) runs it with a two-minute
-window (`dd.verify.leaveWindowSeconds`): a member leaves with `dd leave`
-and their session and token stop at once; a second leaves and comes back
-and keeps everything; after the window the first one's library, disk
-images, notes and names are gone and nobody else's are. The schedule is
+window (`dd.verify.leaveWindowSeconds`): `dd leave` without `--yes` does
+nothing; a member leaves with `dd leave --yes`, their session and token
+stop at once, they are due at once, and their library, disk images,
+notes and names are gone within the gate's next minute; leaving again is
+refused; a second member removed by the owner keeps their library until
+the window is out, then loses it; nobody else's is touched. The schedule is
 unit-tested in leaving.rs, the statement in the identity crate, the
 Worker's check in client/mail, the games manager's share in its own
 tests, and the library prefix check in dav.rs.

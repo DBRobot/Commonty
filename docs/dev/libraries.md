@@ -25,9 +25,11 @@ This page is how that fits together, and how to change it.
   own keys and serves the page that uses it.
 - **One door.** Every read and write goes through the gate, which decides
   owner, reader or nobody. No S3 key leaves a box.
-- **Nothing is deleted at a client's word.** A delete is a move into the
+- **A delete goes to the trash first.** A delete is a move into the
   library's trash, which the box empties 30 days on; a write over a name
-  already taken puts what was there into the trash first.
+  already taken puts what was there into the trash first. Only the owner,
+  from the trash itself, deletes for good at once: **Delete forever** on
+  one thing, **Empty trash** on all of it.
 - **Plaintext only in memory, only while working.** A box that plays a
   film for someone decrypts it in RAM for that one viewing and forgets it,
   with keys that open that film and nothing else of the library.
@@ -142,7 +144,8 @@ admitted to the entry gets the libraries sealed to it in the same signed
 step ([client/account/src/lib.rs](../../client/account/src/lib.rs),
 `admit`). A passkey admitted gets nothing: it signs in. Recovering an
 account opens each library with the paper key and seals it afresh to the
-new keys.
+new keys; the root it replaces goes into the entry's `recovered_from`, so
+the member stays a member ([gate.md](gate.md#roles)).
 
 A browser has no device key, and gets none from a passkey. Its pages that
 open a library are the app's ([app.md](app.md)): the app opens the key
@@ -277,6 +280,9 @@ MOVE, COPY              Destination must be in the same library, not the
                         then delete)
 DELETE                  moves the file or folder to trash/<unix seconds>/<path>,
                         a second later while that place is taken
+DELETE in the trash     trash/<stamp>/...: that thing, gone for good at once;
+                        trash itself: all of it (Empty trash). The owner's
+                        only, like every write; 404 for what is not there
 PROPPATCH               refused (403 in a multistatus)
 
 in pieces, for a file too large for a tab (header x-dd-upload):
@@ -300,7 +306,11 @@ gate keeps beside it ([Reading a library](#in-a-browser)).
 
 The gate empties the trash itself, once a day (an hour after a failure,
 as at boot before the bucket is up): every `trash/<stamp>/` older than 30
-days is deleted, for every library (`purge_trash`).
+days is deleted, for every library (`purge_trash`). A delete for good
+(`delete_for_good`) lists what is there and deletes it under that
+library's trash lock (the one a move into the trash takes too), and
+reports the bytes it took out, so two deletes of one thing count it once;
+one library's lock never holds up another's.
 
 ### Allowance
 
@@ -313,7 +323,9 @@ it declares none. The body is counted as it streams and cut off past that
 room with 507, so the bucket never keeps the object. A COPY is measured in
 the bucket first and holds that much. A piece of an upload in pieces
 (`x-dd-upload`) is metered like a PUT, whatever its method. What lands is
-counted until the fleet's count next includes it. See [Storage](#storage).
+counted until the fleet's count next includes it, and what a delete for
+good took out of the trash is room again at once (`Ledger::freed`). See
+[Storage](#storage).
 
 ## Reading a library
 
@@ -352,7 +364,8 @@ the last four ciphers.
   where the browser allows it.
 - **Files** shows the `Files/` folder: folders, a preview (whole files up
   to 64 MiB), uploads, move and rename (MOVE with `Overwrite: F`), and the
-  trash with restore. A reader sees no write controls.
+  trash with Restore, Delete forever and Empty trash (each asks first and
+  says it cannot be undone). A reader sees no write controls.
 - **Movies & TV** shows `Movies/` (a film is a file) and `Shows/` (a show
   is a folder of episodes, or of season folders). What it knows beyond
   names is sealed with the library's key like the rest
@@ -672,7 +685,10 @@ the member's machine) are in the `libraries` bucket under the prefix
 - A browser changes nothing there without a passkey shown in the last
   five minutes. A request carrying `x-dd-upload` counts as a change,
   whatever its method. A device token needs no passkey.
-- DELETE moves into the trash, which goes after 30 days like a library's.
+- DELETE moves into the trash, which goes after 30 days like a library's;
+  a DELETE in it, or of it, deletes for good. Backups has **Empty trash**,
+  and its delete a box to delete for good at once (the trash with it:
+  restic's packs are not one image each).
 - Images count against the allowance.
 - The archive password is sealed to the member's devices beside the
   archives (`dd-devices.json`, [Where the keys live](#where-the-keys-live)),
@@ -743,19 +759,22 @@ nix/modules/storage/       garage.nix, ledger.nix (the Photos box's count),
   block keys against NaCl's HSalsa20 vector, against the data key's own
   opening, and against a file rclone wrote
   ([client/web/src/library.rs](../../client/web/src/library.rs)); paths,
-  dates and decoding in dav.rs; the signing in lib.rs; the allowance in
-  storage.rs.
+  dates and decoding in dav.rs, and against a bucket of its own there, two
+  deletes for good of one thing counting it once and one library's trash
+  never waiting on another's; the signing in lib.rs; the allowance in
+  storage.rs, with what a delete for good frees.
 - **`library`** VM test ([nix/tests/library.nix](../../nix/tests/library.nix),
   [library.py](../../nix/tests/library.py)): one box with garage and the
   full gate. A member made with `dd`, `dd library new` with its three
   folders, rclone as a crypt remote over the gate copying in and reading
   back, `dd` and rclone reading each other's files, nothing plain in the
   bucket or on disk, delete into the trash, the trash emptied after 30
-  days, an upload in pieces, the demo's cookie reading its own library
+  days, one thing deleted for good and then the whole trash emptied (and
+  the library root refused), an upload in pieces, the demo's cookie reading its own library
   and nothing else, a stranger's token, no token, and a library id
   claimed in someone else's entry. Disk images under `/_dd/images`: put
   and read, the JSON listing, 404 for an empty folder, another member
-  refused, delete into the trash, no token 401; a browser without a fresh
+  refused, delete into the trash and the trash emptied, no token 401; a browser without a fresh
   passkey refused a write, including a write dressed as a read with
   `x-dd-upload`. The allowance: a declared size too big refused before a
   byte moves, a chunked upload cut off at the room and not kept, what fits
@@ -787,7 +806,8 @@ in CI.
   opening.
 - **The gate moves ciphertext.** Nothing on a box decrypts a name. A new
   method in dav.rs keeps to the library's prefix, refuses readers if it
-  writes, and never deletes outright: a delete is a move into the trash.
+  writes, and never deletes outright outside the trash: a delete there is
+  a move into the trash, and only a delete in the trash is for good.
 - **A new endpoint needs the gate in front.** Under `/_dd/dav/` it is
   already behind `allowed()`. Anything else on `files.<domain>` gets
   `auth_request`, as `/_dd/transcode/` does; the session paths are the one
