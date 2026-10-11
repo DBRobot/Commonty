@@ -56,8 +56,20 @@ let
       vaultwarden = lib.hasInfix ":${toString vaultPort}" to;
     in
     {
+      # a location that must tell the browser something stricter than ours
+      # (the forge's public door: modules/forge/door.nix)
+      options.ddCsp = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "This location's whole Content-Security-Policy, in place of the one chosen by where it proxies.";
+      };
       config.extraConfig = lib.mkAfter (
-        if vaultwarden then
+        if config.ddCsp != null then
+          plain
+          + ''
+            add_header Content-Security-Policy "${config.ddCsp}" always;
+          ''
+        else if vaultwarden then
           hsts
         else if gate then
           plain

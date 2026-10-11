@@ -125,6 +125,8 @@ in
   # the Git pages update as runs and statuses change (live.nix)
   imports = [
     ./live.nix
+    # code.<domain>: the public repositories, for anyone, as nobody
+    ./door.nix
     ../storage/usage.nix
     ../storage/postgres-backup.nix
   ];
@@ -192,7 +194,11 @@ in
             ENABLE_REVERSE_PROXY_AUTO_REGISTRATION = true;
             ENABLE_REVERSE_PROXY_EMAIL = false;
             ENABLE_PASSWORD_SIGNIN_FORM = false;
-            REQUIRE_SIGNIN_VIEW = false; # public repos are public
+            # public repos are public: what nobody may see is what the
+            # public door (door.nix) shows, and a stranger is shown no
+            # private repository and no private or limited account. Forgejo's
+            # API gives nobody an account's address, only its noreply one.
+            REQUIRE_SIGNIN_VIEW = false;
             DEFAULT_KEEP_EMAIL_PRIVATE = true;
             NO_REPLY_ADDRESS = "noreply.${base}";
           };
@@ -237,6 +243,9 @@ in
             DEFAULT_ACTIONS_URL = "github";
           };
           "ui.meta".DESCRIPTION = "git for commonty";
+          # and none in Forgejo's own pages either, though no one outside
+          # reaches them
+          ui.SHOW_USER_EMAIL = false;
           other.SHOW_FOOTER_VERSION = false;
         };
       };

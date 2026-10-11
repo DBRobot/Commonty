@@ -1,4 +1,5 @@
-# Every box's nginx config, through `nginx -t`, before a box ever sees it.
+# Every box's nginx config, through `nginx -t`, before a box ever sees it;
+# and the forge's public door, served and asked (nginx-door.py).
 # Building a config checks nothing of its syntax: release 115 went out with
 # a location regex nginx could not read, and node1 rolled back. The
 # certificates and the files a box writes at run time are not here, so this
@@ -24,6 +25,12 @@ let
       # the fleet's metrics never answer outsiders (roles/observe.nix)
       if grep -q 'demo-metrics\.' "$conf"; then echo "${name}: a demo door to Metrics"; exit 1; fi
     ''
+    # the forge's public door, run: each address it lets through reaches
+    # the right place as nobody, and every other is refused before it does
+    + lib.optionalString (c.config.services.nginx.virtualHosts ? "code.${c.config.dd.domain}") ''
+      python3 ${./nginx-door.py} "$conf" ${nginx} "$tmp" \
+        code.${c.config.dd.domain} git.${c.config.dd.domain} ${c.config.dd.repo}
+    ''
     # the bare domain's security.txt: served, and saying what RFC 9116 asks
     + lib.optionalString (c.config.dd ? securityTxt) ''
       grep -q 'location = /.well-known/security.txt' "$conf"
@@ -35,6 +42,7 @@ pkgs.runCommand "nginx-configs-parse"
     nativeBuildInputs = [
       pkgs.openssl
       pkgs.python3
+      pkgs.curl
     ];
   }
   ''

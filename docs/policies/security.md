@@ -31,8 +31,8 @@ Cloudflare. A disk pulled out of a box is unreadable, and so is a box
 carried away from its house.
 
 **Open source.** All of Commonty's code is public, and so is every change
-to it, at [code.commonty.org](https://code.commonty.org). Anyone can read
-how it works and check that it does what this page says.
+to it, at [code.commonty.org/david/commonty](https://code.commonty.org/david/commonty).
+Anyone can read how it works and check that it does what this page says.
 
 **Checked before every change.** Every change is tested before it
 reaches a box: it is built and checked, scanned for libraries with known

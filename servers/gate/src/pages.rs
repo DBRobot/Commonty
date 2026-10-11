@@ -486,6 +486,8 @@ const PAGES: &[(&str, &str)] = &[
     ("friends", "servers/home/web/pages/friends.html"),
     ("chat", "servers/chat/web/pages/chat.html"),
     ("git", "servers/forge/web/pages/git.html"),
+    // not signed in: anyone, on the forge's public name, read-only
+    ("git-public", "servers/forge/web/pages/git-public.html"),
     ("metrics", "servers/observe/web/pages/metrics.html"),
     ("friend", "servers/home/web/pages/friend.html"),
     ("adblock", "servers/adblock/web/pages/adblock.html"),
@@ -1184,6 +1186,11 @@ mod tests {
         assert!(
             page("media").unwrap().contains("Movies") && page("media").unwrap().contains("Shows")
         );
+        // the public Git page is the same views, its bar marked as anyone's:
+        // nobody there is sent to sign in, and nothing there asks for a name
+        let public = page("git-public").unwrap();
+        assert!(public.contains("data-public") && public.contains("/_dd/static/git.js"));
+        assert!(!public.contains("/_dd/home") && !public.contains("git-bell"));
         assert!(text("shell.js").contains("/_dd/me"));
         // the scripts that need the name ask for it, rather than read the page
         for f in ["files.js", "media.js", "devices.js"] {

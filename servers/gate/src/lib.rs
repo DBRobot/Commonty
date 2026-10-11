@@ -2918,6 +2918,10 @@ pub async fn start(
         .route("/_dd/network/box", post(network::box_join))
         .route("/_dd/chat", get(chat_page))
         .route("/_dd/git", get(git_page))
+        // anyone's: the public repositories, read-only, on the forge's
+        // public name (nix/modules/forge/door.nix); the forge decides what
+        // nobody may see
+        .route("/_dd/git/public", get(|| async { page("git-public") }))
         .route("/_dd/git/events", get(forge_events::events))
         .route("/_dd/metrics", get(metrics_page))
         // anyone's: a Send decrypts in the browser with the key in its link

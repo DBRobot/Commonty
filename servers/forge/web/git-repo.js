@@ -3,7 +3,7 @@
 
 import {
   put, $, app, el, ic, api, text, q, enc, ago, when, plural, bytes, avatar, route, go, statusDot,
-  markdown, toast, copy, setTitle, firstLine, short, pop, pager, whoami, warmers, ghost } from './git-core.js';
+  markdown, toast, copy, setTitle, firstLine, short, pop, pager, whoami, warmers, ghost, open, local } from './git-core.js';
 import { heatmap, lineChart, languages, dayKey } from './git-charts.js';
 import * as diff from './git-diff.js';
 import { feedLine } from './git-home.js';
@@ -60,11 +60,12 @@ export function header(r, tab) {
       r.mirror ? el('span', { class: 'pill', text: 'Mirror' }) : null),
     el('nav', { class: 'rtabs', 'aria-label': 'Repository' },
       t('code', `/${r.full_name}`, 'code', 'Code'),
-      r.has_issues ? t('issues', `/${r.full_name}/issues`, 'issue', 'Issues', r.open_issues_count) : null,
-      r.has_pull_requests ? t('pulls', `/${r.full_name}/pulls`, 'pr', 'Pull requests', r.open_pr_counter) : null,
-      r.has_actions ? t('actions', `/${r.full_name}/actions`, 'play', 'Actions') : null,
+      // the public door has the code and the releases, nothing else
+      r.has_issues && !open ? t('issues', `/${r.full_name}/issues`, 'issue', 'Issues', r.open_issues_count) : null,
+      r.has_pull_requests && !open ? t('pulls', `/${r.full_name}/pulls`, 'pr', 'Pull requests', r.open_pr_counter) : null,
+      r.has_actions && !open ? t('actions', `/${r.full_name}/actions`, 'play', 'Actions') : null,
       r.has_releases ? t('releases', `/${r.full_name}/releases`, 'tag', 'Releases', r.release_counter) : null,
-      t('activity', `/${r.full_name}/activity`, 'pulse', 'Activity'),
+      open ? null : t('activity', `/${r.full_name}/activity`, 'pulse', 'Activity'),
       r.permissions?.admin ? t('settings', `/${r.full_name}/settings`, 'gear', 'Settings') : null))));
 }
 
@@ -88,7 +89,8 @@ function refPicker(r, ref, to) {
 }
 
 function cloneBox(r) {
-  const ways = [['HTTPS', r.clone_url], ['SSH', r.ssh_url]];
+  // over ssh is for members, on the fleet's network
+  const ways = open ? [['HTTPS', local(r.clone_url)]] : [['HTTPS', r.clone_url], ['SSH', r.ssh_url]];
   let pick = 0;
   const input = el('input', { readonly: true, value: ways[0][1], 'aria-label': 'Clone address' });
   const cp = el('button', { 'aria-label': 'Copy' }, ic('copy'));
@@ -103,7 +105,7 @@ let fleetBoxes = null;
 let fleetAt = 0;
 export const fleetRepoName = () => (fleetRepo ??= fetch('/fleet-repo.json').then((x) => (x.ok ? x.json() : {})).then((x) => x.repo || '').catch(() => ''));
 const fleet = async (r) => {
-  if ((await fleetRepoName()) !== r.full_name) return [];
+  if (open || (await fleetRepoName()) !== r.full_name) return [];
   if (!fleetBoxes || performance.now() - fleetAt > 60000) { fleetAt = performance.now(); fleetBoxes = null; }
   fleetBoxes ??= fetch('/_dd/fleet.json').then((x) => (x.ok ? x.json() : [])).catch(() => []);
   const boxes = await fleetBoxes;
@@ -202,9 +204,10 @@ route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
       el('div', { class: 'box' }, last, el('div', { class: 'list files' }, ...(path ? [el('a', { href: path.includes('/') ? `/${r.full_name}/tree/${ref}/${path.split('/').slice(0, -1).join('/')}` : `/${r.full_name}/tree/${ref}` }, el('span', { class: 'name' }, ic('dir', 'i dir'), '..'))] : []), ...rows)),
       readmeBox),
     side));
-});
+}, true);
 
 function emptyRepo(r) {
+  if (open) return el('div', { class: 'box empty', text: 'Nothing here yet.' });
   return el('div', { class: 'box md pad', style: 'max-width:760px' },
     el('h2', { text: 'Nothing here yet' }),
     el('p', { text: 'Push an existing repository from your device:' }),
@@ -305,7 +308,7 @@ route(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/, async ({ m, current }) => {
       el('div', { class: 'box' }, last,
         el('header', { style: 'border-radius:0' }, el('span', { class: 'small muted', text: asText ? `${lines.length.toLocaleString()} lines · ${bytes(meta.size)}` : bytes(meta.size) }), el('span', { class: 'spacer' }), seg, el('a', { class: 'btn plain', href: raw, text: 'Raw' }), asText ? cp : null),
         view))));
-});
+}, true);
 
 // ---- commits
 
@@ -339,7 +342,7 @@ route(/^\/([^/]+)\/([^/]+)\/commits(?:\/(.+))?$/, async ({ m, params, current })
     el('div', { class: 'hrow gap' }, refPicker(r, ref, (n) => `/${r.full_name}/commits/${n}${path ? `/${path}` : ''}`), el('h1', { class: 'h1', style: 'font-size:18px', text: path ? `History of ${path}` : 'Commits' }), el('span', { class: 'small muted', text: plural(total, 'commit') })),
     ...[...days].flatMap(([d, cs]) => [el('h3', { class: 'small muted', style: 'margin:0 0 8px' }, ic('commit'), ` ${d}`), el('div', { class: 'box list gap' }, ...cs.map(row))]),
     pager(page, total, 30, (p) => go(`${location.pathname}${q({ page: p })}`)));
-});
+}, true);
 
 // ---- a commit
 
@@ -371,7 +374,7 @@ route(/^\/([^/]+)\/([^/]+)\/commit\/([0-9a-f]{4,64})$/, async ({ m, current }) =
         el('a', { class: 'btn plain', href: `/${r.full_name}/tree/${sha}`, text: 'Browse files' }))),
     el('div', { class: 'hrow gap' }, diff.summary(files), el('span', { class: 'spacer' }), seg),
     holder);
-});
+}, true);
 
 // ---- branches
 
@@ -381,7 +384,8 @@ route(/^\/([^/]+)\/([^/]+)\/branches$/, async ({ m, current }) => {
   header(r, 'code');
   setTitle('Branches', r.full_name);
   refsOf.delete(r.full_name);
-  const [{ branches }, pulls, rules] = await Promise.all([refs(r), api(`/repos/${r.full_name}/pulls${q({ state: 'open', limit: 50 })}`).catch(() => []), api(`/repos/${r.full_name}/branch_protections`).catch(() => [])]);
+  const none = Promise.resolve([]);
+  const [{ branches }, pulls, rules] = await Promise.all([refs(r), open ? none : api(`/repos/${r.full_name}/pulls${q({ state: 'open', limit: 50 })}`).catch(() => []), open ? none : api(`/repos/${r.full_name}/branch_protections`).catch(() => [])]);
   if (!current()) return;
   branches.sort((a, b) => (b.name === r.default_branch) - (a.name === r.default_branch) || new Date(b.commit.timestamp) - new Date(a.commit.timestamp));
   const rows = branches.map((b) => {
@@ -410,7 +414,7 @@ route(/^\/([^/]+)\/([^/]+)\/branches$/, async ({ m, current }) => {
   });
   if (!current()) return;
   put(main(), el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Branches' }), el('span', { class: 'small muted', text: plural(branches.length, 'branch', 'branches') })), el('div', { class: 'box list' }, ...rows));
-});
+}, true);
 
 // ---- releases: the forge's, its tags, and what the boxes run
 
@@ -436,17 +440,17 @@ route(/^\/([^/]+)\/([^/]+)\/releases(?:\/tag\/(.+))?$/, async ({ m, current }) =
         el('div', { class: 'box' }, el('div', { style: 'padding:18px 22px 6px' }, el('h1', { class: 'h1', style: 'font-size:24px', text: one.name || one.tag_name }), el('p', { class: 'muted', style: 'margin:6px 0 0' }, ic('tag'), ` ${one.tag_name} · `, when(one.published_at || one.created_at))), el('div', { class: 'md pad' }, await markdown(one.body || '_No notes._'))),
         el('aside', { class: 'side' },
           el('section', {}, el('h3', { text: 'Commit' }), el('p', {}, el('a', { class: 'mono', href: `/${r.full_name}/tree/${one.tag_name}`, text: one.target_commitish }))),
-          one.assets?.length ? el('section', {}, el('h3', { text: 'Files' }), ...one.assets.map((a) => el('p', {}, el('a', { href: a.browser_download_url, text: a.name }), el('span', { class: 'small muted', text: ` ${bytes(a.size)}` })))) : null,
-          el('section', {}, el('h3', { text: 'Download the code' }), el('p', {}, el('a', { href: one.zipball_url, text: 'zip' }), ' · ', el('a', { href: one.tarball_url, text: 'tar.gz' }))))));
+          one.assets?.length ? el('section', {}, el('h3', { text: 'Files' }), ...one.assets.map((a) => el('p', {}, el('a', { href: local(a.browser_download_url), text: a.name }), el('span', { class: 'small muted', text: ` ${bytes(a.size)}` })))) : null,
+          el('section', {}, el('h3', { text: 'Download the code' }), el('p', {}, el('a', { href: local(one.zipball_url), text: 'zip' }), ' · ', el('a', { href: local(one.tarball_url), text: 'tar.gz' }))))));
     return;
   }
   const relRows = rels.map((x, i) => el('a', { class: 'item', href: `/${r.full_name}/releases/tag/${x.tag_name}` }, ic('tag'), el('div', { style: 'flex:1;min-width:0' }, el('div', { class: 't' }, x.name || x.tag_name, i === 0 ? el('span', { class: 'state-word', 'data-state': 'ok', style: 'margin-left:8px', text: 'Latest' }) : null, x.prerelease ? el('span', { class: 'state-word', 'data-state': 'attention', style: 'margin-left:8px', text: 'pre-release' }) : null), el('div', { class: 'sub', text: firstLine(x.body) })), el('span', { class: 'small muted' }, when(x.published_at || x.created_at))));
-  const tagRows = tags.map((t) => el('div', {}, ic('tag'), el('a', { href: `/${r.full_name}/tree/${t.name}`, class: 'mono', text: t.name }), el('span', { class: 'spacer' }), el('a', { class: 'mono small muted', href: `/${r.full_name}/commit/${t.commit.sha}`, text: short(t.commit.sha) }), el('a', { class: 'small', href: t.zipball_url, text: 'zip' })));
+  const tagRows = tags.map((t) => el('div', {}, ic('tag'), el('a', { href: `/${r.full_name}/tree/${t.name}`, class: 'mono', text: t.name }), el('span', { class: 'spacer' }), el('a', { class: 'mono small muted', href: `/${r.full_name}/commit/${t.commit.sha}`, text: short(t.commit.sha) }), el('a', { class: 'small', href: local(t.zipball_url), text: 'zip' })));
   if (!current()) return;
   put(main(), el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Releases' })), running,
     rels.length ? el('div', { class: 'box list gap' }, ...relRows) : el('p', { class: 'muted', text: 'No releases published on the forge yet.' }),
     tags.length ? [el('h2', { class: 'ph', style: 'font-size:16px', text: 'Tags' }), el('div', { class: 'box list' }, ...tagRows)] : null);
-});
+}, true);
 
 // ---- activity: the week's lines, the year's squares, what happened
 
@@ -583,7 +587,7 @@ route(/^\/([^/]+)\/([^/]+)\/activity$/, async ({ m, params, current }) => {
 });
 
 // the forge's own addresses, from before these pages, lead to the same place
-route(/^\/([^/]+)\/([^/]+)\/src\/(?:branch|tag|commit)\/(.+)$/, ({ m }) => go(`/${m[1]}/${m[2]}/tree/${m[3]}`, true));
-route(/^\/([^/]+)\/([^/]+)\/(?:commits\/branch)\/(.+)$/, ({ m }) => go(`/${m[1]}/${m[2]}/commits/${m[3]}`, true));
+route(/^\/([^/]+)\/([^/]+)\/src\/(?:branch|tag|commit)\/(.+)$/, ({ m }) => go(`/${m[1]}/${m[2]}/tree/${m[3]}`, true), true);
+route(/^\/([^/]+)\/([^/]+)\/(?:commits\/branch)\/(.+)$/, ({ m }) => go(`/${m[1]}/${m[2]}/commits/${m[3]}`, true), true);
 
 export { refPicker, split, refs };

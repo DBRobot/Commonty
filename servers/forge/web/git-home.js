@@ -4,7 +4,7 @@
 
 import {
   put, $, app, el, ic, api, q, ago, when, plural, avatar, route, go, who, whoami, statusDot,
-  markdown, toast, copy, setTitle, firstLine, short, fail, bell,
+  markdown, toast, copy, setTitle, firstLine, short, fail, bell, open,
 } from './git-core.js';
 import { docsUrl } from './shell.js';
 import { heatmap, dayKey } from './git-charts.js';
@@ -23,7 +23,7 @@ async function repoRow(r) {
       el('div', {}, el('a', { class: 't', href: `/${r.full_name}`, text: r.full_name }), ' ', el('span', { class: 'pill', text: r.archived ? 'Archived' : vis(r) })),
       r.description ? el('div', { class: 'sub', text: r.description }) : null,
       el('div', { class: 'sub hrow', style: 'gap:6px' }, dot, r.language ? el('span', { text: r.language }) : null, el('span', {}, 'updated ', when(r.updated_at)))),
-    r.open_pr_counter ? el('a', { class: 'chip', href: `/${r.full_name}/pulls`, text: plural(r.open_pr_counter, 'open pull request') }) : null);
+    r.open_pr_counter && !open ? el('a', { class: 'chip', href: `/${r.full_name}/pulls`, text: plural(r.open_pr_counter, 'open pull request') }) : null);
   api(`/repos/${r.full_name}/commits/${encodeURIComponent(r.default_branch)}/status`)
     .then((s) => { if (s?.total_count) dot.replaceWith(statusDot(s.state)); })
     .catch(() => {});
@@ -74,10 +74,27 @@ export function feedLine(a) {
   return el('div', {}, ic(pick[0]), el('span', { style: 'flex:1;min-width:0' }, ...pick[1]), el('span', { class: 'small muted' }, when(a.created)));
 }
 
+// ---- every public repository: the public door's front page
+
+async function everyone({ params, current }) {
+  setTitle('Public repositories');
+  const text = params.get('q') || '';
+  const found = await api(`/repos/search${q({ q: text, sort: 'updated', order: 'desc', limit: 50 })}`);
+  if (!current()) return;
+  const repos = found.data || [];
+  const list = el('div', { class: 'box list gap' }, ...(repos.length ? await Promise.all(repos.map(repoRow)) : [el('div', { class: 'empty', text: text ? 'Nothing matches.' : 'No public repositories yet.' })]));
+  if (!current()) return;
+  put(main(),
+    el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: text ? `Public repositories matching “${text}”` : 'Public repositories' })),
+    list,
+    el('p', { class: 'gnote', text: 'Anyone may read and clone these, without an account.' }));
+}
+
 // ---- your repositories
 
-route(/^\/$/, async ({ current }) => {
+route(/^\/$/, async ({ params, current }) => {
   noHead();
+  if (open) { await everyone({ params, current }); return; }
   setTitle('Your repositories');
   const w = await whoami();
   const user = w.forge?.login || w.name;
@@ -111,7 +128,7 @@ route(/^\/$/, async ({ current }) => {
       el('section', {}, el('h3', { text: 'Your settings' }), el('p', { class: 'small' }, el('a', { href: '/settings/tokens', text: 'API tokens' }), ' · ', el('a', { href: '/settings/keys', text: 'SSH keys' }), ' · ', el('a', { href: '/settings/profile', text: 'Profile' }))),
       el('section', {}, el('h3', { text: 'Recent activity' }),
         feed.length ? el('div', { class: 'list small', style: 'margin:0 -14px' }, ...feed.map(feedLine)) : el('p', { class: 'small muted', text: 'Quiet so far.' })))));
-});
+}, true);
 
 // ---- a new repository
 
@@ -327,7 +344,8 @@ route(/^\/settings(?:\/(tokens|keys|profile))?$/, async ({ m, current }) => {
 route(/^\/([^/]+)$/, async ({ m, current }) => {
   noHead();
   const user = m[1];
-  const [u, repos] = await Promise.all([api(`/users/${encodeURIComponent(user)}`), api(`/users/${encodeURIComponent(user)}/repos${q({ limit: 50 })}`)]);
+  // on the public door: their public repositories, and nothing about them
+  const [u, repos] = await Promise.all([open ? { login: user } : api(`/users/${encodeURIComponent(user)}`), api(`/users/${encodeURIComponent(user)}/repos${q({ limit: 50 })}`)]);
   if (!current()) return;
   setTitle(u.login);
   repos.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
@@ -336,8 +354,8 @@ route(/^\/([^/]+)$/, async ({ m, current }) => {
     el('div', {},
       el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: `${u.login}'s repositories` })),
       el('div', { class: 'box list gap' }, ...(repos.length ? await Promise.all(repos.map(repoRow)) : [el('div', { class: 'empty', text: 'Nothing you may see.' })])),
-      await year(u.login)),
-    el('aside', { class: 'side' }, el('section', {}, avatar(u, 'avatar l'), el('h3', { style: 'margin-top:8px', text: u.full_name || u.login }), el('p', { class: 'small muted', text: `here since ${new Date(u.created).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}` })))));
-});
+      open ? null : await year(u.login)),
+    open ? null : el('aside', { class: 'side' }, el('section', {}, avatar(u, 'avatar l'), el('h3', { style: 'margin-top:8px', text: u.full_name || u.login }), el('p', { class: 'small muted', text: `here since ${new Date(u.created).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}` })))));
+}, true);
 
 export { repoRow, year };

@@ -3,7 +3,9 @@
 The forge is where the fleet's code lives: its repositories, pull
 requests, issues, CI runs and releases, and members' own repositories
 beside them. It is [Forgejo](https://forgejo.org), run on one box at
-`git.<domain>`, with our own pages in front of it. Forgejo keeps the data
+`git.<domain>`, with our own pages in front of it. Every public repository
+can also be read and cloned by anyone, without an account, at
+`code.<domain>` ([The public door](#the-public-door)). Forgejo keeps the data
 and does the work; the pages people see are ours, and draw themselves from
 Forgejo's API as whoever the gate says is looking.
 
@@ -18,6 +20,7 @@ nix/roles/forge.nix                   the role: forgejo, the mirror, the tile on
 nix/roles/runner.nix                  the runner role: both runners and the nix cache key
 nix/modules/forge/
   forgejo.nix                         Forgejo's settings, sign-in, nginx, the setup units
+  door.nix                            code.<domain>: the public repositories, read-only, as nobody
   forgejo-setup.sh                    main's rule, through the API
   live.nix                            the database trigger behind the pages' live updates
   ci-cancel.py                        a failing job stops its run
@@ -27,9 +30,10 @@ nix/modules/forge/
   runner-address.sh                   a runner waits for the forge before it registers
   forgejo-mirror.nix                  push mirrors to GitHub
   needs.nix                           what each part needs of a box
-servers/forge/web/                    the Git pages
+servers/forge/web/                    the Git pages (pages/git-public.html: the public door's)
 servers/gate/src/forge_events.rs      the pages' live updates, from the gate
 nix/tests/forge.nix, forge.py         the forge, booted
+nix/tests/nginx-door.py               the public door, served and asked (the nginx check)
 nix/tests/members-runner.nix, .py     a member's job, kept in its box
 ```
 
@@ -184,6 +188,94 @@ The gateway also reaches the socket, for the app's downloads:
 file on the fleet's repository, sent as nobody with no cookie and no
 `Authorization` ([`nix/roles/gateway.nix`](../../nix/roles/gateway.nix)).
 
+## The public door
+
+`code.<domain>` is the forge for anyone: every public repository, to read
+and to clone, and nothing else. It is its own server block
+([`door.nix`](../../nix/modules/forge/door.nix)), and one of the public
+names the Cloudflare tunnel carries (`dd.public.hosts`,
+[gate.md](gate.md#public-names-the-bare-domain-and-the-demo)).
+
+**Why a name of its own.** `git.<domain>` is the members' forge: on the
+fleet's network only, and every request to Forgejo there carries the name
+the gate gives it. Opening that name to the tunnel would send members'
+sessions through Cloudflare (a proxied name resolves there for everyone),
+and leave one server block deciding per request whether it speaks for
+someone. `code.<domain>` never speaks for anyone, so nothing there can go
+wrong in that direction; members' Git is exactly as it was.
+
+**Nobody, always.** Every location to Forgejo sends no `Cookie`, an empty
+`Authorization`, `X-WEBAUTH-USER`, `-EMAIL`, `-FULLNAME`, `Sudo` and OTP
+header, whatever the request carried, and drops `Set-Cookie` on the way
+back; the gate's locations the same. A query naming `token`,
+`access_token` or `sudo`, or any parameter whose name is percent-encoded,
+is 403 (Forgejo would otherwise take a token from the query). A path with
+a `.` or `..` segment, plain or encoded, is 400, so what nginx matched is
+what Forgejo is asked. A 401 or 403 from Forgejo (what a stranger gets for
+a private repository, or a limited organisation's) becomes a plain 404,
+without the `WWW-Authenticate` that would say "this exists, sign in".
+
+```
+let through, GET or HEAD only, as nobody
+  /  /<owner>  /<owner>/<repo>[/tree/… /blob/… /commits[/…] /commit/<sha>
+     /branches /releases[/tag/<t>] /src/…]        the gate's /_dd/git/public
+  /_dd/static/<file>  /_dd/web/<file>              the gate: the page's files
+  /_dd/me                                          401 from nginx: nobody here
+  /api/v1/repos/search, /users/<u>/repos, /repos/<o>/<r>[/branches /tags
+     /languages /commits /releases /contents[/…] /raw/… /git/commits/<sha>[.diff]
+     /git/trees/<ref> /commits/<ref>/status /compare/<a>...<b> /releases/tags/<t>]
+  /<o>/<r>/raw/…  /media/…  /releases/download/…   files
+  /<o>/<r>/archive/<ref>.<ext>                     archives (paced harder)
+  /avatars/<id>  /repo-avatars/<id>  /assets/img/<file>
+  /<o>/<r>[.git]/info/refs?service=git-upload-pack
+  POST /<o>/<r>[.git]/git-upload-pack              clone and fetch
+  /robots.txt                                      keep crawlers off /api, archives, raw
+
+refused
+  any other method                                 405
+  info/refs for anything but upload-pack           404
+  git-receive-pack, LFS, every other /api/…, the
+  runners' API, /user/…, /login/…, /-/…, /admin,
+  /notifications, /settings, packages, /_dd/…
+  but the two above, any other repository page    404
+```
+
+The API list is what the views marked for anyone call, and nothing more
+(below); `/repos/issues/search` and the like are not an owner and a
+repository. Forgejo itself decides what nobody may see among those: public
+repositories only, no private or limited account's, and an account's own
+address never (its API gives nobody the noreply one).
+
+**Limits.** Each location below has its own, in place of the public
+names' (64 connections and 50 requests a second per address, which still
+hold for every other address on the name):
+
+```
+pages, API, files      dd_code          20 r/s per address, burst 100; 32 connections
+info/refs, upload-pack dd_code_git       2 r/s per address, burst 20; 2 connections
+archives               dd_code_archive   6 a minute per address, burst 3; 2 connections
+both of the last two   dd_code_all       8 at once from everyone together
+upload-pack            a 4 MB request, read in 15 s; 60 s between reads either
+                       way; 4 MB/s per connection; streamed, never spooled to disk
+```
+
+**Headers.** The page and its files get a content policy of their own,
+stricter than the signed-in pages': `default-src 'none'`, scripts, styles,
+images and fetches from the door alone, no frames either way, no form but
+to itself (`ddCsp` in [headers.nix](../../nix/modules/gate/headers.nix)).
+What Forgejo answers gets `default-src 'none'; sandbox`, so a file opened
+on its own runs nothing. The page and its files are the gate's: `no-cache`
+with an ETag, fonts a week. Nothing on the door is anyone's own, so
+nothing is kept for one person and not another.
+
+**The page.** `pages/git-public.html` is the Git page with its bar marked
+`data-public`: the same modules, in their public mode (`open` in
+git-core.js). Only the views registered with `route(…, true)` are drawn
+(a repository's code, files, commits, a commit, branches, releases; the
+list of public repositories; an owner's), nothing asks who is looking, the
+bell and "Running now" are not there, and the forge's own `git.<domain>`
+links (clone addresses, avatars, downloads) are drawn as this name's.
+
 ## Forgejo's settings
 
 All in [`forgejo.nix`](../../nix/modules/forge/forgejo.nix):
@@ -205,6 +297,12 @@ All in [`forgejo.nix`](../../nix/modules/forge/forgejo.nix):
 - **Actions** are on. A bare `uses:` would be looked up on GitHub
   (`DEFAULT_ACTIONS_URL = "github"`); our workflows write theirs out in
   full and pin them.
+- **Strangers** see public repositories (`REQUIRE_SIGNIN_VIEW = false`),
+  no account's address (`DEFAULT_KEEP_EMAIL_PRIVATE`, and `SHOW_USER_EMAIL
+  = false` for Forgejo's own pages, which no one outside reaches). A
+  member's account or organisation set to limited or private is not there
+  for them at all. Commits carry whatever address their author's git
+  wrote: that is in the repository, not the forge.
 - **Plaintext.** The forge reads the repositories as they are pushed, so
   its box is labelled as holding plaintext (`dd.box.plaintext`).
 
@@ -496,6 +594,25 @@ order ([`forge.py`](../../nix/tests/forge.py)):
 7. Live updates: nobody signed in gets 401 from `/_dd/git/events`; a
    member watching gets the commit status the test posts, with its sha;
    `dd-verify` may connect to the database and may not read a table.
+8. Nobody, as the public door asks: reads and clones a public
+   repository; does not see a limited organisation's repository by name,
+   in a search or in its list, and git asks them to sign in for it (which
+   the door turns into a 404); and is shown no account's address, even
+   one set to public.
+
+The door itself is the nginx check's (`nix build
+.#checks.x86_64-linux.nginx`, which runs without a VM):
+[`nginx-door.py`](../../nix/tests/nginx-door.py) serves the forge box's
+own nginx config in the build, with stand-ins for Forgejo's socket and the
+gate that write down what reaches them, and asks as an outsider through
+the tunnel's listener. Every address above that is let through must reach
+the right one, with no cookie, `Authorization`, `Sudo` or user header
+however the request was dressed, and come back with no cookie and the
+door's content policy; every refusal must reach neither, and a private
+repository's 401 must come back a plain 404. It also checks that
+`git.<domain>` closes the connection on an outsider and that a flood of
+ref listings and of archives is told to wait. Each case is printed in the
+build log.
 
 It is one job in CI's `vm_tests` matrix.
 
@@ -510,6 +627,10 @@ It is one job in CI's `vm_tests` matrix.
 - **A new Forgejo address** (a page or file that must come from Forgejo
   itself) goes in nginx's list in `forgejo.nix` *and* in `FORGE` in
   `git-core.js`.
+- **A view for anyone** is `route(pattern, view, true)`: it must read
+  only what nobody may read, and every API path it calls must be on the
+  door's list in `door.nix`, and its address on the door's page list. Add
+  both to `nginx-door.py`.
 - **A new view** is a `route()` in the module it belongs to, using
   `api()`, `current()` and the shared pieces in `git-core.js`. Follow
   [ui.md](ui.md): draw from the kept copy first, ask in parallel, warm the

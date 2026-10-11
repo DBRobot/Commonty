@@ -17,6 +17,25 @@ export { $, el };
 export const put = (parent, ...kids) => parent.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false));
 export const app = () => $('app');
 
+// The public door (pages/git-public.html, at code.<domain>): the same views
+// for anyone, read-only and signed in as nobody. Only the views marked for
+// it are drawn, nothing asks who is looking, and nothing is ever written.
+export const open = !!document.querySelector('header.dd-bar[data-public]');
+
+// The forge names itself git.<domain> in what it answers, which is the
+// members' name. On the public door its own links (avatars, clone
+// addresses, downloads) are the same paths here.
+export function local(url) {
+  if (!open || !url) return url;
+  try {
+    const u = new URL(url, location.href);
+    const forge = `git.${location.hostname.split('.').slice(1).join('.')}`;
+    return u.hostname === forge ? `${location.origin}${u.pathname}${u.search}` : url;
+  } catch {
+    return url;
+  }
+}
+
 // ---- building the page
 
 // lines shaped like the text that is coming, until it comes
@@ -58,7 +77,7 @@ export function ic(name, cls = 'i') {
 }
 
 export function avatar(u, cls = 'avatar') {
-  return el('img', { class: cls, src: u?.avatar_url || '', alt: '', loading: 'lazy' });
+  return el('img', { class: cls, src: local(u?.avatar_url) || '', alt: '', loading: 'lazy' });
 }
 
 // ---- the forge's API
@@ -99,6 +118,7 @@ async function request(path, opts = {}) {
     init.body = JSON.stringify(opts.body);
   }
   const r = await fetch(`/api/v1${path}`, init);
+  if (r.status === 401 && open) throw new ApiError(404, 'Nothing here, or nothing anyone may see.');
   if (r.status === 401) {
     // the demo is nobody to the forge: public repos, and no account of its
     // own, so "who am I" answers no one. That is the demo, not signed out
@@ -206,6 +226,10 @@ export async function markdown(src, base) {
 export let who = null;
 export async function whoami() {
   if (who) return who;
+  if (open) {
+    who = { name: null, forge: null, member: false };
+    return who;
+  }
   const [m, u] = await Promise.all([me(), api('/user').catch(() => null)]);
   who = { name: m.user, forge: u, member: m.role === 'member' };
   return who;
@@ -255,7 +279,7 @@ export function pager(page, total, per, go) {
 export function fail(e) {
   const status = e?.status;
   const msg = status === 404 ? 'Nothing here, or nothing you may see.' : status === 403 ? 'You may not see this.' : e?.message || String(e);
-  return el('div', { class: 'box empty' }, el('p', { class: 'err', text: msg }), el('p', {}, el('a', { href: '/', 'data-nav': '', text: 'Your repositories' })));
+  return el('div', { class: 'box empty' }, el('p', { class: 'err', text: msg }), el('p', {}, el('a', { href: '/', 'data-nav': '', text: open ? 'Public repositories' : 'Your repositories' })));
 }
 
 export function setTitle(...parts) {
@@ -290,7 +314,11 @@ export function watch(repoId, until, on) {
 // ---- where we are
 
 const routes = [];
-export function route(pattern, view) { routes.push([pattern, view]); }
+// `anyone`: the view reads only what nobody may read, and is drawn on the
+// public door too
+export function route(pattern, view, anyone = false) {
+  if (!open || anyone) routes.push([pattern, view]);
+}
 
 // Addresses the forge itself answers: clones, raw files, archives, logs.
 // A link to one of these is a real page load, not a view. The same list as
@@ -412,11 +440,12 @@ searchFrom({
     href: `/${x.full_name}`,
     icon: ICONS.repo,
   }))),
-  more: (text) => `/search${q({ q: text })}`,
+  more: open ? undefined : (text) => `/search${q({ q: text })}`,
 });
 
 // the bell: unread notifications, looked at now and every two minutes
 async function bell() {
+  if (open) return;
   try {
     const { new: n } = await api('/notifications/new', { fresh: true });
     $('git-bell').hidden = false;

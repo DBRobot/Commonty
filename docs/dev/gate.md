@@ -561,6 +561,9 @@ object-src 'none'; base-uri 'self'; form-action 'self' https://*.<domain>
 frame-ancestors 'self'; report-uri /_dd/csp
 ```
 
+A location may set its whole policy instead (`ddCsp`): the forge's public
+door does, stricter than this one ([forge.md](forge.md#the-public-door)).
+
 No inline script anywhere. A browser's violation reports go to
 `POST /_dd/csp`, which logs one line (the directive, the blocked url and
 the page's path, without query strings; at most 8 KiB read). Movies &
@@ -825,7 +828,8 @@ opens a Cloudflare tunnel outward and lists which names answer outsiders.
 On the gateway ([roles/gateway.nix](../../nix/roles/gateway.nix)) those
 are `home`, `accounts`, `headscale`, the bare domain, and a
 `demo-<service>` door for each tile that grants the demo something
-(except Photos). Every other name closes the connection (444) to anyone
+(except Photos); and `code`, the forge's public door, which the forge adds
+([door.nix](../../nix/modules/forge/door.nix), [forge.md](forge.md#the-public-door)). Every other name closes the connection (444) to anyone
 not on the fleet network.
 
 On a public gated host, the ceremonies a stranger may start
@@ -887,6 +891,12 @@ The demo has no passkey, so its photos password and library key come
 from the box (`VERIFY_PHOTOS_DEMO_FILE`, `VERIFY_DEMO_LIBRARY_*`). Neither
 is secret: nothing private is in the demo's account.
 
+**The forge's public door** (`code.<domain>`) is not a gated host: no
+`/_dd/` but the Git page's files (`/_dd/static/`, `/_dd/web/`), the
+public Git page (`/_dd/git/public`, served for any path the page draws),
+and `/_dd/me`, which nginx answers 401 itself so the bar shows "Sign in".
+No cookie and no `Authorization` reach the gate from there.
+
 **A demo door** (`demo-<service>.<domain>`) is the service's own site
 under a second, public name. `verify` lets only the demo through there,
 and the `demo_door` middleware does the same for the gate's own paths on
@@ -904,6 +914,7 @@ dd_visitor   per address                        50 r/s, burst 500   /_dd/ and pu
 dd_ceremony  per address                         1 r/s, burst 10    public sign-in/up paths
 dd_model     per credential                      1 r/s, burst 20    the model's api (llm.nix)
 dd_conn      per address                        64 connections      public servers
+dd_code*     per address, and all together      see forge.md        the forge's public door
 public servers: client_max_body_size 1m, body and header timeouts 15 s
 ```
 
@@ -979,6 +990,7 @@ path                                        method   what                       
 /_dd/send                                   GET      Passwords' Send page                      anyone
 /_dd/download                               GET      app downloads                             anyone
 /_dd/docs/page, /_dd/docs/page/{*}          GET      docs page                                 anyone
+/_dd/git/public                             GET      Git, read-only (the forge's public door)  anyone
 /_dd/docs/index.json, /_dd/docs/raw/{*}     GET      docs index, a page's markdown             anyone
 /_dd/csp                                    POST     CSP report, logged                        anyone
 /_dd/player-error                           POST     Movies & TV's player error, logged        anyone

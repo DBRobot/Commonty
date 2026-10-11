@@ -186,3 +186,56 @@ box.succeed(
 box.succeed(
     "(sudo -u dd-verify psql -h /run/postgresql -d forgejo -tAc 'select count(*) from repository' 2>&1 || true) | grep -q 'permission denied'"
 )
+
+# The public door (nix/modules/forge/door.nix) asks the forge as nobody: no
+# header, no cookie. What nobody is shown here is what the world is shown
+# at code.<domain>; nginx-door.py checks the door lets nothing else through.
+nobody = "curl -s --unix-socket %s" % nix["sock"]
+as_admin = (
+    "curl -sf --unix-socket %s -H 'X-WEBAUTH-USER: %s' -H 'content-type: application/json'"
+    % (
+        nix["sock"],
+        nix["admin"],
+    )
+)
+
+
+def status(path):
+    return box.succeed(
+        f"{nobody} -o /dev/null -w '%{{http_code}}' 'http://forgejo{path}'"
+    ).strip()
+
+
+# a public repository: read, and cloned, by nobody
+assert status(f"/api/v1/repos/{nix['admin']}/commonty") == "200"
+assert (
+    status(f"/{nix['admin']}/commonty.git/info/refs?service=git-upload-pack") == "200"
+)
+# a repository nobody may see is not there for nobody, by name or in a
+# search: an organisation only members see, and its repository
+box.succeed(
+    f'{as_admin} -X POST -d \'{{"username":"inner","visibility":"limited"}}\' http://forgejo/api/v1/orgs >/dev/null'
+)
+box.succeed(
+    f'{as_admin} -X POST -d \'{{"name":"hidden","auto_init":true}}\' http://forgejo/api/v1/orgs/inner/repos >/dev/null'
+)
+assert status("/api/v1/repos/inner/hidden") == "404"
+for path in ["/api/v1/repos/search?q=hidden", "/api/v1/users/inner/repos"]:
+    found = box.succeed(f"{nobody} 'http://forgejo{path}'")
+    assert "inner/hidden" not in found, (path, found)
+# git says "sign in" (401) for it; the door turns that into a 404 too
+assert status("/inner/hidden.git/info/refs?service=git-upload-pack") in (
+    "401",
+    "404",
+)
+# an account's own address is nobody's, whatever it is set to
+box.succeed(
+    f"{sql} \"update \\\"user\\\" set email = 'tester@example.org', keep_email_private = false where lower_name = lower('{nix['admin']}')\""
+)
+for path in [
+    f"/api/v1/repos/{nix['admin']}/commonty",
+    f"/api/v1/users/{nix['admin']}/repos",
+    "/api/v1/repos/search?q=commonty",
+]:
+    said = box.succeed(f"{nobody} 'http://forgejo{path}'")
+    assert "example.org" not in said, (path, said)
