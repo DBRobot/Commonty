@@ -1,8 +1,8 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "v0.1.36-1-1791739909",
-    "issued": 1791739910,
+    "id": "v0.1.37-1-1791742015",
+    "issued": 1791742015,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -12,8 +12,8 @@
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/w1d6yxy2p528c71xnlpzar61d5swyzsc-commonty-android-0.1.36",
-        "version": "0.1.36"
+        "path": "/nix/store/k8mjc0nr52mj48g1g9l695mrrck7jhxp-commonty-android-0.1.37",
+        "version": "0.1.37"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -23,35 +23,35 @@
         ],
         "name": "dd-windows",
         "part": "dd-windows",
-        "path": "/nix/store/31kz5big56mrvjcnbi23crmf53klk5a3-dd-windows-0.1.36",
-        "version": "0.1.36"
+        "path": "/nix/store/51fj9gzfym7rpcbfqngfm5w5mzljpjsg-dd-windows-0.1.37",
+        "version": "0.1.37"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "linux",
         "part": "linux",
-        "path": "/nix/store/hkpf393xm50rl5xq57dcg39l721ym52p-commonty-linux-0.1.36",
-        "version": "0.1.36"
+        "path": "/nix/store/yvywwyzsw37yljci0ciksrsd3af8w4cm-commonty-linux-0.1.37",
+        "version": "0.1.37"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/kc13d6p7pm9qj60nzsrkbjjrw3dg53wz-commonty-windows-0.1.36",
-        "version": "0.1.36"
+        "path": "/nix/store/qy6mc31bbrmx1sccsifhpq4sv3y8d16x-commonty-windows-0.1.37",
+        "version": "0.1.37"
       }
     ],
     "kind": "build-order",
-    "rev": "01abcefbd7393a34f577d3cfbe240c9fc0b1a9ea"
+    "rev": "4d4e983fa4856447b1bf265d428d9f3a8b9f3554"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "vchlhUas/Ixy0misVfl8x4E2RZOG1zC1hJP93V2RR5hxheiJTFLlxnq5w70QfQojWY9MQyabuAuffxqsdQgwAA=="
+  "signature": "8aouHfAUe5XQCwvVwBz4JleGf7zx4AME/phy05QuY4CxtxCIAsM4aG/f6empOxSy3qC2VYLumqATGkcUb1zRBA=="
 }
