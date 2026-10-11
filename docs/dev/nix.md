@@ -19,12 +19,12 @@ nix/
     <program>.nix        options.dd.<thing>, the units, nginx, ports
     needs.nix            what each service in the area needs of a box (typed)
     *.sh, *.py           a unit's script, beside the module that runs it
-  modules/mail.nix       outbound alert mail for a box
+  modules/mail.nix       dd-sendmail: a box's mail, TPM-signed, to the mail Worker
   modules/member-mail.nix  mail to members at <name>@<domain>
   roles/
     <role>.nix           one role: the modules it imports, its secrets, tile, backups
     _sops.nix            the sops setup every role that reads a secret imports
-    _member-mail.nix     member mail and its smtp secret, for roles that write to members
+    _member-mail.nix     member mail, for roles that write to members
     README.md            the roles in one list
   lib/
     needs-type.nix       the type every needs.nix is checked against

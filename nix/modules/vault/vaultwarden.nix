@@ -208,8 +208,9 @@ in
             DISABLE_ICON_DOWNLOAD = true;
 
             USE_SENDMAIL = true;
-            SENDMAIL_COMMAND = "${config.dd.memberMail.sendmail}";
-            SMTP_FROM = "distributed.datacenter@gmail.com";
+            SENDMAIL_COMMAND = config.dd.mail.sendmail;
+            # the mail Worker sends it as noreply@<domain> whatever it says here
+            SMTP_FROM = "noreply@${config.dd.domain}";
             SMTP_FROM_NAME = "Commonty Passwords";
 
             # a deleted item is gone everywhere within 90 days (nix/tests/retention.nix);
@@ -244,7 +245,7 @@ in
           after = lib.optional (options.dd ? garage) "garage-setup.service";
           wants = lib.optional (options.dd ? garage) "garage-setup.service";
           environment.AWS_REGION = "us-east-1";
-          serviceConfig.LoadCredential = config.dd.memberMail.credentials;
+          serviceConfig.SupplementaryGroups = [ config.dd.mail.group ];
         };
 
         # Signing a member out of Passwords: the gate drops their name in

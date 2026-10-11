@@ -523,7 +523,10 @@ with sync_playwright() as p:
     before = mails()
     s, v, nonce, t = mailcall("alerts", b"Subject: node1: backup FAILED\n\nlook\n")
     ok(s == 200, f"alerts, to the owner {s} {v}")
-    ok("From: \"Commonty\" <alerts@commonty.test>" in newest(before), "alerts come from alerts@")
+    ok(
+        'From: "Commonty" <alerts@commonty.test>' in newest(before),
+        "alerts come from alerts@",
+    )
     ok(
         mailcall("alerts", b"Subject: x\n\nagain\n", nonce=nonce)[0] == 403,
         "the same nonce again: refused",
@@ -548,7 +551,8 @@ with sync_playwright() as p:
     )
     ok(
         mailcall(
-            "tester@commonty.test", b"Subject: x\n\nhi\n",
+            "tester@commonty.test",
+            b"Subject: x\n\nhi\n",
             key=EC.generate_private_key(EC.SECP256R1()),
         )[0]
         == 403,
@@ -556,7 +560,9 @@ with sync_playwright() as p:
     )
     ok(
         mailcall(
-            "someone@example.com", b"Subject: x\n\nhi\n", signed_to="tester@commonty.test"
+            "someone@example.com",
+            b"Subject: x\n\nhi\n",
+            signed_to="tester@commonty.test",
         )[0]
         == 403,
         "recipients changed after signing: refused",
@@ -568,8 +574,13 @@ with sync_playwright() as p:
     ok(len(mails()) == len(before), "nothing refused was sent")
     # SEND_PER_RCPT 4 and SEND_PER_BOX 6 here (mail-worker.nix): tester has
     # one, alerts one
-    codes = [mailcall("tester@commonty.test", b"Subject: n\n\nn\n")[0] for _ in range(4)]
-    ok(codes == [200, 200, 200, 429], f"a fifth to one member in the hour: refused {codes}")
+    codes = [
+        mailcall("tester@commonty.test", b"Subject: n\n\nn\n")[0] for _ in range(4)
+    ]
+    ok(
+        codes == [200, 200, 200, 429],
+        f"a fifth to one member in the hour: refused {codes}",
+    )
     codes = [mailcall("alerts", b"Subject: n\n\nn\n")[0] for _ in range(2)]
     ok(codes == [200, 429], f"a seventh from the box in the hour: refused {codes}")
     b.close()

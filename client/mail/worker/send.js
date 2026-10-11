@@ -84,8 +84,8 @@ export async function sendApi(req, env, json, h) {
   const nonce = req.headers.get('x-dd-nonce') || '';
   const to = req.headers.get('x-dd-to') || '';
   const sig = req.headers.get('x-dd-sig') || '';
-  if (Number(req.headers.get('content-length') || 0) > MAX) return json({ error: 'too big' }, 413);
-  // read before anything is decided, as worker.js does for /api/
+  // read before anything is decided, as worker.js does for /api/: an unread
+  // body can break the next request on the same connection
   const bytes = new Uint8Array(await req.arrayBuffer().catch(() => new ArrayBuffer(0)));
   if (bytes.length > MAX) return json({ error: 'too big' }, 413);
   if (!BOXES[box]) return json({ error: 'no such box' }, 403);

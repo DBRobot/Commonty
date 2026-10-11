@@ -6,20 +6,20 @@
   ...
 }:
 let
-  # Not an address: an msmtp alias, expanded from sops at send time by
-  # modules/mail.nix. This repo is public and a real address here is a real
-  # address published.
+  # Not an address: the mail Worker sends "alerts" to the owner's own
+  # (modules/mail.nix), so no address is in this public repo or on the box.
   to = "alerts";
 in
 {
   # Everything here ends at an email. metrics.nix records; this interrupts.
   # alertmanager belongs here too when it arrives.
   services.zfs.zed = {
-    enableMail = false; # we provide sendmail via msmtp, not the mail package
+    enableMail = false; # dd-sendmail (modules/mail.nix), not the mail package
     settings = {
       ZED_EMAIL_ADDR = [ to ];
-      ZED_EMAIL_PROG = "${pkgs.msmtp}/bin/msmtp";
-      ZED_EMAIL_OPTS = "-a default @ADDRESS@";
+      ZED_EMAIL_PROG = config.dd.mail.sendmail;
+      # no @SUBJECT@: zed then writes a Subject header itself
+      ZED_EMAIL_OPTS = "@ADDRESS@";
       ZED_NOTIFY_VERBOSE = true; # also report scrub completions, not just faults
       ZED_NOTIFY_INTERVAL_SECS = 3600;
       ZED_USE_ENCLOSURE_LEDS = false; # usb dock, no backplane
@@ -38,7 +38,6 @@ in
       pkgs.curl
       pkgs.jq
       pkgs.coreutils
-      pkgs.msmtp
     ];
     serviceConfig = {
       Type = "oneshot";
@@ -48,6 +47,7 @@ in
       QUERY = "http://127.0.0.1:10903/api/v1/query";
       STATE = "/var/lib/dd-fleet-alerts/sent.json";
       TO = to;
+      SENDMAIL = config.dd.mail.sendmail;
       # a block's length and an hour: every box's newest numbers are in it
       WINDOW =
         let

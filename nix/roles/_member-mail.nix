@@ -1,12 +1,6 @@
-# Mail to members, for the whole box: to <name>@<domain>, which Cloudflare
-# forwards to the address each member gave the mail Worker. Roles that write
-# to members import this.
-{ config, ... }:
+# Mail to members, for the whole box: to <name>@<domain>, through the mail
+# Worker, which sends it to the address each member gave it. Roles that
+# write to members import this.
 {
-  imports = [
-    ./_sops.nix
-    ../modules/member-mail.nix
-  ];
-  sops.secrets.ente-smtp-password = { };
-  dd.memberMail.smtpPasswordFile = config.sops.secrets.ente-smtp-password.path;
+  imports = [ ../modules/member-mail.nix ];
 }

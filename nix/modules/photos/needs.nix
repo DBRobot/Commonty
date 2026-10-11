@@ -14,7 +14,7 @@
         storage = "1M";
       };
       network = {
-        outbound = [ "smtp.gmail.com" ]; # sign-up and login codes
+        outbound = "none";
         inbound = "network";
       };
       depends = {

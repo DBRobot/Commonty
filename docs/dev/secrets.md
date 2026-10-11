@@ -74,11 +74,10 @@ gateway     cloudflare-token             the zone's names (dd-dns) and the ACME 
             cloudflare-workers-read      the mail and DNS Worker checks (when configured)
             tmdb-token                   the gate's Movies & TV lookups
 photos      ente-key-encryption, ente-key-hash, ente-jwt-secret, ente-ott,
-            ente-demo-password, ente-smtp-password, ente-storage-password,
+            ente-demo-password, ente-storage-password,
             garage-key-id/-secret        ente's own bucket key
 library     library-key-id/-secret       the libraries bucket
-vault       vault-key-id/-secret, vault-oidc-secret, ente-smtp-password (member mail)
-observe     alert-recipient, alert-smtp-password
+vault       vault-key-id/-secret, vault-oidc-secret
 forge       github-mirror-token
 adblock     pihole-api-password
 ```

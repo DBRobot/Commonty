@@ -72,14 +72,14 @@ anyone who breaks into it) can see what the box can see.
 | **Chat, while it answers** | The message being answered, only while it is answered | 👁 Open to the box | 🏠 Stays home | Demo chats pass through Cloudflare, which can read them |
 | **Web search** | Nothing kept | 👁 Open to the box | 📖 Read outside | The search engines the box asks (Google, Bing, DuckDuckGo and others) see what you search for, sent from the box, not from you |
 | **Playing a film** | The one film, in memory while it plays | 👁 Open to the box | 🏠 Stays home | — |
-| **Passwords** | Your vault | 🔏 Locked, labelled | 📖 Read outside | Its notices are emailed to you through Gmail and forwarded by Cloudflare: both can read each email |
+| **Passwords** | Your vault | 🔏 Locked, labelled | 📖 Read outside | Its notices are emailed to you through Cloudflare, which can read each email |
 | **Photos** | Your photos and albums | 🔏 Locked, labelled | 🏠 Stays home | — |
 | **Your account** | Your name, and your devices' and passkeys' public keys. Nothing secret | 👁 Open to the box | 📖 Read outside | Sign-in pages pass through Cloudflare, which can read them; Cloudflare also carries your account record between boxes |
 | **Your email address** | Where your address here forwards to | 👁 Open to the box | 📖 Read outside | Cloudflare keeps where it forwards and handles every email sent to your address |
 | **The network** | Which devices you have, their names, and when they were online | 👁 Open to the box | ✉️ Envelope seen | Tailscale's relays may carry your traffic, sealed, and see your devices' internet addresses. Cloudflare sees when your devices connect. Every name your devices look up on the network goes to Quad9, encrypted on the way |
 | **Ad blocking** | Nothing about which sites you visit | 👁 Open to the box | ✉️ Envelope seen | Quad9 sees each name looked up, encrypted on the way |
 | **Storage counts** | How many bytes you keep in each service | 👁 Open to the box | 🏠 Stays home | — |
-| **Metrics** | How the boxes are doing. Nothing about any member | 👁 Open to the box | ✉️ Envelope seen | Alerts about a box are emailed to its owner through Gmail; ipinfo.io sees each box's internet address |
+| **Metrics** | How the boxes are doing. Nothing about any member | 👁 Open to the box | 📖 Read outside | Alerts about a box are emailed to its owner through Cloudflare, which can read them; ipinfo.io sees each box's internet address |
 | **Git** | Repositories, issues, pull requests | 👁 Open to the box | 📖 Read outside | Every repository is public, by design. A picture in a repository from another site tells that site you looked |
 | **Games** | Your worlds, saves and server logs | 👁 Open to the box | 🏠 Stays home | Games and their mods download from Steam, GitHub and modding sites; Steam's server list sees that a server is running. Nothing of yours goes out |
 | **The front door** (every page's address) | Request logs: address, page, browser, for 20 days | 👁 Open to the box | 📖 Read outside | Cloudflare carries the public pages and can read them |

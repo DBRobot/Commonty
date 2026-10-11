@@ -254,7 +254,7 @@ museum's records      postgres database "ente", local socket, no password;
 the photos            garage bucket "ente", ciphertext; browsers upload to it
                       directly with presigned URLs (CORS "*", see roles/photos.nix)
 sops, read by ente    ente-ott, ente-key-encryption, ente-key-hash,
-                      ente-jwt-secret, ente-smtp-password, garage-key-id/secret
+                      ente-jwt-secret, garage-key-id/secret
 sops, read by gate    ente-ott (as ente-ott-verify), ente-demo-password
 ```
 
@@ -409,8 +409,8 @@ sops               vault-key-id, vault-key-secret (garage), vault-oidc-secret
 
 Site icons are never fetched (`/icons/` is a 404): a request for one would
 tell the box which sites are in a vault. Mail to members goes out by
-`dd.memberMail.sendmail` to `<name>@<domain>`, which the mail Worker
-forwards ([member-mail.nix](../../nix/modules/member-mail.nix)).
+`dd.mail.sendmail` to `<name>@<domain>`, and the mail Worker sends it to
+the address that member gave it ([mail.nix](../../nix/modules/mail.nix)).
 
 ### Public and members-only
 

@@ -98,12 +98,12 @@ in
         # a TXT record at Cloudflare with the same token the front door uses.
         security.acme = {
           acceptTerms = true;
-          # The role account, not a personal address. This one genuinely cannot come
-          # from sops: the module passes it to lego as --email at eval time, so any
-          # value here is a value in the store and in this public repo. Changing it
+          # The fleet's own security@ alias (fleet/policy.json mailAliases), not a
+          # personal address: the module passes it to lego as --email at eval
+          # time, so it is in the store and in this public repo. Changing it
           # re-registers the acme account (the address is hashed into the account
           # directory); issued certs are unaffected.
-          defaults.email = "distributed.datacenter@gmail.com";
+          defaults.email = "security@${base}";
           certs.${base} = {
             # a group rather than the nginx user: kanidm once read these too, and
             # the next service that terminates its own tls will again

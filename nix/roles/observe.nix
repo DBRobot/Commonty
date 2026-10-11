@@ -30,15 +30,4 @@
     git
     htop
   ];
-
-  # Where machine mail actually goes. Read only through the msmtp aliases
-  # template below, so root-only is right.
-  sops.secrets.alert-recipient = { };
-  # msmtp expands local names through this, so zed, smartd and the backup
-  # alerts can all address "alerts" and the real destination stays here.
-  # One place to change it, and nothing names a person in the repo.
-  sops.templates."msmtp-aliases".content = ''
-    alerts: ${config.sops.placeholder.alert-recipient}
-    default: ${config.sops.placeholder.alert-recipient}
-  '';
 }

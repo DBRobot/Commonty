@@ -83,6 +83,28 @@
     };
   };
 
+  dd-mail = {
+    what = "mail from the box to members and the owner, signed by its TPM and handed to the mail Worker (modules/mail.nix)";
+    # one instance per message, behind the dd-mail socket
+    units = [ "dd-mail@" ];
+    base = {
+      requires.tpm = true;
+      uses = {
+        memory = "8M";
+        storage = "0";
+        estimated = true; # a curl and the TPM tools, for each message
+      };
+      network = {
+        outbound = [ "mail" ]; # mail.<domain>, the mail Worker
+        inbound = "localhost"; # a socket for the box's own services
+      };
+      depends = { };
+      # each message passes through as it was written, on its way to
+      # Cloudflare (which can read it too); none is kept
+      privacy = "plaintext";
+    };
+  };
+
   disk-unlock = {
     what = "the encrypted pools open at boot from the TPM, under the signed boot it measures; over the network from the owner's paper key when it cannot";
     units = [

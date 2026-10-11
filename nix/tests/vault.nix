@@ -42,9 +42,6 @@ in
       oidcSecretFile = pkgs.writeText "oidc" "test-oidc-secret";
       pwnedDir = "/srv/pwned";
     };
-    dd.memberMail = {
-      smtpPasswordFile = pkgs.writeText "smtp" "unused";
-    };
     services.postgresqlBackup.enable = true;
     environment.systemPackages = [
       pkgs.curl

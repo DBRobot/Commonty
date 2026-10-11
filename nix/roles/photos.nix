@@ -21,7 +21,6 @@
     ente-key-encryption.owner = "ente";
     ente-key-hash.owner = "ente";
     ente-jwt-secret.owner = "ente";
-    ente-smtp-password.owner = "ente";
   };
 
   dd.verify.photos = {

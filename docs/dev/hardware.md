@@ -96,9 +96,9 @@ storage   ZFS                                        a dataset for garage blocks
                                                      string per box; rf=2 means the
                                                      smallest box caps usable space
 photos    -  (build: 5 Next.js apps + wasm,           postgres on tank; blobs in      api/s3 through the gateway;        postgres on its own box, its
-          heavy for attesters)                       garage                          smtp out                           dumps there; the gate
+          heavy for attesters)                       garage                          -                                  dumps there; the gate
 vault     -                                          postgres; the pool at dd.box.s3 tailnet only (Send public);        the pool (dd.box.s3),
-                                                     (DATA_FOLDER);                  smtp out                           the gate, postgres
+                                                     (DATA_FOLDER);                  mail. out                          the gate, postgres
                                                      pwned list ~90G, peak ~180G,
                                                      1M files, under /vault
 media     -                                          - (disk images are in the       tailnet; unlimited upload          the gate
@@ -122,7 +122,7 @@ runner    /dev/kvm (VM tests); nested KVM (games     /nix/store grows (every box
           test); 2 jobs; >=4 CPUs, 8G for            closure built on every box);    git.<domain>                       127.0.0.1:3900 + storage's keys)
           members' 2 jobs; docker + gVisor;          1.5G VM images; /var/lib/docker
           iptables backend
-observe   SMART-readable disks (each box's           /vault/backups (dumps),         smtp out                           storage (thanos objstore is local
+observe   SMART-readable disks (each box's           /vault/backups (dumps),         mail. out                          storage (thanos objstore is local
           reported disks)                            /var/lib/thanos-*                                                  garage), the gate, gateway (ACME)
 adblock   -                                          -                               :53 tcp/udp on every interface;    the gate; the box must be in the
                                                                                      the house LAN address; DoT out     house whose router hands it out
@@ -148,8 +148,9 @@ reached over the fleet's network:
    the storage role's Thanos store) names 127.0.0.1.
 3. **The gate is on every box** (`everyBox`), and every service that asks it
    about a request says `depends.dd-verify.local`.
-4. **Alerts mail on their own secret** (mail.nix, `alert-smtp-password`), so
-   observe needs neither Photos nor the vault beside it.
+4. **Alerts need no secret** (mail.nix): a box signs each mail with its TPM
+   and the mail Worker sends it, so observe needs neither Photos nor the
+   vault beside it.
 5. **Datasets in the box's own pool.** Each service's dataset is made in
    `dd.box.bulkPool`, from the box's report; `/vault/...` is only the name
    of the mountpoint, and works on any pool.

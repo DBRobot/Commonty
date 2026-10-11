@@ -20,7 +20,7 @@
         storage = "1M";
       };
       network = {
-        outbound = [ "smtp.gmail.com" ];
+        outbound = [ "mail" ]; # mail.<domain>, the mail Worker, for notices
         inbound = "network";
       };
       depends = {

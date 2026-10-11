@@ -2,8 +2,9 @@
 # What is wrong on any box, as the fleet view has it, mailed once per change:
 # disk events in the last week, a pool that is not healthy, a backup over a
 # day old. QUERY is thanos-query's api; STATE remembers what was mailed;
-# WINDOW is how far back to look: another box's newest numbers are only in
-# the bucket once its block is cut, so an instant query would not see them.
+# SENDMAIL is dd-sendmail; WINDOW is how far back to look: another box's
+# newest numbers are only in the bucket once its block is cut, so an
+# instant query would not see them.
 set -eu
 # Every box writes its own numbers and its own name into what this reads,
 # and no box is trusted: a name is kept only if it is a name, a value only if
@@ -29,6 +30,10 @@ lines=$(
 before=$(jq -r . "$STATE")
 # the same trouble is mailed once; a change (new, or more of it) again
 if [ -n "$lines" ] && [ "$lines" != "$before" ]; then
-  printf 'Subject: fleet: something needs a look\n\n%s\n' "$lines" | msmtp -a default "$TO"
+  # not sent: nothing is remembered, and the next run tries again
+  if ! printf 'Subject: fleet: something needs a look\n\n%s\n' "$lines" | "$SENDMAIL" "$TO"; then
+    echo "not mailed; again next time"
+    exit 0
+  fi
 fi
 jq -n --arg l "$lines" '$l' >"$STATE"

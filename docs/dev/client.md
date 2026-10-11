@@ -318,6 +318,33 @@ secrets, the name); `dd release publish` uploads it with every release.
 signed by its TPM key from its house, or after a member approves it; a
 box marked stolen is never answered.
 
+`send.js` is the boxes' outgoing mail, at `POST /send`. A box's
+`dd-sendmail` ([mail.nix](../../nix/modules/mail.nix)) hands the message
+to a root unit behind a socket, which signs `commonty mail send
+v1\0<box>\0<time>\0<nonce>\0<to>\0<sha256 of the message>` with the same
+TPM key as the unlock, and posts the message with those in `x-dd-*`
+headers. The Worker sends it through its `send_email` binding (`SEND`) and
+refuses:
+
+```
+a box not in BOXES, a bad signature, a box marked stolen
+a time more than 5 minutes off, a nonce seen in the last 10 (KV)
+a message over 256 KiB, more than 10 recipients
+a recipient that is not "alerts" (the owner, fleet/policy.json owner)
+  or <name>@<domain> of a member on the list whose rule forwards to an
+  address Email Routing has confirmed (an alias is refused too)
+over 100 an hour from one box, or 20 an hour to one recipient
+```
+
+Every recipient is checked before any is sent. It goes from
+`noreply@<domain>` (`alerts@<domain>` for alerts) to that rule's address,
+with only the Subject, the From's display name and the body's
+Content-Type and transfer encoding kept; every other header the box wrote
+is dropped. Nothing of the body is logged. Sending to confirmed
+destination addresses is free on every plan, with only Email Routing set
+up; the binding is uploaded by `dd mail setup` and `dd release publish`,
+allowed to send from those two addresses only.
+
 ## The dd commands
 
 `dd --help` lists them; each has `--help`. By who uses them:

@@ -1,5 +1,6 @@
 {
   config,
+  options,
   pkgs,
   lib,
   ...
@@ -9,7 +10,8 @@ let
   box = config.networking.hostName;
   facts = "/var/lib/dd-facts";
   garage = config.services.garage.enable;
-  mail = config.programs.msmtp.enable;
+  # where the box can mail (modules/mail.nix)
+  mail = options.dd ? mail;
 
   # After a good run: when it ended, and what the repository holds, so the
   # backups page can say how far back this box goes without anything but
@@ -46,9 +48,8 @@ let
   alert = pkgs.writeShellScript "dd-alert" ''
         set -eu
         unit="$1"
-        ${pkgs.msmtp}/bin/msmtp --from=distributed.datacenter@gmail.com alerts <<EOF
-    From: ${box} <distributed.datacenter@gmail.com>
-    To: alerts
+        ${config.dd.mail.sendmail} alerts <<EOF
+    From: ${box} <alerts@${config.dd.domain}>
     Subject: ${box}: $unit FAILED
 
     $unit failed on ${box}.

@@ -21,7 +21,6 @@ let
     head -c 32 /dev/zero | base64 -w0 > $out/ente-jwt-secret
     echo GK0123456789abcdef01234567 > $out/garage-key-id
     echo unused > $out/garage-key-secret
-    echo unused > $out/ente-smtp-password
   '';
   cert = pkgs.runCommand "test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out
@@ -70,7 +69,6 @@ in
         "ente-jwt-secret"
         "garage-key-id"
         "garage-key-secret"
-        "ente-smtp-password"
       ] (_: { });
       dd.verify.role = lib.mkForce "full";
       dd.verify.photos = {

@@ -16,7 +16,8 @@ let
   # ente's dump is restored weekly to prove it: its key hierarchy is the one
   # thing without which the photos cannot be decrypted by anyone
   ente = builtins.elem "ente" dbs;
-  mail = config.programs.msmtp.enable or false;
+  # where the box can mail (modules/mail.nix)
+  mail = options.dd ? mail;
   box = config.networking.hostName;
   # services.postgresqlBackup writes <db>.sql.zstd and keeps one .prev. History
   # beyond that comes from zfs snapshots on the dataset, which is a mechanism
@@ -60,9 +61,8 @@ let
   alert = pkgs.writeShellScript "pg-backup-alert" ''
         set -eu
         unit="$1"
-        ${pkgs.msmtp}/bin/msmtp --from=distributed.datacenter@gmail.com alerts <<EOF
-    From: ${box} <distributed.datacenter@gmail.com>
-    To: alerts
+        ${config.dd.mail.sendmail} alerts <<EOF
+    From: ${box} <alerts@${config.dd.domain}>
     Subject: ${box}: $unit FAILED
 
     $unit failed on ${box}.

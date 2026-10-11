@@ -171,7 +171,7 @@
         estimated = true; # a curl and a jq, every fifteen minutes
       };
       network = {
-        outbound = [ "smtp.gmail.com" ];
+        outbound = [ "mail" ]; # mail.<domain>, the mail Worker
         inbound = "none";
       };
       depends.thanos-query.local = true;
