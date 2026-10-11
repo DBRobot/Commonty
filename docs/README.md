@@ -16,6 +16,7 @@ These pages are in four parts:
 - [Joining Commonty](guide/joining.md)
 - [Signing in](guide/signing-in.md)
 - [Your devices](guide/devices.md)
+- [Settings](guide/settings.md)
 - [Your recovery key](guide/recovery-key.md)
 - [Using a browser](guide/browser.md)
 - [Inviting friends to games](guide/guests.md)

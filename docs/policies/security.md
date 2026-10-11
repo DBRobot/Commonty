@@ -70,8 +70,3 @@ Some things Commonty uses belong to other companies, such as Cloudflare,
 or the companies that carry email. Problems in their own systems are
 theirs to fix, so please report those to them. If something of theirs
 puts Commonty's members at risk, we still want to hear about it.
-
-## Past problems
-
-From October 2026 on, every security problem we find or are told about,
-and what we did about it, is listed here once it is fixed.

@@ -8,7 +8,7 @@ Commonty app on the same computer.
 
 These need nothing but a browser:
 
-- the public site, these docs, the demo and the **Get the app** page;
+- the public site, these docs, the demo and [the app's download page](https://commonty.org/download);
 - a Passwords Send link someone gave you;
 - once you sign in with your passkey: home, Games, Git, Metrics, Friends,
   Ad blocking and Settings. In Settings, Backups and your device names

@@ -21,7 +21,7 @@ your devices locked.
 You approve a new device from the device that holds your account's main
 key.
 
-1. Install the app on the new device.
+1. Install the app on the new device, from [commonty.org/download](https://commonty.org/download).
 2. On the device with the main key, open Settings, then **Devices**, then
    **Add a device**. It shows a code and a QR code.
 3. On the new device, choose **Have a code?** and type the code. If you

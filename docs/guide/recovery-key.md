@@ -29,7 +29,7 @@ password, which only you know.
 
 If every device is lost or stolen:
 
-1. Install the app on a new device.
+1. Install the app on a new device, from [commonty.org/download](https://commonty.org/download).
 2. Choose **Recover with your recovery key**.
 3. Enter your name and your recovery key, and press **Recover**.
 

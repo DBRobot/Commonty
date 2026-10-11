@@ -24,7 +24,7 @@ they stay a member.
 To play, a guest needs the Commonty app, because game servers are only
 reachable on Commonty's own network:
 
-1. Install the app on the computer or phone they play on (Linux, Windows
+1. Install the app, from [commonty.org/download](https://commonty.org/download), on the computer or phone they play on (Linux, Windows
    or Android; there is no Mac or iPhone app yet).
 2. Add it as a device: in the browser, Settings, Devices, **Add a
    device**; in the app, **Have a code?**, then approve with the passkey
