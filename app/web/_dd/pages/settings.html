@@ -127,6 +127,7 @@
         <header><h2 id="images">Your disk images</h2><span class="bk-spacer"></span><span class="bk-muted" id="total"></span></header>
         <p class="bk-note" id="msg" role="status">Looking for your images…</p>
         <ul class="bk-list" id="list" hidden></ul>
+        <footer class="bk-trash" id="bk-trash" hidden><p>A deleted image stays in the trash for 30 days, then goes for good.</p><button class="quiet" id="bk-empty">Empty trash</button></footer>
       </section>
     </div>
 
@@ -199,9 +200,16 @@
   <dialog class="bk-dialog" id="ask" aria-labelledby="ask-h">
     <h3 id="ask-h"></h3>
     <p id="ask-size"></p>
+    <label class="check"><input type="checkbox" id="ask-forever"> Delete it forever now, and everything else in the trash. This cannot be undone.</label>
     <p>Confirm with your passkey to delete it.</p>
     <p class="bad" id="ask-msg" role="alert" hidden></p>
     <div class="row"><button class="quiet" id="ask-no">Cancel</button><button class="danger" id="ask-yes">Delete with passkey</button></div>
+  </dialog>
+  <dialog class="bk-dialog" id="bk-empty-ask" aria-labelledby="bk-empty-h">
+    <h3 id="bk-empty-h">Empty the trash?</h3>
+    <p>Every disk image in it is deleted from the box at once. This cannot be undone.</p>
+    <p class="bad" id="bk-empty-msg" role="alert" hidden></p>
+    <div class="row"><button class="quiet" id="bk-empty-no">Cancel</button><button class="danger" id="bk-empty-yes">Empty trash</button></div>
   </dialog>
   <dialog class="bk-dialog" id="remove" aria-labelledby="rm-h">
     <h3 id="rm-h"></h3>

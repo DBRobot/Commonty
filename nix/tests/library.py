@@ -124,6 +124,32 @@ box.wait_until_succeeds(f"! {aws} | grep -q '{old}'", timeout=60)
 kept = json.loads(box.succeed(aws).strip() or "[]")
 assert any(k.startswith(f"{lib}/trash/") for k in kept), kept
 
+# the owner deletes for good from the trash: one thing, then all of it
+dav = f"http://127.0.0.1:4181/_dd/dav/{lib}"
+code = "curl -s -o /dev/null -w '%{http_code}'"
+one = next(k for k in kept if k.startswith(f"{lib}/trash/"))[len(lib) + 1 :]
+assert (
+    box.succeed(f"{code} -X DELETE -H 'authorization: Bearer {token}' {dav}/{one}").strip()
+    == "204"
+)
+assert one not in box.succeed(aws)
+assert (
+    box.succeed(f"{code} -X DELETE -H 'authorization: Bearer {token}' {dav}/{one}").strip()
+    == "404"
+)
+assert (
+    box.succeed(f"{code} -X DELETE -H 'authorization: Bearer {token}' {dav}/trash").strip()
+    == "204"
+)
+gone = json.loads(box.succeed(aws).strip() or "[]")
+assert not any(k.startswith(f"{lib}/trash/") for k in gone), gone
+assert box.succeed(f"{rc} cat lib:Files/dd.txt").strip() == "again", "only the trash"
+# never the library itself
+assert (
+    box.succeed(f"{code} -X DELETE -H 'authorization: Bearer {token}' {dav}/").strip()
+    == "403"
+)
+
 # A file too big for a browser tab goes in pieces: the gate hands each on
 # as one part of an S3 multipart upload and joins them at the end. What
 # lands is the pieces in order, byte for byte (the page seals each piece
@@ -280,6 +306,16 @@ assert (
 )
 names = [e["name"] for e in json.loads(box.succeed(f"curl -sf {as_sarah} {img}/"))]
 assert "trash" not in names, names
+# and emptying the trash deletes it for good
+assert (
+    box.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' {as_sarah} -X DELETE {img}/trash"
+    ).strip()
+    == "204"
+)
+assert "images-sarah/trash/" not in box.succeed(
+    f"{aws.replace('--bucket libraries', '--bucket libraries --prefix images-sarah/')}"
+)
 # nobody at all: no images
 assert (
     box.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {img}/config").strip()

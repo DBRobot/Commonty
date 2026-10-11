@@ -359,6 +359,18 @@ export async function trashed(lib) {
   return out.sort((a, b) => b.when - a.when);
 }
 
+/// out of the trash for good, at once: the box keeps no copy to bring back
+export async function forever(lib, item) {
+  const r = await fetch(trashUrl(lib, item.stamp, item.enc), { method: 'DELETE' });
+  if (!r.ok && r.status !== 404) throw new Error(`the gate said ${r.status}`);
+}
+
+/// everything in the trash, gone for good at once
+export async function emptyTrash(lib) {
+  const r = await fetch(`/_dd/dav/${lib.id}/trash`, { method: 'DELETE' });
+  if (!r.ok) throw new Error(`the gate said ${r.status}`);
+}
+
 /// back where it was; beside it, under a new name, if that place is taken
 export async function restore(lib, item, to = item.path) {
   const r = await fetch(trashUrl(lib, item.stamp, item.enc), {

@@ -892,6 +892,10 @@ main.drive .note { margin: 0; padding: 12px 16px; font-size: 14px; color: var(--
 .popmenu button, .popmenu button:hover { justify-content: flex-start; height: 36px; margin: 0; padding: 0 14px; background: none; color: var(--ink); font-size: 15px; font-weight: 500; border-radius: 0; }
 .popmenu button:hover { background: var(--bg); }
 .popmenu button.danger { color: var(--broken); }
+/* what deletes for good: Delete forever, Empty trash, and their dialog */
+main.drive button.danger, #ask-ok.danger { background: var(--broken); border-color: var(--broken); color: var(--surface); }
+main.drive .act .danger { background: transparent; color: var(--broken); }
+main.drive .act .acts { display: inline-flex; gap: 6px; white-space: nowrap; }
 .preview { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); z-index: 30; background: var(--surface); border-left: 1px solid var(--line); display: flex; flex-direction: column; box-shadow: -8px 0 24px rgba(0, 0, 0, .08); }
 .pv-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .pv-head b { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

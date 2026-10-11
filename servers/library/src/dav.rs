@@ -1,9 +1,10 @@
 //! A library as WebDAV: what rclone, a file manager and the app all speak.
 //! One prefix in the bucket per library, the device token as bearer, an
-//! owner may write and a reader may only read, and nothing is deleted at
-//! once: DELETE, and a PUT or MOVE over a name already taken, put what was
-//! there into `trash/` under the library, and the trash lets go of it after
-//! 30 days. The bytes and names through here are rclone's crypt format,
+//! owner may write and a reader may only read. DELETE, and a PUT or MOVE
+//! over a name already taken, put what was there into `trash/` under the
+//! library, and the trash lets go of it after 30 days; a DELETE in the
+//! trash itself (the owner's "Delete forever", or of `trash`, "Empty
+//! trash") deletes at once. The bytes and names through here are rclone's crypt format,
 //! made and read on the device; this box moves ciphertext.
 //!
 //!   OPTIONS, PROPFIND (depth 0 or 1), HEAD, GET (ranges), PUT, MKCOL,
@@ -324,8 +325,8 @@ impl Gate {
     }
 }
 
-/// the trash itself or anything in it: kept by DELETE and emptied by the
-/// purge, never written by a client
+/// the trash itself or anything in it: never written by a client, emptied
+/// by the purge or by the owner's DELETE
 fn in_trash(path: &str) -> bool {
     path == TRASH || path.starts_with("trash/")
 }
@@ -546,12 +547,53 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
 /// The upload header, as `serve` reads it: a request with one is a piece of
 /// an upload whatever its method. Callers that meter or guard writes ask
 /// this, so they and `serve` cannot read the header two ways.
+/// a DELETE here deletes for good: something in the trash, or all of it
+pub fn deletes_for_good(method: &Method, raw: &str) -> bool {
+    method == Method::DELETE && clean(raw).is_some_and(|p| in_trash(&p))
+}
+
+/// The owner's DELETE in the trash, and the bytes it took out of the
+/// bucket: what was there when it ran, so two at once count it once.
+pub async fn delete_for_good(g: &Gate, lib: &str, raw: &str) -> Result<(Response, u64)> {
+    match clean(raw).filter(|p| in_trash(p)) {
+        Some(path) => for_good(g, lib, &path).await,
+        None => Ok((StatusCode::FORBIDDEN.into_response(), 0)),
+    }
+}
+
+/// one thing in the trash, or with `trash` all of it, gone for good: under
+/// the trash's lock, so a second delete of the same finds nothing to count
+async fn for_good(g: &Gate, lib: &str, path: &str) -> Result<(Response, u64)> {
+    let _held = TRASH_PLACE.lock().await;
+    let at = key(lib, path);
+    let mut found: Vec<(String, u64)> = Vec::new();
+    if let Some((size, _)) = g.stat(&at).await? {
+        found.push((at.clone(), size));
+    }
+    found.extend(
+        g.list_all(&format!("{at}/"))
+            .await?
+            .into_iter()
+            .map(|e| (e.key, e.size)),
+    );
+    if found.is_empty() && path != TRASH {
+        return Ok((StatusCode::NOT_FOUND.into_response(), 0));
+    }
+    let mut freed = 0;
+    for (o, size) in &found {
+        g.delete(o).await?;
+        freed += size;
+    }
+    Ok((StatusCode::NO_CONTENT.into_response(), freed))
+}
+
 pub fn piece(headers: &HeaderMap) -> Option<&str> {
     headers.get("x-dd-upload").and_then(|v| v.to_str().ok())
 }
 
 /// What a COPY from `raw` would add to the bucket: the object's size, or
-/// everything under the folder. None: not a path.
+/// everything under the folder.
+/// None: not a path.
 pub async fn bytes_at(g: &Gate, lib: &str, raw: &str) -> Result<Option<u64>> {
     let Some(path) = clean(raw) else {
         return Ok(None);
@@ -907,11 +949,15 @@ async fn in_pieces(
     }
 }
 
-/// gone from where it was, kept under trash with a stamp so nothing there
-/// is ever overwritten
+/// Gone from where it was, kept under trash with a stamp so nothing there
+/// is ever overwritten. In the trash, gone for good: the one thing there,
+/// or with `trash` itself, everything in it.
 async fn delete(g: &Gate, lib: &str, path: &str) -> Result<Response> {
-    if path.is_empty() || in_trash(path) {
+    if path.is_empty() {
         return Ok(StatusCode::FORBIDDEN.into_response());
+    }
+    if in_trash(path) {
+        return Ok(for_good(g, lib, path).await?.0);
     }
     let objects = g.objects_at(lib, path, true).await?;
     if objects.is_empty() {
@@ -1008,6 +1054,115 @@ fn percent_decode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bucket in a thread, enough S3 for the trash: HEAD, a listing,
+    /// DELETE. A listing waits a little, so two deletes at once would both
+    /// see the object if nothing held them apart.
+    fn fake_bucket(objects: &[(&str, u64)]) -> Gate {
+        use std::io::{BufRead as _, BufReader, Write as _};
+        use std::sync::{Arc, Mutex};
+        let store: Arc<Mutex<std::collections::BTreeMap<String, u64>>> = Arc::new(Mutex::new(
+            objects.iter().map(|(k, n)| (k.to_string(), *n)).collect(),
+        ));
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for c in l.incoming().flatten() {
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    let mut r = BufReader::new(c.try_clone().unwrap());
+                    let mut line = String::new();
+                    r.read_line(&mut line).unwrap();
+                    loop {
+                        let mut h = String::new();
+                        if r.read_line(&mut h).unwrap() == 0 || h == "\r\n" {
+                            break;
+                        }
+                    }
+                    let mut parts = line.split_whitespace();
+                    let method = parts.next().unwrap_or("").to_string();
+                    let target = parts.next().unwrap_or("");
+                    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+                    let object = percent_decode(path.trim_start_matches("/b/"));
+                    let (status, body, len) = match method.as_str() {
+                        "HEAD" => match store.lock().unwrap().get(&object) {
+                            Some(n) => ("200 OK", String::new(), *n),
+                            None => ("404 Not Found", String::new(), 0),
+                        },
+                        "DELETE" => {
+                            store.lock().unwrap().remove(&object);
+                            ("204 No Content", String::new(), 0)
+                        }
+                        _ => {
+                            let prefix = query
+                                .split('&')
+                                .find_map(|kv| kv.strip_prefix("prefix="))
+                                .map(percent_decode)
+                                .unwrap_or_default();
+                            let found: Vec<(String, u64)> = store
+                                .lock()
+                                .unwrap()
+                                .iter()
+                                .filter(|(k, _)| k.starts_with(&prefix))
+                                .map(|(k, n)| (k.clone(), *n))
+                                .collect();
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            let xml: String = found
+                                .iter()
+                                .map(|(k, n)| {
+                                    format!("<Contents><Key>{k}</Key><Size>{n}</Size></Contents>")
+                                })
+                                .collect();
+                            let body = format!("<ListBucketResult>{xml}</ListBucketResult>");
+                            let n = body.len() as u64;
+                            ("200 OK", body, n)
+                        }
+                    };
+                    let mut c = c;
+                    let _ = write!(
+                        c,
+                        "HTTP/1.1 {status}\r\ncontent-length: {len}\r\nconnection: close\r\n\r\n{}",
+                        if method == "HEAD" { "" } else { &body }
+                    );
+                });
+            }
+        });
+        Gate {
+            endpoint,
+            bucket: "b".into(),
+            key_id: "k".into(),
+            key_secret: "s".into(),
+            region: "garage".into(),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn two_deletes_of_one_thing_in_the_trash_count_it_once() {
+        let lib = "0123456789abcdef0123456789abcdef";
+        let item = format!("{lib}/trash/100/Files/a");
+        let g = fake_bucket(&[(&item, 700), (&format!("{lib}/Files/b"), 5)]);
+        let (a, b) = tokio::join!(
+            delete_for_good(&g, lib, "trash/100/Files/a"),
+            delete_for_good(&g, lib, "trash/100/Files/a"),
+        );
+        let (a, b) = (a.unwrap(), b.unwrap());
+        assert_eq!(a.1 + b.1, 700, "counted once, by the one that deleted it");
+        let mut codes = [a.0.status().as_u16(), b.0.status().as_u16()];
+        codes.sort();
+        assert_eq!(codes, [204, 404]);
+        // emptying an empty trash frees nothing, and only the trash is touched
+        let (r, n) = delete_for_good(&g, lib, "trash").await.unwrap();
+        assert_eq!((r.status().as_u16(), n), (204, 0));
+        assert_eq!(
+            g.stat(&format!("{lib}/Files/b"))
+                .await
+                .unwrap()
+                .map(|s| s.0),
+            Some(5)
+        );
+        let (r, n) = delete_for_good(&g, lib, "Files/b").await.unwrap();
+        assert_eq!((r.status().as_u16(), n), (403, 0), "outside the trash");
+    }
 
     #[test]
     fn only_one_library_or_one_members_images_can_be_forgotten() {

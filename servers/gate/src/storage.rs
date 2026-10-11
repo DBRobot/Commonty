@@ -50,8 +50,9 @@ pub struct Ledger {
     path: Option<PathBuf>,
     /// the file as last read, and its modification time
     read: Mutex<Option<(std::time::SystemTime, Arc<Counted>)>>,
-    /// bytes uploaded to a member's libraries since the ledger's count
-    since: Mutex<HashMap<String, (u64, u64)>>,
+    /// bytes uploaded to a member's libraries since the ledger's count, and
+    /// bytes deleted for good from their trash: (count, uploaded, freed)
+    since: Mutex<HashMap<String, (u64, u64, u64)>>,
     /// room promised to uploads still under way, per member, so two at once
     /// cannot each be told the same room is free
     held: Mutex<HashMap<String, u64>>,
@@ -88,12 +89,24 @@ impl Ledger {
         Some(c)
     }
 
-    /// uploaded since the ledger counted, for this member
-    fn uploaded(&self, user: &str, counted_at: u64) -> u64 {
+    /// uploaded and freed since the ledger counted, for this member
+    fn since(&self, user: &str, counted_at: u64) -> (u64, u64) {
         match self.since.lock().unwrap().get(user) {
-            Some((at, n)) if *at == counted_at => *n,
-            _ => 0,
+            Some((at, up, freed)) if *at == counted_at => (*up, *freed),
+            _ => (0, 0),
         }
+    }
+
+    /// what a member keeps now: the ledger's count, and what changed since
+    fn used(&self, c: &Counted, user: &str) -> u64 {
+        let (up, freed) = self.since(user, c.updated);
+        (c.members.get(user).map(Usage::total).unwrap_or(0) + up).saturating_sub(freed)
+    }
+
+    /// their libraries' part of it, for Settings
+    pub fn libraries(&self, c: &Counted, user: &str) -> u64 {
+        let (up, freed) = self.since(user, c.updated);
+        (c.members.get(user).map(|u| u.libraries).unwrap_or(0) + up).saturating_sub(freed)
     }
 
     /// Room for `more` bytes in this member's libraries? With no ledger (a
@@ -108,9 +121,7 @@ impl Ledger {
         if c.budget == 0 {
             return true;
         }
-        let used = c.members.get(user).map(Usage::total).unwrap_or(0)
-            + self.uploaded(user, c.updated)
-            + self.held.lock().unwrap().get(user).copied().unwrap_or(0);
+        let used = self.used(&c, user) + self.held.lock().unwrap().get(user).copied().unwrap_or(0);
         used.saturating_add(more) <= c.budget
     }
 
@@ -125,9 +136,7 @@ impl Ledger {
         };
         let mut held = self.held.lock().unwrap();
         let busy = held.get(user).copied().unwrap_or(0);
-        let used = c.members.get(user).map(Usage::total).unwrap_or(0)
-            + self.uploaded(user, c.updated)
-            + busy;
+        let used = self.used(&c, user) + busy;
         let left = c.budget.saturating_sub(used);
         let take = match want {
             Some(w) if w <= left => w,
@@ -157,13 +166,23 @@ impl Ledger {
 
     /// an upload landed: count it until the ledger next does
     pub fn landed(&self, user: &str, bytes: u64) {
+        self.change(user, |e| e.1 += bytes);
+    }
+
+    /// deleted for good from the trash: room again at once, not at the
+    /// ledger's next count
+    pub fn freed(&self, user: &str, bytes: u64) {
+        self.change(user, |e| e.2 += bytes);
+    }
+
+    fn change(&self, user: &str, f: impl FnOnce(&mut (u64, u64, u64))) {
         let Some(c) = self.counted() else { return };
         let mut since = self.since.lock().unwrap();
-        let e = since.entry(user.to_string()).or_insert((c.updated, 0));
+        let e = since.entry(user.to_string()).or_insert((c.updated, 0, 0));
         if e.0 != c.updated {
-            *e = (c.updated, 0);
+            *e = (c.updated, 0, 0);
         }
-        e.1 += bytes;
+        f(e);
     }
 }
 
@@ -239,7 +258,7 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
         return Json(serde_json::json!({ "counted": false })).into_response();
     };
     let mut u = c.members.get(&user).cloned().unwrap_or_default();
-    u.libraries += app.storage.uploaded(&user, c.updated);
+    u.libraries = app.storage.libraries(&c, &user);
     Json(serde_json::json!({
         "counted": true,
         "updated": c.updated,
@@ -278,6 +297,12 @@ mod tests {
         l.landed("tom", 100);
         assert!(l.room("tom", 50));
         assert!(!l.room("tom", 51));
+        // what is deleted for good is room again at once
+        l.freed("tom", 30);
+        assert!(l.room("tom", 80));
+        assert!(!l.room("tom", 81));
+        l.freed("tom", 1 << 40);
+        assert!(l.room("tom", 1000), "never below nothing");
         // someone the ledger has not seen yet starts from nothing
         assert!(l.room("sarah", 1000));
         assert!(!l.room("sarah", 1001));

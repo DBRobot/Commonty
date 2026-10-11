@@ -314,18 +314,50 @@ async function download(s, ui) {
 function ask(s, ui) {
   $('ask-h').textContent = `Delete ${s.label || s.id.slice(0, 8)}?`;
   $('ask-size').textContent = size(s) !== undefined
-    ? `The ${human(size(s))} image goes to the trash, and is gone for good 30 days later.`
-    : 'The image goes to the trash, and is gone for good 30 days later.';
+    ? `The ${human(size(s))} image goes to the trash, and is gone for good 30 days later, or now if you tick the box.`
+    : 'The image goes to the trash, and is gone for good 30 days later, or now if you tick the box.';
   $('ask-msg').hidden = true;
   $('ask-yes').disabled = false;
+  $('ask-forever').checked = false;
   $('ask-no').onclick = () => $('ask').close();
   $('ask-yes').onclick = () => {
+    const forever = $('ask-forever').checked;
     $('ask-yes').disabled = true;
     $('ask').close();
     ui.actions.replaceChildren();
-    remove(s, ui).catch((e) => failRow(ui, e));
+    remove(s, ui)
+      .then(() => (forever ? emptyTrash() : null))
+      .catch((e) => failRow(ui, e));
   };
   $('ask').showModal();
+}
+
+// the images' trash, for good and at once: a DELETE of trash itself
+async function emptyTrash() {
+  const r = await fetch(ROOT + 'trash', { method: 'DELETE' });
+  if (r.status === 403) throw new Error('the box refused; open this page again from the app');
+  if (!r.ok) throw new Error(`the box said ${r.status}`);
+}
+
+function askEmpty() {
+  const d = $('bk-empty-ask');
+  $('bk-empty-msg').hidden = true;
+  $('bk-empty-yes').disabled = false;
+  $('bk-empty-no').onclick = () => d.close();
+  $('bk-empty-yes').onclick = async () => {
+    $('bk-empty-yes').disabled = true;
+    try {
+      await emptyTrash();
+      d.close();
+      $('bk-empty').textContent = 'Emptied';
+      $('bk-empty').disabled = true;
+    } catch (e) {
+      $('bk-empty-msg').textContent = String(e.message || e);
+      $('bk-empty-msg').hidden = false;
+      $('bk-empty-yes').disabled = false;
+    }
+  };
+  d.showModal();
 }
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -430,6 +462,10 @@ let shown = false;
 
 /// the Backups tab, the first time it is shown
 export async function start() {
+  if (inApp || servedByApp) {
+    $('bk-trash').hidden = false;
+    $('bk-empty').onclick = askEmpty;
+  }
   return images(tab());
 }
 

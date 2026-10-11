@@ -189,6 +189,17 @@ async fn metered(
         app.storage.done(held, landed);
         return r;
     }
+    // deleted for good from the trash: room again at once, for what the
+    // delete itself took out, so two of one thing count it once
+    if library_gate::dav::deletes_for_good(req.method(), &raw) && role == Role::Owner {
+        return match library_gate::dav::delete_for_good(g, &lib, &raw).await {
+            Ok((r, freed)) => {
+                app.storage.freed(user, freed);
+                r
+            }
+            Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+        };
+    }
     if method != "PUT" && !piece {
         return library_gate::dav::serve(g, lib, raw, role, req).await;
     }

@@ -3,7 +3,7 @@
 // folders, their contents, a preview, uploads, and the trash. Every name
 // and byte is turned over here: the gate moves ciphertext.
 
-import { unlock, list, download as fetchTo, fetchPlain, put, trash, mkdir, move, trashed, restore, human } from './library.js';
+import { unlock, list, download as fetchTo, fetchPlain, put, trash, mkdir, move, trashed, restore, forever, emptyTrash, human } from './library.js';
 import { me } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
@@ -131,6 +131,7 @@ function render() {
   const trashy = place === 'trash';
   document.querySelector('[data-sort="modified"]').firstChild.textContent = trashy ? 'Trashed' : 'Modified';
   $('actions').hidden = !!lib.reader || trashy;
+  $('trash-actions').hidden = !!lib.reader || !trashy || !items.length;
   for (const b of document.querySelectorAll('[data-sort]')) {
     b.querySelector('.arrow')?.remove();
     if (b.dataset.sort === sort.key) b.append(el('span', { class: 'arrow', text: sort.up ? ' ↑' : ' ↓' }));
@@ -149,7 +150,9 @@ function render() {
       el('td', { class: 'mono wide-only', text: trashy ? when(it.when) : when(it.modified) }),
       el('td', { class: 'mono wide-only', text: it.dir ? '—' : human(it.size) }),
       el('td', { class: 'act' }, trashy
-        ? (lib.reader ? '' : el('button', { class: 'quiet small', type: 'button', text: 'Restore', onclick: (e) => { e.stopPropagation(); back(it); } }))
+        ? (lib.reader ? '' : el('span', { class: 'acts' },
+          el('button', { class: 'quiet small', type: 'button', text: 'Restore', 'aria-label': `Restore ${it.name}`, onclick: (e) => { e.stopPropagation(); back(it); } }),
+          el('button', { class: 'quiet small danger', type: 'button', text: 'Delete forever', 'aria-label': `Delete ${it.name} forever`, onclick: (e) => { e.stopPropagation(); gone([it]); } })))
         : el('button', { class: 'more', type: 'button', 'aria-label': `More for ${it.name}`, text: '⋯', onclick: (e) => { e.stopPropagation(); menu(it, e.currentTarget); } })));
     tr.onclick = (e) => { if (!e.target.closest('input,button')) open(it); };
     return tr;
@@ -169,7 +172,7 @@ function render() {
   for (const b of document.querySelectorAll('[data-place]')) b.setAttribute('aria-current', String(b.dataset.place === place));
   $('empty').hidden = list.length > 0;
   $('empty').textContent = trashy ? 'The trash is empty. Things put here go for good after 30 days.' : ($('search').value ? 'Nothing here by that name.' : 'Nothing here yet. Drop files anywhere on the page, or use Upload.');
-  $('foot').textContent = trashy ? 'Trashed files stay for 30 days, then the box lets them go for good.' : 'Names and contents are encrypted in this tab. Drop files anywhere on the page to upload them here.';
+  $('foot').textContent = trashy ? 'Trashed files stay for 30 days, then the box lets them go for good. Delete forever and Empty trash delete them at once.' : 'Names and contents are encrypted in this tab. Drop files anywhere on the page to upload them here.';
   $('all').hidden = trashy || lib.reader;
   selection();
 }
@@ -207,11 +210,12 @@ const reload = () => (place === 'trash' ? showTrash() : show(here));
 
 // ---- a question in a small window: a name, or a folder
 
-function ask({ title, text = '', value = null, folders = false, ok = 'OK' }) {
+function ask({ title, text = '', value = null, folders = false, ok = 'OK', danger = false }) {
   const d = $('ask');
   $('ask-title').textContent = title;
   $('ask-text').textContent = text;
   $('ask-ok').textContent = ok;
+  $('ask-ok').classList.toggle('danger', danger);
   const input = $('ask-input');
   input.hidden = value === null;
   input.value = value ?? '';
@@ -227,6 +231,7 @@ function ask({ title, text = '', value = null, folders = false, ok = 'OK' }) {
     );
   };
   if (folders) drawFolders();
+  d.returnValue = '';
   return new Promise((resolve) => {
     d.onclose = () => resolve(d.returnValue === 'ok' ? (folders ? at : input.value.trim()) : null);
     d.showModal();
@@ -302,6 +307,27 @@ async function toTrash(list) {
   reload();
 }
 
+// for good, from the trash: asked first, since nothing brings it back
+async function gone(list) {
+  const what = list.length > 1 ? `${list.length} things` : list[0].name;
+  const yes = await ask({ title: `Delete ${what} forever?`, text: 'It is deleted from the box at once. This cannot be undone.', ok: 'Delete forever', danger: true });
+  if (yes === null) return;
+  const failed = [];
+  for (const it of list) {
+    try { await forever(lib, it); } catch { failed.push(it.name); }
+  }
+  if (failed.length) note(`Not deleted: ${failed.join(', ')}`);
+  closePreview();
+  showTrash();
+}
+
+async function emptyAll() {
+  const yes = await ask({ title: 'Empty the trash?', text: `Everything in it (${items.length === 1 ? 'one thing' : items.length + ' things'}) is deleted from the box at once. This cannot be undone.`, ok: 'Empty trash', danger: true });
+  if (yes === null) return;
+  try { await emptyTrash(lib); } catch (e) { note(`The trash was not emptied: ${e.message}`); }
+  showTrash();
+}
+
 async function back(it) {
   let to = it.path;
   for (let n = 1; ; n++) {
@@ -349,7 +375,11 @@ async function open(it) {
   const acts = $('pv-actions');
   acts.replaceChildren();
   if (place === 'trash') {
-    if (!lib.reader) acts.append(el('button', { type: 'button', text: 'Restore', onclick: () => { back(it); closePreview(); } }));
+    if (!lib.reader) {
+      acts.append(
+        el('button', { type: 'button', text: 'Restore', onclick: () => { back(it); closePreview(); } }),
+        el('button', { type: 'button', class: 'danger', text: 'Delete forever', onclick: () => gone([it]) }));
+    }
   } else {
     acts.append(el('button', { type: 'button', text: 'Download', onclick: () => download(it) }));
     if (!lib.reader) {
@@ -478,6 +508,7 @@ async function start() {
   $('sel-down').onclick = async () => { for (const it of picked()) if (!it.dir) await download(it); };
   $('sel-move').onclick = () => relocate(picked());
   $('sel-trash').onclick = () => toTrash(picked());
+  $('empty-trash').onclick = emptyAll;
   $('pv-close').onclick = closePreview;
   $('up-close').onclick = () => { $('uploads').hidden = true; };
   addEventListener('keydown', (e) => { if (e.key === 'Escape') { closePreview(); document.querySelector('.popmenu')?.remove(); } });
