@@ -221,6 +221,37 @@ release gives to the boxes able to run it:
   before skips that lease's requests, and agrees again once its switch
   restarts dd-control, which replays the log under the new rules.
 
+### Postgres follows its lease
+
+[`storage/postgres-follow.nix`](../../nix/modules/storage/postgres-follow.nix):
+the box holding `svc/postgresql` archives every WAL segment, encrypted on
+the box (wal-g, libsodium), into the store under its epoch
+(`postgres-wal/main/e<epoch>`), at least every 30 seconds. The next holder
+starts from there. The databases are small (about 100M on node1), so this
+takes seconds, and no box keeps a live standby.
+
+- **Taking the lease:** the newest base backup, then every segment after
+  it from the epochs since, then promote. A box that held the newest
+  epoch keeps its own data, which has everything it wrote, archived or
+  not.
+- **Handing it over:** on stop, the last segment is switched and archived
+  before postgres goes, so a planned move loses nothing. An unplanned one
+  loses at most what was not yet archived.
+- **Fencing:** a segment is archived only while the flag holds the epoch
+  this postgres started at. A holder whose lease moved on archives
+  nothing more.
+- **Nothing is deleted:** a data directory set aside for a restore stays
+  beside it, named `<dir>.before-e<epoch>.<when>`.
+- **The archive's key** is made once, by the first holder, only when the
+  archive lists no keys at all. A box that can't list the store doesn't
+  start. Each holder seals it to every box able to run postgres (their
+  TPM-held secrets keys) beside `keys/fingerprint`, and seals only a key
+  that matches the fingerprint. No secrets file holds it.
+- **Until each box has its own store:** today the two-box cluster takes no
+  writes while either box is away. A holder on the remaining box starts
+  and runs, but its archive and base backup wait until the other box is
+  back.
+
 ## Not in scope
 
 The control plane doesn't run commands, push configuration, hold secrets or
