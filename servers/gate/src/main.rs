@@ -158,6 +158,7 @@ async fn main() -> Result<()> {
         box_only: role == "box",
         owner: std::env::var("VERIFY_OWNER").ok().filter(|s| !s.is_empty()),
         admin: std::env::var("VERIFY_ADMIN").ok().filter(|s| !s.is_empty()),
+        boxes: serde_json::from_str(&env_or("VERIFY_BOXES", "{}")).context("VERIFY_BOXES")?,
         id_origin: std::env::var("VERIFY_ID")
             .ok()
             .map(|s| s.trim().trim_end_matches('/').to_string())

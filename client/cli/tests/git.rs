@@ -55,6 +55,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         box_only: false,
         owner: None,
         admin: None,
+        boxes: Default::default(),
         oidc: None,
         app_manifest: None,
         bind: "127.0.0.1:0".parse().unwrap(),

@@ -73,6 +73,7 @@ in
       virtualisation.memorySize = 2048;
       virtualisation.cores = 2;
 
+      dd.acme.enable = true;
       dd.acme.worker = "http://127.0.0.1:8787";
       dd.acme.softKey = "${key}/key.pem";
       security.acme.defaults.server = "https://localhost:14000/dir";

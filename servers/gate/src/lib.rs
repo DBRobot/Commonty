@@ -31,7 +31,7 @@ mod signins;
 mod sso;
 mod storage;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -85,6 +85,7 @@ struct App {
     /// this box's owner and the fleet's admin (Config)
     owner: Option<String>,
     admin: Option<String>,
+    boxes: BTreeMap<String, BoxOf>,
     /// challenges given to the id page, waiting for its answer (sso.rs)
     sso: Mutex<HashMap<String, sso::Waiting>>,
     /// the encrypted libraries' gate (library.rs), on a box with the bucket
@@ -229,6 +230,17 @@ pub struct Config {
     /// every box's.
     pub owner: Option<String>,
     pub admin: Option<String>,
+    /// Every box: whose it is and where its own metrics answer (the
+    /// Metrics page's sources)
+    pub boxes: BTreeMap<String, BoxOf>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct BoxOf {
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub metrics: String,
 }
 
 /// What the photos page needs to make or open an ente account for a person:
@@ -520,6 +532,19 @@ impl App {
         [&self.owner, &self.admin]
             .iter()
             .any(|w| w.as_deref() == Some(user))
+    }
+
+    fn is_admin(&self, user: &str) -> bool {
+        self.admin.as_deref() == Some(user)
+    }
+
+    /// the boxes whose metrics this person sees: every box, for the admin;
+    /// the ones they own, for anyone else
+    fn boxes_seen(&self, user: &str) -> Vec<(&String, &BoxOf)> {
+        self.boxes
+            .iter()
+            .filter(|(_, b)| self.is_admin(user) || b.owner.as_deref() == Some(user))
+            .collect()
     }
 
     fn passkey_fresh(&self, session: &str) -> bool {
@@ -1875,7 +1900,13 @@ async fn git_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
 async fn metrics_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.signed_in(cookie) {
-        Some(u) if u == pages::DEMO_USER || !app.member(&u) || !app.sees_box(&u) => {
+        // the page is anyone's who owns a box, or the admin's; what it then
+        // shows is each box's to say (metrics_sources)
+        Some(u)
+            if u == pages::DEMO_USER
+                || !app.member(&u)
+                || (!app.sees_box(&u) && app.boxes_seen(&u).is_empty()) =>
+        {
             StatusCode::FORBIDDEN.into_response()
         }
         _ => signed_in_page(&app, &headers, "metrics"),
@@ -2286,23 +2317,50 @@ async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
 }
 
 /// one of this fleet's own names, and nothing that could carry more
+/// GET /_dd/metrics/sources: where the Metrics page asks, for this person.
+/// `here`: this box's Thanos (every box's), for the admin and this box's
+/// owner; `boxes`: each box they see that answers for itself, live.
+async fn metrics_sources(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let Some(user) = app.identify(&headers, "access") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if user == pages::DEMO_USER || !app.member(&user) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let boxes: Vec<serde_json::Value> = app
+        .boxes_seen(&user)
+        .into_iter()
+        .filter(|(_, b)| !b.metrics.is_empty() && fleet_host(&app.domain, &b.metrics))
+        .map(
+            |(name, b)| serde_json::json!({ "box": name, "url": format!("https://{}", b.metrics) }),
+        )
+        .collect();
+    let mut r =
+        Json(serde_json::json!({ "here": app.sees_box(&user), "boxes": boxes })).into_response();
+    r.headers_mut()
+        .insert("cache-control", HeaderValue::from_static("no-store"));
+    r
+}
+
 /// metrics.<domain>, or a box's own metrics.<box>.<domain>
 fn is_metrics_host(domain: &str, host: &str) -> bool {
     host.strip_suffix(&format!(".{domain}"))
         .is_some_and(|sub| sub == "metrics" || sub.starts_with("metrics."))
 }
 
-/// GET /_dd/back?to=: on to another of the fleet's names, after a box's
-/// own sign-in (the metrics page goes through each box once, and back).
-/// Only https, only a name of this fleet, nothing else.
+/// GET /_dd/back?to=: back to the Metrics page after this box's own sign-in
+/// (the page goes through each box once). Only there: https, the fleet's
+/// metrics.<domain>, no port, no credentials in the address - anything
+/// else is this box's front page.
 async fn back(State(app): State<Arc<App>>, Query(q): Query<HashMap<String, String>>) -> Response {
     let to = q.get("to").map(String::as_str).unwrap_or_default();
+    let metrics = format!("metrics.{}", app.domain);
     let ok = Url::parse(to).ok().filter(|u| {
         u.scheme() == "https"
             && u.port().is_none()
             && u.username().is_empty()
             && u.password().is_none()
-            && u.host_str().is_some_and(|h| fleet_host(&app.domain, h))
+            && u.host_str() == Some(metrics.as_str())
     });
     match ok {
         Some(u) => Redirect::to(u.as_str()).into_response(),
@@ -2618,6 +2676,7 @@ pub async fn start(
         id_origin: cfg.id_origin.clone(),
         owner: cfg.owner.clone(),
         admin: cfg.admin.clone(),
+        boxes: cfg.boxes.clone(),
         sso: Mutex::new(HashMap::new()),
         library: cfg.library,
         library_owners: Mutex::new(HashMap::new()),
@@ -2766,6 +2825,7 @@ pub async fn start(
     let router = Router::new()
         .route("/verify", get(verify))
         .route("/_dd/back", get(back))
+        .route("/_dd/metrics/sources", get(metrics_sources))
         .route("/health", get(|| async { "ok" }))
         // the browser side, served under /_dd/ on every vhost
         .route(
@@ -3227,6 +3287,7 @@ mod tests {
             owner: None,
             // the fleet's admin, who sees every box's metrics
             admin: Some("tom".into()),
+            boxes: Default::default(),
         })
         .await
         .unwrap();

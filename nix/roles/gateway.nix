@@ -91,6 +91,7 @@ in
     tokenFile = if byToken then config.sops.templates."cloudflare.env".path else null;
   };
   dd.verify.role = "full";
+  dd.acme.enable = true;
   services.tailscale.permitCertUid = "nginx"; # so nginx can fetch *.ts.net certs without root
 
   sops.secrets.cloudflare-token = lib.mkIf byToken { };

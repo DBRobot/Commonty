@@ -117,6 +117,9 @@ export async function handle(req, env) {
 export async function converge(env) {
   if (!RECORDS) return [];
   const { zone, address, tunnel, hosts, open, bare } = RECORDS;
+  // boxes with names of their own: *.<box>.<zone> at each one's address
+  const boxes = RECORDS.boxes || {};
+  const addresses = new Set([address, ...Object.values(boxes), ...(RECORDS.fleet || [])]);
   const ours = `${tunnel}.cfargotunnel.com`;
   const done = [];
   const have = {};
@@ -130,10 +133,11 @@ export async function converge(env) {
     [`*.${zone}`]: ['A', address, false],
   };
   for (const h of hosts) want[`${h}.${zone}`] = open ? ['CNAME', ours, true] : null;
+  for (const [b, a] of Object.entries(boxes)) want[`*.${b}.${zone}`] = ['A', a, false];
 
   // a record this Worker made: the A at the gateway's address, or a CNAME to
   // this tunnel
-  const mine = (r) => (r.type === 'A' && r.content === address) || (r.type === 'CNAME' && r.content === ours);
+  const mine = (r) => (r.type === 'A' && addresses.has(r.content)) || (r.type === 'CNAME' && r.content === ours);
   const remove = async (name, r, why) => {
     await dns(env, 'DELETE', `/${r.id}`);
     done.push(`removed ${name} ${r.type} (${why})`);
@@ -141,9 +145,12 @@ export async function converge(env) {
 
   // a name that was public and no longer is: its proxied record goes, so
   // the wildcard answers with the gateway's address again
+  // and a box that has none any more loses its wildcard, if it was ours
+  const boxWildcard = new RegExp(`^\\*\\.[a-z0-9-]+\\.${zone.replace(/\./g, '\\.')}$`);
   for (const [name, records] of Object.entries(have)) {
     if (Object.hasOwn(want, name)) continue;
     for (const r of records) if (r.type === 'CNAME' && r.content === ours) await remove(name, r, 'no longer public');
+    if (boxWildcard.test(name)) for (const r of records) if (r.type === 'A' && addresses.has(r.content)) await remove(name, r, 'no longer a box with names');
   }
   for (const [name, spec] of Object.entries(want)) {
     const current = have[name] || [];

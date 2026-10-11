@@ -33,7 +33,12 @@ in
     ../modules/box/domain.nix
     ../modules/box/box.nix
     ../modules/gate/verify.nix
+    # a certificate for the names a box serves, when it serves any
+    ../modules/gate/acme.nix
     ../modules/observe/metrics.nix
+    # a box's own metrics at metrics.<box>.<domain>, once sign-in and the
+    # zone are the Workers'
+    ../modules/observe/box-metrics.nix
     ../modules/observe/disks.nix
     ../modules/box/zfs-datasets.nix
     ../modules/storage/usage.nix

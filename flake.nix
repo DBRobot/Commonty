@@ -952,7 +952,19 @@
                   if gateways == [ ] then
                     null
                   else
-                    import ./nix/lib/fleet-names.nix self.nixosConfigurations.${builtins.head gateways}.config;
+                    import ./nix/lib/fleet-names.nix self.nixosConfigurations.${builtins.head gateways}.config
+                    // {
+                      # every box's address on the fleet's network: an A at one
+                      # of these is a record of ours
+                      fleet = map (n: self.nixosConfigurations.${n}.config.dd.box.net) (builtins.attrNames boxList);
+                      # a box with names of its own (metrics.<box>.<domain>):
+                      # *.<box>.<domain> at its address on the fleet's network
+                      boxes = nixpkgs.lib.mapAttrs (n: _: self.nixosConfigurations.${n}.config.dd.box.net) (
+                        nixpkgs.lib.filterAttrs (
+                          n: _: self.nixosConfigurations.${n}.config.dd.boxMetrics.host != ""
+                        ) boxList
+                      );
+                    };
                 BOXES = nixpkgs.lib.mapAttrs (_: b: b.unlockKey) withKeys;
                 NAMES = nixpkgs.lib.mapAttrs (
                   n: _: import ./nix/lib/https-names.nix nixpkgs.lib self.nixosConfigurations.${n}.config
@@ -1451,6 +1463,11 @@
                   );
                   # itself included: Settings' Network tab is the whole fleet
                   dd.verify.fleet = lib.mapAttrs (_: b: b.net) boxes;
+                  # whose each box is, and where its own metrics answer
+                  dd.verify.boxes = lib.mapAttrs (n: _: {
+                    owner = (lib.importJSON ./fleet/boxes/${n}/box.json).owner or null;
+                    metrics = self.nixosConfigurations.${n}.config.dd.boxMetrics.host;
+                  }) boxes;
                   # the other boxes, as the agent checks a release did not
                   # cost this box its way off itself
                   # a port each other box listens on, or refuses from: the gate's

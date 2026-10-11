@@ -9,6 +9,8 @@
 let
   cfg = config.dd.verify;
   full = cfg.role == "full";
+  # a gate with a domain and sessions: the full one, or a box's own pages
+  serving = full || cfg.role == "box";
   base = config.dd.domain;
   port = config.dd.verify.port;
   user = "dd-verify";
@@ -67,10 +69,11 @@ in
 
     type = lib.types.enum [
       "full"
+      "box"
       "directory"
     ];
     default = "full";
-    description = "full: auth_request for the services on this box plus the directory; directory: the directory alone, on the tailnet.";
+    description = "full: auth_request for the services on this box plus the directory; box: this box's own pages (its metrics) for its owner and the admin, and the directory; directory: the directory alone, on the tailnet.";
   };
   # The mail Worker's directory read key (fleet/mail.json reader): single
   # entries are shown to it; to nobody else without a credential. Empty: a
@@ -102,6 +105,22 @@ in
   # Every box in the fleet. Settings' Network tab and the Git page show each one's
   # facts as thanos on this box gathered them; no box is asked by another
   # (prometheus answers only on its own box).
+  options.dd.verify.boxes = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule {
+        options.owner = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+        };
+        options.metrics = lib.mkOption {
+          type = lib.types.str;
+          default = "";
+        };
+      }
+    );
+    default = { };
+    description = "Every box: whose it is (box.json owner) and its own metrics name, if it has one. The Metrics page shows a person the boxes they own, and the admin every box.";
+  };
   options.dd.verify.fleet = lib.mkOption {
     type = lib.types.attrsOf lib.types.str;
     default = { };
@@ -388,7 +407,7 @@ in
       // lib.optionalAttrs (full && options.dd ? public && config.dd.public.enable) {
         VERIFY_MAIL_FORGET = "https://mail.${base}/api/forget";
       }
-      // lib.optionalAttrs full {
+      // lib.optionalAttrs serving {
         # the browser login: passkeys scoped to the whole domain, so one login
         # covers every service on this box and the session cookie rides along
         VERIFY_DOMAIN = base;
@@ -398,6 +417,7 @@ in
         VERIFY_HOSTS = lib.concatStringsSep "," cfg.hosts;
         # sign-in at the id Worker, when it is set up (sso.rs)
         VERIFY_ID = config.dd.idWorker;
+        VERIFY_BOXES = builtins.toJSON cfg.boxes;
         VERIFY_MEMBERS = builtins.toJSON config.dd.members;
         # our Rust for the browser, next to the pages that use it
         VERIFY_WEB_DIR = "${self.packages.${pkgs.stdenv.hostPlatform.system}.web}";
