@@ -53,14 +53,20 @@ impl Issuer {
         email_domain: String,
     ) -> Result<Self> {
         let p = dir.join("oidc.key");
+        // a key others could read may have been: a new one, and the
+        // services fetch its public half again
+        let loose = crate::private::loose(&p);
+        if loose {
+            eprintln!("{} was readable by others: making a new one", p.display());
+        }
         let key = match std::fs::read(&p) {
-            Ok(der) => {
+            Ok(der) if !loose => {
                 SigningKey::from_pkcs8_der(&der).context("oidc.key is not a pkcs8 p256 key")?
             }
-            Err(_) => {
+            _ => {
                 let k = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
                 let der = k.to_pkcs8_der()?;
-                std::fs::write(&p, der.as_bytes()).context("writing oidc.key")?;
+                crate::private::write(&p, der.as_bytes()).context("writing oidc.key")?;
                 k
             }
         };

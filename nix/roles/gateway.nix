@@ -22,6 +22,7 @@ in
     ../modules/gate/acme.nix
     ../modules/gate/public.nix
     ../modules/gate/mail-worker.nix
+    ../modules/gate/security-txt.nix
     ../modules/net/headscale.nix
   ];
   # the fleet's own network is run from here

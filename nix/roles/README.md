@@ -7,7 +7,7 @@ per box from its entry and its folder in `fleet/boxes/<box>/`, which is data,
 not Nix: what the box found on itself and what its owner chose
 (modules/box/host.nix).
 
-    core      every box: identity, directory replica, metrics, tailnet, ssh, admin
+    core      every box: identity, directory replica, metrics, the fleet's network, ssh, admin
     gateway   certificates, the public front door (tunnel, bare domain), headscale
     storage   a node of the garage cluster; the box's own backup key
     photos    ente
@@ -24,7 +24,8 @@ not Nix: what the box found on itself and what its owner chose
 Every box backs itself up (nix/modules/storage/backup.nix): restic, encrypted on the
 box, into its own bucket in the garage cluster, which keeps two copies. A
 role adds the paths its state lives in with `dd.backup.paths`. A box's
-datasets are declared in its hardware file with `dd.zfs.datasets`.
+datasets are declared in its `fleet/boxes/<box>/box.json` (`datasets`),
+which modules/box/host.nix turns into `dd.zfs.datasets`.
 
 No box is trusted. Roles that read people's plaintext register with
 `dd.box.plaintext`; the box publishes that list as a metric so the services

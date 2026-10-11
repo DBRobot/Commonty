@@ -13,6 +13,7 @@
   dd.domain = "test.invalid";
   dd.repo = "tester/commonty";
   dd.verify.role = "directory";
-  dd.verify.syncSeconds = 2;
+  # the tests ask the directory on loopback, from the box itself
+  dd.verify.names = [ "127.0.0.1" ];
   networking.firewall.enable = false; # the test network is the only network
 }

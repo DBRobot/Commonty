@@ -557,12 +557,19 @@ The demo may start a film: the gate counts a POST to
 - **The storage pool.** The garage dataset is capped at garage's capacity
   (`dd.zfs.atMountpoint`, never below what it already holds). Its blocks
   keep 15-minute, hourly and daily snapshots, so a week, never weekly or
-  monthly. Garage's metadata snapshots are kept 7 days
+  monthly, like every dataset on every box
+  ([nix/modules/storage/snapshots.nix](../../nix/modules/storage/snapshots.nix)).
+  Garage's metadata snapshots are kept 7 days
   ([nix/modules/storage/backup.nix](../../nix/modules/storage/backup.nix)).
+  What each place keeps, and the check that holds it to 90 days, is in
+  [servers.md](servers.md#retention).
 - **What each box says.** Each box puts `usage/<service>/<member>` facts in
   its heartbeat; dd-control reads them from
-  `/var/lib/dd-facts/usage-*.prom`
+  `/var/lib/dd-facts/usage-*.facts`, one `usage/<service>/<member> <bytes>`
+  a line
   ([client/cli/src/storage_ledger.rs](../../client/cli/src/storage_ledger.rs)).
+  They are not `.prom` files: node-exporter never serves them, so no
+  member's figures are in Prometheus or Thanos (`checks.usage-facts`).
   - The forge counts `code` and the vault counts `passwords`
     ([nix/modules/storage/usage.nix](../../nix/modules/storage/usage.nix)).
   - The Photos box runs `dd storage-ledger`

@@ -15,6 +15,10 @@ pub struct Members {
     pub members: Vec<String>,
     #[serde(default)]
     pub revoked: Vec<String>,
+    /// when each revoked id was removed, unix seconds: their things are
+    /// deleted from every box 90 days later (docs/dev/leaving.md)
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub removed: std::collections::BTreeMap<String, u64>,
 }
 
 fn path(repo: &str) -> PathBuf {
@@ -31,7 +35,7 @@ pub fn read(repo: &str) -> Result<Members> {
     if let Ok(list) = serde_json::from_slice::<Vec<String>>(&raw) {
         return Ok(Members {
             members: list,
-            revoked: vec![],
+            ..Default::default()
         });
     }
     serde_json::from_slice(&raw).with_context(|| format!("parsing {}", p.display()))
@@ -68,6 +72,8 @@ pub async fn add(repo: &str, who: &str, dirs: &[String]) -> Result<()> {
     let id = resolve(who, dirs).await?;
     let mut m = read(repo)?;
     m.revoked.retain(|x| *x != id);
+    // back within 90 days of being removed: nothing of theirs was deleted
+    m.removed.remove(&id);
     if m.members.contains(&id) {
         println!("already a member: {id}");
     } else {
@@ -90,8 +96,11 @@ pub async fn remove(repo: &str, who: &str, dirs: &[String]) -> Result<()> {
         bail!("already revoked: {id}");
     }
     m.revoked.push(id.clone());
+    m.removed.entry(id.clone()).or_insert_with(identity::now);
     write(repo, m)?;
-    println!("revoked {id}\ncommit fleet/members.json and release; every box then shuts them out");
+    println!(
+        "revoked {id}\ncommit fleet/members.json and release; every box then shuts them out, and deletes what is theirs 90 days after this"
+    );
     Ok(())
 }
 
@@ -103,14 +112,10 @@ pub async fn list(repo: &str, dirs: &[String]) -> Result<()> {
     let mut names = std::collections::HashMap::new();
     let mut invited = Vec::new();
     if let Some(d) = dirs.first()
-        && let Ok(h) = crate::who::http()
-        && let Ok(r) = h.get(d.trim_end_matches('/')).send().await
-        && let Ok(listed) = r.json::<Vec<serde_json::Value>>().await
+        && let Ok(listed) = directory::names(d.trim_end_matches('/')).await
     {
-        for l in listed {
-            if let Some(n) = l["name"].as_str()
-                && let Some(e) = crate::who::newest(&crate::who::fetch(&dirs[..1], n).await)
-            {
+        for n in &listed {
+            if let Some(e) = crate::who::newest(&crate::who::fetch(&dirs[..1], n).await) {
                 let id = identity::member_id(&e.entry.root);
                 names.insert(id.clone(), n.to_string());
                 if let Some(g) = &e.entry.grant {
@@ -135,7 +140,7 @@ pub async fn list(repo: &str, dirs: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn date(t: u64) -> String {
+pub(crate) fn date(t: u64) -> String {
     // days since the epoch to y-m-d, no calendar crate for one line
     let days = (t / 86400) as i64;
     let z = days + 719468;

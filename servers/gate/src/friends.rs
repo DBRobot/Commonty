@@ -111,9 +111,7 @@ impl Store {
 
     /// the whole file, written aside and moved into place
     fn save(&self, f: &File) -> Result<()> {
-        let tmp = self.path.with_extension("tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(f)?)?;
-        std::fs::rename(&tmp, &self.path)?;
+        crate::private::write(&self.path, &serde_json::to_vec_pretty(f)?)?;
         Ok(())
     }
 
@@ -239,6 +237,26 @@ impl Store {
             let before = f.pairs.len();
             f.pairs.retain(|p| pair_of(p, user) != Some(other));
             f.pairs.len() != before
+        })
+    }
+
+    /// someone left: the links they sent go at once (leaving.rs)
+    pub fn drop_links_of(&self, by: &str) -> Result<usize> {
+        self.change(|f| {
+            let before = f.links.len();
+            f.links.retain(|_, l| l.by != by);
+            before - f.links.len()
+        })
+    }
+
+    /// and at the end of their window, every friendship and their own
+    /// guest record; a guest they brought stays one while a member is
+    /// still their friend
+    pub fn forget(&self, user: &str) -> Result<()> {
+        self.change(|f| {
+            f.links.retain(|_, l| l.by != user);
+            f.pairs.retain(|p| pair_of(p, user).is_none());
+            f.guests.remove(user);
         })
     }
 

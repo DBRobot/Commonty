@@ -74,6 +74,12 @@ pub fn run() {
             app.manage(account::Keys(auth::open_file(
                 paths::data().join("keys.json"),
             )));
+            // the directory is members' to read: every read carries this
+            // device's token once it has a name and a key
+            let h = app.handle().clone();
+            directory::read_with(Some(std::sync::Arc::new(move |host: &str| {
+                ::account::read_token(&tauri::Manager::try_state::<account::Keys>(&h)?.0, host)
+            })));
             // on the network from the start, if this device has joined before
             net::resume(app.handle(), &crate::account::control_url());
             Ok(())

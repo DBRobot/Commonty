@@ -2,8 +2,8 @@
 # firmware needs, and the rest of the boot disk is a ZFS pool that root is a
 # dataset on. Root keeps a reservation so a full pool can never brick the
 # box; everything else is datasets with no size at all. Other disks become
-# a pool each, named by what they are (modules/zfs-datasets.nix adds the
-# datasets a role wants).
+# a pool each, named by what they are (nix/modules/box/zfs-datasets.nix adds
+# the datasets box.json and the roles want).
 #
 #   imports = [ (import ../../fleet/layout.nix { device = "/dev/disk/by-id/..."; }) ];
 {

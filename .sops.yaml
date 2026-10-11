@@ -1,5 +1,5 @@
-# Public age recipients, derived from SSH keys that already exist. Each box
-# decrypts at boot with its host key; david edits with his own. Nothing
+# Public age recipients. Each box decrypts at boot with the key in its TPM;
+# david edits with his own. Nothing
 # private lives here - these encrypt, they cannot decrypt.
 #
 # One file per box, and a box is a recipient of its own file only. No box is
@@ -36,7 +36,7 @@ creation_rules:
       - age:
           - *david-dd
           - *david
-  # node2's: empty so far. Its only role, the directory, needs no secret.
+  # node2's: what its own roles (storage, runner) read
   - path_regex: secrets/node2\.yaml$
     key_groups:
       - age:

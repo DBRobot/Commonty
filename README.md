@@ -18,15 +18,16 @@ committed encrypted rather than kept out of tree.
     client/            Rust a person runs: the dd cli, its libraries, the browser wasm
     app/               the app: the client crates behind a window, copies of the pages
     data/              the games catalogue and covers
-    scripts/           deploy, install-box, restore-box
+    scripts/           a box by hand (deploy, install-box, restore-box, box-report),
+                       the laptop's setup, the public face's stress test, the app's pages
     secrets/           sops-encrypted values (safe to publish)
 
 ## Deploying
 
-    nixos-rebuild switch --flake github:DBRobot/Home-Server#node1 --refresh
-
-`--refresh` matters: nix caches flake tarballs for an hour and will otherwise
-silently redeploy the previous revision.
+Boxes pull signed releases: what merges to `main` on the forge is published
+with `dd release publish`, and each box's agent switches to it
+([docs/dev/releases.md](docs/dev/releases.md)). By hand, one box from one
+ref of the forge's repository: `scripts/deploy node1 [ref]`.
 
 ## TODO
 

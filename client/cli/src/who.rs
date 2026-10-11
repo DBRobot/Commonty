@@ -10,6 +10,17 @@ pub use account::{
 };
 pub use directory::{fetch, http, newest};
 
+/// our own entry from every directory: this device's token, and the root's
+/// proof where the root is here (a machine it was imported to, say)
+pub async fn fetch_ours(
+    keys: &impl auth::KeyStore,
+    dirs: &[String],
+    name: &str,
+) -> Result<Vec<(String, Result<Option<SignedEntry>>)>> {
+    let root = load_root(keys)?;
+    Ok(directory::fetch_proven(dirs, name, &root.iter().collect::<Vec<_>>()).await)
+}
+
 /// publish, and say what each directory made of it
 pub async fn publish(dirs: &[String], signed: &SignedEntry) -> Result<()> {
     let took = account::publish(dirs, signed).await?;

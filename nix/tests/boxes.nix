@@ -20,12 +20,6 @@ let
           (builtins.all (r: builtins.pathExists (../roles + "/${r}.nix")) box.roles)
           (builtins.hasAttr name cfgs)
           (cfgs.${name}.config.networking.hostName == name)
-          # peers: every other box, none of itself
-          (
-            builtins.length cfgs.${name}.config.dd.verify.peers
-            == builtins.length (builtins.attrNames boxes) - 1
-          )
-          (builtins.all (p: !lib.hasInfix box.net p) cfgs.${name}.config.dd.verify.peers)
           # every box has its address on the fleet's network recorded
           (box ? net && cfgs.${name}.config.dd.box.net == box.net)
           # the keyboard way in: a hash nixos will actually write. With

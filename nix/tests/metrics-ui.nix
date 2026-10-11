@@ -52,6 +52,16 @@ in
         ../modules/observe/metrics-ui.nix
       ];
       dd.verify.role = lib.mkForce "full";
+      # a tile the demo may use, so the demo exists; Metrics is never one
+      dd.home.services = [
+        {
+          name = "Files";
+          url = "https://files.test.invalid/_dd/files";
+          icon = "files";
+          color = "#2f6fd6";
+          demo = "read";
+        }
+      ];
       services.nginx.enable = true;
       # the address the observe box's query answers on (thanos.nix)
       services.thanos.query.http-address = "127.0.0.1:10903";

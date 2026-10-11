@@ -2,12 +2,13 @@
 {
   # A node of the garage cluster and the datasets its pool holds. Which
   # pool, how much of it, and where the blocks live are facts of the
-  # machine (hosts/<box>/hardware.nix and fleet/boxes.json); this binds the
+  # machine (fleet/boxes/<box>/box.json and fleet/boxes.json); this binds the
   # secrets: the cluster's rpc secret, shared by every storage box, and
   # this box's own backup key and password, shared with nobody.
   imports = [
     ./_sops.nix
     ../modules/storage/garage.nix
+    ../modules/storage/snapshots.nix
   ];
   services.zfs.autoSnapshot.enable = true;
   services.zfs.autoScrub.enable = true;

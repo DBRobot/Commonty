@@ -117,6 +117,13 @@ in
     services.nginx.appendHttpConfig = lib.mkIf cfg.enable ''
         # per address: a ceremony a second, ten in hand
         limit_req_zone $binary_remote_addr zone=dd_ceremony:1m rate=1r/s;
+        # the directory asked with no credential at all: counted by address,
+        # as a ceremony is (trying names); with one, not counted here
+        map "$cookie_dd_session$http_authorization$http_x_dd_key_proof" $dd_anonymous {
+          "" $binary_remote_addr;
+          default "";
+        }
+        limit_req_zone $dd_anonymous zone=dd_directory:1m rate=1r/s;
         # and a lid on how many connections one address holds open
         limit_conn_zone $binary_remote_addr zone=dd_conn:1m;
       geo $dd_net {
@@ -199,6 +206,18 @@ in
               proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";
               extraConfig = ''
                 limit_req zone=dd_ceremony burst=10 nodelay;
+                limit_req_status 429;
+                proxy_set_header X-Original-URI $request_uri;
+              '';
+            };
+            # the directory and invites: a stranger asks a few times, a
+            # script trying names is told to wait (servers/gate directory.rs)
+            locations."~ ^/_dd/(directory|invite)(/|$)" = {
+              proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";
+              extraConfig = ''
+                limit_req zone=dd_directory burst=10 nodelay;
+                limit_req zone=dd_user burst=300 nodelay;
+                limit_req zone=dd_visitor burst=500 nodelay;
                 limit_req_status 429;
                 proxy_set_header X-Original-URI $request_uri;
               '';

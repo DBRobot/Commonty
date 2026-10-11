@@ -142,7 +142,7 @@ jobs:
       # ci is one of those: it holds this file to the flake's vm tests and
       # to ci_ok waiting on every job.
       - name: plaintext labels, box list, and this file
-        run: nix build --no-link .#checks.x86_64-linux.plaintext-label .#checks.x86_64-linux.boxes .#checks.x86_64-linux.box-reports .#checks.x86_64-linux.ci .#checks.x86_64-linux.stylesheet .#checks.x86_64-linux.cargo-nix .#checks.x86_64-linux.nginx
+        run: nix build --no-link .#checks.x86_64-linux.plaintext-label .#checks.x86_64-linux.boxes .#checks.x86_64-linux.box-reports .#checks.x86_64-linux.ci .#checks.x86_64-linux.stylesheet .#checks.x86_64-linux.cargo-nix .#checks.x86_64-linux.nginx .#checks.x86_64-linux.usage-facts .#checks.x86_64-linux.fleet-defaults .#checks.x86_64-linux.retention
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -284,7 +284,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [console, directory, metrics, metrics-ui, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, photos, llm, vault, adblock, unlock]
+        test: [console, directory, metrics, metrics-ui, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, photos, llm, vault, adblock, unlock, leaving]
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: ${{ matrix.test }}

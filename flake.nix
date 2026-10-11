@@ -61,6 +61,7 @@
         "vault"
         "adblock"
         "unlock"
+        "leaving"
       ];
       rust =
         let
@@ -516,14 +517,12 @@
             inherit src;
             strictDeps = true;
             nativeBuildInputs = [ pkgs.pkg-config ];
-            # the cli's mount (dd media) links libfuse
-            buildInputs = [ pkgs.fuse3 ];
             doCheck = false;
           };
           # the app: its window, and its network engine (app/build.rs links
           # it from here)
           appCommon = common // {
-            buildInputs = [ pkgs.fuse3 ] ++ appLibs;
+            buildInputs = appLibs;
             COMMONTY_NET_LIB_DIR = "${appNet}/lib";
           };
           # The workspace but the app, for clippy: the
@@ -869,7 +868,7 @@
           # the Android toolchain, for the dev shell below
           android-sdk = androidSdk;
           # Our Rust in the browser: the ente account for a person whose key
-          # is a passkey (crates/web). The verifier serves this directory.
+          # is a passkey (client/web). The verifier serves this directory.
           # A film is HLS, because that is what the box's transcode makes
           # and what lets a viewer seek. Safari plays a playlist by itself;
           # nothing else does, so the page needs a player. Pinned by hash
@@ -919,7 +918,22 @@
                   );
                 }
               );
+              # fleet/policy.json mailAliases: <alias>@<domain> to a member.
+              # An alias is lowercase a-z, 0-9 and -, never a person's name
+              policy = nixpkgs.lib.importJSON ./fleet/policy.json;
+              aliases = policy.mailAliases or { };
+              people = [ policy.owner ] ++ builtins.attrNames (policy.people or { });
+              badAlias =
+                a: m:
+                builtins.match "[a-z0-9-]{1,64}" a == null
+                || builtins.match "[a-z0-9][a-z0-9._-]{0,63}" m == null
+                || builtins.elem a people
+                || a == m;
+              bad = builtins.attrNames (nixpkgs.lib.filterAttrs badAlias aliases);
             in
+            assert nixpkgs.lib.assertMsg (
+              bad == [ ]
+            ) "fleet/policy.json mailAliases: not an alias here: ${builtins.concatStringsSep ", " bad}";
             pkgs.runCommand "dd-mail-worker"
               {
                 nativeBuildInputs = [
@@ -937,6 +951,7 @@
                 {
                   echo "export const MEMBERS = $(jq -c . ${./fleet/members.json} | jq -R .);"
                   echo "export const RELEASE = $(tr -d '[:space:]' < ${./fleet/release.pub} | jq -R .);"
+                  echo "export const ALIASES = $(jq -c '.mailAliases // {}' ${./fleet/policy.json});"
                   # each box's TPM-held unlock key, where it has one (unlock.js)
                   echo "export const BOXES = $(jq -c 'with_entries(select(.value.unlockKey) | .value = .value.unlockKey)' ${./fleet/boxes.json});"
                 } > $out/fleet.js
@@ -1054,7 +1069,7 @@
             pkgs.clippy # linter that teaches you the language
             pkgs.rustfmt
             pkgs.pkg-config # crates with C dependencies need this to find them
-            pkgs.fuse3 # the cli's mount
+            pkgs.fuse3 # fusermount3, which dd media runs to unmount rclone's mount
             pkgs.sops # `dd secret run -- ...` runs this
             pkgs.age
             pkgs.age-plugin-tpm # sops encrypts to the boxes' TPM keys through it
@@ -1214,7 +1229,34 @@
           boxes = import ./nix/tests/boxes.nix args;
           box-reports = import ./nix/tests/box-reports.nix args;
           role-fit = import ./nix/tests/role-fit.nix args;
+          # nothing deleted lasts past 90 days, where config says how long
+          retention = import ./nix/tests/retention.nix args;
           nginx = import ./nix/tests/nginx.nix args;
+          # no member's figures in the fleet's metrics: usage is heartbeat
+          # lines, never a Prometheus sample (storage/usage.nix)
+          usage-facts = pkgs.runCommand "usage-facts-are-not-metrics" { } ''
+            printf 'tom@x.org\t2048\nbad name\t1\nsarah\t7\n' > rows
+            ${pkgs.gawk}/bin/awk -F '\t' -v svc=code -v suffix=@x.org \
+              -f ${./nix/modules/storage/usage-facts.awk} rows > got
+            printf 'usage/code/tom 2048\nusage/code/sarah 7\n' | cmp - got
+            if ${pkgs.gnugrep}/bin/grep -rn 'dd_usage' ${./nix/modules}; then exit 1; fi
+            # node-exporter serves /var/lib/dd-facts/*.prom: nothing writes usage there but to remove it
+            if ${pkgs.gnugrep}/bin/grep -rn 'usage-[^ ]*\.prom' ${./nix/modules} | ${pkgs.gnugrep}/bin/grep -v 'rm -f'; then exit 1; fi
+            touch $out
+          '';
+          # the clients' default names are the fleet's (client/identity/src/fleet.rs)
+          fleet-defaults =
+            let
+              policy = nixpkgs.lib.importJSON ./fleet/policy.json;
+              boxes = nixpkgs.lib.importJSON ./fleet/boxes.json;
+              src = ./client/identity/src/fleet.rs;
+            in
+            pkgs.runCommand "fleet-defaults" { } ''
+              grep -qF '"${policy.domain}"' ${src}
+              grep -qF '"${policy.repo}"' ${src}
+              grep -qF '"${boxes.node1.net}"' ${src}
+              touch $out
+            '';
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
           # the control plane: relay, witness and three validators, offline
@@ -1318,7 +1360,6 @@
                   dd.box.net = box.net;
                   dd.box.site = box.siteId;
                   dd.box.region = box.regionId;
-                  dd.verify.peers = lib.mapAttrsToList directoryOf (lib.filterAttrs (n: _: n != name) boxes);
                   # the same house's boxes alone: its Wi-Fi and its page
                   dd.verify.housePeers = lib.mapAttrsToList directoryOf (
                     lib.filterAttrs (n: b: n != name && b.siteId == box.siteId) boxes

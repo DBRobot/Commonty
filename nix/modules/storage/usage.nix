@@ -4,7 +4,8 @@
 # Each count also goes into this box's facts (/var/lib/dd-facts), so its
 # heartbeat carries it and every box's gate adds the fleet's up
 # (storage/view.nix): no service's login reaches another's tables, and no
-# box reads another.
+# box reads another. Never a .prom file: per-member figures stay out of
+# Prometheus (checks.usage-facts).
 {
   config,
   lib,
@@ -73,12 +74,13 @@ in
           # into the heartbeat: as root, where node-exporter's facts are
           ExecStartPost = "+${pkgs.writeShellScript "dd-usage-${name}-facts" ''
             [ -f /var/lib/dd-usage/${name}/usage.tsv ] || exit 0
-            ${pkgs.gawk}/bin/awk -F '\t' -v svc=${u.counts} -v suffix=${lib.escapeShellArg u.memberSuffix} '
-              { m = $1; if (suffix != "" && substr(m, length(m) - length(suffix) + 1) == suffix) m = substr(m, 1, length(m) - length(suffix)) }
-              m ~ /^[A-Za-z0-9._-]+$/ && $2 ~ /^[0-9]+$/ { printf "dd_usage{service=\"%s\",member=\"%s\"} %s\n", svc, m, $2 }
-            ' /var/lib/dd-usage/${name}/usage.tsv > /var/lib/dd-facts/usage-${u.counts}.prom.tmp
-            chmod 0644 /var/lib/dd-facts/usage-${u.counts}.prom.tmp
-            mv /var/lib/dd-facts/usage-${u.counts}.prom.tmp /var/lib/dd-facts/usage-${u.counts}.prom
+            out=/var/lib/dd-facts/usage-${u.counts}.facts
+            ${pkgs.gawk}/bin/awk -F '\t' -v svc=${u.counts} -v suffix=${lib.escapeShellArg u.memberSuffix} \
+              -f ${./usage-facts.awk} /var/lib/dd-usage/${name}/usage.tsv > "$out.tmp"
+            chmod 0644 "$out.tmp"
+            mv "$out.tmp" "$out"
+            # the metric it once was, which node-exporter would still serve
+            rm -f /var/lib/dd-facts/usage-${u.counts}.prom
           ''}";
         };
         script = ''

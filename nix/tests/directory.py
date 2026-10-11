@@ -1,29 +1,50 @@
-# The directory test: entries, invites and revocation across boxes.
+# The directory test: an entry published, a device admitted, a restart, and
+# what a stranger with no credential is refused.
 
 start_all()
-for m in (a, b, c):
+for m in (a, b):
     m.wait_for_unit("dd-verify.service")
     m.wait_for_open_port(4181)
-a.wait_until_succeeds("journalctl -u dd-verify > /tmp/j && grep -q 'every peer pulled once' /tmp/j")
-b.wait_until_succeeds("journalctl -u dd-verify > /tmp/j && grep -q 'every peer pulled once' /tmp/j")
 
 env = "DD_KEYRING_FILE=/root/laptop.json"
-client.succeed(f"{env} {nix['dd']} identity new --name sarah --directory http://a:4181/_dd/directory")
-b.wait_until_succeeds("curl -sf http://localhost:4181/_dd/directory/sarah")
+for box in ("a", "b"):
+    client.succeed(
+        f"{env}-{box} {nix['dd']} identity new --name sarah --directory http://{box}:4181/_dd/directory"
+    )
 
-# a stranger's sarah on b: b asks a, which holds her under another root
-client.fail(f"DD_KEYRING_FILE=/root/stranger.json {nix['dd']} identity new --name sarah --directory http://b:4181/_dd/directory")
+# the list is members': a stranger is refused it, sarah's device is not
+for box in ("a", "b"):
+    out = client.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' http://{box}:4181/_dd/directory"
+    ).strip()
+    assert out == "401", f"{box}: anonymous list answered {out}"
 
-# c never pulled its peer: it refuses a new name
-out = client.fail(f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} identity new --name tom --directory http://c:4181/_dd/directory 2>&1")
-assert "503" in out or "not yet pulled" in out, out
+# a: no reader key in the release yet, so one entry is still anyone's
+a.succeed("curl -sf http://localhost:4181/_dd/directory/sarah")
+# b: refused, and the same refusal whether or not the name is there
+for name in ("sarah", "nobody"):
+    out = client.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' http://b:4181/_dd/directory/{name}"
+    ).strip()
+    assert out == "401", f"b: anonymous {name} answered {out}"
 
-# a device added through b alone reaches a
-pub = client.succeed(f"DD_KEYRING_FILE=/root/phone.json {nix['dd']} device show | tail -1").strip()
-client.succeed(f"{env} {nix['dd']} device admit {pub} --directory http://b:4181/_dd/directory")
-a.wait_until_succeeds("curl -sf http://localhost:4181/_dd/directory/sarah -o /tmp/out && grep -q '\"version\":2' /tmp/out")
+# her own device reads her entry (it sends its token), and admits a phone
+show = client.succeed(
+    f"{env}-b {nix['dd']} identity show --directory http://b:4181/_dd/directory"
+)
+assert "version 1" in show and "(yours)" in show, show
+pub = client.succeed(
+    f"DD_KEYRING_FILE=/root/phone.json {nix['dd']} device show | tail -1"
+).strip()
+client.succeed(
+    f"{env}-b {nix['dd']} device admit {pub} --directory http://b:4181/_dd/directory"
+)
+show = client.succeed(
+    f"{env}-b {nix['dd']} identity show --directory http://b:4181/_dd/directory"
+)
+assert "version 2" in show, show
 
 # b restarts and still has sarah at version 2
 b.succeed("systemctl restart dd-verify")
 b.wait_for_open_port(4181)
-b.wait_until_succeeds("curl -sf http://localhost:4181/_dd/directory/sarah -o /tmp/out && grep -q '\"version\":2' /tmp/out")
+b.wait_until_succeeds("grep -q '\"version\": 2' /var/lib/dd-verify/keys/sarah.json")

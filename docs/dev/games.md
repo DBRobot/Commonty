@@ -415,6 +415,12 @@ the gate and the Commonty network on the same box. Each catalogue game is a
 variant with its own memory, threads and disk (above). The role's own entry
 in [fleet/roles.json](../../fleet/roles.json) asks for KVM and 24 GiB.
 
+## Someone who left
+
+The manager asks its gate who left every minute (`/internal/leaving`):
+their servers stop at once, and 90 days later every server and kept world
+of theirs is deleted (`Manager::forget`, [leaving.md](leaving.md)).
+
 ## Friends and guests
 
 Who may play is the gate's, not the manager's

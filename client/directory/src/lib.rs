@@ -10,7 +10,7 @@ use identity::SignedEntry;
 /// tailnet and not yet on the fleet's network reaches nothing else, and
 /// signing up, signing in and joining the network all start here. The
 /// other boxes hold copies, pulled from this one.
-pub const DEFAULT: [&str; 1] = ["https://home.commonty.org/_dd/directory"];
+pub const DEFAULT: [&str; 1] = [identity::fleet::DIRECTORY];
 
 /// a proxy every client this process builds goes through: the app's way
 /// into the fleet's own network (app/src/net.rs), a SOCKS5 one that
@@ -60,6 +60,50 @@ fn agent() -> String {
         })
 }
 
+/// Where a read's credential comes from: this device's token for its own
+/// name, minted for directory reads at the one host given and nowhere else.
+/// The directory answers members, an entry's own keys and nobody else
+/// (docs/dev/gate.md).
+pub type TokenSource = std::sync::Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+static TOKEN: std::sync::RwLock<Option<TokenSource>> = std::sync::RwLock::new(None);
+
+/// every read from here on carries what `t` mints (account::read_as_device)
+pub fn read_with(t: Option<TokenSource>) {
+    if let Ok(mut v) = TOKEN.write() {
+        *v = t;
+    }
+}
+
+fn token(url: &str) -> Option<String> {
+    let host = reqwest::Url::parse(url).ok()?.host_str()?.to_lowercase();
+    let t = TOKEN.read().ok()?.clone()?;
+    t(&host)
+}
+
+/// a read: this device's token, and a proof by each key given
+fn read_request(
+    http: &reqwest::Client,
+    url: &str,
+    name: Option<&str>,
+    keys: &[&identity::SigningKey],
+) -> reqwest::RequestBuilder {
+    let mut r = http.get(url);
+    if let Some(t) = token(url) {
+        r = r.bearer_auth(t);
+    }
+    if let Some(name) = name {
+        let at = identity::now();
+        for k in keys {
+            r = r.header(
+                identity::READ_PROOF_HEADER,
+                identity::read_proof(k, name, at),
+            );
+        }
+    }
+    r
+}
+
 /// a client: no redirects, a short timeout, through the network's proxy
 /// when this process is on it
 pub fn http() -> Result<reqwest::Client> {
@@ -83,7 +127,18 @@ pub fn builder() -> Result<reqwest::ClientBuilder> {
 
 /// What each directory has for `name`; a directory that cannot be reached is
 /// an error entry, not a missing one, because the two mean different things.
+/// A directory that will not say (401: not this device's to read) is one too.
 pub async fn fetch(dirs: &[String], name: &str) -> Vec<(String, Result<Option<SignedEntry>>)> {
+    fetch_proven(dirs, name, &[]).await
+}
+
+/// The same, proven by keys in the entry: its root or paper key, for a
+/// machine that holds one and is not (yet) one of its devices.
+pub async fn fetch_proven(
+    dirs: &[String],
+    name: &str,
+    keys: &[&identity::SigningKey],
+) -> Vec<(String, Result<Option<SignedEntry>>)> {
     let mut out = Vec::new();
     let http = match http() {
         Ok(h) => h,
@@ -92,7 +147,7 @@ pub async fn fetch(dirs: &[String], name: &str) -> Vec<(String, Result<Option<Si
     for d in dirs {
         let url = format!("{}/{name}", d.trim_end_matches('/'));
         let r = async {
-            let r = http.get(&url).send().await?;
+            let r = read_request(&http, &url, Some(name), keys).send().await?;
             match r.status().as_u16() {
                 404 => Ok(None),
                 200 => Ok(Some(r.json::<SignedEntry>().await?)),
@@ -184,8 +239,7 @@ pub fn newest(found: &[(String, Result<Option<SignedEntry>>)]) -> Option<SignedE
 
 /// every name a directory lists
 pub async fn names(dir: &str) -> Result<Vec<String>> {
-    let v: Vec<serde_json::Value> = http()?
-        .get(dir)
+    let v: Vec<serde_json::Value> = read_request(&http()?, dir, None, &[])
         .send()
         .await?
         .error_for_status()?
@@ -194,6 +248,12 @@ pub async fn names(dir: &str) -> Result<Vec<String>> {
     Ok(v.into_iter()
         .filter_map(|l| l["name"].as_str().map(str::to_string))
         .collect())
+}
+
+/// a GET of something else a directory box keeps for members (its
+/// /_dd/leaving statements): with this device's token, as every read here
+pub fn read(http: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+    read_request(http, url, None, &[])
 }
 
 /// what one directory said to a publish

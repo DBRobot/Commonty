@@ -31,41 +31,25 @@ struct Box_ {
 }
 
 impl Box_ {
-    async fn start(full: bool, peers: Vec<String>, sync_secs: u64) -> Self {
-        Self::start_members(full, peers, sync_secs, None).await
+    async fn start(full: bool) -> Self {
+        Self::start_members(full, None).await
     }
     /// `members`: Some(list) gates the services the way a real box does
-    async fn start_members(
-        full: bool,
-        peers: Vec<String>,
-        sync_secs: u64,
-        members: Option<Vec<String>>,
-    ) -> Self {
-        Self::start_with(
-            full,
-            peers,
-            sync_secs,
-            members.map(verify::Members::list),
-            None,
-        )
-        .await
+    async fn start_members(full: bool, members: Option<Vec<String>>) -> Self {
+        Self::start_with(full, members.map(verify::Members::list), None).await
     }
     /// everything: the member list with revocations, and the release key
     /// whose invites count
     async fn start_with(
         full: bool,
-        peers: Vec<String>,
-        sync_secs: u64,
         members: Option<verify::Members>,
         release_pub: Option<String>,
     ) -> Self {
-        Self::start_home(full, peers, sync_secs, members, release_pub, vec![]).await
+        Self::start_home(full, members, release_pub, vec![]).await
     }
     /// and the tiles this box offers
     async fn start_home(
         full: bool,
-        peers: Vec<String>,
-        sync_secs: u64,
         members: Option<verify::Members>,
         release_pub: Option<String>,
         home: Vec<verify::pages::Service>,
@@ -73,11 +57,23 @@ impl Box_ {
         Self::start_on(
             scratch("box").join("keys"),
             full,
-            peers,
-            sync_secs,
             members,
             release_pub,
             home,
+        )
+        .await
+    }
+    /// a box whose release names a reader key, as one does once the mail
+    /// Worker has its own: no single entry is anyone's any more
+    async fn start_closed(full: bool, members: Option<verify::Members>) -> Self {
+        let reader = identity::encode_public(&identity::generate().verifying_key());
+        Self::start_full(
+            scratch("box").join("keys"),
+            full,
+            members,
+            None,
+            vec![],
+            vec![reader],
         )
         .await
     }
@@ -86,11 +82,19 @@ impl Box_ {
     async fn start_on(
         dir: PathBuf,
         full: bool,
-        peers: Vec<String>,
-        sync_secs: u64,
         members: Option<verify::Members>,
         release_pub: Option<String>,
         home: Vec<verify::pages::Service>,
+    ) -> Self {
+        Self::start_full(dir, full, members, release_pub, home, vec![]).await
+    }
+    async fn start_full(
+        dir: PathBuf,
+        full: bool,
+        members: Option<verify::Members>,
+        release_pub: Option<String>,
+        home: Vec<verify::pages::Service>,
+        directory_readers: Vec<String>,
     ) -> Self {
         let (addr, _task) = verify::start(verify::Config {
             home,
@@ -112,8 +116,8 @@ impl Box_ {
             network: None,
             bind: "127.0.0.1:0".parse().unwrap(),
             dir: dir.clone(),
-            peers,
-            sync_secs,
+            directory_readers,
+            names: vec!["127.0.0.1".into()],
             control: None,
             house_peers: vec![],
             domain: full.then(|| "localhost".to_string()),
@@ -244,6 +248,75 @@ async fn entry(b: &Box_, name: &str) -> Option<serde_json::Value> {
     Some(r.json().await.unwrap())
 }
 
+/// what the directory answers a request with no credential at all
+async fn anonymous(b: &Box_, path: &str) -> u16 {
+    reqwest::get(format!("{}{path}", b.directory()))
+        .await
+        .unwrap()
+        .status()
+        .as_u16()
+}
+
+/// Once the release names a reader key, an entry is nobody's to read
+/// without a credential: and still a name is taken, a device admitted by
+/// the root, an identity recovered by the paper key on a bare machine, and
+/// a browser signed in by its passkey.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_closed_directory_still_signs_up_admits_recovers_and_signs_in() {
+    let a = Box_::start_closed(true, None).await;
+    let d = dirs([&a]);
+    let laptop = Device::new();
+    let out = laptop.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
+    let paper = recovery_key(&out);
+    assert_eq!(anonymous(&a, "").await, 401);
+    assert_eq!(anonymous(&a, "/tom").await, 401);
+    assert_eq!(anonymous(&a, "/nobody").await, 401);
+
+    // the name is taken: the publish says so, not a read
+    Device::new().dd_fails(
+        &args(&["identity", "new", "--name", "tom"], &d),
+        "already an entry for tom",
+    );
+
+    // the laptop reads its own entry and admits a phone
+    let show = laptop.dd_ok(&args(&["identity", "show"], &d));
+    assert!(
+        show.contains("version 1") && show.contains("(yours)"),
+        "{show}"
+    );
+    let phone = Device::new();
+    let pk = phone.public_key();
+    laptop.dd_ok(&args(&["device", "admit", &pk], &d));
+    let show = laptop.dd_ok(&args(&["identity", "show"], &d));
+    assert!(show.contains("version 2"), "{show}");
+
+    // the paper key, on a machine that is no device of tom's
+    let bare = Device::new();
+    bare.dd_ok(&["device", "show"]);
+    let out = run_with_stdin(
+        &bare,
+        &args(&["identity", "recover", "--name", "tom", "--key-stdin"], &d),
+        &format!("{paper}\n"),
+        true,
+    );
+    let _ = recovery_key(&out);
+    let show = bare.dd_ok(&args(&["identity", "show"], &d));
+    assert!(
+        show.contains("version 3") && show.contains("(this one)"),
+        "{show}"
+    );
+    // the laptop is no device of tom's now, nor its root his: it reads nothing
+    let after = laptop.dd_ok(&args(&["identity", "show"], &d));
+    assert!(after.contains("401"), "{after}");
+
+    // a browser: an account by passkey, then a sign-in by it
+    let mut eve = SoftPasskey::new(true);
+    assert_eq!(join_in_browser(&a, &mut eve, "eve").await.0, 200);
+    let (st, _) = login_in_browser(&a, &mut eve, "eve").await;
+    assert_eq!(st, 200);
+    assert_eq!(anonymous(&a, "/eve").await, 401);
+}
+
 async fn put_raw(b: &Box_, name: &str, body: &serde_json::Value) -> (u16, String) {
     let r = reqwest::Client::new()
         .put(format!("{}/{name}", b.directory()))
@@ -257,8 +330,8 @@ async fn put_raw(b: &Box_, name: &str, body: &serde_json::Value) -> (u16, String
 
 #[tokio::test(flavor = "multi_thread")]
 async fn identity_devices_tokens_and_recovery() {
-    let a = Box_::start(true, vec![], 300).await;
-    let b = Box_::start(false, vec![], 300).await;
+    let a = Box_::start(true).await;
+    let b = Box_::start(false).await;
     let d = dirs([&a, &b]);
     let laptop = Device::new();
     let phone = Device::new();
@@ -377,7 +450,7 @@ fn base64_zero() -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn enrol_links_and_access_tokens_do_not_swap() {
-    let a = Box_::start(true, vec![], 300).await;
+    let a = Box_::start(true).await;
     let d = dirs([&a]);
     let dev = Device::new();
     dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
@@ -417,7 +490,7 @@ async fn enrol_links_and_access_tokens_do_not_swap() {
 async fn membership_gates_the_services_not_the_account() {
     // a was released with nobody on the list. tom makes his account there:
     // that works, and gets him nothing
-    let a = Box_::start_members(true, vec![], 300, Some(vec![])).await;
+    let a = Box_::start_members(true, Some(vec![])).await;
     let d = dirs([&a]);
     let dev = Device::new();
     dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
@@ -438,7 +511,7 @@ async fn membership_gates_the_services_not_the_account() {
         .trim()
         .to_string();
     assert_eq!(id.len(), 64);
-    let b = Box_::start_members(true, vec![], 300, Some(vec![id.clone()])).await;
+    let b = Box_::start_members(true, Some(vec![id.clone()])).await;
     dev.dd_ok(&args(&["identity", "publish"], &dirs([&a, &b])));
     assert_eq!(verify_status(&b, &access).await, 200);
     assert_eq!(verify_status(&a, &access).await, 403);
@@ -451,7 +524,8 @@ async fn membership_gates_the_services_not_the_account() {
     dev.dd_ok(&args(&["member", "add", "tom", "--repo", &repo], &d));
     assert!(file().contains(&id), "{}", file());
     assert!(!file().contains("tom"));
-    let out = dev.dd_ok(&args(&["member", "list", "--repo", &repo], &d));
+    // the names come from a box where tom is a member: the list is members'
+    let out = dev.dd_ok(&args(&["member", "list", "--repo", &repo], &dirs([&b])));
     assert!(out.contains(&id) && out.contains("tom"), "{out}");
     dev.dd_ok(&args(&["member", "remove", "tom", "--repo", &repo], &d));
     let f: serde_json::Value = serde_json::from_str(&file()).unwrap();
@@ -562,7 +636,7 @@ async fn get_with_cookie(b: &Box_, path: &str, cookie: &str) -> (u16, String) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership() {
-    let a = Box_::start_members(true, vec![], 300, Some(vec![])).await;
+    let a = Box_::start_members(true, Some(vec![])).await;
     let mut eve = SoftPasskey::new(true);
     let (status, cookie) = join_in_browser(&a, &mut eve, "eve").await;
     assert_eq!(status, 200);
@@ -614,8 +688,6 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     let b = Box_::start_on(
         a.dir.clone(),
         true,
-        vec![],
-        1,
         Some(verify::Members::list(vec![id.clone()])),
         None,
         vec![],
@@ -739,8 +811,6 @@ async fn an_invite_code_lets_one_person_in_once() {
     // a box released with nobody on the list, holding the release key
     let a = Box_::start_with(
         true,
-        vec![],
-        300,
         Some(verify::Members::list(vec![])),
         Some(release_pub.clone()),
     )
@@ -848,7 +918,20 @@ async fn an_invite_code_lets_one_person_in_once() {
     assert_eq!(entry(&a, "fay").await.unwrap()["entry"]["version"], 2);
     assert!(!fay_held.exists());
 
-    // the owner sees them, and can shut one out again: revoked beats a grant
+    // the owner sees them, as a member: the directory's names are members'.
+    // They let themselves in with a code of their own
+    let out = owner.dd_ok(&args(&["invite", "--ttl", "10m"], &d));
+    let own = out
+        .lines()
+        .find_map(|l| l.strip_prefix("code: "))
+        .unwrap()
+        .trim()
+        .to_string();
+    owner.dd_ok(&args(
+        &["identity", "new", "--name", "owner", "--code", &own],
+        &d,
+    ));
+    // and can shut one out again: revoked beats a grant
     let out = owner.dd_ok(&args(&["member", "list", "--repo", &repo], &d));
     assert!(
         out.contains("eve  invited") && out.contains("fay  invited"),
@@ -856,19 +939,19 @@ async fn an_invite_code_lets_one_person_in_once() {
     );
     owner.dd_ok(&args(&["member", "remove", "eve", "--repo", &repo], &d));
     let eve_id = identity::member_id(e["entry"]["root"].as_str().unwrap());
-    let b = Box_::start_with(
+    let b_dir = scratch("b").join("keys");
+    copy_entries(&a, &b_dir);
+    let b = Box_::start_on(
+        b_dir,
         true,
-        vec![a.directory()],
-        1,
         Some(verify::Members {
-            members: vec![],
             revoked: vec![eve_id],
+            ..Default::default()
         }),
         Some(release_pub.clone()),
+        vec![],
     )
     .await;
-    wait_for(|| async { entry(&b, "fay").await.is_some() && entry(&b, "eve").await.is_some() })
-        .await;
     // a page of another host of the domain is not this box's to ask from
     let (st, _) = login_in_browser_at(&b, &mut fay, "fay", "https://other.localhost").await;
     assert_ne!(st, 200, "a sign-in made on another host was taken");
@@ -921,8 +1004,6 @@ async fn the_demo_is_an_account_with_a_small_permission_set() {
     // no tile lets the demo do anything: there is no demo
     let plain = Box_::start_home(
         true,
-        vec![],
-        300,
         Some(verify::Members::list(vec![])),
         None,
         vec![tile("files", None)],
@@ -932,8 +1013,6 @@ async fn the_demo_is_an_account_with_a_small_permission_set() {
 
     let a = Box_::start_home(
         true,
-        vec![],
-        300,
         Some(verify::Members::list(vec![])),
         None,
         vec![
@@ -1097,7 +1176,7 @@ fn enrol_token(dev: &Device, b: &Box_) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn passkey_made_in_a_browser_is_signed_into_the_entry_and_logs_in() {
-    let a = Box_::start(true, vec![], 300).await;
+    let a = Box_::start(true).await;
     let d = dirs([&a]);
     let dev = Device::new();
     dev.dd_ok(&args(&["identity", "new", "--name", "amy"], &d));
@@ -1241,194 +1320,16 @@ async fn passkey_made_in_a_browser_is_signed_into_the_entry_and_logs_in() {
     assert_eq!(verify_status(&a, "").await, 401);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn boxes_share_the_directory_and_refuse_squats() {
-    // a and b peer with each other, quickly. We need each other's addresses
-    // before starting, so bind first, drop, and start on those ports; another
-    // test can take a port in between, so try again when that happens
-    let (a, b) = loop {
-        let a_dir = scratch("a").join("keys");
-        let b_dir = scratch("b").join("keys");
-        let la = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let lb = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (pa, pb) = (la.local_addr().unwrap(), lb.local_addr().unwrap());
-        drop((la, lb));
-        if let (Ok(a), Ok(b)) = tokio::join!(
-            start_at(
-                pa,
-                a_dir,
-                true,
-                vec![format!("http://{pb}/_dd/directory")],
-                1
-            ),
-            start_at(
-                pb,
-                b_dir,
-                false,
-                vec![format!("http://{pa}/_dd/directory")],
-                1
-            )
-        ) {
-            break (a, b);
+/// another box's entries, as that box holds them: what the agreed log
+/// gives every box (the directory no longer pulls one box from another)
+fn copy_entries(from: &Box_, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for f in std::fs::read_dir(&from.dir).unwrap() {
+        let f = f.unwrap().path();
+        if f.extension().is_some_and(|e| e == "json") {
+            std::fs::copy(&f, to.join(f.file_name().unwrap())).unwrap();
         }
-    };
-    tokio::time::sleep(Duration::from_millis(1500)).await; // first pulls
-
-    let sarah = Device::new();
-    sarah.dd_ok(&[
-        "identity",
-        "new",
-        "--name",
-        "sarah",
-        "--directory",
-        &a.directory(),
-    ]);
-    // b pulls it
-    wait_for(|| async { entry(&b, "sarah").await.is_some() }).await;
-
-    // a stranger tries the name on b: the client sees it is taken
-    let stranger = Device::new();
-    stranger.dd_fails(
-        &[
-            "identity",
-            "new",
-            "--name",
-            "sarah",
-            "--directory",
-            &b.directory(),
-        ],
-        "already has an entry",
-    );
-
-    // a box that never managed to pull its peer takes no new names
-    let lonely = Box_::start(false, vec!["http://127.0.0.1:1/_dd/directory".into()], 1).await;
-    stranger.dd_fails(
-        &[
-            "identity",
-            "new",
-            "--name",
-            "tom",
-            "--directory",
-            &lonely.directory(),
-        ],
-        "did not take the update",
-    );
-
-    // an update via b alone reaches a
-    let phone = Device::new();
-    let pk = phone.public_key();
-    sarah.dd_ok(&["device", "admit", &pk, "--directory", &b.directory()]);
-    wait_for(|| async { entry(&a, "sarah").await.unwrap()["entry"]["version"] == 2 }).await;
-
-    // a recovery published to a reaches b, which checks the old paper key
-    let amy = Device::new();
-    let out = amy.dd_ok(&[
-        "identity",
-        "new",
-        "--name",
-        "amy",
-        "--directory",
-        &a.directory(),
-    ]);
-    let paper = recovery_key(&out);
-    wait_for(|| async { entry(&b, "amy").await.is_some() }).await;
-    let amy2 = Device::new();
-    amy2.dd_ok(&["device", "show"]);
-    run_with_stdin(
-        &amy2,
-        &[
-            "identity",
-            "recover",
-            "--name",
-            "amy",
-            "--key-stdin",
-            "--directory",
-            &a.directory(),
-        ],
-        &format!("{paper}\n"),
-        true,
-    );
-    wait_for(|| async { entry(&b, "amy").await.unwrap()["entry"]["version"] == 2 }).await;
-    assert!(entry(&b, "amy").await.unwrap()["recovery_signature"].is_string());
-
-    // a brand-new box pointed at a fills itself, at whatever version things are
-    let fresh = Box_::start(false, vec![a.directory()], 1).await;
-    wait_for(|| async {
-        entry(&fresh, "amy").await.is_some() && entry(&fresh, "sarah").await.is_some()
-    })
-    .await;
-    assert_eq!(entry(&fresh, "amy").await.unwrap()["entry"]["version"], 2);
-
-    // bob is born on a. Whether the fresh box has pulled him yet is a
-    // race with its one-second pull: if it has, the cli sees the entry and
-    // refuses before asking; if not, the box asks its peer before taking a
-    // new name and answers 409; and if the pull lands between the cli's
-    // look and its write, the box refuses the write as not newer. A
-    // stranger's bob is refused every way.
-    let bob = Device::new();
-    bob.dd_ok(&[
-        "identity",
-        "new",
-        "--name",
-        "bob",
-        "--directory",
-        &a.directory(),
-    ]);
-    let sq = Device::new();
-    sq.dd_fails_with(
-        &[
-            "identity",
-            "new",
-            "--name",
-            "bob",
-            "--directory",
-            &fresh.directory(),
-        ],
-        &["409", "already has an entry for bob", "not newer"],
-    );
-
-    // a forged newer entry pushed straight at the fresh box
-    let mut forged = entry(&fresh, "amy").await.unwrap();
-    forged["entry"]["version"] = serde_json::json!(9);
-    forged["signature"] = serde_json::json!(base64_zero());
-    assert_eq!(put_raw(&fresh, "amy", &forged).await.0, 403);
-}
-
-async fn start_at(
-    addr: std::net::SocketAddr,
-    dir: PathBuf,
-    full: bool,
-    peers: Vec<String>,
-    sync_secs: u64,
-) -> anyhow::Result<Box_> {
-    let (addr, _task) = verify::start(verify::Config {
-        home: vec![],
-        fleet: Default::default(),
-        thanos: None,
-        adblock: None,
-        forge_events: None,
-        storage_ledger: None,
-        demo_library: None,
-        tmdb: None,
-        search: None,
-        oidc: None,
-        app_manifest: None,
-        members: None,
-        release_pub: None,
-        web_dir: None,
-        photos: None,
-        library: None,
-        network: None,
-        bind: addr,
-        dir: dir.clone(),
-        peers,
-        sync_secs,
-        control: None,
-        house_peers: vec![],
-        domain: full.then(|| "localhost".to_string()),
-    })
-    .await?;
-    Ok(Box_ { addr, dir })
+    }
 }
 
 async fn wait_for<F, Fut>(mut cond: F)
@@ -1447,8 +1348,8 @@ where
 
 #[tokio::test(flavor = "multi_thread")]
 async fn publish_brings_a_lagging_box_up() {
-    let a = Box_::start(false, vec![], 300).await;
-    let b = Box_::start(false, vec![], 300).await;
+    let a = Box_::start(false).await;
+    let b = Box_::start(false).await;
     let dev = Device::new();
     dev.dd_ok(&[
         "identity",
@@ -1505,8 +1406,8 @@ async fn download_page_of(release_pub: String, manifest_url: String) -> (u16, St
         network: None,
         bind: "127.0.0.1:0".parse().unwrap(),
         dir: scratch("box").join("keys"),
-        peers: vec![],
-        sync_secs: 300,
+        directory_readers: vec![],
+        names: vec!["127.0.0.1".into()],
         control: None,
         house_peers: vec![],
         domain: Some("localhost".to_string()),
@@ -1574,63 +1475,6 @@ async fn the_download_page_offers_only_what_the_release_key_signed() {
     assert_eq!(st, 404);
 }
 
-/// A new box learns names from its peers. When they disagree about whose a
-/// name is, it takes neither: taking the first one heard would let a lying
-/// peer seed `david` under its own root, and the accept rule would then
-/// refuse the real one for good.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_new_box_takes_no_side_when_its_peers_disagree_about_a_name() {
-    // two directories that never talk: each has its own `david`
-    let honest = Box_::start(false, vec![], 300).await;
-    let liar = Box_::start(false, vec![], 300).await;
-    Device::new().dd_ok(&[
-        "identity",
-        "new",
-        "--name",
-        "david",
-        "--directory",
-        &honest.directory(),
-    ]);
-    Device::new().dd_ok(&[
-        "identity",
-        "new",
-        "--name",
-        "david",
-        "--directory",
-        &liar.directory(),
-    ]);
-    let (h, l) = (
-        entry(&honest, "david").await.unwrap(),
-        entry(&liar, "david").await.unwrap(),
-    );
-    assert_ne!(
-        h["entry"]["root"], l["entry"]["root"],
-        "two different people"
-    );
-
-    // a new box that pulls from both, and a name only one of them has
-    Device::new().dd_ok(&[
-        "identity",
-        "new",
-        "--name",
-        "carol",
-        "--directory",
-        &honest.directory(),
-    ]);
-    let fresh = Box_::start(false, vec![honest.directory(), liar.directory()], 1).await;
-    wait_for(|| async { entry(&fresh, "carol").await.is_some() }).await;
-
-    // carol, whom nobody disputes, arrived; david, whom they dispute, did not
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    assert!(
-        entry(&fresh, "david").await.is_none(),
-        "the new box took a side on a disputed name"
-    );
-}
-
-/// A member's friend link brings someone in as their guest: the gate lets
-/// the guest through to the games page and to no other service, shows them
-/// the Games tile alone, and takes it all back when the friendship ends.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
     let tile = |name: &str| verify::pages::Service {
@@ -1645,7 +1489,7 @@ async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
     };
     let home = vec![tile("files"), tile("photos"), tile("games")];
     // david signs up, and the box is released with him on the member list
-    let a = Box_::start_members(true, vec![], 300, Some(vec![])).await;
+    let a = Box_::start_members(true, Some(vec![])).await;
     let mut david = SoftPasskey::new(true);
     assert_eq!(join_in_browser(&a, &mut david, "david").await.0, 200);
     let held = a.dir.parent().unwrap().join("held").join("david.json");
@@ -1654,8 +1498,6 @@ async fn a_friend_link_makes_a_guest_who_reaches_games_and_nothing_else() {
     let b = Box_::start_on(
         a.dir.clone(),
         true,
-        vec![],
-        1,
         Some(verify::Members::list(vec![id])),
         None,
         home,
@@ -1873,7 +1715,7 @@ async fn fake_museum() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>
 async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
     let (museum, seen) = fake_museum().await;
     // tom's account first, on a box that knows nobody, for his member id
-    let a = Box_::start(true, vec![], 300).await;
+    let a = Box_::start(true).await;
     let d = dirs([&a]);
     let dev = Device::new();
     dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
@@ -1909,9 +1751,12 @@ async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
         app_manifest: None,
         network: None,
         bind: "127.0.0.1:0".parse().unwrap(),
-        dir,
-        peers: vec![a.directory()],
-        sync_secs: 1,
+        dir: {
+            copy_entries(&a, &dir);
+            dir
+        },
+        directory_readers: vec![],
+        names: vec!["127.0.0.1".into()],
         control: None,
         house_peers: vec![],
         domain: Some("localhost".to_string()),
@@ -2019,7 +1864,7 @@ async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
 /// request with no session is forbidden, never let through as anonymous.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_demo_door_lets_in_the_demo_alone() {
-    let a = Box_::start(true, vec![], 300).await;
+    let a = Box_::start(true).await;
     let d = dirs([&a]);
     let dev = Device::new();
     dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
@@ -2040,11 +1885,11 @@ async fn a_demo_door_lets_in_the_demo_alone() {
         demo_url: Some("https://demo-git.x/".into()),
         menu_only: false,
     };
+    let b_dir = scratch("demodoor").join("keys");
+    copy_entries(&a, &b_dir);
     let b = Box_::start_on(
-        scratch("demodoor").join("keys"),
+        b_dir,
         true,
-        vec![a.directory()],
-        1,
         Some(verify::Members::list(vec![id])),
         None,
         vec![tile],
@@ -2149,9 +1994,13 @@ async fn gate_for(
         app_manifest: None,
         network: None,
         bind: "127.0.0.1:0".parse().unwrap(),
-        dir: scratch(scratch_name).join("keys"),
-        peers: vec![a.directory()],
-        sync_secs: 1,
+        dir: {
+            let d = scratch(scratch_name).join("keys");
+            copy_entries(a, &d);
+            d
+        },
+        directory_readers: vec![],
+        names: vec!["127.0.0.1".into()],
         control: None,
         house_peers: vec![],
         domain: Some("localhost".to_string()),
@@ -2183,7 +2032,7 @@ async fn app_signin(http: &reqwest::Client, addr: std::net::SocketAddr, token: &
 /// token are let through.
 #[tokio::test(flavor = "multi_thread")]
 async fn deleting_an_image_wants_the_passkey_just_now() {
-    let a = Box_::start(true, vec![], 300).await;
+    let a = Box_::start(true).await;
     let d = dirs([&a]);
     let dev = Device::new();
     dev.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
@@ -2252,7 +2101,7 @@ async fn deleting_an_image_wants_the_passkey_just_now() {
 /// removing a device ends what it signed in.
 #[tokio::test(flavor = "multi_thread")]
 async fn sessions_are_listed_and_end_when_their_device_goes() {
-    let a = Box_::start(true, vec![], 300).await;
+    let a = Box_::start(true).await;
     let d = dirs([&a]);
     let laptop = Device::new();
     let phone = Device::new();
@@ -2328,7 +2177,13 @@ async fn sessions_are_listed_and_end_when_their_device_goes() {
         .unwrap()
         .trim()
         .to_string();
-    laptop.dd_ok(&args(&["device", "remove", &fp[..8]], &d));
+    // to both boxes: each holds the directory (the agreed log, in a fleet)
+    let both = [
+        d.clone(),
+        vec!["--directory".into(), format!("http://{addr}/_dd/directory")],
+    ]
+    .concat();
+    laptop.dd_ok(&args(&["device", "remove", &fp[..8]], &both));
     let mut gone = false;
     for _ in 0..50 {
         if list(phones.clone()).await.status().as_u16() == 401 {
@@ -2376,7 +2231,7 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
     unsafe { std::env::set_var("VERIFY_HOUSE", &house) };
     // the one page a change may be signed on
     unsafe { std::env::set_var("VERIFY_HOUSE_ORIGINS", "https://files.commonty.test") };
-    let a = Box_::start(true, vec![], 300).await;
+    let a = Box_::start(true).await;
     let (addr, _task) = gate_for(&a, id.clone(), "house-gate").await;
     // and a box that runs only the directory, as node2 does
     unsafe { std::env::set_var("VERIFY_HOUSE", &house2) };
@@ -2400,8 +2255,8 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
         network: None,
         bind: "127.0.0.1:0".parse().unwrap(),
         dir: scratch("house-dir").join("keys"),
-        peers: vec![],
-        sync_secs: 1,
+        directory_readers: vec![],
+        names: vec!["127.0.0.1".into()],
         control: None,
         house_peers: vec![],
         domain: None,
@@ -2544,7 +2399,7 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
 /// sees nothing of it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_device_is_offered_by_code_and_seen_by_its_owner_alone() {
-    let a = Box_::start(true, vec![], 300).await;
+    let a = Box_::start(true).await;
     let d = dirs([&a]);
     let laptop = Device::new();
     laptop.dd_ok(&args(&["identity", "new", "--name", "tom"], &d));
@@ -2689,7 +2544,7 @@ async fn a_device_is_offered_by_code_and_seen_by_its_owner_alone() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_page_opened_again_is_told_nothing_changed() {
-    let a = Box_::start(true, vec![], 300).await;
+    let a = Box_::start(true).await;
     let http = reqwest::Client::new();
     let first = http
         .get(a.url("/_dd/static/shell.js"))

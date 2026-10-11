@@ -12,11 +12,18 @@ servers/   what runs on a box: programs, pages, patches
 client/    what runs on people's devices: the dd cli, its libraries, the browser wasm
 app/       the app: the same client crates behind a window, and copies of the pages
 nix/       how a box is made of those: modules, roles, tests
+scripts/   what a person runs around a box: reports, reinstall, restore, the laptop
+secrets/   each box's secrets, sops-encrypted
 fleet/     what the fleet is: the boxes, their roles, the members, and the
            owner's policy (policy.json: owner, domain, repo, allowanceGb,
            people.<name>.{ssh,paperKey}, ownHardware, forgeMirrors)
 data/      data the services are built with (data/games/catalogue.json)
 ```
+
+`client/`, `fleet/`, `data/`, `nix/`, `scripts/` and `secrets/` have pages
+of their own: [the client](client.md), [the fleet](fleet.md),
+[data](data.md), [Nix](nix.md), [scripts](scripts.md) and
+[secrets](secrets.md).
 
 The Rust is one cargo workspace ([`Cargo.toml`](../../Cargo.toml)); its
 members are the crates in `servers/`, `client/` and `app/`. The one Go
@@ -361,7 +368,8 @@ program wants an environment file. Each box's secrets are in
 `secrets/<box>.yaml`, encrypted to that box's TPM key and to the editor's;
 no box can read another's. They are edited with
 `dd secret run -- set secrets/node1.yaml '["name"]' '"value"'`. A box with
-no role that declares a secret has no sops at all.
+no role that declares a secret has no sops at all. [Secrets](secrets.md)
+has the whole of it.
 
 ### Talking to the gate
 
@@ -397,6 +405,45 @@ into the gate's config; unset, that part of the gate is off.
   storage-view's list of who may count what (`KINDS` in
   [`storage_ledger.rs`](../../client/cli/src/storage_ledger.rs))
   ([libraries.md](libraries.md#storage)).
+- How long it keeps what someone deleted, at most 90 days (below).
+
+### Retention
+
+Nothing deleted lasts longer than 90 days in any one place. Each place
+keeps its own window, and none is longer:
+
+```
+ZFS snapshots      15-minute x4, hourly x24, daily x7: a week. Weekly and
+                   monthly are masked on every box, and dd-snapshot-trim
+                   (every 6 h) destroys any automatic snapshot over 8 days
+                   (storage/snapshots.nix)
+restic             --keep-daily 7 --keep-weekly 4 --keep-monthly 2, pruned
+                   after every nightly backup: about 62 days (storage/backup.nix)
+garage metadata    its snapshots 7 days (storage/backup.nix)
+postgres dumps     hourly, one .prev; older ones only in the two above
+library trash      90 days (servers/library/src/dav.rs TRASH_SECS)
+Passwords          TRASH_AUTO_DELETE_DAYS=90, EVENTS_DAYS_RETAIN=90
+Photos             museum's trash: 30 days, then the file's objects 45 days
+                   later (constants in museum, no setting): 75 days
+nginx access log   3 weekly files (gate/acme.nix)
+journald           MaxRetentionSec=14day (roles/core.nix)
+```
+
+The windows are each place's own, and they follow one another: a file
+deleted from a library sits 90 days in its trash, then its blocks live up
+to a week in the garage snapshots. Something in a database (a vault
+item in the trash) can, after its 90 days, still be in a nightly backup
+for 62 days and in the snapshots of those backups for a week. Leaving has
+its own sum ([leaving.md](leaving.md#the-guarantee)).
+
+[`nix/tests/retention.nix`](../../nix/tests/retention.nix)
+(`checks.retention`, in CI's flake check job) fails when any box's config
+keeps something longer: snapshot counts times their period for every
+level whose timer runs and the trim's age, each restic backup's keeps (a
+backup that is never pruned, or keeps a way it cannot read, fails too),
+Vaultwarden's two settings (unset is forever), journald, the nginx log,
+and museum's two constants read from the source each box runs. A new
+service that keeps deleted things for a time adds its setting there.
 
 ## How it is built
 

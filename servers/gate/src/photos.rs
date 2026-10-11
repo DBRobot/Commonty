@@ -305,7 +305,7 @@ pub(crate) async fn app_signin(
         return StatusCode::FORBIDDEN.into_response();
     }
     let (user, device) =
-        match app.verify_biscuit_device(&f.token, "access", &crate::asked_host(&headers)) {
+        match app.verify_biscuit_device(&f.token, "access", &app.directory.here(&headers)) {
             Ok(u) => u,
             Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
         };

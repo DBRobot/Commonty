@@ -310,7 +310,6 @@ pub(crate) fn images_prefix(user: &str) -> String {
 pub(crate) mod notes {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
     use axum::body::Bytes;
     use axum::extract::{Path as UrlPath, State};
@@ -393,21 +392,13 @@ pub(crate) mod notes {
             return StatusCode::BAD_REQUEST;
         };
         // two tabs saving at once each write their own; the last rename wins whole
-        static N: AtomicU64 = AtomicU64::new(0);
-        let tmp = p.with_extension(format!(
-            "{}.{}.tmp",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
         let ok = p
             .parent()
             .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
-            && std::fs::write(&tmp, body).is_ok()
-            && std::fs::rename(&tmp, &p).is_ok();
+            && crate::private::write(&p, body).is_ok();
         if ok {
             StatusCode::NO_CONTENT
         } else {
-            let _ = std::fs::remove_file(&tmp);
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }

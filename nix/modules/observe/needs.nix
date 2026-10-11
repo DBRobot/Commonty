@@ -16,7 +16,7 @@
         inbound = "localhost";
       };
       depends.prometheus-node-exporter.local = true;
-      privacy = "metadata"; # how the box is doing, never what is on it
+      privacy = "metadata"; # how the box is doing; no member's figures (storage/usage.nix)
     };
   };
 

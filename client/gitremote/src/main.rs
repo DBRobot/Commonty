@@ -33,7 +33,12 @@ use auth::KeyStore;
 use serde::{Deserialize, Serialize};
 
 const SERVICE: &str = "commonty";
-const DEFAULT_DIRECTORIES: [&str; 1] = ["https://home.commonty.org/_dd/directory"];
+const DEFAULT_DIRECTORIES: [&str; 1] = [identity::fleet::DIRECTORY];
+
+/// DD_KEYRING names a different credential-store service, as for dd
+fn service() -> String {
+    std::env::var("DD_KEYRING").unwrap_or_else(|_| SERVICE.to_string())
+}
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct Keys {
@@ -112,6 +117,8 @@ struct Remote {
     device: crypto::Device,
     user: String,
     directories: Vec<String>,
+    /// this device's key, for a token per directory: read by members only
+    kp: biscuit_auth::KeyPair,
 }
 
 /// A git command against one git directory. git launched us with GIT_DIR
@@ -183,7 +190,7 @@ impl Remote {
         let id = &crypto::sha256_hex(url.as_bytes())[..16];
         let base = git_dir.join("dd").join(id);
         std::fs::create_dir_all(&base)?;
-        let keys = auth::open(SERVICE);
+        let keys = auth::open(&service());
         let kp = auth::device::load(&keys)?.context("no device key here - `dd device show`")?;
         let user = keys
             .get("user")?
@@ -201,6 +208,7 @@ impl Remote {
             local_path: base.join("local.json"),
             git_dir,
             device: crypto::Device::from_biscuit(&kp)?,
+            kp,
             user,
             directories,
         })
@@ -282,10 +290,20 @@ impl Remote {
             .build()?;
         let mut best: Option<identity::SignedEntry> = None;
         for d in &self.directories {
-            let Ok(r) = http
-                .get(format!("{}/{}", d.trim_end_matches('/'), self.owner))
-                .send()
-            else {
+            let url = format!("{}/{}", d.trim_end_matches('/'), self.owner);
+            // for directory reads at this host alone
+            let host = reqwest::Url::parse(&url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_lowercase))
+                .unwrap_or_default();
+            let token = auth::device::mint_at(
+                &self.kp,
+                &self.user,
+                std::time::Duration::from_secs(300),
+                Some(identity::DIRECTORY_READ),
+                Some(&host),
+            )?;
+            let Ok(r) = http.get(&url).bearer_auth(token).send() else {
                 continue;
             };
             if !r.status().is_success() {
@@ -890,4 +908,16 @@ fn readers(args: &[String]) -> Result<()> {
         println!("  {}", r.fingerprint);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn dd_keyring_names_the_store_as_for_dd() {
+        // the only test here that touches the environment
+        unsafe { std::env::set_var("DD_KEYRING", "second") };
+        assert_eq!(super::service(), "second");
+        unsafe { std::env::remove_var("DD_KEYRING") };
+        assert_eq!(super::service(), "commonty");
+    }
 }

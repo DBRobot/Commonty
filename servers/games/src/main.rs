@@ -68,6 +68,42 @@ impl App {
     }
 }
 
+/// the gate's list of who left; a gate not up yet is next time
+async fn forget_leavers(a: &App) -> Result<()> {
+    let list: serde_json::Value = a
+        .http
+        .get(format!("{}/internal/leaving", a.gate))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    for l in list["members"].as_array().into_iter().flatten() {
+        let (Some(name), Some(id)) = (l["name"].as_str(), l["id"].as_str()) else {
+            continue;
+        };
+        let due = l["due"].as_bool().unwrap_or(false);
+        let done = l["done"]
+            .as_array()
+            .is_some_and(|d| d.iter().any(|s| s == "games"));
+        let m = a.m.clone();
+        let owner = name.to_string();
+        let n = tokio::task::spawn_blocking(move || m.forget(&owner, due)).await??;
+        if n > 0 {
+            eprintln!("games: member {id}: {n} server(s) or world(s) stopped or deleted");
+        }
+        if due && !done {
+            a.http
+                .post(format!("{}/internal/leaving/done", a.gate))
+                .json(&serde_json::json!({ "name": name, "service": "games" }))
+                .send()
+                .await?
+                .error_for_status()?;
+        }
+    }
+    Ok(())
+}
+
 async fn index(State(a): State<Arc<App>>, h: HeaderMap, Query(q): Query<IndexQuery>) -> Response {
     match user(&h) {
         // a guest hosts nothing and has no library: their servers are it
@@ -367,6 +403,17 @@ async fn main() -> Result<()> {
             .timeout(std::time::Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())
             .build()?,
+    });
+    // someone who left: their servers stop, and after 90 days go, with their
+    // worlds (docs/dev/leaving.md); the gate on this box says who
+    let leaving = app.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Err(e) = forget_leavers(&leaving).await {
+                eprintln!("games: leaving: {e:#}");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
     });
     let router = Router::new()
         .route("/", get(index))

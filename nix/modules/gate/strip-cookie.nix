@@ -17,9 +17,16 @@ let
         default = "$dd_cookie_stripped";
         description = "The Cookie this location sends on: $dd_cookie_stripped or a variable made from it, never $http_cookie; empty sends none.";
       };
-      config.extraConfig = lib.mkIf (
-        config.proxyPass != null && !lib.hasInfix gatePort config.proxyPass
-      ) (lib.mkAfter ''proxy_set_header Cookie "${config.ddCookie}";'');
+      config.extraConfig = lib.mkMerge [
+        (lib.mkIf (config.proxyPass != null && !lib.hasInfix gatePort config.proxyPass) (
+          lib.mkAfter ''proxy_set_header Cookie "${config.ddCookie}";''
+        ))
+        # and to the gate, the name this server block was asked under, never
+        # one the client sent (the gate also checks it against its own names)
+        (lib.mkIf (config.proxyPass != null && lib.hasInfix gatePort config.proxyPass) (
+          lib.mkAfter "proxy_set_header X-Original-Host $host;"
+        ))
+      ];
     };
 in
 {

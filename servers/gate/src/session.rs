@@ -25,11 +25,16 @@ pub struct Sessions {
 impl Sessions {
     pub fn open(dir: &Path, domain: &str) -> Result<Self> {
         let p = dir.join("session.secret");
+        // one anyone else could read may have been: a new one, and every
+        // session signs in again
+        if crate::private::loose(&p) {
+            eprintln!("{} was readable by others: making a new one", p.display());
+        }
         let secret = match std::fs::read(&p) {
-            Ok(b) if b.len() == 32 => b,
+            Ok(b) if b.len() == 32 && !crate::private::loose(&p) => b,
             _ => {
                 let b = random(32)?;
-                std::fs::write(&p, &b).context("writing the session secret")?;
+                crate::private::write(&p, &b).context("writing the session secret")?;
                 b
             }
         };
@@ -158,5 +163,26 @@ mod tests {
         // and the id cannot be changed to pass as another session's
         let forged = a.replacen("demo~", "demo~x", 1);
         assert_eq!(s.session(Some(&forged)).map(|x| x.0), None);
+    }
+
+    #[test]
+    fn the_secret_is_the_gates_alone() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let d = std::env::temp_dir().join(format!("dd-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("session.secret");
+        let mode = || std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        let first = Sessions::open(&d, "x").unwrap();
+        assert_eq!(mode(), 0o600);
+        // kept across a restart
+        let again = Sessions::open(&d, "x").unwrap();
+        assert_eq!(first.secret, again.secret);
+        // one others could read is replaced, and its sessions end
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let after = Sessions::open(&d, "x").unwrap();
+        assert_ne!(first.secret, after.secret);
+        assert_eq!(mode(), 0o600);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

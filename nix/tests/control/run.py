@@ -207,7 +207,8 @@ gates = {i: gate(i) for i in (1, 2, 3)}
 until(
     "the gates up",
     lambda: all(
-        http("GET", f"http://127.0.0.1:428{i}/_dd/directory", timeout=3)[0] == 200
+        # the list is members' (401 to this script): up is answering at all
+        http("GET", f"http://127.0.0.1:428{i}/_dd/directory", timeout=3)[0] == 401
         for i in (1, 2, 3)
     ),
 )

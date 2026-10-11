@@ -13,19 +13,26 @@ These pages are in three parts:
 ## Develop
 
 - [How the servers are organised](dev/servers.md)
+- [The fleet: boxes, roles and policy](dev/fleet.md)
 - [The gate](dev/gate.md)
 - [Releases of the fleet](dev/releases.md)
 - [The forge](dev/forge.md)
 - [Game servers](dev/games.md)
+- [Data the services are built with](dev/data.md)
 - [Encrypted libraries](dev/libraries.md)
+- [Leaving, and announcing a change](dev/leaving.md)
 - [Programs we package](dev/packaged.md)
 - [Pull requests, CI and releases](dev/ci.md)
 - [UI guidelines](dev/ui.md)
+- [The client: dd and the device crates](dev/client.md)
 - [The app](dev/app.md)
 - [Releasing the app](dev/app-release.md)
 - [The control plane](dev/control-plane.md)
 - [What each service needs from a box](dev/hardware.md)
 - [The mirror](dev/mirror.md)
+- [Nix: modules, roles and tests](dev/nix.md)
+- [Scripts](dev/scripts.md)
+- [Secrets](dev/secrets.md)
 
 ## Guide
 
@@ -33,4 +40,5 @@ Coming as each part of Commonty gets its page.
 
 ## Policies
 
-Coming.
+- [Terms of use](policies/terms.md)
+- [Changes to the policies](policies/changes.md): each announced to every member 30 days ahead

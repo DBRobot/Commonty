@@ -1,7 +1,7 @@
 # Secure Boot. Each box signs what it boots with keys of its own
 # (/var/lib/sbctl, made on first switch), so its firmware runs nothing else
 # once the keys are enrolled - a step at the box's own screen, once
-# (docs/secure-boot.md). The TPM unseals the disk key's half only under
+# (docs/dev/hardware.md, Booting on a stock PC). The TPM unseals the disk key's half only under
 # that signed boot (PCR 7, nix/modules/box/disk-unlock.nix), and a release
 # signed by the same keys leaves PCR 7 as it was.
 { lib, pkgs, ... }:
