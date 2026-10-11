@@ -71,6 +71,7 @@
         "leaving"
         "home-controller"
         "waits"
+        "wired-watch"
       ];
       rust =
         let
