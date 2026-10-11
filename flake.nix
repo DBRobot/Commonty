@@ -345,6 +345,31 @@
                 host = pkgs.lib.findFirst holds null testHosts;
               in
               if host == null then graphOf n true testOverrides else hostGraphs.${host};
+          # Lint with the tests: clippy stands in for rustc where a crate of
+          # ours is compiled for its own checks (never for a box, and never a
+          # dependency, which stays the shared build). Its test build is
+          # linted as it is compiled, and its plain build once more for what
+          # only exists outside tests - cargo clippy --all-targets, a crate
+          # at a time, cached like the tests
+          clippyRustc = pkgs.writeShellScriptBin "rustc" ''exec ${pkgs.clippy}/bin/clippy-driver "$@"'';
+          linted =
+            o:
+            let
+              u = unoptimised o;
+            in
+            u
+            // {
+              rust = clippyRustc;
+              capLints = "forbid";
+              extraRustcOpts = u.extraRustcOpts ++ [
+                "-D"
+                "warnings"
+              ];
+            };
+          crateLint = n: [
+            ((testGraph n).${n}.override (o: linted o // { buildTests = true; }))
+            ((testGraph n).${n}.override linted)
+          ];
           # The gate's tests (and dd's, which run a gate) read the pages from
           # the tree; the library's are checked against rclone itself; dd's
           # run git and ssh
@@ -355,7 +380,7 @@
             in
             (cargoNix.internal.crateWithTest {
               crate = g.${n};
-              testCrate = g.${n}.override unoptimised;
+              testCrate = g.${n}.override linted;
               testCrateFlags = [ ];
               testInputs = [
                 pkgs.gitMinimal
@@ -525,11 +550,6 @@
             buildInputs = appLibs;
             COMMONTY_NET_LIB_DIR = "${appNet}/lib";
           };
-          # The workspace but the app, for clippy: the
-          # app's dependency tree (tauri, webkit) is most of the compile,
-          # and nothing else in the workspace uses it. The app is checked
-          # on its own (checks.clippy-app), only when it changed.
-          workspaceArgs = "--locked --workspace --exclude commonty";
           # and one dependency build per binary, with that binary's own
           # `-p`: cargo unifies features per package set, so a cache built
           # for the whole workspace does not match `-p dd` and every run
@@ -981,32 +1001,15 @@
             pname = "dd";
             version = "0.1.0";
           };
-          clippy = craneLib.cargoClippy (
-            common
-            // {
-              # Its own dependencies, checked and never built: clippy needs
-              # only their metadata. Sharing the tests' cache made lint wait
-              # on - or, cold, repeat - a full release and test build of
-              # every dependency, three compiles where one check will do.
-              cargoArtifacts = craneLib.buildDepsOnly (
-                common
-                // {
-                  pname = "dd-clippy-deps";
-                  dummySrc = depsSrc;
-                  version = "0.1.0";
-                  cargoExtraArgs = workspaceArgs;
-                  cargoBuildCommand = "true";
-                  doCheck = false;
-                }
-              );
-              pname = "dd";
-              version = "0.1.0";
-              cargoExtraArgs = workspaceArgs;
-              cargoClippyExtraArgs = "--all-targets -- -D warnings";
-              # the answer is that it passed: no target dir kept, so nothing
-              # big goes up to the cache after it (tests below)
-              doInstallCargoArtifacts = false;
-            }
+          # every crate's lint, each its own build (crateLint above)
+          clippy = pkgs.linkFarm "clippy" (
+            pkgs.lib.concatMap (
+              n:
+              pkgs.lib.imap0 (i: path: {
+                name = "${n}${pkgs.lib.optionalString (i == 0) "-tests"}";
+                inherit path;
+              }) (crateLint n)
+            ) testedCrates
           );
           clippy-app = craneLib.cargoClippy (
             appCommon
@@ -1021,7 +1024,7 @@
             }
           );
           # the app's own tests, on the app's cached dependency build: the
-          # workspace's tests leave the app out (workspaceArgs)
+          # workspace's tests leave the app out (testedCrates)
           tests-app = craneLib.cargoTest (
             appCommon
             // {
@@ -1234,6 +1237,9 @@
           role-fit = import ./nix/tests/role-fit.nix args;
           # nothing deleted lasts past 90 days, where config says how long
           retention = import ./nix/tests/retention.nix args;
+          # every unit our modules define is in some service's needs, and no
+          # timer of ours counts from boot
+          needs-units = import ./nix/tests/needs-units.nix args;
           nginx = import ./nix/tests/nginx.nix args;
           # no member's figures in the fleet's metrics: usage is heartbeat
           # lines, never a Prometheus sample (storage/usage.nix)
