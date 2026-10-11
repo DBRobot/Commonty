@@ -208,6 +208,11 @@ in
             SMTP_FROM = "distributed.datacenter@gmail.com";
             SMTP_FROM_NAME = "Commonty Passwords";
 
+            # nothing deleted lasts past 90 days (nix/tests/retention.nix);
+            # upstream keeps both forever
+            TRASH_AUTO_DELETE_DAYS = 90;
+            EVENTS_DAYS_RETAIN = 90;
+
             LOG_LEVEL = "warn";
             EXTENDED_LOGGING = true;
           };

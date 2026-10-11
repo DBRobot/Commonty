@@ -397,6 +397,45 @@ into the gate's config; unset, that part of the gate is off.
   storage-view's list of who may count what (`KINDS` in
   [`storage_ledger.rs`](../../client/cli/src/storage_ledger.rs))
   ([libraries.md](libraries.md#storage)).
+- How long it keeps what someone deleted, at most 90 days (below).
+
+### Retention
+
+Nothing deleted lasts longer than 90 days in any one place. Each place
+keeps its own window, and none is longer:
+
+```
+ZFS snapshots      15-minute x4, hourly x24, daily x7: a week. Weekly and
+                   monthly are masked on every box, and dd-snapshot-trim
+                   (every 6 h) destroys any automatic snapshot over 8 days
+                   (storage/snapshots.nix)
+restic             --keep-daily 7 --keep-weekly 4 --keep-monthly 2, pruned
+                   after every nightly backup: about 62 days (storage/backup.nix)
+garage metadata    its snapshots 7 days (storage/backup.nix)
+postgres dumps     hourly, one .prev; older ones only in the two above
+library trash      90 days (servers/library/src/dav.rs TRASH_SECS)
+Passwords          TRASH_AUTO_DELETE_DAYS=90, EVENTS_DAYS_RETAIN=90
+Photos             museum's trash: 30 days, then the file's objects 45 days
+                   later (constants in museum, no setting): 75 days
+nginx access log   3 weekly files (gate/acme.nix)
+journald           MaxRetentionSec=14day (roles/core.nix)
+```
+
+The windows are each place's own, and they follow one another: a file
+deleted from a library sits 90 days in its trash, then its blocks live up
+to a week in the garage snapshots. Something in a database (a vault
+item in the trash) can, after its 90 days, still be in a nightly backup
+for 62 days and in the snapshots of those backups for a week. Leaving has
+its own sum ([leaving.md](leaving.md#the-guarantee)).
+
+[`nix/tests/retention.nix`](../../nix/tests/retention.nix)
+(`checks.retention`, in CI's flake check job) fails when any box's config
+keeps something longer: snapshot counts times their period for every
+level whose timer runs and the trim's age, each restic backup's keeps (a
+backup that is never pruned, or keeps a way it cannot read, fails too),
+Vaultwarden's two settings (unset is forever), journald, the nginx log,
+and museum's two constants read from the source each box runs. A new
+service that keeps deleted things for a time adds its setting there.
 
 ## How it is built
 

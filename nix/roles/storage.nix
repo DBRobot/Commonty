@@ -8,6 +8,7 @@
   imports = [
     ./_sops.nix
     ../modules/storage/garage.nix
+    ../modules/storage/snapshots.nix
   ];
   services.zfs.autoSnapshot.enable = true;
   services.zfs.autoScrub.enable = true;

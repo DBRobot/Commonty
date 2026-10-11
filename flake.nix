@@ -1227,6 +1227,8 @@
           boxes = import ./nix/tests/boxes.nix args;
           box-reports = import ./nix/tests/box-reports.nix args;
           role-fit = import ./nix/tests/role-fit.nix args;
+          # nothing deleted lasts past 90 days, where config says how long
+          retention = import ./nix/tests/retention.nix args;
           nginx = import ./nix/tests/nginx.nix args;
           # no member's figures in the fleet's metrics: usage is heartbeat
           # lines, never a Prometheus sample (storage/usage.nix)
