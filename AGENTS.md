@@ -22,6 +22,10 @@ rebuilt from it, so a change here reaches real machines.
   `nix/app-release/`, `dd release app`, or anything they pin. A change to
   how any download is built is checked on two boxes, not one (it says
   how). The GitHub mirror is [`docs/dev/mirror.md`](docs/dev/mirror.md).
+- **Other sessions working here too: the `sessions` skill**
+  ([`.claude/skills/sessions/SKILL.md`](.claude/skills/sessions/SKILL.md)).
+  Look at the board and claim your paths before you start; queue for the
+  release lock; hand off by short messages; no secret ever crosses.
 - **A unit on a box that runs on a timer** must never fail a switch:
   [`docs/dev/ci.md`](docs/dev/ci.md#when-a-release-does-not-land).
 
