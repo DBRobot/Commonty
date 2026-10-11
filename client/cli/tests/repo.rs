@@ -280,6 +280,20 @@ async fn encrypted_remote_end_to_end() {
     let readers = phone.ok(&cwd, env!("CARGO_BIN_EXE_dd"), &["repo", "readers", &url]);
     assert!(readers.contains("state 4"), "{readers}");
 
+    // unshared, the phone pushes no more
+    laptop.ok(
+        &cwd,
+        env!("CARGO_BIN_EXE_dd"),
+        &["repo", "unshare", &url, &phone_pub],
+    );
+    let readers = laptop.ok(&cwd, env!("CARGO_BIN_EXE_dd"), &["repo", "readers", &url]);
+    assert!(readers.contains("state 5"), "{readers}");
+    phone.git(&pc, &["commit", "-q", "--allow-empty", "-m", "four"]);
+    let (ok, out) = phone.run(&pc, "git", &["push", "origin", "main"]);
+    assert!(!ok, "{out}");
+    // the laptop's checkout sees state 5, so state 4 is the old one below
+    laptop.git(&work, &["fetch", "-q", "origin"]);
+
     // a stranger holding the name but no key cannot share themselves in
     let stranger = device(&directory);
     let st_pub = stranger

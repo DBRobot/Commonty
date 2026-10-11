@@ -1223,8 +1223,23 @@
               -f ${./nix/modules/storage/usage-facts.awk} rows > got
             printf 'usage/code/tom 2048\nusage/code/sarah 7\n' | cmp - got
             if ${pkgs.gnugrep}/bin/grep -rn 'dd_usage' ${./nix/modules}; then exit 1; fi
+            # node-exporter serves /var/lib/dd-facts/*.prom: nothing writes usage there but to remove it
+            if ${pkgs.gnugrep}/bin/grep -rn 'usage-[^ ]*\.prom' ${./nix/modules} | ${pkgs.gnugrep}/bin/grep -v 'rm -f'; then exit 1; fi
             touch $out
           '';
+          # the clients' default names are the fleet's (client/identity/src/fleet.rs)
+          fleet-defaults =
+            let
+              policy = nixpkgs.lib.importJSON ./fleet/policy.json;
+              boxes = nixpkgs.lib.importJSON ./fleet/boxes.json;
+              src = ./client/identity/src/fleet.rs;
+            in
+            pkgs.runCommand "fleet-defaults" { } ''
+              grep -qF '"${policy.domain}"' ${src}
+              grep -qF '"${policy.repo}"' ${src}
+              grep -qF '"${boxes.node1.net}"' ${src}
+              touch $out
+            '';
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
           # the control plane: relay, witness and three validators, offline

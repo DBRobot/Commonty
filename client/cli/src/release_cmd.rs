@@ -20,11 +20,9 @@ use crate::build_order;
 
 /// keyring account holding the release key, base64
 const ACCOUNT: &str = "release-key";
-pub const DEFAULT_URL: &str =
-    "https://git.commonty.org/david/commonty/raw/branch/releases/current.json";
-/// the nix-cache bucket, through node1's garage over the fleet's network
-/// (the owner's devices reach 3900 on the owner's boxes)
-const DEFAULT_CACHE: &str = "s3://nix-cache?endpoint=100.64.0.2:3900&scheme=http&region=us-east-1";
+pub const DEFAULT_URL: &str = identity::fleet::RELEASES;
+/// over the fleet's network: the owner's devices reach 3900 on the owner's boxes
+const DEFAULT_CACHE: &str = identity::fleet::CACHE;
 
 #[derive(Subcommand)]
 pub enum ReleaseCmd {

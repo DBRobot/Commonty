@@ -1,0 +1,40 @@
+//! The fleet's names as every client defaults to them, in one place.
+//! checks.fleet-defaults holds them to fleet/policy.json and fleet/boxes.json.
+
+macro_rules! domain {
+    () => {
+        "commonty.org"
+    };
+}
+macro_rules! repo {
+    () => {
+        "david/commonty"
+    };
+}
+macro_rules! cache_box {
+    () => {
+        "100.64.0.2"
+    };
+}
+
+pub const DOMAIN: &str = domain!();
+/// the front door's directory: the one name that answers from anywhere
+pub const DIRECTORY: &str = concat!("https://home.", domain!(), "/_dd/directory");
+pub const ENTE: &str = concat!("https://api.", domain!());
+pub const IMAGES: &str = concat!("https://files.", domain!(), "/images/");
+/// any browser-facing host does; the session cookie covers the whole domain
+pub const ENROL: &str = concat!("https://home.", domain!(), "/_dd/enrol");
+/// where boxes read the release from
+pub const RELEASES: &str = concat!(
+    "https://git.",
+    domain!(),
+    "/",
+    repo!(),
+    "/raw/branch/releases/current.json"
+);
+/// the nix-cache bucket, through the first storage box's garage (node1)
+pub const CACHE: &str = concat!(
+    "s3://nix-cache?endpoint=",
+    cache_box!(),
+    ":3900&scheme=http&region=us-east-1"
+);

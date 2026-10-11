@@ -28,10 +28,10 @@ fn service() -> String {
 /// The archive password. Separate again: it decrypts old computers, not
 /// photos, and `dd lock` should be able to forget one without the other.
 const ARCHIVE: &str = "archive";
-const DEFAULT_ENTE: &str = "https://api.commonty.org";
-const DEFAULT_IMAGES: &str = "https://files.commonty.org/images/";
+const DEFAULT_ENTE: &str = identity::fleet::ENTE;
+const DEFAULT_IMAGES: &str = identity::fleet::IMAGES;
 /// Any browser-facing host does; the session cookie covers the whole domain.
-const DEFAULT_ENROL: &str = "https://home.commonty.org/_dd/enrol";
+const DEFAULT_ENROL: &str = identity::fleet::ENROL;
 /// Where a person's signed entry lives. Any box can hold one; a client that
 /// names several sees whether they agree. node2 has no public name yet, so
 /// its copy is reachable on the fleet's network only.
@@ -428,6 +428,15 @@ enum RepoCmd {
         /// their device public key, from `dd device show` there
         public_key: String,
     },
+    /// Take a device off the signers: it can no longer push or share. It
+    /// still reads what is already published; making the repository again
+    /// is what changes the key.
+    Unshare {
+        /// the remote, with or without the dd:: prefix
+        url: String,
+        /// their device public key, from `dd device show` there
+        public_key: String,
+    },
     /// Who holds the key, and where the remote stands.
     Readers { url: String },
 }
@@ -450,7 +459,7 @@ enum MailCmd {
     /// Once: make the Worker's store, upload it, give it its two secrets
     /// and the name mail.<domain>; writes fleet/mail.json
     Setup {
-        #[arg(long, default_value = "commonty.org")]
+        #[arg(long, default_value = identity::fleet::DOMAIN)]
         domain: String,
         /// the branch whose Worker goes up first
         #[arg(long, default_value = "main")]
@@ -470,7 +479,7 @@ enum ControlCmd {
     /// here whose key goes only to Cloudflare - the first upload, and the
     /// name control.<domain>
     Setup {
-        #[arg(long, default_value = "commonty.org")]
+        #[arg(long, default_value = identity::fleet::DOMAIN)]
         domain: String,
         /// a voting box as name=key, in order; one per house
         #[arg(long = "validator")]
@@ -580,6 +589,56 @@ fn seal_for_passkeys(keys: &impl auth::KeyStore, repo: &str, password: &str) -> 
             .error_for_status()?;
         Ok(sealed.len())
     })
+}
+
+/// Where `dd box list` sends a device token: the compiled-in domain only. A
+/// repo whose policy names another is refused, not followed: a file must
+/// never decide where a credential goes.
+fn metrics_url(policy_domain: Option<&str>) -> Result<String> {
+    if let Some(d) = policy_domain {
+        anyhow::ensure!(
+            d == identity::fleet::DOMAIN,
+            "fleet/policy.json names {d:?}, but this dd is for {}: no token goes there",
+            identity::fleet::DOMAIN
+        );
+    }
+    Ok(format!(
+        "https://metrics.{}/api/v1/query",
+        identity::fleet::DOMAIN
+    ))
+}
+
+/// One metric's samples for one box, from the fleet's Metrics API (the
+/// gate lets a member's device token through; observe/metrics-ui.nix)
+async fn box_samples(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+    metric: &str,
+    name: &str,
+) -> Option<Vec<serde_json::Value>> {
+    // a box name from the repo's list, never a query of its own
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    let query = format!("{metric}{{box=\"{name}\"}}");
+    let v: serde_json::Value = http
+        .get(url)
+        .bearer_auth(token)
+        .query(&[("query", query)])
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    v["data"]["result"].as_array().cloned()
 }
 
 /// Archives are written without locks (rustic keeps none), and the Backups
@@ -1247,6 +1306,22 @@ async fn main() -> Result<()> {
                 } else {
                     None
                 };
+                let policy: Option<serde_json::Value> =
+                    std::fs::read(std::path::Path::new(&repo).join("fleet/policy.json"))
+                        .ok()
+                        .and_then(|b| serde_json::from_slice(&b).ok());
+                let url = metrics_url(policy.as_ref().and_then(|p| p["domain"].as_str()))?;
+                // no device key here: the list alone, as the repo has it
+                let metrics = match (auth::device::load(&keys).ok().flatten(), keys.get(USER)?) {
+                    (Some(kp), Some(user)) => Some((
+                        reqwest::Client::builder()
+                            .timeout(std::time::Duration::from_secs(5))
+                            .build()?,
+                        url,
+                        auth::device::mint(&kp, &user, std::time::Duration::from_secs(300))?,
+                    )),
+                    _ => None,
+                };
                 for (name, b) in boxes.as_object().context("boxes.json is not an object")? {
                     let roles: Vec<&str> = b["roles"]
                         .as_array()
@@ -1264,25 +1339,12 @@ async fn main() -> Result<()> {
                         },
                     );
                     println!("  roles: {}", roles.join(" "));
-                    // what the box itself says, from its own metrics over the fleet's network
-                    if let Some(net) = b["net"].as_str() {
-                        let out = std::process::Command::new("curl")
-                            .args([
-                                "-sf",
-                                "-m",
-                                "5",
-                                "--get",
-                                "--data-urlencode",
-                                "query=dd_box_location",
-                            ])
-                            .arg(format!("http://{net}:9090/api/v1/query"))
-                            .output();
-                        let seen = out
-                            .ok()
-                            .and_then(|o| {
-                                serde_json::from_slice::<serde_json::Value>(&o.stdout).ok()
-                            })
-                            .and_then(|v| v["data"]["result"].as_array()?.first().cloned());
+                    // what the box itself says, from the fleet's Metrics as a
+                    // member: a box's own prometheus answers only the box
+                    if let Some((http, url, token)) = &metrics {
+                        let seen = box_samples(http, url, token, "dd_box_location", name)
+                            .await
+                            .and_then(|r| r.first().cloned());
                         match seen {
                             Some(r) => {
                                 let m = &r["metric"];
@@ -1302,7 +1364,17 @@ async fn main() -> Result<()> {
                                     }
                                 );
                             }
-                            None => println!("  says: unreachable"),
+                            None => println!("  says: unheard"),
+                        }
+                        // the services there that read people's plaintext (box.nix)
+                        let plain = box_samples(http, url, token, "dd_box_plaintext", name).await;
+                        let plain: Vec<&str> = plain
+                            .iter()
+                            .flatten()
+                            .filter_map(|s| s["metric"]["service"].as_str())
+                            .collect();
+                        if !plain.is_empty() {
+                            println!("  reads plaintext: {}", plain.join(" "));
                         }
                     }
                     if let Some(sec) = &secret {
@@ -1480,8 +1552,8 @@ async fn main() -> Result<()> {
                             let pk = ssh_key::PublicKey::from(ssh_key::public::Ed25519PublicKey(
                                 vk.to_bytes(),
                             ));
-                            // git matches the principal against the signer's email;
-                            // name@domain is what `dd git setup` puts in user.email
+                            // the principal git names a signer by; `dd git setup`
+                            // leaves user.email alone, so it is a label, not a match
                             lines.insert(format!(
                                 "{name}@dd {}",
                                 pk.to_openssh().unwrap_or_default()
@@ -1510,6 +1582,9 @@ async fn main() -> Result<()> {
             let status = match cmd {
                 RepoCmd::Share { url, public_key } => std::process::Command::new(&helper)
                     .args(["share", &url, &public_key])
+                    .status()?,
+                RepoCmd::Unshare { url, public_key } => std::process::Command::new(&helper)
+                    .args(["unshare", &url, &public_key])
                     .status()?,
                 RepoCmd::Readers { url } => std::process::Command::new(&helper)
                     .args(["readers", &url])
@@ -1829,4 +1904,30 @@ fn which(bin: &str) -> bool {
     std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).is_file()))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_token_goes_only_to_the_compiled_in_domain() {
+        let ours = format!("https://metrics.{}/api/v1/query", identity::fleet::DOMAIN);
+        assert_eq!(super::metrics_url(None).unwrap(), ours);
+        assert_eq!(
+            super::metrics_url(Some(identity::fleet::DOMAIN)).unwrap(),
+            ours
+        );
+        for other in ["evil.example", "commonty.org.evil.example", "x/y", ""] {
+            assert!(super::metrics_url(Some(other)).is_err(), "{other}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_box_name_is_not_a_query() {
+        let http = reqwest::Client::new();
+        // refused before anything is sent: no server at this address
+        for name in ["node1\"}or{x=\"", "", "a b"] {
+            let got = super::box_samples(&http, "http://127.0.0.1:9/", "t", "up", name).await;
+            assert!(got.is_none(), "{name}");
+        }
+    }
 }

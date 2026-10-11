@@ -10,7 +10,7 @@ use identity::SignedEntry;
 /// tailnet and not yet on the fleet's network reaches nothing else, and
 /// signing up, signing in and joining the network all start here. The
 /// other boxes hold copies, pulled from this one.
-pub const DEFAULT: [&str; 1] = ["https://home.commonty.org/_dd/directory"];
+pub const DEFAULT: [&str; 1] = [identity::fleet::DIRECTORY];
 
 /// a proxy every client this process builds goes through: the app's way
 /// into the fleet's own network (app/src/net.rs), a SOCKS5 one that

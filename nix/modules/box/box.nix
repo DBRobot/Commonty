@@ -1,4 +1,9 @@
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 {
   # No box is trusted. A service that reads people's plaintext exposes it
   # to whichever box runs it, and until that service is fixed that is a
@@ -81,4 +86,15 @@
 
   config.environment.etc."dd/plaintext".text =
     lib.concatStringsSep "\n" config.dd.box.plaintext + "\n";
+  # the metric `dd box list` reads (L+: the directory is metrics.nix's)
+  config.systemd.tmpfiles.rules = [
+    "L+ /var/lib/dd-facts/plaintext.prom - - - - ${
+      pkgs.writeText "plaintext.prom" (
+        "# HELP dd_box_plaintext A service on this box that reads people's plaintext.\n# TYPE dd_box_plaintext gauge\n"
+        + lib.concatMapStrings (
+          s: "dd_box_plaintext{box=\"${config.networking.hostName}\",service=\"${s}\"} 1\n"
+        ) config.dd.box.plaintext
+      )
+    }"
+  ];
 }

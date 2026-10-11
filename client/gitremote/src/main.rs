@@ -33,7 +33,12 @@ use auth::KeyStore;
 use serde::{Deserialize, Serialize};
 
 const SERVICE: &str = "commonty";
-const DEFAULT_DIRECTORIES: [&str; 1] = ["https://home.commonty.org/_dd/directory"];
+const DEFAULT_DIRECTORIES: [&str; 1] = [identity::fleet::DIRECTORY];
+
+/// DD_KEYRING names a different credential-store service, as for dd
+fn service() -> String {
+    std::env::var("DD_KEYRING").unwrap_or_else(|_| SERVICE.to_string())
+}
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct Keys {
@@ -183,7 +188,7 @@ impl Remote {
         let id = &crypto::sha256_hex(url.as_bytes())[..16];
         let base = git_dir.join("dd").join(id);
         std::fs::create_dir_all(&base)?;
-        let keys = auth::open(SERVICE);
+        let keys = auth::open(&service());
         let kp = auth::device::load(&keys)?.context("no device key here - `dd device show`")?;
         let user = keys
             .get("user")?
@@ -890,4 +895,16 @@ fn readers(args: &[String]) -> Result<()> {
         println!("  {}", r.fingerprint);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn dd_keyring_names_the_store_as_for_dd() {
+        // the only test here that touches the environment
+        unsafe { std::env::set_var("DD_KEYRING", "second") };
+        assert_eq!(super::service(), "second");
+        unsafe { std::env::remove_var("DD_KEYRING") };
+        assert_eq!(super::service(), "commonty");
+    }
 }

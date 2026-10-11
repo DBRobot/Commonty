@@ -18,6 +18,8 @@
 //! same way and none can make one: the authenticator signs, the box only
 //! asked.
 
+pub mod fleet;
+
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
 pub use ed25519_dalek::SigningKey;
