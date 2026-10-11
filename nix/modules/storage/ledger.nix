@@ -85,6 +85,48 @@ in
         ];
       };
     };
+    # Photos' share of deleting whoever left 90 days ago, with the same
+    # admin login (docs/dev/leaving.md)
+    systemd.services.dd-forget-photos = {
+      description = "Delete the Photos accounts of members who left 90 days ago";
+      after = [
+        "dd-verify.service"
+        "ente.service"
+      ];
+      restartIfChanged = false;
+      serviceConfig = {
+        Type = "oneshot";
+        User = user;
+        Group = user;
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+      };
+      # the gate or museum not answering yet is next time, not a failure
+      script = ''
+        ${
+          lib.escapeShellArgs [
+            dd
+            "forget-photos"
+            "--ente-origin"
+            "https://api.${base}"
+            "--photos-suffix"
+            "@users.${base}"
+            "--password-file"
+            config.sops.secrets.ente-storage-password.path
+          ]
+        } || echo "not this time; again within the hour"
+      '';
+    };
+    systemd.timers.dd-forget-photos = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "5min";
+        OnUnitActiveSec = "1h";
+      };
+    };
+
     systemd.timers.dd-storage-ledger = {
       wantedBy = [ "timers.target" ];
       timerConfig = {

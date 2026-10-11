@@ -164,7 +164,11 @@ in
           webVaultPackage = webvault;
           dbBackend = "postgresql";
           configurePostgres = true;
-          environmentFile = [ cfg.envFile ];
+          environmentFile = [
+            cfg.envFile
+            # ADMIN_TOKEN, for dd-forget-passwords below
+            "/run/dd-vault-admin/env"
+          ];
           config = {
             DOMAIN = "https://${host}";
             ROCKET_ADDRESS = "127.0.0.1";
@@ -282,6 +286,83 @@ in
           '';
         };
 
+        # Deleting the account of someone who left 90 days ago is upstream's
+        # own admin delete (sends, attachments in the bucket, everything), on
+        # loopback only: nginx never passes /admin, and the token is made at
+        # boot, kept in /run, readable by root alone (docs/dev/leaving.md)
+        systemd.services.dd-vault-admin-token = {
+          description = "A fresh admin token for Vaultwarden, for this boot";
+          before = [ "vaultwarden.service" ];
+          requiredBy = [ "vaultwarden.service" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            install -d -m 0700 /run/dd-vault-admin
+            [ -s /run/dd-vault-admin/env ] && exit 0
+            umask 077
+            printf 'ADMIN_TOKEN=%s\n' "$(${pkgs.openssl}/bin/openssl rand -hex 32)" > /run/dd-vault-admin/env.tmp
+            mv /run/dd-vault-admin/env.tmp /run/dd-vault-admin/env
+          '';
+        };
+        systemd.services.dd-forget-passwords = {
+          description = "Delete the Passwords accounts of members who left 90 days ago";
+          after = [
+            "vaultwarden.service"
+            "dd-verify.service"
+          ];
+          restartIfChanged = false;
+          path = [
+            pkgs.curl
+            pkgs.jq
+            pkgs.gnugrep
+          ];
+          serviceConfig = {
+            Type = "oneshot";
+            PrivateTmp = true;
+          };
+          script = ''
+            gate=http://127.0.0.1:${toString config.dd.verify.port}
+            vw=http://127.0.0.1:${toString port}
+            list=$(curl -fsS "$gate/internal/leaving") || { echo "the gate is not answering; next time"; exit 0; }
+            due=$(echo "$list" | jq -r '.members[] | select(.due and ((.done // []) | index("passwords") | not)) | .name')
+            [ -n "$due" ] || exit 0
+            . /run/dd-vault-admin/env
+            cookie=$(curl -sS -o /dev/null -D - --data-urlencode "token=$ADMIN_TOKEN" "$vw/admin" \
+              | grep -io '^set-cookie: *VW_ADMIN=[^;]*' | sed 's/^[^:]*: *//') || true
+            [ -n "$cookie" ] || { echo "Vaultwarden did not take the admin token; next time"; exit 0; }
+            for name in $due; do
+              case "$name" in *[!a-z0-9._-]* | [!a-z0-9]*) continue ;; esac
+              id=$(echo "$list" | jq -r --arg n "$name" '.members[] | select(.name == $n) | .id')
+              code=$(curl -sS -o /tmp/user.json -w '%{http_code}' -H "Cookie: $cookie" "$vw/admin/users/by-mail/$name@${base}")
+              if [ "$code" = 200 ]; then
+                uuid=$(jq -r .id /tmp/user.json)
+                case "$uuid" in "" | *[!0-9a-f-]*) echo "member $id: no account id"; continue ;; esac
+                if ! curl -fsS -o /dev/null -X POST -H "Cookie: $cookie" -H 'Content-Type: application/json' -d '{}' \
+                  "$vw/admin/users/$uuid/delete"; then
+                  echo "member $id: Vaultwarden refused the delete (the last owner of a shared organization?)"
+                  continue
+                fi
+                echo "member $id: their Passwords account is deleted"
+              elif [ "$code" != 404 ]; then
+                echo "member $id: Vaultwarden answered $code; next time"
+                continue
+              fi
+              curl -fsS -X POST -H 'Content-Type: application/json' \
+                -d "$(jq -cn --arg n "$name" '{name: $n, service: "passwords"}')" "$gate/internal/leaving/done" \
+                || echo "member $id: the gate did not take the report"
+            done
+          '';
+        };
+        systemd.timers.dd-forget-passwords = {
+          wantedBy = [ "timers.target" ];
+          timerConfig = {
+            OnActiveSec = "5min";
+            OnUnitActiveSec = "1h";
+          };
+        };
+
         # the gate: the issuer this sign-in goes through (servers/gate/src/oidc.rs)
         systemd.services.dd-verify = {
           environment = {
@@ -322,6 +403,8 @@ in
               # browser is told to open Passwords in the app; the same page
               # starts a Bitwarden app's sign-in and opens a Send (use-app.js).
               # Outside: the Send page and nothing else.
+              # the admin page is for dd-forget-passwords on loopback alone
+              "^~ /admin".return = "404";
               "/" = {
                 extraConfig =
                   lib.optionalString public ''

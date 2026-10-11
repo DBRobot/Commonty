@@ -1061,6 +1061,37 @@ impl Manager {
         Ok(())
     }
 
+    /// Someone left (the gate's leaving.rs): their servers stop at once, and
+    /// once their window is out every server and kept world of theirs goes.
+    /// Returns how many things it changed; nothing, the second time.
+    pub fn forget(&self, owner: &str, due: bool) -> Result<usize> {
+        anyhow::ensure!(
+            !owner.is_empty()
+                && !owner.starts_with('.')
+                && owner.chars().all(|c| c.is_ascii_lowercase()
+                    || c.is_ascii_digit()
+                    || matches!(c, '-' | '_' | '.')),
+            "not a name"
+        );
+        let mut n = 0;
+        for i in self.instances().into_iter().filter(|i| i.owner == owner) {
+            if self.up(&i) || i.desired != "stopped" {
+                self.stop(owner, &i.id)?;
+                n += 1;
+            }
+            if due {
+                self.delete(owner, &i.id)?;
+                n += 1;
+            }
+        }
+        let worlds = self.worlds_dir().join(owner);
+        if due && worlds.exists() {
+            std::fs::remove_dir_all(&worlds)?;
+            n += 1;
+        }
+        Ok(n)
+    }
+
     /// After a reboot, or this service's own restart: every server whose
     /// record says it should be up, is.
     pub fn restore(&self) -> usize {
@@ -1475,6 +1506,28 @@ mod tests {
         assert_eq!(*fake.world_at_start.lock().unwrap(), [true]);
         assert!(m.instance_dir(&j.id).join("world/save.db").exists());
         assert!(!m.instance_dir(&j.id).join("world/world.json").exists());
+    }
+
+    #[test]
+    fn someone_who_left_has_their_servers_stopped_then_everything_deleted() {
+        let (m, fake) = manager(2, 16384);
+        keep_one(&m, "tom");
+        let i = m.create("tom", "valheim", &BTreeMap::new()).unwrap();
+        m.start("tom", &i.id).unwrap();
+        let ann = m.create("ann", "valheim", &BTreeMap::new()).unwrap();
+        m.start("ann", &ann.id).unwrap();
+        assert!(m.forget("tom", false).unwrap() > 0);
+        assert!(!fake.up.lock().unwrap().contains(&i.id));
+        assert!(m.instance(&i.id).is_some(), "kept until the window is out");
+        assert_eq!(m.worlds("tom").len(), 1);
+        assert_eq!(m.forget("tom", false).unwrap(), 0);
+        m.forget("tom", true).unwrap();
+        assert!(m.instance(&i.id).is_none());
+        assert!(m.worlds("tom").is_empty());
+        assert!(!m.instance_dir(&i.id).exists());
+        assert_eq!(m.forget("tom", true).unwrap(), 0);
+        assert!(m.instance(&ann.id).is_some() && fake.up.lock().unwrap().contains(&ann.id));
+        assert!(m.forget("../x", true).is_err());
     }
 
     #[test]

@@ -157,13 +157,28 @@ let
     '') ente
   );
 
+  # what someone who left keeps until it is deleted (servers/gate/src/leaving.rs)
+  leaving =
+    name: c:
+    let
+      w = c.dd.verify.leaveWindowSeconds or null;
+    in
+    lib.optional (
+      w != null && w > limitMin * 60
+    ) "${name}: someone who left keeps their things ${toString (w / 86400)} days";
+
   problems = lib.concatLists (
     lib.mapAttrsToList (
       name: sys:
       let
         c = sys.config;
       in
-      snapshots name c ++ restic name c ++ vaultwarden name c ++ journald name c ++ nginxLog name c
+      snapshots name c
+      ++ restic name c
+      ++ vaultwarden name c
+      ++ journald name c
+      ++ nginxLog name c
+      ++ leaving name c
     ) self.nixosConfigurations
   );
 in

@@ -13,10 +13,11 @@
 // reader-key`), PINNED (KV: the newest entry accepted per name), DOMAIN. A
 // local test also sets CF_API, DIRECTORY and ORIGIN; deployed, they are unset.
 
-import { initSync, admit, login, readProof } from './dd_mail.js';
+import { initSync, admit, login, readProof, forgetDue } from './dd_mail.js';
 import wasm from './dd_mail_bg.wasm';
 import { MEMBERS, RELEASE, ALIASES } from './fleet.js';
 import { boxApi, memberApi } from './unlock.js';
+import { forgetApi } from './leaving.js';
 import boxesHtml from './boxes.html';
 import boxesJs from './boxes.js';
 import changeHtml from './change.html';
@@ -404,6 +405,8 @@ export default {
       const sent = req.method === 'GET' ? '' : await req.text().catch(() => '');
       // a box at boot: signed by its TPM, from no page at all
       if (path === '/api/unlock' || path.startsWith('/api/unlock/')) return boxApi(req, env, path, parse(sent), json);
+      // someone who left 90 days ago: their own statement decides (leaving.js)
+      if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, MEMBERS, zone, lists, stateIn, cf });
       if (req.method !== 'GET' && origin !== (env.ORIGIN || `https://mail.${env.DOMAIN}`)) {
         return json({ error: 'not from here' }, 403);
       }

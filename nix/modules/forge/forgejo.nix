@@ -341,6 +341,33 @@ in
         };
       };
 
+      # the forge's share of deleting whoever left 90 days ago
+      systemd.services.dd-forget-forge = {
+        description = "Delete the repositories and forge accounts of members who left 90 days ago";
+        after = [
+          "forgejo.service"
+          "dd-verify.service"
+        ];
+        restartIfChanged = false;
+        path = [
+          pkgs.curl
+          pkgs.jq
+        ];
+        serviceConfig.Type = "oneshot";
+        script = ddScript ./forget.sh {
+          ADMIN = cfg.admin;
+          SOCK = sock;
+          GATE = "http://127.0.0.1:${toString config.dd.verify.port}";
+        };
+      };
+      systemd.timers.dd-forget-forge = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnActiveSec = "5min";
+          OnUnitActiveSec = "1h";
+        };
+      };
+
       # the rules above, in the forge's database (as live.nix's trigger)
       systemd.services.dd-forge-rules = {
         description = "No private repositories, and host runners for the admin's alone";

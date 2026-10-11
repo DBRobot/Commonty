@@ -96,6 +96,72 @@ pub fn read_proof_js(secret: &str, name: &str, at: f64) -> Result<String, JsValu
     read_proof(secret, name, at as u64).map_err(|e| JsValue::from_str(&e))
 }
 
+/// How long a member's things are kept after they leave (docs/dev/leaving.md)
+pub const LEAVE_WINDOW: u64 = 90 * 24 * 3600;
+
+/// May `name`'s address go? Only for their own leaving, signed by the root
+/// of the entry this Worker pinned and said the window ago or more, and
+/// never a coming back; or for the release's removal of them, as long ago.
+/// `said` is what the gate serves at /_dd/leaving/<name>: a box can hold
+/// back a statement, never make one.
+pub fn forget_due(
+    name: &str,
+    pinned: &str,
+    said: Option<&str>,
+    members: &str,
+    now: u64,
+    window: u64,
+) -> R<()> {
+    let e = parse(pinned)?;
+    if e.entry.name != name {
+        return Err("that entry is someone else's".into());
+    }
+    let list: serde_json::Value = serde_json::from_str(members).map_err(|e| e.to_string())?;
+    let id = identity::member_id(&e.entry.root);
+    let revoked = list["revoked"]
+        .as_array()
+        .is_some_and(|a| a.iter().any(|x| x.as_str() == Some(&id)));
+    if revoked
+        && let Some(at) = list["removed"][&id].as_u64()
+        && at.saturating_add(window) <= now
+    {
+        return Ok(());
+    }
+    let Some(said) = said else {
+        return Err("they have not left".into());
+    };
+    let v: serde_json::Value = serde_json::from_str(said).map_err(|e| e.to_string())?;
+    let s: identity::SignedLeave = serde_json::from_value(v["statement"].clone())
+        .map_err(|_| "not a statement".to_string())?;
+    identity::verify_leave(&s, &e.entry).map_err(|e| e.to_string())?;
+    if s.leave.back {
+        return Err("they came back".into());
+    }
+    if s.leave.at.saturating_add(window) > now {
+        return Err("their things are kept a while yet".into());
+    }
+    Ok(())
+}
+
+#[wasm_bindgen(js_name = forgetDue)]
+pub fn forget_due_js(
+    name: &str,
+    pinned: &str,
+    said: Option<String>,
+    members: &str,
+    now: f64,
+) -> Result<(), JsValue> {
+    forget_due(
+        name,
+        pinned,
+        said.as_deref(),
+        members,
+        now as u64,
+        LEAVE_WINDOW,
+    )
+    .map_err(|e| JsValue::from_str(&e))
+}
+
 #[wasm_bindgen(js_name = admit)]
 pub fn admit_js(
     name: &str,
@@ -218,6 +284,44 @@ mod tests {
         );
         assert_eq!(identity::check_read_proof(&p, "other", 1010), None);
         assert!(read_proof("not a key", "tester", 1000).is_err());
+    }
+
+    #[test]
+    fn an_address_goes_only_the_window_after_leaving_or_removal() {
+        let t = Tester::new();
+        let e = serde_json::to_string(&t.entry(3)).unwrap();
+        let w = LEAVE_WINDOW;
+        let said = |at, back| {
+            let s = identity::sign_leave(
+                identity::Leave {
+                    name: "tester".into(),
+                    root: identity::encode_public(&t.root.verifying_key()),
+                    at,
+                    back,
+                },
+                &t.root,
+            )
+            .unwrap();
+            serde_json::json!({ "statement": s, "agreed": at }).to_string()
+        };
+        let m = t.members();
+        assert!(forget_due("tester", &e, None, &m, 10 * w, w).is_err());
+        assert!(forget_due("tester", &e, Some(&said(100, false)), &m, 100 + w, w).is_ok());
+        assert!(forget_due("tester", &e, Some(&said(100, false)), &m, 99 + w, w).is_err());
+        assert!(forget_due("tester", &e, Some(&said(100, true)), &m, 100 + w, w).is_err());
+        assert!(forget_due("other", &e, Some(&said(100, false)), &m, 100 + w, w).is_err());
+        let mut forged: serde_json::Value = serde_json::from_str(&said(100, false)).unwrap();
+        forged["statement"]["leave"]["at"] = 1.into();
+        assert!(forget_due("tester", &e, Some(&forged.to_string()), &m, 100 + w, w).is_err());
+        let id = identity::member_id(&identity::encode_public(&t.root.verifying_key()));
+        let removed =
+            serde_json::json!({ "members": [], "revoked": [id], "removed": { id.clone(): 50 } })
+                .to_string();
+        assert!(forget_due("tester", &e, None, &removed, 50 + w, w).is_ok());
+        assert!(forget_due("tester", &e, None, &removed, 49 + w, w).is_err());
+        let not_revoked =
+            serde_json::json!({ "members": [id], "removed": { id.clone(): 50 } }).to_string();
+        assert!(forget_due("tester", &e, None, &not_revoked, 50 + w, w).is_err());
     }
 
     #[test]
