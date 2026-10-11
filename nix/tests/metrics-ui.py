@@ -87,8 +87,9 @@ assert "not-for-thanos" not in seen, seen
 # nothing else of Thanos: no other method, no admin API, no other path.
 # Those land on the page or are refused, and Thanos never hears them
 box.succeed("rm /tmp/thanos.log")
-assert status(f"{sarah} -X DELETE '{site}/api/v1/query?query=up'") == "403"
-assert status(f"{sarah} -X PUT '{site}/api/v1/labels'") == "403"
+# refused, and like any refusal there, sent home
+assert status(f"{sarah} -X DELETE '{site}/api/v1/query?query=up'") == "302"
+assert status(f"{sarah} -X PUT '{site}/api/v1/labels'") == "302"
 for path in (
     "/api/v1/admin/tsdb/delete_series?match[]=up",
     "/api/v1/admin/tsdb/clean_tombstones",
