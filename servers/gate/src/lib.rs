@@ -791,7 +791,14 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
         // the demo looks and does not touch: reads only, and only where a
         // tile sends it. Decided here, where the name is certain; an nginx
         // `if` runs before the gate has answered and cannot know it
-        Some(pages::Role::Demo) => app.demo_allows(&headers),
+        // and never the fleet's metrics, whatever a tile says
+        Some(pages::Role::Demo) => {
+            let metrics = format!("metrics.{}", app.domain);
+            let h = asked_host(&headers);
+            h != metrics
+                && h.strip_prefix("demo-") != Some(metrics.as_str())
+                && app.demo_allows(&headers)
+        }
         // a guest reaches the games page and nothing else, whatever the
         // service behind another door would have made of them
         Some(pages::Role::Guest) => !demo_door && app.guest_host(&headers),
@@ -1753,10 +1760,16 @@ async fn git_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     signed_in_page(&app, &headers, "git")
 }
 
-/// Metrics (servers/observe): the fleet's figures, for anyone signed in; the
-/// queries behind it pass the same gate.
+/// Metrics (servers/observe): the fleet's figures, for members; the queries
+/// behind it pass the same gate. Not the demo's, whatever a tile says.
 async fn metrics_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    signed_in_page(&app, &headers, "metrics")
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    match app.signed_in(cookie) {
+        Some(u) if u == pages::DEMO_USER || !app.member(&u) => {
+            StatusCode::FORBIDDEN.into_response()
+        }
+        _ => signed_in_page(&app, &headers, "metrics"),
+    }
 }
 
 fn signed_in_page(app: &App, headers: &HeaderMap, name: &str) -> Response {
@@ -2979,6 +2992,38 @@ mod tests {
         // and a header that is no device's token changes nothing
         assert_eq!(ask("DELETE", Some("x")).await, 403);
         assert_eq!(ask("PUT", Some("not-a-biscuit")).await, 403);
+    }
+
+    #[tokio::test]
+    async fn the_demo_never_sees_metrics() {
+        // even a tile that would let it in
+        let mut m = demo_tile();
+        m.name = "Metrics".into();
+        m.url = format!("https://metrics.{DOMAIN}/");
+        m.demo = Some("full".into());
+        let (url, s) = gate("demo-metrics", None, vec![demo_tile(), m]).await;
+        let http = client();
+        let demo = cookie(&s.issue(pages::DEMO_USER));
+        let tom = cookie(&s.issue("tom"));
+        let ask = |c: &str, host: String| {
+            let r = http
+                .get(format!("{url}/verify"))
+                .header("cookie", c)
+                .header("x-original-host", host)
+                .header("x-original-uri", "/api/v1/query?query=up");
+            async move { r.send().await.unwrap().status().as_u16() }
+        };
+        assert_eq!(ask(&demo, format!("metrics.{DOMAIN}")).await, 403);
+        assert_eq!(ask(&demo, format!("demo-metrics.{DOMAIN}")).await, 403);
+        assert_eq!(ask(&tom, format!("metrics.{DOMAIN}")).await, 200);
+        // its own door still lets it in
+        assert_eq!(ask(&demo, format!("files.{DOMAIN}")).await, 200);
+        let page = |c: String| {
+            let r = http.get(format!("{url}/_dd/metrics")).header("cookie", c);
+            async move { r.send().await.unwrap().status().as_u16() }
+        };
+        assert_eq!(page(demo).await, 403);
+        assert_eq!(page(tom).await, 200);
     }
 
     #[tokio::test]

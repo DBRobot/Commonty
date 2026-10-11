@@ -101,6 +101,26 @@ for path in (
     box.succeed(f"{curl} -g --path-as-is -X POST {sarah} '{site}{path}' -o /dev/null")
 box.succeed("test ! -e /tmp/thanos.log")
 
+# the demo gets neither the page nor a single query, and Thanos hears nothing
+head = box.succeed("curl -s -D - -o /dev/null http://127.0.0.1:4181/_dd/demo")
+jar = (
+    next(h for h in head.splitlines() if h.lower().startswith("set-cookie:"))
+    .split(":", 1)[1]
+    .split(";")[0]
+    .strip()
+)
+assert jar.startswith("dd_session="), jar
+as_demo = f"-H 'Cookie: {jar}'"
+assert status(f"{as_demo} {site}/") == "403", status(f"{as_demo} {site}/")
+# the gate's 403 is nginx's @waiting: back to the home page
+for args in (
+    f"{as_demo} '{site}/api/v1/query?query=up'",
+    f"{as_demo} -X POST -d query=up {site}/api/v1/query",
+):
+    assert status(args) == "302", (args, status(args))
+    assert location(args) == "https://home.test.invalid/", location(args)
+box.succeed("test ! -e /tmp/thanos.log")
+
 # the old name sends people to the new one
 assert status("https://grafana.test.invalid/d/x") == "301"
 assert location("https://grafana.test.invalid/d/x") == f"{site}/d/x"

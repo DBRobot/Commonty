@@ -17,8 +17,8 @@
       # in the bar's menu beside Boxes and Backups, where looking at the
       # fleet belongs; it is not a service the way photos and films are
       menuOnly = true;
-      # read-only figures: the demo sees the fleet as a member does
-      demo = "full";
+      # no demo: the fleet's figures are members' business, and a demo door
+      # would put them on the open internet
       icon = "metrics";
       color = "#c4562d";
       rank = 60;

@@ -76,10 +76,13 @@ in
           "--view"
           "${dir}/ledger.json"
           "--facts-out"
-          "${dir}/usage.prom"
+          "${dir}/usage.facts"
         ];
-        # into this box's heartbeat: as root, where the facts are
-        ExecStartPost = "+${pkgs.coreutils}/bin/install -m 0644 ${dir}/usage.prom /var/lib/dd-facts/usage-ledger.prom";
+        # into this box's heartbeat, not Prometheus: as root, where the facts are
+        ExecStartPost = [
+          "+${pkgs.coreutils}/bin/install -m 0644 ${dir}/usage.facts /var/lib/dd-facts/usage-ledger.facts"
+          "+${pkgs.coreutils}/bin/rm -f /var/lib/dd-facts/usage-ledger.prom"
+        ];
       };
     };
     systemd.timers.dd-storage-ledger = {

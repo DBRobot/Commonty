@@ -139,20 +139,26 @@ pub async fn run(l: Ledger) -> Result<()> {
 
     // this box's own word, for its heartbeat: Photos and the libraries,
     // each member's, as the fleet adds them up
+    let tmp = l.facts_out.with_extension("tmp");
+    std::fs::write(&tmp, usage_facts(&counted))?;
+    std::fs::rename(&tmp, &l.facts_out)?;
+    eprintln!("counted {} members", counted.len());
+    Ok(())
+}
+
+/// The heartbeat's lines, `usage/<service>/<member> <bytes>`: not a
+/// Prometheus metric, so no member's figures reach the fleet's metrics
+fn usage_facts(counted: &serde_json::Map<String, Value>) -> String {
     let mut facts = String::from("# what members keep here (dd storage-ledger)\n");
-    for (name, c) in &counted {
+    for (name, c) in counted {
         for k in ["photos", "libraries"] {
             facts.push_str(&format!(
-                "dd_usage{{service=\"{k}\",member=\"{name}\"}} {}\n",
+                "usage/{k}/{name} {}\n",
                 c[k].as_u64().unwrap_or(0)
             ));
         }
     }
-    let tmp = l.facts_out.with_extension("tmp");
-    std::fs::write(&tmp, facts)?;
-    std::fs::rename(&tmp, &l.facts_out)?;
-    eprintln!("counted {} members", counted.len());
-    Ok(())
+    facts
 }
 
 /// The fleet's count, from the control plane's agreed state: every box's
@@ -327,5 +333,14 @@ mod tests {
         // the rest already fills it: no more photos, and none taken away
         assert_eq!(photos_limit(200 * gb, 210 * gb, 5 * gb), 5 * gb);
         assert_eq!(photos_limit(200 * gb, 210 * gb, 0), 1);
+    }
+
+    #[test]
+    fn usage_facts_are_not_metrics() {
+        let counted = serde_json::json!({ "tom": { "photos": 5, "libraries": 2 } });
+        let f = super::usage_facts(counted.as_object().unwrap());
+        assert!(f.contains("usage/photos/tom 5\n"), "{f}");
+        assert!(f.contains("usage/libraries/tom 2\n"), "{f}");
+        assert!(!f.contains("dd_usage") && !f.contains("member="), "{f}");
     }
 }

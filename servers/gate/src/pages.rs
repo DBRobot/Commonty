@@ -585,14 +585,11 @@ impl Menu {
             url: url.to_string(),
         };
         let demo = user == DEMO_USER;
-        // the demo goes where its tile sends it: the service's demo door
-        let metrics = services.iter().find(|s| s.icon == "metrics").map(|s| {
-            let url = match (demo, &s.demo_url) {
-                (true, Some(u)) => u,
-                _ => &s.url,
-            };
-            item("Metrics", url)
-        });
+        // never the demo's: the gate refuses it there (metrics_page, verify)
+        let metrics = services
+            .iter()
+            .find(|s| s.icon == "metrics" && !demo)
+            .map(|s| item("Metrics", &s.url));
         // The tile's url, where a tile says. A library page belongs on the
         // gate's own host: that is the only one serving /_dd/transcode, so
         // a relative link followed from another host plays nothing.
@@ -1025,7 +1022,12 @@ mod tests {
             !menu.iter().any(|u| u == "/_dd/settings"),
             "the demo was offered Settings"
         );
-        assert!(menu.iter().any(|u| u == "https://metrics.example/"));
+        // nor Metrics, even from a tile that grants it something
+        assert!(!menu.iter().any(|u| u.contains("metrics")), "{menu:?}");
+        let mut granted = svc("Metrics", "metrics");
+        granted.demo = Some("read".into());
+        let menu = menu_urls(&me(DEMO_USER, &[granted]));
+        assert!(!menu.iter().any(|u| u.contains("metrics")), "{menu:?}");
         // no metrics on this box: no line for it, and nothing else moves
         let menu = menu_urls(&me("tom", &[svc("Chat", "chat")]));
         assert!(!menu.iter().any(|u| u.contains("metrics")));

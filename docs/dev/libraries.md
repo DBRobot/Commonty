@@ -561,8 +561,11 @@ The demo may start a film: the gate counts a POST to
   ([nix/modules/storage/backup.nix](../../nix/modules/storage/backup.nix)).
 - **What each box says.** Each box puts `usage/<service>/<member>` facts in
   its heartbeat; dd-control reads them from
-  `/var/lib/dd-facts/usage-*.prom`
+  `/var/lib/dd-facts/usage-*.facts`, one `usage/<service>/<member> <bytes>`
+  a line
   ([client/cli/src/storage_ledger.rs](../../client/cli/src/storage_ledger.rs)).
+  They are not `.prom` files: node-exporter never serves them, so no
+  member's figures are in Prometheus or Thanos (`checks.usage-facts`).
   - The forge counts `code` and the vault counts `passwords`
     ([nix/modules/storage/usage.nix](../../nix/modules/storage/usage.nix)).
   - The Photos box runs `dd storage-ledger`

@@ -148,7 +148,9 @@ list) carries no names.
 - no credential: 401, or 403 on a `demo-*` host (a 401 there would let
   some services treat the visitor as anonymous);
 - Member: allowed anywhere except a demo door;
-- Demo: `demo_allows` (below);
+- Demo: `demo_allows` (below), and never `metrics.<domain>`: the fleet's
+  figures are not the internet's, so the demo has no Metrics page, query
+  or menu line whatever a tile says;
 - Guest: only `games.<domain>`, never a demo door.
 
 Disk images are not behind `auth_request`: nginx sends

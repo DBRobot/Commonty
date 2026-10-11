@@ -1215,6 +1215,16 @@
           box-reports = import ./nix/tests/box-reports.nix args;
           role-fit = import ./nix/tests/role-fit.nix args;
           nginx = import ./nix/tests/nginx.nix args;
+          # no member's figures in the fleet's metrics: usage is heartbeat
+          # lines, never a Prometheus sample (storage/usage.nix)
+          usage-facts = pkgs.runCommand "usage-facts-are-not-metrics" { } ''
+            printf 'tom@x.org\t2048\nbad name\t1\nsarah\t7\n' > rows
+            ${pkgs.gawk}/bin/awk -F '\t' -v svc=code -v suffix=@x.org \
+              -f ${./nix/modules/storage/usage-facts.awk} rows > got
+            printf 'usage/code/tom 2048\nusage/code/sarah 7\n' | cmp - got
+            if ${pkgs.gnugrep}/bin/grep -rn 'dd_usage' ${./nix/modules}; then exit 1; fi
+            touch $out
+          '';
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
           # the control plane: relay, witness and three validators, offline
