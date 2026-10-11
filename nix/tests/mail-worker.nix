@@ -3,7 +3,9 @@
 # a browser through the change-email pages and the line in Settings, then
 # at its API with what it must refuse. A made-up member signs in
 # (client/mail/tests/tester.json, made by client/mail/examples/fixture.rs). No network, no vm: under a
-# minute, and cached by content like every other check.
+# minute, and cached by content like every other check. A box's mail
+# (send.js) goes to wrangler's own stand-in for send_email, which writes
+# each message to a file and names it in wrangler.log.
 { pkgs, self, ... }:
 let
   bundle = self.packages.${pkgs.stdenv.hostPlatform.system}.mail-worker;
@@ -35,7 +37,7 @@ pkgs.runCommand "mail-worker-e2e"
     # and its aliases: security to it, and two the Worker must refuse (a
     # member's address already, "other", and one that is no alias) - fake.py
     # starts with a rule for a dropped one, "old", and other's own
-    printf 'export const MEMBERS = %s;\nexport const RELEASE = "unused";\nexport const BOXES = {"testbox": %s};\nexport const ALIASES = {"security": "tester", "other": "tester", "Bad.One": "tester"};\n' \
+    printf 'export const MEMBERS = %s;\nexport const RELEASE = "unused";\nexport const BOXES = {"testbox": %s};\nexport const ALIASES = {"security": "tester", "other": "tester", "Bad.One": "tester"};\nexport const OWNER = "tester";\n' \
       "$(jq -c '.members' $tester)" "$(jq -c '.box_spki' $tester)" > w/fleet.js
     cat > w/wrangler.toml <<'TOML'
     name = "mail-e2e"
@@ -46,14 +48,17 @@ pkgs.runCommand "mail-worker-e2e"
       { type = "Text", globs = ["**/*.html", "**/*.css", "**/change.js", "**/row.js", "**/passkey.js", "**/boxes.js"] },
       { type = "Data", globs = ["**/*.woff2"] },
       { type = "CompiledWasm", globs = ["**/*.wasm"] },
-      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js", "**/leaving.js"] },
+      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js", "**/leaving.js", "**/send.js"] },
     ]
     kv_namespaces = [{ binding = "PINNED", id = "local" }]
+    send_email = [{ name = "SEND", allowed_sender_addresses = ["noreply@commonty.test", "alerts@commonty.test"] }]
     [vars]
     DOMAIN = "commonty.test"
     CF_API = "http://127.0.0.1:8899/client/v4"
     DIRECTORY = "http://127.0.0.1:8899/dir/"
     ORIGIN = "http://localhost:8787"
+    SEND_PER_BOX = "6"
+    SEND_PER_RCPT = "4"
     TOML
     sed -i 's/^    //' w/wrangler.toml
     # the read key: 32 bytes of 5, as the fake directory expects (fake.py)

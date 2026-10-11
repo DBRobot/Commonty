@@ -42,7 +42,7 @@ function rawSig(sig) {
   return out;
 }
 
-async function signedBy(box, message, sig) {
+export async function signedBy(box, message, sig) {
   const pub = BOXES[box];
   if (!pub) return false;
   try {

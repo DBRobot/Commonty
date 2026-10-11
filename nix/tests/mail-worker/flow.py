@@ -453,6 +453,125 @@ with sync_playwright() as p:
         "and it unlocks again",
     )
     ok(call("/api/boxes", cookie="")[0] == 401, "nobody signed in sees no boxes")
+
+    # A box's mail (send.js), signed as dd-sendmail signs it with the TPM
+    import os, re
+
+    def mailcall(to, msg, key=None, at=None, nonce=None, signed_to=None):
+        t = at if at is not None else int(time.time())
+        n = nonce or b64u(os.urandom(18))
+        digest = hashlib.sha256(msg).hexdigest()
+        m = f"commonty mail send v1\0testbox\0{t}\0{n}\0{signed_to or to}\0{digest}"
+        sig = b64u((key or boxkey).sign(m.encode(), EC.ECDSA(H.SHA256())))
+        req = urllib.request.Request(
+            W + "/send",
+            data=msg,
+            method="POST",
+            headers={
+                "x-dd-box": "testbox",
+                "x-dd-at": str(t),
+                "x-dd-nonce": n,
+                "x-dd-to": to,
+                "x-dd-sig": sig,
+            },
+        )
+        try:
+            r = urllib.request.urlopen(req)
+            return r.status, json.load(r), n, t
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}"), n, t
+
+    def mails():
+        # wrangler's send_email stand-in names each message's file in its log
+        log = open("wrangler.log", errors="replace").read()
+        return re.findall(r"(/\S+\.eml)", log)
+
+    def newest(before):
+        for _ in range(50):
+            now = mails()
+            if len(now) > len(before):
+                return open(now[-1], "rb").read().decode()
+            time.sleep(0.1)
+        return ""
+
+    msg = (
+        b"From: Commonty Passwords <noreply@elsewhere.example>\n"
+        b"To: someone@evil.example\n"
+        b"Bcc: someone@evil.example\n"
+        b"Reply-To: phish@evil.example\n"
+        b"Subject: Your vault\n"
+        b"Content-Type: text/plain; charset=utf-8\n"
+        b"\n"
+        b"Hello from the vault.\n"
+    )
+    before = mails()
+    s, v, _, _ = mailcall("tester@commonty.test", msg)
+    ok(s == 200 and v.get("sent") == 1, f"a box writes to a member {s} {v}")
+    eml = newest(before)
+    head = eml.split("\r\n\r\n")[0]
+    ok(
+        'From: "Commonty Passwords" <noreply@commonty.test>' in head
+        and "To: <tester@commonty.test>" in head
+        and "Subject: Your vault" in head
+        and "Hello from the vault." in eml,
+        f"from noreply@, to the member, subject and body kept {head!r}",
+    )
+    ok(
+        "evil.example" not in eml and "elsewhere.example" not in eml,
+        "the box's own To, Bcc, Reply-To and From are gone",
+    )
+    before = mails()
+    s, v, nonce, t = mailcall("alerts", b"Subject: node1: backup FAILED\n\nlook\n")
+    ok(s == 200, f"alerts, to the owner {s} {v}")
+    ok("From: \"Commonty\" <alerts@commonty.test>" in newest(before), "alerts come from alerts@")
+    ok(
+        mailcall("alerts", b"Subject: x\n\nagain\n", nonce=nonce)[0] == 403,
+        "the same nonce again: refused",
+    )
+    ok(
+        mailcall("alerts", b"Subject: x\n\nold\n", at=int(time.time()) - 3600)[0]
+        == 403,
+        "an hour-old time: refused",
+    )
+    before = mails()
+    ok(
+        mailcall("someone@example.com", b"Subject: x\n\nhi\n")[0] == 403,
+        "a stranger's address: refused",
+    )
+    ok(
+        mailcall("other@commonty.test", b"Subject: x\n\nhi\n")[0] == 403,
+        "a rule that is no member's: refused",
+    )
+    ok(
+        mailcall("security@commonty.test", b"Subject: x\n\nhi\n")[0] == 403,
+        "an alias: refused",
+    )
+    ok(
+        mailcall(
+            "tester@commonty.test", b"Subject: x\n\nhi\n",
+            key=EC.generate_private_key(EC.SECP256R1()),
+        )[0]
+        == 403,
+        "signed by another key: refused",
+    )
+    ok(
+        mailcall(
+            "someone@example.com", b"Subject: x\n\nhi\n", signed_to="tester@commonty.test"
+        )[0]
+        == 403,
+        "recipients changed after signing: refused",
+    )
+    ok(
+        mailcall("tester@commonty.test", b"x" * (300 * 1024))[0] == 413,
+        "too big: refused",
+    )
+    ok(len(mails()) == len(before), "nothing refused was sent")
+    # SEND_PER_RCPT 4 and SEND_PER_BOX 6 here (mail-worker.nix): tester has
+    # one, alerts one
+    codes = [mailcall("tester@commonty.test", b"Subject: n\n\nn\n")[0] for _ in range(4)]
+    ok(codes == [200, 200, 200, 429], f"a fifth to one member in the hour: refused {codes}")
+    codes = [mailcall("alerts", b"Subject: n\n\nn\n")[0] for _ in range(2)]
+    ok(codes == [200, 429], f"a seventh from the box in the hour: refused {codes}")
     b.close()
 if failed:
     sys.exit(f"{len(failed)} failed")

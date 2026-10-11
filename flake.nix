@@ -1039,6 +1039,8 @@
                   echo "export const MEMBERS = $(jq -c . ${./fleet/members.json} | jq -R .);"
                   echo "export const RELEASE = $(tr -d '[:space:]' < ${./fleet/release.pub} | jq -R .);"
                   echo "export const ALIASES = $(jq -c '.mailAliases // {}' ${./fleet/policy.json});"
+                  # whose address "alerts" is (send.js)
+                  echo "export const OWNER = $(jq -c '.owner' ${./fleet/policy.json});"
                   # each box's TPM-held unlock key, where it has one (unlock.js)
                   echo "export const BOXES = $(jq -c 'with_entries(select(.value.unlockKey) | .value = .value.unlockKey)' ${./fleet/boxes.json});"
                 } > $out/fleet.js

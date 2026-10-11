@@ -103,7 +103,7 @@ fn bundle(root: &Path, r#ref: &str) -> Result<std::path::PathBuf> {
 /// styles as text it serves, the fonts as bytes, the checks as wasm.
 fn kind(name: &str) -> &'static str {
     match name {
-        "worker.js" | "dd_mail.js" | "fleet.js" | "unlock.js" | "leaving.js" => {
+        "worker.js" | "dd_mail.js" | "fleet.js" | "unlock.js" | "leaving.js" | "send.js" => {
             "application/javascript+module"
         }
         n if n.ends_with(".wasm") => "application/wasm",
@@ -119,6 +119,16 @@ async fn upload(http: &reqwest::Client, token: &str, s: &Setup, dir: &Path) -> R
         "bindings": [
             { "type": "plain_text", "name": "DOMAIN", "text": s.domain },
             { "type": "kv_namespace", "name": "PINNED", "namespace_id": s.kv },
+            // the boxes' mail (send.js): only to addresses Email Routing has
+            // confirmed, and only from these two
+            {
+                "type": "send_email",
+                "name": "SEND",
+                "allowed_sender_addresses": [
+                    format!("noreply@{}", s.domain),
+                    format!("alerts@{}", s.domain),
+                ],
+            },
         ],
         // CF_TOKEN and SESSION_KEY were set once and are kept
         "keep_bindings": ["secret_text"],

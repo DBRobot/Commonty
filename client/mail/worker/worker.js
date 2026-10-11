@@ -8,16 +8,20 @@
 // It also keeps the release's aliases (fleet/policy.json mailAliases, in
 // fleet.js): <alias>@<domain> forwards to that member's confirmed address.
 //
+// It also carries the boxes' mail to members and the owner (send.js).
+//
 // Bindings: CF_TOKEN (secret: Email Routing, this zone), SESSION_KEY
 // (secret), DIRECTORY_KEY (secret: the directory's read key, `dd mail
-// reader-key`), PINNED (KV: the newest entry accepted per name), DOMAIN. A
-// local test also sets CF_API, DIRECTORY and ORIGIN; deployed, they are unset.
+// reader-key`), PINNED (KV: the newest entry accepted per name), SEND
+// (send_email), DOMAIN. A local test also sets CF_API, DIRECTORY, ORIGIN,
+// SEND_PER_BOX and SEND_PER_RCPT; deployed, they are unset.
 
 import { initSync, admit, login, readProof, forgetDue } from './dd_mail.js';
 import wasm from './dd_mail_bg.wasm';
 import { MEMBERS, RELEASE, ALIASES } from './fleet.js';
 import { boxApi, memberApi } from './unlock.js';
 import { forgetApi } from './leaving.js';
+import { sendApi } from './send.js';
 import boxesHtml from './boxes.html';
 import boxesJs from './boxes.js';
 import changeHtml from './change.html';
@@ -400,6 +404,8 @@ export default {
       const [body, type] = STATIC[path];
       return new Response(body, { headers: { 'content-type': type, 'cache-control': 'public, max-age=300', 'x-content-type-options': 'nosniff' } });
     }
+    // a box's mail: signed by its TPM, from no page at all
+    if (path === '/send') return sendApi(req, env, json, { entry, lists, stateIn });
     if (path.startsWith('/api/')) {
       // the pages here are the only callers
       const origin = req.headers.get('origin');
