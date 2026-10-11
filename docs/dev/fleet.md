@@ -183,8 +183,9 @@ dead route (node2, 2026-10-11). `dd-wired-watch`
 ([wired-watch.sh](../../nix/modules/box/wired-watch.sh)) asks the router
 over the cable every 30 s (`ping -I`). After 90 s without an answer it
 resets the adapter if it is USB (its `authorized` 0 then 1), and if the
-cable still does not answer it takes `house-wired` down so the wifi carries
-everything. While on wifi it listens for the router on the cable with an
+cable still does not answer while the router answers over the wifi, it
+takes `house-wired` down so the wifi carries everything (with the wifi
+down too, or a router that answers neither, the cable stays). While on wifi it listens for the router on the cable with an
 ARP probe (no address, so no route moves), and every 10 minutes brings the
 profile up to try it outright; `house-wired` comes back the moment the
 router answers over it. It never reboots, and writes `dd_wired_state`

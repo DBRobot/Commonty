@@ -8,7 +8,7 @@
 # back the wired profile goes down so the wifi carries everything, and the
 # cable is tried again until it answers. Never a reboot.
 # Environment: MAC (the wired adapter's), GATEWAY, PROFILE (house-wired),
-# DIR (this unit's state), FACTS (node_exporter's textfile folder), GRACE,
+# WIFI (the wifi interface), DIR (this unit's state), FACTS (node_exporter's textfile folder), GRACE,
 # RETRY (seconds between full tries of the cable while on wifi).
 set -u
 # NetworkManager not up (stopped under a switch, or still starting): next time
@@ -16,12 +16,13 @@ nmcli -t -f RUNNING general >/dev/null 2>&1 || exit 0
 
 now=$(date +%s)
 # state: ok, failing or wifi; since when; when the failing began; resets
-# since boot and the last one
-state=ok since=$now fail=0 resets=0 reset_at=0 tried=0
-[ -s "$DIR/state" ] && read -r state since fail resets reset_at tried <"$DIR/state"
+# since boot and the last one; the last full try of the cable while on wifi;
+# when this failing was last acted on
+state=ok since=$now fail=0 resets=0 reset_at=0 tried=0 acted=0
+[ -s "$DIR/state" ] && read -r state since fail resets reset_at tried acted <"$DIR/state"
 
 save() {
-  printf '%s %s %s %s %s %s\n' "$state" "$since" "$fail" "$resets" "$reset_at" "$tried" >"$DIR/state.tmp"
+  printf '%s %s %s %s %s %s %s\n' "$state" "$since" "$fail" "$resets" "$reset_at" "$tried" "$acted" >"$DIR/state.tmp"
   mv -f "$DIR/state.tmp" "$DIR/state"
   [ -d "$FACTS" ] || return 0
   local n=0
@@ -126,21 +127,32 @@ if [ $((now - fail)) -lt "$GRACE" ]; then
   exit 0
 fi
 
-echo "no answer over the cable for $((now - fail)) s"
-if [ -n "$dev" ] && usb_reset "$dev"; then
-  resets=$((resets + 1))
-  reset_at=$now
-  save
-  if comes_back 45; then
-    echo "the router answers over the cable after the reset"
-    to ok
-    fail=0
+# once a failing: the reset, if there is one to try
+if [ "$acted" -lt "$fail" ]; then
+  acted=$now
+  echo "no answer over the cable for $((now - fail)) s"
+  if [ -n "$dev" ] && usb_reset "$dev"; then
+    resets=$((resets + 1))
+    reset_at=$now
     save
-    exit 0
+    if comes_back 45; then
+      echo "the router answers over the cable after the reset"
+      to ok
+      fail=0
+      save
+      exit 0
+    fi
+    echo "still no answer after the reset"
+  else
+    echo "${dev:-the wired adapter} is not a USB device here: no reset to try"
   fi
-  echo "still no answer after the reset"
-else
-  echo "${dev:-the wired adapter} is not a USB device here: no reset to try"
 fi
-wired_down
+# only for a wifi the router answers on: with the wifi down too there is
+# nothing to fall back on, and a router that answers neither is the router
+# (or one that does not answer a ping), not the cable
+if [[ $(nmcli -t -g GENERAL.STATE device show "$WIFI" 2>/dev/null) == 100* ]] && answers "$WIFI"; then
+  wired_down
+elif [ "$acted" = "$now" ]; then
+  echo "the router does not answer over the wifi ($WIFI) either: $PROFILE stays up"
+fi
 save
