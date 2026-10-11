@@ -63,6 +63,7 @@
         "adblock"
         "unlock"
         "leaving"
+        "wired-watch"
       ];
       rust =
         let
