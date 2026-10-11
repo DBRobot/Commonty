@@ -3,7 +3,8 @@
 //! Runs from a timer. Fetches the release file, checks it is signed by the
 //! release key this box was installed with, refuses a counter lower than
 //! the last one it applied, looks up its own entry, fetches that closure,
-//! checks the nar hash, switches, and proves the box is still a box: no
+//! checks the nar hash and that two boxes of the fleet vouched for that
+//! closure, switches, and proves the box is still a box: no
 //! failed units, sshd listening, the verifier answering. If that fails
 //! within the window the previous system comes back. Nothing here accepts
 //! a push; the only input is a signed file and the only authority is the
@@ -49,6 +50,134 @@ struct Args {
     /// switch may not strand the box, however healthy it looks from here.
     #[arg(long, env = "DD_AGENT_REACH", default_value = "")]
     reach: String,
+    /// json file of the fleet's boxes, name -> ssh host key, as this box's
+    /// system was built with them (fleet/boxes.json): whose word on a
+    /// closure counts. None, or fewer than two, is a fleet that cannot vouch.
+    #[arg(long, env = "DD_AGENT_ATTESTERS")]
+    attesters: Option<PathBuf>,
+}
+
+/// Why this box may switch to a closure on the boxes' word, or may without it.
+#[derive(Debug, PartialEq, Eq)]
+enum Vouched {
+    /// these boxes of the fleet vouched for exactly this closure
+    By(Vec<String>),
+    /// the fleet this box was built with has fewer boxes than must vouch
+    FleetTooSmall,
+    /// signed as published with no box asked, on a box that has never
+    /// taken an attested release
+    Bootstrap,
+    /// a release from before attestations, on a box that has never taken one
+    Before,
+}
+
+/// The rule. Two boxes of this box's fleet vouch for its closure, or it is
+/// refused - except on a box that has never taken an attested release
+/// (`since` is None), which still takes one from before them or one the
+/// release key marks as bootstrap; once it has, neither will do again. A
+/// release that carries attestations is held to them from the start.
+fn judge(
+    fleet: usize,
+    by: &std::collections::BTreeSet<String>,
+    carries: bool,
+    bootstrap: bool,
+    since: Option<u64>,
+) -> std::result::Result<Vouched, String> {
+    if fleet < release::ATTEST_NEED {
+        return Ok(Vouched::FleetTooSmall);
+    }
+    if by.len() >= release::ATTEST_NEED {
+        return Ok(Vouched::By(by.iter().cloned().collect()));
+    }
+    let short = format!(
+        "{} of the {} boxes needed vouch for it{}",
+        by.len(),
+        release::ATTEST_NEED,
+        if by.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", by.iter().cloned().collect::<Vec<_>>().join(", "))
+        }
+    );
+    match since {
+        Some(n) => Err(format!(
+            "{short}; this box has required that since release {n}"
+        )),
+        None if carries => Err(short),
+        None if bootstrap => Ok(Vouched::Bootstrap),
+        None => Ok(Vouched::Before),
+    }
+}
+
+/// The fleet's boxes and their host keys, as this system was built with them.
+fn read_attesters(path: Option<&Path>) -> Result<std::collections::BTreeMap<String, String>> {
+    let Some(path) = path else {
+        return Ok(Default::default());
+    };
+    let raw = fs::read_to_string(path).with_context(|| format!("{}", path.display()))?;
+    serde_json::from_str(&raw).with_context(|| format!("{}", path.display()))
+}
+
+/// The first release this box took on the boxes' word; from then on it
+/// takes no other kind.
+fn read_since(state: &Path) -> Option<u64> {
+    fs::read_to_string(state.join("attested"))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
+/// Who vouches for this box's closure, each attestation's signature
+/// checked by ssh-keygen in a directory of the agent's own.
+fn check_vouchers(
+    args: &Args,
+    payload: &release::Payload,
+    name: &str,
+    fleet: &std::collections::BTreeMap<String, String>,
+) -> (std::collections::BTreeSet<String>, Vec<String>) {
+    let dir = args.state.join("attest");
+    let _ = fs::remove_dir_all(&dir);
+    let made = {
+        let mut b = fs::DirBuilder::new();
+        std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+        b.create(&dir)
+    };
+    let out = release::vouchers(payload, name, fleet, |a, key| {
+        made.is_ok() && release::ssh_signed(&dir, a, key).is_ok()
+    });
+    let _ = fs::remove_dir_all(&dir);
+    out
+}
+
+/// What the boxes' word says about this release for this box, and the
+/// state written once it is an attested one.
+fn vouch(
+    args: &Args,
+    payload: &release::Payload,
+    name: &str,
+) -> Result<std::result::Result<Vouched, String>> {
+    let fleet = read_attesters(args.attesters.as_deref())?;
+    let (by, not) = if fleet.len() >= release::ATTEST_NEED {
+        check_vouchers(args, payload, name, &fleet)
+    } else {
+        Default::default()
+    };
+    for n in &not {
+        eprintln!("attestation: {n}");
+    }
+    let since = read_since(&args.state);
+    let verdict = judge(
+        fleet.len(),
+        &by,
+        !payload.attestations.is_empty(),
+        payload.bootstrap,
+        since,
+    );
+    if matches!(verdict, Ok(Vouched::By(_))) && since.is_none() {
+        let tmp = args.state.join("attested.tmp");
+        fs::write(&tmp, format!("{}\n", payload.counter))?;
+        fs::rename(tmp, args.state.join("attested"))?;
+    }
+    Ok(verdict)
 }
 
 /// Can this box still reach the fleet? None of these is a health check of
@@ -189,6 +318,11 @@ fn run(args: &Args) -> Result<String> {
     // probe.
     let pending = args.state.join("pending");
     if current == mine.path {
+        // nothing to switch to, so nothing to refuse; but a release that
+        // runs here on the boxes' word is where requiring it starts
+        if let Ok(Ok(Vouched::By(by))) = vouch(args, &signed.payload, &name) {
+            eprintln!("release {counter}: vouched for by {}", by.join(", "));
+        }
         let owed = fs::read_to_string(&pending)
             .map(|t| t.trim() == stamp)
             .unwrap_or(false);
@@ -227,6 +361,27 @@ fn run(args: &Args) -> Result<String> {
         write_applied(&args.state, counter, &stamp)?;
         record(args, &name, counter, "ok");
         return Ok(format!("release {counter}: already running {}", mine.path));
+    }
+
+    // Two boxes of this fleet rebuilt exactly this closure and signed so
+    // with their host keys, or nothing changes here. The release key alone
+    // does not move a box. Refused before anything is fetched or switched:
+    // the box stays on what it runs.
+    match vouch(args, &signed.payload, &name)? {
+        Ok(Vouched::By(by)) => eprintln!("release {counter}: vouched for by {}", by.join(", ")),
+        Ok(Vouched::FleetTooSmall) => {
+            eprintln!("release {counter}: a fleet of fewer than two boxes; no box can vouch")
+        }
+        Ok(Vouched::Bootstrap) => {
+            eprintln!("release {counter}: bootstrap, published with no box asked to vouch")
+        }
+        Ok(Vouched::Before) => eprintln!(
+            "release {counter}: carries no attestations; taken, as this box has not yet taken one that does"
+        ),
+        Err(why) => {
+            record(args, &name, last, "refused");
+            bail!("release {counter}: not switching to {}: {why}", mine.path);
+        }
     }
 
     // fetch, then check the contents are what was signed: an input-addressed
@@ -675,6 +830,196 @@ mod tests {
         assert_eq!(
             fs::read_to_string(dir.join("applied")).unwrap().trim(),
             "7 /nix/store/x"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn two_boxes_vouch_or_nothing_moves() {
+        use std::collections::BTreeSet;
+        let none = BTreeSet::new();
+        let one: BTreeSet<String> = ["node1".to_string()].into();
+        let two: BTreeSet<String> = ["node1".to_string(), "node2".to_string()].into();
+        // two boxes of the fleet: taken, before and after it is required
+        assert_eq!(
+            judge(2, &two, true, false, None),
+            Ok(Vouched::By(vec!["node1".into(), "node2".into()]))
+        );
+        assert!(matches!(
+            judge(3, &two, true, false, Some(5)),
+            Ok(Vouched::By(_))
+        ));
+        // one is not two, whatever else the release says
+        assert!(judge(2, &one, true, false, None).is_err());
+        assert!(judge(2, &one, true, true, None).is_err());
+        let why = judge(2, &one, true, false, Some(5)).unwrap_err();
+        assert!(
+            why.contains("1 of the 2") && why.contains("since release 5"),
+            "{why}"
+        );
+        // once required: a release without them, bootstrap or not, is refused
+        assert!(judge(2, &none, false, false, Some(5)).is_err());
+        assert!(judge(2, &none, false, true, Some(5)).is_err());
+        // until then: one from before them, or marked bootstrap, is taken
+        assert_eq!(judge(2, &none, false, false, None), Ok(Vouched::Before));
+        assert_eq!(judge(2, &none, false, true, None), Ok(Vouched::Bootstrap));
+        // a fleet that cannot make two
+        assert_eq!(
+            judge(1, &none, false, false, Some(5)),
+            Ok(Vouched::FleetTooSmall)
+        );
+        assert_eq!(
+            judge(0, &none, true, false, None),
+            Ok(Vouched::FleetTooSmall)
+        );
+    }
+
+    fn args_in(state: &Path, attesters: Option<PathBuf>) -> Args {
+        Args::parse_from(
+            [
+                "dd-agent".to_string(),
+                "--url".into(),
+                "http://127.0.0.1:9/current.json".into(),
+                "--key-file".into(),
+                "/nonexistent".into(),
+                "--state".into(),
+                state.display().to_string(),
+            ]
+            .into_iter()
+            .chain(attesters.map(|a| format!("--attesters={}", a.display()))),
+        )
+    }
+
+    fn payload(attestations: Vec<release::Attestation>) -> release::Payload {
+        let mut boxes = std::collections::BTreeMap::new();
+        boxes.insert(
+            "node2".to_string(),
+            release::BoxRelease {
+                path: "/nix/store/new-node2".into(),
+                nar_hash: "sha256-x".into(),
+                closure: Some("c".into()),
+            },
+        );
+        release::Payload {
+            counter: 12,
+            rev: "a".repeat(40),
+            issued: 1,
+            boxes,
+            attestations,
+            bootstrap: false,
+        }
+    }
+
+    #[test]
+    fn a_refusal_leaves_the_state_as_it_was_and_says_why() {
+        let dir = std::env::temp_dir().join(format!("dd-agent-vouch-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let fleet = dir.join("attesters.json");
+        fs::write(
+            &fleet,
+            r#"{"node1": "ssh-ed25519 AAAA1", "node2": "ssh-ed25519 AAAA2"}"#,
+        )
+        .unwrap();
+        let args = args_in(&dir, Some(fleet.clone()));
+        // an attestation whose signature is nobody's: refused, nothing written
+        let forged = release::Attestation {
+            attester: "node1".into(),
+            statement: serde_json::json!({
+                "v": 1, "attester": "node1", "flake": "git+https://x/o/r", "rev": "a".repeat(40),
+                "boxes": { "node2": { "path": "/nix/store/new-node2", "closure": "c" } },
+            })
+            .to_string(),
+            signature: "not a signature".into(),
+        };
+        let p = payload(vec![
+            forged.clone(),
+            release::Attestation {
+                attester: "node2".into(),
+                ..forged
+            },
+        ]);
+        let why = vouch(&args, &p, "node2").unwrap().unwrap_err();
+        assert!(why.starts_with("0 of the 2"), "{why}");
+        assert_eq!(read_since(&dir), None);
+        assert!(!dir.join("attest").exists(), "its work directory is gone");
+        // the same, signed by the two boxes' own host keys: taken, and
+        // from here on required
+        let keygen = |n: &str| {
+            let k = dir.join(n);
+            assert!(
+                Command::new("ssh-keygen")
+                    .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+                    .arg(&k)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let p = fs::read_to_string(k.with_extension("pub")).unwrap();
+            (
+                k,
+                p.split_whitespace().take(2).collect::<Vec<_>>().join(" "),
+            )
+        };
+        let sign = |key: &Path, text: &str| {
+            use std::io::Write as _;
+            let mut c = Command::new("ssh-keygen")
+                .args(["-Y", "sign", "-q", "-f"])
+                .arg(key)
+                .args(["-n", release::ATTEST_NAMESPACE])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            c.stdin.take().unwrap().write_all(text.as_bytes()).unwrap();
+            String::from_utf8(c.wait_with_output().unwrap().stdout).unwrap()
+        };
+        let ((k1, pub1), (k2, pub2)) = (keygen("node1"), keygen("node2"));
+        let real = dir.join("real.json");
+        fs::write(
+            &real,
+            serde_json::json!({ "node1": pub1, "node2": pub2 }).to_string(),
+        )
+        .unwrap();
+        let said = |who: &str, key: &Path| {
+            let statement = p.attestations[0]
+                .statement
+                .replace("\"node1\"", &format!("\"{who}\""));
+            release::Attestation {
+                attester: who.into(),
+                signature: sign(key, &statement),
+                statement,
+            }
+        };
+        let good = payload(vec![said("node1", &k1), said("node2", &k2)]);
+        let both = vouch(&args_in(&dir, Some(real.clone())), &good, "node2").unwrap();
+        assert_eq!(both, Ok(Vouched::By(vec!["node1".into(), "node2".into()])));
+        assert_eq!(read_since(&dir), Some(12));
+        // the box alone is not two boxes
+        let alone = payload(vec![said("node2", &k2)]);
+        assert!(
+            vouch(&args_in(&dir, Some(real)), &alone, "node2")
+                .unwrap()
+                .is_err()
+        );
+        fs::remove_file(dir.join("attested")).unwrap();
+
+        // a release from before them, on a box that never required them
+        assert_eq!(
+            vouch(&args, &payload(vec![]), "node2").unwrap(),
+            Ok(Vouched::Before)
+        );
+        // once one was taken on the boxes' word, the same is refused
+        fs::write(dir.join("attested"), "11\n").unwrap();
+        assert!(vouch(&args, &payload(vec![]), "node2").unwrap().is_err());
+        // a fleet file that does not parse stops the agent rather than
+        // turning the check off
+        fs::write(&fleet, "not json").unwrap();
+        assert!(vouch(&args, &payload(vec![]), "node2").is_err());
+        // no fleet file at all (the vm test's boxes): a fleet that cannot vouch
+        assert_eq!(
+            vouch(&args_in(&dir, None), &payload(vec![]), "node2").unwrap(),
+            Ok(Vouched::FleetTooSmall)
         );
         fs::remove_dir_all(&dir).unwrap();
     }

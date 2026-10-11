@@ -27,7 +27,8 @@ dd release publish            the laptop, with the dd built from what merged
                                                                   box instead
   every box runs dd-attest over ssh; 2 must agree per box   no ─► stop
   counter = the published counter + 1 (signature checked first)
-  sign with the release key (v2, or legacy for one release)
+  sign with the release key (v2, or legacy for one release),
+    the boxes' signed answers inside it
   built here? copy the closures to the cache bucket
   releases branch: current.json + history/<counter>.json, pushed
   nudge: ssh each box, `systemctl start --no-block dd-agent`
@@ -37,6 +38,7 @@ dd release publish            the laptop, with the dd built from what merged
 │
 each box: dd-agent, nudged or on its timer (every 5 min)
   fetch current.json ─► verify ─► counter ≥ mine? ─► my entry? ─► tried before?
+  two boxes of my fleet vouch for my closure?               no ─► refused, nothing changes
   nix copy from the cache ─► nar hash ─► closure digest
   arm the guard ─► set the profile ─► switch
   healthy within probeSeconds, and still reaching the fleet?
@@ -81,7 +83,15 @@ The code:
         "closure": "79f62b…"           sha256 over the whole closure (below)
       },
       "node2": { … }
-    }
+    },
+    "attestations": [                  each box's answer from dd-attest, as signed
+      {
+        "attester": "node1",
+        "statement": "{\"v\":1,\"attester\":\"node1\",\"flake\":…,\"rev\":…,\"boxes\":{…}}",
+        "signature": "-----BEGIN SSH SIGNATURE-----…"
+      },
+      { "attester": "node2", … }
+    ]
   },
   "signer": "fdpY…=",                  the release key's public half, base64
   "signature": "WeQx…=="               ed25519 over the payload, base64
@@ -95,6 +105,16 @@ the contents come from a cache bucket more than one machine can write. So
 lists, as `<path> <narHash>` lines, sorted, sha256, hex
 (`closure_digest`). It is optional in the format: releases before it
 (history/1 to 80) have none, and a box checks it when it is there.
+
+**Why the attestations.** Publish refuses to sign unless two boxes rebuilt
+every closure (below), but a box that only checked the release key's
+signature would take whatever that key signed: the key alone could move
+the fleet. So the boxes' answers travel inside the signed payload, exactly
+as dd-attest printed them, and each box checks them again before it
+switches ([What the agent does](#what-the-agent-does), step 7). Absent on
+releases before they were carried. `"bootstrap": true` instead says, under
+the release key, that no box was asked (`DD_ATTEST=off`); see [The
+bridges](#the-bridges).
 
 **What is signed.** Two forms; a box accepts either (`verify_json`):
 
@@ -292,6 +312,8 @@ previous       the system it ran before the last switch
 pending        "<counter> <path>": switched to, not yet proved
 failed-before  the units failed before that switch, one a line
 refused        "<counter> <path>" lines: tried here and rolled back
+attested       the first release this box took on two boxes' word; from
+               then on it takes nothing else
 ```
 
 Step by step:
@@ -316,22 +338,53 @@ Step by step:
    against `failed-before` (what was failing before the switch, not what
    is failing after the reboot); failing it rolls back to `previous`.
    Otherwise the counter is written and the run ends `ok`.
-7. **Fetch and check.** `nix copy --from <cache> --no-check-sigs <path>`,
+7. **Two boxes vouch.** The boxes whose word counts are the ones this
+   box's own system was built with: `/etc/dd/attesters.json`, each box in
+   `fleet/boxes.json` and its `hostKey` (`dd.agent.attesters`, set in
+   core.nix). A release cannot add an attester for itself. An attestation
+   counts when its attester is on that list, its statement is about this
+   release's `rev`, names this box with exactly its `path` and `closure`,
+   and `ssh-keygen -Y verify` finds it signed by that box's host key in
+   the attest namespace (`release::vouchers`, `release::ssh_signed`). At
+   least two distinct boxes must vouch; the box itself may be one of them,
+   never the only one. Each attestation that does not count is logged
+   (`attestation: node3: not one of this fleet's boxes`). Then
+   (`judge` in dd-agent.rs):
+
+   ```
+   fewer than 2 boxes on the list      taken: a fleet that cannot vouch
+   2 or more vouch                     taken; `attested` written the first time
+   fewer, and `attested` exists        refused: required since that release
+   fewer, and the release carries      refused: what it carries does not hold
+     attestations
+   none, "bootstrap", no `attested`    taken: bootstrap
+   none, no `attested`                 taken: a release from before them
+   ```
+
+   A refusal comes before anything is fetched or changed: the box stays on
+   the generation it runs, the result is `refused`, and the unit fails with
+   `release N: not switching to <path>: 1 of the 2 boxes needed vouch for
+   it (node1)`. It is not added to `refused`, so a box that gets its
+   `attested` file removed by hand would take it on the next run.
+   The running release, when it is already this box's, is never refused
+   here, but if two boxes vouch for it `attested` is written: that is how a
+   box whose release came before the agent that checks starts requiring.
+8. **Fetch and check.** `nix copy --from <cache> --no-check-sigs <path>`,
    then the toplevel's nar hash must equal `nar_hash`, and the digest of
    the recursive path-info must equal `closure`. A mismatch refuses the
    release before anything changes.
-8. **Get ready to go back.** Write `previous`, the units already failed
+9. **Get ready to go back.** Write `previous`, the units already failed
    (`failed-before`), then `pending`. Note whether any other box is
    reachable.
-9. **Arm the guard**: a transient `dd-agent-guard` timer
+10. **Arm the guard**: a transient `dd-agent-guard` timer
    (`systemd-run --on-active=2×probeSeconds+300`) that sets the profile
    back to the *current* system and runs its `switch-to-configuration
    switch`, as the agent's own rollback does. If the agent dies mid-way, or
    the switch takes it down, the guard brings the old system back, and the
    next boot comes up on it too.
-10. **Switch.** Set `/nix/var/nix/profiles/system` to the new path, run its
+11. **Switch.** Set `/nix/var/nix/profiles/system` to the new path, run its
     `switch-to-configuration switch`.
-11. **Is it a box?** Healthy means all of:
+12. **Is it a box?** Healthy means all of:
     - the switch exited 0;
     - within `probeSeconds` (600), a probe passes, tried every 10 s: no
       *newly* failed unit (units failed before the switch, and `dd-game@*`,
@@ -339,13 +392,13 @@ Step by step:
       127.0.0.1:4181;
     - if the box reached the fleet before, it still does: two answers in a
       row, 5 s apart, within `probeSeconds`.
-12. **Healthy:** stop the guard's timer, then look again at what runs. If
+13. **Healthy:** stop the guard's timer, then look again at what runs. If
     the guard went off while the probes ran (its service started, or
     `/run/current-system` is no longer the release), the pass was measured
     across a switch back: it is a rollback, "the guard switched back before
     it was proved". Otherwise disarm, remove `pending`, write `counter` and
     `applied`, result `ok`.
-13. **Not:** append to `refused` first (so a crash before the undo does not
+14. **Not:** append to `refused` first (so a crash before the undo does not
     meet the same release in five minutes), let a guard already switching
     back finish, set the profile back, switch back, disarm, remove
     `pending`, result `rollback`. The unit fails with
@@ -362,6 +415,22 @@ a box healthy inside and cut off from everyone is rolled back. Release 211
 went back on node1 because node2 has nothing on 443 and an older agent did
 not count a refusal. With no other boxes, there is nothing to compare and
 reach always holds.
+
+**Migrating to attestations.** Releases published before them carry
+none, and the agent that checks them reaches each box in a release
+published by the publisher that adds them. The rule is per box, kept in its state: until a
+box has taken one release on two boxes' word it still takes a release
+without attestations (one published by an older `dd`, or marked
+bootstrap), and logs that it did; the first attested release it takes or
+finds itself running writes `attested`, and from then on it takes nothing
+less. A release that carries attestations is held to them from the start.
+The alternative, requiring them from the agent's first run, refuses
+nothing more in practice (publish has carried them since the same pull
+request) but would leave no way to bootstrap a new fleet of two boxes
+before dd-attest runs on them. A box that must be moved without two boxes
+vouching once it requires them is moved by hand, at the box (remove
+`/var/lib/dd-agent/attested`, or switch it yourself): no flag in a release
+and no setting per box turns the check off.
 
 **Why the counter only goes up.** Every release is signed, so an old one is
 still a valid file. Without the counter, whoever serves `current.json` (the
@@ -415,6 +484,9 @@ release N is older than the M …        a counter going backwards
 … applied N as something else          the same counter naming another system
 release N has nothing for <box>        the box is not in the release
 … was tried here and rolled back …     in refused; it will not try it again
+… not switching to …: K of the 2 …    too few boxes of this fleet vouch for
+                                       its closure; "attestation: …" lines say
+                                       why each one did not count
 … has nar hash X, the release says Y   the cache handed over something else
 the closure under … is not the one …   the same, somewhere under the top path
 … did not come up healthy; back on …   the probe or the reach failed;
@@ -452,11 +524,14 @@ no current release could be read, yet …      the forge is not answering
 Three environment variables exist for one-off crossings. None is for
 everyday use.
 
-- **`DD_ATTEST=off`**: publish without asking any box to vouch. For the
-  one release that first carried `dd-attest` to the boxes: before it, there
-  was nothing on them to ask. Also the only way to publish to a fleet of
-  one box. It prints that no box vouched.
-- **`DD_RELEASE_FORM=legacy`**: sign the old way and drop `closure`. For the
+- **`DD_ATTEST=off`**: publish without asking any box to vouch, for
+  bootstrap only. The release says so under the release key
+  (`"bootstrap": true`, no attestations). A fleet of one box needs it, and
+  its agent takes it (fewer than two attesters). A box that has taken an
+  attested release refuses it, whatever the fleet; on one that has not, it
+  is taken and logged as bootstrap. It prints that no box vouched.
+- **`DD_RELEASE_FORM=legacy`**: sign the old way and drop `closure`, the
+  attestations and the bootstrap mark. For the
   one release that carried the v2-reading agent to boxes still running the
   old one. Any value but `legacy` or `v2` is an error.
 - **`DD_BUILD_STORE=ssh-ng://admin@<box>`**: when publish has to build
@@ -486,10 +561,23 @@ release 2  again, unchanged              taken: a re-publish
 release 6  broken, agent killed          the guard: profile and system back on marked
 ```
 
-The digest, the two forms and the documents have unit tests in
-[lib.rs](../../servers/system/release/src/lib.rs), including one that
+The VM test's box has no attesters (`dd.agent.attesters` empty), so it
+runs every case above as a fleet that cannot vouch. The attestations are
+unit tests: in [lib.rs](../../servers/system/release/src/lib.rs) which
+attestation counts (another box, path, closure, commit, a claimed
+statement, another key) and the real `ssh-keygen` check (another key, the
+wrong namespace, a changed statement, a name that would break the
+allowed-signers line); in
+[dd-agent.rs](../../servers/system/release/src/bin/dd-agent.rs) the rule
+(`two_boxes_vouch_or_nothing_moves`) and a refusal writing nothing, two
+real host keys being taken and `attested` written, the box alone not being
+two, and a fleet file that does not parse stopping the agent rather than
+turning the check off; in
+[release_cmd.rs](../../client/cli/src/release_cmd.rs) that what publish
+puts in the release is what a box checks and takes. The digest, the two
+forms and the documents have unit tests in lib.rs too, including one that
 plays the old agent against a bridging release; reach has one in
-[dd-agent.rs](../../servers/system/release/src/bin/dd-agent.rs).
+dd-agent.rs.
 
 ## Changing it
 
@@ -516,9 +604,11 @@ plays the old agent against a bridging release; reach has one in
 - **A new unit or timer on the boxes.** It must not fail during a switch
   (above). Run it in the VM test, and expect the box to roll back if it
   does.
-- **The attest rule.** `ATTEST_NEED` (2) and the accepted kinds of path are
-  the whole of what stops one machine from choosing what the fleet runs.
-  Loosening either needs the reason in the pull request.
+- **The attest rule.** `ATTEST_NEED` (2, in lib.rs, for publish and the
+  agent alike) and the accepted kinds of path are the whole of what stops
+  one machine from choosing what the fleet runs. Loosening either needs
+  the reason in the pull request. The agent's `judge` is the other half:
+  never add a way for a release, or one box's setting, to switch it off.
 - **A new box** gets an entry in `fleet/boxes.json` (with `net` and
   `hostKey`) and is in the next release; it is also asked to vouch from
   then on.

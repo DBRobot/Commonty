@@ -10,7 +10,8 @@
 //! than the last it applied, fetches its own path, checks the hash, and
 //! switches. Nothing a box or the forge does can produce a valid one.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -27,6 +28,8 @@ pub enum Error {
     Signer(String),
     #[error("key: {0}")]
     Key(String),
+    #[error("attestation: {0}")]
+    Attest(String),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 }
@@ -106,6 +109,149 @@ pub struct Payload {
     pub issued: u64,
     /// box name -> what it runs. Sorted, so the bytes signed are stable.
     pub boxes: BTreeMap<String, BoxRelease>,
+    /// The boxes' signed words that they rebuilt these closures
+    /// (dd-attest), as publish received them. A box switches only to a
+    /// closure two boxes of its fleet vouch for here (`vouchers`).
+    /// Absent on releases made before boxes checked them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attestations: Vec<Attestation>,
+    /// Published with no box asked to vouch (DD_ATTEST=off), and saying so
+    /// under the release key: for bootstrap alone. A box that has taken an
+    /// attested release never takes one of these again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bootstrap: bool,
+}
+
+/// The namespace dd-attest signs in: an ssh signature made for anything
+/// else is not an attestation.
+pub const ATTEST_NAMESPACE: &str = "commonty-attest-v1";
+/// How many distinct boxes must vouch for each box's closure. The box
+/// itself may be one of them, never the only one.
+pub const ATTEST_NEED: usize = 2;
+
+/// One box's signed answer from dd-attest: the statement exactly as signed,
+/// `{"v":1,"attester","flake","rev","boxes":{<name>:{path,closure}}}`, and
+/// its ssh signature by that box's host key.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Attestation {
+    pub attester: String,
+    pub statement: String,
+    pub signature: String,
+}
+
+/// Which boxes of `fleet` (name -> ssh host key) vouch, in `payload`, for
+/// `name`'s closure: a statement about this release's commit, naming the
+/// same path and the same closure digest, signed by the attester's own host
+/// key as `fleet` has it (`signed` checks that; `ssh_signed` is the real
+/// check). The second list says why each other attestation did not count.
+pub fn vouchers(
+    payload: &Payload,
+    name: &str,
+    fleet: &BTreeMap<String, String>,
+    signed: impl Fn(&Attestation, &str) -> bool,
+) -> (BTreeSet<String>, Vec<String>) {
+    let mut by = BTreeSet::new();
+    let mut not = Vec::new();
+    let Some(mine) = payload.boxes.get(name) else {
+        return (by, vec![format!("the release has nothing for {name}")]);
+    };
+    let Some(closure) = &mine.closure else {
+        return (
+            by,
+            vec![format!("no closure digest for {name} to vouch for")],
+        );
+    };
+    for a in &payload.attestations {
+        let who = &a.attester;
+        let Some(host_key) = fleet.get(who) else {
+            not.push(format!("{who}: not one of this fleet's boxes"));
+            continue;
+        };
+        let Ok(st) = serde_json::from_str::<serde_json::Value>(&a.statement) else {
+            not.push(format!("{who}: the statement is not json"));
+            continue;
+        };
+        let about = st["v"] == 1
+            && st["attester"].as_str() == Some(who)
+            && st["rev"].as_str() == Some(payload.rev.as_str())
+            && st["flake"].as_str().is_some_and(|f| !f.is_empty());
+        if !about {
+            not.push(format!(
+                "{who}: the statement is about another commit or box"
+            ));
+            continue;
+        }
+        let b = &st["boxes"][name];
+        if b["path"].as_str() != Some(mine.path.as_str())
+            || b["closure"].as_str() != Some(closure.as_str())
+        {
+            not.push(format!(
+                "{who}: does not vouch for this path and closure of {name}"
+            ));
+            continue;
+        }
+        if !signed(a, host_key) {
+            not.push(format!("{who}: not signed by its host key"));
+            continue;
+        }
+        by.insert(who.clone());
+    }
+    (by, not)
+}
+
+/// `a.statement` signed by `host_key` (as fleet/boxes.json has it), in the
+/// attest namespace, checked by ssh-keygen. `dir` is a fresh directory no
+/// one else may write in; the files it is given there are removed after.
+pub fn ssh_signed(dir: &Path, a: &Attestation, host_key: &str) -> Result<()> {
+    use std::io::Write as _;
+    // the allowed-signers line is built from these: neither may break out of it
+    let plain = !a.attester.is_empty()
+        && a.attester
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !plain || host_key.contains(['\n', '\r', '"']) {
+        return Err(Error::Attest(format!(
+            "{}: not a plain name and key",
+            a.attester
+        )));
+    }
+    let allowed = dir.join("allowed");
+    let sig = dir.join("sig");
+    std::fs::write(
+        &allowed,
+        format!(
+            "{} namespaces=\"{ATTEST_NAMESPACE}\" {host_key}\n",
+            a.attester
+        ),
+    )
+    .map_err(|e| Error::Attest(e.to_string()))?;
+    std::fs::write(&sig, &a.signature).map_err(|e| Error::Attest(e.to_string()))?;
+    let checked = (|| -> std::io::Result<bool> {
+        let mut c = std::process::Command::new("ssh-keygen")
+            .args(["-Y", "verify", "-f"])
+            .arg(&allowed)
+            .args(["-I", &a.attester, "-n", ATTEST_NAMESPACE, "-s"])
+            .arg(&sig)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        c.stdin
+            .take()
+            .expect("piped")
+            .write_all(a.statement.as_bytes())?;
+        Ok(c.wait()?.success())
+    })();
+    let _ = std::fs::remove_file(&allowed);
+    let _ = std::fs::remove_file(&sig);
+    match checked {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(Error::Attest(format!(
+            "{}: the signature is not its host key's",
+            a.attester
+        ))),
+        Err(e) => Err(Error::Attest(format!("ssh-keygen: {e}"))),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -325,6 +471,8 @@ mod tests {
             rev: "deadbeef".into(),
             issued: 1,
             boxes,
+            attestations: vec![],
+            bootstrap: false,
         }
     }
 
@@ -434,6 +582,8 @@ mod form_tests {
             rev: "deadbeef".into(),
             issued: 1,
             boxes,
+            attestations: vec![],
+            bootstrap: false,
         }
     }
 
@@ -524,5 +674,236 @@ mod doc_tests {
         assert!(verify_doc(&raw.replace("v1", "v2"), "app", &vk).is_err());
         // nor signed by some other key
         assert!(verify_doc(&raw, "app", &generate().verifying_key()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod attest_tests {
+    use super::*;
+
+    const REV: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    fn statement(attester: &str, rev: &str, path: &str, closure: &str) -> String {
+        serde_json::json!({
+            "v": 1, "attester": attester, "flake": "git+https://git.example/o/r", "rev": rev,
+            "boxes": { "node2": { "path": path, "closure": closure } },
+        })
+        .to_string()
+    }
+
+    fn att(attester: &str, statement: String) -> Attestation {
+        Attestation {
+            attester: attester.into(),
+            statement,
+            signature: format!("signed by {attester}"),
+        }
+    }
+
+    fn release(attestations: Vec<Attestation>) -> Payload {
+        let mut boxes = BTreeMap::new();
+        boxes.insert(
+            "node2".into(),
+            BoxRelease {
+                path: "/nix/store/aaaa-nixos-system-node2".into(),
+                nar_hash: "sha256-AAAA".into(),
+                closure: Some("c2".into()),
+            },
+        );
+        Payload {
+            counter: 9,
+            rev: REV.into(),
+            issued: 1,
+            boxes,
+            attestations,
+            bootstrap: false,
+        }
+    }
+
+    fn fleet() -> BTreeMap<String, String> {
+        ["node1", "node2", "node3"]
+            .iter()
+            .map(|n| (n.to_string(), format!("key of {n}")))
+            .collect()
+    }
+
+    // a signature counts when it is the attester's own key's
+    fn fake(a: &Attestation, key: &str) -> bool {
+        a.signature == format!("signed by {}", a.attester)
+            && key == format!("key of {}", a.attester)
+    }
+
+    #[test]
+    fn two_boxes_of_the_fleet_vouch_for_exactly_this_closure() {
+        let good = |who: &str| {
+            att(
+                who,
+                statement(who, REV, "/nix/store/aaaa-nixos-system-node2", "c2"),
+            )
+        };
+        let (by, not) = vouchers(
+            &release(vec![good("node1"), good("node2")]),
+            "node2",
+            &fleet(),
+            fake,
+        );
+        assert_eq!(by.into_iter().collect::<Vec<_>>(), ["node1", "node2"]);
+        assert!(not.is_empty(), "{not:?}");
+
+        // the same box twice is one box
+        let (by, _) = vouchers(
+            &release(vec![good("node1"), good("node1")]),
+            "node2",
+            &fleet(),
+            fake,
+        );
+        assert_eq!(by.len(), 1);
+
+        let cases = [
+            // a box the fleet does not know
+            att(
+                "stranger",
+                statement("stranger", REV, "/nix/store/aaaa-nixos-system-node2", "c2"),
+            ),
+            // another path, another closure, another commit
+            att(
+                "node1",
+                statement("node1", REV, "/nix/store/bbbb-nixos-system-node2", "c2"),
+            ),
+            att(
+                "node1",
+                statement("node1", REV, "/nix/store/aaaa-nixos-system-node2", "c9"),
+            ),
+            att(
+                "node1",
+                statement(
+                    "node1",
+                    &"f".repeat(40),
+                    "/nix/store/aaaa-nixos-system-node2",
+                    "c2",
+                ),
+            ),
+            // one box's statement claimed by another
+            att(
+                "node3",
+                statement("node1", REV, "/nix/store/aaaa-nixos-system-node2", "c2"),
+            ),
+            // signed by someone else's key
+            Attestation {
+                signature: "signed by node3".into(),
+                ..good("node1")
+            },
+        ];
+        for (i, c) in cases.into_iter().enumerate() {
+            let (by, not) = vouchers(&release(vec![c, good("node2")]), "node2", &fleet(), fake);
+            assert_eq!(by.len(), 1, "case {i}");
+            assert_eq!(not.len(), 1, "case {i}: {not:?}");
+        }
+
+        // vouching for one box is not vouching for another
+        let (by, not) = vouchers(
+            &release(vec![good("node1"), good("node2")]),
+            "node1",
+            &fleet(),
+            fake,
+        );
+        assert!(by.is_empty() && not.len() == 1);
+        // nor for a box whose closure the release does not pin
+        let mut p = release(vec![good("node1"), good("node2")]);
+        p.boxes.get_mut("node2").unwrap().closure = None;
+        assert!(vouchers(&p, "node2", &fleet(), fake).0.is_empty());
+    }
+
+    #[test]
+    fn they_are_signed_with_the_release_and_absent_when_there_are_none() {
+        let k = generate();
+        let mut p = release(vec![att(
+            "node1",
+            statement("node1", REV, "/nix/store/aaaa-nixos-system-node2", "c2"),
+        )]);
+        p.bootstrap = true;
+        let published = serde_json::to_string_pretty(&sign(p.clone(), &k).unwrap()).unwrap();
+        assert_eq!(
+            verify_json(&published, &k.verifying_key()).unwrap().payload,
+            p
+        );
+        // an attestation cannot be added, dropped or swapped after signing
+        let dropped = published.replace("\"bootstrap\": true", "\"bootstrap\": false");
+        assert!(verify_json(&dropped, &k.verifying_key()).is_err());
+        // a release without them is the bytes it always was, so the legacy
+        // form and the agents before this field read it unchanged
+        let bare = serde_json::to_string(&sign(release(vec![]), &k).unwrap()).unwrap();
+        assert!(!bare.contains("attestations") && !bare.contains("bootstrap"));
+    }
+
+    /// The real check, with ssh-keygen as the boxes have it
+    #[test]
+    fn only_the_host_key_in_the_attest_namespace_signs() {
+        let dir = std::env::temp_dir().join(format!("dd-attest-lib-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let keygen = |n: &str| {
+            let k = dir.join(n);
+            assert!(
+                std::process::Command::new("ssh-keygen")
+                    .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+                    .arg(&k)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let p = std::fs::read_to_string(k.with_extension("pub")).unwrap();
+            (
+                k,
+                p.split_whitespace().take(2).collect::<Vec<_>>().join(" "),
+            )
+        };
+        let sign = |key: &Path, ns: &str, text: &str| {
+            use std::io::Write as _;
+            let mut c = std::process::Command::new("ssh-keygen")
+                .args(["-Y", "sign", "-q", "-f"])
+                .arg(key)
+                .args(["-n", ns])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            c.stdin.take().unwrap().write_all(text.as_bytes()).unwrap();
+            String::from_utf8(c.wait_with_output().unwrap().stdout).unwrap()
+        };
+        let (k1, pub1) = keygen("node1");
+        let (_, pub2) = keygen("node2");
+        let st = statement("node1", REV, "/nix/store/aaaa-nixos-system-node2", "c2");
+        let a = Attestation {
+            attester: "node1".into(),
+            signature: sign(&k1, ATTEST_NAMESPACE, &st),
+            statement: st.clone(),
+        };
+        let work = dir.join("check");
+        std::fs::create_dir_all(&work).unwrap();
+        ssh_signed(&work, &a, &pub1).unwrap();
+        assert!(ssh_signed(&work, &a, &pub2).is_err(), "another box's key");
+        let other_ns = Attestation {
+            signature: sign(&k1, "file", &st),
+            ..a.clone()
+        };
+        assert!(
+            ssh_signed(&work, &other_ns, &pub1).is_err(),
+            "made for anything else"
+        );
+        let changed = Attestation {
+            statement: st.replace("c2", "c3"),
+            ..a.clone()
+        };
+        assert!(
+            ssh_signed(&work, &changed, &pub1).is_err(),
+            "changed under it"
+        );
+        let sneaky = Attestation {
+            attester: "node1 namespaces=\"x\"".into(),
+            ..a.clone()
+        };
+        assert!(ssh_signed(&work, &sneaky, &pub1).is_err());
+        assert_eq!(std::fs::read_dir(&work).unwrap().count(), 0, "nothing left");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -15,6 +15,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail, ensure};
 use auth::KeyStore as _;
 use clap::Subcommand;
+use release::ATTEST_NEED;
 
 use crate::build_order;
 
@@ -314,15 +315,24 @@ fn publish(
     // each evaluates the commit itself and accounts for every path, by
     // upstream's signature or by building it (dd-attest). CI, the forge
     // and the cache can each lie about a path; not past two rebuilds.
-    // DD_ATTEST=off is for the one release that first carries dd-attest.
+    // Their signed answers go in the release: each box checks them itself
+    // before it switches (dd-agent), so the release key alone moves no box.
+    // DD_ATTEST=off is for bootstrap alone, and the release says so under
+    // the key; a box that has taken an attested release refuses it.
+    let mut attestations = Vec::new();
+    let mut bootstrap = false;
     if dry_run {
         // a box's word is an ssh, a rebuild, minutes per box; a look at
         // what would be signed is not worth that
         eprintln!("== not vouched (dry run): no box was asked");
     } else if std::env::var("DD_ATTEST").as_deref() == Ok("off") {
-        eprintln!("== DD_ATTEST=off: no box was asked to vouch for this release");
+        eprintln!(
+            "== DD_ATTEST=off: no box was asked to vouch; the release is marked bootstrap, \
+             and a box that has taken an attested release will refuse it"
+        );
+        bootstrap = true;
     } else {
-        attest(&boxes, url, &rev, &built)?;
+        attestations = attest(&boxes, url, &rev, &built)?;
     }
 
     // The counter only ever goes up. A current release that cannot be
@@ -368,10 +378,14 @@ fn publish(
         Ok(other) => bail!("DD_RELEASE_FORM={other}: legacy or v2"),
     };
     if form == release::Form::Legacy {
-        eprintln!("== the old form: no closure digest, so the agents running now accept it");
+        eprintln!(
+            "== the old form: no closure digest and no attestations, so the agents running now accept it"
+        );
         for b in built.values_mut() {
             b.closure = None;
         }
+        attestations.clear();
+        bootstrap = false;
     }
     let signed = release::sign_as(
         release::Payload {
@@ -379,6 +393,8 @@ fn publish(
             rev: rev.clone(),
             issued: release::now(),
             boxes: built,
+            attestations,
+            bootstrap,
         },
         &key,
         form,
@@ -946,19 +962,16 @@ fn nudge(boxes: &serde_json::Value) {
     }
 }
 
-const ATTEST_NAMESPACE: &str = "commonty-attest-v1";
-/// boxes that must agree with CI on each box's closure
-const ATTEST_NEED: usize = 2;
-
 /// Ask every box, at once, to vouch for the release; each answer is
 /// checked against the box's ssh host key in boxes.json, and every box of
 /// the release needs ATTEST_NEED of them agreeing on its path and closure.
+/// The answers that check out, to go in the release as they were signed.
 fn attest(
     boxes: &serde_json::Value,
     url: &str,
     rev: &str,
     built: &BTreeMap<String, release::BoxRelease>,
-) -> Result<()> {
+) -> Result<Vec<release::Attestation>> {
     let boxes = boxes.as_object().context("boxes.json is not an object")?;
     ensure!(
         boxes.len() >= ATTEST_NEED,
@@ -1009,6 +1022,7 @@ fn attest(
         asks.push((name.clone(), c.spawn()));
     }
     let mut agree: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut signed = Vec::new();
     for (attester, child) in asks {
         let answer = child
             .map_err(anyhow::Error::from)
@@ -1024,7 +1038,8 @@ fn attest(
                 vouched(&attester, host_key, out.trim(), &flake, rev)
             });
         match answer {
-            Ok(said) => {
+            Ok((said, attestation)) => {
+                signed.push(attestation);
                 for (name, b) in built {
                     let same = said
                         .get(name)
@@ -1052,18 +1067,22 @@ fn attest(
         );
         eprintln!("   {name}: vouched for by {}", who.join(", "));
     }
-    Ok(())
+    Ok(signed)
 }
 
-/// one box's signed answer, checked: box name -> (path, closure)
+/// what one box vouched for: box name -> (path, closure)
+type Said = BTreeMap<String, (String, String)>;
+
+/// one box's signed answer, checked: what it says, and the answer as it
+/// was signed
 fn vouched(
     attester: &str,
     host_key: &str,
     answer: &str,
     flake: &str,
     rev: &str,
-) -> Result<BTreeMap<String, (String, String)>> {
-    let st = statement(attester, host_key, answer, flake, rev)?;
+) -> Result<(Said, release::Attestation)> {
+    let (st, attestation) = statement(attester, host_key, answer, flake, rev)?;
     let mut out = BTreeMap::new();
     for (name, b) in st["boxes"].as_object().context("no boxes")? {
         out.insert(
@@ -1074,7 +1093,7 @@ fn vouched(
             ),
         );
     }
-    Ok(out)
+    Ok((out, attestation))
 }
 
 /// one box's answer, taken only if its host key signed it, in the attest
@@ -1085,7 +1104,7 @@ fn statement(
     answer: &str,
     flake: &str,
     rev: &str,
-) -> Result<serde_json::Value> {
+) -> Result<(serde_json::Value, release::Attestation)> {
     let v: serde_json::Value =
         serde_json::from_str(answer.lines().last().unwrap_or_default()).context("the answer")?;
     let statement = v["statement"].as_str().context("no statement")?;
@@ -1096,7 +1115,14 @@ fn statement(
         st["v"] == 1 && st["attester"] == attester && st["rev"] == rev && st["flake"] == flake,
         "the statement is about something else"
     );
-    Ok(st)
+    Ok((
+        st,
+        release::Attestation {
+            attester: attester.to_string(),
+            statement: statement.to_string(),
+            signature: signature.to_string(),
+        },
+    ))
 }
 
 /// A new directory only this user can enter, at a name nobody else chose:
@@ -1130,29 +1156,20 @@ fn private_dir(prefix: &str) -> Result<PathBuf> {
 }
 
 /// `statement` signed by `attester`'s ssh host key, in the attest namespace
+/// (the same check every box makes of the release: release::ssh_signed)
 fn host_signed(attester: &str, host_key: &str, statement: &str, signature: &str) -> Result<()> {
     let dir = private_dir("dd-attest")?;
-    let allowed = dir.join("allowed");
-    let sig = dir.join("sig");
-    std::fs::write(
-        &allowed,
-        format!("{attester} namespaces=\"{ATTEST_NAMESPACE}\" {host_key}\n"),
-    )?;
-    std::fs::write(&sig, signature)?;
-    let mut c = Command::new("ssh-keygen")
-        .args(["-Y", "verify", "-f"])
-        .arg(&allowed)
-        .args(["-I", attester, "-n", ATTEST_NAMESPACE, "-s"])
-        .arg(&sig)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
-    std::io::Write::write_all(&mut c.stdin.take().unwrap(), statement.as_bytes())?;
-    let ok = c.wait()?.success();
+    let checked = release::ssh_signed(
+        &dir,
+        &release::Attestation {
+            attester: attester.to_string(),
+            statement: statement.to_string(),
+            signature: signature.to_string(),
+        },
+        host_key,
+    );
     let _ = std::fs::remove_dir_all(&dir);
-    ensure!(ok, "the signature is not {attester}'s host key");
-    Ok(())
+    checked.map_err(|_| anyhow::anyhow!("the signature is not {attester}'s host key"))
 }
 
 /// A file of an unpacked download, and only that: the download a real
@@ -1655,6 +1672,13 @@ fn print(signed: &release::Signed, refused: Option<&String>) {
     );
     for (name, b) in &p.boxes {
         println!("  {name}  {}", b.path);
+    }
+    // what the file says; each box checks the signatures itself
+    let by: Vec<&str> = p.attestations.iter().map(|a| a.attester.as_str()).collect();
+    if p.bootstrap {
+        println!("  bootstrap: published with no box asked to vouch");
+    } else if !by.is_empty() {
+        println!("  attested by {}", by.join(", "));
     }
 }
 
@@ -2246,6 +2270,7 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use release::ATTEST_NAMESPACE;
 
     // the lock a ship script holds is an fd it opened without close-on-exec;
     // the app's background run must not carry it off
@@ -2329,6 +2354,8 @@ mod tests {
             rev: "0123456789abcdef".into(),
             issued: 1,
             boxes: BTreeMap::new(),
+            attestations: vec![],
+            bootstrap: false,
         };
         let body = serde_json::to_string(&release::sign(payload, &key).unwrap()).unwrap();
         let (s, check) = checked(&body, &key.verifying_key()).unwrap();
@@ -2487,7 +2514,7 @@ mod tests {
             serde_json::json!({ "statement": st, "signature": sign(&k1, ns, st) }).to_string()
         };
 
-        let said = vouched(
+        let (said, attestation) = vouched(
             "node1",
             &pub1,
             &answer(&statement, ATTEST_NAMESPACE),
@@ -2496,6 +2523,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(said["node1"], ("/nix/store/x-node1".into(), "c1".into()));
+        // what goes in the release is the answer as signed, and a box checking
+        // it against the same host key takes it as node1's word on node1
+        assert_eq!(attestation.statement, statement);
+        let mut boxes = BTreeMap::new();
+        boxes.insert(
+            "node1".to_string(),
+            release::BoxRelease {
+                path: "/nix/store/x-node1".into(),
+                nar_hash: "sha256-x".into(),
+                closure: Some("c1".into()),
+            },
+        );
+        let payload = release::Payload {
+            counter: 1,
+            rev: rev.clone(),
+            issued: 1,
+            boxes,
+            attestations: vec![attestation],
+            bootstrap: false,
+        };
+        let fleet: BTreeMap<String, String> = [("node1".to_string(), pub1.clone())].into();
+        let work = private_dir("dd-vouch-check").unwrap();
+        let (by, not) = release::vouchers(&payload, "node1", &fleet, |a, k| {
+            release::ssh_signed(&work, a, k).is_ok()
+        });
+        assert!(by.contains("node1") && not.is_empty(), "{not:?}");
+        let _ = std::fs::remove_dir_all(&work);
 
         // node2's key does not stand behind node1's signature
         assert!(

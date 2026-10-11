@@ -68,6 +68,11 @@ in
     enable = true;
     url = "https://git.${config.dd.domain}/${config.dd.repo}/raw/branch/releases/current.json";
     publicKey = lib.fileContents ../../fleet/release.pub;
+    # each box's host key, as dd-attest signs with it: two of them must
+    # vouch for a closure before a box switches to it
+    attesters = lib.mapAttrs (_: b: b.hostKey) (
+      lib.filterAttrs (_: b: b ? hostKey) (lib.importJSON ../../fleet/boxes.json)
+    );
   };
 
   # prometheus history cannot be backfilled, so it is in the box's backup

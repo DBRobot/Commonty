@@ -51,6 +51,11 @@ in
       default = [ ];
       description = "host:port of the other boxes. A release that costs this box its reach to all of them is rolled back, however healthy the box looks from inside. Empty: a fleet of one, nothing to compare.";
     };
+    attesters = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      description = "The fleet's boxes and their ssh host keys (fleet/boxes.json): a release moves this box only to a closure two of them vouched for. Fewer than two: a fleet that cannot vouch, and nothing is asked.";
+    };
     probeSeconds = lib.mkOption {
       type = lib.types.int;
       default = 600;
@@ -62,6 +67,9 @@ in
     environment.etc."dd/release.pub" = lib.mkIf (cfg.publicKey != null) {
       text = cfg.publicKey + "\n";
     };
+    # whose word on a closure counts, as this system was built: a release
+    # cannot add a box to it for itself
+    environment.etc."dd/attesters.json".text = builtins.toJSON cfg.attesters;
 
     # this box's word on a release before it is signed: `dd release
     # publish` runs it over ssh with sudo (servers/system/release/src/bin/dd-attest.rs)
@@ -90,9 +98,11 @@ in
         config.nix.package
         pkgs.systemd
         pkgs.coreutils
+        pkgs.openssh # ssh-keygen checks the boxes' signatures
       ];
       environment = {
         DD_AGENT_URL = cfg.url;
+        DD_AGENT_ATTESTERS = "/etc/dd/attesters.json";
         DD_AGENT_KEY_FILE = cfg.publicKeyFile;
         DD_AGENT_PROBE_SECS = toString cfg.probeSeconds;
         DD_AGENT_VERIFY_PORT = "4181";
