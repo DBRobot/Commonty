@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Open it in the Commonty app</title>
+  <title>Open it with the Commonty app</title>
   <link rel="stylesheet" href="/_dd/static/home.css">
   <script type="module" src="/_dd/static/use-app.js"></script>
 </head>
@@ -23,9 +23,13 @@
   </header>
   <main class="auth">
     <section class="add-device" id="use-app">
-      <h1><span id="what">This</span> opens in the Commonty app</h1>
-      <p class="lead">It holds your keys, so its code comes with the app you installed, never from a server. Open <span id="what-2">it</span> from the app on this device.</p>
-      <p><a class="button" id="download" href="/_dd/download">Get the Commonty app</a></p>
+      <h1><span id="what">This</span> opens through the Commonty app</h1>
+      <p class="lead">It holds your keys, so its code comes with the app you installed, never from a server. The app opens <span id="what-2">it</span> here in this browser, once you allow this browser in the app.</p>
+      <p><button id="open" type="button">Open <span id="what-3">it</span></button></p>
+      <div id="not-open" hidden>
+        <p class="lead">Nothing opened? The Commonty app needs to be installed on this device and signed in.</p>
+        <p><a class="button" id="download" href="/_dd/download">Get the Commonty app</a> <button class="quiet" id="retry" type="button">Try again</button></p>
+      </div>
     </section>
     <section class="add-device" id="signed-in" hidden>
       <h1>Signed in</h1>

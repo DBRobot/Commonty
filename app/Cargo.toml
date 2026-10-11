@@ -29,6 +29,10 @@ library = { path = "../client/library" }
 tauri = { version = "2", features = [] }
 # the system browser, for setting up a passkey there
 tauri-plugin-opener = "2"
+# commonty:// links: Photos' or Passwords' site in a browser hands over to the app (local.rs)
+tauri-plugin-deep-link = "2"
+# a browser's pairing proof: the hash of what only that tab holds (handoff.rs)
+sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
@@ -39,6 +43,10 @@ tokio = { version = "1", features = ["sync", "time", "net", "fs", "io-util"] }
 axum = "0.8"
 futures-util = "0.3"
 tokio-util = { version = "0.7", features = ["io"] }
+
+# a second launch (a commonty:// link) hands its link to the copy already running
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 # the title bar's buttons on Linux (lib.rs); the version tauri already uses
 [target.'cfg(target_os = "linux")'.dependencies]

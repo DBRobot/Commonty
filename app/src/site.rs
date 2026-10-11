@@ -154,6 +154,8 @@ async fn serve<R: Runtime>(
                 | "/_dd/app/open"
                 | "/_dd/app/vault"
                 | "/_dd/app/vault.js"
+                | "/_dd/app/allow"
+                | "/_dd/app/allow.js"
         )
         && !has_secret(&req)
     {
@@ -200,6 +202,27 @@ async fn serve<R: Runtime>(
     }
     if path == "/_dd/app/vault/state" {
         return crate::local::vault_state(app);
+    }
+    // a browser asking to open Photos or Passwords (local.rs): the page
+    // where the member lets it in by the code both show
+    if path == "/_dd/app/allow" {
+        return Ok(page_asset(app, "allow.html"));
+    }
+    if path == "/_dd/app/allow.js" {
+        return Ok(asset(app, "allow.js"));
+    }
+    if path == "/_dd/app/pair/state" {
+        return Ok(json_response(&crate::local::pair_state()));
+    }
+    if path == "/_dd/app/pair/answer" && req.method() == "POST" {
+        let v: serde_json::Value = serde_json::from_slice(req.body()).unwrap_or_default();
+        return Ok(
+            match crate::local::pair_answer(v["service"].as_str().unwrap_or(""), v["code"].as_str())
+            {
+                Ok(()) => json_response(&serde_json::json!({})),
+                Err(e) => plain(StatusCode::CONFLICT, &e),
+            },
+        );
     }
     if path == "/_dd/app/photos/state" {
         return crate::photos::state(app).await;

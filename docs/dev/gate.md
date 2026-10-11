@@ -907,7 +907,7 @@ path                                        method   what                       
 /_dd/login                                  GET      sign-in page                              anyone
 /_dd/login/start, /finish                   POST     passkey sign-in, sets the cookie          anyone
 /_dd/logout                                 GET      a page with the sign-out button           anyone
-/_dd/use-app                                GET      "open it in the app", photos. and vault.  anyone
+/_dd/use-app                                GET      hands photos. and vault. to the app       anyone
 /_dd/logout                                 POST     end session, clear photo storage          our own pages
 /_dd/join                                   GET      sign-up page                              anyone
 /_dd/join/start, /finish, /sign             POST     account from a passkey                    anyone

@@ -1,9 +1,10 @@
-// Photos in the app's own window, from the app's own copy of Ente's client
-// (src/local.rs): the app put this device's photo password after the # of
-// this page's address, the part no server is sent. It opens the account
-// with our Rust in the page (dd_web) straight against museum, seeds what
-// Ente's client reads to be signed in, and goes to the gallery. The box
-// serves none of this code; it answers museum's calls and keeps the files.
+// Photos in the app's window or the member's browser, from the app's own
+// copy of Ente's client (src/local.rs): this page asks the app once for
+// this device's photo password (no address carries it, so no history or
+// synced history keeps it). It opens the account with our Rust in the page
+// (dd_web) straight against museum, seeds what Ente's client reads to be
+// signed in, and goes to the gallery. The box serves none of this code; it
+// answers museum's calls and keeps the files.
 
 import init, { ente_login } from '/_dd/web/dd_web.js';
 
@@ -41,29 +42,39 @@ async function seed(s) {
       tx.onerror = () => reject(tx.error);
     };
   });
-  location.replace('/gallery');
+  location.replace(next);
+}
+
+// the page a link asked for, on this origin only
+const to = new URLSearchParams(location.search).get('to');
+const next = to && /^\/(?![/\\])/.test(to) ? to : '/gallery';
+
+// the password, handed once for the door this page came through
+async function key() {
+  const r = await fetch('/_dd/app/photos-key', { method: 'POST' });
+  return r.ok ? (await r.json()).pw : null;
 }
 
 async function go() {
   const h = new URLSearchParams(location.hash.slice(1));
-  const password = h.get('pw');
   // where the app's pages are, for the bar to go back to (shell.js): only
   // the app's own two addresses
   if (['commonty://localhost', 'http://commonty.localhost'].includes(h.get('app'))) sessionStorage.setItem('dd-app-origin', h.get('app'));
-  if (location.hash) history.replaceState(null, '', location.pathname);
+  if (location.hash || location.search) history.replaceState(null, '', location.pathname);
   const r = await fetch('/_dd/photos/config', { method: 'POST' });
   if (!r.ok) throw new Error(`the box said ${r.status}`);
   const cfg = await r.json();
   if (keptFor() !== cfg.email) {
     await wipe();
   } else if (sessionStorage.getItem('encryptionKey')) {
-    location.replace('/gallery');
+    location.replace(next);
     return;
   }
+  const password = await key();
   if (!password) throw new Error('open Photos from the Commonty app');
   await init();
   say('Opening your photos…');
   await seed(JSON.parse(await ente_login(cfg.api, cfg.email, password)));
 }
 
-go().catch((err) => say('Could not open Photos: ' + ((err && err.message) || err)));
+go().catch((err) => say(`Could not open Photos: ${err?.message || err}`));

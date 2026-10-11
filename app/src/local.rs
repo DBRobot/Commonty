@@ -1,46 +1,73 @@
-//! Photos and Passwords, served by this app to its own windows. Their code -
-//! Ente's photos client, the Bitwarden web vault - comes in the app's signed
-//! release, never from a box: whoever has root on a box could otherwise hand
-//! the page that holds a person's keys a copy that sends them away. The
-//! boxes keep the data and answer the clients' calls; the code is ours.
+//! Photos and Passwords, served by this app to its own windows and to the
+//! member's own browser. Their code - Ente's photos client, the Bitwarden
+//! web vault - comes in the app's signed release, never from a box:
+//! whoever has root on a box could otherwise hand the page that holds a
+//! person's keys a copy that sends them away. The boxes keep the data and
+//! answer the clients' calls; the code is ours.
 //!
-//! Each runs at its own address on this computer (its own origin, so one
+//! Each runs at its own port on this computer (its own origin, so one
 //! cannot read the other's storage), a real web server and not the app's
 //! scheme: Android's webview hands a scheme an empty body for every POST,
 //! and a server streams where the scheme holds a whole file in memory.
 //! Anything else on this computer could knock on these ports, so nothing is
-//! answered without the cookie the app's own window was given at the door
-//! (`/_dd/app/enter?k=<this launch's secret>`).
+//! answered without a cookie given at a door: the window's on 127.0.0.1
+//! (`/_dd/app/enter?k=<this launch's secret>`), a browser's on its own
+//! session's name, once the member has let that browser in from the app's
+//! window (handoff.rs).
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::TryStreamExt as _;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager as _, Runtime};
 
-/// Photos' address on this computer: fixed, because a browser keeps an
-/// origin's storage by its port and Ente keeps a session there
-pub const PHOTOS_PORT: u16 = 41661;
-/// Passwords': the vault keeps its settings and the sign-in's state there
-pub const VAULT_PORT: u16 = 41662;
+use crate::handoff::{self, Finish, Names, Once, Pairing, Sessions, Via, View, Which};
 
-const COOKIE: &str = "dd_local";
-
-/// Whether this app holds each port. A window is only ever sent to a port
-/// this app is serving: if something else had one first, it would be
-/// handed the door's secret and the password after the page's #, so the
-/// window is not sent at all.
+/// Whether this app holds each port. A window or a browser is only ever
+/// sent to a port this app is serving: if something else had one first, it
+/// would be what the window or the browser asks its way in, so neither is
+/// sent at all.
 static PHOTOS_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static VAULT_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-#[derive(Clone, Copy, PartialEq)]
-enum Which {
-    Photos,
-    Vault,
+/// Photos' pairing and Passwords'
+static PAIRS: LazyLock<Mutex<[Pairing; 2]>> = LazyLock::new(Default::default);
+static SESSIONS: LazyLock<Mutex<Sessions>> = LazyLock::new(Default::default);
+/// the Photos password for the window's next page, once
+static WINDOW_KEY: Mutex<Once> = Mutex::new(Once::new());
+/// when a commonty:// link last opened the browser
+static LAST_LINK: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn up(w: Which) -> &'static std::sync::atomic::AtomicBool {
+    if w == Which::Vault {
+        &VAULT_UP
+    } else {
+        &PHOTOS_UP
+    }
+}
+
+fn holds(w: Which) -> bool {
+    up(w).load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn slot(w: Which) -> usize {
+    if w == Which::Vault { 1 } else { 0 }
+}
+
+/// this install's two pairing names, kept beside its other state
+fn names() -> Option<&'static Names> {
+    static N: std::sync::OnceLock<Option<Names>> = std::sync::OnceLock::new();
+    N.get_or_init(|| {
+        Names::load(&crate::paths::data().join("local-names"))
+            .map_err(|e| eprintln!("local: names: {e}"))
+            .ok()
+    })
+    .as_ref()
 }
 
 struct Site<R: Runtime> {
@@ -52,20 +79,23 @@ struct Site<R: Runtime> {
 }
 
 pub fn url(which_vault: bool, path: &str) -> String {
-    let port = if which_vault { VAULT_PORT } else { PHOTOS_PORT };
-    format!("http://127.0.0.1:{port}{path}")
+    let w = if which_vault {
+        Which::Vault
+    } else {
+        Which::Photos
+    };
+    format!("http://127.0.0.1:{}{path}", w.port())
 }
 
 /// where a window starts: the door, with this launch's secret, and the page
 /// after it; only while this app holds the port
 pub fn door(which_vault: bool, then: &str) -> Result<String, String> {
-    let up = if which_vault { &VAULT_UP } else { &PHOTOS_UP };
-    if !up.load(std::sync::atomic::Ordering::SeqCst) {
-        return Err(format!(
-            "something else on this computer holds port {}, so this app will not open its page there",
-            if which_vault { VAULT_PORT } else { PHOTOS_PORT }
-        ));
-    }
+    let w = if which_vault {
+        Which::Vault
+    } else {
+        Which::Photos
+    };
+    handoff::door_if_up(holds(w), w.port())?;
     Ok(url(
         which_vault,
         &format!(
@@ -74,6 +104,14 @@ pub fn door(which_vault: bool, then: &str) -> Result<String, String> {
             enc(then)
         ),
     ))
+}
+
+/// the Photos password the window's page asks for once (photos.rs), so it
+/// is in no address
+pub fn set_window_key(pw: &str) {
+    if let Ok(mut k) = WINDOW_KEY.lock() {
+        k.set(pw.to_string(), Instant::now());
+    }
 }
 
 fn enc(s: &str) -> String {
@@ -87,13 +125,129 @@ fn enc(s: &str) -> String {
         .collect()
 }
 
+/// A commonty:// link (lib.rs): the member's default browser opened at this
+/// install's pairing page for Photos or Passwords, and the app's window at
+/// the page where the member lets that browser in. A link from anywhere
+/// only does that; nothing goes back to what sent it.
+pub fn open_link<R: Runtime>(app: &AppHandle<R>, url: &str) {
+    let Some(link) = handoff::parse_link(url) else {
+        eprintln!("local: not a link of ours");
+        return;
+    };
+    {
+        let Ok(mut last) = LAST_LINK.lock() else {
+            return;
+        };
+        let now = Instant::now();
+        if last.is_some_and(|t| now.duration_since(t) < Duration::from_secs(1)) {
+            return;
+        }
+        *last = Some(now);
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = to_browser(&app, &link).await {
+            eprintln!("local: {e}");
+        }
+    });
+}
+
+fn photos_password<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, String> {
+    use auth::KeyStore as _;
+    let keys = app.state::<crate::account::Keys>();
+    Ok(keys
+        .0
+        .get(crate::photos::PASSWORD)
+        .map_err(|e| e.to_string())?
+        .map(|pw| pw.to_string()))
+}
+
+async fn to_browser<R: Runtime>(app: &AppHandle<R>, link: &handoff::Link) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt as _;
+    // a link can start the app: its servers come up a moment after
+    for _ in 0..50 {
+        if holds(link.which) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    handoff::door_if_up(holds(link.which), link.which.port())?;
+    let names = names().ok_or("no names for the browser")?;
+    if link.which == Which::Photos && photos_password(app)?.is_none() {
+        // the first time on this device: the window fetches the password
+        // with the browser's passkey (photos.rs)
+        show_window(app, "/_dd/app/photos");
+        return Ok(());
+    }
+    PAIRS.lock().map_err(|e| e.to_string())?[slot(link.which)]
+        .arm(&handoff::then_for(link), Instant::now());
+    show_window(app, "/_dd/app/allow");
+    app.opener()
+        .open_url(handoff::browser_url(names, link.which), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+fn show_window<R: Runtime>(app: &AppHandle<R>, path: &str) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        if let Ok(u) = format!("{}{path}", crate::site::origin()).parse() {
+            let _ = w.navigate(u);
+        }
+    }
+}
+
+fn view_json(v: View) -> serde_json::Value {
+    match v {
+        View::Idle => serde_json::json!({ "state": "idle" }),
+        View::Waiting => serde_json::json!({ "state": "waiting" }),
+        View::Asking(code) => serde_json::json!({ "state": "asking", "code": code }),
+        View::Crowded => serde_json::json!({ "state": "crowded" }),
+    }
+}
+
+/// what the app's window shows on its allow page (site.rs), for each service
+pub fn pair_state() -> serde_json::Value {
+    let now = Instant::now();
+    match PAIRS.lock() {
+        Ok(p) => serde_json::json!({
+            "photos": view_json(p[0].view(now)),
+            "vault": view_json(p[1].view(now)),
+        }),
+        Err(_) => serde_json::json!({}),
+    }
+}
+
+fn which_of(service: &str) -> Result<Which, String> {
+    match service {
+        "photos" => Ok(Which::Photos),
+        "vault" => Ok(Which::Vault),
+        _ => Err("no such service".into()),
+    }
+}
+
+/// the member's click in the app's window: let in the browser showing
+/// `code`, or refuse it
+pub fn pair_answer(service: &str, code: Option<&str>) -> Result<(), String> {
+    let w = which_of(service)?;
+    let mut p = PAIRS.lock().map_err(|e| e.to_string())?;
+    match code {
+        Some(c) => p[slot(w)].allow(c, Instant::now()).map_err(Into::into),
+        None => {
+            p[slot(w)].refuse();
+            Ok(())
+        }
+    }
+}
+
 /// Both servers, for the life of the app. A port already taken (a second
 /// copy of the app) leaves that one unserved, said in the log.
 pub fn start<R: Runtime>(app: &AppHandle<R>) {
-    for (which, port, var) in [
-        (Which::Photos, PHOTOS_PORT, "COMMONTY_PHOTOS_WEB"),
-        (Which::Vault, VAULT_PORT, "COMMONTY_VAULT_WEB"),
+    for (which, var) in [
+        (Which::Photos, "COMMONTY_PHOTOS_WEB"),
+        (Which::Vault, "COMMONTY_VAULT_WEB"),
     ] {
+        let port = which.port();
         let site = Arc::new(Site {
             app: app.clone(),
             which,
@@ -102,12 +256,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
         tauri::async_runtime::spawn(async move {
             let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
                 Ok(l) => {
-                    let up = if which == Which::Vault {
-                        &VAULT_UP
-                    } else {
-                        &PHOTOS_UP
-                    };
-                    up.store(true, std::sync::atomic::Ordering::SeqCst);
+                    up(which).store(true, std::sync::atomic::Ordering::SeqCst);
                     l
                 }
                 Err(e) => {
@@ -132,52 +281,239 @@ fn plain(status: StatusCode, text: &str) -> Response {
         .into_response()
 }
 
-fn has_cookie(h: &HeaderMap) -> bool {
-    let want = format!("{COOKIE}={}", crate::site::launch_secret());
-    h.get_all(header::COOKIE)
-        .iter()
-        .filter_map(|v| v.to_str().ok())
-        .flat_map(|v| v.split(';'))
-        .any(|c| c.trim() == want)
+fn json(status: StatusCode, v: serde_json::Value) -> Response {
+    (
+        status,
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        v.to_string(),
+    )
+        .into_response()
+}
+
+fn cookie<'a>(h: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    handoff::cookie(
+        h.get_all(header::COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok()),
+        name,
+    )
+}
+
+fn header_str<'a>(h: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    h.get(name).and_then(|v| v.to_str().ok())
 }
 
 async fn handle<R: Runtime>(State(site): State<Arc<Site<R>>>, req: Request) -> Response {
+    let Some(names) = names() else {
+        return plain(StatusCode::INTERNAL_SERVER_ERROR, "no names for this app");
+    };
+    let h = req.headers();
+    let via = match SESSIONS.lock() {
+        Ok(s) => handoff::via(header_str(h, "host"), site.which, names, &s),
+        Err(_) => None,
+    };
+    let Some(via) = via else {
+        return plain(StatusCode::MISDIRECTED_REQUEST, "not this app's address");
+    };
+    let own = format!("http://{}", header_str(h, "host").unwrap_or_default());
     let path = req.uri().path().to_string();
-    // the door: the app's own window, holding this launch's secret, is given
-    // the cookie every other request needs. Lax, not Strict: the window
-    // arrives here from the app's own scheme, another site to a browser,
-    // and a Strict cookie set on that way in is not sent on the redirect
-    // that follows it
-    if path == "/_dd/app/enter" {
-        let q = req.uri().query().unwrap_or("");
-        let get = |k: &str| {
-            q.split('&')
-                .find_map(|kv| kv.strip_prefix(&format!("{k}=")))
-                .map(crate::site::percent_decode)
-        };
-        if get("k").as_deref() != Some(crate::site::launch_secret()) {
-            return plain(StatusCode::FORBIDDEN, "not the app's window");
-        }
-        let to = get("to").filter(|t| t.starts_with('/') && !t.starts_with("//"));
-        return Response::builder()
-            .status(StatusCode::SEE_OTHER)
-            .header(
-                header::SET_COOKIE,
-                format!(
-                    "{COOKIE}={}; Path=/; HttpOnly; SameSite=Lax",
-                    crate::site::launch_secret()
-                ),
-            )
-            .header(header::LOCATION, to.unwrap_or_else(|| "/".into()))
-            .body(Body::empty())
-            .unwrap_or_default();
+    let method = req.method().as_str().to_string();
+    let way_in = handoff::way_in(site.which, &via, &method, &path);
+    if !way_in
+        && !handoff::same_origin(
+            &method,
+            header_str(h, "origin"),
+            header_str(h, "sec-fetch-site"),
+            &own,
+            via == Via::Window,
+        )
+    {
+        return plain(StatusCode::FORBIDDEN, "not this page's own request");
     }
-    if !has_cookie(req.headers()) {
-        return plain(StatusCode::FORBIDDEN, "open this from the Commonty app");
+    match &via {
+        Via::Window => {
+            if path == "/_dd/app/enter" {
+                return enter_window(&req);
+            }
+            if cookie(h, handoff::WINDOW_COOKIE) != Some(crate::site::launch_secret()) {
+                return plain(StatusCode::FORBIDDEN, "open this from the Commonty app");
+            }
+        }
+        // the pairing page and what it asks; nothing else is here
+        Via::Pair => return pair(&site, req, &path).await,
+        Via::Browser(label) => {
+            if path == "/_dd/app/enter" {
+                return enter_browser(&req, site.which, label);
+            }
+            let ok = SESSIONS
+                .lock()
+                .is_ok_and(|s| s.valid(site.which, label, cookie(h, handoff::BROWSER_COOKIE)));
+            if !ok && !way_in {
+                return plain(
+                    StatusCode::FORBIDDEN,
+                    "open this from Photos' or Passwords' page, through the Commonty app",
+                );
+            }
+        }
+    }
+    if site.which == Which::Photos && path == "/_dd/app/photos-key" {
+        return photos_key(&req, &via);
     }
     match site.which {
         Which::Photos => photos(&site, req, &path).await,
         Which::Vault => vault(&site, req, &path).await,
+    }
+}
+
+/// The window's door: the app's own window, holding this launch's secret,
+/// is given the cookie every other request needs. Lax, not Strict: the
+/// window arrives here from the app's own scheme, another site to a
+/// browser, and a Strict cookie set on that way in is not sent on the
+/// redirect that follows it.
+fn enter_window(req: &Request) -> Response {
+    let q = req.uri().query().unwrap_or("");
+    if handoff::query(q, "k").map(handoff::dec).as_deref() != Some(crate::site::launch_secret()) {
+        return plain(StatusCode::FORBIDDEN, "not the app's window");
+    }
+    let to = handoff::query(q, "to")
+        .map(handoff::dec)
+        .filter(|t| handoff::safe_then(t).is_some());
+    Response::builder()
+        .status(StatusCode::SEE_OTHER)
+        .header(
+            header::SET_COOKIE,
+            format!(
+                "{}={}; Path=/; HttpOnly; SameSite=Lax",
+                handoff::WINDOW_COOKIE,
+                crate::site::launch_secret()
+            ),
+        )
+        .header(header::LOCATION, to.unwrap_or_else(|| "/".into()))
+        .body(Body::empty())
+        .unwrap_or_default()
+}
+
+/// The pairing page on the install's name: the page and its script, the
+/// app's own files it styles itself with, and its two asks. A browser
+/// shows the hash of a verifier only it holds, the member lets it in from
+/// the app's window by the code both show, and the browser then shows the
+/// verifier for its own session's door.
+async fn pair<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Response {
+    match (req.method().as_str(), path) {
+        ("GET", "/_dd/app/pair") => return app_asset(&site.app, "pair.html"),
+        ("GET", "/_dd/app/pair.js") => return app_asset(&site.app, "pair.js"),
+        ("GET", p) if p.starts_with("/_dd/static/") => {
+            let f = &p["/_dd/static/".len()..];
+            if f.contains('/') || f.starts_with('.') {
+                return plain(StatusCode::NOT_FOUND, "no such file");
+            }
+            return app_asset(&site.app, &format!("_dd/static/{f}"));
+        }
+        ("POST", "/_dd/app/pair/ask" | "/_dd/app/pair/finish") => {}
+        _ => return plain(StatusCode::NOT_FOUND, "not here"),
+    }
+    let Ok(body) = axum::body::to_bytes(req.into_body(), 4096).await else {
+        return plain(StatusCode::BAD_REQUEST, "too much");
+    };
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+    let now = Instant::now();
+    let Ok(mut pairs) = PAIRS.lock() else {
+        return plain(StatusCode::INTERNAL_SERVER_ERROR, "no pairing");
+    };
+    let p = &mut pairs[slot(site.which)];
+    if path == "/_dd/app/pair/ask" {
+        return match p.ask(v["hash"].as_str().unwrap_or(""), now) {
+            Ok(code) => json(StatusCode::OK, serde_json::json!({ "code": code })),
+            Err(why) => json(StatusCode::FORBIDDEN, serde_json::json!({ "why": why })),
+        };
+    }
+    let then = match p.finish(v["verifier"].as_str().unwrap_or(""), now) {
+        Finish::Wait => return json(StatusCode::ACCEPTED, serde_json::json!({})),
+        Finish::No => return json(StatusCode::FORBIDDEN, serde_json::json!({})),
+        Finish::In(then) => then,
+    };
+    drop(pairs);
+    let pw = if site.which == Which::Photos {
+        match photos_password(&site.app) {
+            Ok(Some(pw)) => Some(pw),
+            _ => {
+                return plain(
+                    StatusCode::NOT_FOUND,
+                    "Photos is not open on this device yet",
+                );
+            }
+        }
+    } else {
+        None
+    };
+    let Ok((label, k)) = SESSIONS
+        .lock()
+        .map(|mut s| s.create(site.which, &then, pw, now))
+    else {
+        return plain(StatusCode::INTERNAL_SERVER_ERROR, "no session");
+    };
+    json(
+        StatusCode::OK,
+        serde_json::json!({ "go": handoff::session_door(site.which, &label, &k) }),
+    )
+}
+
+/// A browser's door on its session's own name: the one-time secret the
+/// pairing page was handed, spent here, for this browser's own cookie.
+fn enter_browser(req: &Request, which: Which, label: &str) -> Response {
+    let q = req.uri().query().unwrap_or("");
+    let k = handoff::query(q, "k").unwrap_or("");
+    let got = SESSIONS
+        .lock()
+        .ok()
+        .and_then(|mut s| s.enter(which, label, k, Instant::now()));
+    let Some((c, then)) = got else {
+        return plain(
+            StatusCode::FORBIDDEN,
+            "this link was used already or is too old: open it again from the page",
+        );
+    };
+    let then = handoff::safe_then(&then).unwrap_or("/").to_string();
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header("referrer-policy", "no-referrer")
+        .header(
+            header::SET_COOKIE,
+            format!(
+                "{}={c}; Path=/; HttpOnly; SameSite=Strict",
+                handoff::BROWSER_COOKIE
+            ),
+        )
+        .body(Body::from(handoff::enter_page(&then)))
+        .unwrap_or_default()
+}
+
+/// The Photos password for the page that opens the account, once, to the
+/// window or the browser session the app let in with it.
+fn photos_key(req: &Request, via: &Via) -> Response {
+    if req.method() != "POST" {
+        return plain(StatusCode::METHOD_NOT_ALLOWED, "POST");
+    }
+    let now = Instant::now();
+    let pw = match via {
+        Via::Window => WINDOW_KEY.lock().ok().and_then(|mut k| k.take(now)),
+        Via::Browser(label) => SESSIONS.lock().ok().and_then(|mut s| {
+            s.take_key(
+                Which::Photos,
+                label,
+                cookie(req.headers(), handoff::BROWSER_COOKIE),
+                now,
+            )
+        }),
+        Via::Pair => None,
+    };
+    match pw {
+        Some(pw) => json(StatusCode::OK, serde_json::json!({ "pw": pw })),
+        None => plain(StatusCode::NOT_FOUND, "open Photos from the Commonty app"),
     }
 }
 

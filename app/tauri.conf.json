@@ -21,6 +21,23 @@
     },
     "withGlobalTauri": true
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "commonty"
+        ]
+      },
+      "mobile": [
+        {
+          "scheme": [
+            "commonty"
+          ],
+          "appLink": false
+        }
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "icon": [

@@ -5,6 +5,7 @@
 
 mod account;
 mod browser;
+mod handoff;
 mod local;
 mod net;
 mod paths;
@@ -26,6 +27,32 @@ pub fn version() -> &'static str {
 #[cfg(target_os = "android")]
 use tauri::Manager as _;
 
+/// commonty:// links: Photos' and Passwords' sites in a browser hand over
+/// to the app, which opens that browser at its own copy (local.rs). An
+/// AppImage is installed by no one, so it says it takes them itself.
+fn links(app: &tauri::AppHandle) {
+    #[cfg(target_os = "linux")]
+    use tauri::Manager as _;
+    use tauri_plugin_deep_link::DeepLinkExt as _;
+    #[cfg(target_os = "linux")]
+    if app.env().appimage.is_some()
+        && let Err(e) = app.deep_link().register_all()
+    {
+        eprintln!("links: {e}");
+    }
+    let h = app.clone();
+    app.deep_link().on_open_url(move |e| {
+        for u in e.urls() {
+            local::open_link(&h, u.as_str());
+        }
+    });
+    if let Ok(Some(urls)) = app.deep_link().get_current() {
+        for u in urls {
+            local::open_link(app, u.as_str());
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // what the Devices tab calls this device's requests
@@ -37,7 +64,20 @@ pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(not(target_os = "android"))]
     let builder = builder.manage(account::Keys(auth::open(SERVICE)));
+    // a commonty:// link opening a second copy hands its link to this one
+    // (the deep-link feature), and a plain second launch shows this window
+    #[cfg(any(target_os = "linux", windows))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _| {
+        use tauri::Manager as _;
+        if !argv.iter().any(|a| a.starts_with("commonty://"))
+            && let Some(w) = app.get_webview_window("main")
+        {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    }));
     builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(vpn::init())
         .plugin(tauri_plugin_opener::init())
         // the site's own pages, carried in the app and served to itself
@@ -58,6 +98,7 @@ pub fn run() {
             // Photos and Passwords, served to the app's windows from its
             // own release (local.rs)
             local::start(app.handle());
+            links(app.handle());
             // GTK draws the title bar itself on Wayland, with the buttons its
             // settings name. Built with Nix, the app brings GNOME's own
             // default - a close button alone - and never sees the one the

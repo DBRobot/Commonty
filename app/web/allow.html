@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Allow this browser</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+    </div>
+  </header>
+  <main class="auth">
+    <div class="card">
+      <h1 id="title">Opening in your browser</h1>
+      <p class="lead" id="msg">Waiting for your browser to ask…</p>
+      <div id="asking" hidden>
+        <p class="lead">Your browser should show this code. Allow it only if the codes match.</p>
+        <p id="code" style="font: 600 32px/1.2 var(--mono); letter-spacing: .12em; margin: 8px 0 16px"></p>
+        <button id="allow" type="button">Allow this browser</button>
+        <button class="quiet" id="refuse" type="button">Not me</button>
+      </div>
+      <p><a href="/_dd/home">Back to Commonty</a></p>
+    </div>
+  </main>
+  <script src="/_dd/app/allow.js"></script>
+</body>
+</html>

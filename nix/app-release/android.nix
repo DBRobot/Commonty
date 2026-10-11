@@ -46,10 +46,10 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
   dontUseGradleCheck = true;
   dontFixup = true;
   # The crates in a place gradle can write beside: tauri's own Android
-  # library and the opener plugin's are gradle projects inside them, and
-  # gradle builds a project in its own directory. And the files tauri
-  # writes when it builds, written ahead so gradle's dependency listing
-  # sees the same projects the build does.
+  # library and the opener and deep-link plugins' are gradle projects inside
+  # them, and gradle builds a project in its own directory. And the files
+  # tauri writes when it builds, written ahead so gradle's dependency
+  # listing sees the same projects the build does.
   postPatch = ''
     # the Android plugin keeps its own settings in the home directory
     export HOME=$(mktemp -d)
@@ -64,11 +64,14 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
     crate() { find $CARGO_VENDOR -maxdepth 2 -type d -name "$1-$2" | head -1; }
     tauri=$(crate tauri ${versionOf "tauri"})
     opener=$(crate tauri-plugin-opener ${versionOf "tauri-plugin-opener"})
+    deeplink=$(crate tauri-plugin-deep-link ${versionOf "tauri-plugin-deep-link"})
     cat > app/gen/android/tauri.settings.gradle <<EOS
     include ':tauri-android'
     project(':tauri-android').projectDir = new File("$tauri/mobile/android")
     include ':tauri-plugin-opener'
     project(':tauri-plugin-opener').projectDir = new File("$opener/android")
+    include ':tauri-plugin-deep-link'
+    project(':tauri-plugin-deep-link').projectDir = new File("$deeplink/android")
     EOS
     cat > app/gen/android/app/tauri.build.gradle.kts <<EOS
     val implementation = configurations.getByName("implementation")
@@ -76,6 +79,7 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
       implementation("androidx.lifecycle:lifecycle-process:2.10.0")
       implementation(project(":tauri-android"))
       implementation(project(":tauri-plugin-opener"))
+      implementation(project(":tauri-plugin-deep-link"))
     }
     EOS
   '';

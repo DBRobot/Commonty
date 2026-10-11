@@ -4550,12 +4550,26 @@ rec {
             packageId = "serde_json";
           }
           {
+            name = "sha2";
+            packageId = "sha2 0.10.9";
+          }
+          {
             name = "tauri";
             packageId = "tauri";
           }
           {
+            name = "tauri-plugin-deep-link";
+            packageId = "tauri-plugin-deep-link";
+          }
+          {
             name = "tauri-plugin-opener";
             packageId = "tauri-plugin-opener";
+          }
+          {
+            name = "tauri-plugin-single-instance";
+            packageId = "tauri-plugin-single-instance";
+            target = { target, features }: (("linux" == target."os" or null) || (target."windows" or false));
+            features = [ "deep-link" ];
           }
           {
             name = "tokio";
@@ -4627,6 +4641,52 @@ rec {
           "arbitrary" = [ "dep:arbitrary" ];
         };
         resolvedDefaultFeatures = [ "db" "std" ];
+      };
+      "const-random" = rec {
+        crateName = "const-random";
+        version = "0.1.18";
+        edition = "2018";
+        sha256 = "0n8kqz3y82ks8znvz1mxn3a9hadca3amzf33gmi6dc3lzs103q47";
+        libName = "const_random";
+        authors = [
+          "Tom Kaitchuck <Tom.Kaitchuck@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "const-random-macro";
+            packageId = "const-random-macro";
+          }
+        ];
+
+      };
+      "const-random-macro" = rec {
+        crateName = "const-random-macro";
+        version = "0.1.16";
+        edition = "2018";
+        sha256 = "03iram4ijjjq9j5a7hbnmdngj8935wbsd0f5bm8yw2hblbr3kn7r";
+        procMacro = true;
+        libName = "const_random_macro";
+        authors = [
+          "Tom Kaitchuck <Tom.Kaitchuck@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.17";
+          }
+          {
+            name = "once_cell";
+            packageId = "once_cell";
+            usesDefaultFeatures = false;
+            features = [ "race" "alloc" ];
+          }
+          {
+            name = "tiny-keccak";
+            packageId = "tiny-keccak";
+            features = [ "shake" ];
+          }
+        ];
+
       };
       "constant_time_eq" = rec {
         crateName = "constant_time_eq";
@@ -7250,6 +7310,27 @@ rec {
           }
         ];
 
+      };
+      "dlv-list" = rec {
+        crateName = "dlv-list";
+        version = "0.5.2";
+        edition = "2021";
+        sha256 = "0pqvrinxzdz7bpy4a3p450h8krns3bd0mc3w0qqvm03l2kskj824";
+        libName = "dlv_list";
+        authors = [
+          "Scott Godwin <sgodwincs@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "const-random";
+            packageId = "const-random";
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+          "serde" = [ "dep:serde" ];
+        };
+        resolvedDefaultFeatures = [ "std" ];
       };
       "dom_query" = rec {
         crateName = "dom_query";
@@ -10765,6 +10846,29 @@ rec {
           "serde" = [ "dep:serde" ];
         };
         resolvedDefaultFeatures = [ "raw" ];
+      };
+      "hashbrown 0.14.5" = rec {
+        crateName = "hashbrown";
+        version = "0.14.5";
+        edition = "2021";
+        sha256 = "1wa1vy1xs3mp11bn3z9dv0jricgr6a2j0zkf1g19yz3vw4il89z5";
+        authors = [
+          "Amanieu d'Antras <amanieu@gmail.com>"
+        ];
+        features = {
+          "ahash" = [ "dep:ahash" ];
+          "alloc" = [ "dep:alloc" ];
+          "allocator-api2" = [ "dep:allocator-api2" ];
+          "compiler_builtins" = [ "dep:compiler_builtins" ];
+          "core" = [ "dep:core" ];
+          "default" = [ "ahash" "inline-more" "allocator-api2" ];
+          "equivalent" = [ "dep:equivalent" ];
+          "nightly" = [ "allocator-api2?/nightly" "bumpalo/allocator_api" ];
+          "rayon" = [ "dep:rayon" ];
+          "rkyv" = [ "dep:rkyv" ];
+          "rustc-dep-of-std" = [ "nightly" "core" "compiler_builtins" "alloc" "rustc-internal-api" ];
+          "serde" = [ "dep:serde" ];
+        };
       };
       "hashbrown 0.16.1" = rec {
         crateName = "hashbrown";
@@ -17130,6 +17234,34 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
+      "ordered-multimap" = rec {
+        crateName = "ordered-multimap";
+        version = "0.7.3";
+        edition = "2021";
+        sha256 = "0ygg08g2h381r3zbclba4zx4amm25zd2hsqqmlxljc00mvf3q829";
+        libName = "ordered_multimap";
+        authors = [
+          "Scott Godwin <sgodwincs@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "dlv-list";
+            packageId = "dlv-list";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "hashbrown";
+            packageId = "hashbrown 0.14.5";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+          "serde" = [ "dep:serde" ];
+          "std" = [ "dlv-list/std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
+      };
       "ordered-stream" = rec {
         crateName = "ordered-stream";
         version = "0.2.0";
@@ -20870,6 +21002,31 @@ rec {
           "mime-guess" = [ "mime_guess" ];
           "mime_guess" = [ "dep:mime_guess" ];
         };
+      };
+      "rust-ini" = rec {
+        crateName = "rust-ini";
+        version = "0.21.3";
+        edition = "2018";
+        sha256 = "1iw8yss8ncygd9yx5ay5gmr2jk7vcyv1d0d5pr1jlfcncqmqsvkr";
+        libName = "ini";
+        authors = [
+          "Y. T. Chung <zonyitoo@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "ordered-multimap";
+            packageId = "ordered-multimap";
+          }
+        ];
+        features = {
+          "case-insensitive" = [ "unicase" ];
+          "unicase" = [ "dep:unicase" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
       };
       "rustc-hash 1.1.0" = rec {
         crateName = "rustc-hash";
@@ -25218,9 +25375,9 @@ rec {
       };
       "tauri-plugin" = rec {
         crateName = "tauri-plugin";
-        version = "2.7.0";
+        version = "2.7.1";
         edition = "2024";
-        sha256 = "18a9xxfxwg8nlm1qaja3px8jks5s4sqwpxj67nwwwmnskyxkxzy9";
+        sha256 = "18jslvdcd981vhsx9jrl6p6dacc8y4bspp0366hkdf5klcscyh0i";
         libName = "tauri_plugin";
         authors = [
           "Tauri Programme within The Commons Conservancy"
@@ -25272,6 +25429,95 @@ rec {
           "build" = [ "dep:anyhow" "dep:serde" "dep:serde_json" "dep:glob" "dep:plist" "dep:walkdir" ];
         };
         resolvedDefaultFeatures = [ "build" ];
+      };
+      "tauri-plugin-deep-link" = rec {
+        crateName = "tauri-plugin-deep-link";
+        version = "2.6.1";
+        edition = "2024";
+        links = "tauri-plugin-deep-link";
+        sha256 = "0dppc0r5w4mbfr9qrpsdina8li3fdn851jij8ps8hp5b8qmakisa";
+        libName = "tauri_plugin_deep_link";
+        authors = [
+          "Tauri Programme within The Commons Conservancy"
+        ];
+        dependencies = [
+          {
+            name = "dunce";
+            packageId = "dunce";
+            target = { target, features }: (target."windows" or false);
+          }
+          {
+            name = "rust-ini";
+            packageId = "rust-ini";
+            target = { target, features }: ("linux" == target."os" or null);
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "tauri";
+            packageId = "tauri";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "tauri-utils";
+            packageId = "tauri-utils";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.20";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "url";
+            packageId = "url";
+          }
+          {
+            name = "windows-registry";
+            packageId = "windows-registry";
+            target = { target, features }: (target."windows" or false);
+          }
+          {
+            name = "windows-result";
+            packageId = "windows-result 0.4.1";
+            target = { target, features }: (target."windows" or false);
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "plist";
+            packageId = "plist";
+            target = { target, features }: ("macos" == target."os" or null);
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "tauri-plugin";
+            packageId = "tauri-plugin";
+            features = [ "build" ];
+          }
+          {
+            name = "tauri-utils";
+            packageId = "tauri-utils";
+          }
+        ];
+
       };
       "tauri-plugin-opener" = rec {
         crateName = "tauri-plugin-opener";
@@ -25378,6 +25624,66 @@ rec {
           }
         ];
 
+      };
+      "tauri-plugin-single-instance" = rec {
+        crateName = "tauri-plugin-single-instance";
+        version = "2.5.3";
+        edition = "2024";
+        sha256 = "1wbampy6c07q9ydvgmgbyv0c3dkkbk9nk4lp5nyj5qpfipc2w51w";
+        libName = "tauri_plugin_single_instance";
+        authors = [
+          "Tauri Programme within The Commons Conservancy"
+        ];
+        dependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "tauri";
+            packageId = "tauri";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "tauri-plugin-deep-link";
+            packageId = "tauri-plugin-deep-link";
+            optional = true;
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.20";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "net" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "windows-sys";
+            packageId = "windows-sys 0.61.2";
+            target = { target, features }: ("windows" == target."os" or null);
+            features = [ "Win32_System_Threading" "Win32_System_DataExchange" "Win32_Foundation" "Win32_UI_WindowsAndMessaging" "Win32_Security" "Win32_System_LibraryLoader" "Win32_Graphics_Gdi" ];
+          }
+          {
+            name = "zbus";
+            packageId = "zbus";
+            target = { target, features }: ("linux" == target."os" or null);
+          }
+        ];
+        features = {
+          "deep-link" = [ "dep:tauri-plugin-deep-link" ];
+          "semver" = [ "dep:semver" ];
+        };
+        resolvedDefaultFeatures = [ "deep-link" ];
       };
       "tauri-runtime" = rec {
         crateName = "tauri-runtime";
@@ -25605,9 +25911,9 @@ rec {
       };
       "tauri-utils" = rec {
         crateName = "tauri-utils";
-        version = "2.10.0";
+        version = "2.10.1";
         edition = "2024";
-        sha256 = "0xwnjd242c2an0arcr1qzs3azbh4c4afs29lvr89bxzg5l45gljd";
+        sha256 = "1vi1hvhijz2a1xp0z3av2w3jdpwlgiixy4gj23qa7fa391hmmx9g";
         libName = "tauri_utils";
         authors = [
           "Tauri Programme within The Commons Conservancy"
@@ -26066,6 +26372,30 @@ rec {
         features = {
         };
         resolvedDefaultFeatures = [ "formatting" "parsing" "serde" ];
+      };
+      "tiny-keccak" = rec {
+        crateName = "tiny-keccak";
+        version = "2.0.2";
+        edition = "2018";
+        sha256 = "0dq2x0hjffmixgyf6xv9wgsbcxkd65ld0wrfqmagji8a829kg79c";
+        libName = "tiny_keccak";
+        authors = [
+          "debris <marek.kotewicz@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "crunchy";
+            packageId = "crunchy";
+          }
+        ];
+        features = {
+          "fips202" = [ "keccak" "shake" "sha3" ];
+          "kmac" = [ "cshake" ];
+          "parallel_hash" = [ "cshake" ];
+          "sp800" = [ "cshake" "kmac" "tuple_hash" ];
+          "tuple_hash" = [ "cshake" ];
+        };
+        resolvedDefaultFeatures = [ "default" "shake" ];
       };
       "tinystr" = rec {
         crateName = "tinystr";
@@ -31865,7 +32195,7 @@ rec {
         features = {
           "default" = [ "std" ];
         };
-        resolvedDefaultFeatures = [ "std" ];
+        resolvedDefaultFeatures = [ "default" "std" ];
       };
       "windows-strings 0.4.2" = rec {
         crateName = "windows-strings";
@@ -32960,7 +33290,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";

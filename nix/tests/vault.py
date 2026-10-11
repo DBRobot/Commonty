@@ -75,12 +75,17 @@ assert "send.js" in page, page
 box.succeed(
     "curl -sf http://127.0.0.1:4181/_dd/static/send.js | grep -q bitwarden-send"
 )
-# the web vault is the app's now: a browser here is told so, and the same
-# page starts a Bitwarden app's sign-in
+# the web vault is the app's now: a browser here is handed to the app,
+# which opens it at the app's own copy, and the same page starts a
+# Bitwarden app's sign-in
 page = box.succeed("curl -sf http://127.0.0.1:4181/_dd/use-app")
-assert "use-app.js" in page, page
+assert "use-app.js" in page and 'id="open"' in page and 'id="retry"' in page, page
+assert "/_dd/download" in page, page
 box.succeed(
     "curl -sf http://127.0.0.1:4181/_dd/static/use-app.js | grep -q prevalidate"
+)
+box.succeed(
+    "curl -sf http://127.0.0.1:4181/_dd/static/use-app.js | grep -qF 'commonty://open?'"
 )
 
 # the breach list is fetched on a timer, from the internet this test has not
@@ -175,6 +180,55 @@ rows = box.succeed(
     'sudo -u postgres psql -d vaultwarden -tAc "select email from users"'
 ).split()
 assert rows == ["sarah@test.invalid"], rows
+
+
+# Where Vaultwarden sends a web sign-in back to: the app's own copies on the
+# member's device (its window, or a browser at the install's v-<label>
+# name), and for anything else its own address
+def returns_to(back):
+    q = urllib.parse.urlencode(
+        {
+            "client_id": "web",
+            "redirect_uri": back,
+            "response_type": "code",
+            "scope": "api offline_access",
+            "state": f"client-state-{secrets.token_hex(4)}",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "domain_hint": "test.invalid",
+        }
+    )
+    to_gate = box.succeed(
+        f"curl -s -c /root/vw2.jar -o /dev/null -w '%{{redirect_url}}' 'http://127.0.0.1:8222/identity/connect/authorize?{q}'"
+    ).strip()
+    to_vault = box.succeed(
+        f"curl -s -o /dev/null -w '%{{redirect_url}}' -H 'Cookie: {jar}' '{to_gate}'"
+    ).strip()
+    signin = to_vault.replace("https://vault.test.invalid", "http://127.0.0.1:8222")
+    return box.succeed(
+        f"curl -s -b /root/vw2.jar -o /dev/null -w '%{{redirect_url}}' '{signin}'"
+    ).strip()
+
+
+label = "0123456789abcdef0123456789abcdef"
+for ok in [
+    "http://127.0.0.1:41662/sso-connector.html",
+    f"http://v-{label}.localhost:41662/sso-connector.html",
+]:
+    got_back = returns_to(ok)
+    assert got_back.startswith(ok + "?"), (ok, got_back)
+for bad in [
+    "http://127.0.0.1:41661/sso-connector.html",
+    "http://localhost:41662/sso-connector.html",
+    "http://evil.localhost:41662/sso-connector.html",
+    f"http://p-{label}.localhost:41662/sso-connector.html",
+    f"http://v-{label}.localhost:41663/sso-connector.html",
+    f"http://v-{label}.localhost.evil.example:41662/sso-connector.html",
+    f"http://v-{label}.localhost:41662/other.html",
+    "https://evil.example/sso-connector.html",
+]:
+    got_back = returns_to(bad)
+    assert got_back.startswith(back + "?"), (bad, got_back)
 
 # Signed out of Passwords everywhere: the gate drops her name when a device
 # or passkey of hers goes, or she signs out everywhere else; her session

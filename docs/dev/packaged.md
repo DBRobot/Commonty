@@ -63,21 +63,31 @@ the web vault come in its signed release, never from a box, so root on a
 box cannot hand the page that holds a member's keys a copy that sends
 them away.
 
-- It serves them on local servers, Photos on 127.0.0.1:41661 and
-  Passwords on 127.0.0.1:41662.
-- A per-launch door, `/_dd/app/enter?k=…`, sets the cookie every other
-  request there needs.
-- A window is only sent to a port the app holds.
+- It serves them on local servers, Photos on port 41661 and Passwords on
+  41662: to its own window at `127.0.0.1`, and to the member's own browser
+  at a name made for that browser alone (`p-<session>.localhost`,
+  `v-<session>.localhost`).
+- A door sets the cookie every other request there needs. The window's
+  door takes the launch secret. A browser gets a door only after the
+  member allows it in the app's window, by a code both show, and only
+  that browser can then use the door.
+- A window or a browser is only sent to a port the app holds.
 - Code-type answers from a box (html, js, css, svg, xml) are refused.
 - Both clients are built into the app on every platform (`appWeb` in
   flake.nix bundles them under `app/web/_clients/`, source maps left out),
   and the app serves them from its own assets. The boxes still build them
   from the box config, but no box serves either one to a browser.
-- In a browser, `photos.<domain>` and `vault.<domain>` show a page that
-  says to open it in the Commonty app (the gate's `/_dd/use-app`,
-  [use-app.html](../../servers/home/web/pages/use-app.html)). nginx keeps
-  Photos' `/_dd/` and `/_dd/museum/`, and the vault's `/api`,
-  `/identity`, `/notifications`, `/events`, `/alive` and Send paths.
+- In a browser, `photos.<domain>` and `vault.<domain>` show a handoff page
+  (the gate's `/_dd/use-app`,
+  [use-app.html](../../servers/home/web/pages/use-app.html)). Its button
+  opens `commonty://open?service=photos|vault&path=…`, and the app opens
+  this browser at its own copy once the member allows it in the app. If
+  nothing opens, the page says the app must be installed and signed in,
+  with the download link and "Try again".
+  How the handoff is kept safe is in
+  [app.md](app.md#photos-and-passwords-in-a-browser). nginx keeps Photos'
+  `/_dd/` and `/_dd/museum/`, and the vault's `/api`, `/identity`,
+  `/notifications`, `/events`, `/alive` and Send paths.
 - Bitwarden's desktop app and browser extension still sign in through
   `vault.<domain>/#/sso`: [use-app.js](../../servers/home/web/use-app.js)
   makes the same hops the web vault did (`identity/sso/prevalidate`, then
@@ -203,10 +213,12 @@ browser at photos.<domain>                  gate                       museum
   password sealed to a key only the app holds, and the app keeps it in its
   keyring ([app/src/photos.rs](../../app/src/photos.rs)). After that the
   app opens its own copy of Photos: Ente's web client from the app's
-  release, built into the app, on 127.0.0.1:41661
-  ([app/src/local.rs](../../app/src/local.rs)), with the password after
-  the `#`. That copy asks the gate's `/_dd/` routes with the device's
-  token, and talks to museum (`api.<domain>`) and S3 directly.
+  release, built into the app, on port 41661
+  ([app/src/local.rs](../../app/src/local.rs)), in its window or the
+  member's browser. The opening page asks the app for the password once
+  (`POST /_dd/app/photos-key`). It is in no address, so no history keeps
+  it. That copy asks the gate's `/_dd/` routes with the device's token,
+  and talks to museum (`api.<domain>`) and S3 directly.
 
 ### Our pages
 
@@ -303,9 +315,14 @@ token, since the old one cannot be read back. Tokens from before the patch
 are hashed once by `vaultwarden.service`'s `preStart`.
 
 [vaultwarden-app-loopback.patch](../../servers/vault/vaultwarden-app-loopback.patch),
-in `sso.rs`: the web client's SSO may return to exactly
-`http://127.0.0.1:41662/sso-connector.html`, where the Commonty app serves
-its own copy of the web vault. No other loopback address.
+in `sso.rs`: the web client's SSO may return to where the Commonty app
+serves its own copy of the web vault. That is exactly
+`http://127.0.0.1:41662/sso-connector.html` for the app's window, or
+`http://v-<32 hex>.localhost:41662/sso-connector.html` for the member's
+browser's session. No other loopback address. The box cannot know each
+session's name, so the patch checks its shape. Either way the code goes
+back to the member's own device, and only the page that started the
+sign-in holds its PKCE verifier.
 
 Edits to the web vault, made in the module:
 
@@ -349,12 +366,14 @@ Bitwarden app or web vault
   is removed, the gate drops their name in `/run/dd-ended`.
   `dd-vault-end` then deletes their devices and changes their security
   stamp, so every app has to sign in again through the gate.
-- In the app, the web vault is served from the app's release on
-  127.0.0.1:41662. Its `/api`, `/identity`, `/icons`, `/events`,
-  `/notifications`, `/alive` and `/pwned` calls go through the app to
-  `vault.<domain>`. The window first signs in at the gate
-  (`POST /_dd/app/signin` with `then=vault`), which sends it back to the
-  app's `/_dd/app/vault`.
+- The web vault is served from the app's release on port 41662, to the
+  app's window and to the member's browser. Its `/api`, `/identity`,
+  `/icons`, `/events`, `/notifications`, `/alive` and `/pwned` calls go
+  through the app to `vault.<domain>`. The window first signs in at the
+  gate (`POST /_dd/app/signin` with `then=vault`), which sends it back to
+  the app's `/_dd/app/vault`. A browser signs in at the gate with its own
+  passkey on `home.<domain>`, the way any sign-in does. Vaultwarden then
+  sends it back to `v-<session>.localhost:41662/sso-connector.html`.
 
 ### Our pages
 
@@ -410,8 +429,10 @@ page served to anyone.
 5. Check the Send API paths in nginx's rules still match what
    [send.js](../../servers/vault/web/send.js) calls.
 6. Run the `vault` test.
-7. Check the Passwords window in the app still signs in and returns to
-   127.0.0.1:41662. The vault test does not cover that path.
+7. Check that Passwords still signs in and returns, in the app's window
+   (127.0.0.1:41662) and in a browser opened from `vault.<domain>`'s
+   button (`v-<session>.localhost:41662`). The vault test checks only that
+   Vaultwarden accepts these return addresses and refuses others.
 
 ## Ad blocking (Pi-hole)
 

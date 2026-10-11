@@ -1,8 +1,10 @@
 // photos.<domain> and vault.<domain> in a browser (use-app.html): their
 // clients hold a person's keys, so they come with the app (app/src/local.rs)
-// and these sites say so. What still has to work here without a client:
-// a Send opened from inside, and a Bitwarden desktop app's or browser
-// extension's sign-in, which starts and ends on the web vault's address.
+// and never from here. The button hands over to the app (commonty://open),
+// which opens this browser at its own copy. What still has to work here
+// without a client: a Send opened from inside, and a Bitwarden desktop
+// app's or browser extension's sign-in, which starts and ends on the web
+// vault's address.
 const vault = location.hostname.startsWith('vault.');
 const domain = location.hostname.split('.').slice(1).join('.');
 const home = `https://home.${domain}`;
@@ -13,9 +15,42 @@ const show = (id) => {
 
 document.getElementById('home').href = `${home}/_dd/home`;
 document.getElementById('download').href = `${home}/_dd/download`;
-for (const id of ['what', 'what-2']) {
+for (const id of ['what', 'what-2', 'what-3']) {
   document.getElementById(id).textContent = vault ? 'Passwords' : 'Photos';
 }
+
+// The page asked for, for the app to open after its door: the vault's
+// own pages are after the #, Photos' are paths.
+function asked() {
+  if (vault) return location.hash.startsWith('#/') ? `/${location.hash}` : '/';
+  return location.pathname + location.search;
+}
+
+// A browser says nothing when no app takes the link: if this page is still
+// in front a few seconds on, the app did not open.
+function handOff() {
+  document.getElementById('not-open').hidden = true;
+  let left = false;
+  const away = () => {
+    left = true;
+  };
+  window.addEventListener('blur', away, { once: true });
+  document.addEventListener('visibilitychange', away, { once: true });
+  const q = new URLSearchParams({ service: vault ? 'vault' : 'photos' });
+  const path = asked();
+  if (path !== '/') q.set('path', path);
+  location.href = `commonty://open?${q}`;
+  setTimeout(() => {
+    window.removeEventListener('blur', away);
+    document.removeEventListener('visibilitychange', away);
+    if (!left && document.visibilityState === 'visible') {
+      document.getElementById('not-open').hidden = false;
+    }
+  }, 3000);
+}
+
+document.getElementById('open').addEventListener('click', handOff);
+document.getElementById('retry').addEventListener('click', handOff);
 
 // A Bitwarden app's sign-in, as the web vault's SSO page does it: the app
 // sends its own client, return address, state and code challenge; this asks

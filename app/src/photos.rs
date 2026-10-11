@@ -4,9 +4,8 @@
 //! gate, sends the browser to the Photos page with the slot and a one-time
 //! key, and the browser - with the passkey - leaves the password there
 //! sealed to that key (servers/photos/web/photos.js). The app opens it, keeps it
-//! in this device's keyring, and from then on signs its window in and
-//! hands the password to the Photos page after the `#` of its address,
-//! the part no server is ever sent.
+//! in this device's keyring, and from then on hands it to the app's own
+//! Photos page once, when that page asks (local.rs, `/_dd/app/photos-key`).
 
 use std::sync::Mutex;
 
@@ -91,17 +90,16 @@ pub async fn state<R: Runtime>(app: &AppHandle<R>) -> Result<Response<Vec<u8>>, 
 }
 
 /// Where the window goes: the app's own copy of Photos (local.rs), through
-/// its door, the password after the # of the page that opens the account.
+/// its door; the page that opens the account asks the app for the password
+/// once (no address carries it, so no history keeps it).
 fn ready<R: Runtime>(_app: &AppHandle<R>, pw: &str) -> Result<Response<Vec<u8>>, String> {
-    json(serde_json::json!({
-        "ready": true,
-        "url": format!(
-            "{}#app={}&pw={}",
-            crate::local::door(false, "/_dd/photos")?,
-            enc(crate::site::origin()),
-            enc(pw)
-        ),
-    }))
+    let url = format!(
+        "{}#app={}",
+        crate::local::door(false, "/_dd/photos")?,
+        enc(crate::site::origin())
+    );
+    crate::local::set_window_key(pw);
+    json(serde_json::json!({ "ready": true, "url": url }))
 }
 
 /// The first time on this device: a slot at the gate, and the browser sent
