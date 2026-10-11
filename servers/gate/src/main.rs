@@ -153,6 +153,11 @@ async fn main() -> Result<()> {
         search: std::env::var("VERIFY_SEARCH")
             .ok()
             .filter(|s| !s.is_empty()),
+        // sign-in at the id Worker (sso.rs): https://id.<domain>
+        id_origin: std::env::var("VERIFY_ID")
+            .ok()
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| s.starts_with("https://")),
         release_pub: std::env::var("VERIFY_RELEASE_PUB")
             .ok()
             .map(|s| s.trim().to_string())

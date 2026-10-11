@@ -51,6 +51,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         demo_library: None,
         tmdb: None,
         search: None,
+        id_origin: None,
         oidc: None,
         app_manifest: None,
         bind: "127.0.0.1:0".parse().unwrap(),

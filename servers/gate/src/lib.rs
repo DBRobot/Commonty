@@ -28,6 +28,7 @@ mod photos;
 mod private;
 mod session;
 mod signins;
+mod sso;
 mod storage;
 
 use std::collections::HashMap;
@@ -79,6 +80,10 @@ struct App {
     demo_rate: Mutex<HashMap<String, (u64, u32)>>,
     /// photo passwords on their way from a browser to the app (photos.rs)
     handoffs: Mutex<HashMap<String, photos::Handoff>>,
+    /// where sign-in is, when it is the id Worker's (sso.rs)
+    id_origin: Option<String>,
+    /// challenges given to the id page, waiting for its answer (sso.rs)
+    sso: Mutex<HashMap<String, sso::Waiting>>,
     /// the encrypted libraries' gate (library.rs), on a box with the bucket
     library: Option<library::Gate>,
     /// whose entry named a reader of each library last time (library.rs)
@@ -208,6 +213,10 @@ pub struct Config {
     pub tmdb: Option<String>,
     /// SearXNG on this box, for Chat's web search: None, no search
     pub search: Option<String>,
+    /// The id Worker's origin (https://id.<domain>): sign-in is there, once
+    /// for every box, and this box's sessions are for each of its names
+    /// alone (sso.rs). None: this box's own sign-in page, as before.
+    pub id_origin: Option<String>,
 }
 
 /// What the photos page needs to make or open an ente account for a person:
@@ -1489,8 +1498,20 @@ async fn login_finish(
         .unwrap_or_default();
     app.signins
         .used(&user, &format!("passkey:{}", cred.id), agent);
-    // the session this one replaces in this browser is over
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    // shown to confirm something, in a session that is this person's: that
+    // session, fresh. With sign-in at the id Worker it is the fleet
+    // sign-in's own, which a new one here would split off from
+    if app.id_origin.is_some()
+        && let Some((was, id, _)) = app.sessions.session(cookie)
+        && was == user
+        && !id.is_empty()
+        && app.session_live(&user, &id)
+    {
+        app.saw_passkey(&id);
+        return StatusCode::OK.into_response();
+    }
+    // the session this one replaces in this browser is over
     if let Some((was, id, _)) = app.sessions.session(cookie)
         && was == user
         && !id.is_empty()
@@ -2215,11 +2236,21 @@ async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     {
         app.signins.end(&id);
     }
-    let to = match (photos::origin(&app.home), back) {
+    let mut to = match (photos::origin(&app.home), back) {
         (_, Some(b)) if demo => b,
         (Some(p), Some(b)) => format!("{p}/_dd/photos/forget?then={b}"),
         _ => "/".to_string(),
     };
+    // and the browser's key at the sign-in page, or the next name it opens
+    // would sign it straight back in
+    if let Some(id) = &app.id_origin {
+        let then = if to.starts_with('/') {
+            format!("https://{}{to}", asked_host(&headers))
+        } else {
+            to
+        };
+        to = format!("{id}/out?then={}", urlencode(&then));
+    }
     let mut r = Redirect::to(&to).into_response();
     r.headers_mut().insert(
         "set-cookie",
@@ -2495,7 +2526,9 @@ pub async fn start(
     });
     let app = Arc::new(App {
         directory: directory.clone(),
-        sessions: session::Sessions::open(&state_dir, &domain)?,
+        // with sign-in at the id Worker, a cookie for each name alone: one
+        // sent to every name of the domain would reach every box's
+        sessions: session::Sessions::open(&state_dir, &domain, cfg.id_origin.is_some())?,
         signins: signins::SignIns::open(Some(state_dir.join("signins.json"))),
         state_dir: state_dir.clone(),
         adding: Default::default(),
@@ -2517,6 +2550,8 @@ pub async fn start(
         photos: cfg.photos,
         demo_rate: Mutex::new(HashMap::new()),
         handoffs: Mutex::new(HashMap::new()),
+        id_origin: cfg.id_origin.clone(),
+        sso: Mutex::new(HashMap::new()),
         library: cfg.library,
         library_owners: Mutex::new(HashMap::new()),
         network: cfg.network,
@@ -2621,8 +2656,24 @@ pub async fn start(
         // the browser side, served under /_dd/ on every vhost
         .route(
             "/_dd/login",
-            get(|State(a): State<Arc<App>>| async move { Html(pages::login(&a.domain)) }),
+            get(
+                |State(a): State<Arc<App>>, Query(q): Query<HashMap<String, String>>| async move {
+                    // sign-in is the id Worker's: there and back, with a challenge
+                    if a.id_origin.is_some() {
+                        let rd = q.get("rd").map(String::as_str).unwrap_or("/");
+                        return Redirect::to(&format!(
+                            "/_dd/sso/start?rd={}",
+                            urlencode(&sso::local_path(rd))
+                        ))
+                        .into_response();
+                    }
+                    Html(pages::login(&a.domain)).into_response()
+                },
+            ),
         )
+        .route("/_dd/sso/start", get(sso::start))
+        .route("/_dd/sso/creds", get(sso::creds))
+        .route("/_dd/sso", post(sso::finish))
         .route("/_dd/login/start", post(login_start))
         .route("/_dd/login/finish", post(login_finish))
         .route(
@@ -3057,10 +3108,11 @@ mod tests {
             storage_ledger: None,
             tmdb: None,
             search: None,
+            id_origin: None,
         })
         .await
         .unwrap();
-        let sessions = session::Sessions::open(&d, DOMAIN).unwrap();
+        let sessions = session::Sessions::open(&d, DOMAIN, false).unwrap();
         (format!("http://{addr}"), sessions)
     }
 

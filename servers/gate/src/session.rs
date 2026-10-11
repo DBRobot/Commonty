@@ -15,15 +15,21 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
 pub const COOKIE: &str = "dd_session";
+/// The cookie for one name alone, when sign-in is the id Worker's: the
+/// browser keeps a __Host- cookie to the name that set it, on https, and
+/// lets no page or other name of the domain set one in its place.
+pub const HOST_COOKIE: &str = "__Host-dd";
 pub const TTL: u64 = 8 * 3600;
 
 pub struct Sessions {
     secret: Vec<u8>,
     domain: String,
+    /// sessions for each name alone (HOST_COOKIE), not the whole domain
+    host_only: bool,
 }
 
 impl Sessions {
-    pub fn open(dir: &Path, domain: &str) -> Result<Self> {
+    pub fn open(dir: &Path, domain: &str, host_only: bool) -> Result<Self> {
         let p = dir.join("session.secret");
         // one anyone else could read may have been: a new one, and every
         // session signs in again
@@ -41,6 +47,7 @@ impl Sessions {
         Ok(Self {
             secret,
             domain: domain.to_string(),
+            host_only,
         })
     }
 
@@ -59,30 +66,59 @@ impl Sessions {
     /// Each is its own, even for one user in one second: the demo counts
     /// what each visitor does by the session they were given.
     pub fn issue(&self, user: &str) -> String {
-        let exp = now() + TTL;
-        let who = format!("{user}~{}", B64.encode(random(9).unwrap_or_default()));
-        let value = format!("{who}.{exp}.{}", self.mac(&who, exp));
-        format!(
-            "{COOKIE}={value}; Domain={}; Path=/; Max-Age={TTL}; Secure; HttpOnly; SameSite=Lax",
-            self.domain
+        self.issue_as(
+            user,
+            &B64.encode(random(9).unwrap_or_default()),
+            now() + TTL,
         )
     }
 
+    /// A session with a given id and end: a fleet sign-in's (sso.rs), whose
+    /// id every box's session from it shares.
+    pub fn issue_as(&self, user: &str, id: &str, exp: u64) -> String {
+        let who = format!("{user}~{id}");
+        let value = format!("{who}.{exp}.{}", self.mac(&who, exp));
+        let age = exp.saturating_sub(now());
+        if self.host_only {
+            format!("{HOST_COOKIE}={value}; Path=/; Max-Age={age}; Secure; HttpOnly; SameSite=Lax")
+        } else {
+            format!(
+                "{COOKIE}={value}; Domain={}; Path=/; Max-Age={age}; Secure; HttpOnly; SameSite=Lax",
+                self.domain
+            )
+        }
+    }
+
     pub fn clear(&self) -> String {
-        format!(
-            "{COOKIE}=; Domain={}; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
-            self.domain
-        )
+        if self.host_only {
+            format!("{HOST_COOKIE}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax")
+        } else {
+            format!(
+                "{COOKIE}=; Domain={}; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
+                self.domain
+            )
+        }
     }
 
     /// The user a Cookie header names, if the session is ours and unexpired.
     /// The user, the session's own id ("" for one from before ids) and when
     /// it runs out - of a cookie this box made and that has not.
+    /// With sessions for each name, the domain-wide cookie from before is
+    /// still read until it runs out: this box made it too.
     pub fn session(&self, cookie_header: Option<&str>) -> Option<(String, String, u64)> {
-        let raw = cookie_header?
-            .split(';')
-            .map(str::trim)
-            .find_map(|c| c.strip_prefix(&format!("{COOKIE}=")))?;
+        let header = cookie_header?;
+        let named = |name: &str| {
+            header
+                .split(';')
+                .map(str::trim)
+                .find_map(|c| c.strip_prefix(&format!("{name}=")))
+                .filter(|v| !v.is_empty())
+        };
+        let raw = if self.host_only {
+            named(HOST_COOKIE).or_else(|| named(COOKIE))
+        } else {
+            named(COOKIE)
+        }?;
         let mut parts = raw.rsplitn(3, '.');
         let mac = parts.next()?;
         let exp: u64 = parts.next()?.parse().ok()?;
@@ -97,12 +133,7 @@ impl Sessions {
     /// A fresh session's Set-Cookie, with its id and expiry for the record.
     pub fn issue_noted(&self, user: &str) -> (String, String, u64) {
         let cookie = self.issue(user);
-        let value = cookie
-            .split(';')
-            .next()
-            .and_then(|c| c.strip_prefix(&format!("{COOKIE}=")))
-            .unwrap_or_default();
-        let header = format!("{COOKIE}={value}");
+        let header = cookie.split(';').next().unwrap_or_default().to_string();
         let (_, id, exp) = self.session(Some(&header)).unwrap_or_default();
         (cookie, id, exp)
     }
@@ -139,6 +170,17 @@ mod tests {
         Sessions {
             secret: vec![7; 32],
             domain: "x".into(),
+            host_only: false,
+        }
+    }
+
+    impl Sessions {
+        fn clone_for_test(&self) -> Self {
+            Sessions {
+                secret: self.secret.clone(),
+                domain: self.domain.clone(),
+                host_only: self.host_only,
+            }
         }
     }
 
@@ -166,6 +208,39 @@ mod tests {
     }
 
     #[test]
+    fn a_session_for_one_name_alone() {
+        let s = Sessions {
+            secret: vec![7; 32],
+            domain: "x".into(),
+            host_only: true,
+        };
+        let set = s.issue_as("tom", "sid-sid-sid-sid-1", now() + 60);
+        assert!(set.starts_with("__Host-dd="), "{set}");
+        assert!(!set.contains("Domain="), "for this name alone: {set}");
+        let (user, id, _) = s.session(Some(&value(&set))).unwrap();
+        assert_eq!((user.as_str(), id.as_str()), ("tom", "sid-sid-sid-sid-1"));
+        // the domain-wide cookie from before still reads, until it runs out
+        let old = Sessions {
+            host_only: false,
+            ..s.clone_for_test()
+        };
+        assert_eq!(
+            s.session(Some(&value(&old.issue("tom"))))
+                .map(|x| x.0)
+                .as_deref(),
+            Some("tom")
+        );
+        // and another box's (another secret) is nobody here
+        let other = Sessions {
+            secret: vec![8; 32],
+            domain: "x".into(),
+            host_only: true,
+        };
+        assert!(s.session(Some(&value(&other.issue("tom")))).is_none());
+        assert!(s.clear().starts_with("__Host-dd=;"));
+    }
+
+    #[test]
     fn the_secret_is_the_gates_alone() {
         use std::os::unix::fs::PermissionsExt as _;
         let d = std::env::temp_dir().join(format!("dd-session-{}", std::process::id()));
@@ -173,14 +248,14 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let p = d.join("session.secret");
         let mode = || std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
-        let first = Sessions::open(&d, "x").unwrap();
+        let first = Sessions::open(&d, "x", false).unwrap();
         assert_eq!(mode(), 0o600);
         // kept across a restart
-        let again = Sessions::open(&d, "x").unwrap();
+        let again = Sessions::open(&d, "x", false).unwrap();
         assert_eq!(first.secret, again.secret);
         // one others could read is replaced, and its sessions end
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let after = Sessions::open(&d, "x").unwrap();
+        let after = Sessions::open(&d, "x", false).unwrap();
         assert_ne!(first.secret, after.secret);
         assert_eq!(mode(), 0o600);
         let _ = std::fs::remove_dir_all(&d);
