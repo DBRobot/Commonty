@@ -75,7 +75,7 @@ anyone who breaks into it) can see what the box can see.
 | **Passwords** | Your vault | 🔏 Locked, labelled | 📖 Read outside | Its notices are emailed to you through Cloudflare, which can read each email |
 | **Photos** | Your photos and albums | 🔏 Locked, labelled | 🏠 Stays home | — |
 | **Your account** | Your name, and your devices' and passkeys' public keys. Nothing secret | 👁 Open to the box | 📖 Read outside | Sign-in pages pass through Cloudflare, which can read them; Cloudflare also carries your account record between boxes |
-| **Your email address** | Where your address here forwards to | 👁 Open to the box | 📖 Read outside | Cloudflare keeps where it forwards and handles every email sent to your address |
+| **Your email address** | Where your address here forwards to | — Not on any box | 📖 Read outside | Only Cloudflare keeps where it forwards, and it handles every email sent to your address |
 | **The network** | Which devices you have, their names, and when they were online | 👁 Open to the box | ✉️ Envelope seen | Tailscale's relays may carry your traffic, sealed, and see your devices' internet addresses. Cloudflare sees when your devices connect. Every name your devices look up on the network goes to Quad9, encrypted on the way |
 | **Ad blocking** | Nothing about which sites you visit | 👁 Open to the box | ✉️ Envelope seen | Quad9 sees each name looked up, encrypted on the way |
 | **Storage counts** | How many bytes you keep in each service | 👁 Open to the box | 🏠 Stays home | — |
