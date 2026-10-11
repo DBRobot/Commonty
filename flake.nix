@@ -294,21 +294,40 @@
             "git-remote-dd"
           ];
           graphOf =
-            root: runTests:
+            root: runTests: overrides:
             (cargoNix.internal.builtRustCratesWithFeatures {
               packageId = root;
               features = [ "default" ];
               inherit runTests;
               buildRustCrateForPkgsFunc =
-                p: (buildRustCrateForPkgs p).override { defaultCrateOverrides = crateOverrides; };
+                p: (buildRustCrateForPkgs p).override { defaultCrateOverrides = overrides; };
             }).crates;
-          hostGraphs = pkgs.lib.genAttrs testHosts (h: graphOf h false);
+          hostGraphs = pkgs.lib.genAttrs testHosts (h: graphOf h false crateOverrides);
+          # Tests compile unoptimised, as cargo test does: a test program
+          # never ships, and optimising it made a change to the gate cost
+          # ten minutes (its tests and dd's, each rebuilt at opt-level 3).
+          # The boxes' own builds stay optimised and shared; only what is
+          # built for the tests alone - each crate's test build, and our own
+          # crates in a graph made for dev-dependencies - is not.
+          unoptimised = o: {
+            extraRustcOpts = (o.extraRustcOpts or [ ]) ++ [
+              "-C"
+              "opt-level=0"
+              "-C"
+              "debuginfo=0"
+            ];
+          };
+          testOverrides =
+            crateOverrides
+            // pkgs.lib.genAttrs (builtins.attrNames cargoNix.workspaceMembers) (
+              w: attrs: (crateOverrides.${w} or (_: { })) attrs // unoptimised attrs
+            );
           withDevDeps = n: (cargoNix.internal.crates.${n}.devDependencies or [ ]) != [ ];
           # the graph a crate's tests are built in
           testGraph =
             n:
             if withDevDeps n then
-              graphOf n true
+              graphOf n true testOverrides
             else
               let
                 # a graph lists every crate; the program's own build says which
@@ -319,7 +338,7 @@
                   || builtins.any (d: d.drvPath == hostGraphs.${h}.${n}.drvPath) hostGraphs.${h}.${h}.completeDeps;
                 host = pkgs.lib.findFirst holds null testHosts;
               in
-              if host == null then graphOf n true else hostGraphs.${host};
+              if host == null then graphOf n true testOverrides else hostGraphs.${host};
           # The gate's tests (and dd's, which run a gate) read the pages from
           # the tree; the library's are checked against rclone itself; dd's
           # run git and ssh
@@ -330,14 +349,21 @@
             in
             (cargoNix.internal.crateWithTest {
               crate = g.${n};
-              testCrate = g.${n};
+              testCrate = g.${n}.override unoptimised;
               testCrateFlags = [ ];
               testInputs = [
                 pkgs.gitMinimal
                 pkgs.openssh
                 pkgs.rclone
               ];
-              testPreRun = "export HOME=$TMPDIR VERIFY_PAGES_DIR=${pages}";
+              # the pages only where they are read: a page edit would run
+              # every crate's tests again otherwise
+              testPreRun =
+                "export HOME=$TMPDIR"
+                + pkgs.lib.optionalString (builtins.elem n [
+                  "verify"
+                  "dd"
+                ]) " VERIFY_PAGES_DIR=${pages}";
               testPostRun = "";
             }).test;
           # every crate but the app, whose tests are its own check (tests-app)
