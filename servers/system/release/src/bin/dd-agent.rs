@@ -326,6 +326,11 @@ fn run(args: &Args) -> Result<String> {
         &format!("{}/bin/switch-to-configuration", mine.path),
         &["switch"],
     );
+    // why, in the journal: release 244 rolled back on node1 with nothing to
+    // say what the switch had refused
+    if let Err(e) = &switched {
+        eprintln!("release {counter}: the switch failed: {e:#}");
+    }
 
     let probed =
         switched.is_ok() && probe_until(args, Duration::from_secs(args.probe_secs), &failed_before);
