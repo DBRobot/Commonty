@@ -77,12 +77,12 @@ for path in (
     )
     assert '"success"' in out, (path, out)
 box.succeed(f"{curl} -f {sarah} -X POST -d query=up {site}/api/v1/query")
-log = box.succeed("cat /tmp/thanos.log")
-assert "GET /api/v1/query?query=up" in log, log
-assert "GET /api/v1/label/job/values" in log, log
-assert "POST /api/v1/query" in log, log
-assert "dd_session" not in log, log
-assert "not-for-thanos" not in log, log
+seen = box.succeed("cat /tmp/thanos.log")
+assert "GET /api/v1/query?query=up" in seen, seen
+assert "GET /api/v1/label/job/values" in seen, seen
+assert "POST /api/v1/query" in seen, seen
+assert "dd_session" not in seen, seen
+assert "not-for-thanos" not in seen, seen
 
 # nothing else of Thanos: no other method, no admin API, no other path.
 # Those land on the page or are refused, and Thanos never hears them

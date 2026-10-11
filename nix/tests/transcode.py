@@ -241,6 +241,6 @@ assert "picture copied" in line, line
 assert "keyframes 2.0s apart" in line, line
 # The log has what was chosen and why, and nothing of the film's: not its
 # sealed name, and not a session's whole id, which opens its segments
-log = box.succeed("journalctl -u dd-transcode.service --no-pager")
+journal = box.succeed("journalctl -u dd-transcode.service --no-pager")
 for private in [sparse, dense, sparse_enc, dense_enc, sid]:
-    assert private not in log, private
+    assert private not in journal, private
