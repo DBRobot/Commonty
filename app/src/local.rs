@@ -876,7 +876,8 @@ async fn file(root: Option<&Path>, path: &str, shell: bool) -> Response {
 /// The page's call, sent on to a box over the fleet's network and answered
 /// back as it came, streamed both ways. `bearer`: this device's token for
 /// the gate. `same_site`: the box is the page's own server (Vaultwarden),
-/// so its redirects to itself come back here.
+/// so its redirects to itself come back here, and its sign-in's binding
+/// cookie passes both ways.
 async fn forward(base: &str, bearer: Option<&str>, req: Request, same_site: bool) -> Response {
     let target = match req.uri().query() {
         Some(q) => format!("{base}{}?{q}", req.uri().path()),
@@ -894,6 +895,18 @@ async fn forward(base: &str, bearer: Option<&str>, req: Request, same_site: bool
         return plain(StatusCode::METHOD_NOT_ALLOWED, "no such method");
     };
     let mut out = client.request(method, &target);
+    // the vault's sign-in binding, and no other cookie (handoff.rs)
+    if same_site
+        && let Some(c) = handoff::binding_cookie_for(
+            req.uri().path(),
+            req.headers()
+                .get_all(header::COOKIE)
+                .iter()
+                .filter_map(|v| v.to_str().ok()),
+        )
+    {
+        out = out.header(header::COOKIE.as_str(), c);
+    }
     for (k, v) in req.headers() {
         // what is this hop's, and what would speak for this computer
         if matches!(
@@ -949,6 +962,14 @@ async fn forward(base: &str, bearer: Option<&str>, req: Request, same_site: bool
         back = back.header(header::CONTENT_TYPE, "application/octet-stream");
     }
     for (k, v) in r.headers() {
+        if k == header::SET_COOKIE && same_site {
+            if let Some(c) = v.to_str().ok().and_then(handoff::binding_set_cookie)
+                && let Ok(h) = HeaderValue::from_str(&c)
+            {
+                back = back.header(k, h);
+            }
+            continue;
+        }
         if matches!(
             k.as_str(),
             "connection"

@@ -509,6 +509,46 @@ pub fn cookie<'a>(headers: impl Iterator<Item = &'a str>, name: &str) -> Option<
         .find_map(|c| c.trim().strip_prefix(name)?.strip_prefix('='))
 }
 
+/// Vaultwarden binds its sign-in's two halves (/identity/connect/authorize
+/// and the gate's return to oidc-signin) to one browser by this cookie. It
+/// is the one cookie a box may set through the app, and only the vault's.
+pub const SSO_BINDING: &str = "VW_SSO_BINDING";
+
+/// The vault's binding cookie as this browser keeps it: host-only, so on the
+/// session's own v-<hex>.localhost and nowhere else, without Secure (the
+/// page is plain http on this computer). Any other cookie is dropped.
+pub fn binding_set_cookie(v: &str) -> Option<String> {
+    let mut parts = v.split(';').map(str::trim);
+    let (name, value) = parts.next()?.split_once('=')?;
+    if name != SSO_BINDING || value.is_empty() || value.contains(['"', ',', ' ']) {
+        return None;
+    }
+    let mut out = format!("{SSO_BINDING}={value}");
+    for a in parts {
+        let key = a.split('=').next().unwrap_or("").to_ascii_lowercase();
+        if matches!(
+            key.as_str(),
+            "path" | "max-age" | "expires" | "samesite" | "httponly"
+        ) {
+            out.push_str("; ");
+            out.push_str(a);
+        }
+    }
+    Some(out)
+}
+
+/// What of a request's cookies goes on to the vault: its binding, for its
+/// sign-in's own paths, and nothing of the app's
+pub fn binding_cookie_for<'a>(
+    path: &str,
+    headers: impl Iterator<Item = &'a str>,
+) -> Option<String> {
+    if !path.starts_with("/identity/connect/") {
+        return None;
+    }
+    cookie(headers, SSO_BINDING).map(|v| format!("{SSO_BINDING}={v}"))
+}
+
 /// a value good once, for a short while
 #[derive(Default)]
 pub struct Once(Option<(String, Instant)>);
@@ -681,6 +721,38 @@ mod tests {
         let v = "the browser's own verifier".to_string();
         p.ask(&hash_of(&v), now).unwrap();
         (p, v)
+    }
+
+    #[test]
+    fn the_vaults_sign_in_binding_and_only_it_passes() {
+        let set = "VW_SSO_BINDING=abc_-9; Path=/identity/connect/; Max-Age=600; SameSite=Lax; HttpOnly; Secure; Domain=vault.example.org";
+        assert_eq!(
+            binding_set_cookie(set).as_deref(),
+            Some(
+                "VW_SSO_BINDING=abc_-9; Path=/identity/connect/; Max-Age=600; SameSite=Lax; HttpOnly"
+            )
+        );
+        for other in [
+            "dd_browser=x; Path=/; HttpOnly",
+            "VW_SSO_BINDINGX=y",
+            "VW_SSO_BINDING=",
+            "session=VW_SSO_BINDING=z",
+        ] {
+            assert_eq!(binding_set_cookie(other), None, "{other}");
+        }
+        let sent = ["dd_browser=secret; VW_SSO_BINDING=abc"];
+        assert_eq!(
+            binding_cookie_for("/identity/connect/oidc-signin", sent.iter().copied()).as_deref(),
+            Some("VW_SSO_BINDING=abc")
+        );
+        assert_eq!(binding_cookie_for("/api/sync", sent.iter().copied()), None);
+        assert_eq!(
+            binding_cookie_for(
+                "/identity/connect/token",
+                ["dd_browser=secret"].iter().copied()
+            ),
+            None
+        );
     }
 
     #[test]
