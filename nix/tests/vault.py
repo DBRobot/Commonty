@@ -5,8 +5,12 @@ import json
 box.wait_for_unit("garage.service")
 box.wait_for_open_port(3901)
 box.succeed("systemctl restart garage-setup.service")
-box.wait_until_succeeds(f"set -a; . {nix['rpc']}; garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l")
-box.succeed("systemctl restart garage-setup.service")  # the bucket and its key, now that the layout exists
+box.wait_until_succeeds(
+    f"set -a; . {nix['rpc']}; garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l"
+)
+box.succeed(
+    "systemctl restart garage-setup.service"
+)  # the bucket and its key, now that the layout exists
 
 box.succeed("systemctl restart vaultwarden.service")
 box.wait_for_unit("vaultwarden.service")
@@ -19,7 +23,9 @@ s3 = (
     "AWS_SECRET_ACCESS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef "
     "AWS_DEFAULT_REGION=us-east-1 aws --endpoint-url http://127.0.0.1:3900"
 )
-box.wait_until_succeeds(f"{s3} s3 ls s3://vaultwarden/data/ | grep -q rsa_key", timeout=60)
+box.wait_until_succeeds(
+    f"{s3} s3 ls s3://vaultwarden/data/ | grep -q rsa_key", timeout=60
+)
 box.fail("ls /var/lib/vaultwarden/rsa_key.pem")
 
 # and its records in postgres, where the hourly dumps take them from
@@ -39,7 +45,11 @@ assert "access_token" not in out, out
 assert "sso" in out.lower() or "SSO" in out, out
 
 box.wait_for_open_port(4181)
-disc = json.loads(box.succeed("curl -sf http://127.0.0.1:4181/_dd/oidc/.well-known/openid-configuration"))
+disc = json.loads(
+    box.succeed(
+        "curl -sf http://127.0.0.1:4181/_dd/oidc/.well-known/openid-configuration"
+    )
+)
 assert disc["issuer"] == "http://127.0.0.1:4181/_dd/oidc", disc
 assert "S256" in disc["code_challenge_methods_supported"], disc
 keys = json.loads(box.succeed("curl -sf http://127.0.0.1:4181/_dd/oidc/jwks"))
@@ -62,8 +72,17 @@ box.fail(
 # the Send page and its script, for anyone
 page = box.succeed("curl -sf http://127.0.0.1:4181/_dd/send")
 assert "send.js" in page, page
-box.succeed("curl -sf http://127.0.0.1:4181/_dd/static/send.js | grep -q bitwarden-send")
+box.succeed(
+    "curl -sf http://127.0.0.1:4181/_dd/static/send.js | grep -q bitwarden-send"
+)
 box.succeed("curl -sf http://127.0.0.1:4181/_dd/static/vault-bar.js -o /dev/null")
+# the web vault is the app's now: a browser here is told so, and the same
+# page starts a Bitwarden app's sign-in
+page = box.succeed("curl -sf http://127.0.0.1:4181/_dd/use-app")
+assert "use-app.js" in page, page
+box.succeed(
+    "curl -sf http://127.0.0.1:4181/_dd/static/use-app.js | grep -q prevalidate"
+)
 
 # the breach list is fetched on a timer, from the internet this test has not
 box.succeed("systemctl list-timers dd-pwned.timer | grep -q dd-pwned")
@@ -84,7 +103,7 @@ box.succeed(f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs}")
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
 box.succeed(
     "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "
-    "\"$(jq -c . /root/fleet/fleet/members.json)\" "
+    '"$(jq -c . /root/fleet/fleet/members.json)" '
     "> /run/systemd/system/dd-verify.service.d/members.conf"
 )
 box.succeed("systemctl daemon-reload && systemctl restart dd-verify.service")
@@ -92,26 +111,52 @@ box.wait_for_open_port(4181)
 
 # the app's way in: a device token for a session, as the app's browser does
 token = box.succeed(f"{env} {nix['dd']} token").strip()
-head = box.succeed(f"curl -s -D - -o /dev/null -X POST --data-urlencode token={token} http://127.0.0.1:4181/_dd/app/signin")
-jar = [l for l in head.splitlines() if l.lower().startswith("set-cookie:")][0].split(":", 1)[1].split(";")[0].strip()
+head = box.succeed(
+    f"curl -s -D - -o /dev/null -X POST --data-urlencode token={token} http://127.0.0.1:4181/_dd/app/signin"
+)
+jar = (
+    [l for l in head.splitlines() if l.lower().startswith("set-cookie:")][0]
+    .split(":", 1)[1]
+    .split(";")[0]
+    .strip()
+)
 assert jar.startswith("dd_session="), head
 
 # what a Bitwarden client does: its own pkce, then Vaultwarden's authorize
 verifier = secrets.token_urlsafe(48)
-challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+challenge = (
+    base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+    .rstrip(b"=")
+    .decode()
+)
 back = "https://vault.test.invalid/sso-connector.html"
-q = urllib.parse.urlencode({
-    "client_id": "web", "redirect_uri": back, "response_type": "code",
-    "scope": "api offline_access", "state": "client-state", "code_challenge": challenge,
-    "code_challenge_method": "S256", "domain_hint": "test.invalid",
-})
-to_gate = box.succeed(f"curl -s -c /root/vw.jar -o /dev/null -w '%{{redirect_url}}' 'http://127.0.0.1:8222/identity/connect/authorize?{q}'").strip()
+q = urllib.parse.urlencode(
+    {
+        "client_id": "web",
+        "redirect_uri": back,
+        "response_type": "code",
+        "scope": "api offline_access",
+        "state": "client-state",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "domain_hint": "test.invalid",
+    }
+)
+to_gate = box.succeed(
+    f"curl -s -c /root/vw.jar -o /dev/null -w '%{{redirect_url}}' 'http://127.0.0.1:8222/identity/connect/authorize?{q}'"
+).strip()
 assert to_gate.startswith("http://127.0.0.1:4181/_dd/oidc/authorize?"), to_gate
 # the gate knows sarah by her session and sends her back with a code
-to_vault = box.succeed(f"curl -s -o /dev/null -w '%{{redirect_url}}' -H 'Cookie: {jar}' '{to_gate}'").strip()
-assert to_vault.startswith("https://vault.test.invalid/identity/connect/oidc-signin?code="), to_vault
+to_vault = box.succeed(
+    f"curl -s -o /dev/null -w '%{{redirect_url}}' -H 'Cookie: {jar}' '{to_gate}'"
+).strip()
+assert to_vault.startswith(
+    "https://vault.test.invalid/identity/connect/oidc-signin?code="
+), to_vault
 signin = to_vault.replace("https://vault.test.invalid", "http://127.0.0.1:8222")
-to_client = box.succeed(f"curl -s -b /root/vw.jar -o /dev/null -w '%{{redirect_url}}' '{signin}'").strip()
+to_client = box.succeed(
+    f"curl -s -b /root/vw.jar -o /dev/null -w '%{{redirect_url}}' '{signin}'"
+).strip()
 assert to_client.startswith(back), to_client
 code = urllib.parse.parse_qs(urllib.parse.urlparse(to_client).query)["code"][0]
 # and the client's code buys a session in Passwords: Vaultwarden checked the
@@ -127,7 +172,9 @@ got = box.succeed(
 assert "access_token" in got, got
 # her account is hers by her Commonty name, and holds no password yet: she
 # sets the master password on her own device next
-rows = box.succeed("sudo -u postgres psql -d vaultwarden -tAc \"select email from users\"").split()
+rows = box.succeed(
+    'sudo -u postgres psql -d vaultwarden -tAc "select email from users"'
+).split()
 assert rows == ["sarah@test.invalid"], rows
 
 # Signed out of Passwords everywhere: the gate drops her name when a device
@@ -135,21 +182,29 @@ assert rows == ["sarah@test.invalid"], rows
 # here stops working and her app cannot refresh it
 tokens = json.loads(got)
 # the refresh token works while she is signed in (only its hash is kept)
-renewed = json.loads(box.succeed(
-    "curl -s -X POST http://127.0.0.1:8222/identity/connect/token "
-    f"--data-urlencode grant_type=refresh_token --data-urlencode refresh_token={tokens['refresh_token']} "
-    "--data-urlencode client_id=web"
-))
+renewed = json.loads(
+    box.succeed(
+        "curl -s -X POST http://127.0.0.1:8222/identity/connect/token "
+        f"--data-urlencode grant_type=refresh_token --data-urlencode refresh_token={tokens['refresh_token']} "
+        "--data-urlencode client_id=web"
+    )
+)
 assert "access_token" in renewed, renewed
-kept = box.succeed("sudo -u postgres psql -d vaultwarden -tAc 'select refresh_token from devices'").split()
-assert kept and all(len(k) == 64 for k in kept) and tokens["refresh_token"] not in kept, "refresh tokens are kept as hashes"
+kept = box.succeed(
+    "sudo -u postgres psql -d vaultwarden -tAc 'select refresh_token from devices'"
+).split()
+assert (
+    kept and all(len(k) == 64 for k in kept) and tokens["refresh_token"] not in kept
+), "refresh tokens are kept as hashes"
 tokens = renewed
 api = f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Authorization: Bearer {tokens['access_token']}' http://127.0.0.1:8222/api/accounts/revision-date"
 assert box.succeed(api).strip() == "200"
-box.succeed("systemctl show dd-verify.service -p Environment | grep -q VERIFY_ENDED=/run/dd-ended")
+box.succeed(
+    "systemctl show dd-verify.service -p Environment | grep -q VERIFY_ENDED=/run/dd-ended"
+)
 box.succeed("sudo -u dd-verify touch /run/dd-ended/sarah")
 box.wait_until_succeeds("test ! -e /run/dd-ended/sarah", timeout=30)
-box.wait_until_succeeds(f"test \"$({api})\" = 401", timeout=10)
+box.wait_until_succeeds(f'test "$({api})" = 401', timeout=10)
 again = box.succeed(
     "curl -s -X POST http://127.0.0.1:8222/identity/connect/token "
     f"--data-urlencode grant_type=refresh_token --data-urlencode refresh_token={tokens['refresh_token']} "

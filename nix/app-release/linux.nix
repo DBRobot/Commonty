@@ -10,7 +10,7 @@
   cargoVendor,
   netSrc,
   netVendor,
-  webDist,
+  appWeb,
 }:
 let
   image = pkgs.vmTools.diskImageFuns.ubuntu2204x86_64 {
@@ -95,8 +95,7 @@ pkgs.vmTools.runInLinuxImage (
 
       cp -r ${src} /work/src && chmod -R u+w /work/src
       cd /work/src
-      mkdir -p app/web/_dd/web
-      cp ${webDist}/* app/web/_dd/web/
+      cp -r ${appWeb}/. app/web/ && chmod -R u+w app/web
       mkdir -p .cargo
       cp ${cargoVendor}/config.toml .cargo/config.toml
 

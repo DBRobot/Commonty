@@ -2349,6 +2349,16 @@ pub async fn start(
                 )
             }),
         )
+        // anyone's: Photos' and Passwords' sites say to open them in the app
+        .route(
+            "/_dd/use-app",
+            get(|| async {
+                (
+                    [("cache-control", "no-cache")],
+                    Html(pages::page("use-app").unwrap_or_default()),
+                )
+            }),
+        )
         .route("/_dd/chat/search", get(chat_search))
         .route("/_dd/adblock", get(adblock::page))
         .route("/_dd/adblock/state", get(adblock::state))
