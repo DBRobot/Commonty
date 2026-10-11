@@ -187,8 +187,10 @@ in
   # Builds are held to their share of the box's memory, so a big one is
   # what gets killed, not garage or the gate: node2 (14G) ran out entirely
   # building node1's system while garage resynced. Above 60% builds are
-  # slowed, at 75% killed; and one build at a time per 6G, at most one per
-  # four threads.
+  # slowed, at 75% killed; and one build at a time per 6G, at most three
+  # for every four threads. A crate's build is mostly one thread, so one
+  # per four threads left node1 compiling two crates at once with six of
+  # its eight threads idle (a cold test build took half an hour).
   systemd.services.nix-daemon.serviceConfig =
     let
       mib = config.dd.box.memoryBytes / (1024 * 1024);
@@ -199,7 +201,7 @@ in
     };
   nix.settings.max-jobs = lib.mkIf (config.dd.box.memoryBytes > 0) (
     lib.max 1 (
-      lib.min (config.dd.box.memoryBytes / (6 * 1024 * 1024 * 1024)) (config.dd.box.threads / 4)
+      lib.min (config.dd.box.memoryBytes / (6 * 1024 * 1024 * 1024)) (config.dd.box.threads * 3 / 4)
     )
   );
   nix.settings.min-free = 10 * 1024 * 1024 * 1024;
