@@ -48,7 +48,9 @@ in
       description = "Make sure every declared push mirror exists, with the token in sops";
       after = [ "forgejo-admin.service" ];
       requires = [ "forgejo.service" ];
-      wantedBy = [ "multi-user.target" ];
+      # a timer's, never a switch's: GitHub refusing a sync (the account is
+      # suspended) rolled release 232 back on node1
+      restartIfChanged = false;
       path = [
         pkgs.curl
         pkgs.jq
@@ -62,7 +64,12 @@ in
       };
       script = ''
         set -euo pipefail
+        # a failed unit counts against the next release's probe: say it, try next time
+        trap 'echo "mirror check failed at line $LINENO; next time"; exit 0' ERR
         token=$(cat "$CREDENTIALS_DIRECTORY/token")
+        # the forge not answering yet (restarting under a switch) is next time
+        as_admin_ok() { curl -fsS --unix-socket ${sock} -o /dev/null ${api}/version; }
+        as_admin_ok || { echo "forge not answering; next time"; exit 0; }
         as_admin() { curl -fsS --unix-socket ${sock} -H 'X-WEBAUTH-USER: ${cfg.admin}' "$@"; }
         ${lib.concatMapStringsSep "\n" (m: ''
           # the API has no way to change a mirror's token: one given another
@@ -80,11 +87,21 @@ in
               '{remote_address: $addr, remote_username: $user, remote_password: $pw, interval: "8h0m0s", sync_on_commit: true}' \
               | as_admin -X POST -H 'content-type: application/json' -d @- ${api}/repos/${m.repo}/push_mirrors >/dev/null
             echo "$given" >"$kept"
-            as_admin -X POST ${api}/repos/${m.repo}/push_mirrors-sync >/dev/null
-            echo "${m.repo} -> ${m.to}: ''${names:+token changed, }added and first sync requested"
+            if as_admin -X POST ${api}/repos/${m.repo}/push_mirrors-sync >/dev/null; then
+              echo "${m.repo} -> ${m.to}: ''${names:+token changed, }added and first sync requested"
+            else
+              echo "${m.repo} -> ${m.to}: ''${names:+token changed, }added; the first sync was refused, next push tries again"
+            fi
           fi
         '') cfg.mirrors}
       '';
+    };
+    systemd.timers.forgejo-mirrors = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "5min";
+        OnUnitActiveSec = "6h";
+      };
     };
   };
 }
