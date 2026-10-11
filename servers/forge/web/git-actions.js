@@ -223,18 +223,7 @@ async function graph(r, run) {
   };
   const direct = edges.filter(([a, b]) => !reaches(a, b, b));
   edges.splice(0, edges.length, ...direct);
-  // depth: the longest line of waiting before a job
-  const depth = new Map();
-  const d = (id, seen = new Set()) => {
-    if (depth.has(id)) return depth.get(id);
-    if (seen.has(id)) return 0;
-    seen.add(id);
-    const v = Math.max(0, ...edges.filter(([, b]) => b === id).map(([a]) => d(a, seen) + 1));
-    depth.set(id, v);
-    return v;
-  };
-  for (const n of nodes) d(n.id);
-  return { nodes, edges, depth };
+  return { nodes, edges };
 }
 
 // a job's instances: "vm_tests (games)" belongs to the node vm_tests
@@ -249,91 +238,130 @@ function rollup(jobs) {
   return s[0] || 'waiting';
 }
 
+// a matrix with more jobs than this shows them as dots until asked
+const MATRIX_ROWS = 4;
+// the matrices opened on this page, kept while it redraws
+const shown = new Set();
+
 function drawGraph(r, run, g, jobs) {
   const dag = el('div', { class: 'dag' });
   const edgesSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   edgesSvg.setAttribute('class', 'edges');
   const byNode = new Map(g.nodes.map((n) => [n.id, []]));
   for (const j of jobs) (byNode.get(nodeOf(j.leaf)) || byNode.get(j.leaf))?.push(j);
-  const cols = new Map();
-  for (const n of g.nodes) {
-    const k = g.depth.get(n.id);
-    if (!cols.has(k)) cols.set(k, []);
-    cols.get(k).push(n);
-  }
   const card = (n) => {
     const js = byNode.get(n.id) || [];
     const state = js.length ? rollup(js) : 'waiting';
     const cls = `job${state === 'running' ? ' working' : state === 'failure' ? ' broken' : ''}`;
     const one = js.length === 1 && js[0].leaf === n.id;
     const head = el(one ? 'a' : 'div', one ? { href: `/${r.full_name}/actions/runs/${run.index_in_repo}${q({ job: js[0].index })}` } : {},
-      statusDot(state), el('span', { class: 't', text: n.id }), js.length > 1 ? el('small', { text: `${js.filter((j) => DONE.includes(j.state)).length} of ${js.length}` }) : el('small', {}, js[0]?.started ? took(js[0]) : js[0] ? (js[0].state === 'blocked' ? 'blocked' : DONE.includes(js[0].state) ? '' : 'waiting') : ''));
-    return el('div', { class: cls, 'data-id': n.id }, head,
-      ...(js.length > 1 || (js.length === 1 && !one) ? js.map((j) => el('a', { class: 'sub', href: `/${r.full_name}/actions/runs/${run.index_in_repo}${q({ job: j.index })}` }, statusDot(j.state), el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: j.leaf.replace(`${n.id} `, '') || j.leaf }), el('small', {}, took(j))) ) : []));
+      statusDot(state), el('span', { class: 't', text: n.id }, n.group ? el('span', { class: 'grp', text: n.group }) : null), js.length > 1 ? el('small', { text: `${js.filter((j) => DONE.includes(j.state)).length} of ${js.length}` }) : el('small', {}, js[0]?.started ? took(js[0]) : js[0] ? (js[0].state === 'blocked' ? 'blocked' : DONE.includes(js[0].state) ? '' : 'waiting') : ''));
+    const name = (j) => j.leaf.replace(`${n.id} `, '') || j.leaf;
+    const href = (j) => `/${r.full_name}/actions/runs/${run.index_in_repo}${q({ job: j.index })}`;
+    const rows = () => js.map((j) => el('a', { class: 'sub', href: href(j) }, statusDot(j.state), el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: name(j) }), el('small', {}, took(j))));
+    if (!(js.length > 1 || (js.length === 1 && !one))) return el('div', { class: cls, 'data-id': n.id }, head);
+    if (js.length <= MATRIX_ROWS) return el('div', { class: cls, 'data-id': n.id }, head, ...rows());
+    // a matrix of many: a dot for each, its name on hover, and the rows on asking
+    const c = el('div', { class: cls, 'data-id': n.id });
+    const open = shown.has(n.id);
+    const toggle = el('button', { class: 'more', type: 'button', text: open ? 'Fewer' : `Show all ${js.length}` });
+    toggle.onclick = () => { open ? shown.delete(n.id) : shown.add(n.id); c.replaceWith(card(n)); };
+    c.append(head, ...(open ? rows() : [el('div', { class: 'dots' }, ...js.map((j) => el('a', { href: href(j), title: `${name(j)} · ${j.state}${j.started ? ` · ${took(j)}` : ''}` }, statusDot(j.state))))]), toggle);
+    return c;
   };
-  const order = [...cols.keys()].sort((a, b) => a - b);
-  const colEls = order.map((k) => {
-    const groups = [...new Set(cols.get(k).map((n) => n.group))];
-    return el('div', { class: 'col' }, ...groups.flatMap((gname) => [gname && groups.length > 0 ? el('div', { class: 'grp', text: gname }) : null, ...cols.get(k).filter((n) => n.group === gname).map(card)]));
-  });
-  const colsEl = el('div', { class: 'cols' }, ...colEls);
-  dag.append(edgesSvg, colsEl);
-  // A line from a job to one that waits on it. One that crosses columns
-  // goes through the space between the cards there, never under one.
-  const drawEdges = () => {
-    if (!dag.isConnected) return;
-    const box = dag.getBoundingClientRect();
-    const X = (x) => x - box.left + dag.scrollLeft, Y = (y) => y - box.top + dag.scrollTop;
-    const rect = (id) => dag.querySelector(`[data-id="${CSS.escape(id)}"]`)?.getBoundingClientRect();
-    const colOf = new Map();
-    const spans = colEls.map((c, i) => {
-      const cards = [...c.querySelectorAll(':scope > .job')];
-      for (const j of cards) colOf.set(j.dataset.id, i);
-      const r = c.getBoundingClientRect();
-      return { left: X(r.left), right: X(r.right), cards: cards.map((j) => { const b = j.getBoundingClientRect(); return [Y(b.top), Y(b.bottom)]; }) };
-    });
-    // the nearest place at about this height where the column has no card
-    const clear = (span, y) => {
-      const pad = 7;
-      const hit = span.cards.find(([t, b]) => y > t - pad && y < b + pad);
-      if (!hit) return y;
-      const spots = [span.cards[0][0] - pad * 2, span.cards[span.cards.length - 1][1] + pad * 2];
-      for (let i = 1; i < span.cards.length; i++) spots.push((span.cards[i - 1][1] + span.cards[i][0]) / 2);
-      return spots.reduce((a, b) => (Math.abs(b - y) < Math.abs(a - y) ? b : a));
-    };
-    const curve = (x1, y1, x2, y2) => { const m = (x1 + x2) / 2; return `C${m},${y1} ${m},${y2} ${x2},${y2}`; };
-    edgesSvg.innerHTML = g.edges.map(([a, b]) => {
-      const p = rect(a), qb = rect(b);
-      if (!p || !qb) return '';
-      let x = X(p.right), y = Y(p.top) + 18;
-      const x2 = X(qb.left), y2 = Y(qb.top) + 18;
-      let d = `M${x},${y}`;
-      for (let c = colOf.get(a) + 1; c < colOf.get(b); c++) {
-        const s = spans[c];
-        const want = y + ((y2 - y) * (s.left - x)) / Math.max(1, x2 - x);
-        const yc = clear(s, want);
-        d += ` ${curve(x, y, s.left, yc)} L${s.right},${yc}`;
-        x = s.right;
-        y = yc;
-      }
-      d += ` ${curve(x, y, x2, y2)}`;
-      const live = dag.querySelector(`[data-id="${CSS.escape(b)}"]`)?.classList.contains('working');
-      return `<path class="${live ? 'live' : ''}" d="${d}"/>`;
-    }).join('');
+
+  // ELK lays it out (elk.js in the web bundle, loaded on this page alone):
+  // the cards keep their own size, and it says where each goes and where
+  // each line bends. Lines going the same way share their path.
+  const edges = g.edges;
+  const layer = el('div', { class: 'cards' });
+  const cards = new Map(g.nodes.map((n) => [n.id, card(n)]));
+  layer.append(edgesSvg, ...cards.values());
+  dag.append(layer);
+
+  const round = (pts, rad = 6) => {
+    let d = `M${pts[0].x},${pts[0].y}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const p = pts[i - 1], c = pts[i], n = pts[i + 1];
+      const r1 = Math.min(rad, Math.hypot(c.x - p.x, c.y - p.y) / 2), r2 = Math.min(rad, Math.hypot(n.x - c.x, n.y - c.y) / 2);
+      const ux = Math.sign(c.x - p.x), uy = Math.sign(c.y - p.y), vx = Math.sign(n.x - c.x), vy = Math.sign(n.y - c.y);
+      d += ` L${c.x - ux * r1},${c.y - uy * r1} Q${c.x},${c.y} ${c.x + vx * r2},${c.y + vy * r2}`;
+    }
+    const last = pts[pts.length - 1];
+    return d + ` L${last.x},${last.y}`;
   };
-  // again whenever a card changes size (a job's rows, a time growing, the
-  // window): lines drawn once drift away from the cards they join
+  const WIDTH = 210;
+  let busy = false, again = false;
+  const place = async () => {
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      const ELK = await loadElk();
+      for (const c of layer.children) c.style.width = `${WIDTH}px`;
+      const graph = {
+        id: 'run',
+        layoutOptions: {
+          'elk.algorithm': 'layered',
+          'elk.direction': 'RIGHT',
+          'elk.edgeRouting': 'ORTHOGONAL',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '56',
+          'elk.spacing.nodeNode': '16',
+          'elk.spacing.edgeEdge': '8',
+          'elk.layered.spacing.edgeNodeBetweenLayers': '16',
+          'elk.layered.mergeEdges': 'true',
+          'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+          'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+          'elk.padding': '[top=0,left=0,bottom=0,right=0]',
+          // each job as early as what it waits on allows, as the run goes
+          'elk.layered.layering.strategy': 'LONGEST_PATH_SOURCE',
+          // a job with no lines stays in the picture, not in a corner
+          'elk.separateConnectedComponents': 'false',
+        },
+        children: [...cards].map(([id, c]) => ({ id, width: WIDTH, height: c.offsetHeight })),
+        edges: edges.map(([a, b], i) => ({ id: `e${i}`, sources: [a], targets: [b] })),
+      };
+      const out = await new ELK().layout(graph);
+      for (const n of out.children) Object.assign(cards.get(n.id).style, { left: `${n.x}px`, top: `${n.y}px` });
+      layer.style.width = `${out.width}px`;
+      layer.style.height = `${out.height}px`;
+      edgesSvg.setAttribute('width', out.width);
+      edgesSvg.setAttribute('height', out.height);
+      edgesSvg.innerHTML = out.edges.map((e, i) => {
+        const [, b] = edges[i];
+        const live = cards.get(b)?.classList.contains('working');
+        return (e.sections || []).map((s) => `<path class="${live ? 'live' : ''}" d="${round([s.startPoint, ...(s.bendPoints || []), s.endPoint])}"/>`).join('');
+      }).join('');
+    } finally {
+      busy = false;
+      if (again) { again = false; place(); }
+    }
+  };
   let queued = false;
-  const soon = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; drawEdges(); }); } };
+  const soon = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; if (dag.isConnected) place(); }); } };
   if (typeof ResizeObserver !== 'undefined') {
     const watcher = new ResizeObserver(() => (dag.isConnected ? soon() : watcher.disconnect()));
-    watcher.observe(colsEl);
-    for (const c of colEls) watcher.observe(c);
-    watcher.observe(dag);
+    for (const c of cards.values()) watcher.observe(c);
+    new MutationObserver((ms) => {
+      for (const m of ms) for (const e of m.addedNodes) if (e.classList?.contains('job')) { cards.set(e.dataset.id, e); watcher.observe(e); }
+      soon();
+    }).observe(layer, { childList: true });
     dag.stop = () => watcher.disconnect();
   }
   soon();
   return dag;
+}
+
+// elk.js, once, when a run's graph is first drawn
+let elk = null;
+function loadElk() {
+  elk ||= new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = '/_dd/web/elk.js';
+    s.onload = () => ok(window.ELK);
+    s.onerror = fail;
+    document.head.append(s);
+  });
+  return elk;
 }
 
 // ---- a job's log

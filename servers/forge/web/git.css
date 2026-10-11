@@ -192,10 +192,9 @@ textarea.write { min-height: 110px; resize: vertical; }
 .jobs a[aria-current="page"] { background: var(--line-2); font-weight: 600; }
 .jobs a:hover { background: var(--sunk); text-decoration: none !important; }
 .dag { position: relative; padding: 24px; overflow-x: auto; background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 16px 16px; border-radius: 0 0 4px 4px; }
-.dag .cols { display: flex; gap: 40px; align-items: center; position: relative; z-index: 1; }
-/* columns share the width and only scroll sideways once each is as narrow as it can be */
-.dag .col { display: grid; gap: 14px; flex: 1 1 0; min-width: 160px; max-width: 230px; }
-.dag .grp { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); margin-bottom: -6px; }
+.dag .cards { position: relative; z-index: 1; }
+.dag .cards > .job { position: absolute; z-index: 1; }
+.dag .grp { display: block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
 .job { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
 .job > a, .job > div { display: flex; gap: 8px; align-items: center; padding: 8px 10px; color: var(--ink) !important; }
 .job > * + * { border-top: 1px solid var(--line-2); }
@@ -203,6 +202,11 @@ textarea.write { min-height: 110px; resize: vertical; }
 .job .t { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job .sub { padding: 5px 10px; font-size: 12.5px; }
 .job small { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.job .dots { display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 10px; }
+.job .dots a { display: inline-flex; padding: 2px; border-radius: 3px; }
+.job .dots a:hover { background: var(--sunk); }
+.job .more { all: unset; display: block; width: 100%; box-sizing: border-box; padding: 5px 10px; font-size: 12px; color: var(--ink-3); cursor: pointer; }
+.job .more:hover { color: var(--ink); background: var(--sunk); }
 .job.working { border-color: var(--working); box-shadow: 0 0 0 3px var(--working-bg); }
 .job.broken { border-color: var(--broken); }
 .dag svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; overflow: visible; }

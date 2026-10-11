@@ -307,7 +307,10 @@ git-repo.js        a repository: header and tabs, code and files, commits, a com
 git-pulls.js       issues and pull requests: lists, a conversation, commits/checks/files,
                    the merge box, compare and open
 git-actions.js     runs; one run as a graph of its jobs (read from the workflow's needs:)
-                   or as jobs and their logs
+                   or as jobs and their logs. The graph is laid out by ELK (elk.js in
+                   the web bundle, loaded on that page alone): columns as the run goes,
+                   square lines that share their path, a matrix of more than four jobs
+                   as dots until "Show all"
 git-settings.js    a repository's settings: general, people, rulesets, secrets and
                    variables, runners, webhooks, deploy keys, labels, mirror, careful
 git-diff.js        a git diff parsed into files, drawn unified or side by side

@@ -613,6 +613,14 @@
                 hash = "sha256-LJCptG1kY/JgOKKbaG6CvJHeAf2snVIp58/js2ATTqI=";
               }
             } $out/purify.js
+            # a run's graph on the Git pages: where each job goes and where
+            # each line bends (Eclipse's layout engine; loaded on that page alone)
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdn.jsdelivr.net/npm/elkjs@0.12.0/lib/elk.bundled.js";
+                hash = "sha256-EiLkT5U853Rq8jgB5yNwj45vQ2uLN3pqX8dVLzSjB7M=";
+              }
+            } $out/elk.js
           '';
           # The control plane (servers/system/control, docs/dev/control-plane.md): every box
           # runs dd-control; the witness is the same validator as wasm.
