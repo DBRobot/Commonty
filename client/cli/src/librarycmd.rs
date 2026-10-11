@@ -42,6 +42,10 @@ pub enum LibraryCmd {
     Mkdir { library: String, path: String },
     /// Move a file to the trash (nothing is gone until the box purges it)
     Trash { library: String, name: String },
+    /// Seal every library key again to your devices, the root and the
+    /// paper key alone, and drop what was sealed to a passkey (needs the
+    /// root). The app does it at launch; once is enough.
+    Reseal,
 }
 
 pub async fn run(cmd: LibraryCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> {
@@ -72,6 +76,19 @@ pub async fn run(cmd: LibraryCmd, keys: &auth::Store, dirs: &[String]) -> Result
                 gate.mkdir(folder).await?;
             }
             println!("  with Files, Movies and Shows in it");
+        }
+        LibraryCmd::Reseal => {
+            let root = opener
+                .root
+                .as_ref()
+                .context("the root key is not on this machine: run this where it is")?;
+            match account::reseal(dirs, &user, root).await? {
+                Some(s) => println!(
+                    "your libraries are sealed to your devices, root and paper key alone; version {}",
+                    s.entry.version
+                ),
+                None => println!("nothing to do: no library is sealed to a passkey"),
+            }
         }
         LibraryCmd::List => {
             let libs = openable(dirs, &user, &opener).await?;

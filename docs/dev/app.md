@@ -46,15 +46,72 @@ the browser's proxy ─── no password (browsers cannot send one), so it
                         reaches the fleet's names and nothing else
 ```
 
-## Photos and Passwords in a browser
+## Keys come only from devices
 
-Ente's photos client and the web vault hold a member's keys, so their code
-comes only in the app's signed release ([packaged.md](packaged.md)). No
-box serves it. The app serves both from this computer
+No node is trusted, and a passkey is no key. Root on any box can change
+any page under `*.<domain>`, and a passkey answers its PRF, with any salt,
+to any page of the domain during an ordinary prompt. So:
+
+- **A passkey signs in, and that is all.** No key is made from one or
+  sealed to one, and no page asks one for its PRF but the one-time move of
+  an old Photos account ([packaged.md](packaged.md#sign-in)), whose answer
+  opens nothing once moved. A sign-in signature is not key material.
+- **Keys are this device's.** Library keys, the Photos password and the
+  archive password are sealed to device keys (the app's, dd's), a root
+  kept on one, and the paper key ([libraries.md](libraries.md#where-the-keys-live)).
+  The app opens them with its own key, out of the entry it checks under
+  the root it holds or pinned the first time (`account::own_entry`); a
+  shared secret is taken only when a device of that entry signed it.
+- **Every page that holds a key is the app's.** Files, Movies & TV,
+  Chat, Settings (Backups, device names), Photos and Passwords come in
+  the app's signed release, in its window and in the member's browser. A
+  box hands a member's browser to the app instead of serving them.
+- **One sign-in.** The browser signs in once with its passkey at the gate
+  (the session every box page and the vault's single sign-on take). What
+  the app serves asks the boxes with its device's token, and the app
+  hands its pages their keys itself: no second prompt anywhere. Letting a
+  browser in from the app is a click in the app, not a sign-in.
+- **A member is made in the app.** Sign-up with an invite code is the
+  app's (or `dd identity new --code`): the root, the paper key and the
+  code stay on the device. The site's own sign-up makes a passkey-only
+  account with no code (a friend's guest), which holds no keys.
+
+At each launch the app moves what came before
+([`site::at_launch`](../../app/src/site.rs)): where the root is on this
+device, every library is sealed again to devices, root and paper key alone
+(`account::reseal`), and Photos' password is shared with the member's
+other devices. What that does not undo is in
+[libraries.md](libraries.md#moving-off-passkey-keys).
+
+An account whose root is a passkey (made in a browser) is the one gap: its
+entry is signed by an assertion, which a box's page can ask for over an
+entry the box wrote. Such an account holds no library (only a root on a
+device makes one). Its Photos password is kept on one device alone, and
+it has no paper key to recover with: its recovery is that device. Moving
+such a member to a root on a device (the app making a root and a paper
+key, signed in once by the passkey) is not built yet.
+
+## The site's key pages, Photos and Passwords in a browser
+
+Ente's photos client, the web vault, and the site's pages that open a
+library or another key hold a member's keys, so their code comes only in
+the app's signed release ([packaged.md](packaged.md)). No box serves it to
+a member. The app serves them from this computer
 ([`app/src/local.rs`](../../app/src/local.rs)), to its own window and to
-the member's own browser. A browser is let in only when the member allows
-it from the app's window, and the address the app opens the browser at
-holds no secret.
+the member's own browser: Photos on port 41661, Passwords on 41662, and
+the site's pages (Files, Movies & TV, Chat, Settings) on 41660. A browser
+is let in only when the member allows it from the app's window, and the
+address the app opens the browser at holds no secret.
+
+The site's pages there are the very files the window carries
+(`app/carried`), served at `s-<session>.localhost:41660`; `/_dd/app/library`
+and `/_dd/app/archive` answer that browser's session alone (`handoff::admit`:
+the key is behind `Serve`, so behind the session's cookie), every other
+call goes to the boxes with the device's token, Chat's to the model box,
+and nothing a box answers is code. Adding or removing a device with the
+root stays the window's. From one of these pages, Photos and Passwords
+open through `/_dd/app/go`, a session of their own for the same browser,
+without another click.
 
 ```
 photos.<domain> in a browser ─ the gate's handoff page (/_dd/use-app)
@@ -109,9 +166,10 @@ the browser ─ POST /_dd/app/pair/finish {verifier} ─▶ the hash matches and
   from another site and a Strict cookie is not sent then. What they load
   after that is same-site and carries the cookie.
 - **The first time on a device**, Photos has no password in the keyring
-  yet. A link then opens the app's window at its Photos page, which gets
-  the password with the browser's passkey (photos.rs). Links after that
-  open the browser.
+  yet. The app takes it from the copy beside the member's disk images,
+  signed by another of their devices; failing that it makes one and the
+  Photos page makes the account with it, or moves an account a passkey
+  made ([packaged.md](packaged.md#sign-in), photos.rs).
 - **Sessions live as long as the app.** After the app restarts, a browser
   pairs again from the page. Old session names stay in the browser's
   storage, but nothing on the device knows them except that browser
@@ -129,7 +187,7 @@ What each threat is, and what closes it (the tests are in
 another site fires commonty://      it can only make the app open the member's own
                                     browser at the pairing page and arm one pairing;
                                     nothing goes back to the site. Links are taken
-                                    at most once a second, and only service=photos|vault
+                                    at most once a second, and only service=photos|vault|site
                                     with a plain path (a_link_names_a_service_and_a_path_on_it)
 a local program reads the           the address holds no secret
   browser's command line            (the_launched_url_holds_no_secret); asking with
@@ -165,6 +223,15 @@ an open redirect through the path   a path on the service's own origin, in a sho
 the Photos password in history      in no address: the page asks for it once, within
   or synced history                 60 s of its door, same-origin, with its session's
                                     cookie (the_photos_password_is_handed_once_...)
+a key asked of a browser no one      the library, the archive and Photos' password are
+  let in                            behind Serve: the session's cookie, given after the
+                                    member's click (keys_are_served_only_to_a_browser_the_member_let_in)
+a link to the site's pages          only Files, Movies & TV, Chat, Settings, home
+                                    (a_link_can_ask_for_the_sites_own_pages_and_nothing_else)
+a copy of a secret a box sealed     taken only signed by a device of the root-checked
+                                    entry (account: a_copy_a_box_made_is_refused)
+a javascript: link in the bar       the bar links only paths here and the fleet's own
+                                    names, by the domain the app writes into its pages
 the box sends code                  refused, as for the window (site.rs,
                                     a_box_sends_data_and_never_a_page)
 ```
@@ -180,12 +247,13 @@ before. None of this stands against that.
 ```
 app/src/      the window and its commands
   site.rs       the carried pages, and the proxy to the boxes
-  local.rs      Photos and Passwords, served to the window and the browser
-  handoff.rs    pairing a browser, its sessions and names, links
+  local.rs      what holds keys in a page (Photos, Passwords, the site's
+                key pages), served to the window and the browser
+  handoff.rs    pairing a browser, its sessions and names, links, admit
   account.rs    sign-up, recovery, joining by code, a browser passkey
+  photos.rs     Photos' password: made here, shared signed, the move
   net.rs        the engine, through four C calls
   browser.rs    the system browser's proxy setting
-  photos.rs     Photos' sign-in, handed over from the browser once
   vpn.rs        Android's VPN
 app/net/      the engine (Go): tsnet, its proxies, the bridge through
               the front door, the owner check
@@ -227,7 +295,7 @@ storage, the services - is the site's own pages, which the app carries.
 - **Anything that touches keys** goes behind the launch secret
   (`/_dd/app/...`), and its pull request says so in "Risk and rollback".
   For Photos and Passwords in a browser, it goes behind the member's click
-  ([above](#photos-and-passwords-in-a-browser)). That needs a by-hand
+  ([above](#the-sites-key-pages-photos-and-passwords-in-a-browser)). That needs a by-hand
   check in Chrome, Firefox and Samsung Internet on the platforms it
   touches.
 - The [CI values](ci.md#adding-to-ci) hold here too: complete, and fast.

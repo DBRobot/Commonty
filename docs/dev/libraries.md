@@ -17,6 +17,12 @@ This page is how that fits together, and how to change it.
 - **The key lives in the identity.** A library's key is sealed to the
   member's own keys and kept in their signed directory entry. Never on a
   box, never in a file.
+- **Keys come only from devices.** The keys it is sealed to are ones a
+  device holds: the app's and dd's device keys, a root kept on one of
+  them, and the paper recovery key. Never a passkey: a passkey answers its
+  PRF to any page of the domain, so any box could ask for it. A browser
+  gets a library key only from the member's app, which opens it with its
+  own keys and serves the page that uses it.
 - **One door.** Every read and write goes through the gate, which decides
   owner, reader or nobody. No S3 key leaves a box.
 - **Nothing is deleted at a client's word.** A delete is a move into the
@@ -127,23 +133,65 @@ that may open it, a list of readers, and when it was made.
 ```
 device:<fingerprint>   each device in the entry
 root                   the root key, unless the root is a passkey
-passkey:<id>           each passkey that has published a library key
 recovery               the paper recovery key, if there is one
 ```
 
 Sealing is a libsodium sealed box to the x25519 twin of an ed25519 key,
-so the keys already in the directory are the ones that open it. When a
-passkey is admitted to an entry, the libraries are sealed to it in the
-same signed step ([client/account/src/lib.rs](../../client/account/src/lib.rs),
-`admit_passkey`). Recovering an account opens each library with the paper
-key and seals it afresh to the new keys.
+so the keys already in the directory are the ones that open it. A device
+admitted to the entry gets the libraries sealed to it in the same signed
+step ([client/account/src/lib.rs](../../client/account/src/lib.rs),
+`admit`). A passkey admitted gets nothing: it signs in. Recovering an
+account opens each library with the paper key and seals it afresh to the
+new keys.
 
-A browser has no device key. Its key comes from the passkey: the WebAuthn
-PRF extension with the salt `SHA-256("dd-library")` gives a secret only
-that passkey makes, and `SHA-512("dd-library-device" || secret)` is the
-seed of an ed25519 key ([client/web/src/library.rs](../../client/web/src/library.rs)).
-Its public half is the passkey's `library_key` in the entry; the secret
-half exists only in the tab.
+A browser has no device key, and gets none from a passkey. Its pages that
+open a library are the app's ([app.md](app.md)): the app opens the key
+with its own device key, out of the entry it checks under the root it
+holds or pinned (`account::own_entry`, `Opener::anchor`), and hands it to
+the page through `/_dd/app/library`, to its window or to a browser the
+member let in from it. A box never serves a member a page that holds a
+library key; the demo's library holds nothing private and is the one
+exception.
+
+The other secrets a member's devices share go the same way
+(`account::seal_for_keys`): the archive password for Backups
+(`dd-devices.json`, written by `dd image push` and `dd image devices`) and
+the Photos password (`dd-photos.json`, written by the app), beside the
+member's disk images. Each is sealed to the same keys as a library and
+signed by the device that made it; a copy is opened only when a device of
+the root-signed entry signed it, for that purpose. Sealing needs only a
+public key, so a box could seal a secret of its own to a device; the
+signature is what refuses it. For an account whose root is a passkey
+(signed by an assertion a box's page could have asked for) a copy is
+sealed to the device that made it alone, and only that device's own copy
+is believed.
+
+### Moving off passkey keys
+
+Entries made before this sealed library keys to `passkey:<id>`, and a
+passkey carried the public half of a key its PRF made (`library_key`).
+The move:
+
+- The app, at each launch where the root is on its device, runs
+  `account::reseal`: every library key is opened with the root and sealed
+  again to the devices, the root and the paper key alone, and the passkey
+  seals and `library_key`s go, in one signed version. `dd library reseal`
+  does the same by hand. Every other entry update drops them too
+  (`identity::drop_passkey_keys`).
+- The directory refuses a new version that still carries one
+  (`directory::no_passkey_keys`); older versions on file still read and
+  still move between boxes.
+- **What this does not undo.** The library key stays what it was, and
+  entries are public: anyone who kept an old version holds the passkey
+  seal. A box that can get the old passkey's PRF (by asking during any
+  sign-in) can still open that seal, for as long as that passkey exists.
+  Closing it takes one of: each member replacing their passkeys (a new
+  one made, the old one removed from the entry and deleted from their
+  password manager), or rotating the library key (re-encrypting the
+  library, names and all, on a device). Neither is automatic yet. The same
+  holds for an archive password once sealed to a passkey
+  (`dd-passkeys.json`, deleted by `dd image push` or `dd image devices`) and
+  for the Photos account's old keys at museum (a box that kept them).
 
 Readers are in the format and the gate already honours them (a reader's
 keys are sealed under the owner's entry, `readers[].keys`), but nothing
@@ -278,19 +326,19 @@ which opens the library and speaks to the gate, and the wasm in
 [client/web/src/library.rs](../../client/web/src/library.rs), which does
 the crypto with the same `library` crate as everything else.
 
-The gate serves both pages at `/_dd/files` and `/_dd/media` to members and
-to the demo when it has a library. They belong on `files.<domain>`: that
+The gate serves both pages at `/_dd/files` and `/_dd/media` to the demo
+when it has a library; a member's are the app's (below). They belong on `files.<domain>`: that
 host is the only one that serves `/_dd/transcode`.
 
 Opening (`unlock`):
 
 ```
-in the app      GET /_dd/app/library: the app opens it with the device's
-                keys and hands the page { id, key, reader }
+the app         GET /_dd/app/library: the app opens it with the device's
+                keys and hands the page { id, key, reader }: its window,
+                or a browser it let in (the page on s-<session>.localhost)
 the demo        /_dd/config carries demoLibrary { id, key }; reader
-a browser       the passkey's PRF secret -> its key -> the first library
-                in the member's own entry with a passkey: key that opens;
-                none opens: the page says to set up a passkey again
+anything else   { app: true }: the page says it opens through the app; a
+                box serves a member the page that hands over to it instead
 ```
 
 Then every name is encrypted to ask the gate and decrypted from its
@@ -390,6 +438,13 @@ own library, or a shared one when they have none. Every other `/_dd/`
 request the pages make is proxied to `files.<domain>` with the device's
 token instead of a cookie, `x-dd-presign` and the upload headers among
 those passed on.
+
+The same pages, and Chat, are what the app serves the member's browser
+once they let it in ([app.md](app.md#the-sites-key-pages-photos-and-passwords-in-a-browser)),
+from `app/src/local.rs` on `s-<session>.localhost:41660`: the same
+`/_dd/app/library`, behind that browser's session cookie, and every call
+sent on with the device's token. The gate hands a member's browser at
+`/_dd/files`, `/_dd/media` or Chat to the app (the use-app page).
 
 ## Transcoding
 
@@ -619,8 +674,9 @@ the member's machine) are in the `libraries` bucket under the prefix
   whatever its method. A device token needs no passkey.
 - DELETE moves into the trash, which goes after 90 days like a library's.
 - Images count against the allowance.
-- The archive password is sealed to the member's passkeys beside the
-  archives (`dd-passkeys.json`), so Backups in Settings opens them
+- The archive password is sealed to the member's devices beside the
+  archives (`dd-devices.json`, [Where the keys live](#where-the-keys-live)),
+  so Backups in Settings opens them where the app serves Settings
   ([client/web/src/archive.rs](../../client/web/src/archive.rs)).
 - `/srv/images` and the old nginx WebDAV are gone: the copy into the
   bucket was checked member by member, and the dataset was destroyed.
@@ -681,7 +737,9 @@ nix/modules/storage/       garage.nix, ledger.nix (the Photos box's count),
   ([client/library/tests/rclone.rs](../../client/library/tests/rclone.rs));
   sealing to devices, root and boxes
   ([client/library/src/lib.rs](../../client/library/src/lib.rs)); the
-  browser's passkey key, pieces and one file's block keys for a box;
+  pieces and one file's block keys for a box; that a passkey is never
+  sealed to; the shared secrets' signatures, a copy a box made refused
+  ([client/account/src/lib.rs](../../client/account/src/lib.rs));
   block keys against NaCl's HSalsa20 vector, against the data key's own
   opening, and against a file rclone wrote
   ([client/web/src/library.rs](../../client/web/src/library.rs)); paths,

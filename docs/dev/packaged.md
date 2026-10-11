@@ -25,7 +25,8 @@ Three rules, held for every program here:
   member uses to get in. Either nginx asks the gate who is calling
   (`auth_request`), or the program trusts the gate as its identity provider
   (OIDC), or our own page signs the member in to the program with a key
-  made from their passkey. Nobody has an account password to know.
+  their app keeps (never one made from a passkey). Nobody has an account
+  password to know.
 
 How a request reaches a program, in the common case:
 
@@ -85,7 +86,7 @@ them away.
   nothing opens, the page says the app must be installed and signed in,
   with the download link and "Try again".
   How the handoff is kept safe is in
-  [app.md](app.md#photos-and-passwords-in-a-browser). nginx keeps Photos'
+  [app.md](app.md#the-sites-key-pages-photos-and-passwords-in-a-browser). nginx keeps Photos'
   `/_dd/` and `/_dd/museum/`, and the vault's `/api`, `/identity`,
   `/notifications`, `/events`, `/alive` and Send paths.
 - Bitwarden's desktop app and browser extension still sign in through
@@ -144,10 +145,10 @@ Applied in this order (the menu patch builds on the passkey patch):
 - [ente-web-commonty-menu.patch](../../servers/photos/ente-web-commonty-menu.patch),
   on photos. The side menu without what needs the account password, which
   nobody knows: no Account, Help, Free up space, plans or Sign out (signing
-  out is the site's). "Confirm it's you" asks the passkey to make the
-  password again and checks it opens the master key, exactly as a typed
+  out is the site's). "Confirm it's you" asks the app for the
+  password (photos-confirm.js) and checks it opens the master key, as a typed
   one would be checked. The recovery key is in the menu, behind that
-  passkey check, and so is the hidden section, as in Ente: hiding photos and
+  check, and so is the hidden section, as in Ente: hiding photos and
   albums works.
 - [ente-web-commonty-thumbs.patch](../../servers/photos/ente-web-commonty-thumbs.patch),
   on photos. A thumbnail is fetched only once it has stayed in view a
@@ -172,57 +173,70 @@ Edits made in the module, not as patches:
 ### Sign-in
 
 The member's photo account is `<name>@users.<domain>`. Its password is
-made by their passkey: the WebAuthn PRF output under the salt
-`sha256("dd-photos")`. It is never stored and nobody can type it.
+made by the member's app, at random, and kept with the device's keys
+([app/src/photos.rs](../../app/src/photos.rs)). Nobody types it and no
+passkey makes it: a passkey answers its PRF to any page of the domain, so
+anything made from one is open to every box. The member's other devices
+get it from a copy beside their disk images (`dd-photos.json`), sealed to
+each device, the root and the paper key of their root-signed entry and
+signed by the device that made it; a copy no device of theirs signed is
+not taken.
 
 ```
-browser at photos.<domain>                  gate                       museum
- GET /_dd/photos ─────────────────────────▶ member with a session?
-                                            no: /_dd/login?rd=...
- ◀─ photos.html ────────────────────────────
- POST /_dd/photos/config ─────────────────▶ api, accountApi=/_dd/museum,
-                                            email, rpId
- passkey (PRF) → password
+the app's Photos page (its window, or a      the app                    gate / museum
+ browser it let in, port 41661)
+ POST /_dd/photos/config ─────────────────────────────────────────────▶ api, accountApi, email
+ POST /_dd/app/photos-key ──────────────────▶ once per door:
+                                              {pw}            the account's
+                                              {pw, fresh}     none yet: make it
+                                              {pw, next}      a passkey's: move it
  ente_login (SRP, our wasm) ──────────────────────────────────────────▶ api.<domain>
-   no account yet:
-   ente_create / ente_adopt ─▶ /_dd/museum/... ─▶ nginx ─────────────▶ museum
-     users/verify-email, users/change-email ─▶ gate adds the code ───▶ museum
+   fresh, no account: ente_create ─▶ /_dd/museum ─▶ the app, with its token ─▶ photos.<domain>
+     users/verify-email ─▶ gate adds the code ─────────────────────────▶ museum
+   next: ente_rekey(pw → next) ────────────────────────────────────────▶ api.<domain>
+ POST /_dd/app/photos-keyed {pw} ───────────▶ that password is the account's:
+                                              keyring, dd-photos.json
  session written where Ente's app reads it, then /gallery
 ```
 
-- [photos.js](../../servers/photos/web/photos.js) runs it, with
-  [photos-passkey.js](../../servers/photos/web/photos-passkey.js) for the
-  passkey and our Rust in the browser
-  ([client/web/src/lib.rs](../../client/web/src/lib.rs): `ente_login`,
-  `ente_create`, `ente_adopt`). The master key never leaves the tab.
+- [app/web/photos-open.js](../../app/web/photos-open.js) runs it, with our
+  Rust in the browser ([client/web/src/lib.rs](../../client/web/src/lib.rs):
+  `ente_login`, `ente_create`, `ente_rekey`). The master key never leaves
+  the page.
 - Museum makes accounts under `@users.<domain>` with a fixed verification
   code instead of a mail (`internal.hardcoded-ott`), which it honours
   because the module runs it as `ENVIRONMENT=local`. That code would let
-  anyone claim any address there, so it never reaches a browser: the two
+  anyone claim any address there, so it never reaches a page: the two
   calls that need it go to the gate (`museum_verify` in
   [photos.rs](../../servers/gate/src/photos.rs)), which checks the address
-  is the caller's own and fills it in.
-- "Link that account" moves an account made before with an email and
-  password to the member's address and re-keys it to the passkey.
+  is the caller's own (session or device token) and fills it in.
+- **Moving an account a passkey made.** Before the app held the password,
+  a passkey's PRF under `sha256("dd-photos")` made it. A device that held
+  that password (from the old handoff) re-keys the account the next time
+  Photos opens (`{pw, next}`). A member whose devices never held it moves
+  it once: the page offers it, the app opens a slot at the gate
+  (`/_dd/photos/handoff`) and the browser at `home.<domain>/_dd/photos/move`,
+  whose page ([photos-move.js](../../servers/photos/web/photos-move.js),
+  the one page that still asks a PRF) seals that old password to a key only
+  the app holds; then the page re-keys. After the move the old password
+  opens nothing at museum.
+- Ente's own "confirm it's you" imports `/_dd/static/photos-passkey.js`
+  (the menu patch); the app answers it with its own
+  [photos-confirm.js](../../app/web/photos-confirm.js), which asks the app.
 - Before seeding, the page clears whatever Ente's app kept for someone else
-  in this browser. Signing out of the site goes through
+  on its origin. Signing out of the site goes through
   `/_dd/photos/forget`, which clears the photos host's storage with
   `Clear-Site-Data`.
-- The app's window cannot use a passkey. The first time, the app opens a
-  slot at the gate (`/_dd/photos/handoff`), a browser fills it with the
-  password sealed to a key only the app holds, and the app keeps it in its
-  keyring ([app/src/photos.rs](../../app/src/photos.rs)). After that the
-  app opens its own copy of Photos: Ente's web client from the app's
-  release, built into the app, on port 41661
-  ([app/src/local.rs](../../app/src/local.rs)), in its window or the
-  member's browser. The opening page asks the app for the password once
-  (`POST /_dd/app/photos-key`). It is in no address, so no history keeps
-  it. That copy asks the gate's `/_dd/` routes with the device's token,
-  and talks to museum (`api.<domain>`) and S3 directly.
+- Ente's web client comes in the app's release, built into the app, on
+  port 41661 ([app/src/local.rs](../../app/src/local.rs)), in its window or
+  the member's browser. What it is handed is in no address, so no history
+  keeps it. That copy asks the gate's `/_dd/` routes with the device's
+  token, and talks to museum (`api.<domain>`) and S3 directly.
 
 ### Our pages
 
-- `/_dd/photos`: the unlocking page,
+- `/_dd/photos`: the page that hands a browser to the app; `/_dd/photos/move`:
+  the one-time move,
   [servers/photos/templates/photos.html](../../servers/photos/templates/photos.html)
   rendered by the gate.
 - `/_dd/photos/demo`: the demo's gallery,
@@ -282,11 +296,11 @@ database.
    hashes we already have into `token_hash` by hand. Do not hash them
    again.
 4. Move `ente-accounts` and `ente-core` in both Cargo files to the matching
-   commit, and check `seed()` in [photos.js](../../servers/photos/web/photos.js)
+   commit, and check `seed()` in [photos-open.js](../../app/web/photos-open.js)
    still writes the session in the shape the new app reads (`user`,
    `keyAttributes`, `encryptionKey`, the `kv` IndexedDB token).
-5. Check by hand: a new account from a passkey, an existing one opening,
-   "Link that account", an upload, "Confirm it's you", the recovery key,
+5. Check by hand: a new account made by the app, an existing one opening,
+   the move off a passkey's password, an upload, "Confirm it's you", the recovery key,
    hiding a photo and opening the hidden section,
    sign-out clearing the app, the app's handoff, the app's own copy of
    Photos opening (it is built from the same ente-web), and the demo

@@ -167,10 +167,11 @@ Entry
   recovery    base64 ed25519 key that may install a new root; empty for a
               passkey root
   devices[]   fingerprint, public_key, added
-  passkeys[]  id, cred (webauthn-rs's), added, rp_id, library_key
+  passkeys[]  id, cred (webauthn-rs's), added, rp_id; library_key only in
+              versions from before the move off passkey keys
   grant       an invite redeemed: the signed invite, when, and the code's proof
-  libraries[] id, keys (sealed to device:<fp>, root, passkey:<id>, recovery),
-              readers, created
+  libraries[] id, keys (sealed to device:<fp>, root, recovery; passkey:<id>
+              only in older versions), readers, created
   version     strictly increasing
   updated
 SignedEntry   entry, signature, recovery_signature
@@ -205,13 +206,17 @@ proxy into the fleet's network when one is set (`directory::via`).
 [`account`](../../client/account/src/lib.rs) is what a member does to
 their own entry, shared by `dd` and the app: `create` (root and recovery
 made here, this device the first, an invite's grant if a code is given),
-`admit` and `remove_device`, `admit_passkey` (which seals every library
-to the passkey in the same signed step), `link_passkey`, `remove_passkey`,
+`admit` and `remove_device`, `admit_passkey` (a sign-in, sealed nothing),
+`link_passkey`, `remove_passkey`,
 `recover` (the paper key co-signs a new root; every other device is
 dropped; libraries are opened with the paper key and sealed afresh),
-`redeem` and `add_library`. Each fetches the current entry, checks it is
-ours (`ours`: the root this machine holds), changes it, signs and
-publishes.
+`redeem`, `add_library` and `reseal` (the move off passkey keys,
+[libraries.md](libraries.md#moving-off-passkey-keys)). Each fetches the
+current entry, checks it is ours (`ours`: the root this machine holds),
+changes it, drops any passkey seal, signs and publishes. A secret the
+member's devices share (the archive and Photos passwords) is sealed with
+`seal_for_keys` and taken only when `vouched`: signed by a device of the
+entry `own_entry` checks under the root this device holds or pinned.
 
 ## Libraries, media and archives
 
@@ -233,9 +238,10 @@ These have their own page: [Encrypted libraries](libraries.md). In short:
   on a 401 so an upload outlives the hour. Its password is derived from
   the photo password with HKDF (`cli/src/derive.rs`, label
   `archive password v1`, salt `distributed-datacenter`), so a new machine
-  needs `dd unlock` and nothing more. `dd image passkey` seals it to each
-  passkey's library key in `dd-passkeys.json` beside the archives, which
-  is how Backups in Settings opens them in a browser
+  needs `dd unlock` and nothing more. `dd image devices` (and every
+  `dd image push`) seals it to the member's devices, root and paper key in
+  `dd-devices.json` beside the archives, which is how Backups in Settings
+  opens them where the app serves it
   ([libraries.md](libraries.md#disk-images)).
 
 ## The encrypted git remote

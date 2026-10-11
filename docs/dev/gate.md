@@ -256,25 +256,27 @@ sign in      POST /_dd/login/start {username}
                → checked; the old session in this browser is ended;
                  a new cookie; the passkey is "fresh" for 5 minutes
 
-sign up      POST /_dd/join/start {username}       name free, not "demo",
-                                                    not guest* (unless x-dd-probe)
-             POST /_dd/join/finish (new credential [+ library_key])
-               → an entry with that passkey as root (and a grant, if the
-                 browser sent an invite claim in x-dd-grant); the browser is
-                 asked to sign the entry's hash with the same passkey
+a browser   POST /_dd/join/start {username}       name free, not "demo",
+account                                             not guest* (unless x-dd-probe)
+             POST /_dd/join/finish (new credential)
+               → an entry with that passkey as root; the browser is asked
+                 to sign the entry's hash with the same passkey. 400 for an
+                 invite claim (x-dd-grant) or a library_key: a code is typed
+                 only into the app or dd, and a passkey holds no keys
              POST /_dd/join/sign (assertion)
-               → with a grant or already on the member list: admitted to
-                 the directory. Otherwise HELD on this box (below).
-                 Either way: a session cookie.
+               → already on the member list: admitted to the directory.
+                 Otherwise HELD on this box (below). Either way: a cookie.
 
-redeem       POST /_dd/redeem/start (x-dd-grant)   signed in, passkey root
-             POST /_dd/redeem/sign                 same as join/sign: the
-                                                    entry with the grant, v+1
+a member     made in the app (or `dd identity new --code`): a root and a
+             paper key made on the device, the invite redeemed there, the
+             entry published to the directory like any other. No page of
+             a box sees the code or a key.
 
-enrol        dd enrol prints a link with a token minted for purpose "enrol"
+enrol        the app or dd prints a link with a token for purpose "enrol"
              POST /_dd/enrol/start   (Bearer enrol token)
              POST /_dd/enrol/finish  the new passkey is kept in memory for
-                                     10 minutes under sha256(token); never stored
+                                     10 minutes under sha256(token); never
+                                     stored; 400 if a library_key comes with it
              GET  /_dd/enrol/result  dd collects it (204 until ready) and
                                      signs it into the entry with the root
 
@@ -286,8 +288,27 @@ the app      POST /_dd/app/signin (form: token)    Origin must be absent,
                                                     then=vault, back to the
                                                     app's own /_dd/app/vault
                                                     (the origin the form came
-                                                    from), else /_dd/photos
+                                                    from), else /_dd/home
 ```
+
+**A passkey signs in, and holds no keys.** Any page under the relying
+party - any box's - can ask a passkey for its PRF secret, with any salt,
+during an ordinary prompt. So nothing is ever sealed to or made from one:
+library keys, the Photos password and the archive password are sealed to
+device keys alone ([libraries.md](libraries.md#where-the-keys-live)).
+`PUT /_dd/directory/{name}` and a held sign-up refuse an entry that still
+carries a key for a passkey (`directory::no_passkey_keys`): a `passkey:`
+seal, or a passkey's `library_key`. Entries from before still read and
+move between boxes; their next version drops them.
+
+**One sign-in.** The passkey sign-in here gives the browser the session
+cookie every box page and the vault's single sign-on take. The pages that
+hold a key are served by the member's app (in its window, or to a browser
+it let in, [app.md](app.md#the-sites-key-pages-photos-and-passwords-in-a-browser)),
+which asks the boxes with its device's token: so `/_dd/signins`,
+`/_dd/signins/end` and `/_dd/devices/names` take a device token as well as
+a cookie, and ending sessions with a token needs no passkey shown again.
+Nothing the app serves asks the passkey for anything.
 
 The signature counter is not written back after a sign-in: the
 credential lives in the signed entry, which the gate cannot change. Clone
@@ -296,8 +317,8 @@ detection by counter is given up for that (comment in `login_finish`).
 **Held sign-ups.** A browser sign-up with no code and not on the member
 list is kept on this box only, in `held/`, never served or pulled. The
 name counts as taken here and the person can sign in; they land on the
-waiting page. It becomes an entry when a code is redeemed, when a friend
-link is accepted (as a guest), or when the member list names it: a task
+waiting page. It becomes an entry when a friend link is accepted (as a
+guest), or when the member list names it: a task
 checks every 300 s. Unfollowed, it is dropped after 7 days (`HELD_TTL`).
 Names starting `guest` are probes' and last 15 minutes (`GUEST_TTL`).
 
@@ -403,7 +424,7 @@ this mode when `VERIFY_CONTROL` is set (verify.nix sets it wherever
 `dd.control.enable` is on).
 
 ```
-write (PUT /_dd/directory/x, a join, a redeem, PUT /_dd/invite/k)
+write (PUT /_dd/directory/x, a join, PUT /_dd/invite/k)
   │  this gate's checks pass
   ▼
 dd-control submit socket (/run/dd-control/submit.sock, POST /submit)
@@ -476,7 +497,7 @@ are files, never strings in Rust ([ui.md](ui.md)).
 - **Templates** (askama) are the few pages that carry a value from the
   server: `login.html`, `join.html`, `enrol.html`, `waiting.html`,
   `download.html` in [servers/gate/templates](../../servers/gate/templates),
-  and Photos' `photos.html` in `servers/photos/templates`
+  and Photos' move page, `photos.html` in `servers/photos/templates`
   ([askama.toml](../../servers/gate/askama.toml)). Their scripts are in
   [servers/gate/web](../../servers/gate/web).
 - **The wasm bundle** (client/web, built by the flake) is served from
@@ -549,20 +570,24 @@ table below says who.
 
 ### Photos ([photos.rs](../../servers/gate/src/photos.rs), [demo_photos.rs](../../servers/gate/src/demo_photos.rs))
 
-The step between the site and Ente's own app. The passkey (through the
-wasm in `photos.js`) makes the photo account's password in the browser.
-`/_dd/photos/config` (a session, or a device token: the app's own copy
-of Photos asks with the device's) gives the page museum's address, the
-person's ente address (`<user><VERIFY_PHOTOS_SUFFIX>`) and the rpId; the demo also gets
-its password. The two museum calls that need the fleet's verification
-code (`verify-email`, `change-email`) go through
-`/_dd/photos/museum/{op}`: the gate checks the address is the caller's
-own and adds the code, which never reaches a browser.
+Ente's client and the photo account's password are the member's app's
+([app.md](app.md)); a browser at `/_dd/photos` gets the page that hands it
+to the app (`use_app`). `/_dd/photos/config` (a session, or a device
+token) gives the app's Photos page museum's address and the person's ente
+address (`<user><VERIFY_PHOTOS_SUFFIX>`); the demo also gets its password.
+The two museum calls that need the fleet's verification code
+(`verify-email`, `change-email`) go through `/_dd/photos/museum/{op}`, by
+session or device token: the gate checks the address is the caller's own
+and adds the code, which never reaches a page.
 
-The app cannot use a passkey, so it borrows a browser's: the app opens a
-**handoff** slot (device token), a signed-in browser fills it with the
-password sealed to a key only the app holds, and the app takes it once.
-At most 256 slots, 10 minutes each, 1 KiB each.
+**The move.** An account made before the app held its password was opened
+with what a passkey's PRF made. Its member's app moves it once: it opens
+a **handoff** slot (device token), sends the browser to
+`/_dd/photos/move` (`photos-move.js`, the one page that asks a PRF, for
+the old label `dd-photos` only), which fills the slot with that old
+password sealed to a key only the app holds; the app takes it once and its
+Photos page re-keys the account at once. At most 256 slots, 10 minutes
+each, 1 KiB each.
 
 The demo's photos are not Ente's app: the gate signs in to Ente as the
 demo, lists and decrypts the demo account's photos, and serves a gallery
@@ -787,7 +812,7 @@ are `home`, `accounts`, `headscale`, the bare domain, and a
 not on the fleet network.
 
 On a public gated host, the ceremonies a stranger may start
-(`/_dd/(join|login|enrol|redeem|network|add)/`) are limited to one a
+(`/_dd/(join|login|enrol|network|add)/`) are limited to one a
 second per address, ten in hand; so are `/_dd/directory` and
 `/_dd/invite` for a request that carries no credential at all (no
 session, no token, no read proof).
@@ -909,11 +934,10 @@ path                                        method   what                       
 /_dd/logout                                 GET      a page with the sign-out button           anyone
 /_dd/use-app                                GET      hands photos. and vault. to the app       anyone
 /_dd/logout                                 POST     end session, clear photo storage          our own pages
-/_dd/join                                   GET      sign-up page                              anyone
-/_dd/join/start, /finish, /sign             POST     account from a passkey                    anyone
-/_dd/redeem/start, /sign                    POST     add an invite to your entry               session, passkey root
+/_dd/join                                   GET      a browser account's page (no code)        anyone
+/_dd/join/start, /finish, /sign             POST     account from a passkey, no code           anyone
 /_dd/enrol                                  GET      enrol page                                anyone
-/_dd/enrol/start, /finish                   POST     make a passkey for dd                     token with purpose "enrol"
+/_dd/enrol/start, /finish                   POST     make a passkey for the app or dd          token with purpose "enrol"
 /_dd/enrol/result                           GET      dd collects the passkey                   the same token
 /_dd/app/signin                             POST     device token -> session                   the app's page; member
 /_dd/demo                                   GET      a demo session; signed in: the button     anyone, if the demo is on
@@ -924,11 +948,13 @@ path                                        method   what                       
 /_dd/config                                 GET      rpId (+ demo library)                     anyone
 /_dd/static/{file}                          GET      css, js, fonts, icons                     anyone
 /_dd/web/{file}                             GET      wasm bundle                               anyone
-/_dd/files, /_dd/media                      GET      Files, Movies & TV                        member; demo if a demo library
+/_dd/files, /_dd/media                      GET      the demo's Files, Movies & TV; a          member: the use-app page;
+                                                     member's browser is handed to the app     demo if a demo library
 /_dd/settings                               GET      Settings                                  member or guest
 /_dd/boxes, /backups, /devices,             GET      redirect to /_dd/settings#<tab>           anyone
   /network, /storage
-/_dd/chat                                   GET      Chat                                      member or demo
+/_dd/chat                                   GET      Chat (the demo's; a member's: use-app)    member or demo
+/_dd/chat/search                            GET      web search for Chat                       member, session or token
 /_dd/git, /_dd/metrics                      GET      Git, Metrics                              any session
 /_dd/friends                                GET      Friends                                   member or guest
 /_dd/adblock                                GET      Ad blocking                               household member
@@ -946,15 +972,16 @@ path                                        method   what                       
 /_dd/invite/{key}                           GET      an invite                                 anyone
 /_dd/invite/{key}                           PUT      keep an invite                            anyone; release key must sign it
 -- sessions and devices
-/_dd/signins                                GET      sessions, key uses                        member or guest
-/_dd/signins/end                            POST     end one, or all others                    member or guest, passkey fresh
-/_dd/devices/names                          GET,PUT  sealed device names                       member or guest
+/_dd/signins                                GET      sessions, key uses                        member or guest, session or token
+/_dd/signins/end                            POST     end one, or all others                    member or guest: token, or passkey fresh
+/_dd/devices/names                          GET,PUT  sealed device names                       member or guest, session or token
 /_dd/add/start, /status, /cancel, /theirs   *        the approving device's side               member or guest
 /_dd/add/offer, /wait, /reveal              *        the new device's side                     anyone with the code
 -- photos
-/_dd/photos                                 GET      Photos' sign-in step                      member; demo with a password
-/_dd/photos/config                          POST     museum, address, rpId                     member or demo; session or device token
-/_dd/photos/museum/{op}                     POST     verify-email, change-email + code         member, own address
+/_dd/photos                                 GET      hands a browser to the app (use-app)      anyone
+/_dd/photos/move                            GET      the one-time move off a passkey's PRF     member
+/_dd/photos/config                          POST     museum, address                           member or demo; session or device token
+/_dd/photos/museum/{op}                     POST     verify-email, change-email + code         member, own address; session or token
 /_dd/photos/forget                          GET      Clear-Site-Data, then on                  anyone
 /_dd/photos/handoff                         POST     open a slot                               member (session or token)
 /_dd/photos/handoff/{id}                    PUT      browser fills it                          session of the slot's owner
@@ -987,7 +1014,7 @@ path                                        method   what                       
 /internal/games/access                      POST     who may play, and their addresses         local (games manager)
 /internal/games/friends/{user}              GET      who they may invite                       local
 -- leaving (leaving.rs, leaving.md)
-/_dd/leave                                  GET      where the signed-in person stands         session
+/_dd/leave                                  GET      where the signed-in person stands         session or token
 /_dd/leave/start                            POST     a statement for the root passkey          session; member to leave,
                                                                                                someone who left to come back
 /_dd/leave/sign                             POST     the passkey's answer, into the log        session + the ceremony

@@ -324,7 +324,7 @@ impl Directory {
     /// member list. It is kept on the box that took it and nowhere else -
     /// never served from the directory, never pulled by a peer - so a name
     /// is not claimed across the fleet by someone who may never come back.
-    /// It becomes an entry when it earns one: a code redeemed, or the member
+    /// It becomes an entry when it earns one: the member
     /// list naming it. Unfollowed, it is gone after a week and the name is
     /// free again.
     pub fn hold(
@@ -338,6 +338,7 @@ impl Directory {
         if let Err(e) = identity::accept(None, signed) {
             return Err((StatusCode::FORBIDDEN, format!("refused: {e}")));
         }
+        no_passkey_keys(signed).map_err(|e| (StatusCode::FORBIDDEN, e))?;
         let taken = || (StatusCode::CONFLICT, "that name is taken".to_string());
         if self.entry(name).ok().flatten().is_some() {
             return Err(taken());
@@ -611,6 +612,21 @@ async fn put_entry(
     }
 }
 
+/// What a member publishes from now on carries no key for a passkey: any
+/// page of the domain can ask a passkey for its PRF, and so for whatever
+/// was sealed to it. Entries from before stay readable and still move
+/// between boxes; their next version, made by an app or a dd that knows
+/// this, drops those keys (account::reseal, identity::drop_passkey_keys).
+pub(crate) fn no_passkey_keys(signed: &identity::SignedEntry) -> std::result::Result<(), String> {
+    if identity::holds_passkey_keys(&signed.entry) {
+        return Err(
+            "refused: this entry keeps a key for a passkey; update the app or dd, which drop them"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 /// a device or passkey the old entry had and the new one does not
 fn lost_a_key(old: &identity::Entry, new: &identity::Entry) -> bool {
     old.devices
@@ -768,6 +784,10 @@ impl Directory {
         if let Err(e) = identity::accept(existing.as_ref(), &signed) {
             eprintln!("directory: refused update for {name}: {e}");
             return Err((StatusCode::FORBIDDEN, format!("refused: {e}")));
+        }
+        if let Err(e) = no_passkey_keys(&signed) {
+            eprintln!("directory: refused update for {name}: {e}");
+            return Err((StatusCode::FORBIDDEN, e));
         }
         if let Err(e) = self.check_grant(existing.as_ref(), &signed.entry, identity::now()) {
             eprintln!("directory: refused update for {name}: {e}");
@@ -1400,6 +1420,62 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(d.entry("sarah").unwrap().unwrap().entry.version, 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An entry from before passkeys held no keys (a library sealed to one)
+    /// is on file and still read; its next version may not keep that seal,
+    /// and the one without it is taken.
+    #[tokio::test]
+    async fn an_update_that_keeps_a_passkey_seal_is_refused() {
+        let dir = scratch("passkey-seal");
+        let d = Directory::open(dir.clone(), None).unwrap();
+        let sarah = generate();
+        let lib = "a996a28ca51c9cf1d3f8e2038c8339c8";
+        let sealed_to_passkey = |v| {
+            let mut e = entry("sarah", &sarah, &[lib], v);
+            e.libraries[0].keys = vec![
+                identity::SealedKey {
+                    to: "device:f".into(),
+                    sealed: "a".into(),
+                },
+                identity::SealedKey {
+                    to: "passkey:p1".into(),
+                    sealed: "b".into(),
+                },
+            ];
+            e
+        };
+        // what an older dd published, as it lies on disk
+        let old = sign(sealed_to_passkey(1), &sarah).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("sarah.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+        assert_eq!(d.entry("sarah").unwrap().unwrap().entry.version, 1);
+
+        let (status, why) = d
+            .admit(sign(sealed_to_passkey(2), &sarah).unwrap())
+            .await
+            .unwrap_err();
+        assert_eq!(status, StatusCode::FORBIDDEN, "{why}");
+        assert!(why.contains("passkey"), "{why}");
+        let mut keyed = sealed_to_passkey(2);
+        keyed.libraries[0].keys.clear();
+        keyed.passkeys.push(identity::Passkey {
+            id: "p1".into(),
+            cred: serde_json::json!({}),
+            added: 1,
+            rp_id: None,
+            library_key: Some("a key a page made".into()),
+        });
+        assert!(d.admit(sign(keyed, &sarah).unwrap()).await.is_err());
+
+        let mut moved = sealed_to_passkey(2);
+        identity::drop_passkey_keys(&mut moved);
+        d.admit(sign(moved, &sarah).unwrap()).await.unwrap();
+        let now = d.entry("sarah").unwrap().unwrap();
+        assert_eq!(now.entry.version, 2);
+        assert!(!identity::holds_passkey_keys(&now.entry));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
