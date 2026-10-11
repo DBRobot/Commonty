@@ -29,7 +29,7 @@ function show(i) {
     whole.onload = () => { if (at === i) big.src = whole.src; };
     whole.src = `/_dd/photos/demo/photo/${p.id}`;
   }
-  big.alt = p.title || '';
+  big.alt = p.title || `Photo, ${dayOf(p.taken)}`;
   $('cap').textContent = [p.title, dayOf(p.taken)].filter(Boolean).join(' · ');
   $('prev').hidden = i === 0;
   $('next').hidden = i === shown.length - 1;
@@ -49,7 +49,7 @@ function draw(album) {
     const d = dayOf(p.taken);
     if (d !== last) {
       last = d;
-      const h = document.createElement('h3');
+      const h = document.createElement('h2');
       h.className = 'dp-day';
       h.textContent = d;
       grid = document.createElement('ul');
@@ -58,7 +58,7 @@ function draw(album) {
     }
     const li = document.createElement('li');
     const b = document.createElement('button');
-    b.setAttribute('aria-label', p.title || 'Photo');
+    b.setAttribute('aria-label', p.title || `Photo, ${dayOf(p.taken)}`);
     const img = document.createElement('img');
     img.loading = 'lazy';
     img.decoding = 'async';

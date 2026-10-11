@@ -42,7 +42,7 @@ export function heatmap(days) {
   }
   for (const [i, t] of [[1, 'Mon'], [3, 'Wed'], [5, 'Fri']]) out += `<text x="0" y="${top + i * (cell + gap) + 9}" font-size="10" fill="var(--ink-3)">${t}</text>`;
   const W = left + (w + 1) * (cell + gap), H = top + 7 * (cell + gap);
-  return el('div', { class: 'heat' },
+  return el('div', { class: 'heat', tabindex: '0', role: 'group', 'aria-label': 'Contributions over the last year' },
     svg(W, H, out, 'Contributions by day over the last year'),
     el('div', { class: 'legend' }, 'Less', ...[0, 1, 2, 3, 4].map((i) => el('i', { style: `background:var(--heat-${i})` })), 'More'));
 }

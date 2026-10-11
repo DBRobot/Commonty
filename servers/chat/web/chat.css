@@ -2,7 +2,7 @@
    rest of the site. Its own neutrals; the site's fonts, focus and bar. */
 
 body.chatpage {
-  --c-page: #FFFFFF; --c-side: #F7F7F8; --c-ink: #1F2328; --c-ink-2: #5D6470; --c-ink-3: #8B929C;
+  --c-page: #FFFFFF; --c-side: #F7F7F8; --c-ink: #1F2328; --c-ink-2: #5D6470; --c-ink-3: #636A75;
   --c-line: #E5E7EB; --c-hover: #ECEDEF; --c-bubble: #F1F2F4; --c-code: #F6F8FA;
   --c-chip-on: #E6EFF8; --c-chip-on-ink: #1D4470; --c-send: #1F2328; --c-send-ink: #FFFFFF;
   --c-ok: #2E8B57; --c-wait: #C98A12; --c-off: #A0A7B1; --c-bad: #B3261E;
@@ -12,17 +12,18 @@ body.chatpage {
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) body.chatpage {
-    --c-page: #212226; --c-side: #18191C; --c-ink: #ECEDEF; --c-ink-2: #AEB4BD; --c-ink-3: #7F8691;
+    --c-page: #212226; --c-side: #18191C; --c-ink: #ECEDEF; --c-ink-2: #AEB4BD; --c-ink-3: #8D949F;
     --c-line: #33353B; --c-hover: #2A2C31; --c-bubble: #2F3136; --c-code: #18191C;
     --c-chip-on: #1B2838; --c-chip-on-ink: #9CC3EA; --c-send: #ECEDEF; --c-send-ink: #18191C; --c-bad: #F2867D;
   }
 }
 :root[data-theme="dark"] body.chatpage {
-  --c-page: #212226; --c-side: #18191C; --c-ink: #ECEDEF; --c-ink-2: #AEB4BD; --c-ink-3: #7F8691;
+  --c-page: #212226; --c-side: #18191C; --c-ink: #ECEDEF; --c-ink-2: #AEB4BD; --c-ink-3: #8D949F;
   --c-line: #33353B; --c-hover: #2A2C31; --c-bubble: #2F3136; --c-code: #18191C;
   --c-chip-on: #1B2838; --c-chip-on-ink: #9CC3EA; --c-send: #ECEDEF; --c-send-ink: #18191C; --c-bad: #F2867D;
 }
 .chatpage .dd-bar .bar { height: 52px; padding: 0 18px; }
+@media (max-width: 560px) { .chatpage .dd-bar .bar { padding: 0 12px; } }
 .sprite { display: none; }
 .chatpage svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .chatpage svg.i.small { width: 16px; height: 16px; }
@@ -45,6 +46,7 @@ body.chatpage {
 .chatpage .srow:hover { background: var(--c-hover); }
 .chatpage .srow.strong { font-weight: 600; }
 .srow.search input { flex: 1; min-width: 0; height: auto; border: 0; padding: 0; background: none; color: var(--c-ink); font-size: 14.5px; outline: none; }
+.srow.search:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: -3px; }
 .list { flex: 1; overflow: auto; margin-top: 8px; }
 .list h3 { margin: 16px 10px 4px; font-size: 12px; font-weight: 600; color: var(--c-ink-3); }
 .list .row { position: relative; }

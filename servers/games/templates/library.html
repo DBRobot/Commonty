@@ -30,15 +30,15 @@
 {% if let Some(o) = open %}
 {# the game, opened over the library #}
 <a class="veil" href="{{ o.back }}" aria-label="Close"></a>
-<dialog open data-back="{{ o.back }}">
+<dialog open data-back="{{ o.back }}" aria-labelledby="game-name">
   <a class="close" href="{{ o.back }}" aria-label="Close">×</a>
   <div class="open">
     {% let game = o.game %}
     {% include "cover.html" %}
     <form method="post" action="/create/{{ o.game.id }}" id="start">
       <div class="body">
-        <h2>{{ o.game.name }}{% if o.game.wine %}<span class="tag">Windows server, via Wine</span>{% endif %}</h2>
-        <p class="desc">{{ o.game.description }}</p>
+        <h2 id="game-name">{{ o.game.name }}{% if o.game.wine %}<span class="tag">Windows server, via Wine</span>{% endif %}</h2>
+        <p class="desc" tabindex="0">{{ o.game.description }}</p>
         {% if let Some(n) = notice %}<p class="note">{{ n }}</p>{% endif %}
         <div class="fields">
           {% for f in o.ours %}{% include "field.html" %}{% endfor %}

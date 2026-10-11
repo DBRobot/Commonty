@@ -140,7 +140,8 @@ function render() {
     tick.checked = chosen.has(it.path);
     tick.hidden = trashy || lib.reader;
     tick.onchange = () => { tick.checked ? chosen.add(it.path) : chosen.delete(it.path); selection(); };
-    const name = el('div', { class: 'name' }, icon(it), el('span', { text: it.name }));
+    // the name opens it, from the keyboard too; the row is the mouse's way
+    const name = el('div', { class: 'name' }, icon(it), el('button', { type: 'button', class: 'open', text: it.name, onclick: () => open(it) }));
     if (trashy) name.append(el('span', { class: 'from', text: `from ${folderOf(it.path)}` }));
     const tr = el('tr', { 'aria-selected': String(chosen.has(it.path)) },
       el('td', { class: 'chk' }, tick),
@@ -154,7 +155,7 @@ function render() {
     return tr;
   }));
   $('tiles').replaceChildren(...list.map((it) => {
-    const t = el('button', { type: 'button', class: 'tile', 'aria-selected': String(chosen.has(it.path)) },
+    const t = el('button', { type: 'button', class: 'tile' },
       el('div', { class: 'thumb' }, icon(it, 'big')),
       el('b', { text: it.name }),
       el('span', { text: it.dir ? 'Folder' : `${human(it.size)} · ${when(trashy ? it.when : it.modified)}` }));
@@ -238,7 +239,7 @@ function ask({ title, text = '', value = null, folders = false, ok = 'OK' }) {
 function menu(it, anchor) {
   document.querySelector('.popmenu')?.remove();
   const m = el('div', { class: 'popmenu', role: 'menu' });
-  const add = (label, fn, danger) => m.append(el('button', { type: 'button', role: 'menuitem', class: danger ? 'danger' : '', text: label, onclick: () => { m.remove(); fn(); } }));
+  const add = (label, fn, danger) => m.append(el('button', { type: 'button', role: 'menuitem', class: danger ? 'danger' : '', text: label, onclick: () => { m.remove(); anchor.focus(); fn(); } }));
   if (it.dir) add('Open', () => open(it));
   else add('Download', () => download(it));
   if (!lib.reader) {
@@ -251,6 +252,17 @@ function menu(it, anchor) {
   m.style.top = `${r.bottom + scrollY + 4}px`;
   m.style.left = `${Math.max(8, r.right + scrollX - 190)}px`;
   setTimeout(() => addEventListener('click', () => m.remove(), { once: true }));
+  // from the keyboard: the first choice has focus, arrows move, Escape goes back
+  m.addEventListener('keydown', (e) => {
+    const items = [...m.querySelectorAll('button')];
+    const i = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') { m.remove(); anchor.focus(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
+    }
+  });
+  m.querySelector('button').focus();
 }
 
 async function rename(it) {

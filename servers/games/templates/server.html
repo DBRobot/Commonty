@@ -9,7 +9,7 @@
   {% if let Some(game) = s.game %}{% include "cover.html" %}{% else %}<div class="blank"></div>{% endif %}
   <div class="body"{% if busy %} data-live="{{ s.state }}"{% endif %}>
     <h2>{{ s.name }}</h2>
-    <p class="desc"><span id="st" class="state-word" data-state="{{ s.tone }}">{{ s.label }}</span> · {{ s.who }}</p>
+    <p class="desc"><span id="st" role="status" class="state-word" data-state="{{ s.tone }}">{{ s.label }}</span> · {{ s.who }}</p>
     {% if let Some(why) = s.reason %}<p class="spec">What went wrong: {{ why }}. The log below says more.</p>{% endif %}
     {# what a player pastes into the game: the address and its port, as one #}
     <div class="join">
@@ -70,7 +70,7 @@
 {% if mine %}
 <section style="margin-top:28px">
   <h2>Log</h2>
-  <pre id="log" class="log">{% if log.is_empty() %}nothing yet{% else %}{{ log }}{% endif %}</pre>
+  <pre id="log" class="log" tabindex="0" aria-label="Log">{% if log.is_empty() %}nothing yet{% else %}{{ log }}{% endif %}</pre>
 </section>
 {% endif %}
 {% endblock %}

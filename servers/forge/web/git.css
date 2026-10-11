@@ -5,7 +5,7 @@
 
 :root {
   --sunk: #F6F8F9;
-  --ink-3: #6E7671;
+  --ink-3: #5E6661;
   --add: #E4F2E9; --add-strong: #BFE0CB;
   --del: #F8E4DE; --del-strong: #EFC2B4;
   --heat-0: #E3E6E1; --heat-1: #9FCFB3; --heat-2: #5FA881; --heat-3: #2F7D59; --heat-4: #1D5C42;
@@ -47,7 +47,7 @@
 /* a repository's header: its name, then its sections as tabs */
 .rhead { background: var(--surface); border-bottom: 1px solid var(--line); }
 .rhead .in { max-width: 1280px; margin: 0 auto; padding: 16px 16px 0; }
-.crumb { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 20px; }
+.crumb { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; font-size: 20px; font-weight: 400; line-height: 1.5; letter-spacing: 0; }
 .crumb b a { font-weight: 700; }
 .pill { font-size: 12px; font-weight: 600; border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; color: var(--ink-2); }
 .rhead .acts { margin-left: auto; display: flex; gap: 8px; }
@@ -57,7 +57,7 @@
 .rtabs a[aria-current="page"] { border-bottom-color: var(--accent); font-weight: 600; }
 .rtabs .n { font-size: 12px; background: var(--line-2); border-radius: 999px; padding: 0 7px; color: var(--ink-2); font-weight: 600; }
 
-main.git { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
+#app.git { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
 .btn { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 13.5px; font-weight: 600; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface); color: var(--ink) !important; cursor: pointer; white-space: nowrap; }
 .btn:hover { background: var(--sunk); text-decoration: none !important; }
 .btn:disabled { opacity: .55; cursor: default; }
@@ -66,7 +66,7 @@ main.git { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
 .btn.bad { color: var(--broken) !important; }
 .btn.plain { font-weight: 400; }
 .gseg { display: inline-flex; } .gseg .btn { border-radius: 0; font-weight: 400; } .gseg .btn:first-child { border-radius: 4px 0 0 4px; } .gseg .btn + .btn { border-left: 0; } .gseg .btn:last-child { border-radius: 0 4px 4px 0; }
-.gseg .btn[aria-pressed="true"] { background: var(--line-2); font-weight: 600; }
+.gseg .btn:is([aria-pressed="true"], [aria-current="page"]) { background: var(--line-2); font-weight: 600; }
 .box { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
 .box > header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--sunk); border-bottom: 1px solid var(--line); border-radius: 4px 4px 0 0; flex-wrap: wrap; }
 .box > header:last-child { border-bottom: 0; border-radius: 4px; }
@@ -101,8 +101,8 @@ main.git { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
 .chip.ok { background: var(--ok-bg); color: var(--ok); } .chip.broken { background: var(--broken-bg); color: var(--broken); }
 .two { display: grid; grid-template-columns: minmax(0, 1fr) 296px; gap: 24px; align-items: start; }
 .two.left { grid-template-columns: 240px minmax(0, 1fr); }
-@media (max-width: 880px) { .two, .two.left { grid-template-columns: 1fr; } }
-.side h3 { font-size: 14px; margin: 0 0 8px; }
+@media (max-width: 880px) { .two, .two.left { grid-template-columns: minmax(0, 1fr); } }
+.side :is(h2, h3) { font-size: 14px; margin: 0 0 8px; }
 .side section { padding: 0 0 16px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
 .side p { margin: 0 0 8px; }
 .h1 { margin: 0; font-size: 20px; }
@@ -133,6 +133,9 @@ main.git { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
 .md pre { background: var(--code); padding: 12px 14px; border-radius: 4px; overflow-x: auto; font: 12.5px/1.5 var(--mono); }
 .md :not(pre) > code { background: var(--code); padding: 1px 5px; border-radius: 3px; }
 .md img { max-width: 100%; }
+/* a link in running text is underlined, not told apart by colour alone */
+.md a, .words a { text-decoration: underline; }
+.md li + li { margin-top: 4px; }
 .md table { border-collapse: collapse; } .md td, .md th { border: 1px solid var(--line); padding: 4px 10px; }
 
 /* code and diffs */
@@ -159,7 +162,7 @@ main.git { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
 
 /* the file tree beside a file */
 .withtree { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
-@media (max-width: 880px) { .withtree { grid-template-columns: 1fr; } .withtree .tree { display: none; } }
+@media (max-width: 880px) { .withtree { grid-template-columns: minmax(0, 1fr); } .withtree .tree { display: none; } }
 .tree { font-size: 13px; padding: 8px 6px; position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow: auto; }
 .tree input { width: 100%; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); margin-bottom: 6px; }
 .tree a { display: flex; gap: 6px; align-items: center; padding: 3px 6px; border-radius: 4px; color: var(--ink) !important; white-space: nowrap; }

@@ -71,7 +71,7 @@ export function feedLine(a) {
     comment_issue: ['issue', [u, ' commented on ', el('a', { href: `/${repo}/issues/${n}`, text: `#${n}` })]],
     publish_release: ['tag', [u, ' published a release in ', R]],
   }[a.op_type] || ['pulse', [u, ` ${a.op_type.replace(/_/g, ' ')} `, R]];
-  return el('div', {}, ic(pick[0]), el('span', { style: 'flex:1;min-width:0' }, ...pick[1]), el('span', { class: 'small muted' }, when(a.created)));
+  return el('div', {}, ic(pick[0]), el('span', { class: 'words', style: 'flex:1;min-width:0' }, ...pick[1]), el('span', { class: 'small muted' }, when(a.created)));
 }
 
 // ---- every public repository: the public door's front page
@@ -120,13 +120,13 @@ route(/^\/$/, async ({ params, current }) => {
       list,
       await year(user)),
     el('aside', { class: 'side' },
-      el('section', {}, el('h3', { text: 'Waiting on you' }),
+      el('section', {}, el('h2', { text: 'Waiting on you' }),
         waiting.length ? waiting.map((i) => el('p', {},
           el('a', { href: `/${i.repository.full_name}/${i.pull_request ? 'pull' : 'issues'}/${i.number}` }, ic(i.pull_request ? 'pr' : 'issue'), ` #${i.number} ${i.title}`),
           el('br'), el('span', { class: 'small muted', text: `${i.repository.full_name} · ${reviews.includes(i) ? 'review asked' : 'assigned to you'}` })))
           : el('p', { class: 'small muted', text: 'Nothing: no reviews asked of you, nothing assigned.' })),
-      el('section', {}, el('h3', { text: 'Your settings' }), el('p', { class: 'small' }, el('a', { href: '/settings/tokens', text: 'API tokens' }), ' · ', el('a', { href: '/settings/keys', text: 'SSH keys' }), ' · ', el('a', { href: '/settings/profile', text: 'Profile' }))),
-      el('section', {}, el('h3', { text: 'Recent activity' }),
+      el('section', {}, el('h2', { text: 'Your settings' }), el('p', { class: 'small' }, el('a', { href: '/settings/tokens', text: 'API tokens' }), ' · ', el('a', { href: '/settings/keys', text: 'SSH keys' }), ' · ', el('a', { href: '/settings/profile', text: 'Profile' }))),
+      el('section', {}, el('h2', { text: 'Recent activity' }),
         feed.length ? el('div', { class: 'list small', style: 'margin:0 -14px' }, ...feed.map(feedLine)) : el('p', { class: 'small muted', text: 'Quiet so far.' })))));
 }, true);
 
@@ -192,7 +192,7 @@ route(/^\/notifications$/, async ({ params, current }) => {
   if (!current()) return;
   put(main(), el('div', { style: 'max-width:980px' },
     el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Notifications' }), el('span', { class: 'spacer' }),
-      el('span', { class: 'gseg' }, el('a', { class: 'btn', href: '/notifications', 'aria-pressed': String(!all), text: 'Unread' }), el('a', { class: 'btn', href: '/notifications?all=1', 'aria-pressed': String(all), text: 'All' })),
+      el('span', { class: 'gseg' }, el('a', { class: 'btn', href: '/notifications', 'aria-current': all ? null : 'page', text: 'Unread' }), el('a', { class: 'btn', href: '/notifications?all=1', 'aria-current': all ? 'page' : null, text: 'All' })),
       all ? null : markAll),
     el('div', { class: 'box list' }, ...(items.length ? items.map((n) => {
       const a = el('a', { class: 'item', href: link(n) },
@@ -355,7 +355,7 @@ route(/^\/([^/]+)$/, async ({ m, current }) => {
       el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: `${u.login}'s repositories` })),
       el('div', { class: 'box list gap' }, ...(repos.length ? await Promise.all(repos.map(repoRow)) : [el('div', { class: 'empty', text: 'Nothing you may see.' })])),
       open ? null : await year(u.login)),
-    open ? null : el('aside', { class: 'side' }, el('section', {}, avatar(u, 'avatar l'), el('h3', { style: 'margin-top:8px', text: u.full_name || u.login }), el('p', { class: 'small muted', text: `here since ${new Date(u.created).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}` })))));
+    open ? null : el('aside', { class: 'side' }, el('section', {}, avatar(u, 'avatar l'), el('h2', { style: 'margin-top:8px', text: u.full_name || u.login }), el('p', { class: 'small muted', text: `here since ${new Date(u.created).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}` })))));
 }, true);
 
 export { repoRow, year };

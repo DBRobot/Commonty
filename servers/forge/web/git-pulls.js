@@ -143,7 +143,7 @@ async function timeline(r, n, issue) {
 // the right-hand column: labels, people, milestone
 async function sidebar(r, n, issue, isPull) {
   const can = r.permissions?.push;
-  const section = (title, body, edit) => el('section', {}, el('div', { class: 'hrow', style: 'margin-bottom:8px' }, el('h3', { style: 'margin:0', text: title }), el('span', { class: 'spacer' }), edit), body);
+  const section = (title, body, edit) => el('section', {}, el('div', { class: 'hrow', style: 'margin-bottom:8px' }, el('h2', { style: 'margin:0', text: title }), el('span', { class: 'spacer' }), edit), body);
   const labels = el('p', {}, ...(issue.labels?.length ? issue.labels.map(labelChip) : [el('span', { class: 'small muted', text: 'None yet' })]));
   const labelEdit = can ? pop(el('button', { class: 'btn plain', style: 'padding:2px 6px', 'aria-label': 'Change labels' }, ic('gear', 'i s')), async (close) => {
     const all = await api(`/repos/${r.full_name}/labels${q({ limit: 100 })}`);

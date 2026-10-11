@@ -10,9 +10,10 @@
   <script type="module" src="/_dd/static/send.js"></script>
 </head>
 <body>
+  <a class="skip-to" href="#main">Skip to content</a>
   <header class="dd-bar">
     <div class="bar">
-      <span class="brand" aria-label="Commonty">
+      <span class="brand">
         <svg viewBox="0 0 22 22" aria-hidden="true">
           <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
           <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
@@ -23,7 +24,7 @@
       </span>
     </div>
   </header>
-  <main class="send">
+  <main id="main" class="send">
     <section class="card">
       <p class="eyebrow">Someone sent you this</p>
       <h1 id="name">Opening…</h1>
@@ -50,7 +51,7 @@
         <button type="button" id="download">Download</button>
       </div>
 
-      <p class="note" id="note"></p>
+      <p class="note" id="note" role="status"></p>
     </section>
     <p class="foot">Sent with Passwords on Commonty. Sends expire, and some open only a set number of times.</p>
   </main>

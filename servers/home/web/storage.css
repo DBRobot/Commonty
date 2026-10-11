@@ -1,5 +1,5 @@
 /* Storage, a tab of Settings, on home.css's colours */
-.st-pane { --st-sunk: #F5F7F9; --st-ink-3: #6E7671; --st-ok: #1D5C42; --st-warn: #8A5A12; --st-bad: #9B2C2C;
+.st-pane { --st-sunk: #F5F7F9; --st-ink-3: #5E6661; --st-ok: #1D5C42; --st-warn: #8A5A12; --st-bad: #9B2C2C;
       --c-photos: #d9822b; --c-files: #2f6fd6; --c-movies: #b4457a; --c-code: #4a5a8a; --c-games: #7a4fb5; --c-pw: #1b8aa0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .st-pane { --st-sunk: #13171C; --st-ink-3: #87909A; --st-ok: #7CCBA2; --st-warn: #E3B769; --st-bad: #F08A8A; } }
 :root[data-theme="dark"] .st-pane { --st-sunk: #13171C; --st-ink-3: #87909A; --st-ok: #7CCBA2; --st-warn: #E3B769; --st-bad: #F08A8A; }

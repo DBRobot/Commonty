@@ -4,7 +4,7 @@
 
 :root {
   --sunk: #F6F8F9;
-  --ink-3: #6E7671;
+  --ink-3: #5E6661;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -146,8 +146,10 @@
 .docs-md h3 { margin: 26px 0 8px; font-size: 16.5px; }
 .docs-md h4 { margin: 20px 0 6px; font-size: 15px; }
 .docs-md :is(h2, h3, h4) { position: relative; scroll-margin-top: 84px; }
-.docs-md .anchor { position: absolute; left: -22px; color: var(--ink-3); font-weight: 400; opacity: 0; }
+.docs-md .anchor { position: absolute; left: -22px; color: var(--ink-3); font-weight: 400; opacity: 0; text-decoration: none; }
 .docs-md :is(h2, h3, h4):hover .anchor, .docs-md .anchor:focus-visible { opacity: 1; text-decoration: none; }
+/* a link in running text is underlined, not told apart by colour alone */
+.docs-md a { text-decoration: underline; }
 .docs-md p, .docs-md ul, .docs-md ol, .docs-md blockquote { margin: 0 0 14px; }
 .docs-md li { margin: 3px 0; }
 .docs-md li > p { margin: 0; }

@@ -12,7 +12,14 @@ let timer = null;
 let digits = null;
 
 function show(page) {
+  const was = document.activeElement?.closest(".page");
   for (const p of document.querySelectorAll(".page")) p.hidden = p.id !== "page-" + page;
+  // focus on a screen that just went: the new screen's title takes it
+  const title = $("page-" + page)?.querySelector("h1");
+  if (was?.hidden && title) {
+    title.tabIndex = -1;
+    title.focus();
+  }
 }
 
 function render(st) {

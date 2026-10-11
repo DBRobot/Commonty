@@ -23,7 +23,7 @@
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') location.href = d.dataset.back;
     });
-    const first = d.querySelector('input:not([type=hidden]),select');
+    const first = d.querySelector('input:not([type=hidden]),select') || d.querySelector('.close');
     if (first) first.focus();
   }
 

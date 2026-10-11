@@ -201,6 +201,23 @@ if (!document.querySelector('link[rel~="icon"]')) {
   document.head.append(Object.assign(document.createElement('link'), { rel: 'icon', type: 'image/svg+xml', href: '/_dd/static/favicon.svg' }));
 }
 
+// The first stop for a keyboard: past the bar, to the page. Focus is moved
+// by hand, since the docs and Git pages take over clicks on their links.
+function skipLink() {
+  const main = document.querySelector('main');
+  if (!main || document.querySelector('.skip-to')) return;
+  main.id ||= 'main';
+  if (!main.hasAttribute('tabindex')) main.tabIndex = -1;
+  const a = el('a', { class: 'skip-to', href: '#' + main.id, text: 'Skip to content' });
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    main.focus();
+    main.scrollIntoView();
+  });
+  document.body.prepend(a);
+}
+skipLink();
+
 // the name is the control: it opens everything that is not a service
 function bar(m, slot) {
   const nav = el('nav');
@@ -231,7 +248,8 @@ function bar(m, slot) {
       nav.append(el('a', { href: here(homeLink(m, item.url)), text: item.label }));
     }
   });
-  const summary = el('summary', {},
+  // named for a screen reader too when a phone hides the name
+  const summary = el('summary', { 'aria-label': m.user },
     el('span', { class: 'avatar', 'aria-hidden': 'true', text: m.initial }),
     el('span', { text: m.user }),
     el('span', { class: 'chev', 'aria-hidden': 'true' }));

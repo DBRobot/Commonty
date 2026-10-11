@@ -7,9 +7,9 @@ main.app > .card { max-width: 440px; }
 .who { gap: 10px; font-weight: 600; }
 
 .small { margin: 0 0 12px; font-size: 15px; color: var(--ink-2); }
-.error { color: #B3401F; }
+.error { color: var(--broken); }
 .ok { color: var(--accent); }
-@media (prefers-color-scheme: dark) { .error { color: #E88A6A; } .ok { color: var(--link); } }
+@media (prefers-color-scheme: dark) { .ok { color: var(--link); } }
 .waiting::before { content: "· "; }
 
 /* a button that reads as a link: the other ways in */

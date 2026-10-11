@@ -1,7 +1,8 @@
 /* The bar across the top of every page, on its own so that a page that is
    not one of ours (Ente's photos app) carries the same one: the logo going
    home, and the menu shell.js fills from /_dd/me. home.css imports it. It
-   brings its own tokens and touches nothing outside header.dd-bar. */
+   brings its own tokens and touches nothing outside header.dd-bar, but for
+   the skip link before it. */
 
 @font-face {
   font-family: "Public Sans";
@@ -57,6 +58,20 @@
   -webkit-font-smoothing: antialiased;
 }
 .dd-bar *, .dd-bar *::before, .dd-bar *::after { box-sizing: border-box; }
+/* the first thing a keyboard reaches: past the bar, to the page (shell.js
+   puts it in; a page without the shell carries it) */
+.skip-to {
+  position: absolute;
+  left: 8px;
+  top: -80px;
+  z-index: 100;
+  padding: 10px 16px;
+  background: #FFFFFF;
+  color: #1A1F1C;
+  font: 600 16px "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+  border-radius: 4px;
+}
+.skip-to:focus { top: 12px; outline: 3px solid #E0A21B; outline-offset: 2px; }
 .dd-bar :focus-visible { outline: 3px solid var(--bar-focus); outline-offset: 2px; }
 .dd-bar .bar {
   height: 64px;
@@ -228,6 +243,7 @@
 }
 @media (max-width: 560px) {
   .dd-bar .brand span { display: none; }
+  .dd-bar .bar { gap: 6px; }
   .dd-bar .me summary > span:not(.avatar):not(.chev) { display: none; }
   .dd-bar .svc-menu { position: fixed; left: 8px; right: 8px; top: 60px; width: auto; }
 }

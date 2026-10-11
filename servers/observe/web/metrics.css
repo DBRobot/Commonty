@@ -2,7 +2,7 @@
    clear of home.css's own (.row, .tabs, .seg, .note are taken there). */
 
 :root {
-  --sunk: #F6F8F9; --ink-3: #6E7671;
+  --sunk: #F6F8F9; --ink-3: #5E6661;
   --ok: #1D5C42; --ok-bg: #DDEEE5; --busy: #9A6A00; --busy-bg: #F6ECD9; --bad: #B3401F; --bad-bg: #F7E1D9;
   --c1: #1D5C42; --c2: #1D4470; --c3: #C69214; --c4: #B3401F; --c5: #4F7F9E; --c6: #7A8B3A;
 }
@@ -33,7 +33,7 @@
 .mtabs a { padding: 9px 12px 11px; color: var(--ink) !important; border-bottom: 2px solid transparent; font-weight: 500; white-space: nowrap; }
 .mtabs a:hover { text-decoration: none !important; border-bottom-color: var(--line); }
 .mtabs a[aria-current="page"] { border-bottom-color: var(--accent); font-weight: 600; }
-main.metrics { max-width: 1280px; margin: 0 auto; padding: 22px 16px 60px; }
+#app.metrics { max-width: 1280px; margin: 0 auto; padding: 22px 16px 60px; }
 .mrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
 .gap { margin-bottom: 16px; }
@@ -42,7 +42,7 @@ main.metrics { max-width: 1280px; margin: 0 auto; padding: 22px 16px 60px; }
 .mbtn { font: inherit; font-size: 13px; font-weight: 600; padding: 6px 11px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface); color: var(--ink) !important; cursor: pointer; }
 .mbtn.go { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) !important; }
 .mseg { display: inline-flex; } .mseg .mbtn { border-radius: 0; font-weight: 400; } .mseg .mbtn:first-child { border-radius: 4px 0 0 4px; } .mseg .mbtn + .mbtn { border-left: 0; } .mseg .mbtn:last-child { border-radius: 0 4px 4px 0; }
-.mseg .mbtn[aria-pressed="true"] { background: var(--line-2); font-weight: 600; }
+.mseg .mbtn:is([aria-pressed="true"], [aria-current="page"]) { background: var(--line-2); font-weight: 600; }
 .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; background: var(--line); }
 .dot.ok { background: var(--ok); } .dot.busy { background: var(--busy); } .dot.bad { background: var(--bad); }
 .mchip { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 1px 9px; background: var(--line-2); color: var(--ink-2); white-space: nowrap; }

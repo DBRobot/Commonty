@@ -397,8 +397,8 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
     el('span', {}, el('span', { class: 'small muted', text: 'Commit' }), el('br'), el('a', { class: 'mono', href: `/${r.full_name}/commit/${run.commit_sha}`, text: short(run.commit_sha) }), ' ', el('span', { class: 'small', text: run.prettyref || '' })),
     el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: `${jobs.filter((j) => DONE.includes(j.state)).length} of ${jobs.length} jobs done` })));
   const seg = el('span', { class: 'gseg', role: 'group', 'aria-label': 'View' },
-    el('a', { class: 'btn', href: `/${r.full_name}/actions/runs/${index}`, 'aria-pressed': String(view === 'graph'), text: 'Graph' }),
-    el('a', { class: 'btn', href: `/${r.full_name}/actions/runs/${index}${q({ job: jobs.find((j) => j.state === 'failure')?.index ?? jobs.find((j) => j.state === 'running')?.index ?? jobs[0]?.index ?? 0 })}`, 'aria-pressed': String(view === 'log'), text: 'Jobs and logs' }));
+    el('a', { class: 'btn', href: `/${r.full_name}/actions/runs/${index}`, 'aria-current': view === 'graph' ? 'page' : null, text: 'Graph' }),
+    el('a', { class: 'btn', href: `/${r.full_name}/actions/runs/${index}${q({ job: jobs.find((j) => j.state === 'failure')?.index ?? jobs.find((j) => j.state === 'running')?.index ?? jobs[0]?.index ?? 0 })}`, 'aria-current': view === 'log' ? 'page' : null, text: 'Jobs and logs' }));
   if (!current()) return;
   put(main(),
     el('div', { class: 'hrow gap' }, el('a', { href: `/${r.full_name}/actions`, text: '← All runs' }), el('h1', { class: 'h1', style: 'font-size:19px', text: `Run ${index} · ${run.title}` }), el('span', { class: 'spacer' }), seg),

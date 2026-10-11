@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
+  <a class="skip-to" href="#main">Skip to content</a>
   <header class="dd-bar">
     <div class="bar">
       <span class="brand">
@@ -26,7 +27,7 @@
     </div>
   </header>
 
-  <main class="auth app">
+  <main id="main" class="auth app">
     <!-- what shows until the first screen draws: its shape, not "Loading" -->
     <section id="page-wait" class="page card skel" aria-busy="true" aria-label="Opening">
       <span class="h"></span><span></span><span class="short"></span>
@@ -39,7 +40,7 @@
         <input id="name" autocomplete="username" autocapitalize="none" spellcheck="false">
         <button type="submit">Continue</button>
       </form>
-      <p id="name-error" class="error" hidden></p>
+      <p id="name-error" role="alert" class="error" hidden></p>
       <div class="ways">
         <div class="way">
           <span class="what">Your other device shows a code</span>
@@ -66,7 +67,7 @@
         <input id="recover-key" autocomplete="off" autocapitalize="none" spellcheck="false">
         <button type="submit">Recover</button>
       </form>
-      <p id="recover-error" class="error" hidden></p>
+      <p id="recover-error" role="alert" class="error" hidden></p>
       <button id="recover-back" class="quiet">Back</button>
     </section>
 
@@ -92,7 +93,7 @@
         <input id="signup-code" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="xxxxx-xxxxx">
         <button type="submit" id="signup-go" disabled>Create my account</button>
       </form>
-      <p id="signup-error" class="error" hidden></p>
+      <p id="signup-error" role="alert" class="error" hidden></p>
       <button id="signup-back" class="quiet">I already have an account</button>
     </section>
 
@@ -111,8 +112,8 @@
         <input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="7KQ-4MZ">
         <button type="submit">Continue</button>
       </form>
-      <p id="code-wait" class="small waiting" hidden>Waiting for your other device to see this one…</p>
-      <p id="code-error" class="error" hidden></p>
+      <p id="code-wait" role="status" class="small waiting" hidden>Waiting for your other device to see this one…</p>
+      <p id="code-error" role="alert" class="error" hidden></p>
       <button id="code-back" class="quiet">Back</button>
     </section>
 
@@ -132,8 +133,8 @@
     <section id="page-home" class="page card" hidden>
       <h1>This device</h1>
       <p class="lead">Signed in as <strong id="home-name"></strong>.</p>
-      <p class="row"><span id="net-state" class="state-word" data-state="working">Checking</span> <span id="net-text" class="small"></span></p>
-      <p id="net-error" class="error small" hidden></p>
+      <p class="row"><span id="net-state" class="state-word" data-state="working">Checking</span> <span id="net-text" role="status" class="small"></span></p>
+      <p id="net-error" role="alert" class="error small" hidden></p>
       <div class="row">
         <a id="to-site" class="button" href="#">Open your services</a>
         <button id="net-join" class="quiet" hidden>Connect</button>
@@ -142,7 +143,7 @@
       <h2>Your browser</h2>
       <p class="small">The website signs in with a passkey. Make one in this computer's browser, and your pages open there too.</p>
       <button id="passkey-add" class="quiet">Set up a passkey</button>
-      <p id="passkey-text" class="small" hidden></p>
+      <p id="passkey-text" role="status" class="small" hidden></p>
 
       <h2>Signing out</h2>
       <p class="small">Devices are added and removed in Settings, under Devices.</p>

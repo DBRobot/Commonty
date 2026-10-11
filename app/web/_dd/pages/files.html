@@ -34,7 +34,7 @@
       </div>
     </div>
 
-    <p id="msg" class="lead">Opening your library…</p>
+    <p id="msg" class="lead" role="status">Opening your library…</p>
     <div id="link" hidden>
       <p class="lead">Your files open through the Commonty app, which holds their key on your device. <a href="/_dd/download">Get the app</a></p>
     </div>
@@ -64,11 +64,11 @@
         </div>
         <table class="files" id="table">
           <thead><tr>
-            <th class="chk"><input type="checkbox" id="all" aria-label="Select all"></th>
+            <th class="chk"><span class="sr-only">Select</span><input type="checkbox" id="all" aria-label="Select all"></th>
             <th><button type="button" data-sort="name">Name</button></th>
             <th class="wide-only"><button type="button" data-sort="modified">Modified</button></th>
             <th class="wide-only"><button type="button" data-sort="size">Size</button></th>
-            <th class="act"></th>
+            <th class="act"><span class="sr-only">Actions</span></th>
           </tr></thead>
           <tbody id="rows"></tbody>
         </table>
@@ -89,7 +89,7 @@
   </aside>
 
   <div class="uploads" id="uploads" hidden>
-    <div class="up-head"><span id="up-title"></span><button type="button" id="up-close" aria-label="Hide">×</button></div>
+    <div class="up-head"><span id="up-title" role="status"></span><button type="button" id="up-close" aria-label="Hide">×</button></div>
     <div id="up-rows"></div>
   </div>
 
@@ -99,7 +99,7 @@
     <form method="dialog">
       <h2 id="ask-title"></h2>
       <p id="ask-text" class="note"></p>
-      <input id="ask-input" autocomplete="off">
+      <input id="ask-input" autocomplete="off" aria-labelledby="ask-title">
       <div id="ask-list" class="ask-list"></div>
       <div class="ask-actions">
         <button value="cancel" class="quiet" type="submit">Cancel</button>

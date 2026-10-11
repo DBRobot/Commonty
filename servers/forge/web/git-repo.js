@@ -55,7 +55,7 @@ export function header(r, tab) {
     return warmers[key] ? warm(a, () => warmers[key](r)) : a;
   };
   $('rhead').replaceChildren(el('div', { class: 'rhead' }, el('div', { class: 'in' },
-    el('div', { class: 'crumb' }, ic(r.private ? 'lock' : 'repo'), el('a', { href: `/${owner}`, text: owner }), el('span', { class: 'muted', text: '/' }), el('b', {}, el('a', { href: `/${r.full_name}`, text: name })),
+    el('h1', { class: 'crumb' }, ic(r.private ? 'lock' : 'repo'), el('a', { href: `/${owner}`, text: owner }), el('span', { class: 'muted', text: '/' }), el('b', {}, el('a', { href: `/${r.full_name}`, text: name })),
       el('span', { class: 'pill', text: r.archived ? 'Archived' : r.private ? 'Private' : 'Public' }),
       r.mirror ? el('span', { class: 'pill', text: 'Mirror' }) : null),
     el('nav', { class: 'rtabs', 'aria-label': 'Repository' },
@@ -96,7 +96,7 @@ function cloneBox(r) {
   const cp = el('button', { 'aria-label': 'Copy' }, ic('copy'));
   cp.onclick = () => copy(input.value, cp);
   const seg = el('span', { class: 'gseg', style: 'margin-bottom:6px' }, ...ways.map(([t], i) => el('button', { class: 'btn', style: 'padding:2px 10px;font-size:12px', 'aria-pressed': String(i === pick), text: t, onclick: (e) => { pick = i; input.value = ways[i][1]; seg.querySelectorAll('button').forEach((x, j) => { x.setAttribute('aria-pressed', String(j === i)); }); } })));
-  return el('section', {}, el('h3', { text: 'Clone' }), seg, el('div', { class: 'clone' }, input, cp));
+  return el('section', {}, el('h2', { text: 'Clone' }), seg, el('div', { class: 'clone' }, input, cp));
 }
 
 // the repository the boxes are built from: only its pages show what they run
@@ -146,7 +146,7 @@ route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
       .catch(() => {});
   }
 
-  const crumbs = path ? el('span', {}, el('a', { href: `/${r.full_name}/tree/${ref}`, text: r.name }), ...path.split('/').flatMap((p, i, a) => [' / ', i === a.length - 1 ? el('b', { text: p }) : el('a', { href: `/${r.full_name}/tree/${ref}/${a.slice(0, i + 1).join('/')}`, text: p })])) : null;
+  const crumbs = path ? el('span', { class: 'words' }, el('a', { href: `/${r.full_name}/tree/${ref}`, text: r.name }), ...path.split('/').flatMap((p, i, a) => [' / ', i === a.length - 1 ? el('b', { text: p }) : el('a', { href: `/${r.full_name}/tree/${ref}/${a.slice(0, i + 1).join('/')}`, text: p })])) : null;
   const last = el('div', { class: 'lastc' }, ghost(1));
   api(`/repos/${r.full_name}/commits${q({ sha: ref, path, limit: 1, stat: false, verification: false, files: false })}`, { withTotal: true }).then(async ({ data, total }) => {
     const c = data[0];
@@ -182,12 +182,12 @@ route(/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/, async ({ m, current }) => {
     nTagWord.textContent = ` tag${tags.length === 1 ? '' : 's'}`;
   }).catch(() => {});
   const side = el('aside', { class: 'side' },
-    el('section', {}, el('h3', { text: 'About' }), el('p', { text: r.description || 'No description.' }), webUrl(r.website) ? el('p', {}, el('a', { href: webUrl(r.website), text: r.website })) : null,
+    el('section', {}, el('h2', { text: 'About' }), el('p', { text: r.description || 'No description.' }), webUrl(r.website) ? el('p', {}, el('a', { href: webUrl(r.website), text: r.website })) : null,
       el('p', { class: 'small muted' }, ic(r.private ? 'lock' : 'repo', 'i s'), r.private ? ' Only the people it is shared with can see it' : ' Anyone can see it')),
     cloneBox(r));
-  const langs = el('section', {}, el('h3', { text: 'Languages' }));
+  const langs = el('section', {}, el('h2', { text: 'Languages' }));
   api(`/repos/${r.full_name}/languages`).then((l) => { if (Object.keys(l).length) langs.append(...languages(l)); else langs.remove(); }).catch(() => langs.remove());
-  const rel = el('section', {}, el('h3', { text: 'Running now' }));
+  const rel = el('section', {}, el('h2', { text: 'Running now' }));
   fleet(r).then((boxes) => {
     if (!boxes.length) { rel.remove(); return; }
     rel.append(...boxes.map((b) => el('p', {}, el('span', { class: `dot ${b.up ? 'ok' : 'broken'}` }), ' ', el('b', { text: b.name }), ` release ${b.release ?? '?'}`, el('span', { class: 'small muted', text: b.result && b.result !== 'ok' ? ` · ${b.result}` : '' }))));
@@ -299,7 +299,7 @@ route(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/, async ({ m, current }) => {
   }).catch(() => {});
   const cp = el('button', { class: 'btn plain', 'aria-label': 'Copy the file' }, ic('copy'));
   cp.onclick = () => copy(src, cp);
-  const crumbs = el('span', {}, el('a', { href: `/${r.full_name}/tree/${ref}`, text: r.name }), ...path.split('/').flatMap((p, i, a) => [' / ', i === a.length - 1 ? el('b', { text: p }) : el('a', { href: `/${r.full_name}/tree/${ref}/${a.slice(0, i + 1).join('/')}`, text: p })]));
+  const crumbs = el('span', { class: 'words' }, el('a', { href: `/${r.full_name}/tree/${ref}`, text: r.name }), ...path.split('/').flatMap((p, i, a) => [' / ', i === a.length - 1 ? el('b', { text: p }) : el('a', { href: `/${r.full_name}/tree/${ref}/${a.slice(0, i + 1).join('/')}`, text: p })]));
   if (!current()) return;
   put(main(), el('div', { class: 'withtree' },
     await tree(r, ref, path),
@@ -340,7 +340,7 @@ route(/^\/([^/]+)\/([^/]+)\/commits(?:\/(.+))?$/, async ({ m, params, current })
   if (!current()) return;
   put(main(),
     el('div', { class: 'hrow gap' }, refPicker(r, ref, (n) => `/${r.full_name}/commits/${n}${path ? `/${path}` : ''}`), el('h1', { class: 'h1', style: 'font-size:18px', text: path ? `History of ${path}` : 'Commits' }), el('span', { class: 'small muted', text: plural(total, 'commit') })),
-    ...[...days].flatMap(([d, cs]) => [el('h3', { class: 'small muted', style: 'margin:0 0 8px' }, ic('commit'), ` ${d}`), el('div', { class: 'box list gap' }, ...cs.map(row))]),
+    ...[...days].flatMap(([d, cs]) => [el('h2', { class: 'small muted', style: 'margin:0 0 8px' }, ic('commit'), ` ${d}`), el('div', { class: 'box list gap' }, ...cs.map(row))]),
     pager(page, total, 30, (p) => go(`${location.pathname}${q({ page: p })}`)));
 }, true);
 
@@ -439,9 +439,9 @@ route(/^\/([^/]+)\/([^/]+)\/releases(?:\/tag\/(.+))?$/, async ({ m, current }) =
       el('div', { class: 'two' },
         el('div', { class: 'box' }, el('div', { style: 'padding:18px 22px 6px' }, el('h1', { class: 'h1', style: 'font-size:24px', text: one.name || one.tag_name }), el('p', { class: 'muted', style: 'margin:6px 0 0' }, ic('tag'), ` ${one.tag_name} · `, when(one.published_at || one.created_at))), el('div', { class: 'md pad' }, await markdown(one.body || '_No notes._'))),
         el('aside', { class: 'side' },
-          el('section', {}, el('h3', { text: 'Commit' }), el('p', {}, el('a', { class: 'mono', href: `/${r.full_name}/tree/${one.tag_name}`, text: one.target_commitish }))),
-          one.assets?.length ? el('section', {}, el('h3', { text: 'Files' }), ...one.assets.map((a) => el('p', {}, el('a', { href: local(a.browser_download_url), text: a.name }), el('span', { class: 'small muted', text: ` ${bytes(a.size)}` })))) : null,
-          el('section', {}, el('h3', { text: 'Download the code' }), el('p', {}, el('a', { href: local(one.zipball_url), text: 'zip' }), ' · ', el('a', { href: local(one.tarball_url), text: 'tar.gz' }))))));
+          el('section', {}, el('h2', { text: 'Commit' }), el('p', {}, el('a', { class: 'mono', href: `/${r.full_name}/tree/${one.tag_name}`, text: one.target_commitish }))),
+          one.assets?.length ? el('section', {}, el('h2', { text: 'Files' }), ...one.assets.map((a) => el('p', {}, el('a', { href: local(a.browser_download_url), text: a.name }), el('span', { class: 'small muted', text: ` ${bytes(a.size)}` })))) : null,
+          el('section', {}, el('h2', { text: 'Download the code' }), el('p', {}, el('a', { href: local(one.zipball_url), text: 'zip' }), ' · ', el('a', { href: local(one.tarball_url), text: 'tar.gz' }))))));
     return;
   }
   const relRows = rels.map((x, i) => el('a', { class: 'item', href: `/${r.full_name}/releases/tag/${x.tag_name}` }, ic('tag'), el('div', { style: 'flex:1;min-width:0' }, el('div', { class: 't' }, x.name || x.tag_name, i === 0 ? el('span', { class: 'state-word', 'data-state': 'ok', style: 'margin-left:8px', text: 'Latest' }) : null, x.prerelease ? el('span', { class: 'state-word', 'data-state': 'attention', style: 'margin-left:8px', text: 'pre-release' }) : null), el('div', { class: 'sub', text: firstLine(x.body) })), el('span', { class: 'small muted' }, when(x.published_at || x.created_at))));
@@ -526,7 +526,7 @@ route(/^\/([^/]+)\/([^/]+)\/activity$/, async ({ m, params, current }) => {
   const feedBox = el('div', { class: 'box list' }, el('div', { class: 'ghosts' }, ghost(4)));
   put(main(),
     el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Activity' }), el('span', { class: 'spacer' }),
-      el('span', { class: 'gseg' }, el('a', { class: 'btn', href: `/${r.full_name}/activity`, 'aria-pressed': String(span === 7), text: 'This week' }), el('a', { class: 'btn', href: `/${r.full_name}/activity?span=month`, 'aria-pressed': String(span === 30), text: 'This month' }))),
+      el('span', { class: 'gseg' }, el('a', { class: 'btn', href: `/${r.full_name}/activity`, 'aria-current': span === 7 ? 'page' : null, text: 'This week' }), el('a', { class: 'btn', href: `/${r.full_name}/activity?span=month`, 'aria-current': span === 30 ? 'page' : null, text: 'This month' }))),
     el('div', { class: 'box gap' }, chart, el('div', { class: 'stats' }, sCommitsBox, sMergedBox, sTagsBox, sRunsBox)),
     el('div', { class: 'box gap' }, el('header', {}, yearHead, el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: `every day with a commit on ${r.default_branch}` })), heat),
     el('div', { class: 'hrow', style: 'margin-bottom:10px' }, el('b', { text: 'Everything that happened' })),

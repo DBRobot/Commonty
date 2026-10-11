@@ -132,6 +132,31 @@ a:hover { color: var(--link-hover); }
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
+/* where the skip link lands: focus moves there, no ring around the page */
+main[tabindex="-1"]:focus { outline: none; }
+
+/* words for a screen reader alone: a column's name, a heading the eye
+   gets from the layout */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+/* someone who asked for less motion gets none: no slides, spins or fades */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 h1 {
   margin: 0;
@@ -715,7 +740,7 @@ main.movies .card, main.movies .card:hover {
   background: none; color: var(--ink); text-align: left; font-weight: 400;
 }
 .eps .ep:hover { background: var(--bg); }
-.eps .ep[aria-current="true"] .n { color: var(--accent); }
+.eps .ep[aria-current="true"] .n { color: var(--ok); }
 .ep .n { font: 500 15px var(--mono); color: var(--ink-2); text-align: right; }
 .ep .still { position: relative; aspect-ratio: 16 / 9; border-radius: 3px; overflow: hidden; background: var(--line-2); }
 .ep .t { display: block; font-weight: 700; }
@@ -840,7 +865,8 @@ table.files .chk { width: 36px; padding-right: 0; }
 table.files input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--pick); }
 table.files .act { width: 96px; text-align: right; }
 table.files .name { display: flex; align-items: center; gap: 12px; font-weight: 600; min-width: 0; }
-table.files .name > span:not(.ic) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.files .name > :is(span, button):not(.ic) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+main.drive .name > button.open, main.drive .name > button.open:hover { display: block; height: auto; margin: 0; padding: 0; background: none; color: inherit; font: inherit; text-align: left; }
 table.files .name .from { font: 12px var(--mono); font-weight: 400; color: var(--ink-2); }
 table.files .mono { font: 13px var(--mono); color: var(--ink-2); white-space: nowrap; }
 .ic { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 4px; background: color-mix(in srgb, var(--c) 14%, var(--surface)); }
@@ -864,7 +890,7 @@ main.drive .note { margin: 0; padding: 12px 16px; font-size: 14px; color: var(--
 .popmenu { position: absolute; z-index: 40; width: 190px; padding: 6px 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, .12); display: grid; }
 .popmenu button, .popmenu button:hover { justify-content: flex-start; height: 36px; margin: 0; padding: 0 14px; background: none; color: var(--ink); font-size: 15px; font-weight: 500; border-radius: 0; }
 .popmenu button:hover { background: var(--bg); }
-.popmenu button.danger { color: #B3401F; }
+.popmenu button.danger { color: var(--broken); }
 .preview { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); z-index: 30; background: var(--surface); border-left: 1px solid var(--line); display: flex; flex-direction: column; box-shadow: -8px 0 24px rgba(0, 0, 0, .08); }
 .pv-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .pv-head b { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -890,7 +916,7 @@ main.drive .note { margin: 0; padding: 12px 16px; font-size: 14px; color: var(--
 .up-row .top span:last-child { font: 12px var(--mono); color: var(--ink-2); white-space: nowrap; }
 .up-row .track { height: 6px; border-radius: 2px; background: var(--line-2); overflow: hidden; }
 .up-row .track i { display: block; height: 100%; width: 0; background: var(--accent); }
-.up-row.failed .track i { background: #B3401F; }
+.up-row.failed .track i { background: var(--broken); }
 .drop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--pick) 18%, transparent); border: 3px dashed var(--pick); pointer-events: none; }
 .drop div { padding: 24px 32px; border-radius: var(--radius); background: var(--surface); font-weight: 700; font-size: 18px; box-shadow: 0 8px 24px rgba(0, 0, 0, .15); }
 #ask { width: min(440px, calc(100vw - 32px)); padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); }
@@ -927,7 +953,7 @@ main.friends .linkbox input { flex: 1; min-width: 0; margin: 0; height: 48px; fo
 main.friends .fine { margin: 0; font: 13px var(--mono); color: var(--ink-2); }
 main.friends .note { margin: 4px 0 0; padding: 12px 14px; border: 0; border-radius: var(--radius); background: var(--guest-bg); color: var(--ink); font-size: 14px; }
 main.friends .note b { color: var(--guest); }
-main.friends .error { margin: 12px 0 0; color: #B3261E; font-size: 15px; }
+main.friends .error { margin: 12px 0 0; color: var(--broken); font-size: 15px; }
 main.friends .people { list-style: none; margin: 14px 0 0; padding: 0; }
 main.friends .people li { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 14px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line-2); }
 main.friends .people li.waiting { grid-template-columns: minmax(0, 1fr) auto; }

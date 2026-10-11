@@ -207,6 +207,8 @@ export async function markdown(src, base) {
   const html = marked.parse(src || '', { gfm: true, breaks: false });
   const div = el('div', { class: 'md' });
   div.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(html) : '';
+  // a code block that scrolls sideways can be scrolled from the keyboard
+  for (const pre of div.querySelectorAll('pre')) pre.tabIndex = 0;
   // relative links and pictures inside a readme point into the repository
   if (base) {
     for (const a of div.querySelectorAll('a[href]')) {
@@ -252,17 +254,19 @@ export function statusDot(state) {
 
 export function pop(button, build) {
   const wrap = el('span', { class: 'pop' });
-  const menu = el('div', { class: 'menu', role: 'menu' });
+  const menu = el('div', { class: 'menu' });
   menu.hidden = true;
-  button.setAttribute('aria-haspopup', 'true');
+  button.setAttribute('aria-expanded', 'false');
+  const show = (on) => { menu.hidden = !on; button.setAttribute('aria-expanded', String(on)); };
   button.onclick = async (e) => {
     e.stopPropagation();
-    if (!menu.hidden) { menu.hidden = true; return; }
-    menu.replaceChildren(...[await build(() => { menu.hidden = true; })].flat());
-    menu.hidden = false;
+    if (!menu.hidden) { show(false); return; }
+    menu.replaceChildren(...[await build(() => { show(false); })].flat());
+    show(true);
     menu.querySelector('input')?.focus();
   };
-  document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) menu.hidden = true; });
+  document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) show(false); });
+  wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) { show(false); button.focus(); } });
   wrap.append(button, menu);
   return wrap;
 }
@@ -279,7 +283,7 @@ export function pager(page, total, per, go) {
 export function fail(e) {
   const status = e?.status;
   const msg = status === 404 ? 'Nothing here, or nothing you may see.' : status === 403 ? 'You may not see this.' : e?.message || String(e);
-  return el('div', { class: 'box empty' }, el('p', { class: 'err', text: msg }), el('p', {}, el('a', { href: '/', 'data-nav': '', text: open ? 'Public repositories' : 'Your repositories' })));
+  return el('div', { class: 'box empty' }, el('h1', { class: 'err h1', text: msg }), el('p', {}, el('a', { href: '/', 'data-nav': '', text: open ? 'Public repositories' : 'Your repositories' })));
 }
 
 export function setTitle(...parts) {
@@ -407,8 +411,8 @@ document.addEventListener('pointerdown', (e) => {
 function follow(a, u) {
   const bar = a.closest('.rtabs, .settings nav, .gseg');
   if (bar) {
-    bar.querySelectorAll('[aria-current], [aria-pressed="true"]').forEach((x) => { x.removeAttribute('aria-current'); if (x.hasAttribute('aria-pressed')) x.setAttribute('aria-pressed', 'false'); });
-    a.setAttribute(a.hasAttribute('aria-pressed') ? 'aria-pressed' : 'aria-current', a.hasAttribute('aria-pressed') ? 'true' : 'page');
+    bar.querySelectorAll('[aria-current]').forEach((x) => { x.removeAttribute('aria-current'); });
+    a.setAttribute('aria-current', 'page');
   }
   go(u.href);
   window.scrollTo(0, 0);

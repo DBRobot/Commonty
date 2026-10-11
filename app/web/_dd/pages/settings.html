@@ -77,7 +77,7 @@
       <section class="st-box" aria-labelledby="st-yours">
         <header><h2 id="st-yours">Your allowance</h2><span class="st-spacer"></span><span class="st-muted" id="st-updated"></span></header>
         <div class="st-total">
-          <p class="st-muted" id="st-state">Counting…</p>
+          <p class="st-muted" id="st-state" role="status">Counting…</p>
           <div class="st-figure" id="st-figure" hidden><b id="st-used"></b><span id="st-of"></span><span class="st-pill" id="st-pct"></span></div>
           <div class="st-bar" id="st-bar" role="img" hidden></div>
           <ul class="st-legend" id="st-legend"></ul>
@@ -125,7 +125,7 @@
     <div class="se-pane" data-pane="backups" hidden>
       <section class="bk-box" aria-labelledby="images">
         <header><h2 id="images">Your disk images</h2><span class="bk-spacer"></span><span class="bk-muted" id="total"></span></header>
-        <p class="bk-note" id="msg">Looking for your images…</p>
+        <p class="bk-note" id="msg" role="status">Looking for your images…</p>
         <ul class="bk-list" id="list" hidden></ul>
       </section>
     </div>
@@ -187,27 +187,27 @@
         <p class="se-hint" id="lv-removed" hidden>You were removed by the person who runs this Commonty; only they can let you back in.</p>
         <footer><button id="lv-back">Come back</button></footer>
       </section>
-      <p class="se-msg" id="lv-msg"></p>
+      <p class="se-msg" id="lv-msg" role="status"></p>
     </div>
   </main>
   <dialog class="bk-dialog" id="lv-ask" aria-labelledby="lv-ask-h">
     <h3 id="lv-ask-h">Leave Commonty?</h3>
     <p>Every sign-in ends now. In 30 days everything of yours is deleted, and that cannot be undone.</p>
     <p id="lv-ask-how">Confirm with your passkey.</p>
-    <p class="bad" id="lv-ask-msg"></p>
+    <p class="bad" id="lv-ask-msg" role="alert"></p>
     <div class="row"><button class="quiet" id="lv-ask-no">Cancel</button><button class="danger" id="lv-ask-yes">Leave with passkey</button></div>
   </dialog>
   <dialog class="bk-dialog" id="ask" aria-labelledby="ask-h">
     <h3 id="ask-h"></h3>
     <p id="ask-size"></p>
     <p>Confirm with your passkey to delete it.</p>
-    <p class="bad" id="ask-msg" hidden></p>
+    <p class="bad" id="ask-msg" role="alert" hidden></p>
     <div class="row"><button class="quiet" id="ask-no">Cancel</button><button class="danger" id="ask-yes">Delete with passkey</button></div>
   </dialog>
   <dialog class="bk-dialog" id="remove" aria-labelledby="rm-h">
     <h3 id="rm-h"></h3>
     <p>It is signed out everywhere and can't sign in again.</p>
-    <p class="bad" id="rm-msg" hidden></p>
+    <p class="bad" id="rm-msg" role="alert" hidden></p>
     <div class="row"><button class="quiet" id="rm-no">Close</button><button class="danger" id="rm-yes">Remove with passkey</button></div>
   </dialog>
   <dialog class="bk-dialog ad-dialog" id="add" aria-labelledby="ad-h">
@@ -231,7 +231,7 @@
       <p>It's connecting to Commonty by itself. You can name it in the list.</p>
       <div class="row"><button id="ad-close">Done</button></div>
     </div>
-    <p class="bad" id="ad-msg" hidden></p>
+    <p class="bad" id="ad-msg" role="alert" hidden></p>
   </dialog>
   <script type="module" src="/_dd/static/settings.js"></script>
   <script type="module" src="/_dd/static/shell.js"></script>

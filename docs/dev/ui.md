@@ -99,6 +99,45 @@ raw value.
   phone and desktop width, before it ships - with screenshots in the pull
   request for anything visible.
 
+## Everyone can use it
+
+Every page meets WCAG 2.2 AA. What that asks of a page here:
+
+- **Landmarks.** The bar is the `header`; everything else a page shows is
+  in its one `main`, or a `nav` or `aside` beside it. `shell.js` puts a
+  "Skip to content" link first on every page that loads it, to the `main`;
+  a page without the shell carries the link itself
+  (`<a class="skip-to" href="#main">`).
+- **Headings.** One `h1` names the page, and levels go down one at a time:
+  a panel's title under an `h1` is an `h2`, even when it is drawn small.
+- **Contrast.** Words are 4.5:1 against what is behind them, in both themes.
+  The quiet greys (`--ink-2`, and `--ink-3` where a page has one) are set to
+  pass on `--bg`, `--sunk` and `--line-2`, not just on white.
+- **Links in words are underlined.** A link inside a sentence or a
+  rendered markdown page is told apart by more than its colour. Links that
+  are plainly controls - tabs, lists, buttons - need not be.
+- **Names.** Every field has a `label` or an `aria-label`; a button that
+  is only an icon has an `aria-label`; a picture has `alt`, empty when the
+  words beside it already say it. A table's column with no title has one
+  for a screen reader (`<span class="sr-only">`).
+- **State.** Something said after the page loads - "Saved", an error, a
+  count - is in an element with `role="status"` (or `role="alert"` for an
+  error). A picked link is `aria-current`; `aria-pressed` and
+  `aria-selected` are for buttons and the roles that allow them.
+- **Focus.** The `--focus` ring shows on everything reachable, and nothing
+  sets `outline: none` without drawing its own ring. A dialog is a
+  `<dialog>` opened with `showModal()` where it can be: it takes focus,
+  closes on Escape and gives focus back. A menu of buttons takes focus
+  when it opens, arrows move in it, Escape closes it.
+- **Motion.** `home.css` turns animation and transition off for anyone
+  who asks for less motion (`prefers-reduced-motion`).
+- **Size.** A page reflows at 320px wide and 200% zoom with no sideways
+  scroll; a part that must scroll (a log, a long description) can be
+  reached from the keyboard (`tabindex="0"`). Targets are at least 24px.
+- **Checked by a machine and by hand.** axe-core runs over the pages in a
+  headless browser before a page ships, and the keyboard is tried by hand:
+  Tab through, open and close each dialog and menu.
+
 ## Words
 
 - Plain words, from the member's side of the screen: what they can see and

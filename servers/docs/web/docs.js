@@ -148,7 +148,7 @@ function relink(md) {
 function headings(md) {
   for (const h of md.querySelectorAll('h2, h3, h4')) {
     h.id = slug(h.textContent);
-    h.prepend(el('a', { class: 'anchor', href: `#${h.id}`, 'aria-hidden': 'true', text: '#' }));
+    h.prepend(el('a', { class: 'anchor', href: `#${h.id}`, 'aria-hidden': 'true', tabindex: '-1', text: '#' }));
   }
 }
 
@@ -199,6 +199,8 @@ async function drawText(want, text) {
   const md = el('div', { class: 'docs-md' });
   const html = marked.parse(text, { gfm: true, breaks: false });
   md.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(html) : '';
+  // a code block that scrolls sideways can be scrolled from the keyboard
+  for (const pre of md.querySelectorAll('pre')) pre.tabIndex = 0;
   for (const t of md.querySelectorAll('table')) {
     const wrap = el('div', { class: 'table' });
     t.replaceWith(wrap);

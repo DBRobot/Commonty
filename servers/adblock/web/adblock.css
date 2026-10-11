@@ -1,7 +1,7 @@
 /* Ad blocking at home (pages/adblock.html), on home.css's colours */
 .adblock {
   --ab-sunk: #F5F7F9;
-  --ab-ink-3: #6E7671;
+  --ab-ink-3: #5E6661;
   --ab-tile: #8A5A12;
   --ab-tile-soft: #F6ECD9;
   --ab-blocked: #B3401F;

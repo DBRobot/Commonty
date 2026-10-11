@@ -20,13 +20,13 @@ body { background: var(--bg); }
 .fl-card .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
 .fl-card .row button { margin: 0; height: 44px; padding: 0 18px; }
 .fl-card .fine { font-size: 14px; }
-.fl-card .fl-bad { color: #9B2C2C; font-size: 14px; }
+.fl-card .fl-bad { color: var(--broken); font-size: 14px; }
 .fl-mail { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); }
 .fl-mail svg { width: 28px; height: 28px; }
 .fl-wait { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 .fl-wait i { width: 14px; height: 14px; border: 2px solid var(--line-2); border-top-color: var(--accent); border-radius: 50%; animation: fl-spin 1s linear infinite; }
 @keyframes fl-spin { to { transform: rotate(360deg); } }
-.linkish { background: none; border: 0; padding: 0; height: auto; color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; margin: 0; font-size: inherit; }
+.linkish { background: none; border: 0; padding: 0; height: auto; color: var(--link); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; margin: 0; font-size: inherit; }
 @media (prefers-color-scheme: dark) { .fl-card .fl-bad { color: #F08A8A; } }
 @media (max-width: 600px) { .fl-card { padding: 20px; } }
 
@@ -47,6 +47,6 @@ body.row-frame { background: transparent; margin: 0; }
 .bx-item > div:first-child { flex: 1 1 220px; min-width: 0; }
 .bx-name { font-weight: 600; }
 .bx-meta { color: var(--ink-2); font-size: 14px; margin-top: 2px; }
-.bx-meta.bad { color: var(--bad, #9B2C2C); }
+.bx-meta.bad { color: var(--broken); }
 .bx-actions { display: flex; gap: 8px; }
 .bx-actions button { margin-top: 0; }

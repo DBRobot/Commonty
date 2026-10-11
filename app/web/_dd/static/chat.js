@@ -278,7 +278,7 @@ function botView(m, last) {
     box.append(d);
   }
   if (m.content) box.append(md(m.content));
-  if (m.writing && !m.content && !m.waking && !m.think && !m.searching) box.append(el('span', { class: 'dot', 'aria-label': 'Writing' }));
+  if (m.writing && !m.content && !m.waking && !m.think && !m.searching) box.append(el('span', { class: 'dot', role: 'img', 'aria-label': 'Writing' }));
   if (m.searchNote) box.append(el('p', { class: 'note', text: m.searchNote }));
   // what the answer was given to read, numbered as it cites them
   if (m.sources?.length && !m.writing) {

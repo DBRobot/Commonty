@@ -318,7 +318,7 @@ async function fleetView() {
 
 const SPANS = [['1h', '1 hour', 3600], ['24h', '24 hours', 86400], ['7d', '7 days', 7 * 86400], ['30d', '30 days', 30 * 86400]];
 function spanPicker(key, base) {
-  return el('span', { class: 'mseg' }, SPANS.map(([k, t]) => el('a', { class: 'mbtn', href: `${base}?span=${k}`, 'aria-pressed': String(k === key), text: t })));
+  return el('span', { class: 'mseg' }, SPANS.map(([k, t]) => el('a', { class: 'mbtn', href: `${base}?span=${k}`, 'aria-current': k === key ? 'page' : null, text: t })));
 }
 
 async function boxView(name, params) {
