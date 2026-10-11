@@ -1,5 +1,5 @@
 {
-  "_": "What each role needs from a box (docs/hardware.md has the evidence). requires: against the box's signed report (fleet/boxes/<box>/hardware.json); box: against its owner's box.json; with: roles that must be on the same box, because the code reaches them on localhost; perFleet: exactly that many boxes run it. nix/tests/role-fit.nix fails when fleet/boxes.json breaks any of it; placement will read the same file.",
+  "_": "What each role needs from a box (docs/dev/hardware.md has the evidence). requires: against the box's signed report (fleet/boxes/<box>/hardware.json); box: against its owner's box.json; with: roles that must be on the same box, because the code reaches them on localhost; perFleet: exactly that many boxes run it. nix/tests/role-fit.nix fails when fleet/boxes.json breaks any of it. Nothing places roles yet: placement will read this file with each service's needs (.#needs, nix/lib/needs.nix).",
   "core": {
     "requires": {
       "arch": "x86_64",
@@ -26,7 +26,10 @@
     "why": "photos.<domain> and the gate; its database is its own (the ledger reads counts, not databases)"
   },
   "vault": {
-    "why": "passwords; garage reached at the storage pool's address, not localhost",
+    "with": [
+      "gateway"
+    ],
+    "why": "passwords; its sign-in issuer is the gate at home.<domain>, the gateway's, and sessions are per box; garage reached at the storage pool's address, not localhost",
     "services": [
       "vaultwarden",
       "vaultwarden-send",

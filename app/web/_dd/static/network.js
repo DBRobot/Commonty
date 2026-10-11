@@ -1,7 +1,7 @@
 // Network, a tab of Settings: the house's boxes and how each is connected,
 // the Wi-Fi they fall back to, and ad blocking at home. A Wi-Fi change is
 // signed by your passkey here and tried on every box, each of which keeps
-// its old details if the new ones do not work (box/verify/src/home.rs,
+// its old details if the new ones do not work (servers/gate/src/home.rs,
 // nix/modules/box/wifi-apply.sh).
 
 import { me, pageConfig, entryOf } from './shell.js';

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ s.name }} server{% endblock %}
+
+{% block main %}
+<p><a href="/servers">← Your servers</a></p>
+
+<div class="panel"><div class="open">
+  {% if let Some(game) = s.game %}{% include "cover.html" %}{% else %}<div class="blank"></div>{% endif %}
+  <div class="body"{% if busy %} data-live="{{ s.state }}"{% endif %}>
+    <h2>{{ s.name }}</h2>
+    <p class="desc"><span id="st" class="state-word" data-state="{{ s.tone }}">{{ s.label }}</span> · {{ s.who }}</p>
+    {% if let Some(why) = s.reason %}<p class="spec">What went wrong: {{ why }}. The log below says more.</p>{% endif %}
+    {# what a player pastes into the game: the address and its port, as one #}
+    <div class="join">
+      <label>Address<span class="copy"><input type="text" readonly value="{{ join }}" size="{{ join.len() }}"><button type="button" class="quiet" data-copy>Copy</button></span></label>
+    </div>
+    <p class="spec">To join: turn on the network in the Commonty app, then {% if how.is_empty() %}paste the address where the game asks for a server.{% else %}{{ how }}{% endif %}</p>
+    {% if !other_ports.is_empty() %}
+    <p class="spec">Also open: {% for p in other_ports %}{{ p.port }} ({{ p.label }}){% if !loop.last %}, {% endif %}{% endfor %}</p>
+    {% endif %}
+    {% if mine && !settings.is_empty() %}<p class="spec">{{ settings }} · only you see this</p>{% endif %}
+    {% if !mine %}<p class="spec">You're invited. Ask {{ owner }} for the password if it has one.</p>{% endif %}
+    {% if mine && !demo %}
+    <div class="row">
+      {% if idle %}
+      <form method="post" action="/start/{{ s.id }}"><button>Start</button></form>
+      <form method="post" action="/keep/{{ s.id }}" data-confirm="Keep the world and delete the server? The game files go; the world stays under Your saved worlds and can start a new server later."><button class="quiet">Keep world, delete server</button></form>
+      <form method="post" action="/delete/{{ s.id }}" data-confirm="This deletes the server AND its world. There is no undo. Delete?"><button class="quiet">Delete server and world</button></form>
+      {% else %}
+      <form method="post" action="/stop/{{ s.id }}"><button class="quiet">Stop</button></form>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div></div>
+
+{% if mine && !demo && !fields.is_empty() %}
+<section style="margin-top:28px">
+  <h2>Settings</h2>
+  <form method="post" action="/configure/{{ s.id }}" class="panel" style="padding:20px 24px">
+    {% for f in fields %}{% include "field.html" %}{% endfor %}
+    <div class="row">
+      <button>Save{% if !idle %} and restart{% endif %}</button>
+      <span class="spec">Settings take effect when the server starts; a running one restarts, world kept.</span>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+{% if mine && !demo %}
+<section style="margin-top:28px" id="players">
+  <h2>Players</h2>
+  <p class="spec">Only you and the people here can reach this server; nobody else on Commonty sees it.{% if players.is_empty() %} Nobody is invited yet.{% endif %}</p>
+  {% if friends.is_empty() %}
+  <p class="spec">Invite comes from your friends: make a friend link on <a href="{{ home }}_dd/friends">Friends</a> and send it to whoever you want to play with.</p>
+  {% else %}
+  <form method="post" action="/players/{{ s.id }}" class="panel players">
+    <ul>
+      {% for (name, on) in friends %}
+      <li><label><input type="checkbox" name="p:{{ name }}"{% if *on %} checked{% endif %}><span>{{ name }}</span></label></li>
+      {% endfor %}
+    </ul>
+    <div class="row"><button>Save players</button><span class="spec">They can reach it until you untick them, or stop being friends.</span></div>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if mine %}
+<section style="margin-top:28px">
+  <h2>Log</h2>
+  <pre id="log" class="log">{% if log.is_empty() %}nothing yet{% else %}{{ log }}{% endif %}</pre>
+</section>
+{% endif %}
+{% endblock %}

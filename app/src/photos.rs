@@ -3,7 +3,7 @@
 //! time on a device the app asks the browser for it: it opens a slot at the
 //! gate, sends the browser to the Photos page with the slot and a one-time
 //! key, and the browser - with the passkey - leaves the password there
-//! sealed to that key (box/photos/web/photos.js). The app opens it, keeps it
+//! sealed to that key (servers/photos/web/photos.js). The app opens it, keeps it
 //! in this device's keyring, and from then on signs its window in and
 //! hands the password to the Photos page after the `#` of its address,
 //! the part no server is ever sent.

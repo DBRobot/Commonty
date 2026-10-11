@@ -1,19 +1,20 @@
 # Ad blocking at home: Pi-hole on the house's main box, for the house
 # network. The router hands out this box's house address as DNS (and a
-# public resolver second, so the house stays online when the box is off);
-# devices on the Commonty network away from home are not filtered, since
-# every lookup would cross the VPN.
+# public resolver second, so the house stays online when the box is off).
+# Devices on the Commonty network are handed Quad9, unfiltered
+# (net/headscale.nix), not this: every lookup would cross the network. It
+# listens on the box's address there too, for the box's owner's own devices
+# alone (net/owner.nix), which are filtered only if set to ask it.
 #
 # Pi-hole keeps totals and nothing about which device looked up what
 # (privacy level 3). Its api answers on this box alone and wants a password
 # only the gate holds: the gate is its only door, and lets in only the
-# household, signed in (box/verify/src/adblock.rs, the page and the menu's
+# household, signed in (servers/gate/src/adblock.rs, the page and the menu's
 # switch). What it asks the internet goes out encrypted, through Unbound
 # over TLS to Quad9 and Cloudflare, so the line's provider cannot read it.
 #
-# Its dnsmasq also takes over the fleet's own names from gate/public.nix:
-# every name this box serves resolves to the address on the network the
-# question came in on, the Commonty network's or the house's.
+# The fleet's own names it does not answer itself: they resolve as the
+# world answers them (below, at dnsmasq_lines).
 {
   config,
   lib,
@@ -92,17 +93,20 @@ in
         misc.dnsmasq_lines = [
           "listen-address=${cfg.lan}"
         ]
-        # the owner's devices away from home, on the fleet's network
+        # the box's owner's devices, on the fleet's network, when set to ask
+        # it: the network hands every device Quad9, and the firewall lets in
+        # the owner's alone (net/owner.nix)
         ++ lib.optional (config.dd.box.net != "") "listen-address=${config.dd.box.net}"
         ++ [
           # the box itself: Pi-hole's own list update checks it answers here
           "listen-address=127.0.0.1"
           "bind-dynamic"
           # The fleet's own names are answered as the world answers them, not
-          # here: the box takes web traffic from the fleet's network and the tunnel,
-          # never the house network, so a house address for them was a page
-          # that never loaded. Public ones go through the tunnel; the rest
-          # name the box's address on the fleet's network, reached with the app's network on.
+          # here: the box takes web traffic from the fleet's network and the
+          # tunnel, never the house network, so a house address for them was
+          # a page that never loaded. Public ones go through the tunnel; the
+          # rest name the box's address on the fleet's network, reached with
+          # the app's network on.
         ];
       };
     };

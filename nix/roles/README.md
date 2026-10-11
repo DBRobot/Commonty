@@ -8,13 +8,18 @@ not Nix: what the box found on itself and what its owner chose
 (modules/box/host.nix).
 
     core      every box: identity, directory replica, metrics, tailnet, ssh, admin
-    gateway   nginx, certificates, the browser login: a box with a public name
+    gateway   certificates, the public front door (tunnel, bare domain), headscale
     storage   a node of the garage cluster; the box's own backup key
     photos    ente
     media     Movies & TV and Files tiles, uploads, per-user directories
-    llm       llama-cpp and its gateway
-    forge     forgejo, its runner, the github mirror
-    observe   grafana, alerting, mail, database dumps
+    library   members' encrypted libraries behind the gate, and the transcoder
+    llm       llama-cpp, its Chat page and web search
+    game      game servers a member starts, each in a guest of its own
+    forge     forgejo and the github mirror
+    runner    a CI runner for the forge; any box can run one
+    observe   our Metrics page over Thanos, alerting, mail
+    vault     Passwords: vaultwarden and the breach list
+    adblock   Pi-hole for the house the box is in
 
 Every box backs itself up (nix/modules/storage/backup.nix): restic, encrypted on the
 box, into its own bucket in the garage cluster, which keeps two copies. A

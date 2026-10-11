@@ -442,7 +442,8 @@ async function start() {
   }
   lib = r.ok;
   $('msg').hidden = true;
-  if (lib.reader) $('lead').textContent = 'You are looking at the demo’s files. A member sees their own here, and only they can read them.';
+  if (lib.demo) $('lead').textContent = 'You are looking at the demo’s files. A member sees their own here, and only they can read them.';
+  else if (lib.reader) $('lead').textContent = 'A library shared with you: you can look and save copies, and only its owner changes it.';
   $('drive').hidden = false;
   $('actions').hidden = !!lib.reader;
   $('trashplace').hidden = !!lib.reader;

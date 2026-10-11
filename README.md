@@ -13,8 +13,10 @@ committed encrypted rather than kept out of tree.
       modules/         NixOS modules, grouped by concern (box, gate, forge, games, ...)
       roles/           what a box runs, by role; a box lists its roles in fleet/
       tests/           VM tests: boxes booted and driven
-    box/               Rust that runs on boxes: the agent, the gate, the games manager
+    servers/           what runs on boxes: our programs (the gate, the release agent,
+                       the games manager, the control plane), the pages, patches
     client/            Rust a person runs: the dd cli, its libraries, the browser wasm
+    app/               the app: the client crates behind a window, copies of the pages
     data/              the games catalogue and covers
     scripts/           deploy, install-box, restore-box
     secrets/           sops-encrypted values (safe to publish)
@@ -51,7 +53,7 @@ silently redeploy the previous revision.
   through the bucket.
 - **An off-site copy.** Every copy of every member's data is in one building.
 - **One vote per house in the control plane.** It starts with three voters:
-  node1, node2 and the Cloudflare witness (docs/control-plane.md). That
+  node1, node2 and the Cloudflare witness (docs/dev/control-plane.md). That
   survives any one of them going down, but it is not Byzantine-safe (that
   takes four), and node1 and node2 share a house, so the house votes twice.
   As boxes go off site: each new house gets one validator and node2 stops
@@ -68,7 +70,7 @@ silently redeploy the previous revision.
   already there: the fleet's network only, TLS on the box, and Cloudflare sees none of
   it; its page stays on the box, and the box's keys move into its TPM.
   The directory's log items (names, public keys, passkey ids) pass through
-  the relay too: encrypt them to the boxes' TPM keys (docs/control-plane.md).
+  the relay too: encrypt them to the boxes' TPM keys (docs/dev/control-plane.md).
 
 ## License
 

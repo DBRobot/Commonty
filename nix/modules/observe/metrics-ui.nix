@@ -4,7 +4,7 @@ let
   query = "http://${config.services.thanos.query.http-address}";
 in
 {
-  # Metrics: our own page (box/observe/web) over Thanos, which answers for
+  # Metrics: our own page (servers/observe/web) over Thanos, which answers for
   # every box's Prometheus. The page asks /api/v1 as whoever the gate says
   # is looking, and only these read-only calls go through: no admin API,
   # nothing that writes.
@@ -26,8 +26,9 @@ in
         error_page 401 = @login;
         error_page 403 = @waiting;
         proxy_set_header Authorization "";
-        proxy_set_header Cookie "";
       '';
+      # no cookie at all (a Cookie line here would be a second one: strip-cookie.nix)
+      ddCookie = "";
     };
   };
   # where Metrics used to be: links and bookmarks still arrive

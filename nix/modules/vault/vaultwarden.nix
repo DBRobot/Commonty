@@ -14,6 +14,7 @@ let
   hasPublic = options.dd ? public;
   public = hasPublic && config.dd.public.enable;
   issuer = cfg.issuer;
+  homeIssuer = "https://home.${base}/_dd/oidc";
 
   # Pinned: a nixpkgs bump that moves Vaultwarden stops here until someone
   # reads what changed and updates this line.
@@ -24,9 +25,9 @@ let
     (pkgs.vaultwarden.override { dbBackend = "postgresql"; }).overrideAttrs (o: {
       # refresh tokens kept as sha256: a copy of the database renews nobody
       patches = (o.patches or [ ]) ++ [
-        ../../../box/vault/vaultwarden-hash-refresh.patch
+        ../../../servers/vault/vaultwarden-hash-refresh.patch
         # the Commonty app's web vault signs in on this computer's loopback
-        ../../../box/vault/vaultwarden-app-loopback.patch
+        ../../../servers/vault/vaultwarden-app-loopback.patch
       ];
       # files (attachments, sends) in garage, not on this laptop's disk.
       # buildRustPackage turns buildFeatures into these when the package is
@@ -41,9 +42,15 @@ let
       ];
     });
 
+  # The web vault, pinned like the server: its edits below match its text,
+  # so a nixpkgs bump that moves it stops here until they are checked.
+  webvaultVersion = "2026.6.4+0";
+
   # The web vault asks the breach list on this box (pwned.nix) instead of
   # api.pwnedpasswords.com: checking a password never leaves the box.
   webvault =
+    assert lib.assertMsg (pkgs.vaultwarden.webvault.version == webvaultVersion)
+      "vaultwarden's web vault is ${pkgs.vaultwarden.webvault.version} in nixpkgs, pinned to ${webvaultVersion}: check the edits in modules/vault/vaultwarden.nix still match, then update it";
     pkgs.runCommand "vaultwarden-webvault-local-breach-list" { } ''
       cp -r ${pkgs.vaultwarden.webvault} $out
       chmod -R u+w $out
@@ -66,13 +73,16 @@ let
       ${pkgs.imagemagick}/bin/magick ${../../../app/icons/icon.png} -resize 32x32 $v/images/favicon-32x32.png
       ${pkgs.imagemagick}/bin/magick ${../../../app/icons/icon.png} -resize 16x16 $v/images/favicon-16x16.png
       ${pkgs.imagemagick}/bin/magick ${../../../app/icons/icon.png} -resize 180x180 $v/images/apple-touch-icon.png
-      ! grep -q 'Vaultwarden Web' $v/index.html
+      # a `!` command never stops the build under set -e: these test and exit
+      if grep -q 'Vaultwarden Web' $v/index.html; then echo "the web vault's title moved" >&2; exit 1; fi
       # master passwords from 8 characters, as Bitwarden had them before
       # 12 (David's call, 2026-09-28): the check is the client's, here
-      grep -rl --include='*.js' 'minimumPasswordLength=12' $out/share/vaultwarden/vault | while read -r f; do
+      hits=$(grep -rl --include='*.js' 'minimumPasswordLength=12' $v || true)
+      [ -n "$hits" ] || { echo "the web vault's minimumPasswordLength=12 moved; find the new spot" >&2; exit 1; }
+      for f in $hits; do
         sed -i 's|minimumPasswordLength=12|minimumPasswordLength=8|g' "$f"
       done
-      ! grep -rq --include='*.js' 'minimumPasswordLength=12' $out/share/vaultwarden/vault
+      if grep -rq --include='*.js' 'minimumPasswordLength=12' $v; then exit 1; fi
     ''
     // {
       inherit (pkgs.vaultwarden.webvault) version;
@@ -82,7 +92,7 @@ let
   # template it serves with the web vault. Their pages, our colours and type.
   templates = pkgs.runCommand "dd-vault-templates" { } ''
     mkdir -p $out/scss
-    cp ${../../../box/vault/web/user.vaultwarden.scss.hbs} $out/scss/user.vaultwarden.scss.hbs
+    cp ${../../../servers/vault/web/user.vaultwarden.scss.hbs} $out/scss/user.vaultwarden.scss.hbs
   '';
 
 in
@@ -100,9 +110,14 @@ in
       type = lib.types.path;
       description = "env file with its garage key as VAULT_ID/VAULT_SECRET and again as AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, and SSO_CLIENT_SECRET";
     };
+    # The issuer is this box's own gate (servers/gate/src/oidc.rs): the
+    # sessions it reads are this box's alone (session.rs), and it gets the
+    # client's settings below. It is reached at home.<domain>, which the
+    # fleet's names point at the gateway, so Passwords runs on the gateway
+    # (fleet/roles.json: with gateway; asserted below).
     issuer = lib.mkOption {
       type = lib.types.str;
-      default = "https://home.${config.dd.domain}/_dd/oidc";
+      default = homeIssuer;
       description = "the gate's sign-in issuer; a test points it at the gate itself";
     };
     oidcSecretFile = lib.mkOption {
@@ -130,6 +145,13 @@ in
         };
       })
       {
+        assertions = [
+          {
+            assertion = issuer != homeIssuer || public;
+            message = "Passwords signs in through home.${base}, which is the gateway's gate: run the vault role on the gateway, or set dd.vault.issuer to this box's own gate";
+          }
+        ];
+
         # what the box holds: every vault encrypted on its owner's devices; names,
         # who is in the Family and when things changed are in the clear. The web
         # vault's code comes from here, so a box that turned hostile could serve a
@@ -218,7 +240,7 @@ in
 
         # Signing a member out of Passwords: the gate drops their name in
         # /run/dd-ended when one of their devices or passkeys is removed, or
-        # they sign out everywhere else (box/verify/src/directory.rs). Their
+        # they sign out everywhere else (servers/gate/src/directory.rs). Their
         # apps and browsers here are forgotten, as the admin page's
         # "deauthorize" does, and they sign in again through the gate. The
         # gate never touches the vault's database; this runs as the vault.
@@ -255,7 +277,7 @@ in
           '';
         };
 
-        # the gate: the issuer this sign-in goes through (box/verify/src/oidc.rs)
+        # the gate: the issuer this sign-in goes through (servers/gate/src/oidc.rs)
         systemd.services.dd-verify = {
           environment = {
             VERIFY_OIDC_ISSUER = issuer;

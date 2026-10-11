@@ -1,4 +1,4 @@
-# The Git pages update as things happen (box/verify/src/forge_events.rs):
+# The Git pages update as things happen (servers/gate/src/forge_events.rs):
 # a trigger in Forgejo's database announces each run, job and commit status
 # that changes, as ids and a state and nothing else, and the gate listens.
 # Forgejo has no webhook for a run or a job starting, and a webhook to this
@@ -16,23 +16,33 @@
 }:
 let
   db = config.services.forgejo.database.name;
+  # each announcement says whether its repository is hidden from members:
+  # private, or its owner's profile private (visibility 2); the gate passes
+  # on only those that say false
   sql = pkgs.writeText "dd-forge-notify.sql" ''
+    CREATE OR REPLACE FUNCTION dd_forge_private(repo bigint) RETURNS boolean LANGUAGE sql STABLE AS $f$
+      SELECT COALESCE((SELECT r.is_private OR u.visibility = 2
+        FROM repository r JOIN "user" u ON u.id = r.owner_id WHERE r.id = repo), true)
+    $f$;
     CREATE OR REPLACE FUNCTION dd_forge_run() RETURNS trigger LANGUAGE plpgsql AS $f$
     BEGIN
       PERFORM pg_notify('dd_forge', json_build_object(
-        'kind', 'run', 'repo', NEW.repo_id, 'run', NEW.id, 'index', NEW.index, 'status', NEW.status)::text);
+        'kind', 'run', 'repo', NEW.repo_id, 'run', NEW.id, 'index', NEW.index, 'status', NEW.status,
+        'private', dd_forge_private(NEW.repo_id))::text);
       RETURN NULL;
     END $f$;
     CREATE OR REPLACE FUNCTION dd_forge_job() RETURNS trigger LANGUAGE plpgsql AS $f$
     BEGIN
       PERFORM pg_notify('dd_forge', json_build_object(
-        'kind', 'job', 'repo', NEW.repo_id, 'run', NEW.run_id, 'job', NEW.id, 'status', NEW.status)::text);
+        'kind', 'job', 'repo', NEW.repo_id, 'run', NEW.run_id, 'job', NEW.id, 'status', NEW.status,
+        'private', dd_forge_private(NEW.repo_id))::text);
       RETURN NULL;
     END $f$;
     CREATE OR REPLACE FUNCTION dd_forge_status() RETURNS trigger LANGUAGE plpgsql AS $f$
     BEGIN
       PERFORM pg_notify('dd_forge', json_build_object(
-        'kind', 'status', 'repo', NEW.repo_id, 'sha', NEW.sha, 'state', NEW.state)::text);
+        'kind', 'status', 'repo', NEW.repo_id, 'sha', NEW.sha, 'state', NEW.state,
+        'private', dd_forge_private(NEW.repo_id))::text);
       RETURN NULL;
     END $f$;
     DROP TRIGGER IF EXISTS dd_forge_notify ON action_run;

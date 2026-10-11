@@ -723,7 +723,7 @@ pub fn now() -> u64 {
 mod tests {
     #[test]
     fn pairing_sums_are_the_browsers() {
-        // the same sums as box/fleet/web/devices.js makes with SubtleCrypto
+        // the same sums as servers/fleet/web/devices.js makes with SubtleCrypto
         assert_eq!(
             super::pairing_commit("PK", "aa"),
             "d82c73c3d371a64897284f4167a9b89cee2999c7fcef74de148ce8ecae0649f8"

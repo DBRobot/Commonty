@@ -1,7 +1,9 @@
 //! The libraries as folders on a desktop: rclone does it. Each library is
-//! an rclone crypt remote over the gate's WebDAV, with the device token as
+//! an rclone crypt remote over the gate's WebDAV, with a device token as
 //! bearer and the library key as password; `rclone mount` puts it under
-//! a folder of its own. Nothing of ours is in the path of a byte.
+//! a folder of its own. Nothing of ours is in the path of a byte. The
+//! token comes from a command rclone runs at start and again whenever the
+//! gate answers 401, so a mount outlives every token it is given.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -71,12 +73,31 @@ pub fn obscure(rclone: &Path, plain: &str) -> Result<String> {
     Ok(String::from_utf8(o.stdout)?.trim().to_string())
 }
 
-/// mount one library at `at`, as rclone crypt over the gate's WebDAV
+/// A command line as rclone's bearer_token_command reads it: words split
+/// on spaces, a word with a space or a quote in double quotes, a quote in
+/// it doubled (a Windows install is under "Program Files").
+pub fn token_command(exe: &Path, args: &[&str]) -> String {
+    let exe = exe.to_string_lossy();
+    std::iter::once(exe.as_ref())
+        .chain(args.iter().copied())
+        .map(|w| {
+            if w.contains([' ', '"']) {
+                format!("\"{}\"", w.replace('"', "\"\""))
+            } else {
+                w.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// mount one library at `at`, as rclone crypt over the gate's WebDAV, the
+/// bearer token from running `token_command`
 pub fn mount(
     id: &str,
     owner: &str,
     dav_url: &str,
-    token: &str,
+    token_command: &str,
     key: &library::Key,
     at: &Path,
 ) -> Result<Mounted> {
@@ -105,7 +126,7 @@ pub fn mount(
         .env("RCLONE_CONFIG_DAV_TYPE", "webdav")
         .env("RCLONE_CONFIG_DAV_URL", dav_url)
         .env("RCLONE_CONFIG_DAV_VENDOR", "other")
-        .env("RCLONE_CONFIG_DAV_BEARER_TOKEN", token)
+        .env("RCLONE_CONFIG_DAV_BEARER_TOKEN_COMMAND", token_command)
         .env("RCLONE_CONFIG_LIB_TYPE", "crypt")
         .env("RCLONE_CONFIG_LIB_REMOTE", "dav:")
         .env("RCLONE_CONFIG_LIB_PASSWORD", password)
@@ -120,4 +141,22 @@ pub fn mount(
         at: at.to_path_buf(),
         child,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_token_command_rclone_splits_back_into_its_words() {
+        assert_eq!(
+            token_command(Path::new("/nix/store/x-dd/bin/dd"), &["media", "--token"]),
+            "/nix/store/x-dd/bin/dd media --token"
+        );
+        assert_eq!(
+            token_command(Path::new(r"C:\Program Files\dd.exe"), &["media", "--token"]),
+            r#""C:\Program Files\dd.exe" media --token"#
+        );
+        assert_eq!(token_command(Path::new(r#"a"b"#), &[]), r#""a""b""#);
+    }
 }

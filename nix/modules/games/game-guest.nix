@@ -119,11 +119,14 @@
       serviceConfig = {
         User = "game";
         WorkingDirectory = "/var/lib/game";
+        # until the runner gives up (game-run.py, TRIES_MAX), which it says
+        # in the status and ends with success
         Restart = "on-failure";
         RestartSec = 15;
-        # the game's own output, readable on the box beside the record
-        StandardOutput = "append:/instance/game.log";
-        StandardError = "inherit";
+        # the game's own output goes to /instance/game.log, beside the
+        # record on the box; the runner writes it and cuts it at a size,
+        # since the share is backed up. Only what the runner itself says
+        # past that lands in the guest's journal
         # the egg's stop command goes down the game's stdin; give it a minute
         KillSignal = "SIGTERM";
         TimeoutStopSec = 75;

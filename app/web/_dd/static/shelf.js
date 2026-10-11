@@ -1,11 +1,14 @@
 // What Movies & TV knows about a film beyond its name: its art, a year, a
-// line about it, and where each viewer stopped. It all lives in the
-// library under .commonty/, sealed like everything else there, so the box
-// holds none of it in the clear. A poster comes from TMDB, asked from this
-// device with nothing but the title and year, once per title; a film TMDB
-// does not know gets a still from its own frames instead.
+// line about it, and where each viewer stopped. The pictures live in the
+// library under .commonty/art/; the rest is a note the gate keeps beside
+// the library (the shelf, and each viewer's place), so a place saved every
+// half minute is not a file left in the trash each time. All of it is
+// sealed with the library's key, so the box holds none of it in the clear.
+// A poster comes from TMDB, asked from this device with nothing but the
+// title and year, once per title; a film TMDB does not know gets a still
+// from its own frames instead.
 
-import { fetchPlain, put, mkdir } from './library.js';
+import { fetchPlain, put, mkdir, trash, note, putNote } from './library.js';
 
 const DIR = '.commonty';
 // TMDB's terms: nothing of theirs kept longer than six months. It is asked
@@ -15,6 +18,7 @@ const DAY = 24 * 3600 * 1000;
 const REFRESH = 150 * DAY;
 const EXPIRE = 180 * DAY;
 const age = (it) => (it?.looked ? Date.now() - Date.parse(it.looked) : Infinity);
+// where an older page kept them, as files in the library
 const SHELF = `${DIR}/shelf.json`;
 const PROGRESS = `${DIR}/progress.json`;
 
@@ -51,35 +55,61 @@ async function readJSON(lib, path, empty) {
 }
 
 // One write at a time, and a burst of changes as one: a shelf filling in
-// its posters would otherwise send the whole file once per poster.
-function writer(lib, path) {
+// its posters would otherwise send the whole note once per poster.
+function writer(save) {
   let timer = null;
   let chain = Promise.resolve();
-  let made = false;
   return (value) => {
     clearTimeout(timer);
     timer = setTimeout(() => {
-      chain = chain.then(async () => {
-        if (!made) { await mkdir(lib, DIR); made = true; }
-        await put(lib, path, new Blob([JSON.stringify(value)]));
-      }).catch(() => {});
+      chain = chain.then(() => save(value)).catch(() => {});
     }, 1500);
   };
 }
 
+// A note from the gate; the first time, what an older page kept instead
+// (a file in the library, a reader's place in this browser) is moved
+// there and the old copy let go. The gate out of reach: { offline }.
+async function load(lib, kind, old) {
+  let value;
+  try {
+    value = await note(lib, kind);
+  } catch {
+    return { offline: true };
+  }
+  if (value || !old) return { value };
+  const was = await old.read();
+  if (was) {
+    try {
+      await putNote(lib, kind, was);
+      await old.drop();
+    } catch { /* moved next visit */ }
+  }
+  return { value: was };
+}
+
 /// The shelf's store: what is known about each title, and where each one
-/// was left. A reader of someone else's library keeps their place on this
-/// device only; the library is not theirs to write to.
+/// was left. The shelf is the owner's, and a reader reads it; each viewer
+/// keeps their own place. With the gate out of reach the page still
+/// works: the shelf as an older page left it, and the place in this
+/// browser until the gate answers again.
 export async function open(lib) {
-  const [meta, progress] = await Promise.all([
-    readJSON(lib, SHELF, { items: {} }),
-    lib.reader ? JSON.parse(local(lib) || '{}') : readJSON(lib, PROGRESS, {}),
-  ]);
+  const owner = !lib.reader;
+  const inLibrary = (path) => ({ read: () => readJSON(lib, path, null), drop: () => trash(lib, path) });
+  const inBrowser = { read: async () => local(lib), drop: async () => forgetLocal(lib) };
+  // the demo keeps nothing at the gate
+  const [shelf, place] = lib.demo
+    ? [{ offline: true }, { offline: true }]
+    : await Promise.all([
+      load(lib, 'shelf', owner ? inLibrary(SHELF) : null),
+      load(lib, 'progress', owner ? inLibrary(PROGRESS) : inBrowser),
+    ]);
+  // a reader whose owner has not opened Movies & TV since, or no gate
+  const meta = shelf.value || (owner && !shelf.offline ? null : await readJSON(lib, SHELF, null)) || { items: {} };
   meta.items ||= {};
-  const saveMeta = lib.reader ? () => {} : writer(lib, SHELF);
-  const saveProgress = lib.reader
-    ? (p) => { try { localStorage.setItem(`dd-progress-${lib.id}`, JSON.stringify(p)); } catch { /* private window */ } }
-    : writer(lib, PROGRESS);
+  const saveMeta = owner && !shelf.offline ? writer((m) => putNote(lib, 'shelf', m)) : () => {};
+  const progress = (place.offline ? local(lib) : place.value) || {};
+  const saveProgress = place.offline ? (p) => keepLocal(lib, p) : writer((p) => putNote(lib, 'progress', p));
   const art = new Map();
   let dirs = null;
   return {
@@ -126,8 +156,17 @@ export async function open(lib) {
   };
 }
 
+// a place kept in this browser: the demo's, or anyone's while the gate is away
 function local(lib) {
-  try { return localStorage.getItem(`dd-progress-${lib.id}`); } catch { return null; }
+  try { return JSON.parse(localStorage.getItem(`dd-progress-${lib.id}`) || 'null'); } catch { return null; }
+}
+
+function keepLocal(lib, p) {
+  try { localStorage.setItem(`dd-progress-${lib.id}`, JSON.stringify(p)); } catch { /* private window */ }
+}
+
+function forgetLocal(lib) {
+  try { localStorage.removeItem(`dd-progress-${lib.id}`); } catch { /* private window */ }
 }
 
 // TMDB: a read token (long) goes in a header, an api key (short) in the url

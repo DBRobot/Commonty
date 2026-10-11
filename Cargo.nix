@@ -1057,7 +1057,7 @@ rec {
         crateName = "archive";
         version = "0.1.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./box/archive; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./client/archive; };
         dependencies = [
           {
             name = "anyhow";
@@ -9226,7 +9226,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./box/games; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./servers/games; };
         dependencies = [
           {
             name = "anyhow";
@@ -13706,6 +13706,15 @@ rec {
             packageId = "identity";
           }
           {
+            name = "poly1305";
+            packageId = "poly1305 0.8.0";
+          }
+          {
+            name = "salsa20";
+            packageId = "salsa20 0.10.2";
+            features = [ "zeroize" ];
+          }
+          {
             name = "scrypt";
             packageId = "scrypt 0.11.0";
             usesDefaultFeatures = false;
@@ -13722,6 +13731,11 @@ rec {
           {
             name = "sha2";
             packageId = "sha2 0.10.9";
+          }
+          {
+            name = "subtle";
+            packageId = "subtle";
+            usesDefaultFeatures = false;
           }
           {
             name = "thiserror";
@@ -13743,7 +13757,7 @@ rec {
         crateName = "library-gate";
         version = "0.1.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./box/library; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./servers/library; };
         libName = "library_gate";
         dependencies = [
           {
@@ -19844,7 +19858,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./box/release; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./servers/system/release; };
         dependencies = [
           {
             name = "anyhow";
@@ -27255,7 +27269,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./box/transcode; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./servers/transcode; };
         dependencies = [
           {
             name = "anyhow";
@@ -28101,7 +28115,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./box/verify; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./servers/gate; };
         dependencies = [
           {
             name = "anyhow";

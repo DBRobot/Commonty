@@ -541,14 +541,63 @@ async function attach(it, from, current = () => true) {
     // segment is waiting, not failing
     // and from its start: a playlist still growing looks like a live
     // broadcast, which a player joins near the newest piece instead
-    hls = new Hls({ startPosition: into, manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6 });
-    hls.on(Hls.Events.ERROR, (_, d) => {
-      if (d.fatal) $('p-note').textContent = `The player stopped: ${d.details}. Close it and press play again.`;
+    // A phone's browser holds far less of a film than a desktop's: the
+    // defaults (60 MB, 30 s ahead) stopped Chrome on a small Android
+    const h = new Hls({
+      startPosition: into, manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 6, fragLoadingMaxRetry: 6,
+      maxBufferSize: 20 * 1000 * 1000, maxBufferLength: 20, maxMaxBufferLength: 60, backBufferLength: 30,
     });
-    hls.loadSource(s.url);
-    hls.attachMedia(v);
+    hls = h;
+    lastPiece = null;
+    let recovered = false, bufferErrors = 0;
+    h.on(Hls.Events.FRAG_LOADED, (_, d) => { lastPiece = { bytes: d.frag?.stats?.total || 0, secs: d.frag?.duration || 0 }; });
+    h.on(Hls.Events.ERROR, (_, d) => {
+      const buffer = d.details === Hls.ErrorDetails.BUFFER_FULL_ERROR || d.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR;
+      // every fatal one, and the first of a run of buffer ones and every tenth after
+      if (d.fatal || (buffer && bufferErrors++ % 10 === 0)) {
+        reportPlayer(it, { kind: 'hls', type: d.type, details: d.details, fatal: !!d.fatal, recovered, error: d.error?.name });
+      }
+      if (!d.fatal || hls !== h) return;
+      // the player's own way back from a media error, once
+      if (d.type === Hls.ErrorTypes.MEDIA_ERROR && !recovered) {
+        recovered = true;
+        h.recoverMediaError();
+        return;
+      }
+      $('p-note').textContent = d.type === Hls.ErrorTypes.NETWORK_ERROR
+        ? 'The player lost the box. Close it and press play again.'
+        : buffer
+          ? 'This device ran out of room for the film. Close the player and press play again; if it stops again, try the desktop app or a computer.'
+          : 'The player stopped. Close it and press play again.';
+    });
+    h.loadSource(s.url);
+    h.attachMedia(v);
   }
   return true;
+}
+
+// The last segment the player loaded, for a report: its bytes and seconds
+let lastPiece = null;
+
+// A player error to the gate's log (/_dd/player-error), so a film that
+// stops on someone's phone leaves a record. Only the kind of film goes:
+// never its name, path or library.
+function reportPlayer(it, what) {
+  const v = $('video');
+  const level = hls?.levels?.[hls.currentLevel] || hls?.levels?.[0];
+  let buffered = 0;
+  for (let i = 0; i < v.buffered.length; i++) {
+    if (v.buffered.start(i) <= v.currentTime && v.currentTime <= v.buffered.end(i)) buffered = v.buffered.end(i) - v.currentTime;
+  }
+  const ending = /\.([a-z0-9]{2,4})$/i.exec(it?.name || '')?.[1]?.toLowerCase();
+  const body = {
+    ...what,
+    size: it?.size, container: ending,
+    video: level?.videoCodec, audio: level?.audioCodec,
+    width: level?.width || v.videoWidth || undefined, height: level?.height || v.videoHeight || undefined,
+    piece: lastPiece?.bytes, pieceSecs: lastPiece?.secs, buffered,
+  };
+  fetch('/_dd/player-error', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), keepalive: true }).catch(() => {});
 }
 
 async function closePlayer() {
@@ -608,7 +657,7 @@ function readyTo() {
 }
 
 // How far back the box still has it: it keeps six minutes behind where the
-// player has asked (box/transcode/src/main.rs, BEHIND), so five behind where
+// player has asked (servers/transcode/src/main.rs, BEHIND), so five behind where
 // it plays is safely there; further back, the box starts again.
 function keptFrom() {
   return Math.max(playing?.offset || 0, filmAt() - 300);
@@ -813,6 +862,12 @@ async function start() {
   v.addEventListener('timeupdate', () => { remember(false); stillFrom(v); });
   v.addEventListener('pause', () => remember(true));
   v.addEventListener('ended', () => remember(true));
+  // the video element's own errors: the only word from Safari's player
+  v.addEventListener('error', () => {
+    if (!playing || !v.error) return;
+    reportPlayer(playing.it, { kind: 'video', code: v.error.code, fatal: true });
+    if (!hls) $('p-note').textContent = 'The player stopped. Close it and press play again.';
+  });
   addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!$('player').hidden) closePlayer();

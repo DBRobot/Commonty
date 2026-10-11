@@ -96,10 +96,12 @@ pub fn open_with(secret_ed25519: &ed25519_dalek::SigningKey, sealed_b64: &str) -
 
 use sha2::Digest as _;
 
-/// A fresh x25519 pair for a box that will do one job on one file: the
-/// client seals the file key to `public`, the box opens it with `secret`
-/// and forgets both when the job ends. Nothing about the library is ever
-/// sealed this way, only a file key, for a session.
+/// A fresh x25519 pair for a box that does jobs for devices, made when its
+/// service starts: a client seals one file's block keys
+/// (crypt::Cipher::block_keys) to `public`, the box opens them with
+/// `secret` for one session and drops them when the session ends, and the
+/// pair goes with a restart. They open that file and nothing else; the
+/// data key and the names' key are never sealed this way.
 pub fn ephemeral() -> (String, Zeroizing<[u8; 32]>) {
     let mut sk = Zeroizing::new([0u8; 32]);
     fill(&mut sk[..]);
@@ -129,6 +131,17 @@ pub fn open_x25519(secret: &[u8; 32], sealed_b64: &str) -> Result<Key> {
         .try_into()
         .map_err(|_| Error::Key("sealed key is not 32 bytes".into()))?;
     Ok(Zeroizing::new(arr))
+}
+
+/// what was sealed to this x25519 key, whatever its length
+pub fn open_x25519_bytes(secret: &[u8; 32], sealed_b64: &str) -> Result<Zeroizing<Vec<u8>>> {
+    let sk = crypto_box::SecretKey::from(*secret);
+    let sealed = B64
+        .decode(sealed_b64)
+        .map_err(|e| Error::Key(e.to_string()))?;
+    sk.unseal(&sealed)
+        .map(Zeroizing::new)
+        .map_err(|_| Error::Sealed)
 }
 
 fn rand_core() -> Urandom {
@@ -282,12 +295,13 @@ mod tests {
     }
 
     #[test]
-    fn a_file_key_sealed_to_a_box_for_one_job() {
+    fn block_keys_sealed_to_a_box_open_there_only() {
         let (public, secret) = ephemeral();
-        let fk = random_key();
-        let sealed = seal_to_x25519(&public, &fk[..]).unwrap();
-        assert_eq!(&open_x25519(&secret, &sealed).unwrap()[..], &fk[..]);
+        let c = crypt::Cipher::new("pw", "salt");
+        let keys = c.block_keys(&c.encrypter().header(), 3).unwrap();
+        let sealed = seal_to_x25519(&public, &keys).unwrap();
+        assert_eq!(&open_x25519_bytes(&secret, &sealed).unwrap()[..], &keys[..]);
         let (_, other) = ephemeral();
-        assert!(open_x25519(&other, &sealed).is_err());
+        assert!(open_x25519_bytes(&other, &sealed).is_err());
     }
 }

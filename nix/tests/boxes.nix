@@ -1,7 +1,7 @@
 # Evaluation only: the box list is well-formed. Every role a box names is a
 # file, every box has core, every box builds, and the wiring the flake
-# derives from the list (peers, grafana's datasources) says what the list
-# says.
+# derives from the list (peers, garage's addresses, thanos on its own box)
+# says what the list says.
 {
   pkgs,
   self,

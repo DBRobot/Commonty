@@ -1,0 +1,36 @@
+# Commonty docs
+
+Commonty is a home server that a few households run together: photos,
+files, films, passwords and games, on boxes the members own, reached
+through one app.
+
+These pages are in three parts:
+
+- **Develop**: how the code works and how to change it.
+- **Guide**: using Commonty, for the people who do.
+- **Policies**: privacy, terms, and what ships under which licence.
+
+## Develop
+
+- [How the servers are organised](dev/servers.md)
+- [The gate](dev/gate.md)
+- [Releases of the fleet](dev/releases.md)
+- [The forge](dev/forge.md)
+- [Game servers](dev/games.md)
+- [Encrypted libraries](dev/libraries.md)
+- [Programs we package](dev/packaged.md)
+- [Pull requests, CI and releases](dev/ci.md)
+- [UI guidelines](dev/ui.md)
+- [The app](dev/app.md)
+- [Releasing the app](dev/app-release.md)
+- [The control plane](dev/control-plane.md)
+- [What each service needs from a box](dev/hardware.md)
+- [The mirror](dev/mirror.md)
+
+## Guide
+
+Coming as each part of Commonty gets its page.
+
+## Policies
+
+Coming.

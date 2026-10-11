@@ -1,6 +1,8 @@
-# The release test: a signed release moves a box; a bad one is rolled back; a tampered one is refused.
+# The release test: a signed release moves a box; a bad one is rolled back; a tampered one is refused;
+# one counter names one system; the guard puts back the system and the profile.
 
 import json
+
 start_all()
 forge.wait_for_unit("nginx.service")
 box.wait_for_unit("dd-verify.service")
@@ -11,34 +13,57 @@ box.wait_for_unit("sshd.service")
 # laptop; the box gets the public half
 env = "DD_KEYRING_FILE=/root/keys.json"
 forge.succeed("git init -q /root/repo && mkdir -p /root/repo/fleet")
-pub = forge.succeed(f"{env} {nix['dd']} release init --repo /root/repo | tail -1").strip()
+pub = forge.succeed(
+    f"{env} {nix['dd']} release init --repo /root/repo | tail -1"
+).strip()
 box.succeed(f"echo '{pub}' > /root/release.pub")
 
+
 def nar_hash(path):
-    info = json.loads(box.succeed(f"nix --extra-experimental-features nix-command path-info --json {path}"))
+    info = json.loads(
+        box.succeed(
+            f"nix --extra-experimental-features nix-command path-info --json {path}"
+        )
+    )
     entry = info.get(path) or next(e for e in info if e["path"] == path)
     return entry["narHash"]
 
+
 def publish(counter, path, tamper=False):
-    payload = json.dumps({
-        "counter": counter, "rev": "0123456789abcdef", "issued": 1,
-        "boxes": {"box": {"path": path, "nar_hash": nar_hash(path)}},
-    })
+    payload = json.dumps(
+        {
+            "counter": counter,
+            "rev": "0123456789abcdef",
+            "issued": 1,
+            "boxes": {"box": {"path": path, "nar_hash": nar_hash(path)}},
+        }
+    )
     forge.succeed(f"cat > /root/payload.json <<'EOF'\n{payload}\nEOF")
-    forge.succeed(f"{env} {nix['dd']} release sign /root/payload.json --out /root/current.json")
+    forge.succeed(
+        f"{env} {nix['dd']} release sign /root/payload.json --out /root/current.json"
+    )
     if tamper:
-        forge.succeed("sed -i 's/\"counter\": [0-9]*/\"counter\": 99/' /root/current.json")
-    forge.succeed("mkdir -p /srv/release && install -m 644 /root/current.json /srv/release/current.json")
+        forge.succeed(
+            'sed -i \'s/"counter": [0-9]*/"counter": 99/\' /root/current.json'
+        )
+    forge.succeed(
+        "mkdir -p /srv/release && install -m 644 /root/current.json /srv/release/current.json"
+    )
+
 
 def agent(expect_ok=True):
     # a switch can make systemd re-exec, which cuts systemctl's wait
     # short while the agent is still running: wait for the unit itself
     box.succeed("systemctl start --no-block dd-agent.service")
-    box.wait_until_succeeds("[ $(systemctl is-active dd-agent.service) != active ] && [ $(systemctl is-active dd-agent.service) != activating ]", timeout=300)
+    box.wait_until_succeeds(
+        "[ $(systemctl is-active dd-agent.service) != active ] && [ $(systemctl is-active dd-agent.service) != activating ]",
+        timeout=300,
+    )
     if expect_ok:
         box.succeed("! systemctl is-failed dd-agent.service")
     else:
         box.succeed("systemctl is-failed dd-agent.service")
+
 
 # release 1 names what the box already runs: nothing to do, counter kept
 publish(1, f"{nix['base']}")
@@ -84,4 +109,57 @@ agent(expect_ok=False)
 box.succeed(f"[ $(readlink /run/current-system) = {nix['marked']} ]")
 box.succeed("grep -q 'release 2' /etc/dd-marker")
 box.succeed("[ $(cat /var/lib/dd-agent/counter) = 2 ]")
-box.succeed("journalctl -u dd-agent > /tmp/j2 && grep -q 'could no longer reach the fleet' /tmp/j2")
+box.succeed(
+    "journalctl -u dd-agent > /tmp/j2 && grep -q 'could no longer reach the fleet' /tmp/j2"
+)
+
+# a file the key did not sign leaves the counter this box applied on its
+# status, not 0
+publish(7, f"{nix['base']}", tamper=True)
+agent(expect_ok=False)
+box.succeed("grep -q 'dd_agent_counter{box=\"box\"} 2' /var/lib/dd-facts/dd_agent.prom")
+box.succeed("grep -q 'result=\"refused\"' /var/lib/dd-facts/dd_agent.prom")
+
+# one counter is one system: release 2 again, naming something else, is
+# refused; release 2 published again unchanged is taken
+publish(2, f"{nix['base']}")
+agent(expect_ok=False)
+box.succeed(f"[ $(readlink /run/current-system) = {nix['marked']} ]")
+box.succeed(
+    "journalctl -u dd-agent > /tmp/j3 && grep -q 'applied 2 as something else' /tmp/j3"
+)
+publish(2, f"{nix['marked']}")
+agent()
+box.succeed("[ $(cat /var/lib/dd-agent/counter) = 2 ]")
+box.succeed(f"grep -qx '2 {nix['marked']}' /var/lib/dd-agent/applied")
+
+# the guard: armed for the whole decision (2 x 20 s of probe and reach,
+# plus 300), and when it goes off it puts back the profile as well as the
+# system. The agent is killed mid-probe, as a crash would, and the guard
+# is fired at once rather than waited for.
+probes = int(
+    box.succeed("journalctl -u dd-agent -o cat | grep -c '^probe: ' || true").strip()
+    or 0
+)
+publish(6, f"{nix['broken']}")
+box.succeed("systemctl start --no-block dd-agent.service")
+box.wait_until_succeeds(
+    f"[ $(journalctl -u dd-agent -o cat | grep -c '^probe: ') -gt {probes} ]",
+    timeout=300,
+)
+box.succeed(
+    "systemctl show -P TimersMonotonic dd-agent-guard.timer | grep -q 'OnActiveUSec=5min 40s'"
+)
+box.succeed(f"[ $(readlink -f /nix/var/nix/profiles/system) = {nix['broken']} ]")
+box.succeed("systemctl kill -s KILL dd-agent.service")
+box.wait_until_succeeds("! systemctl is-active dd-agent.service")
+box.succeed("systemctl start --no-block dd-agent-guard.service")
+box.wait_until_succeeds(
+    f"[ $(readlink /run/current-system) = {nix['marked']} ]", timeout=300
+)
+box.wait_until_succeeds("! systemctl is-active dd-agent-guard.service", timeout=300)
+box.succeed(f"[ $(readlink -f /nix/var/nix/profiles/system) = {nix['marked']} ]")
+box.succeed("grep -q 'release 2' /etc/dd-marker")
+box.succeed(
+    "systemctl stop dd-agent-guard.timer; systemctl reset-failed dd-agent-guard.timer dd-agent-guard.service dd-agent.service || true"
+)

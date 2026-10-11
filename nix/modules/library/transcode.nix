@@ -1,8 +1,10 @@
 # The compute side of the encrypted libraries: a member's device asks this
-# box to play a file its own player cannot. The device brings the chunk
-# urls and the file key sealed to this box's key; the box decrypts in
-# memory, transcodes, streams, and wipes the session. Plaintext exists
-# here only in RAM while working, which is the fleet's rule for compute.
+# box to play a file its own player cannot. The device brings one presigned
+# url for the sealed file and that file's block keys sealed to this box's
+# key (never the library's data key: they open this file and no other);
+# the box decrypts in memory, transcodes, streams, and wipes the session.
+# Plaintext exists here only in RAM while working, which is the fleet's
+# rule for compute.
 {
   config,
   pkgs,
@@ -32,11 +34,8 @@ in
     dd.box.plaintext = [ "transcode (a file in memory while it plays)" ];
 
     systemd.services.dd-transcode = {
-
       # kill: ffmpeg is paused while it is far ahead of the player (main.rs,
-
       # keep_window)
-
       path = [ pkgs.coreutils ];
       description = "Transcode one encrypted file for one viewer, in memory";
       wantedBy = [ "multi-user.target" ];
@@ -57,7 +56,9 @@ in
       serviceConfig = {
         Type = "simple";
         DynamicUser = true;
-        # the sessions live in tmpfs and go with the unit
+        # the sessions live in tmpfs and go with the unit: plaintext, so
+        # never on a disk. tmpfs pages count against MemoryMax below, and
+        # main.rs holds each session's segments to WINDOW_BYTES for it
         RuntimeDirectory = "dd-transcode";
         RuntimeDirectoryMode = "0700";
         ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.transcode}/bin/dd-transcode";
@@ -89,6 +90,11 @@ in
         PrivateTmp = true;
         ProtectSystem = "strict";
         ProtectHome = true;
+        # four sessions (MAX_SESSIONS): 256M of decrypted pieces (KEEP) and
+        # at most 384M of segments (WINDOW_BYTES) each, 2.5G, plus each
+        # film's block keys (1M for 2 GB of film, 64M at most), and the
+        # rest for their ffmpegs. Changing any of those is checked against this
+        # and needs.nix.
         MemoryMax = "4G";
       }
       // lib.optionalAttrs (vaapi != null) {
@@ -112,7 +118,11 @@ in
             # the session it makes is its own credential; it never replays
             # the caller's
             proxy_set_header Authorization "";
-            client_max_body_size 8m;
+            # a start carries the film's block keys: 32 bytes a 64 KiB
+            # block, base64, up to 128 GiB of film (main.rs, START_BODY).
+            # A large one may wait in nginx's temp files: sealed to the
+            # box's in-memory key, so nothing readable on disk
+            client_max_body_size 96m;
             proxy_read_timeout 120s;
           '';
         };
@@ -135,7 +145,7 @@ in
         # or a cookie, so the id is the credential: 128 bits from
         # /dev/urandom, minted only for a member who asked for this one
         # file, good only while the session lives. That is what a presigned
-        # url is, and the gate already hands those out (box/library/src/dav.rs). Starting a
+        # url is, and the gate already hands those out (servers/library/src/dav.rs). Starting a
         # session is still behind the gate above; this is only watching one
         # that somebody already started.
         "/_dd/transcode/session/" = {

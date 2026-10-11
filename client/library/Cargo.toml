@@ -12,6 +12,11 @@ scrypt = { version = "0.11", default-features = false }
 aes = "0.8"
 eme-mode = { version = "0.3", features = ["block-padding", "alloc"] }
 crypto_secretbox = "0.1"
+# a block opened with its own key (crypt.rs, BlockOpener): the two halves
+# of secretbox's XSalsa20 and its MAC, the versions crypto_secretbox uses
+salsa20 = { version = "0.10", features = ["zeroize"] }
+poly1305 = "0.8"
+subtle = { version = "2", default-features = false }
 base32 = "0.5"
 getrandom = "0.2"
 crypto_box = { version = "0.9", features = ["seal"] }

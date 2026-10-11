@@ -13,7 +13,7 @@ account = { path = "../account" }
 media = { path = "../media" }
 library = { path = "../library" }
 libc = "0.2"
-release = { path = "../../box/release" }
+release = { path = "../../servers/system/release" }
 ed25519-dalek = "2"
 biscuit-auth = "6"
 # the device key written as an OpenSSH key, so git signs commits with it
@@ -21,7 +21,7 @@ ssh-key = { version = "0.6", features = ["ed25519", "std"] }
 # an age identity for editing the repo's sops files, kept in the keyring
 age = { version = "0.11", default-features = false, features = ["ssh"] }
 secrecy = "0.10"
-archive = { path = "../../box/archive" }
+archive = { path = "../archive" }
 # already in the tree through ente; used to derive the archive password
 hkdf = "0.12"
 sha2 = "0.10"
@@ -40,7 +40,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 
 [dev-dependencies]
 # the boxes the end-to-end tests run in-process
-verify = { path = "../../box/verify" }
+verify = { path = "../../servers/gate" }
 # the browser, headless: a software passkey that answers the box's
 # webauthn ceremonies, so enrolment and login are tested without a person
 webauthn-rs = "0.6.1-dev"

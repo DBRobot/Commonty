@@ -5,7 +5,7 @@ windows ones for a server that runs under wine. Written into the catalogue
 as disk_bytes; nix/modules/games/needs.nix sizes a world's disk from it.
 Run after resolve.py; the result is committed.
 
-  games/sizes.py games/catalogue.json
+  data/games/sizes.py data/games/catalogue.json
 """
 
 import json
@@ -38,6 +38,8 @@ for g in cat["games"]:
     if total:
         g["disk_bytes"] = total
     time.sleep(1)
-json.dump(cat, open(out, "w"), indent=1)
+with open(out, "w") as f:
+    json.dump(cat, f, indent=1)
+    f.write("\n")
 known = [g for g in cat["games"] if "disk_bytes" in g]
 print(len(known), "of", len(cat["games"]), "sized")

@@ -1,0 +1,510 @@
+# Servers
+
+`servers/` is everything that runs on a box: our own programs, the pages
+the gate serves, and the patches to the upstream programs we package. This
+page is how that folder is laid out, and how one service goes from its
+folder to a page a member opens on a box: served, placed, built and tested.
+
+## The top of the tree
+
+```
+servers/   what runs on a box: programs, pages, patches
+client/    what runs on people's devices: the dd cli, its libraries, the browser wasm
+app/       the app: the same client crates behind a window, and copies of the pages
+nix/       how a box is made of those: modules, roles, tests
+fleet/     what the fleet is: the boxes, their roles, the members, and the
+           owner's policy (policy.json: owner, domain, repo, allowanceGb,
+           people.<name>.{ssh,paperKey}, ownHardware, forgeMirrors)
+data/      data the services are built with (data/games/catalogue.json)
+```
+
+The Rust is one cargo workspace ([`Cargo.toml`](../../Cargo.toml)); its
+members are the crates in `servers/`, `client/` and `app/`. The one Go
+program on a box is the control plane, in `servers/system/control`.
+
+## A service's folder
+
+A service has a folder of its own, `servers/<service>/`, and holds only the
+parts it has:
+
+```
+servers/<service>/
+  Cargo.toml, src/     its own program (a crate in the workspace)
+  web/
+    pages/<page>.html  its pages, as files: the frame, no inline script
+    <page>.js          each page's module, beside it
+    <page>.css         what the page adds to the shared look
+    icons/             pictures the pages load
+  templates/           askama templates, rendered on the server
+  *.patch              changes to an upstream program we package
+```
+
+Most services have no program of their own. Their pages are served by the
+gate, and what runs on the box is either the gate or an upstream program
+from nixpkgs that their NixOS module sets up. The crates' names are not
+always the folder's:
+
+```
+servers/gate            crate verify        the gate's old name, still in its unit (dd-verify),
+                                            its module (nix/modules/gate/verify.nix) and its
+                                            environment (VERIFY_*)
+servers/library         crate library-gate
+servers/system/release  crate release       binaries dd-agent, dd-attest
+```
+
+## The special folders
+
+- **`gate/`** is the front door. It answers nginx's sign-in check for every
+  service on the box, keeps the sessions and the directory, and serves every
+  page in `servers/*/web/`. Its `src/` holds the program, with one module
+  per service it speaks for (`adblock.rs`, `photos.rs`, `library.rs`,
+  `docs.rs`, ...); `templates/` the few pages it renders (sign-in, join,
+  enrol, waiting, downloads); `web/` the sign-in scripts and the platform
+  icons. It runs on every box
+  ([`nix/roles/core.nix`](../../nix/roles/core.nix)).
+- **`web-shared/`** is what every page uses: `home.css` and `bar.css` (the
+  look), `kit.js` (fetching, elements, states), `shell.js` (the bar),
+  `webauthn.js`, the fonts, the favicon and the service icons. It has no
+  `web/` of its own: the folder is the shared web. [UI guidelines](ui.md)
+  is how to use it.
+- **`home/`** is the home pages: home, settings, friends, a friend's link,
+  and add-a-device. They belong to no one service.
+- **`system/`** is how a box runs itself. `system/release` is the release
+  agent (`dd-agent`, which moves the box to a signed release, and
+  `dd-attest`, which vouches for one) and the release format the cli signs.
+  `system/control` is the control plane: `dd-control` on every box, the
+  witness, and the relay Worker ([the control plane](control-plane.md)).
+
+## The services
+
+One line per folder. "Module" is under `nix/modules/`; "test" is a VM test
+in `nix/tests/` unless it says otherwise; "crate tests" run in
+`checks.tests`.
+
+| Folder | What it is | Code and module | Tests | Page |
+|---|---|---|---|---|
+| `adblock` | Pi-hole for the house, switched from its page | page; `adblock/pihole.nix`; gate `adblock.rs` | `adblock` | [packaged.md](packaged.md) |
+| `chat` | the Chat page at `llm.<domain>` | page; `llm/llm.nix`, `llm/llama-cpp.nix`, `llm/search.nix` | `llm` | - |
+| `docs` | these pages, at `<domain>/docs` | page; gate `docs.rs`; `roles/gateway.nix` | crate tests, lint's docs links | - |
+| `files` | the Files page, a member's encrypted library | page; `media/webdav-media.nix` | `library` | [libraries.md](libraries.md) |
+| `fleet` | Settings' Backups, Devices and Network tabs | scripts and a stylesheet; gate `fleet.rs`, `network.rs`, `signins.rs` | crate tests, `network` | - |
+| `forge` | the Git pages over Forgejo's API | page; `forge/forgejo.nix`, `forge/live.nix` | `forge`, `members-runner` | [forge.md](forge.md) |
+| `games` | the games manager and its pages | `src/`, `templates/`, `web/`; `games/games.nix` | `games`, crate tests | [games.md](games.md) |
+| `gate` | the front door | `src/`, `templates/`, `web/`; `gate/verify.nix` | crate tests, `directory`, `network`, `library`, `checks.nginx` | [gate.md](gate.md) |
+| `home` | the home, settings, friends and add-a-device pages | pages; gate `home.rs`, `friends.rs`, `adddevice.rs`, `storage.rs` | crate tests | [gate.md](gate.md) |
+| `library` | the libraries bucket behind the gate: presigned urls, listing, trash, WebDAV; members' disk images (`/_dd/images`) | `src/` (in the gate); `library/libraries.nix` | `library`, crate tests | [libraries.md](libraries.md) |
+| `media` | the Movies & TV page and its player | page; `media/webdav-media.nix` | `library`, `transcode` | [libraries.md](libraries.md) |
+| `observe` | the Metrics page over Thanos | page; `observe/metrics-ui.nix` | `metrics`, `thanos`, `metrics-ui` | - |
+| `photos` | Ente, patched, and the gate's Photos sign-in | patches, `templates/`, `web/`; `photos/ente.nix`; gate `photos.rs`, `demo_photos.rs` | `photos`, `pgrestore`, crate tests | [packaged.md](packaged.md) |
+| `system/control` | the control plane | Go; `box/control.nix` | `checks.control` | [control-plane.md](control-plane.md) |
+| `system/release` | the release agent and attestation | `src/`; `box/agent.nix` | `release`, crate tests | [releases.md](releases.md) |
+| `transcode` | one file for one viewer, decrypted in memory and transcoded | `src/`; `library/transcode.nix` | `transcode` | [libraries.md](libraries.md) |
+| `vault` | Vaultwarden, patched, and the public Send page | patch, `web/`; `vault/vaultwarden.nix`, `vault/pwned.nix` | `vault` | [packaged.md](packaged.md) |
+| `web-shared` | the shared look, bar, kit, fonts and icons | files only | `checks.stylesheet`, crate tests | [ui.md](ui.md) |
+
+## How a page is served
+
+```
+browser ── https://<host>.<domain>/... ──► nginx on the box
+   │                                         │ the page's location: proxy to the gate,
+   │                                         │ e.g. git.<domain>/ ─► /_dd/git
+   │                                         ▼
+   │                                       gate (127.0.0.1:4181)
+   │                                         signed in? no ─► /_dd/login?rd=...
+   │                                         yes ─► the page's file, as it is
+   │◄── servers/forge/web/pages/git.html ────┘
+   │
+   ├── /_dd/static/git.js, home.css, ... ─► gate: STATIC, by name
+   ├── /_dd/web/marked.js, dd_web.wasm  ─► gate: the web bundle (.#web)
+   └── /_dd/me ─► gate: who is looking, the bar's menu, the tiles
+```
+
+Everything the gate serves as a file is listed in
+[`servers/gate/src/pages.rs`](../../servers/gate/src/pages.rs), in four
+tables:
+
+```
+STATIC    (name, path in the tree, type)   served at /_dd/static/<name>
+PAGES     (name, path in the tree)         a page, sent by its route's handler
+ICONS     (key, path)                      a tile's mark, drawn into /_dd/me
+OS_ICONS  (key, path)                      a platform's logo on the downloads page
+```
+
+- **A file's URL is its name, not its path.** `servers/forge/web/git-diff.js`
+  is `/_dd/static/git-diff.js`. The names are one flat space across every
+  service, so a new file needs a name no other service uses: a service's
+  files carry its name (`git-*.js`, `demo-photos.css`). A page's module
+  imports the others as `./kit.js`, which the browser asks for at
+  `/_dd/static/kit.js`.
+- **A page has a route.** `PAGES` names the file; a handler in
+  [`servers/gate/src/lib.rs`](../../servers/gate/src/lib.rs) decides who
+  gets it (`signed_in_page`, or its own check, like `files_page` letting
+  the demo in only where the box has a demo library) and sends a signed-out
+  browser to `/_dd/login`. The page itself holds nobody's name: it fills in
+  from `/_dd/me` (`shell.js`).
+- **Read once, at start.** The gate reads every file in the four tables
+  when it starts (`pages::load`), from `VERIFY_PAGES_DIR`. A file that is
+  missing stops the gate starting, rather than a page answering 404. Each
+  file gets an ETag from its bytes: a browser asks every time
+  (`no-cache`) and is told 304 when it already holds them. Fonts are
+  cached for a week.
+- **`/_dd/web/`** is the other directory: our Rust compiled to wasm
+  (`client/web`), and the players and libraries a page loads (`hls.js`,
+  `marked.js`, `purify.js`), pinned by hash in the flake (`webDist`). It is
+  `.#web`, handed to the gate as `VERIFY_WEB_DIR`. Only `.js` and `.wasm`
+  are served from it.
+- **The pages are their own derivation.** `.#pages` in
+  [`flake.nix`](../../flake.nix) is the tree filtered to
+  `servers/web-shared`, every `servers/<service>/web` and `docs/`, laid out
+  as in the tree. A page changing makes a new pages directory and the same
+  gate binary. In its tests the gate reads the files from the checkout
+  instead (`pages::tree`).
+
+### The content policy
+
+[`nix/modules/gate/headers.nix`](../../nix/modules/gate/headers.nix) adds
+the headers to every nginx location, by where the location proxies:
+
+```
+to the gate (:4181) or the games manager (dd-games.sock)
+    our pages: scripts from this site only, no inline script, wasm allowed,
+    data from our own names (and TMDB for Movies & TV); reports to /_dd/csp
+to Vaultwarden (:8222)
+    HSTS only: it sends its own set
+anything else
+    HSTS, nosniff, referrer policy, frame-ancestors 'self'
+```
+
+A page that needs another origin (a new API it calls from the browser) is a
+change to `ours` in that file. What the policy blocks is logged by the
+gate (`csp_report`).
+
+### The app's copies
+
+The app serves the signed-in pages members use from copies it carries, at
+the site's own paths ([`app/src/site.rs`](../../app/src/site.rs)).
+[`app/carried`](../../app/carried) lists them, one line each:
+
+```
+servers/files/web/pages/files.html    pages/files.html
+servers/files/web/files.js            static/files.js
+```
+
+[`scripts/sync-app-web`](../../scripts/sync-app-web) copies them into
+`app/web/_dd/`. The flake's `checks.stylesheet` compares every copy with
+its source and fails while one differs, or while `app/web/_dd` holds a file
+the list does not name. A change to a carried file changes its copy in the
+same pull request.
+
+### The exceptions
+
+- **Games** serves its own pages. The manager is its own program, behind
+  `games.<domain>`: its templates in `servers/games/templates`, its
+  `games.css` and `games.js` compiled in (`include_str!`). It still gets the
+  content policy, and the same sign-in check in front.
+- **Photos** is Ente's own web app, patched (`servers/photos/*.patch`,
+  applied in [`nix/modules/photos/ente.nix`](../../nix/modules/photos/ente.nix)),
+  with the shared `bar.css` copied in at build. The gate's part is the
+  sign-in step (`servers/photos/templates/photos.html`, found by askama
+  through [`servers/gate/askama.toml`](../../servers/gate/askama.toml))
+  and the demo's Photos. The app serves its own copy of the client from
+  its release ([`app/src/local.rs`](../../app/src/local.rs)).
+- **Passwords** is Vaultwarden, patched
+  (`servers/vault/vaultwarden-hash-refresh.patch` and
+  `servers/vault/vaultwarden-app-loopback.patch`) and restyled
+  (`user.vaultwarden.scss.hbs`). nginx puts the bar into its pages with a
+  `sub_filter`, and sends `/_dd/static/` on `vault.<domain>` to the gate.
+  The app serves its own copy of the web vault from its release
+  ([`app/src/local.rs`](../../app/src/local.rs)).
+
+## How a service gets onto a box
+
+```
+fleet/boxes.json        node1: roles [core, gateway, ..., adblock]
+   │                       checked against fleet/roles.json (checks.role-fit)
+   ▼
+nix/roles/adblock.nix   imports the modules; its secrets; its tile; its backups
+   │
+   ▼
+nix/modules/adblock/pihole.nix   options.dd.adblock, the units, the gate's environment
+nix/modules/adblock/needs.nix    what it needs of a box (typed, nix/lib/needs-type.nix)
+   │
+   ▼
+flake.nix   nixosConfigurations.node1 = core modules + every role file it names
+```
+
+### Roles
+
+A box is its hardware plus a list of roles in
+[`fleet/boxes.json`](../../fleet/boxes.json). The flake builds one
+`nixosConfiguration` per box: `nix/roles/<role>.nix` for each role it
+names, and the modules every box gets (secure boot, disk unlock, the
+control plane, ports, the box report). A role is a bundle of modules that
+move together, with what they read from sops, their tile on the home page
+(`dd.home.services`), and the paths to back up (`dd.backup.paths`).
+
+[`fleet/roles.json`](../../fleet/roles.json) says what each role needs of
+a box: `requires` against the box's signed hardware report, `box` against
+its owner's `box.json`, `with` for roles that must share the box (they
+reach each other on localhost), `perFleet` for a role exactly that many
+boxes run. `checks.role-fit` ([`nix/lib/fit.nix`](../../nix/lib/fit.nix))
+fails when a box in `fleet/boxes.json` breaks any of it, or names a role
+`roles.json` does not have. `services` lists the needs' service names a
+role runs; one listed in the policy's `ownHardware` may only run on a box
+whose `box.json` owner is the fleet's owner, and `role-fit` checks it.
+
+Every box also keeps itself tidy ([`nix/roles/core.nix`](../../nix/roles/core.nix)
+and the modules it names):
+
+- `nix.gc` weekly, keeping 14 days, with min-free 10G and max-free 30G;
+- nix-daemon held to `MemoryHigh` 60% and `MemoryMax` 75% of RAM, and
+  max-jobs one per 6G (at most threads/4);
+- the nix-cache bucket cleaned daily, keeping the last 10 releases'
+  closures plus 7 days ([`cache-gc.sh`](../../nix/modules/storage/cache-gc.sh),
+  where the forge runs);
+- the runner's cargo-target aged out after 14 days, and docker pruned
+  weekly on the members' runner;
+- Prometheus keeping 30 days locally.
+
+### Needs, and placement
+
+Each module area has a `needs.nix` beside it: per service, what it is,
+what it uses (memory and storage, measured where it runs), what it
+requires and what makes it faster, who reaches it and what it reaches,
+what it depends on, and what of people's data it can read. The shape is
+typed in [`nix/lib/needs-type.nix`](../../nix/lib/needs-type.nix), so a
+needs file that says something unknown fails to evaluate:
+
+```
+per service      what, instances, perHouse, everyBox, servesCode, base/variants
+requires/faster  arch, gpu, memory, disk, place, threads, windowsLicense, kvm,
+                 nestedKvm, uefi, wiredInitrd, tpm
+uses             memory, storage, estimated
+network          outbound: none, internet or a list of hosts
+                 inbound: none, localhost, lan, network or public
+depends          <svc>.local
+privacy          none, metadata or plaintext
+```
+
+[`nix/lib/needs.nix`](../../nix/lib/needs.nix) lists every file and merges
+them; `.#needs` is the result as JSON.
+
+Placement is still the list in `fleet/boxes.json`, written by hand and
+held honest by `role-fit`. Nothing places roles from the needs yet: they
+are what placement will read
+([what each service needs from a box](hardware.md),
+[the control plane](control-plane.md)).
+
+### Ports
+
+Every fixed port a service listens on is in `dd.ports`
+([`nix/modules/box/ports.nix`](../../nix/modules/box/ports.nix)). The
+nixpkgs services are listed there, by whether the box runs them; ours are
+listed there too, by their unit. Two services claiming one port fail the
+build, not the box's switch, and an hourly `dd-ports-check` names any port
+that is listening and was never declared. Ports from 32768 up are the
+kernel's and are not listed. The gate is on 4181, the control plane on
+4195.
+
+### nginx and signing in
+
+A service's site is an nginx virtual host in its module,
+`useACMEHost = config.dd.domain; forceSSL = true;`. Its locations are of
+two kinds:
+
+```nix
+# the page: the gate's, which checks who is looking itself
+locations."= /" = {
+  proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/chat";
+  extraConfig = "proxy_set_header X-Original-URI $request_uri;";
+};
+# the service: nginx asks the gate first
+locations."/v1/" = {
+  proxyPass = "http://unix:/run/dd-llm/llm.sock";
+  extraConfig = ''
+    auth_request /_dd/verify;
+    error_page 401 = @login;
+    error_page 403 = @waiting;
+  '';
+};
+```
+
+- **`auth_request /_dd/verify`** sends every request to the gate's
+  `/verify` first. It answers 200 with `X-Auth-Request-Preferred-Username`
+  and `X-DD-Role` (member, demo, guest), 401 for nobody (`@login` sends a
+  browser to sign in and back), or 403 for someone signed in who may not
+  (`@waiting` sends them home). A service that wants the name takes it with
+  `auth_request_set` and passes it on itself, as games does with
+  `X-DD-User`.
+- **The host has to be one the gate stands in front of.**
+  `dd.verify.hosts` in
+  [`nix/modules/gate/verify.nix`](../../nix/modules/gate/verify.nix)
+  is the list of subdomains that get the gate's `/_dd/` paths, `@login`,
+  `@waiting` and the `/_dd/verify` subrequest. Lists from every module add
+  up: a new service's module adds its own subdomain.
+- **The session cookie never reaches a service.**
+  [`strip-cookie.nix`](../../nix/modules/gate/strip-cookie.nix) takes
+  `dd_session` out of every location that proxies anywhere but the gate.
+- **Public or not.** Every host is on the fleet's network only, unless it
+  is in `dd.public.hosts`
+  ([`nix/modules/gate/public.nix`](../../nix/modules/gate/public.nix)),
+  which puts it behind the Cloudflare tunnel. A tile with `demo` set gets a
+  demo door, `demo-<service>.<domain>`, that lets the demo session in and
+  nobody else.
+
+### Secrets
+
+A role that reads a secret imports
+[`nix/roles/_sops.nix`](../../nix/roles/_sops.nix) and declares it:
+`sops.secrets.<name> = { };`, with a `sops.templates` entry where a
+program wants an environment file. Each box's secrets are in
+`secrets/<box>.yaml`, encrypted to that box's TPM key and to the editor's;
+no box can read another's. They are edited with
+`dd secret run -- set secrets/node1.yaml '["name"]' '"value"'`. A box with
+no role that declares a secret has no sops at all.
+
+### Talking to the gate
+
+A service the gate speaks for (adblock, photos, libraries, the network)
+gets its settings into the gate through the gate's unit, from its own
+module:
+
+```nix
+systemd.services.dd-verify = lib.mkIf config.dd.verify.enable {
+  environment.VERIFY_ADBLOCK = "http://127.0.0.1:8053";
+  serviceConfig.LoadCredential = [ "pihole-password:${cfg.passwordFile}" ];
+};
+```
+
+[`servers/gate/src/main.rs`](../../servers/gate/src/main.rs) reads them
+into the gate's config; unset, that part of the gate is off.
+
+### What a module also says
+
+- `dd.box.plaintext = [ "<service> (what it reads)" ];` when it reads
+  people's plaintext. Nothing refuses it; the box publishes the list as a
+  metric, so it stays in view.
+- `dd.backup.paths` for state that has to survive the box.
+- A unit on a timer never fails during a switch
+  ([CI: when a release does not land](ci.md#when-a-release-does-not-land)).
+- A service that keeps members' data counts it into the allowance: a
+  `dd.usage.<service>` query
+  ([`nix/modules/storage/usage.nix`](../../nix/modules/storage/usage.nix),
+  with `counts` and `memberSuffix`), which becomes `usage/<service>/<member>`
+  facts in the box's heartbeat. A new kind of data also needs its value in
+  `counts`, its field in the gate's `Usage`
+  ([`storage.rs`](../../servers/gate/src/storage.rs)) and its role in
+  storage-view's list of who may count what (`KINDS` in
+  [`storage_ledger.rs`](../../client/cli/src/storage_ledger.rs))
+  ([libraries.md](libraries.md#storage)).
+
+## How it is built
+
+[`flake.nix`](../../flake.nix) builds the Rust two ways.
+
+- **The programs on the boxes** (`.#verify`, `.#agent`, `.#games`,
+  `.#transcode`, and `.#dd`) are built per crate from
+  [`Cargo.nix`](../../Cargo.nix), which crate2nix makes from `Cargo.lock`.
+  A dependency moving rebuilds that crate and what uses it. Each crate's
+  source is its own folder. After `Cargo.lock` changes:
+  `nix run nixpkgs#crate2nix -- generate`; `checks.cargo-nix` fails while
+  the two disagree.
+- **The lint checks, the app's tests, the app and the wasm** are built
+  with crane. `srcFor`
+  filters the tree to what one build needs: the workspace's manifests, the
+  folders it is built from (`crateSrc` follows the path dependencies in the
+  manifests, so the list does not go stale), with their templates. Every
+  workspace member it leaves out gets an empty stub target, since cargo
+  loads the whole workspace. Dependencies build once, from `depsSrc`, which
+  is the lockfile and the manifests alone, so a page or a source file
+  changing never rebuilds them.
+- **The pages** are `.#pages`, apart from the gate (above).
+- **The control plane** is Go: `dd-control` with `buildGoModule`, the
+  witness as wasm from the same vendored modules, and `.#control-worker`,
+  the relay Worker `dd release publish` uploads.
+
+## How it is tested
+
+- **Crate tests**: `checks.tests` runs every workspace crate's tests but
+  the app's (`checks.tests-app`), each its own build from `Cargo.nix`
+  inside the box program that carries it, cached crate by crate
+  ([CI](ci.md#how-a-run-fits-together)). `checks.fmt`, `checks.clippy`
+  and `checks.clippy-app` (`-D warnings`) run beside it. The gate's tests read the
+  pages from the tree, so a page that names a script the table does not
+  have fails there.
+- **VM tests**: boxes booted and driven. A test is two files,
+  `nix/tests/<name>.nix` (the boxes, built from the same modules the real
+  boxes import, usually on top of
+  [`nix/tests/box.nix`](../../nix/tests/box.nix)) and `nix/tests/<name>.py`
+  (the scenario). [`nix/lib/vm-test.nix`](../../nix/lib/vm-test.nix) hands
+  the script one name, `nix`, holding what the Nix side computed (its
+  `scriptEnv`), so nothing is pasted into the Python. Run one with
+  `nix build .#checks.x86_64-linux.<name>`.
+- **Evaluation checks**, seconds each: `boxes` (every role is a file, every
+  box builds), `role-fit`, `nginx` (every box's config through
+  `nginx -t`), `stylesheet` (the app's copies), `cargo-nix`, `ci`,
+  `plaintext-label` (a module that reads plaintext labels itself),
+  `box-reports`, `net-check` (the app's network engine: go vet and its
+  tests), `control` (the control plane, offline) and `mail-worker` (the
+  mail Worker in a browser). `clippy-app` and `tests-app` are the app's
+  lint and tests.
+
+A VM test is listed twice: in `vmTests` in `flake.nix`, and in the
+`vm_tests` matrix in
+[`.forgejo/workflows/entry_point.yml`](../../.forgejo/workflows/entry_point.yml).
+`checks.ci` fails when the two differ. In CI, `files_modified` decides what
+runs: a change under `servers/` turns on the nix, rust and VM parts, a
+change under `docs/` only the nix part (the pages are built). The VM tests
+run as one job each, after `build_part` has built the box programs
+([CI](ci.md)).
+
+## Adding a service
+
+Modelled on ad blocking: an upstream program, a page, the gate as its only
+door, and one role.
+
+1. **Its folder.** `servers/<service>/`, with only what it has:
+   - a page: `web/pages/<service>.html` from an existing page's frame, and
+     `web/<service>.js` and `.css` beside it ([UI guidelines](ui.md));
+   - a program: `Cargo.toml` and `src/`, a member in the root
+     `Cargo.toml`, then `nix run nixpkgs#crate2nix -- generate`, a package
+     in `flake.nix` (`perCrate "<crate>"`), and the package in the `boxes`
+     part of `build_part` in `entry_point.yml`;
+   - an upstream program: nothing here unless it needs a patch,
+     `servers/<service>/<what>.patch`, applied in its module.
+2. **Its page in the gate.** Each file in `STATIC`, under a name no other
+   service uses, and the page in `PAGES`
+   ([`servers/gate/src/pages.rs`](../../servers/gate/src/pages.rs)). A
+   route in `servers/gate/src/lib.rs` that checks who is looking. What the
+   page asks of the box goes in a module of the gate,
+   `servers/gate/src/<service>.rs`, with its routes beside the page's, and
+   its settings read in `main.rs` from `VERIFY_<SERVICE>*`. Add the page to
+   the gate's page tests.
+3. **The app**, if members use it there: its files in `app/carried`, then
+   `scripts/sync-app-web`.
+4. **Its module.** `nix/modules/<service>/<program>.nix`:
+   `options.dd.<service>` with `enable`, the units, the gate's environment
+   (`systemd.services.dd-verify`, above), the nginx host with the page
+   proxied to the gate and anything else behind `auth_request`. A new
+   subdomain goes in `dd.verify.hosts`; a public one in `dd.public.hosts`.
+   Its ports go in the list in `ports.nix`, by its unit, whether the
+   program is ours or nixpkgs'. `dd.box.plaintext` if it reads
+   people's data. A `dd.usage.<service>` count if it keeps members' data
+   (above).
+5. **Its needs.** `nix/modules/<service>/needs.nix`, measured where it
+   runs (`estimated = true` until it has run anywhere), and the file in
+   the list in `nix/lib/needs.nix`.
+6. **Its role.** `nix/roles/<role>.nix`: the module, `./_sops.nix` and its
+   `sops.secrets` if it has any, `enable = true`, its tile in
+   `dd.home.services` (with `demo` set if the demo may look), its
+   `dd.backup.paths`. The role in `fleet/roles.json` with its `why`, then
+   in the box's `roles` in `fleet/boxes.json`. Its secrets in
+   `secrets/<box>.yaml` with `dd secret run`, before the release that
+   needs them.
+7. **Its test.** `nix/tests/<service>.nix` and `.py`, booting
+   `./box.nix` and the module with test values for the secrets, driving
+   the failure cases as well as the working one. The name in `vmTests` and
+   in the `vm_tests` matrix.
+8. **Its page here.** A line in the table above, and a page of its own
+   under `docs/dev/` linked from [`docs/README.md`](../README.md) when it
+   has more to say than a line.

@@ -42,7 +42,7 @@
   --member: #1D4470;
   --member-bg: #E3ECF5;
   --off: #8A918C;
-  /* the five state words (docs/ui.md): a word with its colour, everywhere */
+  /* the five state words (docs/dev/ui.md): a word with its colour, everywhere */
   --ok: #1D5C42; --ok-bg: #DDEEE5;
   --working: #1D4470; --working-bg: #E3ECF5;
   --attention: #8A5A12; --attention-bg: #F6ECD9;
@@ -948,7 +948,7 @@ main.home .guest-more p { margin: 0; max-width: 62ch; color: var(--ink-2); }
 .add-device { max-width: 440px; }
 .add-device .add-code { font-family: var(--mono); font-size: 34px; letter-spacing: .14em; font-weight: 600; margin: 8px 0 0; }
 
-/* a status: its word, in its colour (docs/ui.md), on any page */
+/* a status: its word, in its colour (docs/dev/ui.md), on any page */
 .state-word { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; border-radius: 999px; font-size: 13px; font-weight: 600; line-height: 1.6; white-space: nowrap; }
 .state-word::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .state-word[data-state="ok"] { color: var(--ok); background: var(--ok-bg); }

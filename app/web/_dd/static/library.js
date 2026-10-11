@@ -3,7 +3,7 @@
 // turned over here. Files and Movies & TV are two corners of the same
 // library, so the opening, listing and carrying live here once.
 
-import init, { library_device_key, library_open, library_key_for_box, path_encrypt, path_decrypt, file_open, file_seal, plain_size, Sealer, Opener } from '/_dd/web/dd_web.js';
+import init, { library_device_key, library_open, library_blocks_for_box, path_encrypt, path_decrypt, file_open, file_seal, plain_size, Sealer, Opener } from '/_dd/web/dd_web.js';
 import { b64u, u8b64 } from './webauthn.js';
 import { inApp, appFetch, pageConfig, entryText } from './shell.js';
 
@@ -47,7 +47,7 @@ export async function unlock(user) {
   const cfg = await pageConfig();
   // the demo holds no key of its own; the box hands it one (verify.nix)
   if (cfg.demoLibrary) {
-    return { ok: { id: cfg.demoLibrary.id, key: cfg.demoLibrary.key, reader: true } };
+    return { ok: { id: cfg.demoLibrary.id, key: cfg.demoLibrary.key, reader: true, demo: true } };
   }
   const text = await entryText(user);
   const entry = JSON.parse(text);
@@ -104,6 +104,22 @@ export async function fetchPlain(lib, path) {
   const r = await fetch(dav(lib, path));
   if (!r.ok) throw new Error(`the gate said ${r.status}`);
   return file_open(lib.key, lib.id, new Uint8Array(await r.arrayBuffer()));
+}
+
+/// A note about the library kept beside it at the gate, not in it
+/// ('progress', 'shelf'): sealed here as a file would be, and replaced
+/// whole, so nothing of it goes to the trash. null when there is none.
+export async function note(lib, kind) {
+  const r = await fetch(`/_dd/library/${lib.id}/notes/${kind}`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`the gate said ${r.status}`);
+  return JSON.parse(new TextDecoder().decode(file_open(lib.key, lib.id, new Uint8Array(await r.arrayBuffer()))));
+}
+
+export async function putNote(lib, kind, value) {
+  const body = file_seal(lib.key, lib.id, new TextEncoder().encode(JSON.stringify(value)));
+  const r = await fetch(`/_dd/library/${lib.id}/notes/${kind}`, { method: 'PUT', body });
+  if (!r.ok) throw new Error(`the gate said ${r.status}`);
 }
 
 export function save(bytes, name) {
@@ -214,23 +230,26 @@ export async function trash(lib, path) {
 }
 
 /// A film this tab cannot open: the box does the work instead. It is
-/// given a url it can fetch ranges from while the film plays and the
-/// library's data key sealed to a key it made when it started, so the
-/// plaintext exists in its memory for this one file and nowhere else.
+/// given a url it can fetch ranges from while the film plays and this
+/// file's block keys (one per 64 KiB, made here from its header) sealed to
+/// a key it made when it started: they open this file and nothing else,
+/// and the library's key never leaves the tab.
 /// What comes back is a playlist on the same host as this page, where in
 /// the film it begins (`from`, seconds: resuming), and the film's length
 /// when its container says.
 export async function transcode(lib, path, sealedSize, from = 0) {
-  const pre = await fetch(dav(lib, path), { headers: { 'x-dd-presign': '1' } });
+  const at = dav(lib, path);
+  const pre = await fetch(at, { headers: { 'x-dd-presign': '1' } });
   if (!pre.ok) throw new Error(`the gate said ${pre.status}`);
   const { url } = await pre.json();
+  const header = await range(at, 0, HEADER - 1);
   const box = await fetch('/_dd/transcode/key');
   if (!box.ok) throw new Error('this box does not transcode');
   const { key } = await box.json();
   const r = await fetch('/_dd/transcode/session', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ url, key: library_key_for_box(lib.key, lib.id, key), size: sealedSize, from }),
+    body: JSON.stringify({ url, keys: library_blocks_for_box(lib.key, lib.id, header, sealedSize, key), size: sealedSize, from }),
   });
   if (!r.ok) throw new Error(`the box said ${r.status}: ${await r.text()}`);
   const s = await r.json();

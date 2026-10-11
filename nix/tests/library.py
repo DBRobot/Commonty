@@ -100,6 +100,20 @@ keys_after = json.loads(box.succeed(aws).strip() or "[]")
 assert any(k.startswith(f"{lib}/trash/") for k in keys_after), keys_after
 assert len(keys_after) == len(keys), (keys, keys_after)
 
+# writing over a name keeps what was there in the trash too, and nothing
+# is written into the trash itself
+box.succeed(f"echo 'again' > /root/dd.txt && {rc} copyto /root/dd.txt lib:Files/dd.txt")
+assert box.succeed(f"{rc} cat lib:Files/dd.txt").strip() == "again"
+keys_over = json.loads(box.succeed(aws).strip() or "[]")
+n_trash = sum(k.startswith(f"{lib}/trash/") for k in keys_over)
+assert n_trash == sum(k.startswith(f"{lib}/trash/") for k in keys_after) + 1, keys_over
+assert (
+    box.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' -X PUT -H 'authorization: Bearer {token}' --data x http://127.0.0.1:4181/_dd/dav/{lib}/trash/1/x"
+    ).strip()
+    == "403"
+)
+
 # and the trash lets go after 90 days: an item trashed 91 days ago goes
 # when the gate next empties it (at start, then daily), a fresh one stays
 s3 = aws.split(" s3api ")[0]
@@ -197,7 +211,7 @@ claim = (
 # through the front door it never even reaches the claim rule: the entry is
 # not his to edit, so the signature settles it. The claim rule itself - one
 # entry may not name a library another already claims - is covered by the
-# unit test in box/verify/src/directory.rs, which can sign for real.
+# unit test in servers/gate/src/directory.rs, which can sign for real.
 box.succeed(f"jq '{claim} | .entry.version = 9' {keys}/tom.json > /root/claim.json")
 code = box.succeed(
     "curl -s -o /root/claim.out -w '%{http_code}' -X PUT -H 'Content-Type: application/json' "
@@ -228,7 +242,7 @@ box.succeed(
 )
 
 # A member's disk images, in the bucket under images-<name>: what `dd image`
-# (restic's layout over webdav, box/archive) reads and writes through
+# (restic's layout over webdav, client/archive) reads and writes through
 # files.<domain>/images/, which nginx sends to /_dd/images/.
 img = "http://127.0.0.1:4181/_dd/images"
 as_sarah = f"-H 'Authorization: Bearer {token}'"
@@ -297,6 +311,13 @@ assert (
 assert (
     box.succeed(
         f"curl -s -o /dev/null -w '%{{http_code}}' {as_page} -H 'x-dd-upload: start' {img}/data/zz"
+    ).strip()
+    == "403"
+)
+# nor with a bearer beside the cookie that is no device token
+assert (
+    box.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' {as_page} -H 'Authorization: Bearer x' -X DELETE {img}/config"
     ).strip()
     == "403"
 )

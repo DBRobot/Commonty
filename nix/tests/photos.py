@@ -1,0 +1,114 @@
+# The photos test: museum up on loopback alone, its sessions kept as
+# hashes, and the gate's Photos sign-in: the page for a member, its
+# settings without the fleet's code, and the code filled in for her own
+# address only.
+import hashlib
+import json
+
+start_all()
+
+box.wait_for_unit("postgresql.service")
+box.wait_for_unit("ente.service")
+box.wait_until_succeeds("curl -sf http://127.0.0.1:8080/ping", timeout=120)
+# museum's api and metrics on loopback, as the module's edit has them
+listening = box.succeed("ss -Htln")
+assert "127.0.0.1:8080" in listening and "127.0.0.1:2112" in listening, listening
+for anywhere in (
+    "*:8080",
+    "0.0.0.0:8080",
+    "[::]:8080",
+    "*:2112",
+    "0.0.0.0:2112",
+    "[::]:2112",
+):
+    assert anywhere not in listening, listening
+# the health check finds it well and leaves it be
+box.succeed("systemctl start ente-health.service")
+assert "restarting" not in box.succeed("journalctl -u ente-health.service"), (
+    "museum restarted"
+)
+
+box.wait_for_unit("nginx.service")
+box.wait_for_open_port(4181)
+site = "https://photos.test.invalid"
+curl = "curl -sk --resolve photos.test.invalid:443:127.0.0.1"
+
+# nobody signed in is sent to sign in, and back here after
+out = box.succeed(
+    f"{curl} -o /dev/null -w '%{{http_code}} %{{redirect_url}}' {site}/_dd/photos"
+).split()
+assert out[0] in ("302", "303") and "/_dd/login" in out[1], out
+
+# sarah and tom, members, each with a session as the app's browser has
+dirs = "--directory http://127.0.0.1:4181/_dd/directory"
+box.succeed("mkdir -p /root/fleet/fleet")
+for who in ("sarah", "tom"):
+    box.succeed(
+        f"DD_KEYRING_FILE=/root/{who}.json {nix['dd']} identity new --name {who} {dirs}"
+    )
+    box.succeed(
+        f"DD_KEYRING_FILE=/root/{who}.json {nix['dd']} member add {who} --repo /root/fleet {dirs}"
+    )
+box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
+box.succeed(
+    "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "
+    '"$(jq -c . /root/fleet/fleet/members.json)" '
+    "> /run/systemd/system/dd-verify.service.d/members.conf"
+)
+box.succeed("systemctl daemon-reload && systemctl restart dd-verify.service")
+box.wait_for_open_port(4181)
+
+
+def session(who):
+    token = box.succeed(f"DD_KEYRING_FILE=/root/{who}.json {nix['dd']} token").strip()
+    head = box.succeed(
+        f"curl -s -D - -o /dev/null -X POST --data-urlencode token={token} http://127.0.0.1:4181/_dd/app/signin"
+    )
+    return (
+        next(h for h in head.splitlines() if h.lower().startswith("set-cookie:"))
+        .split(":", 1)[1]
+        .split(";")[0]
+        .strip()
+    )
+
+
+sarah = f"-H 'Cookie: {session('sarah')}'"
+tom = f"-H 'Cookie: {session('tom')}'"
+as_json = "-H 'content-type: application/json'"
+
+# her page, and what it needs: her address at museum, museum on this
+# site's own name, and never the fleet's code
+assert "photos.js" in box.succeed(f"{curl} -f {sarah} {site}/_dd/photos")
+cfg = json.loads(box.succeed(f"{curl} -f -X POST {sarah} {site}/_dd/photos/config"))
+assert cfg["email"] == "sarah@users.test.invalid", cfg
+assert cfg["accountApi"] == "/_dd/museum", cfg
+assert "123456" not in json.dumps(cfg), cfg
+
+# a code asked for her address, through nginx to museum
+box.succeed(
+    f'{curl} -f -X POST {as_json} -d \'{{"email": "sarah@users.test.invalid", "purpose": "signup"}}\' '
+    f"{site}/_dd/museum/users/ott"
+)
+# tom cannot have the gate fill in the code for her address
+code = box.succeed(
+    f"{curl} -o /dev/null -w '%{{http_code}}' -X POST {tom} {as_json} "
+    f'-d \'{{"email": "sarah@users.test.invalid"}}\' {site}/_dd/museum/users/verify-email'
+).strip()
+assert code == "403", code
+# she can: the gate adds the code, museum makes her account and a session
+made = json.loads(
+    box.succeed(
+        f"{curl} -f -X POST {sarah} {as_json} "
+        f'-d \'{{"email": "sarah@users.test.invalid"}}\' {site}/_dd/museum/users/verify-email'
+    )
+)
+assert made["id"] and made["token"], made
+
+# museum keeps the session as its sha256, and still knows it by the token
+kept = box.succeed(
+    "sudo -u postgres psql -d ente -tAc 'select token from tokens'"
+).split()
+assert kept == [hashlib.sha256(made["token"].encode()).hexdigest()], kept
+box.succeed(
+    f"curl -sf -H 'X-Auth-Token: {made['token']}' http://127.0.0.1:8080/users/session-validity/v2"
+)

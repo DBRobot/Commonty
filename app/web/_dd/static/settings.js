@@ -1,7 +1,7 @@
 // Settings: the member's own, a tab at a time. Profile is their account as
 // their entry has it, and their email - which no box holds: the line is a
 // frame from the mail Worker (client/mail), and changing it happens there.
-// Backups is their disk images (box/fleet/web/backups.js).
+// Backups is their disk images (servers/fleet/web/backups.js).
 import { start as backups, FILES } from './backups.js';
 import { start as devices } from './devices.js';
 import { start as network } from './network.js';

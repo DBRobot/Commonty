@@ -54,7 +54,7 @@ async function net(st) {
     $("net-text").textContent = String(e);
     return;
   }
-  // a state word and what it means (docs/ui.md)
+  // a state word and what it means (docs/dev/ui.md)
   const [state, word, text] = st.running
     ? ["ok", "Connected", "Your boxes are reached directly from here."]
     : st.error

@@ -24,7 +24,7 @@ in
     {
       # A member's files are their library: named
       # and encrypted on their own machine, stored as ciphertext under
-      # /_dd/dav (modules/gate/verify.nix, box/library/src/dav.rs), opened in
+      # /_dd/dav (modules/gate/verify.nix, servers/library/src/dav.rs), opened in
       # the browser at /_dd/files or mounted with `dd media`. This host keeps
       # /images/ too: `dd image`'s archives of old computers, restic's
       # format, encrypted on the device.
@@ -37,7 +37,7 @@ in
           return 302 https://files.${base}/_dd/files;
         '';
         # The disk images are in the bucket now, beside the libraries: the
-        # gate serves them (box/verify/src/library.rs, images) and decides
+        # gate serves them (servers/gate/src/library.rs, images) and decides
         # who, so nothing here asks first. /srv/images is what they were
         # copied from, kept until its owner lets it go.
         locations."/images/" = {

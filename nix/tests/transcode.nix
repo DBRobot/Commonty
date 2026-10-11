@@ -1,8 +1,9 @@
 # The compute side of the libraries: a clip is chunked and encrypted the
 # way a library holds it (rclone writes it; nix/tests/transcode-chunks.py
-# seals the data key to the box), served over plain http like the bucket
-# would, and the box turns it into HLS with only the
-# file key, sealed to its ephemeral key. The session is wiped on request.
+# makes its block keys and seals them to the box), served over plain http
+# like the bucket would, and the box turns it into HLS with those keys
+# alone, sealed to the key it made at start: never the data key, never the
+# names' key. The session is wiped on request.
 { self, pkgs, ... }:
 {
   name = "transcode";

@@ -62,11 +62,9 @@ pub async fn run(cmd: LibraryCmd, keys: &auth::Store, dirs: &[String]) -> Result
                 created: identity::now(),
             };
             let id = lib.id.clone();
+            let sealed = lib.keys.len();
             who::add_library(dirs, &user, root, lib).await?;
-            println!(
-                "library {id}: sealed to {} of your keys, in your entry",
-                cur.entry.devices.len() + 2
-            );
+            println!("library {id}: sealed to {sealed} of your keys, in your entry");
             // the three the pages and the mount expect; a library with
             // none of them opens empty everywhere and looks broken
             let gate = Gate::new(&base, &id, &token, &key);

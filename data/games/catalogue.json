@@ -1,5 +1,8 @@
 {
- "eggs": "eggs",
+ "eggs": {
+  "repo": "https://github.com/pelican-eggs/games-steamcmd",
+  "commit": "e17e2c3db36aaf1ddecbc227803dd6cdbb0e6b1f"
+ },
  "games": [
   {
    "id": "7-days-to-die",
@@ -90,6 +93,8 @@
     "TELNET_PORT": "8081"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 17607545324
   },
   {
@@ -180,6 +185,8 @@
     "QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 3014954555
   },
   {
@@ -251,6 +258,8 @@
     "QUERY_PORT": "27016"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 1396570108
   },
   {
@@ -386,6 +395,8 @@
     "RCON_PORT": "37015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 12222927781
   },
   {
@@ -514,6 +525,8 @@
     "QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 22942306343
   },
   {
@@ -674,6 +687,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 10278170614
   },
   {
@@ -785,7 +800,9 @@
    "port_defaults": {
     "HTTP_PORT": ""
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144
   },
   {
    "id": "astro-colony",
@@ -945,6 +962,8 @@
     "SERVER_QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 355394062
   },
   {
@@ -1060,6 +1079,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 2665758135
   },
   {
@@ -1228,6 +1249,8 @@
     "QUERY_PORT": "27003"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 191405119
   },
   {
@@ -1270,6 +1293,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 267535983
   },
   {
@@ -1332,6 +1357,8 @@
     "QUERY_PORT": "27016"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2002003243
   },
   {
@@ -1411,6 +1438,8 @@
     "SRCDS_CPORT": "27005"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 30945428986
   },
   {
@@ -1494,6 +1523,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 788155146
   },
   {
@@ -1556,6 +1587,8 @@
     "QPORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2191066486
   },
   {
@@ -1628,6 +1661,8 @@
     "SERVER_STEAMPORT": "27005"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 251798620
   },
   {
@@ -1744,6 +1779,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 591725710
   },
   {
@@ -1873,6 +1910,8 @@
     "TV_PORT": "27020"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 75652631978
   },
   {
@@ -1932,6 +1971,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2395331145
   },
   {
@@ -1974,6 +2015,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 647861942
   },
   {
@@ -2072,6 +2115,8 @@
     "VAC_PORT": "26900"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 147867421
   },
   {
@@ -2186,6 +2231,8 @@
     "VAC_PORT": "26900"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 147867421
   },
   {
@@ -2297,6 +2344,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 145686644
   },
   {
@@ -2362,6 +2411,8 @@
     "QUERY_PORT": "7002"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 6567415176
   },
   {
@@ -2487,6 +2538,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 4490782099
   },
   {
@@ -2692,6 +2745,8 @@
     "RCON_PORT": ""
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 566463984
   },
   {
@@ -2830,6 +2885,8 @@
     "TELNET_PORT": "30004"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 18969621154
   },
   {
@@ -2928,6 +2985,8 @@
     "QUERY_PORT": ""
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 8824614826
   },
   {
@@ -2999,6 +3058,8 @@
     "QUERY_PORT": "27016"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 1343127998
   },
   {
@@ -3058,6 +3119,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 3250095983
   },
   {
@@ -3241,6 +3304,8 @@
     "QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 2504451070
   },
   {
@@ -3328,6 +3393,8 @@
     "RCON_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2672874133
   },
   {
@@ -3443,6 +3510,8 @@
     "QUERY_PORT": ""
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 1842270020
   },
   {
@@ -3563,6 +3632,8 @@
     "SERVER_QUERY_PORT": ""
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 10317424429
   },
   {
@@ -4060,6 +4131,8 @@
     "QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 1428683197
   },
   {
@@ -4139,6 +4212,8 @@
     "QUERY_PORT": "13871"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 3963803971
   },
   {
@@ -4239,6 +4314,8 @@
     "QUERY_PORT": "27131"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 4968712561
   },
   {
@@ -4323,6 +4400,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 4968325555
   },
   {
@@ -4468,6 +4547,8 @@
     "WEB_ADMIN_PORT": "8089"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 32089020909
   },
   {
@@ -4519,6 +4600,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 8756194936
   },
   {
@@ -4570,6 +4653,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 9792573129
   },
   {
@@ -4722,6 +4807,8 @@
     "QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 111284048
   },
   {
@@ -4835,6 +4922,8 @@
     "BEACON_PORT": "7787"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 2011927531
   },
   {
@@ -4898,6 +4987,8 @@
     "QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 342474797
   },
   {
@@ -4996,6 +5087,8 @@
     "BEACON_PORT": "15000"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 5520679746
   },
   {
@@ -5086,6 +5179,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 2927062714
   },
   {
@@ -5230,6 +5325,8 @@
     "RCON_PORT": "13888"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 8305553130
   },
   {
@@ -5314,6 +5411,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 302086297
   },
   {
@@ -5405,6 +5504,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 242143944
   },
   {
@@ -5585,6 +5686,8 @@
     "QUERY_PORT": "27016"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 7332570707
   },
   {
@@ -5644,6 +5747,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 6075846986
   },
   {
@@ -5706,6 +5811,8 @@
     "QUERY_PORT": "27016"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 4510413209
   },
   {
@@ -5908,6 +6015,8 @@
     "QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 12914111931
   },
   {
@@ -5975,6 +6084,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 8094043598
   },
   {
@@ -6035,6 +6146,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 291721219
   },
   {
@@ -6095,6 +6208,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 804660757
   },
   {
@@ -6184,6 +6299,8 @@
     "RCON_PORT": "7779"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 7006652612
   },
   {
@@ -6299,6 +6416,8 @@
     "RCON_PORT": "25575"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 4932070576
   },
   {
@@ -6380,6 +6499,8 @@
     "RCON_PORT": "8188"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 8747200689
   },
   {
@@ -6500,6 +6621,8 @@
     "CUBEPORT": ""
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 2398338420
   },
   {
@@ -6660,6 +6783,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 11030638396
   },
   {
@@ -6821,6 +6946,8 @@
     "RCON_PORT": "21114"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 34891674187
   },
   {
@@ -6905,6 +7032,8 @@
     "STEAM_PORT": "16262"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 7206115414
   },
   {
@@ -6977,6 +7106,8 @@
     "PING_PORT": ""
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 215545436
   },
   {
@@ -7039,6 +7170,8 @@
     "QUERY_PORT": "27016"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2822975828
   },
   {
@@ -7123,6 +7256,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 1078681421
   },
   {
@@ -7214,6 +7349,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2647939019
   },
   {
@@ -7308,6 +7445,8 @@
     "RCON_PORT": "4253"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2688976470
   },
   {
@@ -7439,6 +7578,8 @@
     "RCON_PORT": "4253"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2688976470
   },
   {
@@ -7591,7 +7732,9 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192
   },
   {
    "id": "runescape-dragonwilds",
@@ -7694,6 +7837,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 5484001507
   },
   {
@@ -7877,6 +8022,8 @@
     "APP_PORT": "28082"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 6111734811
   },
   {
@@ -8066,6 +8213,8 @@
     "APP_PORT": "28082"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 6111734811
   },
   {
@@ -8224,6 +8373,8 @@
     "APP_PORT": "28082"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 6111734811
   },
   {
@@ -8341,6 +8492,8 @@
     "SERVER_PORT": 7777,
     "RELIABLE_PORT": 8888
    },
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2887563617
   },
   {
@@ -8407,6 +8560,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 598947615
   },
   {
@@ -8555,6 +8710,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 1772542681
   },
   {
@@ -8594,6 +8751,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 909946660
   },
   {
@@ -8673,6 +8832,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 56582868
   },
   {
@@ -8829,6 +8990,8 @@
     "BLOBSYNC_PORT": "9700"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 3493150490
   },
   {
@@ -8935,6 +9098,8 @@
     "ECHO_PORT": "18888"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2191424807
   },
   {
@@ -9170,6 +9335,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 30945428986
   },
   {
@@ -9405,6 +9572,8 @@
     "REMOTEAPI_PORT": "8081"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 8435077888
   },
   {
@@ -9582,6 +9751,8 @@
     "REMOTEAPI_PORT": "8081"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 8435077888
   },
   {
@@ -9712,6 +9883,8 @@
     "BEACON_PORT": "15000"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 14605813115
   },
   {
@@ -9790,6 +9963,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 1126979394
   },
   {
@@ -9928,6 +10103,8 @@
     "UPDATE_PORT": "27014"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 5010173733
   },
   {
@@ -10066,6 +10243,8 @@
     "UPDATE_PORT": "27014"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 5010173733
   },
   {
@@ -10113,6 +10292,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 67889760
   },
   {
@@ -10280,7 +10461,9 @@
     "SERVER_PORT"
    ],
    "port_defaults": {},
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144
   },
   {
    "id": "sven-co-op",
@@ -10361,6 +10544,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 2789156061
   },
   {
@@ -10487,6 +10672,8 @@
     "QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 1548257104
   },
   {
@@ -10558,6 +10745,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 804660757
   },
   {
@@ -10638,6 +10827,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 6293476103
   },
   {
@@ -10750,6 +10941,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 3831419879
   },
   {
@@ -10913,6 +11106,8 @@
     "QUERY_PORT": "27016"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 1765492913
   },
   {
@@ -11113,6 +11308,8 @@
     "SHUTDOWN_PORT": "27017"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 3371538269
   },
   {
@@ -11301,7 +11498,9 @@
     "RCON_PORT": "44000",
     "QUEUE_PORT": "44000"
    },
-   "fixed_ports": {}
+   "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144
   },
   {
    "id": "the-lord-of-the-rings-return-to-moria",
@@ -11411,6 +11610,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 4297015751
   },
   {
@@ -11506,6 +11707,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 1493067988
   },
   {
@@ -11628,6 +11831,8 @@
     "QUERY_PORT": "27016"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 4267631548
   },
   {
@@ -11711,6 +11916,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 1902472307
   },
   {
@@ -12027,6 +12234,8 @@
     "VR_RCON_PORT": "25575"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 2024504069
   },
   {
@@ -12325,6 +12534,8 @@
     "RCON_PORT": "25575"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 2024504069
   },
   {
@@ -12471,6 +12682,10 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {
+    "QUERY_PORT": 1
+   },
+   "memory_mib": 6144,
    "disk_bytes": 2186649264
   },
   {
@@ -12633,6 +12848,10 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {
+    "QUERY_PORT": 1
+   },
+   "memory_mib": 6144,
    "disk_bytes": 2186649264
   },
   {
@@ -12811,6 +13030,10 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {
+    "QUERY_PORT": 1
+   },
+   "memory_mib": 6144,
    "disk_bytes": 2186649264
   },
   {
@@ -12907,6 +13130,8 @@
     "QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 9669982385
   },
   {
@@ -12995,6 +13220,8 @@
    ],
    "port_defaults": {},
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 2039045025
   },
   {
@@ -13137,6 +13364,8 @@
     "QUERY_PORT": ""
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 6144,
    "disk_bytes": 782405418
   },
   {
@@ -13306,6 +13535,8 @@
     "QUERY_PORT": "27015"
    },
    "fixed_ports": {},
+   "implicit_ports": {},
+   "memory_mib": 8192,
    "disk_bytes": 2179422123
   }
  ]

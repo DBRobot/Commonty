@@ -32,6 +32,9 @@ let
       ];
   };
   guest = guestPkgs.nixos ./game-guest.nix;
+  # the repo's catalogue, not cfg.catalogue: a test's is a derivation, and
+  # reading one here would be import from derivation
+  repoGames = (lib.importJSON ../../../data/games/catalogue.json).games;
   vm = guest.config.system.build.vm;
 
   # One instance, by id: read its record, give the guest its memory, cores
@@ -52,7 +55,9 @@ let
     # every port both ways: games use udp and tcp on the same number, and
     # the guest listens on the number the host hands it
     fwd=$(${pkgs.jq}/bin/jq -r '[.ports[] | "hostfwd=udp::\(.port)-:\(.port)", "hostfwd=tcp::\(.port)-:\(.port)"] | join(",")' "$rec")
-    rm -f "$qmp" "$d"/qmp "$d"/status
+    # a fresh start: what the guest said last time, and its count of tries
+    # that came to nothing (game-run.py), start over
+    rm -f "$qmp" "$d"/qmp "$d"/status "$d"/tries
     export DD_INSTANCE_DIR="$d"
     export NIX_DISK_IMAGE="$d"/disk.qcow2
     export QEMU_NET_OPTS="$fwd"
@@ -93,22 +98,32 @@ in
     catalogue = lib.mkOption {
       type = lib.types.path;
       default = ../../../data/games/catalogue.json;
-      description = "every game that can run: the pelican eggs, resolved by games/resolve.py";
+      description = "every game that can run: the pelican eggs, resolved by data/games/resolve.py";
     };
     covers = lib.mkOption {
       type = lib.types.path;
       default = ../../../data/games/covers;
-      description = "the games' covers, by steam app id, fetched once by games/resolve.py";
+      description = "the games' covers, by steam app id, fetched once by data/games/resolve.py";
     };
     perMember = lib.mkOption {
       type = lib.types.int;
       default = 1;
       description = "servers one member may have up at once";
     };
+    keptPerMember = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 5;
+      description = "servers one member may keep at all, stopped ones too: each holds its ports and its world on disk";
+    };
+    worldsPerMember = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 5;
+      description = "worlds one member may keep apart from any server (Keep world, delete server)";
+    };
     memoryMiB = lib.mkOption {
       type = lib.types.int;
       default = lib.max 4096 (config.dd.box.memoryBytes / (1024 * 1024) / 3);
-      description = "memory every running guest and its qemu on this box may have together: a third of the box's (box.json can say otherwise)";
+      description = "memory every running guest and its qemu on this box may have together: a third of the box's, unless its box.json says gamesMemoryMiB (modules/box/host.nix)";
     };
     portBase = lib.mkOption {
       type = lib.types.port;
@@ -129,6 +144,34 @@ in
       type = lib.types.bool;
       default = true;
       description = "run the manager and its page (a test of the template alone turns it off)";
+    };
+    fixedPorts = lib.mkOption {
+      type = lib.types.listOf lib.types.port;
+      readOnly = true;
+      # a port a game insists on, and any it opens by itself beside that
+      # one (implicit_ports, at offsets from SERVER_PORT)
+      default = lib.unique (
+        lib.concatMap (
+          g:
+          let
+            fixed = g.fixed_ports or { };
+          in
+          lib.attrValues fixed
+          ++ lib.optionals (fixed ? SERVER_PORT) (
+            map (o: fixed.SERVER_PORT + o) (lib.attrValues (g.implicit_ports or { }))
+          )
+        ) repoGames
+      );
+      description = "every port a catalogue game insists on, whatever the pool: ports.nix reserves them, and they are in reach";
+    };
+    reach = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      readOnly = true;
+      default = [
+        "${toString cfg.portBase}-${toString (cfg.portBase + cfg.portCount - 1)}"
+      ]
+      ++ map toString cfg.fixedPorts;
+      description = "the ports a player's device may reach on this box, as headscale's policy writes them: the pool and the fixed ports. The one list headscale and the flake read";
     };
   };
 
@@ -191,7 +234,7 @@ in
     dd.box.plaintext = [ "games (servers members start; their worlds)" ];
 
     # fixed ids: the guest's game user has the same, so a 9p share needs no
-    # id mapping (modules/game-guest.nix)
+    # id mapping (nix/modules/games/game-guest.nix)
     # nginx opens the manager's socket; naming users.users.nginx where nginx
     # does not run would leave a user with no group and no kind
     users.users.nginx = lib.mkIf config.services.nginx.enable {
@@ -212,6 +255,10 @@ in
       # and each machine's control socket
       "d ${dir}/records 0750 dd-games dd-games -"
       "d ${dir}/control 0750 dd-games dd-games -"
+      # backed up (roles/game.nix) before anyone is invited or keeps a
+      # world: a path missing from a backup fails it
+      "d ${dir}/players 0750 dd-games dd-games -"
+      "d ${dir}/worlds 0750 dd-games dd-games -"
     ];
 
     # The manager: makes and removes the records, starts and stops the
@@ -240,6 +287,8 @@ in
         DD_GAMES_PORT_BASE = toString cfg.portBase;
         DD_GAMES_PORT_COUNT = toString cfg.portCount;
         DD_GAMES_PER_MEMBER = toString cfg.perMember;
+        DD_GAMES_KEPT_PER_MEMBER = toString cfg.keptPerMember;
+        DD_GAMES_WORLDS_PER_MEMBER = toString cfg.worldsPerMember;
         DD_GAMES_MEMORY_MIB = toString cfg.memoryMiB;
         DD_GAMES_ADDRESS = config.dd.box.net;
         # this box on the fleet's network, where the players it lets in are
@@ -254,7 +303,7 @@ in
         Group = "dd-games";
         RuntimeDirectory = "dd-games";
         RuntimeDirectoryMode = "0750";
-        ExecStartPre = "+${pkgs.coreutils}/bin/install -d -o dd-games -g dd-games -m 0750 ${dir} ${dir}/instances";
+        ExecStartPre = "+${pkgs.coreutils}/bin/install -d -o dd-games -g dd-games -m 0750 ${dir} ${dir}/instances ${dir}/records ${dir}/players ${dir}/worlds";
         ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.games}/bin/dd-games";
         Restart = "on-failure";
         NoNewPrivileges = true;
@@ -299,7 +348,8 @@ in
       };
     };
 
-    # each game's real memory, from its worlds as they run (games-measure.sh)
+    # each game's highest memory peak as its worlds run (games-measure.sh,
+    # which says why nothing sizes from it)
     systemd.services.dd-games-measure = {
       description = "Record what each running game takes";
       path = [

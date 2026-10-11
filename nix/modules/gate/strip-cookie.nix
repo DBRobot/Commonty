@@ -9,9 +9,17 @@ let
   location =
     { config, ... }:
     {
+      # A location that must send less sets this, never a Cookie line of its
+      # own: nginx sends every proxy_set_header Cookie it is given, so the
+      # backend would still get every cookie but ours.
+      options.ddCookie = lib.mkOption {
+        type = lib.types.str;
+        default = "$dd_cookie_stripped";
+        description = "The Cookie this location sends on: $dd_cookie_stripped or a variable made from it, never $http_cookie; empty sends none.";
+      };
       config.extraConfig = lib.mkIf (
         config.proxyPass != null && !lib.hasInfix gatePort config.proxyPass
-      ) (lib.mkAfter "proxy_set_header Cookie $dd_cookie_stripped;");
+      ) (lib.mkAfter ''proxy_set_header Cookie "${config.ddCookie}";'');
     };
 in
 {

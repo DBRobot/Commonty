@@ -20,7 +20,7 @@ pkgs.runCommand "control-e2e"
     export HOME=$TMPDIR WRANGLER_SEND_METRICS=false CI=1 CLOUDFLARE_CF_FETCH_ENABLED=false
     # the state machine's and the validators' own tests first: the build of
     # dd-control compiles only its command
-    cp -r ${../../box/control} src && chmod -R u+w src
+    cp -r ${../../servers/system/control} src && chmod -R u+w src
     cp -r ${self.packages.${sys}.dd-control.goModules} src/vendor
     (cd src && GOFLAGS=-mod=vendor GOCACHE=$TMPDIR/go-cache CGO_ENABLED=0 go test ./state/ ./validator/ ./cmd/dd-control/)
     mkdir w && cp ${self.packages.${sys}.control-worker}/{worker.js,wasm_exec.js,witness.wasm} w/

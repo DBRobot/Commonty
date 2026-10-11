@@ -43,10 +43,12 @@ in
     };
     # The access log keeps the path and never the query string: that is
     # where share links, one-time codes and search terms travel. The
-    # referrer, which is another page's whole address, is cut the same way.
+    # referrer, which is another page's whole address, is cut the same way,
+    # and a friend link's page to before its secret, which is its path.
     appendHttpConfig = ''
       map $http_referer $dd_referer_path {
         default "";
+        "~^(?<dd_ref>[^?#]*?/_dd/friend/)" $dd_ref;
         "~^(?<dd_ref>[^?#]*)" $dd_ref;
       }
       log_format dd_path '$remote_addr - $remote_user [$time_local] '

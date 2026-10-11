@@ -65,7 +65,7 @@ in
           # signs nobody in. Newer museum does this itself (its migrations
           # 134+), from the plain tokens: a bump has to carry these hashes
           # into its token_hash column by hand, not hash them again
-          patches = (o.patches or [ ]) ++ [ ../../../box/photos/museum-hash-tokens.patch ];
+          patches = (o.patches or [ ]) ++ [ ../../../servers/photos/museum-hash-tokens.patch ];
         });
         ente-web = prev.ente-web.overrideAttrs (
           o:
@@ -87,19 +87,20 @@ in
             # every app wears the site's colours, type and corners
             patches =
               (o.patches or [ ])
-              ++ [ ../../../box/photos/ente-web-theme.patch ]
+              ++ [ ../../../servers/photos/ente-web-theme.patch ]
               ++ lib.optionals photos [
                 # every way out of the app that would show ente's own sign-in
                 # or sign-up goes to the passkey page instead: the app is
                 # reached only through it
-                ../../../box/photos/ente-web-passkey.patch
+                ../../../servers/photos/ente-web-passkey.patch
                 # the site's own bar across the top
-                ../../../box/photos/ente-web-commonty.patch
+                ../../../servers/photos/ente-web-commonty.patch
                 # the menu: the site's, with a passkey where Ente asks for the
-                # password nobody here knows, and nothing that needs it (hiding)
-                ../../../box/photos/ente-web-commonty-menu.patch
+                # password nobody here knows (the recovery key, the hidden
+                # section), and none of what changes it (account, plans)
+                ../../../servers/photos/ente-web-commonty-menu.patch
                 # pictures on screen fetched first, those flung past not at all
-                ../../../box/photos/ente-web-commonty-thumbs.patch
+                ../../../servers/photos/ente-web-commonty-thumbs.patch
               ];
             # Next names each build at random, and every page carries the
             # name: two builds of the same source never matched, and the
@@ -112,7 +113,7 @@ in
               ''
               + lib.optionalString photos ''
                 # the bar's stylesheet is the site's own file, not a copy of it
-                cp ${../../../box/web/bar.css} apps/photos/src/styles/commonty-bar.css
+                cp ${../../../servers/web-shared/bar.css} apps/photos/src/styles/commonty-bar.css
                 # The grid drew three rows past the screen, and a picture is only
                 # fetched once it is drawn: scrolling reached pictures still on
                 # their way. Twenty rows is a few screens of warning.
@@ -138,8 +139,6 @@ in
       })
     ];
 
-    # the login route, probed every few minutes; a 500 there is the known
-    # panic and a restart is the cure (ente-health.sh)
     # the sessions made before the patch, hashed once (a token is never 64
     # hex characters, a hash always is), before museum reads the table
     systemd.services.ente.path = [ config.services.postgresql.package ];
@@ -151,6 +150,8 @@ in
       SQL
     '';
 
+    # the login route, probed every few minutes; a 500 there is the known
+    # panic and a restart is the cure (ente-health.sh)
     systemd.services.ente-health = {
       description = "Restart museum when its login route is broken";
       after = [ "ente.service" ];
@@ -247,7 +248,7 @@ in
         # on its own name: same origin, so the member's session comes along.
         # Museum as it is, but for the two calls that carry the fleet's
         # verification code, which the gate makes with the code filled in
-        # (box/verify/src/photos.rs, museum_verify).
+        # (servers/gate/src/photos.rs, museum_verify).
         ${d "photos"} = {
           useACMEHost = base;
           forceSSL = true;

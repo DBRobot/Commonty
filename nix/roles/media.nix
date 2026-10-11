@@ -2,7 +2,7 @@
 {
   # People's files and the Movies & TV and Files tiles. Media lives
   # encrypted in each person's library and plays on the page's own player
-  # (box/media, box/transcode); the demo's is the demo library.
+  # (servers/media, servers/transcode); the demo's is the demo library.
   imports = [
     ./_sops.nix
     ../modules/gate/user-accounts.nix

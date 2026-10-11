@@ -21,4 +21,4 @@ also needs Hardware and ports. Delete a section your type does not need.
 <!-- what could break, and how to undo it -->
 
 ## Hardware and ports
-<!-- service: only. What it needs from a box (cpu, memory, disk, gpu, kvm, tpm) and the ports it listens on (docs/hardware.md) -->
+<!-- service: only. What it needs from a box (cpu, memory, disk, gpu, kvm, tpm) and the ports it listens on (docs/dev/hardware.md) -->

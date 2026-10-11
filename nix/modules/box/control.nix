@@ -1,4 +1,4 @@
-# The control plane on this box (box/control, docs/control-plane.md):
+# The control plane on this box (servers/system/control, docs/dev/control-plane.md):
 # dd-control heartbeats what the box has and runs, signed by its TPM, and
 # keeps the agreed state at http://127.0.0.1:4195/state, checked against the
 # validators' signatures. A box named as its house's validator in
@@ -53,7 +53,7 @@ in
           "-tpm-keys /boot/dd/unlock"
           "-listen 127.0.0.1:4195"
           (lib.optionalString (roles != "") "-roles ${roles}")
-          # the gate hands in directory items here (box/verify/src/directory.rs)
+          # the gate hands in directory items here (servers/gate/src/directory.rs)
           (lib.optionalString config.dd.verify.enable "-submit /run/dd-control/submit.sock -submit-group dd-verify")
           # dd-attest hands in what it built for a build order here
           "-builds /run/dd-control/built.sock"

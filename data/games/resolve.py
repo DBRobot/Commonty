@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
 """Turn the pelican eggs into the catalogue: every Steam dedicated server the
 eggs know, with its game's store id (for the cover) and our names for its
-common settings. Run when the eggs input moves; the result is committed.
+common settings. Run by hand when the eggs should move; the result is
+committed, and says which eggs it was made from ("eggs": the repository and
+the commit of the checkout).
 
-  games/resolve.py <eggs checkout> games/catalogue.json games/covers/
+  git clone https://github.com/pelican-eggs/games-steamcmd eggs
+  git -C eggs checkout <commit>      # the catalogue's "eggs.commit", or newer
+  data/games/resolve.py eggs data/games/catalogue.json data/games/covers/
+  data/games/sizes.py data/games/catalogue.json
 """
 
-import json, glob, re, sys, os, time, urllib.request, urllib.parse
+import json
+import glob
+import re
+import sys
+import os
+import subprocess
+import time
+import urllib.request
+import urllib.parse
 
 eggs_dir, out, covers = sys.argv[1:4]
 os.makedirs(covers, exist_ok=True)
@@ -37,6 +50,25 @@ RELABEL = {"AUTO_UPDATE": ("Update on start", "0")}
 # Every other port the manager hands from the pool. Curated: an egg's default
 # is what it would pick, not what it needs.
 FIXED_PORTS = {"satisfactory": {"SERVER_PORT": 7777, "RELIABLE_PORT": 8888}}
+# ports a game opens by itself at SERVER_PORT plus an offset, with no egg
+# variable to move them: the manager holds and forwards them with
+# SERVER_PORT, so the pool never hands one to another server. By id;
+# curated, only where the game is known to do it (valheim's steam query).
+IMPLICIT_PORTS = {
+    "valheim": {"QUERY_PORT": 1},
+    "valheim-bepinex": {"QUERY_PORT": 1},
+    "valheim-plus-mod": {"QUERY_PORT": 1},
+}
+# MiB a game's guest gets. Nothing in an egg says, so a class: wine servers
+# want more. The manager and the placement (needs.nix) both read the figure
+# written here; a game known to need otherwise gets its own in MEMORY.
+MEMORY = {}
+
+
+def memory(slug, wine):
+    return MEMORY.get(slug) or (8192 if wine else 6144)
+
+
 HIDE = {
     "SRCDS_APPID",
     "SRCDS_BETAID",
@@ -188,9 +220,10 @@ for p in sorted(glob.glob(os.path.join(eggs_dir, "**", "egg-*.json"), recursive=
     if isinstance(ready, list):
         ready = ready[0] if ready else None
     stop = cfg.get("stop", "^C")
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     games.append(
         {
-            "id": re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-"),
+            "id": slug,
             "egg": egg,
             "name": name,
             "description": d.get("description", ""),
@@ -209,6 +242,8 @@ for p in sorted(glob.glob(os.path.join(eggs_dir, "**", "egg-*.json"), recursive=
                 k: vars_[k]["default_value"] for k in vars_ if PORTS.search(k)
             },
             "fixed_ports": FIXED_PORTS.get(name.lower(), {}),
+            "implicit_ports": IMPLICIT_PORTS.get(slug, {}),
+            "memory_mib": memory(slug, wine),
         }
     )
 # one entry per game: prefer the linux one over the wine one, the plain over the mod
@@ -218,11 +253,23 @@ for g in games:
     if key not in seen or (seen[key]["wine"] and not g["wine"]):
         seen[key] = g
 games = sorted(seen.values(), key=lambda g: g["name"].lower())
-json.dump(
-    {"eggs": os.path.basename(os.path.abspath(eggs_dir)), "games": games},
-    open(out, "w"),
-    indent=1,
-)
+
+
+def git(*args):
+    return subprocess.run(
+        ["git", "-C", eggs_dir, *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+# what it was made from: a checkout of the eggs, at one commit
+eggs = {"repo": git("remote", "get-url", "origin"), "commit": git("rev-parse", "HEAD")}
+if git("status", "--porcelain"):
+    sys.exit(
+        "the eggs checkout has changes; the catalogue would not say what it came from"
+    )
+with open(out, "w") as f:
+    json.dump({"eggs": eggs, "games": games}, f, indent=1)
+    f.write("\n")
 print(
     len(games),
     "games,",

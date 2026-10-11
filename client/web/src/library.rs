@@ -211,18 +211,29 @@ impl Opener {
     }
 }
 
-/// The library's data key, sealed to a box that is about to do one job
-/// on one file. The box can read this library while the session lasts,
-/// which is what transcoding is: plaintext in its memory for one film,
-/// nothing kept. Nothing else about the library goes with it, and the
-/// key it is sealed to is thrown away when the box restarts.
-fn key_for_box(library_key_b64: &str, id: &str, box_public_b64: &str) -> R<String> {
+/// One file's block keys, sealed to a box that is about to do one job on
+/// it: from the file's header and sealed size, every block of it. The box
+/// can read that one file while the session lasts and nothing else of the
+/// library; the data key never leaves this tab. 32 bytes a 64 KiB block:
+/// 1 MiB for a 2 GB film. The key it is sealed to is thrown away when the
+/// box restarts.
+fn blocks_for_box(
+    library_key_b64: &str,
+    id: &str,
+    header: &[u8],
+    sealed_size: f64,
+    box_public_b64: &str,
+) -> R<String> {
     let c = cipher(library_key_b64, id)?;
-    library::seal_to_x25519(box_public_b64, &c.data_key()[..]).map_err(err)
+    let plain = library::crypt::plain_size(sealed_size as u64).map_err(err)?;
+    let keys = c
+        .block_keys(header, plain.div_ceil(library::crypt::BLOCK as u64))
+        .map_err(err)?;
+    library::seal_to_x25519(box_public_b64, &keys).map_err(err)
 }
 
 /// A passkey's secret sealed to an app's one-time key: how the Photos
-/// password reaches the app (box/photos), which cannot use a passkey itself.
+/// password reaches the app (servers/photos), which cannot use a passkey itself.
 /// The secret comes base64url, as the page has it; only that key opens it.
 fn secret_for_app(app_public_b64: &str, secret_b64u: &str) -> R<String> {
     use base64::Engine as _;
@@ -279,12 +290,20 @@ pub fn file_seal(library_key_b64: &str, id: &str, plain: &[u8]) -> Result<Vec<u8
 }
 
 #[wasm_bindgen]
-pub fn library_key_for_box(
+pub fn library_blocks_for_box(
     library_key_b64: &str,
     id: &str,
+    header: &[u8],
+    sealed_size: f64,
     box_public_b64: &str,
 ) -> Result<String, JsValue> {
-    js(key_for_box(library_key_b64, id, box_public_b64))
+    js(blocks_for_box(
+        library_key_b64,
+        id,
+        header,
+        sealed_size,
+        box_public_b64,
+    ))
 }
 
 #[wasm_bindgen]
@@ -407,16 +426,41 @@ mod tests {
         assert!(open(&json, &id, &stranger).is_err());
     }
 
+    /// a box gets one file's block keys, sealed to it: they open that
+    /// file there, and no other box opens them
     #[test]
-    fn the_data_key_goes_to_a_box_sealed_and_to_no_one_else() {
+    fn one_files_keys_go_to_a_box_sealed_and_to_no_one_else() {
+        use base64::Engine as _;
         let (public, secret) = library::ephemeral();
-        let key = library::random_key();
-        let k = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &key[..]);
-        let sealed = key_for_box(&k, "aa", &public).unwrap();
-        let opened = library::open_x25519(&secret, &sealed).unwrap();
-        let c = cipher(&k, "aa").unwrap();
-        assert_eq!(&opened[..], &c.data_key()[..]);
-        let (_, other) = library::ephemeral();
-        assert!(library::open_x25519(&other, &sealed).is_err());
+        let k = base64::engine::general_purpose::STANDARD.encode(&library::random_key()[..]);
+        let id = "aa";
+        let plain: Vec<u8> = (0..(2 * library::crypt::BLOCK + 5))
+            .map(|i| i as u8)
+            .collect();
+        let sealed = seal_file(&k, id, &plain).unwrap();
+        let hdr = &sealed[..library::crypt::HEADER];
+        let to_box = blocks_for_box(&k, id, hdr, sealed.len() as f64, &public).unwrap();
+        let keys = library::open_x25519_bytes(&secret, &to_box).unwrap();
+        assert_eq!(keys.len(), 3 * library::crypt::BLOCK_KEY);
+        let o = library::crypt::BlockOpener::new(hdr, keys).unwrap();
+        let mut back = Vec::new();
+        for (n, b) in sealed[library::crypt::HEADER..]
+            .chunks(library::crypt::SEALED_BLOCK)
+            .enumerate()
+        {
+            back.extend(o.block(n as u64, b).unwrap());
+        }
+        assert_eq!(back, plain);
+        // another file of the same library stays shut to them
+        let other = seal_file(&k, id, &plain).unwrap();
+        assert!(
+            o.block(
+                0,
+                &other[library::crypt::HEADER..][..library::crypt::SEALED_BLOCK]
+            )
+            .is_err()
+        );
+        let (_, stranger) = library::ephemeral();
+        assert!(library::open_x25519_bytes(&stranger, &to_box).is_err());
     }
 }

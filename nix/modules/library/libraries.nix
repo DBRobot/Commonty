@@ -1,7 +1,8 @@
 # The members' encrypted libraries (crate library): one bucket, a prefix per
 # library, and the verifier's gate as the only way in. The box holds
 # ciphertext and one key of its own for the bucket; a member's device never
-# sees that key, it asks the gate for a url to one object at a time.
+# sees that key, it asks the gate, which moves the bytes of one object at a
+# time.
 {
   config,
   lib,
@@ -30,22 +31,9 @@ in
         "read"
         "write"
       ];
-      # devices fetch and upload chunks straight to the bucket with the urls
-      # the gate signs; the objects are ciphertext, the signature is the
-      # access control
-      cors = {
-        CORSRules = [
-          {
-            AllowedOrigins = [ "*" ];
-            AllowedMethods = [
-              "GET"
-              "PUT"
-            ];
-            AllowedHeaders = [ "*" ];
-            MaxAgeSeconds = 3600;
-          }
-        ];
-      };
+      # no CORS: no page reaches the bucket. Devices go through the gate,
+      # which streams the bytes, and the one presigned url handed out goes
+      # to the transcoder, which fetches it server to server
     };
     # what a visitor sees on the Files page: a library of its own, empty,
     # read-only. The key is in the open because the demo cannot keep one.

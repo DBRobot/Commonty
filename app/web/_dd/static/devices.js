@@ -300,7 +300,7 @@ function remove(k, label) {
   $('remove').showModal();
 }
 
-// Adding a device by QR code (box/verify/src/adddevice.rs). The account's
+// Adding a device by QR code (servers/gate/src/adddevice.rs). The account's
 // main key approves: a passkey one here, or a device one in the app on the
 // device that holds it.
 let rootHere = false;
@@ -310,7 +310,9 @@ async function canAdd() {
   if (entry.entry.root.startsWith('webauthn:')) return true;
   if (!inApp) return false;
   const r = await appFetch('/_dd/app/root').catch(() => null);
-  return !!(r && r.ok && (await r.json()).here && (rootHere = true));
+  const here = !!(r && r.ok && (await r.json()).here);
+  if (here) rootHere = true;
+  return here;
 }
 
 function adPanel(which) {

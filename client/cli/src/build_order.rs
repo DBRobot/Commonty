@@ -5,7 +5,7 @@
 //! its answer is signed by its host key, so neither the relay, the forge nor
 //! the box the log is read through can put words in its mouth. Two builders
 //! per job, as far apart as the fleet allows: a different owner, house and
-//! region where there is one (docs/app-release.md).
+//! region where there is one (docs/dev/app-release.md).
 
 use std::collections::BTreeMap;
 
