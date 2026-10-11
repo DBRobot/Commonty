@@ -27,7 +27,7 @@ let
   publicNames = map (h: "${h}.${base}") cfg.hosts ++ lib.optional cfg.bare base;
   # the demo's doors: demo-<service>.<domain>, each the service's own site
   # under a second name that outsiders may reach and that lets only the
-  # demo in (the gate says who: box/verify/src/lib.rs, demo_door and verify)
+  # demo in (the gate says who: servers/gate/src/lib.rs, demo_door and verify)
   demoParents = map (h: "${h}.${base}") cfg.demoDoors;
   demoNames = map (h: "demo-${h}.${base}") cfg.demoDoors;
   outside = publicNames ++ demoNames;

@@ -1,7 +1,7 @@
 # Ad blocking at home: Pi-hole on the house's box, a device on the house
-# network and one on the Commonty network (a second test network stands in
-# for it), and the household switching it through the gate. The blocklist
-# is a file here: the test has no internet.
+# network and one away on the Commonty network (a second test network stands
+# in for it) that asks the box there, and the household switching it
+# through the gate. The blocklist is a file here: the test has no internet.
 { pkgs, self, ... }:
 let
   blocklist = pkgs.writeText "blocklist" "0.0.0.0 ads.example.test\n0.0.0.0 tracker.example.test\n";

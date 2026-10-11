@@ -1,9 +1,9 @@
 # Every fixed port a service on this box listens on, by service. Two
 # services claiming one port fail the build (in CI), not the box's switch -
 # release 172 rolled back on node1 because dd-control took the transcoder's
-# 4190. Services from nixpkgs are listed here when this box has them; our
-# own modules say theirs. An hourly check compares the list with what is
-# actually listening, so a service that never said is found (dd-ports-check).
+# 4190. Every service is listed here, ours and nixpkgs' alike, each when
+# this box runs its unit. An hourly check compares the list with what is
+# actually listening, so a service never listed is found (dd-ports-check).
 # Ports from 32768 up are the kernel's to hand out and are not listed.
 {
   config,
@@ -97,7 +97,7 @@ in
       (lib.mkIf (lib.any (lib.hasPrefix "cloudflared-tunnel-") (lib.attrNames config.systemd.services)) {
         cloudflared = [ 20241 ];
       })
-      # ours (box/*): each where its module runs it
+      # ours (servers/*): each where its module runs it
       (lib.mkIf (has "dd-verify") { verify = [ config.dd.verify.port ]; })
       (lib.mkIf (has "dd-transcode") {
         transcode = [
@@ -106,16 +106,12 @@ in
         ];
       })
       # the pool worlds are handed ports from, and every port a game insists
-      # on (data/games/catalogue.json fixed_ports): no service of ours may
-      # take one, or that game could never start here
+      # on (dd.games.fixedPorts): no service of ours may take one, or that
+      # game could never start here
       (lib.mkIf (has "dd-games") {
         games =
           lib.range config.dd.games.portBase (config.dd.games.portBase + config.dd.games.portCount - 1)
-          ++ lib.unique (
-            lib.concatMap (
-              g: lib.attrValues (g.fixed_ports or { })
-            ) (lib.importJSON ../../../data/games/catalogue.json).games
-          );
+          ++ config.dd.games.fixedPorts;
       })
       (lib.mkIf (has "dd-control") { control = [ 4195 ]; })
       (lib.mkIf (has "dd-ci-cancel") { ci-cancel = [ 3003 ]; })

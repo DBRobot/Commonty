@@ -15,7 +15,7 @@ in
   # against the release key it was built with, refuses anything older than
   # what it last applied, fetches its own closure, checks the hash,
   # switches, probes, and rolls back if the box is not a box afterwards.
-  # Nothing pushes to a box. bin/deploy stays as the hand on the wheel.
+  # Nothing pushes to a box.
   options.dd.agent = {
     enable = lib.mkEnableOption "the release agent";
     url = lib.mkOption {
@@ -64,7 +64,7 @@ in
     };
 
     # this box's word on a release before it is signed: `dd release
-    # publish` runs it over ssh with sudo (box/release/src/bin/dd-attest.rs)
+    # publish` runs it over ssh with sudo (servers/system/release/src/bin/dd-attest.rs)
     environment.systemPackages = [
       (pkgs.writeShellScriptBin "dd-attest" ''
         export PATH=${
@@ -108,7 +108,7 @@ in
         EnvironmentFile = lib.optional (cfg.cacheEnvFile != null) cfg.cacheEnvFile;
       };
     };
-    # Build orders (docs/app-release.md): the release key names which boxes
+    # Build orders (docs/dev/app-release.md): the release key names which boxes
     # build what; a box named builds it, rebuilds what it did not build
     # itself, and puts its signed word in the agreed log through
     # dd-control. Beside the release file, fetched the same way.

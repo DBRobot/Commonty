@@ -272,7 +272,7 @@ def kind_matches(files):
 
 
 def slug(text):
-    # as the docs page and the bar's search make it (box/web/shell.js)
+    # as the docs page and the bar's search make it (servers/web-shared/shell.js)
     text = re.sub(r"[^\w\s-]", "", text.lower())
     return re.sub(r"\s+", "-", text.strip())
 

@@ -1,6 +1,6 @@
 // What every page shares: finding and making elements, and getting data the
 // fast way - what was shown before at once, the fresh answer when it lands
-// (docs/ui.md). A page imports what it uses; nothing here draws a page.
+// (docs/dev/ui.md). A page imports what it uses; nothing here draws a page.
 
 export const $ = (id) => document.getElementById(id);
 

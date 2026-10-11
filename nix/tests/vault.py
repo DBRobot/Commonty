@@ -75,7 +75,6 @@ assert "send.js" in page, page
 box.succeed(
     "curl -sf http://127.0.0.1:4181/_dd/static/send.js | grep -q bitwarden-send"
 )
-box.succeed("curl -sf http://127.0.0.1:4181/_dd/static/vault-bar.js -o /dev/null")
 # the web vault is the app's now: a browser here is told so, and the same
 # page starts a Bitwarden app's sign-in
 page = box.succeed("curl -sf http://127.0.0.1:4181/_dd/use-app")

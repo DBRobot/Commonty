@@ -12,7 +12,6 @@
       name = "Chat";
       blurb = "An AI model that runs on the box, not in someone else's cloud.";
       url = "https://llm.${config.dd.domain}/";
-      # a prompt is real compute on one model: ten an hour for the demo
       # ten messages an hour for each demo, sixty for every demo together:
       # a model's answer takes the box's whole cpu for seconds
       demo = "rate:10/60";

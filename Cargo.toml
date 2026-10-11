@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
-  "box/release",
-  "box/verify",
-  "box/library",
-  "box/games",
-  "box/transcode",
-  "box/archive",
+  "servers/system/release",
+  "servers/gate",
+  "servers/library",
+  "servers/games",
+  "servers/transcode",
+  "client/archive",
   "client/cli",
   "client/identity",
   "client/library",

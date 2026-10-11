@@ -1,5 +1,5 @@
 // Storage, a tab of Settings: one allowance across every service, as the
-// storage ledger last counted it (box/verify/src/storage.rs). One bar,
+// storage ledger last counted it (servers/gate/src/storage.rs). One bar,
 // split by service.
 const $ = (id) => document.getElementById(id);
 const services = [

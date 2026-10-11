@@ -1,4 +1,4 @@
-//! The control plane's relay at Cloudflare (box/control/worker): set up once
+//! The control plane's relay at Cloudflare (servers/system/control/worker): set up once
 //! with `dd control setup`, uploaded by `dd release publish` from the release
 //! it ships with, beside the mail Worker and with the same token. The
 //! witness's key is made here, handed straight to the Worker as a secret and

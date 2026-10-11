@@ -1,5 +1,5 @@
 //! A member's disk archives in the browser: restic's repository format, as
-//! `dd image` writes it (box/archive). The archive password comes sealed to
+//! `dd image` writes it (client/archive). The archive password comes sealed to
 //! the passkey (dd-passkeys.json, written by `dd image passkey`); opened
 //! here it unlocks restic's key file, and the master key opens everything
 //! else - the list of archives, the index, the pieces of a disk. Nothing is

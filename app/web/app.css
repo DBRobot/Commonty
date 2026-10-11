@@ -37,7 +37,7 @@ button.link:hover { background: none; color: var(--link-hover); }
 #page-home .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0 4px; }
 #page-home .row > * { margin-top: 0; margin-bottom: 0; }
 
-/* the shape of a screen, until the first one draws (docs/ui.md) */
+/* the shape of a screen, until the first one draws (docs/dev/ui.md) */
 .skel span { display: block; height: 12px; margin: 0 0 14px; border-radius: 2px; background: var(--line-2); }
 .skel span.h { height: 26px; width: 60%; margin-bottom: 22px; }
 .skel span.short { width: 45%; }

@@ -55,6 +55,51 @@ assert p["status_check_contexts"] == ["entry_point / ci_ok (pull_request)"], p[
 ]
 assert p["block_on_outdated_branch"], p
 assert p["required_approvals"] == 0
+# and nobody pushes main directly, the admin included
+assert not p["enable_push"], p
+
+# no private repositories: the forge's database refuses one, made or changed
+box.wait_for_unit("dd-forge-rules.service")
+box.fail(
+    "curl -sf --unix-socket %s -X POST -H 'X-WEBAUTH-USER: %s' -H 'content-type: application/json' "
+    '-d \'{"name":"secret","private":true}\' '
+    "http://forgejo/api/v1/user/repos" % (nix["sock"], nix["admin"])
+)
+box.fail(
+    "curl -sf --unix-socket %s -X PATCH -H 'X-WEBAUTH-USER: %s' -H 'content-type: application/json' "
+    "-d '{\"private\":true}' http://forgejo/api/v1/repos/%s/commonty"
+    % (nix["sock"], nix["admin"], nix["admin"])
+)
+assert not json.loads(
+    box.succeed(
+        "curl -sf --unix-socket %s -H 'X-WEBAUTH-USER: %s' http://forgejo/api/v1/repos/%s/commonty"
+        % (nix["sock"], nix["admin"], nix["admin"])
+    )
+)["private"]
+
+# a runner registered for every repository is the admin's, unless all it
+# runs is members' sandboxed jobs
+sql = "sudo -u postgres psql -d forgejo -tAc"
+box.succeed(
+    f'{sql} "insert into action_runner (uuid, name, owner_id, repo_id, token_hash, agent_labels) values '
+    "('00000000-0000-0000-0000-000000000001', 'host', 0, 0, 'h1', '[\\\"nix\\\"]'), "
+    "('00000000-0000-0000-0000-000000000002', 'members', 0, 0, 'h2', '[\\\"members\\\"]')\""
+)
+admin_id = box.succeed(
+    f'{sql} "select id from \\"user\\" where lower_name = lower(\'{nix["admin"]}\')"'
+).strip()
+assert (
+    box.succeed(
+        f"{sql} \"select owner_id from action_runner where name = 'host'\""
+    ).strip()
+    == admin_id
+)
+assert (
+    box.succeed(
+        f"{sql} \"select owner_id from action_runner where name = 'members'\""
+    ).strip()
+    == "0"
+)
 
 # a run a restart killed is run again: the timer is set, and a pass over a
 # forge with no runs finds nothing to do and fails nothing

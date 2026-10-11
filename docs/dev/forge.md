@@ -1,0 +1,524 @@
+# The forge
+
+The forge is where the fleet's code lives: its repositories, pull
+requests, issues, CI runs and releases, and members' own repositories
+beside them. It is [Forgejo](https://forgejo.org), run on one box at
+`git.<domain>`, with our own pages in front of it. Forgejo keeps the data
+and does the work; the pages people see are ours, and draw themselves from
+Forgejo's API as whoever the gate says is looking.
+
+This page is how the forge is put together. How CI uses it (the workflow,
+what blocks a merge, how to change a check) is [its own page](ci.md); the
+GitHub copy is [the mirror](mirror.md).
+
+## Where it is
+
+```
+nix/roles/forge.nix                   the role: forgejo, the mirror, the tile on home, backups
+nix/roles/runner.nix                  the runner role: both runners and the nix cache key
+nix/modules/forge/
+  forgejo.nix                         Forgejo's settings, sign-in, nginx, the setup units
+  forgejo-setup.sh                    main's rule, through the API
+  live.nix                            the database trigger behind the pages' live updates
+  ci-cancel.py                        a failing job stops its run
+  ci-resume.py                        a run a restart killed is run again
+  forgejo-runner.nix                  the host runner: the fleet's own CI
+  members-runner.nix                  the members' runner: Docker under gVisor
+  runner-address.sh                   a runner waits for the forge before it registers
+  forgejo-mirror.nix                  push mirrors to GitHub
+  needs.nix                           what each part needs of a box
+servers/forge/web/                    the Git pages
+servers/gate/src/forge_events.rs      the pages' live updates, from the gate
+nix/tests/forge.nix, forge.py         the forge, booted
+nix/tests/members-runner.nix, .py     a member's job, kept in its box
+```
+
+The `forge` role runs on one box (`fleet/boxes.json`; node1 today), always
+beside the `gateway` role ([`fleet/roles.json`](../../fleet/roles.json)):
+Forgejo uses the box's PostgreSQL, the one Photos and Passwords use. The
+`runner` role is separate and goes on any box that can run VM tests.
+
+## Who talks to whom
+
+```
+browser ── https://git.<domain>/... ──> nginx (the forge's box)
+                                          │
+   /owner/repo, /owner/repo/pulls, /  ────┼──> gate :4181  /_dd/git   the one page (servers/forge/web)
+   /_dd/...  (scripts, sign-in, events) ──┼──> gate :4181  /_dd/...
+                                          │
+   /api/..., *.git, raw, archive, logs ───┼──> auth_request /_dd/verify ──> gate: who is this?
+                                          │       X-WEBAUTH-USER: <name>
+                                          │         │
+                                          │         v
+                                          │    /run/forgejo/forgejo.sock ──> Forgejo ──> PostgreSQL
+                                          │    (group forgejo, dir 0750)          │        "forgejo"
+   /_dd/ci/cancel/<run> ──────────────────┴──> ci-cancel.py :3003 ──> socket       │
+                                                                                   │ trigger: pg_notify
+   gate ── LISTEN dd_forge (as dd-verify, no table) ──────────────────────────────┘
+     └── /_dd/git/events?repo=<id> ── Server-Sent Events ──> the page
+
+runner boxes ── https://git.<domain> ──> nginx ──> Forgejo   (fetch jobs, report, push statuses)
+ci-resume.py (timer) ──> socket          forgejo-mirrors (oneshot) ──> socket
+Forgejo ── push mirror, on every push and every 8 h ──> github.com
+```
+
+Forgejo listens on nothing but its socket. Everything outside the box
+reaches it through nginx, and everything on the box that acts for someone
+(the setup units, ci-cancel, ci-resume, the mirror's setup) opens the
+socket as the admin.
+
+## Signing in
+
+Nobody has a password on the forge, and nobody signs up there. Forgejo is
+set to believe a header, `X-WEBAUTH-USER`, for both its pages and its API,
+and to make the account the first time it sees a name
+([`forgejo.nix`](../../nix/modules/forge/forgejo.nix), `service` and
+`security`). Registration and the password form are off, mail is off, and
+emails are kept private (`noreply.<domain>`).
+
+nginx fills in the header. Every location that goes to Forgejo (`toForge`)
+first asks the gate who this is (`auth_request /_dd/verify`), takes the
+name it answers with, and sets `X-WEBAUTH-USER` to it. Whatever the
+browser sent in that header is replaced either way, so nobody names
+themselves. Two cases differ:
+
+- **Nobody signed in.** The gate answers 401, and nginx hands the request
+  to `@anonymous`, which sends it on with an empty header and no cookie.
+  Forgejo then shows what it shows a stranger: public repositories only
+  (`REQUIRE_SIGNIN_VIEW = false`). That is why a public repository can be
+  cloned without signing in.
+- **The demo.** A map turns the name `demo` into an empty header, so the
+  demo is nobody to the forge: public repositories, and no account is ever
+  made for it. The demo reaches the forge at `demo-git.<domain>`
+  ([`nix/roles/forge.nix`](../../nix/roles/forge.nix) lands it on the
+  fleet's own repository); on a demo door the gate answers 403 rather than
+  401 for nobody, so that door is never the anonymous forge for the whole
+  internet (`verify` in [`servers/gate/src/lib.rs`](../../servers/gate/src/lib.rs)).
+
+Forgejo's own `/user/login` is sent to the gate's passkey page
+(`/_dd/login?rd=...`). Our session cookie, `dd_session`, never reaches
+Forgejo: every location that proxies anywhere but the gate forwards the
+cookie with it taken out
+([`nix/modules/gate/strip-cookie.nix`](../../nix/modules/gate/strip-cookie.nix)).
+
+Forgejo keeps a session cookie of its own, and when the header is empty
+it signs in whoever that cookie names. So whenever the header is empty
+(nobody, or the demo) no cookie at all reaches Forgejo: the `toForge`
+locations send `$forge_cookie`, which is empty when `$forge_user` is, and
+`@anonymous` sends none. A session the gate has ended is ended on the
+forge too. A location changes what it sends through `ddCookie`
+(strip-cookie.nix), never a `proxy_set_header Cookie` of its own: nginx
+sends every one it is given, so a second line would put the cookie back.
+
+The **admin** is the fleet's owner (`policy.owner` in
+[`fleet/policy.json`](../../fleet/policy.json)). `forgejo-admin` makes that
+account ahead of time with a random password nobody uses, so the same
+header lands on an admin.
+
+### Why the socket, and why its group matters
+
+Forgejo believes `X-WEBAUTH-USER` from whoever reaches it.
+`REVERSE_PROXY_TRUSTED_PROXIES` names only loopback, but on this box
+loopback is not enough: the host runner runs CI jobs here, and game guests
+run here too. Anything that could open a TCP port on 127.0.0.1 could say
+"I am the admin".
+
+So Forgejo listens on a unix socket, `/run/forgejo/forgejo.sock`
+(`PROTOCOL = "http+unix"`, mode `660`), in a directory only the `forgejo`
+group may enter (`RuntimeDirectoryMode = "0750"`). The members of that
+group are the whole list of what may speak for someone:
+
+```
+nginx            users.users.nginx.extraGroups = [ "forgejo" ]
+dd-ci-cancel     DynamicUser, SupplementaryGroups = [ "forgejo" ]
+dd-ci-resume     DynamicUser, SupplementaryGroups = [ "forgejo" ]
+forgejo-admin    runs as forgejo
+forgejo-protection, forgejo-mirrors   run as root
+```
+
+The runner's user, which is what a CI job runs as, is not in it. Adding a
+unit to the `forgejo` group gives it the admin; treat it that way. The old
+port, 3001, has nothing listening, and the forge VM test checks that.
+
+## Which addresses are ours
+
+Every address on `git.<domain>` is ours unless it is on Forgejo's list.
+Ours all get the same page: nginx rewrites them to the gate's `/_dd/git`,
+which serves `servers/forge/web/pages/git.html` to anyone signed in and
+sends anyone else to sign in (`git_page` in
+[`servers/gate/src/lib.rs`](../../servers/gate/src/lib.rs)). The page then
+reads the address and draws the view.
+
+```
+Forgejo's own (toForge: sign-in header, or anonymous)
+  /api/  /assets/  /avatars/  /repo-avatars/  /attachments/  /user/  /login/  /-/  /.well-known/
+  /<owner>/<repo>.git/...                       git over https
+  /<owner>/<repo>/info/refs, info/lfs, git-upload-pack, git-receive-pack
+  /<owner>/<repo>/raw/ archive/ media/ releases/download/ attachments/
+  /<owner>/<repo>/actions/runs/<n>/jobs/<n>/attempt/<n>/logs
+
+Special
+  = /user/login        302 to /_dd/login (the passkey page)
+  = /fleet-repo.json   { "repo": "<owner>/<name>" }: the repository the boxes are built from
+  /_dd/ci/             ci-cancel.py on 127.0.0.1:3003, no sign-in
+  /_dd/                the gate (every gate host has it: nix/modules/gate/verify.nix)
+
+Ours (rewritten to /_dd/git)
+  everything else: /, /new, /search, /notifications, /settings, /<owner>,
+  /<owner>/<repo>, .../tree, blob, commits, commit, branches, releases,
+  activity, issues, pulls, compare, actions, actions/runs/<n>, settings/<pane>
+```
+
+Forgejo's own HTML pages (anything not on its list) are never reached
+from outside; a link into one of them lands on ours. The page keeps a copy
+of that list (`FORGE` in [`git-core.js`](../../servers/forge/web/git-core.js))
+so that a link to a clone, a raw file or a log is a real page load, not a
+view. The two lists must agree: each says where the other is.
+
+Git over ssh goes through the box's own sshd on port 22
+(`START_SSH_SERVER = false`): Forgejo keeps the `forgejo` user's
+`authorized_keys`, sshd does the rest.
+
+The gateway also reaches the socket, for the app's downloads:
+`<domain>/download/v<x.y.z>/<file>` is rewritten to that tag's release
+file on the fleet's repository, sent as nobody with no cookie and no
+`Authorization` ([`nix/roles/gateway.nix`](../../nix/roles/gateway.nix)).
+
+## Forgejo's settings
+
+All in [`forgejo.nix`](../../nix/modules/forge/forgejo.nix):
+
+- **Package**: `forgejo-lts`, PostgreSQL over its socket, LFS on.
+- **Repositories** are public, and a push may create one
+  (`ENABLE_PUSH_CREATE_USER`). There are no private ones: see
+  [Encrypted repositories](#encrypted-repositories). The landing page is Explore, though no
+  one sees it: `/` is ours.
+- **Attachments** to an issue or a pull request: images, PDF, text, logs,
+  Markdown, CSV, JSON, patches, archives and video, up to 100 MB. Never
+  `.svg` or `.html`: served from `git.<domain>`, either would run as
+  whoever opens it.
+- **Release files**: the same, plus the app's packages (`.deb`,
+  `.appimage`, `.apk`, `.exe`), up to 400 MB each. `dd release app`
+  uploads them; the downloads page serves them.
+- **Webhooks** may go to the internet only (`ALLOWED_HOST_LIST =
+  "external"`): never to this box, the house or the tailnet.
+- **Actions** are on. A bare `uses:` would be looked up on GitHub
+  (`DEFAULT_ACTIONS_URL = "github"`); our workflows write theirs out in
+  full and pin them.
+- **Plaintext.** The forge reads the repositories as they are pushed, so
+  its box is labelled as holding plaintext (`dd.box.plaintext`).
+
+### Encrypted repositories
+
+A repository on the forge is plaintext on its box, so the forge offers no
+private ones: "private" would be a promise the box cannot keep. The Git
+pages offer public only, a push creates a public one, and the forge's
+database refuses a new private repository or a change to private
+(`dd-forge-rules` in `forgejo.nix`: Forgejo itself has no setting that
+forbids them). One that was private before stays so until its owner makes
+it public.
+
+Code that must stay private goes in an encrypted repository, through the
+`dd` remote helper ([`client/gitremote`](../../client/gitremote/src/main.rs)):
+
+```
+git remote add origin dd::https://git.<domain>/<you>/<name>.git
+git push -u origin main
+```
+
+Every push encrypts on the device before anything leaves it; the forge
+stores opaque files in an ordinary repository and cannot read them. So an
+encrypted repository has no pull requests and no Actions: those need the
+box to read the code.
+
+### The setup units
+
+The repository itself is pushed to the forge, never made by it. What the
+forge needs around it is made again on every start, idempotently:
+
+```
+forgejo-secrets      Forgejo's own secrets; makes its state dirs as root first
+forgejo              after zfs-datasets, RequiresMountsFor the state dir
+forgejo-admin        the admin account, if missing
+forgejo-protection   main's rule (forgejo-setup.sh); "nothing to protect" until the repo exists
+forgejo-mirrors      each declared push mirror, made again when its token changes (forgejo-mirror.nix)
+dd-forge-rules       no private repositories; host runners for the admin's alone (forgejo.nix)
+dd-forge-notify      the trigger for live updates (live.nix), after every Forgejo start
+dd-ci-cancel         the cancel route, always running
+dd-ci-resume         oneshot on a timer
+```
+
+**main's rule** is declared in Nix and set through the API on every
+release, so a rebuilt box gets it back and a change made on the Settings
+page does not last (the page says so for the fleet's repository):
+
+```
+status check   entry_point / ci_ok (pull_request)
+outdated       block_on_outdated_branch = true
+approvals      0
+push           nobody, the admin included: main takes merged pull requests only
+```
+
+`ci_ok` is the one job that waits on every other, so the rule names one
+check that always exists. [`ci.md`](ci.md) is what that means for a pull
+request. `forgejo-setup.sh` also deletes an old `DD_CI` repository secret,
+which the cancel route no longer needs.
+
+### Cancel and resume
+
+Forgejo's API can neither cancel a run nor run one again; its web routes
+can. Both are done by small services on the forge's box, as the admin,
+through the socket.
+
+- **ci-cancel** ([`ci-cancel.py`](../../nix/modules/forge/ci-cancel.py)):
+  a failing job's last step, `stop-run`, posts its run id to
+  `https://git.<domain>/_dd/ci/cancel/<id>`. The service answers 202 at
+  once, looks the run up, and cancels it only once the forge itself has
+  one of that run's jobs on record as failed (it looks every 5 s for two
+  minutes, since the asking job's own failure lands a moment later). It
+  takes no secret: all anyone can do with it is stop a run that already
+  failed.
+- **ci-resume** ([`ci-resume.py`](../../nix/modules/forge/ci-resume.py)):
+  a run killed from outside (the forge or a runner restarting under it, as
+  a release can) has jobs that end "failed" with `context canceled` in
+  their logs. Every 3 minutes (first 5 minutes after the timer starts,
+  never inside a switch) it looks at the last 50 runs and reruns a pull
+  request's run once when: it is that pull request's newest run, it
+  stopped within the last 3 hours, every job that failed has `context
+  canceled` in the last 4000 bytes of its log, and it has not been rerun
+  before (kept in `/var/lib/dd-ci-resume/retried.json`, the last 500). The
+  forge not answering is "next time", exit 0. It has
+  `restartIfChanged = false`: release 213 rolled back because it ran while
+  the forge restarted under the switch.
+
+## The Git pages
+
+`servers/forge/web` is one page and a set of modules. The gate serves
+them as files under `/_dd/static/` (`servers/gate/src/pages.rs`); there is
+no build step.
+
+```
+pages/git.html     the bar, the bell, #rhead (a repository's header), #app; purify.js, git.js, shell.js
+git.js             imports every view, asks who is looking, starts the bell, draws
+git-core.js        $ and el (from kit.js), put/ic, api(), the cache, the router, watch(), the bell, the bar's search
+git-home.js        /, /new, /notifications, /search, /settings (tokens, keys, profile), /<owner>
+git-repo.js        a repository: header and tabs, code and files, commits, a commit,
+                   branches, releases, activity; "Running now" on the fleet's repository
+git-pulls.js       issues and pull requests: lists, a conversation, commits/checks/files,
+                   the merge box, compare and open
+git-actions.js     runs; one run as a graph of its jobs (read from the workflow's needs:)
+                   or as jobs and their logs
+git-settings.js    a repository's settings: general, people, rulesets, secrets and
+                   variables, runners, webhooks, deploy keys, labels, mirror, careful
+git-diff.js        a git diff parsed into files, drawn unified or side by side
+git-charts.js      the year's squares and the week's line, as SVG
+git.css            what a forge adds to home.css: diffs, the run graph, placeholders (states are home.css's)
+```
+
+**How a view draws.** Each view module calls `route(pattern, view)`; the
+router in `git-core.js` matches the address and calls the view with the
+match, the query and `current()`, which turns false as soon as another
+view starts drawing, so a slow answer never draws over a newer page.
+Links inside the page are followed on pointer-down, without a reload
+(`history.pushState`); links to `/_dd/` or to Forgejo's own addresses are
+real page loads.
+
+**How it reads the forge.** Everything comes from `/api/v1`, on the same
+name, with the browser's cookie; nginx turns that into
+`X-WEBAUTH-USER`. Forgejo decides what each person may see and do; the
+page is the same file for everyone. A 401 sends the person to sign in,
+except for the demo, which is nobody to the forge and is told so. Raw
+files, diffs and logs come as text through `text()`. Markdown is rendered
+with `marked.js` (imported when first needed) and cleaned with DOMPurify
+before it is drawn. Two things come from outside the API: `/fleet-repo.json`
+says which repository the boxes are built from, and on that repository
+only, `/_dd/fleet.json` (the gate) fills the "Running now" list with each
+box and its release.
+
+**Caching**, as [ui.md](ui.md) asks:
+
+- `api()` keeps every read for a minute, and two views asking the same
+  thing share one request. Any write clears it all; a view that must see
+  now passes `fresh: true`.
+- The router keeps what the last 40 addresses looked like. Going back to
+  one shows it at once, and the view then draws it again from what the
+  forge says now.
+- A repository is asked once per visit (`repo()` in `git-repo.js`), its
+  branches and tags once.
+- A tab with the most to fetch (pull requests, issues, actions, releases,
+  activity) starts fetching when the pointer reaches it (`warmers`).
+- A repository row's check dot, the languages and "Running now" fill in
+  after the page is drawn, never before.
+
+The page fires `git:shown` (drawn from the kept copy) and `git:drawn`
+(drawn fresh) with the time each took, for measuring click-to-paint.
+
+**Live updates.** Forgejo has no webhook for a run or a job starting, and
+a webhook to its own box is refused on purpose, so the database says
+instead ([`live.nix`](../../nix/modules/forge/live.nix)):
+
+```
+action_run, action_run_job, commit_status  (AFTER INSERT OR UPDATE)
+   │ pg_notify('dd_forge', {kind: run|job|status, repo, run, job, index, sha, status|state, private})
+   v
+gate: LISTEN dd_forge, as dd-verify (CONNECT only, no table); reconnects every 5 s
+   │ broadcast, filtered by ?repo=<id>, and only where "private" is false
+   v
+GET /_dd/git/events?repo=<id>  (members only; 401 nobody, 403 the demo)
+   │ Server-Sent Events, keep-alive every 20 s, X-Accel-Buffering: no
+   v
+watch(repoId, until, on) in git-core.js: gathers 250 ms, then asks the API again
+```
+
+The announcement is ids and a state, nothing else; the page asks the API
+for what changed, as the person looking. The Actions list redraws on a run
+or job change; a run's graph redraws on its own changes. The log view
+reads the log every 3 seconds while its job runs. `dd-forge-notify` puts
+the trigger in after every Forgejo start, so an upgrade that rebuilds a
+table gets it back. The gate is told where to listen by
+`VERIFY_FORGE_EVENTS`; without it, `/_dd/git/events` is 404 and the pages
+do not update live. The bell (unread notifications) is asked every two
+minutes.
+
+## The runners
+
+Two runners, both from the `runner` role
+([`nix/roles/runner.nix`](../../nix/roles/runner.nix)), on every box that
+has it (node1 and node2 today). Both run as the plain system user
+`forgejo-runner` (not the NixOS module's dynamic user, whose state
+directory is mounted `noexec` and broke every cargo build script), share
+`/var/lib/gitea-runner`, and before they start wait up to five minutes for
+the forge to answer at `https://git.<domain>` with a certificate the box
+believes. If the registration on disk is for another address, it is
+deleted and the runner registers again
+([`runner-address.sh`](../../nix/modules/forge/runner-address.sh)).
+
+```
+                 host runner (<box>)                members' runner (members-<box>)
+module           forgejo-runner.nix                 members-runner.nix
+labels           nix:host  <box>:host                members:docker://ghcr.io/catthehacker/ubuntu:act-22.04
+runs             the fleet's CI (runs-on: nix,      a member's workflow (runs-on: members)
+                 or a box's name for build_host)
+where            on the box, as forgejo-runner,     in a container under gVisor (runsc)
+                 nix on the path, the box's store
+capacity         min(threads/4, memory GiB/6)       min(2, threads/4, memory GiB/4)
+                 (box.json runnerCapacity)          4 cpus, 4 GiB, 1024 pids, 1 h per job
+token (sops)     forgejo-runner-token (admin's)     forgejo-members-runner-token (global)
+caches           act, nix and cargo-target kept;    none (cache.enabled = false);
+                 untouched for 14 days goes         docker prunes what is a week old
+```
+
+**The host runner** runs a job straight on the box, so what a green run
+built is already in that box's store when the release goes out, and
+signed into the nix cache with the box's key (`storage/cache.nix`). That
+also means a job is code running on the box as `forgejo-runner`; the
+module says so, and is labelled `forgejo-runner (runs contributed code)`.
+Two rules keep that safe: the runner's user is not in the `forgejo`
+group (above), and the host runners take the admin's repositories alone.
+The forge enforces the second, whatever token registered a runner: a
+trigger in its database (`dd-forge-rules`) moves any runner registered
+for every repository to the admin's own scope, unless `members` is its
+only label. A pull request from someone else's fork of the admin's
+repository runs only once the admin approves it (Forgejo's own rule).
+`nix.settings.eval-cache` is off on a runner box: it remembered derivation
+paths a garbage collection had removed. The `<box>:host` label is how
+`build_host` builds every box's system on every box
+([`ci.md`](ci.md)).
+
+**The members' runner** gives every member CI without letting a job reach
+the box. Docker's default runtime is gVisor, so a job sees a sandboxed
+kernel. The container gets no host volume, no Docker socket, no secrets,
+`no-new-privileges`, and a network that reaches the internet and nothing
+of ours: the `DOCKER-USER` chain drops everything from its subnet
+(`172.30.0.0/24`) to the tailnet, private ranges, link-local and
+loopback, and `nixos-fw` drops anything from it to the box itself. It is
+Docker's default bridge on purpose: on a user-defined network, Docker's
+own name server is reached by NAT rules gVisor does not carry, and nothing
+resolved. The `members-runner` VM test checks that a container reaches
+none of it and sees gVisor's kernel.
+
+## The mirror
+
+[`forgejo-mirror.nix`](../../nix/modules/forge/forgejo-mirror.nix) makes
+sure each push mirror listed in `forgeMirrors` in
+[`fleet/policy.json`](../../fleet/policy.json) exists on the forge (the
+repository defaults to the fleet's own). Today that is one: the fleet's
+repository to `https://github.com/DBRobot/Home-Server.git` as `DBRobot`,
+with the token in sops as `github-mirror-token`. Forgejo pushes on every
+commit and every 8 hours, and keeps its own encrypted copy of the token
+once told.
+
+The unit adds a mirror that is missing (by its address), and makes one
+again when the token in sops is not the one it last gave it: Forgejo's
+API cannot change a mirror's token, and keeps the token encrypted, so the
+unit keeps a hash of what it gave each mirror in
+`/var/lib/forgejo-mirrors`. A rotated token reaches Forgejo on the next
+release.
+
+GitHub suspended the account on 2026-10-04, and the mirror's pushes have
+failed since; nothing else notices or depends on it. The rest (the rename,
+the Workflows permission) is on [the mirror's page](mirror.md).
+
+## Storage and backups
+
+```
+/vault/forgejo     <bulk pool>/enc/forgejo: repositories, LFS, custom/conf
+                   recordsize 128K, zstd, auto-snapshot; in the box's restic backup
+postgres "forgejo" dumped hourly to /vault/backups/postgres (storage/postgres-backup.nix),
+                   which is in the restic backup too
+```
+
+The state dir is its own dataset under the encrypted root. Forgejo waits
+for `zfs-datasets` and the mount, or it would set itself up on the root
+disk under the mountpoint. Each owner's repository sizes (`size +
+lfs_size`) are counted from Forgejo's own table for the storage ledger
+(`dd.usage.forgejo`, `storage/usage.nix`).
+
+## The VM test
+
+[`nix/tests/forge.nix`](../../nix/tests/forge.nix) boots one box with the
+forge and the full gate, the state dir a plain directory. It checks, in
+order ([`forge.py`](../../nix/tests/forge.py)):
+
+1. Forgejo is on its socket, and nothing answers on port 3001.
+2. `forgejo-admin` and `forgejo-protection` finish; with no repository,
+   protection says "nothing to protect".
+3. Once a repository exists, main's rule is `ci_ok`, up to date, no
+   approvals, and no direct pushes; the admin is an admin.
+4. A private repository is refused, made or changed; a runner registered
+   for every repository is moved to the admin, unless it is the members'.
+5. ci-resume's timer is set, and a pass over no runs fails nothing.
+6. No `DD_CI` secret; the cancel route answers 202 to a run id and 404 to
+   anything else, and logs a run that does not exist as not found.
+7. Live updates: nobody signed in gets 401 from `/_dd/git/events`; a
+   member watching gets the commit status the test posts, with its sha;
+   `dd-verify` may connect to the database and may not read a table.
+
+It is one job in CI's `vm_tests` matrix.
+
+## Changing it
+
+- **A Forgejo setting** goes in `forgejo.nix`, with the reason beside it.
+  Anything set by hand in Forgejo's admin pages is lost on a rebuilt box.
+- **Never open another way to Forgejo.** No TCP port, no unit added to the
+  `forgejo` group unless it is meant to act as anyone it names. A new
+  nginx location to Forgejo uses `toForge`, so the header is always the
+  gate's.
+- **A new Forgejo address** (a page or file that must come from Forgejo
+  itself) goes in nginx's list in `forgejo.nix` *and* in `FORGE` in
+  `git-core.js`.
+- **A new view** is a `route()` in the module it belongs to, using
+  `api()`, `current()` and the shared pieces in `git-core.js`. Follow
+  [ui.md](ui.md): draw from the kept copy first, ask in parallel, warm the
+  tab, every state drawn. Measure with `git:shown`/`git:drawn`.
+- **Something new to watch live** is another trigger in `live.nix` (ids
+  and a state only, never content) and a `watch()` in the view. The forge
+  VM test should see it arrive.
+- **main's rule** changes in `forgejo.nix` (`RULE`), never only on the
+  Settings page. If it names a new check, `ci_ok` is still the one to
+  name; see [ci.md](ci.md).
+- **A runner change** is checked by the VM tests that use it: a sandbox
+  change by `members-runner`; anything a host job needs on its path goes
+  in `hostPackages`. A unit on a timer follows the rules in
+  [ci.md](ci.md#when-a-release-does-not-land).
+- **A mirror** is an entry in `forgeMirrors` in `fleet/policy.json`.

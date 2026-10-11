@@ -9,7 +9,8 @@
   name = "games";
   node.specialArgs = { inherit self; };
   nodes.box = {
-    # the gate stays: invites and the firewall ask it who is whose friend
+    # the gate (box.nix's verifier) stays: invites and the firewall ask it
+    # who is whose friend, and here nobody is anybody's
     imports = [
       ./box.nix
       ../modules/games/games.nix
@@ -43,6 +44,7 @@
               }
             ];
             ports = [ "SERVER_PORT" ];
+            memory_mib = 6144;
           }
         ];
       }
@@ -59,7 +61,7 @@
       pkgs.jq
     ];
     virtualisation.memorySize = 4096;
-    # a 1536M guest and its qemu (box/games/src/lib.rs, QEMU_OVERHEAD_MIB)
+    # a 1536M guest and its qemu (servers/games/src/lib.rs, QEMU_OVERHEAD_MIB)
     dd.games.memoryMiB = 2048;
     virtualisation.cores = 2;
     virtualisation.diskSize = 8192;

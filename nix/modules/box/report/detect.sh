@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # What this box finds on itself, as fleet/boxes/<box>/hardware.json reads it
-# (modules/box/host.nix) and placement will (docs/hardware.md, section 1):
+# (modules/box/host.nix) and placement will (docs/dev/hardware.md, section 1):
 # what never changes while it runs. What does (free space, heat, the
 # clock's offset) goes in its heartbeats instead.
 # Env: SECRETS_KEY (the TPM key's file), INITRD_MODULES (space separated).

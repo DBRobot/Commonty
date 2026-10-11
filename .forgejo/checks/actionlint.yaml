@@ -3,7 +3,6 @@
 self-hosted-runner:
   labels:
     - nix
-    - gating
     - node1
     - node2
     - members

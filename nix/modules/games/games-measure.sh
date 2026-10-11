@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # What each game really takes: every running world's memory peak, as
 # systemd counts it for its unit (the guest and its qemu together), kept
-# per game at its highest in measured.json. Nothing publishes a dedicated
-# server's memory; this is where nix/modules/games/needs.nix's figures will
-# come from (they are the class defaults until a game has run).
+# per game at its highest in measured.json. Nothing sizes from it: a guest's
+# kernel fills the memory it is given with its own cache, and the host's
+# cache of the share's files is charged to the same unit, so a peak is what
+# the world was given more than what the game needs. The catalogue's
+# memory_mib (data/games/resolve.py) is what is given.
 set -euo pipefail
 out="$DIR/measured.json"
 [ -s "$out" ] || echo '{}' >"$out"

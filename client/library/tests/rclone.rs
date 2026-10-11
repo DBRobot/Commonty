@@ -148,5 +148,13 @@ fn rclone_reads_what_we_write_and_back() {
     }
     let sealed = found.expect("rclone's file");
     assert_eq!(decrypt_file(&c, &sealed), theirs);
+    // and its blocks open with their own keys, as a box gets them
+    let keys = c.block_keys(&sealed[..HEADER], 2).unwrap();
+    let o = library::crypt::BlockOpener::new(&sealed[..HEADER], keys).unwrap();
+    let mut back = Vec::new();
+    for (n, chunk) in sealed[HEADER..].chunks(SEALED_BLOCK).enumerate() {
+        back.extend(o.block(n as u64, chunk).unwrap());
+    }
+    assert_eq!(back, theirs);
     let _ = std::fs::remove_dir_all(&dir);
 }

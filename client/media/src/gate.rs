@@ -301,24 +301,6 @@ impl Gate {
         Ok(done)
     }
 
-    /// a url a box may fetch the sealed file from for a few minutes, for
-    /// the transcode handoff
-    pub async fn handoff_url(&self, plain_path: &str) -> Result<String> {
-        let r = self
-            .req("GET", &self.url(plain_path))
-            .header("x-dd-presign", "1")
-            .send()
-            .await?;
-        if !r.status().is_success() {
-            bail!("handing off {plain_path}: {}", r.status());
-        }
-        let v: serde_json::Value = r.json().await?;
-        v["url"]
-            .as_str()
-            .map(str::to_string)
-            .context("gate gave no url")
-    }
-
     /// to the trash (the gate never deletes)
     pub async fn trash(&self, plain_path: &str) -> Result<()> {
         let r = self.req("DELETE", &self.url(plain_path)).send().await?;

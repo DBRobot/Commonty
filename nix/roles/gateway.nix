@@ -112,13 +112,14 @@ in
           extraConfig = ''
             rewrite ^/download/([^/]+)/([^/]+)$ /${config.dd.repo}/releases/download/$1/$2 break;
             proxy_set_header X-WEBAUTH-USER "";
-            proxy_set_header Cookie "";
             proxy_set_header Authorization "";
             proxy_max_temp_file_size 0;
             limit_req zone=dd_visitor burst=20 nodelay;
           '';
+          # no cookie at all (a Cookie line here would be a second one: strip-cookie.nix)
+          ddCookie = "";
         };
-    # the docs, for anyone (box/verify/src/docs.rs), and the few gate paths
+    # the docs, for anyone (servers/gate/src/docs.rs), and the few gate paths
     # their page needs: its files, the bar's who-is-looking, the index and
     # the markdown. Nothing else of the gate answers on this name.
     locations."= /docs".proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/docs/page";

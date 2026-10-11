@@ -7,9 +7,9 @@ let
     name = g.id;
     value = {
       requires = {
-        # the manager's sizes (box/games/src/lib.rs, Game::memory/cores):
-        # wine servers want more; nothing in an egg says
-        memory.fixed = if g.wine or false then "8G" else "6G";
+        # what the manager gives its guest: the catalogue's figure for it
+        # (data/games/resolve.py, MEMORY), and Game::cores in lib.rs
+        memory.fixed = "${toString g.memory_mib}M";
         threads = 4;
         # its install as Steam lists it (data/games/sizes.py), half again for
         # updates and saves, and at least 2G; 15G where Steam does not say

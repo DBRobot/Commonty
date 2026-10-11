@@ -44,8 +44,9 @@
   dd-transcode = {
     what = "plays a film a member's device cannot, decrypting it in memory only";
     base = {
-      # four sessions of 256M decrypted pieces each, and each one's twelve
-      # minutes of segments (main.rs: BEHIND and AHEAD)
+      # four sessions of 256M decrypted pieces each, and each one's
+      # segments: twelve minutes, at most 384M (main.rs: BEHIND, AHEAD,
+      # WINDOW_BYTES), and their ffmpegs
       requires.memory.fixed = "4G";
       faster = {
         # any maker's GPU that encodes H.264 (VAAPI): Intel's, AMD's

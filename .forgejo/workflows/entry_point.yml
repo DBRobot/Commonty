@@ -98,14 +98,14 @@ jobs:
           echo "changed files:"; echo "$changed" | sed 's/^/  /'
           nix=false; rust=false; vm=false; app=false
           # the rust is built by the flake too, so a rust change is a nix
-          # change; and docs/ is in every box's pages (box/verify docs.rs),
+          # change; and docs/ is in every box's pages (servers/gate docs.rs),
           # so it is built, though nothing in a vm or a test reads it; and
           # the app's release build is held to the flake's Rust (ci.nix)
-          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|secrets/|data/|docs/|box/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/|\.github/)' && nix=true
-          echo "$changed" | grep -qE '^(box/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|\.forgejo/)' && rust=true
+          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|secrets/|data/|docs/|servers/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/|\.github/)' && nix=true
+          echo "$changed" | grep -qE '^(servers/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|\.forgejo/)' && rust=true
           # boxes booted as vms: only when what a box runs changed, not for
           # every client or host tweak. Minutes, so spent where it counts.
-          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|data/|box/|client/(identity|auth)/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/)' && vm=true
+          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|data/|servers/|client/(identity|auth)/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/)' && vm=true
           # the app, and the crates and toolchain it builds on
           echo "$changed" | grep -qE '^(app/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|nix/app-release/|\.forgejo/)' && app=true
           echo "nix=$nix" >> "$GITHUB_OUTPUT"
@@ -119,7 +119,9 @@ jobs:
   flake_check:
     needs: files_modified
     if: ${{ needs.files_modified.outputs.nix == 'true' }}
-    runs-on: nix
+    # evaluating the flake takes ~11G: not on a box with less beside a vm
+    # test (node2 ran out under it). Placement by memory replaces this.
+    runs-on: node1
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       # evaluate everything, build nothing: the vm tests are built by their
@@ -139,8 +141,8 @@ jobs:
       # check whose whole answer is whether it builds says nothing there.
       # ci is one of those: it holds this file to the flake's vm tests and
       # to ci_ok waiting on every job.
-      - name: placement, box list, and this file
-        run: nix build --no-link .#checks.x86_64-linux.placement .#checks.x86_64-linux.boxes .#checks.x86_64-linux.box-reports .#checks.x86_64-linux.ci .#checks.x86_64-linux.stylesheet .#checks.x86_64-linux.cargo-nix .#checks.x86_64-linux.nginx
+      - name: plaintext labels, box list, and this file
+        run: nix build --no-link .#checks.x86_64-linux.plaintext-label .#checks.x86_64-linux.boxes .#checks.x86_64-linux.box-reports .#checks.x86_64-linux.ci .#checks.x86_64-linux.stylesheet .#checks.x86_64-linux.cargo-nix .#checks.x86_64-linux.nginx
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -192,7 +194,7 @@ jobs:
   # CI, the release finds it all already built by this box's own daemon
   # and the check takes seconds instead of rebuilding after the merge.
   # Each records what it built under its own name; same_build holds the
-  # two builders of a system to one answer.
+  # two builders of a system to one store path.
   build_host:
     needs: [files_modified, build_part]
     if: ${{ needs.files_modified.outputs.nix == 'true' }}
@@ -218,10 +220,14 @@ jobs:
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
-  # The two builds of each system are one path, or the build is not
-  # reproducible and the boxes would refuse to vouch for it after the merge:
-  # found here instead. Then build/<host>, which `dd release publish` signs
-  # rather than building again.
+  # The two builds of each system are one store path. A system's path is
+  # fixed by its derivation, not by the bytes the build makes, so this
+  # catches the builders evaluating the commit differently, not a build
+  # that is not reproducible: two different outputs land at the same path.
+  # The bytes are dd-attest's at publish (two boxes must report the same
+  # closure digest, and it rebuilds with --check what it did not build).
+  # Then build/<host>, which `dd release publish` signs rather than
+  # building again.
   same_build:
     needs: [files_modified, build_host]
     if: ${{ needs.files_modified.outputs.nix == 'true' }}
@@ -255,7 +261,7 @@ jobs:
             for (const [b, p] of by) console.log(`${host} on ${b}: ${p ?? 'nothing recorded'}`);
             const paths = new Set(by.map(([, p]) => p));
             if (paths.size !== 1 || paths.has(undefined)) {
-              console.log(`${host}: the builders disagree; the build is not reproducible (or one did not record)`);
+              console.log(`${host}: the builders disagree on the path: they evaluated the commit differently (or one did not record)`);
               bad = true;
               continue;
             }
@@ -278,7 +284,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [console, directory, metrics, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, llm, vault, adblock, unlock]
+        test: [console, directory, metrics, metrics-ui, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, photos, llm, vault, adblock, unlock]
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: ${{ matrix.test }}
@@ -331,7 +337,7 @@ jobs:
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
-  # ---- rust: everything in box/ and client/ formatted, lint-clean, and
+  # ---- rust: everything in servers/ and client/ formatted, lint-clean, and
   # the tests pass - the end-to-end ones included, which run boxes
   # in-process and try to break them. Each is a nix derivation on the same
   # compiled artifacts as the binaries (flake.nix: checks fmt, clippy,
@@ -353,7 +359,7 @@ jobs:
   # any compile, so the workspace checks leave it out and this runs only
   # when the app or what it builds on changed. Its downloads are built
   # after a release, not here: two boxes build them when one changes the
-  # app (dd release app-next, docs/app-release.md).
+  # app (dd release app-next, docs/dev/app-release.md).
   app_lint:
     needs: files_modified
     if: ${{ needs.files_modified.outputs.app == 'true' }}

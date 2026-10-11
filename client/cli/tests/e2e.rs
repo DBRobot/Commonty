@@ -2093,9 +2093,11 @@ async fn a_demo_door_lets_in_the_demo_alone() {
     // and on the service's own name, as ever
     assert_eq!(gate(Some(&tom), "git.x").await, 200);
     assert_eq!(gate(None, "git.x").await, 401);
-    // the gate's own pages on the door
+    // the gate's own pages on the door, which is one of this box's names
     let page = |cookie: Option<&str>| {
-        let mut r = http.get(b.url("/_dd/me")).header("host", "demo-git.x");
+        let mut r = http
+            .get(b.url("/_dd/me"))
+            .header("host", "demo-git.localhost");
         if let Some(c) = cookie {
             r = r.header("cookie", c);
         }
@@ -2111,7 +2113,7 @@ async fn a_demo_door_lets_in_the_demo_alone() {
     assert_eq!(page(Some(&demo)).await.0, 200);
     assert_eq!(
         page(Some(&tom)).await,
-        (303, Some("https://git.x/_dd/me".into()))
+        (303, Some("https://git.localhost/_dd/me".into()))
     );
     assert_eq!(
         page(None).await,
@@ -2339,7 +2341,7 @@ async fn sessions_are_listed_and_end_when_their_device_goes() {
     assert_eq!(list(mine.clone()).await.status().as_u16(), 200);
 
     // signing out ends the session itself, not only the cookie
-    http.get(format!("http://{addr}/_dd/logout"))
+    http.post(format!("http://{addr}/_dd/logout"))
         .header("cookie", &mine)
         .send()
         .await

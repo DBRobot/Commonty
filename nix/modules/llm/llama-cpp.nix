@@ -32,6 +32,12 @@ let
 
   dir = "/tank/models";
   file = m: "${dir}/${m.localName}";
+  # every name a fetch here has placed in ${dir}, so the prune below removes
+  # only files of ours, never something else kept there
+  placed = "${dir}/.dd-placed";
+  current = pkgs.writeText "dd-models" (
+    lib.concatMapStrings (m: "${m.localName}\n") (lib.attrValues cfg.models)
+  );
   url = m: "https://huggingface.co/${m.repo}/resolve/${m.rev}/${m.file}";
   run = "/run/dd-llm";
   port = 8081; # 8080 is taken by ente's museum
@@ -165,6 +171,7 @@ in
           path = with pkgs; [
             curl
             coreutils
+            gnugrep
           ];
           unitConfig.RequiresMountsFor = dir;
           serviceConfig = {
@@ -177,8 +184,10 @@ in
           };
           script = ''
             set -uo pipefail
-            [ -e ${file m} ] && exit 0
             mkdir -p ${dir}
+            touch ${placed}
+            grep -qxF '${m.localName}' ${placed} || echo '${m.localName}' >> ${placed}
+            [ -e ${file m} ] && exit 0
             for attempt in $(seq 1 60); do
               echo "fetch attempt $attempt"
               curl -fL --retry 5 --retry-delay 10 --retry-all-errors \
@@ -192,6 +201,36 @@ in
         }
       ) cfg.models
       // {
+        # A model no longer pinned is deleted (each is ~21G): of the files a
+        # fetch here placed, those the config no longer names, and their
+        # unfinished .part.
+        dd-models-prune = {
+          description = "Delete the models in ${dir} no longer offered";
+          after = [ "zfs-mount.service" ];
+          path = with pkgs; [
+            coreutils
+            gnugrep
+          ];
+          unitConfig.RequiresMountsFor = dir;
+          serviceConfig.Type = "oneshot";
+          script = ''
+            set -u
+            [ -e ${placed} ] || exit 0
+            : > ${placed}.next
+            while IFS= read -r name; do
+              case "$name" in
+                "" | .* | */*) continue ;;
+              esac
+              if grep -qxF -- "$name" ${current}; then
+                echo "$name" >> ${placed}.next
+              else
+                rm -f -- "${dir}/$name" "${dir}/$name.part"
+                echo "deleted $name: no longer offered"
+              fi
+            done < ${placed}
+            mv ${placed}.next ${placed}
+          '';
+        };
         # llama-swap and the model servers it starts share a network of their
         # own: nothing else on this box - CI jobs, game guests - can reach a
         # model server's port. llama-swap checks nginx's key and drops it
@@ -238,17 +277,30 @@ in
           };
         };
       };
-    systemd.timers = lib.mapAttrs' (
-      id: _:
-      lib.nameValuePair "fetch-model-${id}" {
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnActiveSec = "5s";
-          OnBootSec = "1min";
-          AccuracySec = "1s";
+    systemd.timers =
+      lib.mapAttrs' (
+        id: _:
+        lib.nameValuePair "fetch-model-${id}" {
+          wantedBy = [ "timers.target" ];
+          timerConfig = {
+            OnActiveSec = "5s";
+            OnBootSec = "1min";
+            AccuracySec = "1s";
+          };
+        }
+      ) cfg.models
+      // {
+        # at boot, and after a switch that changed the models: the list in
+        # its unit restarts the timer then
+        dd-models-prune = {
+          wantedBy = [ "timers.target" ];
+          restartTriggers = [ current ];
+          timerConfig = {
+            OnActiveSec = "1min";
+            OnBootSec = "2min";
+          };
         };
-      }
-    ) cfg.models;
+      };
     systemd.sockets.llm-proxy = {
       wantedBy = [ "sockets.target" ];
       listenStreams = [ "${run}/llm.sock" ];
@@ -301,7 +353,7 @@ in
               # enable_thinking): measured 0.8s vs 16.5s for the same answer
               "--reasoning off"
               "--no-slots" # /slots would show one person's requests to another
-              "--no-webui" # the chat page is ours (box/chat)
+              "--no-webui" # the chat page is ours (servers/chat)
             ]
             ++ lib.optionals gpu m.split
             ++ m.args

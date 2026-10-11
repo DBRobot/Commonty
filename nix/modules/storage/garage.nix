@@ -249,6 +249,11 @@ in
                   aws --endpoint-url http://127.0.0.1:3900 s3api put-bucket-cors --bucket ${q} \
                   --cors-configuration ${lib.escapeShellArg (builtins.toJSON b.cors)} || true
               ''
+              # no cors in the config means none on the bucket, so a rule taken out here goes there too
+              + lib.optionalString (b.cors == null && b.key != null) ''
+                AWS_ACCESS_KEY_ID=${id} AWS_SECRET_ACCESS_KEY=${secret} AWS_DEFAULT_REGION=us-east-1 \
+                  aws --endpoint-url http://127.0.0.1:3900 s3api delete-bucket-cors --bucket ${q} 2>/dev/null || true
+              ''
             ) cfg.buckets
           );
       };

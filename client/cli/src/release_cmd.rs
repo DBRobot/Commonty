@@ -1,10 +1,12 @@
 //! `dd release`: the fleet moves when this machine says so.
 //!
-//! `publish` builds every box in fleet/boxes.json from one commit, puts the
-//! closures where the boxes fetch from, and pushes one signed file naming
-//! the commit, a counter and every box's store path and nar hash. The
-//! agent on each box does the rest. CI never does this: a box's runner
-//! would be signing what a box built.
+//! `publish` takes the store paths CI built for one commit, checks each
+//! against this machine's own evaluation of it, has two boxes vouch for
+//! every closure, and pushes one signed file naming the commit, a counter
+//! and every box's store path, nar hash and closure digest. Only when CI's
+//! paths are missing does it build every box itself (on a box, with
+//! DD_BUILD_STORE) and put the closures in the cache. The agent on each
+//! box does the rest. CI never signs: the key stays on this machine.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -29,8 +31,10 @@ pub enum ReleaseCmd {
     /// Make the release key here and write its public half to
     /// fleet/release.pub, which every box is built with.
     Init,
-    /// Build every box from a ref, push the closures to the cache, sign
-    /// and publish the release.
+    /// Sign and publish the release of a ref: the paths CI built for it,
+    /// checked against this machine's evaluation and vouched for by two
+    /// boxes. Builds every box (and fills the cache) only when CI's paths
+    /// are missing.
     Publish {
         /// a local branch that matches the forge's
         #[arg(long, default_value = "main")]
@@ -41,7 +45,8 @@ pub enum ReleaseCmd {
         /// where boxes read the release from
         #[arg(long, default_value = DEFAULT_URL)]
         url: String,
-        /// build and sign, print the release, push nothing
+        /// check and sign, print the release, push nothing. No box is asked
+        /// to vouch: the release printed is not vouched for
         #[arg(long)]
         dry_run: bool,
     },
@@ -133,8 +138,12 @@ pub fn run(cmd: ReleaseCmd, repo: &str, keys: &auth::Store) -> Result<()> {
             );
         }
         ReleaseCmd::Show { url } => {
-            let signed = fetch(&url)?.context("no release published yet")?;
-            print(&signed);
+            let (signed, check) =
+                fetch(&repo_root(repo)?, &url)?.context("no release published yet")?;
+            print(&signed, check.as_ref().err());
+            if let Err(e) = check {
+                bail!("the published release does not verify against fleet/release.pub: {e}");
+            }
         }
         ReleaseCmd::Status { url } => status(repo, &url)?,
         ReleaseCmd::App { tag, dry_run } => app(repo, keys, &tag, dry_run)?,
@@ -308,7 +317,11 @@ fn publish(
     // upstream's signature or by building it (dd-attest). CI, the forge
     // and the cache can each lie about a path; not past two rebuilds.
     // DD_ATTEST=off is for the one release that first carries dd-attest.
-    if std::env::var("DD_ATTEST").as_deref() == Ok("off") {
+    if dry_run {
+        // a box's word is an ssh, a rebuild, minutes per box; a look at
+        // what would be signed is not worth that
+        eprintln!("== not vouched (dry run): no box was asked");
+    } else if std::env::var("DD_ATTEST").as_deref() == Ok("off") {
         eprintln!("== DD_ATTEST=off: no box was asked to vouch for this release");
     } else {
         attest(&boxes, url, &rev, &built)?;
@@ -332,11 +345,7 @@ fn publish(
             // everything after it, for good, with nothing to publish over
             // the top. It is signed by the key whose public half is in the
             // repo, so check it here before believing a number out of it.
-            let trusted = release::decode_public(
-                std::fs::read_to_string(root.join("fleet/release.pub"))?.trim(),
-            )
-            .map_err(|e| anyhow::anyhow!("fleet/release.pub: {e}"))?;
-            let current = release::verify_json(&raw, &trusted)
+            let current = release::verify_json(&raw, &trusted_key(&root)?)
                 .map_err(|e| anyhow::anyhow!("the published release does not verify: {e}"))?;
             current
                 .payload
@@ -379,6 +388,7 @@ fn publish(
     let body = serde_json::to_string_pretty(&signed)?;
     if dry_run {
         println!("{body}");
+        eprintln!("== dry run: not vouched, not pushed");
         return Ok(());
     }
 
@@ -395,7 +405,7 @@ fn publish(
         ],
         &format!("release {counter}: {}", &rev[..12]),
     )?;
-    print(&signed);
+    print(&signed, None);
     nudge(&boxes);
     // the control plane's relay this release carries
     let relayed = tokio::task::block_in_place(|| {
@@ -461,7 +471,7 @@ fn app_in_background(root: &Path, r#ref: &str) {
 
 /// A session of its own, and nothing of ours but its stdio: whatever else
 /// is open here - the release lock a ship script holds, for one
-/// (docs/ci.md) - closes as the child starts. Release 196's app run kept
+/// (docs/dev/ci.md) - closes as the child starts. Release 196's app run kept
 /// that lock for its whole wait on GitHub.
 fn detach(cmd: &mut Command) {
     #[cfg(unix)]
@@ -1217,15 +1227,28 @@ fn status(repo: &str, url: &str) -> Result<()> {
     let root = repo_root(repo)?;
     let boxes: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("fleet/boxes.json"))?)?;
-    let current = fetch(url)?;
-    match &current {
-        Some(s) => println!(
-            "release {}  commit {}",
-            s.payload.counter,
-            &s.payload.rev[..12.min(s.payload.rev.len())]
-        ),
-        None => println!("no release published yet"),
-    }
+    let current = match fetch(&root, url)? {
+        Some((s, Ok(()))) => {
+            println!(
+                "release {}  commit {}",
+                s.payload.counter,
+                &s.payload.rev[..12.min(s.payload.rev.len())]
+            );
+            Some(s)
+        }
+        Some((s, Err(e))) => {
+            println!(
+                "release {} as published DOES NOT VERIFY against fleet/release.pub: {e}\n\
+                 the boxes refuse it; \"current\" and \"behind\" below are against it",
+                s.payload.counter
+            );
+            Some(s)
+        }
+        None => {
+            println!("no release published yet");
+            None
+        }
+    };
     for (name, b) in boxes.as_object().context("boxes.json is not an object")? {
         let net = b["net"].as_str().unwrap_or("-");
         // a box's prometheus answers on its own loopback only; the owner
@@ -1280,14 +1303,14 @@ fn copy_to_cache(
     signing_key: &str,
 ) -> Result<()> {
     eprintln!("== copy the closures to the cache");
-    // the signing key in a file only for the length of the copy
-    let key_dir = std::env::var("XDG_RUNTIME_DIR")
-        .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
-    let key_file = PathBuf::from(key_dir).join(format!("dd-cache-key-{}", std::process::id()));
+    // the signing key in a file only for the length of the copy, in a
+    // directory only this user can enter, at a name nobody chose in advance
+    let key_dir = private_dir("dd-cache-key")?;
+    let key_file = key_dir.join("key");
     {
         use std::io::Write as _;
         let mut o = std::fs::OpenOptions::new();
-        o.write(true).create(true).truncate(true);
+        o.write(true).create_new(true);
         // the key is on disk for the length of one copy; where the
         // filesystem has modes, it is readable by nobody else
         #[cfg(unix)]
@@ -1309,7 +1332,7 @@ fn copy_to_cache(
         .env("AWS_ACCESS_KEY_ID", key_id)
         .env("AWS_SECRET_ACCESS_KEY", key_secret)
         .status();
-    let _ = std::fs::remove_file(&key_file);
+    let _ = std::fs::remove_dir_all(&key_dir);
     ensure!(
         status.context("running nix copy")?.success(),
         "copying to the cache"
@@ -1598,25 +1621,53 @@ fn cache_writer(root: &Path) -> Result<(String, String, String)> {
     Ok((id.to_owned(), secret.to_owned(), signing.to_owned()))
 }
 
-fn print(signed: &release::Signed) {
+/// `refused` is why the file did not verify; then the signer it names is
+/// only what the file says, and is not printed as if it signed.
+fn print(signed: &release::Signed, refused: Option<&String>) {
     let p = &signed.payload;
+    let by = match refused {
+        None => format!("signed by {}", identity::fingerprint(&signed.signer)),
+        Some(e) => format!("DOES NOT VERIFY against fleet/release.pub ({e})"),
+    };
     println!(
-        "release {}  commit {}  signed by {}",
+        "release {}  commit {}  {by}",
         p.counter,
         &p.rev[..12.min(p.rev.len())],
-        identity::fingerprint(&signed.signer)
     );
     for (name, b) in &p.boxes {
         println!("  {name}  {}", b.path);
     }
 }
 
-fn fetch(url: &str) -> Result<Option<release::Signed>> {
+/// The release key's public half, as every box is built with it.
+fn trusted_key(root: &Path) -> Result<ed25519_dalek::VerifyingKey> {
+    release::decode_public(std::fs::read_to_string(root.join("fleet/release.pub"))?.trim())
+        .map_err(|e| anyhow::anyhow!("fleet/release.pub: {e}"))
+}
+
+/// The published release, and whether it verifies against
+/// fleet/release.pub as a box would check it. One that does not is still
+/// returned, to show what is there, with the reason.
+fn fetch(
+    root: &Path,
+    url: &str,
+) -> Result<Option<(release::Signed, std::result::Result<(), String>)>> {
     match ureq_get(url) {
-        Ok(body) => Ok(Some(
-            serde_json::from_str(&body).context("release file is not json")?,
-        )),
+        Ok(body) => Ok(Some(checked(&body, &trusted_key(root)?)?)),
         Err(NotFound) => Ok(None),
+    }
+}
+
+fn checked(
+    body: &str,
+    trusted: &ed25519_dalek::VerifyingKey,
+) -> Result<(release::Signed, std::result::Result<(), String>)> {
+    match release::verify_json(body, trusted) {
+        Ok(s) => Ok((s, Ok(()))),
+        Err(e) => Ok((
+            serde_json::from_str(body).context("release file is not json")?,
+            Err(e.to_string()),
+        )),
     }
 }
 
@@ -1644,7 +1695,9 @@ pub(crate) fn load(keys: &auth::Store) -> Result<ed25519_dalek::SigningKey> {
 /// Write files onto the releases branch and push it: the history of what
 /// the release key has signed, never merged anywhere.
 fn to_releases(root: &std::path::Path, files: &[(String, String)], message: &str) -> Result<()> {
-    let wt = std::env::temp_dir().join(format!("dd-release-{}", std::process::id()));
+    // git takes an empty directory; a fresh private one, not a name anyone
+    // could have put something at first
+    let wt = private_dir("dd-release")?;
     let have_branch = git(
         root,
         &["ls-remote", "--exit-code", "--heads", "forge", "releases"],
@@ -1686,6 +1739,7 @@ fn to_releases(root: &std::path::Path, files: &[(String, String)], message: &str
         root,
         &["worktree", "remove", "--force", wt.to_str().unwrap()],
     );
+    let _ = std::fs::remove_dir_all(&wt);
     result
 }
 
@@ -2202,6 +2256,75 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "free");
         drop(held);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // the throwaway worktree is a fresh private directory, and is gone after
+    #[test]
+    fn the_releases_branch_is_written_from_a_private_worktree() {
+        let t = private_dir("dd-test-releases").unwrap();
+        let (forge, root) = (t.join("forge.git"), t.join("repo"));
+        git(&t, &["init", "-q", "--bare", forge.to_str().unwrap()]).unwrap();
+        git(&t, &["init", "-q", root.to_str().unwrap()]).unwrap();
+        git(&root, &["remote", "add", "forge", forge.to_str().unwrap()]).unwrap();
+        // the worktree shares this config: who commits, and no signing
+        for (k, v) in [
+            ("user.name", "t"),
+            ("user.email", "t@t"),
+            ("commit.gpgsign", "false"),
+        ] {
+            git(&root, &["config", k, v]).unwrap();
+        }
+        let before = |base: &Path| {
+            std::fs::read_dir(base)
+                .map(|d| {
+                    d.filter_map(|e| e.ok())
+                        .filter(|e| e.file_name().to_string_lossy().starts_with("dd-release-"))
+                        .count()
+                })
+                .unwrap_or(0)
+        };
+        let base = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let left = before(&base);
+        // the first one starts the branch, the second adds to it
+        to_releases(&root, &[("current.json".into(), "1".into())], "release 1").unwrap();
+        to_releases(&root, &[("current.json".into(), "2".into())], "release 2").unwrap();
+        assert_eq!(
+            git(&forge, &["show", "releases:current.json"]).unwrap(),
+            "2"
+        );
+        assert_eq!(
+            git(&forge, &["rev-list", "--count", "releases"]).unwrap(),
+            "2"
+        );
+        assert_eq!(before(&base), left, "no worktree left behind");
+        std::fs::remove_dir_all(&t).unwrap();
+    }
+
+    #[test]
+    fn show_and_status_say_when_the_release_does_not_verify() {
+        let key = release::generate();
+        let payload = release::Payload {
+            counter: 7,
+            rev: "0123456789abcdef".into(),
+            issued: 1,
+            boxes: BTreeMap::new(),
+        };
+        let body = serde_json::to_string(&release::sign(payload, &key).unwrap()).unwrap();
+        let (s, check) = checked(&body, &key.verifying_key()).unwrap();
+        assert_eq!(s.payload.counter, 7);
+        assert!(check.is_ok());
+        // the counter changed after signing
+        let forged = body.replace("\"counter\":7", "\"counter\":99");
+        assert_ne!(forged, body);
+        let (s, check) = checked(&forged, &key.verifying_key()).unwrap();
+        assert_eq!(s.payload.counter, 99, "shown as it is");
+        assert!(check.is_err());
+        // signed, but by a key that is not the release key
+        let (_, check) = checked(&body, &release::generate().verifying_key()).unwrap();
+        assert!(check.is_err());
+        assert!(checked("not json", &key.verifying_key()).is_err());
     }
 
     #[cfg(unix)]

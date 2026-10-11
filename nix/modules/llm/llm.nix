@@ -11,7 +11,8 @@ let
   run = "/run/dd-llm";
 in
 {
-  # reads plaintext: only on a box whose owner is trusted with it (modules/box.nix)
+  # reads plaintext: prompts and answers, which every box it runs on can
+  # read. A label to see, not a gate (modules/box/box.nix)
   dd.box.plaintext = [ "llm (prompts and answers)" ];
   # The gateway in front of llama-server: nginx asks the verifier who this is
   # (a device-signed token, or a passkey session on this box) and proxies.
@@ -20,7 +21,7 @@ in
     useACMEHost = base;
     forceSSL = true;
 
-    # the page: the gate's (box/chat), which asks who is looking itself
+    # the page: the gate's (servers/chat), which asks who is looking itself
     locations."= /" = {
       proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/chat";
       extraConfig = "proxy_set_header X-Original-URI $request_uri;";
@@ -57,7 +58,7 @@ in
         # by the one llama-server was started with
         include ${run}/proxy.conf;
         # a browser with no credential gets the box's passkey page (@login is
-        # defined for every browser-facing vhost in modules/verify.nix)
+        # defined for every browser-facing vhost in modules/gate/verify.nix)
         error_page 401 = @login;
         error_page 403 = @waiting;
         # the demo's prompts are counted at the gate (rate:N/M on the tile);

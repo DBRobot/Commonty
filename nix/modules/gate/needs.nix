@@ -30,7 +30,17 @@
         storage = "122K";
       };
       network = {
-        outbound = "none";
+        # each where the box has that part, which is off otherwise: the
+        # signed app manifest on git.<domain>, museum at api.<domain> for
+        # Photos, the libraries' bucket, and the house's other boxes' gates
+        # for a Wi-Fi change. On this box too, on loopback: dd-control,
+        # Pi-hole, SearXNG, Thanos and Headscale
+        outbound = [
+          "git.<domain>"
+          "api.<domain>"
+          "s3"
+          "the house's boxes"
+        ];
         inbound = "localhost"; # nginx asks it; the network's door through nginx
       };
       depends.dd-control.local = true; # the directory comes from the agreed log

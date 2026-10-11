@@ -19,7 +19,7 @@ let
       lib.head (lib.splitString "/" (lib.removePrefix "https://" t.url))
     );
   # the directory is the control plane's agreed log wherever the control
-  # plane runs (box/verify/src/directory.rs, Agreed)
+  # plane runs (servers/gate/src/directory.rs, Agreed)
   agreed = options.dd ? control && config.dd.control.enable;
   demoDoors = if options.dd ? public then config.dd.public.demoDoors else [ ];
 in
@@ -27,6 +27,18 @@ in
   imports = [
     ./strip-cookie.nix
     ./headers.nix
+    # the fleet's own hosts, on every box; a module adds its own beside them
+    {
+      dd.verify.hosts = [
+        "files"
+        "llm"
+        "metrics"
+        "git"
+        "home"
+        "photos"
+        "games"
+      ];
+    }
   ];
   # A box that runs services verifies for them and serves its users' browser
   # login. A box that runs nothing else can still hold the directory: the
@@ -39,16 +51,7 @@ in
   };
   options.dd.verify.hosts = lib.mkOption {
     type = lib.types.listOf lib.types.str;
-    default = [
-      "files"
-      "llm"
-      "metrics"
-      "git"
-      "home"
-      "photos"
-      "games"
-    ];
-    description = "the subdomains the gate stands in front of; every one gets the sign-in redirect and the auth subrequest";
+    description = "the subdomains the gate stands in front of; every one gets the sign-in redirect and the auth subrequest. Lists from every module add up.";
   };
   options.dd.verify.enable = lib.mkOption {
     type = lib.types.bool;
@@ -184,13 +187,6 @@ in
     default = null;
     description = "the network's door: with this, an admitted device gets a join key for the fleet's own network (POST /_dd/network/join)";
   };
-  # The demo's library: an id and its key, both plain. This is not a
-  # secret and must not be dressed as one. A passkey lives in one browser
-  # on one device and the demo is one account every visitor shares, so the
-  # demo cannot hold a key of its own; the box hands this one to the
-  # demo's page, exactly as it already hands over the demo's photos
-  # password. Nothing private is in that library, and anyone at all may
-  # sign in as the demo and be given the same key.
   # The app the downloads page offers: whatever a manifest signed with the
   # release key names, published beside the box releases. Which tag is
   # current is the manifest's to say, not this box's configuration - so a
@@ -208,6 +204,13 @@ in
     default = null;
     description = "file holding the fleet's TMDB api key or read token; null: stills and title cards, no posters";
   };
+  # The demo's library: an id and its key, both plain. This is not a
+  # secret and must not be dressed as one. A passkey lives in one browser
+  # on one device and the demo is one account every visitor shares, so the
+  # demo cannot hold a key of its own; the box hands this one to the
+  # demo's page, exactly as it already hands over the demo's photos
+  # password. Nothing private is in that library, and anyone at all may
+  # sign in as the demo and be given the same key.
   options.dd.verify.demoLibrary = lib.mkOption {
     type = lib.types.nullOr (
       lib.types.submodule {
@@ -226,7 +229,7 @@ in
         options = {
           s3 = lib.mkOption {
             type = lib.types.str;
-            description = "the s3 endpoint devices reach with the urls the gate signs";
+            description = "the s3 endpoint the gate reaches the bucket at, and the transcoder with the one url it is handed";
           };
           bucket = lib.mkOption {
             type = lib.types.str;
@@ -314,7 +317,7 @@ in
         # the house's own boxes, for its Wi-Fi and its page; never the fleet
         VERIFY_HOUSE_PEERS = lib.concatStringsSep "," cfg.housePeers;
         VERIFY_FLEET = builtins.toJSON cfg.fleet;
-        # every box's facts, from thanos on this box (box/verify/src/fleet.rs)
+        # every box's facts, from thanos on this box (servers/gate/src/fleet.rs)
         VERIFY_THANOS = lib.optionalString (config.services.thanos.query.enable or false
         ) "http://${config.services.thanos.query.http-address}";
         VERIFY_SYNC_SECS = toString cfg.syncSeconds;
@@ -366,7 +369,7 @@ in
         VERIFY_DOMAIN = base;
         # where the docs live on the forge, for a member's edit and history links
         VERIFY_REPO = config.dd.repo;
-        # the hosts whose pages may ask for a passkey here (box/verify own_hosts)
+        # the hosts whose pages may ask for a passkey here (servers/gate own_hosts)
         VERIFY_HOSTS = lib.concatStringsSep "," cfg.hosts;
         VERIFY_MEMBERS = builtins.toJSON config.dd.members;
         # our Rust for the browser, next to the pages that use it
@@ -486,6 +489,23 @@ in
                   limit_req_status 429;
                 '';
               };
+              # a friend link's secret is its path, and the access log keeps
+              # paths: these are not logged at all
+              "~ ^/_dd/friend/" = {
+                proxyPass = "http://127.0.0.1:${toString port}";
+                extraConfig = ''
+                  access_log off;
+                  proxy_set_header X-Original-URI $request_uri;
+                  limit_req zone=dd_user burst=300 nodelay;
+                  limit_req zone=dd_visitor burst=500 nodelay;
+                  limit_req_status 429;
+                '';
+              };
+              # this box's link is for its own processes, not the house's
+              # page through here (servers/gate/src/home.rs)
+              "= /_dd/house/here".extraConfig = ''
+                return 404;
+              '';
               "@login".extraConfig = ''
                 return 302 /_dd/login?rd=$request_uri;
               '';

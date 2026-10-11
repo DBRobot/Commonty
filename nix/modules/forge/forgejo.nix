@@ -39,7 +39,6 @@ let
   ];
   base = config.dd.domain;
   host = "git.${base}";
-  port = 3001; # 3000 is grafana; kept for the runner's own url only
   # Forgejo believes X-WEBAUTH-USER from whoever reaches it, and this box
   # runs CI jobs and game guests. A socket in a directory only forgejo's
   # group may enter is how "from nginx, or from one of our own units" gets
@@ -62,7 +61,65 @@ let
       # forgejo shows private ones to no one it does not know.
       error_page 401 = @anonymous;
     '';
+    # no cookie when the header is empty (the map below)
+    ddCookie = "$forge_cookie";
   };
+  admin = lib.replaceStrings [ "'" ] [ "''" ] cfg.admin;
+  # What the forge's database holds to, whatever asked for otherwise; put
+  # in after every Forgejo start, as live.nix's trigger is, so a table an
+  # upgrade rebuilt gets it back.
+  rules = pkgs.writeText "dd-forge-rules.sql" ''
+    -- No new private repository, and none made private: a repository here
+    -- is plaintext on the box, so "private" would be a promise the box
+    -- cannot keep. Forgejo has no setting that forbids one (FORCE_PRIVATE
+    -- is the opposite), so the database refuses it, through the API, a
+    -- push option or a migration alike. One that is private already stays
+    -- as it is until its owner makes it public.
+    CREATE OR REPLACE FUNCTION dd_no_private_repo() RETURNS trigger LANGUAGE plpgsql AS $f$
+    BEGIN
+      IF NEW.is_private AND (TG_OP = 'INSERT' OR NOT OLD.is_private) THEN
+        RAISE EXCEPTION 'private repositories are not offered here: use an encrypted repository';
+      END IF;
+      RETURN NEW;
+    END $f$;
+    DROP TRIGGER IF EXISTS dd_no_private_repo ON repository;
+    CREATE TRIGGER dd_no_private_repo BEFORE INSERT OR UPDATE ON repository
+      FOR EACH ROW EXECUTE FUNCTION dd_no_private_repo();
+
+    -- A host runner runs a job on the box itself, so it takes the admin's
+    -- repositories and no one else's. Whatever token registered it, a
+    -- runner for every repository may carry the members' label alone (the
+    -- sandboxed runner, members-runner.nix); any other is moved to the
+    -- admin's own scope, or with no admin yet to a scope no repository has.
+    CREATE OR REPLACE FUNCTION dd_runner_scope() RETURNS trigger LANGUAGE plpgsql AS $f$
+    DECLARE
+      labels jsonb;
+      members_only boolean;
+    BEGIN
+      IF NEW.owner_id = 0 AND NEW.repo_id = 0 THEN
+        BEGIN
+          labels := coalesce(nullif(NEW.agent_labels, '''), '[]')::jsonb;
+        EXCEPTION WHEN others THEN
+          labels := '[]';
+        END;
+        IF jsonb_typeof(labels) <> 'array' THEN
+          labels := '[]';
+        END IF;
+        -- a label is its name, or its name and how it runs ("members:docker://...")
+        SELECT coalesce(bool_and(split_part(l, ':', 1) = 'members'), false) INTO members_only
+          FROM jsonb_array_elements_text(labels) AS l;
+        IF NOT members_only THEN
+          NEW.owner_id := coalesce((SELECT id FROM "user" WHERE lower_name = lower('${admin}')), -1);
+        END IF;
+      END IF;
+      RETURN NEW;
+    END $f$;
+    DROP TRIGGER IF EXISTS dd_runner_scope ON action_runner;
+    CREATE TRIGGER dd_runner_scope BEFORE INSERT OR UPDATE ON action_runner
+      FOR EACH ROW EXECUTE FUNCTION dd_runner_scope();
+    -- and the runners already registered
+    UPDATE action_runner SET owner_id = owner_id WHERE owner_id = 0 AND repo_id = 0;
+  '';
 in
 {
   # the Git pages update as runs and statuses change (live.nix)
@@ -96,12 +153,13 @@ in
       };
     })
     {
-      # reads plaintext: only on a box whose owner is trusted with it (modules/box.nix)
+      # reads plaintext: every box it runs on can read these repositories
+      # (nix/modules/box/box.nix)
       dd.box.plaintext = [ "forgejo (plain repositories)" ];
-      # Private repositories here are private from the world, not from whoever
-      # runs this box. The forge reads the code; that is what a forge is. What
-      # must be private from the box too goes through the dd remote helper,
-      # which stores ciphertext in an ordinary repository here.
+      # The forge reads the code; that is what a forge is. So there are no
+      # private repositories here (dd-forge-rules refuses one): what must be
+      # private goes through the dd remote helper, which stores ciphertext
+      # in an ordinary repository here.
       services.forgejo = {
         enable = true;
         package = pkgs.forgejo-lts;
@@ -146,12 +204,14 @@ in
           };
           session.COOKIE_SECURE = true;
           repository = {
+            # public, the only kind there is (dd-forge-rules)
             DEFAULT_PRIVATE = "public";
             DEFAULT_PUSH_CREATE_PRIVATE = false;
             ENABLE_PUSH_CREATE_USER = true;
             # A workflow is code that runs on a box. Every repo may have one:
-            # a member's lands on the members' runner (modules/members-runner.nix),
-            # sandboxed, and the host runners take the owner's repos alone.
+            # a member's lands on the members' runner
+            # (nix/modules/forge/members-runner.nix), sandboxed, and the host
+            # runners take the admin's repos alone (dd-forge-rules).
           };
           # What a member may attach to an issue or a release: files that are
           # data, never a page. An .svg or .html served from this name runs as
@@ -171,7 +231,7 @@ in
           # the tailnet
           webhook.ALLOWED_HOST_LIST = "external";
           actions = {
-            ENABLED = true; # the runner is modules/forgejo-runner.nix
+            ENABLED = true; # the runners: nix/modules/forge/forgejo-runner.nix, members-runner.nix
             # `uses: actions/checkout@v4` is written out in full in our
             # workflows; this is where a bare one would be looked up
             DEFAULT_ACTIONS_URL = "github";
@@ -181,12 +241,6 @@ in
         };
       };
 
-      # The state dir is a dataset (modules/zfs-datasets.nix); do not start
-      # before it is mounted, or forgejo would happily initialise itself onto
-      # the root disk underneath the mountpoint. The secret bootstrap is the
-      # first thing to write there and tmpfiles may have run before the dataset
-      # existed (it did, on the activation that created it), so it makes its
-      # own directory as root before dropping to forgejo.
       # each owner's repositories, counted by the forge itself (storage/usage.nix)
       dd.usage.forgejo = {
         user = "forgejo";
@@ -195,6 +249,12 @@ in
         counts = "code";
       };
 
+      # The state dir is a dataset (nix/modules/box/zfs-datasets.nix); do not
+      # start before it is mounted, or forgejo would happily initialise itself
+      # onto the root disk underneath the mountpoint. The secret bootstrap is
+      # the first thing to write there and tmpfiles may have run before the
+      # dataset existed (it did, on the activation that created it), so it
+      # makes its own directory as root before dropping to forgejo.
       systemd.services.forgejo-secrets = {
         after = [ "zfs-datasets.service" ];
         requires = [ "zfs-datasets.service" ];
@@ -245,10 +305,9 @@ in
       };
 
       # main takes merges only, after the forge's own CI has passed on the
-      # pull request. Declared here so a rebuilt box gets it back, and
-      # idempotent: an existing rule is updated, not duplicated. The admin
-      # may still push main directly while GitHub is where merges happen;
-      # that allowance goes when the forge is the only source.
+      # pull request: nobody pushes it directly, the admin included.
+      # Declared here so a rebuilt box gets it back, and idempotent: an
+      # existing rule is updated, not duplicated.
       systemd.services.forgejo-protection = {
         description = "Make sure main is protected by the forge's CI";
         after = [ "forgejo-admin.service" ];
@@ -271,9 +330,9 @@ in
           RULE = builtins.toJSON {
             rule_name = "main";
             branch_name = "main";
-            enable_push = true;
-            enable_push_whitelist = true;
-            push_whitelist_usernames = [ cfg.admin ];
+            enable_push = false;
+            enable_push_whitelist = false;
+            push_whitelist_usernames = [ ];
             enable_status_check = true;
             status_check_contexts = [ "entry_point / ci_ok (pull_request)" ];
             block_on_outdated_branch = true;
@@ -282,9 +341,32 @@ in
         };
       };
 
-      # a failing ci job stops the rest of its run: the job posts here with
-      # the ci secret and this cancels the run as the admin, the one thing
-      # the forge's api cannot do
+      # the rules above, in the forge's database (as live.nix's trigger)
+      systemd.services.dd-forge-rules = {
+        description = "No private repositories, and host runners for the admin's alone";
+        wantedBy = [ "forgejo.service" ];
+        after = [ "forgejo.service" ];
+        partOf = [ "forgejo.service" ];
+        path = [ config.services.postgresql.package ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          User = "postgres";
+        };
+        script = ''
+          # the first start: Forgejo makes its tables as it comes up
+          for _ in $(seq 1 120); do
+            [ "$(psql -d ${config.services.forgejo.database.name} -tAc "select to_regclass('public.repository') is not null and to_regclass('public.action_runner') is not null")" = t ] && break
+            sleep 1
+          done
+          psql -d ${config.services.forgejo.database.name} -v ON_ERROR_STOP=1 -q -f ${rules}
+        '';
+      };
+
+      # a failing ci job stops the rest of its run: the job posts its run id
+      # here and this cancels the run as the admin, the one thing the
+      # forge's api cannot do. No secret: it cancels only a run the forge
+      # already has a failed job in (ci-cancel.py)
       systemd.services.dd-ci-cancel = {
         description = "Cancel a ci run at a failing job's request";
         after = [ "forgejo.service" ];
@@ -335,10 +417,19 @@ in
         };
       };
 
+      # Forgejo signs in whoever its own session cookie names when the header
+      # is empty, so with an empty header it gets no cookie at all: a session
+      # the gate ended, or the demo, is nobody here. The Cookie line is set
+      # through ddCookie (nix/modules/gate/strip-cookie.nix), never a second
+      # proxy_set_header: nginx would send both lines.
       services.nginx.appendHttpConfig = ''
         map $auth_user $forge_user {
           default $auth_user;
           demo "";
+        }
+        map $forge_user $forge_cookie {
+          "" "";
+          default $dd_cookie_stripped;
         }
       '';
       # the socket's directory: forgejo makes it, its group may enter it, and
@@ -352,7 +443,7 @@ in
       services.nginx.virtualHosts.${host} = {
         useACMEHost = base;
         forceSSL = true;
-        # The pages are ours (box/forge/web): every address that is not the
+        # The pages are ours (servers/forge/web): every address that is not the
         # forge's own below gets the one page, which draws itself from the
         # forge's API.
         locations."/" = {
@@ -363,7 +454,8 @@ in
           '';
         };
         # the forge's own: its API, git over https, raw files and archives,
-        # a job's log, avatars, and its account pages
+        # a job's log, avatars, and its account pages. The Git pages keep the
+        # same list (FORGE in servers/forge/web/git-core.js): change both.
         locations."~ ^/(api|assets|avatars|repo-avatars|attachments|user|login|-|\\.well-known)(/|$)" =
           toForge;
         locations."~ ^/[^/]+/[^/]+\\.git(/|$)" = toForge;
@@ -375,7 +467,8 @@ in
           default_type application/json;
           return 200 '${builtins.toJSON { repo = config.dd.repo; }}';
         '';
-        # the ci cancel route: the secret is the credential, not a session
+        # the ci cancel route: no sign-in and no secret, it only stops a run
+        # that has already failed (ci-cancel.py)
         locations."/_dd/ci/" = {
           proxyPass = "http://127.0.0.1:${toString cancelPort}";
         };
@@ -384,10 +477,10 @@ in
           extraConfig = ''
             client_max_body_size 0;
             proxy_set_header X-WEBAUTH-USER "";
-            # and not whoever forgejo's own cookie remembers: a session the
-            # gate has ended is ended here too
-            proxy_set_header Cookie "";
           '';
+          # and not whoever forgejo's own cookie remembers: a session the
+          # gate has ended is ended here too
+          ddCookie = "";
         };
         # forgejo's own sign-in page is a password form that is switched off;
         # the box's passkey page is the sign-in

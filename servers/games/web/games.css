@@ -1,0 +1,539 @@
+/* The Games pages: what they add to home.css (loaded before this), on a
+   library of covers. The colours, the type, the bar and the state words
+   are home.css's; where its general rules (buttons, fields, rows) would
+   change a part these pages draw their own way, it is said below. */
+
+:root {
+  /* a hairline drawn as a ring, for the covers and cards */
+  --shadow: 0 0 0 1px var(--line);
+  --shadow-hover: 0 0 0 1px var(--ink-2);
+}
+
+a { color: inherit; }
+a:hover { color: inherit; }
+
+main {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-inline: 24px;
+  padding-block: 32px 72px;
+}
+h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+h2 {
+  margin: 0 0 14px;
+  font-size: 18px;
+}
+section { margin-bottom: 36px; }
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.search input {
+  height: auto;
+  width: min(360px, 70vw);
+  padding: 10px 14px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.search input:focus {
+  border-color: var(--accent);
+  outline: 3px solid var(--focus); outline-offset: 2px;
+}
+
+.note {
+  margin: 0 0 22px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+}
+.empty { color: var(--ink-2); }
+
+/* the servers up on this box, yours first */
+.servers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.server {
+  display: flex;
+  gap: 14px;
+  padding: 14px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  text-decoration: none;
+}
+.server img,
+.server .blank {
+  width: 64px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  flex: none;
+  background: var(--code);
+}
+.server h3 {
+  margin: 0 0 2px;
+  font-size: 16px;
+}
+.server p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+.addr {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--code);
+  padding: 5px 9px;
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+  display: inline-block;
+  margin-top: 6px;
+}
+
+/* the library: a cover per game */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tile {
+  display: block;
+  text-decoration: none;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.tile:hover { box-shadow: var(--shadow-hover); }
+.tile img,
+.tile .blank {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  background: linear-gradient(160deg, var(--accent), #1e7a94);
+}
+.tile .blank {
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  text-align: center;
+  letter-spacing: -.01em;
+}
+.tile .t {
+  padding: 8px 10px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  background: var(--code);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile { transition: none; }
+}
+
+/* a game opened over the library: a veil, then a ribbon the width of the
+   page, with the cover standing proud of it on the left */
+.veil {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 20, 26, .6);
+  backdrop-filter: blur(3px);
+  z-index: 10;
+}
+dialog {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  margin: 0;
+  z-index: 11;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  width: 100%;
+  max-width: none;
+  overflow: visible;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, .55), 0 -24px 60px -20px rgba(0, 0, 0, .55);
+}
+.close {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--code);
+  text-decoration: none;
+  font-size: 20px;
+  z-index: 1;
+}
+
+/* the ribbon: the cover standing proud on the left, the settings in the
+   middle, the start button on the right. The ribbon has a fixed height;
+   the settings and the description scroll inside it */
+.open {
+  display: grid;
+  grid-template-columns: 450px minmax(0, 1fr) auto;
+  grid-template-rows: 100%;
+  gap: 48px;
+  align-items: center;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 32px 56px;
+  height: 460px;
+  box-sizing: border-box;
+}
+.open img,
+.open .blank {
+  width: 450px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: var(--radius);
+  margin-block: -108px;
+  box-shadow: 0 24px 60px -12px rgba(0, 0, 0, .65), 0 0 0 1px rgba(255, 255, 255, .06);
+  background: linear-gradient(160deg, var(--accent), #1e7a94);
+}
+.open .blank {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 30px;
+  text-align: center;
+}
+.open .body {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.open h2 {
+  font-size: 32px;
+  margin: 0 0 8px;
+  letter-spacing: -.02em;
+}
+.open .desc {
+  color: var(--ink-2);
+  font-size: 15px;
+  margin: 0 0 16px;
+  max-width: 70ch;
+  max-height: 4.5em;
+  overflow: auto;
+  padding-right: 8px;
+}
+.open form {
+  display: contents;
+}
+.open .fields {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 12px;
+  padding-bottom: 8px;
+  /* the bottom edge fades so a cut-off field reads as more below */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+.open .desc:not(:hover),
+.open .fields:not(:hover) {
+  scrollbar-color: transparent transparent;
+}
+.open .desc:not(:hover)::-webkit-scrollbar-thumb,
+.open .fields:not(:hover)::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+/* thin scrollbars inside the ribbon, in the card's own colours */
+.open .desc,
+.open .fields {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.open .desc::-webkit-scrollbar,
+.open .fields::-webkit-scrollbar { width: 6px; }
+.open .desc::-webkit-scrollbar-thumb,
+.open .fields::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
+.open .desc::-webkit-scrollbar-track,
+.open .fields::-webkit-scrollbar-track { background: transparent; }
+.open .fields label:first-child { margin-top: 0; }
+.open .actions {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  text-align: right;
+  min-width: 190px;
+}
+.open .actions button {
+  padding: 14px 24px;
+  font-size: 16px;
+  white-space: nowrap;
+}
+.open .actions .spec {
+  margin: 0;
+  max-width: 220px;
+}
+@media (max-width: 1100px) {
+  .open {
+    grid-template-columns: 300px minmax(0, 1fr) auto;
+    gap: 32px;
+    padding: 28px 36px;
+    height: 400px;
+  }
+  .open img,
+  .open .blank {
+    width: 300px;
+    margin-block: -80px;
+  }
+}
+@media (max-width: 760px) {
+  .open {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 24px;
+    height: auto;
+  }
+  .open img,
+  .open .blank {
+    width: 180px;
+    margin-block: -60px 0;
+  }
+  .open .actions { align-items: flex-start; text-align: left; }
+  dialog {
+    top: 0;
+    bottom: 0;
+    transform: none;
+    overflow: auto;
+  }
+}
+
+/* home.css draws the panel: surface, hairline, radius */
+.panel {
+  overflow: hidden;
+}
+.panel .open {
+  grid-template-columns: 220px 1fr;
+  gap: 28px;
+  padding: 24px 28px;
+  height: auto;
+}
+.panel .open img,
+.panel .open .blank {
+  width: 220px;
+  margin-block: 0;
+  box-shadow: var(--shadow);
+}
+.panel .open h2 { font-size: 24px; }
+@media (max-width: 700px) {
+  .open,
+  .panel .open { grid-template-columns: 1fr; }
+  .open img,
+  .open .blank {
+    aspect-ratio: 16 / 9;
+    max-height: 40vh;
+  }
+  .open .body { padding: 24px 24px 20px; }
+  dialog { max-height: 100vh; }
+}
+
+/* the settings form */
+/* smaller than home.css's sign-in fields, beside one another or not */
+label,
+input + label,
+label + label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 12px 0 5px;
+}
+label small {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+input[type=text],
+input[type=number],
+input[type=password],
+select {
+  width: 100%;
+  height: auto;
+  padding: 9px 12px;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+input:focus,
+select:focus {
+  border-color: var(--accent);
+  outline: 3px solid var(--focus); outline-offset: 2px;
+}
+details { margin-top: 16px; }
+summary {
+  cursor: pointer;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+/* a row of buttons, not home.css's scrolling shelf */
+.row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 20px;
+  overflow: visible;
+  padding-bottom: 0;
+  scroll-snap-type: none;
+}
+form { margin: 0; }
+/* home.css's colours and hover, at the size these pages use */
+button {
+  height: auto;
+  margin-top: 0;
+  padding: 10px 16px;
+  font-size: 14px;
+}
+button.quiet {
+  margin-top: 0;
+  border: 0;
+  background: var(--code);
+  color: var(--ink);
+}
+.spec {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin-top: 8px;
+}
+
+/* the address and port a player types, each with a copy */
+.join {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 8px 0 4px;
+}
+.join label { margin: 0; }
+.copy {
+  display: flex;
+  gap: 6px;
+  margin-top: 5px;
+}
+.copy input {
+  width: auto;
+  min-width: 120px;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  background: var(--code);
+  border-color: transparent;
+}
+.copy button {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+/* the game's own words */
+pre.log {
+  margin: 0;
+  padding: 14px 16px;
+  background: #0b151b;
+  color: #d7e3ea;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.45;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* the Your servers button beside the search, and its count */
+.topright {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.yours {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+}
+.yours:hover { box-shadow: var(--shadow-hover); }
+.count {
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Your servers: sections of cards, each opening its server */
+main section + section { margin-top: 28px; }
+main section > h2 { font-size: 18px; margin: 0 0 12px; }
+.srv .cover { flex: none; }
+.srv h3 a { color: inherit; text-decoration: none; }
+.srv h3 a:hover { text-decoration: underline; }
+.srv .copy { margin-top: 8px; }
+.copy input { max-width: 100%; }

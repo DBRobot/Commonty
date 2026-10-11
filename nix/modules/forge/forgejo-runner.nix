@@ -33,15 +33,19 @@ in
   };
 
   config = {
-    # reads plaintext: only on a box whose owner is trusted with it (modules/box.nix)
+    # reads plaintext: every box it runs on can read the code its jobs run
+    # (nix/modules/box/box.nix)
     dd.box.plaintext = [ "forgejo-runner (runs contributed code)" ];
     # One runner, on this box, in host mode: a job runs as the runner user with
     # nix on the path and builds straight into this box's store. So the closure
     # a green check just built is already here, and a deploy is a switch.
     #
-    # Host mode means a job is code running on node1 as the runner's dynamic
-    # user. Fine while every author is the admin; the day strangers can open
-    # pull requests here this becomes a container runner or a separate box.
+    # Host mode means a job is code running on this box as forgejo-runner.
+    # So the host runners take the admin's repositories and no one else's:
+    # the forge's database moves any runner registered for every repository
+    # to the admin's scope, whatever token registered it (dd-forge-rules in
+    # nix/modules/forge/forgejo.nix). A pull request from someone else's
+    # fork runs only once the admin approves it (Forgejo's own rule).
     services.gitea-actions-runner = {
       package = pkgs.forgejo-runner;
       instances.${name} = {
@@ -49,20 +53,16 @@ in
         inherit name;
         url = "https://git.${base}";
         # a registration token, minted once with `forgejo actions
-        # generate-runner-token` and kept in sops; the runner registers on
-        # first start and keeps its own credential in its state dir after
+        # generate-runner-token --scope <admin>` and kept in sops; the runner
+        # registers on first start and keeps its own credential in its state
+        # dir after
         tokenFile = config.sops.templates."forgejo-runner.env".path;
-        # nix: the job runs on a box with nix. gating: what this box builds and
-        # reports is what the fleet installs and what merges main; that is
-        # only ever a box the release signer owns (roles/runner.nix). A
-        # stranger's box, when there is one, gets a runner without the second
-        # label, a read-only cache key, and jobs whose verdicts are advisory.
-        # and the box's own name, for a job that must run on this box and
-        # no other: each box building every box's system (entry_point.yml, build_host),
-        # so that what it later vouches for it has built itself
+        # nix: the job runs on a box with nix. And the box's own name, for a
+        # job that must run on this box and no other: each box building every
+        # box's system (entry_point.yml, build_host), so that what it later
+        # vouches for it has built itself
         labels = [
           "nix:host"
-          "gating:host"
           "${name}:host"
         ];
         settings.runner.capacity = config.dd.runner.capacity;

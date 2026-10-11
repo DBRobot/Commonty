@@ -5,7 +5,7 @@
     # its repositories are on one box's disk, beside its database
     instances = 1;
     base = {
-      # repositories, LFS, release files of up to 100M each: overestimated
+      # repositories, LFS, release files of up to 400M each: overestimated
       requires.disk.size.min = "20G";
       # node1, 2026-10-04: peak; its dataset (and 70M in postgresql)
       uses = {

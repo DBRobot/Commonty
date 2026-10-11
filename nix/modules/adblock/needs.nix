@@ -1,7 +1,7 @@
 # What a house's ad blocking needs of a box (types: nix/lib/needs-type.nix)
 {
   pihole = {
-    what = "ad and tracker blocking for a household's own devices, lookups sent out encrypted";
+    what = "ad and tracker blocking for a household's own devices, and its owner's set to ask it on the Commonty network; lookups sent out encrypted";
     perHouse = 1;
     base = {
       # on the house's own network, with its household in box.json: only
@@ -18,7 +18,9 @@
           "cloudflare-dns.com"
           "raw.githubusercontent.com"
         ];
-        inbound = "lan"; # never the Commonty network
+        # the house network, and on the Commonty network the box's owner's
+        # devices alone (net/owner.nix); the network hands everyone else Quad9
+        inbound = "lan";
       };
       depends = {
         dd-verify.local = true; # holds its password

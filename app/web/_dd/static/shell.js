@@ -115,6 +115,19 @@ function el(tag, props = {}, ...kids) {
   return e;
 }
 
+// Signing out and opening the demo change the session, so the gate takes
+// them as a POST from our own pages only. The link still works on its own:
+// it opens a page with the same button.
+function posting(a) {
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    const f = el('form', { method: 'post', action: a.href, hidden: '' });
+    document.body.append(f);
+    f.submit();
+  });
+  return a;
+}
+
 // A setting that belongs at hand (Ad blocking at home): its name opens its
 // page, the switch beside it flips it. Its state is asked for when the menu
 // opens, not on every page.
@@ -164,6 +177,10 @@ function bar(m, slot) {
       // this device signs out
       if (inApp && item.url === '/_dd/logout') {
         nav.append(el('a', { href: deviceScreen, text: 'This device' }));
+        continue;
+      }
+      if (item.url === '/_dd/logout') {
+        nav.append(posting(el('a', { href: homeLink(m, item.url), text: item.label })));
         continue;
       }
       if (item.toggle) {
@@ -275,7 +292,7 @@ function guestHome(m) {
   main.append(el('section', { class: 'guest-more' },
     el('h2', { text: 'Want to see what else Commonty can do?' }),
     el('p', { text: 'Files, photos, films and more, kept on boxes the people in it own. The demo shows a member\'s view. Opening it signs you out of your account here; sign back in after.' }),
-    el('a', { class: 'button', href: m.home + '/_dd/demo', text: 'Try the demo' })));
+    posting(el('a', { class: 'button', href: m.home + '/_dd/demo', text: 'Try the demo' }))));
 }
 
 // the home page: one row per service
@@ -311,7 +328,7 @@ export function slug(text) {
 // home.<domain> once someone signed in says it, else this host less its
 // first label, and the host itself when it is the bare name already.
 let site = null;
-function docsUrl(path = '') {
+export function docsUrl(path = '') {
   if (site) return `https://${site}/docs${path}`;
   const parts = location.hostname.split('.');
   if (parts.length <= 2 || inApp) return `/docs${path}`;

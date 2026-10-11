@@ -1,6 +1,6 @@
 # The Commonty app
 
-What it is and how it is kept safe: [docs/app.md](../docs/app.md). This file
+What it is and how it is kept safe: [docs/dev/app.md](../docs/app.md). This file
 is how to build and run it.
 
 The same crates as `dd`, behind a window: Tauri 2, Rust core, plain pages in
@@ -26,7 +26,7 @@ your entry with every library key sealed to it.
 
 Milestone 2: Movies & TV. The site's own page and player, carried in the
 app (`app/carried`); the box transcodes what the webview cannot play
-(box/transcode).
+(servers/transcode).
 
 Network: the fleet's own network (Headscale on the gateway box). Join asks
 the gate for a single-use key in your name and hands it to the engine,
@@ -87,7 +87,7 @@ builds and the copied libraries are not. An emulator:
 
 CI runs the app's tests and the engine's vet and tests (`checks.tests-app`,
 `checks.net-check`); the downloads for every platform are built by two
-boxes after a release that changes the app (docs/app-release.md), and the
+boxes after a release that changes the app (docs/dev/app-release.md), and the
 apk is signed on the laptop. Proven 2026-09-24 on the emulator:
 recovery of an account, sign-in, joining the network through the bridge,
 node1 as a peer.

@@ -55,6 +55,12 @@ in
           iptables -I OUTPUT -p tcp --dport 80 -j DROP
           ip6tables -I OUTPUT -p tcp --dport 80 -j DROP
         '';
+        # the firewall's own stop leaves OUTPUT alone, and the box goes back
+        # to a system without one: so the drop goes with it
+        networking.firewall.extraStopCommands = ''
+          iptables -D OUTPUT -p tcp --dport 80 -j DROP || true
+          ip6tables -D OUTPUT -p tcp --dport 80 -j DROP || true
+        '';
       };
     };
   };

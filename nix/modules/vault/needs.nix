@@ -20,7 +20,10 @@
         postgresql.local = true;
         garage.local = false;
         nginx.local = true;
-        dd-verify.local = true; # sign-in, and /run/dd-ended
+        # sign-in, and /run/dd-ended. The issuer is home.<domain>'s gate
+        # and sessions are per box, so this box is the gateway's
+        # (fleet/roles.json: with gateway)
+        dd-verify.local = true;
         pwned-list.local = true; # breach checks never leave the box
       };
       privacy = "metadata"; # vaults are ciphertext; it sees names, emails, when things change

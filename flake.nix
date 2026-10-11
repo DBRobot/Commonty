@@ -45,6 +45,7 @@
         "console"
         "directory"
         "metrics"
+        "metrics-ui"
         "backup"
         "release"
         "thanos"
@@ -55,6 +56,7 @@
         "network"
         "library"
         "pgrestore"
+        "photos"
         "llm"
         "vault"
         "adblock"
@@ -87,12 +89,14 @@
                     # the trees on the way to every member, and every manifest
                     tree =
                       builtins.elem rel [
-                        "box"
+                        "servers"
                         "client"
                         "app"
                       ]
-                      || builtins.match "(box|client)/[^/]+" rel != null;
-                    manifest = builtins.match "(box|client)/[^/]+/Cargo\\.toml" rel != null || rel == "app/Cargo.toml";
+                      || builtins.match "(servers/system|servers|client)/[^/]+" rel != null;
+                    manifest =
+                      builtins.match "(servers/system|servers|client)/[^/]+/Cargo\\.toml" rel != null
+                      || rel == "app/Cargo.toml";
                     # the app's pages, icons and tauri config sit beside its src
                     appFile = pkgs.lib.hasPrefix "app/" rel;
                     ours = builtins.any (d: rel == d || pkgs.lib.hasPrefix "${d}/" rel) dirs;
@@ -112,7 +116,7 @@
                       # from the pages directory at start (pages below), so
                       # they are not its source; other crates still compile
                       # theirs in, and the tests read them from the tree
-                      || (name != "verify" && builtins.match ".*/web/.*" rel != null)
+                      || (name != "verify" && builtins.match ".*/web(-shared)?/.*" rel != null)
                       # where askama looks for templates beyond the crate's own
                       || builtins.match ".*/askama\\.toml" rel != null
                       || appFile
@@ -123,7 +127,7 @@
             pkgs.runCommand "src-${name}" { } ''
               cp -r ${filtered} $out
               chmod -R u+w $out
-              for m in $out/box/* $out/client/* $out/app; do
+              for m in $out/servers/* $out/servers/system/* $out/client/* $out/app; do
                 [ -f "$m/Cargo.toml" ] || continue
                 if [ ! -d "$m/src" ]; then
                   mkdir -p "$m/src"
@@ -134,7 +138,7 @@
             '';
           # every crate: the checks (fmt, clippy, tests) build the workspace
           src = srcFor "workspace" [
-            "box"
+            "servers"
             "client"
             "app"
           ];
@@ -190,11 +194,12 @@
               let
                 rel = pkgs.lib.removePrefix (toString ./. + "/") (toString path);
               in
-              # box/web (the shared pages) and box/<service>/web, whole
-              rel == "box"
-              || (type == "directory" && builtins.match "box/[^/]+" rel != null)
-              || builtins.match "box/([^/]+/)?web(/.*)?" rel != null
-              # the docs, which the gate serves as they are (box/verify/src/docs.rs)
+              # servers/web-shared (the shared pages) and servers/<service>/web, whole
+              rel == "servers"
+              || (type == "directory" && builtins.match "servers/[^/]+" rel != null)
+              || builtins.match "servers/([^/]+/)?web(/.*)?" rel != null
+              || builtins.match "servers/web-shared(/.*)?" rel != null
+              # the docs, which the gate serves as they are (servers/gate/src/docs.rs)
               || builtins.match "docs(/.*)?" rel != null;
           };
           # What a dependency build sees: the lockfile and the manifests, with
@@ -222,14 +227,14 @@
                   type == "directory"
                   && (
                     builtins.elem rel [
-                      "box"
+                      "servers"
                       "client"
                       "app"
                     ]
-                    || builtins.match "(box|client)/[^/]+" rel != null
+                    || builtins.match "(servers/system|servers|client)/[^/]+" rel != null
                   )
                 )
-                || builtins.match "(box|client)/[^/]+/Cargo\\.toml" rel != null;
+                || builtins.match "(servers/system|servers|client)/[^/]+/Cargo\\.toml" rel != null;
             };
           };
           # The same, under the name of the source a crate builds from: a
@@ -252,7 +257,7 @@
           crateOverrides = pkgs.defaultCrateOverrides // {
             # askama finds the Photos pages' templates beside the gate's
             verify = _: {
-              postUnpack = "mkdir -p $NIX_BUILD_TOP/photos && cp -r ${./box/photos/templates} $NIX_BUILD_TOP/photos/templates";
+              postUnpack = "mkdir -p $NIX_BUILD_TOP/photos && cp -r ${./servers/photos/templates} $NIX_BUILD_TOP/photos/templates";
             };
             # dd's tests: e2e.rs reads the mail Worker's tester from beside
             # the cli, and repo.rs runs git with git-remote-dd from beside
@@ -368,27 +373,13 @@
             }).test;
           # every crate but the app, whose tests are its own check (tests-app)
           testedCrates = pkgs.lib.filter (n: n != "commonty") (builtins.attrNames cargoNix.workspaceMembers);
+          # what crane builds from: dd for the app, the wasm and the app;
+          # the box programs build per crate from Cargo.nix above
           sources = {
             dd = crateSrc "dd" [
               "client/cli"
               "client/gitremote"
             ];
-            agent = crateSrc "agent" [ "box/release" ];
-            # the gate serves the services' pages, which live with each
-            # service (box/<service>/web, templates), not in a crate
-            verify = srcFor "verify" (
-              crateClosure [ "box/verify" ]
-              ++ [
-                "box/web"
-                "box/photos"
-                "box/media"
-                "box/files"
-                "box/fleet"
-                "box/chat"
-              ]
-            );
-            games = crateSrc "games" [ "box/games" ];
-            transcode = crateSrc "transcode" [ "box/transcode" ];
             web = crateSrc "web" [ "client/web" ];
             app = crateSrc "app" [ "app" ];
           };
@@ -603,7 +594,7 @@
               }
             } $out/purify.js
           '';
-          # The control plane (box/control, docs/control-plane.md): every box
+          # The control plane (servers/system/control, docs/dev/control-plane.md): every box
           # runs dd-control; the witness is the same validator as wasm.
           control =
             let
@@ -627,14 +618,14 @@
                 inherit (ctl) validators rules;
               };
               src = pkgs.lib.fileset.toSource {
-                root = ./box/control;
+                root = ./servers/system/control;
                 fileset = pkgs.lib.fileset.unions [
-                  ./box/control/go.mod
-                  ./box/control/go.sum
-                  ./box/control/state
-                  ./box/control/validator
-                  ./box/control/wire
-                  ./box/control/cmd
+                  ./servers/system/control/go.mod
+                  ./servers/system/control/go.sum
+                  ./servers/system/control/state
+                  ./servers/system/control/validator
+                  ./servers/system/control/wire
+                  ./servers/system/control/cmd
                 ];
               };
               dd-control = pkgs.buildGoModule {
@@ -740,7 +731,7 @@
           # runs on a server and has no business pulling in the keyring/dbus
           # stack that the cli needs.
           verify = perCrate "verify";
-          # the manager behind the Games tile (modules/games.nix)
+          # the manager behind the Games tile (nix/modules/games/games.nix)
           games = perCrate "games";
           # one file, one viewer, in memory: the compute side of the
           # encrypted libraries (modules/library/transcode.nix)
@@ -789,7 +780,7 @@
           # What a stranger downloads, for one release's version: every
           # file built the same way on each box that builds it, so the boxes
           # can compare and the laptop signs what they agree on
-          # (docs/app-release.md). `dd release app` asks for these by version.
+          # (docs/dev/app-release.md). `dd release app` asks for these by version.
           appRelease =
             version:
             let
@@ -890,14 +881,16 @@
           # control.<domain>, with this release's config inside
           control-worker = pkgs.runCommand "dd-control-worker" { } ''
             mkdir -p $out
-            cp ${./box/control/worker/worker.js} $out/worker.js
+            cp ${./servers/system/control/worker/worker.js} $out/worker.js
             cp ${pkgs.go}/share/go/lib/wasm/wasm_exec.js $out/wasm_exec.js
             cp ${control.witness}/witness.wasm $out/witness.wasm
             echo "export default $(cat ${control.configFile});" > $out/config.js
           '';
           dd-control = control.dd-control;
           control-config = control.configFile;
-          # every service's needs, typed (nix/lib/needs.nix): what placement reads
+          # every service's needs, typed (nix/lib/needs.nix): what placement
+          # will read, with fleet/roles.json. Nothing places roles yet;
+          # fleet/boxes.json is written by hand and checked by role-fit
           needs = pkgs.writeText "needs.json" (
             builtins.toJSON (import ./nix/lib/needs.nix { lib = nixpkgs.lib; })
           );
@@ -938,9 +931,9 @@
                 mkdir -p $out
                 wasm-bindgen --target web --no-typescript --out-dir $out ${mailWasm}/lib/dd_mail.wasm
                 cp ${./client/mail/worker}/* $out/
-                cp ${./box/web/home.css} $out/home.css
-                cp ${./box/web/bar.css} $out/bar.css
-                cp ${./box/web/fonts}/*.woff2 $out/
+                cp ${./servers/web-shared/home.css} $out/home.css
+                cp ${./servers/web-shared/bar.css} $out/bar.css
+                cp ${./servers/web-shared/fonts}/*.woff2 $out/
                 {
                   echo "export const MEMBERS = $(jq -c . ${./fleet/members.json} | jq -R .);"
                   echo "export const RELEASE = $(tr -d '[:space:]' < ${./fleet/release.pub} | jq -R .);"
@@ -1216,7 +1209,7 @@
             net-check
             tests
             ;
-          placement = import ./nix/tests/placement.nix args;
+          plaintext-label = import ./nix/tests/plaintext-label.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;
           box-reports = import ./nix/tests/box-reports.nix args;
@@ -1251,7 +1244,7 @@
 
       # One box per entry in fleet/boxes.json: its hardware file plus its
       # roles. What a box runs is data, not a hand-written import list, and
-      # the per-box wiring (who its peers are, which prometheus grafana reads)
+      # the per-box wiring (who its peers are, the boxes Settings shows)
       # is derived from the same list.
       nixosConfigurations =
         let
@@ -1302,21 +1295,11 @@
               dd.backup.endpoint = "http://${(builtins.head (builtins.attrValues storage)).net}:3900";
             };
           # what a member's device may reach for games, on any box: each
-          # games box's range and every port a game insists on
+          # games box's own list (dd.games.reach: its range and every port
+          # a game insists on)
           fleetGamePorts = lib.unique (
-            map (
-              n:
-              let
-                g = self.nixosConfigurations.${n}.config.dd.games;
-              in
-              "${toString g.portBase}-${toString (g.portBase + g.portCount - 1)}"
-            ) (builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "game" b.roles) boxes))
-            ++ map toString (
-              lib.unique (
-                lib.concatMap (
-                  g: lib.attrValues (g.fixed_ports or { })
-                ) (lib.importJSON ./data/games/catalogue.json).games
-              )
+            lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.games.reach) (
+              builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "game" b.roles) boxes)
             )
           );
           mkBox =

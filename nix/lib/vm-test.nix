@@ -27,10 +27,13 @@ pkgs.testers.runNixOSTest (
   (builtins.removeAttrs test [ "scriptEnv" ])
   // lib.optionalAttrs (builtins.pathExists script) { inherit testScript; }
   // {
-    # every box gets the script helper the real boxes get (flake.nix)
-    node.specialArgs = (test.node.specialArgs or { }) // {
-      inherit vmTests boxNames;
-      ddScript = import ./script.nix { inherit lib; };
+    # every box gets the script helper the real boxes get (flake.nix); the
+    # test's other node settings stay
+    node = (test.node or { }) // {
+      specialArgs = (test.node.specialArgs or { }) // {
+        inherit vmTests boxNames;
+        ddScript = import ./script.nix { inherit lib; };
+      };
     };
   }
 )

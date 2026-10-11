@@ -52,8 +52,10 @@ in
   # this one. The container has no secrets, no volume from the host, no
   # docker socket, a cpu and memory cap, and a network that reaches the
   # internet and nothing of ours: the tailnet, the lan, this box. The host
-  # runners (modules/forgejo-runner.nix) keep the owner's repos; a
-  # member's workflow says `runs-on: members` and lands here.
+  # runners (nix/modules/forge/forgejo-runner.nix) take the admin's repos
+  # alone, which the forge enforces (dd-forge-rules in forgejo.nix): this
+  # runner may stay registered for every repo only while `members` is its
+  # one label. A member's workflow says `runs-on: members` and lands here.
   config = {
     dd.box.plaintext = [ "members-runner (runs members' code, sandboxed)" ];
 

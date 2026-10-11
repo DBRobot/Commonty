@@ -1,8 +1,9 @@
+# shellcheck shell=bash
 # A Wi-Fi change a member made on the Network tab, tried on this box: the
 # new name and password go into a profile of their own above the house one.
 # If the box cannot join with them, that profile goes, the one before it
 # comes back, and the box rejoins as it was. Either way the result is left
-# for the gate to show (box/verify/src/home.rs).
+# for the gate to show (servers/gate/src/home.rs).
 # Environment: IFACE (the wifi interface), DIR (/run/dd-wifi).
 set -u
 req="$DIR/request"

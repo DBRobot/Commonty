@@ -67,7 +67,7 @@ enum Command {
         #[arg(long, default_value = ".", global = true)]
         repo: String,
     },
-    /// The control plane's relay and witness at Cloudflare (box/control).
+    /// The control plane's relay and witness at Cloudflare (servers/system/control).
     /// `dd release publish` uploads it.
     Control {
         #[command(subcommand)]
@@ -120,6 +120,10 @@ enum Command {
         at: Option<std::path::PathBuf>,
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES)]
         directories: Vec<String>,
+        /// print a fresh token and stop: what rclone runs for one when the
+        /// mount's token runs out
+        #[arg(long, hide = true)]
+        token: bool,
     },
     /// The browser passkeys in your entry.
     Passkey {
@@ -915,7 +919,11 @@ async fn main() -> Result<()> {
         }
 
         Command::Library { cmd, directories } => librarycmd::run(cmd, &keys, &directories).await?,
-        Command::Media { at, directories } => mediacmd::run(&keys, &directories, at).await?,
+        Command::Media {
+            at,
+            directories,
+            token,
+        } => mediacmd::run(&keys, &directories, at, token).await?,
 
         Command::Passkey { cmd, directories } => match cmd {
             PasskeyCmd::List => {

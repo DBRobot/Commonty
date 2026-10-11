@@ -1,7 +1,8 @@
 # A box's owner administers it from their own devices on the fleet's
-# network: ssh, its dns, the cache push. The network's rules already say
-# so (modules/net/headscale.nix); this box says it again, so a rule there
-# that is wrong does not open these ports to every member. A device's
+# network: ssh, its dns (Pi-hole, where the box has it, for a device set to
+# ask it), the cache push. The network's rules already say so
+# (modules/net/headscale.nix); this box says it again, so a rule there that
+# is wrong does not open these ports to every member. A device's
 # address is not in the config, so dd-owner-devices keeps a set of them
 # from this box's own view of the network: each peer and whose it is.
 {

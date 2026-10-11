@@ -84,20 +84,8 @@ in
     };
     gamePorts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = lib.optionals (config.dd ? games) (
-        [
-          "${toString config.dd.games.portBase}-${
-            toString (config.dd.games.portBase + config.dd.games.portCount - 1)
-          }"
-        ]
-        ++ map toString (
-          lib.unique (
-            lib.concatMap (
-              g: lib.attrValues (g.fixed_ports or { })
-            ) (lib.importJSON ../../../data/games/catalogue.json).games
-          )
-        )
-      );
+      # alone, this box's own (dd.games.reach, the one list of them)
+      default = lib.optionals (config.dd ? games) config.dd.games.reach;
       description = "the ports a member's device may reach on a box for games: every games box's range, and every port a game insists on (the flake gives the fleet's; alone, this box's own)";
     };
     owners = lib.mkOption {
