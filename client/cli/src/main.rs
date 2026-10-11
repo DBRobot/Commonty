@@ -3,6 +3,7 @@ mod control_worker;
 mod derive;
 mod diskcmd;
 mod dns_worker;
+mod id_worker;
 mod leaving;
 mod librarycmd;
 mod mail_worker;
@@ -85,6 +86,15 @@ enum Command {
     Dns {
         #[command(subcommand)]
         cmd: DnsCmd,
+        /// the repository checkout; defaults to the current directory
+        #[arg(long, default_value = ".", global = true)]
+        repo: String,
+    },
+    /// The id Worker: sign-in once for every box, at id.<domain>
+    /// (servers/system/id). `dd release publish` uploads it.
+    Id {
+        #[command(subcommand)]
+        cmd: IdCmd,
         /// the repository checkout; defaults to the current directory
         #[arg(long, default_value = ".", global = true)]
         repo: String,
@@ -535,6 +545,22 @@ enum MailCmd {
     /// alone, the public half into fleet/mail.json, which a release takes to
     /// every box. From that release on, no entry is anyone else's to read.
     ReaderKey,
+}
+
+#[derive(Subcommand)]
+enum IdCmd {
+    /// Once: upload it and give it the name id.<domain>; writes
+    /// fleet/id-worker.json, which moves every box's sign-in onto it when
+    /// released
+    Setup {
+        #[arg(long, default_value = identity::fleet::DOMAIN)]
+        domain: String,
+    },
+    /// Upload the Worker a branch builds (publish does this itself)
+    Deploy {
+        #[arg(long, default_value = "main")]
+        r#ref: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1335,6 +1361,15 @@ async fn main() -> Result<()> {
                 }
                 MailCmd::Deploy { r#ref } => mail_worker::deploy(&root, &keys, &r#ref).await?,
                 MailCmd::ReaderKey => mail_worker::reader_key(&root, &keys).await?,
+            }
+        }
+
+        Command::Id { cmd, repo } => {
+            let root = release_cmd::repo_root(&repo)?;
+            let keys = auth::open(&service());
+            match cmd {
+                IdCmd::Setup { domain } => id_worker::setup(&root, &keys, &domain).await?,
+                IdCmd::Deploy { r#ref } => id_worker::deploy(&root, &keys, &r#ref).await?,
             }
         }
 

@@ -415,6 +415,16 @@ fn publish(
             "== the DNS Worker did not go up: {e:#}\n   `dd dns deploy --ref {ref}` when it can"
         );
     }
+    // the id Worker: sign-in, up before the boxes are told, so a box that
+    // switches to it finds it there
+    let id = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(crate::id_worker::deploy(&root, keys, r#ref))
+    });
+    if let Err(e) = id {
+        eprintln!(
+            "== the id Worker did not go up: {e:#}\n   `dd id deploy --ref {ref}` when it can"
+        );
+    }
     nudge(&boxes);
     // the control plane's relay this release carries
     let relayed = tokio::task::block_in_place(|| {
