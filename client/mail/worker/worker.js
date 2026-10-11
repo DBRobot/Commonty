@@ -284,7 +284,8 @@ async function setEmail(env, name, email) {
   if (!d.success) throw new Error('that did not work; try again in a minute');
   // the old address is no one's business once no rule sends there
   if (before.destination && !same(before.email, email)) {
-    const used = l.rules.some((r) => r.id !== before.rule.id && (r.actions || []).some((a) => (a.value || []).some((v) => same(v, before.email))));
+    // an alias's rule follows the member and is put right on the next look
+    const used = l.rules.some((r) => r.id !== before.rule.id && aliasOf(r) === null && (r.actions || []).some((a) => (a.value || []).some((v) => same(v, before.email))));
     const old = before.destination;
     if (!used) await cf(env, 'DELETE', `/accounts/${z.account}/email/routing/addresses/${old.tag || old.id}`);
   }
