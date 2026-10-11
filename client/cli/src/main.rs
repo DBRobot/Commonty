@@ -679,7 +679,7 @@ fn seal_for_devices(
             .send()
             .await?
             .error_for_status()?;
-        // gone or never there, either is done; the trash keeps it its 90 days
+        // gone or never there, either is done; the trash keeps it its 30 days
         http.delete(base.join("dd-passkeys.json")?)
             .bearer_auth(&token)
             .send()
