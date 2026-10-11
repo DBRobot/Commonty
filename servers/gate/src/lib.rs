@@ -2693,6 +2693,23 @@ pub async fn start(
             }
         });
     }
+    // the demo's Photos are listed at start and kept fresh here, so no
+    // visitor ever waits on its sign-in
+    if app
+        .photos
+        .as_ref()
+        .is_some_and(|p| p.demo_password.is_some())
+    {
+        let a = app.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Ok((g, all)) = a.demo_photos.refresh(&a).await {
+                    a.demo_photos.warm(g, all);
+                }
+                tokio::time::sleep(demo_photos::FRESH).await;
+            }
+        });
+    }
     // someone who left: out at once, and their things gone after the window
     {
         let a = app.clone();

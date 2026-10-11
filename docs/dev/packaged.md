@@ -251,7 +251,11 @@ the app's Photos page (its window, or a      the app                    gate / m
   [demo-photos.js](../../servers/photos/web/demo-photos.js). The gate signs
   in as the demo account itself and serves its thumbnails and pictures
   ([demo_photos.rs](../../servers/gate/src/demo_photos.rs)), so Ente's app
-  and server are never opened to the demo.
+  and server are never opened to the demo. It signs in once at start, lists
+  again every 10 minutes in the background (signing in again only when the
+  session no longer lists) and opens every thumbnail ahead, so a visitor is
+  always answered from what it holds and never waits on the sign-in's key
+  derivation.
 
 ### Data and secrets
 

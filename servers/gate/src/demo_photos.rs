@@ -16,52 +16,77 @@ use ente::gallery::{Album, Gallery, Photo};
 use crate::App;
 use crate::pages;
 
-/// how long a listing is believed before the account is asked again
-const FRESH: Duration = Duration::from_secs(600);
+/// how often the listing is taken again, in the background
+pub const FRESH: Duration = Duration::from_secs(600);
 /// the biggest original shown whole; a larger one shows its thumbnail
 const ORIGINAL: usize = 25 << 20;
 
 /// a signed-in gallery, its albums and photos, and when they were listed
 type Open = (Arc<Gallery>, Arc<(Vec<Album>, Vec<Photo>)>, Instant);
+type Listed = (Arc<Gallery>, Arc<(Vec<Album>, Vec<Photo>)>);
 
 #[derive(Default)]
 pub struct DemoPhotos {
-    open: tokio::sync::Mutex<Option<Open>>,
+    open: std::sync::RwLock<Option<Open>>,
+    // one listing at a time; a reader never waits on it
+    busy: tokio::sync::Mutex<()>,
     thumbs: std::sync::Mutex<HashMap<i64, Arc<Vec<u8>>>>,
 }
 
 impl DemoPhotos {
-    /// the gallery and its photos, signing in again when the listing is old
-    /// or the last attempt failed
-    async fn get(
-        &self,
-        app: &App,
-    ) -> Result<(Arc<Gallery>, Arc<(Vec<Album>, Vec<Photo>)>), StatusCode> {
-        let mut open = self.open.lock().await;
-        if let Some((g, ps, at)) = open.as_ref()
-            && at.elapsed() < FRESH
+    /// the photos as last listed: only the very first ask waits for a
+    /// sign-in, the rest are answered from what the refresh keeps
+    async fn get(&self, app: &App) -> Result<Listed, StatusCode> {
+        if let Some((g, ps, _)) = self.open.read().unwrap().as_ref() {
+            return Ok((g.clone(), ps.clone()));
+        }
+        self.refresh(app).await
+    }
+
+    /// List again with the session held, and sign in again (a slow key
+    /// derivation) only when that session no longer lists.
+    pub async fn refresh(&self, app: &App) -> Result<Listed, StatusCode> {
+        let _one = self.busy.lock().await;
+        if let Some((g, ps, at)) = self.open.read().unwrap().as_ref()
+            && at.elapsed() < Duration::from_secs(5)
         {
             return Ok((g.clone(), ps.clone()));
         }
-        let p = app.photos.as_ref().ok_or(StatusCode::NOT_FOUND)?;
-        let pw = p.demo_password.as_ref().ok_or(StatusCode::NOT_FOUND)?;
-        let email = format!("{}{}", pages::DEMO_USER, p.email_suffix);
-        let g = Gallery::sign_in(&p.api, &email, pw).await.map_err(|e| {
-            eprintln!("demo photos: sign-in: {e:#}");
-            StatusCode::BAD_GATEWAY
-        })?;
-        let ps = g.photos().await.map_err(|e| {
-            eprintln!("demo photos: listing: {e:#}");
-            StatusCode::BAD_GATEWAY
-        })?;
-        let (g, ps) = (Arc::new(g), Arc::new(ps));
-        *open = Some((g.clone(), ps.clone(), Instant::now()));
+        let held = self
+            .open
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|(g, _, _)| g.clone());
+        let relisted = match held {
+            Some(g) => g.photos().await.ok().map(|ps| (g, ps)),
+            None => None,
+        };
+        let (g, ps) = match relisted {
+            Some((g, ps)) => (g, ps),
+            None => {
+                let p = app.photos.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+                let pw = p.demo_password.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+                let email = format!("{}{}", pages::DEMO_USER, p.email_suffix);
+                let g = Gallery::sign_in(&p.api, &email, pw).await.map_err(|e| {
+                    eprintln!("demo photos: sign-in: {e:#}");
+                    StatusCode::BAD_GATEWAY
+                })?;
+                let ps = g.photos().await.map_err(|e| {
+                    eprintln!("demo photos: listing: {e:#}");
+                    StatusCode::BAD_GATEWAY
+                })?;
+                (Arc::new(g), ps)
+            }
+        };
+        let ps = Arc::new(ps);
+        *self.open.write().unwrap() = Some((g.clone(), ps.clone(), Instant::now()));
         Ok((g, ps))
     }
 
     /// Every thumbnail opened ahead, a few at a time: the first person to
     /// look finds the grid ready instead of waiting on thirty of them.
-    fn warm(self: &Arc<Self>, g: Arc<Gallery>, all: Arc<(Vec<Album>, Vec<Photo>)>) {
+    pub fn warm(self: &Arc<Self>, g: Arc<Gallery>, all: Arc<(Vec<Album>, Vec<Photo>)>) {
         let me = self.clone();
         tokio::spawn(async move {
             for chunk in all.1.chunks(4) {
