@@ -161,5 +161,5 @@ box.wait_until_succeeds("! systemctl is-active dd-agent-guard.service", timeout=
 box.succeed(f"[ $(readlink -f /nix/var/nix/profiles/system) = {nix['marked']} ]")
 box.succeed("grep -q 'release 2' /etc/dd-marker")
 box.succeed(
-    "systemctl stop dd-agent-guard.timer; systemctl reset-failed dd-agent-guard.timer dd-agent-guard.service dd-agent.service || true"
+    "systemctl stop dd-agent-guard.timer || true; systemctl reset-failed dd-agent-guard.timer dd-agent-guard.service dd-agent.service || true"
 )
