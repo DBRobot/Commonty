@@ -52,6 +52,9 @@ in
         ../modules/observe/metrics-ui.nix
       ];
       dd.verify.role = lib.mkForce "full";
+      # Metrics are the box owner's and the admin's alone: the member signed
+      # in here is the fleet's admin
+      dd.verify.admin = "sarah";
       # a tile the demo may use, so the demo exists; Metrics is never one
       dd.home.services = [
         {
