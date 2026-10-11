@@ -65,7 +65,7 @@ pull request opened, pushed, or edited
 - **Jobs run where they fit.** A job heavier than a runner's usual one is
   a variant in the runner's needs
   ([`nix/modules/forge/needs.nix`](../../nix/modules/forge/needs.nix)):
-  today `flake-check`, which holds 8G (`nix flake check` peaked at 7.5G and
+  today `flake-check`, which holds 11G (`nix flake check` peaked at 10.5G and
   ran node2 out of memory beside a VM test).
   [`nix/lib/ci-runners.nix`](../../nix/lib/ci-runners.nix) fits each
   variant to the runner boxes whose reported memory holds the runner's own
