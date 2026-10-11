@@ -3,11 +3,12 @@
 // folders, their contents, a preview, uploads, and the trash. Every name
 // and byte is turned over here: the gate moves ciphertext.
 
-import { unlock, list, download as fetchTo, fetchPlain, put, trash, mkdir, move, trashed, restore, forever, emptyTrash, human } from './library.js';
+import { begin, unlock, list, download as fetchTo, fetchPlain, put, trash, mkdir, move, trashed, restore, forever, emptyTrash, human } from './library.js';
 import { me, searchFrom } from './shell.js';
 import { zipOf, dropped, picked as fromFolderPicker, putAll, Names, folderSize, sizesChanged } from './files-more.js';
 
 const $ = (id) => document.getElementById(id);
+begin();
 const { user } = await me();
 const ROOT = 'Files';
 // a preview opens the whole file in the tab: past this, Download
