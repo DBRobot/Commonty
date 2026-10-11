@@ -1,7 +1,7 @@
 /* the change-email pages and the email line on Settings */
 html { scrollbar-gutter: stable; }
 /* in Settings' frame the page never scrolls: no room kept */
-html:has(body.row-frame) { scrollbar-gutter: auto; }
+html:has(body.row-frame), html:has(body.al-frame) { scrollbar-gutter: auto; }
 body { background: var(--bg); }
 .fl { max-width: 520px; margin: 0 auto; padding: 40px 16px 64px; display: grid; gap: 18px; }
 .fl-back { color: var(--ink-2); text-decoration: none; font-size: 14px; font-weight: 600; }
@@ -50,3 +50,77 @@ body.row-frame { background: transparent; margin: 0; }
 .bx-meta.bad { color: var(--broken); }
 .bx-actions { display: flex; gap: 8px; }
 .bx-actions button { margin-top: 0; }
+
+/* the aliases on Settings' Email tab: the whole box is this frame's */
+body.al-frame { background: transparent; margin: 0; }
+.al-box { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.al-box > header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); }
+.al-box > header h2 { margin: 0; font-size: 15px; }
+.al-count { font: 13px var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.al-spacer { flex: 1; }
+.al-find { height: 34px; width: 190px; max-width: 100%; margin: 0; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); color: var(--ink); font: inherit; font-size: 14px; }
+.al-box > header button { height: 34px; margin: 0; padding: 0 14px; font-size: 14px; }
+.al-list { list-style: none; margin: 0; padding: 0; }
+.al-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line-2); }
+.al-what { display: grid; gap: 3px; min-width: 0; }
+.al-label { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.al-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.al-addr-text { font: 13.5px var(--mono); color: var(--ink-2); overflow-wrap: break-word; min-width: 0; }
+.al-meta { font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.al-list li.off .al-label, .al-list li.off .al-addr-text { color: var(--off); }
+.al-copy, .al-copy:hover { width: 26px; height: 26px; margin: 0; padding: 0; flex: none; background: none; border: 1px solid transparent; color: var(--ink-2); opacity: 0; }
+.al-copy svg { width: 15px; height: 15px; }
+.al-copy:hover { background: var(--bg); border-color: var(--line); color: var(--ink); }
+.al-list li:hover .al-copy, .al-copy:focus-visible, .al-copy.done { opacity: 1; }
+.al-copy.done { color: var(--ok); }
+@media (hover: none) { .al-copy { opacity: 1; } }
+.al-act { display: flex; align-items: center; gap: 12px; }
+.al-menu { position: relative; }
+.al-more, .al-more:hover { width: 32px; height: 32px; margin: 0; padding: 0; font-size: 18px; line-height: 1; border: 1px solid var(--line); }
+.al-pop { right: 0; top: calc(100% + 4px); }
+.al-confirm { padding: 8px 14px; font-size: 13px; color: var(--ink-2); display: grid; gap: 8px; line-height: 1.45; width: 260px; }
+.al-confirm div { display: flex; gap: 6px; }
+.al-confirm button, .al-confirm button:hover { height: 30px; margin: 0; padding: 0 10px; font-size: 13px; }
+.al-confirm .al-yes, .al-confirm .al-yes:hover { background: var(--broken); color: var(--surface); }
+.al-pop { width: auto; min-width: 190px; }
+.al-rename { height: 30px; width: min(260px, 100%); padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; font-weight: 600; }
+.al-foot { margin: 0; padding: 12px 16px; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+.al-ph { display: grid; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line-2); }
+.al-ph i { display: block; height: 11px; border-radius: 2px; background: var(--line-2); }
+.al-ph .a { width: 30%; } .al-ph .b { width: 50%; } .al-ph .c { width: 22%; }
+.al-empty, .al-oops { margin: 0; padding: 20px 16px; display: grid; gap: 10px; justify-items: start; font-size: 14px; color: var(--ink-2); line-height: 1.5; border-bottom: 1px solid var(--line-2); }
+.al-empty b { color: var(--ink); font-size: 15px; }
+.al-oops { color: var(--broken); }
+.al-empty button, .al-oops button { height: 34px; margin: 0; padding: 0 14px; font-size: 14px; }
+.al-limit { margin: 0; padding: 10px 16px; font-size: 13px; color: var(--attention); border-bottom: 1px solid var(--line-2); }
+/* the on/off switch, as the bar's menu draws it (bar.css) */
+.switch, .switch:hover { flex: none; width: 34px; height: 20px; min-height: 0; margin: 0; padding: 0; border-radius: 10px; border: 0; background: var(--line); position: relative; cursor: pointer; transition: background .15s; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s; }
+.switch[aria-checked="true"], .switch[aria-checked="true"]:hover { background: var(--accent); }
+.switch[aria-checked="true"]::after { transform: translateX(14px); }
+.switch:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
+/* New alias */
+#dlg { width: min(440px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); }
+#dlg::backdrop { background: rgba(10, 15, 20, .4); }
+#dlg form, #dlg #done { display: grid; gap: 10px; padding: 20px; }
+#dlg [hidden], #dlg #done[hidden] { display: none; }
+#dlg h3 { margin: 0 0 4px; font-size: 18px; }
+#dlg label { font-size: 13px; font-weight: 600; }
+#dlg input { height: 40px; width: 100%; margin: 0; box-sizing: border-box; font-size: 15px; }
+.al-addr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 10px 12px; margin-top: 4px; background: var(--code); border-radius: var(--radius); font: 14px var(--mono); }
+.al-addr span { overflow-wrap: anywhere; min-width: 0; }
+.al-done { background: var(--ok-bg); }
+.al-link, .al-link:hover { margin: 0 0 0 auto; height: 26px; padding: 0 6px; background: none; color: var(--link); font: 600 13px var(--font); }
+.al-link:hover { text-decoration: underline; }
+.al-hint { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.45; }
+.al-bad { margin: 0; font-size: 13px; color: var(--broken); }
+.al-bad:empty { display: none; }
+.al-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.al-btns button, .al-btns button:hover { height: 38px; margin: 0; padding: 0 16px; font-size: 14px; }
+.al-btns button.quiet:hover { background: var(--bg); }
+@media (max-width: 600px) {
+  .al-list li { align-items: start; gap: 6px 10px; }
+  .al-act { gap: 8px; padding-top: 2px; }
+  .al-find { width: 100%; order: 5; }
+}

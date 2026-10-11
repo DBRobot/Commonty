@@ -1,6 +1,7 @@
 // Settings: the member's own, a tab at a time. Profile is their account as
-// their entry has it, and their email - which no box holds: the line is a
-// frame from the mail Worker (client/mail), and changing it happens there.
+// their entry has it. Email is their address and their aliases - which no
+// box holds: both are frames from the mail Worker (client/mail), and
+// changing them happens there.
 // Backups is their disk images (servers/fleet/web/backups.js).
 import { start as backups } from './backups.js';
 import { start as devices } from './devices.js';
@@ -13,7 +14,7 @@ import { shown, setShown, shortcut, setShortcut, ownKey, comboOf, keyName, DEFAU
 const $ = (id) => document.getElementById(id);
 
 function tab(name) {
-  if (!['profile', 'devices', 'storage', 'network', 'backups', 'this-device', 'leave'].includes(name)) name = 'profile';
+  if (!['profile', 'email', 'devices', 'storage', 'network', 'backups', 'this-device', 'leave'].includes(name)) name = 'profile';
   if (gone) name = 'leave';
   for (const a of document.querySelectorAll('[data-tab]')) {
     if (a.dataset.tab === name) a.setAttribute('aria-current', 'page');
@@ -41,7 +42,8 @@ async function profile() {
   const me = await whoIsIt();
   // a guest has devices and sign-ins here, and no email or disk images
   if (me.role === 'guest') {
-    $('email').closest('.se-row').hidden = true;
+    $('email-row').hidden = true;
+    document.querySelector('[data-tab="email"]').hidden = true;
     document.querySelector('[data-tab="backups"]').hidden = true;
     document.querySelector('[data-tab="network"]').hidden = true;
   }
@@ -50,8 +52,19 @@ async function profile() {
   $('name').textContent = me.user;
   $('role').textContent = me.role === 'member' ? 'Member' : me.role === 'guest' ? 'Guest'
     : me.role === 'suspended' ? `Suspended: ${(me.suspended || {}).reason || ''}` : me.role;
-  const back = `${location.origin}/_dd/settings`;
-  $('email').src = `https://mail.${domain}/row?name=${encodeURIComponent(me.user)}&back=${encodeURIComponent(back)}`;
+  const back = `${location.origin}/_dd/settings#email`;
+  const q = `name=${encodeURIComponent(me.user)}&back=${encodeURIComponent(back)}`;
+  $('address').textContent = $('address-short').textContent = `${me.user}@${domain}`;
+  // both frames load with the page, so the Email tab is there at once
+  if (me.role !== 'guest') {
+    $('email').src = `https://mail.${domain}/row?${q}`;
+    $('aliases').src = `https://mail.${domain}/aliases?${q}`;
+    window.addEventListener('message', (e) => {
+      if (e.origin !== `https://mail.${domain}` || e.source !== $('aliases').contentWindow) return;
+      const h = Number(e.data?.aliasesHeight);
+      if (h > 0 && h < 20000) $('aliases').style.height = `${Math.ceil(h)}px`;
+    });
+  }
   const { entry } = await entryOf(me.user);
   const n = (x, one) => `${x} ${one}${x === 1 ? '' : 's'}`;
   $('devices').firstChild.textContent = `${n((entry.devices || []).length, 'device')}, ${n((entry.passkeys || []).length, 'passkey')}`;

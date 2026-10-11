@@ -8,12 +8,13 @@
 // It also keeps the release's aliases (fleet/policy.json mailAliases, in
 // fleet.js): <alias>@<domain> forwards to that member's confirmed address.
 //
-// It also carries the boxes' mail to members and the owner (send.js).
+// It also carries the boxes' mail to members and the owner (send.js), and
+// keeps each member's own aliases (aliases.js).
 //
 // Bindings: CF_TOKEN (secret: Email Routing, this zone), SESSION_KEY
 // (secret), DIRECTORY_KEY (secret: the directory's read key, `dd mail
 // reader-key`), PINNED (KV: the newest entry accepted per name), SEND
-// (send_email), DOMAIN. A local test also sets CF_API, DIRECTORY, ORIGIN,
+// (send_email), DOMAIN, WORKER (its own name, for the catch-all rule). A local test also sets CF_API, DIRECTORY, ORIGIN,
 // SEND_PER_BOX and SEND_PER_RCPT; deployed, they are unset.
 
 import { initSync, admit, login, readProof, forgetDue } from './dd_mail.js';
@@ -22,6 +23,9 @@ import { MEMBERS, RELEASE, ALIASES } from './fleet.js';
 import { boxApi, memberApi } from './unlock.js';
 import { forgetApi } from './leaving.js';
 import { sendApi } from './send.js';
+import { aliasApi, aliasMail, forgetAliases, aliasHolds, keepCatchAll } from './aliases.js';
+import aliasesHtml from './aliases.html';
+import aliasesPageJs from './aliases-page.js';
 import boxesHtml from './boxes.html';
 import boxesJs from './boxes.js';
 import changeHtml from './change.html';
@@ -50,6 +54,7 @@ const CHALLENGE = 5 * 60;
 const STATIC = {
   '/_dd/static/change.js': [changeJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/row.js': [rowJs, 'text/javascript; charset=utf-8'],
+  '/_dd/static/aliases-page.js': [aliasesPageJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/boxes.js': [boxesJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/passkey.js': [passkeyJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/mail.css': [mailCss, 'text/css; charset=utf-8'],
@@ -137,6 +142,21 @@ const opened = async (env, v) => {
   return { 'set-cookie': `mail_session=${s}; Path=/; Max-Age=${SESSION}; HttpOnly; Secure; SameSite=Strict` };
 };
 
+// a passkey answer made for one act, as delete wants: its challenge is
+// spent once, and the answer is the member's own, made on this Worker's page
+async function asserted(env, b, name) {
+  const c = await unseal(env, b?.token, 'challenge');
+  if (!c || c.n !== name) return false;
+  if ((await env.PINNED.get(`spent:${c.c}`)) !== null) return false;
+  try {
+    login(await entry(env, name), b.id, JSON.stringify(b.assertion), c.c, `https://mail.${env.DOMAIN}`);
+  } catch {
+    return false;
+  }
+  await env.PINNED.put(`spent:${c.c}`, '1', { expirationTtl: CHALLENGE + 60 });
+  return true;
+}
+
 // The member's entry, as the directory has it, held to the newest this
 // Worker has accepted. Throws for a name that is not a member.
 async function entry(env, name) {
@@ -207,12 +227,16 @@ async function state(env, name) {
 // Your own address, behind your passkey, is always read fresh.
 const SHARED = 60 * 1000;
 let shared = null;
-async function sharedState(env, name) {
+async function sharedLists(env) {
   if (!shared || Date.now() - shared.at > SHARED) {
     shared = { at: Date.now(), ...(await lists(env)) };
     await keepAliases(env, shared);
+    try { await keepCatchAll(env, { zone, cf }); } catch (err) { console.log(`catch-all: ${err.message || err}`); }
   }
-  const s = stateIn(shared, env, name);
+  return shared;
+}
+async function sharedState(env, name) {
+  const s = stateIn(await sharedLists(env), env, name);
   return { forwarding: !!s.rule, confirmed: s.confirmed };
 }
 
@@ -272,6 +296,7 @@ async function setEmail(env, name, email) {
   const l = await lists(env);
   // an alias's address is the alias's, unless a member had it first
   if (isAlias(name) && !memberName(l, name)) throw new Error('that name is an alias of the fleet\'s; it has no address of its own');
+  if (!memberName(l, name) && await aliasHolds(env, name)) throw new Error('that name is a member\'s alias; it has no address of its own');
   const before = stateIn(l, env, name);
   // Adding an address Cloudflare does not know sends its confirmation; one
   // the account already holds confirmed gets none, and none is waited for
@@ -369,6 +394,10 @@ async function api(req, env, path, sent) {
   }
   // Settings' "sign out everywhere else": every other session of this
   // member's ends; this one is opened again, after the line
+  // their own aliases (aliases.js): the session is enough, no fresh passkey
+  if (path === '/api/aliases' || path.startsWith('/api/aliases/')) {
+    return aliasApi(req, env, path, body(), me, json, { ALIASES, memberName, listsShared: sharedLists, now, confirmed: (b) => asserted(env, b, me.n) });
+  }
   if (req.method === 'POST' && path === '/api/end-others') {
     const t = Date.now();
     await env.PINNED.put(`ended:${me.n}`, String(t));
@@ -394,6 +423,10 @@ async function api(req, env, path, sent) {
 }
 
 export default {
+  // mail to an address with no rule of its own: maybe a member's alias
+  async email(message, env) {
+    return aliasMail(message, env, { stateIn, listsShared: sharedLists });
+  },
   async fetch(req, env) {
     const url = new URL(req.url);
     const path = url.pathname;
@@ -416,7 +449,7 @@ export default {
       if (path === '/api/unlock' || path.startsWith('/api/unlock/')) return boxApi(req, env, path, parse(sent), json);
       // someone who left, or was removed 30 days ago: their own statement, or
       // the release, decides (leaving.js)
-      if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, readProof, MEMBERS, ALIASES, aliasOf, zone, lists, stateIn, cf });
+      if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, readProof, MEMBERS, ALIASES, aliasOf, zone, lists, stateIn, cf, forgetAliases });
       if (req.method !== 'GET' && origin !== (env.ORIGIN || `https://mail.${env.DOMAIN}`)) {
         return json({ error: 'not from here' }, 403);
       }
@@ -431,6 +464,8 @@ export default {
     }
     // the email line on Settings, in a frame on the fleet's own pages
     if (path === '/row') return page(rowHtml, env, `https://*.${env.DOMAIN}`);
+    // the aliases on Settings' Email tab, in a frame there too
+    if (path === '/aliases') return page(aliasesHtml, env, `https://*.${env.DOMAIN}`);
     // the boxes: approve one in a new place, or mark one stolen
     if (path === '/boxes') return page(boxesHtml, env);
     return Response.redirect(`https://home.${env.DOMAIN}/_dd/settings`, 302);

@@ -174,7 +174,9 @@ forge              their own repositories, then their account; what they
                    every 5 minutes                                dd-forget-forge
 games              every server and kept world of theirs          games forget
 mail               their <name>@<domain> rule, its destination if no other
-                   rule uses it, and what the Worker pinned        mail Worker leaving.js
+                   rule uses it, their aliases (each address kept
+                   from anyone else, with no name on it), and what
+                   the Worker pinned                               mail Worker leaving.js
 usage              their usage facts stop when there is nothing left to count
 ```
 

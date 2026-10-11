@@ -10,6 +10,28 @@ async function post(url, body) {
   return v;
 }
 
+/// a passkey answer for one act (deleting an alias), sent along with it
+export async function confirm(name) {
+  const c = await post('/api/challenge', { name });
+  const a = await navigator.credentials.get({
+    publicKey: {
+      challenge: unb64u(c.challenge),
+      rpId: c.rpId,
+      allowCredentials: c.allow.map((id) => ({ type: 'public-key', id: unb64u(id) })),
+      userVerification: 'required',
+    },
+  });
+  return {
+    token: c.token,
+    id: b64u(a.rawId),
+    assertion: {
+      authenticatorData: b64u(a.response.authenticatorData),
+      clientDataJSON: b64u(a.response.clientDataJSON),
+      signature: b64u(a.response.signature),
+    },
+  };
+}
+
 export async function signIn(name) {
   const c = await post('/api/challenge', { name });
   const a = await navigator.credentials.get({

@@ -291,6 +291,177 @@ with sync_playwright() as p:
         len(sec) == 1 and sec[0]["actions"][0]["value"] == ["second@example.com"],
         f"confirmed, security@ follows it {sec}",
     )
+
+    # A member's own aliases (aliases.js): made, sent on, turned off, deleted
+    import re, time
+
+    def mail(to):
+        raw = (
+            f"From: shop@example.org\r\nTo: {to}\r\nSubject: hi\r\n"
+            f"Message-ID: <{time.time_ns()}@example.org>\r\n\r\nhello\r\n"
+        ).encode()
+        req = urllib.request.Request(
+            f"{W}/cdn-cgi/handler/email?from=shop@example.org&to={to}",
+            data=raw,
+            method="POST",
+        )
+        try:
+            return urllib.request.urlopen(req).status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    def forwarded():
+        time.sleep(0.5)
+        return open("wrangler.log").read().count("rcptTo: second@example.com")
+
+    ok(call("/api/aliases")[0] == 401, "no session: no aliases")
+    s, v, _ = call("/api/aliases", cookie=sess)
+    ok(
+        s == 200 and v["aliases"] == [] and v["max"] == 100,
+        f"none yet, at most 100 {v}",
+    )
+    ca = fake("/state")["catch_all"]
+    ok(
+        ca["enabled"] and ca["actions"] == [{"type": "worker", "value": ["mail-e2e"]}],
+        f"the zone's catch-all sends to this Worker {ca}",
+    )
+    s, nxt, _ = call("/api/aliases/next", {}, cookie=sess)
+    addr = nxt.get("address", "")
+    offer = {"n": nxt.get("n"), "day": nxt.get("day")}
+    ok(
+        call("/api/aliases/next", {"n": offer["n"]}, cookie=sess)[1].get("address")
+        == addr,
+        "asked again, the same address: Another cannot be pressed until one you like comes up",
+    )
+    ok(
+        s == 200
+        and re.fullmatch(r"[a-z]{3,10}\.[a-z]{3,10}\.[0-9]{4}@commonty\.test", addr),
+        f"an address is offered {addr}",
+    )
+    ok(
+        call(
+            "/api/aliases",
+            {**offer, "label": "Shop"},
+            origin="http://127.0.0.1:8787",
+            cookie=sess,
+        )[0]
+        == 403,
+        "made from another origin: refused",
+    )
+    ok(
+        call(
+            "/api/aliases",
+            {"address": "billing.paypal.0001@commonty.test", "label": "x"},
+            cookie=sess,
+        )[0]
+        == 403,
+        "an address of your own choosing, never offered: refused",
+    )
+    ok(
+        call("/api/aliases", {"n": 99, "day": offer["day"], "label": "x"}, cookie=sess)[
+            0
+        ]
+        == 403,
+        "an offer past today's ten: refused",
+    )
+    s, v, _ = call("/api/aliases", {**offer, "label": "Shop"}, cookie=sess)
+    ok(s == 200 and v["alias"]["address"] == addr and v["alias"]["on"], f"made {v}")
+    ok(
+        call("/api/aliases", {**offer, "label": "again"}, cookie=sess)[0] == 409,
+        "the same address twice: refused",
+    )
+    n0 = forwarded()
+    ok(
+        mail(addr) == 200 and forwarded() == n0 + 1,
+        "mail to it goes on to the confirmed address",
+    )
+    ok(mail("nobody.here.0000@commonty.test") == 400, "an address no one holds bounces")
+    ok(mail("someone@commonty.test") == 400, "a name with no rule and no alias bounces")
+    local = addr.split("@")[0]
+    s, v, _ = call(f"/api/aliases/{local}", {"on": False}, cookie=sess)
+    ok(s == 200 and not v["alias"]["on"] and v["alias"]["off"], "turned off")
+    ok(mail(addr) == 400, "turned off, it bounces")
+    call(f"/api/aliases/{local}", {"on": True, "label": "Hardware shop"}, cookie=sess)
+    ok(mail(addr) == 200, "on again, it is sent on")
+    ok(
+        call("/api/aliases", cookie=sess)[1]["aliases"][0]["label"] == "Hardware shop",
+        "renamed",
+    )
+    # deleting wants a passkey answer made for it, spent once
+    ok(
+        call(f"/api/aliases/{local}/delete", {}, cookie=sess)[0] == 403,
+        "deleting with the session alone: refused",
+    )
+
+    def confirmed():
+        c = call("/api/challenge", {"name": "tester"})[1]
+        return {"token": c["token"], "id": "cGsx", "assertion": sign(c["challenge"])}
+
+    yes = confirmed()
+    ok(call(f"/api/aliases/{local}/delete", yes, cookie=sess)[0] == 200, "deleted")
+    ok(mail(addr) == 400, "deleted, it bounces")
+    ok(
+        call(f"/api/aliases/{local}/delete", yes, cookie=sess)[0] in (403, 404),
+        "the same passkey answer, again: refused",
+    )
+    ok(
+        call(f"/api/aliases/{local}", {"on": True}, cookie=sess)[0] == 404
+        and mail(addr) == 400,
+        "a deleted alias cannot be turned back on",
+    )
+    ok(call("/api/aliases", cookie=sess)[1]["aliases"] == [], "and is off the list")
+    ok(
+        call("/api/aliases", {**offer, "label": "back"}, cookie=sess)[0] == 409,
+        "a deleted address is never given out again",
+    )
+
+    # the page in Settings' frame: New alias, its dialog, the switch, the menu
+    pg.goto(f"{W}/aliases?name=tester&back={back}")
+    pg.wait_for_selector("#new:not([disabled])", timeout=10000)
+    ok("No aliases yet" in pg.inner_text("#state"), "the page says there are none")
+    pg.click("#new")
+    for _ in range(50):
+        if "@" in pg.inner_text("#next"):
+            break
+        time.sleep(0.1)
+    shown = pg.inner_text("#next")
+    pg.fill("#label", "Airline newsletter")
+    pg.click("#make-ok")
+    pg.wait_for_selector("#done:not([hidden])", timeout=10000)
+    ok(pg.inner_text("#done-addr") == shown, "made the address it showed")
+    pg.click("#done-ok")
+    ok(
+        pg.inner_text(".al-list li .al-label") == "Airline newsletter"
+        and pg.inner_text("#count") == "1 of 100",
+        "listed, and counted",
+    )
+    pg.click(".al-list li .switch")
+    pg.wait_for_selector(".al-list li.off", timeout=10000)
+    ok(mail(shown) == 400, "the switch turns it off")
+    pg.click(".al-list li .switch")
+    pg.wait_for_selector(".al-list li:not(.off)", timeout=10000)
+    pg.click(".al-list li .al-more")
+    pg.click(".al-pop .danger")
+    pg.click(".al-yes")
+    pg.wait_for_selector("text=No aliases yet", timeout=10000)
+    ok(mail(shown) == 400, "deleted from the menu")
+    ok(not errs, f"no errors on the aliases page {errs}")
+    # ten offers a day, each made at most once: two made so far, eight more
+    for i in range(8):
+        o = call("/api/aliases/next", {}, cookie=sess)[1]
+        call(
+            "/api/aliases",
+            {"n": o["n"], "day": o["day"], "label": f"n{i}"},
+            cookie=sess,
+        )
+    ok(
+        call("/api/aliases/next", {}, cookie=sess)[0] == 429,
+        "today's ten made: no eleventh offered",
+    )
+    ok(
+        len(call("/api/aliases", cookie=sess)[1]["aliases"]) == 8,
+        "the eight still had listed",
+    )
     forged = sess[:-2] + ("AA" if not sess.endswith("AA") else "BB")
     ok(call("/api/me", cookie=forged)[0] == 401, "forged session: refused")
     # a box replaying an old entry after a newer one was seen

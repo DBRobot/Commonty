@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aliases</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/mail.css">
+</head>
+<body class="al-frame">
+  <section class="al-box" aria-labelledby="al-h">
+    <header>
+      <h2 id="al-h">Aliases</h2>
+      <span class="al-count" id="count">— of 100</span>
+      <span class="al-spacer"></span>
+      <input class="al-find" id="find" type="search" placeholder="Find an alias" aria-label="Find an alias" hidden>
+      <button type="button" id="new" disabled>New alias</button>
+    </header>
+    <div id="state">
+      <div class="al-ph"><i class="a"></i><i class="b"></i><i class="c"></i></div>
+      <div class="al-ph"><i class="a"></i><i class="b"></i><i class="c"></i></div>
+    </div>
+    <ul class="al-list" id="list"></ul>
+    <p class="al-foot">Aliases only receive mail; you can't send from one. Cloudflare reads each message as it passes it on, and whoever runs Commonty's Cloudflare account can see which aliases are yours. <a href="https://{{domain}}/docs/guide/email#aliases" target="_top">About aliases</a></p>
+  </section>
+
+  <dialog id="dlg" aria-labelledby="dlg-h">
+    <form id="make" method="dialog">
+      <h3 id="dlg-h">New alias</h3>
+      <label for="label">What is it for?</label>
+      <input id="label" type="text" maxlength="60" placeholder="e.g. Airline newsletter" autocomplete="off">
+      <div class="al-addr"><span id="next">…</span><button class="al-link" type="button" id="another">Another</button></div>
+      <p class="al-bad" id="make-bad" role="alert"></p>
+      <div class="al-btns"><button type="button" class="quiet" id="cancel">Cancel</button><button type="submit" id="make-ok">Make it</button></div>
+    </form>
+    <div id="done" hidden>
+      <h3>Alias made</h3>
+      <div class="al-addr al-done"><span id="done-addr"></span></div>
+      <p class="al-hint">Give this address to <b id="done-label"></b>. Its mail comes to your inbox.</p>
+      <div class="al-btns"><button type="button" class="quiet" id="done-copy">Copy address</button><button type="button" id="done-ok">Done</button></div>
+    </div>
+  </dialog>
+  <script type="module" src="/_dd/static/aliases-page.js"></script>
+</body>
+</html>

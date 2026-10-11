@@ -5,7 +5,9 @@
 # (client/mail/tests/tester.json, made by client/mail/examples/fixture.rs). No network, no vm: under a
 # minute, and cached by content like every other check. A box's mail
 # (send.js) goes to wrangler's own stand-in for send_email, which writes
-# each message to a file and names it in wrangler.log.
+# each message to a file and names it in wrangler.log. Mail to a member's
+# alias goes in at wrangler's /cdn-cgi/handler/email, and where it was sent
+# on is read back from wrangler.log too.
 { pkgs, self, ... }:
 let
   bundle = self.packages.${pkgs.stdenv.hostPlatform.system}.mail-worker;
@@ -46,15 +48,16 @@ pkgs.runCommand "mail-worker-e2e"
     compatibility_date = "2026-05-01"
     no_bundle = true
     rules = [
-      { type = "Text", globs = ["**/*.html", "**/*.css", "**/change.js", "**/row.js", "**/passkey.js", "**/boxes.js"] },
+      { type = "Text", globs = ["**/*.html", "**/*.css", "**/change.js", "**/row.js", "**/passkey.js", "**/boxes.js", "**/aliases-page.js"] },
       { type = "Data", globs = ["**/*.woff2"] },
       { type = "CompiledWasm", globs = ["**/*.wasm"] },
-      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js", "**/leaving.js", "**/send.js"] },
+      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js", "**/leaving.js", "**/send.js", "**/aliases.js"] },
     ]
     kv_namespaces = [{ binding = "PINNED", id = "local" }]
     send_email = [{ name = "SEND", allowed_sender_addresses = ["noreply@commonty.test", "alerts@commonty.test"] }]
     [vars]
     DOMAIN = "commonty.test"
+    WORKER = "mail-e2e"
     CF_API = "http://127.0.0.1:8899/client/v4"
     DIRECTORY = "http://127.0.0.1:8899/dir/"
     ORIGIN = "http://localhost:8787"

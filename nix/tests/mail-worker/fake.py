@@ -15,6 +15,12 @@ state = {
     "addrs": {},
     "sent": [],
     "n": 0,
+    # the zone's catch-all, as Email Routing starts it: drop everything
+    "catch_all": {
+        "enabled": False,
+        "matchers": [{"type": "all"}],
+        "actions": [{"type": "drop"}],
+    },
     "rules": {
         "r-old": {
             "id": "r-old",
@@ -111,12 +117,15 @@ class H(BaseHTTPRequestHandler):
                     else [],
                 }
             )
+        if p == "/client/v4/zones/Z/email/routing/rules/catch_all":
+            return self.send({"success": True, "result": state["catch_all"]})
         if p == "/state":
             return self.send(
                 {
                     "rules": state["rules"],
                     "addrs": state["addrs"],
                     "sent": state["sent"],
+                    "catch_all": state["catch_all"],
                 }
             )
         self.send({}, 404)
@@ -180,6 +189,9 @@ class H(BaseHTTPRequestHandler):
     def do_PUT(self):
         b = self.body()
         rid = self.path.rsplit("/", 1)[1]
+        if rid == "catch_all":
+            state["catch_all"] = b
+            return self.send({"success": True, "result": b})
         state["rules"][rid] = dict(b, id=rid)
         self.send({"success": True, "result": state["rules"][rid]})
 

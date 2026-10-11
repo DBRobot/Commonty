@@ -420,6 +420,49 @@ destination addresses is free on every plan, with only Email Routing set
 up; the binding is uploaded by `dd mail setup` and `dd release publish`,
 allowed to send from those two addresses only.
 
+`aliases.js` is each member's own aliases, made on the Email tab of
+Settings (the `/aliases` page, framed there like the email line).
+An alias is `<word>.<word>.<4 digits>@<domain>`, made up by the Worker,
+never chosen: it is made only from one of the member's ten offers of the
+day (`/api/aliases/next`), each worked out again from the Worker's own key,
+the member's name and the date. Asking again gives the same ten, so no one
+presses Another until an address they like comes up, and at most ten are
+made in a day, since every address made is kept for good. A member has at
+most 100. The zone's catch-all rule sends
+every address with no rule of its own to the Worker's `email()` handler:
+members' own addresses and the release's aliases keep their rules, which
+match first. The handler forwards an alias that is on to its member's
+confirmed address and rejects everything else, so the sender gets a
+bounce. The Worker keeps the catch-all pointed at itself (`WORKER`, its own
+name, uploaded as a plain binding), on the same minute-old look as the
+release's aliases. In KV (`PINNED`):
+
+```
+alias:<local>           {m, l, on, t, x}: member, label, on, made, off since
+owner:<member>:<local>  one key per alias: no write rewrites a shared list
+forgot:<member>         when they left, for a day: their aliases made before it are dead
+alias:<local>           {gone}: deleted, its member forgotten, never given out again
+```
+
+Mail goes on only while the alias's record and its owner key both say so,
+and the alias was made after any `forgot:` of its member's: KV has no
+transactions, so a rename racing a delete may write the record back, but
+never the owner key, and a listing that misses a just-made alias when its
+member leaves leaves it dead all the same. `forgot:` lasts a day, far
+longer than any request or KV's minute, and then goes, so nothing keeps
+the name of someone who left. The limit of 100 is checked,
+then written, so a burst of requests at one instant can pass it by a few
+(never by more than the day's ten).
+
+Making, renaming and turning off take the member's session alone;
+deleting, which is for good, takes a passkey answer made for that one
+delete (its challenge spent once, `spent:<challenge>` in KV), so a page
+that frames this one cannot have a member click their aliases away unseen:
+the browser's own prompt is the one thing such a page can neither hide nor
+answer. A member's own address is refused under a
+name an alias holds (`setEmail`), so a later member cannot take one over.
+Aliases only receive: nothing is sent as one.
+
 ## The dd commands
 
 `dd --help` lists them; each has `--help`. By who uses them:

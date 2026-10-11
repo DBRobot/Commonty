@@ -22,6 +22,8 @@
 .se-row dd small { display: block; color: var(--ink-2); font-size: 13px; margin-top: 2px; }
 .se-row.se-email { padding-block: 4px; }
 .se-row iframe { display: block; width: 100%; height: 56px; border: 0; background: transparent; color-scheme: light dark; }
+/* the aliases: a frame from the mail Worker, as tall as it says it is */
+.se-aliases { display: block; width: 100%; height: 132px; border: 0; background: transparent; color-scheme: light dark; }
 .se-ok { display: inline-flex; align-items: center; gap: 6px; }
 .se-ok::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .se-banner { display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); color: var(--ink); font-size: 15px; }

@@ -1,6 +1,6 @@
 // Someone left, or was removed 30 days ago (docs/dev/leaving.md): their <name>@<domain>
-// rule goes, the address it forwarded to if no other rule uses it, and what
-// this Worker pinned for them. Anyone may ask; what decides is the
+// rule goes, the address it forwarded to if no other rule uses it, their
+// own aliases (aliases.js), and what this Worker pinned for them. Anyone may ask; what decides is the
 // member's own signed statement, checked here against the entry pinned for
 // them, or the release's removal (forgetDue, client/mail/src/lib.rs).
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -41,6 +41,8 @@ export async function forgetApi(req, env, body, json, h) {
     const used = l.rules.some((x) => x.id !== s.rule.id && !((h.ALIASES || {})[h.aliasOf(x)] === name) && (x.actions || []).some((a) => (a.value || []).some((v) => (v || '').toLowerCase() === (s.email || '').toLowerCase())));
     if (s.destination && !used) await h.cf(env, 'DELETE', `/accounts/${z.account}/email/routing/addresses/${s.destination.tag || s.destination.id}`);
   }
+  // their own aliases: deleted, and nothing left saying they were theirs
+  await h.forgetAliases(env, name);
   await env.PINNED.delete(`ended:${name}`);
   await env.PINNED.delete(`entry:${name}`);
   return json({ gone: true });

@@ -103,7 +103,8 @@ fn bundle(root: &Path, r#ref: &str) -> Result<std::path::PathBuf> {
 /// styles as text it serves, the fonts as bytes, the checks as wasm.
 fn kind(name: &str) -> &'static str {
     match name {
-        "worker.js" | "dd_mail.js" | "fleet.js" | "unlock.js" | "leaving.js" | "send.js" => {
+        "worker.js" | "dd_mail.js" | "fleet.js" | "unlock.js" | "leaving.js" | "send.js"
+        | "aliases.js" => {
             "application/javascript+module"
         }
         n if n.ends_with(".wasm") => "application/wasm",
@@ -118,6 +119,8 @@ async fn upload(http: &reqwest::Client, token: &str, s: &Setup, dir: &Path) -> R
         "compatibility_date": COMPATIBILITY,
         "bindings": [
             { "type": "plain_text", "name": "DOMAIN", "text": s.domain },
+            // its own name: the zone's catch-all sends members' aliases here
+            { "type": "plain_text", "name": "WORKER", "text": s.script },
             { "type": "kv_namespace", "name": "PINNED", "namespace_id": s.kv },
             // the boxes' mail (send.js): only to addresses Email Routing has
             // confirmed, and only from these two
