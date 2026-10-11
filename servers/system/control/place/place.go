@@ -44,7 +44,10 @@ type Service struct {
 	Class     string  `json:"class"`     // high | medium | low
 	UpMbps    float64 `json:"upMbps"`
 	DownMbps  float64 `json:"downMbps"`
+	// the needs' estimate, until a box measures it
 	MemoryGiB float64 `json:"memoryGiB"`
+	// what it keeps whatever it measures (a model it may load)
+	ReserveGiB float64 `json:"reserveGiB"`
 	// what moving it carries: its data, at least its floor
 	StorageGiB float64 `json:"storageGiB"`
 	// what must share its box
@@ -97,6 +100,24 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		}
 	}
 
+	// what a service holds: the most any live box measured it holding
+	// (nix/modules/box/service-memory.nix), never under what it reserves;
+	// the needs' estimate until one has
+	memory := map[string]float64{}
+	for svc, sv := range in.Services {
+		m, seen := 0.0, false
+		for _, name := range live {
+			if v, ok := s.Boxes[name].Facts["svc/"+svc+"/mem"]; ok {
+				m, seen = max(m, v/gib), true
+			}
+		}
+		if seen {
+			memory[svc] = max(m, sv.ReserveGiB)
+		} else {
+			memory[svc] = sv.MemoryGiB
+		}
+	}
+
 	planned := map[string]map[string]bool{} // box -> services
 	used := map[string]float64{}            // box -> GiB of memory planned
 	for _, name := range live {
@@ -105,15 +126,30 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 	facts := func(name, k string) float64 { return s.Boxes[name].Facts[k] }
 	capacity := func(name string) float64 { return 0.85 * facts(name, "ram_bytes") / gib }
 
-	// what placing svc on name adds: itself and what must share its box
+	// what placing svc on name adds: itself and what must share its box,
+	// and what that must share its box with
 	adds := func(name, svc string) []string {
-		out := []string{svc}
-		for _, d := range in.Services[svc].Local {
-			if !planned[name][d] {
-				out = append(out, d)
+		out, seen := []string{svc}, map[string]bool{svc: true}
+		for i := 0; i < len(out); i++ {
+			for _, d := range in.Services[out[i]].Local {
+				if !seen[d] && !planned[name][d] {
+					seen[d] = true
+					out = append(out, d)
+				}
 			}
 		}
 		return out
+	}
+	count := map[string]int{} // service -> boxes planned to run it
+	// whether what svc brings with it may run one more time: a service
+	// that needs one which is already at its count goes where that one is
+	allowed := func(name, svc string) bool {
+		for _, x := range adds(name, svc)[1:] {
+			if c := in.Services[x].Instances; c > 0 && count[x] >= c {
+				return false
+			}
+		}
+		return true
 	}
 	room := func(name, svc string) bool {
 		if capacity(name) == 0 {
@@ -121,7 +157,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		}
 		m := 0.0
 		for _, x := range adds(name, svc) {
-			m += in.Services[x].MemoryGiB
+			m += memory[x]
 		}
 		return used[name]+m <= capacity(name)
 	}
@@ -167,7 +203,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		if c := capacity(name); c > 0 {
 			m := 0.0
 			for _, x := range adds(name, svc) {
-				m += in.Services[x].MemoryGiB
+				m += memory[x]
 			}
 			// room weighs only as a box fills: below 60% one box is as good
 			// as another, and what suits a service best keeps it
@@ -182,7 +218,8 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		for _, x := range adds(name, svc) {
 			if !planned[name][x] {
 				planned[name][x] = true
-				used[name] += in.Services[x].MemoryGiB
+				count[x]++
+				used[name] += memory[x]
 				w := why
 				if x != svc {
 					w = "beside " + svc
@@ -230,17 +267,30 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		return wanted[i] < wanted[j]
 	})
 
-	for _, svc := range wanted {
+	// what must share a box is decided before what needs it, so a service
+	// goes where it suits best and what needs it follows
+	done := map[string]bool{}
+	var decide func(svc string)
+	decide = func(svc string) {
+		if done[svc] {
+			return
+		}
+		done[svc] = true
 		sv := in.Services[svc]
+		for _, d := range sv.Local {
+			if in.Services[d].Enabled && !in.Services[d].EveryBox {
+				decide(d)
+			}
+		}
 		cands := capable(svc)
 		if len(cands) == 0 {
 			p.Unplaced[svc] = "no live box can run it"
-			continue
+			return
 		}
 		best := func(from []string) []string {
 			out := []string{}
 			for _, name := range from {
-				if !planned[name][svc] && room(name, svc) {
+				if !planned[name][svc] && allowed(name, svc) && room(name, svc) {
 					out = append(out, name)
 				}
 			}
@@ -318,18 +368,16 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 			if n == 0 {
 				n = 1
 			}
-			for _, name := range live { // pulled in already, beside what needs it
-				if planned[name][svc] {
-					n--
-				}
-			}
-			for ; n > 0; n-- {
+			for n -= count[svc]; n > 0; n-- { // less what came beside what needs it
 				if !choose(cands, "") {
 					p.Unplaced[svc] = "no live box that can run it has room"
 					break
 				}
 			}
 		}
+	}
+	for _, svc := range wanted {
+		decide(svc)
 	}
 	return p
 }

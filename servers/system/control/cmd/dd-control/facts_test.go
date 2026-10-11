@@ -46,3 +46,13 @@ func TestTheHeartbeatCarriesTheLine(t *testing.T) {
 		t.Fatalf("facts: %v", f)
 	}
 }
+
+func TestTheHeartbeatCarriesWhatEachServiceHolds(t *testing.T) {
+	d := t.TempDir()
+	n := filepath.Join(d, "services.prom")
+	_ = os.WriteFile(n, []byte("dd_service_memory_bytes{service=\"forgejo\"} 524288000\ndd_service_memory_bytes{service=\"bad name\"} 1\ndd_service_memory_bytes{service=\"x/y\"} 1\n"), 0o644)
+	f := promFacts(n)
+	if f["svc/forgejo/mem"] != 524288000 || len(f) != 1 {
+		t.Fatalf("facts: %v", f)
+	}
+}

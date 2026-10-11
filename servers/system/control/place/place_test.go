@@ -19,7 +19,7 @@ func fleet() (Inputs, *state.State) {
 			"garage":   {Enabled: true, Spread: true, Class: "high", UpMbps: 50, MemoryGiB: 0.5},
 			"pihole":   {Enabled: true, PerHouse: 1, MemoryGiB: 0.1},
 			"photos":   {Enabled: true, Class: "medium", UpMbps: 10, MemoryGiB: 1, StorageGiB: 20, Local: []string{"postgres"}},
-			"postgres": {Enabled: true, MemoryGiB: 0.5},
+			"postgres": {Enabled: true, Instances: 1, MemoryGiB: 0.5},
 			"games":    {Enabled: true, Class: "high", UpMbps: 10, MemoryGiB: 8, StorageGiB: 100},
 		},
 		Roles:   map[string][]string{"games": {"games"}},
@@ -181,5 +181,49 @@ func TestAHouseMovesItsDNSWhenFarBetter(t *testing.T) {
 	p := Decide(in, s, 90_000)
 	if runs(p, "big", "pihole") || !runs(p, "small", "pihole") {
 		t.Fatalf("pihole should move to small: big %+v small %+v", p.Boxes["big"], p.Boxes["small"])
+	}
+}
+
+func TestWhatABoxMeasuredOverridesTheEstimate(t *testing.T) {
+	in, s := fleet()
+	// the estimate fits the nas; what games really hold does not
+	in.Boxes["nas"].Can["games"] = 9
+	s.Boxes["big"].Facts["svc/games/mem"] = 15 * gib
+	p := Decide(in, s, 90_000)
+	if runs(p, "nas", "games") {
+		t.Fatalf("games on the nas, which cannot hold the 15G measured: %+v", p.Boxes["nas"])
+	}
+	// but never below what it keeps aside
+	delete(s.Boxes["big"].Facts, "svc/games/mem")
+	s.Boxes["big"].Facts["svc/games/mem"] = 0.1 * gib
+	sv := in.Services["games"]
+	sv.ReserveGiB = 15
+	in.Services["games"] = sv
+	p = Decide(in, s, 90_000)
+	if runs(p, "nas", "games") {
+		t.Fatalf("games on the nas past what they reserve: %+v", p.Boxes["nas"])
+	}
+}
+
+func TestOneDatabaseItsUsersFollow(t *testing.T) {
+	in, s := fleet()
+	in.Boxes["nas"].Can["vault"], in.Boxes["nas"].Can["asend"], in.Boxes["nas"].Can["postgres"] = 1, 5, 1
+	in.Boxes["big"].Can["vault"], in.Boxes["big"].Can["asend"] = 3, 1
+	in.Services["vault"] = Service{Enabled: true, Instances: 1, MemoryGiB: 0.2}
+	// asend suits the nas far better, and is decided first by name, but it
+	// must be beside the one vault, which suits big
+	in.Services["asend"] = Service{Enabled: true, MemoryGiB: 0.1, Local: []string{"vault"}}
+	p := Decide(in, s, 90_000)
+	if !runs(p, "big", "vault") || !runs(p, "big", "asend") || runs(p, "nas", "vault") || runs(p, "nas", "asend") {
+		t.Fatalf("vault and send together on big: big %+v nas %+v", p.Boxes["big"], p.Boxes["nas"])
+	}
+	// and with its database, the one postgres stays one
+	sv := in.Services["vault"]
+	sv.Local = []string{"postgres"}
+	in.Services["vault"] = sv
+	in.Boxes["nas"].Can["vault"] = 9
+	p = Decide(in, s, 90_000)
+	if runs(p, "nas", "postgres") || runs(p, "nas", "vault") {
+		t.Fatalf("a second postgres: %+v", p.Boxes["nas"])
 	}
 }

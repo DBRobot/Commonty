@@ -8,6 +8,8 @@
       upMbps = 10;
     };
     alwaysOn = true;
+    # one library of everyone's photos: its records are one database
+    instances = 1;
     units = [
       "ente"
       "ente-health"

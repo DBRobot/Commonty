@@ -219,8 +219,9 @@ func facts() map[string]float64 {
 	// run ended, its last good backup. Here, a box's word reaches the
 	// fleet without any box reading another (servers/gate/src/fleet.rs).
 	// and its line, measured daily (nix/modules/box/netspeed.nix): what
-	// placement weighs a service's traffic against
-	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom") {
+	// placement weighs a service's traffic against; and what each service
+	// holds in memory (nix/modules/box/service-memory.nix)
+	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom") {
 		f[name] = v
 	}
 	// what members keep here: not .prom, so none of it reaches Prometheus
@@ -311,6 +312,13 @@ func promFacts(files ...string) map[string]float64 {
 				out["net_up_mbps"] = v
 			case "dd_net_rtt_ms":
 				out["net_rtt_ms"] = v
+			case "dd_service_memory_bytes":
+				// dd_service_memory_bytes{service="forgejo"} as svc/forgejo/mem
+				svc, ok := strings.CutPrefix(fs[0], `dd_service_memory_bytes{service="`)
+				svc, ok2 := strings.CutSuffix(svc, `"}`)
+				if ok && ok2 && len(fs) == 2 && usageName(svc) && len(out) < maxFacts {
+					out["svc/"+svc+"/mem"] = v
+				}
 			case "dd_agent_info":
 				if strings.Contains(l, `result="ok"`) {
 					out["agent_ok"] = 1

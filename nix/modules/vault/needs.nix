@@ -6,6 +6,8 @@
     trust = "owner";
     alwaysOn = true;
     grows = [ "passwords" ];
+    # one vault: its records are one database
+    instances = 1;
     units = [
       "dd-vault-end"
       "dd-usage-vaultwarden"

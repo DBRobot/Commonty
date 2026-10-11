@@ -30,6 +30,7 @@ in
     instances = if n.instances == null then 0 else n.instances;
     inherit (n.traffic) class upMbps downMbps;
     memoryGiB = capability.sizes.${s}.memory;
+    reserveGiB = capability.sizes.${s}.reserve;
     # until the boxes report what each holds, its floor
     storageGiB = capability.sizes.${s}.floor;
     local = lib.filter (d: needs ? ${d} && n.base.depends.${d}.local) (

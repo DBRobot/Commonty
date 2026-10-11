@@ -47,6 +47,7 @@
       "dd-locate"
       "dd-ports-check"
       "dd-netspeed"
+      "dd-service-memory"
     ];
     everyBox = true;
     base = {

@@ -10,7 +10,7 @@
 #
 # Returns { boxes.<name> = { joins; why; can.<svc> = { score; for }; cannot.<svc> = [ why ]; };
 #           services.<svc> = [ { box; score; } ] best first;
-#           sizes.<svc> = { memory; floor; } in GiB, as judged here }
+#           sizes.<svc> = { memory; reserve; floor; } in GiB, as judged here }
 {
   lib,
   needs,
@@ -41,7 +41,10 @@ let
 
   # what a service holds on its own: its use, what it keeps regardless, and
   # for one that loads a model, the largest it loads
-  memoryOf =
+  memoryOf = s: gib needs.${s}.base.uses.memory + reserveOf s;
+  # what it keeps aside whatever it holds now: its fixed memory, and the
+  # largest model it may load
+  reserveOf =
     s:
     let
       n = needs.${s};
@@ -49,7 +52,7 @@ let
       models = map fixed (builtins.attrValues n.variants);
       biggest = builtins.foldl' lib.max 0.0 models;
     in
-    gib n.base.uses.memory + fixed n.base + (if s == "llama-swap" then biggest else 0.0);
+    fixed n.base + (if s == "llama-swap" then biggest else 0.0);
   floorOf =
     s:
     let
@@ -244,6 +247,7 @@ in
   boxes = table;
   sizes = lib.mapAttrs (s: _: {
     memory = memoryOf s;
+    reserve = reserveOf s;
     floor = floorOf s;
   }) needs;
   services = lib.genAttrs (lib.filter (s: !(builtins.elem s every)) (builtins.attrNames needs)) (
