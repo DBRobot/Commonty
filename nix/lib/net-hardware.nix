@@ -57,7 +57,10 @@ let
       first = if l.dns == [ ] then null else builtins.head l.dns;
       at = if first == null then [ ] else boxAt first;
     in
-    map (b: "${l.link} (the fallback) asks ${b} for names first (${first}): with ${b} down, every lookup there waits out a timeout before the next server") at
+    map (
+      b:
+      "${l.link} (the fallback) asks ${b} for names first (${first}): with ${b} down, every lookup there waits out a timeout before the next server"
+    ) at
   ) fallbacks;
 in
 {
@@ -77,7 +80,9 @@ in
     map (f: "${f.name} (${f.driver}) is ${f.why}. Better: ${f.instead}.") flaky
     ++ (
       if flaky != [ ] && wireless == [ ] then
-        [ "a wired adapter known to fail, and no Wi-Fi to fall back to: when it goes silent this box is gone until someone resets it" ]
+        [
+          "a wired adapter known to fail, and no Wi-Fi to fall back to: when it goes silent this box is gone until someone resets it"
+        ]
       else
         [ ]
     )

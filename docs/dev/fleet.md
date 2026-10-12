@@ -160,7 +160,15 @@ hardware.json
   gpus[]          render, driver, vendor, encode (VAAPI profiles)
   disks[]         id, kind, usb, bytes            smartd (observe/disks.nix)
   pools[]         name, vdevs, bytes, encrypted, redundancy
-  nics[]          name, mac, driver, wireless, usb, initrd
+  nics[]          name, mac, driver, wireless, usb, initrd; bus (usb, pci,
+                  other); ids (vendor:product, and pci's subsystem ids):
+                  what it is whatever its mac or name; slot (the pci
+                  function, or the usb host's and the port); product; a usb
+                  adapter's host {driver, ids} and usbMbps; speedMbps,
+                  carrier; a Wi-Fi adapter's bands ("2.4", "5", "6")
+  stack[]         link, profile, metric (its default route's), dns, role
+                  (primary: the default route; fallback: waits behind it);
+                  null where NetworkManager does not run
   power           battery, mains
   gpu             the first GPU only: older reports; nothing reads it
 ```
@@ -173,6 +181,29 @@ first GPU that encodes H.264. Every box has USB power saving off,
 whatever it reported: `usbcore.autosuspend=-1`, and a udev rule that keeps
 each USB device's `power/control` on and its USB3 link power states (U1,
 U2) off where the kernel offers them.
+
+The links are read by [`report/nics.sh`](../../nix/modules/box/report/nics.sh)
+and made into config by
+[`nix/lib/net-hardware.nix`](../../nix/lib/net-hardware.nix), through
+[`box/net-hardware.nix`](../../nix/modules/box/net-hardware.nix):
+
+- every wired adapter's driver in the initrd, and a USB adapter's host
+  controller's (`xhci_pci` for `xhci_hcd`), so the disks can be unlocked
+  over the cable;
+- `dd.home.wifi` must name the Wi-Fi adapter the box reported, or be null
+  where it has none: no Wi-Fi profile, so no fallback, and no watchdog;
+- an adapter known to fail ([`nix/lib/flaky-nics.json`](../../nix/lib/flaky-nics.json):
+  a driver, and the host controller it fails behind) is a warning at every
+  build of the box's config, a line in its journal at every boot
+  (`dd-net-check`), and said by `scripts/box-report` when the report is
+  copied in. So is such an adapter with no Wi-Fi beside it, and a fallback
+  whose first DNS server is another box in the house (node2's Wi-Fi, handed
+  node1's Pi-hole by the router).
+
+A report from before these fields has no `bus` or `host`: its USB adapter
+is taken to be behind xhci until the box reports again. Adding an adapter
+to `flaky-nics.json` warns every box that has one at its next build; no box
+has to report again.
 
 A box with both `wired` and `wifi` has both house profiles up, the cable at
 route metric 10 and the wifi at 20
