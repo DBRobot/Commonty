@@ -48,7 +48,7 @@ type LeaseRule struct {
 
 // Request is what a box asks for, signed by its TPM-held key over Bytes().
 type Request struct {
-	Kind string          `json:"kind"` // heartbeat | lease | directory | built
+	Kind string          `json:"kind"` // heartbeat | lease | directory | built | join
 	Box  string          `json:"box"`
 	Seq  uint64          `json:"seq"` // strictly increasing per box
 	Body json.RawMessage `json:"body"`
@@ -150,6 +150,10 @@ type State struct {
 	Directory []DirItem `json:"directory,omitempty"`
 	// the build results, in agreed order (BuiltItem)
 	Built []BuiltItem `json:"built,omitempty"`
+	// boxes the release does not list, joined on their own keys (join.go)
+	Joined     map[string]*Joined `json:"joined,omitempty"`
+	JoinWindow int64              `json:"joinWindow,omitempty"`
+	JoinCount  int                `json:"joinCount,omitempty"`
 }
 
 func New() *State {
@@ -167,11 +171,14 @@ var (
 
 // Check says whether r may be applied at agreed time now. It changes nothing.
 func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
-	box, ok := cfg.Boxes[r.Box]
+	if r.Kind == "join" {
+		return s.checkJoin(cfg, verify, r, now)
+	}
+	key, ok := s.BoxKey(cfg, r.Box)
 	if !ok {
 		return ErrUnknownBox
 	}
-	if !verify(box.Key, r.Bytes(), r.Sig) {
+	if !verify(key, r.Bytes(), r.Sig) {
 		return ErrBadSig
 	}
 	if b := s.Boxes[r.Box]; b != nil && r.Seq <= b.Seq {
@@ -222,6 +229,10 @@ func (s *State) checkLease(cfg *Config, box string, op LeaseOp, now int64) error
 	held := cur != nil && cur.Expires > now
 	switch op.Op {
 	case "acquire":
+		// a box that joined on its own key holds no lease: it runs nothing
+		if _, joined := s.Joined[box]; joined {
+			return fmt.Errorf("%s joined on its own key and holds no lease", box)
+		}
 		if held && cur.Holder != box {
 			return fmt.Errorf("%s is held by %s until %d", op.Role, cur.Holder, cur.Expires)
 		}
@@ -251,6 +262,8 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 	b.Seq = r.Seq
 	b.LastSeen = now
 	switch r.Kind {
+	case "join":
+		s.applyJoin(r, now)
 	case "heartbeat":
 		var h Heartbeat
 		_ = json.Unmarshal(r.Body, &h)
@@ -304,6 +317,7 @@ func (s *State) Block(cfg *Config, verify Verify, reqs []Request, now int64) (ap
 			delete(s.Leases, l)
 		}
 	}
+	s.dropGone(s.Time)
 	for _, r := range reqs {
 		if s.Check(cfg, verify, r, s.Time) == nil {
 			s.Apply(cfg, r, s.Time)

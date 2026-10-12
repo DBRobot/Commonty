@@ -107,6 +107,19 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 			p.Boxes[name] = []Decision{}
 		}
 	}
+	// a box that joined on its own key (state/join.go) can run nothing - it
+	// is in no release's capability table - and holds copies where its
+	// store has room: more places a bucket is kept, never the only one, as
+	// a bucket is always kept where its service runs
+	for name := range s.Joined {
+		if _, listed := in.Boxes[name]; listed {
+			continue
+		}
+		if b := s.Boxes[name]; b != nil && s.Time-b.LastSeen <= goneAfter {
+			live = append(live, name)
+			p.Boxes[name] = []Decision{}
+		}
+	}
 	sort.Strings(live)
 
 	// what runs now, by the roles each heartbeat names, and the placed
@@ -560,7 +573,15 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 				more = append(more, name)
 			}
 		}
-		sort.SliceStable(more, func(i, j int) bool { return spare(more[i]) > spare(more[j]) })
+		// a box able to take the service over first: a copy is what it
+		// would start from; then any other, a stranger's too, by room
+		takesOver := func(name string) bool { _, ok := in.Boxes[name].Can[bk.Service]; return ok }
+		sort.SliceStable(more, func(i, j int) bool {
+			if a, b := takesOver(more[i]), takesOver(more[j]); a != b {
+				return a
+			}
+			return spare(more[i]) > spare(more[j])
+		})
 		for _, name := range more {
 			if len(keep) >= n {
 				break
