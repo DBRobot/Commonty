@@ -170,6 +170,36 @@
     };
   };
 
+  store = {
+    what = "this box's own store: a garage of one with a secret nobody else has, its buckets copied to other boxes' stores (storage/store.nix)";
+    # every box keeps copies for the others, and its own buckets
+    everyBox = true;
+    units = [
+      "dd-store"
+      "dd-store-setup"
+      "dd-store-copy"
+      "dd-store-copy-recent"
+      "dd-store-facts"
+      "dd-store-migrate" # the move off the old shared pool
+    ];
+    base = {
+      # node1, 2026-10-11: a fresh garage of one
+      uses = {
+        memory = "100M";
+        storage = "1G";
+      };
+      network = {
+        outbound = [ "store" ]; # the other boxes' stores
+        inbound = "network"; # the other boxes' copies, at store.<box>.<domain>
+      };
+      depends = {
+        nginx.local = true;
+        acme.local = true; # a certificate for store.<box>.<domain>
+      };
+      privacy = "none"; # what it keeps is encrypted before it arrives
+    };
+  };
+
   storage-view = {
     what = "adds up what each member keeps on every box, from the control plane's agreed heartbeats, for this box's gate (storage/view.nix)";
     units = [ "dd-storage-view" ];

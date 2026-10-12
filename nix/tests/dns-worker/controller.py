@@ -65,7 +65,9 @@ def records():
         return sorted(
             (x["type"], x["name"], x["content"].strip('"'))
             for x in json.loads(r.read())
-            if "home.commonty.test" in x["name"]
+            # controllers' names only, under home: the failover checks
+            # before this one point home itself at a tunnel
+            if x["name"].endswith(".home.commonty.test")
         )
 
 

@@ -60,6 +60,7 @@ pkgs.runCommand "dns-worker-check"
     export const BOXES = {"box1": "$(spki box1)", "box2": "$(spki box2)"};
     export const NAMES = {"box1": [], "box2": []};
     export const RECORDS = {"zone": "commonty.test", "address": "100.64.0.2", "tunnel": "t1", "hosts": ["home"], "open": true, "bare": false, "home": "box1", "gateway": "headscale", "addresses": {"box1": "100.64.0.2", "box2": "100.64.0.5"}, "fleet": ["100.64.0.2", "100.64.0.5"], "follow": {"photos": "ente-museum"}};
+    export const MEMBERS = $(jq -c '.members' $tester);
     EOF
     sed -i 's/^    //' w3/fleet.js
     cat >> w3/wrangler.toml <<'TOML'
