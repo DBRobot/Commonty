@@ -27,6 +27,14 @@ let
       pkgs.gnugrep
       pkgs.findutils
       pkgs.git
+      # what the report finds the hardware with (box/report.nix)
+      pkgs.bash
+      pkgs.libva-utils
+      pkgs.pciutils
+      pkgs.usbutils
+      pkgs.ethtool
+      pkgs.iproute2
+      pkgs.nvme-cli
       config.system.build.nixos-install
       config.system.build.nixos-generate-config
       config.boot.zfs.package

@@ -60,6 +60,7 @@
         "pg-follow"
         "store"
         "takeover"
+        "join-install"
         "photos"
         "llm"
         "vault"
