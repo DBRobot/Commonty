@@ -386,6 +386,16 @@ const STATIC: &[(&str, &str, &str)] = &[
         "servers/web-shared/guide.js",
         "text/javascript; charset=utf-8",
     ),
+    (
+        "guide-face.js",
+        "servers/web-shared/guide-face.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "guide-tour.js",
+        "servers/web-shared/guide-tour.js",
+        "text/javascript; charset=utf-8",
+    ),
     // the docs' drawing of the site map
     (
         "docs-map.js",
@@ -1096,7 +1106,7 @@ mod tests {
     /// the page's own code turns into where to go (guide.js)
     #[test]
     fn the_assistant_writes_no_markup_and_goes_only_to_the_map() {
-        for f in ["guide.js", "docs-map.js"] {
+        for f in ["guide.js", "guide-face.js", "guide-tour.js", "docs-map.js"] {
             let js = text(f);
             for not in [
                 "innerHTML",
@@ -1111,7 +1121,25 @@ mod tests {
         }
         let g = text("guide.js");
         assert!(g.contains("Object.hasOwn(places, id)"));
-        assert!(g.contains("const n = byId[id];") && g.contains("opts.here(n.url"));
+        assert!(g.contains("const n = byId[id];") && g.contains("opts.here(url"));
+        // a control is found by the name our pages give it, never by words
+        let t = text("guide-tour.js");
+        assert!(t.contains("querySelectorAll(`[data-guide=\"${name}\"]`)"));
+        assert!(t.contains("const NAME = /^[a-z0-9-]{1,40}$/;"));
+        for not in [
+            "textContent.includes",
+            "innerText",
+            ".textContent ===",
+            "querySelectorAll('*')",
+        ] {
+            assert!(!t.contains(not) && !g.contains(not), "{not}");
+        }
+        // a drafted issue is words in a query, opened for the member to post
+        assert!(g.contains("u.searchParams.set('title', issue.title)"));
+        assert!(
+            !g.contains("/issues', { method: 'POST'")
+                && !g.contains("method: 'POST', body: { title")
+        );
         assert!(text("shell.js").contains("import { start as guide } from './guide.js';"));
         assert!(text("shell.js").contains("export function here("));
     }

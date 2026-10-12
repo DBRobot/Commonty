@@ -8,7 +8,7 @@ import { start as network } from './network.js';
 import { start as storage } from './storage.js';
 import { start as leave, where } from './leave.js';
 import { me as whoIsIt, entryOf } from './shell.js';
-import { shown, setShown } from './guide.js';
+import { shown, setShown, shortcut, setShortcut, ownKey, comboOf, keyName, DEFAULT_KEY } from './guide.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -74,6 +74,61 @@ guideSwitch.onclick = () => {
   guideSwitch.setAttribute('aria-checked', String(on));
   setShown(on);
 };
+
+// and the key that opens it from anywhere: the next combination pressed,
+// with Ctrl, Alt or Cmd so typing never opens it
+const keyShown = $('td-key');
+const keySet = $('td-key-set');
+const keyReset = $('td-key-reset');
+const keyHint = $('td-key-hint');
+const keyWhat = 'Opens Ask Commonty from any page on this device.';
+function showKey() {
+  keyShown.textContent = keyName(shortcut());
+  keyReset.hidden = !ownKey();
+  keyReset.textContent = `Reset to ${keyName(DEFAULT_KEY)}`;
+}
+let capturing = null;
+function stopCapture(said) {
+  removeEventListener('keydown', capturing, true);
+  capturing = null;
+  keySet.textContent = 'Change';
+  keySet.removeAttribute('aria-pressed');
+  keyHint.textContent = said || keyWhat;
+  showKey();
+}
+keySet.onclick = () => {
+  if (capturing) {
+    stopCapture();
+    return;
+  }
+  keySet.textContent = 'Press the keys…';
+  keySet.setAttribute('aria-pressed', 'true');
+  keyHint.textContent = 'Press the new combination now, or Escape to keep the one you have.';
+  capturing = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') {
+      stopCapture();
+      return;
+    }
+    const c = comboOf(e);
+    if (!c) return;
+    if (!(e.ctrlKey || e.altKey || e.metaKey) && !/^F\d{1,2}$/.test(e.key)) {
+      keyHint.textContent = 'Use Ctrl, Alt or Cmd with a key, so typing never opens it. Try again, or press Escape.';
+      return;
+    }
+    setShortcut(c);
+    stopCapture(`Now ${keyName(c)}. ${keyWhat}`);
+  };
+  addEventListener('keydown', capturing, true);
+};
+keyReset.onclick = () => {
+  setShortcut(null);
+  showKey();
+  keyHint.textContent = `Back to ${keyName(DEFAULT_KEY)}. ${keyWhat}`;
+  keySet.focus();
+};
+showKey();
 
 // back from changing the email: say so once, and forget it
 const q = new URLSearchParams(location.search);

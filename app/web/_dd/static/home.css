@@ -1043,11 +1043,11 @@ main.home .guest-more p { margin: 0; max-width: 62ch; color: var(--ink-2); }
 /* Ask Commonty, in the lower right corner of every signed-in page
    (guide.js): the round button, the strip beside it that tucks it away,
    and the conversation it opens */
-.dd-guide-btn, .dd-guide, .dd-tuck { --gd-bar: #1D4470; --gd-bar-ink: #FFFFFF; --gd-mark: #9CC3EA; --gd-sunk: #F4F6F8; --gd-pupil: #0F1A2A; font-family: var(--font); }
+.dd-guide-btn, .dd-guide, .dd-tuck, .dd-ring, .dd-tour { --gd-bar: #1D4470; --gd-bar-ink: #FFFFFF; --gd-mark: #9CC3EA; --gd-sunk: #F4F6F8; --gd-pupil: #0F1A2A; --gd-point: #1D4470; font-family: var(--font); }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) :is(.dd-guide-btn, .dd-guide, .dd-tuck) { --gd-bar: #16304F; --gd-mark: #7FAEDD; --gd-sunk: #13171C; }
+  :root:not([data-theme="light"]) :is(.dd-guide-btn, .dd-guide, .dd-tuck, .dd-ring, .dd-tour) { --gd-bar: #16304F; --gd-mark: #7FAEDD; --gd-sunk: #13171C; --gd-point: #7FAEDD; }
 }
-:root[data-theme="dark"] :is(.dd-guide-btn, .dd-guide, .dd-tuck) { --gd-bar: #16304F; --gd-mark: #7FAEDD; --gd-sunk: #13171C; }
+:root[data-theme="dark"] :is(.dd-guide-btn, .dd-guide, .dd-tuck, .dd-ring, .dd-tour) { --gd-bar: #16304F; --gd-mark: #7FAEDD; --gd-sunk: #13171C; --gd-point: #7FAEDD; }
 .dd-guide-btn { position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: 52px; height: 52px; margin: 0; padding: 0; border-radius: 50%; border: 0; background: var(--gd-bar); color: var(--gd-bar-ink); cursor: pointer; box-shadow: 0 4px 14px rgba(15, 25, 40, .28); display: grid; place-items: center; z-index: 40; transition: transform .25s ease, opacity .25s; }
 .dd-guide-btn:hover { background: var(--gd-bar); }
 .dd-guide-btn .icon { width: 24px; height: 24px; }
@@ -1105,7 +1105,55 @@ body.dd-tucked.dd-peek .dd-guide-btn .eye b { animation: dd-blink 4.6s both; }
   80%, 100% { transform: translate(0, 0); }
 }
 @keyframes dd-blink { 0%, 56% { height: 0; } 58% { height: 100%; } 60%, 84% { height: 0; } 86% { height: 100%; } 88%, 100% { height: 0; } }
-@media (prefers-reduced-motion: reduce) { body.dd-tucked.dd-peek .dd-guide-btn, body.dd-tucked.dd-peek .dd-guide-btn .icon, body.dd-tucked.dd-peek .dd-guide-btn .eyes, body.dd-tucked.dd-peek .dd-guide-btn .eye i, body.dd-tucked.dd-peek .dd-guide-btn .eye b { animation: none; } }
+/* now and then, in its corner, it looks up: the eyes come, the mark
+   shrinks to a mouth, and the pupils follow the pointer (guide-face.js) */
+.dd-guide-btn .icon { transition: transform .35s ease; }
+.dd-guide-btn .eyes { transition: opacity .3s ease; }
+body.dd-eyes .dd-guide-btn .icon { transform: translateY(9px) scale(.5); }
+body.dd-eyes .dd-guide-btn .eyes { opacity: 1; }
+body.dd-eyes .dd-guide-btn .eye i { transform: translate(var(--px, 0px), var(--py, 0px)); transition: transform .12s linear; }
+/* its looks: a wink, surprised, happy, and sleepy at night */
+body:is(.dd-peek, .dd-eyes) .dd-guide-btn[data-face="wink"] .eye:last-child b { animation: dd-wink 2.4s .6s both; }
+body:is(.dd-peek, .dd-eyes) .dd-guide-btn[data-face="surprised"] .eye { transform: scale(1.18); }
+body:is(.dd-peek, .dd-eyes) .dd-guide-btn[data-face="surprised"] .eye i { width: 4px; height: 5px; left: 4.5px; top: 5px; }
+body:is(.dd-peek, .dd-eyes) .dd-guide-btn[data-face="surprised"] .icon { opacity: 0; }
+.dd-guide-btn .o { position: absolute; left: 50%; top: 50%; width: 8px; height: 9px; margin: 4px 0 0 -4px; border: 2px solid var(--gd-mark); border-radius: 50%; opacity: 0; pointer-events: none; }
+body:is(.dd-peek, .dd-eyes) .dd-guide-btn[data-face="surprised"] .o { opacity: 1; }
+body:is(.dd-peek, .dd-eyes) .dd-guide-btn[data-face="happy"] .eye { background: none; height: 8px; margin-bottom: 5px; border: 3px solid #FFFFFF; border-bottom: 0; border-radius: 8px 8px 0 0; }
+body:is(.dd-peek, .dd-eyes) .dd-guide-btn[data-face="happy"] .eye :is(i, b) { display: none; }
+body:is(.dd-peek, .dd-eyes) .dd-guide-btn[data-face="sleepy"] .eye b { animation: dd-doze 2.8s ease-in-out infinite; }
+body:is(.dd-peek, .dd-eyes) .dd-guide-btn[data-face="sleepy"] .eye i { animation: none; top: 6px; }
+.dd-guide-btn .zz { position: absolute; right: -4px; top: -16px; font: 700 13px var(--font); color: var(--ink-2); opacity: 0; pointer-events: none; }
+body:is(.dd-peek, .dd-eyes) .dd-guide-btn .zz { animation: dd-z 2.2s ease-out .4s infinite; }
+/* a hat on its days */
+.dd-guide-btn .hat { position: absolute; left: 12px; top: -21px; width: 30px; height: 24px; transform: rotate(-10deg); opacity: 0; transition: opacity .3s; pointer-events: none; }
+body.dd-eyes .dd-guide-btn .hat { opacity: 1; }
+body.dd-tucked.dd-peek .dd-guide-btn .hat { animation: dd-eyes 4.6s both; }
+/* release notes this device has not seen */
+.dd-guide-btn .new { position: absolute; top: 1px; right: 1px; width: 12px; height: 12px; border-radius: 50%; background: #D3313A; border: 2px solid var(--surface); display: none; }
+.dd-guide-btn.has-new .new { display: block; }
+@keyframes dd-wink { 0%, 20% { height: 0; } 30%, 50% { height: 100%; } 60%, 100% { height: 0; } }
+@keyframes dd-doze { 0%, 55% { height: 55%; } 72% { height: 100%; } 88%, 100% { height: 55%; } }
+@keyframes dd-z { 0% { opacity: 0; transform: translate(0, 6px) scale(.7); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(8px, -14px) scale(1.15); } }
+@media (prefers-reduced-motion: reduce) {
+  body.dd-tucked.dd-peek .dd-guide-btn, body.dd-tucked.dd-peek .dd-guide-btn .icon, body.dd-tucked.dd-peek .dd-guide-btn .eyes, body.dd-tucked.dd-peek .dd-guide-btn .eye i, body.dd-tucked.dd-peek .dd-guide-btn .eye b,
+  .dd-guide-btn .eye b, .dd-guide-btn .zz, .dd-guide-btn .hat, .dd-ring, .dd-ring .tip { animation: none; }
+  .dd-guide-btn .icon, .dd-guide-btn .eyes, .dd-guide-btn .eye i, .dd-guide-btn .hat { transition: none; }
+}
+/* pointing at one of our controls, and the tour's card beside it (guide-tour.js) */
+.dd-ring { position: fixed; z-index: 45; border: 3px solid var(--gd-point); border-radius: 10px; pointer-events: none; animation: dd-pulse 1.2s ease-in-out infinite; }
+.dd-ring.step { animation: none; }
+.dd-ring .tip { position: absolute; left: 50%; top: -32px; width: 20px; height: 24px; margin-left: -10px; fill: none; stroke: var(--gd-point); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; animation: dd-bob .9s ease-in-out infinite; }
+.dd-ring.under .tip { top: auto; bottom: -32px; rotate: 180deg; }
+.dd-ring.step .tip { display: none; }
+@keyframes dd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes dd-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.dd-tour { position: fixed; z-index: 46; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-top: 4px solid var(--gd-bar); border-radius: 10px; box-shadow: 0 12px 40px rgba(15, 25, 40, .22); padding: 12px 14px 14px; font-size: 15px; line-height: 1.5; }
+.dd-tour p { margin: 0 0 12px; }
+.dd-tour .count { margin: 0 0 4px; font: 12px var(--mono); color: var(--ink-2); }
+.dd-tour .row { display: flex; gap: 8px; align-items: center; }
+.dd-tour .grow { flex: 1; }
+.dd-tour button { margin: 0; }
 .dd-guide { position: fixed; right: 20px; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); width: min(370px, calc(100% - 32px)); height: min(520px, calc(100% - 140px)); background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 40px rgba(15, 25, 40, .22); display: flex; flex-direction: column; z-index: 40; overflow: hidden; font-size: 15px; line-height: 1.55; }
 .dd-guide > header { background: var(--gd-bar); color: var(--gd-bar-ink); display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; }
 .dd-guide > header h2 { margin: 0; font-size: 15px; font-weight: 700; }
@@ -1125,6 +1173,10 @@ body.dd-tucked.dd-peek .dd-guide-btn .eye b { animation: dd-blink 4.6s both; }
 .dd-guide .dot, .dd-map .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--accent); }
 .dd-guide .dot-docs, .dd-map .dot-docs { background: var(--pick); }
 .dd-guide .dot-app, .dd-map .dot-app { background: var(--focus); }
+.dd-guide .issue { display: grid; gap: 4px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--gd-sunk); font-size: 13px; }
+.dd-guide .issue b { font-weight: 600; }
+.dd-guide .msg button.out { display: block; margin: 8px 0 0; height: auto; padding: 7px 12px; border: 0; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font: 600 13px var(--font); cursor: pointer; }
+.dd-guide .msg button.out:hover { background: var(--accent-hover); }
 .dd-guide .how { display: block; margin-top: 6px; font: 11px var(--mono); color: var(--ink-2); white-space: normal; }
 .dd-guide .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .dd-guide .chips button { margin: 0; height: auto; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); border-radius: 14px; padding: 4px 10px; font: 12.5px var(--font); cursor: pointer; }
