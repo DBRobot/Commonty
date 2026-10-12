@@ -31,7 +31,9 @@ let
   '';
 in
 {
-  systemd.tmpfiles.rules = [ "d /var/lib/dd-facts 0755 root root -" ];
+  # /var/lib/dd-facts is node-exporter's (observe/metrics.nix): a second
+  # rule naming another owner took it from the units that write there as
+  # node-exporter, and both boxes rolled release 249 back
   systemd.services.dd-netspeed = {
     description = "Measure this box's line, for placement";
     # never run by a switch: a failure there rolls the release back
