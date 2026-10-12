@@ -4,7 +4,15 @@ let
   me = boxes.${config.networking.hostName} or { };
   policy = lib.importJSON ../../fleet/policy.json;
   # whose box this is, and their keys (fleet/policy.json people)
-  owner = policy.people.${config.dd.box.owner};
+  # (nobody's, for a box that joined on its own key: no one's keys log in)
+  owner =
+    if config.dd.box.owner == null then
+      {
+        ssh = [ ];
+        paperKey = null;
+      }
+    else
+      policy.people.${config.dd.box.owner};
   # the other boxes, by their address on the fleet's network
   peersNet = lib.mapAttrsToList (_: b: b.net) (
     lib.filterAttrs (n: b: n != config.networking.hostName && b ? net) boxes
