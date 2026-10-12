@@ -430,6 +430,7 @@ pub async fn openable(
                     members: &list.members,
                     revoked: &list.revoked,
                     handovers: &handovers,
+                    names: Some(&list.names),
                 },
             )
             .with_context(|| format!("your entry is {}", account::NOT_RELEASED))?

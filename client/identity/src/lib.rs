@@ -292,11 +292,18 @@ pub struct Handover {
 /// that entry named. `recovered_from` alone is a directory's word and
 /// counts for nothing here; and an invite counts only once the release
 /// lists its root, so a member let in by one is not anchored until then.
+///
+/// `names`, the list's `name_tag` for each id: the root it anchors at must
+/// be listed under this entry's name, or any member's root could stand
+/// behind an entry under someone else's name. None where the caller vouches
+/// for the name itself (a root this device pinned for the name it is
+/// signed in as). A recovery keeps the name (`accept`), so the chain does.
 pub fn anchored(
     signed: &SignedEntry,
     handovers: &[Handover],
     members: &[String],
     revoked: &[String],
+    names: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Result<()> {
     verify(signed)?;
     // claimed earlier roots only ever shut a person out
@@ -308,8 +315,17 @@ pub fn anchored(
     }
     let mut cur = &signed.entry;
     loop {
-        if members.contains(&member_id(&cur.root)) {
-            return Ok(());
+        let id = member_id(&cur.root);
+        if members.contains(&id) {
+            return match names {
+                Some(n) if n.get(&id) != Some(&name_tag(&id, &signed.entry.name)) => {
+                    Err(Error::Rejected(format!(
+                        "the signed release does not list that root as {}",
+                        signed.entry.name
+                    )))
+                }
+                _ => Ok(()),
+            };
         }
         if cur.recovered_from.is_empty() {
             return Err(Error::Rejected(format!(
@@ -334,6 +350,19 @@ pub fn anchored(
         accept(Some(&h.before), &h.after)?;
         cur = &h.before.entry;
     }
+}
+
+/// What the member list says a root's name is: a hash of the id and the
+/// name, so the list in the open repository names nobody outright, and a
+/// tag lifted onto another id says nothing there.
+pub fn name_tag(id: &str, name: &str) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(b"commonty member name v1\0");
+    h.update(id.as_bytes());
+    h.update(b"\0");
+    h.update(name.as_bytes());
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub fn canonical(entry: &Entry) -> Result<Vec<u8>> {
@@ -494,6 +523,9 @@ pub struct MemberList {
     pub counter: u64,
     pub members: Vec<String>,
     pub revoked: Vec<String>,
+    /// id -> `name_tag(id, name)`: whose name each listed root is
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub names: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1653,9 +1685,15 @@ mod tests {
         };
         let s0 = sign(e0.clone(), &r0).unwrap();
         let listed = [member_id(&e0.root)];
-        anchored(&s0, &[], &listed, &[]).unwrap();
-        assert!(anchored(&s0, &[], &[], &[]).is_err(), "not on the list");
-        assert!(anchored(&s0, &[], &listed, &listed).is_err(), "revoked");
+        anchored(&s0, &[], &listed, &[], None).unwrap();
+        assert!(
+            anchored(&s0, &[], &[], &[], None).is_err(),
+            "not on the list"
+        );
+        assert!(
+            anchored(&s0, &[], &listed, &listed, None).is_err(),
+            "revoked"
+        );
 
         // two recoveries, then an ordinary update under the last root
         let mut e1 = e0.clone();
@@ -1683,14 +1721,44 @@ mod tests {
                 after: s2.clone(),
             },
         ];
-        anchored(&s3, &chain, &listed, &[]).unwrap();
+        anchored(&s3, &chain, &listed, &[], None).unwrap();
         // a pinned root anchors the same way
-        anchored(&s3, &chain, &[member_id(&e1.root)], &[]).unwrap();
+        anchored(&s3, &chain, &[member_id(&e1.root)], &[], None).unwrap();
         // the earlier roots it names are not enough on their own
-        assert!(anchored(&s3, &chain[1..], &listed, &[]).is_err());
-        assert!(anchored(&s3, &[], &listed, &[]).is_err());
+        assert!(anchored(&s3, &chain[1..], &listed, &[], None).is_err());
+        assert!(anchored(&s3, &[], &listed, &[], None).is_err());
         // and a removal of any root along the way holds
-        assert!(anchored(&s3, &chain, &listed, &[member_id(&e1.root)]).is_err());
+        assert!(anchored(&s3, &chain, &listed, &[member_id(&e1.root)], None).is_err());
+
+        // the list names whose each root is: under its own name it anchors,
+        // all the way down a recovery chain, and under anyone else's not
+        let named = |id: &String, name: &str| {
+            std::collections::BTreeMap::from([(id.clone(), name_tag(id, name))])
+        };
+        let hers = named(&listed[0], "sarah");
+        anchored(&s0, &[], &listed, &[], Some(&hers)).unwrap();
+        anchored(&s3, &chain, &listed, &[], Some(&hers)).unwrap();
+        assert!(anchored(&s0, &[], &listed, &[], Some(&named(&listed[0], "tom"))).is_err());
+        assert!(anchored(&s0, &[], &listed, &[], Some(&Default::default())).is_err());
+        // tom, a member, signs an entry under sarah's name with his own root
+        let tom = generate();
+        let mut as_her = e0.clone();
+        as_her.root = encode_public(&tom.verifying_key());
+        let as_her = sign(as_her, &tom).unwrap();
+        let tom_id = member_id(&as_her.entry.root);
+        let both = [listed[0].clone(), tom_id.clone()];
+        let mut names = hers.clone();
+        names.extend(named(&tom_id, "tom"));
+        assert!(anchored(&as_her, &[], &both, &[], Some(&names)).is_err());
+        // nor can a recovery change the name it is under
+        let mut renamed = e1.clone();
+        renamed.name = "tom".into();
+        let renamed = sign_recovery(renamed, &r1, &p0).unwrap();
+        let h = [Handover {
+            before: s0.clone(),
+            after: renamed.clone(),
+        }];
+        assert!(anchored(&renamed, &h, &listed, &[], None).is_err());
 
         // a box's own root, naming sarah's real one as the root it replaced
         let boxed = generate();
@@ -1714,12 +1782,12 @@ mod tests {
                 before,
                 after: forged.clone(),
             }];
-            assert!(anchored(&forged, &h, &listed, &[]).is_err());
+            assert!(anchored(&forged, &h, &listed, &[], None).is_err());
         }
         // the box's root on its own, no earlier roots: not on the list
         f.recovered_from = vec![];
         let plain = sign(f, &boxed).unwrap();
-        assert!(anchored(&plain, &[], &listed, &[]).is_err());
+        assert!(anchored(&plain, &[], &listed, &[], None).is_err());
     }
 
     #[test]
@@ -1728,7 +1796,8 @@ mod tests {
         let list = MemberList {
             counter: 7,
             members: vec![member_id("a")],
-            revoked: vec![],
+            names: [(member_id("a"), name_tag(&member_id("a"), "amy"))].into(),
+            ..Default::default()
         };
         let s = sign_member_list(list.clone(), &release).unwrap();
         verify_member_list(&s, &release.verifying_key()).unwrap();
@@ -1736,6 +1805,12 @@ mod tests {
         let mut grown = s.clone();
         grown.list.members.push(member_id("b"));
         assert!(verify_member_list(&grown, &release.verifying_key()).is_err());
+        let mut renamed = s.clone();
+        renamed
+            .list
+            .names
+            .insert(member_id("a"), name_tag(&member_id("a"), "eve"));
+        assert!(verify_member_list(&renamed, &release.verifying_key()).is_err());
         // the same key's signature over the bare json, as it signs an
         // invite, is no member list
         let bare: Signature = release.sign(&serde_json::to_vec(&list).unwrap());

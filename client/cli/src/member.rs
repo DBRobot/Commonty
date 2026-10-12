@@ -1,6 +1,8 @@
 //! The member list: who may use the services. `fleet/members.json` in the
-//! repo: ids let in and ids shut out, a sha256 of each person's root, so it
-//! carries no names. It reaches the boxes in the signed release; a box
+//! repo: ids let in and ids shut out, a sha256 of each person's root, and
+//! for each id a tag of the name it was confirmed under
+//! (identity::name_tag), so it carries no names in the clear and a client
+//! can tell a root stands behind that name and no other. It reaches the boxes in the signed release; a box
 //! checks it and cannot add to it. An invite (`dd invite`) is the other way
 //! in: a grant in the person's own entry, made with a code the release key
 //! signed; the revoked list is what shuts one of those out again.
@@ -20,6 +22,11 @@ pub struct Members {
     /// deleted from every box 30 days later (docs/dev/leaving.md)
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub removed: std::collections::BTreeMap<String, u64>,
+    /// id -> identity::name_tag(id, name), set by `dd member add <name>`
+    /// once the operator confirmed the id: clients anchor a root only under
+    /// the name listed for it
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub names: std::collections::BTreeMap<String, String>,
 }
 
 fn path(repo: &str) -> PathBuf {
@@ -112,7 +119,7 @@ async fn confirmed(
 /// check it (identity::anchored)
 fn standing(e: &identity::SignedEntry, handovers: &[identity::Handover], m: &Members) -> String {
     let id = identity::member_id(&e.entry.root);
-    match identity::anchored(e, handovers, &m.members, &m.revoked) {
+    match identity::anchored(e, handovers, &m.members, &m.revoked, Some(&m.names)) {
         Ok(()) if m.members.contains(&id) => "on the list".into(),
         Ok(()) => "recovered from a root on the list, every step proven".into(),
         Err(why) => format!("not anchored to the list: {why}"),
@@ -151,6 +158,18 @@ pub async fn add(repo: &str, who: &str, dirs: &[String], confirm: Option<&str>) 
         m.members.push(id.clone());
         println!("added {id}");
     }
+    // the name the operator confirmed this root under, and none other: a
+    // member listed before names were is named by adding them again by name
+    match &entry {
+        Some(_) => {
+            m.names.insert(id.clone(), identity::name_tag(&id, who));
+            println!("listed as {who}");
+        }
+        None if !m.names.contains_key(&id) => println!(
+            "no name is listed for {id}: until `dd member add <their name> --confirm {id}` lists it, no device holds their entry to the release"
+        ),
+        None => {}
+    }
     write(repo, m)?;
     println!("commit fleet/members.json and release; every box then lets them in");
     Ok(())
@@ -177,7 +196,7 @@ pub async fn remove(repo: &str, who: &str, dirs: &[String], confirm: Option<&str
 
 /// Every id on the list, and every entry in the first directory that
 /// carries a redeemed invite, with the name where one is found. Names are
-/// looked up, never stored.
+/// looked up, and stored only as tags.
 pub async fn list(repo: &str, dirs: &[String]) -> Result<()> {
     let m = read(repo)?;
     let mut names = std::collections::HashMap::new();
@@ -196,9 +215,21 @@ pub async fn list(repo: &str, dirs: &[String]) -> Result<()> {
             let handovers = directory::handovers(&dirs[..1], n, &[]).await;
             // a name beside a listed id only where the entry anchors to the
             // list: a directory can name any entry it makes up anything
-            if identity::anchored(&e, &handovers, &m.members, &m.revoked).is_ok() {
+            let shown =
+                if identity::anchored(&e, &handovers, &m.members, &m.revoked, Some(&m.names))
+                    .is_ok()
+                {
+                    Some(n.to_string())
+                } else if identity::anchored(&e, &handovers, &m.members, &m.revoked, None).is_ok() {
+                    Some(format!(
+                        "{n}  name not listed: `dd member add {n}` lists it"
+                    ))
+                } else {
+                    None
+                };
+            if let Some(s) = shown {
                 for i in identity::member_ids(&e.entry) {
-                    names.insert(i, n.to_string());
+                    names.insert(i, s.clone());
                 }
             }
             if let Some(g) = &e.entry.grant {

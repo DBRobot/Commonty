@@ -417,6 +417,7 @@ fn publish(
             counter,
             members: listed.members,
             revoked: listed.revoked,
+            names: listed.names,
         },
         &key,
     )?)?;

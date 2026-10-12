@@ -172,8 +172,8 @@ in
   };
 
   options.dd.members = lib.mkOption {
-    type = lib.types.attrsOf (lib.types.listOf lib.types.str);
-    description = "fleet/members.json: `members`, ids let in, and `revoked`, ids shut out (dd member add|remove). Comes with the signed release; a box cannot add to it.";
+    type = lib.types.attrsOf lib.types.anything;
+    description = "fleet/members.json: `members`, ids let in, and `revoked`, ids shut out (dd member add|remove); `removed`, when, and `names`, each id's name tag, beside them. Comes with the signed release; a box cannot add to it.";
     default = {
       members = [ ];
       revoked = [ ];

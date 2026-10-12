@@ -140,6 +140,7 @@ And on disk:
 ~/.config/dd/device_ed25519(.pub)   dd git setup: the device key as an OpenSSH
                                     key, 0600, for git's ssh signing
 ~/.config/dd/allowed_signers         dd git signers: every device in every entry
+                                     the signed member list anchors
 <repo>/.git/dd/<sha256(url)[..16]>/  git-remote-dd: its clone of the backing
                                      repository, and local.json (the last
                                      counter and commit it verified)
@@ -208,8 +209,8 @@ this device holds or pinned, a first look being `Released` too.
 
 **The signed member list.** `dd release publish` signs
 fleet/members.json at the commit it releases (`identity::MemberList`:
-the release counter, members, revoked; under the label `commonty members
-v1`) with the release key, and puts it on the releases branch as
+the release counter, members, revoked, and each id's name tag; under the
+label `commonty members v1`) with the release key, and puts it on the releases branch as
 `members.json`. Every directory box serves it at `/_dd/members`
 (`dd.verify.memberList`), so a device that reaches only the front door
 can have it. A client checks it against `identity::fleet::RELEASE_KEY`,
@@ -217,6 +218,16 @@ fleet/release.pub as the build was made (checks.fleet-defaults holds the
 two together; `DD_RELEASE_PUB` stands in for it in `dd`'s tests):
 `directory::member_list`. `account::released` also refuses a list older
 than the newest this device saw (keyring account `members-seen`).
+
+**Names.** A root anchors only under the name the list gives it:
+`names` maps each id to `identity::name_tag(id, name)`, a hash, so the
+open repository names nobody outright (a guessed name can still be
+checked against it). `dd member add <name>` writes the tag once the
+operator confirmed the id; otherwise any member's root could stand behind
+an entry under another member's name. A recovery keeps the name
+(`accept`), so a chain does. A member listed before tags existed anchors
+nowhere until `dd member add <their name>` is run again for them (it
+says "already a member" and lists the name), and the release after it.
 
 **Recoveries.** `recovered_from` is the directory's word. Every box keeps
 each recovery it takes, the entry before and the one after

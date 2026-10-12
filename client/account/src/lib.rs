@@ -160,6 +160,7 @@ pub async fn own_entry(keys: &impl KeyStore, dirs: &[String], name: &str) -> Res
                     members: &list.members,
                     revoked: &list.revoked,
                     handovers: &handovers,
+                    names: Some(&list.names),
                 },
             )
             .with_context(|| format!("your entry is {NOT_RELEASED}"))?
@@ -681,6 +682,8 @@ pub async fn recover(
             members: &list.members,
             revoked: &list.revoked,
             handovers: &handovers,
+            // a pin is for this name already (above)
+            names: pinned.is_none().then_some(&list.names),
         },
     )
     .with_context(|| match pinned {

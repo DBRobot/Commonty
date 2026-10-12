@@ -193,11 +193,16 @@ impl Forge {
             counter: Default::default(),
         }
     }
-    fn list(&self, members: &[String], revoked: &[String]) {
+    /// each member by id, under the name `dd member add` confirmed
+    fn list(&self, members: &[(String, &str)], revoked: &[String]) {
         let list = identity::MemberList {
             counter: self.counter.fetch_add(1, Ordering::Relaxed) + 1,
-            members: members.to_vec(),
+            members: members.iter().map(|(id, _)| id.clone()).collect(),
             revoked: revoked.to_vec(),
+            names: members
+                .iter()
+                .map(|(id, name)| (id.clone(), identity::name_tag(id, name)))
+                .collect(),
         };
         let signed = identity::sign_member_list(list, release_key()).unwrap();
         *self.body.lock().unwrap() = serde_json::to_string(&signed).unwrap();
@@ -363,7 +368,7 @@ async fn a_closed_directory_still_signs_up_admits_recovers_and_signs_in() {
     let paper = recovery_key(&out);
     // the release that lets him in, which a paper key on a new machine
     // holds his entry to
-    forge.list(&[member_id_of(&laptop, &d)], &[]);
+    forge.list(&[(member_id_of(&laptop, &d), "tom")], &[]);
     assert_eq!(anonymous(&a, "").await, 401);
     assert_eq!(anonymous(&a, "/tom").await, 401);
     assert_eq!(anonymous(&a, "/nobody").await, 401);
@@ -459,7 +464,7 @@ async fn identity_devices_tokens_and_recovery() {
         &d,
     ));
     let paper = recovery_key(&out);
-    forge.list(&[member_id_of(&laptop, &d)], &[]);
+    forge.list(&[(member_id_of(&laptop, &d), "sarah")], &[]);
     assert_eq!(entry(&a, "sarah").await.unwrap()["entry"]["version"], 1);
     assert_eq!(entry(&b, "sarah").await.unwrap()["entry"]["version"], 1);
     assert_eq!(verify_status(&a, &laptop.token()).await, 200);
@@ -568,7 +573,7 @@ async fn a_recovered_member_stays_a_member_and_a_forged_recovery_moves_nothing()
     let old_root = e["entry"]["root"].as_str().unwrap().to_string();
     let id = identity::member_id(&old_root);
     let forge = Forge::new();
-    forge.list(std::slice::from_ref(&id), &[]);
+    forge.list(&[(id.clone(), "sam")], &[]);
     let b = Box_::start_on_listed(
         a.dir.clone(),
         true,
@@ -759,7 +764,7 @@ async fn a_recovery_reseals_only_an_entry_the_release_anchors() {
     let paper = recovery_key(&out);
     let paper_pub =
         identity::encode_public(&identity::decode_secret(&paper).unwrap().verifying_key());
-    forge.list(&[member_id_of(&laptop, &d)], &[]);
+    forge.list(&[(member_id_of(&laptop, &d), "sam")], &[]);
     let real: identity::SignedEntry =
         serde_json::from_value(entry(&a, "sam").await.unwrap()).unwrap();
 
@@ -970,10 +975,18 @@ async fn a_shared_library_comes_only_from_a_member_the_release_lets_in() {
         vec![borrowed.clone()],
     );
     plant(&a, &identity::sign(e, &boxed).unwrap());
+    // and mallory, a member, whose own listed root the box has her sign
+    // an entry under another member's name with
+    let mallory = identity::generate();
+    let mallory_id = identity::member_id(&identity::encode_public(&mallory.verifying_key()));
     forge.list(
         &[
-            identity::member_id(&identity::encode_public(&alice.verifying_key())),
-            member_id_of(&bob, &d),
+            (
+                identity::member_id(&identity::encode_public(&alice.verifying_key())),
+                "alice",
+            ),
+            (member_id_of(&bob, &d), "bob"),
+            (mallory_id, "mallory"),
         ],
         &[],
     );
@@ -982,6 +995,16 @@ async fn a_shared_library_comes_only_from_a_member_the_release_lets_in() {
     assert!(out.contains(&format!("{}  alice's", hers.id)), "{out}");
     assert!(!out.contains(&planted.id), "{out}");
     assert!(!out.contains(&borrowed.id), "{out}");
+
+    let posing = shared("alice");
+    let mut e = made_entry("alice", &mallory, "", vec![], vec![posing.clone()]);
+    e.version = 2;
+    plant(&a, &identity::sign(e, &mallory).unwrap());
+    let out = bob.dd_ok(&args(&["library", "list"], &d));
+    assert!(
+        !out.contains(&posing.id),
+        "a member's root under alice's name: {out}"
+    );
 }
 
 fn run_with_stdin(dev: &Device, a: &[&str], stdin: &str, want_ok: bool) -> String {
@@ -1126,6 +1149,12 @@ async fn membership_gates_the_services_not_the_account() {
     ));
     assert!(file().contains(&id), "{}", file());
     assert!(!file().contains("tom"));
+    // under the name confirmed, as a tag the release signs for clients
+    assert!(
+        file().contains(&identity::name_tag(&id, "tom")),
+        "{}",
+        file()
+    );
     // the names come from a box where tom is a member: the list is members'
     let out = dev.dd_ok(&args(&["member", "list", "--repo", &repo], &dirs([&b])));
     assert!(out.contains(&id) && out.contains("tom"), "{out}");

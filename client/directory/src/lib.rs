@@ -172,12 +172,15 @@ pub enum Anchor<'a> {
     /// the member list in the signed release (or a root this machine
     /// pinned, as the one id on it): the entry's root is on it, or follows
     /// from one that is by recoveries the handovers prove
-    /// (identity::anchored). Someone let in by an invite the release does
-    /// not list yet is not anchored until it does.
+    /// (identity::anchored), and listed under the entry's name (`names`;
+    /// None for a pinned root, whose name the device is signed in as).
+    /// Someone let in by an invite the release does not list yet is not
+    /// anchored until it does.
     Released {
         members: &'a [String],
         revoked: &'a [String],
         handovers: &'a [identity::Handover],
+        names: Option<&'a std::collections::BTreeMap<String, String>>,
     },
     /// nothing is known yet. Every directory asked has to agree on the
     /// root, and what comes back is worth pinning - or, where a directory
@@ -230,9 +233,10 @@ pub fn resolve(
         members,
         revoked,
         handovers,
+        names,
     } = anchor
     {
-        identity::anchored(&newest, handovers, members, revoked)?;
+        identity::anchored(&newest, handovers, members, revoked, names)?;
     }
     Ok(newest)
 }
@@ -281,6 +285,7 @@ pub async fn resolve_released(
             members: &list.members,
             revoked: &list.revoked,
             handovers: &handovers,
+            names: Some(&list.names),
         },
     )
 }
@@ -491,6 +496,7 @@ mod tests {
             members,
             revoked,
             handovers: &[],
+            names: None,
         };
         assert!(resolve(&found, released(&ids, &[])).is_ok());
         assert!(resolve(&found, released(&[], &[])).is_err());

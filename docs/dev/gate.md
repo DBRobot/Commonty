@@ -146,7 +146,9 @@ none    signed in but not let in: a held sign-up, a revoked member, a
 
 `member_id` is the SHA-256 of the root, so the member list
 (`fleet/members.json`, `{"members": [...], "revoked": [...]}` or a bare
-list) carries no names.
+list) carries no names in the clear: `names` beside them holds a hash of
+each id with its name (`identity::name_tag`), which the gate does not
+read and clients hold entries to ([client.md](client.md#identity-and-the-directory)).
 
 **A recovery keeps membership.** Recovering with the paper key installs a
 new root, so the root's id is no longer the one on the list. The entry it

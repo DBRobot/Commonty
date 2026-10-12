@@ -1525,7 +1525,7 @@ mod tests {
         // root follows the name here with
         let h = d.handovers("sarah");
         assert_eq!(h.len(), 1);
-        identity::anchored(&good, &h, std::slice::from_ref(&old_id), &[]).unwrap();
+        identity::anchored(&good, &h, std::slice::from_ref(&old_id), &[], None).unwrap();
 
         // removed by the owner, then recovered: still out
         let d = open(crate::Members {

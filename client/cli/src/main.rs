@@ -1703,6 +1703,12 @@ async fn main() -> Result<()> {
                 GitCmd::Signers => {
                     let mut lines = std::collections::BTreeSet::new();
                     let mut people = 0;
+                    // whose keys git trusts is the release's to say: an
+                    // entry any box serves would otherwise put a key of its
+                    // choosing behind a member's name
+                    let list = account::released(&keys, &directories)
+                        .await
+                        .context("the signed member list, which signers are held to")?;
                     // every name any directory lists, then each entry asked
                     // of all of them: one directory's word is not enough to
                     // put a key in the file git trusts signatures against
@@ -1716,8 +1722,7 @@ async fn main() -> Result<()> {
                         if !identity::valid_name(&name) {
                             continue;
                         }
-                        let found = who::fetch(&directories, &name).await;
-                        let Ok(e) = directory::resolve(&found, directory::Anchor::FirstSight)
+                        let Ok(e) = directory::resolve_released(&directories, &name, &list).await
                         else {
                             continue;
                         };
