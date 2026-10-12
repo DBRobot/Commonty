@@ -387,6 +387,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "guide-keep.js",
+        "servers/web-shared/guide-keep.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "guide-face.js",
         "servers/web-shared/guide-face.js",
         "text/javascript; charset=utf-8",
@@ -544,6 +549,8 @@ const PAGES: &[(&str, &str)] = &[
     // not signed in: photos.<domain> and vault.<domain> in a browser, whose
     // clients come with the app (modules/photos, modules/vault)
     ("use-app", "servers/home/web/pages/use-app.html"),
+    // the assistant's conversation for this tab, across the site's names (guide-keep.js)
+    ("guide-keep", "servers/home/web/pages/guide-keep.html"),
     // not signed in: anyone, at <domain>/docs (docs.rs)
     ("docs", "servers/docs/web/pages/docs.html"),
     // not signed in: anyone, at the bare name's front (roles/gateway.nix)
@@ -956,7 +963,8 @@ mod tests {
         assert!(static_file("footer.js").is_some());
         let base = include_str!("../templates/base.html");
         assert!(base.contains("/_dd/static/shell.js"));
-        for (name, _) in PAGES {
+        // the assistant's conversation frame is never shown: no page to end
+        for (name, _) in PAGES.iter().filter(|(n, _)| *n != "guide-keep") {
             let html = page(name).unwrap();
             assert!(
                 html.contains("/_dd/static/shell.js") || html.contains("/_dd/static/footer.js"),
@@ -1106,7 +1114,13 @@ mod tests {
     /// the page's own code turns into where to go (guide.js)
     #[test]
     fn the_assistant_writes_no_markup_and_goes_only_to_the_map() {
-        for f in ["guide.js", "guide-face.js", "guide-tour.js", "docs-map.js"] {
+        for f in [
+            "guide.js",
+            "guide-face.js",
+            "guide-tour.js",
+            "guide-keep.js",
+            "docs-map.js",
+        ] {
             let js = text(f);
             for not in [
                 "innerHTML",
@@ -1140,6 +1154,14 @@ mod tests {
             !g.contains("/issues', { method: 'POST'")
                 && !g.contains("method: 'POST', body: { title")
         );
+        // the conversation's frame answers only the pages the assistant runs on
+        let k = text("guide-keep.js");
+        assert!(k.contains("if (e.source !== parent || !ours.test(e.origin)) return;"));
+        assert!(k.contains(
+            "parent.postMessage({ op: d.op === 'get' ? 'got' : 'kept', id, v }, e.origin);"
+        ));
+        assert!(!k.contains("localStorage") && !k.contains("fetch("));
+        assert!(g.contains("e.source !== f.contentWindow || e.origin !== origin"));
         assert!(text("shell.js").contains("import { start as guide } from './guide.js';"));
         assert!(text("shell.js").contains("export function here("));
     }

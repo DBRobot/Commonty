@@ -13,6 +13,7 @@ let
   serving = full || cfg.role == "box";
   base = config.dd.domain;
   port = config.dd.verify.port;
+  guidePages = import ../../lib/guide-pages.nix;
   user = "dd-verify";
   # a tile's service by its host: https://git.<domain>/ is "git"
   tileHost =
@@ -611,6 +612,33 @@ in
             locations."= /" = {
               proxyPass = "http://127.0.0.1:${toString port}/_dd/home";
               extraConfig = "proxy_set_header X-Original-URI $request_uri;";
+            };
+            # the assistant's conversation for this tab across the site's
+            # names (servers/web-shared/guide-keep.js): a frame only the
+            # pages the assistant runs on may hold
+            locations."= /_dd/guide-keep" = {
+              proxyPass = "http://127.0.0.1:${toString port}/_dd/guide-keep";
+              ddCsp = lib.concatStringsSep "; " [
+                "default-src 'none'"
+                "script-src 'self'"
+                "base-uri 'none'"
+                "frame-ancestors ${
+                  lib.concatMapStringsSep " " (h: "https://${h}") (
+                    [ base ]
+                    ++ lib.concatMap (n: [
+                      "${n}.${base}"
+                      "demo-${n}.${base}"
+                    ]) guidePages
+                  )
+                }"
+                "report-uri /_dd/csp"
+              ];
+              extraConfig = ''
+                proxy_set_header X-Original-URI $request_uri;
+                limit_req zone=dd_user burst=300 nodelay;
+                limit_req zone=dd_visitor burst=500 nodelay;
+                limit_req_status 429;
+              '';
             };
             # where a QR code from Settings > Devices goes, short to type
             locations."= /add" = {
