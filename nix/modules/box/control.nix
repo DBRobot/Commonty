@@ -46,7 +46,12 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
-      path = [ pkgs.tpm2-tools ];
+      path = [
+        pkgs.tpm2-tools
+      ]
+      # where the network's control server runs: where each box that joined
+      # on its own key is on the network, into the agreed state
+      ++ lib.optional config.services.headscale.enable config.services.headscale.package;
       environment.TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
       serviceConfig = {
         ExecStart = lib.concatStringsSep " " [

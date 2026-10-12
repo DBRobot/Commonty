@@ -66,3 +66,15 @@ func TestTheStoreSaysItsRoomAndWhatItKeeps(t *testing.T) {
 		t.Fatalf("facts: %v", f)
 	}
 }
+
+func TestOnlyJoinedTaggedNodesGiveAddresses(t *testing.T) {
+	list := []byte(`[
+	  {"givenName": "j0123456789", "ipAddresses": ["100.64.0.9", "fd7a::9"], "validTags": ["tag:joined"]},
+	  {"givenName": "j9999999999", "ipAddresses": ["100.64.0.10"], "tags": ["tag:box"]},
+	  {"givenName": "laptop", "ipAddresses": ["100.64.0.11"], "tags": ["tag:joined"]}
+	]`)
+	got := joinedAddrs(list)
+	if len(got) != 1 || got["j0123456789"] != 100<<24|64<<16|9 {
+		t.Fatalf("%v", got)
+	}
+}

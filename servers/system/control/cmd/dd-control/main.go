@@ -242,13 +242,6 @@ func facts() map[string]float64 {
 	if hottest > 0 {
 		f["temp_c"] = hottest
 	}
-	// its address on the fleet's network, as a number: what a box that
-	// joined on its own key is found at (the DNS Worker's store.<box> name)
-	if b, err := os.ReadFile("/run/commonty-net-address"); err == nil {
-		if ip := net.ParseIP(strings.TrimSpace(string(b))).To4(); ip != nil {
-			f["net_ipv4"] = float64(binary.BigEndian.Uint32(ip))
-		}
-	}
 	// whether builds that boot a VM can run here (a build order's needs)
 	if _, err := os.Stat("/dev/kvm"); err == nil {
 		f["kvm"] = 1
@@ -617,6 +610,34 @@ func main() {
 		return q.Seq, nil
 	}
 
+	// on the box running the network's control server: where each box that
+	// joined on its own key is on the network, as headscale gave it, into
+	// the agreed state - its store's name points there, never at what the
+	// box says of itself
+	if joining == nil {
+		go func() {
+			for {
+				time.Sleep(time.Minute)
+				out, err := exec.Command("headscale", "nodes", "list", "-o", "json").Output()
+				if err != nil {
+					continue // no network server here
+				}
+				s := n.State()
+				if s == nil {
+					continue
+				}
+				for name, ip := range joinedAddrs(out) {
+					if j := s.Joined[name]; j != nil && j.IPv4 != ip {
+						body, _ := json.Marshal(state.NetAddr{Name: name, IPv4: ip})
+						if _, err := submit("netaddr", body); err != nil {
+							log.Printf("netaddr: %v", err)
+						}
+					}
+				}
+			}
+		}()
+	}
+
 	// a box the release does not list asks to join until the agreed state
 	// has it; its heartbeats count from then
 	if joining != nil {
@@ -845,4 +866,44 @@ func softSigner(path string) func([]byte) (string, error) {
 		}
 		return base64.RawURLEncoding.EncodeToString(sig), nil
 	}
+}
+
+// joinedAddrs: from headscale's node list, each node tagged a joined box
+// whose name a key joins under, and its IPv4 address
+func joinedAddrs(list []byte) map[string]uint32 {
+	var nodes []struct {
+		GivenName   string   `json:"givenName"`
+		Name        string   `json:"name"`
+		IPAddresses []string `json:"ipAddresses"`
+		Tags        []string `json:"tags"`
+		ValidTags   []string `json:"validTags"`
+		ForcedTags  []string `json:"forcedTags"`
+	}
+	out := map[string]uint32{}
+	if json.Unmarshal(list, &nodes) != nil {
+		return out
+	}
+	for _, nd := range nodes {
+		name := nd.GivenName
+		if name == "" {
+			name = nd.Name
+		}
+		if len(name) != 11 || name[0] != 'j' {
+			continue
+		}
+		tagged := false
+		for _, t := range append(append(nd.Tags, nd.ValidTags...), nd.ForcedTags...) {
+			tagged = tagged || t == "tag:joined"
+		}
+		if !tagged {
+			continue
+		}
+		for _, a := range nd.IPAddresses {
+			if ip := net.ParseIP(a).To4(); ip != nil {
+				out[name] = binary.BigEndian.Uint32(ip)
+				break
+			}
+		}
+	}
+	return out
 }

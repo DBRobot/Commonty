@@ -25,7 +25,21 @@ type Joined struct {
 	Recipient string `json:"recipient"` // its secrets key's age recipient: what copies' keys are sealed to
 	House     string `json:"house"`     // as it says (dd-locate)
 	At        int64  `json:"at"`        // when it joined, agreed ms
+	// its address on the fleet's network, as the box running the
+	// network's control server gave it (a netaddr request), never its own
+	// word: what its store's name points at
+	IPv4 uint32 `json:"ipv4,omitempty"`
 }
+
+// NetAddr: where a joined box is on the fleet's network, said by a box of
+// the release that runs the network's control server
+type NetAddr struct {
+	Name string `json:"name"`
+	IPv4 uint32 `json:"ipv4"`
+}
+
+// the fleet's network: 100.64.0.0/10
+func fleetIPv4(ip uint32) bool { return ip>>22 == 100<<2|1 }
 
 // JoinReq is a join's body; the request is signed by Key itself.
 type JoinReq struct {
@@ -122,6 +136,23 @@ func (s *State) applyJoin(r Request, now int64) {
 		s.Joined = map[string]*Joined{}
 	}
 	s.Joined[r.Box] = &Joined{ID: id, Key: j.Key, Recipient: j.Recipient, House: j.House, At: now}
+}
+
+func (s *State) checkNetAddr(cfg *Config, r Request) error {
+	if _, listed := cfg.Boxes[r.Box]; !listed {
+		return errors.New("only a box of the release says where a box is on the network")
+	}
+	var a NetAddr
+	if err := json.Unmarshal(r.Body, &a); err != nil {
+		return err
+	}
+	if s.Joined[a.Name] == nil {
+		return fmt.Errorf("%s has not joined", a.Name)
+	}
+	if !fleetIPv4(a.IPv4) {
+		return errors.New("not an address on the fleet's network")
+	}
+	return nil
 }
 
 // dropGone forgets strangers unheard for JoinedGoneAfter

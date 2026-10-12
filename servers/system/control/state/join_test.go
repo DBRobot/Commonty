@@ -100,3 +100,23 @@ func TestNoMoreThanMaxJoined(t *testing.T) {
 		t.Fatal("past the most that may join")
 	}
 }
+
+func TestOnlyABoxOfTheReleaseSaysWhereAJoinedBoxIs(t *testing.T) {
+	f := newFleet(t)
+	k := strangerKey(1)
+	name, _, _ := JoinName(k)
+	f.block(1000, joinReq(k, 1))
+	ip := uint32(100)<<24 | 64<<16 | 9
+	b, _ := json.Marshal(NetAddr{Name: name, IPv4: ip})
+	// the stranger itself may not
+	if f.block(2000, Request{Kind: "netaddr", Box: name, Seq: 2, Body: b, Sig: "ok:" + k}) != 0 {
+		t.Fatal("a joined box said where it is")
+	}
+	if f.block(3000, f.req("node1", "netaddr", NetAddr{Name: name, IPv4: ip})) != 1 || f.s.Joined[name].IPv4 != ip {
+		t.Fatalf("the release box's word refused: %+v", f.s.Joined[name])
+	}
+	// and never off the fleet's network
+	if f.block(4000, f.req("node1", "netaddr", NetAddr{Name: name, IPv4: 8 << 24})) != 0 {
+		t.Fatal("an address off the fleet's network")
+	}
+}

@@ -160,12 +160,11 @@ export class Relay {
     if (url.pathname === '/leases') {
       try {
         const s = JSON.parse(globalThis.controlState());
-        // and the boxes that joined on their own keys, at the address each
-        // gives in its heartbeat
+        // and the boxes that joined on their own keys, at the address the
+        // network's control server gave each (never the box's own word)
         const joined = {};
-        for (const name of Object.keys(s.joined || {})) {
-          const ip = ((s.boxes || {})[name] || {}).facts?.net_ipv4;
-          if (typeof ip === 'number') joined[name] = { ipv4: ip };
+        for (const [name, j] of Object.entries(s.joined || {})) {
+          if (typeof j.ipv4 === 'number') joined[name] = { ipv4: j.ipv4 };
         }
         return Response.json({ time: s.time, leases: s.leases || {}, joined });
       } catch {

@@ -48,7 +48,7 @@ type LeaseRule struct {
 
 // Request is what a box asks for, signed by its TPM-held key over Bytes().
 type Request struct {
-	Kind string          `json:"kind"` // heartbeat | lease | directory | built | join
+	Kind string          `json:"kind"` // heartbeat | lease | directory | built | join | netaddr
 	Box  string          `json:"box"`
 	Seq  uint64          `json:"seq"` // strictly increasing per box
 	Body json.RawMessage `json:"body"`
@@ -205,6 +205,11 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 			return fmt.Errorf("%s has sent %d directory items this minute", r.Box, b.DirCount)
 		}
 		return nil
+	case "netaddr":
+		if b := s.Boxes[r.Box]; b != nil && now-b.DirWindow < 60_000 && b.DirCount >= DirPerMinute {
+			return fmt.Errorf("%s has said too much this minute", r.Box)
+		}
+		return s.checkNetAddr(cfg, r)
 	case "built":
 		if len(r.Body) > MaxBuilt {
 			return fmt.Errorf("a build result of %d bytes; at most %d", len(r.Body), MaxBuilt)
@@ -264,6 +269,14 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 	switch r.Kind {
 	case "join":
 		s.applyJoin(r, now)
+	case "netaddr":
+		if now-b.DirWindow >= 60_000 {
+			b.DirWindow, b.DirCount = now, 0
+		}
+		b.DirCount++
+		var a NetAddr
+		_ = json.Unmarshal(r.Body, &a)
+		s.Joined[a.Name].IPv4 = a.IPv4
 	case "heartbeat":
 		var h Heartbeat
 		_ = json.Unmarshal(r.Body, &h)
