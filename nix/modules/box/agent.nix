@@ -99,7 +99,9 @@ in
         pkgs.systemd
         pkgs.coreutils
         pkgs.openssh # ssh-keygen checks the boxes' signatures
-      ];
+      ]
+      # a box that joined fetches the signed commit to build itself from
+      ++ lib.optional config.dd.box.joined pkgs.git;
       environment = {
         DD_AGENT_URL = cfg.url;
         DD_AGENT_ATTESTERS = "/etc/dd/attesters.json";
