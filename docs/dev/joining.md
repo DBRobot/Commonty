@@ -4,8 +4,7 @@ Status: a box joins **as a stranger** (built) and builds its own system
 from its own report (built). **As a member's box**, set up from the app's
 installer window and a USB drive, is being built (below): the fleet's side
 (the ticket, whose a box is, the pending backup, Your boxes) and the
-drive's installer are built; the app's window is on its own branch. The
-disk's key is not yet bound to the boot chain: see **The disk**.
+drive's installer are built; the app's window is on its own branch.
 
 A box the release does not list needs no one to add it. It joins the
 control plane's agreed state on its own word, and joining gives it nothing
@@ -105,25 +104,42 @@ box installer (full screen)        fleet
   puts its ticket id in the member's signed entry (`removed_boxes`), and on
   every box at once it is nobody's.
 - **The disk** is encrypted (the fleet's layout, `encrypted = true`) with
-  a key made from a half sealed in the box's TPM under PCR 7: the unlock
-  Worker knows nothing of a joined box, so there is no second half
-  (`dd.unlock.tpmOnly`, box.json `"unlock": "tpm"`). The installer makes
-  the half and the key before it wipes anything; the initrd makes the same
-  key at every boot, with no network and nobody at the screen. A boot the
-  TPM does not recognise gets no key at all, never one made from less
-  (disk-unlock-boot.sh), and a boot that stops there has no shell.
-  - **What it protects against:** a pulled disk, or the box carried off
-    and started with its Secure Boot or firmware settings changed.
-  - **What it does not yet:** with Secure Boot off, PCR 7 is the same for
-    any system started on the same machine. Someone with the box in hand
-    can start their own system from a USB drive, or the box's own with a
-    changed command line (lanzaboote's stub accepts one when Secure Boot is
-    off), and the TPM opens the half. Binding the key to the boot chain is
-    needed, and is a choice still to make: the box enrolling Secure Boot
-    keys of its own (as node1 and node2 have; the firmware must be in setup
-    mode, a step at its screen), or systemd-pcrlock predicting PCR 4 for
-    each release (no firmware step; LUKS holding the pool's key, since only
-    systemd-cryptsetup reads a pcrlock policy).
+  a key from a half sealed in the box's TPM under PCR 7, as node1's and
+  node2's are, but with no second half: the unlock Worker knows nothing of
+  a joined box (`dd.unlock.tpmOnly`, box.json `"unlock": "tpm"`).
+  - **Its own Secure Boot keys.** The installer needs Secure Boot in setup
+    mode (the screen sets it where the firmware lets it, or says where).
+    It makes the box's keys on its encrypted disk (`/var/lib/sbctl`), signs
+    its boot with them (lanzaboote, which signs every release's boot after,
+    the box's own builds included), and enrolls them, with Microsoft's
+    beside them as node1 and node2 have: drivers on graphics and network
+    cards are signed by Microsoft, and some machines start with no screen
+    without them.
+  - **Sealed at the first boot.** The installer's boot is setup mode's, so
+    the half it makes is held under no PCR (`bootstrap.priv`). The box's
+    first boot, with Secure Boot on and its keys, opens the pool with it
+    once; `dd-unlock-seal` then seals a new half under that boot's PCR 7,
+    re-keys the pool to it (`zfs change-key`) and removes the installer's.
+    A stop midway leaves a mark the initrd follows. If Secure Boot is not
+    on at that boot, it does not seal, and says so.
+  - **The box's own key** (its name, its signatures) was made by the
+    installer too, so it is held by a password on the encrypted disk
+    (`/var/lib/dd/sig.auth`) rather than by PCR 7: what opens the disk
+    opens it.
+  - **What it protects against:** a pulled disk; another system started on
+    the box (a USB drive's: Secure Boot refuses it; one Microsoft's keys
+    start, through a shim: a different PCR 7, no key); the box's own
+    system with a changed command line (its boot is signed and the stub
+    takes no other line under Secure Boot); Secure Boot turned off or its
+    keys changed (a different PCR 7). A boot the TPM does not recognise gets
+    no key at all, never one made from less, and has no shell.
+  - **What it does not:** between the install and the first boot (minutes,
+    with the person at the machine) the installer's half opens for anyone
+    starting a system there; a copy taken then is worth nothing after the
+    re-key.
+  - **Decided** (David, 2026-10-12): the box enrolls keys of its own, over
+    systemd-pcrlock binding PCR 4, which needs no firmware step but moves
+    the pool's key into LUKS and predicts every release's boot.
 - **Wi-Fi**: the network the box was set up on (the drive's `wifi.json`, or
   one picked on the screen) is sealed to the box's secrets key, which only
   its TPM opens (`/var/lib/dd/wifi.age`, box.json `house.sealedWifi`). The
@@ -144,7 +160,7 @@ steps are `dd-box-setup`'s
 on loopback, which runs the installer's own programs:
 
 ```
-firmware   UEFI, TPM 2.0, Secure Boot off, disks seen (not behind RAID/RST),
+firmware   UEFI, TPM 2.0, Secure Boot in setup mode, disks seen (not behind RAID/RST),
            virtualisation. What the firmware lets Linux change (Dell, Lenovo,
            HP, no BIOS password) it changes and restarts; the rest it says
            where to change. Power-on after an outage can't be read: a tip.
