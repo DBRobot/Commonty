@@ -1,0 +1,10 @@
+{
+  "owner": null,
+  "house": {
+    "ssid": "",
+    "address": ""
+  },
+  "encrypted": false,
+  "extraPools": [],
+  "datasets": {}
+}

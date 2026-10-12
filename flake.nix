@@ -61,6 +61,7 @@
         "store"
         "takeover"
         "join-install"
+        "joined-box"
         "photos"
         "llm"
         "vault"
