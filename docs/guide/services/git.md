@@ -21,6 +21,9 @@ network, or use the demo, which shows Commonty's own repository.
   images, PDFs, text, logs and archives up to 100 MB.
 - **CI:** a workflow that asks for the `members` runner runs your jobs
   in a sealed container with internet access.
+- **Stop a run:** under Actions, a run that is waiting or running has a
+  Cancel button, in the list and on its own page, if you can push to the
+  repository.
 
 ### Encrypted repositories
 

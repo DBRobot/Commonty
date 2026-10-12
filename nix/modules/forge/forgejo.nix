@@ -69,6 +69,25 @@ let
     # no cookie when the header is empty (the map below)
     ddCookie = "$forge_cookie";
   };
+  # Stopping a run from the Actions pages: the API cannot, Forgejo's own
+  # web route can, as the person. Signed out is a 401 here, and the demo is
+  # nobody to the forge (the map below); Forgejo cancels for whoever may
+  # write the repository's actions, is a 404 to anyone else, and refuses a
+  # POST another site's page made (Sec-Fetch-Site, or Origin against Host:
+  # Go's CrossOriginProtection, its CSRF check since 15, with no token)
+  cancelRun = toForge // {
+    extraConfig = ''
+      limit_except POST { deny all; }
+      client_max_body_size 1k;
+      # a location's limits replace the server's, so the visitor's lid too
+      limit_req zone=dd_forge_cancel burst=10 nodelay;
+      limit_req zone=dd_visitor burst=500 nodelay;
+      limit_req_status 429;
+      auth_request /_dd/verify;
+      auth_request_set $auth_user $upstream_http_x_auth_request_preferred_username;
+      proxy_set_header X-WEBAUTH-USER $forge_user;
+    '';
+  };
   admin = lib.replaceStrings [ "'" ] [ "''" ] cfg.admin;
   # What the forge's database holds to, whatever asked for otherwise; put
   # in after every Forgejo start, as live.nix's trigger is, so a table an
@@ -480,6 +499,8 @@ in
           default "";
           "~^GET (?<dd_forge_origin>https://((demo-)?(${lib.concatStringsSep "|" guidePages})\.)?${lib.escapeRegex base}) /(api/v1/|[^/]+/[^/]+/actions/runs/[0-9]+/jobs/[0-9]+/attempt/[0-9]+/logs$)" $dd_forge_origin;
         }
+        # a run cancelled by hand: a person's pace, per sign-in
+        limit_req_zone $dd_credential zone=dd_forge_cancel:1m rate=1r/s;
       '';
       # the socket's directory: forgejo makes it, its group may enter it, and
       # the runner's user - which is what a CI job runs as - is not in it
@@ -518,6 +539,7 @@ in
         locations."~ ^/[^/]+/[^/]+/(info/refs|info/lfs|git-upload-pack|git-receive-pack)" = toForge;
         locations."~ ^/[^/]+/[^/]+/(raw|archive|media|releases/download|attachments)/" = toForge;
         locations."~ ^/[^/]+/[^/]+/actions/runs/[0-9]+/jobs/[0-9]+/attempt/[0-9]+/logs$" = toForge;
+        locations."~ ^/[^/]+/[^/]+/actions/runs/[0-9]+/cancel$" = cancelRun;
         # which repository the boxes are built from: its pages show what they run
         locations."= /fleet-repo.json".extraConfig = ''
           default_type application/json;

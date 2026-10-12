@@ -358,6 +358,8 @@ for p in [
 refused("POST", R + "/info/lfs/objects/batch", ["404"])
 refused("POST", "/api/actions/runner.v1.RunnerService/FetchTask", ["404"])
 refused("POST", "/user/login", ["404"])
+# a run is cancelled only on the members' forge, by someone who may
+refused("POST", R + "/actions/runs/1/cancel", ["404"])
 
 # -- refused: a session, a token or sudo by the query, or a name decoded
 # under nginx's nose

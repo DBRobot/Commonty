@@ -111,6 +111,9 @@ export function api(path, opts = {}) {
   return p;
 }
 
+// a change made outside the API (a run cancelled by its web route) forgets them too
+export const forget = () => kept.clear();
+
 async function request(path, opts = {}) {
   const init = { method: opts.method || 'GET', headers: { accept: 'application/json' }, credentials: 'same-origin' };
   if (opts.body !== undefined) {
@@ -334,6 +337,7 @@ const FORGE = new RegExp([
   '^/[^/]+/[^/]+/(info/refs|info/lfs|git-upload-pack|git-receive-pack)',
   '^/[^/]+/[^/]+/(raw|archive|media|releases/download|attachments)/',
   '^/[^/]+/[^/]+/actions/runs/[0-9]+/jobs/[0-9]+/attempt/[0-9]+/logs$',
+  '^/[^/]+/[^/]+/actions/runs/[0-9]+/cancel$',
 ].join('|'));
 
 export function go(href, replace = false) {

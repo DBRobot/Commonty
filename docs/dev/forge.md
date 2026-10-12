@@ -50,7 +50,8 @@ browser ── https://git.<domain>/... ──> nginx (the forge's box)
    /owner/repo, /owner/repo/pulls, /  ────┼──> gate :4181  /_dd/git   the one page (servers/forge/web)
    /_dd/...  (scripts, sign-in, events) ──┼──> gate :4181  /_dd/...
                                           │
-   /api/..., *.git, raw, archive, logs ───┼──> auth_request /_dd/verify ──> gate: who is this?
+   /api/..., *.git, raw, archive, logs,   │
+   actions/runs/<n>/cancel (POST) ────────┼──> auth_request /_dd/verify ──> gate: who is this?
                                           │       X-WEBAUTH-USER: <name>
                                           │         │
                                           │         v
@@ -160,6 +161,7 @@ Forgejo's own (toForge: sign-in header, or anonymous)
   /<owner>/<repo>/info/refs, info/lfs, git-upload-pack, git-receive-pack
   /<owner>/<repo>/raw/ archive/ media/ releases/download/ attachments/
   /<owner>/<repo>/actions/runs/<n>/jobs/<n>/attempt/<n>/logs
+  /<owner>/<repo>/actions/runs/<n>/cancel      POST only, signed in (cancelRun: no anonymous fallback)
 
 Special
   = /user/login        302 to /_dd/login (the passkey page)
@@ -365,8 +367,30 @@ which the cancel route no longer needs.
 ### Cancel and resume
 
 Forgejo's API can neither cancel a run nor run one again; its web routes
-can. Both are done by small services on the forge's box, as the admin,
+can. A person cancels a run from the Git pages; a failing job and a
+restart are handled by small services on the forge's box, as the admin,
 through the socket.
+
+- **By hand**: the Actions list has a Cancel button on each run that is
+  waiting, blocked or running, and a run's page has one in its header
+  while it is; both only for someone who may push to the repository
+  (`permissions.push`), and never on the public door. The button asks
+  first, then POSTs to Forgejo's own web route,
+  `/<owner>/<repo>/actions/runs/<n>/cancel` (`actions.Cancel` in
+  Forgejo's `routers/web/repo/actions/view.go`, behind
+  `reqRepoActionsWriter`). nginx sends it to Forgejo as the person signed
+  in (`cancelRun` in `forgejo.nix`: POST only, a 1 KB body, one a second
+  per sign-in with a burst of 10, and a 401 for nobody, where the other
+  Forgejo locations fall back to anonymous). Forgejo decides the rest:
+  whoever may not write the repository's Actions gets a 404, the demo
+  (nobody to the forge) included. Since 15, Forgejo's CSRF check is Go's
+  `http.CrossOriginProtection` (`verifyAuthWithOptions` in
+  `routers/web/web.go`), with no token: a POST whose `Sec-Fetch-Site` is
+  not `same-origin`, or, without that header, whose `Origin` is not the
+  request's `Host`, is a 403. So another site's page, a sibling
+  `<service>.<domain>` among them, cannot cancel as a member. The page
+  then asks again once; the run's new state also arrives as any other
+  change does (live updates, below).
 
 - **ci-cancel** ([`ci-cancel.py`](../../nix/modules/forge/ci-cancel.py)):
   a failing job's last step, `stop-run`, posts its run id to
@@ -408,7 +432,7 @@ git-actions.js     runs; one run as a graph of its jobs (read from the workflow'
                    or as jobs and their logs. The graph is laid out by ELK (elk.js in
                    the web bundle, loaded on that page alone): columns as the run goes,
                    square lines that share their path, a matrix of more than four jobs
-                   as dots until "Show all"
+                   as dots until "Show all"; Cancel on a live run (Cancel and resume)
 git-settings.js    a repository's settings: general, people, rulesets, secrets and
                    variables, runners, webhooks, deploy keys, labels, mirror, careful
 git-diff.js        a git diff parsed into files, drawn unified or side by side
@@ -599,6 +623,13 @@ order ([`forge.py`](../../nix/tests/forge.py)):
    in a search or in its list, and git asks them to sign in for it (which
    the door turns into a 404); and is shown no account's address, even
    one set to public.
+9. Cancelling by hand, through nginx (on in this test, with a throwaway
+   certificate): a run no runner takes waits; nobody signed in gets 401,
+   the demo and a member who may not write the repository are refused,
+   and it keeps waiting. Once she may write: a cross-site POST, a foreign
+   `Origin`, a GET and the public door are all refused; from the Git page
+   (`Sec-Fetch-Site: same-origin`) it is 200 and Forgejo reports the run
+   cancelled.
 
 The door itself is the nginx check's (`nix build
 .#checks.x86_64-linux.nginx`, which runs without a VM):

@@ -1,4 +1,5 @@
 # The forge test: it comes up, its admin exists, main is protected by every ci job.
+import base64
 
 box.wait_for_unit("forgejo.service")
 # forgejo serves on a socket, not a port: nothing else on the box may
@@ -243,3 +244,70 @@ for path in [
 ]:
     said = box.succeed(f"{nobody} 'http://forgejo{path}'")
     assert "example.org" not in said, (path, said)
+
+# A run stopped by hand from the Actions pages: Forgejo's own cancel route,
+# through nginx as whoever is signed in (forgejo.nix, cancelRun). A run no
+# runner takes waits until it is cancelled.
+box.wait_for_unit("nginx.service")
+site = "https://git.test.invalid"
+git = "curl -sk --resolve git.test.invalid:443:127.0.0.1 --resolve code.test.invalid:443:127.0.0.1"
+api = f"http://forgejo/api/v1/repos/{nix['admin']}/commonty"
+wait = base64.b64encode(
+    b"on: push\njobs:\n  wait:\n    runs-on: no-runner-has-this\n    steps:\n      - run: true\n"
+).decode()
+box.succeed(
+    f'{as_admin} -X POST -d \'{{"branch":"main","new_branch":"wait","content":"{wait}"}}\' '
+    f"{api}/contents/.forgejo/workflows/wait.yml >/dev/null"
+)
+pick = "jq -ec '[.workflow_runs[] | select(.workflow_id == \"wait.yml\")][0]'"
+box.wait_until_succeeds(
+    f"{as_admin} '{api}/actions/runs?limit=50' | {pick}", timeout=60
+)
+run = json.loads(box.succeed(f"{as_admin} '{api}/actions/runs?limit=50' | {pick}"))
+cancel = f"{site}/{nix['admin']}/commonty/actions/runs/{run['index_in_repo']}/cancel"
+sarah = f"-H 'Cookie: {jar}'"
+# what a browser on the Git page sends with its own POST
+page = f"-H 'Sec-Fetch-Site: same-origin' -H 'Origin: {site}'"
+
+
+def state():
+    return json.loads(box.succeed(f"{as_admin} {api}/actions/runs/{run['id']}"))[
+        "status"
+    ]
+
+
+def code(args):
+    return box.succeed(f"{git} -o /dev/null -w '%{{http_code}}' {args}").strip()
+
+
+assert state() in ("waiting", "blocked"), state()
+# nobody signed in, the demo (nobody to the forge), and sarah while she may
+# not write the repository: none of them stops it
+head = box.succeed("curl -s -D - -o /dev/null http://127.0.0.1:4181/_dd/demo")
+demo = (
+    next(h for h in head.splitlines() if h.lower().startswith("set-cookie:"))
+    .split(":", 1)[1]
+    .split(";")[0]
+    .strip()
+)
+assert code(f"-X POST {page} {cancel}") == "401"
+assert code(f"-X POST {page} -H 'Cookie: {demo}' {cancel}") in ("403", "404")
+box.succeed(f"{git} -f {sarah} {site}/api/v1/user >/dev/null")
+assert code(f"-X POST {page} {sarah} {cancel}") == "404"
+box.succeed(
+    f'{as_admin} -X PUT -d \'{{"permission":"write"}}\' {api}/collaborators/sarah'
+)
+# and now she may: still not from another site's page, nor by a GET, nor
+# through the public door
+assert code(f"-X POST -H 'Sec-Fetch-Site: cross-site' {sarah} {cancel}") == "403"
+assert code(f"-X POST -H 'Origin: https://elsewhere.invalid' {sarah} {cancel}") == "403"
+assert code(f"{sarah} {cancel}") == "403"
+door = cancel.replace("git.test.invalid", "code.test.invalid")
+assert code(f"-X POST {page} {sarah} {door}") == "404"
+assert state() in ("waiting", "blocked"), state()
+# from the Git page, as herself, it stops
+assert code(f"-X POST {page} {sarah} {cancel}") == "200"
+box.wait_until_succeeds(
+    f"{as_admin} {api}/actions/runs/{run['id']} | jq -e '.status == \"cancelled\"'",
+    timeout=30,
+)

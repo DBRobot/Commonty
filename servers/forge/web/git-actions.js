@@ -1,11 +1,45 @@
 // Actions: the runs, and one run as a graph of its jobs - read from the
 // workflow files' `needs:` - or as its jobs and their logs, both live.
 
-import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, stateOf, ghost, setTitle, short, pager, warmers, watch } from './git-core.js';
+import { put, app, el, ic, api, text, q, when, plural, duration, avatar, route, go, statusDot, stateOf, ghost, setTitle, short, pager, warmers, watch, open, forget } from './git-core.js';
 import { repo, header } from './git-repo.js';
 
 const main = () => app();
 const DONE = ['success', 'failure', 'cancelled', 'skipped'];
+// what a run can still be stopped from
+const LIVE = ['waiting', 'running', 'blocked'];
+
+// A run stopped by hand: Forgejo's own web route, as the person looking
+// (nginx's cancelRun, nix/modules/forge/forgejo.nix). It says only yes or
+// no; the run's new state comes as every other change does.
+async function cancel(r, index) {
+  const res = await fetch(`/${r.full_name}/actions/runs/${index}/cancel`, { method: 'POST', credentials: 'same-origin', redirect: 'manual' }).catch(() => null);
+  forget();
+  if (res?.ok) return;
+  const s = res?.status;
+  throw new Error(s === 401 ? 'Signed out: sign in again to cancel.' : s === 403 || s === 404 ? 'You may not cancel runs here.' : s === 429 ? 'Too many at once: try again in a moment.' : `The run was not cancelled${s ? ` (the forge said ${s})` : ''}.`);
+}
+
+// the button, asking first; `done` asks the forge again once it is cancelled
+function cancelButton(r, index, stopping, done) {
+  const b = el('button', { class: 'btn bad', type: 'button', text: 'Cancel', disabled: stopping.has(index) });
+  const said = el('span', { class: 'err small', role: 'alert' });
+  b.onclick = async () => {
+    if (!confirm(`Cancel run ${index}?`)) return;
+    stopping.add(index);
+    b.disabled = true;
+    said.textContent = '';
+    try {
+      await cancel(r, index);
+      await done();
+    } catch (e) {
+      stopping.delete(index);
+      b.disabled = false;
+      said.textContent = e.message;
+    }
+  };
+  return el('span', { class: 'hrow cancel', style: 'gap:8px' }, said, b);
+}
 
 // how long a job took, or has taken so far: the running ones count up
 function took(j) {
@@ -45,10 +79,14 @@ route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
   const workflow = params.get('workflow') || '';
   let { workflow_runs: runs = [], total_count: total = 0 } = await runsData(r, page);
   if (!current()) return;
-  const row = (x) => el('a', { class: 'item', href: `/${r.full_name}/actions/runs/${x.index_in_repo}` },
+  const can = !open && r.permissions?.push;
+  const stopping = new Set();
+  // the whole row is the run's link, and a live run's Cancel sits on top of it
+  const row = (x) => el('div', { class: 'item run' },
     el('span', { style: 'margin-top:6px' }, statusDot(x.status)),
-    el('div', { style: 'flex:1;min-width:0' }, el('div', { class: 't', text: x.title }),
+    el('div', { style: 'flex:1;min-width:0' }, el('a', { class: 't', href: `/${r.full_name}/actions/runs/${x.index_in_repo}`, text: x.title }),
       el('div', { class: 'sub' }, `Run ${x.index_in_repo} · ${x.workflow_id} · ${x.prettyref || ''} · ${x.event} · `, x.trigger_user?.login || '', ' · ', el('span', { class: 'mono', text: short(x.commit_sha) }))),
+    can && LIVE.includes(x.status) ? cancelButton(r, x.index_in_repo, stopping, refresh) : null,
     el('div', { class: 'small muted', style: 'text-align:right' }, when(x.created), el('br'), x.status === 'running' ? 'running' : x.duration ? duration(ns(x.duration)) : x.status));
   const aside = el('aside', { class: 'jobs' });
   const list = el('div', { class: 'list' });
@@ -72,12 +110,14 @@ route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
       pagerSlot)));
   // a run starting, a job moving, a run ending: the forge says so, and the
   // list is asked again then, and only then
-  watch(r.id, () => current() && list.isConnected, async (changes) => {
-    if (!changes.some((c) => c.kind === 'run' || c.kind === 'job')) return;
+  async function refresh() {
     try {
       ({ workflow_runs: runs = [], total_count: total = 0 } = await runsData(r, page, true));
       if (current() && list.isConnected) draw();
     } catch { /* the next change asks again */ }
+  }
+  watch(r.id, () => current() && list.isConnected, (changes) => {
+    if (changes.some((c) => c.kind === 'run' || c.kind === 'job')) refresh();
   });
 });
 
@@ -418,18 +458,26 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
   let [jobs, g] = await Promise.all([jobsOf(r, run, view === 'log'), view === 'graph' ? graph(r, run).catch(() => null) : null]);
   const pane = el('div');
   const summary = el('div', { class: 'box gap' });
-  const drawSummary = () => summary.replaceChildren(el('div', { class: 'hrow', style: 'padding:10px 14px;gap:22px' },
-    el('span', {}, el('span', { class: 'small muted', text: 'Status' }), el('br'), el('span', { class: 'state-word', 'data-state': stateOf(run.status) || 'off', text: run.status[0].toUpperCase() + run.status.slice(1) })),
-    el('span', {}, el('span', { class: 'small muted', text: 'Started' }), el('br'), when(run.started || run.created), run.trigger_user ? el('span', { class: 'small muted', text: ` by ${run.trigger_user.login}` }) : null),
-    el('span', {}, el('span', { class: 'small muted', text: DONE.includes(run.status) ? 'Took' : 'So far' }), el('br'), el('b', { text: duration(DONE.includes(run.status) ? ns(run.duration) : Date.now() - new Date(run.started || run.created)) })),
-    el('span', {}, el('span', { class: 'small muted', text: 'Commit' }), el('br'), el('a', { class: 'mono', href: `/${r.full_name}/commit/${run.commit_sha}`, text: short(run.commit_sha) }), ' ', el('span', { class: 'small', text: run.prettyref || '' })),
-    el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: `${jobs.filter((j) => DONE.includes(j.state)).length} of ${jobs.length} jobs done` })));
+  // Cancel, while the run is live; the view's own asking again redraws it
+  let refresh = async () => {};
+  const stop = el('span');
+  const stopping = new Set();
+  const can = !open && r.permissions?.push;
+  const drawSummary = () => {
+    put(stop, can && LIVE.includes(run.status) ? cancelButton(r, index, stopping, () => refresh()) : null);
+    summary.replaceChildren(el('div', { class: 'hrow', style: 'padding:10px 14px;gap:22px' },
+      el('span', {}, el('span', { class: 'small muted', text: 'Status' }), el('br'), el('span', { class: 'state-word', 'data-state': stateOf(run.status) || 'off', text: run.status[0].toUpperCase() + run.status.slice(1) })),
+      el('span', {}, el('span', { class: 'small muted', text: 'Started' }), el('br'), when(run.started || run.created), run.trigger_user ? el('span', { class: 'small muted', text: ` by ${run.trigger_user.login}` }) : null),
+      el('span', {}, el('span', { class: 'small muted', text: DONE.includes(run.status) ? 'Took' : 'So far' }), el('br'), el('b', { text: duration(DONE.includes(run.status) ? ns(run.duration) : Date.now() - new Date(run.started || run.created)) })),
+      el('span', {}, el('span', { class: 'small muted', text: 'Commit' }), el('br'), el('a', { class: 'mono', href: `/${r.full_name}/commit/${run.commit_sha}`, text: short(run.commit_sha) }), ' ', el('span', { class: 'small', text: run.prettyref || '' })),
+      el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: `${jobs.filter((j) => DONE.includes(j.state)).length} of ${jobs.length} jobs done` })));
+  };
   const seg = el('span', { class: 'gseg', role: 'group', 'aria-label': 'View' },
     el('a', { class: 'btn', href: `/${r.full_name}/actions/runs/${index}`, 'aria-current': view === 'graph' ? 'page' : null, text: 'Graph' }),
     el('a', { class: 'btn', href: `/${r.full_name}/actions/runs/${index}${q({ job: jobs.find((j) => j.state === 'failure')?.index ?? jobs.find((j) => j.state === 'running')?.index ?? jobs[0]?.index ?? 0 })}`, 'aria-current': view === 'log' ? 'page' : null, text: 'Jobs and logs' }));
   if (!current()) return;
   put(main(),
-    el('div', { class: 'hrow gap' }, el('a', { href: `/${r.full_name}/actions`, text: '← All runs' }), el('h1', { class: 'h1', style: 'font-size:19px', text: `Run ${index} · ${run.title}` }), el('span', { class: 'spacer' }), seg),
+    el('div', { class: 'hrow gap' }, el('a', { href: `/${r.full_name}/actions`, text: '← All runs' }), el('h1', { class: 'h1', style: 'font-size:19px', text: `Run ${index} · ${run.title}` }), el('span', { class: 'spacer' }), stop, seg),
     summary, pane);
   drawSummary();
 
@@ -442,14 +490,16 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
       el('header', {}, el('b', { text: run.workflow_id }), el('span', { class: 'small muted', text: `on: ${run.event}` }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: 'a job starts when every job before it has passed' })),
       dag || el('div', { class: 'empty', text: 'The workflow file could not be read; the jobs are under Jobs and logs.' })));
     // this run's jobs moving, as the forge records them
-    watch(r.id, alive, async (changes) => {
-      if (!changes.some((c) => c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) return;
+    refresh = async () => {
       try {
         [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`, { fresh: true }), jobsOf(r, run, true)]);
         if (!alive()) return;
         drawSummary();
         dag?.update(jobs);
       } catch { /* the next change asks again */ }
+    };
+    watch(r.id, alive, (changes) => {
+      if (changes.some((c) => c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) refresh();
     });
     return;
   }
@@ -470,8 +520,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
   pane.replaceChildren(el('div', { class: 'two left', style: 'grid-template-columns:280px minmax(0,1fr)' }, side,
     el('div', { class: 'box', style: 'min-width:0' }, head, log)));
   // the forge's changes move the list; the log is asked for while the job runs
-  watch(r.id, alive, async (changes) => {
-    if (!changes.some((c) => c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) return;
+  refresh = async () => {
     try {
       [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`, { fresh: true }), jobsOf(r, run, true)]);
       if (!alive()) return;
@@ -479,6 +528,9 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
       drawJobs();
       if (!timer && pull) pull();
     } catch { /* the next change asks again */ }
+  };
+  watch(r.id, alive, (changes) => {
+    if (changes.some((c) => c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) refresh();
   });
   // the latest attempt: each one the forge has a log for, asked all at once
   const tries = await Promise.all([2, 3, 4, 5].map((n) => fetch(`/${r.full_name}/actions/runs/${index}/jobs/${job}/attempt/${n}/logs`, { method: 'HEAD', credentials: 'same-origin' }).then((x) => x.ok).catch(() => false)));
