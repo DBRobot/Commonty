@@ -1,19 +1,19 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "v0.1.41-1-1791765285",
-    "issued": 1791765286,
+    "id": "v0.1.42-1-1791772893",
+    "issued": 1791772893,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/flj9gg64v52nb47q5kr1ax7gvxbgli8g-commonty-android-0.1.41",
-        "version": "0.1.41"
+        "path": "/nix/store/nyyism9ilghp9qwwvwq5cslf2p1kbi2s-commonty-android-0.1.42",
+        "version": "0.1.42"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -23,35 +23,35 @@
         ],
         "name": "dd-windows",
         "part": "dd-windows",
-        "path": "/nix/store/5flb2v7zsi50khlw63jg129w24srsyni-dd-windows-0.1.41",
-        "version": "0.1.41"
+        "path": "/nix/store/y803qhvqinxzjpdb86khc0c7q3ny36xa-dd-windows-0.1.42",
+        "version": "0.1.42"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "linux",
         "part": "linux",
-        "path": "/nix/store/0kdmvnw9pb6b97k7d6l69s4xgkh5zgkr-commonty-linux-0.1.41",
-        "version": "0.1.41"
+        "path": "/nix/store/psqxrhcx0jcw73ykr9a6vcalmcjmg92d-commonty-linux-0.1.42",
+        "version": "0.1.42"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/apgzj7sgz08kd4nzryddk1y05z8d3gka-commonty-windows-0.1.41",
-        "version": "0.1.41"
+        "path": "/nix/store/5dyfvh108hqiq6nviqghnfx9sf32m580-commonty-windows-0.1.42",
+        "version": "0.1.42"
       }
     ],
     "kind": "build-order",
-    "rev": "b4cf3c95fc07c012925e4263c6e0b792e33f0341"
+    "rev": "de51996c38a3fccd54ff8f99023c61d273808198"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "pryw5YxHQlRpOkRhRq2Z/Ha3gIBsFwerTa3bFzUy9FidnG1JEU+3jJDkE1t3wEKZ166FTY2Gu4LKx7XpgOIsDw=="
+  "signature": "i0rYCDG++GTZ3oiFr6QB0UxXxs7xxIZ1FVKW5sJNgn2dT2YJYDGDfLnvESOUPvPUZwbTfd3/RpDUiEWHg1hcBw=="
 }
