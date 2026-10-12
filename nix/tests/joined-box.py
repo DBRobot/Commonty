@@ -85,6 +85,12 @@ box.succeed(
     f" && tpm2_import -Q -C srk.ctx -G ecc -i {nix['key']} -L pcr.pol -a 'sign|noda'"
     " -u /boot/dd/unlock/sig.pub -r /boot/dd/unlock/sig.priv"
 )
+# its pool, encrypted, as the installer leaves it
+box.succeed(
+    "zpool create -f tank /dev/vdb && head -c 32 /dev/urandom > /run/k"
+    " && zfs create -o encryption=aes-256-gcm -o keyformat=raw -o keylocation=file:///run/k"
+    " -o mountpoint=none tank/enc && systemctl restart zfs-datasets"
+)
 box.succeed("systemctl restart dd-join-prepare")
 spki = box.succeed("cat /var/lib/dd/box-key.spki").strip()
 name = box.succeed(f"echo {spki} | base64 -d | sha256sum | cut -c1-10").strip()

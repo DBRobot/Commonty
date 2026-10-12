@@ -30,6 +30,8 @@ let
       virtualisation.memorySize = 3072;
       # its agent switches it, as on a box (a test's systems leave it out)
       system.switch.enable = true;
+      # its pool, made by the test (its disk's own making is join-install's)
+      virtualisation.emptyDiskImages = [ 2048 ];
       virtualisation.vlans = [ 1 ];
       # the same address under either name: the switch between them is the
       # box's own, not the test's network
