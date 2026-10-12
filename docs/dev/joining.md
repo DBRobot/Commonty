@@ -221,3 +221,30 @@ done       take the drive out, restart
   The member's free space is not shown yet: there is no route for it on
   the ticket.
 
+## How it is tested
+
+Two VM tests, split where the box first starts:
+
+- **`join-install`**: the installer, through its screen's API: the
+  refusals (a disk in use, two unnamed, an old or forged release, a page
+  that is not the screen's), the backup to a stand-in gate on the ticket
+  alone, the encrypted install, its own Secure Boot keys enrolled; then
+  the installed disk's first boot with Secure Boot on, which seals the
+  disk's key and makes the box's key under PCR 7, a boot after it that
+  opens the disk with nobody there, and a changed PCR 7 that gets no key
+  and no signature. The system installed is a stand-in with the boot chain
+  of a joined box (lanzaboote, the disk unlock), not the whole of one.
+- **`joined-box`**: the real joined box (`lib.joinedBoxModules`), booted
+  under its install name with a test key in its TPM (so its name is known
+  to build for): its agent names it by the key, takes the signed commit,
+  builds and switches to that name's system; dd-control, held until then,
+  joins a control plane of three validators and the witness with the
+  member's ticket; the member's gate lists the box as hers
+  (`/_dd/boxes/mine`).
+
+Not covered by either: a real machine's firmware (the vendor table, Setup
+Mode set from Linux, an unsigned system refused by Secure Boot, which stops
+before anything could be checked), a build of the box's system from
+source inside the VM (the agent's build there is the release's flake
+handing back one built ahead), and the app's side (its own branch).
+
