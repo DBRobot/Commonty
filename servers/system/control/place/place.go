@@ -26,6 +26,16 @@ type Inputs struct {
 	// role -> its services, to read what a heartbeat's roles run
 	Roles   map[string][]string `json:"roles"`
 	Damping Damping             `json:"damping"`
+	// bucket -> how many stores keep it, and the service that writes it
+	Buckets map[string]Bucket `json:"buckets"`
+}
+
+// Bucket is one a service writes to its box's own store
+// (nix/modules/storage/store.nix), copied to as many other stores as the
+// plan's Copies name
+type Bucket struct {
+	Copies  int    `json:"copies"`
+	Service string `json:"service"`
 }
 
 type Box struct {
@@ -70,8 +80,12 @@ type Damping struct {
 // Plan is what each box runs, with why.
 type Plan struct {
 	Boxes map[string][]Decision `json:"boxes"`
-	// a wanted service no live box can hold, with why
+	// a wanted service no live box can hold, with why; a bucket kept in
+	// fewer stores than it asks, as copies/<bucket>
 	Unplaced map[string]string `json:"unplaced"`
+	// bucket -> the boxes whose stores keep it: where its service runs
+	// first, then where it is already, then the boxes with the most room
+	Copies map[string][]string `json:"copies"`
 }
 
 type Decision struct {
@@ -85,7 +99,7 @@ const gib = 1 << 30
 // Decide plans the fleet. goneAfter is how long (ms of agreed time) a box
 // may go unheard and still count as alive.
 func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
-	p := Plan{Boxes: map[string][]Decision{}, Unplaced: map[string]string{}}
+	p := Plan{Boxes: map[string][]Decision{}, Unplaced: map[string]string{}, Copies: map[string][]string{}}
 	live := []string{}
 	for name := range in.Boxes {
 		if b := s.Boxes[name]; b != nil && s.Time-b.LastSeen <= goneAfter {
@@ -118,12 +132,15 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 			}
 		}
 	}
-	// a placed service can run only on a box that carries it
+	// a placed service can run only on a box that carries it, and not
+	// where the box itself refused to start it for want of room
+	// (cmd/dd-control/placed.go)
 	can := func(name, svc string) bool {
 		if _, ok := in.Boxes[name].Can[svc]; !ok {
 			return false
 		}
-		return !in.Services[svc].Placed || s.Boxes[name].Facts["carries/"+svc] > 0
+		f := s.Boxes[name].Facts
+		return !in.Services[svc].Placed || (f["carries/"+svc] > 0 && f["refused/"+svc] == 0)
 	}
 
 	// what a service holds: the most any live box measured it holding
@@ -152,6 +169,79 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 	facts := func(name, k string) float64 { return s.Boxes[name].Facts[k] }
 	capacity := func(name string) float64 { return 0.85 * facts(name, "ram_bytes") / gib }
 
+	// the stores: what each box's has free, and keeps of each bucket. Each
+	// box says so of its own, and none is taken on its word past what it
+	// can only hurt itself with: a bucket is as big as the box writing it
+	// says (where its service runs now), or, with none, the least any
+	// store keeps of it - a box claiming more cannot make a service fit
+	// nowhere, and one claiming less only gets a copy its store refuses.
+	stored := func(name string) bool { _, ok := s.Boxes[name].Facts["store_size_bytes"]; return ok }
+	anyStore := false
+	for _, name := range live {
+		anyStore = anyStore || stored(name)
+	}
+	size := map[string]float64{}
+	// who writes a bucket, as far as anyone else need believe it: for a
+	// service with one writer, the holder of its lease the voters agreed
+	// on; for another, a box that says it runs it and that the release
+	// says can. A box's word on its own room or holdings only moves what
+	// it is given; on a bucket's size, or on another box's copy, only the
+	// writer's counts
+	writer := func(name, svc string) bool {
+		if in.Services[svc].Lease {
+			l := s.Leases["svc/"+svc]
+			return l != nil && l.Holder == name && l.Expires > s.Time
+		}
+		_, can := in.Boxes[name].Can[svc]
+		return can && now[svc][name]
+	}
+	for b, bk := range in.Buckets {
+		least, any := 0.0, false
+		for _, name := range live {
+			v := facts(name, "store/"+b+"/bytes") / gib
+			if writer(name, bk.Service) {
+				size[b] = max(size[b], v)
+			} else if v > 0 && (!any || v < least) {
+				least, any = v, true
+			}
+		}
+		if size[b] == 0 {
+			size[b] = least
+		}
+	}
+	// what a store keeps of a bucket, never past its size; and a store the
+	// box writing it found without what it was sent (dd-store-copy reads a
+	// copy back) keeps nothing
+	lost := func(name, b string) bool {
+		for _, w := range live {
+			if writer(w, in.Buckets[b].Service) && facts(w, "store/"+b+"/lost/"+name) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+	held := func(name, b string) float64 {
+		if lost(name, b) {
+			return 0
+		}
+		return min(facts(name, "store/"+b+"/bytes")/gib, size[b])
+	}
+	bucketsOf := map[string][]string{}
+	for b, bk := range in.Buckets {
+		bucketsOf[bk.Service] = append(bucketsOf[bk.Service], b)
+	}
+	for _, bs := range bucketsOf {
+		sort.Strings(bs)
+	}
+	disk := map[string]float64{} // box -> GiB of its store the plan fills
+	// what a store has to give: free, less what the plan fills, less a
+	// tenth of it kept back
+	spare := func(name string) float64 {
+		return facts(name, "store_free_bytes")/gib - disk[name] - 0.1*facts(name, "store_size_bytes")/gib
+	}
+	// what keeping b here adds to a store: what it does not keep yet
+	needs := func(name, b string) float64 { return max(size[b]-held(name, b), 0) }
+
 	// what placing svc on name adds: itself and what must share its box,
 	// and what that must share its box with
 	adds := func(name, svc string) []string {
@@ -178,6 +268,22 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		return true
 	}
 	room := func(name, svc string) bool {
+		// its buckets: a store here with room for what it does not keep
+		// yet. Until some box has a store, nothing is judged by them
+		if anyStore {
+			d := 0.0
+			for _, x := range adds(name, svc) {
+				for _, b := range bucketsOf[x] {
+					if !stored(name) {
+						return false
+					}
+					d += needs(name, b)
+				}
+			}
+			if d > 0 && d > spare(name) {
+				return false
+			}
+		}
 		if capacity(name) == 0 {
 			return true // a box that has not said its memory: capability judged it
 		}
@@ -246,6 +352,9 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 				planned[name][x] = true
 				count[x]++
 				used[name] += memory[x]
+				for _, b := range bucketsOf[x] {
+					disk[name] += needs(name, b)
+				}
 				w := why
 				if x != svc {
 					w = "beside " + svc
@@ -404,6 +513,71 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 	}
 	for _, svc := range wanted {
 		decide(svc)
+	}
+
+	// the copies, once the services are placed: a bucket stays in the
+	// stores that keep it, and goes to more only where it fits
+	if !anyStore {
+		return p
+	}
+	names := []string{}
+	for b := range in.Buckets {
+		names = append(names, b)
+	}
+	sort.Strings(names)
+	for _, b := range names {
+		bk := in.Buckets[b]
+		n := max(bk.Copies, 1)
+		keep := []string{}
+		kept := map[string]bool{}
+		add := func(name string) {
+			if !kept[name] && len(keep) < n {
+				kept[name] = true
+				keep = append(keep, name)
+			}
+		}
+		// where it is written: its room was judged with the service
+		for _, name := range live {
+			if planned[name][bk.Service] && stored(name) && !lost(name, b) {
+				add(name)
+			}
+		}
+		// where it is already, the most of it first
+		have := []string{}
+		for _, name := range live {
+			if stored(name) && held(name, b) > 0 && !kept[name] {
+				have = append(have, name)
+			}
+		}
+		sort.SliceStable(have, func(i, j int) bool { return held(have[i], b) > held(have[j], b) })
+		for _, name := range have {
+			add(name)
+		}
+		// then the most room, and only where it fits
+		more := []string{}
+		for _, name := range live {
+			if stored(name) && !kept[name] {
+				more = append(more, name)
+			}
+		}
+		sort.SliceStable(more, func(i, j int) bool { return spare(more[i]) > spare(more[j]) })
+		for _, name := range more {
+			if len(keep) >= n {
+				break
+			}
+			if lost(name, b) {
+				continue
+			}
+			if d := needs(name, b); d <= spare(name) {
+				disk[name] += d
+				add(name)
+			}
+		}
+		sort.Strings(keep)
+		p.Copies[b] = keep
+		if len(keep) < n {
+			p.Unplaced["copies/"+b] = fmt.Sprintf("kept in %d of %d stores: no other live box has room for its %.1f GiB", len(keep), n, size[b])
+		}
 	}
 	return p
 }

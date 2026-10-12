@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -184,6 +185,21 @@ const freshFor = 30 * time.Second
 // lease is renewed twice before its margin
 const placeEvery = 5 * time.Second
 
+// memFree is MemAvailable in bytes; 0 when unknown
+func memFree() float64 {
+	b, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		if fs := strings.Fields(l); len(fs) >= 2 && fs[0] == "MemAvailable:" {
+			kb, _ := strconv.ParseFloat(fs[1], 64)
+			return kb * 1024
+		}
+	}
+	return 0
+}
+
 // facts: what this box has, as the placement rules will read them
 func facts() map[string]float64 {
 	f := map[string]float64{"cores": float64(runtime.NumCPU())}
@@ -228,7 +244,9 @@ func facts() map[string]float64 {
 	// and its line, measured daily (nix/modules/box/netspeed.nix): what
 	// placement weighs a service's traffic against; and what each service
 	// holds in memory (nix/modules/box/service-memory.nix)
-	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom") {
+	// and its own store (nix/modules/storage/store.nix): its size, what is
+	// free, and what it keeps of each bucket, for where the copies go
+	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom") {
 		f[name] = v
 	}
 	// what members keep here: not .prom, so none of it reaches Prometheus
@@ -287,6 +305,8 @@ func usageFacts(files ...string) map[string]float64 {
 	return out
 }
 
+var storeLost = regexp.MustCompile(`^dd_store_lost\{bucket="([^"]*)",box="([^"]*)"\}$`)
+
 func promFacts(files ...string) map[string]float64 {
 	out := map[string]float64{}
 	for _, file := range files {
@@ -319,6 +339,24 @@ func promFacts(files ...string) map[string]float64 {
 				out["net_up_mbps"] = v
 			case "dd_net_rtt_ms":
 				out["net_rtt_ms"] = v
+			case "dd_store_size_bytes":
+				out["store_size_bytes"] = v
+			case "dd_store_free_bytes":
+				out["store_free_bytes"] = v
+			case "dd_store_bucket_bytes":
+				// dd_store_bucket_bytes{bucket="ente"} as store/ente/bytes
+				b, ok := strings.CutPrefix(fs[0], `dd_store_bucket_bytes{bucket="`)
+				b, ok2 := strings.CutSuffix(b, `"}`)
+				if ok && ok2 && len(fs) == 2 && usageName(b) && len(out) < maxFacts {
+					out["store/"+b+"/bytes"] = v
+				}
+			case "dd_store_lost":
+				// dd_store_lost{bucket="ente",box="node2"}: the copy read
+				// back from node2 was not what was sent
+				m := storeLost.FindStringSubmatch(fs[0])
+				if m != nil && len(fs) == 2 && usageName(m[1]) && usageName(m[2]) && len(out) < maxFacts {
+					out["store/"+m[1]+"/lost/"+m[2]] = v
+				}
 			case "dd_service_memory_bytes":
 				// dd_service_memory_bytes{service="forgejo"} as svc/forgejo/mem
 				svc, ok := strings.CutPrefix(fs[0], `dd_service_memory_bytes{service="`)
@@ -370,6 +408,7 @@ func main() {
 	every := flag.Duration("heartbeat", 30*time.Second, "how often to heartbeat")
 	placedCarries := flag.String("placed-carries", "", "the placed services this box carries and their units (nix/modules/box/placed.nix); empty: none, and nothing is switched")
 	placedDir := flag.String("placed-dir", "/run/dd-placed", "where a placed service's flag is, the condition its units start on")
+	placedCopies := flag.String("placed-copies", "", "where to write the plan's copies, which boxes' stores keep each bucket (nix/modules/storage/store.nix); empty: nowhere")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
 	submitSock := flag.String("submit", "", "a unix socket where this box's gate hands in directory items (POST /submit); empty: none")
@@ -547,6 +586,8 @@ func main() {
 		box: *box, dir: *placedDir, carries: carried, leased: map[string]bool{},
 		run: systemctl, uptime: uptime, ttl: time.Duration(cfg.Rules.LeaseTTL) * time.Millisecond,
 		since: map[string]int64{}, sent: map[string]map[uint64]int64{},
+		memory: map[string]float64{}, free: memFree, refused: map[string]int64{},
+		copies: *placedCopies,
 		ask: func(op state.LeaseOp) (uint64, error) {
 			body, _ := json.Marshal(op)
 			return submit("lease", body)
@@ -670,8 +711,9 @@ func main() {
 		// but a writer only while its lease may still be this box's
 		for svc := range carried {
 			placed.leased[svc] = in.Services[svc].Lease
+			placed.memory[svc] = max(in.Services[svc].MemoryGiB, in.Services[svc].ReserveGiB)
 		}
-		if len(carried) > 0 {
+		if len(carried) > 0 || *placedCopies != "" {
 			go func() {
 				for {
 					time.Sleep(placeEvery)

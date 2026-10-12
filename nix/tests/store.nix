@@ -1,7 +1,9 @@
 # Each box's own store (storage/store.nix): a garage of one with a secret
 # nobody else has. a's bucket is copied to b's store with the key b handed
 # a, sealed so only a could open it; b's copy holds what a wrote; a cannot
-# read b's buckets it does not copy; with a gone, b serves the copy.
+# read b's buckets it does not copy; the plan's copies decide where a
+# bucket goes, a store nearly full refuses more; with a gone, b serves the
+# copy.
 { pkgs, self, ... }:
 let
   # test keys only: on a real box this is its TPM-held secrets key
@@ -57,6 +59,8 @@ let
         pkgs.age
         pkgs.curl
       ];
+      # where dd-control writes the plan's copies
+      systemd.tmpfiles.rules = [ "d /run/dd-placed 0755 root root -" ];
     };
 in
 {

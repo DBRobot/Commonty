@@ -56,3 +56,13 @@ func TestTheHeartbeatCarriesWhatEachServiceHolds(t *testing.T) {
 		t.Fatalf("facts: %v", f)
 	}
 }
+
+func TestTheStoreSaysItsRoomAndWhatItKeeps(t *testing.T) {
+	d := t.TempDir()
+	st := filepath.Join(d, "store.prom")
+	_ = os.WriteFile(st, []byte("dd_store_size_bytes 1000\ndd_store_free_bytes 400\ndd_store_bucket_bytes{bucket=\"ente\"} 300\ndd_store_bucket_bytes{bucket=\"../x\"} 1\ndd_store_lost{bucket=\"ente\",box=\"node2\"} 1\ndd_store_lost{bucket=\"ente\",box=\"a/b\"} 1\n"), 0o644)
+	f := promFacts(st)
+	if f["store_size_bytes"] != 1000 || f["store_free_bytes"] != 400 || f["store/ente/bytes"] != 300 || f["store/ente/lost/node2"] != 1 || len(f) != 4 {
+		t.Fatalf("facts: %v", f)
+	}
+}
