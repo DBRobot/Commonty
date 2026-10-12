@@ -49,6 +49,7 @@ in
         ];
         virtualisation.memorySize = 2048;
         system.extraDependencies = [ installed ];
+        environment.systemPackages = [ pkgs.jq ];
         environment.etc."installed".text = "${installed}";
         environment.variables = lib.mkForce {
           RELEASE_URL = "http://forge/release/current.json";
