@@ -50,7 +50,7 @@ the trash ([Backups of your computers](backups.md)).
 
 ## This device
 
-**Show the assistant:** Ask Commonty, the round button in the lower
+**Show the assistant:** Monty, the round button in the lower
 right corner of each page, on this device. Turn it off and it is gone
 from every page here; turn it back on any time ([The site,
 drawn](site-map.md)).

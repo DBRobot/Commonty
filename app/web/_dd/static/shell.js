@@ -607,7 +607,7 @@ me().then((m) => {
   // the look it needs; Chat is a conversation of its own already
   const chat = location.pathname === '/_dd/chat' || location.hostname.startsWith('llm.');
   if ((m.role === 'member' || m.role === 'demo') && !chat && document.querySelector('link[href$="/home.css"]')) {
-    guide({ here, inApp, servedByApp, demo: !!m.demo });
+    guide({ here, inApp, servedByApp, demo: !!m.demo, home: m.home, names: [m.user].filter(Boolean) });
   }
 }).catch((e) => {
   const list = document.getElementById('services');

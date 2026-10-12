@@ -81,7 +81,7 @@ const keyShown = $('td-key');
 const keySet = $('td-key-set');
 const keyReset = $('td-key-reset');
 const keyHint = $('td-key-hint');
-const keyWhat = 'Opens Ask Commonty from any page on this device.';
+const keyWhat = 'Opens Monty from any page on this device.';
 function showKey() {
   keyShown.textContent = keyName(shortcut());
   keyReset.hidden = !ownKey();

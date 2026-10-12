@@ -23,6 +23,7 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
     let mut model = Value::Null;
     let mut report = Value::Null;
     let mut tiles = vec![];
+    let mut views = vec![];
     // the tiles a member sees, the demo's own doors for the demo; the fleet's
     // figures (Metrics) are in the menu for the people who run boxes, not here
     for s in services.iter().filter(|s| !s.menu_only) {
@@ -39,8 +40,9 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
                 s.icon.as_str(),
                 "photos" | "passwords" | "files" | "videos" | "chat"
             );
+        let tile_id = format!("svc-{}", slug(&s.name));
         let mut p = place(
-            &format!("svc-{}", slug(&s.name)),
+            &tile_id,
             &s.name,
             Some("home"),
             if app { "app" } else { "page" },
@@ -49,6 +51,44 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
         );
         if s.icon == "code" {
             p["subs"] = git_tabs(!demo).into();
+        }
+        // what a page shows inside itself, with no address of its own
+        if let Some((_, subs)) = SUBS.iter().find(|(i, _)| *i == s.icon) {
+            p["subs"] = (*subs).into();
+        }
+        if let Some(o) = origin(url) {
+            for (icon, id, label, parent, path, words, members) in VIEWS {
+                if *icon == s.icon && (!demo || !members) {
+                    let parent = if parent.is_empty() { &tile_id } else { *parent };
+                    let mut v = place(
+                        id,
+                        label,
+                        Some(parent),
+                        "page",
+                        &format!("{o}{path}"),
+                        words,
+                    );
+                    if path.contains("{repo}") {
+                        v["slot"] = "repo".into();
+                    }
+                    views.push(v);
+                }
+            }
+            // a repository's settings, a pane each, from the page's own list
+            if s.icon == "code" && !demo {
+                for (k, label) in repo_settings_panes() {
+                    let mut v = place(
+                        &format!("code-repo-settings-{k}"),
+                        &label,
+                        Some("code-repo-settings"),
+                        "page",
+                        &format!("{o}/{{repo}}/settings/{k}"),
+                        &format!("repository settings {label} git"),
+                    );
+                    v["slot"] = "repo".into();
+                    views.push(v);
+                }
+            }
         }
         if s.icon == "chat" {
             model = origin(&s.url)
@@ -74,6 +114,15 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
         places.push(p);
     }
     places[0]["targets"] = tiles.into();
+    places.push(place(
+        "download",
+        "Get the app",
+        Some("home"),
+        "page",
+        &format!("{home}/_dd/download"),
+        "get the app download install commonty app windows mac linux android",
+    ));
+    places.extend(views);
     if !demo {
         let friends = crate::pages::page("friends").unwrap_or_default();
         let mut p = place(
@@ -86,6 +135,14 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
         );
         p["subs"] = headings_in(friends).into();
         places.push(p);
+        places.push(place(
+            "adblock",
+            "Ad blocking at home",
+            Some("home"),
+            "page",
+            &format!("{home}/_dd/adblock"),
+            "ad blocking adblock ads pi-hole dns blocklists pause a site broke home network",
+        ));
         // the demo has no account to set: Settings is a member's
         places.push(place(
             "settings",
@@ -132,7 +189,10 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
         }
     }
     places.extend(docs_places(docs, domain));
-    json!({ "places": places, "model": model, "report": report })
+    // the repository a `{repo}` place means when nothing names another:
+    // the fleet's own
+    let repo = docs["repo"].as_str().filter(|r| owner_name(r));
+    json!({ "places": places, "model": model, "report": report, "repo": repo })
 }
 
 /// `owner/name`, as dd.repo is (VERIFY_REPO, in the docs' index): nothing
@@ -146,6 +206,244 @@ fn owner_name(repo: &str) -> bool {
     };
     matches!(repo.split_once('/'), Some((o, n)) if ok(o) && ok(n))
 }
+
+/// Every view of a service the tiles do not list, under its tile ("") or
+/// another view: the tile's icon, the place's id, its name, its parent, its path on
+/// the tile's site, its words, and whether it is a member's alone. A
+/// `{repo}` in the path is a repository's view, filled in by the assistant
+/// (`owner/name`). Every route the Git pages answer is here: a test reads
+/// them from servers/forge/web and fails on one that is not.
+const VIEWS: &[(&str, &str, &str, &str, &str, &str, bool)] = &[
+    (
+        "games",
+        "games-servers",
+        "Your servers",
+        "",
+        "/servers",
+        "your servers hosting invited saved worlds game server start",
+        false,
+    ),
+    (
+        "code",
+        "code-yours",
+        "Your repositories",
+        "",
+        "/",
+        "your repositories repos list mine",
+        true,
+    ),
+    (
+        "code",
+        "code-new",
+        "A new repository",
+        "",
+        "/new",
+        "new repository repo create make start",
+        true,
+    ),
+    (
+        "code",
+        "code-notifications",
+        "Notifications",
+        "",
+        "/notifications",
+        "notifications unread mentions inbox bell",
+        true,
+    ),
+    (
+        "code",
+        "code-search",
+        "Search Git",
+        "",
+        "/search",
+        "search find code repositories issues",
+        false,
+    ),
+    (
+        "code",
+        "code-settings",
+        "Your Git settings",
+        "",
+        "/settings",
+        "git settings account",
+        true,
+    ),
+    (
+        "code",
+        "code-settings-tokens",
+        "API tokens",
+        "code-settings",
+        "/settings/tokens",
+        "api tokens access token key",
+        true,
+    ),
+    (
+        "code",
+        "code-settings-keys",
+        "SSH & signing keys",
+        "code-settings",
+        "/settings/keys",
+        "ssh signing keys gpg public key",
+        true,
+    ),
+    (
+        "code",
+        "code-settings-profile",
+        "Profile",
+        "code-settings",
+        "/settings/profile",
+        "profile name full name",
+        true,
+    ),
+    (
+        "code",
+        "code-repo",
+        "A repository",
+        "",
+        "/{repo}",
+        "repository repo code files readme",
+        false,
+    ),
+    (
+        "code",
+        "code-repo-commits",
+        "Commits",
+        "code-repo",
+        "/{repo}/commits",
+        "commits history log changes",
+        false,
+    ),
+    (
+        "code",
+        "code-repo-branches",
+        "Branches",
+        "code-repo",
+        "/{repo}/branches",
+        "branches branch",
+        false,
+    ),
+    (
+        "code",
+        "code-repo-releases",
+        "Releases",
+        "code-repo",
+        "/{repo}/releases",
+        "releases tags versions downloads",
+        false,
+    ),
+    (
+        "code",
+        "code-repo-issues",
+        "Issues",
+        "code-repo",
+        "/{repo}/issues",
+        "issues bugs tickets open closed",
+        true,
+    ),
+    (
+        "code",
+        "code-repo-new-issue",
+        "New issue",
+        "code-repo-issues",
+        "/{repo}/issues/new",
+        "new issue open bug file report",
+        true,
+    ),
+    (
+        "code",
+        "code-repo-pulls",
+        "Pull requests",
+        "code-repo",
+        "/{repo}/pulls",
+        "pull requests prs merge review",
+        true,
+    ),
+    (
+        "code",
+        "code-repo-compare",
+        "Compare branches",
+        "code-repo-pulls",
+        "/{repo}/compare",
+        "compare branches diff new pull request",
+        true,
+    ),
+    (
+        "code",
+        "code-repo-actions",
+        "Actions",
+        "code-repo",
+        "/{repo}/actions",
+        "actions ci runs workflows builds checks pipeline git",
+        true,
+    ),
+    (
+        "code",
+        "code-repo-latest-run",
+        "The latest run",
+        "code-repo-actions",
+        "/{repo}/actions/runs/latest",
+        "latest newest last recent run ci build workflow job log git actions",
+        true,
+    ),
+    (
+        "code",
+        "code-repo-activity",
+        "Activity",
+        "code-repo",
+        "/{repo}/activity",
+        "activity pulse charts contributors stats",
+        true,
+    ),
+    (
+        "code",
+        "code-repo-settings",
+        "Repository settings",
+        "code-repo",
+        "/{repo}/settings",
+        "repository settings admin collaborators",
+        true,
+    ),
+];
+
+/// The views of a page that have no address of their own: its tabs and
+/// panes, by the tile's icon, as the page names them
+const SUBS: &[(&str, &[&str])] = &[
+    (
+        "files",
+        &[
+            "My files",
+            "Trash",
+            "List",
+            "Grid",
+            "Search this folder",
+            "New folder",
+            "Upload",
+        ],
+    ),
+    (
+        "videos",
+        &[
+            "All",
+            "Films",
+            "Shows",
+            "Continue watching",
+            "Recently added",
+            "Add films",
+            "New show",
+        ],
+    ),
+    (
+        "chat",
+        &[
+            "New chat",
+            "Search chats",
+            "Settings",
+            "General",
+            "About you",
+            "Your chats",
+        ],
+    ),
+];
 
 /// The controls the assistant may point at, under the place they are on: a
 /// `data-guide` name our own pages give a button, what it is called there,
@@ -374,6 +672,31 @@ fn git_tabs(member: bool) -> Vec<String> {
         .collect()
 }
 
+/// A repository's settings panes, from the Git pages' own list
+/// (git-settings.js PANES): the key in the address and what the pane is called
+fn repo_settings_panes() -> Vec<(String, String)> {
+    let js = crate::pages::static_file("git-settings.js")
+        .and_then(|(b, _, _)| std::str::from_utf8(b).ok())
+        .unwrap_or_default();
+    let Some(list) = js
+        .split("const PANES = [")
+        .nth(1)
+        .and_then(|l| l.split("];").next())
+    else {
+        return vec![];
+    };
+    list.split('[')
+        .skip(1)
+        .filter_map(|pair| {
+            let q: Vec<&str> = pair.split('\'').collect();
+            let (k, t) = (q.get(1)?, q.get(3)?);
+            k.chars()
+                .all(|c| c.is_ascii_lowercase())
+                .then(|| (k.to_string(), t.to_string()))
+        })
+        .collect()
+}
+
 /// Every docs page under the docs' own groups, with its `##` headings
 fn docs_places(index: &Value, domain: &str) -> Vec<Value> {
     let docs = format!("https://{domain}/docs");
@@ -501,6 +824,115 @@ mod tests {
             .iter()
             .find(|p| p["id"] == id)
             .unwrap()
+    }
+
+    /// Every route the Git pages answer is on the map: a place of its own,
+    /// or one thing a place lists (an issue of Issues, a run of Actions). A
+    /// route added to servers/forge/web fails here until it is listed.
+    #[test]
+    fn every_git_route_is_on_the_map() {
+        const ROUTES: &[(&str, &str)] = &[
+            (r"/^\/$/", "code-yours"),
+            (r"/^\/new$/", "code-new"),
+            (r"/^\/notifications$/", "code-notifications"),
+            (r"/^\/search$/", "code-search"),
+            (
+                r"/^\/settings(?:\/(tokens|keys|profile))?$/",
+                "code-settings",
+            ),
+            (r"/^\/([^/]+)$/", "code-yours"),
+            (r"/^\/([^/]+)\/([^/]+)\/pulls$/", "code-repo-pulls"),
+            (r"/^\/([^/]+)\/([^/]+)\/issues$/", "code-repo-issues"),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/issues\/new$/",
+                "code-repo-new-issue",
+            ),
+            (r"/^\/([^/]+)\/([^/]+)\/issues\/(\d+)$/", "code-repo-issues"),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/pulls?\/(\d+)(?:\/(commits|checks|files))?$/",
+                "code-repo-pulls",
+            ),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/compare(?:\/(.+?)\.\.\.(.+))?$/",
+                "code-repo-compare",
+            ),
+            (r"/^\/([^/]+)\/([^/]+)(?:\/tree\/(.+))?$/", "code-repo"),
+            (r"/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/", "code-repo"),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/commits(?:\/(.+))?$/",
+                "code-repo-commits",
+            ),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/commit\/([0-9a-f]{4,64})$/",
+                "code-repo-commits",
+            ),
+            (r"/^\/([^/]+)\/([^/]+)\/branches$/", "code-repo-branches"),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/releases(?:\/tag\/(.+))?$/",
+                "code-repo-releases",
+            ),
+            (r"/^\/([^/]+)\/([^/]+)\/activity$/", "code-repo-activity"),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/src\/(?:branch|tag|commit)\/(.+)$/",
+                "code-repo",
+            ),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/(?:commits\/branch)\/(.+)$/",
+                "code-repo-commits",
+            ),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/",
+                "code-repo-settings",
+            ),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/actions\/runs\/latest$/",
+                "code-repo-latest-run",
+            ),
+            (r"/^\/([^/]+)\/([^/]+)\/actions$/", "code-repo-actions"),
+            (
+                r"/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/",
+                "code-repo-actions",
+            ),
+        ];
+        let m = build(&tiles(), Role::Member, "x", &docs());
+        let ids = ids(&m);
+        for (_, id) in ROUTES {
+            assert!(ids.iter().any(|i| i == id), "{id}");
+        }
+        for f in [
+            "git-home.js",
+            "git-repo.js",
+            "git-pulls.js",
+            "git-actions.js",
+            "git-settings.js",
+        ] {
+            let js = std::str::from_utf8(crate::pages::static_file(f).unwrap().0).unwrap();
+            for line in js.lines().filter(|l| l.starts_with("route(/")) {
+                let src = format!("{}$/", line["route(".len()..].split("$/,").next().unwrap());
+                assert!(
+                    ROUTES.iter().any(|(r, _)| *r == src),
+                    "{f}: {src} is not on the map (VIEWS, and this test's ROUTES)"
+                );
+            }
+        }
+        // a repository's views are filled in, the fleet's own when none is named
+        assert_eq!(m["repo"], "fleet/commonty");
+        let latest = by(&m, "code-repo-latest-run");
+        assert_eq!(latest["url"], "https://git.x/{repo}/actions/runs/latest");
+        assert_eq!(latest["slot"], "repo");
+        assert!(
+            ids.iter().any(|i| i == "code-repo-settings-careful"),
+            "{ids:?}"
+        );
+        // the demo has no account: none of a member's own views
+        let d = build(&tiles(), Role::Demo, "x", &docs());
+        let dids = super::tests::ids(&d);
+        assert!(
+            !dids
+                .iter()
+                .any(|i| i == "code-settings" || i == "code-repo-actions"),
+            "{dids:?}"
+        );
     }
 
     #[test]

@@ -1040,7 +1040,7 @@ main.home .guest-more p { margin: 0; max-width: 62ch; color: var(--ink-2); }
   .dd-foot .in { grid-template-columns: minmax(0, 1fr); gap: 24px; }
 }
 
-/* Ask Commonty, in the lower right corner of every signed-in page
+/* Monty, in the lower right corner of every signed-in page
    (guide.js): the round button, the strip beside it that tucks it away,
    and the conversation it opens */
 .dd-guide-btn, .dd-guide, .dd-tuck, .dd-ring, .dd-tour { --gd-bar: #1D4470; --gd-bar-ink: #FFFFFF; --gd-mark: #9CC3EA; --gd-sunk: #F4F6F8; --gd-pupil: #0F1A2A; --gd-point: #1D4470; font-family: var(--font); }
@@ -1175,6 +1175,10 @@ body.dd-tucked.dd-peek .dd-guide-btn .hat { animation: dd-eyes 4.6s both; }
 .dd-guide .dot-app, .dd-map .dot-app { background: var(--focus); }
 .dd-guide .issue { display: grid; gap: 4px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--gd-sunk); font-size: 13px; }
 .dd-guide .issue b { font-weight: 600; }
+.dd-guide .private { margin: 8px 0 0; padding: 8px 10px 8px 26px; border: 1px solid var(--line); border-left: 3px solid var(--pick); border-radius: 6px; font-size: 13px; }
+.dd-guide .private li + li { margin-top: 2px; }
+.dd-guide .private span { color: var(--ink-2); }
+.dd-guide .private b { font-weight: 600; overflow-wrap: anywhere; }
 .dd-guide .msg button.out { display: block; margin: 8px 0 0; height: auto; padding: 7px 12px; border: 0; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font: 600 13px var(--font); cursor: pointer; }
 .dd-guide .msg button.out:hover { background: var(--accent-hover); }
 .dd-guide .how { display: block; margin-top: 6px; font: 11px var(--mono); color: var(--ink-2); white-space: normal; }
