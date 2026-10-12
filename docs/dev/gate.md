@@ -586,7 +586,14 @@ are files, never strings in Rust ([ui.md](ui.md)).
   names in a frame of home it never shows, `/_dd/guide-keep`
   ([guide-keep.js](../../servers/web-shared/guide-keep.js)): that tab's
   sessionStorage on home, answered only to the same names (checked in the
-  script, and in its `frame-ancestors`), never sent to a box.
+  script, and in its `frame-ancestors`), never sent to a box. It looks up
+  a member's own, read only and as them
+  ([guide-look.js](../../servers/web-shared/guide-look.js)): their Git
+  through the forge's API and a job's log, which the forge lets the same
+  names read with a GET and nothing else (`$dd_forge_cors`,
+  [forgejo.nix](../../nix/modules/forge/forgejo.nix)), and `/_dd/house`,
+  `/_dd/fleet.json` and `/_dd/storage/mine`, which the bare name answers
+  too. Nothing Locked (privacy.md); only a failed job's log goes to the model.
 - `/_dd/config` gives `rpId` to any page, and the demo's library id and
   key to the demo.
 - **Caching**: static files and pages are `no-cache` with an ETag (the

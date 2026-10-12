@@ -10,6 +10,7 @@ servers/web-shared/kit.js                    static/kit.js
 servers/web-shared/guide.js                  static/guide.js
 servers/web-shared/guide-face.js             static/guide-face.js
 servers/web-shared/guide-tour.js             static/guide-tour.js
+servers/web-shared/guide-look.js             static/guide-look.js
 servers/home/web/library.js                static/library.js
 servers/web-shared/webauthn.js               static/webauthn.js
 servers/web-shared/age.js                    static/age.js

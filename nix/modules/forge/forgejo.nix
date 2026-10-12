@@ -46,6 +46,7 @@ let
   sock = "/run/forgejo/forgejo.sock";
   cancelPort = 3003;
   cfg = config.dd.forgejo;
+  guidePages = import ../../lib/guide-pages.nix;
   # the forge, as whoever the gate says is looking
   toForge = {
     proxyPass = "http://unix:${sock}:";
@@ -60,6 +61,10 @@ let
       # nobody: still let them in, as nobody. Public repos are public and
       # forgejo shows private ones to no one it does not know.
       error_page 401 = @anonymous;
+      # read by Monty on the site's other names (the map above)
+      add_header Access-Control-Allow-Origin $dd_forge_cors always;
+      add_header Access-Control-Allow-Credentials true always;
+      add_header Vary Origin always;
     '';
     # no cookie when the header is empty (the map below)
     ddCookie = "$forge_cookie";
@@ -467,6 +472,13 @@ in
         map $forge_user $forge_cookie {
           "" "";
           default $dd_cookie_stripped;
+        }
+        # Monty, on the site's other names (servers/web-shared/guide-git.js),
+        # may read what a member reads here - the API and a job's log -
+        # with their own session, and only read: GET alone is told yes
+        map "$request_method $http_origin $uri" $dd_forge_cors {
+          default "";
+          "~^GET (?<dd_forge_origin>https://((demo-)?(${lib.concatStringsSep "|" guidePages})\.)?${lib.escapeRegex base}) /(api/v1/|[^/]+/[^/]+/actions/runs/[0-9]+/jobs/[0-9]+/attempt/[0-9]+/logs$)" $dd_forge_origin;
         }
       '';
       # the socket's directory: forgejo makes it, its group may enter it, and
