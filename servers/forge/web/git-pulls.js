@@ -65,7 +65,8 @@ async function list({ m, params, current }, kind) {
   if (!current()) return;
   put(main(),
     el('div', { class: 'hrow gap' }, find,
-      r.permissions?.pull ? el('a', { class: 'btn go', href: pulls ? `/${r.full_name}/compare` : `/${r.full_name}/issues/new` }, ic('plus'), pulls ? 'New pull request' : 'New issue') : null),
+      r.permissions?.pull && pulls ? el('a', { class: 'btn go', href: `/${r.full_name}/compare`, 'data-guide': 'new-pull' }, ic('plus'), 'New pull request') : null,
+      r.permissions?.pull && !pulls ? el('a', { class: 'btn go', href: `/${r.full_name}/issues/new`, 'data-guide': 'new-issue' }, ic('plus'), 'New issue') : null),
     el('div', { class: 'box' },
       el('header', {},
         el('a', { href: `${base}${q({ q: search })}`, style: state === 'open' ? 'font-weight:700;color:var(--ink)' : 'color:var(--ink-2)' }, stateIcon({ state: 'open', pull_request: pulls ? {} : undefined }), ` ${open.total} open`),
@@ -199,6 +200,10 @@ route(/^\/([^/]+)\/([^/]+)\/issues\/new$/, async ({ m, current }) => {
   setTitle('New issue', r.full_name);
   const title = el('input', { class: 'write', placeholder: 'Title', 'aria-label': 'Title', required: true });
   const body = el('textarea', { class: 'write', style: 'min-height:180px', placeholder: 'What happened, or what you would like. Markdown works.', 'aria-label': 'Description' });
+  // written up somewhere else first (the assistant's bug report): its words, as words
+  const given = new URLSearchParams(location.search);
+  title.value = (given.get('title') || '').slice(0, 255);
+  body.value = (given.get('body') || '').slice(0, 65535);
   const form = el('form', {}, el('div', { class: 'gap' }, title), body, el('div', { class: 'hrow', style: 'justify-content:flex-end;margin-top:8px' }, el('button', { class: 'btn go', type: 'submit', text: 'Open issue' })));
   form.onsubmit = async (e) => {
     e.preventDefault();
