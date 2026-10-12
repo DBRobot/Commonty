@@ -39,6 +39,8 @@ let
       ];
       # the test's network, not the house's
       networking.networkmanager.enable = lib.mkForce false;
+      # its disk's boot is join-install's test; this one boots the test's
+      dd.unlock.waits.enrolment = 1;
       dd.control.relay = "ws://fleet:8789/relay";
       environment.etc."dd-control/config.json".source = lib.mkForce "/run/dd-test/config.json";
       dd.agent.url = lib.mkForce "http://fleet/release/current.json";

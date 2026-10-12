@@ -4,7 +4,8 @@
     "ssid": "",
     "address": ""
   },
-  "encrypted": false,
+  "encrypted": true,
+  "unlock": "tpm",
   "extraPools": [],
   "datasets": {}
 }
