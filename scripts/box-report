@@ -17,3 +17,9 @@ for f in hardware-configuration.nix hardware.json report.sig; do
 done
 for f in hardware-configuration.nix hardware.json report.sig; do mv "$dir/$f.new" "$dir/$f"; done
 git -C "$here" diff --stat -- "fleet/boxes/$box"
+# what in it is known to fail (nix/lib/net-hardware.nix), said while the
+# owner is here to hear it
+nix --extra-experimental-features nix-command eval --raw --impure --expr "
+  builtins.concatStringsSep \"\" (map (w: \"warning: $box: \" + w + \"\n\") (import $here/nix/lib/net-hardware.nix {
+    hw = builtins.fromJSON (builtins.readFile $dir/hardware.json);
+  }).warnings)" >&2 || true

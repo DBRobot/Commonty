@@ -17,7 +17,9 @@ node2  AMD Ryzen 5 7520U, 8 threads, 14G, 512G NVMe (tank), Radeon 610M (unused)
 ## 1. What discovery has to find
 
 Detected today (nix/modules/box/report/detect.sh): host id, boot disk by
-id, one wired NIC (MAC, usb or not), one wifi interface, first GPU render
+id, every NIC (report/nics.sh: driver, bus, ids, host controller, speed,
+carrier, Wi-Fi bands) and how the box uses each (primary, fallback, DNS),
+one wifi interface, first GPU render
 node and driver, the TPM secrets key. facts.sh (metrics) separately reads CPU
 model and flags, cores, RAM, disk kinds, GPUs, but unsigned.
 
@@ -71,9 +73,11 @@ node1's HP and node2's Acer can't.
   the control plane's signatures, the box report, the secrets key
   (disk-unlock-boot.sh:62-109, control main.go:117-144, report.nix).
 - A **wired NIC whose driver is in the initrd**: only r8152, cdc_ether,
-  cdc_ncm, ax88179 (USB adapters) are there (disk-unlock.nix:124-133). A box
-  with an onboard Intel/Realtek PCIe NIC would never unlock. Wifi can't
-  unlock (its password is on the locked disk).
+  cdc_ncm, ax88179 (USB adapters) are there (disk-unlock.nix:124-133), and
+  the driver of each wired NIC the box reported, with a USB adapter's host
+  controller (nix/lib/net-hardware.nix): an onboard PCIe NIC is in its
+  box's initrd once the box has reported it. Wifi can't unlock (its
+  password is on the locked disk).
 - The house's static address, router and router MAC (home proven by the
   router's MAC, disk-unlock-boot.sh:51-57); internet to the unlock Worker; a
   roughly right RTC (no NTP in the initrd).

@@ -41,9 +41,13 @@ in
       dd.box.gpus = map (g: { inherit (g) render driver encode; }) hw.gpus;
       # its links, and the house's other boxes (box/net-hardware.nix)
       dd.box.links.report = hw;
-      dd.box.links.houseBoxes = lib.mapAttrs (n: _: lib.head (lib.splitString "/" others.${n}.house.address)) (
-        lib.filterAttrs (n: _: n != config.networking.hostName && others.${n}.house.ssid or null == house.ssid) others
-      );
+      dd.box.links.houseBoxes =
+        lib.mapAttrs (n: _: lib.head (lib.splitString "/" others.${n}.house.address))
+          (
+            lib.filterAttrs (
+              n: _: n != config.networking.hostName && others.${n}.house.ssid or null == house.ssid
+            ) others
+          );
     }
     # Any GPU, whoever made it: Mesa's Vulkan drivers (Intel's, AMD's, and
     # NVK for NVIDIA from the GTX 16 series on) come with graphics on. Video
