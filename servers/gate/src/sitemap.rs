@@ -55,10 +55,14 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
                 .map(|o| format!("{o}/v1/chat/completions"))
                 .into();
         }
-        // where a member writes up a bug, in Code: the demo has no account to
-        if s.icon == "code" && !demo {
+        // where a member writes up a bug: the fleet's own repository, in
+        // Code. The demo has no account to.
+        if s.icon == "code"
+            && !demo
+            && let Some(repo) = docs["repo"].as_str().filter(|r| owner_name(r))
+        {
             report = origin(&s.url)
-                .map(|o| format!("{o}/{REPORTS}/issues/new"))
+                .map(|o| format!("{o}/{repo}/issues/new"))
                 .into();
         }
         tiles.push(target(
@@ -131,8 +135,17 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
     json!({ "places": places, "model": model, "report": report })
 }
 
-/// The repository bugs in Commonty itself are written up in, on Code
-const REPORTS: &str = "david/commonty";
+/// `owner/name`, as dd.repo is (VERIFY_REPO, in the docs' index): nothing
+/// that could make the address anything but a repository's
+fn owner_name(repo: &str) -> bool {
+    let ok = |p: &str| {
+        !p.is_empty()
+            && !p.starts_with('.')
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    matches!(repo.split_once('/'), Some((o, n)) if ok(o) && ok(n))
+}
 
 /// The controls the assistant may point at, under the place they are on: a
 /// `data-guide` name our own pages give a button, what it is called there,
@@ -458,6 +471,7 @@ mod tests {
 
     fn docs() -> Value {
         json!({
+            "repo": "fleet/commonty",
             "home": "README.md",
             "groups": [{ "name": "Guide", "pages": ["guide/leaving.md"] }],
             "pages": {
@@ -684,11 +698,41 @@ mod tests {
             assert!(has(at, name), "{at}.{name}");
         }
         assert!(seen > 20, "{seen}");
-        assert_eq!(m["report"], "https://git.x/david/commonty/issues/new");
+        assert_eq!(m["report"], "https://git.x/fleet/commonty/issues/new");
         // the demo writes up nothing, and has none of Settings' controls
         let d = build(&tiles, Role::Demo, "x", &docs());
         assert!(d["report"].is_null());
         assert!(!d.to_string().contains("add-device"));
+    }
+
+    /// Bugs go to the fleet's own repository (dd.repo), never a name
+    /// written here, and only one shaped like owner/name
+    #[test]
+    fn bug_reports_go_to_the_fleets_repository() {
+        let report = |repo: Value| {
+            let mut d = docs();
+            d["repo"] = repo;
+            build(&tiles(), Role::Member, "x", &d)["report"].clone()
+        };
+        assert_eq!(
+            report(json!("someone/their-fork")),
+            "https://git.x/someone/their-fork/issues/new"
+        );
+        for not in [
+            json!(null),
+            json!(""),
+            json!("nameonly"),
+            json!("a/b/c"),
+            json!("../x"),
+            json!("a/b?x=1"),
+            json!("a/b#x"),
+            json!("evil.example/@x"),
+            json!(7),
+        ] {
+            assert!(report(not.clone()).is_null(), "{not}");
+        }
+        let src = include_str!("sitemap.rs");
+        assert!(!src.contains(&["david", "commonty"].join("/")));
     }
 
     #[test]
