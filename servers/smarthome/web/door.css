@@ -1,0 +1,23 @@
+/* The door's own pages: sign-in, people, pairing. What they add to home.css. */
+main.door { max-width: 760px; }
+.door .card { gap: 0; }
+.door h2 { margin: 32px 0 12px; }
+.door .rows li .who { font-weight: 600; }
+.door .rows li .fp { font-family: var(--mono); font-size: 13px; color: var(--ink-2); }
+.door .rows li .grow { flex: 1; }
+.door .rows .skeleton { height: 1.2em; width: 40%; background: var(--line-2); border-radius: var(--radius); }
+.door .empty { margin: 0; font-size: 15px; }
+.door .warn {
+  margin: 0 0 24px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.door .warn p { margin: 8px 0 0; color: var(--ink-2); font-size: 15px; }
+.door .warn ul { margin: 8px 0 0; padding-left: 20px; font-family: var(--mono); font-size: 13px; }
+.door .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 24px; }
+.door .actions button, .door .actions .button { margin-top: 0; }
+.door .code { font-family: var(--mono); font-size: 32px; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+
+.door .updates { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }

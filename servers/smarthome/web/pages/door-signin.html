@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in to your home</title>
+  <link rel="icon" href="/_door/static/favicon.svg">
+  <link rel="stylesheet" href="/_door/static/home.css">
+  <link rel="stylesheet" href="/_door/static/door.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_door/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="auth door">
+    <div class="auth-grid">
+      <section>
+        <h1>Sign in to your home</h1>
+        <p class="lead">Use the passkey you sign in to Commonty with. Only a signature leaves this device, and this home checks it itself.</p>
+        <div id="who" hidden>
+          <label for="name">Your Commonty name</label>
+          <input id="name" autocomplete="username" autocapitalize="none" spellcheck="false">
+          <p class="hint">This home does not know that passkey. With your name it can check it, and you can ask to be let in.</p>
+        </div>
+        <button id="go" type="button">Sign in with passkey</button>
+        <div id="msg" role="status"></div>
+      </section>
+      <aside>
+        <div class="aside-note">
+          <h2>In the Commonty app</h2>
+          <p>Open the app and choose Smart home: it signs in with this device's own key, with nothing to type.</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <script type="module" src="/_door/static/door-signin.js"></script>
+</body>
+</html>

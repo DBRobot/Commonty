@@ -74,6 +74,24 @@ fn member(e: &SignedEntry, members: &str, release: &str) -> R<bool> {
     ))
 }
 
+/// The release lists `e`'s root as its name's current root, and none of its
+/// roots is revoked (identity::anchored): an entry from before a recovery,
+/// or one let in only by an invite, is not enough.
+fn anchored(e: &SignedEntry, members: &str) -> R<()> {
+    let list: serde_json::Value = serde_json::from_str(members).map_err(|e| e.to_string())?;
+    let ids = |k: &str| -> Vec<String> {
+        list[k]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect()
+    };
+    let names: std::collections::BTreeMap<String, String> =
+        serde_json::from_value(list["names"].clone()).unwrap_or_default();
+    identity::anchored(e, &ids("members"), &ids("revoked"), &names).map_err(|e| e.to_string())
+}
+
 /// The member's passkey `id`, in `entry`, answering `challenge` (base64url),
 /// on the Worker's own page `origin` and nowhere else.
 pub fn login(entry: &str, id: &str, assertion: &str, challenge: &str, origin: &str) -> R<()> {
@@ -177,6 +195,89 @@ pub fn forget_due_js(
     .map_err(|e| JsValue::from_str(&e))
 }
 
+/// The words a member's root signs to give a home controller its name
+/// (docs/dev/home-controller.md): the name, and the controller's key.
+pub fn controller_name_message(label: &str, domain: &str, controller: &str) -> Vec<u8> {
+    identity::controller_name_message(&format!("{label}.home.{domain}"), controller)
+}
+
+/// A controller's label: 16 of base32's lowercase letters and digits, from its key,
+/// so the name says nothing about the house it is in
+pub fn valid_label(label: &str) -> bool {
+    label.len() == 16
+        && label
+            .bytes()
+            .all(|b| matches!(b, b'a'..=b'z' | b'2'..=b'7'))
+}
+
+/// `sig` (ed25519, base64) by `public` (base64) over `message`
+pub fn signed_by(public: &str, message: &[u8], sig: &str) -> bool {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use ed25519_dalek::Verifier;
+    let Ok(key) = identity::decode_public(public) else {
+        return false;
+    };
+    let Ok(sig) = B64.decode(sig.trim()) else {
+        return false;
+    };
+    let Ok(sig) = ed25519_dalek::Signature::from_slice(&sig) else {
+        return false;
+    };
+    key.verify(message, &sig).is_ok()
+}
+
+/// May `controller` take `<label>.home.<domain>`? Only on the word of a
+/// member's root, the one the release lists as theirs now (an old entry,
+/// from before a recovery, names nothing: its root may be a thief's). The
+/// member is who it returns. A box can sign none of this, so no box can name a
+/// controller, nor get a certificate for one's name.
+pub fn controller_name(
+    entry: &str,
+    label: &str,
+    controller: &str,
+    sig: &str,
+    domain: &str,
+    members: &str,
+) -> R<String> {
+    let e = parse(entry)?;
+    identity::verify(&e).map_err(|e| e.to_string())?;
+    if !valid_label(label) {
+        return Err("not a controller's label".into());
+    }
+    if identity::decode_public(controller).is_err() {
+        return Err("not a controller's key".into());
+    }
+    anchored(&e, members).map_err(|e| format!("not a member: {e}"))?;
+    // a passkey root answers on the gate's page for it (/_dd/controller-name)
+    identity::controller_name_signed(
+        &e.entry,
+        &format!("{label}.home.{domain}"),
+        controller,
+        sig,
+        &[format!("https://home.{domain}")],
+    )
+    .map_err(|_| "not signed by that member's root".to_string())?;
+    Ok(e.entry.name)
+}
+
+#[wasm_bindgen(js_name = controllerName)]
+pub fn controller_name_js(
+    entry: &str,
+    label: &str,
+    controller: &str,
+    sig: &str,
+    domain: &str,
+    members: &str,
+) -> Result<String, JsValue> {
+    controller_name(entry, label, controller, sig, domain, members)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
+#[wasm_bindgen(js_name = signedBy)]
+pub fn signed_by_js(public: &str, message: &str, sig: &str) -> bool {
+    signed_by(public, message.as_bytes(), sig)
+}
+
 #[wasm_bindgen(js_name = admit)]
 pub fn admit_js(
     name: &str,
@@ -260,7 +361,8 @@ mod tests {
 
         fn members(&self) -> String {
             let id = identity::member_id(&identity::encode_public(&self.root.verifying_key()));
-            serde_json::json!({ "members": [id], "revoked": [] }).to_string()
+            let names = serde_json::json!({ id.clone(): identity::name_tag(&id, "tester") });
+            serde_json::json!({ "members": [id], "revoked": [], "names": names }).to_string()
         }
 
         fn answer(&self, challenge: &[u8], rp: &str, flags: u8, origin: &str) -> String {
@@ -420,5 +522,204 @@ mod tests {
             "pk1",
             t.answer(&c, "commonty.org", 0b101, "https://home.commonty.org")
         ));
+    }
+
+    #[test]
+    fn an_entry_from_before_a_recovery_names_no_controller() {
+        use base64::engine::general_purpose::STANDARD as B64;
+        use ed25519_dalek::Signer as _;
+        let t = Tester::new();
+        let entry = serde_json::to_string(&t.entry(3)).unwrap();
+        let controller = identity::encode_public(
+            &ed25519_dalek::SigningKey::from_bytes(&[5; 32]).verifying_key(),
+        );
+        let label = &identity::controller_label(&controller).unwrap();
+        let sig = B64.encode(
+            t.root
+                .sign(&controller_name_message(label, "commonty.org", &controller))
+                .to_bytes(),
+        );
+        // the release now lists another root as the tester's: this one, from
+        // before, may be in a thief's hands
+        let old = identity::member_id(&identity::encode_public(&t.root.verifying_key()));
+        let new = identity::member_id(&identity::encode_public(
+            &ed25519_dalek::SigningKey::from_bytes(&[9; 32]).verifying_key(),
+        ));
+        let moved = serde_json::json!({
+            "members": [old, new.clone()],
+            "revoked": [],
+            "names": { new.clone(): identity::name_tag(&new, "tester") },
+        })
+        .to_string();
+        let e = controller_name(&entry, label, &controller, &sig, "commonty.org", &moved);
+        assert!(e.unwrap_err().contains("not a member"));
+        // and a list that names nobody as the tester's names nothing
+        let unnamed = serde_json::json!({ "members": [old], "revoked": [] }).to_string();
+        assert!(
+            controller_name(&entry, label, &controller, &sig, "commonty.org", &unnamed).is_err()
+        );
+        assert!(
+            controller_name(
+                &entry,
+                label,
+                &controller,
+                &sig,
+                "commonty.org",
+                &t.members()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_members_root_names_a_controller_and_nothing_else_does() {
+        use base64::engine::general_purpose::STANDARD as B64;
+        use ed25519_dalek::Signer as _;
+        let t = Tester::new();
+        let entry = serde_json::to_string(&t.entry(3)).unwrap();
+        let controller = identity::encode_public(
+            &ed25519_dalek::SigningKey::from_bytes(&[5; 32]).verifying_key(),
+        );
+        let label = &identity::controller_label(&controller).unwrap();
+        let sign = |k: &ed25519_dalek::SigningKey, label: &str, c: &str| {
+            B64.encode(
+                k.sign(&controller_name_message(label, "commonty.org", c))
+                    .to_bytes(),
+            )
+        };
+        let good = sign(&t.root, label, &controller);
+        let name = controller_name(
+            &entry,
+            label,
+            &controller,
+            &good,
+            "commonty.org",
+            &t.members(),
+        );
+        assert_eq!(name.unwrap(), "tester");
+
+        // someone else's key, a box's for instance
+        let other = sign(
+            &ed25519_dalek::SigningKey::from_bytes(&[8; 32]),
+            label,
+            &controller,
+        );
+        assert!(
+            controller_name(
+                &entry,
+                label,
+                &controller,
+                &other,
+                "commonty.org",
+                &t.members()
+            )
+            .is_err()
+        );
+        // the root's word for another name, or another controller, or another fleet
+        assert!(
+            controller_name(
+                &entry,
+                "bbbbbbbbbbbbbbbb",
+                &controller,
+                &good,
+                "commonty.org",
+                &t.members()
+            )
+            .is_err()
+        );
+        let swapped = identity::encode_public(
+            &ed25519_dalek::SigningKey::from_bytes(&[6; 32]).verifying_key(),
+        );
+        assert!(
+            controller_name(&entry, label, &swapped, &good, "commonty.org", &t.members()).is_err()
+        );
+        assert!(
+            controller_name(
+                &entry,
+                label,
+                &controller,
+                &good,
+                "example.org",
+                &t.members()
+            )
+            .is_err()
+        );
+        // not a member any more
+        let id = identity::member_id(&identity::encode_public(&t.root.verifying_key()));
+        let gone = serde_json::json!({ "members": [], "revoked": [id] }).to_string();
+        assert!(controller_name(&entry, label, &controller, &good, "commonty.org", &gone).is_err());
+        // a label that could carry a word
+        let word = sign(&t.root, "living-room", &controller);
+        assert!(
+            controller_name(
+                &entry,
+                "living-room",
+                &controller,
+                &word,
+                "commonty.org",
+                &t.members()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_passkey_root_names_a_controller_on_the_gates_page_alone() {
+        use base64::engine::general_purpose::STANDARD as B64;
+        let t = Tester::new();
+        // the same member, but the root is the passkey
+        let mut e = t.entry(3).entry;
+        let cred = e.passkeys[0].cred.clone();
+        e.root = identity::passkey_root("pk1", &cred);
+        e.devices.clear();
+        let answer_b64 = |challenge: &[u8], origin: &str| {
+            B64.encode(t.answer(challenge, "commonty.org", 0x05, origin))
+        };
+        let sig = answer_b64(
+            &identity::challenge(&e).unwrap(),
+            "https://home.commonty.org",
+        );
+        let signed = SignedEntry {
+            entry: e.clone(),
+            signature: sig,
+            recovery_signature: None,
+        };
+        identity::verify(&signed).unwrap();
+        let id = identity::member_id(&e.root);
+        let members = serde_json::json!({
+            "members": [id.clone()],
+            "revoked": [],
+            "names": { id.clone(): identity::name_tag(&id, "tester") },
+        })
+        .to_string();
+        let entry = serde_json::to_string(&signed).unwrap();
+        let controller = identity::encode_public(
+            &ed25519_dalek::SigningKey::from_bytes(&[5; 32]).verifying_key(),
+        );
+        let label = &identity::controller_label(&controller).unwrap();
+        let msg = controller_name_message(label, "commonty.org", &controller);
+        let challenge = <sha2::Sha256 as sha2::Digest>::digest(&msg);
+        let good = answer_b64(&challenge, "https://home.commonty.org");
+        assert_eq!(
+            controller_name(&entry, label, &controller, &good, "commonty.org", &members).unwrap(),
+            "tester"
+        );
+        // answered on another page, or for another controller
+        let elsewhere = answer_b64(&challenge, "https://evil.commonty.org");
+        assert!(
+            controller_name(
+                &entry,
+                label,
+                &controller,
+                &elsewhere,
+                "commonty.org",
+                &members
+            )
+            .is_err()
+        );
+        let other = identity::encode_public(
+            &ed25519_dalek::SigningKey::from_bytes(&[6; 32]).verifying_key(),
+        );
+        assert!(controller_name(&entry, label, &other, &good, "commonty.org", &members).is_err());
     }
 }

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pair this home controller</title>
+  <link rel="icon" href="/_door/static/favicon.svg">
+  <link rel="stylesheet" href="/_door/static/home.css">
+  <link rel="stylesheet" href="/_door/static/door.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_door/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="auth door">
+    <section class="card">
+      <h1>Pair this home controller</h1>
+      <p><span class="state-word" data-state="working" id="state">Looking</span></p>
+      <p class="lead" id="text">Checking how far pairing has got.</p>
+    </section>
+  </main>
+  <script type="module" src="/_door/static/door-pair.js"></script>
+</body>
+</html>

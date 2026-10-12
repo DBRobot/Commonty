@@ -29,7 +29,7 @@ pkgs.runCommand "commonty-windows-installs"
     wineserver -w || true
     dir=$(find $WINEPREFIX/drive_c/users -maxdepth 4 -type d -path "*AppData/Local/Commonty" | head -1)
     [ -n "$dir" ] || { echo "no Commonty in AppData:"; find $WINEPREFIX/drive_c/users -maxdepth 4; exit 1; }
-    for f in commonty.exe commontynet.dll uninstall.exe; do
+    for f in commonty.exe commontynet.dll dd-hub-writer.exe uninstall.exe; do
       [ -s "$dir/$f" ] || { echo "the installer left out $f"; exit 1; }
     done
     mkdir $out

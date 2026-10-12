@@ -5,14 +5,20 @@
 
 mod account;
 mod browser;
+mod controllers;
 mod export;
 mod handoff;
+#[cfg(desktop)]
+mod installer;
 mod local;
 mod net;
 mod paths;
 mod photos;
 mod site;
+mod smarthome;
 mod vpn;
+#[cfg(desktop)]
+mod writer;
 mod zip;
 
 /// the keystore this app keeps its device key in: its own, so an app beside
@@ -105,6 +111,8 @@ pub fn run() {
             // member's browser from its own release (local.rs)
             local::start(app.handle());
             links(app.handle());
+            // Smart home, the same way (smarthome.rs)
+            smarthome::start(app.handle());
             // GTK draws the title bar itself on Wayland, with the buttons its
             // settings name. Built with Nix, the app brings GNOME's own
             // default - a close button alone - and never sees the one the

@@ -305,6 +305,8 @@ mod tests {
 pub(crate) mod http {
     //! GET /_dd/signins, POST /_dd/signins/end, and the locked device names
     //! at /_dd/devices/names - the Devices tab's (servers/fleet/web/devices.js).
+    //! The locked list of the member's home controllers at /_dd/controllers
+    //! is kept the same way (docs/dev/home-controller.md).
     use std::sync::Arc;
 
     use axum::Json;
@@ -442,6 +444,67 @@ pub(crate) mod http {
             return StatusCode::PAYLOAD_TOO_LARGE.into_response();
         }
         let Some(p) = names_file(&app, &user) else {
+            return StatusCode::BAD_REQUEST.into_response();
+        };
+        let ok = p
+            .parent()
+            .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+            && crate::private::write(&p, &body).is_ok();
+        if ok {
+            StatusCode::NO_CONTENT.into_response()
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+
+    fn controllers_file(app: &App, user: &str) -> Option<std::path::PathBuf> {
+        crate::valid_user(user).then(|| {
+            app.state_dir
+                .join("controllers")
+                .join(format!("{user}.bin"))
+        })
+    }
+
+    /// A member, by session or by a device's token: the app keeps this
+    /// list from its own side, not from a page with a session.
+    #[allow(clippy::result_large_err)]
+    fn holder(app: &App, headers: &HeaderMap) -> Result<String, Response> {
+        let user = app
+            .identify(headers, "access")
+            .ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())?;
+        if user == pages::DEMO_USER || !app.member(&user) {
+            return Err(StatusCode::FORBIDDEN.into_response());
+        }
+        Ok(user)
+    }
+
+    /// The member's home controllers (label, name, key), locked with their
+    /// library key in the app or the browser: this box keeps the bytes, and
+    /// cannot tell whether a household has a controller at all from them.
+    pub(crate) async fn controllers(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+        let user = match holder(&app, &headers) {
+            Ok(u) => u,
+            Err(r) => return r,
+        };
+        match controllers_file(&app, &user).and_then(|p| std::fs::read(p).ok()) {
+            Some(b) => b.into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        }
+    }
+
+    pub(crate) async fn put_controllers(
+        State(app): State<Arc<App>>,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> Response {
+        let user = match holder(&app, &headers) {
+            Ok(u) => u,
+            Err(r) => return r,
+        };
+        if body.len() > 64 * 1024 {
+            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        }
+        let Some(p) = controllers_file(&app, &user) else {
             return StatusCode::BAD_REQUEST.into_response();
         };
         let ok = p

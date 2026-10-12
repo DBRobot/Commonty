@@ -259,6 +259,21 @@ let
       ) first
     );
 
+  # Home Assistant's history on a home controller (modules/smarthome)
+  homeAssistant =
+    name: c:
+    let
+      keep = c.services.home-assistant.config.recorder.purge_keep_days or null;
+    in
+    lib.optionals c.services.home-assistant.enable (
+      if keep == null then
+        [ "${name}: Home Assistant's history is kept with no purge_keep_days" ]
+      else
+        lib.optional (
+          keep > limitMin / 1440
+        ) "${name}: Home Assistant keeps ${toString keep} days of history"
+    );
+
   problems = lib.concatLists (
     lib.mapAttrsToList (
       name: sys:
@@ -271,6 +286,7 @@ let
       ++ journald name c
       ++ nginxLog name c
       ++ chain name c
+      ++ homeAssistant name c
     ) self.nixosConfigurations
   );
 in

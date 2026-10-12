@@ -471,12 +471,20 @@ pub(crate) async fn tick(app: &App) {
                     }
                 }
             }
+            // the home controllers they vouched for: their backups
+            match crate::controller::forget(&app.controllers, g, &l.name).await {
+                Ok(k) => n += k,
+                Err(e) => {
+                    ok = false;
+                    eprintln!("leaving: member {}: a controller's backup: {e:#}", l.id);
+                }
+            }
             if ok {
                 app.directory
                     .leaving
                     .mark(&l.name, l.left, |w| _ = w.done.insert("libraries".into()));
                 eprintln!(
-                    "leaving: member {}: libraries and disk images gone ({n} object(s))",
+                    "leaving: member {}: libraries, disk images and controllers' backups gone ({n} object(s))",
                     l.id
                 );
             }
@@ -521,13 +529,18 @@ pub(crate) async fn tick(app: &App) {
 }
 
 /// what this box's gate keeps of someone: the names they gave their
-/// devices, their notes on films, their friends, their sign-ins
+/// devices, their locked list of home controllers, their notes on films, their friends, their sign-ins
 fn forget_here(app: &App, l: &Leaver) -> anyhow::Result<()> {
     let gone = |p: PathBuf| match std::fs::remove_file(&p) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
     };
     gone(app.state_dir.join("names").join(format!("{}.bin", l.name)))?;
+    gone(
+        app.state_dir
+            .join("controllers")
+            .join(format!("{}.bin", l.name)),
+    )?;
     anyhow::ensure!(identity::valid_name(&l.name), "not a name");
     let notes = app.state_dir.join("notes");
     for id in l.libraries.iter().filter(|id| well_formed(id)) {

@@ -141,8 +141,10 @@ gate (every box)   names/<name>.bin, notes on their libraries and their
                    progress in others', friendships, their own guest
                    record, their sign-in history                   leaving.rs
 libraries          every object under each of their libraries' prefixes
-                   and images-<name>, trash and all (the gate that holds
-                   the bucket key)                                 dav.rs forget
+                   and images-<name>, trash and all, and the backups of
+                   the home controllers they vouched for
+                   (controllers/<label>/), with the gate's record of
+                   them (the gate that holds the bucket key)       dav.rs forget, controller.rs
 photos             their Ente account, through museum's admin delete with
                    the ledger's admin login, every 5 minutes      dd forget-photos
 passwords          their Vaultwarden account, through upstream's admin
@@ -222,7 +224,9 @@ refused; a second member removed by the owner keeps their library until
 the window is out, then loses it; nobody else's is touched. The schedule is
 unit-tested in leaving.rs, the statement in the identity crate, the
 Worker's check in client/mail, the games manager's share in its own
-tests, and the library prefix check in dav.rs.
+tests, the library prefix check in dav.rs, and a home controller's
+backups (only those its member vouched for, and the records with them) in
+controller.rs and dav.rs.
 
 ## Announcing a change
 

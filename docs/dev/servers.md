@@ -102,6 +102,7 @@ in `nix/tests/` unless it says otherwise; "crate tests" run in
 | `library` | the libraries bucket behind the gate: presigned urls, listing, trash, WebDAV; members' disk images (`/_dd/images`) | `src/` (in the gate); `library/libraries.nix` | `library`, crate tests | [libraries.md](libraries.md) |
 | `media` | the Movies & TV page and its player | page; `media/webdav-media.nix` | `library`, `transcode` | [libraries.md](libraries.md) |
 | `observe` | the Metrics page over Thanos | page; `observe/metrics-ui.nix` | `metrics`, `thanos`, `metrics-ui` | - |
+| `smarthome` | Smart home: the door in front of Home Assistant on a household's home controller (a Pi, not a box), and Home Assistant's Commonty theme | `door/` (crate smarthome-door), `web/`, `theme/`; `smarthome/home-assistant.nix`, `smarthome/door.nix`, `smarthome/tang.nix`, `smarthome/cache-door.nix`; the system in `nix/controller` | `home-controller`, `dns-worker`, crate tests | [home-controller.md](home-controller.md) |
 | `photos` | Ente, patched, and the gate's Photos sign-in | patches, `templates/`, `web/`; `photos/ente.nix`; gate `photos.rs`, `demo_photos.rs` | `photos`, `pgrestore`, crate tests | [packaged.md](packaged.md) |
 | `system/control` | the control plane | Go; `box/control.nix` | `checks.control` | [control-plane.md](control-plane.md) |
 | `system/release` | the release agent and attestation | `src/`; `box/agent.nix` | `release`, crate tests | [releases.md](releases.md) |

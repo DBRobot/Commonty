@@ -377,6 +377,73 @@ function services(m, list) {
   }));
 }
 
+// Smart home: a tile for the household's home controller, drawn here from
+// the member's own locked list and never from /_dd/me - no box knows a
+// home has one (docs/dev/home-controller.md). The app opens the list with
+// the device's keys; a browser shows what Settings, Network last opened
+// there with the passkey.
+// the same drawing as servers/web-shared/icons/smarthome.svg
+const SMART_HOME = '<path d="M3 9.5 10 3.5l7 6"/><path d="M5 8v8.5h10V8"/><circle cx="10" cy="12" r="1.6"/>';
+
+/// the account's home controllers as this device last saw them
+export function keptControllers(user) {
+  try { return JSON.parse(localStorage.getItem(`dd-controllers:${user}`) || 'null'); } catch { return null; }
+}
+export function keepControllers(user, list) {
+  try { localStorage.setItem(`dd-controllers:${user}`, JSON.stringify(list)); } catch { /* shown again next time it is opened */ }
+}
+
+/// Smart home in this window: the app's own server, signed in and held to
+/// the controller's key (app/src/smarthome.rs); a browser goes straight there
+export async function openSmartHome(name) {
+  if (!inApp) {
+    location.href = `https://${name}/`;
+    return;
+  }
+  const r = await appFetch('/_dd/app/smarthome/open', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) });
+  if (!r.ok) throw new Error((await r.text()) || `the app said ${r.status}`);
+  location.href = (await r.json()).url;
+}
+
+function smartHome(m, list) {
+  const appHere = inApp && !appOrigin;
+  if (m.demo || m.role !== 'member') return;
+  const draw = (all) => {
+    for (const t of list.querySelectorAll('li.smart-home')) t.remove();
+    for (const c of all || []) {
+      // on Photos' host in the app's window the app's routes are not here:
+      // back to the app's own pages, where the tile opens it
+      const row = el('a', { class: 'service', href: appHere ? '#' : appOrigin ? `${appPages}/` : `https://${c.name}/` });
+      row.style.setProperty('--c', '#3f7f6a');
+      row.append(
+        mark({ icon: SMART_HOME }),
+        el('span', {},
+          el('span', { class: 'name', text: 'Smart home' }),
+          el('span', { class: 'blurb', text: 'Your home\'s lights, sensors and switches' })),
+        el('span', { class: 'host', text: c.name }),
+        el('span', { class: 'open', text: 'Open' }));
+      if (appHere) {
+        row.addEventListener('click', (e) => {
+          e.preventDefault();
+          openSmartHome(c.name).catch((err) => { row.querySelector('.blurb').textContent = String(err.message || err); });
+        });
+      }
+      list.append(el('li', { class: 'smart-home' }, row));
+    }
+  };
+  const old = keptControllers(m.user);
+  if (old) draw(old);
+  if (!appHere) return;
+  appFetch('/_dd/app/controllers')
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((fresh) => {
+      if (JSON.stringify(fresh) === JSON.stringify(old)) return;
+      keepControllers(m.user, fresh);
+      draw(fresh);
+    })
+    .catch(() => {});
+}
+
 // ---- the search in the bar, and the docs beside it
 
 /// A heading's anchor, the same here and on the docs page
@@ -585,7 +652,10 @@ me().then((m) => {
   links(m);
   if (m.role === 'guest' && document.getElementById('services')) guestHome(m);
   const list = document.getElementById('services');
-  if (list) services(m, list);
+  if (list) {
+    services(m, list);
+    if (list.isConnected) smartHome(m, list);
+  }
   const banner = document.getElementById('demo');
   if (banner) banner.hidden = !m.demo;
   for (const e of document.querySelectorAll('[data-user]')) e.dataset.user = m.user;

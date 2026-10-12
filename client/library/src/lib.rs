@@ -75,8 +75,11 @@ pub fn seal_to(public_ed25519_b64: &str, secret: &[u8]) -> Result<String> {
     Ok(B64.encode(sealed))
 }
 
-/// open what was sealed to this ed25519 signing key
-pub fn open_with(secret_ed25519: &ed25519_dalek::SigningKey, sealed_b64: &str) -> Result<Key> {
+/// open what was sealed to this ed25519 signing key, whatever its length
+pub fn open_bytes_with(
+    secret_ed25519: &ed25519_dalek::SigningKey,
+    sealed_b64: &str,
+) -> Result<Zeroizing<Vec<u8>>> {
     let h = sha2::Sha512::digest(secret_ed25519.to_bytes());
     let mut scalar = [0u8; 32];
     scalar.copy_from_slice(&h[..32]);
@@ -87,7 +90,14 @@ pub fn open_with(secret_ed25519: &ed25519_dalek::SigningKey, sealed_b64: &str) -
     let sealed = B64
         .decode(sealed_b64)
         .map_err(|e| Error::Key(e.to_string()))?;
-    let opened = sk.unseal(&sealed).map_err(|_| Error::Sealed)?;
+    Ok(Zeroizing::new(
+        sk.unseal(&sealed).map_err(|_| Error::Sealed)?,
+    ))
+}
+
+/// open a key sealed to this ed25519 signing key
+pub fn open_with(secret_ed25519: &ed25519_dalek::SigningKey, sealed_b64: &str) -> Result<Key> {
+    let opened = open_bytes_with(secret_ed25519, sealed_b64)?;
     let arr: [u8; 32] = opened[..]
         .try_into()
         .map_err(|_| Error::Key("sealed key is not 32 bytes".into()))?;

@@ -293,6 +293,13 @@ control.json         validators [{id, name, key}]: each voting box's
 control-worker.json  {domain, account, zone, script}: where the relay is
 mail.json            {domain, account, zone, kv, script}: where the mail
                      Worker is; the gateway role reads it
+devices.json         systems the fleet builds and signs that run on a
+                     household's device, not a box: today home-controller
+                     (home-controller.md). CI builds each like a box's
+                     system, dd release publish signs it beside them
+tang.json            {<box>: {url, thp}}: each house box's Tang and its key's
+                     thumbprint (`tang-show-keys 7654` on the box), built
+                     into the home controller's image, which takes no other
 layout.nix           the disk: a 1G ESP, the rest one ZFS pool (tank) with
                      system/root (reserved 2G), system/nix, system/var and
                      home; under <pool>/enc when encrypted

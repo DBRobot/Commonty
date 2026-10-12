@@ -45,6 +45,10 @@ struct Args {
     /// the verifier's port, probed after a switch
     #[arg(long, env = "DD_AGENT_VERIFY_PORT", default_value = "4181")]
     verify_port: u16,
+    /// whether sshd must be up after a switch: a box's is its way in; a home
+    /// controller runs none
+    #[arg(long, env = "DD_AGENT_SSH", default_value_t = true, action = clap::ArgAction::Set)]
+    ssh: bool,
     /// host:port of the other boxes, whitespace separated. A release that
     /// takes away the reach this box had before it is rolled back: the
     /// switch may not strand the box, however healthy it looks from here.
@@ -241,6 +245,13 @@ fn run(args: &Args) -> Result<String> {
         Some(b) => b.clone(),
         None => hostname()?,
     };
+    // the household held this home controller's updates, at its door
+    // (servers/smarthome/door, updates.rs): nothing moves until they let go.
+    // No box ever has the file.
+    if args.state.join("hold").exists() {
+        record(args, &name, read_counter(&args.state), "held");
+        return Ok("updates are held".into());
+    }
     let trusted = release::decode_public(
         fs::read_to_string(&args.key_file)
             .with_context(|| format!("release key {}", args.key_file.display()))?
@@ -676,9 +687,11 @@ fn probe(args: &Args, before: &[String]) -> Result<()> {
     if !failed.is_empty() {
         bail!("failed units: {}", failed.join(" ").trim());
     }
-    let ssh = sh("systemctl", &["is-active", "sshd.service"])?;
-    if ssh.trim() != "active" {
-        bail!("sshd is {}", ssh.trim());
+    if args.ssh {
+        let ssh = sh("systemctl", &["is-active", "sshd.service"])?;
+        if ssh.trim() != "active" {
+            bail!("sshd is {}", ssh.trim());
+        }
     }
     std::net::TcpStream::connect_timeout(
         &([127, 0, 0, 1], args.verify_port).into(),
