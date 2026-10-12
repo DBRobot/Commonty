@@ -625,10 +625,11 @@ in
                 "frame-ancestors ${
                   lib.concatMapStringsSep " " (h: "https://${h}") (
                     [ base ]
-                    ++ lib.concatMap (n: [
-                      "${n}.${base}"
-                      "demo-${n}.${base}"
-                    ]) guidePages
+                    ++ map (n: "${n}.${base}") guidePages
+                    # a demo- name only where the demo has a door (roles/gateway.nix)
+                    ++ map (n: "demo-${n}.${base}") (
+                      lib.intersectLists guidePages (lib.attrByPath [ "dd" "public" "demoDoors" ] [ ] config)
+                    )
                   )
                 }"
                 "report-uri /_dd/csp"
