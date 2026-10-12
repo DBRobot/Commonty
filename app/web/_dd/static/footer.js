@@ -31,8 +31,13 @@ const mark = '<rect x="1" y="1" width="9" height="9" fill="none" stroke="current
   + '<rect x="1" y="12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.6"/>'
   + '<rect x="12" y="12" width="9" height="9" fill="#9CC3EA"/>';
 
+// only on our own pages: Photos' and Passwords' apps carry the shell for
+// the bar but not our stylesheet, and a footer there is unstyled and in
+// the way of a full-screen app
+const ours = () => !!document.querySelector('link[rel="stylesheet"][href*="/_dd/static/home.css"], link[rel="stylesheet"][href*="/_dd/static/landing.css"]');
+
 export function footer() {
-  if (inApp || document.querySelector('footer.dd-foot')) return;
+  if (inApp || !ours() || document.querySelector('footer.dd-foot')) return;
   const base = bareName();
   const site = `https://${base}`;
   const home = `https://home.${base}`;
