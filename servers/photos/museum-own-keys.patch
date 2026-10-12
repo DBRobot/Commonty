@@ -1,0 +1,169 @@
+diff --git a/cmd/museum/dd_rekey.go b/cmd/museum/dd_rekey.go
+new file mode 100644
+index 0000000..5fb02d2
+--- /dev/null
++++ b/cmd/museum/dd_rekey.go
+@@ -0,0 +1,151 @@
++package main
++
++// Commonty: museum's keys are this box's own, made here, and a box that
++// takes photos over starts with keys of its own. What museum encrypted and
++// hashed with the keys before - each account's email - is made again with
++// these, from the address kept beside it (users.dd_email). That address is
++// only ever <member>@users.<the fleet's domain>: a member's name, not a
++// secret. An address outside that domain is never kept, and its account is
++// not carried over to new keys.
++
++import (
++	"crypto/sha256"
++	"database/sql"
++	"encoding/hex"
++	"strings"
++	"time"
++
++	"github.com/ente-io/museum/pkg/utils/crypto"
++	log "github.com/sirupsen/logrus"
++)
++
++func ddFingerprint(enc, hash []byte) string {
++	h := sha256.New()
++	h.Write(enc)
++	h.Write(hash)
++	return hex.EncodeToString(h.Sum(nil))
++}
++
++// ddRekey runs before museum serves anything
++func ddRekey(db *sql.DB, enc, hash []byte, suffix string) {
++	suffix = strings.ToLower(suffix)
++	if suffix == "" {
++		log.Fatal("dd rekey: no local-domain-suffix, so no address can be kept")
++	}
++	for _, q := range []string{
++		`ALTER TABLE users ADD COLUMN IF NOT EXISTS dd_email TEXT`,
++		`CREATE TABLE IF NOT EXISTS dd_keys (id INT PRIMARY KEY, fingerprint TEXT NOT NULL)`,
++	} {
++		if _, err := db.Exec(q); err != nil {
++			log.Fatalf("dd rekey: %v", err)
++		}
++	}
++	fp := ddFingerprint(enc, hash)
++	var was string
++	if err := db.QueryRow(`SELECT fingerprint FROM dd_keys WHERE id = 1`).Scan(&was); err != nil && err != sql.ErrNoRows {
++		log.Fatalf("dd rekey: %v", err)
++	}
++	if was != fp {
++		if err := ddReencrypt(db, enc, hash, fp, was != ""); err != nil {
++			log.Fatalf("dd rekey: %v", err)
++		}
++	}
++	ddKeep(db, enc, suffix)
++	go func() {
++		for {
++			time.Sleep(time.Minute)
++			ddKeep(db, enc, suffix)
++		}
++	}()
++}
++
++// ddReencrypt makes every kept address's email fields again under these
++// keys, and records them as the keys the table is under: all at once
++func ddReencrypt(db *sql.DB, enc, hash []byte, fp string, moved bool) error {
++	tx, err := db.Begin()
++	if err != nil {
++		return err
++	}
++	defer tx.Rollback()
++	if moved {
++		rows, err := tx.Query(`SELECT user_id, dd_email FROM users WHERE dd_email IS NOT NULL`)
++		if err != nil {
++			return err
++		}
++		type acct struct {
++			id    int64
++			email string
++		}
++		var all []acct
++		for rows.Next() {
++			var a acct
++			if err := rows.Scan(&a.id, &a.email); err != nil {
++				rows.Close()
++				return err
++			}
++			all = append(all, a)
++		}
++		rows.Close()
++		for _, a := range all {
++			e, err := crypto.Encrypt(a.email, enc)
++			if err != nil {
++				return err
++			}
++			h, err := crypto.GetHash(a.email, hash)
++			if err != nil {
++				return err
++			}
++			if _, err := tx.Exec(`UPDATE users SET encrypted_email = $1, email_decryption_nonce = $2, email_hash = $3 WHERE user_id = $4`, e.Cipher, e.Nonce, h, a.id); err != nil {
++				return err
++			}
++		}
++		var lost int
++		if err := tx.QueryRow(`SELECT count(*) FROM users WHERE dd_email IS NULL AND encrypted_email IS NOT NULL`).Scan(&lost); err != nil {
++			return err
++		}
++		// codes asked for under the old keys are for nobody now
++		if _, err := tx.Exec(`DELETE FROM otts`); err != nil {
++			return err
++		}
++		log.Printf("dd rekey: new keys; %d accounts carried over, %d without a kept address are not", len(all), lost)
++	}
++	if _, err := tx.Exec(`INSERT INTO dd_keys (id, fingerprint) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET fingerprint = $1`, fp); err != nil {
++		return err
++	}
++	return tx.Commit()
++}
++
++// ddKeep keeps the address of every account under the fleet's domain
++// that has none kept yet
++func ddKeep(db *sql.DB, enc []byte, suffix string) {
++	rows, err := db.Query(`SELECT user_id, encrypted_email, email_decryption_nonce FROM users WHERE dd_email IS NULL AND encrypted_email IS NOT NULL`)
++	if err != nil {
++		log.Printf("dd rekey: %v", err)
++		return
++	}
++	type found struct {
++		id    int64
++		email string
++	}
++	var keep []found
++	for rows.Next() {
++		var id int64
++		var c, n []byte
++		if rows.Scan(&id, &c, &n) != nil {
++			continue
++		}
++		email, err := crypto.Decrypt(c, enc, n)
++		if err != nil {
++			continue
++		}
++		if e := strings.ToLower(strings.TrimSpace(email)); strings.HasSuffix(e, suffix) {
++			keep = append(keep, found{id, e})
++		}
++	}
++	rows.Close()
++	for _, f := range keep {
++		if _, err := db.Exec(`UPDATE users SET dd_email = $1 WHERE user_id = $2 AND dd_email IS NULL`, f.email, f.id); err != nil {
++			log.Printf("dd rekey: %v", err)
++		}
++	}
++}
+diff --git a/cmd/museum/main.go b/cmd/museum/main.go
+index e8c6ac3..c26448e 100644
+--- a/cmd/museum/main.go
++++ b/cmd/museum/main.go
+@@ -134,6 +134,7 @@ func main() {
+ 
+ 	db := setupDatabase()
+ 	defer db.Close()
++	ddRekey(db, secretEncryptionKeyBytes, hashingKeyBytes, viper.GetString("internal.hardcoded-ott.local-domain-suffix"))
+ 
+ 	hostName, err := os.Hostname()
+ 	if err != nil {

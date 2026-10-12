@@ -8,7 +8,12 @@
     grows = [ "passwords" ];
     # one vault: its records are one database
     instances = 1;
+    lease = true;
+    # attachments and Sends, encrypted on their owners' devices
+    buckets.vaultwarden = { };
+    hosts = [ "vault" ];
     units = [
+      "vaultwarden"
       "dd-vault-end"
       "dd-usage-vaultwarden"
       "dd-vault-admin-token"
@@ -37,6 +42,9 @@
         # and sessions are per box, so this box is the gateway's
         # (fleet/roles.json: with gateway)
         dd-verify.local = true;
+        # where the gateway's names point, home.<domain> among them: the
+        # network's lease's box (failover)
+        headscale.local = true;
         pwned-list.local = true; # breach checks never leave the box
       };
       privacy = "metadata"; # vaults are ciphertext; it sees names, emails, when things change
@@ -47,6 +55,9 @@
     what = "Send links: one thing shared with anyone, opened without an account";
     # it serves the page a Send is decrypted in
     trust = "owner";
+    # the vault's sign-in secret with failover on: made wherever the vault
+    # is carried, as the gate on every such box reads it
+    units = [ "dd-vault-keys" ];
     alwaysOn = true;
     servesCode = true; # the Send page decrypts in the visitor's browser
     base = {

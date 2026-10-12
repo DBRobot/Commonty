@@ -6,11 +6,17 @@
     trust = "owner";
     alwaysOn = true;
     units = [
+      "headscale"
       "headscale-seed"
       "headscale-snapshot"
+      "dd-headscale-copy" # its database, sealed, into the store (follow.nix)
     ];
-    # one control server for the fleet; its database is the network
+    # one control server for the fleet; its database is the network. It
+    # follows its lease, and the gateway's names follow it
     instances = 1;
+    lease = true;
+    buckets.headscale = { };
+    hosts = [ "headscale" ];
     base = {
       # a sqlite database and its key: tiny, a floor for thousands of devices
       requires.disk.size.min = "1G";
@@ -26,6 +32,9 @@
       depends = {
         nginx.local = true;
         dd-verify.local = true; # mints join keys with its api key
+        # the gateway's box is where the databases are: the vault signs in
+        # through it, and the services with one writer move as one
+        postgresql.local = true;
       };
       privacy = "metadata"; # who has which devices, and when they were on
     };

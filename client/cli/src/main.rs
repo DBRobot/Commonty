@@ -607,6 +607,9 @@ enum DnsCmd {
         #[arg(long, default_value = "main")]
         r#ref: String,
     },
+    /// Once, for failover: give the Worker the token it makes each box's own
+    /// tunnel with
+    Tunnels,
 }
 
 #[derive(Subcommand)]
@@ -1397,6 +1400,7 @@ async fn main() -> Result<()> {
             match cmd {
                 DnsCmd::Setup { domain } => dns_worker::setup(&root, &keys, &domain).await?,
                 DnsCmd::Deploy { r#ref } => dns_worker::deploy(&root, &keys, &r#ref).await?,
+                DnsCmd::Tunnels => dns_worker::tunnels(&root, &keys).await?,
             }
         }
 

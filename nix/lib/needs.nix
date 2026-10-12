@@ -23,5 +23,16 @@ let
       { needs = lib.foldl' (a: f: a // import f) { } files; }
     ];
   };
+  # services switched by the control plane are, until the fleet's owner
+  # turns failover on (fleet/policy.json failover), where their roles put
+  # them, as before: one switch for every box at once
+  on = (lib.importJSON ../../fleet/policy.json).failover or false;
 in
-checked.config.needs
+lib.mapAttrs (
+  _: n:
+  n
+  // {
+    placed = n.placed && on;
+    lease = n.lease && on;
+  }
+) checked.config.needs

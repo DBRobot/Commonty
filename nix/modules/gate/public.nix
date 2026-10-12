@@ -31,6 +31,17 @@ let
   demoParents = map (h: "${h}.${base}") cfg.demoDoors;
   demoNames = map (h: "demo-${h}.${base}") cfg.demoDoors;
   outside = publicNames ++ demoNames;
+  # the same rules, as cloudflared reads them from a config of this box's own
+  ingress =
+    map (host: {
+      hostname = host;
+      service = "https://127.0.0.1:${toString tunnelPort}";
+      originRequest.originServerName = host;
+    }) outside
+    ++ [ { service = "http_status:404"; } ];
+  doorAsk = pkgs.writeShellScript "door-ask" (
+    builtins.readFile ./box-sign.sh + builtins.readFile ./door-ask.sh
+  );
 in
 {
   options.dd.public = {
@@ -56,6 +67,11 @@ in
     credentialsFile = lib.mkOption {
       type = lib.types.path;
       description = "cloudflared's credentials json for the tunnel (AccountTag, TunnelSecret, TunnelID)";
+    };
+    ownTunnel = lib.mkOption {
+      type = lib.types.bool;
+      default = (config.dd.failover or false) && config.dd.dnsWorker != "";
+      description = "a tunnel of this box's own, made through the DNS Worker with a secret this box makes (door-ask.sh), in place of the one tunnel and its credentials file: with failover, every box able to be the gateway has its door ready, and the names follow the gateway's lease";
     };
     tokenFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
@@ -101,8 +117,9 @@ in
     # over tcp: quic to the edge kept dropping through the carrier's nat
     # ("no recent network activity" every minute); http2 holds
     systemd.services."cloudflared-tunnel-${cfg.tunnel}".environment.TUNNEL_TRANSPORT_PROTOCOL =
-      lib.mkIf cfg.enable "http2";
-    services.cloudflared = lib.mkIf cfg.enable {
+      lib.mkIf (cfg.enable && !cfg.ownTunnel)
+        "http2";
+    services.cloudflared = lib.mkIf (cfg.enable && !cfg.ownTunnel) {
       enable = true;
       tunnels.${cfg.tunnel} = {
         credentialsFile = cfg.credentialsFile;
@@ -111,6 +128,87 @@ in
           service = "https://127.0.0.1:${toString tunnelPort}";
           originRequest.originServerName = host;
         });
+      };
+    };
+
+    # This box's own door: its tunnel asked for once, with its own secret,
+    # then run as the one above is. Up on every box able to be the gateway,
+    # whether it is now or not: the names decide which one is used
+    systemd.services.dd-door = lib.mkIf (cfg.enable && cfg.ownTunnel) {
+      description = "This box's own tunnel to the front door";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      startLimitIntervalSec = 0;
+      path = [
+        pkgs.cloudflared
+        pkgs.openssl
+        pkgs.jq
+        pkgs.curl
+        pkgs.tpm2-tools
+        pkgs.coreutils
+      ];
+      environment = {
+        BOX = config.networking.hostName;
+        WORKER = "https://dns.${base}";
+        KEYS = "/boot/dd/unlock";
+        TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
+        # over tcp: quic to the edge kept dropping through the carrier's nat
+        TUNNEL_TRANSPORT_PROTOCOL = "http2";
+      };
+      serviceConfig = {
+        StateDirectory = "dd-door";
+        StateDirectoryMode = "0700";
+        ExecStartPre = "${doorAsk} tunnel /var/lib/dd-door";
+        Restart = "always";
+        RestartSec = 30;
+      };
+      script = ''
+        jq -n --arg t "$(jq -r .TunnelID /var/lib/dd-door/credentials.json)" \
+          --argjson ingress ${lib.escapeShellArg (builtins.toJSON ingress)} \
+          '{tunnel: $t, "credentials-file": "/var/lib/dd-door/credentials.json", ingress: $ingress}' \
+          > /var/lib/dd-door/config.yml
+        exec cloudflared tunnel --no-autoupdate --config /var/lib/dd-door/config.yml run
+      '';
+    };
+    # a lease taken here: the names are put in step at once, not at the
+    # Worker's next minute. The flags change at every renewal; only a
+    # change in which services are held here asks
+    systemd.services.dd-door-names = lib.mkIf (cfg.enable && cfg.ownTunnel) {
+      description = "Ask the DNS Worker to point the names at what this box now holds";
+      restartIfChanged = false;
+      path = [
+        pkgs.openssl
+        pkgs.jq
+        pkgs.curl
+        pkgs.tpm2-tools
+        pkgs.coreutils
+      ];
+      environment = {
+        BOX = config.networking.hostName;
+        WORKER = "https://dns.${base}";
+        KEYS = "/boot/dd/unlock";
+        TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
+      };
+      serviceConfig = {
+        Type = "oneshot";
+        StateDirectory = "dd-door-names";
+      };
+      script = ''
+        now=$(ls /run/dd-placed 2>/dev/null | grep -v '\.' | sort | tr '\n' ' ')
+        [ "$now" = "$(cat /var/lib/dd-door-names/held 2>/dev/null)" ] && exit 0
+        if ${doorAsk} converge; then
+          echo "$now" > /var/lib/dd-door-names/held
+        fi
+        exit 0
+      '';
+    };
+    systemd.paths.dd-door-names = lib.mkIf (cfg.enable && cfg.ownTunnel) {
+      wantedBy = [ "paths.target" ];
+      pathConfig = {
+        PathChanged = "/run/dd-placed";
+        TriggerLimitIntervalSec = "10s";
+        TriggerLimitBurst = 5;
       };
     };
 

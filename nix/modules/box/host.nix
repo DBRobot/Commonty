@@ -15,6 +15,17 @@ let
   hw = lib.importJSON (dir + "/hardware.json");
   box = lib.importJSON (dir + "/box.json");
   house = box.house;
+  # the other boxes with a store of their own (box.json store), and what
+  # their secrets keys are: what is sealed to them
+  fleet = builtins.attrNames (lib.importJSON ../../../fleet/boxes.json);
+  boxJson = n: lib.importJSON (../../../fleet/boxes + "/${n}/box.json");
+  secretsKey = n: (lib.importJSON (../../../fleet/boxes + "/${n}/hardware.json")).secretsKey or null;
+  stores = lib.filter (n: (boxJson n) ? store && secretsKey n != null) fleet;
+  # who may hold the postgres lease (the flake's lease rules): the archive's
+  # key is sealed to them, and to no other box that keeps a copy of it
+  placement = import ../../lib/fleet-placement.nix { inherit lib; };
+  pgAble = lib.filter (n: placement.inputs.boxes.${n}.can ? postgresql) stores;
+  netAble = lib.filter (n: placement.inputs.boxes.${n}.can ? headscale) stores;
 in
 {
   imports = [
@@ -24,6 +35,8 @@ in
       inherit (box) encrypted;
     })
     ./home-network.nix
+    ../storage/store.nix
+    ../storage/postgres-follow.nix
   ];
 
   config = lib.mkMerge [
@@ -107,6 +120,43 @@ in
       };
     }
     { networking.hostId = hw.hostId; }
+    # its own store, where its owner gave it one (box.json store: capacity,
+    # dataset, dir); the copies go to the other boxes with one
+    (lib.mkIf (box ? store) {
+      dd.store = {
+        enable = true;
+        inherit (box.store) capacity;
+        dataset = box.store.dataset or null;
+        dataDir = box.store.dir or "/srv/store";
+        peers = lib.genAttrs (lib.remove config.networking.hostName stores) (n: {
+          url = "https://store.${n}.${config.dd.domain}";
+          recipient = secretsKey n;
+        });
+      };
+    })
+    # with failover on, postgres follows its lease through this store
+    (lib.mkIf (config.dd.failover && box ? store && config.services.postgresql.enable) {
+      dd.store.buckets.postgres-wal.owner = "postgres";
+      dd.postgres.follow = {
+        enable = true;
+        endpoint = "http://127.0.0.1:${toString config.dd.store.port}";
+        envFile = "/var/lib/dd-store/keys/postgres-wal.env";
+        recipients = lib.genAttrs pgAble secretsKey;
+      };
+    })
+    (lib.optionalAttrs (options.dd ? headscale) {
+      dd.headscale.follow.recipients = lib.mkIf (config.dd.failover && box ? store) (
+        lib.genAttrs netAble secretsKey
+      );
+    })
+    {
+      assertions = [
+        {
+          assertion = !config.dd.failover || !config.services.postgresql.enable || box ? store;
+          message = "failover is on (fleet/policy.json) and ${config.networking.hostName} runs postgres without a store of its own (box.json store)";
+        }
+      ];
+    }
     # a usb ethernet adapter must never autosuspend: it is the wired link
     (lib.mkIf hw.usbNic { boot.kernelParams = [ "usbcore.autosuspend=-1" ]; })
   ];

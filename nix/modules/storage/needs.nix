@@ -4,9 +4,16 @@
     what = "the databases of the services on this box";
     # who may run it follows the services whose databases it holds
     alwaysOn = true;
-    units = [ "dd-postgres-isolation" ];
-    # one writer: a second copy is a standby (replication), not another postgres
+    units = [
+      "postgresql"
+      "postgresql-setup"
+      "dd-postgres-isolation"
+    ];
+    # one writer, which follows its lease (storage/postgres-follow.nix):
+    # the next holder restores from the archive
     instances = 1;
+    lease = true;
+    buckets.postgres-wal = { };
     base = {
       # every database here, and room to restore a dump beside them
       requires.disk = {

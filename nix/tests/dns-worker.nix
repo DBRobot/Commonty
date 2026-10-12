@@ -53,13 +53,31 @@ pkgs.runCommand "dns-worker-check"
     cp -r w w2
     sed -i 's/"open": true/"open": false/' w2/fleet.js
 
+    # and with failover: the names follow the leases the control plane's
+    # agreed state has, and each box has a tunnel of its own
+    cp -r w w3
+    cat > w3/fleet.js <<EOF
+    export const BOXES = {"box1": "$(spki box1)", "box2": "$(spki box2)"};
+    export const NAMES = {"box1": [], "box2": []};
+    export const RECORDS = {"zone": "commonty.test", "address": "100.64.0.2", "tunnel": "t1", "hosts": ["home"], "open": true, "bare": false, "home": "box1", "gateway": "headscale", "addresses": {"box1": "100.64.0.2", "box2": "100.64.0.5"}, "fleet": ["100.64.0.2", "100.64.0.5"], "follow": {"photos": "ente-museum"}};
+    EOF
+    sed -i 's/^    //' w3/fleet.js
+    cat >> w3/wrangler.toml <<'TOML'
+    CONTROL_URL = "http://127.0.0.1:8899/control"
+    ACCOUNT = "acct1"
+    TOML
+    sed -i 's/^    //' w3/wrangler.toml
+    printf 'DNS_TOKEN=dns-token\nTUNNEL_TOKEN=tunnel-token\n' > w3/.dev.vars
+
     python3 $t/fake.py > fake.log 2>&1 &
     fake=$!
     (cd w && wrangler dev --test-scheduled --port 8787 --ip 127.0.0.1 > ../wrangler.log 2>&1) &
     worker=$!
     (cd w2 && wrangler dev --test-scheduled --port 8788 --inspector-port 9230 --ip 127.0.0.1 > ../wrangler2.log 2>&1) &
     worker2=$!
-    for p in 8787 8788; do
+    (cd w3 && wrangler dev --test-scheduled --port 8789 --inspector-port 9231 --ip 127.0.0.1 > ../wrangler3.log 2>&1) &
+    worker3=$!
+    for p in 8787 8788 8789; do
       for i in $(seq 1 120); do
         curl -s -o /dev/null http://127.0.0.1:$p/ && break
         sleep 0.5
@@ -72,14 +90,20 @@ pkgs.runCommand "dns-worker-check"
       echo 'export NAMES=$(printf "%s\n" commonty.test home.commonty.test files.commonty.test)'
       cat ${../modules/gate/acme-ask.sh}
     } > helper.sh
+    # and the box's door helper (nix/modules/gate/door-ask.sh), as box1
+    {
+      echo "export BOX=box1 WORKER=http://127.0.0.1:8789 KEYS=/nonexistent SOFT_KEY=$PWD/box1.pem"
+      cat ${../modules/gate/box-sign.sh} ${../modules/gate/door-ask.sh}
+    } > door.sh
 
     status=0
-    python3 $t/flow.py $PWD/helper.sh || status=$?
+    python3 $t/flow.py $PWD/helper.sh $PWD/door.sh || status=$?
     [ $status -ne 0 ] || python3 $t/controller.py $tester || status=$?
-    kill $worker $worker2 $fake 2>/dev/null || true
+    kill $worker $worker2 $worker3 $fake 2>/dev/null || true
     if [ $status -ne 0 ]; then
       echo "--- worker log"; tail -40 wrangler.log
       echo "--- second worker log"; tail -20 wrangler2.log
+      echo "--- third worker log"; tail -30 wrangler3.log
       echo "--- fake log"; tail -40 fake.log
       exit $status
     fi
