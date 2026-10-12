@@ -416,3 +416,16 @@ func TestACopyGoesFirstToABoxThatCouldTakeTheServiceOver(t *testing.T) {
 		t.Fatalf("copies %q: the box that could take photos over comes first", got)
 	}
 }
+
+func TestAStrangerSayingItKeepsACopyPushesOutNoBoxOfTheRelease(t *testing.T) {
+	in, s := stores()
+	s.Boxes["nas"].Facts["store/ente/bytes"] = 40 * gib
+	s.Joined = map[string]*state.Joined{"jabc": {Key: "k"}}
+	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
+		"store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib, "store/ente/bytes": 40 * gib,
+	}}
+	p := Decide(in, s, 90_000)
+	if got := strings.Join(p.Copies["ente"], ","); got != "big,nas" {
+		t.Fatalf("copies %q: the stranger's claim took the release box's slot", got)
+	}
+}

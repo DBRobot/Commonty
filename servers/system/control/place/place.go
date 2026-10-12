@@ -562,7 +562,20 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 				have = append(have, name)
 			}
 		}
-		sort.SliceStable(have, func(i, j int) bool { return held(have[i], b) > held(have[j], b) })
+		// a holder able to take the service over first, then a box of
+		// the release, then one that joined: a box's own word that it
+		// keeps a copy never pushes out a box the release names
+		takesOver := func(name string) bool { _, ok := in.Boxes[name].Can[bk.Service]; return ok }
+		listed := func(name string) bool { _, ok := in.Boxes[name]; return ok }
+		sort.SliceStable(have, func(i, j int) bool {
+			if a, b := takesOver(have[i]), takesOver(have[j]); a != b {
+				return a
+			}
+			if a, b := listed(have[i]), listed(have[j]); a != b {
+				return a
+			}
+			return held(have[i], b) > held(have[j], b)
+		})
 		for _, name := range have {
 			add(name)
 		}
@@ -575,7 +588,6 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		}
 		// a box able to take the service over first: a copy is what it
 		// would start from; then any other, a stranger's too, by room
-		takesOver := func(name string) bool { _, ok := in.Boxes[name].Can[bk.Service]; return ok }
 		sort.SliceStable(more, func(i, j int) bool {
 			if a, b := takesOver(more[i]), takesOver(more[j]); a != b {
 				return a
