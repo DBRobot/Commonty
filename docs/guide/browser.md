@@ -11,13 +11,14 @@ These need nothing but a browser:
 - the public site, these docs, the demo and [the app's download page](https://commonty.org/download);
 - a Passwords Send link someone gave you;
 - once you sign in with your passkey: home, Games, Git, Metrics, Friends,
-  Ad blocking and Settings. In Settings, Backups and your device names
-  hold keys, so those two parts work only through the app.
+  Ad blocking and Settings. In Settings, your disk images, your device
+  names and the Leave tab's downloads hold keys, so a button there has
+  the app open them in your browser, as below.
 
 ## What opens through the app
 
 Files, Movies & TV, Chat, Photos and Passwords hold your keys, and so
-do Backups and device names in Settings.
+do Backups, device names and the Leave tab's downloads in Settings.
 Their code comes with the app you installed, never from a box, so a box
 cannot change it to steal a key. The app serves them to its own window,
 and to your browser on the same computer once you allow it.
@@ -25,7 +26,8 @@ and to your browser on the same computer once you allow it.
 The first time, you link your browser to the app once, for all of them:
 
 1. Open the page in your browser, for example Photos, and press **Open with
-   the Commonty app**.
+   the Commonty app**. In Settings, press **Open Backups**, **Show names**
+   or, on the Leave tab, **Open them**.
 2. Your browser shows a 6-digit code, and the app comes up with
    **Link this browser?** and a code.
 3. Check the two codes match, then press **Link this browser** in the app.
@@ -35,14 +37,16 @@ The first time, you link your browser to the app once, for all of them:
 After that, every one of these pages opens in the app by itself, with no
 code and no button: Photos, Passwords, Files, Movies & TV, Chat and Mail,
 from a link, a bookmark or the address bar, even after the app or the
-computer restarts.
+computer restarts. The buttons in Settings open their parts with no code
+too.
 
 To stop a browser opening them, open the app's **This device** screen
 and press **Forget** beside it under **Browsers you let in**. Signing
 out in that browser forgets it too. A forgotten browser asks for a code
 again next time.
 
-If the app does not answer, the page says so and offers **Get the app**.
+If the app does not answer, it is not installed or not signed in on this
+computer: the page says so and offers to get the app.
 
 Good to know:
 

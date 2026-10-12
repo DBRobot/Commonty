@@ -4,7 +4,7 @@
 // and byte is turned over here: the gate moves ciphertext.
 
 import { unlock, list, download as fetchTo, fetchPlain, put, trash, mkdir, move, trashed, restore, forever, emptyTrash, human } from './library.js';
-import { me } from './shell.js';
+import { me, throughApp } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const { user } = await me();
@@ -479,6 +479,7 @@ async function start() {
   }
   if (r.app) {
     $('msg').hidden = true;
+    $('link').firstElementChild.replaceChildren(throughApp('Your files are locked with a key only your devices hold, so the Commonty app opens them here in this browser.', 'Open Files', '/_dd/files'));
     $('link').hidden = false;
     return;
   }

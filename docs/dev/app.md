@@ -113,6 +113,9 @@ to any page of the domain during an ordinary prompt. So:
   Chat, Settings (Backups, device names), Photos and Passwords come in
   the app's signed release, in its window and in the member's browser. A
   box hands a member's browser to the app instead of serving them.
+  Settings from a box is given no key: one button there hands those
+  parts to the app (shell.js `throughApp`), which opens its own copy of
+  Settings in that browser.
 - **One sign-in.** The browser signs in once with its passkey at the gate
   (the session every box page and the vault's single sign-on take). What
   the app serves asks the boxes with its device's token, and the app

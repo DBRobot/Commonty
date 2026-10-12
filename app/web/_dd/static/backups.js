@@ -4,11 +4,11 @@
 // devices beside it (dd-devices.json), and the member's app opens it with
 // this device's key and hands it to this page: the box only ever hands
 // over ciphertext. So the tab works where the app serves Settings - its
-// window, or a browser it let in - and nowhere else.
+// window, or a browser it let in - and Settings from a box hands it there.
 
 import init, { Archive } from '/_dd/web/dd_web.js';
 import { human } from './library.js';
-import { inApp, servedByApp, appFetch, me } from './shell.js';
+import { inApp, servedByApp, appFetch, me, throughApp } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,11 +20,11 @@ const ROOT = '/_dd/images/';
 const views = [];
 const tab = () => ({ msg: $('msg'), list: $('list'), total: $('total'), delete: true });
 
-function say(text, html) {
+function say(text, node) {
   for (const v of views) {
     v.msg.hidden = false;
     v.list.hidden = true;
-    if (html) v.msg.innerHTML = html;
+    if (node) v.msg.replaceChildren(node);
     else v.msg.textContent = text;
   }
 }
@@ -491,7 +491,7 @@ export async function images(view) {
 
 async function show() {
   if (!inApp && !servedByApp) {
-    say('', 'Your disk images open through the Commonty app, which holds their key on your device. <a data-guide="open-backups" href="commonty://open?service=site&amp;path=%2F_dd%2Fsettings%23backups">Open them in the app</a> · <a data-guide="get-app" href="/_dd/download">Get the app</a>');
+    say('', throughApp('Your disk images are locked with a key only your devices hold, so the Commonty app opens them here in this browser.', 'Open Backups', '/_dd/settings#backups', 'open-backups'));
     return;
   }
   await me();

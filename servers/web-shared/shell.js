@@ -73,6 +73,32 @@ export function appFetch(url, init = {}) {
   const secret = document.querySelector('meta[name="dd-app"]')?.content || '';
   return fetch(url, { ...init, headers: { ...(init.headers || {}), 'x-dd-app': secret } });
 }
+/// A part holding a key, on a page a box served: the member's app opens its
+/// own copy of `path` in this browser (as use-app.js), or `nothing` runs
+export function toApp(path, nothing) {
+  let left = false;
+  const away = () => { left = true; };
+  window.addEventListener('blur', away, { once: true });
+  document.addEventListener('visibilitychange', away, { once: true });
+  location.href = `commonty://open?${new URLSearchParams({ service: 'site', path })}`;
+  // a browser says nothing when no app takes the link
+  setTimeout(() => {
+    window.removeEventListener('blur', away);
+    document.removeEventListener('visibilitychange', away);
+    if (!left && document.visibilityState === 'visible') nothing();
+  }, 3000);
+}
+const getApp = () => el('a', { href: '/_dd/download', 'data-guide': 'get-app', text: 'Get the Commonty app' });
+export const noApp = () => el('span', {}, "Nothing opened: the Commonty app isn't installed on this computer, or isn't signed in. ", getApp());
+
+/// `text`, and one button that hands this part to the app (toApp)
+export function throughApp(text, label, path, guide) {
+  const after = el('span', {}, ' No Commonty app on this computer? ', getApp());
+  const open = el('button', { class: 'inline', type: 'button', 'data-guide': guide, text: label });
+  open.onclick = () => toApp(path, () => after.replaceChildren(' ', noApp()));
+  return el('span', {}, `${text} `, open, after);
+}
+
 // where the app's pages are, from wherever this page is
 const appPages = appOrigin || '';
 

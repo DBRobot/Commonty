@@ -39,8 +39,9 @@ signs in by itself.
 
 Devices start as "Device 1", "Passkey 2" and so on. In Settings,
 Devices, press **Show names**, then the pencil next to a device. Names
-are locked with your library key, so they show only where the app holds
-it: in the app, or in a browser it let in.
+are locked with your library key, which only your devices hold. In a
+browser, **Show names** has the app on this computer open the tab in the
+same browser ([Using a browser](browser.md)).
 
 ## Removing a device
 

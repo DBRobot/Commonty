@@ -19,9 +19,9 @@ only what changed. The app cannot make a disk image yet.
 
 ### Seeing, downloading and deleting
 
-Open Settings, then **Backups**, in the app, or in a browser you allowed
-from the app ([Using a browser](browser.md)). Settings opened straight
-from a box cannot open your images.
+Open Settings, then **Backups**, in the app or in a browser. In a
+browser, press **Open Backups**: the app on this computer opens the tab
+in the same browser, once you allow it ([Using a browser](browser.md)).
 
 - **Your disk images** lists each one with its size and when it was
   saved.

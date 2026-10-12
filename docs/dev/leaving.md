@@ -18,8 +18,9 @@ Settings has a **Leave** tab
 ([leave.js](../../servers/home/web/leave.js)) whose **Take your things with
 you** downloads everything from the page itself, where the app serves it
 (its window, or a browser it let in): no links off to the services, and no
-command. A plain browser of a member says they work from the app, or a
-browser let in from it.
+command. Settings from a box has one button that hands the tab to the
+app (shell.js `throughApp`, `commonty://open`), which opens its own copy
+in the same browser.
 
 ```
 Files & Movies   one zip of the whole library, made in the page: walked by
