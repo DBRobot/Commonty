@@ -94,7 +94,7 @@ in
       dd.adblock.household = lib.mkIf (house ? household) house.household;
     })
     (lib.mkIf (box.extraPools != [ ]) { boot.zfs.extraPools = box.extraPools; })
-    (lib.mkIf (box ? runnerCapacity) { dd.runner.capacity = box.runnerCapacity; })
+    (lib.optionalAttrs (box ? runnerCapacity) { dd.runner.capacity = box.runnerCapacity; })
     # the memory game servers may have together, where a third of the box's
     # is not the owner's choice
     (lib.optionalAttrs (options.dd ? games && box ? gamesMemoryMiB) {
