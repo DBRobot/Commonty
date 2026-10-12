@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Open it with the Commonty app</title>
   <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/bar.css">
   <script type="module" src="/_dd/static/use-app.js"></script>
 </head>
 <body>
   <a class="skip-to" href="#main">Skip to content</a>
   <header class="dd-bar">
     <div class="bar">
-      <a class="brand" id="home" href="/" aria-label="Commonty">
+      <a class="brand" id="home-link" href="/" aria-label="Commonty">
         <svg viewBox="0 0 22 22" aria-hidden="true">
           <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
           <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
@@ -26,10 +27,11 @@
     <section class="add-device" id="use-app">
       <h1><span id="what">This</span> opens through the Commonty app</h1>
       <p class="lead">It holds your keys, so its code comes with the app you installed, never from a server. The app opens <span id="what-2">it</span> here in this browser, once you allow this browser in the app.</p>
-      <p><button id="open" type="button">Open <span id="what-3">it</span></button></p>
+      <p><button id="open" type="button">Open it</button></p>
+      <p class="small" id="no-app">No Commonty app on this computer? <a id="download" href="/_dd/download">Get the app</a>: once it's installed and signed in, it opens <span id="what-3">it</span> from here.</p>
       <div id="not-open" hidden>
-        <p class="lead">Nothing opened? The Commonty app needs to be installed on this device and signed in.</p>
-        <p><a class="button" id="download" href="/_dd/download">Get the Commonty app</a> <button class="quiet" id="retry" type="button">Try again</button></p>
+        <p class="lead">Nothing opened. The Commonty app isn't installed on this computer, or isn't signed in.</p>
+        <p><a class="button" id="download-2" href="/_dd/download">Get the Commonty app</a> <button class="quiet" id="retry" type="button">Try again</button></p>
       </div>
     </section>
     <section class="add-device" id="signed-in" hidden>

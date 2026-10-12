@@ -20,11 +20,13 @@ const show = (id) => {
     s.hidden = s.id !== id;
 };
 
-document.getElementById('home').href = `${home}/_dd/home`;
-document.getElementById('download').href = `${home}/_dd/download`;
+document.getElementById('home-link').href = `${home}/_dd/home`;
+for (const id of ['download', 'download-2']) document.getElementById(id).href = `${home}/_dd/download`;
 for (const id of ['what', 'what-2', 'what-3']) {
   document.getElementById(id).textContent = id === 'what' ? what : what === 'This' ? 'it' : what;
 }
+// one piece of text: the button is a flex box, and drops the space before a span
+document.getElementById('open').textContent = `Open ${what === 'This' ? 'it' : what}`;
 
 // The page asked for, for the app to open after its door: the vault's
 // own pages are after the #, Photos' are paths, the site's its own path.
@@ -38,6 +40,7 @@ function asked() {
 // in front a few seconds on, the app did not open.
 function handOff() {
   document.getElementById('not-open').hidden = true;
+  document.getElementById('no-app').hidden = false;
   let left = false;
   const away = () => {
     left = true;
@@ -53,6 +56,7 @@ function handOff() {
     document.removeEventListener('visibilitychange', away);
     if (!left && document.visibilityState === 'visible') {
       document.getElementById('not-open').hidden = false;
+      document.getElementById('no-app').hidden = true;
     }
   }, 3000);
 }
