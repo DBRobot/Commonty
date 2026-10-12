@@ -132,8 +132,8 @@ fn who(app: &App, headers: &HeaderMap) -> Result<(String, Adblock), StatusCode> 
     let Some(ab) = app.adblock.clone() else {
         return Err(StatusCode::NOT_FOUND);
     };
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.signed_in(cookie) {
+    // a device's token too: the bar's switch on a page the app serves
+    match app.identify(headers, "access") {
         Some(u) if app.member(&u) && ab.allows(&u) => Ok((u, ab)),
         Some(_) => Err(StatusCode::FORBIDDEN),
         None => Err(StatusCode::UNAUTHORIZED),

@@ -180,8 +180,8 @@ pub(crate) async fn here_route(State(app): State<Arc<App>>) -> Response {
 }
 
 fn member(app: &App, headers: &HeaderMap) -> Option<String> {
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let user = app.signed_in(cookie)?;
+    // a device's token too: Settings' Network tab in the app
+    let user = app.identify(headers, "access")?;
     (app.member(&user) && user != pages::DEMO_USER && !app.guest(&user)).then_some(user)
 }
 

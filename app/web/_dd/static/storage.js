@@ -1,6 +1,8 @@
 // Storage, a tab of Settings: one allowance across every service, as the
 // storage ledger last counted it (servers/gate/src/storage.rs). One bar,
 // split by service.
+import { inApp, servedByApp } from './shell.js';
+
 const $ = (id) => document.getElementById(id);
 const services = [
   ['photos', 'Photos', '#d9822b'],
@@ -24,7 +26,11 @@ function ago(t) {
 
 async function load() {
   const r = await fetch('/_dd/storage/mine');
+  // a page the app serves has no sign-in of its own to go to: its boxes
+  // did not take the device's (older boxes asked a browser's session)
+  if (r.status === 401 && (inApp || servedByApp)) { $('st-state').textContent = 'Your boxes did not say how much you use. Open Storage in a browser where you are signed in.'; return; }
   if (r.status === 401) { location.href = '/_dd/login?rd=/_dd/settings%23storage'; return; }
+  if (!r.ok) { $('st-state').textContent = `Your boxes did not answer (${r.status}). Try again in a minute.`; return; }
   const d = await r.json();
   if (!d.counted) { $('st-state').textContent = 'Your storage has not been counted yet. It is counted every hour.'; return; }
   $('st-state').hidden = true;

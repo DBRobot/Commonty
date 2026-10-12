@@ -3933,6 +3933,40 @@ mod tests {
         assert_eq!(read(&url, "", Ask::Bearer(sarah.token())).await, 200);
     }
 
+    /// Settings on a page the app serves asks with the device's token:
+    /// Storage, the house's boxes and adding a device took a browser's
+    /// session alone, so the app's page was sent to sign in, which it
+    /// cannot (and the box's sign-in page came back as a 502)
+    #[tokio::test]
+    async fn settings_are_answered_for_a_devices_token() {
+        let sarah = Person::new("sarah");
+        let (url, _) = gate(
+            "device-settings",
+            Some(Members::list(vec![sarah.id()])),
+            vec![],
+        )
+        .await;
+        sarah.publish(&url).await;
+        let ask = |method: &'static str, path: &'static str, t: Option<String>| {
+            let mut r = client().request(method.parse().unwrap(), format!("{url}{path}"));
+            if let Some(t) = t {
+                r = r.bearer_auth(t);
+            }
+            async move { r.send().await.unwrap().status().as_u16() }
+        };
+        for (method, path) in [
+            ("GET", "/_dd/storage/mine"),
+            ("GET", "/_dd/house"),
+            ("POST", "/_dd/add/start"),
+        ] {
+            assert_eq!(ask(method, path, None).await, 401, "{path}");
+            assert_eq!(ask(method, path, Some(sarah.token())).await, 200, "{path}");
+        }
+        // a token to read the directory with is not one for these
+        let read = sarah.read_token("127.0.0.1");
+        assert_eq!(ask("GET", "/_dd/storage/mine", Some(read)).await, 401);
+    }
+
     #[tokio::test]
     async fn storage_tells_a_signed_in_stranger_403_not_401() {
         let (url, s) = gate("storage-403", Some(Members::list(vec![])), vec![]).await;

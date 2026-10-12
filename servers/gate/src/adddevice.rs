@@ -78,8 +78,8 @@ fn hexish(s: &str, len: usize) -> bool {
 
 /// members and guests: anyone with devices of their own
 fn person(app: &App, headers: &HeaderMap) -> Option<String> {
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let user = app.signed_in(cookie)?;
+    // a device's token too: adding a device from Settings in the app
+    let user = app.identify(headers, "access")?;
     (user != pages::DEMO_USER && (app.member(&user) || app.guest(&user))).then_some(user)
 }
 

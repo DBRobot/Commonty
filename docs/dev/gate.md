@@ -1045,7 +1045,7 @@ path                                        method   what                       
 /_dd/chat/search                            GET      web search for Chat                       member, session or token
 /_dd/git, /_dd/metrics                      GET      Git, Metrics                              any session
 /_dd/friends                                GET      Friends                                   member or guest
-/_dd/adblock                                GET      Ad blocking                               household member
+/_dd/adblock                                GET      Ad blocking                               household member, session or token
 /_dd/add                                     GET      add-device page (QR target)               anyone
 /_dd/send                                   GET      Passwords' Send page                      anyone
 /_dd/download                               GET      app downloads                             anyone
@@ -1064,7 +1064,7 @@ path                                        method   what                       
 /_dd/signins                                GET      sessions, key uses                        member or guest, session or token
 /_dd/signins/end                            POST     end one, or all others                    member or guest: token, or passkey fresh
 /_dd/devices/names                          GET,PUT  sealed device names                       member or guest, session or token
-/_dd/add/start, /status, /cancel, /theirs   *        the approving device's side               member or guest
+/_dd/add/start, /status, /cancel, /theirs   *        the approving device's side               member or guest, session or token
 /_dd/add/offer, /wait, /reveal              *        the new device's side                     anyone with the code
 -- photos
 /_dd/photos                                 GET      hands a browser to the app (use-app)      anyone
@@ -1083,12 +1083,12 @@ path                                        method   what                       
 /_dd/library/{lib}/notes/shelf              GET,PUT  the library's shelf, sealed               GET owner, reader; PUT owner
 /_dd/images, /_dd/images/, /_dd/images/{*}  any      a member's disk images                    member, own; a browser's change
                                                      (files.<domain>/images/)                  needs a fresh passkey
-/_dd/storage/mine                           GET      allowance and use                         member
+/_dd/storage/mine                           GET      allowance and use                         member, session or token
 /internal/storage/members                   GET      library and disk-image bytes per member   local (the Photos box's dd storage-ledger)
 -- network and house
 /_dd/network/join                           POST     Headscale join key                        token; member or guest
 /_dd/network/box                            POST     a box's key, sealed to it                 a listed box's TPM signature
-/_dd/house                                  GET      every box in the house                    member
+/_dd/house                                  GET      every box in the house                    member, session or token
 /_dd/house/here                             GET      this box's link                           local; a directory box: its house
 /_dd/house/wifi                             POST     a signed Wi-Fi change                     member + passkey signature
 /_dd/house/wifi/relay                       POST     a peer passing it on                      port 4181 only (nginx 404s it); signature
@@ -1116,9 +1116,9 @@ path                                        method   what                       
 /_dd/fleet.json                             GET      boxes' release, agent, backup             member (session or token)
 /_dd/git/events                             GET      forge changes (SSE)                       member (session or token)
 /_dd/chat/search                            GET      web search                                member
-/_dd/adblock/state                          GET      on/off, totals, lists                     household member
-/_dd/adblock/switch, /allow                 POST     switch, pause, allow a site               household member
-/_dd/adblock/allow/{domain}                 DELETE   stop allowing                             household member
+/_dd/adblock/state                          GET      on/off, totals, lists                     household member, session or token
+/_dd/adblock/switch, /allow                 POST     switch, pause, allow a site               household member, session or token
+/_dd/adblock/allow/{domain}                 DELETE   stop allowing                             household member, session or token
 /_dd/oidc/.well-known/openid-configuration  GET      discovery                                 anyone
 /_dd/oidc/authorize                         GET      a code for Vaultwarden                    member session (else -> login)
 /_dd/oidc/token                             POST     id token                                  the client, by secret

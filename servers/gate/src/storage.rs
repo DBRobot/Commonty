@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Json, Redirect, Response};
+use axum::response::{IntoResponse, Json, Response};
 use serde::Deserialize;
 
 use crate::App;
@@ -238,27 +238,14 @@ pub(crate) async fn members(State(app): State<Arc<App>>) -> Response {
     Json(serde_json::Value::Object(out)).into_response()
 }
 
-#[allow(clippy::result_large_err)]
-fn member(app: &App, headers: &HeaderMap) -> Result<String, Response> {
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    match app.signed_in(cookie) {
-        Some(u) if app.member(&u) && u != pages::DEMO_USER && !app.guest(&u) => Ok(u),
-        Some(_) => Err(Redirect::to("/_dd/home").into_response()),
-        None => Err(Redirect::to("/_dd/login?rd=/_dd/settings").into_response()),
-    }
-}
-
 /// GET /_dd/storage/mine: this member's allowance and what fills it
 pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     // signed in and not a member is a 403, as everywhere else: a 401 would
     // send them to sign in again
-    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
-    let user = match member(&app, &headers) {
-        Ok(u) => u,
-        Err(_) if app.signed_in(cookie).is_some() => {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
+    let user = match app.identify(&headers, "access") {
+        Some(u) if app.member(&u) && u != pages::DEMO_USER && !app.guest(&u) => u,
+        Some(_) => return StatusCode::FORBIDDEN.into_response(),
+        None => return StatusCode::UNAUTHORIZED.into_response(),
     };
     let Some(c) = app.storage.counted() else {
         return Json(serde_json::json!({ "counted": false })).into_response();
