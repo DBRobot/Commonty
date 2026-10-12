@@ -92,10 +92,11 @@ jq -er .secretsKey /mnt/var/lib/dd/box/hardware.json > /mnt/var/lib/dd/secrets-r
 jq -n '{owner: null, house: {ssid: "", address: ""}, encrypted: false, extraPools: [], datasets: {}}' \
   > /mnt/var/lib/dd/box/box.json
 
-# its system, built here from that commit and its report
+# its system, built here from that commit and its report, onto the disk:
+# the installer's own store is memory. What it already has is taken from it
 say "building its system from $rev"
 sys=$(nix --extra-experimental-features "nix-command flakes" build --impure --no-link --print-out-paths \
-  --store /mnt --expr "let f = builtins.getFlake \"$SOURCE?rev=$rev\"; in (f.lib.joinedBox { name = \"$name\"; dir = builtins.path { path = /mnt/var/lib/dd/box; name = \"box\"; }; }).config.system.build.toplevel")
+  --store /mnt --extra-substituters 'daemon?trusted=true' --expr "let f = builtins.getFlake \"$SOURCE?rev=$rev\"; in (f.lib.joinedBox { name = \"$name\"; dir = builtins.path { path = /mnt/var/lib/dd/box; name = \"box\"; }; }).config.system.build.toplevel")
 nixos-install --root /mnt --system "$sys" --no-root-passwd --no-channel-copy
 # the release it runs is where its agent starts: one signed before it
 # never takes the box back
