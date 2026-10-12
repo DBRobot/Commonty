@@ -64,6 +64,7 @@
         "unlock"
         "leaving"
         "wired-watch"
+        "net-detect"
       ];
       rust =
         let
