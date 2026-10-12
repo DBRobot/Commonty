@@ -73,7 +73,11 @@ let
         llvm.clang-unwrapped
         llvm.lld
         llvm.llvm
+        pkgs.pkg-config
       ];
+      # the tray: tauri-cli looks for the Linux tray library on the machine
+      # it bundles on, whatever the target, and stops if it is not there
+      buildInputs = [ pkgs.libayatana-appindicator ];
       SOURCE_DATE_EPOCH = "315532800";
       dontConfigure = true;
       dontFixup = true;
