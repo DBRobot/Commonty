@@ -35,6 +35,7 @@ These pages are in four parts:
 - [Passwords](guide/services/passwords.md)
 - [Chat](guide/services/chat.md)
 - [Games](guide/services/games.md)
+- [Smart home](guide/services/home.md)
 - [Git](guide/services/git.md)
 - [Ad blocking](guide/services/ad-blocking.md)
 - [Metrics](guide/services/metrics.md)
