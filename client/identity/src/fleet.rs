@@ -1,5 +1,6 @@
 //! The fleet's names as every client defaults to them, in one place.
-//! checks.fleet-defaults holds them to fleet/policy.json and fleet/boxes.json.
+//! checks.fleet-defaults holds them to fleet/policy.json, fleet/boxes.json
+//! and fleet/release.pub.
 
 macro_rules! domain {
     () => {
@@ -24,6 +25,9 @@ pub const ENTE: &str = concat!("https://api.", domain!());
 pub const IMAGES: &str = concat!("https://files.", domain!(), "/images/");
 /// any browser-facing host does; the session cookie covers the whole domain
 pub const ENROL: &str = concat!("https://home.", domain!(), "/_dd/enrol");
+/// the release key's public half (fleet/release.pub): what a client checks
+/// the member list against, the one thing no box can make
+pub const RELEASE_KEY: &str = "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=";
 /// where boxes read the release from
 pub const RELEASES: &str = concat!(
     "https://git.",

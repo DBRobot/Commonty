@@ -402,28 +402,42 @@ fn unxml(s: &str) -> String {
 }
 
 /// every library this machine can open: the member's own, then those
-/// shared with them by anyone whose entry names them
+/// shared with them by members of the release (`released`, the signed
+/// member list: account::released). None: the member's own alone.
 pub async fn openable(
     dirs: &[String],
     user: &str,
     opener: &Opener,
+    released: Option<&identity::MemberList>,
 ) -> Result<Vec<(String, Library, library::Key)>> {
     let mut out = Vec::new();
     let found = directory::fetch(dirs, user).await;
     // the library ids and sealed keys below go straight into rclone mounts
     // and the app, so the entry they come out of has to verify and the
     // directories have to agree about it, under the root this device holds
-    // or pinned: otherwise a box could hand it a library key of its own
-    // making, sealed to this device's public key, and read what it writes
+    // or pinned, or else the release's member list: otherwise a box could
+    // hand it a library key of its own making, sealed to this device's
+    // public key, and read what it writes
     let anchor = opener.anchor();
-    let mine = directory::resolve(
-        &found,
-        match &anchor {
-            Some(r) => directory::Anchor::Root(r),
-            None => directory::Anchor::FirstSight,
-        },
-    )
-    .context("no directory has a usable entry for you")?;
+    let mine = match (&anchor, released) {
+        (Some(r), _) => directory::resolve(&found, directory::Anchor::Root(r))
+            .context("no directory has a usable entry for you")?,
+        (None, Some(list)) => {
+            let handovers = directory::handovers(dirs, user, &[]).await;
+            directory::resolve(
+                &found,
+                directory::Anchor::Released {
+                    members: &list.members,
+                    revoked: &list.revoked,
+                    handovers: &handovers,
+                },
+            )
+            .with_context(|| format!("your entry is {}", account::NOT_RELEASED))?
+        }
+        (None, None) => bail!(
+            "this device has not pinned your entry and has no signed member list to hold it to"
+        ),
+    };
     // every id here is about to be a folder and an argument; a box may have
     // refused a bad one already, and this machine does not take its word
     for lib in mine
@@ -439,14 +453,15 @@ pub async fn openable(
     // shared with us: a reader's keys are sealed the same way, under the
     // owner's entry. The gate lists every entry; a reader looks through
     // them once
-    if let Some(dir) = dirs.first()
+    if let Some(list) = released
+        && let Some(dir) = dirs.first()
         && let Ok(names) = directory::names(dir).await
     {
         for name in names.into_iter().filter(|n| n != user) {
-            let f = directory::fetch(dirs, &name).await;
-            // an owner who shared with us: the same rule. A forged entry
-            // here would name a library and a key of the liar's choosing
-            let Ok(e) = directory::resolve(&f, directory::Anchor::FirstSight) else {
+            // an owner who shared with us, held to the release: a box can
+            // sign an entry under a root of its own naming any library and
+            // a key sealed to this device, and agreeing with itself is easy
+            let Ok(e) = directory::resolve_released(dirs, &name, list).await else {
                 continue;
             };
             for lib in e

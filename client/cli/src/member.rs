@@ -7,6 +7,7 @@
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use std::io::{IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
 
 #[derive(Default, Serialize, Deserialize)]
@@ -31,14 +32,22 @@ pub fn read(repo: &str) -> Result<Members> {
         return Ok(Members::default());
     }
     let raw = std::fs::read(&p).with_context(|| format!("reading {}", p.display()))?;
+    parse(&raw).with_context(|| format!("parsing {}", p.display()))
+}
+
+/// the file's contents; none at all is nobody
+pub fn parse(raw: &[u8]) -> Result<Members> {
+    if raw.iter().all(u8::is_ascii_whitespace) {
+        return Ok(Members::default());
+    }
     // the first shape was a bare list
-    if let Ok(list) = serde_json::from_slice::<Vec<String>>(&raw) {
+    if let Ok(list) = serde_json::from_slice::<Vec<String>>(raw) {
         return Ok(Members {
             members: list,
             ..Default::default()
         });
     }
-    serde_json::from_slice(&raw).with_context(|| format!("parsing {}", p.display()))
+    Ok(serde_json::from_slice(raw)?)
 }
 
 fn write(repo: &str, mut m: Members) -> Result<()> {
@@ -55,33 +64,87 @@ fn is_id(s: &str) -> bool {
     s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// A member id, or a name looked up in the directories.
-pub async fn resolve(who: &str, dirs: &[String]) -> Result<String> {
-    Ok(resolve_all(who, dirs).await?.remove(0))
-}
-
-/// Every member id the person has had, the current root's first: a
-/// revocation of any of them shuts out the whole identity
-/// (identity::is_member), so letting them back in clears them all.
-async fn resolve_all(who: &str, dirs: &[String]) -> Result<Vec<String>> {
+/// A member id as given, or a name looked up in the directories and
+/// confirmed by the person running this: the id is about to be written into
+/// fleet/members.json and released to every box, and a directory can serve
+/// an entry of its own making under any name, which would be it naming who
+/// joins or who is shut out. So the root's id is shown, and taken only once
+/// the operator says it is the one the person's own device shows (`dd
+/// identity show`), or `--confirm` names it. The entry for a name, too:
+/// only the entry the operator confirmed.
+async fn confirmed(
+    who: &str,
+    dirs: &[String],
+    m: &Members,
+    confirm: Option<&str>,
+) -> Result<(String, Option<identity::SignedEntry>)> {
     if is_id(who) {
-        return Ok(vec![who.to_string()]);
+        return Ok((who.to_string(), None));
     }
     let found = crate::who::fetch(dirs, who).await;
-    // this id is about to be written into fleet/members.json and released
-    // to every box: a directory that made it up would be naming who joins
     let e = directory::resolve(&found, directory::Anchor::FirstSight)
         .with_context(|| format!("no usable entry for {who}"))?;
-    Ok(identity::member_ids(&e.entry))
+    let id = identity::member_id(&e.entry.root);
+    let handovers = directory::handovers(dirs, who, &[]).await;
+    println!(
+        "{who}: root {}, member id\n  {id}\n  {}",
+        identity::fingerprint(&e.entry.root),
+        standing(&e, &handovers, m)
+    );
+    match confirm {
+        Some(c) if c == id => {}
+        Some(c) => bail!("--confirm {c} is not the member id the directories have for {who}"),
+        None if std::io::stdin().is_terminal() => {
+            print!("is that the member id {who}'s own device shows (`dd identity show`)? [y/N] ");
+            std::io::stdout().flush()?;
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line)?;
+            if !matches!(line.trim(), "y" | "Y" | "yes") {
+                bail!("not confirmed; nothing changed");
+            }
+        }
+        None => bail!("without a terminal, --confirm <member id> says it is {who}'s"),
+    }
+    Ok((id, Some(e)))
 }
 
-pub async fn add(repo: &str, who: &str, dirs: &[String]) -> Result<()> {
-    let ids = resolve_all(who, dirs).await?;
-    let id = ids[0].clone();
+/// what the repo's own list makes of an entry, as far as this machine can
+/// check it (identity::anchored)
+fn standing(e: &identity::SignedEntry, handovers: &[identity::Handover], m: &Members) -> String {
+    let id = identity::member_id(&e.entry.root);
+    match identity::anchored(e, handovers, &m.members, &m.revoked) {
+        Ok(()) if m.members.contains(&id) => "on the list".into(),
+        Ok(()) => "recovered from a root on the list, every step proven".into(),
+        Err(why) => format!("not anchored to the list: {why}"),
+    }
+}
+
+pub async fn add(repo: &str, who: &str, dirs: &[String], confirm: Option<&str>) -> Result<()> {
     let mut m = read(repo)?;
-    m.revoked.retain(|x| !ids.contains(x));
-    // back within 30 days of being removed: nothing of theirs was deleted
-    m.removed.retain(|x, _| !ids.contains(x));
+    let (id, entry) = confirmed(who, dirs, &m, confirm).await?;
+    match &entry {
+        // only an id given as itself comes off the revoked list: a
+        // directory's word for which roots a name had is no reason to
+        None if m.revoked.contains(&id) => {
+            m.revoked.retain(|x| *x != id);
+            // back within 30 days of being removed: nothing of theirs was deleted
+            m.removed.remove(&id);
+            println!("{id} is no longer revoked");
+        }
+        Some(e) => {
+            let shut: Vec<String> = identity::member_ids(&e.entry)
+                .into_iter()
+                .filter(|x| m.revoked.contains(x))
+                .collect();
+            if !shut.is_empty() {
+                bail!(
+                    "{who} is revoked by {}: `dd member add <id>` with that id, if it is theirs, lets it back in",
+                    shut.join(", ")
+                );
+            }
+        }
+        None => {}
+    }
     if m.members.contains(&id) {
         println!("already a member: {id}");
     } else {
@@ -95,9 +158,9 @@ pub async fn add(repo: &str, who: &str, dirs: &[String]) -> Result<()> {
 
 /// Off the list and onto the revoked one, so an invite they redeemed
 /// counts for nothing either.
-pub async fn remove(repo: &str, who: &str, dirs: &[String]) -> Result<()> {
-    let id = resolve(who, dirs).await?;
+pub async fn remove(repo: &str, who: &str, dirs: &[String], confirm: Option<&str>) -> Result<()> {
     let mut m = read(repo)?;
+    let (id, _) = confirmed(who, dirs, &m, confirm).await?;
     let was = m.members.len();
     m.members.retain(|x| *x != id);
     if m.revoked.contains(&id) && m.members.len() == was {
@@ -123,12 +186,23 @@ pub async fn list(repo: &str, dirs: &[String]) -> Result<()> {
         && let Ok(listed) = directory::names(d.trim_end_matches('/')).await
     {
         for n in &listed {
-            if let Some(e) = crate::who::newest(&crate::who::fetch(&dirs[..1], n).await) {
-                let id = identity::member_id(&e.entry.root);
-                names.insert(id.clone(), n.to_string());
-                if let Some(g) = &e.entry.grant {
-                    invited.push((id, n.to_string(), g.redeemed));
+            let Ok(e) = directory::resolve(
+                &crate::who::fetch(&dirs[..1], n).await,
+                directory::Anchor::FirstSight,
+            ) else {
+                continue;
+            };
+            let id = identity::member_id(&e.entry.root);
+            let handovers = directory::handovers(&dirs[..1], n, &[]).await;
+            // a name beside a listed id only where the entry anchors to the
+            // list: a directory can name any entry it makes up anything
+            if identity::anchored(&e, &handovers, &m.members, &m.revoked).is_ok() {
+                for i in identity::member_ids(&e.entry) {
+                    names.insert(i, n.to_string());
                 }
+            }
+            if let Some(g) = &e.entry.grant {
+                invited.push((id, n.to_string(), g.redeemed));
             }
         }
     }
@@ -137,10 +211,13 @@ pub async fn list(repo: &str, dirs: &[String]) -> Result<()> {
         println!("{id}  {}", name(id));
     }
     for (id, n, t) in &invited {
-        if m.members.contains(id) || m.revoked.contains(id) {
+        if names.contains_key(id) || m.revoked.contains(id) {
             continue;
         }
-        println!("{id}  {n}  invited {}", date(*t));
+        println!(
+            "{id}  {n}  invited {}, not anchored: unverified until a release lists it",
+            date(*t)
+        );
     }
     for id in &m.revoked {
         println!("{id}  {}  revoked", name(id));

@@ -1360,6 +1360,7 @@
               grep -qF '"${policy.domain}"' ${src}
               grep -qF '"${policy.repo}"' ${src}
               grep -qF '"${boxes.node1.net}"' ${src}
+              grep -qF '"${nixpkgs.lib.trim (builtins.readFile ./fleet/release.pub)}"' ${src}
               touch $out
             '';
           # the Terms of use a sign-up agrees to (identity::TERMS, kept in

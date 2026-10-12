@@ -28,6 +28,14 @@ pub struct Directory {
     invites: PathBuf,
     /// sign-ups that have not followed through yet: this box's alone
     held: PathBuf,
+    /// every recovery this box took, by name (identity::Handover): what a
+    /// client follows a name from a root it knows to the one it has now
+    recoveries: PathBuf,
+    /// where the release's signed member list is published (the releases
+    /// branch); served at /_dd/members for clients to check themselves
+    member_list: Option<String>,
+    /// the member list as last fetched, and when
+    member_list_seen: std::sync::Mutex<Option<(std::time::Instant, Option<String>)>>,
     /// the release key: what signs an invite. None: grants cannot be
     /// checked here and are refused
     release: Option<ed25519_dalek::VerifyingKey>,
@@ -82,6 +90,11 @@ impl Directory {
             .map(|p| p.join("held"))
             .unwrap_or_else(|| dir.join("held"));
         std::fs::create_dir_all(&held)?;
+        let recoveries = dir
+            .parent()
+            .map(|p| p.join("recoveries"))
+            .unwrap_or_else(|| dir.join("recoveries"));
+        std::fs::create_dir_all(&recoveries)?;
         let leaving = crate::leaving::Store::open(Some(
             dir.parent()
                 .map(|p| p.join("leaving.json"))
@@ -94,6 +107,9 @@ impl Directory {
             dir,
             invites,
             held,
+            recoveries,
+            member_list: None,
+            member_list_seen: Default::default(),
             release,
             members: None,
             readers: vec![],
@@ -262,6 +278,12 @@ impl Directory {
             eprintln!("directory: {e:#}");
             (StatusCode::INTERNAL_SERVER_ERROR, String::new())
         })?;
+        if let Some(c) = &current
+            && c.entry.root != signed.entry.root
+            && let Err(e) = self.keep_handover(c, signed)
+        {
+            eprintln!("directory: keeping {}'s recovery: {e:#}", c.entry.name);
+        }
         if current.is_some_and(|c| lost_a_key(&c.entry, &signed.entry)) {
             self.end_elsewhere(&signed.entry.name);
         }
@@ -290,6 +312,73 @@ impl Directory {
         // two writes in the same instant with the same length look alike
         self.read.lock().unwrap().remove(name.as_str());
         Ok(())
+    }
+
+    /// a recovery just taken, after the ones before it
+    fn keep_handover(
+        &self,
+        before: &identity::SignedEntry,
+        after: &identity::SignedEntry,
+    ) -> Result<()> {
+        let mut all = self.handovers(&after.entry.name);
+        all.push(identity::Handover {
+            before: before.clone(),
+            after: after.clone(),
+        });
+        let p = self.recoveries.join(format!("{}.json", after.entry.name));
+        let tmp = self.recoveries.join(format!(".{}.tmp", after.entry.name));
+        std::fs::write(&tmp, serde_json::to_vec_pretty(&all)?)?;
+        std::fs::rename(&tmp, &p)?;
+        Ok(())
+    }
+
+    /// every recovery this box took for the name, oldest first
+    pub fn handovers(&self, name: &str) -> Vec<identity::Handover> {
+        if !identity::valid_name(name) {
+            return vec![];
+        }
+        std::fs::read(self.recoveries.join(format!("{name}.json")))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    /// The release's member list as published, if it is signed by the
+    /// release key this box knows; refetched every ten minutes (a minute
+    /// while there is none). The client checks it again: this is only so
+    /// a box does not pass on what it can already tell is not one.
+    async fn member_list(&self) -> Option<String> {
+        let url = self.member_list.as_ref()?;
+        if let Some((at, seen)) = &*self.member_list_seen.lock().unwrap() {
+            let fresh = if seen.is_some() { 600 } else { 60 };
+            if at.elapsed() < Duration::from_secs(fresh) {
+                return seen.clone();
+            }
+        }
+        let read = async {
+            let raw = self
+                .http
+                .get(url)
+                .send()
+                .await
+                .ok()?
+                .error_for_status()
+                .ok()?
+                .text()
+                .await
+                .ok()?;
+            let s: identity::SignedMemberList = serde_json::from_str(&raw).ok()?;
+            if let Some(k) = &self.release
+                && let Err(e) = identity::verify_member_list(&s, k)
+            {
+                eprintln!("member list refused: {e}");
+                return None;
+            }
+            Some(raw)
+        };
+        let seen = read.await;
+        *self.member_list_seen.lock().unwrap() = Some((std::time::Instant::now(), seen.clone()));
+        seen
     }
 
     /// A library id belongs to the entry that claimed it first. Ids are
@@ -412,6 +501,11 @@ impl Directory {
         self
     }
 
+    pub fn with_member_list(mut self, url: Option<String>) -> Self {
+        self.member_list = url;
+        self
+    }
+
     pub fn with_readers(mut self, readers: Vec<String>) -> Self {
         self.readers = readers;
         self
@@ -510,6 +604,8 @@ pub fn router(d: Arc<Directory>) -> Router {
     Router::new()
         .route("/_dd/directory", get(list))
         .route("/_dd/directory/{name}", get(get_entry).put(put_entry))
+        .route("/_dd/directory/{name}/recoveries", get(get_recoveries))
+        .route("/_dd/members", get(get_members))
         .route("/_dd/invite/{key}", get(get_invite).put(put_invite))
         .with_state(d)
 }
@@ -550,6 +646,35 @@ async fn get_entry(
             eprintln!("directory: {e:#}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
+    }
+}
+
+/// The recoveries this box took for a name: read as the entry is
+async fn get_recoveries(
+    State(d): State<Arc<Directory>>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !identity::valid_name(&name) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    if !d.may_read(&headers, Some(&name)) {
+        return refused();
+    }
+    Json(d.handovers(&name)).into_response()
+}
+
+/// The signed member list, for anyone: member ids and revoked ids, which
+/// fleet/members.json in the open repository carries already, and a paper
+/// key on a new machine has nothing else to show for itself
+async fn get_members(State(d): State<Arc<Directory>>) -> Response {
+    match d.member_list().await {
+        Some(raw) => (
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            raw,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -1396,6 +1521,11 @@ mod tests {
             d.member("sarah"),
             "still a member, by the root recovered from"
         );
+        // kept, the refused ones not: what a client that knows only the old
+        // root follows the name here with
+        let h = d.handovers("sarah");
+        assert_eq!(h.len(), 1);
+        identity::anchored(&good, &h, std::slice::from_ref(&old_id), &[]).unwrap();
 
         // removed by the owner, then recovered: still out
         let d = open(crate::Members {

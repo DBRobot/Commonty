@@ -23,8 +23,8 @@ pub mod session;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
-pub use ed25519_dalek::SigningKey;
-use ed25519_dalek::{Signature, Signer, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, Verifier};
+pub use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -274,6 +274,68 @@ pub fn is_member(
         || (entry.grant.is_some() && release.is_some_and(|r| verify_grant(entry, r).is_ok()))
 }
 
+/// A recovery as the box that took it saw it: the entry on file, and the
+/// one the recovery key on file put in its place. A directory keeps every
+/// one it takes, so a client that knows an earlier root can follow the name
+/// to its current one without taking the directory's word for
+/// `recovered_from`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Handover {
+    pub before: SignedEntry,
+    pub after: SignedEntry,
+}
+
+/// Is `signed` let in by these lists, as a client can check on its own?
+/// Its root is on `members`, or it follows from a root that is through
+/// recoveries, each one proven by a handover that `accept` takes: the
+/// earlier entry signed by its root, the next co-signed by the paper key
+/// that entry named. `recovered_from` alone is a directory's word and
+/// counts for nothing here; and an invite counts only once the release
+/// lists its root, so a member let in by one is not anchored until then.
+pub fn anchored(
+    signed: &SignedEntry,
+    handovers: &[Handover],
+    members: &[String],
+    revoked: &[String],
+) -> Result<()> {
+    verify(signed)?;
+    // claimed earlier roots only ever shut a person out
+    if member_ids(&signed.entry)
+        .iter()
+        .any(|id| revoked.contains(id))
+    {
+        return Err(Error::Rejected(format!("{} is revoked", signed.entry.name)));
+    }
+    let mut cur = &signed.entry;
+    loop {
+        if members.contains(&member_id(&cur.root)) {
+            return Ok(());
+        }
+        if cur.recovered_from.is_empty() {
+            return Err(Error::Rejected(format!(
+                "{} is not under a member root in the signed release",
+                signed.entry.name
+            )));
+        }
+        let h = handovers
+            .iter()
+            .find(|h| {
+                h.after.entry.name == cur.name
+                    && h.after.entry.root == cur.root
+                    && h.after.entry.recovered_from == cur.recovered_from
+            })
+            .ok_or_else(|| {
+                Error::Rejected(format!(
+                    "no directory showed how {} came to the root it has",
+                    signed.entry.name
+                ))
+            })?;
+        verify(&h.before)?;
+        accept(Some(&h.before), &h.after)?;
+        cur = &h.before.entry;
+    }
+}
+
 pub fn canonical(entry: &Entry) -> Result<Vec<u8>> {
     Ok(serde_json::to_vec(entry)?)
 }
@@ -420,6 +482,56 @@ pub fn verify_invite(s: &SignedInvite, release: &VerifyingKey) -> Result<()> {
     let sig = Signature::from_slice(&sig).map_err(|_| Error::Signature)?;
     release
         .verify(&serde_json::to_vec(&s.invite)?, &sig)
+        .map_err(|_| Error::Signature)
+}
+
+/// The fleet's member list as a release carries it to a client
+/// (fleet/members.json at the commit released): the ids let in and the ids
+/// shut out, and the release's counter, so a client that has seen a newer
+/// one is not handed an older one back.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemberList {
+    pub counter: u64,
+    pub members: Vec<String>,
+    pub revoked: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedMemberList {
+    pub list: MemberList,
+    /// the release key, base64
+    pub signer: String,
+    pub signature: String,
+}
+
+/// what the release key signs for a member list: the list under a label of
+/// its own, so no invite, release or app manifest signature counts as one
+fn member_list_bytes(l: &MemberList) -> Result<Vec<u8>> {
+    let mut b = b"commonty members v1\0".to_vec();
+    b.extend(serde_json::to_vec(l)?);
+    Ok(b)
+}
+
+pub fn sign_member_list(list: MemberList, release: &SigningKey) -> Result<SignedMemberList> {
+    let sig: Signature = release.sign(&member_list_bytes(&list)?);
+    Ok(SignedMemberList {
+        list,
+        signer: encode_public(&release.verifying_key()),
+        signature: B64.encode(sig.to_bytes()),
+    })
+}
+
+/// Signed by the release key named, and by no other.
+pub fn verify_member_list(s: &SignedMemberList, release: &VerifyingKey) -> Result<()> {
+    if s.signer != encode_public(release) {
+        return Err(Error::Rejected(
+            "member list is not signed by the release key".into(),
+        ));
+    }
+    let sig = B64.decode(&s.signature).map_err(|_| Error::Signature)?;
+    let sig = Signature::from_slice(&sig).map_err(|_| Error::Signature)?;
+    release
+        .verify(&member_list_bytes(&s.list)?, &sig)
         .map_err(|_| Error::Signature)
 }
 
@@ -1518,6 +1630,118 @@ mod tests {
         let mut lifted = e2.clone();
         lifted.recovered_from = vec![];
         assert!(verify_grant(&lifted, &r).is_err());
+    }
+
+    /// What a client holds an entry to: the released list, and recoveries
+    /// it can check for itself. A box can sign an entry under a root of its
+    /// own and write any earlier roots into it; it cannot sign a handover.
+    #[test]
+    fn an_entry_is_anchored_by_the_release_and_proven_recoveries_alone() {
+        let (r0, p0, r1, p1, r2) = (generate(), generate(), generate(), generate(), generate());
+        let e0 = Entry {
+            name: "sarah".into(),
+            root: encode_public(&r0.verifying_key()),
+            recovery: encode_public(&p0.verifying_key()),
+            recovered_from: vec![],
+            devices: vec![dev(&generate())],
+            passkeys: vec![],
+            grant: None,
+            libraries: vec![],
+            terms: None,
+            version: 1,
+            updated: 1,
+        };
+        let s0 = sign(e0.clone(), &r0).unwrap();
+        let listed = [member_id(&e0.root)];
+        anchored(&s0, &[], &listed, &[]).unwrap();
+        assert!(anchored(&s0, &[], &[], &[]).is_err(), "not on the list");
+        assert!(anchored(&s0, &[], &listed, &listed).is_err(), "revoked");
+
+        // two recoveries, then an ordinary update under the last root
+        let mut e1 = e0.clone();
+        e1.root = encode_public(&r1.verifying_key());
+        e1.recovery = encode_public(&p1.verifying_key());
+        e1.recovered_from = vec![e0.root.clone()];
+        e1.version = 2;
+        let s1 = sign_recovery(e1.clone(), &r1, &p0).unwrap();
+        let mut e2 = e1.clone();
+        e2.root = encode_public(&r2.verifying_key());
+        e2.recovery = encode_public(&generate().verifying_key());
+        e2.recovered_from = vec![e0.root.clone(), e1.root.clone()];
+        e2.version = 3;
+        let s2 = sign_recovery(e2.clone(), &r2, &p1).unwrap();
+        let mut e3 = e2.clone();
+        e3.version = 4;
+        let s3 = sign(e3, &r2).unwrap();
+        let chain = [
+            Handover {
+                before: s0.clone(),
+                after: s1.clone(),
+            },
+            Handover {
+                before: s1.clone(),
+                after: s2.clone(),
+            },
+        ];
+        anchored(&s3, &chain, &listed, &[]).unwrap();
+        // a pinned root anchors the same way
+        anchored(&s3, &chain, &[member_id(&e1.root)], &[]).unwrap();
+        // the earlier roots it names are not enough on their own
+        assert!(anchored(&s3, &chain[1..], &listed, &[]).is_err());
+        assert!(anchored(&s3, &[], &listed, &[]).is_err());
+        // and a removal of any root along the way holds
+        assert!(anchored(&s3, &chain, &listed, &[member_id(&e1.root)]).is_err());
+
+        // a box's own root, naming sarah's real one as the root it replaced
+        let boxed = generate();
+        let mut f = e0.clone();
+        f.root = encode_public(&boxed.verifying_key());
+        f.recovery = encode_public(&boxed.verifying_key());
+        f.recovered_from = vec![e0.root.clone()];
+        f.version = 2;
+        // co-signed by a paper key of its own, with a "before" it signed
+        // too, or the real one: neither is a handover accept takes
+        let forged = sign_recovery(f.clone(), &boxed, &boxed).unwrap();
+        let mut fake_before = e0.clone();
+        fake_before.recovery = encode_public(&boxed.verifying_key());
+        let unsigned = SignedEntry {
+            entry: fake_before.clone(),
+            signature: s0.signature.clone(),
+            recovery_signature: None,
+        };
+        for before in [s0.clone(), unsigned] {
+            let h = [Handover {
+                before,
+                after: forged.clone(),
+            }];
+            assert!(anchored(&forged, &h, &listed, &[]).is_err());
+        }
+        // the box's root on its own, no earlier roots: not on the list
+        f.recovered_from = vec![];
+        let plain = sign(f, &boxed).unwrap();
+        assert!(anchored(&plain, &[], &listed, &[]).is_err());
+    }
+
+    #[test]
+    fn a_member_list_is_the_release_keys_and_nobody_elses() {
+        let release = generate();
+        let list = MemberList {
+            counter: 7,
+            members: vec![member_id("a")],
+            revoked: vec![],
+        };
+        let s = sign_member_list(list.clone(), &release).unwrap();
+        verify_member_list(&s, &release.verifying_key()).unwrap();
+        assert!(verify_member_list(&s, &generate().verifying_key()).is_err());
+        let mut grown = s.clone();
+        grown.list.members.push(member_id("b"));
+        assert!(verify_member_list(&grown, &release.verifying_key()).is_err());
+        // the same key's signature over the bare json, as it signs an
+        // invite, is no member list
+        let bare: Signature = release.sign(&serde_json::to_vec(&list).unwrap());
+        let mut swapped = s.clone();
+        swapped.signature = B64.encode(bare.to_bytes());
+        assert!(verify_member_list(&swapped, &release.verifying_key()).is_err());
     }
 
     #[test]

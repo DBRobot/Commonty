@@ -169,10 +169,19 @@ pub enum Anchor<'a> {
     /// this machine holds the root already (its own keyring, or a pin
     /// written when the device was admitted)
     Root(&'a str),
-    /// the member ids in the signed release: the entry must be one of them
-    Members(&'a [String]),
+    /// the member list in the signed release (or a root this machine
+    /// pinned, as the one id on it): the entry's root is on it, or follows
+    /// from one that is by recoveries the handovers prove
+    /// (identity::anchored). Someone let in by an invite the release does
+    /// not list yet is not anchored until it does.
+    Released {
+        members: &'a [String],
+        revoked: &'a [String],
+        handovers: &'a [identity::Handover],
+    },
     /// nothing is known yet. Every directory asked has to agree on the
-    /// root, and what comes back is worth pinning.
+    /// root, and what comes back is worth pinning - or, where a directory
+    /// could choose the root, worth showing a person to confirm.
     FirstSight,
 }
 
@@ -203,26 +212,134 @@ pub fn resolve(
             other.entry.root
         );
     }
-    match anchor {
-        Anchor::Root(want) if first.entry.root != want => {
-            bail!(
-                "{} is not the root this machine holds for {}",
-                first.entry.root,
-                first.entry.name
-            )
-        }
-        Anchor::Members(ids) => {
-            let id = identity::member_id(&first.entry.root);
-            if !ids.contains(&id) {
-                bail!("{} is not in the member list", first.entry.name);
-            }
-        }
-        _ => {}
+    if let Anchor::Root(want) = anchor
+        && first.entry.root != want
+    {
+        bail!(
+            "{} is not the root this machine holds for {}",
+            first.entry.root,
+            first.entry.name
+        )
     }
-    good.into_iter()
+    let newest = good
+        .into_iter()
         .max_by_key(|e| e.entry.version)
         .cloned()
-        .context("no directory has that entry")
+        .context("no directory has that entry")?;
+    if let Anchor::Released {
+        members,
+        revoked,
+        handovers,
+    } = anchor
+    {
+        identity::anchored(&newest, handovers, members, revoked)?;
+    }
+    Ok(newest)
+}
+
+/// The recoveries each directory took for `name` (identity::Handover), all
+/// of them: a proof is checked, not believed, so one more does no harm, and
+/// a directory that has none, or is not asked, just proves less.
+pub async fn handovers(
+    dirs: &[String],
+    name: &str,
+    keys: &[&identity::SigningKey],
+) -> Vec<identity::Handover> {
+    let Ok(http) = http() else { return vec![] };
+    let mut out = Vec::new();
+    for d in dirs {
+        let url = format!("{}/{name}/recoveries", d.trim_end_matches('/'));
+        let got = async {
+            read_request(&http, &url, Some(name), keys)
+                .send()
+                .await
+                .ok()?
+                .error_for_status()
+                .ok()?
+                .json::<Vec<identity::Handover>>()
+                .await
+                .ok()
+        }
+        .await;
+        out.extend(got.unwrap_or_default());
+    }
+    out
+}
+
+/// The entry for `name`, anchored to a member list (`Anchor::Released`):
+/// fetched, with every directory's handovers for it.
+pub async fn resolve_released(
+    dirs: &[String],
+    name: &str,
+    list: &identity::MemberList,
+) -> Result<SignedEntry> {
+    let found = fetch(dirs, name).await;
+    let handovers = handovers(dirs, name, &[]).await;
+    resolve(
+        &found,
+        Anchor::Released {
+            members: &list.members,
+            revoked: &list.revoked,
+            handovers: &handovers,
+        },
+    )
+}
+
+/// The release key a member list must be signed by: fleet/release.pub as
+/// this build was made with it, unless the program says otherwise (`dd`
+/// for its tests, DD_RELEASE_PUB). Never anything a box says.
+static RELEASE_KEY: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+pub fn trust_release(key: Option<String>) {
+    if let Ok(mut v) = RELEASE_KEY.write() {
+        *v = key;
+    }
+}
+
+pub fn release_key() -> Result<identity::VerifyingKey> {
+    let k = RELEASE_KEY
+        .read()
+        .ok()
+        .and_then(|v| v.clone())
+        .unwrap_or_else(|| identity::fleet::RELEASE_KEY.to_string());
+    identity::decode_public(&k).context("the release key")
+}
+
+/// The newest member list any directory's box has from the releases, signed
+/// by the release key (`release_key`): `/_dd/members` beside each
+/// directory. A box can withhold it or hand back an older one; the caller
+/// that keeps state holds it to the newest it saw (account::released).
+pub async fn member_list(dirs: &[String]) -> Result<identity::MemberList> {
+    let key = release_key()?;
+    let http = http()?;
+    let mut best: Option<identity::MemberList> = None;
+    let mut why = Vec::new();
+    for d in dirs {
+        let base = d.trim_end_matches('/');
+        let base = base.strip_suffix("/_dd/directory").unwrap_or(base);
+        let got = async {
+            let s: identity::SignedMemberList = read(&http, &format!("{base}/_dd/members"))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            identity::verify_member_list(&s, &key)?;
+            anyhow::Ok(s.list)
+        }
+        .await;
+        match got {
+            Ok(l) if best.as_ref().is_none_or(|b| l.counter > b.counter) => best = Some(l),
+            Ok(_) => {}
+            Err(e) => why.push(format!("{d}: {e:#}")),
+        }
+    }
+    best.with_context(|| {
+        format!(
+            "no signed member list from any directory:\n  {}",
+            why.join("\n  ")
+        )
+    })
 }
 
 /// The newest entry any directory holds, checked against nothing yet: the
@@ -370,8 +487,14 @@ mod tests {
 
         // and the released member list, where there is one
         let ids = [identity::member_id(&ok)];
-        assert!(resolve(&found, Anchor::Members(&ids)).is_ok());
-        assert!(resolve(&found, Anchor::Members(&[])).is_err());
+        let released = |members, revoked| Anchor::Released {
+            members,
+            revoked,
+            handovers: &[],
+        };
+        assert!(resolve(&found, released(&ids, &[])).is_ok());
+        assert!(resolve(&found, released(&[], &[])).is_err());
+        assert!(resolve(&found, released(&ids, &ids)).is_err());
     }
 
     /// An entry that does not verify is not an entry, however it arrived.

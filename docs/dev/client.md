@@ -190,10 +190,50 @@ every directory a client names and decides what to believe in one place,
 root, and then the anchor must hold:
 
 ```
-Root(key)       the root this machine holds
-Members(ids)    the member ids in the signed release
-FirstSight      nothing known yet: every directory asked must agree
+Root(key)       the root this machine holds, or pinned
+Released{..}    the signed release's member list (or a pinned root as the
+                one id on it): the entry's root is on it, or follows from
+                one that is through recoveries each proven by a handover
+                (identity::anchored); none of its roots is revoked
+FirstSight      nothing known yet: every directory asked must agree. Only
+                where the root is this machine's own (account::ours) or a
+                person confirms what is shown (dd member add|remove)
 ```
+
+A box can sign an entry under a root of its own, under any name, and
+write any earlier roots into it; with only the front door asked, "every
+directory agrees" is that box agreeing with itself. So another member's
+entry is believed only `Released`, and a member's own only under the root
+this device holds or pinned, a first look being `Released` too.
+
+**The signed member list.** `dd release publish` signs
+fleet/members.json at the commit it releases (`identity::MemberList`:
+the release counter, members, revoked; under the label `commonty members
+v1`) with the release key, and puts it on the releases branch as
+`members.json`. Every directory box serves it at `/_dd/members`
+(`dd.verify.memberList`), so a device that reaches only the front door
+can have it. A client checks it against `identity::fleet::RELEASE_KEY`,
+fleet/release.pub as the build was made (checks.fleet-defaults holds the
+two together; `DD_RELEASE_PUB` stands in for it in `dd`'s tests):
+`directory::member_list`. `account::released` also refuses a list older
+than the newest this device saw (keyring account `members-seen`).
+
+**Recoveries.** `recovered_from` is the directory's word. Every box keeps
+each recovery it takes, the entry before and the one after
+(`identity::Handover`), and serves them at
+`/_dd/directory/{name}/recoveries`; `identity::anchored` follows an
+entry's earlier roots only as far as those prove, each step one
+`identity::accept` takes (the entry before signed by its root, the next
+co-signed by the paper key it named). A recovery made before boxes kept
+them proves nothing: that member anchors again once `dd member add` puts
+their current root on the list.
+
+**Let in by an invite, not yet released.** The gate counts the grant at
+once; a client does not, until a release lists the root. Until then the
+member's devices cannot be shared with, cannot see libraries others
+share, and a new machine cannot recover the account with the paper key
+(a device that pinned the root still can). The error says so
+(`account::NOT_RELEASED`).
 
 Publishing PUTs the signed entry to every directory; `account::publish`
 fails unless every one took it. The default directory is the front door,
@@ -209,14 +249,18 @@ made here, this device the first, an invite's grant if a code is given),
 `admit` and `remove_device`, `admit_passkey` (a sign-in, sealed nothing),
 `link_passkey`, `remove_passkey`,
 `recover` (the paper key co-signs a new root; every other device is
-dropped; libraries are opened with the paper key and sealed afresh),
+dropped; libraries are opened with the paper key and sealed afresh; the
+entry it reseals is held to the root this device pinned, or else to the
+signed member list),
 `redeem`, `add_library` and `reseal` (the move off passkey keys,
 [libraries.md](libraries.md#moving-off-passkey-keys)). Each fetches the
 current entry, checks it is ours (`ours`: the root this machine holds),
 changes it, drops any passkey seal, signs and publishes. A secret the
 member's devices share (the archive and Photos passwords) is sealed with
 `seal_for_keys` and taken only when `vouched`: signed by a device of the
-entry `own_entry` checks under the root this device holds or pinned.
+entry `own_entry` checks under the root this device holds or pinned. A
+device with neither holds its first look to the signed member list
+(`Released`), then pins it.
 
 ## Libraries, media and archives
 
@@ -517,4 +561,5 @@ change under `client/` turns on the rust part; under `client/identity` or
   `DD_KEYRING_FILE`; a test that forgets it writes to the developer's own
   keyring.
 - **A shared library is not shared yet.** `readers` exists in the format
-  and the gate honours it; nothing writes one.
+  and the gate honours it; nothing writes one. What reads one takes it
+  only from an owner the signed member list anchors (`media::gate::openable`).

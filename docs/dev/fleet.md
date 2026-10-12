@@ -306,7 +306,7 @@ lives on the laptop's keyring ([client.md](client.md#keys-on-a-device)).
 ## Commands that write here
 
 ```
-dd member add|remove <name or id>    members.json
+dd member add|remove <name or id>    members.json (a name's id confirmed, or --confirm <id>)
 dd release init                      release.pub (refuses if a key exists)
 dd control setup --validator n=k...  control.json validators, control-worker.json
 dd mail setup                        mail.json

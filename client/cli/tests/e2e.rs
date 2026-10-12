@@ -65,7 +65,7 @@ impl Box_ {
     }
     /// a box whose release names a reader key, as one does once the mail
     /// Worker has its own: no single entry is anyone's any more
-    async fn start_closed(full: bool, members: Option<verify::Members>) -> Self {
+    async fn start_closed(full: bool, members: Option<verify::Members>, forge: &Forge) -> Self {
         let reader = identity::encode_public(&identity::generate().verifying_key());
         Self::start_full(
             scratch("box").join("keys"),
@@ -74,6 +74,28 @@ impl Box_ {
             None,
             vec![],
             vec![reader],
+            Some(forge.url.clone()),
+        )
+        .await
+    }
+    /// a box that serves the member list `forge` publishes
+    async fn start_listed(full: bool, members: Option<verify::Members>, forge: &Forge) -> Self {
+        Self::start_on_listed(scratch("box").join("keys"), full, members, forge).await
+    }
+    async fn start_on_listed(
+        dir: PathBuf,
+        full: bool,
+        members: Option<verify::Members>,
+        forge: &Forge,
+    ) -> Self {
+        Self::start_full(
+            dir,
+            full,
+            members,
+            None,
+            vec![],
+            vec![],
+            Some(forge.url.clone()),
         )
         .await
     }
@@ -86,7 +108,7 @@ impl Box_ {
         release_pub: Option<String>,
         home: Vec<verify::pages::Service>,
     ) -> Self {
-        Self::start_full(dir, full, members, release_pub, home, vec![]).await
+        Self::start_full(dir, full, members, release_pub, home, vec![], None).await
     }
     async fn start_full(
         dir: PathBuf,
@@ -95,6 +117,7 @@ impl Box_ {
         release_pub: Option<String>,
         home: Vec<verify::pages::Service>,
         directory_readers: Vec<String>,
+        member_list: Option<String>,
     ) -> Self {
         let (addr, _task) = verify::start(verify::Config {
             home,
@@ -118,6 +141,7 @@ impl Box_ {
             boxes: Default::default(),
             oidc: None,
             app_manifest: None,
+            member_list,
             network: None,
             bind: "127.0.0.1:0".parse().unwrap(),
             dir: dir.clone(),
@@ -136,6 +160,47 @@ impl Box_ {
     }
     fn directory(&self) -> String {
         self.url("/_dd/directory")
+    }
+}
+
+/// the release key every `dd` here holds other members' entries to
+/// (DD_RELEASE_PUB): the test's own, standing in for fleet/release.pub
+fn release_key() -> &'static identity::SigningKey {
+    static K: std::sync::OnceLock<identity::SigningKey> = std::sync::OnceLock::new();
+    K.get_or_init(identity::generate)
+}
+
+fn release_pub() -> String {
+    identity::encode_public(&release_key().verifying_key())
+}
+
+/// The releases branch, as far as a box reads the member list from it:
+/// signed by `release_key`, a newer one each `list`. A box keeps what it
+/// read for minutes, so a test lists before anything asks.
+struct Forge {
+    body: std::sync::Arc<std::sync::Mutex<String>>,
+    url: String,
+    counter: std::sync::atomic::AtomicU64,
+}
+
+impl Forge {
+    fn new() -> Self {
+        let body = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let url = serve(body.clone()).replace("/app.json", "/members.json");
+        Self {
+            body,
+            url,
+            counter: Default::default(),
+        }
+    }
+    fn list(&self, members: &[String], revoked: &[String]) {
+        let list = identity::MemberList {
+            counter: self.counter.fetch_add(1, Ordering::Relaxed) + 1,
+            members: members.to_vec(),
+            revoked: revoked.to_vec(),
+        };
+        let signed = identity::sign_member_list(list, release_key()).unwrap();
+        *self.body.lock().unwrap() = serde_json::to_string(&signed).unwrap();
     }
 }
 
@@ -159,6 +224,7 @@ impl Device {
         let o = Command::new(env!("CARGO_BIN_EXE_dd"))
             .args(args)
             .env("DD_KEYRING_FILE", &self.keyring)
+            .env("DD_RELEASE_PUB", release_pub())
             .output()
             .unwrap();
         Ran {
@@ -223,6 +289,16 @@ fn args<'a>(fixed: &[&'a str], extra: &'a [String]) -> Vec<&'a str> {
         .collect()
 }
 
+/// the member id `dd identity show` prints for this device's own entry
+fn member_id_of(dev: &Device, d: &[String]) -> String {
+    dev.dd_ok(&args(&["identity", "show"], d))
+        .lines()
+        .find_map(|l| l.strip_prefix("member id:"))
+        .expect("identity show prints the member id")
+        .trim()
+        .to_string()
+}
+
 /// The paper key out of `dd identity new` / `recover` output.
 fn recovery_key(out: &str) -> String {
     out.lines()
@@ -268,7 +344,8 @@ async fn anonymous(b: &Box_, path: &str) -> u16 {
 /// a browser signed in by its passkey.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_closed_directory_still_signs_up_admits_recovers_and_signs_in() {
-    let a = Box_::start_closed(true, None).await;
+    let forge = Forge::new();
+    let a = Box_::start_closed(true, None, &forge).await;
     let d = dirs([&a]);
     let laptop = Device::new();
     let out = laptop.dd_ok(&args(
@@ -284,6 +361,9 @@ async fn a_closed_directory_still_signs_up_admits_recovers_and_signs_in() {
         &d,
     ));
     let paper = recovery_key(&out);
+    // the release that lets him in, which a paper key on a new machine
+    // holds his entry to
+    forge.list(&[member_id_of(&laptop, &d)], &[]);
     assert_eq!(anonymous(&a, "").await, 401);
     assert_eq!(anonymous(&a, "/tom").await, 401);
     assert_eq!(anonymous(&a, "/nobody").await, 401);
@@ -357,7 +437,8 @@ async fn put_raw(b: &Box_, name: &str, body: &serde_json::Value) -> (u16, String
 
 #[tokio::test(flavor = "multi_thread")]
 async fn identity_devices_tokens_and_recovery() {
-    let a = Box_::start(true).await;
+    let forge = Forge::new();
+    let a = Box_::start_listed(true, None, &forge).await;
     let b = Box_::start(false).await;
     let d = dirs([&a, &b]);
     let laptop = Device::new();
@@ -378,6 +459,7 @@ async fn identity_devices_tokens_and_recovery() {
         &d,
     ));
     let paper = recovery_key(&out);
+    forge.list(&[member_id_of(&laptop, &d)], &[]);
     assert_eq!(entry(&a, "sarah").await.unwrap()["entry"]["version"], 1);
     assert_eq!(entry(&b, "sarah").await.unwrap()["entry"]["version"], 1);
     assert_eq!(verify_status(&a, &laptop.token()).await, 200);
@@ -485,12 +567,13 @@ async fn a_recovered_member_stays_a_member_and_a_forged_recovery_moves_nothing()
     let e = entry(&a, "sam").await.unwrap();
     let old_root = e["entry"]["root"].as_str().unwrap().to_string();
     let id = identity::member_id(&old_root);
-    let b = Box_::start_on(
+    let forge = Forge::new();
+    forge.list(std::slice::from_ref(&id), &[]);
+    let b = Box_::start_on_listed(
         a.dir.clone(),
         true,
         Some(verify::Members::list(vec![id.clone()])),
-        None,
-        vec![],
+        &forge,
     )
     .await;
     let removed = Box_::start_on(
@@ -597,11 +680,316 @@ async fn a_recovered_member_stays_a_member_and_a_forged_recovery_moves_nothing()
     assert_eq!(verify_status(&b, &bare.token()).await, 200);
 }
 
+/// An entry signed by `root`, for a person or a box the test plays: one
+/// device, the libraries given, the terms agreed.
+fn made_entry(
+    name: &str,
+    root: &identity::SigningKey,
+    recovery: &str,
+    recovered_from: Vec<String>,
+    libraries: Vec<identity::Library>,
+) -> identity::Entry {
+    let device = identity::encode_public(&identity::generate().verifying_key());
+    identity::Entry {
+        name: name.into(),
+        root: identity::encode_public(&root.verifying_key()),
+        recovery: recovery.into(),
+        recovered_from,
+        devices: vec![identity::Device {
+            fingerprint: identity::fingerprint(&device),
+            public_key: device,
+            added: 1,
+        }],
+        passkeys: vec![],
+        grant: None,
+        libraries,
+        terms: Some(identity::TERMS.into()),
+        version: 1,
+        updated: identity::now(),
+    }
+}
+
+/// What a box that lies serves for a name: written where it keeps the
+/// name's entry, past every rule an honest one applies on the way in.
+fn plant(b: &Box_, signed: &identity::SignedEntry) {
+    std::fs::write(
+        b.dir.join(format!("{}.json", signed.entry.name)),
+        serde_json::to_vec(signed).unwrap(),
+    )
+    .unwrap();
+}
+
+/// A recovery the box says it took, beside the entry
+fn plant_handover(b: &Box_, before: &identity::SignedEntry, after: &identity::SignedEntry) {
+    let dir = b.dir.parent().unwrap().join("recoveries");
+    std::fs::write(
+        dir.join(format!("{}.json", after.entry.name)),
+        serde_json::to_vec(&[identity::Handover {
+            before: before.clone(),
+            after: after.clone(),
+        }])
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+/// Finding: a recovery took the entry it reseals on first sight, so a box
+/// could serve one under a root of its own - the member's library ids, keys
+/// of its choosing sealed to the paper key (public) - and read every write
+/// after. The entry is held to the release now, and every recovery that
+/// led to it has to be proven; the honest ones still go through.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recovery_reseals_only_an_entry_the_release_anchors() {
+    let forge = Forge::new();
+    let a = Box_::start_listed(true, None, &forge).await;
+    let d = dirs([&a]);
+    let laptop = Device::new();
+    let out = laptop.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "sam",
+        ],
+        &d,
+    ));
+    let paper = recovery_key(&out);
+    let paper_pub =
+        identity::encode_public(&identity::decode_secret(&paper).unwrap().verifying_key());
+    forge.list(&[member_id_of(&laptop, &d)], &[]);
+    let real: identity::SignedEntry =
+        serde_json::from_value(entry(&a, "sam").await.unwrap()).unwrap();
+
+    // the box's own root, its own library key sealed to the paper key
+    let boxed = identity::generate();
+    let lib = |key: &library::Key| identity::Library {
+        id: library::random_id(),
+        keys: vec![identity::SealedKey {
+            to: "recovery".into(),
+            sealed: library::seal_to(&paper_pub, &key[..]).unwrap(),
+        }],
+        readers: vec![],
+        created: 1,
+    };
+    let theirs = library::random_key();
+    let mut forged = made_entry("sam", &boxed, &paper_pub, vec![], vec![lib(&theirs)]);
+    forged.version = real.entry.version + 1;
+    let bare = Device::new();
+    bare.dd_ok(&["device", "show"]);
+    let recover = |dev: &Device, paper: &str, ok: bool| {
+        run_with_stdin(
+            dev,
+            &args(&["identity", "recover", "--name", "sam", "--key-stdin"], &d),
+            &format!("{paper}\n"),
+            ok,
+        )
+    };
+    plant(&a, &identity::sign(forged.clone(), &boxed).unwrap());
+    let out = recover(&bare, &paper, false);
+    assert!(out.contains("not in a signed release"), "{out}");
+
+    // the same, naming sam's real root as the one it replaced, with a
+    // handover the box made up: its own key co-signs, not sam's paper key
+    forged.recovered_from = vec![real.entry.root.clone()];
+    let forged = identity::sign_recovery(forged, &boxed, &boxed).unwrap();
+    plant(&a, &forged);
+    plant_handover(&a, &real, &forged);
+    let out = recover(&bare, &paper, false);
+    assert!(out.contains("not in a signed release"), "{out}");
+    assert_eq!(
+        entry(&a, "sam").await.unwrap()["entry"]["root"],
+        forged.entry.root.as_str()
+    );
+
+    // the honest box again: the paper key recovers, anchored by the list
+    plant(&a, &real);
+    std::fs::remove_file(a.dir.parent().unwrap().join("recoveries/sam.json")).unwrap();
+    let next = recovery_key(&recover(&bare, &paper, true));
+    // and again on another new machine: the root now is on no list, and the
+    // recovery the box kept proves where it came from
+    let other = Device::new();
+    other.dd_ok(&["device", "show"]);
+    let third = recovery_key(&recover(&other, &next, true));
+    let now = entry(&a, "sam").await.unwrap();
+    assert_eq!(now["entry"]["recovered_from"].as_array().unwrap().len(), 2);
+    // without the proofs, that last root anchors to nothing
+    std::fs::remove_file(a.dir.parent().unwrap().join("recoveries/sam.json")).unwrap();
+    let last = Device::new();
+    last.dd_ok(&["device", "show"]);
+    let out = recover(&last, &third, false);
+    assert!(out.contains("not in a signed release"), "{out}");
+}
+
+/// Finding: `dd member add` and `remove` took a name's root on first
+/// sight and followed its `recovered_from`, so a box could put its own root
+/// on the list, take a revoked id off it, or have a made-up one revoked.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_member_list_takes_no_directory_s_word_for_whose_root_a_name_has() {
+    let a = Box_::start(true).await;
+    let d = dirs([&a]);
+    let dev = Device::new();
+    dev.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "tom",
+        ],
+        &d,
+    ));
+    let id = member_id_of(&dev, &d);
+    let repo = scratch("repo");
+    std::fs::create_dir_all(repo.join("fleet")).unwrap();
+    let repo = repo.to_str().unwrap().to_string();
+    let file = || std::fs::read_to_string(format!("{repo}/fleet/members.json")).unwrap();
+    dev.dd_ok(&args(
+        &["member", "add", "tom", "--repo", &repo, "--confirm", &id],
+        &d,
+    ));
+    dev.dd_ok(&args(&["member", "remove", &id, "--repo", &repo], &d));
+    let before = file();
+
+    // the box serves tom under its own root, recovered from his revoked one
+    let boxed = identity::generate();
+    let real: identity::SignedEntry =
+        serde_json::from_value(entry(&a, "tom").await.unwrap()).unwrap();
+    let mut forged = made_entry("tom", &boxed, "", vec![real.entry.root.clone()], vec![]);
+    forged.version = real.entry.version + 1;
+    let forged = identity::sign(forged, &boxed).unwrap();
+    plant(&a, &forged);
+    let boxed_id = identity::member_id(&forged.entry.root);
+    // the id shown is the box's, and confirming tom's real one fails
+    let out = dev.dd_fails(
+        &args(
+            &["member", "add", "tom", "--repo", &repo, "--confirm", &id],
+            &d,
+        ),
+        "is not the member id",
+    );
+    assert!(out.contains(&boxed_id), "{out}");
+    // an operator who confirms what was shown still takes no revoked id
+    // off the list on a directory's say
+    dev.dd_fails(
+        &args(
+            &[
+                "member",
+                "add",
+                "tom",
+                "--repo",
+                &repo,
+                "--confirm",
+                &boxed_id,
+            ],
+            &d,
+        ),
+        "is revoked",
+    );
+    dev.dd_fails(
+        &args(
+            &["member", "remove", "tom", "--repo", &repo, "--confirm", &id],
+            &d,
+        ),
+        "is not the member id",
+    );
+    assert_eq!(file(), before, "nothing changed");
+    // and the list puts tom's name beside no id for the box's entry
+    let out = dev.dd_ok(&args(&["member", "list", "--repo", &repo], &d));
+    assert!(!out.contains("tom"), "{out}");
+}
+
+/// Finding: a library "shared by" anyone with an entry was opened and
+/// mounted, so a box could plant one sealed to a member's device and read
+/// what they put in it. Only a sharer the release lets in counts now.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shared_library_comes_only_from_a_member_the_release_lets_in() {
+    let forge = Forge::new();
+    let a = Box_::start_listed(true, None, &forge).await;
+    let d = dirs([&a]);
+    let bob = Device::new();
+    bob.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "bob",
+        ],
+        &d,
+    ));
+    let to_bob = bob.public_key();
+    let shared = |owner: &str| identity::Library {
+        id: library::random_id(),
+        keys: vec![],
+        readers: vec![identity::Reader {
+            name: "bob".into(),
+            keys: vec![identity::SealedKey {
+                to: format!("device:{}", identity::fingerprint(&to_bob)),
+                sealed: library::seal_to(&to_bob, &library::random_key()[..]).unwrap(),
+            }],
+        }],
+        created: owner.len() as u64,
+    };
+    // alice is a member, and shares one with him
+    let alice = identity::generate();
+    let hers = shared("alice");
+    let e = made_entry("alice", &alice, "", vec![], vec![hers.clone()]);
+    let (st, why) = put_raw(
+        &a,
+        "alice",
+        &serde_json::to_value(identity::sign(e, &alice).unwrap()).unwrap(),
+    )
+    .await;
+    assert_eq!(st, 200, "{why}");
+    // carol is anyone with an entry; dave is the box's, naming alice's root
+    // as one it was recovered from
+    let carol = identity::generate();
+    let planted = shared("carol");
+    let e = made_entry("carol", &carol, "", vec![], vec![planted.clone()]);
+    let (st, why) = put_raw(
+        &a,
+        "carol",
+        &serde_json::to_value(identity::sign(e, &carol).unwrap()).unwrap(),
+    )
+    .await;
+    assert_eq!(st, 200, "{why}");
+    let boxed = identity::generate();
+    let borrowed = shared("dave");
+    let e = made_entry(
+        "dave",
+        &boxed,
+        "",
+        vec![identity::encode_public(&alice.verifying_key())],
+        vec![borrowed.clone()],
+    );
+    plant(&a, &identity::sign(e, &boxed).unwrap());
+    forge.list(
+        &[
+            identity::member_id(&identity::encode_public(&alice.verifying_key())),
+            member_id_of(&bob, &d),
+        ],
+        &[],
+    );
+
+    let out = bob.dd_ok(&args(&["library", "list"], &d));
+    assert!(out.contains(&format!("{}  alice's", hers.id)), "{out}");
+    assert!(!out.contains(&planted.id), "{out}");
+    assert!(!out.contains(&borrowed.id), "{out}");
+}
+
 fn run_with_stdin(dev: &Device, a: &[&str], stdin: &str, want_ok: bool) -> String {
     use std::io::Write as _;
     let mut c = Command::new(env!("CARGO_BIN_EXE_dd"))
         .args(a)
         .env("DD_KEYRING_FILE", &dev.keyring)
+        .env("DD_RELEASE_PUB", release_pub())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -718,20 +1106,55 @@ async fn membership_gates_the_services_not_the_account() {
     std::fs::create_dir_all(repo.join("fleet")).unwrap();
     let repo = repo.to_str().unwrap().to_string();
     let file = || std::fs::read_to_string(format!("{repo}/fleet/members.json")).unwrap_or_default();
-    dev.dd_ok(&args(&["member", "add", "tom", "--repo", &repo], &d));
+    // by name, the id is the operator's to confirm: not the directory's
+    dev.dd_fails(
+        &args(&["member", "add", "tom", "--repo", &repo], &d),
+        "--confirm",
+    );
+    let wrong = identity::member_id("someone else");
+    dev.dd_fails(
+        &args(
+            &["member", "add", "tom", "--repo", &repo, "--confirm", &wrong],
+            &d,
+        ),
+        "is not the member id",
+    );
+    assert!(!file().contains(&id), "{}", file());
+    dev.dd_ok(&args(
+        &["member", "add", "tom", "--repo", &repo, "--confirm", &id],
+        &d,
+    ));
     assert!(file().contains(&id), "{}", file());
     assert!(!file().contains("tom"));
     // the names come from a box where tom is a member: the list is members'
     let out = dev.dd_ok(&args(&["member", "list", "--repo", &repo], &dirs([&b])));
     assert!(out.contains(&id) && out.contains("tom"), "{out}");
-    dev.dd_ok(&args(&["member", "remove", "tom", "--repo", &repo], &d));
+    dev.dd_ok(&args(
+        &["member", "remove", "tom", "--repo", &repo, "--confirm", &id],
+        &d,
+    ));
     let f: serde_json::Value = serde_json::from_str(&file()).unwrap();
     assert!(f["members"].as_array().unwrap().is_empty(), "{}", file());
     assert_eq!(f["revoked"][0], id, "{}", file());
     assert!(
-        !dev.dd(&args(&["member", "remove", "tom", "--repo", &repo], &d))
-            .ok
+        !dev.dd(&args(
+            &["member", "remove", "tom", "--repo", &repo, "--confirm", &id],
+            &d
+        ))
+        .ok
     );
+    // by name, a revoked id stays revoked; given as itself, it comes off
+    dev.dd_fails(
+        &args(
+            &["member", "add", "tom", "--repo", &repo, "--confirm", &id],
+            &d,
+        ),
+        "is revoked",
+    );
+    dev.dd_ok(&args(&["member", "add", &id, "--repo", &repo], &d));
+    let f: serde_json::Value = serde_json::from_str(&file()).unwrap();
+    assert_eq!(f["members"][0], id, "{}", file());
+    assert!(f["revoked"].as_array().unwrap().is_empty(), "{}", file());
 }
 
 /// The browser side of a join, against a box: name, passkey, signed entry.
@@ -967,7 +1390,7 @@ async fn an_account_made_in_a_browser_is_a_passkey_root_and_waits_for_membership
     let repo = repo.to_str().unwrap().to_string();
     let dev = Device::new();
     dev.dd_ok(&args(
-        &["member", "add", "eve", "--repo", &repo],
+        &["member", "add", "eve", "--repo", &repo, "--confirm", &id],
         &dirs([&a]),
     ));
     let file = std::fs::read_to_string(format!("{repo}/fleet/members.json")).unwrap();
@@ -1451,8 +1874,19 @@ async fn an_invite_code_lets_one_person_in_once() {
         out.contains("eve  invited") && out.contains("fay2  invited"),
         "{out}"
     );
-    owner.dd_ok(&args(&["member", "remove", "eve", "--repo", &repo], &d));
     let eve_id = identity::member_id(e["entry"]["root"].as_str().unwrap());
+    owner.dd_ok(&args(
+        &[
+            "member",
+            "remove",
+            "eve",
+            "--repo",
+            &repo,
+            "--confirm",
+            &eve_id,
+        ],
+        &d,
+    ));
     let b_dir = scratch("b").join("keys");
     copy_entries(&a, &b_dir);
     let b = Box_::start_on(
@@ -1955,12 +2389,18 @@ async fn publish_brings_a_lagging_box_up() {
 /// Answer every request with `body`, from a thread: enough of a forge to
 /// serve one file.
 fn serve_forever(body: String) -> String {
+    serve(std::sync::Arc::new(std::sync::Mutex::new(body)))
+}
+
+/// the same, with whatever `body` holds at the time
+fn serve(body: std::sync::Arc<std::sync::Mutex<String>>) -> String {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     std::thread::spawn(move || {
         for mut s in l.incoming().flatten() {
             let mut buf = [0u8; 4096];
             let _ = std::io::Read::read(&mut s, &mut buf);
+            let body = body.lock().unwrap().clone();
             let r = format!(
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                 body.len()
@@ -1994,6 +2434,7 @@ async fn download_page_of(release_pub: String, manifest_url: String) -> (u16, St
         boxes: Default::default(),
         oidc: None,
         app_manifest: Some(manifest_url),
+        member_list: None,
         network: None,
         bind: "127.0.0.1:0".parse().unwrap(),
         dir: scratch("box").join("keys"),
@@ -2540,6 +2981,7 @@ async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
         boxes: Default::default(),
         oidc: None,
         app_manifest: None,
+        member_list: None,
         network: None,
         bind: "127.0.0.1:0".parse().unwrap(),
         dir: {
@@ -2820,6 +3262,7 @@ async fn gate_for(
         boxes: Default::default(),
         oidc: None,
         app_manifest: None,
+        member_list: None,
         network: None,
         bind: "127.0.0.1:0".parse().unwrap(),
         dir: {
@@ -3107,6 +3550,7 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
         boxes: Default::default(),
         oidc: None,
         app_manifest: None,
+        member_list: None,
         network: None,
         bind: "127.0.0.1:0".parse().unwrap(),
         dir: scratch("house-dir").join("keys"),

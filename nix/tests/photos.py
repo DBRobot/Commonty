@@ -46,7 +46,7 @@ for who in ("sarah", "tom"):
         f"DD_KEYRING_FILE=/root/{who}.json {nix['dd']} identity new --born 1990-01 --agree-terms --name {who} {dirs}"
     )
     box.succeed(
-        f"DD_KEYRING_FILE=/root/{who}.json {nix['dd']} member add {who} --repo /root/fleet {dirs}"
+        f"DD_KEYRING_FILE=/root/{who}.json {nix['dd']} member add {who} --repo /root/fleet {dirs} --confirm $(DD_KEYRING_FILE=/root/{who}.json {nix['dd']} identity show {dirs} | sed -n 's/^member id: *//p')"
     )
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
 box.succeed(

@@ -23,7 +23,9 @@ box.succeed(
 # own entry: an entry is a document you write about yourself. The list starts
 # empty, so sarah opens nothing until she is in it.
 box.succeed("mkdir -p /root/fleet/fleet")
-box.succeed(f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs}")
+box.succeed(
+    f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs} --confirm $({env} {nix['dd']} identity show {dirs} | sed -n 's/^member id: *//p')"
+)
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
 box.succeed(
     "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "

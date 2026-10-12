@@ -150,7 +150,8 @@ the member stays a member ([gate.md](gate.md#roles)).
 A browser has no device key, and gets none from a passkey. Its pages that
 open a library are the app's ([app.md](app.md)): the app opens the key
 with its own device key, out of the entry it checks under the root it
-holds or pinned (`account::own_entry`, `Opener::anchor`), and hands it to
+holds or pinned (`account::own_entry`, `Opener::anchor`; a first look is
+held to the release's signed member list), and hands it to
 the page through `/_dd/app/library`, to its window or to a browser the
 member let in from it. A box never serves a member a page that holds a
 library key; the demo's library holds nothing private and is the one
@@ -198,7 +199,11 @@ The move:
 
 Readers are in the format and the gate already honours them (a reader's
 keys are sealed under the owner's entry, `readers[].keys`), but nothing
-writes a reader yet: no command or page shares a library.
+writes a reader yet: no command or page shares a library. A device takes
+a library shared with it only from an owner whose entry the release's
+signed member list anchors (`media::gate::openable`,
+`directory::resolve_released`): any entry would otherwise do, and a box
+can make one, sealed to the member's device, and read what goes in.
 
 ### What a box can and cannot read
 
@@ -447,7 +452,8 @@ its `bearer_token_command` at start and again whenever the gate answers
 The app carries the Files and Movies & TV pages and library.js
 ([app/carried](../../app/carried)). `/_dd/app/library`
 ([app/src/site.rs](../../app/src/site.rs)) gives its window the member's
-own library, or a shared one when they have none. Every other `/_dd/`
+own library alone: one shared with them is another member's, and never
+stands in as their Files. Every other `/_dd/`
 request the pages make is proxied to `files.<domain>` with the device's
 token instead of a cookie, `x-dd-presign` and the upload headers among
 those passed on.

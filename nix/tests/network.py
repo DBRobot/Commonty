@@ -54,7 +54,9 @@ box.succeed(
 # a key on this network is for members. The list starts empty, so sarah has
 # to be in it before the door opens for her at all.
 box.succeed("mkdir -p /root/fleet/fleet")
-box.succeed(f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs}")
+box.succeed(
+    f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs} --confirm $({env} {nix['dd']} identity show {dirs} | sed -n 's/^member id: *//p')"
+)
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
 box.succeed(
     "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "

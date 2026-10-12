@@ -105,7 +105,9 @@ box.succeed(
     f"{env} {nix['dd']} identity new --born 1990-01 --agree-terms --name sarah {dirs}"
 )
 box.succeed("mkdir -p /root/fleet/fleet")
-box.succeed(f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs}")
+box.succeed(
+    f"{env} {nix['dd']} member add sarah --repo /root/fleet {dirs} --confirm $({env} {nix['dd']} identity show {dirs} | sed -n 's/^member id: *//p')"
+)
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
 box.succeed(
     "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "

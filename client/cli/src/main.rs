@@ -449,9 +449,21 @@ enum PolicyCmd {
 #[derive(Subcommand)]
 enum MemberCmd {
     /// Let a person in: their name (looked up in the directory) or member id.
-    Add { who: String },
-    /// Shut a person out.
-    Remove { who: String },
+    /// A name's member id is shown and asked about; an id given as itself is
+    /// the only thing that takes it off the revoked list.
+    Add {
+        who: String,
+        /// the member id a name must have, for no terminal: what their own
+        /// device shows (`dd identity show`)
+        #[arg(long)]
+        confirm: Option<String>,
+    },
+    /// Shut a person out: a name's member id is shown and asked about, as for add.
+    Remove {
+        who: String,
+        #[arg(long)]
+        confirm: Option<String>,
+    },
     /// Every member id, with the name behind it where a directory has one.
     List,
 }
@@ -948,6 +960,9 @@ async fn main() -> Result<()> {
     let keys = auth::open(&service());
     // the directory is members' to read: every read says which device asks
     account::read_as_device(|| auth::open(&service()));
+    // the release key other members' entries are held to: the fleet's,
+    // unless DD_RELEASE_PUB names another - tests, as DD_KEYRING_FILE is
+    directory::trust_release(std::env::var("DD_RELEASE_PUB").ok());
 
     match cli.command {
         Command::Signup {
@@ -1318,7 +1333,7 @@ async fn main() -> Result<()> {
                     Zeroizing::new(rpassword::prompt_password("recovery key: ")?)
                 };
                 let (kp, _) = auth::device::load_or_create(&keys)?;
-                let next = who::recover(&keys, &directories, &name, &key, &kp).await?;
+                let (next, _) = who::recover(&keys, &directories, &name, &key, &kp).await?;
                 keys.set(USER, &name)?;
                 println!("recovered {name}: new root here, every other device dropped");
                 who::print_recovery(&next);
@@ -1393,8 +1408,12 @@ async fn main() -> Result<()> {
             repo,
             directories,
         } => match cmd {
-            MemberCmd::Add { who } => member::add(&repo, &who, &directories).await?,
-            MemberCmd::Remove { who } => member::remove(&repo, &who, &directories).await?,
+            MemberCmd::Add { who, confirm } => {
+                member::add(&repo, &who, &directories, confirm.as_deref()).await?
+            }
+            MemberCmd::Remove { who, confirm } => {
+                member::remove(&repo, &who, &directories, confirm.as_deref()).await?
+            }
             MemberCmd::List => member::list(&repo, &directories).await?,
         },
         Command::Box { cmd, repo } => match cmd {

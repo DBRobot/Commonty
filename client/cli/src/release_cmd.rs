@@ -400,6 +400,26 @@ fn publish(
         form,
     )?;
     let body = serde_json::to_string_pretty(&signed)?;
+    // the member list at the commit released, for clients: they hold other
+    // members' entries to it, and the counter keeps an old one from coming back
+    let file = format!("{rev}:fleet/members.json");
+    let has_list = !git(
+        &root,
+        &["ls-tree", "--name-only", &rev, "fleet/members.json"],
+    )?
+    .is_empty();
+    let listed = match has_list {
+        true => crate::member::parse(git(&root, &["show", &file])?.as_bytes())?,
+        false => crate::member::Members::default(),
+    };
+    let members = serde_json::to_string_pretty(&identity::sign_member_list(
+        identity::MemberList {
+            counter,
+            members: listed.members,
+            revoked: listed.revoked,
+        },
+        &key,
+    )?)?;
     if dry_run {
         println!("{body}");
         eprintln!("== dry run: not vouched, not pushed");
@@ -416,6 +436,7 @@ fn publish(
         &[
             ("current.json".into(), body.clone()),
             (format!("history/{counter}.json"), body.clone()),
+            ("members.json".into(), members),
         ],
         &format!("release {counter}: {}", &rev[..12]),
     )?;

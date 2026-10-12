@@ -103,8 +103,9 @@ Someone who left accepts no friend link.
 [fleet/members.json](../../fleet/members.json) and writes the time under
 `removed`; the signed release carries both to every box. Everything of
 theirs is kept for the window (`WINDOW`, 30 days;
-`dd.verify.leaveWindowSeconds` shortens it in tests), so `dd member add`,
-which takes both away (for every root they have had), undoes a mistake.
+`dd.verify.leaveWindowSeconds` shortens it in tests), so `dd member add
+<id>`, which takes both away for that id, undoes a mistake. By name it
+does not: which roots a name has had is a directory's word.
 An id revoked before dates were kept has none and is never scheduled for
 deletion. A removal of any root a person has had counts for the person
 after a recovery ([gate.md](gate.md#roles)).

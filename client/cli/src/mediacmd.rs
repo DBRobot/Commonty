@@ -27,7 +27,8 @@ pub async fn run(
     let renew = media::mount::token_command(&std::env::current_exe()?, &["media", "--token"]);
     let base = media::gate::files_base(dirs)?;
     let mut mounts = Vec::new();
-    for (owner, lib, key) in media::gate::openable(dirs, &user, &opener).await? {
+    let list = crate::librarycmd::released(keys, dirs).await;
+    for (owner, lib, key) in media::gate::openable(dirs, &user, &opener, list.as_ref()).await? {
         let gate = media::gate::Gate::new(&base, &lib.id, &token, &key);
         let (dav, _) = gate.dav();
         let dir = at.join(&lib.id[..12]);

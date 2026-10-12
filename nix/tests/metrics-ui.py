@@ -36,7 +36,7 @@ box.succeed(
 )
 box.succeed("mkdir -p /root/fleet/fleet")
 box.succeed(
-    f"DD_KEYRING_FILE=/root/sarah.json {nix['dd']} member add sarah --repo /root/fleet {dirs}"
+    f"DD_KEYRING_FILE=/root/sarah.json {nix['dd']} member add sarah --repo /root/fleet {dirs} --confirm $(DD_KEYRING_FILE=/root/sarah.json {nix['dd']} identity show {dirs} | sed -n 's/^member id: *//p')"
 )
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
 box.succeed(

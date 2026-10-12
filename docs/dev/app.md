@@ -60,8 +60,10 @@ to any page of the domain during an ordinary prompt. So:
   archive password are sealed to device keys (the app's, dd's), a root
   kept on one, and the paper key ([libraries.md](libraries.md#where-the-keys-live)).
   The app opens them with its own key, out of the entry it checks under
-  the root it holds or pinned the first time (`account::own_entry`); a
-  shared secret is taken only when a device of that entry signed it.
+  the root it holds or pinned the first time (`account::own_entry`), and
+  that first time is held to the release's signed member list, not taken
+  on sight; a shared secret is taken only when a device of that entry
+  signed it.
 - **Every page that holds a key is the app's.** Files, Movies & TV,
   Chat, Settings (Backups, device names), Photos and Passwords come in
   the app's signed release, in its window and in the member's browser. A

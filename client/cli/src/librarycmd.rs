@@ -91,7 +91,8 @@ pub async fn run(cmd: LibraryCmd, keys: &auth::Store, dirs: &[String]) -> Result
             }
         }
         LibraryCmd::List => {
-            let libs = openable(dirs, &user, &opener).await?;
+            let list = released(keys, dirs).await;
+            let libs = openable(dirs, &user, &opener, list.as_ref()).await?;
             if libs.is_empty() {
                 println!("no libraries - `dd library new` makes one");
             }
@@ -105,11 +106,11 @@ pub async fn run(cmd: LibraryCmd, keys: &auth::Store, dirs: &[String]) -> Result
             }
         }
         LibraryCmd::Key { library } => {
-            let (_, key) = pick(dirs, &user, &opener, &library).await?;
+            let (_, key) = pick(keys, dirs, &user, &opener, &library).await?;
             println!("{}", library::crypt::password_of(&key));
         }
         LibraryCmd::Ls { library } => {
-            let (_, key) = pick(dirs, &user, &opener, &library).await?;
+            let (_, key) = pick(keys, dirs, &user, &opener, &library).await?;
             let gate = Gate::new(&base, &library, &token, &key);
             for it in gate.walk("").await? {
                 if it.dir {
@@ -124,7 +125,7 @@ pub async fn run(cmd: LibraryCmd, keys: &auth::Store, dirs: &[String]) -> Result
             file,
             name,
         } => {
-            let (_, key) = pick(dirs, &user, &opener, &library).await?;
+            let (_, key) = pick(keys, dirs, &user, &opener, &library).await?;
             let gate = Gate::new(&base, &library, &token, &key);
             let name = name.unwrap_or_else(|| {
                 file.file_name()
@@ -156,7 +157,7 @@ pub async fn run(cmd: LibraryCmd, keys: &auth::Store, dirs: &[String]) -> Result
             println!("{name}: {len} bytes");
         }
         LibraryCmd::Get { library, name, out } => {
-            let (_, key) = pick(dirs, &user, &opener, &library).await?;
+            let (_, key) = pick(keys, dirs, &user, &opener, &library).await?;
             let gate = Gate::new(&base, &library, &token, &key);
             let f = std::fs::File::create(&out)?;
             let shown = name.clone();
@@ -169,13 +170,13 @@ pub async fn run(cmd: LibraryCmd, keys: &auth::Store, dirs: &[String]) -> Result
             println!("{name}: {n} bytes -> {}", out.display());
         }
         LibraryCmd::Mkdir { library, path } => {
-            let (_, key) = pick(dirs, &user, &opener, &library).await?;
+            let (_, key) = pick(keys, dirs, &user, &opener, &library).await?;
             let gate = Gate::new(&base, &library, &token, &key);
             gate.mkdir(&path).await?;
             println!("{path}: made");
         }
         LibraryCmd::Trash { library, name } => {
-            let (_, key) = pick(dirs, &user, &opener, &library).await?;
+            let (_, key) = pick(keys, dirs, &user, &opener, &library).await?;
             let gate = Gate::new(&base, &library, &token, &key);
             gate.trash(&name).await?;
             println!("{name}: in the trash; nothing is gone until the box purges");
@@ -184,13 +185,27 @@ pub async fn run(cmd: LibraryCmd, keys: &auth::Store, dirs: &[String]) -> Result
     Ok(())
 }
 
+/// The release's member list, which a library shared with this member is
+/// held to; without it, a word on why and this member's own alone.
+pub async fn released(keys: &auth::Store, dirs: &[String]) -> Option<identity::MemberList> {
+    match account::released(keys, dirs).await {
+        Ok(l) => Some(l),
+        Err(e) => {
+            eprintln!("libraries shared with you are not shown: {e:#}");
+            None
+        }
+    }
+}
+
 async fn pick(
+    keys: &auth::Store,
     dirs: &[String],
     user: &str,
     opener: &Opener,
     library: &str,
 ) -> Result<(Library, library::Key)> {
-    openable(dirs, user, opener)
+    let list = released(keys, dirs).await;
+    openable(dirs, user, opener, list.as_ref())
         .await?
         .into_iter()
         .find(|(_, l, _)| l.id == library)

@@ -197,6 +197,10 @@ pub struct Config {
     /// beside the box releases). The downloads page offers what it names,
     /// and nothing else. None: no page.
     pub app_manifest: Option<String>,
+    /// Where the release's signed member list is published (the releases
+    /// branch, members.json): the directory serves it at /_dd/members, for
+    /// a client to anchor other members' entries to. None: not served.
+    pub member_list: Option<String>,
     /// Every box in the fleet, for Settings (Network) and the Git page. Empty on a
     /// box that is not told.
     pub fleet: fleet::Fleet,
@@ -2492,6 +2496,7 @@ pub async fn start(
     };
     let mut directory = directory::Directory::open(cfg.dir.clone(), release)?
         .with_members(cfg.members.clone())
+        .with_member_list(cfg.member_list.clone())
         .with_readers(cfg.directory_readers.clone())
         .with_names(box_names(&cfg.names, cfg.domain.as_deref()));
     if let Some((control, submit, config)) = &cfg.control {
@@ -3240,6 +3245,7 @@ mod tests {
             network: None,
             demo_library: None,
             app_manifest: None,
+            member_list: None,
             fleet: Default::default(),
             thanos: None,
             adblock: None,

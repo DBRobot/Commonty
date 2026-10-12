@@ -228,6 +228,16 @@ in
     default = null;
     description = "url of the signed app manifest (releases branch, app.json); null: no downloads page";
   };
+  # The member list a client holds other members' entries to: what `dd
+  # release publish` signed beside the box releases, passed on as it is.
+  # The client checks the signature; the box only serves it, so a device
+  # that reaches nothing but the front door can still get it.
+  options.dd.verify.memberList = lib.mkOption {
+    type = lib.types.nullOr lib.types.str;
+    default = "https://git.${config.dd.domain}/${config.dd.repo}/raw/branch/releases/members.json";
+    defaultText = lib.literalExpression ''"https://git.''${config.dd.domain}/''${config.dd.repo}/raw/branch/releases/members.json"'';
+    description = "url of the signed member list (releases branch, members.json), served at /_dd/members; null: not served";
+  };
   # Posters for Movies & TV: a member's device asks TMDB for a title's art
   # with this key and keeps it, sealed, in the library. The key goes to
   # signed-in pages (/_dd/me); the titles never come near the box.
@@ -363,6 +373,9 @@ in
         VERIFY_CONTROL = "http://127.0.0.1:4195";
         VERIFY_CONTROL_SUBMIT = "/run/dd-control/submit.sock";
         VERIFY_CONTROL_CONFIG = "/etc/dd-control/config.json";
+      }
+      // lib.optionalAttrs (cfg.memberList != null) {
+        VERIFY_MEMBER_LIST = cfg.memberList;
       }
       // lib.optionalAttrs (full && cfg.appManifest != null) {
         VERIFY_APP_MANIFEST = cfg.appManifest;

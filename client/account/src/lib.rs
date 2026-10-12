@@ -109,23 +109,62 @@ pub fn read_as_device<S: KeyStore + 'static>(open: impl Fn() -> S + Send + Sync 
 /// what anything sealed to the entry's keys is checked against
 pub const ROOT_PIN: &str = "entry-root";
 
+/// keyring account holding the counter of the newest signed member list
+/// this device has seen: an older one is refused from then on
+pub const MEMBERS_SEEN: &str = "members-seen";
+
+/// The release's member list, signed by the release key, and no older than
+/// the newest this device has seen (directory::member_list).
+pub async fn released(keys: &impl KeyStore, dirs: &[String]) -> Result<identity::MemberList> {
+    let list = directory::member_list(dirs).await?;
+    let seen: u64 = keys
+        .get(MEMBERS_SEEN)?
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    if list.counter < seen {
+        bail!(
+            "the directories hand back member list {} after this device saw {seen}",
+            list.counter
+        );
+    }
+    if list.counter > seen {
+        keys.set(MEMBERS_SEEN, &list.counter.to_string())?;
+    }
+    Ok(list)
+}
+
+/// what a person let in by an invite sees until a release lists them, for
+/// any check that holds an entry to the released list
+pub const NOT_RELEASED: &str = "not in a signed release yet: an account let in by an invite is \
+     unverified until the next release lists it, and until then cannot be shared with or recovered \
+     on a new device";
+
 /// This member's entry, as this device can vouch for it: under the root it
 /// holds, or the one it pinned the first time it looked (kept from then on).
 /// A box that serves an entry under some other root, listing keys of its
-/// own beside this device's, is refused here rather than sealed to.
+/// own beside this device's, is refused here rather than sealed to. That
+/// first look is held to the release's member list, never taken on sight.
 pub async fn own_entry(keys: &impl KeyStore, dirs: &[String], name: &str) -> Result<SignedEntry> {
     let found = fetch(dirs, name).await;
     let held = load_root(keys)?.map(|r| identity::encode_public(&r.verifying_key()));
     let pin = keys.get(ROOT_PIN)?.map(|s| s.to_string());
-    let anchor = held.clone().or(pin.clone());
-    let e = directory::resolve(
-        &found,
-        match &anchor {
-            Some(r) => directory::Anchor::Root(r),
-            None => directory::Anchor::FirstSight,
-        },
-    )
-    .context("your entry is not one this device can vouch for (signed out and in again after a recovery elsewhere?)")?;
+    let e = match held.or(pin.clone()) {
+        Some(r) => directory::resolve(&found, directory::Anchor::Root(&r))
+            .context("your entry is not one this device can vouch for (signed out and in again after a recovery elsewhere?)")?,
+        None => {
+            let list = released(keys, dirs).await?;
+            let handovers = directory::handovers(dirs, name, &[]).await;
+            directory::resolve(
+                &found,
+                directory::Anchor::Released {
+                    members: &list.members,
+                    revoked: &list.revoked,
+                    handovers: &handovers,
+                },
+            )
+            .with_context(|| format!("your entry is {NOT_RELEASED}"))?
+        }
+    };
     if pin.as_deref() != Some(e.entry.root.as_str()) {
         keys.set(ROOT_PIN, &e.entry.root)?;
     }
@@ -605,22 +644,49 @@ pub async fn reseal(
 /// the device list starts over with this device alone. Membership stays:
 /// the old root goes into `recovered_from`, and the invite with it. Everything a lost or
 /// stolen device could sign is dead the moment a directory takes this.
+/// Returns the new paper key, and the entry as it was before.
 pub async fn recover(
     keys: &impl KeyStore,
     dirs: &[String],
     name: &str,
     recovery_secret: &str,
     kp: &auth::device::KeyPair,
-) -> Result<zeroize::Zeroizing<String>> {
+) -> Result<(zeroize::Zeroizing<String>, SignedEntry)> {
     let recovery = identity::decode_secret(recovery_secret).context("bad recovery key")?;
     let found = fetch_proven(dirs, name, &[&recovery]).await;
-    // Verified, and every directory asked has to agree about whose root
-    // this name has. What follows reseals library keys out of this entry
-    // and co-signs the result with the real recovery key, so a made-up one
-    // would be the fleet accepting a key the liar chose. The recovery key
-    // matching is not the check it looks like: it is public.
-    let cur = directory::resolve(&found, directory::Anchor::FirstSight)
-        .with_context(|| format!("no directory has a usable entry for {name}"))?;
+    let handovers = directory::handovers(dirs, name, &[&recovery]).await;
+    // What follows reseals library keys out of this entry and co-signs the
+    // result with the real recovery key, so a made-up one would be the
+    // fleet accepting keys the liar chose and could read. The recovery key
+    // matching is not the check it looks like: it is public. So the entry
+    // is held to the root this device pinned, or, on a machine that knows
+    // none, to the release's member list: on it, or recovered from a root
+    // that is, every step proven.
+    // a pin is for the name this device is signed in as, no other
+    let pinned = match load_root(keys)? {
+        _ if keys.get(USER)?.as_deref().map(|s| s.as_str()) != Some(name) => None,
+        Some(r) => Some(identity::encode_public(&r.verifying_key())),
+        None => keys.get(ROOT_PIN)?.map(|s| s.to_string()),
+    };
+    let list = match &pinned {
+        Some(r) => identity::MemberList {
+            members: vec![identity::member_id(r)],
+            ..Default::default()
+        },
+        None => released(keys, dirs).await?,
+    };
+    let cur = directory::resolve(
+        &found,
+        directory::Anchor::Released {
+            members: &list.members,
+            revoked: &list.revoked,
+            handovers: &handovers,
+        },
+    )
+    .with_context(|| match pinned {
+        Some(_) => format!("the entry for {name} does not follow from the root this device knows"),
+        None => format!("{name}: no usable entry, or one {NOT_RELEASED}"),
+    })?;
     if cur.entry.recovery != identity::encode_public(&recovery.verifying_key()) {
         bail!("that recovery key does not match the entry for {name}");
     }
@@ -668,7 +734,7 @@ pub async fn recover(
     publish(dirs, &signed).await?;
     keys.set(ROOT, &identity::encode_secret(&root))?;
     keys.set(ROOT_PIN, &identity::encode_public(&root.verifying_key()))?;
-    Ok(identity::encode_secret(&next_recovery))
+    Ok((identity::encode_secret(&next_recovery), cur))
 }
 
 /// Sign a passkey into the entry. The box that ran the browser ceremony hands

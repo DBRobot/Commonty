@@ -27,7 +27,9 @@ for who in ["sarah", "ann", "tom"]:
     box.succeed(
         f"{as_(who)} identity new --born 1990-01 --agree-terms --name {who} {dirs}"
     )
-    box.succeed(f"{as_(who)} member add {who} --repo /root/fleet {dirs}")
+    box.succeed(
+        f"{as_(who)} member add {who} --repo /root/fleet {dirs} --confirm $({as_(who)} identity show {dirs} | sed -n 's/^member id: *//p')"
+    )
 box.succeed("mkdir -p /run/systemd/system/dd-verify.service.d")
 
 
@@ -133,7 +135,9 @@ assert sarah and sarah[0]["due"], listed
 box.fail(f"{as_('sarah')} leave --yes {dirs}")
 
 # the owner removes ann: out at once, everything kept for the window
-box.succeed(f"{as_('tom')} member remove ann --repo /root/fleet {dirs}")
+box.succeed(
+    f"{as_('tom')} member remove ann --repo /root/fleet {dirs} --confirm $({as_('ann')} identity show {dirs} | sed -n 's/^member id: *//p')"
+)
 release_members()
 assert me(token=ann_token) != "200", "removed, and still let in"
 listed = json.loads(box.succeed(f"curl -sf {gate}/internal/leaving"))

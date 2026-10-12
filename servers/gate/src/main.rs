@@ -104,6 +104,9 @@ async fn main() -> Result<()> {
         app_manifest: std::env::var("VERIFY_APP_MANIFEST")
             .ok()
             .filter(|u| !u.is_empty()),
+        member_list: std::env::var("VERIFY_MEMBER_LIST")
+            .ok()
+            .filter(|u| !u.is_empty()),
         demo_library: match (
             std::env::var("VERIFY_DEMO_LIBRARY_ID"),
             std::env::var("VERIFY_DEMO_LIBRARY_KEY"),

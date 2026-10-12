@@ -153,6 +153,9 @@ worktree, commits, and pushes.
 ```
 current.json            the release the boxes follow
 history/<counter>.json  every release ever published, the same bytes
+members.json            fleet/members.json at that commit, signed for clients
+                        (identity::MemberList, the release's counter): what
+                        every directory serves at /_dd/members
 app.json                the app's signed manifest (app-release.md)
 app-history/<tag>.json  every app manifest
 build-order.json        the order the boxes are building for an app release
@@ -173,7 +176,9 @@ release key      ed25519. The private half in the laptop's OS keyring
                  points dd at a json file instead, for tests. The public half
                  is fleet/release.pub, built into every box as
                  /etc/dd/release.pub, into the gate (dd.verify.releasePublicKey)
-                 and into the control relay Worker.
+                 and into the control relay Worker; and into every client
+                 (identity::fleet::RELEASE_KEY), which checks the member
+                 list against it.
 cache bucket     s3://nix-cache in garage. publish reaches it at
                  100.64.0.2:3900 (node1, over the fleet's network); a box
                  through its own garage, or a storage box's.

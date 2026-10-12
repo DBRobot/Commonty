@@ -318,19 +318,14 @@ pub async fn recover(
         return Err("a name is lowercase letters, digits and dashes".to_string());
     }
     let (kp, _) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
-    // the entry as it was: whose devices signed what was sealed to the
-    // paper key, which account::recover checks the paper key against too
-    let before = directory::resolve(
-        &directory::fetch(&dirs(), &name).await,
-        directory::Anchor::FirstSight,
-    )
-    .ok();
-    let next = account::recover(&keys.0, &dirs(), &name, recovery.trim(), &kp)
+    // and the entry as it was, held to the release as the recovery was:
+    // whose devices signed what was sealed to the paper key
+    let (next, before) = account::recover(&keys.0, &dirs(), &name, recovery.trim(), &kp)
         .await
         .map_err(|e| format!("{e:#}"))?;
     keys.0.set(USER, &name).map_err(|e| e.to_string())?;
     // Photos' password, out of its copy sealed to the paper key just used
-    if let (Ok(paper), Some(before)) = (identity::decode_secret(recovery.trim()), before)
+    if let Ok(paper) = identity::decode_secret(recovery.trim())
         && let Err(e) = crate::photos::recovered(&app, &paper, &before.entry).await
     {
         eprintln!("recover: photos: {e}");

@@ -161,6 +161,14 @@ agreed. A removal of any of those roots shuts the person out, recovered
 or not. The mail Worker counts earlier roots only as far as it held them
 to the entry it pinned before.
 
+A client cannot replay the log, so each box keeps every recovery it takes
+(`Directory::keep_handover`: the entry on file and the one that replaced
+it, `recoveries/<name>.json` beside `keys/`) and serves them for a
+client to check itself ([client.md](client.md#identity-and-the-directory),
+`identity::anchored`). A box that replays the log from the start keeps
+them all; one that had replayed past a recovery before this was kept has
+none for it.
+
 ### The answer to nginx
 
 `verify()` in lib.rs:
@@ -395,7 +403,14 @@ GET /_dd/directory/{name}   a member; the person themselves (their session, even
                             link's token); a key in that entry, by a read proof
                             (its root, its paper key, one of its devices); a
                             reader key (the mail Worker's)
+GET /_dd/directory/{name}/recoveries
+                            the recoveries this box took for the name, oldest
+                            first (identity::Handover); read as the entry is
 everyone else               401, whether or not the name exists
+GET /_dd/members            anyone: the signed member list from the releases
+                            branch (VERIFY_MEMBER_LIST), as published, if it
+                            verifies here; ids only, which the open repo's
+                            fleet/members.json carries already
 ```
 
 - **Device tokens for reads** are minted by `account::read_token`

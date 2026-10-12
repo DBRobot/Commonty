@@ -557,29 +557,33 @@ fn no_store(v: &serde_json::Value) -> Response<Vec<u8>> {
 
 /// The library a page opens, `{ id, key, reader }`: this device's own keys
 /// open the member's library out of the entry this device vouches for, as
-/// the mount and the player do. The member's own first; one shared with
-/// them otherwise, to read. For the app's own pages only: its window, and a
-/// browser it let in (local.rs).
+/// the mount and the player do. The member's own alone: one shared with
+/// them is another member's, never their Files. For the app's own pages
+/// only: its window, and a browser it let in (local.rs).
 pub(crate) async fn library_value<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<Option<serde_json::Value>, String> {
     use base64::Engine as _;
     let keys = app.state::<crate::account::Keys>();
-    let (opener, user, _) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
-    let libs = media::gate::openable(&crate::account::dirs(), &user, &opener)
+    let (mut opener, user, _) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
+    let dirs = crate::account::dirs();
+    if opener.anchor().is_none() {
+        // a first look is held to the release (own_entry), which pins it
+        account::own_entry(&keys.0, &dirs, &user)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        (opener, _, _) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
+    }
+    let libs = media::gate::openable(&dirs, &user, &opener, None)
         .await
         .map_err(|e| format!("{e:#}"))?;
-    let Some((owner, lib, key)) = libs
-        .iter()
-        .find(|(o, _, _)| *o == user)
-        .or_else(|| libs.first())
-    else {
+    let Some((_, lib, key)) = libs.iter().find(|(o, _, _)| *o == user) else {
         return Ok(None);
     };
     Ok(Some(serde_json::json!({
         "id": lib.id,
         "key": base64::engine::general_purpose::STANDARD.encode(&key[..]),
-        "reader": *owner != user,
+        "reader": false,
     })))
 }
 
