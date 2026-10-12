@@ -104,9 +104,7 @@ fn bundle(root: &Path, r#ref: &str) -> Result<std::path::PathBuf> {
 fn kind(name: &str) -> &'static str {
     match name {
         "worker.js" | "dd_mail.js" | "fleet.js" | "unlock.js" | "leaving.js" | "send.js"
-        | "aliases.js" => {
-            "application/javascript+module"
-        }
+        | "aliases.js" => "application/javascript+module",
         n if n.ends_with(".wasm") => "application/wasm",
         n if n.ends_with(".woff2") => "application/octet-stream",
         _ => "text/plain",
