@@ -102,7 +102,9 @@ in
   dd.repo = policy.repo;
   # the box owner's paper key (their entry's recovery key): the box's disk keys
   # have a copy encrypted to it in /boot/dd, for a dead TPM
-  dd.unlock.recovery = owner.paperKey;
+  # (none for a box nobody owns, whose disks are not encrypted: what it
+  # keeps is ciphertext already)
+  dd.unlock.recovery = if owner.paperKey == null then "" else owner.paperKey;
   # every box holds a directory replica; the gateway role turns this into
   # the full verifier with the browser login
   dd.verify.role = lib.mkDefault "directory";

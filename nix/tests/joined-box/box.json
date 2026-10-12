@@ -4,7 +4,7 @@
     "ssid": "",
     "address": ""
   },
-  "encrypted": true,
+  "encrypted": false,
   "extraPools": [],
   "datasets": {}
 }
