@@ -13,7 +13,7 @@
   ...
 }:
 let
-  efiArch = config.nixpkgs.hostPlatform.efiArch;
+  efiArch = pkgs.stdenv.hostPlatform.efiArch;
   top = config.system.build.toplevel;
 in
 {
