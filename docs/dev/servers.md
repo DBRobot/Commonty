@@ -103,6 +103,7 @@ in `nix/tests/` unless it says otherwise; "crate tests" run in
 | `media` | the Movies & TV page and its player | page; `media/webdav-media.nix` | `library`, `transcode` | [libraries.md](libraries.md) |
 | `observe` | the Metrics page over Thanos | page; `observe/metrics-ui.nix` | `metrics`, `thanos`, `metrics-ui` | - |
 | `photos` | Ente, patched, and the gate's Photos sign-in | patches, `templates/`, `web/`; `photos/ente.nix`; gate `photos.rs`, `demo_photos.rs` | `photos`, `pgrestore`, crate tests | [packaged.md](packaged.md) |
+| `status` | the uptime page at `<domain>/status` | page; gate `status.rs`; `observe/uptime.nix` | crate tests, `thanos`, `checks.nginx` | [gate.md](gate.md#status-and-release-notes-statusrs) |
 | `system/control` | the control plane | Go; `box/control.nix` | `checks.control` | [control-plane.md](control-plane.md) |
 | `system/release` | the release agent and attestation | `src/`; `box/agent.nix` | `release`, crate tests | [releases.md](releases.md) |
 | `transcode` | one file for one viewer, decrypted in memory and transcoded | `src/`; `library/transcode.nix` | `transcode` | [libraries.md](libraries.md) |

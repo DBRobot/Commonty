@@ -38,6 +38,9 @@ These pages are in four parts:
 - [Ad blocking](guide/services/ad-blocking.md)
 - [Metrics](guide/services/metrics.md)
 
+Whether each service is working right now, and how it has been over the
+last 90 days, is on the [status page](https://commonty.org/status).
+
 ## Policies
 
 - [Privacy](policies/privacy.md): what each part of Commonty can see, and who else can

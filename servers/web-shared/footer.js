@@ -55,6 +55,7 @@ export function footer() {
         ['Demo', `${home}/_dd/demo`],
         ['Sign in', `${home}/`],
         ['Joining', `${site}/docs/guide/joining`],
+        ['Status', `${site}/status`],
       ]),
       column('Learn', [
         ['Docs', `${site}/docs`],

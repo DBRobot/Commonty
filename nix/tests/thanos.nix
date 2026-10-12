@@ -31,6 +31,7 @@ let
       ./box.nix
       ../modules/storage/garage.nix
       ../modules/observe/thanos.nix
+      ../modules/observe/uptime.nix
     ];
     dd.garage = {
       zone = "r-test";
@@ -77,6 +78,8 @@ in
             b = "192.168.1.2";
           };
           environment.systemPackages = [ pkgs.jq ];
+          # the site, as far as the uptime page goes: the gate and nginx
+          services.nginx.enable = true;
         }
       ];
     };

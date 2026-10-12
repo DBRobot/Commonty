@@ -29,6 +29,7 @@ mod private;
 mod session;
 mod signins;
 mod sso;
+pub mod status;
 mod storage;
 
 use std::collections::{BTreeMap, HashMap};
@@ -102,6 +103,10 @@ struct App {
     app_seen: Mutex<Option<(Instant, Option<SignedApp>)>>,
     fleet: fleet::Fleet,
     thanos: Option<String>,
+    /// the forge's releases list, as nobody (status.rs)
+    releases: Option<String>,
+    /// the uptime page's answer and the releases, worked out now and then
+    status: status::Cache,
     /// this box's dd-control: the agreed state the fleet pages read
     control: Option<String>,
     /// Ad blocking at home: Pi-hole's api on this box, and its household
@@ -207,6 +212,9 @@ pub struct Config {
     /// Thanos on this box, which holds every box's facts (fleet.rs). None:
     /// this box does not gather them, and every box shows as unknown.
     pub thanos: Option<String>,
+    /// the forge's API list of this fleet's releases, as anyone reads it
+    /// (status.rs). None: no release notes here.
+    pub releases: Option<String>,
     /// Pi-hole on this box (adblock.rs). None: no ad blocking here.
     pub adblock: Option<adblock::Adblock>,
     /// how to reach Forgejo's database to listen for its changes
@@ -2053,6 +2061,38 @@ async fn fleet_json(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
     }
 }
 
+/// GET /_dd/status.json: whether each service works, now and each of the
+/// last 90 days. Anyone may ask: it names services, never a box.
+async fn status_json(State(app): State<Arc<App>>) -> Response {
+    match app.status.status(app.thanos.as_deref()).await {
+        Some(s) => ([("cache-control", "public, max-age=30")], Json(s)).into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [("cache-control", "no-store")],
+            Json(serde_json::json!({ "services": [] })),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /_dd/releases.json: the newest releases' notes, as plain lines. The
+/// forge shows them to anyone already.
+async fn releases_json(State(app): State<Arc<App>>) -> Response {
+    match app.status.releases(app.releases.as_deref()).await {
+        Some(r) => (
+            [("cache-control", "public, max-age=300")],
+            Json(serde_json::json!({ "releases": r })),
+        )
+            .into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [("cache-control", "no-store")],
+            Json(serde_json::json!({ "releases": [] })),
+        )
+            .into_response(),
+    }
+}
+
 /// POST /_dd/csp: what a page's content policy would have blocked, as the
 /// browser reports it. Logged, one line each, for whoever tunes the policy;
 /// anyone may send one, so it is read small and never answered with more
@@ -2700,6 +2740,8 @@ pub async fn start(
         app_seen: Mutex::new(None),
         fleet: cfg.fleet,
         thanos: cfg.thanos,
+        releases: cfg.releases,
+        status: Default::default(),
         control: cfg.control.as_ref().map(|(c, _, _)| c.clone()),
         adblock: cfg.adblock,
         forge_events: cfg.forge_events.map(forge_events::ForgeEvents::start),
@@ -2936,6 +2978,10 @@ pub async fn start(
         .route("/_dd/docs/index.json", get(docs_index))
         .route("/_dd/docs/raw/{*path}", get(docs_raw))
         .route("/_dd/fleet.json", get(fleet_json))
+        // anyone's: whether the services work, and what each release changed
+        .route("/_dd/status", get(|| async { page("status") }))
+        .route("/_dd/status.json", get(status_json))
+        .route("/_dd/releases.json", get(releases_json))
         .route("/_dd/me", get(me))
         // Ente comes with the app: a browser here is handed to it
         .route("/_dd/photos", get(|| async { use_app() }))
@@ -3290,6 +3336,18 @@ mod tests {
         home: Vec<pages::Service>,
         directory_readers: Vec<String>,
     ) -> (String, session::Sessions) {
+        gate_reading(what, members, home, directory_readers, None, None).await
+    }
+
+    /// the same, with thanos and the forge's releases at these addresses
+    async fn gate_reading(
+        what: &str,
+        members: Option<Members>,
+        home: Vec<pages::Service>,
+        directory_readers: Vec<String>,
+        thanos: Option<String>,
+        releases: Option<String>,
+    ) -> (String, session::Sessions) {
         let d = std::env::temp_dir().join(format!("dd-gate-{what}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
@@ -3313,7 +3371,8 @@ mod tests {
             app_manifest: None,
             member_list: None,
             fleet: Default::default(),
-            thanos: None,
+            thanos,
+            releases,
             adblock: None,
             forge_events: None,
             storage_ledger: None,
@@ -3378,6 +3437,140 @@ mod tests {
         // and a header that is no device's token changes nothing
         assert_eq!(ask("DELETE", Some("x")).await, 403);
         assert_eq!(ask("PUT", Some("not-a-biscuit")).await, 403);
+    }
+
+    /// A stand-in for thanos and the forge on a free port: every answer
+    /// carries a box's name and address, as a real one could, and none of
+    /// it may reach what the gate tells anyone.
+    async fn thanos_and_forge() -> String {
+        use axum::extract::Query;
+        let now = session::now();
+        let point = move |v: &str| serde_json::json!([now, v]);
+        let app = Router::new()
+            .route(
+                "/api/v1/query",
+                get(move || async move {
+                    Json(serde_json::json!({"status": "success", "data": {"resultType": "vector", "result": [
+                        {"metric": {"service": "photos", "box": "node1", "instance": "100.64.0.2:9100"}, "value": point("1")},
+                        {"metric": {"service": "git", "box": "node2"}, "value": point("0")},
+                        {"metric": {"service": "node1-secret"}, "value": point("1")}
+                    ]}}))
+                }),
+            )
+            .route(
+                "/api/v1/query_range",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    let start: u64 = q["start"].parse().unwrap();
+                    let end: u64 = q["end"].parse().unwrap();
+                    let step: u64 = q["step"].parse().unwrap();
+                    let values: Vec<_> = (0..)
+                        .map(|i| start + i * step)
+                        .take_while(|t| *t <= end)
+                        .map(|t| serde_json::json!([t, "1"]))
+                        .collect();
+                    Json(serde_json::json!({"status": "success", "data": {"resultType": "matrix", "result": [
+                        {"metric": {"service": "photos", "box": "node1", "site": "s-c844d9db"}, "values": values},
+                        {"metric": {"service": "git", "box": "node2"}, "values": values}
+                    ]}}))
+                }),
+            )
+            .route(
+                "/releases",
+                get(|| async {
+                    Json(serde_json::json!([
+                        {"tag_name": "r9", "name": "9 · one thing", "body": "- one **thing** (#4)", "published_at": "2026-10-01T10:00:00Z"},
+                        {"tag_name": "r10", "name": "10 · 2 changes", "body": "Release 10, signed on the laptop and pulled by the boxes.\n\n### Fixes\n- `x` works (#5)\n- see [this](https://x.invalid) (#6)\n", "published_at": "2026-10-02T10:00:00Z"}
+                    ]))
+                }),
+            );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, app).await });
+        format!("http://{addr}")
+    }
+
+    /// The uptime page's answer is the same for anyone: services, never a
+    /// box, an address, a place or how many boxes there are.
+    #[tokio::test]
+    async fn the_status_is_services_alone_and_the_same_for_anyone() {
+        let fake = thanos_and_forge().await;
+        let (url, s) = gate_reading(
+            "status",
+            None,
+            vec![demo_tile()],
+            vec![],
+            Some(fake.clone()),
+            Some(format!("{fake}/releases")),
+        )
+        .await;
+        let http = client();
+        let mut seen = vec![];
+        for c in [
+            None,
+            Some(cookie(&s.issue("tom"))),
+            Some(cookie(&s.issue("demo"))),
+        ] {
+            let mut r = http.get(format!("{url}/_dd/status.json"));
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            let r = r.send().await.unwrap();
+            assert_eq!(r.status(), 200);
+            assert_eq!(r.headers()["cache-control"], "public, max-age=30");
+            let body = r.text().await.unwrap();
+            for no in ["node", "box", "100.64", "instance", "s-c844", "site\":\"s"] {
+                assert!(!body.contains(no), "{no} in {body}");
+            }
+            seen.push(body);
+        }
+        assert!(seen.iter().all(|b| *b == seen[0]));
+        let v: serde_json::Value = serde_json::from_str(&seen[0]).unwrap();
+        assert_eq!(v.as_object().unwrap().len(), 3, "{v}");
+        let services = v["services"].as_array().unwrap();
+        let ids: Vec<_> = services.iter().map(|x| x["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["photos", "git"]);
+        assert_eq!(services[0]["label"], "Photos");
+        assert_eq!(services[0]["up"], true);
+        assert_eq!(services[1]["up"], false);
+        assert_eq!(services[0]["days"].as_array().unwrap().len(), 90);
+        assert_eq!(services[0]["days"][89], 1.0);
+        assert!(services[0]["since"].is_u64());
+
+        // the releases: plain lines, newest first
+        let r: serde_json::Value = http
+            .get(format!("{url}/_dd/releases.json"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let r = r["releases"].as_array().unwrap();
+        assert_eq!(r[0]["n"], 10);
+        assert_eq!(r[0]["title"], "2 changes");
+        assert_eq!(r[0]["notes"], serde_json::json!(["x works", "see this"]));
+        assert_eq!(r[1]["notes"], serde_json::json!(["one thing"]));
+
+        // and the page, for anyone
+        let page = http.get(format!("{url}/_dd/status")).send().await.unwrap();
+        assert_eq!(page.status(), 200);
+        let html = page.text().await.unwrap();
+        for f in ["status.js", "status.css", "shell.js", "home.css"] {
+            assert!(html.contains(&format!("/_dd/static/{f}")), "{f}");
+        }
+    }
+
+    /// Where nothing is measured, the gate says so rather than guessing.
+    #[tokio::test]
+    async fn no_thanos_is_no_status_rather_than_a_guess() {
+        let (url, _) = gate("status-none", None, vec![]).await;
+        let r = client()
+            .get(format!("{url}/_dd/status.json"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 503);
+        assert_eq!(r.headers()["cache-control"], "no-store");
     }
 
     /// The bare name's front page is for anyone, signed in or not, and

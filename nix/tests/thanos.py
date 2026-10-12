@@ -76,6 +76,22 @@ assert set(by) == {"a", "b"}, seen
 for n in ("a", "b"):
     assert by[n]["up"], (n, seen)
 
+# the uptime page's answer: each box notes its own services, and the gate
+# reads them from thanos as services alone, for anyone: no token here
+a.succeed("systemctl start dd-uptime.service")
+a.succeed("grep -q 'dd_service_up{service=\"site\"} 1' /var/lib/dd-facts/uptime.prom")
+b.succeed("systemctl start dd-uptime.service")
+b.fail("grep -q 'service=' /var/lib/dd-facts/uptime.prom")
+a.wait_until_succeeds(
+    "curl -sf http://127.0.0.1:4181/_dd/status.json -o /tmp/s && jq -e '.services[0].id == \"site\" and .services[0].up' /tmp/s",
+    timeout=300,
+)
+status = json.loads(a.succeed("cat /tmp/s"))
+assert set(status) == {"services", "checked", "start"}, status
+assert [x["id"] for x in status["services"]] == ["site"], status
+assert set(status["services"][0]) == {"id", "label", "up", "since", "days"}, status
+assert len(status["services"][0]["days"]) == 90, status
+
 # b goes away: a still answers, with what it has
 b.shutdown()
 a.wait_until_succeeds(

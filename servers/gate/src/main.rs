@@ -73,6 +73,9 @@ async fn main() -> Result<()> {
         thanos: std::env::var("VERIFY_THANOS")
             .ok()
             .filter(|s| !s.is_empty()),
+        releases: std::env::var("VERIFY_RELEASES")
+            .ok()
+            .filter(|s| !s.is_empty()),
         forge_events: std::env::var("VERIFY_FORGE_EVENTS")
             .ok()
             .filter(|s| !s.is_empty()),

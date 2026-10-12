@@ -150,6 +150,13 @@ in
     locations."= /_dd/me" = docsGate;
     locations."= /_dd/config" = docsGate;
     locations."= /_dd/csp" = docsGate;
+    # whether the services work, for anyone (servers/gate/src/status.rs):
+    # the page, and its one answer, which names no box
+    locations."= /status" = docsGate // {
+      proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/status";
+    };
+    locations."= /_dd/status.json" = docsGate;
+    locations."= /_dd/releases.json" = docsGate;
   };
 
   # garage's public face: ente's browser uploads and any other s3 client

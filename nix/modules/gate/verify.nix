@@ -238,6 +238,19 @@ in
     defaultText = lib.literalExpression ''"https://git.''${config.dd.domain}/''${config.dd.repo}/raw/branch/releases/members.json"'';
     description = "url of the signed member list (releases branch, members.json), served at /_dd/members; null: not served";
   };
+  # The release notes the uptime page and the corner assistant read
+  # (/_dd/releases.json): the forge's own list, through its public door as
+  # nobody, so only what a stranger may read already.
+  options.dd.verify.releases = lib.mkOption {
+    type = lib.types.nullOr lib.types.str;
+    default =
+      if config.services.forgejo.enable then
+        "https://code.${config.dd.domain}/api/v1/repos/${config.dd.repo}/releases?limit=50"
+      else
+        null;
+    defaultText = lib.literalExpression ''"https://code.''${config.dd.domain}/api/v1/repos/''${config.dd.repo}/releases?limit=50" when the forge is here'';
+    description = "url of the forge's release list for this fleet's repository; null: no release notes";
+  };
   # Posters for Movies & TV: a member's device asks TMDB for a title's art
   # with this key and keeps it, sealed, in the library. The key goes to
   # signed-in pages (/_dd/me); the titles never come near the box.
@@ -376,6 +389,9 @@ in
       }
       // lib.optionalAttrs (cfg.memberList != null) {
         VERIFY_MEMBER_LIST = cfg.memberList;
+      }
+      // lib.optionalAttrs (full && cfg.releases != null) {
+        VERIFY_RELEASES = cfg.releases;
       }
       // lib.optionalAttrs (full && cfg.appManifest != null) {
         VERIFY_APP_MANIFEST = cfg.appManifest;

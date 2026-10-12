@@ -406,6 +406,16 @@ const STATIC: &[(&str, &str, &str)] = &[
         "servers/landing/web/landing.css",
         "text/css; charset=utf-8",
     ),
+    (
+        "status.js",
+        "servers/status/web/status.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "status.css",
+        "servers/status/web/status.css",
+        "text/css; charset=utf-8",
+    ),
 ];
 
 /// the stylesheet, the scripts, the fonts and the pictures, by the name
@@ -526,6 +536,8 @@ const PAGES: &[(&str, &str)] = &[
     ("docs", "servers/docs/web/pages/docs.html"),
     // not signed in: anyone, at the bare name's front (roles/gateway.nix)
     ("landing", "servers/landing/web/pages/landing.html"),
+    // not signed in: anyone, at the bare name's /status (status.rs)
+    ("status", "servers/status/web/pages/status.html"),
 ];
 
 pub fn page(name: &str) -> Option<&'static str> {

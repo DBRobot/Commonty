@@ -1,8 +1,9 @@
 # The bare name's front page, run: the box's own nginx config, served in
 # the build, with a stand-in for the gate that writes down what reaches it.
 # Every request is an outsider's, through the tunnel's listener. The front
-# page is served at / (not a redirect), home's / is still the way in, and
-# the docs, the download and security.txt answer as they did.
+# page is served at / (not a redirect), home's / is still the way in, the
+# uptime page is at /status, and the docs, the download and security.txt
+# answer as they did.
 import os
 import re
 import signal
@@ -127,6 +128,10 @@ served("/", "/_dd/home", host=home)
 # the docs, the download and everything else as before
 served("/docs", "/_dd/docs/page")
 served("/docs/guide/joining", "/_dd/docs/page/guide/joining")
+# the uptime page and its answers, for anyone
+served("/status", "/_dd/status")
+served("/_dd/status.json", "/_dd/status.json")
+served("/_dd/releases.json", "/_dd/releases.json")
 moved("/download", f"https://{home}/_dd/download")
 moved("/_dd/login", f"https://{home}/_dd/login")
 moved("/anything", f"https://{home}/anything")
@@ -142,4 +147,4 @@ print("\n".join(told))
 if failures:
     print("\n".join(failures))
     sys.exit(1)
-print(f"{bare}: the front page at /, home's sign-in, the docs and the download")
+print(f"{bare}: the front page at /, home's sign-in, the status, the docs and the download")
