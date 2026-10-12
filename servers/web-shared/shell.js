@@ -261,7 +261,7 @@ function bar(m, slot) {
   const brand = document.querySelector('header.dd-bar .brand');
   if (brand && appOrigin) brand.setAttribute('href', appOrigin + '/_dd/home');
   else if (brand) brand.setAttribute('href', homeLink(m, '/_dd/home'));
-  const menu = el('details', { class: 'menu' }, summary, nav);
+  const menu = el('details', { class: 'menu', 'data-guide': 'menu' }, summary, nav);
   menu.addEventListener('toggle', () => {
     if (menu.open) for (const t of nav.querySelectorAll('.toggle')) t.read();
   });
@@ -386,7 +386,7 @@ function services(m, list) {
         el('span', { class: 'blurb', text: s.shut ? 'Not in the demo.' : s.blurb })),
       el('span', { class: 'host', text: s.host }),
       el('span', { class: 'open', text: s.shut ? 'Shut' : 'Open' }));
-    return el('li', {}, row);
+    return el('li', { 'data-guide': `tile-${slug(s.name)}` }, row);
   }));
 }
 
@@ -484,7 +484,7 @@ function tools() {
   const found = el('div', { class: 'found', role: 'listbox' });
   found.hidden = true;
   const opener = el('button', { type: 'button', class: 'open-search', 'aria-label': 'Search' }, svg('0 0 24 24', glass));
-  const form = el('form', { class: 'dd-search', role: 'search' }, opener, svg('0 0 24 24', glass, 'glass'), input, el('kbd', { text: '/' }), found);
+  const form = el('form', { class: 'dd-search', role: 'search', 'data-guide': 'search' }, opener, svg('0 0 24 24', glass, 'glass'), input, el('kbd', { text: '/' }), found);
   row.insertBefore(docsLink, after);
   row.insertBefore(form, after);
 

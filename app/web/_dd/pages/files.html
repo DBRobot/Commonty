@@ -28,8 +28,8 @@
         <p class="lead" id="lead">Encrypted on this device before they leave it. The box only ever holds the locked copies.</p>
       </div>
       <div class="drive-actions" id="actions" hidden>
-        <button id="newfolder" class="quiet" type="button">New folder</button>
-        <button id="up" type="button">Upload</button>
+        <button id="newfolder" class="quiet" type="button" data-guide="new-folder">New folder</button>
+        <button id="up" type="button" data-guide="upload">Upload</button>
         <input id="picker" type="file" multiple hidden>
       </div>
       <div class="drive-actions" id="trash-actions" hidden>
@@ -45,7 +45,7 @@
     <div class="drive-body" id="drive" hidden>
       <nav class="rail" aria-label="Places">
         <button type="button" data-place="files" aria-current="true">My files</button>
-        <button type="button" data-place="trash" id="trashplace">Trash</button>
+        <button type="button" data-place="trash" id="trashplace" data-guide="trash">Trash</button>
       </nav>
 
       <section class="panel" aria-label="Files">

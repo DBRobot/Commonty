@@ -491,7 +491,7 @@ export async function images(view) {
 
 async function show() {
   if (!inApp && !servedByApp) {
-    say('', 'Your disk images open through the Commonty app, which holds their key on your device. <a href="commonty://open?service=site&amp;path=%2F_dd%2Fsettings%23backups">Open them in the app</a> · <a href="/_dd/download">Get the app</a>');
+    say('', 'Your disk images open through the Commonty app, which holds their key on your device. <a data-guide="open-backups" href="commonty://open?service=site&amp;path=%2F_dd%2Fsettings%23backups">Open them in the app</a> · <a data-guide="get-app" href="/_dd/download">Get the app</a>');
     return;
   }
   await me();

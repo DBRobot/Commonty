@@ -55,6 +55,10 @@ right corner of each page, on this device. Turn it off and it is gone
 from every page here; turn it back on any time ([The site,
 drawn](site-map.md)).
 
+**Keyboard shortcut for the assistant:** the keys that open it from any
+page on this device, Ctrl+K (Cmd+K on a Mac) at first. **Change** takes
+the next keys you press, with Ctrl, Alt or Cmd; **Reset** goes back.
+
 ## Leave
 
 Take everything with you, and leave Commonty ([Leaving](leaving.md)).

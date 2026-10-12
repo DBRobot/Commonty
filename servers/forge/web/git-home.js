@@ -116,7 +116,7 @@ route(/^\/$/, async ({ params, current }) => {
   if (!current()) return;
   put(main(), el('div', { class: 'two' },
     el('div', {},
-      el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Your repositories' }), el('span', { class: 'spacer' }), filter, el('a', { class: 'btn go', href: '/new' }, ic('plus'), 'New')),
+      el('div', { class: 'hrow gap' }, el('h1', { class: 'h1', text: 'Your repositories' }), el('span', { class: 'spacer' }), filter, el('a', { class: 'btn go', href: '/new', 'data-guide': 'new-repo' }, ic('plus'), 'New')),
       list,
       await year(user)),
     el('aside', { class: 'side' },

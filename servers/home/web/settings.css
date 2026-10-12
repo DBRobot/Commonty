@@ -100,6 +100,9 @@
 .nw-switch .switch[aria-checked="true"] { background: var(--accent); }
 .nw-switch .switch[aria-checked="true"]::after { transform: translateX(16px); }
 .nw-switch .switch:disabled { opacity: .5; }
+.td-key { flex-wrap: wrap; border-top: 1px solid var(--line-2); }
+.td-key kbd { font: 13px var(--mono); padding: 3px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); white-space: nowrap; }
+.td-key button { margin: 0; }
 /* Add a device */
 .ad-dialog { width: min(440px, calc(100% - 32px)); }
 .ad-panel { display: grid; gap: 12px; justify-items: center; text-align: center; }
