@@ -22,7 +22,10 @@
 
   prometheus-node-exporter = {
     what = "the box's own counters, and the facts this repo writes beside them (/var/lib/dd-facts)";
-    units = [ "dd-facts" ];
+    units = [
+      "dd-facts"
+      "dd-uptime"
+    ];
     everyBox = true;
     base = {
       # node1, 2026-10-04: peak

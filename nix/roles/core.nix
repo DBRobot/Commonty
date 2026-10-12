@@ -40,6 +40,8 @@ in
     # zone are the Workers'
     ../modules/observe/box-metrics.nix
     ../modules/observe/disks.nix
+    # whether the services members use work here, for the uptime page
+    ../modules/observe/uptime.nix
     ../modules/box/zfs-datasets.nix
     ../modules/storage/usage.nix
     ../modules/storage/view.nix
