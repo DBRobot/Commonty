@@ -1,7 +1,7 @@
 # Settings
 
 Settings is under your name in the bar, or **Settings** in the app. It has
-six tabs. The parts that hold your keys (your device names and disk
+seven tabs. The parts that hold your keys (your device names and disk
 images) open through the Commonty app ([Using a browser](browser.md)).
 
 ## Profile
@@ -47,6 +47,13 @@ emptied.
 
 Your disk images: copies of your computers. Download one, or delete it to
 the trash ([Backups of your computers](backups.md)).
+
+## This device
+
+**Show the assistant:** Ask Commonty, the round button in the lower
+right corner of each page, on this device. Turn it off and it is gone
+from every page here; turn it back on any time ([The site,
+drawn](site-map.md)).
 
 ## Leave
 

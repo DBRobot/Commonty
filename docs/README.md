@@ -17,6 +17,7 @@ These pages are in four parts:
 - [Signing in](guide/signing-in.md)
 - [Your devices](guide/devices.md)
 - [Settings](guide/settings.md)
+- [The site, drawn](guide/site-map.md)
 - [Your recovery key](guide/recovery-key.md)
 - [Using a browser](guide/browser.md)
 - [Inviting friends to games](guide/guests.md)

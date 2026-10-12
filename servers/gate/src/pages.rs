@@ -380,6 +380,18 @@ const STATIC: &[(&str, &str, &str)] = &[
         "servers/web-shared/footer.js",
         "text/javascript; charset=utf-8",
     ),
+    // the assistant in the corner of every signed-in page (sitemap.rs)
+    (
+        "guide.js",
+        "servers/web-shared/guide.js",
+        "text/javascript; charset=utf-8",
+    ),
+    // the docs' drawing of the site map
+    (
+        "docs-map.js",
+        "servers/docs/web/docs-map.js",
+        "text/javascript; charset=utf-8",
+    ),
     // what every page shares (docs/dev/ui.md)
     (
         "kit.js",
@@ -1077,6 +1089,31 @@ mod tests {
         ] {
             assert!(!mover.contains(other), "the move page touches {other}");
         }
+    }
+
+    /// What the assistant's model says is data: shown as words, never as
+    /// markup or code, and a place is only ever an id the map holds, which
+    /// the page's own code turns into where to go (guide.js)
+    #[test]
+    fn the_assistant_writes_no_markup_and_goes_only_to_the_map() {
+        for f in ["guide.js", "docs-map.js"] {
+            let js = text(f);
+            for not in [
+                "innerHTML",
+                "outerHTML",
+                "insertAdjacentHTML",
+                "eval(",
+                "new Function",
+                "document.write",
+            ] {
+                assert!(!js.contains(not), "{f}: {not}");
+            }
+        }
+        let g = text("guide.js");
+        assert!(g.contains("Object.hasOwn(places, id)"));
+        assert!(g.contains("const n = byId[id];") && g.contains("opts.here(n.url"));
+        assert!(text("shell.js").contains("import { start as guide } from './guide.js';"));
+        assert!(text("shell.js").contains("export function here("));
     }
 
     #[test]

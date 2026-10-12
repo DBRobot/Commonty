@@ -32,6 +32,7 @@
       <a href="#storage" data-tab="storage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Storage</a>
       <a href="#network" data-tab="network"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>Network</a>
       <a href="#backups" data-tab="backups"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15h18"/><circle cx="17" cy="17" r=".9" fill="currentColor"/></svg>Backups</a>
+      <a href="#this-device" data-tab="this-device"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2"/><path d="M10.5 18.5h3"/></svg>This device</a>
       <a href="#leave" data-tab="leave"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/></svg>Leave</a>
     </nav>
 
@@ -128,6 +129,13 @@
         <p class="bk-note" id="msg" role="status">Looking for your images…</p>
         <ul class="bk-list" id="list" hidden></ul>
         <footer class="bk-trash" id="bk-trash" hidden><p>A deleted image stays in the trash for 30 days, then goes for good.</p><button class="quiet" id="bk-empty">Empty trash</button></footer>
+      </section>
+    </div>
+
+    <div class="se-pane" data-pane="this-device" hidden>
+      <section class="se-box" aria-labelledby="td-h">
+        <header><h2 id="td-h">The assistant</h2></header>
+        <div class="nw-switch"><div class="grow">Show the assistant<small id="td-guide-what">Ask Commonty, in the lower right corner, on this device. Turn it off and it's gone from every page here; turn it back on any time.</small></div><button class="switch" id="td-guide" role="switch" aria-checked="true" aria-label="Show the assistant" aria-describedby="td-guide-what"></button></div>
       </section>
     </div>
 

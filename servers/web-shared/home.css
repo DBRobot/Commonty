@@ -1039,3 +1039,106 @@ main.home .guest-more p { margin: 0; max-width: 62ch; color: var(--ink-2); }
 @media (max-width: 420px) {
   .dd-foot .in { grid-template-columns: minmax(0, 1fr); gap: 24px; }
 }
+
+/* Ask Commonty, in the lower right corner of every signed-in page
+   (guide.js): the round button, the strip beside it that tucks it away,
+   and the conversation it opens */
+.dd-guide-btn, .dd-guide, .dd-tuck { --gd-bar: #1D4470; --gd-bar-ink: #FFFFFF; --gd-mark: #9CC3EA; --gd-sunk: #F4F6F8; --gd-pupil: #0F1A2A; font-family: var(--font); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :is(.dd-guide-btn, .dd-guide, .dd-tuck) { --gd-bar: #16304F; --gd-mark: #7FAEDD; --gd-sunk: #13171C; }
+}
+:root[data-theme="dark"] :is(.dd-guide-btn, .dd-guide, .dd-tuck) { --gd-bar: #16304F; --gd-mark: #7FAEDD; --gd-sunk: #13171C; }
+.dd-guide-btn { position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: 52px; height: 52px; margin: 0; padding: 0; border-radius: 50%; border: 0; background: var(--gd-bar); color: var(--gd-bar-ink); cursor: pointer; box-shadow: 0 4px 14px rgba(15, 25, 40, .28); display: grid; place-items: center; z-index: 40; transition: transform .25s ease, opacity .25s; }
+.dd-guide-btn:hover { background: var(--gd-bar); }
+.dd-guide-btn .icon { width: 24px; height: 24px; }
+.dd-guide-btn .icon .plus { stroke: var(--gd-mark); }
+body.dd-tucked .dd-guide-btn { transform: translateX(110px); opacity: 0; pointer-events: none; }
+/* the strip right of the button: an arrow on hover or focus tucks it away,
+   and the same spot, with nothing showing, brings it back */
+.dd-tuck { position: fixed; right: 0; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: 24px; height: 52px; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; color: var(--ink-2); cursor: pointer; display: grid; place-items: center; z-index: 41; }
+.dd-tuck:hover { background: none; color: var(--ink); }
+.dd-tuck svg { width: 12px; height: 20px; opacity: 0; transition: opacity .15s, transform .2s; }
+.dd-tuck:hover svg, .dd-tuck:focus-visible svg { opacity: 1; }
+body.dd-tucked .dd-tuck svg { transform: rotate(180deg); }
+@media (hover: none) { .dd-tuck svg { opacity: .7; } }
+/* the peek: tucked away a long while, it leans out, looks around, blinks,
+   and ducks back; the chat mark, small, is its mouth */
+.dd-guide-btn .eyes { position: absolute; inset: 0; top: -14px; display: flex; gap: 6px; align-items: center; justify-content: center; opacity: 0; pointer-events: none; }
+.dd-guide-btn .eye { position: relative; width: 13px; height: 15px; border-radius: 50%; background: #FFFFFF; overflow: hidden; }
+.dd-guide-btn .eye i { position: absolute; width: 6px; height: 7px; border-radius: 50%; background: var(--gd-pupil); left: 3.5px; top: 4px; }
+.dd-guide-btn .eye b { position: absolute; left: 0; right: 0; top: 0; height: 0; background: var(--gd-bar); }
+body.dd-tucked.dd-peek .dd-guide-btn { animation: dd-peek 4.6s cubic-bezier(.35, .1, .25, 1) both; pointer-events: auto; }
+body.dd-tucked.dd-peek .dd-guide-btn .icon { animation: dd-mouth 4.6s ease-in-out both; }
+body.dd-tucked.dd-peek .dd-guide-btn .eyes { animation: dd-eyes 4.6s both; }
+body.dd-tucked.dd-peek .dd-guide-btn .eye i { animation: dd-look 4.6s ease-in-out both; }
+body.dd-tucked.dd-peek .dd-guide-btn .eye b { animation: dd-blink 4.6s both; }
+@keyframes dd-peek {
+  0% { transform: translateX(110px) rotate(0); opacity: 1; }
+  12% { transform: translateX(28px) rotate(-14deg); }
+  18% { transform: translateX(32px) rotate(-10deg); }
+  34% { transform: translateX(30px) rotate(-10deg); }
+  42% { transform: translateX(24px) rotate(6deg); }
+  52% { transform: translateX(24px) rotate(6deg) translateY(-3px); }
+  58% { transform: translateX(26px) rotate(2deg) translateY(0); }
+  70% { transform: translateX(30px) rotate(-4deg); }
+  76% { transform: translateX(22px) rotate(0) translateY(-5px); }
+  82% { transform: translateX(26px) rotate(0) translateY(0); }
+  90% { transform: translateX(40px) rotate(8deg); }
+  100% { transform: translateX(110px) rotate(12deg); opacity: 1; }
+}
+@keyframes dd-mouth {
+  0%, 8% { transform: none; }
+  12%, 40% { transform: translateY(9px) scale(.5); }
+  46% { transform: translateY(9px) scale(.5, .62); }
+  50% { transform: translateY(9px) scale(.5, .42); }
+  54%, 72% { transform: translateY(9px) scale(.5); }
+  76% { transform: translateY(9px) scale(.58, .5); }
+  80%, 90% { transform: translateY(9px) scale(.5); }
+  100% { transform: none; }
+}
+@keyframes dd-eyes { 0%, 8% { opacity: 0; } 12%, 92% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes dd-look {
+  0%, 20% { transform: translate(0, 0); }
+  26%, 36% { transform: translate(-3px, 0); }
+  44%, 54% { transform: translate(-2px, -3px); }
+  66%, 74% { transform: translate(3px, 1px); }
+  80%, 100% { transform: translate(0, 0); }
+}
+@keyframes dd-blink { 0%, 56% { height: 0; } 58% { height: 100%; } 60%, 84% { height: 0; } 86% { height: 100%; } 88%, 100% { height: 0; } }
+@media (prefers-reduced-motion: reduce) { body.dd-peek .dd-guide-btn, body.dd-peek .dd-guide-btn * { animation: none !important; } }
+.dd-guide { position: fixed; right: 20px; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); width: min(370px, calc(100% - 32px)); height: min(520px, calc(100% - 140px)); background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 40px rgba(15, 25, 40, .22); display: flex; flex-direction: column; z-index: 40; overflow: hidden; font-size: 15px; line-height: 1.55; }
+.dd-guide > header { background: var(--gd-bar); color: var(--gd-bar-ink); display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; }
+.dd-guide > header h2 { margin: 0; font-size: 15px; font-weight: 700; }
+.dd-guide > header button { margin: 0 0 0 auto; width: 32px; height: 32px; padding: 0; display: grid; place-items: center; background: none; border: 0; border-radius: var(--radius); color: var(--gd-bar-ink); cursor: pointer; }
+.dd-guide > header button:hover { background: rgba(255, 255, 255, .12); }
+.dd-guide > header button svg { width: 20px; height: 20px; }
+.dd-guide .log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--gd-sunk); }
+.dd-guide .msg { max-width: 86%; padding: 8px 11px; border-radius: 10px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dd-guide .msg.me { align-self: flex-end; background: var(--gd-bar); color: var(--gd-bar-ink); border-bottom-right-radius: 3px; }
+.dd-guide .msg.it { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+.dd-guide .dest { margin-top: 8px; display: grid; gap: 6px; white-space: normal; }
+.dd-guide .dest button { margin: 0; height: auto; text-align: left; display: flex; gap: 8px; align-items: center; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; cursor: pointer; font: 13px var(--font); color: var(--ink); }
+.dd-guide .dest button:hover { border-color: var(--pick); background: var(--surface); color: var(--ink); }
+.dd-guide .dest .path { flex: 1; min-width: 0; }
+.dd-guide .dest .path b { display: block; font-weight: 600; }
+.dd-guide .dest .path span { color: var(--ink-2); font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
+.dd-guide .dot, .dd-map .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--accent); }
+.dd-guide .dot-docs, .dd-map .dot-docs { background: var(--pick); }
+.dd-guide .dot-app, .dd-map .dot-app { background: var(--focus); }
+.dd-guide .how { display: block; margin-top: 6px; font: 11px var(--mono); color: var(--ink-2); white-space: normal; }
+.dd-guide .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.dd-guide .chips button { margin: 0; height: auto; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); border-radius: 14px; padding: 4px 10px; font: 12.5px var(--font); cursor: pointer; }
+.dd-guide .chips button:hover { color: var(--ink); border-color: var(--pick); background: var(--surface); }
+.dd-guide form { display: flex; gap: 8px; padding: 10px; margin: 0; border-top: 1px solid var(--line-2); }
+.dd-guide input[type="text"] { flex: 1; min-width: 0; height: 40px; margin: 0; border: 1px solid var(--field); border-radius: var(--radius); padding: 0 11px; font: 14px var(--font); background: var(--surface); color: var(--ink); }
+.dd-guide form button { margin: 0; height: 40px; padding: 0 14px; border: 0; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font: 600 14px var(--font); cursor: pointer; }
+.dd-guide form button:hover { background: var(--accent-hover); }
+.dd-guide .fine { display: flex; align-items: center; gap: 9px; padding: 0 12px 10px; margin: 0; font-size: 13px; font-weight: 400; color: var(--ink-2); cursor: pointer; }
+.dd-guide .sw { position: relative; width: 34px; height: 20px; flex: none; }
+.dd-guide .sw input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: pointer; }
+.dd-guide .sw i { position: absolute; inset: 0; border-radius: 10px; background: var(--field); transition: background .15s; pointer-events: none; }
+.dd-guide .sw i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #FFFFFF; transition: transform .15s; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); }
+.dd-guide .sw input:checked + i { background: var(--accent); }
+.dd-guide .sw input:checked + i::after { transform: translateX(14px); }
+.dd-guide .sw input:focus-visible + i { outline: 3px solid var(--focus); outline-offset: 2px; }
+@media (max-width: 480px) { .dd-guide { right: 16px; width: calc(100% - 32px); } }

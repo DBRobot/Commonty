@@ -4,6 +4,7 @@
 // carries its own copy, and both look the same because they are the same.
 
 import { webUrl } from './kit.js';
+import { start as guide } from './guide.js';
 // and the footer, after the page
 import './footer.js';
 
@@ -109,13 +110,15 @@ function linkable(url) {
   const h = new URL(w).hostname;
   return h === fleet || h.endsWith('.' + fleet) ? w : '#';
 }
-function here(raw) {
+/// where this page may send someone for an address of the fleet's: the
+/// address itself in a browser, the app's own copy or door in the app
+export function here(raw) {
   const url = linkable(raw);
   if (servedByApp) return served(url);
   if (!inApp) return url;
   try {
     const u = new URL(url, location.href);
-    if (carried.includes(u.pathname)) return appPages + u.pathname;
+    if (carried.includes(u.pathname)) return appPages + u.pathname + u.hash;
     if (u.pathname === '/_dd/photos') return appPages + '/_dd/app/photos';
     // Passwords too: the app serves the vault's code itself (app/src/local.rs)
     if (u.hostname.startsWith('vault.')) return appPages + '/_dd/app/vault';
@@ -600,6 +603,12 @@ me().then((m) => {
   const banner = document.getElementById('demo');
   if (banner) banner.hidden = !m.demo;
   for (const e of document.querySelectorAll('[data-user]')) e.dataset.user = m.user;
+  // the assistant in the corner, for members and the demo, on a page with
+  // the look it needs; Chat is a conversation of its own already
+  const chat = location.pathname === '/_dd/chat' || location.hostname.startsWith('llm.');
+  if ((m.role === 'member' || m.role === 'demo') && !chat && document.querySelector('link[href$="/home.css"]')) {
+    guide({ here, inApp, servedByApp, demo: !!m.demo });
+  }
 }).catch((e) => {
   const list = document.getElementById('services');
   if (list) list.replaceWith(el('p', { class: 'empty', text: String(e.message || e) }));

@@ -8,11 +8,12 @@ import { start as network } from './network.js';
 import { start as storage } from './storage.js';
 import { start as leave, where } from './leave.js';
 import { me as whoIsIt, entryOf } from './shell.js';
+import { shown, setShown } from './guide.js';
 
 const $ = (id) => document.getElementById(id);
 
 function tab(name) {
-  if (!['profile', 'devices', 'storage', 'network', 'backups', 'leave'].includes(name)) name = 'profile';
+  if (!['profile', 'devices', 'storage', 'network', 'backups', 'this-device', 'leave'].includes(name)) name = 'profile';
   if (gone) name = 'leave';
   for (const a of document.querySelectorAll('[data-tab]')) {
     if (a.dataset.tab === name) a.setAttribute('aria-current', 'page');
@@ -64,6 +65,15 @@ async function profile() {
   }
   $('recovery').append(r);
 }
+
+// This device: the assistant in the corner, on or off here alone
+const guideSwitch = $('td-guide');
+guideSwitch.setAttribute('aria-checked', String(shown()));
+guideSwitch.onclick = () => {
+  const on = guideSwitch.getAttribute('aria-checked') !== 'true';
+  guideSwitch.setAttribute('aria-checked', String(on));
+  setShown(on);
+};
 
 // back from changing the email: say so once, and forget it
 const q = new URLSearchParams(location.search);

@@ -210,6 +210,12 @@ async function drawText(want, text) {
   headings(md);
   if (want === index.home) md.querySelector('h1 + p')?.classList.add('lead');
   body.replaceChildren(md);
+  // a page that asks for the site map gets it drawn (The site, drawn)
+  for (const code of md.querySelectorAll('pre > code.language-sitemap')) {
+    const slot = el('div', { class: 'dd-map' });
+    code.parentElement.replaceWith(slot);
+    import('./docs-map.js').then((m) => m.drawMap(slot)).catch(() => {});
+  }
   drawToc(md);
 }
 

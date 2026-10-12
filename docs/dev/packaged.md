@@ -563,7 +563,11 @@ nginx replaces the caller's credential with a key made at boot, which
 llama-swap checks. A client with a device token can use `/v1/` too: it is
 the OpenAI-shaped API. The demo's prompts are counted at the gate
 (`rate:10/60` on its tile: ten an hour each, sixty for every demo
-together); everyone's are paced by nginx's `dd_model` zone.
+together); everyone's are paced by nginx's `dd_model` zone. Ask Commonty,
+on the site's other pages, asks the same `/v1/` from those names: nginx
+lets those origins read `/v1/models` and `/v1/chat/completions` with the
+caller's own session, and answers their preflight before the gate is asked
+([gate.md](gate.md)).
 [llm.nix](../../nix/modules/llm/llm.nix) has the vhost.
 
 ### Our pages

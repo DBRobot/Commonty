@@ -28,6 +28,7 @@ mod photos;
 mod private;
 mod session;
 mod signins;
+mod sitemap;
 mod sso;
 mod storage;
 
@@ -1875,6 +1876,27 @@ async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     }
 }
 
+/// Every place a member can open, for the assistant on each page and the
+/// docs' drawing of it (sitemap.rs): members and the demo, each their own.
+async fn site_map(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let Some(user) = app.identify(&headers, "access") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    match app.role(&user) {
+        Some(role @ (pages::Role::Member | pages::Role::Demo)) => (
+            [("cache-control", "private, no-cache")],
+            Json(sitemap::build(
+                &app.home,
+                role,
+                &app.domain,
+                docs::index().0,
+            )),
+        )
+            .into_response(),
+        _ => StatusCode::FORBIDDEN.into_response(),
+    }
+}
+
 /// Chat (servers/chat): the demo's, with its counted prompts and nothing
 /// kept, is served here. A member's keeps their chats sealed in their
 /// library, so the member's app serves it to their browser (use_app).
@@ -2359,24 +2381,29 @@ fn is_metrics_host(domain: &str, host: &str) -> bool {
         .is_some_and(|sub| sub == "metrics" || sub.starts_with("metrics."))
 }
 
-/// GET /_dd/back?to=: back to the Metrics page after this box's own sign-in
-/// (the page goes through each box once). Only there: https, the fleet's
-/// metrics.<domain>, no port, no credentials in the address - anything
-/// else is this box's front page.
+/// GET /_dd/back?to=: back to the page that sent someone through this box's
+/// own sign-in - Metrics, which goes through each box once, or a page whose
+/// assistant needed Chat's (guide.js). Only those pages' names: https, no
+/// port, no credentials in the address - anything else is this box's front
+/// page.
 async fn back(State(app): State<Arc<App>>, Query(q): Query<HashMap<String, String>>) -> Response {
     let to = q.get("to").map(String::as_str).unwrap_or_default();
-    let metrics = format!("metrics.{}", app.domain);
-    let ok = Url::parse(to).ok().filter(|u| {
+    match back_to(&app.domain, to) {
+        Some(u) => Redirect::to(u.as_str()).into_response(),
+        None => Redirect::to("/").into_response(),
+    }
+}
+
+fn back_to(domain: &str, to: &str) -> Option<Url> {
+    let pages = ["metrics", "home", "files", "git", "games"].map(|h| format!("{h}.{domain}"));
+    Url::parse(to).ok().filter(|u| {
         u.scheme() == "https"
             && u.port().is_none()
             && u.username().is_empty()
             && u.password().is_none()
-            && u.host_str() == Some(metrics.as_str())
-    });
-    match ok {
-        Some(u) => Redirect::to(u.as_str()).into_response(),
-        None => Redirect::to("/").into_response(),
-    }
+            && u.host_str()
+                .is_some_and(|h| h == domain || pages.iter().any(|p| p == h))
+    })
 }
 
 /// auth_request on a box that serves its own pages alone: its owner and
@@ -2937,6 +2964,7 @@ pub async fn start(
         .route("/_dd/docs/raw/{*path}", get(docs_raw))
         .route("/_dd/fleet.json", get(fleet_json))
         .route("/_dd/me", get(me))
+        .route("/_dd/sitemap.json", get(site_map))
         // Ente comes with the app: a browser here is handed to it
         .route("/_dd/photos", get(|| async { use_app() }))
         .route("/_dd/photos/move", get(photos::move_page))
@@ -3269,6 +3297,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn back_goes_only_to_our_own_pages() {
+        for ok in [
+            "https://metrics.x/boxes",
+            "https://home.x/_dd/settings#devices",
+            "https://git.x/a/b",
+            "https://x/docs/guide",
+        ] {
+            assert!(back_to("x", ok).is_some(), "{ok}");
+        }
+        for not in [
+            "http://home.x/",
+            "https://home.x:8443/",
+            "https://a@home.x/",
+            "https://evil.example/",
+            "https://home.x.evil.example/",
+            "https://vault.x/",
+            "javascript:alert(1)",
+            "/_dd/home",
+        ] {
+            assert!(back_to("x", not).is_none(), "{not}");
+        }
+    }
+
     const DOMAIN: &str = "commonty.test";
 
     /// A full gate on a free port of loopback, its state in a folder of its
@@ -3428,6 +3480,52 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(home.status(), 200);
+    }
+
+    /// The site map is for members and the demo, each their own; nobody
+    /// signed out, nobody signed in who is neither
+    #[tokio::test]
+    async fn the_site_map_is_a_members_and_the_demos() {
+        let tom = Person::new("tom");
+        let (url, s) = gate(
+            "sitemap",
+            Some(Members::list(vec![tom.id()])),
+            vec![demo_tile()],
+        )
+        .await;
+        let http = client();
+        let ask = |c: Option<String>| {
+            let mut r = http.get(format!("{url}/_dd/sitemap.json"));
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            async move { r.send().await.unwrap() }
+        };
+        assert_eq!(ask(None).await.status(), 401);
+        assert_eq!(ask(Some(cookie(&s.issue("stranger")))).await.status(), 403);
+        tom.publish(&url).await;
+        let r = ask(Some(cookie(&s.issue("tom")))).await;
+        assert_eq!(r.status(), 200);
+        assert_eq!(r.headers()["cache-control"], "private, no-cache");
+        let m: serde_json::Value = r.json().await.unwrap();
+        let ids: Vec<&str> = m["places"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|p| p["id"].as_str())
+            .collect();
+        assert!(
+            ids.contains(&"settings-devices") && ids.contains(&"svc-files"),
+            "{ids:?}"
+        );
+        assert!(
+            !m.to_string().contains("\"tom\""),
+            "the map names who asked"
+        );
+        let r = ask(Some(cookie(&s.issue(pages::DEMO_USER)))).await;
+        assert_eq!(r.status(), 200);
+        let m: serde_json::Value = r.json().await.unwrap();
+        assert!(!m.to_string().contains("/_dd/settings"));
     }
 
     #[tokio::test]

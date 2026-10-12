@@ -560,6 +560,24 @@ are files, never strings in Rust ([ui.md](ui.md)).
   bar's menu and the tiles (`pages::me_json`), plus `tmdb` for members and
   the demo, `guestOf` for a guest, and the ad-blocking switch for the
   household. `no-store`. The app carries the same pages.
+- **The site map** ([sitemap.rs](../../servers/gate/src/sitemap.rs)):
+  `/_dd/sitemap.json`, for members and the demo, is every place they can
+  open - the home tiles (`dd.home.services`, menu-only ones left out; the
+  demo's own doors for the demo), Friends, Settings and its tabs read from
+  `settings.html` itself, Git's tabs from `git-repo.js`, and every docs
+  page with its `##` headings from the docs' index - and `model`, Chat's
+  `/v1/chat/completions`. Places only: nothing about who asked, no admin
+  or internal route. Ask Commonty, the assistant in each page's corner
+  ([guide.js](../../servers/web-shared/guide.js)), goes by it, and the
+  docs draw it ([The site, drawn](../guide/site-map.md)). The model's
+  answer is data: words shown as text, places as ids looked up in the
+  map, anything else dropped (`checked`). It asks the model from the
+  page's own name with the member's session on `llm.<domain>`; nginx lets
+  the site's own names (home, files, git, games, metrics and their demo
+  doors, and the bare name) read `/v1/models` and `/v1/chat/completions`
+  there and nothing else ([llm.nix](../../nix/modules/llm/llm.nix)).
+  Without a session there, the page goes through that name's sign-in and
+  back (`/_dd/back`).
 - `/_dd/config` gives `rpId` to any page, and the demo's library id and
   key to the demo.
 - **Caching**: static files and pages are `no-cache` with an ETag (the
@@ -1013,6 +1031,8 @@ path                                        method   what                       
 -- pages and what every page needs
 /_dd/home                                   GET      home, or waiting page                     session (else -> login)
 /_dd/me                                     GET      who, role, menu, tiles                    session or token; 403 without a role
+/_dd/sitemap.json                           GET      every place to open, Chat's model         member or demo; session or token
+/_dd/back?to=                               GET      back to a page after this name's sign-in  anyone; https, our page names only
 /_dd/config                                 GET      rpId (+ demo library)                     anyone
 /_dd/static/{file}                          GET      css, js, fonts, icons                     anyone
 /_dd/web/{file}                             GET      wasm bundle                               anyone

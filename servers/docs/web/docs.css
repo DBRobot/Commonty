@@ -193,3 +193,30 @@
   .docs-pager .next { grid-column: 1; }
 }
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+/* The site, drawn (docs-map.js): the site map as the Git pages draw a run */
+.dd-map { margin: 20px 0; --map-dots: #C9D3DE; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .dd-map { --map-dots: #26303B; } }
+:root[data-theme="dark"] .dd-map { --map-dots: #26303B; }
+.dd-map .box { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+.dd-map .box > header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line-2); flex-wrap: wrap; font-size: 14px; }
+.dd-map .spacer { flex: 1; }
+.dd-map .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
+.dd-map .legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dd-map .map-wait { height: 320px; }
+.dd-map .map-note { color: var(--ink-2); }
+.dd-map .dag { position: relative; overflow-x: auto; padding: 24px; background-image: radial-gradient(var(--map-dots) 1px, transparent 1px); background-size: 16px 16px; border-radius: 0 0 6px 6px; }
+.dd-map .cards { position: relative; }
+.dd-map .edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.dd-map .edges path { fill: none; stroke: var(--line); stroke-width: 1.6; }
+.dd-map .edges path.on { stroke: var(--pick); stroke-width: 2.2; }
+.dd-map .job { position: absolute; width: 188px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; line-height: 1.4; color: var(--ink); text-decoration: none; transition: box-shadow .2s, border-color .2s; }
+.dd-map .job:hover { color: var(--ink); }
+.dd-map .job > div { display: flex; gap: 8px; align-items: center; padding: 8px 10px; }
+.dd-map .job .t { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-map .job .grp { display: block; font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2); }
+.dd-map .job small { color: var(--ink-2); font-family: var(--mono); font-size: 11px; }
+.dd-map .job .sub { border-top: 1px solid var(--line-2); padding: 5px 10px; font-size: 12.5px; color: var(--ink-2); align-items: flex-start; }
+.dd-map .job .sub::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--line); margin-top: 7px; flex: none; }
+.dd-map .job .sub.more::before { visibility: hidden; }
+.dd-map .job.here { border-color: var(--pick); box-shadow: 0 0 0 3px var(--member-bg); }

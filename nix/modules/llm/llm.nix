@@ -1,4 +1,9 @@
-{ config, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   base = config.dd.domain;
   host = "llm.${base}";
@@ -9,11 +14,28 @@ let
   # only it may open, and llama-swap still wants a secret made at boot that
   # nginx sends with every request.
   run = "/run/dd-llm";
+  # Ask Commonty, in the corner of the site's pages (servers/web-shared/
+  # guide.js), asks the same model from those pages' own names: the
+  # browser may read the answer there, for the model's list and its
+  # answers alone, with the member's own session here
+  pages = lib.concatStringsSep "|" [
+    "home"
+    "files"
+    "git"
+    "games"
+    "metrics"
+  ];
 in
 {
   # reads plaintext: prompts and answers, which every box it runs on can
   # read. A label to see, not a gate (modules/box/box.nix)
   dd.box.plaintext = [ "llm (prompts and answers)" ];
+  services.nginx.appendHttpConfig = ''
+    map "$http_origin $uri" $dd_model_cors {
+      default "";
+      "~^(?<dd_model_origin>https://((demo-)?(${pages})\.)?${lib.escapeRegex base}) /v1/(chat/completions|models)$" $dd_model_origin;
+    }
+  '';
   # The gateway in front of llama-server: nginx asks the verifier who this is
   # (a device-signed token, or a passkey session on this box) and proxies.
   # Nothing here can mint a token.
@@ -37,6 +59,14 @@ in
         limit_req_status 429;
       '';
     };
+    # @login, readable by the site's pages that asked (guide.js): they send
+    # the browser through this name's sign-in and back
+    locations."@model-login".extraConfig = ''
+      add_header Access-Control-Allow-Origin $dd_model_cors always;
+      add_header Access-Control-Allow-Credentials true always;
+      add_header Vary Origin always;
+      return 302 /_dd/login?rd=$request_uri;
+    '';
     # which model is awake, for the picker: behind the same gate
     locations."= /running" = {
       proxyPass = "http://unix:${run}/llm.sock:/running";
@@ -53,13 +83,28 @@ in
     locations."/v1/" = {
       proxyPass = "http://unix:${run}/llm.sock";
       extraConfig = ''
+        # a page of the site asking first whether it may (guide.js): told
+        # so before anyone is asked who they are, since a browser sends no
+        # session with the question
+        if ($request_method = OPTIONS) {
+          add_header Access-Control-Allow-Origin $dd_model_cors always;
+          add_header Access-Control-Allow-Credentials true always;
+          add_header Access-Control-Allow-Methods "GET, POST" always;
+          add_header Access-Control-Allow-Headers content-type always;
+          add_header Access-Control-Max-Age 600 always;
+          add_header Vary Origin always;
+          return 204;
+        }
+        add_header Access-Control-Allow-Origin $dd_model_cors always;
+        add_header Access-Control-Allow-Credentials true always;
+        add_header Vary Origin always;
         auth_request /_dd/verify;
         # the caller's own bearer never reaches llama-server: it is replaced
         # by the one llama-server was started with
         include ${run}/proxy.conf;
-        # a browser with no credential gets the box's passkey page (@login is
-        # defined for every browser-facing vhost in modules/gate/verify.nix)
-        error_page 401 = @login;
+        # a browser with no credential gets the box's passkey page, as from
+        # @login (modules/gate/verify.nix), told to a page of the site too
+        error_page 401 = @model-login;
         error_page 403 = @waiting;
         # the demo's prompts are counted at the gate (rate:N/M on the tile);
         # everyone's, here, against a flood (modules/gate/verify.nix)
