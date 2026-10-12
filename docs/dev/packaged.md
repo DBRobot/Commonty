@@ -682,6 +682,60 @@ boots it and checks the admin account and the branch rule on `main`. An
 LTS bump comes with nixpkgs; after one, run the `forge` test and look at
 the Git pages, since they depend on the API's shapes.
 
+## Smart home (Home Assistant)
+
+### What it is
+
+[Home Assistant](https://www.home-assistant.io), from nixpkgs
+(`services.home-assistant`), on a household's home controller: a
+Raspberry Pi of theirs, not a box ([home-controller.md](home-controller.md)).
+Module: [nix/modules/smarthome/home-assistant.nix](../../nix/modules/smarthome/home-assistant.nix);
+the system: [nix/controller](../../nix/controller). Nothing is patched.
+
+What we set instead of patching:
+
+- it listens on 127.0.0.1:8123 alone; the door is the only thing on the
+  network;
+- no cloud, analytics or mobile app integration; the household's own
+  devices' integrations (Zigbee, Matter, Thread, ESPHome, Shelly, Hue,
+  HomeKit) are in;
+- history kept 30 days (`purge_keep_days`, held to 90 by
+  `checks.retention`), written every 30 s so the card wears slower.
+
+### Sign-in
+
+The trusted networks provider, and nothing a person types: the door
+connects from each person's own loopback address, and Home Assistant signs
+that address in as their user (`trusted_users`, from a file the door
+writes). The door's own admin login, from 127.0.0.1, is a password only it
+holds.
+
+### Our pages
+
+Home Assistant's own, with the Commonty theme
+([servers/smarthome/theme/commonty.yaml](../../servers/smarthome/theme/commonty.yaml))
+and the Commonty bar added by the door. The door's own pages (sign-in,
+people, pairing) are in `servers/smarthome/web`.
+
+### Data and secrets
+
+Everything is on the controller's locked partition: Home Assistant's
+state and history, and the door's (the controller's key, who is in).
+No box holds any of it; backups go out locked.
+
+### Tests
+
+`home-controller` (the card locked to the house's Tang, the door, sign-in,
+users) and the door's crate tests.
+
+### Updating
+
+It moves with nixpkgs. After a bump, run `home-controller`. What we rely
+on: the trusted networks provider (`trusted_users`, `allow_bypass_login`),
+the onboarding api and the websocket `config/auth/create`, and the theme
+variables in the theme file (unknown ones are ignored, so a rename shows
+as Home Assistant's default, not a break).
+
 ## Before merging an upgrade
 
 - The pinned ones (Ente, Vaultwarden, a model) change only in their

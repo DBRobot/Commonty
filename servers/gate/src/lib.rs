@@ -12,6 +12,7 @@
 
 pub mod adblock;
 mod adddevice;
+mod controller;
 mod demo_photos;
 mod directory;
 mod docs;
@@ -119,6 +120,9 @@ struct App {
     demo_photos: Arc<demo_photos::DemoPhotos>,
     /// who is friends with whom, and who came in as a guest (friends.rs)
     friends: friends::Store,
+    /// which member vouched for which home controller, and passkeys'
+    /// names on their way to the app (controller.rs)
+    controllers: controller::Store,
 }
 
 /// The app, as the release key vouched for it.
@@ -2765,6 +2769,7 @@ pub async fn start(
         storage: storage::Ledger::new(cfg.storage_ledger.clone()),
         fresh: Mutex::new(HashMap::new()),
         friends: friends::Store::open(&state_dir)?,
+        controllers: controller::Store::open(Some(state_dir.join("controller-backups.json"))),
     });
     // the directory's reads ask who this is the way every route does
     let weak = Arc::downgrade(&app);
@@ -3026,6 +3031,10 @@ pub async fn start(
             "/_dd/devices/names",
             get(signins::http::names).put(signins::http::put_names),
         )
+        .route(
+            "/_dd/controllers",
+            get(signins::http::controllers).put(signins::http::put_controllers),
+        )
         // Storage is a tab of Settings now
         .route(
             "/_dd/storage",
@@ -3050,6 +3059,25 @@ pub async fn start(
         .route("/_dd/network/join", post(network::join))
         // a box's own: signed by its TPM, answered sealed to it
         .route("/_dd/network/box", post(network::box_join))
+        .route("/_dd/network/controller", post(network::controller_join))
+        // a home controller's own requests, signed by its key (controller.rs)
+        .route(
+            "/_dd/controller/directory/{name}",
+            get(controller::directory),
+        )
+        .route("/_dd/controller/backup", post(controller::backup))
+        .route("/_dd/controller/backup/{label}", get(controller::restore))
+        .route("/_dd/controller-name", get(controller::name_page))
+        .route(
+            "/_dd/controller-name/{label}",
+            get(controller::take_name)
+                .post(controller::leave_name)
+                .put(controller::ask_name),
+        )
+        .route(
+            "/_dd/controller-name/{label}/ask",
+            get(controller::asked_name),
+        )
         .route("/_dd/chat", get(chat_page))
         .route("/_dd/git", get(git_page))
         // anyone's: the public repositories, read-only, on the forge's
@@ -3375,6 +3403,17 @@ mod tests {
         home: Vec<pages::Service>,
         directory_readers: Vec<String>,
     ) -> (String, session::Sessions) {
+        gate_full(what, members, home, directory_readers, None).await
+    }
+
+    /// the same, holding the libraries bucket
+    async fn gate_full(
+        what: &str,
+        members: Option<Members>,
+        home: Vec<pages::Service>,
+        directory_readers: Vec<String>,
+        library: Option<library::Gate>,
+    ) -> (String, session::Sessions) {
         let d = std::env::temp_dir().join(format!("dd-gate-{what}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
@@ -3392,7 +3431,7 @@ mod tests {
             release_pub: None,
             web_dir: None,
             photos: None,
-            library: None,
+            library,
             network: None,
             demo_library: None,
             app_manifest: None,
@@ -4041,6 +4080,354 @@ mod tests {
         };
         assert_eq!(mine(None).await, 401);
         assert_eq!(mine(Some(cookie(&s.issue("stranger")))).await, 403);
+    }
+
+    #[tokio::test]
+    async fn a_members_home_controllers_are_theirs_alone_and_only_bytes_here() {
+        let send = |method: &str, url: String, c: Option<String>, body: Vec<u8>| {
+            let mut r = client().request(method.parse().unwrap(), url).body(body);
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            async move { r.send().await.unwrap() }
+        };
+        let (url, s) = gate("controllers-stranger", Some(Members::list(vec![])), vec![]).await;
+        let at = format!("{url}/_dd/controllers");
+        assert_eq!(
+            send("GET", at.clone(), None, vec![])
+                .await
+                .status()
+                .as_u16(),
+            401
+        );
+        let stranger = Some(cookie(&s.issue("stranger")));
+        assert_eq!(
+            send("PUT", at.clone(), stranger, b"x".to_vec())
+                .await
+                .status()
+                .as_u16(),
+            403
+        );
+        let (url, s) = gate("controllers", None, vec![]).await;
+        let at = format!("{url}/_dd/controllers");
+        let tom = || Some(cookie(&s.issue("tom")));
+        assert_eq!(
+            send("GET", at.clone(), tom(), vec![])
+                .await
+                .status()
+                .as_u16(),
+            404
+        );
+        let sealed = vec![7u8, 0, 255, 1];
+        assert_eq!(
+            send("PUT", at.clone(), tom(), sealed.clone())
+                .await
+                .status()
+                .as_u16(),
+            204
+        );
+        let back = send("GET", at.clone(), tom(), vec![]).await;
+        assert_eq!(back.status().as_u16(), 200);
+        assert_eq!(back.bytes().await.unwrap().to_vec(), sealed);
+        // another member's is their own
+        let ann = Some(cookie(&s.issue("ann")));
+        assert_eq!(
+            send("GET", at.clone(), ann, vec![]).await.status().as_u16(),
+            404
+        );
+        assert_eq!(
+            send("PUT", at, tom(), vec![0; 65 * 1024])
+                .await
+                .status()
+                .as_u16(),
+            413
+        );
+    }
+
+    #[tokio::test]
+    async fn a_home_controller_asks_with_its_key_and_its_members_word() {
+        use controller::tests::{bucket, ctl, header, label_of};
+        let (tom, ann, eve) = (Person::new("tom"), Person::new("ann"), Person::new("eve"));
+        let members = || Some(Members::list(vec![tom.id(), ann.id()]));
+        let (g, b) = bucket().await;
+        let (url, s) = gate_full("controller", members(), vec![], vec![], Some(g)).await;
+        for p in [&tom, &ann, &eve] {
+            p.publish(&url).await;
+        }
+        let ctl = ctl();
+        let label = &label_of(&ctl);
+        let now = identity::now();
+        let ask = |method: &str, path: &str, h: Option<String>| {
+            let mut r = client().request(method.parse().unwrap(), format!("{url}{path}"));
+            if let Some(h) = h {
+                r = r.header(controller::HEADER, h);
+            }
+            async move { r.send().await.unwrap() }
+        };
+        let signed = |who: &Person, method: &str, path: &str, at: u64| {
+            Some(header(
+                who.name, &who.root, &ctl, label, DOMAIN, method, path, at,
+            ))
+        };
+        let dir = "/_dd/controller/directory/ann";
+        // one person's entry, never the list
+        let r = ask("GET", dir, signed(&tom, "GET", dir, now)).await;
+        assert_eq!(r.status(), 200);
+        let e: identity::SignedEntry = r.json().await.unwrap();
+        assert_eq!(e.entry.name, "ann");
+        let list = "/_dd/controller/directory";
+        assert_eq!(
+            ask("GET", list, signed(&tom, "GET", list, now))
+                .await
+                .status(),
+            404
+        );
+        let nobody = "/_dd/controller/directory/nobody";
+        assert_eq!(
+            ask("GET", nobody, signed(&tom, "GET", nobody, now))
+                .await
+                .status(),
+            404
+        );
+        // refused: unsigned, stale, for another path, named by another root
+        assert_eq!(ask("GET", dir, None).await.status(), 401);
+        assert_eq!(ask("GET", dir, Some("x".into())).await.status(), 401);
+        assert_eq!(
+            ask("GET", dir, signed(&tom, "GET", dir, now - 400))
+                .await
+                .status(),
+            401
+        );
+        let other = "/_dd/controller/directory/tom";
+        assert_eq!(
+            ask("GET", dir, signed(&tom, "GET", other, now))
+                .await
+                .status(),
+            401
+        );
+        let forged = header("tom", &ann.root, &ctl, label, DOMAIN, "GET", dir, now);
+        assert_eq!(ask("GET", dir, Some(forged)).await.status(), 401);
+        // a stranger's word is good for nothing here
+        assert_eq!(
+            ask("GET", dir, signed(&eve, "GET", dir, now))
+                .await
+                .status(),
+            403
+        );
+
+        // its backup: urls for its one object, ten minutes
+        let up = "/_dd/controller/backup";
+        let r = ask("POST", up, signed(&tom, "POST", up, now)).await;
+        assert_eq!(r.status(), 200);
+        let urls: serde_json::Value = r.json().await.unwrap();
+        let object = format!("/b/controllers/{label}/backup?");
+        for k in ["put", "get"] {
+            let u = urls[k].as_str().unwrap();
+            assert!(
+                u.contains(&object) && u.contains("X-Amz-Expires=600"),
+                "{u}"
+            );
+        }
+        assert_eq!(
+            ask("POST", up, signed(&tom, "POST", up, now))
+                .await
+                .status(),
+            200
+        );
+        // the label is tom's controller's now: another's word for it is refused
+        let theirs = header("ann", &ann.root, &ctl, label, DOMAIN, "POST", up, now);
+        assert_eq!(ask("POST", up, Some(theirs)).await.status(), 409);
+        // nor can a member claim it with a controller of their own: the
+        // label is the key's, so their own root's word for it is no name
+        let squat = identity::generate();
+        let squatting = header("ann", &ann.root, &squat, label, DOMAIN, "POST", up, now);
+        assert_eq!(ask("POST", up, Some(squatting)).await.status(), 401);
+        assert_eq!(
+            ask("POST", up, signed(&eve, "POST", up, now))
+                .await
+                .status(),
+            403
+        );
+
+        // restoring: tom's, by session or device token
+        let restore = format!("{url}/_dd/controller/backup/{label}");
+        let get = |c: Option<String>, t: Option<String>, at: String| {
+            let mut r = client().get(at);
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            if let Some(t) = t {
+                r = r.bearer_auth(t);
+            }
+            async move { r.send().await.unwrap() }
+        };
+        let tom_c = || Some(cookie(&s.issue("tom")));
+        assert_eq!(
+            get(tom_c(), None, restore.clone()).await.status(),
+            404,
+            "nothing put yet"
+        );
+        b.lock()
+            .unwrap()
+            .insert(format!("controllers/{label}/backup"));
+        let r = get(tom_c(), None, restore.clone()).await;
+        assert_eq!(r.status(), 200);
+        let v: serde_json::Value = r.json().await.unwrap();
+        assert!(v["get"].as_str().unwrap().contains(&object));
+        assert_eq!(
+            get(None, Some(tom.token()), restore.clone()).await.status(),
+            200
+        );
+        assert_eq!(get(None, None, restore.clone()).await.status(), 401);
+        assert_eq!(
+            get(Some(cookie(&s.issue("ann"))), None, restore.clone())
+                .await
+                .status(),
+            404
+        );
+        assert_eq!(
+            get(Some(cookie(&s.issue("eve"))), None, restore.clone())
+                .await
+                .status(),
+            403
+        );
+        let unknown = format!("{url}/_dd/controller/backup/zyxwvutsrqponm76");
+        assert_eq!(get(tom_c(), None, unknown).await.status(), 404);
+
+        // a gate without the bucket has no backups at all
+        let (bare, _) = gate("controller-bare", members(), vec![]).await;
+        tom.publish(&bare).await;
+        let r = client()
+            .post(format!("{bare}{up}"))
+            .header(controller::HEADER, signed(&tom, "POST", up, now).unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn a_passkeys_name_waits_for_its_own_member_once() {
+        use controller::tests::{ctl, label_of};
+        use ed25519_dalek::Signer as _;
+        let (tom, ann) = (Person::new("tom"), Person::new("ann"));
+        let (url, s) = gate(
+            "controller-name",
+            Some(Members::list(vec![tom.id(), ann.id()])),
+            vec![],
+        )
+        .await;
+        tom.publish(&url).await;
+        ann.publish(&url).await;
+        let key = identity::encode_public(&ctl().verifying_key());
+        let label = label_of(&ctl());
+        let at = format!("{url}/_dd/controller-name/{label}");
+        let name = format!("{label}.home.{DOMAIN}");
+        let said = |root: &identity::SigningKey| {
+            B64.encode(
+                root.sign(&identity::controller_name_message(&name, &key))
+                    .to_bytes(),
+            )
+        };
+        let page = client()
+            .get(format!("{url}/_dd/controller-name"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(page.status(), 200);
+        assert!(
+            page.text()
+                .await
+                .unwrap()
+                .contains("/_dd/static/controller-name.js")
+        );
+        let home = format!("https://home.{DOMAIN}");
+        let leave = |c: Option<String>, origin: Option<&str>, sig: String| {
+            let mut r = client()
+                .post(at.clone())
+                .json(&serde_json::json!({ "sig": sig }));
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            if let Some(o) = origin {
+                r = r.header("origin", o);
+            }
+            async move { r.send().await.unwrap().status().as_u16() }
+        };
+        let ask = |t: Option<String>, controller: &str| {
+            let mut r = client()
+                .put(at.clone())
+                .json(&serde_json::json!({ "controller": controller }));
+            if let Some(t) = t {
+                r = r.bearer_auth(t);
+            }
+            async move { r.send().await.unwrap().status().as_u16() }
+        };
+        let asked = |c: Option<String>| {
+            let mut r = client().get(format!("{at}/ask"));
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            async move { r.send().await.unwrap() }
+        };
+        let tom_c = || Some(cookie(&s.issue("tom")));
+        // nothing asked: a link alone gets no name signed or kept
+        assert_eq!(asked(tom_c()).await.status(), 404);
+        assert_eq!(leave(tom_c(), Some(&home), said(&tom.root)).await, 404);
+        // only the member's app asks, and only for the label's own key
+        assert_eq!(ask(None, &key).await, 401);
+        assert_eq!(
+            ask(tom_c(), &key).await,
+            401,
+            "a page's cookie is not the app"
+        );
+        let another = identity::encode_public(&identity::generate().verifying_key());
+        assert_eq!(ask(Some(tom.token()), &another).await, 400);
+        assert_eq!(ask(Some(tom.token()), &key).await, 204);
+        // the page reads its own member's ask, nobody else's
+        assert_eq!(asked(None).await.status(), 401);
+        assert_eq!(asked(Some(cookie(&s.issue("ann")))).await.status(), 404);
+        let r = asked(tom_c()).await;
+        assert_eq!(r.status(), 200);
+        let v: serde_json::Value = r.json().await.unwrap();
+        assert_eq!(v["controller"], key.as_str());
+
+        assert_eq!(leave(None, None, said(&tom.root)).await, 401);
+        assert_eq!(
+            leave(tom_c(), Some("https://elsewhere.example"), said(&tom.root)).await,
+            403
+        );
+        assert_eq!(leave(tom_c(), None, String::new()).await, 400);
+        // not tom's root's word: not kept
+        assert_eq!(leave(tom_c(), Some(&home), said(&ann.root)).await, 403);
+        assert_eq!(leave(tom_c(), Some(&home), said(&tom.root)).await, 204);
+        let take = |t: Option<String>, c: Option<String>| {
+            let mut r = client().get(at.clone());
+            if let Some(t) = t {
+                r = r.bearer_auth(t);
+            }
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            async move { r.send().await.unwrap() }
+        };
+        assert_eq!(
+            take(None, tom_c()).await.status(),
+            401,
+            "the app's token, not a page"
+        );
+        assert_eq!(
+            take(Some(ann.token()), None).await.status(),
+            404,
+            "only their own"
+        );
+        let r = take(Some(tom.token()), None).await;
+        assert_eq!(r.status(), 200);
+        let v: serde_json::Value = r.json().await.unwrap();
+        assert_eq!(v["sig"], said(&tom.root));
+        assert_eq!(take(Some(tom.token()), None).await.status(), 404, "once");
+        // and the ask is used up with the answer
+        assert_eq!(asked(tom_c()).await.status(), 404);
     }
 
     #[tokio::test]

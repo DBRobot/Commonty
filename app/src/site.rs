@@ -207,6 +207,9 @@ async fn serve<R: Runtime>(
                 | "/_dd/app/vault.js"
                 | "/_dd/app/allow"
                 | "/_dd/app/allow.js"
+                | "/_dd/app/installer"
+                | "/_dd/app/installer.js"
+                | "/_dd/app/installer.css"
         )
         && !has_secret(&req)
     {
@@ -270,6 +273,72 @@ async fn serve<R: Runtime>(
     }
     if path == "/_dd/app/vault.js" {
         return Ok(asset(app, "vault.js"));
+    }
+    // the home controller's installer, a window of its own (installer.rs)
+    if path == "/_dd/app/installer" {
+        return Ok(page_asset(app, "installer.html"));
+    }
+    if let Some(f) = path
+        .strip_prefix("/_dd/app/")
+        .filter(|f| matches!(*f, "installer.js" | "installer.css"))
+    {
+        return Ok(asset(app, f));
+    }
+    if let Some(step) = path.strip_prefix("/_dd/app/installer/") {
+        #[cfg(desktop)]
+        return crate::installer::route(
+            app,
+            &format!("/{step}"),
+            req.method().as_str(),
+            req.body(),
+        )
+        .await;
+        #[cfg(not(desktop))]
+        {
+            let _ = step;
+            return Ok(plain(StatusCode::NOT_FOUND, "set one up from a computer"));
+        }
+    }
+    // the household's home controllers, as this account keeps them
+    // (controllers.rs), and Smart home in this window (smarthome.rs)
+    if path == "/_dd/app/controllers" {
+        return match crate::controllers::route(app).await {
+            Ok(r) => Ok(r),
+            Err(e) => Ok(plain(StatusCode::BAD_GATEWAY, &e)),
+        };
+    }
+    if path == "/_dd/app/smarthome/open" && req.method() == "POST" {
+        return match crate::smarthome::open(app, req.body()).await {
+            Ok(url) => Ok(json_response(&serde_json::json!({ "url": url }))),
+            Err(e) => Ok(plain(StatusCode::BAD_GATEWAY, &e)),
+        };
+    }
+    if path == "/_dd/app/smarthome/updates" && req.method() == "POST" {
+        let name = req
+            .uri()
+            .query()
+            .and_then(|q| q.strip_prefix("name="))
+            .map(percent_decode)
+            .unwrap_or_default();
+        let hold = serde_json::from_slice::<serde_json::Value>(req.body())
+            .ok()
+            .and_then(|v| v["hold"].as_bool());
+        let Some(hold) = hold else {
+            return Ok(plain(StatusCode::BAD_REQUEST, "hold: true or false"));
+        };
+        return match crate::smarthome::set_updates(app, &name, hold).await {
+            Ok(v) => Ok(json_response(&v)),
+            Err(e) => Ok(plain(StatusCode::BAD_GATEWAY, &e)),
+        };
+    }
+    if path == "/_dd/app/smarthome/status" {
+        let name = req
+            .uri()
+            .query()
+            .and_then(|q| q.strip_prefix("name="))
+            .map(percent_decode)
+            .unwrap_or_default();
+        return Ok(json_response(&crate::smarthome::status(app, &name).await));
     }
     if path == "/_dd/app/vault/state" {
         let to = req

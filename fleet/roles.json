@@ -40,7 +40,8 @@
       "cloudflared",
       "dd-dns",
       "headscale",
-      "mail-worker-check"
+      "mail-worker-check",
+      "harmonia"
     ]
   },
   "storage": {
@@ -170,7 +171,8 @@
     ],
     "why": "it answers the house's DNS: the box has to be in the house, with who lives there",
     "services": [
-      "pihole"
+      "pihole",
+      "tang"
     ]
   }
 }

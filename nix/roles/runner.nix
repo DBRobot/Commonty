@@ -25,7 +25,7 @@
         TOKEN=${config.sops.placeholder.forgejo-members-runner-token}
       '';
       dd.membersRunner.tokenFile = config.sops.templates."forgejo-members-runner.env".path;
-      # the home controller's system, to come, is aarch64:
+      # the home controller's system is aarch64 (docs/dev/home-controller.md):
       # its own programs are cross-built, everything else comes from
       # cache.nixos.org, and the few steps left run here under qemu
       boot.binfmt.emulatedSystems = [ "aarch64-linux" ];

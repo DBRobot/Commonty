@@ -202,12 +202,15 @@ fn publish(
 
     let boxes: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("fleet/boxes.json"))?)?;
-    let names: Vec<String> = boxes
+    let mut names: Vec<String> = boxes
         .as_object()
         .context("boxes.json is not an object")?
         .keys()
         .cloned()
         .collect();
+    // and the devices' systems (fleet/devices.json): signed beside the
+    // boxes', vouched for by the same boxes
+    names.extend(device_systems(&root)?);
 
     let (key_id, key_secret, signing_key) = cache_writer(&root)?;
 
@@ -589,7 +592,13 @@ fn dirs_cache() -> PathBuf {
 }
 
 /// The app's downloads, as the flake names them (legacyPackages.appRelease)
-const APP_BUILDS: &[&str] = &["linux", "windows", "dd-windows", "android"];
+const APP_BUILDS: &[&str] = &[
+    "linux",
+    "windows",
+    "dd-windows",
+    "android",
+    "home-controller",
+];
 
 /// Where each download of `version` lands when built from `rev`: what two
 /// boxes are asked to build, and, at a fixed version, what says whether
@@ -868,6 +877,8 @@ fn app_files(build: &str, version: &str) -> Vec<String> {
         "windows" => vec!["commonty-setup.exe".into()],
         "dd-windows" => vec!["dd.exe".into()],
         "android" => vec!["commonty-unsigned.apk".into()],
+        // the home controller's card, which the app's installer writes
+        "home-controller" => vec![format!("commonty-home-controller-{version}.img.zst")],
         _ => vec![],
     }
 }
@@ -2382,6 +2393,23 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The systems in fleet/devices.json: built and signed like a box's, run by
+/// no box. Its "_" is the file's own note.
+fn device_systems(root: &Path) -> Result<Vec<String>> {
+    let path = root.join("fleet/devices.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let devices: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
+    Ok(devices
+        .as_object()
+        .context("devices.json is not an object")?
+        .keys()
+        .filter(|k| *k != "_")
+        .cloned()
+        .collect())
 }
 
 #[cfg(test)]

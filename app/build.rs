@@ -7,6 +7,30 @@ fn main() {
     println!("cargo:rerun-if-env-changed=COMMONTY_NET_LIB_DIR");
     // the release tag's version (lib.rs version())
     println!("cargo:rerun-if-env-changed=COMMONTY_VERSION");
+    // The release key, and the repository whose releases branch holds the
+    // signed app.json: what the installer checks the controller's card
+    // against (installer.rs). From the tree in a checkout; a nix build,
+    // which has only the crates, hands them over.
+    for (var, file) in [
+        ("COMMONTY_RELEASE_KEY", "../fleet/release.pub"),
+        ("COMMONTY_REPO", "../fleet/policy.json"),
+    ] {
+        println!("cargo:rerun-if-env-changed={var}");
+        let value = std::env::var(var).ok().or_else(|| {
+            let text = std::fs::read_to_string(file).ok()?;
+            println!("cargo:rerun-if-changed={file}");
+            Some(if var == "COMMONTY_REPO" {
+                // "repo": "owner/name", without a json parser here
+                let at = text.find("\"repo\"")?;
+                text[at + 6..].split('"').nth(1)?.to_string()
+            } else {
+                text
+            })
+        });
+        if let Some(v) = value {
+            println!("cargo:rustc-env={var}={}", v.trim());
+        }
+    }
     let target = std::env::var("TARGET").unwrap_or_default();
     let dir = std::env::var("COMMONTY_NET_LIB_DIR")
         .expect("COMMONTY_NET_LIB_DIR: where libcommontynet is (nix build .#net)");

@@ -105,10 +105,15 @@ pkgs.vmTools.runInLinuxImage (
       export CARGO_NET_OFFLINE=true
       export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc
       export COMMONTY_NET_LIB_DIR=/work/netlib COMMONTY_VERSION=${version}
+      # the release key and the repository, for the home controller's installer
+      export COMMONTY_RELEASE_KEY=$(tr -d '[:space:]' < ${../../fleet/release.pub})
+      export COMMONTY_REPO=${(pkgs.lib.importJSON ../../fleet/policy.json).repo}
       export APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 LDAI_RUNTIME_FILE=${runtime}
       export CARGO_BUILD_JOBS=$NIX_BUILD_CORES
+      # the card writer the installer runs elevated, carried beside the app
+      cargo build --release --locked -p hubwriter
       cd app
-      cargo tauri build --verbose --config '{"version":"${version}"}' --bundles deb,appimage -- --locked
+      cargo tauri build --verbose --config '{"version":"${version}","bundle":{"resources":{"../target/release/dd-hub-writer":"dd-hub-writer"}}}' --bundles deb,appimage -- --locked
 
       mkdir -p $out
       # tauri's .deb keeps each file's build time, in whatever order the

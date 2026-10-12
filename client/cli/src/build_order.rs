@@ -20,6 +20,9 @@ pub const BUILDERS: usize = 2;
 pub struct Need {
     pub kvm: bool,
     pub ram_gb: u64,
+    /// an aarch64 build (the home controller's card): the runner boxes run
+    /// aarch64 under emulation (roles/runner.nix)
+    pub aarch64: bool,
 }
 
 impl Need {
@@ -27,6 +30,7 @@ impl Need {
         Need {
             kvm: v["kvm"].as_bool().unwrap_or(false),
             ram_gb: v["ramGB"].as_u64().unwrap_or(0),
+            aarch64: v["aarch64"].as_bool().unwrap_or(false),
         }
     }
 }
@@ -42,6 +46,8 @@ pub struct Candidate {
     pub alive: bool,
     pub ram_bytes: Option<f64>,
     pub kvm: Option<bool>,
+    /// a runner, which runs aarch64 under emulation
+    pub aarch64: bool,
 }
 
 impl Candidate {
@@ -53,6 +59,7 @@ impl Candidate {
                 .ram_bytes
                 .is_none_or(|b| b >= (need.ram_gb as f64) * 1e9 * 0.9)
             && (!need.kvm || self.kvm != Some(false))
+            && (!need.aarch64 || self.aarch64)
     }
 }
 
@@ -80,6 +87,9 @@ pub fn candidates(
                 .is_some_and(|seen| now - seen <= gone_after),
             ram_bytes: s["facts"]["ram_bytes"].as_f64(),
             kvm: s["facts"]["kvm"].as_f64().map(|v| v >= 1.0),
+            aarch64: b["roles"]
+                .as_array()
+                .is_some_and(|r| r.iter().any(|x| x.as_str() == Some("runner"))),
         });
     }
     out
@@ -291,6 +301,7 @@ mod tests {
             alive: true,
             ram_bytes: Some(32e9),
             kvm: Some(true),
+            aarch64: false,
         }
     }
 
@@ -332,6 +343,7 @@ mod tests {
         let need = Need {
             kvm: true,
             ram_gb: 16,
+            aarch64: false,
         };
         let (chosen, _) = pick("/nix/store/x", &need, &fleet, 2, &[]).unwrap();
         let mut chosen = chosen;
@@ -339,6 +351,23 @@ mod tests {
         assert_eq!(chosen, ["big", "quiet"]);
         // a box that went silent is passed over the next time
         assert!(pick("/nix/store/x", &need, &fleet, 2, &["quiet".into()]).is_err());
+    }
+
+    #[test]
+    fn an_aarch64_build_goes_only_to_a_runner() {
+        let mut runner = cand("runner", "ann", "s1", "r1");
+        runner.aarch64 = true;
+        let mut other = cand("other", "bob", "s2", "r2");
+        other.aarch64 = true;
+        let plain = cand("plain", "cat", "s3", "r3");
+        let need = Need {
+            aarch64: true,
+            ..Need::default()
+        };
+        let (mut chosen, _) = pick("/nix/store/x", &need, &[runner, other, plain], 2, &[]).unwrap();
+        chosen.sort();
+        assert_eq!(chosen, ["other", "runner"]);
+        assert!(Need::from_json(&serde_json::json!({"aarch64": true})).aarch64);
     }
 
     #[test]
