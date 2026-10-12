@@ -7,7 +7,7 @@
 import init, { file_seal, file_open, entry_without, box_item_plan, box_item_envelope, entry_signed, entry_with_device, entry_resign, entry_envelope, qr_svg } from '/_dd/web/dd_web.js';
 import { unlock } from './library.js';
 import { requestOptions, assertion, post, b64u, u8b64 } from './webauthn.js';
-import { me, inApp, servedByApp, appFetch, pageConfig, entryOf, forgetEntry } from './shell.js';
+import { me, inApp, servedByApp, appFetch, pageConfig, entryOf, forgetEntry, toApp, noApp } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const ICON = {
@@ -368,7 +368,7 @@ async function openNames() {
     await init();
     if (!lib) {
       const u = await unlock(who.user);
-      if (!u.ok) throw new Error(u.none ? 'names need your library, and this account has none yet' : 'names open where the Commonty app holds your library: in the app, or in a browser it opens');
+      if (!u.ok) throw new Error(u.none ? 'names need your library, and this account has none yet' : 'names open where the Commonty app holds your library: in the app, or in this browser through it');
       lib = u.ok;
     }
     // none yet is a fresh start; a file that will not open is not, or the
@@ -596,6 +596,14 @@ export async function start() {
   if (started) return;
   started = true;
   $('dv-show').onclick = openNames;
+  // on a page a box served, the names open where the app serves this tab,
+  // in this browser too; the demo's library is the box's, and opens here
+  if (!inApp && !servedByApp) {
+    pageConfig().then((cfg) => {
+      if (cfg.demoLibrary) return;
+      $('dv-show').onclick = () => toApp('/_dd/settings#devices', () => $('dv-msg').replaceChildren(noApp()));
+    }).catch(() => {});
+  }
   $('dv-others').onclick = () => endSessions({ others: true }, $('dv-others'));
   $('dv-add').onclick = () => addStart().catch((e) => { $('dv-msg').textContent = String(e.message || e); });
   $('ad-cancel').onclick = addCancel;
@@ -607,6 +615,7 @@ export async function start() {
     await load(false);
     render();
     $('dv-add').hidden = !(await canAdd());
+    $('dv-root').hidden = rootHere || entry.entry.root.startsWith('webauthn:');
     // the main key may be here after all: Remove where it can be done
     if (rootHere) render();
   } catch (e) {

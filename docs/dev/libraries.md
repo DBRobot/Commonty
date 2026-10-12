@@ -406,8 +406,9 @@ the app         GET /_dd/app/library: the app opens it with the device's
                 keys and hands the page { id, key, reader }: its window,
                 or a browser it let in (the page on s-<session>.localhost)
 the demo        /_dd/config carries demoLibrary { id, key }; reader
-anything else   { app: true }: the page says it opens through the app; a
-                box serves a member the page that hands over to it instead
+anything else   { app: true }: the page's button hands it to the app
+                (shell.js throughApp); a box serves a member the page that
+                hands over to it instead
 ```
 
 The page links the wasm and its modules to preload them, and `begin()`
