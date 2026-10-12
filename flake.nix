@@ -1642,5 +1642,16 @@
       # report (docs/dev/joining.md): `nix build --impure --expr` with this,
       # from the release's commit, on the box
       lib.joinedBox = fleetBoxes.joined;
+      # the installer a blank machine boots to become a box of the fleet,
+      # with nothing set up by hand (nix/installer)
+      installers.${system}.join =
+        (nixpkgs.lib.nixosSystem {
+          inherit system;
+          specialArgs = { inherit self; };
+          modules = [
+            "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
+            ./nix/installer/iso.nix
+          ];
+        }).config.system.build.isoImage;
     };
 }

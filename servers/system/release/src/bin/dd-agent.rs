@@ -65,6 +65,10 @@ struct Args {
     /// built for (hardware.json, hardware-configuration.nix, box.json)
     #[arg(long, env = "DD_AGENT_JOINED_DIR", default_value = "/var/lib/dd/box")]
     joined_dir: PathBuf,
+    /// print the commit the current release signed, once its signature
+    /// checks, and change nothing: what an installer builds a new box from
+    #[arg(long)]
+    print_rev: bool,
 }
 
 /// A box that joined on its own key builds its system itself, from the
@@ -330,6 +334,9 @@ fn run(args: &Args) -> Result<String> {
         }
     };
     let counter = signed.payload.counter;
+    if args.print_rev {
+        return Ok(signed.payload.rev.clone());
+    }
 
     let last = read_counter(&args.state);
     if counter < last {

@@ -76,7 +76,11 @@ in
     lib.optional (mail ? reader) mail.reader;
   dd.agent = {
     enable = true;
-    url = "https://git.${config.dd.domain}/${config.dd.repo}/raw/branch/releases/current.json";
+    # (from the public door for a box that joined on its own key, which
+    # the fleet's network keeps out of the forge)
+    url = "https://${
+      if config.dd.box.joined then "code" else "git"
+    }.${config.dd.domain}/${config.dd.repo}/raw/branch/releases/current.json";
     publicKey = lib.fileContents ../../fleet/release.pub;
     # each box's host key, as dd-attest signs with it: two of them must
     # vouch for a closure before a box switches to it
