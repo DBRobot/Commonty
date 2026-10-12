@@ -3025,6 +3025,7 @@ pub async fn start(
         // a member's disk images, in the bucket (library.rs); nginx sends
         // files.<domain>/images/ here
         .route("/_dd/boxes/mine", get(member_boxes::mine))
+        .route("/_dd/network/joined", get(member_boxes::joined_mine))
         .route("/_dd/images", axum::routing::any(library::images_root))
         .route("/_dd/images/", axum::routing::any(library::images_root))
         .route(

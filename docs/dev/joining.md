@@ -94,9 +94,11 @@ box installer (full screen)        fleet
   against the member's allowance, and an hour's check drops the folder 7
   days after its first write unless a box joined with its ticket. With no
   read of the agreed state it drops nothing.
-- **On join** the app, on any of the member's devices, copies the pending
-  backup into the member's images (`restic copy`) and deletes the pending
-  repository.
+- **On join** the app, on any of the member's devices, reads which of its
+  boxes joined and with which ticket (`GET /_dd/network/joined`), copies
+  each one's pending backup into the member's images (`restic copy`) and
+  deletes the pending folder with the member's own token (to the images'
+  trash, as any delete there).
 - **The box** is on the member's Devices tab ("Your boxes",
   `GET /_dd/boxes/mine`), with when it last said how it is. Removing it
   puts its ticket id in the member's signed entry (`removed_boxes`), and on
