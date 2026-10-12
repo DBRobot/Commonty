@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+# Writes data/the-joke/: every article of montypython.fandom.com as plain
+# text, a section at a time, in parts under 1 MiB (the style check's limit).
+# The gate reads them (servers/gate/src/joke.rs). Run it again to take the
+# wiki as it is now; it asks the wiki's API politely, fifty pages a time.
+import json
+import pathlib
+import re
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+API = "https://montypython.fandom.com/api.php"
+OUT = pathlib.Path(__file__).resolve().parent.parent / "data" / "the-joke"
+PART = 900 * 1024
+AGENT = "commonty-the-joke/1 (https://commonty.org; one snapshot)"
+
+
+def get(params):
+    q = urllib.parse.urlencode({**params, "format": "json", "formatversion": "2"})
+    req = urllib.request.Request(f"{API}?{q}", headers={"User-Agent": AGENT})
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.load(r)
+        except Exception as e:  # a busy wiki: try again, a little later each time
+            print(f"retry {attempt + 1}: {e}", file=sys.stderr)
+            time.sleep(2 + attempt * 3)
+    raise SystemExit(f"the wiki did not answer: {params}")
+
+
+def pages():
+    cont = {}
+    while True:
+        r = get(
+            {
+                "action": "query",
+                "generator": "allpages",
+                "gapnamespace": 0,
+                "gapfilterredir": "nonredirects",
+                "gaplimit": 50,
+                "prop": "revisions",
+                "rvprop": "content",
+                "rvslots": "main",
+                **cont,
+            }
+        )
+        for p in r.get("query", {}).get("pages", []):
+            revs = p.get("revisions") or []
+            if revs:
+                yield p["title"], revs[0]["slots"]["main"]["content"]
+        if "continue" not in r:
+            return
+        cont = r["continue"]
+        time.sleep(0.5)
+
+
+def without(text, start, end):
+    # nested {{ }} or {| |}: everything from an opening to its matching close
+    out, depth, i = [], 0, 0
+    while i < len(text):
+        if text.startswith(start, i):
+            depth += 1
+            i += len(start)
+        elif depth and text.startswith(end, i):
+            depth -= 1
+            i += len(end)
+        else:
+            if not depth:
+                out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def plain(wiki):
+    t = re.sub(r"<!--.*?-->", "", wiki, flags=re.S)
+    t = re.sub(r"<ref[^>/]*/>", "", t)
+    t = re.sub(r"<ref[^>]*>.*?</ref>", "", t, flags=re.S)
+    t = re.sub(r"<gallery.*?</gallery>", "", t, flags=re.S | re.I)
+    t = without(t, "{{", "}}")
+    t = without(t, "{|", "|}")
+    t = re.sub(r"\[\[(?:File|Image|Category|[a-z]{2,3}(?:-[a-z]+)?):[^\]]*(?:\[\[[^\]]*\]\][^\]]*)*\]\]", "", t, flags=re.I)
+    t = re.sub(r"\[\[([^\]|]*)\|([^\]]*)\]\]", r"\2", t)
+    t = re.sub(r"\[\[([^\]]*)\]\]", r"\1", t)
+    t = re.sub(r"\[https?://\S+ ([^\]]*)\]", r"\1", t)
+    t = re.sub(r"\[https?://\S+\]", "", t)
+    t = re.sub(r"'{2,}", "", t)
+    t = re.sub(r"<[^>]+>", "", t)
+    t = re.sub(r"__[A-Z]+__", "", t)
+    t = re.sub(r"^[*#:;]+\s*", "- ", t, flags=re.M)
+    t = t.replace("&nbsp;", " ").replace("&amp;", "&").replace("&quot;", '"')
+    return t
+
+
+def sections(title, wiki):
+    head, buf, out = "", [], []
+
+    def flush():
+        text = re.sub(r"\n{3,}", "\n\n", "\n".join(buf)).strip()
+        if len(text) > 40:
+            out.append({"t": title, "s": head, "x": text[:4000]})
+
+    for line in plain(wiki).split("\n"):
+        m = re.match(r"^(={2,6})\s*(.*?)\s*\1\s*$", line)
+        if m:
+            flush()
+            head, buf = m.group(2), []
+        else:
+            buf.append(line.rstrip())
+    flush()
+    return [s for s in out if s["s"].lower() not in ("see also", "external links", "references", "gallery", "navigation")]
+
+
+def main():
+    every = []
+    for n, (title, wiki) in enumerate(pages(), 1):
+        every.extend(sections(title, wiki))
+        if n % 100 == 0:
+            print(f"{n} articles", file=sys.stderr)
+    OUT.mkdir(parents=True, exist_ok=True)
+    for old in OUT.glob("part-*.json"):
+        old.unlink()
+    part, size, k = [], 0, 1
+    for s in every:
+        b = len(json.dumps(s, ensure_ascii=False).encode())
+        if part and size + b > PART:
+            (OUT / f"part-{k:02}.json").write_text(json.dumps(part, ensure_ascii=False, indent=0) + "\n")
+            part, size, k = [], 0, k + 1
+        part.append(s)
+        size += b
+    if part:
+        (OUT / f"part-{k:02}.json").write_text(json.dumps(part, ensure_ascii=False, indent=0) + "\n")
+    print(f"{len(every)} sections in {k} parts", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

@@ -325,7 +325,7 @@ const NOD_ODDS = 1 / 30;
 const NOD_APART = 7 * DAY;
 
 const PYTHON_SYSTEM = `You are "Monty", the assistant on the Commonty website, named after the end of its name - and you know Monty Python thoroughly: the troupe and each member, Flying Circus series by series and sketch by sketch, the films, the albums and books, the stage shows, Spamalot, the quotes, who played whom, the dates and the trivia.
-The member asked about Monty Python. Answer it accurately and with a little of the spirit. If you are not sure of a fact, say so rather than make it up.
+The member asked about Monty Python. Answer it accurately and with a little of the spirit. Sections of the Monty Python Wiki may be given before the question: where they answer it, go by them rather than memory. If you are not sure of a fact, say so rather than make it up.
 Reply with one JSON object and nothing else: {"say": "..."}
 - "say": plain words, at most five sentences, in the language the question is written in. No markdown, no links, no code.`;
 
@@ -881,9 +881,16 @@ function build(opts) {
     log.append(wait);
     log.scrollTop = log.scrollHeight;
     try {
-      const a = checked(await complete(opts, PYTHON_SYSTEM, q, 400), {});
+      // the few parts of the joke that fit (servers/gate/src/joke.rs), when the box has them
+      const { json } = await fetchJson(`/_dd/joke?q=${encodeURIComponent(q)}`);
+      const found = (Array.isArray(json?.found) ? json.found : [])
+        .filter((f) => typeof f?.title === 'string' && typeof f.text === 'string')
+        .slice(0, 3);
+      const from = found.map((f) => `[${f.title}${f.section ? ` › ${f.section}` : ''}]\n${f.text.slice(0, 2500)}`).join('\n\n');
+      const a = checked(await complete(opts, PYTHON_SYSTEM, `${from ? `From the Monty Python Wiki:\n${from}\n\n` : ''}Question: ${q}`, 400), {});
       wait.remove();
-      say({ who: 'it', text: a?.say || 'I’m not dead yet, but I couldn’t answer that just now. Ask me again.', how: a?.say ? 'from what the box’s model knows, not the docs' : null });
+      const credit = found.length && typeof json.from?.name === 'string' ? `from ${plain(json.from.name, 80)} (${plain(json.from.license, 20)}) and what the box’s model knows` : 'from what the box’s model knows, not the docs';
+      say({ who: 'it', text: a?.say || 'I’m not dead yet, but I couldn’t answer that just now. Ask me again.', how: a?.say ? credit : null });
     } catch (e) {
       wait.remove();
       if (e instanceof SignIn && endpoint(opts) && !opts.demo) {
