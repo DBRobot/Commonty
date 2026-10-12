@@ -48,9 +48,27 @@ function rawSig(sig) {
 const validators = new Map(CONFIG.validators.map((v) => [BigInt(v.id), v]));
 const boxes = new Map(Object.values(CONFIG.boxes).map((b) => [BigInt(b.id), b]));
 
-async function helloOK(id, at, sig) {
+// the relay address a key joins under (state.JoinName): 2^40 plus the
+// first five bytes of the sha256 of its SPKI
+const JOINED_BASE = 1n << 40n;
+async function joinID(spki) {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', b64(spki)));
+  let n = 0n;
+  for (let i = 0; i < 5; i++) n = (n << 8n) | BigInt(h[i]);
+  return JOINED_BASE | n;
+}
+
+// who may connect as id: a validator, a box of the release, a box that
+// joined (the witness's agreed state), or a box joining on the key it
+// shows, whose address that key gives. Says 'joining' for the last, which
+// the relay caps.
+async function helloOK(id, at, sig, key, joined) {
   if (Math.abs(Date.now() / 1000 - at) > SKEW) return false;
   const msg = new TextEncoder().encode(`commonty relay v1\0${id}\0${at}`);
+  const p256 = async (spki) => {
+    const k = await crypto.subtle.importKey('spki', b64(spki), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    return crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, k, rawSig(b64url(sig)), msg);
+  };
   try {
     const v = validators.get(id);
     if (v) {
@@ -58,15 +76,18 @@ async function helloOK(id, at, sig) {
       return await crypto.subtle.verify({ name: 'Ed25519' }, k, b64url(sig), msg);
     }
     const b = boxes.get(id);
-    if (b) {
-      const k = await crypto.subtle.importKey('spki', b64(b.key), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
-      return await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, k, rawSig(b64url(sig)), msg);
-    }
+    if (b) return await p256(b.key);
+    const j = joined.get(id);
+    if (j) return await p256(j.key);
+    if (key && id >= JOINED_BASE && (await joinID(key)) === id && (await p256(key))) return 'joining';
   } catch {
     return false;
   }
   return false;
 }
+
+// boxes connected that have not joined yet, at most this many at once
+const MAX_JOINING = 8;
 
 function frame(to, from, kind, payload) {
   const b = new Uint8Array(17 + payload.length);
@@ -147,8 +168,23 @@ export class Relay {
     if (url.pathname !== '/relay' || req.headers.get('upgrade') !== 'websocket') return new Response('not here', { status: 404 });
     let id;
     try { id = BigInt(url.searchParams.get('id') || ''); } catch { return new Response('no id', { status: 400 }); }
-    if (!(await helloOK(id, Number(url.searchParams.get('at')), url.searchParams.get('sig') || ''))) {
+    // the boxes that joined, by the witness's agreed state
+    const joined = new Map();
+    try {
+      const s = this.witness !== null ? JSON.parse(globalThis.controlState()) : {};
+      for (const j of Object.values(s.joined || {})) joined.set(BigInt(j.id), j);
+    } catch { /* starting */ }
+    const ok = await helloOK(id, Number(url.searchParams.get('at')), url.searchParams.get('sig') || '', url.searchParams.get('key') || '', joined);
+    if (!ok) {
       return new Response('that hello is not signed by whoever has that address', { status: 403 });
+    }
+    if (ok === 'joining') {
+      this.joining ??= new Set();
+      for (const j of this.joining) if (!this.socks.has(j)) this.joining.delete(j);
+      if (!this.joining.has(id) && this.joining.size >= MAX_JOINING) {
+        return new Response('too many boxes joining at once', { status: 429 });
+      }
+      this.joining.add(id);
     }
     const [client, server] = Object.values(new WebSocketPair());
     server.accept();

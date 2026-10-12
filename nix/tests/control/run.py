@@ -8,7 +8,7 @@
 # service: on one of the two boxes that carry it, and on the other once
 # that one is gone. And a writer, which only the lease's holder runs, and
 # another box only once that lease has lapsed.
-import json, os, subprocess, sys, time, urllib.request, base64
+import json, os, subprocess, sys, time, urllib.request, urllib.parse, urllib.error, base64
 
 T = os.getcwd()
 GROUP = subprocess.check_output(["id", "-gn"]).decode().strip()
@@ -430,6 +430,114 @@ ok(
     and flag(other)["epoch"] > gone["epoch"],
     "only after the lease it had could have lapsed, at a higher epoch",
 )
+
+# A box the release does not list joins on its own key, under the name its
+# key gives (state/join.go), and its heartbeats count from then. A hello
+# for its address signed by any other key is refused.
+import hashlib
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization as S
+
+sk = ec.generate_private_key(ec.SECP256R1())
+open(f"{T}/stranger.p8", "wb").write(
+    sk.private_bytes(S.Encoding.DER, S.PrivateFormat.PKCS8, S.NoEncryption())
+)
+der = sk.public_key().public_bytes(S.Encoding.DER, S.PublicFormat.SubjectPublicKeyInfo)
+spki = base64.b64encode(der).decode()
+open(f"{T}/stranger.spki", "w").write(spki + "\n")
+digest = hashlib.sha256(der).digest()
+sname = "j" + digest[:5].hex()
+sid = (1 << 40) | int.from_bytes(digest[:5], "big")
+stranger = subprocess.Popen(
+    [
+        f"{T}/dd-control",
+        "-config",
+        f"{T}/config.json",
+        "-box",
+        sname,
+        "-join-key",
+        f"{T}/stranger.spki",
+        "-join-recipient",
+        "age1stranger",
+        "-join-house",
+        "hx",
+        "-relay",
+        "ws://127.0.0.1:8789/relay",
+        "-state",
+        f"{T}/st9",
+        "-box-key",
+        f"{T}/stranger.p8",
+        "-listen",
+        "127.0.0.1:4199",
+        "-heartbeat",
+        "1s",
+        "-placement",
+        f"{T}/placement.json",
+    ],
+    stdout=open(f"{T}/n9.log", "a"),
+    stderr=subprocess.STDOUT,
+)
+live = [i for i in (1, 2, 3) if procs[i].poll() is None]
+until(
+    "the stranger joined",
+    lambda: sname in state(live[0]).get("joined", {}),
+    90,
+)
+j = state(live[0]).get("joined", {}).get(sname, {})
+ok(
+    j.get("key") == spki and j.get("id") == sid,
+    f"a stranger joined as {sname}, on its key",
+)
+seen = lambda: state(live[0]).get("boxes", {}).get(sname, {}).get("lastSeen", 0)
+first = seen()
+until("its heartbeats count", lambda: seen() > first, 30)
+ok(seen() > first, "and its heartbeats count")
+ok(
+    "svc/db"
+    not in [
+        l
+        for l, v in state(live[0]).get("leases", {}).items()
+        if v.get("holder") == sname
+    ],
+    "it holds no lease",
+)
+# its address, with another key: refused
+other = ec.generate_private_key(ec.SECP256R1())
+at = int(time.time())
+msg = f"commonty relay v1\0{sid}\0{at}".encode()
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+
+r_, s_ = decode_dss_signature(other.sign(msg, ec.ECDSA(hashes.SHA256())))
+sig = (
+    base64.urlsafe_b64encode(r_.to_bytes(32, "big") + s_.to_bytes(32, "big"))
+    .decode()
+    .rstrip("=")
+)
+okey = base64.b64encode(
+    other.public_key().public_bytes(S.Encoding.DER, S.PublicFormat.SubjectPublicKeyInfo)
+).decode()
+code = 0
+try:
+    urllib.request.urlopen(
+        urllib.request.Request(
+            f"http://127.0.0.1:8789/relay?id={sid}&at={at}&sig={sig}&key={urllib.parse.quote(okey)}",
+            headers={
+                "Upgrade": "websocket",
+                "Connection": "Upgrade",
+                "Sec-WebSocket-Version": "13",
+                "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+            },
+        ),
+        timeout=10,
+    )
+except urllib.error.HTTPError as e:
+    code = e.code
+ok(
+    code == 403,
+    f"a hello for the stranger's address with another key is refused ({code})",
+)
+stranger.terminate()
 
 for p in procs.values():
     p.terminate()
