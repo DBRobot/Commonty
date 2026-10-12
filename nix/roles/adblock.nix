@@ -5,6 +5,7 @@
   imports = [
     ./_sops.nix
     ../modules/adblock/pihole.nix
+    ../modules/smarthome/tang.nix
   ];
   # Pi-hole's api password, from sops: the gate holds it, nothing else does
   sops.secrets.pihole-api-password = { };
@@ -16,5 +17,11 @@
     passwordEnv = config.sops.templates."pihole.env".path;
     passwordFile = config.sops.secrets.pihole-api-password.path;
     lan = lib.mkDefault (lib.head (lib.splitString "/" config.dd.home.address));
+  };
+  # the house's home controllers open their cards through this box: the
+  # house's main box, the one ad blocking already keeps on the house network
+  dd.tang = {
+    enable = true;
+    house = config.dd.home.address;
   };
 }

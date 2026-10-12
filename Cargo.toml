@@ -6,6 +6,7 @@ members = [
   "servers/library",
   "servers/games",
   "servers/transcode",
+  "servers/smarthome/door",
   "client/archive",
   "client/cli",
   "client/identity",
@@ -18,6 +19,7 @@ members = [
   "client/gitremote",
   "client/web",
   "client/mail",
+  "client/hubwriter",
   "app",
 ]
 

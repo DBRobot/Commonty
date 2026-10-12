@@ -156,6 +156,18 @@ impl Gate {
         Ok(n)
     }
 
+    /// A home controller's backups, gone for good: the member who vouched
+    /// for it left (the gate's leaving.rs). Safe to run again.
+    pub async fn forget_controller(&self, label: &str) -> Result<usize> {
+        anyhow::ensure!(crate::controller_label(label), "not a controller's label");
+        let mut n = 0;
+        for e in self.list_all(&format!("controllers/{label}/")).await? {
+            self.delete(&e.key).await?;
+            n += 1;
+        }
+        Ok(n)
+    }
+
     /// every object under a prefix, all levels
     pub async fn list_all(&self, prefix: &str) -> Result<Vec<Entry>> {
         let mut out = Vec::new();
@@ -1382,6 +1394,39 @@ mod tests {
             region: "garage".into(),
         };
         (g, bucket)
+    }
+
+    #[tokio::test]
+    async fn a_controllers_backups_go_and_no_one_elses() {
+        let (g, b) = bucket().await;
+        let (mine, theirs) = ("abcdefghijklmn23", "zyxwvutsrqponm76");
+        for k in [
+            crate::controller_backup(mine),
+            crate::controller_backup(theirs),
+            format!("{mine}/x"),
+        ] {
+            b.lock().unwrap().insert(k, b"sealed".to_vec());
+        }
+        assert_eq!(g.forget_controller(mine).await.unwrap(), 1);
+        assert_eq!(
+            g.forget_controller(mine).await.unwrap(),
+            0,
+            "again is nothing"
+        );
+        let left: Vec<String> = b.lock().unwrap().keys().cloned().collect();
+        assert_eq!(
+            left,
+            vec![format!("{mine}/x"), crate::controller_backup(theirs)]
+        );
+        for bad in [
+            "",
+            "../x",
+            "ABCDEFGHIJKLMN23",
+            "abcdefghijklmn2",
+            "abcdefghijklmn01",
+        ] {
+            assert!(g.forget_controller(bad).await.is_err(), "{bad:?}");
+        }
     }
 
     async fn dav(

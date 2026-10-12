@@ -142,4 +142,21 @@
       privacy = "none"; # the Worker's code, never members' mail
     };
   };
+  harmonia = {
+    what = "the home controllers' updates: this box's nix store, read-only, on the Commonty network (smarthome/cache-door.nix)";
+    instances = 1;
+    base = {
+      uses = {
+        memory = "20M";
+        storage = "0";
+        estimated = true;
+      };
+      network = {
+        outbound = "none";
+        inbound = "localhost"; # nginx's cache.<domain>
+      };
+      depends.nginx.local = true;
+      privacy = "none"; # built from the public repository; no secret is in a store
+    };
+  };
 }

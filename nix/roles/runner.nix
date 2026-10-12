@@ -25,6 +25,10 @@
         TOKEN=${config.sops.placeholder.forgejo-members-runner-token}
       '';
       dd.membersRunner.tokenFile = config.sops.templates."forgejo-members-runner.env".path;
+      # the home controller's system is aarch64 (docs/dev/home-controller.md):
+      # its own programs are cross-built, everything else comes from
+      # cache.nixos.org, and the few steps left run here under qemu
+      boot.binfmt.emulatedSystems = [ "aarch64-linux" ];
       sops.secrets.nix-cache-signing-key = { };
       dd.cache.signingKeyFile = config.sops.secrets.nix-cache-signing-key.path;
       # the box's cache key, as nix reads credentials; write is granted below

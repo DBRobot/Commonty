@@ -56,6 +56,16 @@ in
       default = { };
       description = "The fleet's boxes and their ssh host keys (fleet/boxes.json): a release moves this box only to a closure two of them vouched for. Fewer than two: a fleet that cannot vouch, and nothing is asked.";
     };
+    verifyPort = lib.mkOption {
+      type = lib.types.port;
+      default = 4181;
+      description = "What must answer on 127.0.0.1 after a switch: the gate on a box, the door on a home controller.";
+    };
+    ssh = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Whether sshd must be up after a switch. A home controller runs none.";
+    };
     probeSeconds = lib.mkOption {
       type = lib.types.int;
       default = 600;
@@ -105,7 +115,8 @@ in
         DD_AGENT_ATTESTERS = "/etc/dd/attesters.json";
         DD_AGENT_KEY_FILE = cfg.publicKeyFile;
         DD_AGENT_PROBE_SECS = toString cfg.probeSeconds;
-        DD_AGENT_VERIFY_PORT = "4181";
+        DD_AGENT_VERIFY_PORT = toString cfg.verifyPort;
+        DD_AGENT_SSH = lib.boolToString cfg.ssh;
         DD_AGENT_REACH = lib.concatStringsSep " " cfg.reach;
       }
       // lib.optionalAttrs (cfg.cache != null) { DD_AGENT_CACHE = cfg.cache; };

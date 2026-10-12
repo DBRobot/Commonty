@@ -1,0 +1,38 @@
+[package]
+name = "hubwriter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "dd-hub-writer"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+# pure Rust, so the Windows and macOS builds need no C toolchain for it
+ruzstd = "0.8"
+# diskutil's output on macOS; parsed on every platform so its tests run here
+plist = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
+  "Win32_System_SystemInformation",
+] }
+
+[dev-dependencies]
+tempfile = "3"

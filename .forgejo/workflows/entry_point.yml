@@ -54,8 +54,10 @@ jobs:
         run: |
           node - <<'EOF'
           const b = require("./fleet/boxes.json");
-          const hosts = Object.keys(b).sort();
-          const builders = hosts.filter((h) => (b[h].roles || []).includes("runner"));
+          // and the devices' systems (the home controller): built like a box's
+          const d = require("./fleet/devices.json");
+          const hosts = [...Object.keys(b), ...Object.keys(d).filter((k) => k !== "_")].sort();
+          const builders = hosts.filter((h) => (b[h]?.roles || []).includes("runner"));
           require("fs").appendFileSync(process.env.GITHUB_OUTPUT, [
             `hosts=${JSON.stringify(hosts)}`,
             `builders=${JSON.stringify(builders)}`,
@@ -330,7 +332,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [acme, console, directory, metrics, metrics-ui, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, photos, llm, vault, adblock, unlock, leaving]
+        test: [acme, console, directory, metrics, metrics-ui, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, photos, llm, vault, adblock, unlock, leaving, home-controller]
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: ${{ matrix.test }}

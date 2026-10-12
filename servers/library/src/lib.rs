@@ -24,6 +24,19 @@ const URL_SECS: u64 = 600;
 /// transcoder alone.
 pub const HANDOFF_SECS: u64 = 6 * 3600;
 
+/// a home controller's label: 16 of base32's lower-case letters and digits
+/// (docs/dev/home-controller.md), so it is one folder and never a path
+pub fn controller_label(s: &str) -> bool {
+    s.len() == 16
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b))
+}
+
+/// where a home controller's backup is kept, one object per controller
+pub fn controller_backup(label: &str) -> String {
+    format!("controllers/{label}/backup")
+}
+
 #[derive(Clone)]
 pub struct Gate {
     /// https://s3.<base>

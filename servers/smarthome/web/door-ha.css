@@ -1,0 +1,9 @@
+/* The bar on Home Assistant's own pages (ha-bar.html, which the door puts
+   just inside <body>). Home Assistant fills the window; the bar takes a
+   slim strip at the top and Home Assistant the rest. */
+body { display: flex; flex-direction: column; height: 100vh; margin: 0; }
+body > home-assistant { flex: 1; min-height: 0; position: relative; }
+.dd-bar.door-bar .bar { height: 40px; padding: 0 16px; }
+.dd-bar.door-bar .brand { font-size: 15px; gap: 8px; }
+.dd-bar.door-bar .brand svg { width: 16px; height: 16px; }
+.dd-bar.door-bar .bar > a:not(.brand) { font-size: 14px; }

@@ -62,7 +62,8 @@ impl Tester {
 
     fn members(&self) -> String {
         let id = identity::member_id(&identity::encode_public(&self.root.verifying_key()));
-        serde_json::json!({ "members": [id], "revoked": [] }).to_string()
+        let names = serde_json::json!({ id.clone(): identity::name_tag(&id, "tester") });
+        serde_json::json!({ "members": [id], "revoked": [], "names": names }).to_string()
     }
 
     #[allow(dead_code)]

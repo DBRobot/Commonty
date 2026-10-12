@@ -153,6 +153,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "hubwriter" = rec {
+      packageId = "hubwriter";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hubwriter";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "identity" = rec {
       packageId = "identity";
       build = internal.buildRustCrateWithFeatures {
@@ -197,6 +207,16 @@ rec {
       packageId = "release";
       build = internal.buildRustCrateWithFeatures {
         packageId = "release";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "smarthome-door" = rec {
+      packageId = "smarthome-door";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "smarthome-door";
       };
 
       # Debug support which might change between releases.
@@ -4531,6 +4551,19 @@ rec {
             target = { target, features }: ("linux" == target."os" or null);
           }
           {
+            name = "hmac";
+            packageId = "hmac 0.12.1";
+          }
+          {
+            name = "hyper";
+            packageId = "hyper";
+          }
+          {
+            name = "hyper-util";
+            packageId = "hyper-util";
+            features = [ "tokio" ];
+          }
+          {
             name = "identity";
             packageId = "identity";
           }
@@ -4543,10 +4576,20 @@ rec {
             packageId = "media";
           }
           {
+            name = "release";
+            packageId = "release";
+          }
+          {
             name = "reqwest";
             packageId = "reqwest 0.12.28";
             usesDefaultFeatures = false;
             features = [ "rustls-tls" "json" "stream" ];
+          }
+          {
+            name = "rustls";
+            packageId = "rustls";
+            usesDefaultFeatures = false;
+            features = [ "ring" "std" ];
           }
           {
             name = "serde";
@@ -4583,7 +4626,7 @@ rec {
           {
             name = "tokio";
             packageId = "tokio";
-            features = [ "sync" "time" "net" "fs" "io-util" ];
+            features = [ "sync" "time" "net" "fs" "io-util" "process" ];
           }
           {
             name = "tokio-util";
@@ -4595,6 +4638,19 @@ rec {
           {
             name = "tauri-build";
             packageId = "tauri-build";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "macros" "rt-multi-thread" ];
+          }
+          {
+            name = "tokio-rustls";
+            packageId = "tokio-rustls";
+            usesDefaultFeatures = false;
+            features = [ "ring" ];
           }
         ];
 
@@ -6426,6 +6482,10 @@ rec {
           {
             name = "base64";
             packageId = "base64 0.22.1";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
           }
           {
             name = "getrandom";
@@ -11343,6 +11403,64 @@ rec {
         sha256 = "1aa9rd2sac0zhjqh24c9xvir96g188zldkx0hr6dnnlx5904cfyz";
         authors = [
           "Pyfisch <pyfisch@posteo.org>"
+        ];
+
+      };
+      "hubwriter" = rec {
+        crateName = "hubwriter";
+        version = "0.1.0";
+        edition = "2024";
+        crateBin = [
+          {
+            name = "dd-hub-writer";
+            path = "src/main.rs";
+            requiredFeatures = [ ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./client/hubwriter; };
+        dependencies = [
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: (target."unix" or false);
+          }
+          {
+            name = "plist";
+            packageId = "plist";
+          }
+          {
+            name = "ruzstd";
+            packageId = "ruzstd";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "sha2";
+            packageId = "sha2 0.10.9";
+          }
+          {
+            name = "windows-sys";
+            packageId = "windows-sys 0.61.2";
+            target = { target, features }: (target."windows" or false);
+            features = [ "Win32_Foundation" "Win32_Security" "Win32_Storage_FileSystem" "Win32_System_IO" "Win32_System_Ioctl" "Win32_System_SystemInformation" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
         ];
 
       };
@@ -23613,6 +23731,129 @@ rec {
         };
         resolvedDefaultFeatures = [ "const_generics" "const_new" "union" ];
       };
+      "smarthome-door" = rec {
+        crateName = "smarthome-door";
+        version = "0.1.0";
+        edition = "2024";
+        crateBin = [
+          {
+            name = "dd-door";
+            path = "src/main.rs";
+            requiredFeatures = [ ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./servers/smarthome/door; };
+        libName = "smarthome_door";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "axum";
+            packageId = "axum";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "clap";
+            packageId = "clap";
+            features = [ "derive" "env" ];
+          }
+          {
+            name = "crypto_secretbox";
+            packageId = "crypto_secretbox";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+          }
+          {
+            name = "futures-util";
+            packageId = "futures-util";
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.3.4";
+          }
+          {
+            name = "hmac";
+            packageId = "hmac 0.12.1";
+          }
+          {
+            name = "hyper";
+            packageId = "hyper";
+            features = [ "client" "http1" ];
+          }
+          {
+            name = "hyper-util";
+            packageId = "hyper-util";
+            features = [ "tokio" ];
+          }
+          {
+            name = "identity";
+            packageId = "identity";
+          }
+          {
+            name = "library";
+            packageId = "library";
+          }
+          {
+            name = "reqwest";
+            packageId = "reqwest 0.12.28";
+            usesDefaultFeatures = false;
+            features = [ "rustls-tls" "json" ];
+          }
+          {
+            name = "rustls";
+            packageId = "rustls";
+            usesDefaultFeatures = false;
+            features = [ "ring" "std" "logging" "tls12" ];
+          }
+          {
+            name = "rustls-pki-types";
+            packageId = "rustls-pki-types";
+            features = [ "std" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "sha2";
+            packageId = "sha2 0.10.9";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "macros" "rt-multi-thread" "sync" "net" "time" "fs" "process" "io-util" ];
+          }
+          {
+            name = "tokio-rustls";
+            packageId = "tokio-rustls";
+            usesDefaultFeatures = false;
+            features = [ "ring" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "p256";
+            packageId = "p256";
+          }
+          {
+            name = "webauthn-rs-core";
+            packageId = "webauthn-rs-core";
+          }
+        ];
+
+      };
       "socket2" = rec {
         crateName = "socket2";
         version = "0.6.5";
@@ -33299,7 +33540,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Ioctl" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";

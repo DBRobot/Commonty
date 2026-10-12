@@ -66,6 +66,8 @@ in
       })
       (lib.mkIf (has "headscale") { headscale = [ config.services.headscale.port ]; })
       (lib.mkIf (has "unbound") { unbound = [ 5335 ]; })
+      (lib.mkIf (has "harmonia") { harmonia = [ 5005 ]; })
+      (lib.mkIf (config.dd ? tang && config.dd.tang.enable) { tang = [ config.dd.tang.port ]; })
       (lib.mkIf (has "searx") { searxng = [ 4196 ]; })
       (lib.mkIf (has "vaultwarden") { vaultwarden = [ config.services.vaultwarden.config.ROCKET_PORT ]; })
       (lib.mkIf (has "pihole-ftl") {

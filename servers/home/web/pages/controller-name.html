@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Name your home controller</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <script type="module" src="/_dd/static/controller-name.js"></script>
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+    </div>
+  </header>
+  <main class="auth">
+    <section class="add-device" id="ask">
+      <h1>Name your home controller</h1>
+      <p class="lead">Your passkey says the home controller you are setting up in the Commonty app is yours, so it can have its own address:</p>
+      <p><code id="name">—</code></p>
+      <p class="lead">This opens nothing and shares nothing from your home.</p>
+      <button type="button" id="sign" disabled>Use my passkey</button>
+      <p class="note" id="said" role="status" hidden></p>
+    </section>
+    <section class="add-device" id="done" hidden>
+      <h1>Named</h1>
+      <p class="lead">Go back to the Commonty app to finish setting up your home controller. You can close this tab.</p>
+    </section>
+    <section class="add-device" id="broken" hidden>
+      <h1>This link is not complete</h1>
+      <p class="lead" id="broken-why">Start again from the Commonty app.</p>
+    </section>
+  </main>
+  <script type="module" src="/_dd/static/footer.js"></script>
+</body>
+</html>
