@@ -196,8 +196,41 @@ for tenant, sender in (("jaaaaaaaaaa", "a"), ("jbbbbbbbbbb", "b")):
 out = box.succeed("curl -sf 'http://127.0.0.1:10913/api/v1/query?query=up'")
 assert json.loads(out)["data"]["result"] == [], out
 
-# the fleet's admin, who sees every release box, does not see a joined box
-# that is not hers: refused like any refusal there, and sent home
+# the fleet's admin sees every box, a joined one too: through to its query,
+# which answers for that box alone
 args = f"{sarah} '{site}/joined/jaaaaaaaaaa/api/v1/query?query=up'"
+got = json.loads(box.succeed(f"{curl} -f {args}"))
+assert got["data"]["result"], got
+assert all(r["metric"]["box"] == "jaaaaaaaaaa" for r in got["data"]["result"]), got
+
+# another member, whose box it is not, is refused and sent home
+box.succeed(
+    f"DD_KEYRING_FILE=/root/bob.json {nix['dd']} identity new --born 1990-01 --agree-terms --name bob {dirs}"
+)
+box.succeed(
+    f"DD_KEYRING_FILE=/root/sarah.json {nix['dd']} member add bob --repo /root/fleet {dirs}"
+)
+box.succeed(
+    "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "
+    '"$(jq -c . /root/fleet/fleet/members.json)" '
+    "> /run/systemd/system/dd-verify.service.d/members.conf"
+)
+box.succeed("systemctl daemon-reload && systemctl restart dd-verify.service")
+box.wait_for_open_port(4181)
+btoken = box.succeed(f"DD_KEYRING_FILE=/root/bob.json {nix['dd']} token").strip()
+head = box.succeed(
+    f"curl -s -D - -o /dev/null -X POST --data-urlencode token={btoken} http://127.0.0.1:4181/_dd/app/signin"
+)
+bcookie = (
+    next(h for h in head.splitlines() if h.lower().startswith("set-cookie:"))
+    .split(":", 1)[1]
+    .split(";")[0]
+    .strip()
+)
+bob = f"-H 'Cookie: {bcookie}'"
+args = f"{bob} '{site}/joined/jaaaaaaaaaa/api/v1/query?query=up'"
 assert status(args) == "302", status(args)
 assert location(args) == "https://home.test.invalid/", location(args)
+# and the admin, asking the same box by a path read two ways, is refused
+args = f"{sarah} --path-as-is '{site}/api/v1/../../joined/jaaaaaaaaaa/api/v1/query?query=up'"
+assert status(args) == "302", status(args)

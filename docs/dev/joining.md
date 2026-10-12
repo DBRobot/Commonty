@@ -118,9 +118,9 @@ box installer (full screen)        fleet
   series take more than a gigabyte (`maxBytes`) it is refused; 15 days
   kept; its token goes when it leaves the agreed state. A query of its own
   (`thanos-query-joined`) answers for one box at a time, the one nginx
-  names, and the Metrics page asks it for the member's own boxes only. The
-  fleet's view never reads these, and the admin sees them no more than
-  anyone else.
+  names. The Metrics page shows a member their own boxes, and the fleet's
+  admin every joined box, as they see every release box; no other member
+  sees them. The fleet's view (the bucket) never holds them.
 - **Fails closed.** Whose a box is is worked out afresh on every request,
   from an agreed state read in the last five minutes and the entries as
   they are: a box removed, a member who left or is suspended, a device
