@@ -233,7 +233,13 @@ clears both.
 
 **Metrics** are a box's owner's (`box.json` owner, `VERIFY_OWNER`) and the
 admin's (`policy.json` owner, `VERIFY_ADMIN`): `metrics.<domain>` and a
-box's own `metrics.<box>.<domain>` answer nobody else. **A box that
+box's own `metrics.<box>.<domain>` answer nobody else. **A box a member
+set up** (docs/dev/joining.md) is that member's alone, the admin's not:
+its series are at `metrics.<domain>/joined/<its name>/api/v1/...`, which
+`/verify` lets through only for the member the gates name as its owner
+(`member_boxes::sees_metrics`), and only for a path already in the one
+form nginx and the gate both read (no escapes, dot segments or doubled
+slashes). **A box that
 serves its own pages alone** runs the gate as role `box`: `/verify` for its
 owner and the admin, the sign-in hand-off, `/_dd/back`, and the directory
 and house routes - no member pages, sign-up or demo.

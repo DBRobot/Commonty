@@ -90,19 +90,48 @@ box installer (full screen)        fleet
   alone: the drive never holds what opens the member's other images. The
   app seals that password to the member's devices, beside the ticket, so
   any of them can open the backup. The gate takes the ticket there and
-  nowhere else (GET, HEAD, PROPFIND, PUT, MKCOL; never a delete), counted
-  against the member's allowance, and an hour's check drops the folder 7
-  days after its first write unless a box joined with its ticket. With no
-  read of the agreed state it drops nothing.
+  nowhere else (GET, HEAD, PROPFIND, PUT, MKCOL, and the pieces of an
+  upload; never a delete), counted against the member's allowance, and an
+  hour's check moves the folder to the images' trash 7 days after its
+  first write unless a box joined with its ticket (below).
 - **On join** the app, on any of the member's devices, reads which of its
   boxes joined and with which ticket (`GET /_dd/network/joined`), copies
   each one's pending backup into the member's images (`restic copy`) and
   deletes the pending folder with the member's own token (to the images'
   trash, as any delete there).
 - **The box** is on the member's Devices tab ("Your boxes",
-  `GET /_dd/boxes/mine`), with when it last said how it is. Removing it
+  `GET /_dd/boxes/mine`), with when it last said how it is, and on their
+  Metrics page. Removing it
   puts its ticket id in the member's signed entry (`removed_boxes`), and on
   every box at once it is nobody's.
+- **Its metrics** are its member's
+  ([`observe/joined-metrics.nix`](../../nix/modules/observe/joined-metrics.nix)).
+  It has no key to the metrics bucket the release boxes' sidecars upload
+  to, so its prometheus writes to the observe box instead, over the store's
+  port (`/_metrics/write`). There it has a token of its own, sealed to its
+  secrets key and served beside its store keys (`/_keys/<box>-metrics.age`,
+  `dd-metrics-joined`; a box joining under the same name with another
+  recipient gets a new one). nginx names the box from the token and
+  nothing else (`THANOS-TENANT`), and a Thanos receive keeps each box's
+  series apart, labelled `box=<its name>`; any `box` label the box sends is
+  dropped. Bounds: a megabyte a write, two writes a second, and while its
+  series take more than a gigabyte (`maxBytes`) it is refused; 15 days
+  kept; its token goes when it leaves the agreed state. A query of its own
+  (`thanos-query-joined`) answers for one box at a time, the one nginx
+  names, and the Metrics page asks it for the member's own boxes only. The
+  fleet's view never reads these, and the admin sees them no more than
+  anyone else.
+- **Fails closed.** Whose a box is is worked out afresh on every request,
+  from an agreed state read in the last five minutes and the entries as
+  they are: a box removed, a member who left or is suspended, a device
+  taken out of the entry each count at once, and with no fresh state no
+  joined box is anyone's. The week's check drops a pending backup only on
+  a fresh agreed state it read whole, whose time is within ten minutes of
+  the box's own, keeps the backup of any box that came with its ticket
+  whoever owns that box now, and moves it to the images' trash (30 days),
+  never deletes it outright. A ticket at the images does only what the DAV
+  layer would route inside its own folder (`dav::ticket_allows`): no
+  delete, move or copy, whatever header comes with it.
 - **The disk** is encrypted with a key sealed to the box's TPM (PCR 7):
   a pulled disk reads as nothing, and the box boots on its own.
 - **BIOS**: the installer checks UEFI, TPM 2.0, Secure Boot (off), AHCI and
