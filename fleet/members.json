@@ -2,5 +2,8 @@
   "members": [
     "26a1cf1d1dd2d2ecd586c50283efa4c362bb030bda8db091bd7baf15bfcb65dc"
   ],
-  "revoked": []
+  "revoked": [],
+  "names": {
+    "26a1cf1d1dd2d2ecd586c50283efa4c362bb030bda8db091bd7baf15bfcb65dc": "57250a53bfb2ed651b8bd68340fc6cce00dcf74388edc41a86d3d3504e1ccef5"
+  }
 }
