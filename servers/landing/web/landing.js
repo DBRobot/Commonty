@@ -4,16 +4,22 @@ const parts = location.hostname.split('.');
 const base = parts.length > 2 ? parts.slice(1).join('.') : location.hostname;
 for (const a of document.querySelectorAll('a[data-home]')) a.href = `https://home.${base}${a.dataset.home}`;
 
-// a slow, endless drift; a second copy of the cards follows the first so the loop has no seam
+// a slow, endless drift: a copy of the cards before and after the real ones,
+// and the view kept on the middle set, so it loops either way, by the
+// buttons or by hand
 const track = document.getElementById('track');
 const first = [...track.children];
-for (const c of first) {
+const copies = () => first.map((c) => {
   const copy = c.cloneNode(true);
   copy.setAttribute('aria-hidden', 'true');
   copy.querySelector('a').tabIndex = -1;
-  track.append(copy);
-}
-const width = () => track.scrollWidth / 2;
+  return copy;
+});
+track.prepend(...copies());
+track.append(...copies());
+// one set's length, gap included: the distance from a card to its copy
+const width = () => first[0].offsetLeft - track.children[0].offsetLeft;
+track.scrollLeft = width();
 const step = () => first[1].offsetLeft - first[0].offsetLeft;
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let paused = false;
@@ -44,8 +50,8 @@ function frame(now) {
     if (Math.abs(nudge) < 0.5) nudge = 0;
   }
   const w = width();
-  if (x >= w) x -= w;
-  if (x < 0) x += w;
+  if (x >= 2 * w) x -= w;
+  if (x < w) x += w;
   track.scrollLeft = x;
   requestAnimationFrame(frame);
 }
