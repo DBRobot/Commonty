@@ -50,6 +50,7 @@
       "dd-ports-check"
       "dd-netspeed"
       "dd-service-memory"
+      "dd-join-prepare" # a box that joined on its own key: its key and report to build from
     ];
     everyBox = true;
     base = {

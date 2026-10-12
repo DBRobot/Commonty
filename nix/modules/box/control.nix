@@ -73,6 +73,9 @@ in
           (lib.optionalString config.dd.verify.enable "-submit /run/dd-control/submit.sock -submit-group dd-verify")
           # dd-attest hands in what it built for a build order here
           "-builds /run/dd-control/built.sock"
+          # a box the release does not list joins on its own key: the one
+          # its TPM holds, and its secrets key's recipient (dd-join-prepare)
+          (lib.optionalString config.dd.box.joined "-join-key /var/lib/dd/box-key.spki -join-recipient-file /var/lib/dd/secrets-recipient -join-house joined")
         ];
         StateDirectory = "dd-control";
         StateDirectoryMode = "0700";

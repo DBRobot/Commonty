@@ -55,6 +55,60 @@ struct Args {
     /// closure counts. None, or fewer than two, is a fleet that cannot vouch.
     #[arg(long, env = "DD_AGENT_ATTESTERS")]
     attesters: Option<PathBuf>,
+    /// A box the release does not list, which joined the fleet on its own
+    /// key (docs/dev/joining.md): the repository its system is built from,
+    /// at the commit the release signed (git+https://code.<domain>/...).
+    /// With it, a release that names nothing for this box is built here.
+    #[arg(long, env = "DD_AGENT_JOINED_SOURCE")]
+    joined_source: Option<String>,
+    /// with joined_source: this box's own report, which its system is
+    /// built for (hardware.json, hardware-configuration.nix, box.json)
+    #[arg(long, env = "DD_AGENT_JOINED_DIR", default_value = "/var/lib/dd/box")]
+    joined_dir: PathBuf,
+}
+
+/// A box that joined on its own key builds its system itself, from the
+/// commit the release key signed and its own report: no other box built
+/// it, so none vouches, and none needs to - it is this box's own build of
+/// signed source.
+fn build_joined(args: &Args, rev: &str, name: &str) -> Result<release::BoxRelease> {
+    let source = args
+        .joined_source
+        .as_deref()
+        .context("no source to build from")?;
+    anyhow::ensure!(
+        rev.len() == 40 && rev.bytes().all(|c| c.is_ascii_hexdigit()),
+        "the release's commit is not a commit: {rev}"
+    );
+    anyhow::ensure!(
+        name.len() == 11
+            && name.starts_with('j')
+            && name[1..].bytes().all(|c| c.is_ascii_hexdigit()),
+        "not a name a box joins under: {name}"
+    );
+    let expr = format!(
+        "let f = builtins.getFlake \"{source}?rev={rev}\"; in (f.lib.joinedBox {{ name = \"{name}\"; dir = builtins.path {{ path = {dir}; name = \"box\"; }}; }}).config.system.build.toplevel",
+        dir = args.joined_dir.display()
+    );
+    let out = sh(
+        "nix",
+        &[
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "build",
+            "--impure",
+            "--no-link",
+            "--print-out-paths",
+            "--expr",
+            &expr,
+        ],
+    )
+    .context("building this box's own system")?;
+    Ok(release::BoxRelease {
+        path: out.trim().to_string(),
+        nar_hash: String::new(),
+        closure: None,
+    })
 }
 
 /// Why this box may switch to a closure on the boxes' word, or may without it.
@@ -69,6 +123,9 @@ enum Vouched {
     Bootstrap,
     /// a release from before attestations, on a box that has never taken one
     Before,
+    /// this box built it, from the commit the release key signed: a box
+    /// that joined on its own key, which no release lists
+    SelfBuilt,
 }
 
 /// The rule. Two boxes of this box's fleet vouch for its closure, or it is
@@ -278,9 +335,20 @@ fn run(args: &Args) -> Result<String> {
         bail!("release {counter} is older than the {last} this box already applied");
     }
 
-    let Some(mine) = signed.payload.boxes.get(&name) else {
-        record(args, &name, last, "absent");
-        return Ok(format!("release {counter} has nothing for {name}"));
+    // a box the release does not list, which joined on its own key,
+    // builds its own system from the release's signed commit
+    let self_built = !signed.payload.boxes.contains_key(&name) && args.joined_source.is_some();
+    let built;
+    let mine = match signed.payload.boxes.get(&name) {
+        Some(m) => m,
+        None if self_built => {
+            built = build_joined(args, &signed.payload.rev, &name)?;
+            &built
+        }
+        None => {
+            record(args, &name, last, "absent");
+            return Ok(format!("release {counter} has nothing for {name}"));
+        }
     };
     // A release this box has already tried and rolled back from is not
     // worth trying every five minutes for the rest of its life: each go
@@ -367,7 +435,14 @@ fn run(args: &Args) -> Result<String> {
     // with their host keys, or nothing changes here. The release key alone
     // does not move a box. Refused before anything is fetched or switched:
     // the box stays on what it runs.
-    match vouch(args, &signed.payload, &name)? {
+    match if self_built {
+        Ok(Ok(Vouched::SelfBuilt))
+    } else {
+        vouch(args, &signed.payload, &name)
+    }? {
+        Ok(Vouched::SelfBuilt) => {
+            eprintln!("release {counter}: built here, from the commit the release key signed")
+        }
         Ok(Vouched::By(by)) => eprintln!("release {counter}: vouched for by {}", by.join(", ")),
         Ok(Vouched::FleetTooSmall) => {
             eprintln!("release {counter}: a fleet of fewer than two boxes; no box can vouch")
@@ -385,8 +460,9 @@ fn run(args: &Args) -> Result<String> {
     }
 
     // fetch, then check the contents are what was signed: an input-addressed
-    // store path says nothing about what is in it, the nar hash does
-    if let Some(cache) = &args.cache {
+    // store path says nothing about what is in it, the nar hash does. A
+    // system this box built itself is what it built
+    if !self_built && let Some(cache) = &args.cache {
         sh(
             "nix",
             &["copy", "--from", cache, "--no-check-sigs", &mine.path],
@@ -406,7 +482,7 @@ fn run(args: &Args) -> Result<String> {
     .context("nar hash")?;
     let got =
         release::nar_hash_from_path_info(&info, &mine.path).map_err(|e| anyhow::anyhow!("{e}"))?;
-    if got != mine.nar_hash {
+    if !self_built && got != mine.nar_hash {
         record(args, &name, last, "refused");
         bail!(
             "{} has nar hash {got}, the release says {}",

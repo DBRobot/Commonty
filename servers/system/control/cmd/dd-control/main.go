@@ -419,6 +419,7 @@ func main() {
 	placedDir := flag.String("placed-dir", "/run/dd-placed", "where a placed service's flag is, the condition its units start on")
 	joinKey := flag.String("join-key", "", "a box the release does not list: a file with its TPM-held key (SPKI, base64), with which it joins the agreed state under the name the key gives (state/join.go); -box must be that name")
 	joinRecipient := flag.String("join-recipient", "", "with -join-key: its secrets key's age recipient, what copies' keys are sealed to")
+	joinRecipientFile := flag.String("join-recipient-file", "", "with -join-key: a file holding -join-recipient")
 	joinHouse := flag.String("join-house", "", "with -join-key: its house, as it found it (dd-locate)")
 	placedCopies := flag.String("placed-copies", "", "where to write the plan's copies, which boxes' stores keep each bucket (nix/modules/storage/store.nix); empty: nowhere")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
@@ -499,6 +500,13 @@ func main() {
 		}
 		if name != *box {
 			log.Fatalf("this box's key joins as %s, not %s", name, *box)
+		}
+		if *joinRecipientFile != "" {
+			b, err := os.ReadFile(*joinRecipientFile)
+			if err != nil {
+				log.Fatal(err)
+			}
+			*joinRecipient = strings.TrimSpace(string(b))
 		}
 		me = state.Box{ID: id, House: *joinHouse, Key: spki}
 		joining = &state.JoinReq{Key: spki, Recipient: *joinRecipient, House: *joinHouse}

@@ -67,6 +67,13 @@
     default = "tank";
     description = "the pool for big, slow-to-matter data (box.json pools.bulk): a hard disk if the box has one";
   };
+  # a box the release does not list (fleet/boxes.json): it joined the
+  # fleet on its own key, and builds its own system (docs/dev/joining.md)
+  options.dd.box.joined = lib.mkOption {
+    type = lib.types.bool;
+    default = !(lib.importJSON ../../../fleet/boxes.json) ? ${config.networking.hostName};
+    readOnly = true;
+  };
   options.dd.box.owner = lib.mkOption {
     type = lib.types.nullOr lib.types.str;
     default = null;

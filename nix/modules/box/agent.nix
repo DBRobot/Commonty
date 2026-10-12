@@ -108,7 +108,13 @@ in
         DD_AGENT_VERIFY_PORT = "4181";
         DD_AGENT_REACH = lib.concatStringsSep " " cfg.reach;
       }
-      // lib.optionalAttrs (cfg.cache != null) { DD_AGENT_CACHE = cfg.cache; };
+      // lib.optionalAttrs (cfg.cache != null) { DD_AGENT_CACHE = cfg.cache; }
+      # a box that joined on its own key builds its own system, from the
+      # fleet's public repository at the commit the release key signed
+      // lib.optionalAttrs config.dd.box.joined {
+        DD_AGENT_JOINED_SOURCE = "git+https://code.${config.dd.domain}/${config.dd.repo}";
+        DD_AGENT_JOINED_DIR = "/var/lib/dd/box";
+      };
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${agent}/bin/dd-agent";
