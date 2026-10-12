@@ -921,8 +921,23 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     // a box's metrics are its owner's and the admin's; this box's Thanos
     // holds every box's, which is the admin's alone (or this box's owner's,
     // who is the admin on the box that gathers them)
-    if is_metrics_host(&app.domain, &asked_host(&headers)) && !app.sees_box(&user) {
-        return StatusCode::FORBIDDEN.into_response();
+    if is_metrics_host(&app.domain, &asked_host(&headers)) {
+        // a joined box's own metrics (/joined/<its name>/api/v1/...) are
+        // its member's, and nobody else's, the fleet's admin included: the
+        // gates say whose it is (member_boxes.rs), nginx then asks for its
+        // series alone (observe/joined-metrics.nix)
+        let uri = headers
+            .get("x-original-uri")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        let owned = if member_boxes::metrics_box(uri).is_some() {
+            member_boxes::current(&app).await.1
+        } else {
+            vec![]
+        };
+        if !member_boxes::sees_metrics(&user, app.sees_box(&user), uri, &owned) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
     }
     // A disk image goes from Backups in Settings only after the passkey, and
     // the box holds the page to that: a tab left signed in is not enough.
@@ -2295,7 +2310,7 @@ async fn metrics_sources(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
     if user == pages::DEMO_USER || !app.member(&user) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let boxes: Vec<serde_json::Value> = app
+    let mut boxes: Vec<serde_json::Value> = app
         .boxes_seen(&user)
         .into_iter()
         .filter(|(_, b)| !b.metrics.is_empty() && fleet_host(&app.domain, &b.metrics))
@@ -2303,6 +2318,24 @@ async fn metrics_sources(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
             |(name, b)| serde_json::json!({ "box": name, "url": format!("https://{}", b.metrics) }),
         )
         .collect();
+    // the boxes this person set up, on the box that gathers their metrics
+    // (observe/joined-metrics.nix): theirs alone
+    if app.thanos.is_some() {
+        let metrics = format!("metrics.{}", app.domain);
+        boxes.extend(
+            member_boxes::current(&app)
+                .await
+                .1
+                .into_iter()
+                .filter(|o| o.user == user)
+                .map(|o| {
+                    serde_json::json!({
+                        "box": o.name,
+                        "url": format!("https://{metrics}/joined/{}", o.name),
+                    })
+                }),
+        );
+    }
     let mut r =
         Json(serde_json::json!({ "here": app.sees_box(&user), "boxes": boxes })).into_response();
     r.headers_mut()

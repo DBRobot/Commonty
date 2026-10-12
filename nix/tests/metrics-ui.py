@@ -1,6 +1,8 @@
 # The metrics-ui test: the page for whoever is signed in, and nothing
 # through to Thanos but the read-only query calls, from someone signed in,
 # with their credential taken out.
+import json
+
 start_all()
 
 box.wait_for_unit("nginx.service")
@@ -124,3 +126,78 @@ box.succeed("test ! -e /tmp/thanos.log")
 # the old name sends people to the new one
 assert status("https://grafana.test.invalid/d/x") == "301"
 assert location("https://grafana.test.invalid/d/x") == f"{site}/d/x"
+
+# ---- a joined box's metrics (joined-metrics.nix)
+box.wait_for_unit("thanos-receive-joined.service")
+box.wait_for_unit("thanos-query-joined.service")
+box.wait_for_unit("control-stand-in.service")
+box.wait_for_open_port(4195, addr="127.0.0.1")
+for w in ("a", "b"):
+    box.succeed(f"age-keygen -o /root/{w}.key")
+ra = box.succeed("age-keygen -y /root/a.key").strip()
+rb = box.succeed("age-keygen -y /root/b.key").strip()
+box.succeed(
+    "cat > /tmp/state.json <<EOF\n"
+    + json.dumps(
+        {
+            "joined": {
+                "jaaaaaaaaaa": {"recipient": ra},
+                "jbbbbbbbbbb": {"recipient": rb},
+            }
+        }
+    )
+    + "\nEOF"
+)
+box.succeed("systemctl start dd-metrics-joined.service")
+store = "https://store.box.test.invalid:3443"
+scurl = "curl -sk --resolve store.box.test.invalid:3443:127.0.0.1"
+# each token sealed to its own box, served beside the store's keys
+for w, j in (("a", "jaaaaaaaaaa"), ("b", "jbbbbbbbbbb")):
+    box.succeed(
+        f"{scurl} -f {store}/_keys/{j}-metrics.age -o /tmp/{w}.age"
+        f" && age -d -i /root/{w}.key /tmp/{w}.age > /var/lib/dd-metrics/{w}"
+    )
+box.fail("age -d -i /root/b.key /tmp/a.age")
+
+# no token, or one nobody was given: refused
+w = f"{scurl} -o /dev/null -w '%{{http_code}}' -X POST --data-binary x {store}/_metrics/write"
+assert box.succeed(w).strip() == "403"
+assert box.succeed(f"{w} -H 'Authorization: Bearer nope'").strip() == "403"
+
+# what each sends is kept under its own name, whatever it says it is
+box.systemctl("restart prometheus.service")
+
+
+def series(tenant):
+    out = box.succeed(
+        f"curl -sf -H 'THANOS-TENANT: {tenant}' "
+        "'http://127.0.0.1:10913/api/v1/query?query=up'"
+    )
+    return json.loads(out)["data"]["result"]
+
+
+box.wait_until_succeeds(
+    "curl -sf -H 'THANOS-TENANT: jbbbbbbbbbb' 'http://127.0.0.1:10913/api/v1/query?query=up'"
+    ' | grep -q \'"sender":"b"\'',
+    timeout=180,
+)
+box.wait_until_succeeds(
+    "curl -sf -H 'THANOS-TENANT: jaaaaaaaaaa' 'http://127.0.0.1:10913/api/v1/query?query=up'"
+    ' | grep -q \'"sender":"a"\'',
+    timeout=180,
+)
+for tenant, sender in (("jaaaaaaaaaa", "a"), ("jbbbbbbbbbb", "b")):
+    got = series(tenant)
+    assert got, tenant
+    for r in got:
+        assert r["metric"].get("box") == tenant, (tenant, r)
+        assert r["metric"].get("sender") == sender, (tenant, r)
+# with no box named, nothing at all
+out = box.succeed("curl -sf 'http://127.0.0.1:10913/api/v1/query?query=up'")
+assert json.loads(out)["data"]["result"] == [], out
+
+# the fleet's admin, who sees every release box, does not see a joined box
+# that is not hers: refused like any refusal there, and sent home
+args = f"{sarah} '{site}/joined/jaaaaaaaaaa/api/v1/query?query=up'"
+assert status(args) == "302", status(args)
+assert location(args) == "https://home.test.invalid/", location(args)
