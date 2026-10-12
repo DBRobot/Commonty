@@ -147,4 +147,6 @@ print("\n".join(told))
 if failures:
     print("\n".join(failures))
     sys.exit(1)
-print(f"{bare}: the front page at /, home's sign-in, the status, the docs and the download")
+print(
+    f"{bare}: the front page at /, home's sign-in, the status, the docs and the download"
+)

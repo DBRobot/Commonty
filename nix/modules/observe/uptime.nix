@@ -40,7 +40,10 @@ let
     }
     ++ lib.optional (has "ente") {
       id = "photos";
-      units = [ "ente" ] ++ local [
+      units = [
+        "ente"
+      ]
+      ++ local [
         "postgresql"
         "nginx"
       ];
@@ -48,7 +51,10 @@ let
     }
     ++ lib.optional (has "vaultwarden") {
       id = "passwords";
-      units = [ "vaultwarden" ] ++ local [
+      units = [
+        "vaultwarden"
+      ]
+      ++ local [
         "postgresql"
         "nginx"
       ];
@@ -56,7 +62,10 @@ let
     }
     ++ lib.optional (has "llama-swap") {
       id = "chat";
-      units = [ "llama-swap" ] ++ local [
+      units = [
+        "llama-swap"
+      ]
+      ++ local [
         "llm-proxy"
         "nginx"
       ];
@@ -67,7 +76,10 @@ let
     }
     ++ lib.optional (has "forgejo") {
       id = "git";
-      units = [ "forgejo" ] ++ local [
+      units = [
+        "forgejo"
+      ]
+      ++ local [
         "postgresql"
         "nginx"
       ];
