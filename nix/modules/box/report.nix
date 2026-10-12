@@ -40,6 +40,8 @@ in
       after = [
         "local-fs.target"
         "dd-secrets-key.service"
+        # the links as the box uses them (report/nics.sh)
+        "NetworkManager.service"
       ];
       wants = [ "dd-secrets-key.service" ];
       path = [
@@ -51,6 +53,10 @@ in
         pkgs.jq
         pkgs.gawk
         pkgs.libva-utils
+        # the Wi-Fi bands, and how the links are used (report/nics.sh)
+        pkgs.iw
+        pkgs.gnused
+        config.networking.networkmanager.package
         config.boot.zfs.package
         config.system.build.nixos-generate-config
         pkg.dd-control
@@ -66,7 +72,7 @@ in
         nixos-generate-config --no-filesystems --show-hardware-config > "$w/hardware-configuration.nix"
         SECRETS_KEY=${key} INITRD_MODULES="${lib.concatStringsSep " " config.boot.initrd.availableKernelModules}" \
           LIBVA_DRIVERS_PATH=/run/opengl-driver/lib/dri TPM2TOOLS_TCTI=device:/dev/tpmrm0 \
-          bash ${./report/detect.sh} > "$w/hardware.json"
+          bash ${./report}/detect.sh > "$w/hardware.json"
         dd-control -sign-report "$w" -box ${config.networking.hostName}
         mkdir -p ${out}
         cp "$w"/hardware-configuration.nix "$w"/hardware.json "$w"/report.sig ${out}/

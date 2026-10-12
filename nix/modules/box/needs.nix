@@ -161,6 +161,7 @@
       "dd-wifi-apply"
       "dd-wifi-status"
       "dd-wired-watch"
+      "dd-net-check"
     ];
     everyBox = true;
     base = {

@@ -1314,6 +1314,8 @@
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;
           box-reports = import ./nix/tests/box-reports.nix args;
+          # what a box finds of its network links, and the config made of it
+          net-report = import ./nix/tests/net-report.nix args;
           role-fit = import ./nix/tests/role-fit.nix args;
           # anything deleted is gone from every box and backup within 90 days
           retention = import ./nix/tests/retention.nix args;

@@ -119,17 +119,10 @@ pools=$(jq -c '.[]' <<<"$pools" | while read -r p; do
       redundancy: ([.vdevs[].type] | if all(. == "disk") then "none" else (map(select(. != "disk")) | unique | join(",")) end) }' <<<"$p"
 done | jq -s .)
 
-# --- network links -------------------------------------------------------
-nics=$(for d in $cls/net/*; do
-  [ -e "$d/device" ] || continue
-  i=$(basename "$d"); drv=$(basename "$(readlink -f "$d/device/driver")")
-  wl=false; { [ -e "$d/wireless" ] || [ -e "$d/phy80211" ]; } && wl=true
-  u=false; case "$(readlink -f "$d/device")" in */usb*) u=true ;; esac
-  ini=false; case " ${INITRD_MODULES:-} " in *" $drv "*) ini=true ;; esac
-  jq -nc --arg name "$i" --arg mac "$(tr a-f A-F < "$d/address")" --arg driver "$drv" \
-    --argjson wireless $wl --argjson usb $u --argjson initrd $ini \
-    '{name: $name, mac: $mac, driver: $driver, wireless: $wireless, usb: $usb, initrd: $initrd}'
-done | jq -s .)
+# --- network links: what each adapter is, and how the box uses it -------
+net=$(bash "$(dirname "$0")/nics.sh")
+nics=$(jq -c .nics <<<"$net")
+stack=$(jq -c .stack <<<"$net")
 
 # --- power -----------------------------------------------------------------
 battery=false; ac=false
@@ -151,7 +144,7 @@ jq -n \
   --arg arch "$(uname -m)" --arg vendor "$vendor" --arg model "$model" \
   --argjson threads "$(nproc)" --argjson flags "$flags" \
   --argjson kvm $kvm --argjson nested $nested --argjson mem "$mem" \
-  --argjson gpus "$gpus" --argjson disks "$disks" --argjson pools "$pools" --argjson nics "$nics" \
+  --argjson gpus "$gpus" --argjson disks "$disks" --argjson pools "$pools" --argjson nics "$nics" --argjson stack "$stack" \
   --argjson battery $battery --argjson ac $ac '
 {
   hostId: $hostId, bootDisk: $bootDisk, wired: $wired, wifi: $wifi, gpu: $gpu,
@@ -167,6 +160,6 @@ jq -n \
   memoryBytes: $mem,
   virt: { kvm: $kvm, nested: $nested },
   gpus: $gpus,
-  disks: $disks, pools: $pools, nics: $nics,
+  disks: $disks, pools: $pools, nics: $nics, stack: $stack,
   power: { battery: $battery, mains: $ac }
 }'

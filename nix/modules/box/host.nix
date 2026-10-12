@@ -15,6 +15,10 @@ let
   hw = lib.importJSON (dir + "/hardware.json");
   box = lib.importJSON (dir + "/box.json");
   house = box.house;
+  # every box's own choices, for which share its house
+  others = lib.mapAttrs (n: _: lib.importJSON (../../../fleet/boxes + "/${n}/box.json")) (
+    lib.filterAttrs (_: t: t == "directory") (builtins.readDir ../../../fleet/boxes)
+  );
 in
 {
   imports = [
@@ -24,6 +28,7 @@ in
       inherit (box) encrypted;
     })
     ./home-network.nix
+    ./net-hardware.nix
   ];
 
   config = lib.mkMerge [
@@ -34,6 +39,11 @@ in
       dd.box.memoryBytes = hw.memoryBytes;
       dd.box.disks = map (d: d.id) (hw.disks or [ ]);
       dd.box.gpus = map (g: { inherit (g) render driver encode; }) hw.gpus;
+      # its links, and the house's other boxes (box/net-hardware.nix)
+      dd.box.links.report = hw;
+      dd.box.links.houseBoxes = lib.mapAttrs (n: _: lib.head (lib.splitString "/" others.${n}.house.address)) (
+        lib.filterAttrs (n: _: n != config.networking.hostName && others.${n}.house.ssid or null == house.ssid) others
+      );
     }
     # Any GPU, whoever made it: Mesa's Vulkan drivers (Intel's, AMD's, and
     # NVK for NVIDIA from the GTX 16 series on) come with graphics on. Video
