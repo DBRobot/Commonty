@@ -63,7 +63,8 @@ in
         virtualisation.diskImage = "./empty0.qcow2";
         virtualisation.tpm.enable = true;
         virtualisation.memorySize = 2048;
-        fileSystems."/" = {
+        # never mounted: it boots what is on the disk; the VM module asks
+        virtualisation.fileSystems."/" = {
           device = "tank/enc/system/root";
           fsType = "zfs";
         };
