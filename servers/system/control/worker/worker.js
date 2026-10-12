@@ -160,7 +160,14 @@ export class Relay {
     if (url.pathname === '/leases') {
       try {
         const s = JSON.parse(globalThis.controlState());
-        return Response.json({ time: s.time, leases: s.leases || {} });
+        // and the boxes that joined on their own keys, at the address each
+        // gives in its heartbeat
+        const joined = {};
+        for (const name of Object.keys(s.joined || {})) {
+          const ip = ((s.boxes || {})[name] || {}).facts?.net_ipv4;
+          if (typeof ip === 'number') joined[name] = { ipv4: ip };
+        }
+        return Response.json({ time: s.time, leases: s.leases || {}, joined });
       } catch {
         return new Response('no state yet', { status: 503 });
       }

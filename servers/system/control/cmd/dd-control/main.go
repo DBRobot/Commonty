@@ -14,6 +14,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -240,6 +241,13 @@ func facts() map[string]float64 {
 	}
 	if hottest > 0 {
 		f["temp_c"] = hottest
+	}
+	// its address on the fleet's network, as a number: what a box that
+	// joined on its own key is found at (the DNS Worker's store.<box> name)
+	if b, err := os.ReadFile("/run/commonty-net-address"); err == nil {
+		if ip := net.ParseIP(strings.TrimSpace(string(b))).To4(); ip != nil {
+			f["net_ipv4"] = float64(binary.BigEndian.Uint32(ip))
+		}
 	}
 	// whether builds that boot a VM can run here (a build order's needs)
 	if _, err := os.Stat("/dev/kvm"); err == nil {

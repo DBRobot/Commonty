@@ -463,6 +463,40 @@ check(
     [("A", "100.64.0.2", False)],
 )
 
+
+# a box that joined on its own key: its store's name at the address it
+# gives, if that is on the fleet's network, and none otherwise
+def joined_control(joined):
+    req = urllib.request.Request(
+        "http://127.0.0.1:8899/control",
+        data=json.dumps({"fresh": True, "joined": joined}).encode(),
+        method="POST",
+    )
+    urllib.request.urlopen(req).read()
+
+
+ip = (100 << 24) | (64 << 16) | 9
+joined_control({"j0123456789": {"ipv4": ip}, "j9876543210": {"ipv4": (8 << 24) | 8}})
+converge(8789)
+now = names()
+check(
+    "joined: its store's name at its address on the fleet's network",
+    now.get("*.j0123456789.commonty.test"),
+    [("A", "100.64.0.9", False)],
+)
+check(
+    "joined: an address off the fleet's network gets no name",
+    now.get("*.j9876543210.commonty.test"),
+    None,
+)
+joined_control({})
+converge(8789)
+check(
+    "joined: gone from the agreed state, its name goes",
+    names().get("*.j0123456789.commonty.test"),
+    None,
+)
+
 # box1's own door, as its helper asks: a tunnel with a secret it made, kept
 # in its credentials; asked again with them there, nothing is asked
 d = subprocess.run(["mktemp", "-d"], capture_output=True, text=True).stdout.strip()
