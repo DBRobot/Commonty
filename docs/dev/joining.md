@@ -2,7 +2,9 @@
 
 Status: a box joins **as a stranger** (built) and builds its own system
 from its own report (built). **As a member's box**, set up from the app's
-installer window and a USB drive, is being built (below).
+installer window and a USB drive, is being built (below): the fleet's side
+(the ticket, whose a box is, the pending backup, Your boxes) is built; the
+app's window and the drive's installer are next.
 
 A box the release does not list needs no one to add it. It joins the
 control plane's agreed state on its own word, and joining gives it nothing
@@ -60,30 +62,45 @@ app ("Set up a box" window)        USB drive (FAT partition, commonty/)
 box installer (full screen)        fleet
   BIOS: check, set what it can     gate: PUT /_dd/images/pending/<ticket id>/...
   network: wired, else wifi.json         with the ticket alone, 7 days
-  backup: the old disk, encrypted  control plane: JoinReq{..., Ticket}
-  install: TPM-sealed disk               Joined.Owner = the ticket's member
-  join: with the ticket            app: on join, the pending backup moves
+  backup: the old disk, encrypted  control plane: JoinReq{..., Ticket},
+  install: TPM-sealed disk               carried as Joined.Ticket
+  join: with the ticket            gates: whose each joined box is
+    (/var/lib/dd/join-ticket)      app: on join, the pending backup moves
                                         into the member's images
 ```
 
 - **The join ticket** is a device biscuit the member's device mints
-  (`client/auth` `mint_for`, purpose `join`): `user(<member>)`, `ticket(<16
-  random bytes, hex>)`, and a check on time, 7 days. It is good for one
-  join and the uploads of that one backup. The control plane checks it
-  against the member's signed entry in the directory, and records the
-  ticket as used once a box joins with it.
+  (`auth::device::mint_join_ticket`): `user(<member>)`, `ticket(<16 random
+  bytes, hex>)`, `purpose("join")`, and checks that it is for `join` alone
+  and good for 7 days. Like any purpose-built token it opens nothing else:
+  not the member's files, pages or directory entry.
+- **Whose a box is, is the gates'**, as the directory is. The box's
+  dd-control sends the ticket with its join (`-join-ticket-file`); the
+  validators carry it in `Joined.Ticket` and judge it no more than they
+  judge the directory (they refuse only one too big, or one that came with
+  another box already). Every gate checks it the same way
+  ([`member_boxes.rs`](../../servers/gate/src/member_boxes.rs)): signed by
+  a device in the member's entry, good at the agreed time the box joined,
+  the first box to come with that ticket id, and not one the member has
+  removed. So every box agrees whose it is, and none vouches for it alone.
+  A ticket no gate takes leaves the box a stranger, and a member's box can
+  do no more on the fleet than a stranger's.
 - **The pending backup** is a restic repository of its own, at
   `images-<member>/pending/<ticket id>/`, under a password made for it
   alone: the drive never holds what opens the member's other images. The
   app seals that password to the member's devices, beside the ticket, so
-  any of them can open the backup. The gate takes writes there on the
-  ticket and nowhere else, and drops the repository 7 days on unless a box
-  joined with its ticket.
+  any of them can open the backup. The gate takes the ticket there and
+  nowhere else (GET, HEAD, PROPFIND, PUT, MKCOL; never a delete), counted
+  against the member's allowance, and an hour's check drops the folder 7
+  days after its first write unless a box joined with its ticket. With no
+  read of the agreed state it drops nothing.
 - **On join** the app, on any of the member's devices, copies the pending
   backup into the member's images (`restic copy`) and deletes the pending
   repository.
-- **The box** joins as `Joined{Owner: <member>}`: on the member's Devices
-  tab, where the member can remove it, and the member sees its metrics.
+- **The box** is on the member's Devices tab ("Your boxes",
+  `GET /_dd/boxes/mine`), with when it last said how it is. Removing it
+  puts its ticket id in the member's signed entry (`removed_boxes`), and on
+  every box at once it is nobody's.
 - **The disk** is encrypted with a key sealed to the box's TPM (PCR 7):
   a pulled disk reads as nothing, and the box boots on its own.
 - **BIOS**: the installer checks UEFI, TPM 2.0, Secure Boot (off), AHCI and

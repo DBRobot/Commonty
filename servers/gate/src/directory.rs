@@ -1312,6 +1312,7 @@ mod tests {
                 })
                 .collect(),
             terms: Some(identity::TERMS.into()),
+            removed_boxes: vec![],
             version,
             updated: identity::now(),
         }

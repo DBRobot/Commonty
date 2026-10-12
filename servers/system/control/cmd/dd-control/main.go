@@ -421,6 +421,7 @@ func main() {
 	joinRecipient := flag.String("join-recipient", "", "with -join-key: its secrets key's age recipient, what copies' keys are sealed to")
 	joinRecipientFile := flag.String("join-recipient-file", "", "with -join-key: a file holding -join-recipient")
 	joinHouse := flag.String("join-house", "", "with -join-key: its house, as it found it (dd-locate)")
+	joinTicket := flag.String("join-ticket-file", "", "with -join-key: a file with the member's join ticket the box was set up with (a base64 biscuit); absent or empty, it joins as a stranger")
 	placedCopies := flag.String("placed-copies", "", "where to write the plan's copies, which boxes' stores keep each bucket (nix/modules/storage/store.nix); empty: nowhere")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
@@ -510,6 +511,11 @@ func main() {
 		}
 		me = state.Box{ID: id, House: *joinHouse, Key: spki}
 		joining = &state.JoinReq{Key: spki, Recipient: *joinRecipient, House: *joinHouse}
+		if *joinTicket != "" {
+			if t, err := os.ReadFile(*joinTicket); err == nil {
+				joining.Ticket = strings.TrimSpace(string(t))
+			}
+		}
 	}
 	var mine *state.Validator
 	for i := range cfg.Validators {

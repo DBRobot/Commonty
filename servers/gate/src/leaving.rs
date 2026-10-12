@@ -997,6 +997,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         };

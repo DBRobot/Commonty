@@ -75,7 +75,7 @@ in
           "-builds /run/dd-control/built.sock"
           # a box the release does not list joins on its own key: the one
           # its TPM holds, and its secrets key's recipient (dd-join-prepare)
-          (lib.optionalString config.dd.box.joined "-join-key /var/lib/dd/box-key.spki -join-recipient-file /var/lib/dd/secrets-recipient -join-house joined)
+          (lib.optionalString config.dd.box.joined "-join-key /var/lib/dd/box-key.spki -join-recipient-file /var/lib/dd/secrets-recipient -join-house joined -join-ticket-file /var/lib/dd/join-ticket")
         ];
         StateDirectory = "dd-control";
         StateDirectoryMode = "0700";

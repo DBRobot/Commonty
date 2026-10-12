@@ -37,6 +37,21 @@ fn trash_place(lib: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
 }
 /// a library's id, or `images-<name>`: the bucket's top level, and nothing
 /// that could reach past one person's folder
+/// an S3 LastModified (2026-10-12T03:51:55.000Z) as unix seconds
+fn unix_of(t: &str) -> Option<u64> {
+    let n = |a: usize, b: usize| t.get(a..b)?.parse::<i64>().ok();
+    let (y, mo, d) = (n(0, 4)?, n(5, 7)?, n(8, 10)?);
+    let (h, mi, s) = (n(11, 13)?, n(14, 16)?, n(17, 19)?);
+    // days from the civil date (Howard Hinnant's algorithm)
+    let y = if mo <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if mo > 2 { mo - 3 } else { mo + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    u64::try_from(days * 86400 + h * 3600 + mi * 60 + s).ok()
+}
+
 fn top_prefix(id: &str) -> bool {
     let images = id.strip_prefix("images-").is_some_and(|n| {
         !n.is_empty()
@@ -139,6 +154,54 @@ impl Gate {
                     n += 1;
                 }
             }
+        }
+        Ok(n)
+    }
+
+    /// Every member's pending backups (images-<name>/pending/<ticket>/, a
+    /// box's old disk waiting for the box to join, docs/dev/joining.md):
+    /// each ticket's folder and when it was first written, unix seconds.
+    pub async fn pending(&self) -> Result<std::collections::BTreeMap<String, (String, u64)>> {
+        let mut out = std::collections::BTreeMap::new();
+        let (_, tops) = self.list_level("").await?;
+        for top in tops {
+            let id = top.trim_end_matches('/');
+            if !id.starts_with("images-") || !top_prefix(id) {
+                continue;
+            }
+            let (_, tickets) = self.list_level(&format!("{id}/pending/")).await?;
+            for t in tickets {
+                let Some(ticket) = t.trim_end_matches('/').rsplit('/').next() else {
+                    continue;
+                };
+                if ticket.len() != 32 || !ticket.bytes().all(|c| c.is_ascii_hexdigit()) {
+                    continue;
+                }
+                let first = self
+                    .list_all(&t)
+                    .await?
+                    .iter()
+                    .filter_map(|e| unix_of(&e.modified))
+                    .min();
+                if let Some(first) = first {
+                    out.insert(ticket.to_string(), (t.clone(), first));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// One pending backup gone for good, not to the trash: its box never
+    /// joined, and it was never the member's images.
+    pub async fn drop_pending(&self, folder: &str) -> Result<usize> {
+        anyhow::ensure!(
+            folder.starts_with("images-") && folder.contains("/pending/") && folder.ends_with('/'),
+            "not a pending backup: {folder}"
+        );
+        let mut n = 0;
+        for e in self.list_all(folder).await? {
+            self.delete(&e.key).await?;
+            n += 1;
         }
         Ok(n)
     }
@@ -1071,6 +1134,14 @@ fn percent_decode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_listing_time_is_its_unix_second() {
+        assert_eq!(unix_of("1970-01-01T00:00:00.000Z"), Some(0));
+        assert_eq!(unix_of("2023-11-14T22:13:20.000Z"), Some(1_700_000_000));
+        assert_eq!(unix_of("2024-02-29T12:00:00Z"), Some(1_709_208_000));
+        assert_eq!(unix_of("garbage"), None);
+    }
 
     /// A bucket in a thread, enough S3 for the trash: HEAD, a listing,
     /// DELETE. A listing waits a little, so two deletes at once would both

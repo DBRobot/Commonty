@@ -448,6 +448,9 @@ open(f"{T}/stranger.spki", "w").write(spki + "\n")
 digest = hashlib.sha256(der).digest()
 sname = "j" + digest[:5].hex()
 sid = (1 << 40) | int.from_bytes(digest[:5], "big")
+# it came with a join ticket, which the validators carry and the gates judge
+# (member_boxes.rs): one no gate takes leaves it a stranger
+open(f"{T}/ticket", "w").write("EnoKZm9yLXRoZS1nYXRlcw==\n")
 stranger = subprocess.Popen(
     [
         f"{T}/dd-control",
@@ -461,6 +464,8 @@ stranger = subprocess.Popen(
         "age1stranger",
         "-join-house",
         "hx",
+        "-join-ticket-file",
+        f"{T}/ticket",
         "-relay",
         "ws://127.0.0.1:8789/relay",
         "-state",
@@ -487,6 +492,10 @@ j = state(live[0]).get("joined", {}).get(sname, {})
 ok(
     j.get("key") == spki and j.get("id") == sid,
     f"a stranger joined as {sname}, on its key",
+)
+ok(
+    j.get("ticket") == "EnoKZm9yLXRoZS1nYXRlcw==",
+    "the ticket it came with is carried for the gates",
 )
 seen = lambda: state(live[0]).get("boxes", {}).get(sname, {}).get("lastSeen", 0)
 first = seen()
