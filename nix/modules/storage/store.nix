@@ -171,6 +171,13 @@ let
       url() {
         case "$1" in
         ${lib.concatStrings (lib.mapAttrsToList (p: v: "  ${p}) echo ${v.url} ;;\n") cfg.peers)}
+        j[0-9a-f]*)
+          # a box that joined on its own key (state/join.go), as the agreed
+          # state has it: its store is at its name
+          curl -fsS --max-time 10 ${cfg.control}/state \
+            | jq -e --arg n "$1" '.joined[$n] // empty' >/dev/null \
+            && echo "https://store.$1.${base}"
+          ;;
         *) return 1 ;;
         esac
       }
@@ -334,6 +341,11 @@ in
       );
       default = { };
       description = "buckets copied hourly from the old shared storage pool (dd.box.s3) into this store, until failover reads them here: copied, never deleted from either";
+    };
+    control = lib.mkOption {
+      type = lib.types.str;
+      default = "http://127.0.0.1:4195";
+      description = "this box's dd-control, whose agreed state lists the boxes that joined on their own keys";
     };
     dataset = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
@@ -537,6 +549,73 @@ in
       timerConfig = {
         OnActiveSec = "10min";
         OnUnitActiveSec = "1h";
+      };
+    };
+
+    # a key here for each box that joined on its own key, as for the
+    # release's (dd-store-setup): written into the buckets copied, sealed
+    # to the recipient it joined with; gone when it is gone from the
+    # agreed state (only its key: what it copied here stays)
+    systemd.services.dd-store-joined = {
+      description = "Keys to this store for the boxes that joined on their own keys";
+      after = [ "dd-store-setup.service" ];
+      restartIfChanged = false;
+      path = [
+        pkgs.coreutils
+        pkgs.gnugrep
+        pkgs.gawk
+        pkgs.age
+        pkgs.curl
+        pkgs.jq
+      ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        set -uo pipefail
+        g() { ${garage} "$@"; }
+        g status >/dev/null 2>&1 || exit 0
+        st=$(curl -fsS --max-time 10 ${cfg.control}/state) || { echo "no agreed state yet"; exit 0; }
+        umask 077
+        key() {
+          g key info "$1" >/dev/null 2>&1 || g key create "$1" >/dev/null
+          g key info "$1" --show-secret | awk '
+            /Key ID:/ { print "AWS_ACCESS_KEY_ID=" $NF }
+            /Secret key:/ { print "AWS_SECRET_ACCESS_KEY=" $NF }'
+        }
+        now=$(printf '%s' "$st" | jq -r '.joined // {} | keys[]')
+        for p in $now; do
+          case "$p" in j[0-9a-f]*) ;; *) continue ;; esac
+          [ -s ${sealed}/$p.age ] && continue
+          recipient=$(printf '%s' "$st" | jq -r --arg p "$p" '.joined[$p].recipient')
+          key peer-$p > ${state}/from/$p.env
+          id=$(awk -F= '/ACCESS_KEY_ID/ { print $2 }' ${state}/from/$p.env)
+          for b in ${lib.concatStringsSep " " copied}; do
+            g bucket allow --read --write "$b" --key "$id" >/dev/null
+          done
+          if age -r "$recipient" -o ${sealed}/$p.age.new ${state}/from/$p.env; then
+            chmod 0444 ${sealed}/$p.age.new
+            mv ${sealed}/$p.age.new ${sealed}/$p.age
+            echo "$p joined: its key here, sealed to it"
+          else
+            echo "$p: its recipient is not one age takes"
+          fi
+        done
+        # a joined box gone from the agreed state: its key goes
+        for f in ${state}/from/j*.env; do
+          [ -e "$f" ] || continue
+          p=$(basename "$f" .env)
+          printf '%s\n' $now | grep -qx "$p" && continue
+          g key delete --yes peer-$p >/dev/null 2>&1 || true
+          rm -f "$f" ${sealed}/$p.age
+          echo "$p is gone: its key here is too"
+        done
+        exit 0
+      '';
+    };
+    systemd.timers.dd-store-joined = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "2min";
+        OnUnitActiveSec = "5min";
       };
     };
 
