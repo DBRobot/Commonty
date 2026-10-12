@@ -1764,17 +1764,28 @@ async fn main() -> Result<()> {
                             signers.display()
                         );
                     }
-                    let gone: Vec<&String> = had.difference(&now).collect();
-                    if !gone.is_empty() {
+                    // one the list no longer names (removed, revoked) goes;
+                    // one it still names that will not resolve is a
+                    // directory withholding, and the file stays as it was
+                    let (stuck, dropped): (Vec<&String>, Vec<&String>) =
+                        had.difference(&now).partition(|p| {
+                            p.strip_suffix("@dd").is_some_and(|n| {
+                                identity::listed_as(n, &list.members, &list.names).is_some()
+                            })
+                        });
+                    if !stuck.is_empty() {
                         anyhow::bail!(
-                            "{} no longer anchor{}; {} left as it was (delete it to write it afresh)",
-                            gone.iter()
+                            "{} still listed, and no entry anchors; {} left as it was",
+                            stuck
+                                .iter()
                                 .map(|s| s.as_str())
                                 .collect::<Vec<_>>()
                                 .join(", "),
-                            if gone.len() == 1 { "s" } else { "" },
                             signers.display()
                         );
+                    }
+                    for p in dropped {
+                        println!("{p}: no longer on the member list, no longer a signer");
                     }
                     let body: String = lines.iter().map(|l| format!("{l}\n")).collect();
                     std::fs::write(&signers, body)?;

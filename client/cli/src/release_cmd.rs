@@ -418,17 +418,22 @@ fn publish(
     // the member list, signed for clients: they hold other members' entries
     // to it, and the counter keeps an old one from coming back. A removal
     // only holds against a client built to refuse every list before it
-    let before = ureq_get(&url.replace("current.json", "members.json"))
+    let published = url.replace("current.json", "members.json");
+    let before = ureq_get(&published)
         .ok()
         .and_then(|raw| serde_json::from_str::<identity::SignedMemberList>(&raw).ok())
         .filter(|s| trusted_key(&root).is_ok_and(|k| identity::verify_member_list(s, &k).is_ok()))
-        .map(|s| s.list.revoked)
-        .unwrap_or_default();
+        .map(|s| s.list);
+    if before.is_none() {
+        eprintln!(
+            "== {published} could not be read, or is not signed by the release key: none was published yet, or the forge is not answering. What this release drops cannot be told, so it is taken to drop someone"
+        );
+    }
     let floor = floor_in(&git(
         &root,
         &["show", &format!("{rev}:client/identity/src/fleet.rs")],
     )?)?;
-    floor_holds(&listed.revoked, &before, floor, counter)?;
+    floor_holds(&listed, before.as_ref(), floor, counter)?;
     let members = serde_json::to_string_pretty(&identity::sign_member_list(
         identity::MemberList {
             counter,
@@ -1791,23 +1796,35 @@ fn floor_in(fleet_rs: &str) -> Result<u64> {
 }
 
 /// The floor clients are built with, for the list this release signs: never
-/// past it (they would take no list), and at it when this release shuts
-/// someone out that the last did not, so no client built from here takes a
-/// list from before.
-fn floor_holds(revoked: &[String], before: &[String], floor: u64, counter: u64) -> Result<()> {
+/// past it (they would take no list), and at it when this release drops a
+/// root the last list let in (a removal, or a root a recovery superseded,
+/// which a thief may hold) or revokes one it did not, so no client built
+/// from here takes a list from before. With no last list to compare
+/// (`before` None: unread or unsigned), every release is taken to drop one.
+fn floor_holds(
+    listed: &crate::member::Members,
+    before: Option<&identity::MemberList>,
+    floor: u64,
+    counter: u64,
+) -> Result<()> {
     ensure!(
         floor <= counter,
         "MEMBER_LIST_FLOOR is {floor}, past this release's {counter}: no client would take a list"
     );
-    let newly: Vec<&String> = revoked.iter().filter(|r| !before.contains(r)).collect();
-    if !newly.is_empty() && floor < counter {
+    let dropped: Vec<&str> = match before {
+        Some(b) => b
+            .members
+            .iter()
+            .filter(|id| !listed.members.contains(id))
+            .chain(listed.revoked.iter().filter(|id| !b.revoked.contains(id)))
+            .map(|s| s.as_str())
+            .collect(),
+        None => vec!["(no last list to compare)"],
+    };
+    if !dropped.is_empty() && floor < counter {
         bail!(
-            "this release revokes {}: set MEMBER_LIST_FLOOR to {counter} in client/identity/src/fleet.rs, commit, push and publish again, so no client built from it takes an older list",
-            newly
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+            "this release drops or revokes {}: set MEMBER_LIST_FLOOR to {counter} in client/identity/src/fleet.rs, commit, push and publish again, so no client built from it takes an older list",
+            dropped.join(", ")
         );
     }
     Ok(())
@@ -2388,12 +2405,31 @@ mod tests {
             1204
         );
         let r = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        // nothing newly revoked: any floor up to the release
-        floor_holds(&r(&["x"]), &r(&["x"]), 0, 9).unwrap();
+        let now = |members: &[&str], revoked: &[&str]| crate::member::Members {
+            members: r(members),
+            revoked: r(revoked),
+            ..Default::default()
+        };
+        let was = |members: &[&str], revoked: &[&str]| identity::MemberList {
+            members: r(members),
+            revoked: r(revoked),
+            ..Default::default()
+        };
+        // nothing dropped: any floor up to the release
+        floor_holds(&now(&["a", "b"], &["x"]), Some(&was(&["a"], &["x"])), 0, 9).unwrap();
         // a removal wants the floor at this release, and no further
-        assert!(floor_holds(&r(&["x", "y"]), &r(&["x"]), 8, 9).is_err());
-        floor_holds(&r(&["x", "y"]), &r(&["x"]), 9, 9).unwrap();
-        assert!(floor_holds(&r(&[]), &r(&[]), 10, 9).is_err());
+        let removed = now(&["a"], &["x", "y"]);
+        assert!(floor_holds(&removed, Some(&was(&["a"], &["x"])), 8, 9).is_err());
+        floor_holds(&removed, Some(&was(&["a"], &["x"])), 9, 9).unwrap();
+        // so does a root a recovery superseded, off the list, not revoked
+        let recovered = now(&["a2"], &[]);
+        let e = floor_holds(&recovered, Some(&was(&["a"], &[])), 8, 9).unwrap_err();
+        assert!(e.to_string().contains("drops or revokes a"), "{e}");
+        floor_holds(&recovered, Some(&was(&["a"], &[])), 9, 9).unwrap();
+        // and no last list to compare: taken as a drop
+        assert!(floor_holds(&now(&["a"], &[]), None, 8, 9).is_err());
+        floor_holds(&now(&["a"], &[]), None, 9, 9).unwrap();
+        assert!(floor_holds(&now(&[], &[]), None, 10, 9).is_err());
     }
 
     // the lock a ship script holds is an fd it opened without close-on-exec;

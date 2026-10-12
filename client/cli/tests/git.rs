@@ -139,10 +139,16 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         .unwrap()
         .trim()
         .to_string();
+    // and carol, whose entry no directory will serve
+    let carol = identity::member_id("carol's root");
     let list = identity::MemberList {
         counter: 1,
-        members: vec![id.clone()],
-        names: [(id.clone(), identity::name_tag(&id, "sarah"))].into(),
+        members: vec![id.clone(), carol.clone()],
+        names: [
+            (id.clone(), identity::name_tag(&id, "sarah")),
+            (carol.clone(), identity::name_tag(&carol, "carol")),
+        ]
+        .into(),
         ..Default::default()
     };
     *listed.lock().unwrap() =
@@ -184,28 +190,33 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         !signers.contains("mallory"),
         "a box's entry is no signer: {signers}"
     );
-    // someone the file trusted, who no longer anchors: the file stays as
-    // it was rather than quietly losing them
-    let sarah_key = signers
-        .split(' ')
-        .skip(1)
-        .take(2)
-        .collect::<Vec<_>>()
-        .join(" ");
-    let had = format!("{signers}bob@dd {sarah_key}\n");
-    std::fs::write(home.join(".config/dd/allowed_signers"), &had).unwrap();
-    let (fine, out) = run(
-        &home,
-        &keyring,
-        &home,
-        dd,
-        &["git", "signers", "--directory", &directory],
+    let file = home.join(".config/dd/allowed_signers");
+    let sarah_key = signers.trim_end().split_once(' ').unwrap().1.to_string();
+    let signers_now = || {
+        run(
+            &home,
+            &keyring,
+            &home,
+            dd,
+            &["git", "signers", "--directory", &directory],
+        )
+    };
+    // someone the file trusted whom the list no longer names (removed):
+    // they go
+    std::fs::write(&file, format!("{signers}bob@dd {sarah_key}\n")).unwrap();
+    let (fine, out) = signers_now();
+    assert!(
+        fine && out.contains("bob@dd: no longer on the member list"),
+        "{out}"
     );
-    assert!(!fine && out.contains("bob@dd no longer anchors"), "{out}");
-    assert_eq!(
-        std::fs::read_to_string(home.join(".config/dd/allowed_signers")).unwrap(),
-        had
-    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), signers);
+    // someone the list still names, whose entry will not anchor: the file
+    // stays as it was rather than quietly losing them
+    let had = format!("{signers}carol@dd {sarah_key}\n");
+    std::fs::write(&file, &had).unwrap();
+    let (fine, out) = signers_now();
+    assert!(!fine && out.contains("carol@dd still listed"), "{out}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), had);
 
     // a commit made with the configured key verifies and names the person
     let repo = scratch("repo");

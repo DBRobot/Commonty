@@ -140,9 +140,11 @@ And on disk:
 ~/.config/dd/device_ed25519(.pub)   dd git setup: the device key as an OpenSSH
                                     key, 0600, for git's ssh signing
 ~/.config/dd/allowed_signers         dd git signers: every device in every entry
-                                     the signed member list anchors; refused,
-                                     the file kept, when nobody anchors or
-                                     someone it had no longer does
+                                     the signed member list anchors; one the
+                                     list no longer names is dropped, and it
+                                     is refused, the file kept, when nobody
+                                     anchors or one the list still names
+                                     will not
 <repo>/.git/dd/<sha256(url)[..16]>/  git-remote-dd: its clone of the backing
                                      repository, and local.json (the last
                                      counter and commit it verified)
@@ -225,9 +227,11 @@ and never again, so nothing in it says it is still the newest.
 `account::released` refuses one older than the newest this device saw
 (keyring account `members-seen`) or than `identity::fleet::MEMBER_LIST_FLOOR`,
 which the build carries. `dd release publish` refuses a release that
-revokes an id the last published list did not, until the floor in the
-commit is that release's counter (it says which), and any floor past the
-counter. So a client built after a removal takes no list from before it;
+drops an id the last published list had (a removal, or a root a recovery
+superseded) or revokes one it did not, until the floor in the commit is
+that release's counter (it says which), and any floor past the counter.
+When the last list cannot be read or does not verify, it says so and
+takes the release to drop one. So a client built after a removal takes no list from before it;
 one built earlier, on its first look, still could.
 
 **Names: one current root each.** `names` maps each id to

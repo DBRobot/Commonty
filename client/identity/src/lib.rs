@@ -337,34 +337,29 @@ pub fn anchored(
 /// has to match: it vouches for nobody to anyone else.
 pub fn follows(signed: &SignedEntry, handovers: &[Handover], from: &str) -> Result<()> {
     verify(signed)?;
-    fn back(cur: &Entry, handovers: &[Handover], from: &str) -> bool {
-        if member_id(&cur.root) == from {
-            return true;
-        }
-        // every handover that could be this step, not the first: a box may
-        // serve a bad one beside the good
-        handovers
-            .iter()
-            .filter(|h| {
-                h.after.entry.name == cur.name
-                    && h.after.entry.root == cur.root
-                    && h.after.entry.recovered_from == cur.recovered_from
-                    && !cur.recovered_from.is_empty()
-            })
-            .any(|h| {
-                verify(&h.before).is_ok()
-                    && accept(Some(&h.before), &h.after).is_ok()
-                    && back(&h.before.entry, handovers, from)
-            })
-    }
-    back(&signed.entry, handovers, from)
-        .then_some(())
-        .ok_or_else(|| {
-            Error::Rejected(format!(
+    let mut cur = &signed.entry;
+    // each step is a recovery: a new root, and `accept` holds the one
+    // before to exactly the earlier roots less the last, so the walk ends
+    // within as many steps as there are earlier roots, and any proof that
+    // passes lands where any other would
+    while member_id(&cur.root) != from {
+        let step = handovers.iter().find(|h| {
+            h.after.entry.name == cur.name
+                && h.after.entry.root == cur.root
+                && h.after.entry.recovered_from == cur.recovered_from
+                && h.before.entry.root != h.after.entry.root
+                && verify(&h.before).is_ok()
+                && accept(Some(&h.before), &h.after).is_ok()
+        });
+        let Some(h) = step else {
+            return Err(Error::Rejected(format!(
                 "no directory showed how {} came from the root this person knows",
                 signed.entry.name
-            ))
-        })
+            )));
+        };
+        cur = &h.before.entry;
+    }
+    Ok(())
 }
 
 /// What the member list says a root's name is: a hash of the id and the
@@ -1782,6 +1777,25 @@ mod tests {
             },
         );
         follows(&s3, &decoy, &id0).unwrap();
+        // two real versions under one root are no recovery: refused, and
+        // nothing goes round in circles over them
+        let mut e3b = e2.clone();
+        e3b.version = 5;
+        let s3b = sign(e3b, &r2).unwrap();
+        let same = [
+            Handover {
+                before: s3.clone(),
+                after: s3b.clone(),
+            },
+            Handover {
+                before: s3b.clone(),
+                after: s3.clone(),
+            },
+        ];
+        assert!(follows(&s3b, &same, &id0).is_err());
+        let mut looping = same.to_vec();
+        looping.extend(chain.iter().cloned());
+        follows(&s3b, &looping, &id0).unwrap();
         // nor can a recovery change the name it is under
         let mut renamed = e1.clone();
         renamed.name = "tom".into();
