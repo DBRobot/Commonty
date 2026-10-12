@@ -165,6 +165,7 @@
       "NetworkManager-ensure-profiles"
       "dd-wifi-apply"
       "dd-wifi-status"
+      "dd-wifi-unseal"
     ];
     everyBox = true;
     base = {

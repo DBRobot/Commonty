@@ -10,7 +10,9 @@
 # Environment: RELEASE_URL, RELEASE_KEY (a file), SOURCE (the repository,
 # git+https://...), DETECT (detect.sh),
 # NOT_BEFORE (seconds: the oldest release it takes, when it was made),
-# DISK (to name the disk when there is more than one; it is wiped).
+# DISK (to name the disk when there is more than one; it is wiped),
+# WIFI ({ssid, psk}, a file) and TICKET (the member's join ticket, a file),
+# both from the drive's commonty/ (docs/dev/joining.md).
 set -euo pipefail
 say() { echo "== $*"; }
 no() { echo "not installing: $*" >&2; exit 1; }
@@ -48,8 +50,38 @@ say "the fleet's release is commit $rev"
 
 w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
-# its layout, unencrypted: what a box that joined on its own key keeps is
-# ciphertext already
+
+# its keys, in its TPM, made before anything is wiped: the one it joins
+# with, usable only under this boot's PCR 7, and the half its disk key comes
+# from, sealed under the same
+export TPM2TOOLS_TCTI=device:/dev/tpmrm0
+mkdir -p "$w/unlock"
+tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
+tpm2_startauthsession -Q -S "$w/s.ctx"
+tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"
+tpm2_flushcontext "$w/s.ctx"
+tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -L "$w/pcr.pol" \
+  -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda' \
+  -u "$w/unlock/sig.pub" -r "$w/unlock/sig.priv"
+( umask 077; head -c 32 /dev/urandom > "$w/half" )
+tpm2_create -Q -C "$w/srk.ctx" -L "$w/pcr.pol" -a 'fixedtpm|fixedparent|noda' \
+  -i "$w/half" -u "$w/unlock/half.pub" -r "$w/unlock/half.priv"
+tpm2_load -Q -C "$w/srk.ctx" -u "$w/unlock/sig.pub" -r "$w/unlock/sig.priv" -c "$w/sig.ctx"
+tpm2_readpublic -Q -c "$w/sig.ctx" -f der -o "$w/spki.der"
+tpm2_flushcontext -t >/dev/null 2>&1 || true
+# its name, from its key alone (state.JoinName): j and the first five
+# bytes of the key's sha256
+name=j$(sha256sum < "$w/spki.der" | cut -c1-10)
+say "this box joins the fleet as $name"
+
+# the disk's key, as its initrd makes it at every boot from the half alone
+# (disk-unlock-boot.sh, TPM_ONLY): a pulled disk opens nothing
+mkdir -p /run/dd
+( umask 077
+  openssl kdf -keylen 32 -kdfopt digest:SHA256 -kdfopt "hexkey:$(od -An -v -tx1 < "$w/half" | tr -d ' \n')" \
+    -kdfopt salt:dd-tpm-only -kdfopt info:dd-disk-v1 -binary HKDF > /run/dd/disk.key )
+shred -u "$w/half"
+
 # the layout's script is made, with nothing to evaluate here, for the one
 # name dd-target: that name is the disk chosen. Its partitions are found by
 # label, so another disk carrying the same labels (an old box's) is refused
@@ -60,27 +92,12 @@ for d in "${disks[@]}"; do
 done
 ln -sfn "$disk" /dev/dd-target
 /etc/dd/wipe --yes-wipe-all-disks
+shred -u /run/dd/disk.key
 
-# its keys, in its TPM: the one it joins with, usable only under its
-# signed boot (PCR 7), and its secrets key
 mkdir -p /mnt/boot/dd/unlock /mnt/var/lib/dd
-export TPM2TOOLS_TCTI=device:/dev/tpmrm0
-tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
-tpm2_startauthsession -Q -S "$w/s.ctx"
-tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"
-tpm2_flushcontext "$w/s.ctx"
-tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -L "$w/pcr.pol" \
-  -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda' \
-  -u /mnt/boot/dd/unlock/sig.pub -r /mnt/boot/dd/unlock/sig.priv
-tpm2_load -Q -C "$w/srk.ctx" -u /mnt/boot/dd/unlock/sig.pub -r /mnt/boot/dd/unlock/sig.priv -c "$w/sig.ctx"
-tpm2_readpublic -Q -c "$w/sig.ctx" -f der -o "$w/spki.der"
-tpm2_flushcontext -t >/dev/null 2>&1 || true
+cp "$w/unlock/"* /mnt/boot/dd/unlock/
 ( umask 077; age-plugin-tpm --generate -o /mnt/var/lib/dd/secrets-key.txt )
-# its name, from its key alone (state.JoinName): j and the first five
-# bytes of the key's sha256
-name=j$(sha256sum < "$w/spki.der" | cut -c1-10)
 base64 -w0 < "$w/spki.der" > /mnt/var/lib/dd/box-key.spki
-say "this box joins the fleet as $name"
 
 # its report, for the disk it is on
 mkdir -p /mnt/var/lib/dd/box
@@ -89,8 +106,20 @@ BOOT=/mnt/boot SECRETS_KEY=/mnt/var/lib/dd/secrets-key.txt bash -x "$DETECT" > "
   || { tail -20 "$w/detect.log" >&2; no "the hardware report failed"; }
 jq --arg d "$byid" '.bootDisk = $d' "$w/hw.json" > /mnt/var/lib/dd/box/hardware.json
 jq -er .secretsKey /mnt/var/lib/dd/box/hardware.json > /mnt/var/lib/dd/secrets-recipient
-jq -n '{owner: null, house: {ssid: "", address: ""}, encrypted: false, extraPools: [], datasets: {}}' \
-  > /mnt/var/lib/dd/box/box.json
+# the Wi-Fi it was set up on, if any: its password sealed to this box's
+# secrets key, which only its TPM opens (host.nix, dd-wifi-unseal)
+ssid=""
+if [ -n "${WIFI:-}" ] && [ -s "$WIFI" ]; then
+  ssid=$(jq -r '.ssid // ""' "$WIFI")
+  jq -r '"psk=" + .psk' "$WIFI" \
+    | age -r "$(cat /mnt/var/lib/dd/secrets-recipient)" -o /mnt/var/lib/dd/wifi.age
+fi
+# the member it is set up for: its join ticket, used once on first boot
+if [ -n "${TICKET:-}" ] && [ -s "$TICKET" ]; then
+  install -m 0400 "$TICKET" /mnt/var/lib/dd/join-ticket
+fi
+jq -n --arg ssid "$ssid" '{owner: null, house: {ssid: $ssid, address: "", sealedWifi: ($ssid != "")},
+  encrypted: true, unlock: "tpm", extraPools: [], datasets: {}}' > /mnt/var/lib/dd/box/box.json
 
 # its system, built here from that commit and its report, onto the disk:
 # the installer's own store is memory. What it already has is taken from it

@@ -13,22 +13,63 @@
 let
   dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
   # what the stand-in commit builds for the box: a small system, already in
-  # the machine's store, so nothing is fetched
+  # the machine's store, so nothing is fetched. It boots as a joined box
+  # does: its pool encrypted, the key from its TPM alone, lanzaboote
   installed =
-    (pkgs.nixos {
-      boot.loader.grub.enable = false;
-      fileSystems."/" = {
-        device = "tank/root";
-        fsType = "zfs";
-      };
-      networking.hostId = "dd000001";
-      system.stateVersion = "26.05";
-    }).config.system.build.toplevel;
+    (pkgs.nixos (
+      { modulesPath, ... }:
+      {
+        imports = [
+          "${modulesPath}/testing/test-instrumentation.nix"
+          "${modulesPath}/profiles/qemu-guest.nix"
+          self.inputs.disko.nixosModules.disko
+          self.inputs.lanzaboote.nixosModules.lanzaboote
+          (import ../../fleet/layout.nix {
+            device = "/dev/vdb";
+            encrypted = true;
+          })
+          ../modules/box/secure-boot.nix
+          ../modules/box/disk-unlock.nix
+        ];
+        _module.args.ddScript = import ../lib/script.nix { inherit lib; };
+        networking.hostName = "joined";
+        networking.hostId = "dd000001";
+        boot.initrd.systemd.enable = true;
+        boot.initrd.availableKernelModules = [ "tpm_tis" ];
+        dd.unlock = {
+          enable = true;
+          tpmOnly = true;
+          url = "http://unused";
+          recovery = "";
+          waits.enrolment = 5;
+        };
+        system.stateVersion = "26.05";
+      }
+    )).config.system.build.toplevel;
 in
 {
   name = "join-install";
   node.specialArgs = { inherit self; };
   nodes = {
+    # the same machine after the install, booting its disk: blank's state
+    # (its TPM, its EFI variables and the disk it installed to)
+    target =
+      { lib, ... }:
+      {
+        system.name = "blank";
+        virtualisation.useBootLoader = true;
+        virtualisation.useEFIBoot = true;
+        virtualisation.useDefaultFilesystems = false;
+        virtualisation.diskImage = "./empty0.qcow2";
+        virtualisation.tpm.enable = true;
+        virtualisation.memorySize = 2048;
+        fileSystems."/" = {
+          device = "tank/enc/system/root";
+          fsType = "zfs";
+        };
+        networking.hostId = "dd000001";
+        boot.supportedFilesystems.zfs = true;
+      };
     forge = {
       services.nginx = {
         enable = true;

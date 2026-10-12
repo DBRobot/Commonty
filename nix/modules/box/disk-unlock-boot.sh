@@ -11,7 +11,8 @@
 #
 # From the unit: BOX, URL, OUT (a directory), and how long to wait:
 # ENROL_WAIT (s, for the boot partition), WAIT_WAITING (s, while a member
-# has not let it in), WAIT_REFUSED (s, while it is marked stolen).
+# has not let it in), WAIT_REFUSED (s, while it is marked stolen), TPM_ONLY
+# (set: a box that joined on its own, whose key is the TPM's half alone).
 set -u
 umask 077
 mkdir -p "$OUT"
@@ -74,6 +75,7 @@ say() { echo "$*" >/dev/console 2>/dev/null || true; echo "$*"; }
 
 wait=2
 share=
+[ -z "$TPM_ONLY" ] || share=tpm-only
 while [ -z "$share" ]; do
   mac=$(router)
   at=$(date +%s)
@@ -111,11 +113,18 @@ tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half"
 tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
 
 # The key: HKDF over both halves, named for this box; the second pool's key
-# from it. Neither half alone says anything about it.
-ikm=$( { cat "$w/half"; printf '%s' "$share" | tr -- '-_' '+/' | sed 's/$/=/' | base64 -d 2>/dev/null; } | od -An -v -tx1 | tr -d ' \n')
+# from it. Neither half alone says anything about it. A box on its TPM
+# alone: over the half, under one name (join-install.sh makes the same)
+salt=$BOX
+if [ -n "$TPM_ONLY" ]; then
+  ikm=$(od -An -v -tx1 <"$w/half" | tr -d ' \n')
+  salt=dd-tpm-only
+else
+  ikm=$( { cat "$w/half"; printf '%s' "$share" | tr -- '-_' '+/' | sed 's/$/=/' | base64 -d 2>/dev/null; } | od -An -v -tx1 | tr -d ' \n')
+fi
 hkdf() {
   openssl kdf -keylen 32 -kdfopt digest:SHA256 -kdfopt "hexkey:$1" \
-    -kdfopt "salt:$BOX" -kdfopt "info:$2" -binary HKDF
+    -kdfopt "salt:$salt" -kdfopt "info:$2" -binary HKDF
 }
 hkdf "$ikm" dd-disk-v1 >"$OUT/disk.key"
 hkdf "$ikm" dd-vault-v1 >"$OUT/vault.key"

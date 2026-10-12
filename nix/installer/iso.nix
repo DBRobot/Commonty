@@ -19,7 +19,11 @@ let
     (pkgs.nixos {
       imports = [
         self.inputs.disko.nixosModules.disko
-        (import ../../fleet/layout.nix { device = "/dev/dd-target"; })
+        # encrypted, under the key the installer makes from the TPM's half
+        (import ../../fleet/layout.nix {
+          device = "/dev/dd-target";
+          encrypted = true;
+        })
       ];
       networking.hostId = "dd000000";
       boot.loader.grub.enable = false;
@@ -31,6 +35,8 @@ let
       self.packages.${sys}.agent
       pkgs.tpm2-tools
       pkgs.age-plugin-tpm
+      pkgs.age
+      pkgs.openssl
       pkgs.jq
       pkgs.util-linux
       pkgs.coreutils

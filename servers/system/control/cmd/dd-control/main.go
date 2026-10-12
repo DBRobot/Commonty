@@ -421,6 +421,9 @@ func main() {
 	joinRecipient := flag.String("join-recipient", "", "with -join-key: its secrets key's age recipient, what copies' keys are sealed to")
 	joinRecipientFile := flag.String("join-recipient-file", "", "with -join-key: a file holding -join-recipient")
 	joinHouse := flag.String("join-house", "", "with -join-key: its house, as it found it (dd-locate)")
+	// STUB until member-join: the ticket is read and checked to exist; the
+	// branch member-join carries it in the JoinReq (docs/dev/joining.md)
+	joinTicket := flag.String("join-ticket", "", "with -join-key: a file with the member's join ticket, from the installer; the box joins as that member's")
 	placedCopies := flag.String("placed-copies", "", "where to write the plan's copies, which boxes' stores keep each bucket (nix/modules/storage/store.nix); empty: nowhere")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
@@ -507,6 +510,11 @@ func main() {
 				log.Fatal(err)
 			}
 			*joinRecipient = strings.TrimSpace(string(b))
+		}
+		if *joinTicket != "" {
+			if _, err := os.Stat(*joinTicket); err != nil {
+				log.Printf("no join ticket at %s: joining as a stranger", *joinTicket)
+			}
 		}
 		me = state.Box{ID: id, House: *joinHouse, Key: spki}
 		joining = &state.JoinReq{Key: spki, Recipient: *joinRecipient, House: *joinHouse}

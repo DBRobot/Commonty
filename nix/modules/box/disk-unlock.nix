@@ -43,6 +43,7 @@ let
       ENROL_WAIT = cfg.waits.enrolment;
       WAIT_WAITING = cfg.waits.waiting;
       WAIT_REFUSED = cfg.waits.refused;
+      TPM_ONLY = if cfg.tpmOnly then "1" else "";
     }
   );
   # the pools are this box's own before anything on them runs (disk-check.sh)
@@ -60,14 +61,17 @@ let
   now = pkgs.writeShellApplication {
     name = "dd-unlock-now";
     runtimeInputs = tools;
-    text = "export TPM2TOOLS_TCTI=device:/dev/tpmrm0\n" + ddScript ./disk-unlock-boot.sh {
-      BOX = box;
-      URL = cfg.url;
-      OUT = "/run/dd";
-      ENROL_WAIT = 1;
-      WAIT_WAITING = cfg.waits.waiting;
-      WAIT_REFUSED = cfg.waits.refused;
-    };
+    text =
+      "export TPM2TOOLS_TCTI=device:/dev/tpmrm0\n"
+      + ddScript ./disk-unlock-boot.sh {
+        BOX = box;
+        URL = cfg.url;
+        OUT = "/run/dd";
+        ENROL_WAIT = 1;
+        WAIT_WAITING = cfg.waits.waiting;
+        WAIT_REFUSED = cfg.waits.refused;
+        TPM_ONLY = if cfg.tpmOnly then "1" else "";
+      };
   };
   enrol = pkgs.writeShellApplication {
     name = "dd-unlock-enrol";
@@ -95,6 +99,14 @@ in
       description = "the owner's paper key, as an ssh-ed25519 public key line: what the disk keys' copies in /boot/dd are encrypted to";
     };
     enable = lib.mkEnableOption "making the disks' key in the initrd at every boot (the box enrolled, its pools encrypted)";
+    # a box that joined on its own (docs/dev/joining.md): no half at the
+    # unlock Worker, which knows nothing of it. The key is the TPM's half
+    # alone, so a pulled disk opens nothing and the box boots by itself
+    tpmOnly = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "the disks' key from the TPM's half alone, with no network at boot";
+    };
     # how long the initrd waits between tries; the test shortens them
     waits = {
       enrolment = lib.mkOption {
@@ -142,9 +154,9 @@ in
         "nls_cp437"
         "nls_iso8859-1"
       ];
-      boot.initrd.network.enable = true;
-      boot.initrd.network.flushBeforeStage2 = true;
-      boot.initrd.systemd.network.networks."10-house" = {
+      boot.initrd.network.enable = !cfg.tpmOnly;
+      boot.initrd.network.flushBeforeStage2 = !cfg.tpmOnly;
+      boot.initrd.systemd.network.networks."10-house" = lib.mkIf (!cfg.tpmOnly) {
         matchConfig.MACAddress = lib.toLower home.wired;
         address = [ home.address ];
         gateway = [ home.gateway ];
@@ -171,10 +183,12 @@ in
         before = map (p: "zfs-import-${p}.service") cfg.pools ++ [ "initrd.target" ];
         after = [
           "tpm2.target"
+        ]
+        ++ lib.optionals (!cfg.tpmOnly) [
           "systemd-networkd.service"
           "systemd-resolved.service"
         ];
-        wants = [ "systemd-networkd.service" ];
+        wants = lib.optional (!cfg.tpmOnly) "systemd-networkd.service";
         unitConfig.DefaultDependencies = false;
         serviceConfig = {
           Type = "oneshot";

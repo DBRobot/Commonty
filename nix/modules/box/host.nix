@@ -15,6 +15,8 @@ let
   hw = lib.importJSON (dir + "/hardware.json");
   box = lib.importJSON (dir + "/box.json");
   house = box.house;
+  # its Wi-Fi password, sealed to it by the installer (join-install.sh)
+  sealedWifi = house.sealedWifi or false;
   # the other boxes with a store of their own (box.json store), and what
   # their secrets keys are: what is sealed to them
   fleet = builtins.attrNames (lib.importJSON ../../../fleet/boxes.json);
@@ -74,17 +76,48 @@ in
       # the disks' key made in the initrd at every boot, from this box's TPM
       # and the unlock Worker (modules/box/disk-unlock.nix)
       dd.unlock.enable = box.encrypted;
+      # one that joined on its own: from its TPM alone (docs/dev/joining.md)
+      dd.unlock.tpmOnly = (box.unlock or "worker") == "tpm";
 
-      # Wi-Fi where this box's secrets hold the house's password; wired
-      # alone where they don't (a box that joined has none)
+      # Wi-Fi where this box's secrets hold the house's password, or where
+      # its installer sealed it to the box (a box that joined: below); wired
+      # alone where neither
       dd.home = {
         inherit (house) ssid address;
         pskFile =
-          if config.dd.hasSecret "wifi-psk" then config.sops.templates."wifi.env".path else "/dev/null";
+          if config.dd.hasSecret "wifi-psk" then
+            config.sops.templates."wifi.env".path
+          else if sealedWifi then
+            "/run/dd-wifi-key/wifi.env"
+          else
+            "/dev/null";
         inherit (hw) wired;
-        wifi = if config.dd.hasSecret "wifi-psk" then hw.wifi else null;
+        wifi = if config.dd.hasSecret "wifi-psk" || sealedWifi then hw.wifi else null;
       };
       sops.secrets.wifi-psk = lib.mkIf (config.dd.hasSecret "wifi-psk") { };
+      # the installer's: the password sealed to this box's secrets key, which
+      # only its TPM opens; opened into memory before NetworkManager reads it
+      systemd.services.dd-wifi-unseal = lib.mkIf sealedWifi {
+        description = "Open the Wi-Fi password the installer sealed to this box";
+        wantedBy = [ "multi-user.target" ];
+        before = [ "NetworkManager-ensure-profiles.service" ];
+        requiredBy = [ "NetworkManager-ensure-profiles.service" ];
+        unitConfig.ConditionPathExists = "/var/lib/dd/wifi.age";
+        path = [
+          pkgs.age
+          pkgs.age-plugin-tpm
+        ];
+        environment.TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          RuntimeDirectory = "dd-wifi-key";
+          RuntimeDirectoryMode = "0700";
+          RuntimeDirectoryPreserve = true;
+          UMask = "0077";
+          ExecStart = "${pkgs.age}/bin/age -d -i /var/lib/dd/secrets-key.txt -o /run/dd-wifi-key/wifi.env /var/lib/dd/wifi.age";
+        };
+      };
       sops.templates."wifi.env" = lib.mkIf (config.dd.hasSecret "wifi-psk") {
         content = "psk=${config.sops.placeholder.wifi-psk}\n";
       };
