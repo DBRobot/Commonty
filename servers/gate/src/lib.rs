@@ -105,6 +105,8 @@ struct App {
     thanos: Option<String>,
     /// the forge's releases list, as nobody (status.rs)
     releases: Option<String>,
+    /// which boxes may say whether each service works (status.rs)
+    service_boxes: status::Speakers,
     /// the uptime page's answer and the releases, worked out now and then
     status: status::Cache,
     /// this box's dd-control: the agreed state the fleet pages read
@@ -215,6 +217,9 @@ pub struct Config {
     /// the forge's API list of this fleet's releases, as anyone reads it
     /// (status.rs). None: no release notes here.
     pub releases: Option<String>,
+    /// service -> the boxes whose roles run it, from the release: only
+    /// their word on it counts (status.rs)
+    pub service_boxes: status::Speakers,
     /// Pi-hole on this box (adblock.rs). None: no ad blocking here.
     pub adblock: Option<adblock::Adblock>,
     /// how to reach Forgejo's database to listen for its changes
@@ -2064,7 +2069,11 @@ async fn fleet_json(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
 /// GET /_dd/status.json: whether each service works, now and each of the
 /// last 90 days. Anyone may ask: it names services, never a box.
 async fn status_json(State(app): State<Arc<App>>) -> Response {
-    match app.status.status(app.thanos.as_deref()).await {
+    match app
+        .status
+        .status(app.thanos.as_deref(), &app.service_boxes)
+        .await
+    {
         Some(s) => ([("cache-control", "public, max-age=30")], Json(s)).into_response(),
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -2741,6 +2750,7 @@ pub async fn start(
         fleet: cfg.fleet,
         thanos: cfg.thanos,
         releases: cfg.releases,
+        service_boxes: cfg.service_boxes,
         status: Default::default(),
         control: cfg.control.as_ref().map(|(c, _, _)| c.clone()),
         adblock: cfg.adblock,
@@ -3373,6 +3383,11 @@ mod tests {
             fleet: Default::default(),
             thanos,
             releases,
+            // node1 runs Photos and Git, node2 neither: its word is not asked
+            service_boxes: [("photos", "node1"), ("git", "node1")]
+                .into_iter()
+                .map(|(s, b)| (s.to_string(), vec![b.to_string()]))
+                .collect(),
             adblock: None,
             forge_events: None,
             storage_ledger: None,
@@ -3452,7 +3467,9 @@ mod tests {
                 get(move || async move {
                     Json(serde_json::json!({"status": "success", "data": {"resultType": "vector", "result": [
                         {"metric": {"service": "photos", "box": "node1", "instance": "100.64.0.2:9100"}, "value": point("1")},
-                        {"metric": {"service": "git", "box": "node2"}, "value": point("0")},
+                        {"metric": {"service": "git", "box": "node1"}, "value": point("0")},
+                        // a box that does not run Git says it works: not asked
+                        {"metric": {"service": "git", "box": "node2"}, "value": point("1")},
                         {"metric": {"service": "node1-secret"}, "value": point("1")}
                     ]}}))
                 }),
@@ -3468,9 +3485,11 @@ mod tests {
                         .take_while(|t| *t <= end)
                         .map(|t| serde_json::json!([t, "1"]))
                         .collect();
+                    let down: Vec<_> = values.iter().map(|v| serde_json::json!([v[0], "0"])).collect();
                     Json(serde_json::json!({"status": "success", "data": {"resultType": "matrix", "result": [
                         {"metric": {"service": "photos", "box": "node1", "site": "s-c844d9db"}, "values": values},
-                        {"metric": {"service": "git", "box": "node2"}, "values": values}
+                        {"metric": {"service": "git", "box": "node1"}, "values": values},
+                        {"metric": {"service": "photos", "box": "node2"}, "values": down}
                     ]}}))
                 }),
             )

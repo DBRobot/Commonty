@@ -83,10 +83,17 @@ in
             wantedBy = [ "multi-user.target" ];
             script = "exec sleep infinity";
           };
+          # a runs Games; b does not, and its word on Games is not asked
+          dd.verify.serviceBoxes.games = [ "a" ];
         }
       ];
     };
-    b = box "b";
+    b = {
+      imports = [ (box "b") ];
+      # a Games that is not running, on a box whose roles do not bring it:
+      # b notes it down, and the uptime page must not believe it
+      systemd.services.dd-games.script = "exec sleep infinity";
+    };
   };
   scriptEnv = {
     inherit rpc;

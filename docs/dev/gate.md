@@ -785,8 +785,12 @@ its own address on loopback answers short of a 5xx. The note is
 `dd_service_up{service="<id>"}` in `/var/lib/dd-facts/uptime.prom`, read
 by node_exporter like the other facts. No box asks another.
 
-The gate reads the notes from thanos on its own box (`VERIFY_THANOS`), as
-`min by (service)`: a service on two boxes is as up as the worse of them.
+The gate reads the notes from thanos on its own box (`VERIFY_THANOS`), by
+service and box, and counts a box's note on a service only when that box's
+roles run it (`VERIFY_SERVICE_BOXES`, `dd.verify.serviceBoxes`, which
+roles/core.nix works out from fleet/boxes.json): no box is trusted, and
+one without the role cannot make a service look up or down. A service on
+two boxes is as up as the worse of them.
 Now is the instant value (a service noted before and silent now is down);
 when it changed is from the last six hours by the minute, else from the
 quarter hours; each day is the share of its quarter hours up
@@ -817,6 +821,13 @@ stranger may read there already.
 
 The page is `/_dd/status` ([servers/status](../../servers/status/web)),
 at `<domain>/status`.
+
+To do: a service on a box other than the one with thanos reaches it only
+with that box's next block, up to two hours late, so its "now" is missing
+until then (today every service is on the box with thanos). The way that
+keeps to no box asking another is the heartbeat: dd-control carrying
+`dd_service_up` as a fact, and the gate reading "now" from the agreed
+state as fleet.rs does, with the days still from thanos.
 
 ### Chat search
 
@@ -1213,6 +1224,7 @@ VERIFY_DIRECTORY_READERS       keys that may read one entry, never the list (the
 VERIFY_FLEET                   box -> address, json
 VERIFY_THANOS                  Thanos query: the fleet's facts with no control plane, and the uptime page (status.rs)
 VERIFY_RELEASES                the forge's release list, as nobody (status.rs)
+VERIFY_SERVICE_BOXES           service -> the boxes whose roles run it, json (status.rs)
 VERIFY_HOUSE                   /run/dd-wifi (home-network.nix; home.rs)
 VERIFY_HOUSE_ORIGINS           where a Wi-Fi change may be signed (home.rs)
 VERIFY_ENDED                   /run/dd-ended, for Passwords (vaultwarden.nix; directory.rs)

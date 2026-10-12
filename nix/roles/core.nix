@@ -92,6 +92,36 @@ in
   # the write-ahead log of a running prometheus does not restore (segments
   # out of order); the blocks do, at the cost of the last two hours
   dd.backup.exclude = [ "/var/lib/prometheus2/data/wal" ];
+  # the uptime page counts a service's notes only from the boxes whose
+  # roles run it (modules/observe/uptime.nix names what each role brings)
+  dd.verify.serviceBoxes =
+    let
+      brings = {
+        gateway = [ "site" ];
+        media = [
+          "files"
+          "movies"
+        ];
+        library = [
+          "files"
+          "movies"
+        ];
+        photos = [ "photos" ];
+        vault = [ "passwords" ];
+        llm = [ "chat" ];
+        game = [ "games" ];
+        forge = [ "git" ];
+      };
+    in
+    lib.mapAttrs (_: lib.unique) (
+      lib.zipAttrs (
+        lib.concatLists (
+          lib.mapAttrsToList (
+            name: b: lib.concatMap (r: map (id: { ${id} = name; }) (brings.${r} or [ ])) (b.roles or [ ])
+          ) boxes
+        )
+      )
+    );
   dd.domain = policy.domain;
   dd.repo = policy.repo;
   # the box owner's paper key (their entry's recovery key): the box's disk keys

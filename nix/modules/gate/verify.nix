@@ -251,6 +251,14 @@ in
     defaultText = lib.literalExpression ''"https://code.''${config.dd.domain}/api/v1/repos/''${config.dd.repo}/releases?limit=50" when the forge is here'';
     description = "url of the forge's release list for this fleet's repository; null: no release notes";
   };
+  # Whose word counts on whether a service works: the boxes whose roles
+  # run it (roles/core.nix, from fleet/boxes.json). Any other box's note
+  # about it is ignored (servers/gate/src/status.rs).
+  options.dd.verify.serviceBoxes = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+    default = { };
+    description = "uptime service id -> the boxes whose roles run it; empty: no service is shown";
+  };
   # Posters for Movies & TV: a member's device asks TMDB for a title's art
   # with this key and keeps it, sealed, in the library. The key goes to
   # signed-in pages (/_dd/me); the titles never come near the box.
@@ -392,6 +400,9 @@ in
       }
       // lib.optionalAttrs (full && cfg.releases != null) {
         VERIFY_RELEASES = cfg.releases;
+      }
+      // lib.optionalAttrs full {
+        VERIFY_SERVICE_BOXES = builtins.toJSON cfg.serviceBoxes;
       }
       // lib.optionalAttrs (full && cfg.appManifest != null) {
         VERIFY_APP_MANIFEST = cfg.appManifest;

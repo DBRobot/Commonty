@@ -99,27 +99,47 @@ fn number(v: &serde_json::Value) -> Option<(u64, f64)> {
     (t >= 0.0 && x.is_finite()).then_some((t as u64, x))
 }
 
-/// a vector or matrix answer as series by service, only services we know
-fn series(result: &serde_json::Value) -> Series {
-    let mut out = Series::new();
+/// which boxes may say whether each service works: those whose roles run
+/// it, from the release (VERIFY_SERVICE_BOXES)
+pub type Speakers = std::collections::BTreeMap<String, Vec<String>>;
+
+/// A vector or matrix answer, one series per service and box, as one
+/// series per service: only services we know, only from a box whose roles
+/// run that service, and the worse of those boxes at each moment. Another
+/// box's word for a service it does not run counts for nothing.
+fn series(result: &serde_json::Value, speakers: &Speakers) -> Series {
+    let mut by: std::collections::BTreeMap<&'static str, std::collections::BTreeMap<u64, f64>> =
+        Default::default();
     for s in result.as_array().into_iter().flatten() {
         let Some((id, _)) = s["metric"]["service"].as_str().and_then(known) else {
             continue;
         };
+        let from = s["metric"]["box"].as_str().unwrap_or_default();
+        if !speakers
+            .get(id)
+            .is_some_and(|b| b.iter().any(|b| b == from))
+        {
+            continue;
+        }
         let points: Vec<(u64, f64)> = match s["values"].as_array() {
             Some(vs) => vs.iter().filter_map(number).collect(),
             None => number(&s["value"]).into_iter().collect(),
         };
-        out.push((id.to_string(), points));
+        let all = by.entry(id).or_default();
+        for (t, v) in points {
+            all.entry(t).and_modify(|w| *w = w.min(v)).or_insert(v);
+        }
     }
-    out
+    by.into_iter()
+        .map(|(id, p)| (id.to_string(), p.into_iter().collect()))
+        .collect()
 }
 
-const NOW: &str = "min by (service) (dd_service_up)";
+const NOW: &str = "min by (service, box) (dd_service_up)";
 /// the last few hours by the minute, for when a change happened
 const RECENT: u64 = 6 * 3600;
 const MINUTE: u64 = 60;
-const WINDOWS: &str = "min by (service) (avg_over_time(dd_service_up[15m]))";
+const WINDOWS: &str = "min by (service, box) (avg_over_time(dd_service_up[15m]))";
 
 /// the first midnight (UTC) the history covers, for `now`
 pub fn first_day(now: u64) -> u64 {
@@ -183,7 +203,7 @@ pub fn since(up: bool, windows: &[(u64, f64)], step: u64) -> Option<u64> {
 }
 
 impl Cache {
-    async fn windows(&self, thanos: &str, now: u64) -> Option<Series> {
+    async fn windows(&self, thanos: &str, speakers: &Speakers, now: u64) -> Option<Series> {
         let mut h = self.history.lock().await;
         if let Some((at, s)) = h.as_ref()
             && at.elapsed() < KEEP_HISTORY
@@ -204,7 +224,7 @@ impl Cache {
             ],
         )
         .await
-        .map(|r| series(&r));
+        .map(|r| series(&r, speakers));
         match got {
             Some(s) => {
                 *h = Some((Instant::now(), s.clone()));
@@ -216,7 +236,7 @@ impl Cache {
 
     /// what the page shows, worked out at most once a minute; the last good
     /// answer while thanos does not answer; None when there never was one
-    pub async fn status(&self, thanos: Option<&str>) -> Option<Status> {
+    pub async fn status(&self, thanos: Option<&str>, speakers: &Speakers) -> Option<Status> {
         let mut g = self.now.lock().await;
         if let Some((at, s)) = g.as_ref()
             && at.elapsed() < KEEP
@@ -224,7 +244,7 @@ impl Cache {
             return Some(s.clone());
         }
         let fresh = match thanos {
-            Some(t) => self.work_out(t).await,
+            Some(t) => self.work_out(t, speakers).await,
             None => None,
         };
         if let Some(s) = fresh {
@@ -233,7 +253,7 @@ impl Cache {
         g.as_ref().map(|(_, s)| s.clone())
     }
 
-    async fn work_out(&self, thanos: &str) -> Option<Status> {
+    async fn work_out(&self, thanos: &str, speakers: &Speakers) -> Option<Status> {
         let now = unix();
         let end = now / MINUTE * MINUTE;
         let now_q = [
@@ -250,10 +270,15 @@ impl Cache {
         let (current, recent, windows) = tokio::join!(
             ask(thanos, "query", &now_q),
             ask(thanos, "query_range", &recent_q),
-            self.windows(thanos, now),
+            self.windows(thanos, speakers, now),
         );
-        let recent = recent.map(|r| series(&r)).unwrap_or_default();
-        Some(assemble(&series(&current?), &recent, &windows?, now))
+        let recent = recent.map(|r| series(&r, speakers)).unwrap_or_default();
+        Some(assemble(
+            &series(&current?, speakers),
+            &recent,
+            &windows?,
+            now,
+        ))
     }
 
     pub async fn releases(&self, url: Option<&str>) -> Option<Vec<Release>> {
@@ -552,14 +577,60 @@ mod tests {
     fn only_services_we_name_are_read_and_their_labels_are_ours() {
         let r = serde_json::json!([
             {"metric": {"service": "photos", "box": "node1"}, "value": [NOW, "1"]},
-            {"metric": {"service": "<b>node2</b>"}, "value": [NOW, "1"]},
-            {"metric": {"service": "git"}, "values": [[NOW - 900, "1"], [NOW, "0"]]}
+            {"metric": {"service": "<b>node2</b>", "box": "node1"}, "value": [NOW, "1"]},
+            {"metric": {"service": "git", "box": "node1"}, "values": [[NOW - 900, "1"], [NOW, "0"]]}
         ]);
-        let s = series(&r);
+        let s = series(&r, &speakers(&[("photos", "node1"), ("git", "node1")]));
         assert_eq!(s.len(), 2);
-        assert_eq!(s[1].1, vec![(NOW - 900, 1.0), (NOW, 0.0)]);
+        assert_eq!(s[0], ("git".into(), vec![(NOW - 900, 1.0), (NOW, 0.0)]));
         let out = serde_json::to_string(&assemble(&s, &s, &s, NOW)).unwrap();
         assert!(!out.contains("node"), "{out}");
+    }
+
+    fn speakers(pairs: &[(&str, &str)]) -> Speakers {
+        let mut out = Speakers::new();
+        for (id, b) in pairs {
+            out.entry(id.to_string()).or_default().push(b.to_string());
+        }
+        out
+    }
+
+    /// A box whose roles do not run a service changes nothing about it,
+    /// whatever it says, up or down; the boxes that do run it count, the
+    /// worse of them at each moment.
+    #[test]
+    fn only_the_boxes_that_run_a_service_speak_for_it() {
+        let who = speakers(&[
+            ("photos", "node1"),
+            ("movies", "node1"),
+            ("movies", "node3"),
+        ]);
+        let honest = serde_json::json!([
+            {"metric": {"service": "photos", "box": "node1"}, "values": [[NOW - 900, "1"], [NOW, "1"]]},
+            {"metric": {"service": "movies", "box": "node1"}, "values": [[NOW - 900, "1"], [NOW, "1"]]},
+            {"metric": {"service": "movies", "box": "node3"}, "values": [[NOW - 900, "1"], [NOW, "0.5"]]}
+        ]);
+        let want = series(&honest, &who);
+        assert_eq!(
+            want[0],
+            ("movies".into(), vec![(NOW - 900, 1.0), (NOW, 0.5)])
+        );
+        for lie in ["0", "1"] {
+            let mut told = honest.as_array().unwrap().clone();
+            told.push(serde_json::json!({"metric": {"service": "photos", "box": "node2"}, "values": [[NOW - 900, lie], [NOW, lie]]}));
+            told.push(serde_json::json!({"metric": {"service": "movies", "box": "node2"}, "values": [[NOW, lie]]}));
+            told.push(serde_json::json!({"metric": {"service": "git", "box": "node2"}, "values": [[NOW, lie]]}));
+            // no box label at all is no box that runs it either
+            told.push(serde_json::json!({"metric": {"service": "photos"}, "values": [[NOW, lie]]}));
+            let got = series(&serde_json::Value::Array(told), &who);
+            assert_eq!(got, want, "a box without the role said {lie}");
+            assert_eq!(
+                assemble(&got, &got, &got, NOW).services,
+                assemble(&want, &want, &want, NOW).services
+            );
+        }
+        // and with nobody named, nobody speaks
+        assert!(series(&honest, &Speakers::new()).is_empty());
     }
 
     #[test]
