@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>People in this home</title>
+  <link rel="icon" href="/_door/static/favicon.svg">
+  <link rel="stylesheet" href="/_door/static/home.css">
+  <link rel="stylesheet" href="/_door/static/door.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_door/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="wide door">
+    <section class="card">
+      <h1>People in this home</h1>
+      <p class="lead" id="lead">Everyone in can open the home, and let others in.</p>
+
+      <div class="warn" id="ct" hidden>
+        <span class="state-word" data-state="attention">Certificate not asked for</span>
+        <p>A certificate for this home's name was issued that this home did not ask for. Someone may be trying to pass for it. The Commonty app still only opens this home, by its own key.</p>
+        <ul id="ct-list"></ul>
+      </div>
+
+      <div id="inside">
+        <ul class="rows" id="people">
+          <li><span class="skeleton"></span></li>
+          <li><span class="skeleton"></span></li>
+        </ul>
+        <h2>Asking to come in</h2>
+        <ul class="rows" id="asked"></ul>
+        <p class="empty" id="asked-empty" hidden>Nobody is asking. Someone with a Commonty account signs in here, then asks; they show up here for you to let in.</p>
+        <h2>Updates</h2>
+        <div class="updates">
+          <div class="tabs" role="group" aria-label="Updates">
+            <button type="button" id="upd-auto" aria-pressed="true">Automatic</button>
+            <button type="button" id="upd-hold" aria-pressed="false">Hold</button>
+          </div>
+          <span class="tag" id="release">—</span>
+        </div>
+        <p class="hint" id="upd-hint">New releases install on their own. Hold them, and this home stays on the release it runs until you let them go.</p>
+        <h2>Backups</h2>
+        <p><span class="state-word" data-state="off" id="backup-state">Not yet</span></p>
+        <p class="hint" id="backup-text">Every night this home is backed up, locked so only the people in can open it. The first is an hour after the controller starts.</p>
+        <div class="actions">
+          <a class="button" href="/" id="open">Open the home</a>
+          <button class="quiet" type="button" id="signout">Sign out on this device</button>
+        </div>
+      </div>
+
+      <div id="outside" hidden>
+        <p><span class="state-word" data-state="off" id="out-state">Not in yet</span></p>
+        <p class="lead" id="out-text">You are signed in, but not in this home yet. Ask, and anyone already in can let you in.</p>
+        <div class="actions">
+          <button type="button" id="ask">Ask to be let in</button>
+          <button class="quiet" type="button" id="signout-out">Sign out on this device</button>
+        </div>
+      </div>
+      <div id="msg" role="status"></div>
+    </section>
+  </main>
+  <script type="module" src="/_door/static/door-people.js"></script>
+</body>
+</html>

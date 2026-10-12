@@ -397,6 +397,11 @@ fn cookie<'a>(h: &'a HeaderMap, name: &str) -> Option<&'a str> {
     )
 }
 
+/// the app's own window, by this launch's cookie (Smart home's server too)
+pub(crate) fn window_cookie(h: &HeaderMap) -> bool {
+    cookie(h, handoff::WINDOW_COOKIE) == Some(crate::site::launch_secret())
+}
+
 fn header_str<'a>(h: &'a HeaderMap, name: &str) -> Option<&'a str> {
     h.get(name).and_then(|v| v.to_str().ok())
 }
@@ -697,7 +702,7 @@ fn browser_door<R: Runtime>(
 /// window arrives here from the app's own scheme, another site to a
 /// browser, and a Strict cookie set on that way in is not sent on the
 /// redirect that follows it.
-fn enter_window(req: &Request) -> Response {
+pub(crate) fn enter_window(req: &Request) -> Response {
     let q = req.uri().query().unwrap_or("");
     if handoff::query(q, "k").map(handoff::dec).as_deref() != Some(crate::site::launch_secret()) {
         return plain(StatusCode::FORBIDDEN, "not the app's window");

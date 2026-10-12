@@ -382,6 +382,10 @@ app/src/      the window and its commands
   net.rs        the engine, through four C calls
   background.rs the tray, the login entry and its setting, Android's service
   browser.rs    the system browser's proxy setting
+  installer.rs  setting up a home controller, a window of its own (desktop)
+  writer.rs     dd-hub-writer, run elevated, and its progress
+  controllers.rs  the household's home controllers, locked with the library key
+  smarthome.rs  Smart home: a loopback server held to the controller's key
   vpn.rs        Android's VPN
 app/net/      the engine (Go): tsnet, its proxies, the bridge through
               the front door, the owner check

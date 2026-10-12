@@ -56,6 +56,8 @@ in
       })
       ''
         dpkg -i ${linux}/*.deb
+        # the card writer the installer runs, carried beside the app
+        dpkg -L commonty | grep -q '/dd-hub-writer$' || { echo "the .deb left out dd-hub-writer"; exit 1; }
         commonty >/tmp/app.log 2>&1 &
         app=$!
       '';

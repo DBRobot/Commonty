@@ -26,18 +26,21 @@ pkgs.runCommand "dns-worker-check"
     done
     spki() { openssl ec -in $1.pem -pubout -outform DER 2>/dev/null | base64 -w0; }
     mkdir w
-    cp ${bundle}/worker.js w/
+    cp ${bundle}/worker.js ${bundle}/controller.js ${bundle}/dd_mail.js ${bundle}/dd_mail_bg.wasm w/
+    tester=${../../client/mail/tests/tester.json}
     cat > w/fleet.js <<EOF
     export const BOXES = {"box1": "$(spki box1)", "box2": "$(spki box2)"};
     export const NAMES = {"box1": ["commonty.test", "home.commonty.test", "files.commonty.test"], "box2": ["photos.commonty.test"]};
     export const RECORDS = {"zone": "commonty.test", "address": "100.64.0.2", "tunnel": "t1", "hosts": ["home", "accounts", "demo-files"], "open": true, "bare": true};
+    export const MEMBERS = $(jq -c '.members' $tester);
+    export const RELEASE = "$(tr -d '[:space:]' < ${../../fleet/release.pub})";
     EOF
     cat > w/wrangler.toml <<'TOML'
     name = "dns-check"
     main = "worker.js"
     compatibility_date = "2026-05-01"
     no_bundle = true
-    rules = [{ type = "ESModule", globs = ["**/*.js"] }]
+    rules = [{ type = "ESModule", globs = ["**/*.js"] }, { type = "CompiledWasm", globs = ["**/*.wasm"] }]
     [vars]
     DOMAIN = "commonty.test"
     ZONE = "zone1"
@@ -72,6 +75,7 @@ pkgs.runCommand "dns-worker-check"
 
     status=0
     python3 $t/flow.py $PWD/helper.sh || status=$?
+    [ $status -ne 0 ] || python3 $t/controller.py $tester || status=$?
     kill $worker $worker2 $fake 2>/dev/null || true
     if [ $status -ne 0 ]; then
       echo "--- worker log"; tail -40 wrangler.log

@@ -401,6 +401,55 @@ pub(crate) async fn join(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
     }
 }
 
+/// POST /_dd/network/controller, bearer device token -> { control_url, key, expires }
+///
+/// A household's home controller's key to the network (docs/dev/home-
+/// controller.md), asked for by the member pairing it, from the app, and
+/// carried to the Pi over the house network. Single use, tagged a
+/// controller and made in the boxes' user, so the reaper leaves it and the
+/// policy lets it reach the boxes' front doors and nothing else; members'
+/// devices reach it on 443 alone. A member's, never a guest's.
+pub(crate) async fn controller_join(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let Some(door) = app.network.as_ref() else {
+        return (StatusCode::NOT_FOUND, "this box has no network door").into_response();
+    };
+    let Some(token) = crate::bearer(&headers) else {
+        return (StatusCode::UNAUTHORIZED, "a device token is required").into_response();
+    };
+    let user = match app.verify_biscuit(token, "access") {
+        Ok(u) => u,
+        Err(e) => return (StatusCode::UNAUTHORIZED, e.to_string()).into_response(),
+    };
+    if !app.member(&user) || user == crate::pages::DEMO_USER {
+        return (
+            StatusCode::FORBIDDEN,
+            "only a member sets up a home controller",
+        )
+            .into_response();
+    }
+    {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let mut asked = door.asked.lock().unwrap();
+        let at = format!("controller:{user}");
+        if asked.get(&at).is_some_and(|&(t, _)| now < t + EVERY) {
+            return (StatusCode::TOO_MANY_REQUESTS, "one a minute").into_response();
+        }
+        asked.insert(at, (now, 0));
+    }
+    match door.mint("boxes", &["tag:controller"]).await {
+        Ok((key, expires)) => Json(serde_json::json!({
+            "control_url": door.control_url,
+            "key": key,
+            "expires": expires
+        }))
+        .into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
+    }
+}
+
 #[derive(serde::Deserialize)]
 pub(crate) struct BoxAsk {
     #[serde(rename = "box")]

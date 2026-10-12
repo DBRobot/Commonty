@@ -743,6 +743,27 @@ With `VERIFY_HEADSCALE_API` set (the gateway, `dd.verify.network`):
   everything when the member list is empty (a broken release, not
   everyone revoked).
 
+### Home controllers ([controller.rs](../../servers/gate/src/controller.rs))
+
+A household's home controller is no member and holds no token; it signs
+each request with its own key, carrying its pairing member's root's word
+for its name, in `x-dd-controller`
+([home-controller.md](home-controller.md#the-gate-for-a-controller)).
+With it, the controller reads one person's entry
+(`/_dd/controller/directory/<name>`, never the list) and, on the gate
+holding the libraries bucket (`files.<domain>`, over the network), gets
+presigned urls for its one backup, `controllers/<label>/backup`, for 10
+minutes. The gate keeps label -> member and controller key in
+`controller-backups.json` (first word holds the label; another is 409); a
+member restores from their own labels alone, and leaving deletes them.
+
+A passkey root names a controller on `/_dd/controller-name`
+(`controller-name.html`): the page signs
+`controller_name_message(<label>.home.<domain>, <key>)` with the root
+passkey and leaves the answer here for the app, which collects it once
+with a device token of the same member, within 10 minutes. Kept in memory
+only.
+
 ### The house ([home.rs](../../servers/gate/src/home.rs), [adddevice.rs](../../servers/gate/src/adddevice.rs))
 
 Settings' Network tab. `GET /_dd/house` lists this box and asks each house
@@ -1081,6 +1102,7 @@ path                                        method   what                       
 /_dd/signins                                GET      sessions, key uses                        member or guest, session or token
 /_dd/signins/end                            POST     end one, or all others                    member or guest: token, or passkey fresh
 /_dd/devices/names                          GET,PUT  sealed device names                       member or guest, session or token
+/_dd/controllers                            GET,PUT  sealed list of home controllers           member, session or token
 /_dd/add/start, /status, /cancel, /theirs   *        the approving device's side               member or guest, session or token
 /_dd/add/offer, /wait, /reveal              *        the new device's side                     anyone with the code
 -- photos
@@ -1109,6 +1131,13 @@ path                                        method   what                       
 /_dd/house/here                             GET      this box's link                           local; a directory box: its house
 /_dd/house/wifi                             POST     a signed Wi-Fi change                     member + passkey signature
 /_dd/house/wifi/relay                       POST     a peer passing it on                      port 4181 only (nginx 404s it); signature
+-- home controllers (controller.rs, home-controller.md)
+/_dd/controller/directory/{name}            GET      one person's entry                        a controller (x-dd-controller)
+/_dd/controller/backup                      POST     {put, get} for its backup, 10 min         a controller; 404 without the bucket
+/_dd/controller/backup/{label}              GET      {get}, to restore                         member (session or token), their own label
+/_dd/controller-name                        GET      the passkey's naming page                 anyone (the page signs in)
+/_dd/controller-name/{label}                POST     leave the passkey's {sig}                 member session, our own pages
+/_dd/controller-name/{label}                GET      {sig}, once, 10 min                       the same member's device token
 -- friends and games
 /_dd/friends/list                           GET      friends, links                            member or guest
 /_dd/friends/link                           POST     a new link                                member

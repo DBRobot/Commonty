@@ -91,6 +91,8 @@ let
         printf '\n[target.${target}]\nrustflags = ["-C", "link-arg=/Brepro", "-C", "link-arg=/DEBUG:NONE", "-C", "strip=symbols"]\n' >> .cargo/config.toml
         export CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=$NIX_BUILD_CORES
         export COMMONTY_NET_LIB_DIR=${net} COMMONTY_VERSION=${version}
+        export COMMONTY_RELEASE_KEY=$(tr -d '[:space:]' < ${../../fleet/release.pub})
+        export COMMONTY_REPO=${(pkgs.lib.importJSON ../../fleet/policy.json).repo}
         ${script}
       '';
       installPhase = "true";
@@ -101,11 +103,14 @@ in
   installer = build "commonty-windows-${version}" appSrc ''
     install -Dm644 ${nsisUtils} $XDG_CACHE_HOME/tauri/NSIS/Plugins/x86-unicode/additional/nsis_tauri_utils.dll
     cp -r ${appWeb}/. app/web/ && chmod -R u+w app/web
+    # the card writer the installer runs elevated (RunAs, no manifest: its
+    # list needs no admin rights)
+    cargo xwin build --release --locked --target ${target} -p hubwriter
     cd app
     # the engine goes beside the exe, where Windows looks for a dll first;
     # the hooks keep file times out of the installer
     cargo tauri build --verbose --runner cargo-xwin --target ${target} --bundles nsis \
-      --config '{"version":"${version}","bundle":{"resources":{"${net}/commontynet.dll":"commontynet.dll"},"windows":{"nsis":{"installerHooks":"${./nsis-hooks.nsh}"}}}}' \
+      --config '{"version":"${version}","bundle":{"resources":{"${net}/commontynet.dll":"commontynet.dll","../target/${target}/release/dd-hub-writer.exe":"dd-hub-writer.exe"},"windows":{"nsis":{"installerHooks":"${./nsis-hooks.nsh}"}}}}' \
       -- --locked
     mkdir -p $out
     cp ../target/${target}/release/bundle/nsis/*.exe $out/commonty-setup.exe

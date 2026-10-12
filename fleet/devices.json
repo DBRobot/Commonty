@@ -1,0 +1,4 @@
+{
+  "_": "Systems the fleet builds and signs that are not boxes: a household's device runs one, the same in every house (docs/dev/home-controller.md). CI builds each on every runner like a box's system, `dd release publish` signs it into the release beside the boxes', and the device's own dd-agent follows its entry. Nothing here names a house or a person.",
+  "home-controller": {}
+}

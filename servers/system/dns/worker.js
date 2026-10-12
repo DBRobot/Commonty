@@ -14,10 +14,15 @@
 // name the release says it serves (fleet.js NAMES, from that box's own
 // nginx). No other kind of record, no other name, no other box's name.
 //
+// Home controllers (controller.js): a household's device given a name by a
+// member's root, which then asks for its own name's challenges with its own
+// key, as a box does with its TPM's.
+//
 // Bindings: DOMAIN, ZONE (plain text, fleet/dns-worker.json); DNS_TOKEN
 // (secret: Zone DNS Edit on this zone, nothing more); CF_API (a test's fake).
 
 import { BOXES, NAMES, RECORDS } from './fleet.js';
+import { controllerApi, controllerSigned } from './controller.js';
 
 // lego asks again after a failure; a recorded request is good this long
 const SKEW = 300;
@@ -79,22 +84,35 @@ export async function handle(req, env) {
   // the body is read before any answer: workerd faults a request whose
   // stream is left behind, and the next one with it
   const text = await req.text().catch(() => '');
-  if (url.pathname !== '/api/challenge' || req.method !== 'POST') return json({ error: 'not here' }, 404);
-  if (text.length > 2048) return json({ error: 'too long' }, 413);
+  const known = ['/api/challenge', '/api/controller'];
+  if (!known.includes(url.pathname) || req.method !== 'POST') return json({ error: 'not here' }, 404);
+  // an entry rides along with a controller's naming and its challenges
+  if (text.length > 65536) return json({ error: 'too long' }, 413);
   let body;
   try {
     body = JSON.parse(text);
   } catch {
     return json({ error: 'not json' }, 400);
   }
-  const { box, at, op, name, value, sig } = body || {};
-  if (typeof box !== 'string' || !Object.hasOwn(BOXES, box)) return json({ error: 'no such box' }, 403);
+  if (url.pathname === '/api/controller') return controllerApi(body, dns, env, json);
+  const { box, controller, at, op, name, value, sig } = body || {};
   if (op !== 'present' && op !== 'cleanup') return json({ error: 'present or cleanup' }, 400);
   if (typeof value !== 'string' || !VALUE.test(value)) return json({ error: 'not a challenge' }, 400);
-  if (typeof name !== 'string' || !(NAMES[box] || []).includes(name)) return json({ error: 'not a name this box serves' }, 403);
   const t = Number(at);
   if (!Number.isInteger(t) || Math.abs(Math.floor(Date.now() / 1000) - t) > SKEW) return json({ error: 'stale' }, 403);
-  if (!(await signedBy(box, `commonty acme v1\0${box}\0${at}\0${op}\0${name}\0${value}`, sig))) return json({ error: 'not signed by that box' }, 403);
+  if (controller !== undefined) {
+    let ok = false;
+    try {
+      ok = await controllerSigned(dns, env, body);
+    } catch (e) {
+      return json({ error: String(e.message || e) }, 502);
+    }
+    if (!ok) return json({ error: 'not that controller\'s name, or not signed by it' }, 403);
+  } else {
+    if (typeof box !== 'string' || !Object.hasOwn(BOXES, box)) return json({ error: 'no such box' }, 403);
+    if (typeof name !== 'string' || !(NAMES[box] || []).includes(name)) return json({ error: 'not a name this box serves' }, 403);
+    if (!(await signedBy(box, `commonty acme v1\0${box}\0${at}\0${op}\0${name}\0${value}`, sig))) return json({ error: 'not signed by that box' }, 403);
+  }
 
   const fqdn = `_acme-challenge.${name}`;
   try {
@@ -102,7 +120,7 @@ export async function handle(req, env) {
       (r) => r.type === 'TXT' && r.name === fqdn && unquote(r.content) === value,
     );
     if (op === 'present') {
-      if (have.length === 0) await dns(env, 'POST', '', { type: 'TXT', name: fqdn, content: value, ttl: 60, comment: `acme ${box}` });
+      if (have.length === 0) await dns(env, 'POST', '', { type: 'TXT', name: fqdn, content: value, ttl: 60, comment: `acme ${box || controller}` });
     } else {
       for (const r of have) await dns(env, 'DELETE', `/${r.id}`);
     }
