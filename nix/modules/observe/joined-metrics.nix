@@ -73,7 +73,8 @@ in
             "--grpc-address=127.0.0.1:10911"
             "--http-address=127.0.0.1:10912"
             "--remote-write.address=127.0.0.1:10910"
-            "--label=receiver=\"joined\""
+            # systemd keeps the quotes inside single ones; thanos wants them
+            "'--label=receiver=\"joined\"'"
             "--receive.tenant-header=THANOS-TENANT"
             "--receive.tenant-label-name=box"
             # a write nginx did not name is nobody's, and nobody reads it
@@ -133,7 +134,7 @@ in
         };
       # the Metrics page asks for one joined box: /joined/<its name>/api/v1/...,
       # once the gate has said it is this person's (lib.rs verify)
-      services.nginx.virtualHosts."metrics.${base}".locations."~ ^/joined/(?<dd_jbox>j[0-9a-f]{10})/api/v1/(?<dd_japi>query|query_range|series|labels|label/[a-zA-Z0-9_]+/values)$" =
+      services.nginx.virtualHosts."metrics.${base}".locations."~ ^/joined/(?<dd_jbox>j[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])/api/v1/(?<dd_japi>query|query_range|series|labels|label/[a-zA-Z0-9_]+/values)$" =
         {
           proxyPass = "http://127.0.0.1:${toString cfg.queryPort}/api/v1/$dd_japi$is_args$args";
           ddCookie = "";
@@ -173,9 +174,15 @@ in
           out=$(mktemp)
           for p in $now; do
             case "$p" in j[0-9a-f]*) ;; *) continue ;; esac
+            recipient=$(printf '%s' "$st" | jq -r --arg p "$p" '.joined[$p].recipient')
+            # a token is for the box that joined with this recipient: one
+            # with another under the same name gets a token of its own
+            if [ "$(cat ${state}/tokens/$p.for 2>/dev/null)" != "$recipient" ]; then
+              rm -f ${state}/tokens/$p ${sealed}/$p-metrics.age
+              printf '%s' "$recipient" > ${state}/tokens/$p.for
+            fi
             [ -s ${state}/tokens/$p ] || head -c 32 /dev/urandom | base64 | tr -d '/+=\n' > ${state}/tokens/$p
             if [ ! -s ${sealed}/$p-metrics.age ]; then
-              recipient=$(printf '%s' "$st" | jq -r --arg p "$p" '.joined[$p].recipient')
               if age -r "$recipient" -o ${sealed}/$p-metrics.age.new ${state}/tokens/$p; then
                 chmod 0444 ${sealed}/$p-metrics.age.new
                 mv ${sealed}/$p-metrics.age.new ${sealed}/$p-metrics.age
@@ -185,7 +192,7 @@ in
                 continue
               fi
             fi
-            used=$(du -sb ${receiveTsdb}/$p 2>/dev/null | cut -f1)
+            used=$(du -sb ${receiveTsdb}/$p 2>/dev/null | cut -f1) || used=0
             if [ "''${used:-0}" -gt ${toString cfg.maxBytes} ]; then
               echo "$p: its series take $used bytes, over ${toString cfg.maxBytes}; refused for now"
               continue
@@ -195,9 +202,9 @@ in
           # a joined box gone from the agreed state: its token goes
           for f in ${state}/tokens/j*; do
             [ -e "$f" ] || continue
-            p=$(basename "$f")
+            p=$(basename "$f" .for)
             printf '%s\n' $now | grep -qx "$p" && continue
-            rm -f "$f" ${sealed}/$p-metrics.age
+            rm -f ${state}/tokens/$p ${state}/tokens/$p.for ${sealed}/$p-metrics.age
             echo "$p is gone: its metrics token is too"
           done
           if ! cmp -s $out ${map}; then

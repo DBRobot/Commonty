@@ -622,6 +622,29 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
     }
 }
 
+/// What a join ticket may do here (docs/dev/joining.md), decided the way
+/// `serve` routes it, so the two cannot disagree: a path `clean` makes the
+/// ticket's own folder or under it, and a method that reads or adds there -
+/// as a piece of an upload (x-dd-upload: PUT a part, POST start or finish),
+/// or plainly (GET, HEAD, PROPFIND, PUT, MKCOL). Never a delete, a move, a
+/// copy or a change of properties, whatever header comes with it.
+pub fn ticket_allows(method: &Method, headers: &HeaderMap, raw: &str, folder: &str) -> bool {
+    let Some(path) = clean(raw) else {
+        return false;
+    };
+    let inside = path
+        .strip_prefix(folder)
+        .is_some_and(|r| r.is_empty() || r.starts_with('/'));
+    let action = match piece(headers) {
+        Some(_) => matches!(method.as_str(), "PUT" | "POST"),
+        None => matches!(
+            method.as_str(),
+            "GET" | "HEAD" | "PROPFIND" | "PUT" | "MKCOL"
+        ),
+    };
+    inside && action
+}
+
 /// The upload header, as `serve` reads it: a request with one is a piece of
 /// an upload whatever its method. Callers that meter or guard writes ask
 /// this, so they and `serve` cannot read the header two ways.
@@ -1134,6 +1157,39 @@ fn percent_decode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ticket_does_what_serve_would_do_in_its_folder_alone() {
+        let f = "pending/0123456789abcdef0123456789abcdef";
+        let none = HeaderMap::new();
+        let mut up = HeaderMap::new();
+        up.insert("x-dd-upload", "abc".parse().unwrap());
+        let ok = |m: &str, h: &HeaderMap, p: &str| ticket_allows(&m.parse().unwrap(), h, p, f);
+        assert!(ok("PUT", &none, &format!("{f}/data/ab")));
+        assert!(ok("PROPFIND", &none, f));
+        assert!(ok("GET", &none, &format!("/{f}/")));
+        assert!(ok("POST", &up, &format!("{f}/data/ab")));
+        // a delete, a move, a copy, whatever header comes with it
+        for m in ["DELETE", "MOVE", "COPY", "PROPPATCH", "POST"] {
+            assert!(!ok(m, &none, &format!("{f}/config")), "{m}");
+        }
+        assert!(!ok("DELETE", &up, &format!("{f}/config")));
+        assert!(!ok("GET", &up, &format!("{f}/config")));
+        // nowhere but its own folder, however the path is written
+        for p in [
+            format!("{f}x/config"),
+            format!("{f}/../config"),
+            format!("{f}/./x"),
+            format!("{f}//x"),
+            format!("{f}\\..\\x"),
+            "pending/0123456789ABCDEF0123456789ABCDEF/x".to_string(),
+            "config".to_string(),
+            "pending".to_string(),
+            String::new(),
+        ] {
+            assert!(!ok("PUT", &none, &p), "{p}");
+        }
+    }
 
     #[test]
     fn a_listing_time_is_its_unix_second() {
