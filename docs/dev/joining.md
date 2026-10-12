@@ -3,8 +3,9 @@
 Status: a box joins **as a stranger** (built) and builds its own system
 from its own report (built). **As a member's box**, set up from the app's
 installer window and a USB drive, is being built (below): the fleet's side
-(the ticket, whose a box is, the pending backup, Your boxes) is built; the
-app's window and the drive's installer are next.
+(the ticket, whose a box is, the pending backup, Your boxes) and the
+drive's installer are built; the app's window is on its own branch. The
+disk's key is not yet bound to the boot chain: see **The disk**.
 
 A box the release does not list needs no one to add it. It joins the
 control plane's agreed state on its own word, and joining gives it nothing
@@ -103,9 +104,72 @@ box installer (full screen)        fleet
   `GET /_dd/boxes/mine`), with when it last said how it is. Removing it
   puts its ticket id in the member's signed entry (`removed_boxes`), and on
   every box at once it is nobody's.
-- **The disk** is encrypted with a key sealed to the box's TPM (PCR 7):
-  a pulled disk reads as nothing, and the box boots on its own.
-- **BIOS**: the installer checks UEFI, TPM 2.0, Secure Boot (off), AHCI and
-  virtualisation, and sets what the firmware lets it through
-  `/sys/class/firmware-attributes` (Dell, Lenovo, HP, with no BIOS
-  password), restarting itself; the rest it shows, where to change.
+- **The disk** is encrypted (the fleet's layout, `encrypted = true`) with
+  a key made from a half sealed in the box's TPM under PCR 7: the unlock
+  Worker knows nothing of a joined box, so there is no second half
+  (`dd.unlock.tpmOnly`, box.json `"unlock": "tpm"`). The installer makes
+  the half and the key before it wipes anything; the initrd makes the same
+  key at every boot, with no network and nobody at the screen. A boot the
+  TPM does not recognise gets no key at all, never one made from less
+  (disk-unlock-boot.sh), and a boot that stops there has no shell.
+  - **What it protects against:** a pulled disk, or the box carried off
+    and started with its Secure Boot or firmware settings changed.
+  - **What it does not yet:** with Secure Boot off, PCR 7 is the same for
+    any system started on the same machine. Someone with the box in hand
+    can start their own system from a USB drive, or the box's own with a
+    changed command line (lanzaboote's stub accepts one when Secure Boot is
+    off), and the TPM opens the half. Binding the key to the boot chain is
+    needed, and is a choice still to make: the box enrolling Secure Boot
+    keys of its own (as node1 and node2 have; the firmware must be in setup
+    mode, a step at its screen), or systemd-pcrlock predicting PCR 4 for
+    each release (no firmware step; LUKS holding the pool's key, since only
+    systemd-cryptsetup reads a pcrlock policy).
+- **Wi-Fi**: the network the box was set up on (the drive's `wifi.json`, or
+  one picked on the screen) is sealed to the box's secrets key, which only
+  its TPM opens (`/var/lib/dd/wifi.age`, box.json `house.sealedWifi`). The
+  box opens it into memory at each boot, before NetworkManager starts
+  (`dd-wifi-unseal`); it is never on its disk in the clear.
+
+## The drive
+
+The app's installer window writes `commonty-box-installer-<version>.img.zst`
+(`installers.x86_64-linux.box`, [`image.nix`](../../nix/installer/image.nix);
+the `box-installer` download). It is a GPT disk: partition 1 the FAT boot
+partition (systemd-boot, the installer, and `commonty/`, which the app
+fills), partition 2 the installer's system, grown to the drive at its
+first boot. It starts to one screen, a browser filling it and nothing to
+click away to ([`setup.nix`](../../nix/installer/setup.nix)). The screen's
+steps are `dd-box-setup`'s
+([`dd-box-setup.rs`](../../servers/system/release/src/bin/dd-box-setup.rs)),
+on loopback, which runs the installer's own programs:
+
+```
+firmware   UEFI, TPM 2.0, Secure Boot off, disks seen (not behind RAID/RST),
+           virtualisation. What the firmware lets Linux change (Dell, Lenovo,
+           HP, no BIOS password) it changes and restarts; the rest it says
+           where to change. Power-on after an outage can't be read: a tip.
+network    a cable, else the drive's Wi-Fi, else a network picked here
+disk       internal, not removable, nothing of it mounted
+back up    optional: dd-box-backup (backup.sh)
+install    dd-join-install (join-install.sh), with the ticket and the Wi-Fi
+done       take the drive out, restart
+```
+
+- **The firmware table** is
+  [`bios-settings.json`](../../servers/system/release/bios-settings.json):
+  per kernel driver, the attribute and value for each setting, and where
+  the names come from. A value is written only where the attribute lists
+  it among its possible values and no BIOS password is set; a setting not
+  in the table is never touched. The names are each maker's own; they have
+  not been tried on every model.
+- **The backup is file by file** (restic), not block by block: NTFS,
+  ext4, XFS, btrfs, FAT and ZFS are mounted read-only and backed up; a
+  BitLocker volume can't be read and is said so. Files come back as files
+  to open, a backup holds what was used and no free space, and both a
+  Windows disk and a Linux one read the same way. It goes to the member's
+  pending folder through the gate, on the ticket (rclone's WebDAV, the
+  ticket as its bearer token), encrypted on the machine with the drive's
+  `backup.key`. A dropped connection is tried again, up to five times.
+  The member's free space is not shown yet: there is no route for it on
+  the ticket.
+
