@@ -1498,12 +1498,22 @@ pub fn vault_state<R: Runtime>(
 mod tests {
     use super::*;
 
+    fn sha(b: &[u8]) -> String {
+        use sha2::Digest as _;
+        sha2::Sha256::digest(b)
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect()
+    }
+
     /// A box on a loopback port, as the pages' calls reach one: a folder's
     /// listing, its own sign-in page, and what it was sent for anything else
     async fn a_box() -> String {
         let app = axum::Router::new().fallback(|req: Request| async move {
             let (parts, body) = req.into_parts();
-            let body = axum::body::to_bytes(body, 1024).await.unwrap_or_default();
+            let body = axum::body::to_bytes(body, 16 << 20)
+                .await
+                .unwrap_or_default();
             let h = |n: &str| {
                 parts
                     .headers
@@ -1538,7 +1548,9 @@ mod tests {
                         "cookie": h("cookie"),
                         "chunked": h("transfer-encoding"),
                         "length": h("content-length"),
-                        "body": String::from_utf8_lossy(&body),
+                        "body": String::from_utf8_lossy(&body[..body.len().min(1024)]),
+                        "size": body.len(),
+                        "sha256": sha(&body),
                     }),
                 ),
             }
@@ -1635,6 +1647,42 @@ mod tests {
             .await;
             let seen: serde_json::Value = serde_json::from_str(&text(r).await.1).unwrap();
             assert_eq!(seen["body"], "abc");
+        });
+    }
+
+    /// A large file goes up a piece at a time (library.js put: a 6 MiB
+    /// part, sealed, by PUT): each part reaches the box whole, whether the
+    /// page said its length or sent it in chunks
+    #[test]
+    fn a_large_upload_reaches_the_box_whole() {
+        tauri::async_runtime::block_on(async {
+            let base = a_box().await;
+            let part: Vec<u8> = (0..7 * 1024 * 1024 + 123)
+                .map(|i| (i % 251) as u8)
+                .collect();
+            let want = sha(&part);
+            for chunked in [false, true] {
+                let mut r = axum::http::Request::builder()
+                    .method("PUT")
+                    .uri("/_dd/dav/l/big")
+                    .header("x-dd-upload", "u")
+                    .header("x-dd-part", "1");
+                let body = if chunked {
+                    r = r.header("transfer-encoding", "chunked");
+                    let pieces: Vec<Result<Vec<u8>, std::io::Error>> =
+                        part.chunks(64 * 1024).map(|c| Ok(c.to_vec())).collect();
+                    Body::from_stream(futures_util::stream::iter(pieces))
+                } else {
+                    r = r.header("content-length", part.len().to_string());
+                    Body::from(part.clone())
+                };
+                let resp = forward(&base, Some("t"), r.body(body).unwrap(), false).await;
+                let (st, seen) = text(resp).await;
+                assert_eq!(st, StatusCode::OK, "{seen}");
+                let seen: serde_json::Value = serde_json::from_str(&seen).unwrap();
+                assert_eq!(seen["size"], part.len(), "chunked: {chunked}");
+                assert_eq!(seen["sha256"], want.as_str(), "chunked: {chunked}");
+            }
         });
     }
 
