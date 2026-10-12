@@ -28,6 +28,8 @@ let
       };
       virtualisation.tpm.enable = true;
       virtualisation.memorySize = 3072;
+      # its agent switches it, as on a box (a test's systems leave it out)
+      system.switch.enable = true;
       virtualisation.vlans = [ 1 ];
       # the same address under either name: the switch between them is the
       # box's own, not the test's network
