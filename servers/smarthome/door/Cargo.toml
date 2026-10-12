@@ -1,0 +1,46 @@
+[package]
+name = "smarthome-door"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "dd-door"
+path = "src/main.rs"
+
+[dependencies]
+identity = { path = "../../../client/identity" }
+# the network key comes sealed to the controller's key (library's sealed box)
+library = { path = "../../../client/library" }
+anyhow = "1"
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "time", "fs", "process", "io-util"] }
+# the proxy to Home Assistant: one connection per request, from the
+# person's own loopback address, upgrades carried through
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive", "env"] }
+base64 = "0.22"
+ed25519-dalek = "2"
+hmac = "0.12"
+sha2 = "0.10"
+getrandom = "0.3"
+# backups: one secretbox over the file, as client/library seals blocks
+crypto_secretbox = "0.1"
+futures-util = "0.3"
+# Home Assistant's REST api and crt.sh
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# the door ends TLS itself; ring, as the rest of the tree uses
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+
+[dev-dependencies]
+# a passkey in the tests, as identity's own tests make one
+p256 = "0.13"
+webauthn-rs-core = "0.6.1-dev"

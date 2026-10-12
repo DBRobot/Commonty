@@ -33,14 +33,31 @@ let
   policy = pkgs.writeText "headscale-policy.json" (
     builtins.toJSON {
       tagOwners."tag:box" = [ "boxes@" ];
+      # a household's home controller (docs/dev/home-controller.md): a
+      # device, joined by the gate in the boxes user so the reaper leaves it
+      tagOwners."tag:controller" = [ "boxes@" ];
       # A person's devices reach a box's front door and its game servers.
       # A box's owner's devices reach that box, and only that box, for what
       # an admin needs: ssh, its dns, the cache push. Boxes reach each other
       # on the channels still between them (roles/core.nix lists them; each
       # box's firewall narrows them again to its peers' addresses). No rule
       # has a person's device as its destination, so devices do not see one
-      # another.
+      # another, except a home controller's door, on 443 alone: any member
+      # may reach any controller there, and the door on the Pi turns away
+      # everyone outside its household. The rule names no house.
       acls = [
+        {
+          action = "accept";
+          src = [ "autogroup:member" ];
+          dst = [ "tag:controller:443" ];
+        }
+        # and a controller reaches the boxes' front doors, for its releases,
+        # the read-only cache and the directory: what any member's device may
+        {
+          action = "accept";
+          src = [ "tag:controller" ];
+          dst = [ "tag:box:443" ];
+        }
         {
           action = "accept";
           src = [ "autogroup:member" ];

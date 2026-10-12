@@ -794,6 +794,86 @@ fn presence_and_place(auth: &[u8], origin: &str, rp_id: Option<&str>) -> bool {
     }
 }
 
+/// What a member's root signs to give a home controller its name and key
+/// (docs/dev/home-controller.md): checked by the door, the gate and the DNS
+/// Worker.
+pub fn controller_name_message(name: &str, controller: &str) -> Vec<u8> {
+    format!("commonty controller name v1\0{name}\0{controller}").into_bytes()
+}
+
+/// A controller's label, made from its key: random to anyone without it, so
+/// it says nothing of the house, and no one names a label as theirs who does
+/// not hold the controller's key (the gate keeps a household's backup by it).
+pub fn controller_label(controller: &str) -> Result<String> {
+    use sha2::Digest as _;
+    let key = decode_public(controller)?;
+    let mut h = sha2::Sha256::new();
+    h.update(b"commonty controller label v1\0");
+    h.update(key.as_bytes());
+    let bits = u128::from_be_bytes(h.finalize()[..16].try_into().expect("16 bytes"));
+    const ABC: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+    Ok((0..16)
+        .map(|i| ABC[((bits >> (123 - 5 * i)) & 31) as usize] as char)
+        .collect())
+}
+
+/// The root of `entry` gave `controller` the name `name`
+/// (controller_name_message): an ed25519 signature (base64) by a device-key
+/// root, or, for a passkey root, the root passkey's assertion (base64 of its
+/// JSON, as an entry's own signature is) over sha256 of that message, made
+/// on one of `origins` exactly. Only this statement: the message is made
+/// here, never handed in, so no other signature of the root's can pass for
+/// it. The entry is the caller's to have checked.
+pub fn controller_name_signed(
+    entry: &Entry,
+    name: &str,
+    controller: &str,
+    sig: &str,
+    origins: &[String],
+) -> Result<()> {
+    use sha2::Digest as _;
+    // the label is the controller's own: <label>.home.<domain>
+    let label = controller_label(controller)?;
+    if name
+        .split_once('.')
+        .is_none_or(|(l, rest)| l != label || !rest.starts_with("home."))
+    {
+        return Err(Error::Rejected("that name is not this controller's".into()));
+    }
+    let message = controller_name_message(name, controller);
+    if !entry.root.starts_with(WEBAUTHN_ROOT) {
+        let key = decode_public(&entry.root)?;
+        let sig = B64.decode(sig.trim()).map_err(|_| Error::Signature)?;
+        let sig = Signature::from_slice(&sig).map_err(|_| Error::Signature)?;
+        return key.verify(&message, &sig).map_err(|_| Error::Signature);
+    }
+    let (id, digest) = root_parts(&entry.root)
+        .ok_or_else(|| Error::Key("a passkey root must commit to its key".into()))?;
+    let passkey = entry
+        .passkeys
+        .iter()
+        .find(|p| p.id == id && cose_digest(&p.cred) == digest)
+        .ok_or_else(|| Error::Key("the root's passkey is not in the entry".into()))?;
+    let a: Assertion =
+        serde_json::from_slice(&B64.decode(sig.trim()).map_err(|_| Error::Signature)?)
+            .map_err(|_| Error::Signature)?;
+    assertion_over(passkey, &a, &sha2::Sha256::digest(&message))?;
+    let client = {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64_URL;
+        B64_URL
+            .decode(&a.client_data_json)
+            .map_err(|_| Error::Signature)?
+    };
+    let c: serde_json::Value = serde_json::from_slice(&client).map_err(|_| Error::Signature)?;
+    if !origins
+        .iter()
+        .any(|o| c["origin"].as_str() == Some(o.as_str()))
+    {
+        return Err(Error::Signature);
+    }
+    Ok(())
+}
+
 /// Is the entry signed by the root it names? True of every valid entry.
 pub fn verify(signed: &SignedEntry) -> Result<()> {
     if signed.entry.root.starts_with(WEBAUTHN_ROOT) {
@@ -1291,6 +1371,55 @@ mod tests {
             signature: signed.signature,
         };
         assert!(verify_leave(&lifted, &entry).is_err());
+    }
+
+    #[test]
+    fn a_device_root_says_a_controllers_name_and_nobody_else_does() {
+        let root = generate();
+        let entry = Entry {
+            name: "tom".into(),
+            root: encode_public(&root.verifying_key()),
+            recovery: String::new(),
+            recovered_from: vec![],
+            terms: None,
+            devices: vec![],
+            passkeys: vec![],
+            libraries: vec![],
+            grant: None,
+            version: 1,
+            updated: 1,
+        };
+        let ctl = encode_public(&generate().verifying_key());
+        let label = controller_label(&ctl).unwrap();
+        let name = format!("{label}.home.commonty.org");
+        let msg = controller_name_message(&name, &ctl);
+        assert!(msg.starts_with(format!("commonty controller name v1\0{name}\0").as_bytes()));
+        let sig = B64.encode(root.sign(&msg).to_bytes());
+        let o = ["https://home.commonty.org".to_string()];
+        controller_name_signed(&entry, &name, &ctl, &sig, &o).unwrap();
+        let other = B64.encode(generate().sign(&msg).to_bytes());
+        assert!(controller_name_signed(&entry, &name, &ctl, &other, &o).is_err());
+        assert!(controller_name_signed(&entry, "xyz.home.commonty.org", &ctl, &sig, &o).is_err());
+        // the root's signature on its own entry is no name
+        let entry_sig = sign(entry.clone(), &root).unwrap().signature;
+        assert!(controller_name_signed(&entry, &name, &ctl, &entry_sig, &o).is_err());
+        // another controller's label is never this one's, even on the root's
+        // word: a label is held by whoever holds its key
+        let theirs = encode_public(&generate().verifying_key());
+        let their_name = format!("{}.home.commonty.org", controller_label(&theirs).unwrap());
+        let squat = B64.encode(
+            root.sign(&controller_name_message(&their_name, &ctl))
+                .to_bytes(),
+        );
+        let e = controller_name_signed(&entry, &their_name, &ctl, &squat, &o).unwrap_err();
+        assert!(format!("{e}").contains("not this controller's"), "{e}");
+        assert_eq!(controller_label(&ctl).unwrap(), label);
+        assert!(
+            label.len() == 16
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b))
+        );
     }
 
     /// A passkey root is a credential id, and a credential id is public.

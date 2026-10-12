@@ -36,4 +36,22 @@
       privacy = "plaintext"; # every name the household's devices look up
     };
   };
+  tang = {
+    what = "opens a household's home controller's card at boot, by one blinded key operation, on the house network alone; never learns the card's key";
+    units = [ "tangd*" ];
+    perHouse = 1;
+    base = {
+      requires.place = "house";
+      uses = {
+        memory = "8M";
+        storage = "1M";
+        estimated = true;
+      };
+      network = {
+        outbound = "none";
+        inbound = "lan";
+      };
+      privacy = "none";
+    };
+  };
 }

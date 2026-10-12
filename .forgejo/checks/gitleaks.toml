@@ -10,6 +10,8 @@ paths = [
   '''^Cargo\.lock$''',
   '''^fleet/''',
   '''^nix/tests/''',
+  '''^app/src/testdata/''',
+  '''^servers/smarthome/door/src/testdata/''',
   '''^data/games/catalogue\.json$''',
   '''^nix/modules/library/libraries\.nix$''',
 ]

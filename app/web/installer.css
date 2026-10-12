@@ -1,0 +1,76 @@
+/* The home controller's installer, a window of its own: the steps down the
+   left, the step on the right, Back and Next under it. Everything else is
+   home.css's. */
+
+body.hi { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); font-family: var(--font); }
+.hi-frame { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+
+.hi-steps { padding: 28px 20px; border-right: 1px solid var(--line); background: var(--surface); }
+.hi-title { margin: 0 0 20px; font-weight: 600; font-size: 15px; color: var(--ink-2); }
+.hi-steps ol { list-style: none; margin: 0; padding: 0; }
+.hi-steps li { display: flex; align-items: center; gap: 10px; padding: 9px 0; font-size: 15px; color: var(--ink-2); }
+.hi-steps .n {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 50%;
+  font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.hi-steps li[aria-current="step"] { color: var(--ink); font-weight: 600; }
+.hi-steps li[aria-current="step"] .n { border-color: var(--pick); background: var(--pick); color: var(--accent-ink); }
+.hi-steps li.done .n { border-color: var(--ok); color: var(--ok); }
+
+.hi-main { display: flex; flex-direction: column; padding: 32px 36px 24px; max-width: 640px; }
+.hi-main > section { flex: 1; }
+.hi-main h1 { margin: 0 0 10px; font-size: 24px; }
+.hi-nav { display: flex; align-items: center; gap: 12px; padding-top: 20px; border-top: 1px solid var(--line); }
+.hi-nav button { margin: 0; }
+.hi-nav .grow { flex: 1; }
+
+.mono { font-family: var(--mono); }
+
+.hi-disks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.hi-disk { margin: 0; }
+.hi-disk label {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px;
+  margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); font-weight: 400; cursor: pointer;
+}
+.hi-disk input { width: 18px; height: 18px; margin: 0; }
+.hi-disk input:checked + span { font-weight: 600; }
+.hi-disk label:has(input:checked) { border-color: var(--pick); }
+.hi-disk .what { display: flex; flex-direction: column; gap: 2px; }
+.hi-disk .meta { font-size: 13px; color: var(--ink-2); font-family: var(--mono); }
+.hi-disk .size { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.hi-disk.skel { height: 58px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.hi-disk.skel span { display: block; height: 10px; margin-bottom: 10px; width: 50%; border-radius: 2px; background: var(--line-2); }
+.hi-disk.skel span.short { width: 30%; }
+.hi-empty { margin: 0; padding: 16px; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--ink-2); }
+
+.hi-warn, .hi-block {
+  margin: 16px 0 0; padding: 12px 14px; border-radius: var(--radius);
+  background: var(--attention-bg); color: var(--ink); font-size: 15px; line-height: 1.5;
+}
+.hi-block.bad { background: var(--broken-bg); }
+
+.hi-progress { margin: 8px 0 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.hi-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; }
+.hi-bar { height: 8px; margin: 14px 0 8px; border-radius: 2px; background: var(--line-2); overflow: hidden; }
+.hi-bar i { display: block; height: 100%; width: 0; background: var(--working); transition: width .25s linear; }
+.hi-numbers { display: flex; justify-content: space-between; margin: 0; font-family: var(--mono); font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+.hi-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0 0; }
+.hi-row button { margin: 0; }
+.hi-restore { margin-top: 24px; }
+.hi-restore h2 { margin: 0 0 6px; font-size: 17px; }
+.hi-disk input:disabled + span { color: var(--ink-2); }
+
+.hi-how { margin: 0 0 20px; padding-left: 20px; line-height: 1.6; }
+.hi-how li + li { margin-top: 6px; }
+
+@media (max-width: 600px) {
+  .hi-frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .hi-steps { min-width: 0; border-right: 0; border-bottom: 1px solid var(--line); padding: 16px; }
+  .hi-steps ol { display: flex; gap: 14px; overflow-x: auto; }
+  .hi-steps li { padding: 4px 0; white-space: nowrap; }
+  .hi-main { min-width: 0; padding: 20px 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .hi-bar i { transition: none; } }

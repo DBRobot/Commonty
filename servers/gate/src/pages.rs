@@ -419,6 +419,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "controller-name.js",
+        "servers/home/web/controller-name.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "docs.js",
         "servers/docs/web/docs.js",
         "text/javascript; charset=utf-8",
@@ -556,6 +561,11 @@ const PAGES: &[(&str, &str)] = &[
     ("use-app", "servers/home/web/pages/use-app.html"),
     // the assistant's conversation for this tab, across the site's names (guide-keep.js)
     ("guide-keep", "servers/home/web/pages/guide-keep.html"),
+    // a member naming their home controller with the passkey (controller.rs)
+    (
+        "controller-name",
+        "servers/home/web/pages/controller-name.html",
+    ),
     // not signed in: anyone, at <domain>/docs (docs.rs)
     ("docs", "servers/docs/web/pages/docs.html"),
     // not signed in: anyone, at the bare name's front (roles/gateway.nix)

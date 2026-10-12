@@ -63,6 +63,7 @@
         "adblock"
         "unlock"
         "leaving"
+        "home-controller"
       ];
       rust =
         let
@@ -95,9 +96,9 @@
                         "client"
                         "app"
                       ]
-                      || builtins.match "(servers/system|servers|client)/[^/]+" rel != null;
+                      || builtins.match "(servers/system|servers/smarthome|servers|client)/[^/]+" rel != null;
                     manifest =
-                      builtins.match "(servers/system|servers|client)/[^/]+/Cargo\\.toml" rel != null
+                      builtins.match "(servers/system|servers/smarthome|servers|client)/[^/]+/Cargo\\.toml" rel != null
                       || rel == "app/Cargo.toml";
                     # the app's pages, icons and tauri config sit beside its src
                     appFile = pkgs.lib.hasPrefix "app/" rel;
@@ -129,7 +130,7 @@
             pkgs.runCommand "src-${name}" { } ''
               cp -r ${filtered} $out
               chmod -R u+w $out
-              for m in $out/servers/* $out/servers/system/* $out/client/* $out/app; do
+              for m in $out/servers/* $out/servers/system/* $out/servers/smarthome/* $out/client/* $out/app; do
                 [ -f "$m/Cargo.toml" ] || continue
                 if [ ! -d "$m/src" ]; then
                   mkdir -p "$m/src"
@@ -236,10 +237,11 @@
                       "client"
                       "app"
                     ]
-                    || builtins.match "(servers/system|servers|client)/[^/]+" rel != null
+                    || builtins.match "(servers/system|servers/smarthome|servers|client)/[^/]+" rel != null
                   )
                 )
-                || builtins.match "(servers/system|servers|client)/[^/]+/Cargo\\.toml" rel != null;
+                ||
+                  builtins.match "(servers/system|servers/smarthome|servers|client)/[^/]+/Cargo\\.toml" rel != null;
             };
           };
           # The same, under the name of the source a crate builds from: a
@@ -251,15 +253,28 @@
           # dependency moving rebuilds that crate and what uses it, where
           # crane rebuilt every dependency at once. After changing
           # Cargo.lock: nix run nixpkgs#crate2nix -- generate
-          cargoNix = pkgs.callPackage ./Cargo.nix {
-            inherit buildRustCrateForPkgs;
-            defaultCrateOverrides = crateOverrides;
+          cargoNix = cargoNixFor pkgs;
+          cargoNixFor =
+            p:
+            p.callPackage ./Cargo.nix {
+              inherit buildRustCrateForPkgs;
+              defaultCrateOverrides = p.defaultCrateOverrides // ourOverrides;
+            };
+          # The home controller's programs (docs/dev/home-controller.md), built
+          # here for the Pi: cross-compiled, so CI's x86 runners build them at
+          # native speed and every other path of its system comes from
+          # cache.nixos.org
+          pkgsPi = import nixpkgs {
+            localSystem = system;
+            crossSystem = "aarch64-linux";
           };
+          perCratePi = n: (cargoNixFor pkgsPi).workspaceMembers.${n}.build;
           # cargo's release default: sixteen pieces of each crate compiled
           # at once. buildRustCrate's is one, which made the first build of
           # every crate - all ~800 of them - several times slower.
           buildRustCrateForPkgs = pkgs: pkgs.buildRustCrate.override { defaultCodegenUnits = 16; };
-          crateOverrides = pkgs.defaultCrateOverrides // {
+          crateOverrides = pkgs.defaultCrateOverrides // ourOverrides;
+          ourOverrides = {
             # askama finds the Photos pages' templates beside the gate's
             verify = _: {
               postUnpack = "mkdir -p $NIX_BUILD_TOP/photos && cp -r ${./servers/photos/templates} $NIX_BUILD_TOP/photos/templates";
@@ -398,7 +413,8 @@
                 + pkgs.lib.optionalString (builtins.elem n [
                   "verify"
                   "dd"
-                ]) " VERIFY_PAGES_DIR=${pages}";
+                ]) " VERIFY_PAGES_DIR=${pages}"
+                + pkgs.lib.optionalString (n == "smarthome-door") " DOOR_PAGES_DIR=${pages}";
               testPostRun = "";
             }).test;
           # every crate but the app, whose tests are its own check (tests-app)
@@ -411,7 +427,12 @@
               "client/gitremote"
             ];
             web = crateSrc "web" [ "client/web" ];
-            app = crateSrc "app" [ "app" ];
+            # and the card writer it carries (dd-hub-writer, the home
+            # controller's installer), built beside it
+            app = crateSrc "app" [
+              "app"
+              "client/hubwriter"
+            ];
           };
           # the app's network engine: Tailscale's tsnet behind four C calls
           # (app/net), a static archive the Rust core links. The one Go in
@@ -550,9 +571,19 @@
           };
           # the app: its window, and its network engine (app/build.rs links
           # it from here)
-          appCommon = common // {
-            buildInputs = appLibs;
-            COMMONTY_NET_LIB_DIR = "${appNet}/lib";
+          appCommon =
+            common
+            // {
+              buildInputs = appLibs;
+              COMMONTY_NET_LIB_DIR = "${appNet}/lib";
+            }
+            // appCards;
+          # what the installer checks the home controller's card with: the
+          # release key and where the releases are (app/build.rs reads them
+          # from the tree, which a crate's source here does not hold)
+          appCards = {
+            COMMONTY_RELEASE_KEY = pkgs.lib.removeSuffix "\n" (builtins.readFile ./fleet/release.pub);
+            COMMONTY_REPO = (pkgs.lib.importJSON ./fleet/policy.json).repo;
           };
           # and one dependency build per binary, with that binary's own
           # `-p`: cargo unifies features per package set, so a cache built
@@ -776,6 +807,8 @@
           # one file, one viewer, in memory: the compute side of the
           # encrypted libraries (modules/library/transcode.nix)
           transcode = perCrate "transcode";
+          # the home controller's door, here for the vm test (the Pi's is rust.pi.door)
+          door = perCrate "smarthome-door";
           # The app: the same crates as dd behind a window (app/). Wrapped
           # so the webview finds its schemas and gio modules; the dmabuf
           # renderer is off because on nvidia it draws a blank window.
@@ -887,6 +920,22 @@
                   netAndroid = appNetAndroid;
                 }
               );
+              # the home controller's card (docs/dev/home-controller.md): the
+              # seed's image, which the app's installer writes. aarch64, so
+              # it goes to the runners, which emulate it
+              home-controller =
+                need
+                  {
+                    ramGB = 4;
+                    aarch64 = true;
+                  }
+                  (
+                    pkgs.runCommand "commonty-home-controller-${version}" { } ''
+                      mkdir -p $out
+                      cp ${self.nixosConfigurations.home-controller-seed.config.system.build.sdImage}/sd-image/*.img.zst \
+                        $out/commonty-home-controller-${version}.img.zst
+                    ''
+                  );
               # the proof each starts where a stranger would run it
               tests.linux = import ./nix/app-release/test-linux.nix { inherit pkgs linux; };
               tests.windows = import ./nix/app-release/test-windows.nix {
@@ -908,6 +957,19 @@
           };
           # and for Android, one .so per abi
           net-android = appNetAndroid;
+          # the home controller's own programs, for aarch64-linux
+          pi = {
+            agent = perCratePi "release";
+            door = perCratePi "smarthome-door";
+            netbridge = pkgsPi.buildGoModule {
+              pname = "commonty-net-bridge";
+              version = "0.1.0";
+              src = ./app/net;
+              inherit (appNet) vendorHash;
+              subPackages = [ "cmd/netbridge" ];
+              env.CGO_ENABLED = "0";
+            };
+          };
           # the Android toolchain, for the dev shell below
           android-sdk = androidSdk;
           # Our Rust in the browser: the ente account for a person whose key
@@ -954,6 +1016,30 @@
           # uploads as dns.<domain>. Each box's TPM-held key, and the names
           # its own nginx serves over https - all it may have a challenge for;
           # and the fleet's names as the gateway's config has them
+          # the Workers' checks: the boxes' own Rust (client/mail) in wasm,
+          # for the mail Worker and the DNS Worker (home controllers' names)
+          mailWasm =
+            let
+              mailCommon = wasmCommon // {
+                src = crateSrc "mail" [ "client/mail" ];
+                cargoExtraArgs = "-p dd-mail";
+              };
+            in
+            craneWasm.buildPackage (
+              mailCommon
+              // {
+                pname = "dd-mail";
+                version = "0.1.0";
+                cargoArtifacts = craneWasm.buildDepsOnly (
+                  mailCommon
+                  // {
+                    pname = "dd-mail-deps";
+                    dummySrc = depsSrc;
+                    version = "0.1.0";
+                  }
+                );
+              }
+            );
           dns-worker =
             let
               boxList = builtins.fromJSON (builtins.readFile ./fleet/boxes.json);
@@ -988,40 +1074,35 @@
                 ) withKeys;
               };
             in
-            pkgs.runCommand "dd-dns-worker" { } ''
-              mkdir -p $out
-              cp ${./servers/system/dns/worker.js} $out/worker.js
-              cp ${pkgs.writeText "fleet.js" ''
-                export const BOXES = ${builtins.toJSON fleet.BOXES};
-                export const NAMES = ${builtins.toJSON fleet.NAMES};
-                export const RECORDS = ${builtins.toJSON fleet.RECORDS};
-              ''} $out/fleet.js
-            '';
+            pkgs.runCommand "dd-dns-worker"
+              {
+                nativeBuildInputs = [
+                  pkgs.wasm-bindgen-cli
+                  pkgs.jq
+                ];
+              }
+              ''
+                mkdir -p $out
+                wasm-bindgen --target web --no-typescript --out-dir $out ${rust.mailWasm}/lib/dd_mail.wasm
+                cp ${./servers/system/dns/worker.js} $out/worker.js
+                cp ${./servers/system/dns/controller.js} $out/controller.js
+                {
+                  cat ${pkgs.writeText "fleet.js" ''
+                    export const BOXES = ${builtins.toJSON fleet.BOXES};
+                    export const NAMES = ${builtins.toJSON fleet.NAMES};
+                    export const RECORDS = ${builtins.toJSON fleet.RECORDS};
+                  ''}
+                  # who may name a home controller: the release's members
+                  echo "export const MEMBERS = $(jq -c . ${./fleet/members.json} | jq -R .);"
+                  echo "export const RELEASE = $(tr -d '[:space:]' < ${./fleet/release.pub} | jq -R .);"
+                } > $out/fleet.js
+              '';
           # The mail Worker (client/mail): what `dd release publish` uploads
           # to Cloudflare, file for file, and what the boxes compare the
           # deployed Worker with. The checks are the boxes' own Rust in wasm;
           # the member list and release key are this release's.
           mail-worker =
             let
-              mailCommon = wasmCommon // {
-                src = crateSrc "mail" [ "client/mail" ];
-                cargoExtraArgs = "-p dd-mail";
-              };
-              mailWasm = craneWasm.buildPackage (
-                mailCommon
-                // {
-                  pname = "dd-mail";
-                  version = "0.1.0";
-                  cargoArtifacts = craneWasm.buildDepsOnly (
-                    mailCommon
-                    // {
-                      pname = "dd-mail-deps";
-                      dummySrc = depsSrc;
-                      version = "0.1.0";
-                    }
-                  );
-                }
-              );
               # fleet/policy.json mailAliases: <alias>@<domain> to a member.
               # An alias is lowercase a-z, 0-9 and -, never a person's name
               policy = nixpkgs.lib.importJSON ./fleet/policy.json;
@@ -1047,7 +1128,7 @@
               }
               ''
                 mkdir -p $out
-                wasm-bindgen --target web --no-typescript --out-dir $out ${mailWasm}/lib/dd_mail.wasm
+                wasm-bindgen --target web --no-typescript --out-dir $out ${rust.mailWasm}/lib/dd_mail.wasm
                 cp ${./client/mail/worker}/* $out/
                 cp ${./servers/web-shared/home.css} $out/home.css
                 cp ${./servers/web-shared/bar.css} $out/bar.css
@@ -1241,6 +1322,7 @@
           "net-check"
           "android-sdk"
           "appRelease"
+          "pi"
         ]
         // {
           # `dd secret run` falls back to this when sops is not on PATH. The
@@ -1254,6 +1336,10 @@
             text = ''exec ${pkgs.sops}/bin/sops "$@"'';
           };
         };
+
+      # what the home controller runs of ours, cross-built on x86 (rust.pi):
+      # its modules take them as self.packages.aarch64-linux, as a box's do
+      packages.aarch64-linux = rust.pi;
 
       # the downloads for a version: `(appRelease "1.2.3").linux`
       legacyPackages.${system} = {
@@ -1559,6 +1645,10 @@
               };
             };
         in
-        lib.mapAttrs mkBox boxes;
+        lib.mapAttrs mkBox boxes
+        // import ./nix/controller {
+          inherit self nixpkgs;
+          tang = lib.importJSON ./fleet/tang.json;
+        };
     };
 }

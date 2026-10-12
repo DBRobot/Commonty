@@ -1370,10 +1370,15 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "gtk",
+ "hmac 0.12.1",
+ "hyper",
+ "hyper-util",
  "identity",
  "library",
  "media",
+ "release",
  "reqwest 0.12.28",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1383,6 +1388,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
 ]
 
@@ -3485,6 +3491,21 @@ name = "httpdate"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
+name = "hubwriter"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "libc",
+ "plist",
+ "ruzstd",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "hybrid-array"
@@ -6834,6 +6855,35 @@ name = "smallvec"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
+
+[[package]]
+name = "smarthome-door"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "clap",
+ "crypto_secretbox",
+ "ed25519-dalek",
+ "futures-util",
+ "getrandom 0.3.4",
+ "hmac 0.12.1",
+ "hyper",
+ "hyper-util",
+ "identity",
+ "library",
+ "p256",
+ "reqwest 0.12.28",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-rustls",
+ "webauthn-rs-core",
+]
 
 [[package]]
 name = "socket2"

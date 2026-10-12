@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"the app's own pages may call its own commands","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"the app's own pages may call its own commands","local":true,"windows":["main"],"permissions":["core:default"]},"installer":{"identifier":"installer","description":"the home controller's installer, a window of its own: it calls none of the app's commands, only the launch-secret routes (installer.rs)","local":true,"windows":["installer"],"permissions":[]}}

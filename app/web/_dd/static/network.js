@@ -1,14 +1,16 @@
 // Network, a tab of Settings: the house's boxes and how each is connected,
-// the Wi-Fi they fall back to, and ad blocking at home. A Wi-Fi change is
+// the Wi-Fi they fall back to, ad blocking at home, and the household's
+// home controller (docs/dev/home-controller.md). A Wi-Fi change is
 // signed by your passkey here and tried on every box, each of which keeps
 // its old details if the new ones do not work (servers/gate/src/home.rs,
 // nix/modules/box/wifi-apply.sh).
 
-import { me, pageConfig, entryOf } from './shell.js';
+import { me, pageConfig, entryOf, inApp, appFetch, keptControllers, keepControllers, openSmartHome } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 const BOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><circle cx="7" cy="7.5" r=".9" fill="currentColor"/><circle cx="7" cy="16.5" r=".9" fill="currentColor"/></svg>';
 const LABEL = new TextEncoder().encode('commonty wifi v1\0');
+const HOME = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 9.5 10 3.5l7 6"/><path d="M5 8v8.5h10V8"/><circle cx="10" cy="12" r="1.6"/></svg>';
 
 const b64u = (a) => btoa(String.fromCharCode(...new Uint8Array(a))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
@@ -212,6 +214,203 @@ async function ads() {
   };
 }
 
+// The home controller. Its list is the member's own, locked with their
+// library key (the app opens it with the device's keys, a browser with the
+// passkey when asked); what it says of itself comes from its door, which
+// only the app can ask, signed in and held to the controller's key.
+function fact(dl, term, ...value) {
+  dl.append(el('dt', '', term));
+  const dd = el('dd');
+  dd.append(...value);
+  dl.append(dd);
+  return dd;
+}
+
+function controllerRow(c) {
+  const li = el('li', 'hc-item');
+  const ico = el('span', 'dv-ico');
+  ico.innerHTML = HOME;
+  const text = el('div');
+  text.append(el('div', 'dv-name', c.name));
+  const dl = el('dl', 'hc-facts');
+  const word = el('span', 'state-word');
+  word.dataset.state = 'working';
+  word.textContent = 'Asking';
+  // only the app can ask the controller itself
+  fact(dl, 'Status', inApp ? word : 'Shown in the Commonty app');
+  const rel = fact(dl, 'Release', '—');
+  rel.className = 'mono';
+  const seg = el('span', 'hc-updates');
+  for (const [k, words] of [['auto', 'Automatic'], ['hold', 'Hold']]) {
+    const b = el('button', '', words);
+    b.type = 'button';
+    b.dataset.v = k;
+    b.disabled = true;
+    b.setAttribute('aria-pressed', String(k === 'auto'));
+    seg.append(b);
+  }
+  const upd = fact(dl, 'Updates', seg);
+  const people = fact(dl, 'Who can open it', inApp ? el('span', 'hc-skel') : '—');
+  text.append(dl);
+  const open = el('button', 'quiet', 'Open smart home');
+  open.type = 'button';
+  open.onclick = () => openSmartHome(c.name).catch((e) => sayHc(String(e.message || e)));
+  const acts = el('div', 'dv-actions');
+  acts.append(open);
+  li.append(ico, text, acts);
+  if (!inApp) {
+    upd.append(el('small', 'hc-note', 'Its own pages say more.'));
+    return li;
+  }
+  appFetch('/_dd/app/smarthome/status?name=' + encodeURIComponent(c.name))
+    .then((r) => r.json())
+    .then((s) => {
+      if (!s.reachable) {
+        word.dataset.state = 'broken';
+        word.textContent = 'Not answering';
+        people.replaceChildren('—');
+        if (s.error) upd.parentNode.append(el('dt', '', 'Why'), el('dd', '', s.error));
+        return;
+      }
+      word.dataset.state = 'ok';
+      word.textContent = 'Online';
+      const st = s.status || {};
+      rel.textContent = st.release || '—';
+      if (st.backup) rel.after(...lastBackup(st.backup));
+      const pressed = (v) => {
+        for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.v === (v === 'hold' ? 'hold' : 'auto')));
+      };
+      pressed(st.updates);
+      if (s.status) {
+        for (const b of seg.children) {
+          b.disabled = false;
+          b.onclick = () => {
+            if (b.getAttribute('aria-pressed') === 'true') return;
+            const hold = b.dataset.v === 'hold';
+            appFetch(`/_dd/app/smarthome/updates?name=${encodeURIComponent(c.name)}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ hold }),
+            })
+              .then((r) => (r.ok ? r.json() : r.text().then((t) => { throw new Error(t || `${r.status}`); })))
+              .then((v) => { pressed(v.updates); rel.textContent = v.release || rel.textContent; sayHc(hold ? 'Updates held.' : 'Updates are automatic again.'); })
+              .catch((e) => sayHc(String(e.message || e)));
+          };
+        }
+      }
+      // holding updates is the door's to do; until a door answers for it
+      // the choice is shown, and not offered
+      if (!s.status) upd.append(el('small', 'hc-note', 'Holding updates is not available on this controller yet.'));
+      const p = s.people;
+      if (p?.people) {
+        const names = p.people.map((x) => x.name);
+        people.replaceChildren(names.length ? names.join(', ') : '—');
+        if (p.asked?.length) people.append(el('small', 'hc-note', `Asking to come in: ${p.asked.map((x) => x.name).join(', ')}`));
+      } else {
+        people.replaceChildren(p?.me ? 'You are not in yet' : '—');
+      }
+    })
+    .catch(() => {
+      word.dataset.state = 'broken';
+      word.textContent = 'Not answering';
+      people.replaceChildren('—');
+    });
+  return li;
+}
+
+// the door's last backup, {at, ok, error?}: when, and whether it went up
+function lastBackup(b) {
+  const when = new Date(typeof b.at === 'number' ? b.at * 1000 : b.at);
+  const word = el('span', 'state-word');
+  word.dataset.state = b.ok ? 'ok' : 'broken';
+  word.textContent = b.ok ? 'Saved' : 'Failed';
+  const dd = el('dd');
+  dd.append(word, ' ', Number.isNaN(when.getTime()) ? '—' : when.toLocaleString());
+  if (!b.ok && b.error) dd.append(el('small', 'hc-note', b.error));
+  return [el('dt', '', 'Last backup'), dd];
+}
+
+function sayHc(text) {
+  $('hc-hint').textContent = text;
+  $('hc-hint').hidden = !text;
+}
+
+function drawControllers(list) {
+  $('hc-list').replaceChildren(...(list || []).map(controllerRow));
+  if (list && !list.length) {
+    sayHc(inApp && !/Android/.test(navigator.userAgent)
+      ? 'A home controller is a Raspberry Pi that runs your smart home in your house. Set one up from here; you will need a Raspberry Pi, a card for it and a network cable.'
+      : 'A home controller is a Raspberry Pi that runs your smart home in your house. Set one up from the Commonty app on a computer.');
+  } else if (list) {
+    sayHc('');
+  }
+}
+
+// in a browser the list opens with the passkey, once asked
+async function showControllers(who) {
+  $('hc-show').disabled = true;
+  try {
+    const [{ unlock }, web] = await Promise.all([import('./library.js'), import('/_dd/web/dd_web.js')]);
+    await web.default();
+    const u = await unlock(who.user);
+    if (!u.ok) throw new Error(u.none ? 'your home controllers are kept locked with your library, and this account has none yet' : 'this browser cannot open your library yet');
+    const r = await fetch('/_dd/controllers');
+    let list = [];
+    if (r.ok) {
+      try {
+        list = JSON.parse(new TextDecoder().decode(web.file_open(u.ok.key, u.ok.id, new Uint8Array(await r.arrayBuffer()))));
+      } catch {
+        throw new Error('your home controllers could not be opened');
+      }
+    } else if (r.status !== 404) throw new Error(`the box said ${r.status}`);
+    keepControllers(who.user, list);
+    drawControllers(list);
+    $('hc-show').hidden = true;
+  } catch (e) {
+    sayHc(e.name === 'NotAllowedError' ? 'Your passkey was not used.' : String(e.message || e));
+  } finally {
+    $('hc-show').disabled = false;
+  }
+}
+
+async function controllers() {
+  const who = await me();
+  const kept = keptControllers(who.user);
+  if (kept) drawControllers(kept);
+  else {
+    // the shape of a row until the list is open
+    const li = el('li', 'hc-item');
+    const t = el('div');
+    t.append(el('span', 'hc-skel'), el('span', 'hc-skel'));
+    li.append(el('span', 'dv-ico'), t);
+    $('hc-list').replaceChildren(li);
+  }
+  if (inApp && !/Android/.test(navigator.userAgent)) {
+    $('hc-setup').hidden = false;
+    $('hc-setup').onclick = async () => {
+      const r = await appFetch('/_dd/app/installer/open', { method: 'POST' });
+      if (!r.ok) sayHc((await r.text()) || `the app said ${r.status}`);
+    };
+  }
+  if (!inApp) {
+    if (!kept) $('hc-list').replaceChildren();
+    $('hc-show').hidden = !!kept;
+    $('hc-show').onclick = () => showControllers(who);
+    if (!kept) sayHc('Your home controllers are kept locked with your library key, so no box knows of them. Show them with your passkey.');
+    return;
+  }
+  try {
+    const r = await appFetch('/_dd/app/controllers');
+    if (!r.ok) throw new Error((await r.text()) || `the app said ${r.status}`);
+    const fresh = await r.json();
+    keepControllers(who.user, fresh);
+    if (JSON.stringify(fresh) !== JSON.stringify(kept)) drawControllers(fresh);
+  } catch (e) {
+    if (!kept) $('hc-list').replaceChildren();
+    sayHc(String(e.message || e));
+  }
+}
+
 let started = false;
 
 /// the Network tab, the first time it is shown
@@ -238,6 +437,7 @@ export async function start() {
     $('nw-unlock').href = `https://mail.${domain}/boxes?name=${encodeURIComponent(who.user)}`;
   }).catch(() => {});
   ads();
+  controllers().catch((e) => sayHc(String(e.message || e)));
   try {
     await load();
   } catch (e) {

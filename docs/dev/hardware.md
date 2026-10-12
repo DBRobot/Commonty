@@ -126,6 +126,8 @@ observe   SMART-readable disks (each box's           /vault/backups (dumps),    
           reported disks)                            /var/lib/thanos-*                                                  garage), the gate, gateway (ACME)
 adblock   -                                          -                               :53 tcp/udp on every interface;    the gate; the box must be in the
                                                                                      the house LAN address; DoT out     house whose router hands it out
+tang      -                                          /var/lib/tang (its keys, a few  :7654 from the house network       adblock (the house's box: the
+                                                     hundred bytes)                  alone, never the Commonty one      controllers are wired to it)
 net       /dev/net/tun                               -                               udp 41642 all ifs; headscale out   -
 ```
 

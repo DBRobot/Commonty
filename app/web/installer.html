@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up a home controller</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/app/installer.css">
+</head>
+<body class="hi">
+  <div class="hi-frame">
+    <nav class="hi-steps" aria-label="Steps">
+      <p class="hi-title">Home controller</p>
+      <ol id="hi-steps">
+        <li data-step="choose" aria-current="step"><span class="n">1</span>Choose a card</li>
+        <li data-step="write"><span class="n">2</span>Write</li>
+        <li data-step="start"><span class="n">3</span>Start the Pi</li>
+        <li data-step="pair"><span class="n">4</span>Pair</li>
+        <li data-step="done"><span class="n">5</span>Done</li>
+      </ol>
+    </nav>
+
+    <main class="hi-main">
+      <section data-pane="choose">
+        <h1>Choose a card</h1>
+        <p class="lead" id="hi-choose-lead">The card goes into the Raspberry Pi. Put it in this computer's card reader, or a USB reader, and pick it here.</p>
+        <p class="hi-block" id="hi-root" hidden></p>
+        <ul class="hi-disks" id="hi-disks" aria-live="polite">
+          <li class="hi-disk skel"><span></span><span class="short"></span></li>
+          <li class="hi-disk skel"><span></span><span class="short"></span></li>
+        </ul>
+        <p class="hi-warn" id="hi-warn" hidden></p>
+        <div class="hi-restore" id="hi-restore" hidden>
+          <h2>Start from a backup</h2>
+          <p class="hint">Your home controllers' backups are locked so that only your devices can open them. Pick one to put its devices, automations and people back on the new card.</p>
+          <ul class="hi-disks" id="hi-backups"></ul>
+        </div>
+        <p class="hi-row">
+          <button type="button" class="quiet" id="hi-rescan">Look again</button>
+          <button type="button" class="quiet" id="hi-have">My card was written another way</button>
+        </p>
+      </section>
+
+      <section data-pane="write" hidden>
+        <h1>Write the card</h1>
+        <p class="lead" id="hi-write-lead">The card is checked against this release's signature before anything is written.</p>
+        <div class="hi-progress">
+          <div class="hi-progress-head">
+            <span id="hi-phase">Getting the release</span>
+            <span class="state-word" data-state="working" id="hi-state">Working</span>
+          </div>
+          <div class="hi-bar" role="progressbar" aria-labelledby="hi-phase" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="hi-bar"><i id="hi-fill"></i></div>
+          <p class="hi-numbers"><span id="hi-done">—</span><span id="hi-eta">—</span></p>
+        </div>
+        <p class="hi-block bad" id="hi-write-error" role="alert" hidden></p>
+        <button type="button" class="quiet" id="hi-key-again" hidden>Try again</button>
+      </section>
+
+      <section data-pane="start" hidden>
+        <h1>Start the Pi</h1>
+        <ol class="hi-how">
+          <li>Take the card out of this computer and put it (back) in the Raspberry Pi.</li>
+          <li>Connect the Pi to your router with a network cable. It has to be wired: it unlocks its card from your home's box before it starts.</li>
+          <li>Plug in the Pi's power.</li>
+        </ol>
+        <div class="hi-progress">
+          <div class="hi-progress-head">
+            <span id="hi-find-words">Looking for it on your home network</span>
+            <span class="state-word" data-state="working" id="hi-find-state">Looking</span>
+          </div>
+        </div>
+        <p class="hint" id="hi-find-help" hidden>The first start takes a few minutes: it sets up its locked card and starts again. If it is not found after ten minutes, check that this computer is on the same home network as the router the Pi is plugged into, and that the Pi's lights show it has power.</p>
+      </section>
+
+      <section data-pane="pair" hidden>
+        <h1>Pair it with your account</h1>
+        <p class="lead">Your home controller learns who you are, gets its own name and joins your Commonty network. Only people you let in can open it; no box can.</p>
+        <div class="hi-progress">
+          <div class="hi-progress-head">
+            <span id="hi-pair-words">Ready to pair</span>
+            <span class="state-word" data-state="off" id="hi-pair-state">Not yet</span>
+          </div>
+          <div id="hi-pair-moving" hidden>
+            <div class="hi-bar" role="progressbar" aria-labelledby="hi-pair-words" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="hi-pair-bar"><i id="hi-pair-fill"></i></div>
+            <p class="hi-numbers"><span id="hi-pair-done">—</span><span id="hi-pair-eta">—</span></p>
+          </div>
+        </div>
+        <p class="hi-block" id="hi-passkey" role="status" hidden>Your browser has opened a page that asks for your passkey. Answer it there; this window carries on by itself once it has.</p>
+        <p class="hi-block bad" id="hi-pair-error" role="alert" hidden></p>
+      </section>
+
+      <section data-pane="done" hidden>
+        <h1>Your home controller is set up</h1>
+        <p class="lead">It is at <span class="mono" id="hi-name">—</span>. Add your devices to it in Smart home.</p>
+        <button type="button" id="hi-open">Open Smart home</button>
+        <p class="hi-block bad" id="hi-open-error" role="alert" hidden></p>
+      </section>
+
+      <footer class="hi-nav">
+        <button type="button" class="quiet" id="hi-back">Back</button>
+        <span class="grow"></span>
+        <button type="button" id="hi-next" disabled>Next</button>
+      </footer>
+    </main>
+  </div>
+  <script type="module" src="/_dd/app/installer.js"></script>
+</body>
+</html>
