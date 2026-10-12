@@ -14,6 +14,8 @@
 set -euo pipefail
 say() { echo "== $*"; }
 no() { echo "not installing: $*" >&2; exit 1; }
+# a step that fails says which, never a silent stop
+trap 'echo "failed: line $LINENO: $BASH_COMMAND" >&2' ERR
 
 [ -e /dev/tpmrm0 ] || no "this machine has no TPM 2.0: a box's keys live in its TPM"
 [ -d /sys/firmware/efi ] || no "this machine did not boot by UEFI"
