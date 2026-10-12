@@ -137,7 +137,7 @@ in
         dataset = "${config.dd.box.bulkPool}/enc/store";
         dataDir = (box.store or { }).dir or "/srv/store";
         peers = lib.genAttrs (lib.remove config.networking.hostName stores) (n: {
-          url = "https://store.${n}.${config.dd.domain}";
+          url = "https://store.${n}.${config.dd.domain}:${toString config.dd.store.publicPort}";
           recipient = secretsKey n;
         });
       };

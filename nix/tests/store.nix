@@ -48,7 +48,13 @@ let
       services.nginx.enable = true;
       services.nginx.virtualHosts."store.${name}.test.invalid" = {
         useACMEHost = lib.mkForce null;
-        forceSSL = lib.mkForce false;
+        onlySSL = lib.mkForce false;
+        listen = lib.mkForce [
+          {
+            addr = "0.0.0.0";
+            port = 80;
+          }
+        ];
       };
       networking.extraHosts = ''
         192.168.1.1 store.a.test.invalid

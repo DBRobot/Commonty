@@ -54,17 +54,21 @@ let
           src = [ "tag:box" ];
           dst = map (p: "tag:box:${p}") boxPorts;
         }
-        # a joined box and the boxes reach each other's stores, at
-        # store.<box>.<domain> on 443, and nothing more
+        # the boxes' stores, at store.<box>.<domain> on a port of their
+        # own: all a box that joined on its own key reaches, and all of it
+        # another box reaches
         {
           action = "accept";
           src = [ "tag:box" ];
-          dst = [ "tag:joined:443" ];
+          dst = [
+            "tag:box:3443"
+            "tag:joined:3443"
+          ];
         }
         {
           action = "accept";
           src = [ "tag:joined" ];
-          dst = [ "tag:box:443" ];
+          dst = [ "tag:box:3443" ];
         }
       ]
       ++ lib.mapAttrsToList (addr: owner: {

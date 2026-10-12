@@ -176,7 +176,7 @@ let
           # state has it: its store is at its name
           curl -fsS --max-time 10 ${cfg.control}/state \
             | jq -e --arg n "$1" '.joined[$n] // empty' >/dev/null \
-            && echo "https://store.$1.${base}"
+            && echo "https://store.$1.${base}:${toString cfg.publicPort}"
           ;;
         *) return 1 ;;
         esac
@@ -341,6 +341,11 @@ in
       );
       default = { };
       description = "buckets copied hourly from the old shared storage pool (dd.box.s3) into this store, until failover reads them here: copied, never deleted from either";
+    };
+    publicPort = lib.mkOption {
+      type = lib.types.port;
+      default = 3443;
+      description = "where other boxes reach this store, at store.<box>.<domain>, and the only port a box that joined on its own key reaches";
     };
     control = lib.mkOption {
       type = lib.types.str;
@@ -688,9 +693,24 @@ in
 
     # other boxes reach this store, and their keys to it, by name on the
     # fleet's network
+    # on a port of its own, which is all a box that joined on its own key
+    # may reach of another box on the fleet's network (net/headscale.nix)
+    networking.firewall.interfaces.commonty0.allowedTCPPorts = [ cfg.publicPort ];
     services.nginx.virtualHosts."store.${box}.${base}" = {
       useACMEHost = base;
-      forceSSL = true;
+      onlySSL = true;
+      listen = [
+        {
+          addr = "0.0.0.0";
+          port = cfg.publicPort;
+          ssl = true;
+        }
+        {
+          addr = "[::]";
+          port = cfg.publicPort;
+          ssl = true;
+        }
+      ];
       locations."/".proxyPass = "http://127.0.0.1:${toString cfg.port}";
       # s3 signs its requests; no cookie of anyone's goes to the store
       locations."/".ddCookie = "";
