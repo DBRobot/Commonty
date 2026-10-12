@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up a box</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/app/installer.css">
+</head>
+<body class="hi">
+  <div class="hi-frame">
+    <nav class="hi-steps" aria-label="Steps">
+      <p class="hi-title">New box</p>
+      <ol id="hi-steps">
+        <li data-step="choose" aria-current="step"><span class="n">1</span>Choose a drive</li>
+        <li data-step="wifi"><span class="n">2</span>Wi-Fi</li>
+        <li data-step="write"><span class="n">3</span>Write</li>
+        <li data-step="start"><span class="n">4</span>Start the box</li>
+        <li data-step="done"><span class="n">5</span>Done</li>
+      </ol>
+    </nav>
+
+    <main class="hi-main">
+      <section data-pane="choose">
+        <h1>Choose a USB drive</h1>
+        <p class="lead">The new box starts from this drive and sets itself up. Put a USB drive of 8 GB or more in this computer, and pick it here.</p>
+        <ul class="hi-disks" id="hi-disks" aria-live="polite">
+          <li class="hi-disk skel"><span></span><span class="short"></span></li>
+          <li class="hi-disk skel"><span></span><span class="short"></span></li>
+        </ul>
+        <p class="hi-warn" id="hi-warn" hidden></p>
+        <p class="hi-row"><button type="button" class="quiet" id="hi-rescan">Look again</button></p>
+      </section>
+
+      <section data-pane="wifi" hidden>
+        <h1>Wi-Fi for the box</h1>
+        <p class="lead">A box plugged into your router by cable needs none. Otherwise it joins this network, and keeps the password locked to its own chip.</p>
+        <ul class="hi-disks" id="hi-wifi">
+          <li class="hi-disk" id="hi-wifi-this" hidden><label><input type="radio" name="wifi" value="this"><span class="what"><span id="hi-wifi-this-name">This computer's Wi-Fi</span><span class="meta" id="hi-wifi-this-meta"></span></span><span></span></label></li>
+          <li class="hi-disk"><label><input type="radio" name="wifi" value="other"><span class="what"><span>Another network</span><span class="meta">type its name and password</span></span><span></span></label></li>
+          <li class="hi-disk"><label><input type="radio" name="wifi" value="none"><span class="what"><span>No Wi-Fi</span><span class="meta">the box will be plugged in by cable</span></span><span></span></label></li>
+        </ul>
+        <form class="hi-form" id="hi-wifi-form" hidden>
+          <label for="hi-ssid">Network name</label>
+          <input id="hi-ssid" autocomplete="off" spellcheck="false" maxlength="32">
+          <label for="hi-psk">Password</label>
+          <input id="hi-psk" type="password" autocomplete="off" minlength="8" maxlength="63">
+        </form>
+        <p class="hi-block" id="hi-wifi-note" hidden></p>
+      </section>
+
+      <section data-pane="write" hidden>
+        <h1>Write the drive</h1>
+        <p class="lead">The installer is checked against this release's signature before anything is written. Then the drive gets a one-use pass for your account, good for a week.</p>
+        <div class="hi-progress">
+          <div class="hi-progress-head">
+            <span id="hi-phase">Getting the release</span>
+            <span class="state-word" data-state="working" id="hi-state">Working</span>
+          </div>
+          <div class="hi-bar" role="progressbar" aria-labelledby="hi-phase" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="hi-bar"><i id="hi-fill"></i></div>
+          <p class="hi-numbers"><span id="hi-done">—</span><span id="hi-eta">—</span></p>
+        </div>
+        <p class="hi-block bad" id="hi-write-error" role="alert" hidden></p>
+      </section>
+
+      <section data-pane="start" hidden>
+        <h1>Start the new box from the drive</h1>
+        <ol class="hi-how">
+          <li>Take the drive out of this computer and put it in the new box.</li>
+          <li>Turn the box on and open its boot menu: usually F12, F11, F10 or Esc while it starts. Pick the USB drive.</li>
+          <li>Follow its screen. It checks the machine's settings, offers to back up its old disk to your images, and installs. Nothing more is asked here.</li>
+        </ol>
+        <div class="hi-progress">
+          <div class="hi-progress-head">
+            <span id="hi-join-words">Waiting for the box to join</span>
+            <span class="state-word" data-state="working" id="hi-join-state">Waiting</span>
+          </div>
+        </div>
+        <p class="hint">You can close this window. The pass on the drive works for a week; once the box has joined, its old disk's backup appears in Settings, Backups, on any of your devices.</p>
+        <p class="hi-block bad" id="hi-join-error" role="alert" hidden></p>
+      </section>
+
+      <section data-pane="done" hidden>
+        <h1>Your box has joined</h1>
+        <p class="lead">It is <span class="mono" id="hi-name">—</span>. You can see it, and remove it, in Settings, Devices.</p>
+        <p class="hint" id="hi-backup-said" hidden>The backup of its old disk is in your images, as <span class="mono" id="hi-backup-name"></span>.</p>
+      </section>
+
+      <footer class="hi-nav">
+        <button type="button" class="quiet" id="hi-back">Back</button>
+        <span class="grow"></span>
+        <button type="button" id="hi-next" disabled>Next</button>
+      </footer>
+    </main>
+  </div>
+  <script type="module" src="/_dd/app/boxsetup.js"></script>
+</body>
+</html>

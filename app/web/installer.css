@@ -74,3 +74,8 @@ body.hi { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink)
   .hi-main { min-width: 0; padding: 20px 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .hi-bar i { transition: none; } }
+
+/* a box's installer drive (boxsetup.html): its Wi-Fi typed in */
+.hi-form { display: grid; gap: 6px; margin: 16px 0 0; max-width: 360px; }
+.hi-form label { margin: 8px 0 0; font-weight: 600; font-size: 14px; }
+.hi-form input { margin: 0; }

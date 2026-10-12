@@ -1364,6 +1364,7 @@ version = "0.1.0"
 dependencies = [
  "account",
  "anyhow",
+ "archive",
  "async-trait",
  "auth",
  "axum",
@@ -1384,6 +1385,7 @@ dependencies = [
  "media",
  "release",
  "reqwest 0.12.28",
+ "rustic_core",
  "rustls",
  "serde",
  "serde_json",
@@ -1397,6 +1399,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "tokio-util",
+ "url",
  "x25519-dalek 2.0.1",
  "zeroize",
 ]

@@ -5,6 +5,8 @@
 
 mod account;
 mod background;
+#[cfg(desktop)]
+mod boxsetup;
 mod browser;
 mod controllers;
 mod dav;
@@ -21,6 +23,8 @@ mod photos;
 mod site;
 mod smarthome;
 mod vpn;
+#[cfg(desktop)]
+mod wifi;
 #[cfg(desktop)]
 mod writer;
 mod zip;

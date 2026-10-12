@@ -213,6 +213,8 @@ async fn serve<R: Runtime>(
                 | "/_dd/app/installer"
                 | "/_dd/app/installer.js"
                 | "/_dd/app/installer.css"
+                | "/_dd/app/boxsetup"
+                | "/_dd/app/boxsetup.js"
         )
         && !has_secret(&req)
     {
@@ -332,6 +334,24 @@ async fn serve<R: Runtime>(
         .filter(|f| matches!(*f, "installer.js" | "installer.css"))
     {
         return Ok(asset(app, f));
+    }
+    // a box's installer drive, a window of its own too (boxsetup.rs); it
+    // looks as the controller's does, from installer.css
+    if path == "/_dd/app/boxsetup" {
+        return Ok(page_asset(app, "boxsetup.html"));
+    }
+    if path == "/_dd/app/boxsetup.js" {
+        return Ok(asset(app, "boxsetup.js"));
+    }
+    if let Some(step) = path.strip_prefix("/_dd/app/boxsetup/") {
+        #[cfg(desktop)]
+        return crate::boxsetup::route(app, &format!("/{step}"), req.method().as_str(), req.body())
+            .await;
+        #[cfg(not(desktop))]
+        {
+            let _ = step;
+            return Ok(plain(StatusCode::NOT_FOUND, "set one up from a computer"));
+        }
     }
     if let Some(step) = path.strip_prefix("/_dd/app/installer/") {
         #[cfg(desktop)]

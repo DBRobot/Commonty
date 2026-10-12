@@ -68,6 +68,13 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 
+# a box's installer drive (boxsetup.rs): the backup it makes on the way
+# in, copied into the member's images
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+archive = { path = "../client/archive" }
+rustic_core = "0.13"
+url = "2"
+
 # a second launch (a commonty:// link) hands its link to the copy already running
 [target.'cfg(any(target_os = "linux", windows))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
