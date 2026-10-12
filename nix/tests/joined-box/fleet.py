@@ -4,7 +4,7 @@
 # makes a member, ada, with a device, and writes her join ticket and a
 # token of hers for the test, then stays up. Run from its working
 # directory, which holds dd-control, verify and the relay's files (w/).
-import base64, json, os, subprocess, sys, time, urllib.request, urllib.error
+import base64, hashlib, json, os, subprocess, sys, time, urllib.request, urllib.error
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519 as ed
 from cryptography.hazmat.primitives import serialization as S
 
@@ -137,6 +137,12 @@ for i in (1, 2, 3):
         stdout=log(f"n{i}"),
         stderr=subprocess.STDOUT,
     )
+# ada, a member (on the fleet's list), with one device
+root = ed.Ed25519PrivateKey.generate()
+dev = ed.Ed25519PrivateKey.generate()
+pub = lambda k: b64(k.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw))
+fp = base64.b64decode(pub(dev))[:6].hex()
+members = json.dumps([hashlib.sha256(pub(root).encode()).hexdigest()])
 for i in (1, 2, 3):
     env = dict(
         os.environ,
@@ -149,6 +155,8 @@ for i in (1, 2, 3):
         VERIFY_CONTROL_SUBMIT=f"{T}/s{i}.sock",
         VERIFY_CONTROL_CONFIG=f"{T}/config.json",
         VERIFY_BOX=f"node{i}",
+        VERIFY_DOMAIN="commonty.test",
+        VERIFY_MEMBERS=members,
     )
     os.makedirs(f"g{i}/keys", exist_ok=True)
     subprocess.Popen(
@@ -159,12 +167,7 @@ until(
     lambda: all(up(f"http://127.0.0.1:428{i}/_dd/directory") for i in (1, 2, 3)),
 )
 
-# ada, a member, with one device: her entry put to the directory
-root = ed.Ed25519PrivateKey.generate()
-dev = ed.Ed25519PrivateKey.generate()
-pub = lambda k: b64(k.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw))
-fp = base64.b64decode(pub(dev))[:6].hex()
-entry = {
+# ada's entry put to the directoryentry = {
     "name": "ada",
     "root": pub(root),
     "recovery": pub(ed.Ed25519PrivateKey.generate()),
