@@ -123,7 +123,9 @@ in
   # only be rebooted blind. The passphrase is in secrets/fleet.yaml on the
   # laptop (`dd secret run -- decrypt --extract '["console-password"]'
   # secrets/fleet.yaml`); the box holds only its hash.
-  sops.secrets.console-password-hash.neededForUsers = true;
+  sops.secrets.console-password-hash = lib.mkIf (config.dd.hasSecret "console-password-hash") {
+    neededForUsers = true;
+  };
   # and it has to be false for that hash to reach /etc/shadow: with
   # mutable users nixos writes a declarative password only for a user it
   # is creating, so on these boxes admin kept the `!` it was made with and
@@ -134,7 +136,12 @@ in
 
   users.users.admin = {
     isNormalUser = true;
-    hashedPasswordFile = config.sops.secrets.console-password-hash.path;
+    # none on a box without it: no keyboard way in there
+    hashedPasswordFile =
+      if config.dd.hasSecret "console-password-hash" then
+        config.sops.secrets.console-password-hash.path
+      else
+        null;
     extraGroups = [ "wheel" ];
     # the box's owner (box.json) logs in as admin
     openssh.authorizedKeys.keys = owner.ssh;

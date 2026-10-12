@@ -75,13 +75,19 @@ in
       # and the unlock Worker (modules/box/disk-unlock.nix)
       dd.unlock.enable = box.encrypted;
 
+      # Wi-Fi where this box's secrets hold the house's password; wired
+      # alone where they don't (a box that joined has none)
       dd.home = {
         inherit (house) ssid address;
-        pskFile = config.sops.templates."wifi.env".path;
-        inherit (hw) wifi wired;
+        pskFile =
+          if config.dd.hasSecret "wifi-psk" then config.sops.templates."wifi.env".path else "/dev/null";
+        inherit (hw) wired;
+        wifi = if config.dd.hasSecret "wifi-psk" then hw.wifi else null;
       };
-      sops.secrets.wifi-psk = { };
-      sops.templates."wifi.env".content = "psk=${config.sops.placeholder.wifi-psk}\n";
+      sops.secrets.wifi-psk = lib.mkIf (config.dd.hasSecret "wifi-psk") { };
+      sops.templates."wifi.env" = lib.mkIf (config.dd.hasSecret "wifi-psk") {
+        content = "psk=${config.sops.placeholder.wifi-psk}\n";
+      };
     }
     (lib.optionalAttrs (options.dd ? adblock) {
       # who lives in this house: they switch its ad blocking
