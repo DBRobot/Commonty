@@ -11,6 +11,7 @@
 # deleted. Its own config and secrets stay its own.
 {
   config,
+  options,
   lib,
   pkgs,
   ...
@@ -60,7 +61,9 @@ let
     [ "$E" -gt 0 ]
     mine=$(cat ${state}/epoch 2>/dev/null || echo 0)
     [ "$mine" = "$E" ] && { echo "epoch $E: this forge, started again"; exit 0; }
-    copied=$(rclone cat here:forge/epoch 2>/dev/null || echo 0)
+    # no copy yet reads as nothing, not a number: none
+    copied=$(rclone cat here:forge/epoch 2>/dev/null | tr -dc 0-9 || true)
+    copied=''${copied:-0}
     if [ "$copied" -le "$mine" ]; then
       echo "epoch $E: from this box's own files (the copy here is of epoch $copied, these of $mine)"
       exit 0
@@ -87,59 +90,64 @@ let
   '';
 in
 {
-  config = lib.mkIf ((config.dd.failover or false) && (store.enable or false)) {
-    dd.store.buckets.forge = { };
-    systemd.tmpfiles.rules = [ "d ${state} 0700 root root -" ];
-    systemd.services.forgejo = {
-      # started with postgres by the plan: its role and database first
-      after = [ "postgresql-setup.service" ];
-      wants = [ "postgresql-setup.service" ];
-      serviceConfig = {
-        ExecStartPre = lib.mkBefore [ "+${take}" ];
-        ExecStartPost = [ "+${started}" ];
+  config = lib.mkMerge [
+    # its bucket, where a store is there to hold it (a test may have none)
+    (lib.optionalAttrs (options.dd ? store) {
+      dd.store.buckets.forge = lib.mkIf ((config.dd.failover or false) && (store.enable or false)) { };
+    })
+    (lib.mkIf ((config.dd.failover or false) && (store.enable or false)) {
+      systemd.tmpfiles.rules = [ "d ${state} 0700 root root -" ];
+      systemd.services.forgejo = {
+        # started with postgres by the plan: its role and database first
+        after = [ "postgresql-setup.service" ];
+        wants = [ "postgresql-setup.service" ];
+        serviceConfig = {
+          ExecStartPre = lib.mkBefore [ "+${take}" ];
+          ExecStartPost = [ "+${started}" ];
+        };
       };
-    };
-    # its hooks are made again where they were restored: a copy keeps no
-    # file's mode
-    systemd.services.forgejo-admin.postStart = ''
-      if [ -e ${state}/restored ]; then
-        forgejo admin regenerate hooks && rm -f ${state}/restored
-      fi
-    '';
-    systemd.services.dd-forge-copy = {
-      description = "Copy the forge's repositories and files into this box's store";
-      after = [ "forgejo.service" ];
-      unitConfig.ConditionPathExists = flag;
-      restartIfChanged = false;
-      path = tools;
-      serviceConfig.Type = "oneshot";
-      script = ''
-        set -uo pipefail
-        ${env}
-        E=$(cat ${state}/epoch 2>/dev/null || echo 0)
-        [ "$E" -gt 0 ] || { echo "the forge has not started here yet"; exit 0; }
-        zfs destroy ${dataset}@dd-copy 2>/dev/null || true
-        zfs snapshot ${dataset}@dd-copy || exit 0
-        src=${dir}/.zfs/snapshot/dd-copy
-        # what the snapshot holds: what a restore takes, and nothing else
-        rclone lsf -R --files-only --filter-from ${filters} "$src" | sort > ${state}/manifest.new
-        if rclone sync --checksum --filter-from ${filters} "$src" here:forge/files \
-          && rclone copyto ${state}/manifest.new here:forge/manifest \
-          && echo "$E" | rclone rcat here:forge/epoch; then
-          mv ${state}/manifest.new ${state}/manifest
-        else
-          echo "not copied this time"
+      # its hooks are made again where they were restored: a copy keeps no
+      # file's mode
+      systemd.services.forgejo-admin.postStart = ''
+        if [ -e ${state}/restored ]; then
+          forgejo admin regenerate hooks && rm -f ${state}/restored
         fi
-        zfs destroy ${dataset}@dd-copy || true
-        exit 0
       '';
-    };
-    systemd.timers.dd-forge-copy = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnActiveSec = "2min";
-        OnUnitActiveSec = "2min";
+      systemd.services.dd-forge-copy = {
+        description = "Copy the forge's repositories and files into this box's store";
+        after = [ "forgejo.service" ];
+        unitConfig.ConditionPathExists = flag;
+        restartIfChanged = false;
+        path = tools;
+        serviceConfig.Type = "oneshot";
+        script = ''
+          set -uo pipefail
+          ${env}
+          E=$(cat ${state}/epoch 2>/dev/null || echo 0)
+          [ "$E" -gt 0 ] || { echo "the forge has not started here yet"; exit 0; }
+          zfs destroy ${dataset}@dd-copy 2>/dev/null || true
+          zfs snapshot ${dataset}@dd-copy || exit 0
+          src=${dir}/.zfs/snapshot/dd-copy
+          # what the snapshot holds: what a restore takes, and nothing else
+          rclone lsf -R --files-only --filter-from ${filters} "$src" | sort > ${state}/manifest.new
+          if rclone sync --checksum --filter-from ${filters} "$src" here:forge/files \
+            && rclone copyto ${state}/manifest.new here:forge/manifest \
+            && echo "$E" | rclone rcat here:forge/epoch; then
+            mv ${state}/manifest.new ${state}/manifest
+          else
+            echo "not copied this time"
+          fi
+          zfs destroy ${dataset}@dd-copy || true
+          exit 0
+        '';
       };
-    };
-  };
+      systemd.timers.dd-forge-copy = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnActiveSec = "2min";
+          OnUnitActiveSec = "2min";
+        };
+      };
+    })
+  ];
 }

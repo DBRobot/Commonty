@@ -264,15 +264,28 @@ in
       # start before it is mounted, or forgejo would happily initialise itself
       # onto the root disk underneath the mountpoint. The secret bootstrap is
       # the first thing to write there and tmpfiles may have run before the
-      # dataset existed (it did, on the activation that created it), so it
-      # makes its own directory as root before dropping to forgejo.
+      # dataset existed (it did, on the activation that created it), so its
+      # directories are made again once the dataset is mounted: by a unit of
+      # their own, as the bootstrap's sandbox needs them before anything of
+      # its own may run (a box taking the forge over first boots that way)
+      systemd.services.dd-forge-dirs = {
+        description = "Make the forge's directories on its dataset";
+        after = [ "zfs-datasets.service" ];
+        requires = [ "zfs-datasets.service" ];
+        before = [ "forgejo-secrets.service" ];
+        requiredBy = [ "forgejo-secrets.service" ];
+        unitConfig.RequiresMountsFor = cfg.stateDir;
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = "${pkgs.coreutils}/bin/install -d -o forgejo -g forgejo -m 0750 ${cfg.stateDir} ${cfg.stateDir}/custom ${cfg.stateDir}/custom/conf";
+          ExecStartPost = "${config.systemd.package}/bin/systemd-tmpfiles --create --prefix=${cfg.stateDir}";
+        };
+      };
       systemd.services.forgejo-secrets = {
         after = [ "zfs-datasets.service" ];
         requires = [ "zfs-datasets.service" ];
         unitConfig.RequiresMountsFor = cfg.stateDir;
-        serviceConfig.ExecStartPre = [
-          "+${pkgs.coreutils}/bin/install -d -o forgejo -g forgejo -m 0750 ${cfg.stateDir} ${cfg.stateDir}/custom ${cfg.stateDir}/custom/conf"
-        ];
       };
       systemd.services.forgejo = {
         after = [ "zfs-datasets.service" ];
