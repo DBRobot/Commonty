@@ -122,10 +122,13 @@ box installer (full screen)        fleet
     re-keys the pool to it (`zfs change-key`) and removes the installer's.
     A stop midway leaves a mark the initrd follows. If Secure Boot is not
     on at that boot, it does not seal, and says so.
-  - **The box's own key** (its name, its signatures) was made by the
-    installer too, so it is held by a password on the encrypted disk
-    (`/var/lib/dd/sig.auth`) rather than by PCR 7: what opens the disk
-    opens it.
+  - **The box's own key** (its name, its signatures) is made at that
+    first boot too, after the seal, under the same PCR 7, as node1's and
+    node2's: nothing that names or signs for the box exists before its
+    signed boot does. It was installed under the name `joining`; its agent
+    names it by the key (state.JoinName) and builds itself again under
+    that name, and only then does it join (dd-control waits for the name).
+    The installer restarts straight into that first boot.
   - **What it protects against:** a pulled disk; another system started on
     the box (a USB drive's: Secure Boot refuses it; one Microsoft's keys
     start, through a shim: a different PCR 7, no key); the box's own
