@@ -13,11 +13,22 @@ let
   sys = pkgs.stdenv.hostPlatform.system;
   domain = (lib.importJSON ../../fleet/policy.json).domain;
   repo = (lib.importJSON ../../fleet/policy.json).repo;
+  # the layout's wipe-and-make script, built here so the installer needs
+  # no nixpkgs to evaluate it: for /dev/dd-target, which it points at the disk
+  wipe =
+    (pkgs.nixos {
+      imports = [
+        self.inputs.disko.nixosModules.disko
+        (import ../../fleet/layout.nix { device = "/dev/dd-target"; })
+      ];
+      networking.hostId = "dd000000";
+      boot.loader.grub.enable = false;
+      system.stateVersion = "26.05";
+    }).config.system.build.destroyFormatMount;
   install = pkgs.writeShellApplication {
     name = "dd-join-install";
     runtimeInputs = [
       self.packages.${sys}.agent
-      pkgs.disko
       pkgs.tpm2-tools
       pkgs.age-plugin-tpm
       pkgs.jq
@@ -50,12 +61,12 @@ in
     "flakes"
   ];
   environment.etc."dd/release.pub".source = ../../fleet/release.pub;
+  environment.etc."dd/wipe".source = "${wipe}/bin/disko-destroy-format-mount";
   environment.systemPackages = [ install ];
   environment.variables = {
     RELEASE_URL = "https://code.${domain}/${repo}/raw/branch/releases/current.json";
     RELEASE_KEY = "/etc/dd/release.pub";
     SOURCE = "git+https://code.${domain}/${repo}";
-    LAYOUT = "${../../fleet/layout.nix}";
     DETECT = "${../modules/box/report/detect.sh}";
     # the commit this installer was made from: no release issued before it
     NOT_BEFORE = toString (self.lastModified or 0);

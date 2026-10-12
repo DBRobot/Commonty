@@ -8,7 +8,7 @@
 # that commit and its report; installs it. On first boot the box joins the
 # fleet on its own key, as a stranger, and takes releases from then on.
 # Environment: RELEASE_URL, RELEASE_KEY (a file), SOURCE (the repository,
-# git+https://...), LAYOUT (fleet/layout.nix), DETECT (detect.sh),
+# git+https://...), DETECT (detect.sh),
 # NOT_BEFORE (seconds: the oldest release it takes, when it was made),
 # DISK (to name the disk when there is more than one; it is wiped).
 set -euo pipefail
@@ -48,8 +48,16 @@ w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
 # its layout, unencrypted: what a box that joined on its own key keeps is
 # ciphertext already
-printf 'import %s { device = "%s"; encrypted = false; }\n' "$LAYOUT" "$byid" > "$w/disko.nix"
-disko --mode destroy,format,mount --yes-wipe-all-disks "$w/disko.nix"
+# the layout's script is made, with nothing to evaluate here, for the one
+# name dd-target: that name is the disk chosen. Its partitions are found by
+# label, so another disk carrying the same labels (an old box's) is refused
+for d in "${disks[@]}"; do
+  [ "$d" = "$disk" ] && continue
+  lsblk -nro PARTLABEL "$d" | grep -q '^disk-boot-' \
+    && no "$d holds an old box's disk: take it out, or wipe it first"
+done
+ln -sfn "$disk" /dev/dd-target
+/etc/dd/wipe --yes-wipe-all-disks
 
 # its keys, in its TPM: the one it joins with, usable only under its
 # signed boot (PCR 7), and its secrets key

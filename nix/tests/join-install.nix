@@ -54,7 +54,6 @@ in
           RELEASE_URL = "http://forge/release/current.json";
           RELEASE_KEY = "/root/release.pub";
           SOURCE = "git+http://forge/flake.git";
-          LAYOUT = "${../../fleet/layout.nix}";
           DETECT = "${../modules/box/report/detect.sh}";
           NOT_BEFORE = "100";
         };
