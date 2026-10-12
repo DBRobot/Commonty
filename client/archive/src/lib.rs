@@ -172,6 +172,46 @@ impl<K: KeyStore + Send + Sync + 'static, P: ProgressBars + Clone> Archive<K, P>
         Ok(gone.into_iter().map(entry).collect())
     }
 
+    /// Every archive here, copied into `dest` - another repository, under
+    /// its own password - each named `label` there when one is given: a
+    /// box's backup made on the way to joining, into its member's images.
+    /// Run again after an interruption, what `dest` has already is skipped.
+    pub fn copy_into<Q: ProgressBars + Clone>(
+        &self,
+        dest: &Archive<K, Q>,
+        label: Option<&str>,
+    ) -> Result<usize> {
+        if !dest.exists()? {
+            dest.init()?;
+        }
+        let from = self
+            .repo()?
+            .open(&self.credentials())
+            .context("opening the backup")?
+            .to_indexed()?;
+        let to = dest
+            .repo()?
+            .open(&dest.credentials())
+            .context("opening your images")?
+            .to_indexed_ids()?;
+        let mut snaps = from.get_all_snapshots()?;
+        if let Some(l) = label {
+            for s in &mut snaps {
+                s.label = l.to_string();
+            }
+        }
+        // the ones `dest` holds already, by what they are, not by id
+        let fresh: Vec<_> = to
+            .relevant_copy_snapshots(|_| true, &snaps)?
+            .into_iter()
+            .filter(|c| c.relevant)
+            .map(|c| c.sn)
+            .collect();
+        from.copy(&to, fresh.iter())
+            .context("copying into your images")?;
+        Ok(fresh.len())
+    }
+
     pub fn list(&self) -> Result<Vec<Entry>> {
         let repo = self.repo()?.open(&self.credentials())?;
         let mut snaps = repo.get_all_snapshots()?;

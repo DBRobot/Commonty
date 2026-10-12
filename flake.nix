@@ -158,7 +158,11 @@
             dir:
             let
               m = builtins.fromTOML (builtins.readFile (./. + "/${dir}/Cargo.toml"));
-              deps = (m.dependencies or { }) // (m.build-dependencies or { });
+              # a platform's own dependencies too (the app's, desktop only)
+              deps =
+                (m.dependencies or { })
+                // (m.build-dependencies or { })
+                // pkgs.lib.foldl' (a: t: a // (t.dependencies or { })) { } (builtins.attrValues (m.target or { }));
               norm =
                 base: rel:
                 let
