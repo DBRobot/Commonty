@@ -950,6 +950,7 @@ main.friends .intro { margin-bottom: 4px; }
 main.friends .panel { padding: 22px 24px; }
 main.friends h2 { margin: 0 0 4px; font-size: 19px; }
 main.friends .small { margin: 0; font-size: 14px; color: var(--ink-2); }
+main.auth .small { font-size: 14px; color: var(--ink-2); }
 main.friends button { margin-top: 0; }
 main.friends .add-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; }
 main.friends .made { margin-top: 16px; display: grid; gap: 8px; }

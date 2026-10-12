@@ -247,12 +247,8 @@ function drawGraph(r, run, g, jobs) {
   const dag = el('div', { class: 'dag' });
   const edgesSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   edgesSvg.setAttribute('class', 'edges');
-  let byNode;
-  const sort = (js) => {
-    byNode = new Map(g.nodes.map((n) => [n.id, []]));
-    for (const j of js) (byNode.get(nodeOf(j.leaf)) || byNode.get(j.leaf))?.push(j);
-  };
-  sort(jobs);
+  const byNode = new Map(g.nodes.map((n) => [n.id, []]));
+  for (const j of jobs) (byNode.get(nodeOf(j.leaf)) || byNode.get(j.leaf))?.push(j);
   const card = (n) => {
     const js = byNode.get(n.id) || [];
     const state = js.length ? rollup(js) : 'waiting';
@@ -269,7 +265,7 @@ function drawGraph(r, run, g, jobs) {
     const c = el('div', { class: cls, 'data-id': n.id });
     const open = shown.has(n.id);
     const toggle = el('button', { class: 'more', type: 'button', text: open ? 'Fewer' : `Show all ${js.length}` });
-    toggle.onclick = () => { open ? shown.delete(n.id) : shown.add(n.id); swap(n); };
+    toggle.onclick = () => { open ? shown.delete(n.id) : shown.add(n.id); c.replaceWith(card(n)); };
     c.append(head, ...(open ? rows() : [el('div', { class: 'dots' }, ...js.map((j) => el('a', { href: href(j), title: `${name(j)} · ${j.state}${j.started ? ` · ${took(j)}` : ''}` }, statusDot(j.state))))]), toggle);
     return c;
   };
@@ -282,21 +278,6 @@ function drawGraph(r, run, g, jobs) {
   const cards = new Map(g.nodes.map((n) => [n.id, card(n)]));
   layer.append(edgesSvg, ...cards.values());
   dag.append(layer);
-  // a card drawn again where the last one stood: the graph and its lines
-  // stay put, and are laid out again only if a card changed size
-  const swap = (n) => {
-    const was = cards.get(n.id);
-    const now = card(n);
-    now.style.left = was.style.left;
-    now.style.top = was.style.top;
-    now.style.width = was.style.width;
-    cards.set(n.id, now);
-    was.replaceWith(now);
-  };
-  dag.update = (js) => {
-    sort(js);
-    for (const n of g.nodes) swap(n);
-  };
 
   const round = (pts, rad = 6) => {
     let d = `M${pts[0].x},${pts[0].y}`;
@@ -427,11 +408,18 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
   let timer = null;
   const alive = () => current() && pane.isConnected;
   if (view === 'graph') {
-    // drawn once; as its jobs move (watch, below) each card is drawn again in place
-    const dag = g ? drawGraph(r, run, g, jobs) : null;
-    pane.replaceChildren(el('div', { class: 'box' },
+    // drawn again as its jobs move (watch, below): where it was scrolled to stays
+    const draw = () => {
+      const was = pane.querySelector('.dag');
+      const x = was?.scrollLeft || 0;
+      was?.stop?.();
+      pane.replaceChildren(el('div', { class: 'box' },
       el('header', {}, el('b', { text: run.workflow_id }), el('span', { class: 'small muted', text: `on: ${run.event}` }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: 'a job starts when every job before it has passed' })),
-      dag || el('div', { class: 'empty', text: 'The workflow file could not be read; the jobs are under Jobs and logs.' })));
+      g ? drawGraph(r, run, g, jobs) : el('div', { class: 'empty', text: 'The workflow file could not be read; the jobs are under Jobs and logs.' })));
+      const now = pane.querySelector('.dag');
+      if (now) now.scrollLeft = x;
+    };
+    draw();
     // this run's jobs moving, as the forge records them
     watch(r.id, alive, async (changes) => {
       if (!changes.some((c) => c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) return;
@@ -439,7 +427,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
         [run, jobs] = await Promise.all([api(`/repos/${r.full_name}/actions/runs/${run.id}`, { fresh: true }), jobsOf(r, run, true)]);
         if (!alive()) return;
         drawSummary();
-        dag?.update(jobs);
+        draw();
       } catch { /* the next change asks again */ }
     });
     return;
