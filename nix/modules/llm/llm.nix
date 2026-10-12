@@ -93,6 +93,11 @@ in
           add_header Access-Control-Allow-Headers content-type always;
           add_header Access-Control-Max-Age 600 always;
           add_header Vary Origin always;
+          # an if block keeps none of the location's headers (gate/headers.nix): the site's own, again
+          add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+          add_header X-Content-Type-Options nosniff always;
+          add_header Referrer-Policy strict-origin-when-cross-origin always;
+          add_header Content-Security-Policy "frame-ancestors 'self'" always;
           return 204;
         }
         add_header Access-Control-Allow-Origin $dd_model_cors always;
