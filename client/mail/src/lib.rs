@@ -99,9 +99,10 @@ pub fn read_proof_js(secret: &str, name: &str, at: f64) -> Result<String, JsValu
     read_proof(secret, name, at as u64).map_err(|e| JsValue::from_str(&e))
 }
 
-/// How long a member's things are kept after the owner removes them; their
-/// own leaving keeps nothing (docs/dev/leaving.md)
-pub const LEAVE_WINDOW: u64 = 30 * 24 * 3600;
+/// How long a member's things are kept after they are suspended, for them
+/// to take; their own leaving keeps nothing (docs/dev/leaving.md). The
+/// gate's window (servers/gate/src/leaving.rs WINDOW), to the day
+pub const LEAVE_WINDOW: u64 = 90 * 24 * 3600;
 
 /// May `name`'s address go? At once for their own leaving, signed by the
 /// root of the entry this Worker pinned, and never a coming back; or the

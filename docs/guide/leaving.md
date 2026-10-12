@@ -103,23 +103,25 @@ to it.)
 - An account still waiting is kept on one box only, and is deleted
   straight away. Its name is then free again.
 
-## Being removed
+## Being suspended
 
-David can remove a member who breaks the [Terms of
-use](../policies/terms.md). Action only starts from a report, because
-Commonty cannot see what you keep locked. Before anything is done, you
-are told what was reported and given a chance to show you are using
-Commonty properly.
+Nobody can remove you; only you can leave. David can suspend a member who
+breaks the [Terms of use](../policies/terms.md). Action only starts from a
+report, because Commonty cannot see what you keep locked. Before anything
+is done, you are told what was reported and given a chance to show you are
+using Commonty properly.
 
-If you are removed:
+If you are suspended:
 
 - every sign-in ends at once, as above;
-- Settings tells you that you were removed by the person who runs
-  Commonty, and until when your things are kept: only David can let you
-  back in;
-- because it was not your own request, and a mistake can be undone, your
-  things are kept, still locked, for 30 days, then deleted the same way,
-  and gone from every box and backup within 90 days.
+- the reason is written in the signed member list, where you and everyone
+  can read it, and your home page shows it and the date it runs to;
+- for 90 days you can still sign in to open and take your own files, and
+  nothing else: nothing of yours is read, changed or deleted in that time.
+  What Passwords keeps is on your own devices, as always;
+- only David can lift it, and within the 90 days nothing is lost;
+- after the 90 days your things are deleted the same way as on leaving,
+  and gone from every box and backup within 90 days of that.
 
 ## More
 

@@ -1,5 +1,6 @@
-# The leaving test: out and deleted at once by one's own word; removed by the
-# owner, kept for the window and then deleted; nothing of anyone else's.
+# The leaving test: out and deleted at once by one's own word; suspended by
+# the owner, read-only for the window, lifted with nothing lost, and deleted
+# once the window runs out; nothing of anyone else's.
 import json
 
 box.wait_for_unit("garage.service")
@@ -20,7 +21,7 @@ def as_(who):
     return f"DD_KEYRING_FILE=/root/{who}.json {dd}"
 
 
-# three members, each with a library; sarah leaves, the owner removes ann,
+# three members, each with a library; sarah leaves, the owner suspends ann,
 # tom stays
 box.succeed("mkdir -p /root/fleet/fleet")
 for who in ["sarah", "ann", "tom"]:
@@ -134,15 +135,65 @@ assert sarah and sarah[0]["due"], listed
 # and there is no coming back, nor a second leaving to put it off
 box.fail(f"{as_('sarah')} leave --yes {dirs}")
 
-# the owner removes ann: out at once, everything kept for the window
-box.succeed(
-    f"{as_('tom')} member remove ann --repo /root/fleet {dirs} --confirm $({as_('ann')} identity show {dirs} | sed -n 's/^member id: *//p')"
+# the owner suspends ann: every sign-in ends, and for the window she may only
+# read and take her own things
+ann_id = f"$({as_('ann')} identity show {dirs} | sed -n 's/^member id: *//p')"
+box.fail(
+    f"{as_('tom')} member suspend ann --reason '' --repo /root/fleet {dirs} --confirm {ann_id}"
 )
+box.succeed(
+    f"{as_('tom')} member suspend ann --reason 'sent spam' --repo /root/fleet {dirs} --confirm {ann_id}"
+)
+assert "sent spam" in box.succeed("cat /root/fleet/fleet/members.json")
 release_members()
-assert me(token=ann_token) != "200", "removed, and still let in"
+box.wait_until_succeeds(
+    f"[ \"$(curl -s -o /dev/null -w '%{{http_code}}' -H 'Cookie: {ann_cookie}' {gate}/_dd/me)\" != 200 ]",
+    timeout=90,
+)
+seen = json.loads(
+    box.succeed(f"curl -sf -H 'Authorization: Bearer {ann_token}' {gate}/_dd/me")
+)
+assert seen["role"] == "suspended" and seen["suspended"]["reason"] == "sent spam", seen
+assert not seen["services"] or all("files." in x["url"] for x in seen["services"]), seen
+
+
+def dav(token, method, path):
+    return box.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' -X {method} -H 'Authorization: Bearer {token}' --data-binary @/root/blob {gate}/_dd/dav/{path}"
+        if method == "PUT"
+        else f"curl -s -o /dev/null -w '%{{http_code}}' -X {method} -H 'Authorization: Bearer {token}' {gate}/_dd/dav/{path}"
+    ).strip()
+
+
+assert dav(ann_token, "GET", f"{libs['ann']}/Files/x") == "200", (
+    "she cannot take her files"
+)
+assert dav(ann_token, "PUT", f"{libs['ann']}/Files/y") != "201", (
+    "a suspended member wrote"
+)
+assert dav(ann_token, "GET", f"{libs['tom']}/Files/x") == "403"
 listed = json.loads(box.succeed(f"curl -sf {gate}/internal/leaving"))
 ann = [m for m in listed["members"] if m["name"] == "ann"]
 assert ann and not ann[0]["due"], listed
+
+# lifted within the window: back, nothing lost
+box.succeed(
+    f"{as_('tom')} member unsuspend ann --repo /root/fleet {dirs} --confirm {ann_id}"
+)
+release_members()
+assert (
+    json.loads(
+        box.succeed(f"curl -sf -H 'Authorization: Bearer {ann_token}' {gate}/_dd/me")
+    )["role"]
+    == "member"
+)
+assert keys(libs["ann"]), "a lifted suspension lost her things"
+
+# suspended again, and this time the window runs out
+box.succeed(
+    f"{as_('tom')} member suspend ann --reason 'sent spam again' --repo /root/fleet {dirs} --confirm {ann_id}"
+)
+release_members()
 
 # a statement from someone else's root is refused
 forged = box.succeed(
@@ -174,7 +225,7 @@ box.succeed(
 )
 
 # ann's library is kept until her window (two minutes) runs out, then goes
-assert keys(libs["ann"]), "a removal keeps things for the window"
+assert keys(libs["ann"]), "a suspension keeps things for the window"
 box.wait_until_succeeds(
     f'curl -sf {gate}/internal/leaving | jq -e \'.members[] | select(.name == "ann") | .due and (.done | index("libraries"))\'',
     timeout=300,

@@ -458,8 +458,22 @@ enum MemberCmd {
         #[arg(long)]
         confirm: Option<String>,
     },
-    /// Shut a person out: a name's member id is shown and asked about, as for add.
-    Remove {
+    /// Suspend a person for breaking the terms: every sign-in ends, and for
+    /// 90 days they may only read and take their own things; then what is
+    /// theirs is deleted, as on leaving. The reason goes into the signed
+    /// list, where they and everyone see it. Nobody is ever removed: only a
+    /// person can leave. A name's member id is shown and asked about, as for add.
+    Suspend {
+        who: String,
+        /// why, as they and everyone will read it
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        confirm: Option<String>,
+    },
+    /// Lift a suspension within its 90 days: nothing of theirs was deleted.
+    /// Only the exact member id given, or the one a name is confirmed as.
+    Unsuspend {
         who: String,
         #[arg(long)]
         confirm: Option<String>,
@@ -1411,8 +1425,13 @@ async fn main() -> Result<()> {
             MemberCmd::Add { who, confirm } => {
                 member::add(&repo, &who, &directories, confirm.as_deref()).await?
             }
-            MemberCmd::Remove { who, confirm } => {
-                member::remove(&repo, &who, &directories, confirm.as_deref()).await?
+            MemberCmd::Suspend {
+                who,
+                reason,
+                confirm,
+            } => member::suspend(&repo, &who, &reason, &directories, confirm.as_deref()).await?,
+            MemberCmd::Unsuspend { who, confirm } => {
+                member::unsuspend(&repo, &who, &directories, confirm.as_deref()).await?
             }
             MemberCmd::List => member::list(&repo, &directories).await?,
         },

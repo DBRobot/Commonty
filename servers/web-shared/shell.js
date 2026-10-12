@@ -355,6 +355,16 @@ function guestHome(m) {
     posting(el('a', { class: 'button', href: m.home + '/_dd/demo', text: 'Try the demo' }))));
 }
 
+// a suspended member: why, and until when they can take their files
+function suspendedHome(m) {
+  const s = m.suspended || {};
+  const until = s.until ? new Date(s.until * 1000).toLocaleDateString() : 'the end of the suspension';
+  const intro = document.querySelector('.intro');
+  if (!intro) return;
+  intro.querySelector('h1').textContent = 'Your account is suspended';
+  intro.querySelector('p').textContent = `The reason given: ${s.reason || 'none'}. Until ${until} you can open and take your own files; nothing of yours is read, changed or deleted before then. After that, everything of yours is deleted, unless the suspension is lifted.`;
+}
+
 // the home page: one row per service
 function services(m, list) {
   if (!m.services.length) {
@@ -584,6 +594,7 @@ me().then((m) => {
   if (slot) bar(m, slot);
   links(m);
   if (m.role === 'guest' && document.getElementById('services')) guestHome(m);
+  if (m.role === 'suspended') suspendedHome(m);
   const list = document.getElementById('services');
   if (list) services(m, list);
   const banner = document.getElementById('demo');

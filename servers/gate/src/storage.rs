@@ -195,7 +195,8 @@ pub(crate) async fn members(State(app): State<Arc<App>>) -> Response {
     };
     let mut out = serde_json::Map::new();
     for l in listed {
-        if l.name == pages::DEMO_USER || !app.member(&l.name) || app.guest(&l.name) {
+        let suspended = app.suspension(&l.name).is_some();
+        if l.name == pages::DEMO_USER || !(app.member(&l.name) || suspended) || app.guest(&l.name) {
             continue;
         }
         let libs = app
@@ -227,7 +228,12 @@ pub(crate) async fn members(State(app): State<Arc<App>>) -> Response {
                 }
             }
         }
-        out.insert(l.name, serde_json::json!({ "libraries": bytes }));
+        // a suspended member's Photos is held to what it keeps: they may
+        // take it, and add nothing (storage_ledger.rs)
+        out.insert(
+            l.name,
+            serde_json::json!({ "libraries": bytes, "suspended": suspended }),
+        );
     }
     Json(serde_json::Value::Object(out)).into_response()
 }

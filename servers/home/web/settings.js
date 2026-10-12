@@ -47,7 +47,8 @@ async function profile() {
   // from the front door's name, not this page's: the app's copy is on its own
   const domain = new URL(me.home).hostname.split('.').slice(-2).join('.');
   $('name').textContent = me.user;
-  $('role').textContent = me.role === 'member' ? 'Member' : me.role === 'guest' ? 'Guest' : me.role;
+  $('role').textContent = me.role === 'member' ? 'Member' : me.role === 'guest' ? 'Guest'
+    : me.role === 'suspended' ? `Suspended: ${(me.suspended || {}).reason || ''}` : me.role;
   const back = `${location.origin}/_dd/settings`;
   $('email').src = `https://mail.${domain}/row?name=${encodeURIComponent(me.user)}&back=${encodeURIComponent(back)}`;
   const { entry } = await entryOf(me.user);

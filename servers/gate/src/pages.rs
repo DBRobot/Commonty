@@ -450,6 +450,9 @@ pub enum Role {
     Demo,
     /// in through a friend link: invited game servers, and nothing else
     Guest,
+    /// suspended for breaking the terms: reads and takes their own files,
+    /// and nothing else, until their things are deleted
+    Suspended,
 }
 
 impl Role {
@@ -458,6 +461,7 @@ impl Role {
             Role::Member => "member",
             Role::Demo => "demo",
             Role::Guest => "guest",
+            Role::Suspended => "suspended",
         }
     }
 }
@@ -538,16 +542,20 @@ pub fn page(name: &str) -> Option<&'static str> {
 pub fn me_json(user: &str, services: &[Service], role: Role, domain: &str) -> serde_json::Value {
     let demo = user == DEMO_USER;
     let guest = role == Role::Guest;
-    let menu = if guest {
+    let suspended = role == Role::Suspended;
+    let menu = if guest || suspended {
         Menu::guest()
     } else {
         Menu::of(user, services)
     };
-    // a guest is shown the one door the gate opens for them
+    // a guest is shown the one door the gate opens for them, a suspended
+    // member theirs: their files, to take them
     let games = format!("games.{domain}");
+    let files = format!("files.{domain}");
     let services: Vec<&Service> = services
         .iter()
         .filter(|s| !guest || host_of(&s.url) == games)
+        .filter(|s| !suspended || host_of(&s.url) == files)
         .collect();
     serde_json::json!({
         "user": user,

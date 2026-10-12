@@ -292,8 +292,10 @@ pub(crate) fn asked_host(headers: &HeaderMap) -> String {
 pub struct Members {
     pub members: Vec<String>,
     pub revoked: Vec<String>,
-    /// when each revoked id was removed (leaving.rs)
+    /// when each revoked id was suspended (leaving.rs)
     pub removed: std::collections::BTreeMap<String, u64>,
+    /// id -> why it is suspended, as the member reads it
+    pub suspended: std::collections::BTreeMap<String, String>,
 }
 
 impl Members {
@@ -315,6 +317,8 @@ impl Members {
                 revoked: Vec<String>,
                 #[serde(default)]
                 removed: std::collections::BTreeMap<String, u64>,
+                #[serde(default)]
+                suspended: std::collections::BTreeMap<String, String>,
             },
         }
         Ok(match serde_json::from_str::<File>(json)? {
@@ -323,10 +327,12 @@ impl Members {
                 members,
                 revoked,
                 removed,
+                suspended,
             } => Self {
                 members,
                 revoked,
                 removed,
+                suspended,
             },
         })
     }
@@ -600,9 +606,28 @@ impl App {
             Some(pages::Role::Member)
         } else if self.guest(user) {
             Some(pages::Role::Guest)
+        } else if self.suspension(user).is_some() {
+            Some(pages::Role::Suspended)
         } else {
             None
         }
+    }
+
+    /// A member suspended for breaking the terms, within the window: why,
+    /// and until when they may read and take their own things. The release-
+    /// signed list says so (fleet/members.json suspended); their own
+    /// leaving, if they said it, ends it at once.
+    pub(crate) fn suspension(&self, user: &str) -> Option<(String, u64)> {
+        let m = self.members.as_ref()?;
+        if user == pages::DEMO_USER || self.directory.leaving.has_left(user) {
+            return None;
+        }
+        let e = self.entry(user).ok().flatten()?;
+        identity::member_ids(&e.entry).into_iter().find_map(|id| {
+            let why = m.suspended.get(&id).filter(|_| m.revoked.contains(&id))?;
+            let until = m.removed.get(&id)?.saturating_add(leaving::window());
+            (identity::now() < until).then(|| (why.clone(), until))
+        })
     }
 
     /// The hosts a guest may reach through the gate: the game servers'
@@ -897,6 +922,14 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
         // a guest reaches the games page and nothing else, whatever the
         // service behind another door would have made of them
         Some(pages::Role::Guest) => !demo_door && app.guest_host(&headers),
+        // suspended: reads their own files, to take them, and nothing else
+        // (their libraries are theirs alone: library.rs)
+        Some(pages::Role::Suspended) => {
+            let h = asked_host(&headers);
+            !demo_door
+                && reads_only(&headers)
+                && (h == format!("files.{}", app.domain) || h == format!("home.{}", app.domain))
+        }
         None => false,
     };
     if !allowed {
@@ -973,6 +1006,17 @@ fn own_hosts(domain: &str) -> Vec<String> {
 /// A change to a disk image - anything but reading, under /images/ - asked
 /// by a browser. The path is held as nginx will route it, not as it was
 /// spelled: `//images/`, `/%69mages/` and `/x/../images/` are /images/ too.
+/// a request that changes nothing: what a suspended member may still make
+fn reads_only(headers: &HeaderMap) -> bool {
+    matches!(
+        headers
+            .get("x-original-method")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("GET"),
+        "GET" | "HEAD" | "OPTIONS" | "PROPFIND"
+    )
+}
+
 fn deletes_image(headers: &HeaderMap) -> bool {
     let h = |k| headers.get(k).and_then(|v: &HeaderValue| v.to_str().ok());
     let reads = matches!(
@@ -1723,7 +1767,14 @@ fn library_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Respons
         // the demo reads the box's one library for it and nothing else, and
         // the page hides every control a reader has no use for
         Some(user) if user == pages::DEMO_USER && app.demo_library.is_some() => page(name),
-        Some(user) if app.member(&user) && user != pages::DEMO_USER => use_app(),
+        // a suspended member too, to take their files: the app reads them,
+        // and the gate lets them read and nothing more (library.rs)
+        Some(user)
+            if (app.member(&user) || app.suspension(&user).is_some())
+                && user != pages::DEMO_USER =>
+        {
+            use_app()
+        }
         Some(_) => Redirect::to("/_dd/home").into_response(),
         None => Redirect::to(&format!("/_dd/login?rd={at}")).into_response(),
     }
@@ -1789,6 +1840,10 @@ async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
             let mut v = pages::me_json(&user, &app.home, role, &app.domain);
             if role == pages::Role::Guest {
                 v["guestOf"] = app.friends.guest(&user).map(|g| g.by).into();
+            }
+            // why, and until when they may take their things
+            if let Some((why, until)) = app.suspension(&user) {
+                v["suspended"] = serde_json::json!({ "reason": why, "until": until });
             }
             if let Some(k) = &app.tmdb
                 && role != pages::Role::Guest
@@ -3041,6 +3096,17 @@ pub async fn start(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_suspension_and_its_reason_come_with_the_list() {
+        let m = Members::parse(
+            r#"{"members": [], "revoked": ["abc"], "removed": {"abc": 7}, "suspended": {"abc": "spam"}}"#,
+        )
+        .unwrap();
+        assert_eq!(m.suspended.get("abc").map(String::as_str), Some("spam"));
+        assert_eq!(m.removed.get("abc"), Some(&7));
+    }
+
     use super::*;
 
     const PHONE: &str = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36";

@@ -53,11 +53,11 @@ Every service's ratings are in the [Privacy policy](../policies/privacy.md); how
 
 ## Deleting and keeping
 
-When you leave, the Worker removes your forwarding rule at once (30 days
-after, if you are removed), and your own address too when
+When you leave, the Worker removes your forwarding rule at once (90 days
+after, if you are suspended), and your own address too when
 no other rule uses it. It does so only on proof it checks itself: your
-own signed statement that you left, or your removal in the signed member
-list. See [Leaving](leaving.md).
+own signed statement that you left, or your suspension in the signed
+member list. See [Leaving](leaving.md).
 
 ## Limits
 

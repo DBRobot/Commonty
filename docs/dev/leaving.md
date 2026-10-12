@@ -1,11 +1,14 @@
 # Leaving and deleting
 
-A member can take everything out and leave, or be removed by the fleet's
-owner. Either way every way in ends at once. Leaving by their own word
-deletes everything of theirs from every box straight away, and there is
-no coming back; a removal keeps it 30 days, since it was not their
-request and the owner can undo a mistake. Within 90 days it is gone from
-every box and every backup.
+A member can take everything out and leave. Nobody else can make them:
+the one thing the fleet's owner can do is suspend a member for breaking
+the terms. Leaving by their own word deletes everything of theirs from
+every box straight away, and there is no coming back, and within 90 days
+it is gone from every box and every backup. A suspension ends every
+sign-in at once and keeps everything for 90 days, readable by them alone
+so they can take it; lifted in that time, nothing is lost. Once the 90
+days are out it is deleted as on leaving, and within 90 days of that it is
+gone from every box and every backup.
 Policy changes are announced to every member 30 days before they take
 effect ([below](#announcing-a-change)).
 
@@ -60,7 +63,7 @@ museum alone and carrying none of the device's credentials (`relay`);
 everything after goes through the fleet's network with the app's own
 client, with no overall timeout, since an original can be large.
 
-## Leaving, and being removed
+## Leaving, and being suspended
 
 **By the member.** The Leave button has the root sign a statement
 (`identity::Leave {name, root, at, back}`, under its own label so no
@@ -99,26 +102,44 @@ the hold, its friendships and sign-ins at once, and the statement with
 them, so the name is free again and whoever takes it next has not left.
 Someone who left accepts no friend link.
 
-**By the owner.** `dd member remove <name>` moves every id listed under the name to `revoked` in
-[fleet/members.json](../../fleet/members.json) and writes the time under
-`removed`; the signed release carries both to every box. Everything of
-theirs is kept for the window (`WINDOW`, 30 days;
-`dd.verify.leaveWindowSeconds` shortens it in tests), so `dd member add
-<id>`, which takes both away for that id, undoes a mistake. By name it
-does not: which roots a name has had is a directory's word.
-An id revoked before dates were kept has none and is never scheduled for
-deletion. A removal of any root a person has had counts for the person
-after a recovery ([gate.md](gate.md#roles)).
+**Suspended by the owner**, for breaking the terms. There is no removal:
+`dd member suspend <name> --reason "<why>"` moves every id listed under the
+name to `revoked` in [fleet/members.json](../../fleet/members.json), writes
+the time under `removed` and the reason under `suspended`; the signed
+release carries all three to every box, and the reason is there for the
+member and everyone to read. A reason is required. Everything of theirs is
+kept for the window (`WINDOW`, 90 days; `dd.verify.leaveWindowSeconds`
+shortens it in tests). In it they are the gate's `suspended` role
+(`App::suspension`): every sign-in of theirs has ended, and a new one opens
+only their own files, to read and take (GET, HEAD, OPTIONS and PROPFIND on
+`files.<domain>` and `home.<domain>`, their own libraries as a reader,
+`library.rs`); their home page says why and until when. Their Photos limit
+is held to what they keep (the ledger, `suspended` in
+`/internal/storage/members`), and Photos' own sign-in, which goes through
+the gate, is closed to them; Passwords' sessions end with every other, so
+what they keep there is the copy on their own devices. `dd member
+unsuspend <id or name>` lifts it within the window, for that exact id or
+the one a name is confirmed as, and nothing was deleted. By name, a
+directory's word on which roots a name has had is never enough to lift
+one. An id revoked before dates were kept has none and is never scheduled
+for deletion. A suspension of any root a person has had counts for the
+person after a recovery ([gate.md](gate.md#roles)).
+
+A suspension revokes an id, so the release that carries it needs
+`MEMBER_LIST_FLOOR` raised to its counter (`dd release publish` says so):
+no client then takes an older list in which they were not suspended.
+Lifting one does not: an older list only says less about who is out.
 
 When someone is out, and when their things are due, is the earlier of the
 two ([leaving.rs](../../servers/gate/src/leaving.rs), `out_at`): their own
-word at once, a removal the window after. Both live where every box
+word at once, a suspension the window after. Both live where every box
 agrees on them, never on one box's disk.
 
 **At once**, on every box (the gate's `leaving::tick`, every minute, and
 `member()` the moment the statement is replayed):
 
-- they are no member: every page, token and service refuses them;
+- they are no member: every page, token and service refuses them (a
+  suspended member's own files excepted, to read, above);
 - every session of theirs in the sign-ins registry ends, their name goes to
   `/run/dd-ended` so Passwords ends its own, and the friend links they
   sent are dropped;
@@ -130,7 +151,7 @@ agrees on them, never on one box's disk.
 ## Deleting
 
 Once someone is due (at once for their own word, the window after a
-removal), each box deletes its own share and reports it. `GET /internal/leaving`
+suspension), each box deletes its own share and reports it. `GET /internal/leaving`
 on a box's own gate lists who left, when, whether they are due and which
 services have reported; `POST /internal/leaving/done {name, service}`
 reports one. Every deleting step is safe to run again; the logs name a
@@ -169,8 +190,8 @@ statement, fetched from `home.<domain>/_dd/leaving/<name>` with its read
 key (the statement is read as the entry is) and verified against the
 entry the Worker pinned (or the directory's newer one, if it follows from
 the pinned one by the accept rule: a recovery since), said by now and not
-a coming back; or a removal date 30 days ago or more, for any root the
-entry has had, in the member list it was deployed with.
+a coming back; or a suspension date 90 days ago or more (`LEAVE_WINDOW`),
+for any root the entry has had, in the member list it was deployed with.
 The front door's gate asks it (`VERIFY_MAIL_FORGET`).
 
 Forgejo's admin account is never deleted this way; the forge says so and
@@ -191,11 +212,11 @@ From the moment someone leaves:
 - **By 90 days at most**: no copy anywhere: the backups and snapshots
   expire on their own (1 + 35 + 7 = 43 days).
 
-From the moment someone is removed: nothing opens at once, every live
-copy is deleted by 30 days and an hour, and no copy is left anywhere by
-30 + 1 + 35 + 7 = 73 days (Photos': 30 + 1 + 0 + 0 + 7 = 38 for the live
-objects). `checks.retention` holds the removal's sums, the longer of the
-two.
+From the moment someone is suspended: nothing opens but their own files,
+to read, at once; nothing of theirs is deleted for 90 days; then every live
+copy is deleted within the hour, and no copy is left anywhere by 1 + 35 + 7
+= 43 days after that (Photos': 1 + 0 + 0 + 7 = 8 for the live objects).
+`checks.retention` holds the window to 90 days and the sums from its end.
 
 What stays: their entry and statement in the control plane's agreed log
 (their name, public keys, and library keys sealed to keys only they hold,
@@ -208,8 +229,8 @@ Headscale keeps a user record by their name with no devices.
 - **By their own word**: there is none. Everything was deleted when they
   left. Settings shows someone who left the date they left and that it is
   gone; their name stays theirs (below).
-- **Removed**: only the owner can undo it (`dd member add`, then release),
-  and within 30 days nothing was deleted.
+- **Suspended**: only the owner can lift it (`dd member unsuspend`, then
+  release), and within 90 days nothing was deleted.
 
 ### Testing it
 
@@ -218,8 +239,11 @@ window (`dd.verify.leaveWindowSeconds`): `dd leave` without `--yes` does
 nothing; a member leaves with `dd leave --yes`, their session and token
 stop at once, they are due at once, and their library, disk images,
 notes and names are gone within the gate's next minute; leaving again is
-refused; a second member removed by the owner keeps their library until
-the window is out, then loses it; nobody else's is touched. The schedule is
+refused; a second member is suspended with a reason (a suspension without
+one is refused): their browser session ends, their device opens their own
+library to read and nothing to write, and `/_dd/me` gives the reason; lifted,
+they are a member again with everything; suspended again, they keep their
+library until the window is out, then lose it; nobody else's is touched. The schedule is
 unit-tested in leaving.rs, the statement in the identity crate, the
 Worker's check in client/mail, the games manager's share in its own
 tests, and the library prefix check in dav.rs.

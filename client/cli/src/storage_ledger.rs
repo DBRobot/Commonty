@@ -104,7 +104,12 @@ pub async fn run(l: Ledger) -> Result<()> {
                 .or(u["user"]["id"].as_i64())
                 .unwrap_or(0);
             let now = u["subscription"]["storage"].as_u64().unwrap_or(0);
-            let want = photos_limit(l.budget, libraries + code + passwords, used_photos);
+            // suspended: what they keep, and no more
+            let want = if members[name]["suspended"].as_bool() == Some(true) {
+                used_photos.max(1)
+            } else {
+                photos_limit(l.budget, libraries + code + passwords, used_photos)
+            };
             if fresh && id != 0 && now != want {
                 let r = http
                     .put(format!(

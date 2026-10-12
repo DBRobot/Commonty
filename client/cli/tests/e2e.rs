@@ -896,7 +896,12 @@ async fn the_member_list_takes_no_directory_s_word_for_whose_root_a_name_has() {
         &["member", "add", "tom", "--repo", &repo, "--confirm", &id],
         &d,
     ));
-    dev.dd_ok(&args(&["member", "remove", &id, "--repo", &repo], &d));
+    dev.dd_ok(&args(
+        &[
+            "member", "suspend", &id, "--reason", "spam", "--repo", &repo,
+        ],
+        &d,
+    ));
     let before = file();
 
     // the box serves tom under its own root, recovered from his revoked one
@@ -937,10 +942,20 @@ async fn the_member_list_takes_no_directory_s_word_for_whose_root_a_name_has() {
     // by name, the repo's own list says which ids: tom's, revoked already
     dev.dd_fails(
         &args(
-            &["member", "remove", "tom", "--repo", &repo, "--confirm", &id],
+            &[
+                "member",
+                "suspend",
+                "tom",
+                "--reason",
+                "spam",
+                "--repo",
+                &repo,
+                "--confirm",
+                &id,
+            ],
             &d,
         ),
-        "already revoked",
+        "already suspended",
     );
     assert_eq!(file(), before, "nothing changed");
     // and the list puts tom's name beside no id for the box's entry
@@ -1199,7 +1214,17 @@ async fn membership_gates_the_services_not_the_account() {
     let out = dev.dd_ok(&args(&["member", "list", "--repo", &repo], &dirs([&b])));
     assert!(out.contains(&id) && out.contains("tom"), "{out}");
     dev.dd_ok(&args(
-        &["member", "remove", "tom", "--repo", &repo, "--confirm", &id],
+        &[
+            "member",
+            "suspend",
+            "tom",
+            "--reason",
+            "spam",
+            "--repo",
+            &repo,
+            "--confirm",
+            &id,
+        ],
         &d,
     ));
     let f: serde_json::Value = serde_json::from_str(&file()).unwrap();
@@ -1207,7 +1232,17 @@ async fn membership_gates_the_services_not_the_account() {
     assert_eq!(f["revoked"][0], id, "{}", file());
     assert!(
         !dev.dd(&args(
-            &["member", "remove", "tom", "--repo", &repo, "--confirm", &id],
+            &[
+                "member",
+                "suspend",
+                "tom",
+                "--reason",
+                "spam",
+                "--repo",
+                &repo,
+                "--confirm",
+                &id
+            ],
             &d
         ))
         .ok
@@ -1947,8 +1982,10 @@ async fn an_invite_code_lets_one_person_in_once() {
     owner.dd_ok(&args(
         &[
             "member",
-            "remove",
+            "suspend",
             "eve",
+            "--reason",
+            "spam",
             "--repo",
             &repo,
             "--confirm",

@@ -244,8 +244,10 @@ root may be in a thief's hands, and an old paper key can fork from any
 entry it once signed for, so neither vouches for anyone. `dd member add
 <name>` writes the tag once the operator confirmed the id, and takes the
 name's previous root off the list (off, not revoked: a revoked root shuts
-its person out at every box, identity::is_member). `dd member remove
-<name>` revokes every id the file lists under the name. `dd release
+its person out at every box, identity::is_member). `dd member suspend
+<name> --reason` revokes every id the file lists under the name, with the
+reason ([leaving.md](leaving.md#leaving-and-being-suspended)); nobody is
+removed. `dd release
 publish` refuses while any listed id has no name.
 
 **Recoveries.** `recovered_from` is the directory's word. Every box keeps

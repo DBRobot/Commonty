@@ -1,6 +1,9 @@
 # Anything deleted is gone from every box and every backup within 90 days:
-# the first place's window (a trash, someone removed), then the backups,
-# then the snapshots under them, summed (docs/dev/servers.md, Retention)
+# the first place's window (a trash), then the backups, then the snapshots
+# under them, summed (docs/dev/servers.md, Retention). A suspension deletes
+# nothing for its window (the member reads and takes their things), so for
+# someone suspended the 90 days count from when the window ends; the window
+# itself is held to 90 days.
 {
   pkgs,
   self,
@@ -205,7 +208,8 @@ let
   enteScript = lib.concatStrings (
     lib.mapAttrsToList (name: sys: ''
       snap=${toString (snapshotsKeep sys.config / minutes.daily)}
-      left=${toString (leftDays sys.config)}
+      # the suspension's window deletes nothing: counted from its end
+      left=0
       src=${sys.pkgs.srcOnly sys.config.services.ente.api.package}
       trash=$(sed -n 's/^\s*TrashDurationInDays = \([0-9]*\)$/\1/p' $src/pkg/repo/trash.go)
       queue=$(sed -n 's|^\s*DeleteObjectQueue: *\([0-9]*\) \* 24 \* 60,.*|\1|p' $src/pkg/repo/queue.go)
@@ -222,10 +226,10 @@ let
         if [ $((trash + queue + snap)) -gt 90 ]; then
           echo "${name}: museum keeps a deleted photo $trash + $queue days, then snapshots $snap" >&2; bad=1
         fi
-        # someone removed (leaving by one's own word has no window): the
-        # window and its hour, then museum's account delay
+        # someone suspended, from when their window ends: the hour, then
+        # museum's account delay
         if [ $((left + 1 + account + queue + snap)) -gt 90 ]; then
-          echo "${name}: the Photos of someone removed go after $left + 1 + $account + $queue + $snap days" >&2; bad=1
+          echo "${name}: the Photos of someone suspended go $left + 1 + $account + $queue + $snap days after their window" >&2; bad=1
         fi
       fi
     '') ente
@@ -237,7 +241,6 @@ let
       w = c.dd.verify.leaveWindowSeconds or null;
     in
     if w == null then leaveDefault else w / 60;
-  leftDays = c: (leftMinutes c + minutes.daily - 1) / minutes.daily;
 
   # the first window, then a backup of the last copy, then a snapshot of
   # that backup
@@ -246,7 +249,8 @@ let
     let
       first = {
         "the library trash" = libraryTrash;
-        "someone removed" = leftMinutes c;
+        # from when the suspension's window ends: the gate's next minute
+        "someone suspended" = 60;
         "Passwords" = vaultwardenDays c;
       };
       after = resticLongest c + snapshotsKeep c;
@@ -265,7 +269,11 @@ let
       let
         c = sys.config;
       in
-      snapshots name c
+      # a suspension keeps everything, readable by them alone, at most 90 days
+      lib.optional (over (
+        leftMinutes c
+      )) "${name}: a suspension keeps everything ${days (leftMinutes c)} days"
+      ++ snapshots name c
       ++ restic name c
       ++ vaultwarden name c
       ++ journald name c

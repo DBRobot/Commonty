@@ -1,7 +1,8 @@
-//! Leaving Commonty: a member's own signed word or the owner's removal, the
-//! same answer on every box, and what goes when (docs/dev/leaving.md). Their
-//! own word deletes everything at once; the owner's removal keeps it for the
-//! window, since that was not their request and the owner can undo it.
+//! Leaving Commonty: a member's own signed word, or a suspension for breaking
+//! the terms, the same answer on every box, and what goes when
+//! (docs/dev/leaving.md). Their own word deletes everything at once; a
+//! suspension keeps it for the window, readable by them alone so they can
+//! take it, since it was not their request and it can be lifted.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -21,8 +22,9 @@ use webauthn_rs::prelude::PublicKeyCredential;
 use crate::App;
 use crate::directory::Directory;
 
-/// how long the owner's removal keeps everything, in case it was a mistake
-pub const WINDOW: u64 = 30 * 24 * 3600;
+/// how long a suspension keeps everything: for them to take it, and in case
+/// it is lifted
+pub const WINDOW: u64 = 90 * 24 * 3600;
 /// how far a statement's own time may run ahead of, or behind, its agreeing
 const AHEAD: u64 = 300;
 const BEHIND: u64 = 24 * 3600;
@@ -886,8 +888,8 @@ mod tests {
     }
 
     #[test]
-    fn a_removal_is_kept_for_the_window_and_then_due() {
-        let w = 30 * DAY;
+    fn a_suspension_is_kept_for_the_window_and_then_due() {
+        let w = 90 * DAY;
         assert_eq!(phase(None, 1000), Phase::Member);
         let removed = out_at(None, Some(1000), w);
         assert_eq!(
@@ -900,7 +902,7 @@ mod tests {
         assert_eq!(phase(removed, 1000 + w), Phase::Due { since: 1000 });
         let own = out_at(Some(&said(1000, 1000, false)), None, w);
         assert_eq!(phase(own, 1000), Phase::Due { since: 1000 });
-        assert_eq!(WINDOW, 30 * DAY);
+        assert_eq!(WINDOW, 90 * DAY);
     }
 
     #[test]

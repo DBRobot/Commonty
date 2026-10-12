@@ -51,6 +51,13 @@ pub(crate) fn allowed(
     // in it proves nothing on its own; the release's member list is the
     // only word on who belongs here.
     if !app.member(&user) {
+        // suspended: their own libraries, to read and take, nothing more
+        if app.suspension(&user).is_some()
+            && let Ok(Some(e)) = app.directory.entry(&user)
+            && e.entry.libraries.iter().any(|l| l.id == lib)
+        {
+            return Ok((user, Role::Reader));
+        }
         return refused(StatusCode::FORBIDDEN, "not your library");
     }
     // the owner: the library is in their entry

@@ -6,6 +6,13 @@
 //! checks it and cannot add to it. An invite (`dd invite`) is the other way
 //! in: a grant in the person's own entry, made with a code the release key
 //! signed; the revoked list is what shuts one of those out again.
+//!
+//! Nobody is removed: a person leaves by their own word alone. The one
+//! thing done to a member is a suspension for breaking the terms (`dd
+//! member suspend`): revoked, with the reason in the list for everyone to
+//! read, and for 90 days only read access to their own things, after which
+//! they are deleted as on leaving (servers/gate/src/leaving.rs). Lifted in
+//! those 90 days, nothing is lost.
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -18,10 +25,13 @@ pub struct Members {
     pub members: Vec<String>,
     #[serde(default)]
     pub revoked: Vec<String>,
-    /// when each revoked id was removed, unix seconds: their things are
-    /// deleted from every box 30 days later (docs/dev/leaving.md)
+    /// when each revoked id was suspended, unix seconds: their things are
+    /// deleted from every box 90 days later (docs/dev/leaving.md)
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub removed: std::collections::BTreeMap<String, u64>,
+    /// id -> why it is suspended, as the member and everyone read it
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub suspended: std::collections::BTreeMap<String, String>,
     /// id -> identity::name_tag(id, name), set by `dd member add <name>`
     /// once the operator confirmed the id: clients anchor a root only under
     /// the name listed for it
@@ -146,9 +156,7 @@ pub async fn add(repo: &str, who: &str, dirs: &[String], confirm: Option<&str>) 
         // only an id given as itself comes off the revoked list: a
         // directory's word for which roots a name had is no reason to
         None if m.revoked.contains(&id) => {
-            m.revoked.retain(|x| *x != id);
-            // back within 30 days of being removed: nothing of theirs was deleted
-            m.removed.remove(&id);
+            lift(&mut m, &id);
             println!("{id} is no longer revoked");
         }
         Some(e) => {
@@ -201,10 +209,29 @@ pub async fn add(repo: &str, who: &str, dirs: &[String], confirm: Option<&str>) 
     Ok(())
 }
 
-/// Off the list and onto the revoked one, so an invite they redeemed
-/// counts for nothing either. By a name the list has, every root listed
-/// under it, as the file says; by a name it does not, the one confirmed.
-pub async fn remove(repo: &str, who: &str, dirs: &[String], confirm: Option<&str>) -> Result<()> {
+/// Off the revoked list: a suspension lifted. Within its 90 days nothing
+/// of theirs was deleted, so nothing is lost
+fn lift(m: &mut Members, id: &str) {
+    m.revoked.retain(|x| x != id);
+    m.removed.remove(id);
+    m.suspended.remove(id);
+}
+
+/// Suspended for breaking the terms: off the list and onto the revoked one,
+/// so an invite they redeemed counts for nothing either, with the time and
+/// the reason. By a name the list has, every root listed under it, as the
+/// file says; by a name it does not, the one confirmed.
+pub async fn suspend(
+    repo: &str,
+    who: &str,
+    reason: &str,
+    dirs: &[String],
+    confirm: Option<&str>,
+) -> Result<()> {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        bail!("a suspension says why: --reason");
+    }
     let mut m = read(repo)?;
     let mut ids: Vec<String> = if is_id(who) {
         vec![]
@@ -216,7 +243,7 @@ pub async fn remove(repo: &str, who: &str, dirs: &[String], confirm: Option<&str
     }
     ids.retain(|id| !m.revoked.contains(id) || m.members.contains(id));
     if ids.is_empty() {
-        bail!("already revoked: {who}");
+        bail!("already suspended: {who}");
     }
     for id in &ids {
         m.members.retain(|x| x != id);
@@ -224,12 +251,35 @@ pub async fn remove(repo: &str, who: &str, dirs: &[String], confirm: Option<&str
             m.revoked.push(id.clone());
         }
         m.removed.entry(id.clone()).or_insert_with(identity::now);
-        println!("revoked {id}");
+        m.suspended.insert(id.clone(), reason.to_string());
+        println!("suspended {id}");
     }
     write(repo, m)?;
     println!(
-        "commit fleet/members.json and release; every box then shuts them out, and deletes what is theirs 30 days after this"
+        "commit fleet/members.json and release; every box then ends their sign-ins, lets them read and take their own things for 90 days, and deletes what is theirs after that unless `dd member unsuspend` lifts it"
     );
+    Ok(())
+}
+
+/// A suspension lifted, for the exact id given or the one a name is
+/// confirmed as: back on the list, nothing lost
+pub async fn unsuspend(
+    repo: &str,
+    who: &str,
+    dirs: &[String],
+    confirm: Option<&str>,
+) -> Result<()> {
+    let mut m = read(repo)?;
+    let (id, _) = confirmed(who, dirs, &m, confirm).await?;
+    if !m.revoked.contains(&id) {
+        bail!("{id} is not suspended");
+    }
+    lift(&mut m, &id);
+    if !m.members.contains(&id) {
+        m.members.push(id.clone());
+    }
+    write(repo, m)?;
+    println!("{id} is no longer suspended: commit fleet/members.json and release");
     Ok(())
 }
 
@@ -290,7 +340,14 @@ pub async fn list(repo: &str, dirs: &[String]) -> Result<()> {
         );
     }
     for id in &m.revoked {
-        println!("{id}  {}  revoked", name(id));
+        match m.suspended.get(id) {
+            Some(why) => println!(
+                "{id}  {}  suspended {}: {why}",
+                name(id),
+                m.removed.get(id).map(|t| date(*t)).unwrap_or_default()
+            ),
+            None => println!("{id}  {}  revoked", name(id)),
+        }
     }
     Ok(())
 }
@@ -371,4 +428,29 @@ fn parse_ttl(s: &str) -> Result<u64> {
         "h" => n * 3600,
         _ => bail!("ttl {s}: use s, m or h"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_lifted_suspension_leaves_nothing_behind() {
+        let mut m = Members::default();
+        m.revoked.push("abc".into());
+        m.removed.insert("abc".into(), 7);
+        m.suspended.insert("abc".into(), "spam".into());
+        m.revoked.push("def".into());
+        lift(&mut m, "abc");
+        assert_eq!(m.revoked, vec!["def".to_string()]);
+        assert!(m.removed.is_empty() && m.suspended.is_empty());
+    }
+
+    #[test]
+    fn the_reason_is_in_the_file() {
+        let mut m = Members::default();
+        m.suspended.insert("abc".into(), "spam".into());
+        let back = parse(serde_json::to_string(&m).unwrap().as_bytes()).unwrap();
+        assert_eq!(back.suspended.get("abc").map(String::as_str), Some("spam"));
+    }
 }
