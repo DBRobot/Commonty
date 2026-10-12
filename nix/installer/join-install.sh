@@ -31,7 +31,8 @@ elif [ "${#disks[@]}" -eq 1 ]; then
 else
   no "${#disks[@]} internal disks (${disks[*]:-none}): say which with DISK=, it is wiped"
 fi
-byid=$(find /dev/disk/by-id -lname "*/$(basename "$disk")" | grep -v -- '-part' | sort | head -1)
+# a disk with no serial (a VM's) has no by-id name: then its own
+byid=$(find /dev/disk/by-id -lname "*/$(basename "$disk")" 2>/dev/null | grep -v -- '-part' | sort | head -1 || true)
 [ -n "$byid" ] || byid=$disk
 say "installing to $disk ($byid); everything on it goes"
 
