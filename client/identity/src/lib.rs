@@ -285,25 +285,32 @@ pub struct Handover {
     pub after: SignedEntry,
 }
 
-/// Is `signed` let in by these lists, as a client can check on its own?
-/// Its root is on `members`, or it follows from a root that is through
-/// recoveries, each one proven by a handover that `accept` takes: the
-/// earlier entry signed by its root, the next co-signed by the paper key
-/// that entry named. `recovered_from` alone is a directory's word and
-/// counts for nothing here; and an invite counts only once the release
-/// lists its root, so a member let in by one is not anchored until then.
-///
-/// `names`, the list's `name_tag` for each id: the root it anchors at must
-/// be listed under this entry's name, or any member's root could stand
-/// behind an entry under someone else's name. None where the caller vouches
-/// for the name itself (a root this device pinned for the name it is
-/// signed in as). A recovery keeps the name (`accept`), so the chain does.
+/// The one id the list names as `name`'s current root, if exactly one:
+/// `dd member add` keeps it so, and a list that names two is no answer.
+pub fn listed_as<'a>(
+    name: &str,
+    members: &'a [String],
+    names: &std::collections::BTreeMap<String, String>,
+) -> Option<&'a String> {
+    let mut it = members
+        .iter()
+        .filter(|id| names.get(*id) == Some(&name_tag(id, name)));
+    let one = it.next()?;
+    it.next().is_none().then_some(one)
+}
+
+/// Is `signed` let in by the release, as a client can check on its own?
+/// Its root is the one the signed list names as this entry's name's
+/// current root, and none of its roots is revoked. A root it was recovered
+/// from does not count: once superseded it is a key that may be in a
+/// thief's hands, and an old paper key can fork from any entry it once
+/// signed for, so neither may vouch for anyone. A member recovered, like
+/// one let in by an invite, anchors once a release lists the new root.
 pub fn anchored(
     signed: &SignedEntry,
-    handovers: &[Handover],
     members: &[String],
     revoked: &[String],
-    names: Option<&std::collections::BTreeMap<String, String>>,
+    names: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     verify(signed)?;
     // claimed earlier roots only ever shut a person out
@@ -313,43 +320,51 @@ pub fn anchored(
     {
         return Err(Error::Rejected(format!("{} is revoked", signed.entry.name)));
     }
-    let mut cur = &signed.entry;
-    loop {
-        let id = member_id(&cur.root);
-        if members.contains(&id) {
-            return match names {
-                Some(n) if n.get(&id) != Some(&name_tag(&id, &signed.entry.name)) => {
-                    Err(Error::Rejected(format!(
-                        "the signed release does not list that root as {}",
-                        signed.entry.name
-                    )))
-                }
-                _ => Ok(()),
-            };
+    let id = member_id(&signed.entry.root);
+    if listed_as(&signed.entry.name, members, names) != Some(&id) {
+        return Err(Error::Rejected(format!(
+            "the signed release does not list that root as {}'s",
+            signed.entry.name
+        )));
+    }
+    Ok(())
+}
+
+/// The recovering person's own entry, followed from a root they know is
+/// theirs (`from`, a member id: their listed root, or one their device
+/// pinned) through recoveries each proven by a handover that `accept`
+/// takes. For that person's own recovery alone, which their paper key then
+/// has to match: it vouches for nobody to anyone else.
+pub fn follows(signed: &SignedEntry, handovers: &[Handover], from: &str) -> Result<()> {
+    verify(signed)?;
+    fn back(cur: &Entry, handovers: &[Handover], from: &str) -> bool {
+        if member_id(&cur.root) == from {
+            return true;
         }
-        if cur.recovered_from.is_empty() {
-            return Err(Error::Rejected(format!(
-                "{} is not under a member root in the signed release",
-                signed.entry.name
-            )));
-        }
-        let h = handovers
+        // every handover that could be this step, not the first: a box may
+        // serve a bad one beside the good
+        handovers
             .iter()
-            .find(|h| {
+            .filter(|h| {
                 h.after.entry.name == cur.name
                     && h.after.entry.root == cur.root
                     && h.after.entry.recovered_from == cur.recovered_from
+                    && !cur.recovered_from.is_empty()
             })
-            .ok_or_else(|| {
-                Error::Rejected(format!(
-                    "no directory showed how {} came to the root it has",
-                    signed.entry.name
-                ))
-            })?;
-        verify(&h.before)?;
-        accept(Some(&h.before), &h.after)?;
-        cur = &h.before.entry;
+            .any(|h| {
+                verify(&h.before).is_ok()
+                    && accept(Some(&h.before), &h.after).is_ok()
+                    && back(&h.before.entry, handovers, from)
+            })
     }
+    back(&signed.entry, handovers, from)
+        .then_some(())
+        .ok_or_else(|| {
+            Error::Rejected(format!(
+                "no directory showed how {} came from the root this person knows",
+                signed.entry.name
+            ))
+        })
 }
 
 /// What the member list says a root's name is: a hash of the id and the
@@ -1664,11 +1679,13 @@ mod tests {
         assert!(verify_grant(&lifted, &r).is_err());
     }
 
-    /// What a client holds an entry to: the released list, and recoveries
-    /// it can check for itself. A box can sign an entry under a root of its
-    /// own and write any earlier roots into it; it cannot sign a handover.
+    /// What a client holds another member's entry to: the root the signed
+    /// list names as that name's current one, and nothing else. What a
+    /// person follows to their own entry on recovery: proven handovers from
+    /// a root they know. A box can sign an entry under a root of its own and
+    /// write any earlier roots into it; it cannot sign a handover.
     #[test]
-    fn an_entry_is_anchored_by_the_release_and_proven_recoveries_alone() {
+    fn an_entry_is_anchored_by_its_listed_root_and_a_recovery_by_proofs_alone() {
         let (r0, p0, r1, p1, r2) = (generate(), generate(), generate(), generate(), generate());
         let e0 = Entry {
             name: "sarah".into(),
@@ -1684,16 +1701,19 @@ mod tests {
             updated: 1,
         };
         let s0 = sign(e0.clone(), &r0).unwrap();
-        let listed = [member_id(&e0.root)];
-        anchored(&s0, &[], &listed, &[], None).unwrap();
-        assert!(
-            anchored(&s0, &[], &[], &[], None).is_err(),
-            "not on the list"
-        );
-        assert!(
-            anchored(&s0, &[], &listed, &listed, None).is_err(),
-            "revoked"
-        );
+        let id0 = member_id(&e0.root);
+        let named = |ids: &[(&String, &str)]| -> std::collections::BTreeMap<String, String> {
+            ids.iter()
+                .map(|(id, n)| ((*id).clone(), name_tag(id, n)))
+                .collect()
+        };
+        let listed = [id0.clone()];
+        let hers = named(&[(&id0, "sarah")]);
+        anchored(&s0, &listed, &[], &hers).unwrap();
+        assert!(anchored(&s0, &[], &[], &hers).is_err(), "not on the list");
+        assert!(anchored(&s0, &listed, &listed, &hers).is_err(), "revoked");
+        assert!(anchored(&s0, &listed, &[], &named(&[(&id0, "tom")])).is_err());
+        assert!(anchored(&s0, &listed, &[], &Default::default()).is_err());
 
         // two recoveries, then an ordinary update under the last root
         let mut e1 = e0.clone();
@@ -1721,35 +1741,47 @@ mod tests {
                 after: s2.clone(),
             },
         ];
-        anchored(&s3, &chain, &listed, &[], None).unwrap();
-        // a pinned root anchors the same way
-        anchored(&s3, &chain, &[member_id(&e1.root)], &[], None).unwrap();
-        // the earlier roots it names are not enough on their own
-        assert!(anchored(&s3, &chain[1..], &listed, &[], None).is_err());
-        assert!(anchored(&s3, &[], &listed, &[], None).is_err());
-        // and a removal of any root along the way holds
-        assert!(anchored(&s3, &chain, &listed, &[member_id(&e1.root)], None).is_err());
+        // to anyone else, the recovered entry anchors only once a release
+        // lists its new root
+        assert!(anchored(&s3, &listed, &[], &hers).is_err());
+        let id2 = member_id(&e2.root);
+        anchored(
+            &s3,
+            std::slice::from_ref(&id2),
+            &[],
+            &named(&[(&id2, "sarah")]),
+        )
+        .unwrap();
+        // and a superseded root vouches for nothing: a thief holding r0
+        // signs sarah's name with it, and the release names r2 as hers
+        let mut stolen = e0.clone();
+        stolen.devices = vec![dev(&generate())];
+        stolen.version = 9;
+        let stolen = sign(stolen, &r0).unwrap();
+        let both = [id0.clone(), id2.clone()];
+        let after = named(&[(&id2, "sarah")]);
+        assert!(anchored(&stolen, &both, &[], &after).is_err());
+        // a list naming two current roots for one name names none
+        assert!(anchored(&s3, &both, &[], &named(&[(&id0, "sarah"), (&id2, "sarah")])).is_err());
 
-        // the list names whose each root is: under its own name it anchors,
-        // all the way down a recovery chain, and under anyone else's not
-        let named = |id: &String, name: &str| {
-            std::collections::BTreeMap::from([(id.clone(), name_tag(id, name))])
-        };
-        let hers = named(&listed[0], "sarah");
-        anchored(&s0, &[], &listed, &[], Some(&hers)).unwrap();
-        anchored(&s3, &chain, &listed, &[], Some(&hers)).unwrap();
-        assert!(anchored(&s0, &[], &listed, &[], Some(&named(&listed[0], "tom"))).is_err());
-        assert!(anchored(&s0, &[], &listed, &[], Some(&Default::default())).is_err());
-        // tom, a member, signs an entry under sarah's name with his own root
-        let tom = generate();
-        let mut as_her = e0.clone();
-        as_her.root = encode_public(&tom.verifying_key());
-        let as_her = sign(as_her, &tom).unwrap();
-        let tom_id = member_id(&as_her.entry.root);
-        let both = [listed[0].clone(), tom_id.clone()];
-        let mut names = hers.clone();
-        names.extend(named(&tom_id, "tom"));
-        assert!(anchored(&as_her, &[], &both, &[], Some(&names)).is_err());
+        // the person's own recovery follows the proofs from a root they know
+        follows(&s3, &chain, &id0).unwrap();
+        follows(&s3, &chain, &member_id(&e1.root)).unwrap();
+        follows(&s0, &[], &id0).unwrap();
+        assert!(follows(&s3, &chain[1..], &id0).is_err());
+        assert!(follows(&s3, &[], &id0).is_err());
+        // a bad handover served beside the good one does not hide it
+        let mut decoy = chain.to_vec();
+        let mut bent = s1.clone();
+        bent.recovery_signature = Some(s0.signature.clone());
+        decoy.insert(
+            0,
+            Handover {
+                before: s0.clone(),
+                after: bent,
+            },
+        );
+        follows(&s3, &decoy, &id0).unwrap();
         // nor can a recovery change the name it is under
         let mut renamed = e1.clone();
         renamed.name = "tom".into();
@@ -1758,7 +1790,17 @@ mod tests {
             before: s0.clone(),
             after: renamed.clone(),
         }];
-        assert!(anchored(&renamed, &h, &listed, &[], None).is_err());
+        assert!(follows(&renamed, &h, &id0).is_err());
+
+        // tom, a member, signs an entry under sarah's name with his own root
+        let tom = generate();
+        let mut as_her = e0.clone();
+        as_her.root = encode_public(&tom.verifying_key());
+        let as_her = sign(as_her, &tom).unwrap();
+        let tom_id = member_id(&as_her.entry.root);
+        let both = [id0.clone(), tom_id.clone()];
+        let names = named(&[(&id0, "sarah"), (&tom_id, "tom")]);
+        assert!(anchored(&as_her, &both, &[], &names).is_err());
 
         // a box's own root, naming sarah's real one as the root it replaced
         let boxed = generate();
@@ -1782,12 +1824,9 @@ mod tests {
                 before,
                 after: forged.clone(),
             }];
-            assert!(anchored(&forged, &h, &listed, &[], None).is_err());
+            assert!(follows(&forged, &h, &id0).is_err());
+            assert!(anchored(&forged, &listed, &[], &hers).is_err());
         }
-        // the box's root on its own, no earlier roots: not on the list
-        f.recovered_from = vec![];
-        let plain = sign(f, &boxed).unwrap();
-        assert!(anchored(&plain, &[], &listed, &[], None).is_err());
     }
 
     #[test]

@@ -1747,6 +1747,35 @@ async fn main() -> Result<()> {
                             ));
                         }
                     }
+                    // a directory that withholds, or a list that will not
+                    // anchor, must not quietly empty the file git trusts
+                    let principal = |l: &str| l.split(' ').next().unwrap_or_default().to_string();
+                    let had: std::collections::BTreeSet<String> = std::fs::read_to_string(&signers)
+                        .unwrap_or_default()
+                        .lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .map(principal)
+                        .collect();
+                    let now: std::collections::BTreeSet<String> =
+                        lines.iter().map(|l| principal(l)).collect();
+                    if people == 0 {
+                        anyhow::bail!(
+                            "no entry anchors to the signed member list; {} left as it was",
+                            signers.display()
+                        );
+                    }
+                    let gone: Vec<&String> = had.difference(&now).collect();
+                    if !gone.is_empty() {
+                        anyhow::bail!(
+                            "{} no longer anchor{}; {} left as it was (delete it to write it afresh)",
+                            gone.iter()
+                                .map(|s| s.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            if gone.len() == 1 { "s" } else { "" },
+                            signers.display()
+                        );
+                    }
                     let body: String = lines.iter().map(|l| format!("{l}\n")).collect();
                     std::fs::write(&signers, body)?;
                     println!(

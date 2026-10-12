@@ -28,6 +28,13 @@ pub const ENROL: &str = concat!("https://home.", domain!(), "/_dd/enrol");
 /// the release key's public half (fleet/release.pub): what a client checks
 /// the member list against, the one thing no box can make
 pub const RELEASE_KEY: &str = "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=";
+/// The oldest member list a client takes: the release counter of the last
+/// one that shut someone out (or 0, before any did). A list is only ever
+/// signed, never re-signed, so without this a device's first look would
+/// take any list ever published. `dd release publish` refuses a release
+/// that revokes someone unless this is at least its counter, so every
+/// client built from it holds out for that list or a newer one.
+pub const MEMBER_LIST_FLOOR: u64 = 0;
 /// where boxes read the release from
 pub const RELEASES: &str = concat!(
     "https://git.",

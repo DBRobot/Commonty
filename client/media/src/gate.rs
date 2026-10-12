@@ -422,19 +422,8 @@ pub async fn openable(
     let mine = match (&anchor, released) {
         (Some(r), _) => directory::resolve(&found, directory::Anchor::Root(r))
             .context("no directory has a usable entry for you")?,
-        (None, Some(list)) => {
-            let handovers = directory::handovers(dirs, user, &[]).await;
-            directory::resolve(
-                &found,
-                directory::Anchor::Released {
-                    members: &list.members,
-                    revoked: &list.revoked,
-                    handovers: &handovers,
-                    names: Some(&list.names),
-                },
-            )
-            .with_context(|| format!("your entry is {}", account::NOT_RELEASED))?
-        }
+        (None, Some(list)) => directory::resolve(&found, directory::Anchor::Released(list))
+            .with_context(|| format!("your entry is {}", account::NOT_RELEASED))?,
         (None, None) => bail!(
             "this device has not pinned your entry and has no signed member list to hold it to"
         ),

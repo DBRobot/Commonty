@@ -99,7 +99,7 @@ the hold, its friendships and sign-ins at once, and the statement with
 them, so the name is free again and whoever takes it next has not left.
 Someone who left accepts no friend link.
 
-**By the owner.** `dd member remove <name>` moves their id to `revoked` in
+**By the owner.** `dd member remove <name>` moves every id listed under the name to `revoked` in
 [fleet/members.json](../../fleet/members.json) and writes the time under
 `removed`; the signed release carries both to every box. Everything of
 theirs is kept for the window (`WINDOW`, 30 days;

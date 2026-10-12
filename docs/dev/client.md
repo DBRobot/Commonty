@@ -140,7 +140,9 @@ And on disk:
 ~/.config/dd/device_ed25519(.pub)   dd git setup: the device key as an OpenSSH
                                     key, 0600, for git's ssh signing
 ~/.config/dd/allowed_signers         dd git signers: every device in every entry
-                                     the signed member list anchors
+                                     the signed member list anchors; refused,
+                                     the file kept, when nobody anchors or
+                                     someone it had no longer does
 <repo>/.git/dd/<sha256(url)[..16]>/  git-remote-dd: its clone of the backing
                                      repository, and local.json (the last
                                      counter and commit it verified)
@@ -192,13 +194,13 @@ root, and then the anchor must hold:
 
 ```
 Root(key)       the root this machine holds, or pinned
-Released{..}    the signed release's member list (or a pinned root as the
-                one id on it): the entry's root is on it, or follows from
-                one that is through recoveries each proven by a handover
-                (identity::anchored); none of its roots is revoked
+Released(list)  the signed release's member list: the entry's root is the
+                one it names as that name's current root, and none of the
+                entry's roots is revoked (identity::anchored)
 FirstSight      nothing known yet: every directory asked must agree. Only
-                where the root is this machine's own (account::ours) or a
-                person confirms what is shown (dd member add|remove)
+                where the root is this machine's own (account::ours), a
+                person confirms what is shown (dd member add|remove), or
+                a recovery then follows proofs to it (below)
 ```
 
 A box can sign an entry under a root of its own, under any name, and
@@ -216,35 +218,47 @@ label `commonty members v1`) with the release key, and puts it on the releases b
 can have it. A client checks it against `identity::fleet::RELEASE_KEY`,
 fleet/release.pub as the build was made (checks.fleet-defaults holds the
 two together; `DD_RELEASE_PUB` stands in for it in `dd`'s tests):
-`directory::member_list`. `account::released` also refuses a list older
-than the newest this device saw (keyring account `members-seen`).
+`directory::member_list`.
 
-**Names.** A root anchors only under the name the list gives it:
-`names` maps each id to `identity::name_tag(id, name)`, a hash, so the
-open repository names nobody outright (a guessed name can still be
-checked against it). `dd member add <name>` writes the tag once the
-operator confirmed the id; otherwise any member's root could stand behind
-an entry under another member's name. A recovery keeps the name
-(`accept`), so a chain does. A member listed before tags existed anchors
-nowhere until `dd member add <their name>` is run again for them (it
-says "already a member" and lists the name), and the release after it.
+**How old a list a client takes.** A list is signed once, at its release,
+and never again, so nothing in it says it is still the newest.
+`account::released` refuses one older than the newest this device saw
+(keyring account `members-seen`) or than `identity::fleet::MEMBER_LIST_FLOOR`,
+which the build carries. `dd release publish` refuses a release that
+revokes an id the last published list did not, until the floor in the
+commit is that release's counter (it says which), and any floor past the
+counter. So a client built after a removal takes no list from before it;
+one built earlier, on its first look, still could.
+
+**Names: one current root each.** `names` maps each id to
+`identity::name_tag(id, name)`, a hash, so the open repository names
+nobody outright (a guessed name can still be checked against it), and the
+list names exactly one current root per name (`identity::listed_as`). An
+entry anchors only under that root: any member's root under another's
+name does not, and nor does a root that name had before. A superseded
+root may be in a thief's hands, and an old paper key can fork from any
+entry it once signed for, so neither vouches for anyone. `dd member add
+<name>` writes the tag once the operator confirmed the id, and takes the
+name's previous root off the list (off, not revoked: a revoked root shuts
+its person out at every box, identity::is_member). `dd member remove
+<name>` revokes every id the file lists under the name. `dd release
+publish` refuses while any listed id has no name.
 
 **Recoveries.** `recovered_from` is the directory's word. Every box keeps
 each recovery it takes, the entry before and the one after
 (`identity::Handover`), and serves them at
-`/_dd/directory/{name}/recoveries`; `identity::anchored` follows an
-entry's earlier roots only as far as those prove, each step one
-`identity::accept` takes (the entry before signed by its root, the next
-co-signed by the paper key it named). A recovery made before boxes kept
-them proves nothing: that member anchors again once `dd member add` puts
-their current root on the list.
+`/_dd/directory/{name}/recoveries`. They serve one thing: the person's
+own recovery (`account::recover`) follows them from the root their device
+pinned, or the one the list names for them, to the entry now
+(`identity::follows`, every step one `identity::accept` takes), and their
+paper key must be that entry's. To everyone else a recovered member
+anchors once a release lists the new root (`dd member add <name>`), as an
+invited one does.
 
-**Let in by an invite, not yet released.** The gate counts the grant at
-once; a client does not, until a release lists the root. Until then the
-member's devices cannot be shared with, cannot see libraries others
-share, and a new machine cannot recover the account with the paper key
-(a device that pinned the root still can). The error says so
-(`account::NOT_RELEASED`).
+**Not yet released.** The gate counts an invite's grant, and a recovery,
+at once; a client does not, until a release lists the root. Until then
+the member cannot be shared with, and their new devices cannot see
+libraries others share. The error says so (`account::NOT_RELEASED`).
 
 Publishing PUTs the signed entry to every directory; `account::publish`
 fails unless every one took it. The default directory is the front door,
@@ -261,8 +275,8 @@ made here, this device the first, an invite's grant if a code is given),
 `link_passkey`, `remove_passkey`,
 `recover` (the paper key co-signs a new root; every other device is
 dropped; libraries are opened with the paper key and sealed afresh; the
-entry it reseals is held to the root this device pinned, or else to the
-signed member list),
+entry it reseals follows, every recovery proven, from the root this
+device pinned or the one the signed member list names),
 `redeem`, `add_library` and `reseal` (the move off passkey keys,
 [libraries.md](libraries.md#moving-off-passkey-keys)). Each fetches the
 current entry, checks it is ours (`ours`: the root this machine holds),

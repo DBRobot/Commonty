@@ -114,16 +114,22 @@ pub const ROOT_PIN: &str = "entry-root";
 pub const MEMBERS_SEEN: &str = "members-seen";
 
 /// The release's member list, signed by the release key, and no older than
-/// the newest this device has seen (directory::member_list).
+/// the newest this device has seen (directory::member_list), nor than the
+/// one this build was made after (identity::fleet::MEMBER_LIST_FLOOR): a
+/// device's first look would otherwise take any list ever signed, one from
+/// before a removal among them.
 pub async fn released(keys: &impl KeyStore, dirs: &[String]) -> Result<identity::MemberList> {
     let list = directory::member_list(dirs).await?;
     let seen: u64 = keys
         .get(MEMBERS_SEEN)?
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    if list.counter < seen {
+    // 0 until a release shuts someone out, which clippy sees as no-op
+    #[allow(clippy::unnecessary_min_or_max)]
+    let floor = seen.max(identity::fleet::MEMBER_LIST_FLOOR);
+    if list.counter < floor {
         bail!(
-            "the directories hand back member list {} after this device saw {seen}",
+            "the directories hand back member list {} where this device holds out for {floor} or newer",
             list.counter
         );
     }
@@ -135,9 +141,9 @@ pub async fn released(keys: &impl KeyStore, dirs: &[String]) -> Result<identity:
 
 /// what a person let in by an invite sees until a release lists them, for
 /// any check that holds an entry to the released list
-pub const NOT_RELEASED: &str = "not in a signed release yet: an account let in by an invite is \
-     unverified until the next release lists it, and until then cannot be shared with or recovered \
-     on a new device";
+pub const NOT_RELEASED: &str = "not in a signed release yet: an account let in by an invite, or \
+     recovered since the last release, is unverified until the next release lists the root it has \
+     now, and until then cannot be shared with";
 
 /// This member's entry, as this device can vouch for it: under the root it
 /// holds, or the one it pinned the first time it looked (kept from then on).
@@ -153,17 +159,8 @@ pub async fn own_entry(keys: &impl KeyStore, dirs: &[String], name: &str) -> Res
             .context("your entry is not one this device can vouch for (signed out and in again after a recovery elsewhere?)")?,
         None => {
             let list = released(keys, dirs).await?;
-            let handovers = directory::handovers(dirs, name, &[]).await;
-            directory::resolve(
-                &found,
-                directory::Anchor::Released {
-                    members: &list.members,
-                    revoked: &list.revoked,
-                    handovers: &handovers,
-                    names: Some(&list.names),
-                },
-            )
-            .with_context(|| format!("your entry is {NOT_RELEASED}"))?
+            directory::resolve(&found, directory::Anchor::Released(&list))
+                .with_context(|| format!("your entry is {NOT_RELEASED}"))?
         }
     };
     if pin.as_deref() != Some(e.entry.root.as_str()) {
@@ -660,35 +657,38 @@ pub async fn recover(
     // result with the real recovery key, so a made-up one would be the
     // fleet accepting keys the liar chose and could read. The recovery key
     // matching is not the check it looks like: it is public. So the entry
-    // is held to the root this device pinned, or, on a machine that knows
-    // none, to the release's member list: on it, or recovered from a root
-    // that is, every step proven.
+    // has to follow, every recovery proven, from the root this device
+    // pinned or, on a machine that knows none, from the one the signed
+    // release lists for this name.
     // a pin is for the name this device is signed in as, no other
     let pinned = match load_root(keys)? {
         _ if keys.get(USER)?.as_deref().map(|s| s.as_str()) != Some(name) => None,
         Some(r) => Some(identity::encode_public(&r.verifying_key())),
         None => keys.get(ROOT_PIN)?.map(|s| s.to_string()),
     };
-    let list = match &pinned {
-        Some(r) => identity::MemberList {
-            members: vec![identity::member_id(r)],
-            ..Default::default()
-        },
-        None => released(keys, dirs).await?,
+    let (from, revoked) = match &pinned {
+        Some(r) => (identity::member_id(r), vec![]),
+        None => {
+            let list = released(keys, dirs).await?;
+            let from = identity::listed_as(name, &list.members, &list.names)
+                .cloned()
+                .with_context(|| format!("the signed release lists no root as {name}'s"))?;
+            (from, list.revoked)
+        }
     };
-    let cur = directory::resolve(
-        &found,
-        directory::Anchor::Released {
-            members: &list.members,
-            revoked: &list.revoked,
-            handovers: &handovers,
-            // a pin is for this name already (above)
-            names: pinned.is_none().then_some(&list.names),
-        },
-    )
-    .with_context(|| match pinned {
+    let cur = directory::resolve(&found, directory::Anchor::FirstSight)
+        .with_context(|| format!("no directory has a usable entry for {name}"))?;
+    if identity::member_ids(&cur.entry)
+        .iter()
+        .any(|id| revoked.contains(id))
+    {
+        bail!("{name} is revoked");
+    }
+    identity::follows(&cur, &handovers, &from).with_context(|| match pinned {
         Some(_) => format!("the entry for {name} does not follow from the root this device knows"),
-        None => format!("{name}: no usable entry, or one {NOT_RELEASED}"),
+        None => {
+            format!("the entry for {name} does not follow from the root the signed release lists")
+        }
     })?;
     if cur.entry.recovery != identity::encode_public(&recovery.verifying_key()) {
         bail!("that recovery key does not match the entry for {name}");

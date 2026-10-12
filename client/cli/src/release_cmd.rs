@@ -185,6 +185,21 @@ fn publish(
         &rev[..12]
     );
 
+    // the member list at the commit released, every root on it under the
+    // name it was confirmed as: a client anchors no root without one
+    let has_list = !git(
+        &root,
+        &["ls-tree", "--name-only", &rev, "fleet/members.json"],
+    )?
+    .is_empty();
+    let listed = match has_list {
+        true => crate::member::parse(
+            git(&root, &["show", &format!("{rev}:fleet/members.json")])?.as_bytes(),
+        )?,
+        false => crate::member::Members::default(),
+    };
+    named_all(&listed)?;
+
     let boxes: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("fleet/boxes.json"))?)?;
     let names: Vec<String> = boxes
@@ -400,18 +415,20 @@ fn publish(
         form,
     )?;
     let body = serde_json::to_string_pretty(&signed)?;
-    // the member list at the commit released, for clients: they hold other
-    // members' entries to it, and the counter keeps an old one from coming back
-    let file = format!("{rev}:fleet/members.json");
-    let has_list = !git(
+    // the member list, signed for clients: they hold other members' entries
+    // to it, and the counter keeps an old one from coming back. A removal
+    // only holds against a client built to refuse every list before it
+    let before = ureq_get(&url.replace("current.json", "members.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<identity::SignedMemberList>(&raw).ok())
+        .filter(|s| trusted_key(&root).is_ok_and(|k| identity::verify_member_list(s, &k).is_ok()))
+        .map(|s| s.list.revoked)
+        .unwrap_or_default();
+    let floor = floor_in(&git(
         &root,
-        &["ls-tree", "--name-only", &rev, "fleet/members.json"],
-    )?
-    .is_empty();
-    let listed = match has_list {
-        true => crate::member::parse(git(&root, &["show", &file])?.as_bytes())?,
-        false => crate::member::Members::default(),
-    };
+        &["show", &format!("{rev}:client/identity/src/fleet.rs")],
+    )?)?;
+    floor_holds(&listed.revoked, &before, floor, counter)?;
     let members = serde_json::to_string_pretty(&identity::sign_member_list(
         identity::MemberList {
             counter,
@@ -1738,6 +1755,64 @@ fn checked(
 
 struct NotFound;
 
+/// every id on the member list has the name it was confirmed under
+fn named_all(m: &crate::member::Members) -> Result<()> {
+    let unnamed: Vec<&String> = m
+        .members
+        .iter()
+        .filter(|id| !m.names.contains_key(*id))
+        .collect();
+    if !unnamed.is_empty() {
+        bail!(
+            "no name is listed for {}: `dd member add <their name> --confirm <id>` for each, commit, push, publish",
+            unnamed
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    Ok(())
+}
+
+/// MEMBER_LIST_FLOOR as client/identity/src/fleet.rs has it
+fn floor_in(fleet_rs: &str) -> Result<u64> {
+    fleet_rs
+        .lines()
+        .find_map(|l| {
+            l.trim()
+                .strip_prefix("pub const MEMBER_LIST_FLOOR: u64 = ")?
+                .strip_suffix(';')
+        })
+        .context("client/identity/src/fleet.rs has no MEMBER_LIST_FLOOR")?
+        .replace('_', "")
+        .parse()
+        .context("MEMBER_LIST_FLOOR is not a number")
+}
+
+/// The floor clients are built with, for the list this release signs: never
+/// past it (they would take no list), and at it when this release shuts
+/// someone out that the last did not, so no client built from here takes a
+/// list from before.
+fn floor_holds(revoked: &[String], before: &[String], floor: u64, counter: u64) -> Result<()> {
+    ensure!(
+        floor <= counter,
+        "MEMBER_LIST_FLOOR is {floor}, past this release's {counter}: no client would take a list"
+    );
+    let newly: Vec<&String> = revoked.iter().filter(|r| !before.contains(r)).collect();
+    if !newly.is_empty() && floor < counter {
+        bail!(
+            "this release revokes {}: set MEMBER_LIST_FLOOR to {counter} in client/identity/src/fleet.rs, commit, push and publish again, so no client built from it takes an older list",
+            newly
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    Ok(())
+}
+
 fn ureq_get(url: &str) -> std::result::Result<String, NotFound> {
     // curl is on every machine this runs on; no need for another http stack
     let out = Command::new("curl")
@@ -2293,6 +2368,33 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
 mod tests {
     use super::*;
     use release::ATTEST_NAMESPACE;
+
+    #[test]
+    fn a_member_list_is_published_named_and_with_its_floor() {
+        let mut m = crate::member::Members {
+            members: vec!["a".into()],
+            ..Default::default()
+        };
+        assert!(named_all(&m).is_err());
+        m.names.insert("a".into(), identity::name_tag("a", "amy"));
+        named_all(&m).unwrap();
+
+        assert_eq!(
+            floor_in("/// the floor\npub const MEMBER_LIST_FLOOR: u64 = 0;\n").unwrap(),
+            0
+        );
+        assert_eq!(
+            floor_in("pub const MEMBER_LIST_FLOOR: u64 = 1_204;").unwrap(),
+            1204
+        );
+        let r = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // nothing newly revoked: any floor up to the release
+        floor_holds(&r(&["x"]), &r(&["x"]), 0, 9).unwrap();
+        // a removal wants the floor at this release, and no further
+        assert!(floor_holds(&r(&["x", "y"]), &r(&["x"]), 8, 9).is_err());
+        floor_holds(&r(&["x", "y"]), &r(&["x"]), 9, 9).unwrap();
+        assert!(floor_holds(&r(&[]), &r(&[]), 10, 9).is_err());
+    }
 
     // the lock a ship script holds is an fd it opened without close-on-exec;
     // the app's background run must not carry it off

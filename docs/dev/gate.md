@@ -165,9 +165,9 @@ to the entry it pinned before.
 
 A client cannot replay the log, so each box keeps every recovery it takes
 (`Directory::keep_handover`: the entry on file and the one that replaced
-it, `recoveries/<name>.json` beside `keys/`) and serves them for a
-client to check itself ([client.md](client.md#identity-and-the-directory),
-`identity::anchored`). A box that replays the log from the start keeps
+it, the newest 32, `recoveries/<name>.json` beside `keys/`) and serves
+them for the person's own recovery to follow
+([client.md](client.md#identity-and-the-directory), `identity::follows`). A box that replays the log from the start keeps
 them all; one that had replayed past a recovery before this was kept has
 none for it.
 
@@ -411,7 +411,8 @@ GET /_dd/directory/{name}/recoveries
 everyone else               401, whether or not the name exists
 GET /_dd/members            anyone: the signed member list from the releases
                             branch (VERIFY_MEMBER_LIST), as published, if it
-                            verifies here; ids only, which the open repo's
+                            verifies here (one fetch at a time, 1 MiB at most,
+                            kept ten minutes); ids only, which the open repo's
                             fleet/members.json carries already
 ```
 

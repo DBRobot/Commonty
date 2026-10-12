@@ -184,6 +184,28 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         !signers.contains("mallory"),
         "a box's entry is no signer: {signers}"
     );
+    // someone the file trusted, who no longer anchors: the file stays as
+    // it was rather than quietly losing them
+    let sarah_key = signers
+        .split(' ')
+        .skip(1)
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let had = format!("{signers}bob@dd {sarah_key}\n");
+    std::fs::write(home.join(".config/dd/allowed_signers"), &had).unwrap();
+    let (fine, out) = run(
+        &home,
+        &keyring,
+        &home,
+        dd,
+        &["git", "signers", "--directory", &directory],
+    );
+    assert!(!fine && out.contains("bob@dd no longer anchors"), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(home.join(".config/dd/allowed_signers")).unwrap(),
+        had
+    );
 
     // a commit made with the configured key verifies and names the person
     let repo = scratch("repo");

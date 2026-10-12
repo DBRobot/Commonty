@@ -155,7 +155,10 @@ current.json            the release the boxes follow
 history/<counter>.json  every release ever published, the same bytes
 members.json            fleet/members.json at that commit, signed for clients
                         (identity::MemberList, the release's counter): what
-                        every directory serves at /_dd/members
+                        every directory serves at /_dd/members. Publish
+                        refuses while a listed id has no name, or while it
+                        revokes someone and MEMBER_LIST_FLOOR is not its
+                        counter (client.md)
 app.json                the app's signed manifest (app-release.md)
 app-history/<tag>.json  every app manifest
 build-order.json        the order the boxes are building for an app release

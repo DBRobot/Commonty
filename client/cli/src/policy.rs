@@ -53,21 +53,41 @@ pub fn check_notice(today: i64, takes_effect: &str) -> Result<()> {
     Ok(())
 }
 
-/// Who is told: everyone the release lets in (on the list, or in by an
-/// invite the release key signed) and not shut out or gone by their own
-/// word. Names only; each is written to at <name>@<domain>.
+/// Who is told: everyone the release lets in and not shut out or gone by
+/// their own word. Names only; each is written to at <name>@<domain>. Each
+/// entry with what the directory proved of its recoveries; held to the
+/// list as a client holds one (identity::anchored), a recovery since
+/// followed from the root listed for the name (identity::follows), or an
+/// invite the release key signed, proved by the root the entry has now:
+/// a directory's word for earlier roots lets nobody in.
 pub fn recipients(
-    entries: &[identity::SignedEntry],
+    entries: &[(identity::SignedEntry, Vec<identity::Handover>)],
     members: &crate::member::Members,
     release: Option<&ed25519_dalek::VerifyingKey>,
     left: &BTreeSet<String>,
 ) -> Vec<String> {
+    let m = members;
+    let let_in = |e: &identity::SignedEntry, h: &[identity::Handover]| {
+        let name = &e.entry.name;
+        if identity::member_ids(&e.entry)
+            .iter()
+            .any(|id| m.revoked.contains(id))
+        {
+            return false;
+        }
+        identity::anchored(e, &m.members, &m.revoked, &m.names).is_ok()
+            || identity::listed_as(name, &m.members, &m.names)
+                .is_some_and(|from| identity::follows(e, h, from).is_ok())
+            || (e.entry.recovered_from.is_empty()
+                && identity::verify(e).is_ok()
+                && release.is_some_and(|r| identity::verify_grant(&e.entry, r).is_ok()))
+    };
     let mut out: Vec<String> = entries
         .iter()
-        .filter(|e| identity::valid_name(&e.entry.name) && !e.entry.name.starts_with("guest"))
-        .filter(|e| !left.contains(&e.entry.name))
-        .filter(|e| identity::is_member(&e.entry, &members.members, &members.revoked, release))
-        .map(|e| e.entry.name.clone())
+        .filter(|(e, _)| identity::valid_name(&e.entry.name) && !e.entry.name.starts_with("guest"))
+        .filter(|(e, _)| !left.contains(&e.entry.name))
+        .filter(|(e, h)| let_in(e, h))
+        .map(|(e, _)| e.entry.name.clone())
         .collect();
     out.sort();
     out.dedup();
@@ -172,7 +192,12 @@ pub async fn announce(a: Announce<'_>) -> Result<()> {
 }
 
 /// the list's names, each one's entry, and who has left by their own word
-async fn directory_now(dirs: &[String]) -> Result<(Vec<identity::SignedEntry>, BTreeSet<String>)> {
+async fn directory_now(
+    dirs: &[String],
+) -> Result<(
+    Vec<(identity::SignedEntry, Vec<identity::Handover>)>,
+    BTreeSet<String>,
+)> {
     let d = dirs.first().context("no directory")?;
     let http = crate::who::http()?;
     // the list and the statements are members': read as this device
@@ -182,8 +207,11 @@ async fn directory_now(dirs: &[String]) -> Result<(Vec<identity::SignedEntry>, B
     let mut entries = Vec::new();
     let mut left = BTreeSet::new();
     for n in &listed {
-        if let Some(e) = crate::who::newest(&crate::who::fetch(&dirs[..1], n).await) {
-            entries.push(e);
+        if let Ok(e) = directory::resolve(
+            &crate::who::fetch(&dirs[..1], n).await,
+            directory::Anchor::FirstSight,
+        ) {
+            entries.push((e, directory::handovers(&dirs[..1], n, &[]).await));
         }
         if let Ok(r) = directory::read(&http, &format!("{base}/_dd/leaving/{n}"))
             .send()
@@ -301,13 +329,27 @@ mod tests {
             entry("dan", &keys[4]),
         ];
         let id = |i: usize| identity::member_id(&es[i].entry.root);
+        let listed = [0, 1, 3, 4];
         let m = crate::member::Members {
-            members: vec![id(0), id(1), id(3), id(4)],
+            members: listed.iter().map(|i| id(*i)).collect(),
             revoked: vec![id(1)],
+            names: listed
+                .iter()
+                .map(|i| (id(*i), identity::name_tag(&id(*i), &es[*i].entry.name)))
+                .collect(),
             ..Default::default()
         };
+        let mut es: Vec<_> = es.into_iter().map(|e| (e, vec![])).collect();
+        // a box's entries: ann's root under another name, and a root of
+        // its own claiming ann's as the one it replaced
+        es.push((entry("eve", &keys[0]), vec![]));
+        let boxed = identity::generate();
+        let mut f = entry("fay", &boxed);
+        f.entry.recovered_from = vec![es[0].0.entry.root.clone()];
+        es.push((identity::sign(f.entry, &boxed).unwrap(), vec![]));
         let left = BTreeSet::from(["dan".to_string()]);
-        // bob is shut out, cat is not on the list, the guest is no member, dan left
+        // bob is shut out, cat is not on the list, the guest is no member,
+        // dan left, eve and fay are the box's
         assert_eq!(recipients(&es, &m, None, &left), vec!["ann".to_string()]);
         assert_eq!(
             recipients(&es, &m, None, &BTreeSet::new()),

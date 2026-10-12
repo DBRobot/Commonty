@@ -36,6 +36,8 @@ pub struct Directory {
     member_list: Option<String>,
     /// the member list as last fetched, and when
     member_list_seen: std::sync::Mutex<Option<(std::time::Instant, Option<String>)>>,
+    /// held by the one fetch in flight: a burst of requests asks the forge once
+    member_list_fetch: tokio::sync::Mutex<()>,
     /// the release key: what signs an invite. None: grants cannot be
     /// checked here and are refused
     release: Option<ed25519_dalek::VerifyingKey>,
@@ -110,6 +112,7 @@ impl Directory {
             recoveries,
             member_list: None,
             member_list_seen: Default::default(),
+            member_list_fetch: Default::default(),
             release,
             members: None,
             readers: vec![],
@@ -320,11 +323,17 @@ impl Directory {
         before: &identity::SignedEntry,
         after: &identity::SignedEntry,
     ) -> Result<()> {
+        // each takes the paper key on file, so a long run is a person's
+        // own; the newest are what a recovery follows from a listed root
+        const KEPT: usize = 32;
         let mut all = self.handovers(&after.entry.name);
         all.push(identity::Handover {
             before: before.clone(),
             after: after.clone(),
         });
+        if all.len() > KEPT {
+            all.drain(..all.len() - KEPT);
+        }
         let p = self.recoveries.join(format!("{}.json", after.entry.name));
         let tmp = self.recoveries.join(format!(".{}.tmp", after.entry.name));
         std::fs::write(&tmp, serde_json::to_vec_pretty(&all)?)?;
@@ -349,24 +358,40 @@ impl Directory {
     /// a box does not pass on what it can already tell is not one.
     async fn member_list(&self) -> Option<String> {
         let url = self.member_list.as_ref()?;
-        if let Some((at, seen)) = &*self.member_list_seen.lock().unwrap() {
+        let cached = || {
+            let seen = self.member_list_seen.lock().unwrap();
+            let (at, seen) = seen.as_ref()?;
             let fresh = if seen.is_some() { 600 } else { 60 };
-            if at.elapsed() < Duration::from_secs(fresh) {
-                return seen.clone();
-            }
+            (at.elapsed() < Duration::from_secs(fresh)).then(|| seen.clone())
+        };
+        if let Some(seen) = cached() {
+            return seen;
+        }
+        let _one = self.member_list_fetch.lock().await;
+        if let Some(seen) = cached() {
+            return seen;
         }
         let read = async {
-            let raw = self
+            let mut r = self
                 .http
                 .get(url)
                 .send()
                 .await
                 .ok()?
                 .error_for_status()
-                .ok()?
-                .text()
-                .await
                 .ok()?;
+            // ids and tags, a few hundred bytes a member: anything past this
+            // is not a member list
+            const MAX: usize = 1 << 20;
+            let mut body = Vec::new();
+            while let Some(c) = r.chunk().await.ok()? {
+                body.extend_from_slice(&c);
+                if body.len() > MAX {
+                    eprintln!("member list refused: over {MAX} bytes");
+                    return None;
+                }
+            }
+            let raw = String::from_utf8(body).ok()?;
             let s: identity::SignedMemberList = serde_json::from_str(&raw).ok()?;
             if let Some(k) = &self.release
                 && let Err(e) = identity::verify_member_list(&s, k)
@@ -1525,7 +1550,7 @@ mod tests {
         // root follows the name here with
         let h = d.handovers("sarah");
         assert_eq!(h.len(), 1);
-        identity::anchored(&good, &h, std::slice::from_ref(&old_id), &[], None).unwrap();
+        identity::follows(&good, &h, &old_id).unwrap();
 
         // removed by the owner, then recovered: still out
         let d = open(crate::Members {

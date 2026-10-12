@@ -116,14 +116,27 @@ async fn confirmed(
 }
 
 /// what the repo's own list makes of an entry, as far as this machine can
-/// check it (identity::anchored)
+/// check it (identity::anchored, identity::follows)
 fn standing(e: &identity::SignedEntry, handovers: &[identity::Handover], m: &Members) -> String {
-    let id = identity::member_id(&e.entry.root);
-    match identity::anchored(e, handovers, &m.members, &m.revoked, Some(&m.names)) {
-        Ok(()) if m.members.contains(&id) => "on the list".into(),
-        Ok(()) => "recovered from a root on the list, every step proven".into(),
-        Err(why) => format!("not anchored to the list: {why}"),
+    let name = &e.entry.name;
+    if let Err(why) = identity::anchored(e, &m.members, &m.revoked, &m.names) {
+        return match identity::listed_as(name, &m.members, &m.names) {
+            Some(from) if identity::follows(e, handovers, from).is_ok() => format!(
+                "recovered from {from}, the root the list has for {name}, every step proven: adding lists this one instead"
+            ),
+            _ => format!("not anchored to the list: {why}"),
+        };
     }
+    format!("the list's root for {name}")
+}
+
+/// the ids the list names `name` by
+fn tagged<'a>(m: &'a Members, name: &str) -> Vec<&'a String> {
+    m.names
+        .iter()
+        .filter(|(id, t)| **t == identity::name_tag(id, name))
+        .map(|(id, _)| id)
+        .collect()
 }
 
 pub async fn add(repo: &str, who: &str, dirs: &[String], confirm: Option<&str>) -> Result<()> {
@@ -158,15 +171,28 @@ pub async fn add(repo: &str, who: &str, dirs: &[String], confirm: Option<&str>) 
         m.members.push(id.clone());
         println!("added {id}");
     }
-    // the name the operator confirmed this root under, and none other: a
-    // member listed before names were is named by adding them again by name
+    // the name the operator confirmed this root under, and none other: one
+    // current root per name, so a root this one replaced (a recovery's)
+    // leaves the list and no client holds an entry to it again. Off the
+    // list, not revoked: a removal of any root a person has had shuts the
+    // person out at every box (identity::is_member)
     match &entry {
         Some(_) => {
+            let old: Vec<String> = tagged(&m, who)
+                .into_iter()
+                .filter(|x| **x != id)
+                .cloned()
+                .collect();
+            for x in &old {
+                m.members.retain(|y| y != x);
+                m.names.remove(x);
+                println!("{x} is no longer listed: {id} is {who}'s root now");
+            }
             m.names.insert(id.clone(), identity::name_tag(&id, who));
             println!("listed as {who}");
         }
         None if !m.names.contains_key(&id) => println!(
-            "no name is listed for {id}: until `dd member add <their name> --confirm {id}` lists it, no device holds their entry to the release"
+            "no name is listed for {id}: until `dd member add <their name> --confirm {id}` lists it, no device holds their entry to the release, and `dd release publish` refuses"
         ),
         None => {}
     }
@@ -176,20 +202,33 @@ pub async fn add(repo: &str, who: &str, dirs: &[String], confirm: Option<&str>) 
 }
 
 /// Off the list and onto the revoked one, so an invite they redeemed
-/// counts for nothing either.
+/// counts for nothing either. By a name the list has, every root listed
+/// under it, as the file says; by a name it does not, the one confirmed.
 pub async fn remove(repo: &str, who: &str, dirs: &[String], confirm: Option<&str>) -> Result<()> {
     let mut m = read(repo)?;
-    let (id, _) = confirmed(who, dirs, &m, confirm).await?;
-    let was = m.members.len();
-    m.members.retain(|x| *x != id);
-    if m.revoked.contains(&id) && m.members.len() == was {
-        bail!("already revoked: {id}");
+    let mut ids: Vec<String> = if is_id(who) {
+        vec![]
+    } else {
+        tagged(&m, who).into_iter().cloned().collect()
+    };
+    if ids.is_empty() {
+        ids.push(confirmed(who, dirs, &m, confirm).await?.0);
     }
-    m.revoked.push(id.clone());
-    m.removed.entry(id.clone()).or_insert_with(identity::now);
+    ids.retain(|id| !m.revoked.contains(id) || m.members.contains(id));
+    if ids.is_empty() {
+        bail!("already revoked: {who}");
+    }
+    for id in &ids {
+        m.members.retain(|x| x != id);
+        if !m.revoked.contains(id) {
+            m.revoked.push(id.clone());
+        }
+        m.removed.entry(id.clone()).or_insert_with(identity::now);
+        println!("revoked {id}");
+    }
     write(repo, m)?;
     println!(
-        "revoked {id}\ncommit fleet/members.json and release; every box then shuts them out, and deletes what is theirs 30 days after this"
+        "commit fleet/members.json and release; every box then shuts them out, and deletes what is theirs 30 days after this"
     );
     Ok(())
 }
@@ -212,25 +251,25 @@ pub async fn list(repo: &str, dirs: &[String]) -> Result<()> {
                 continue;
             };
             let id = identity::member_id(&e.entry.root);
-            let handovers = directory::handovers(&dirs[..1], n, &[]).await;
             // a name beside a listed id only where the entry anchors to the
             // list: a directory can name any entry it makes up anything
-            let shown =
-                if identity::anchored(&e, &handovers, &m.members, &m.revoked, Some(&m.names))
-                    .is_ok()
-                {
-                    Some(n.to_string())
-                } else if identity::anchored(&e, &handovers, &m.members, &m.revoked, None).is_ok() {
-                    Some(format!(
-                        "{n}  name not listed: `dd member add {n}` lists it"
-                    ))
-                } else {
-                    None
-                };
-            if let Some(s) = shown {
-                for i in identity::member_ids(&e.entry) {
-                    names.insert(i, s.clone());
+            if identity::anchored(&e, &m.members, &m.revoked, &m.names).is_ok() {
+                names.insert(id.clone(), n.to_string());
+            } else if let Some(from) = identity::listed_as(n, &m.members, &m.names) {
+                let handovers = directory::handovers(&dirs[..1], n, &[]).await;
+                if identity::follows(&e, &handovers, from).is_ok() {
+                    names.insert(
+                        from.clone(),
+                        format!(
+                            "{n}  recovered since: `dd member add {n}` lists the root they have now"
+                        ),
+                    );
                 }
+            } else if m.members.contains(&id) && !m.names.contains_key(&id) {
+                names.insert(
+                    id.clone(),
+                    format!("{n}  name not listed: `dd member add {n}` lists it"),
+                );
             }
             if let Some(g) = &e.entry.grant {
                 invited.push((id, n.to_string(), g.redeemed));

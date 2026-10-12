@@ -8,7 +8,7 @@ pub use account::{
     ROOT, add_library, admit, admit_passkey, create, load_root, ours, recover, remove_device,
     remove_passkey,
 };
-pub use directory::{fetch, http, newest};
+pub use directory::{fetch, http};
 
 /// our own entry from every directory: this device's token, and the root's
 /// proof where the root is here (a machine it was imported to, say)

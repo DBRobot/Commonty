@@ -764,7 +764,22 @@ async fn a_recovery_reseals_only_an_entry_the_release_anchors() {
     let paper = recovery_key(&out);
     let paper_pub =
         identity::encode_public(&identity::decode_secret(&paper).unwrap().verifying_key());
-    forge.list(&[(member_id_of(&laptop, &d), "sam")], &[]);
+    let first = member_id_of(&laptop, &d);
+    forge.list(&[(first.clone(), "sam")], &[]);
+    // the owner's repo lists him too
+    let repo = scratch("repo");
+    std::fs::create_dir_all(repo.join("fleet")).unwrap();
+    let repo = repo.to_str().unwrap().to_string();
+    let file = || -> serde_json::Value {
+        serde_json::from_str(
+            &std::fs::read_to_string(format!("{repo}/fleet/members.json")).unwrap(),
+        )
+        .unwrap()
+    };
+    laptop.dd_ok(&args(
+        &["member", "add", "sam", "--repo", &repo, "--confirm", &first],
+        &d,
+    ));
     let real: identity::SignedEntry =
         serde_json::from_value(entry(&a, "sam").await.unwrap()).unwrap();
 
@@ -794,7 +809,7 @@ async fn a_recovery_reseals_only_an_entry_the_release_anchors() {
     };
     plant(&a, &identity::sign(forged.clone(), &boxed).unwrap());
     let out = recover(&bare, &paper, false);
-    assert!(out.contains("not in a signed release"), "{out}");
+    assert!(out.contains("does not follow"), "{out}");
 
     // the same, naming sam's real root as the one it replaced, with a
     // handover the box made up: its own key co-signs, not sam's paper key
@@ -803,7 +818,7 @@ async fn a_recovery_reseals_only_an_entry_the_release_anchors() {
     plant(&a, &forged);
     plant_handover(&a, &real, &forged);
     let out = recover(&bare, &paper, false);
-    assert!(out.contains("not in a signed release"), "{out}");
+    assert!(out.contains("does not follow"), "{out}");
     assert_eq!(
         entry(&a, "sam").await.unwrap()["entry"]["root"],
         forged.entry.root.as_str()
@@ -820,12 +835,33 @@ async fn a_recovery_reseals_only_an_entry_the_release_anchors() {
     let third = recovery_key(&recover(&other, &next, true));
     let now = entry(&a, "sam").await.unwrap();
     assert_eq!(now["entry"]["recovered_from"].as_array().unwrap().len(), 2);
+    // the owner lists the root he has now: the first leaves the list, so
+    // whoever holds it vouches for nobody, and is not revoked, which would
+    // shut sam himself out at every box
+    let current = member_id_of(&other, &d);
+    let out = laptop.dd_ok(&args(
+        &[
+            "member",
+            "add",
+            "sam",
+            "--repo",
+            &repo,
+            "--confirm",
+            &current,
+        ],
+        &d,
+    ));
+    assert!(out.contains("every step proven"), "{out}");
+    let f = file();
+    assert_eq!(f["members"], serde_json::json!([current]), "{f}");
+    assert!(f["revoked"].as_array().unwrap().is_empty(), "{f}");
+    assert_eq!(f["names"].as_object().unwrap().len(), 1, "{f}");
     // without the proofs, that last root anchors to nothing
     std::fs::remove_file(a.dir.parent().unwrap().join("recoveries/sam.json")).unwrap();
     let last = Device::new();
     last.dd_ok(&["device", "show"]);
     let out = recover(&last, &third, false);
-    assert!(out.contains("not in a signed release"), "{out}");
+    assert!(out.contains("does not follow"), "{out}");
 }
 
 /// Finding: `dd member add` and `remove` took a name's root on first
@@ -895,12 +931,13 @@ async fn the_member_list_takes_no_directory_s_word_for_whose_root_a_name_has() {
         ),
         "is revoked",
     );
+    // by name, the repo's own list says which ids: tom's, revoked already
     dev.dd_fails(
         &args(
             &["member", "remove", "tom", "--repo", &repo, "--confirm", &id],
             &d,
         ),
-        "is not the member id",
+        "already revoked",
     );
     assert_eq!(file(), before, "nothing changed");
     // and the list puts tom's name beside no id for the box's entry

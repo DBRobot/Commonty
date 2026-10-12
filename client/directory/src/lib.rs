@@ -169,19 +169,11 @@ pub enum Anchor<'a> {
     /// this machine holds the root already (its own keyring, or a pin
     /// written when the device was admitted)
     Root(&'a str),
-    /// the member list in the signed release (or a root this machine
-    /// pinned, as the one id on it): the entry's root is on it, or follows
-    /// from one that is by recoveries the handovers prove
-    /// (identity::anchored), and listed under the entry's name (`names`;
-    /// None for a pinned root, whose name the device is signed in as).
-    /// Someone let in by an invite the release does not list yet is not
-    /// anchored until it does.
-    Released {
-        members: &'a [String],
-        revoked: &'a [String],
-        handovers: &'a [identity::Handover],
-        names: Option<&'a std::collections::BTreeMap<String, String>>,
-    },
+    /// the signed release's member list: the entry's root is the one it
+    /// names as that name's current root (identity::anchored). Someone let
+    /// in by an invite, or recovered since, is not anchored until a release
+    /// lists the root they have now.
+    Released(&'a identity::MemberList),
     /// nothing is known yet. Every directory asked has to agree on the
     /// root, and what comes back is worth pinning - or, where a directory
     /// could choose the root, worth showing a person to confirm.
@@ -229,21 +221,16 @@ pub fn resolve(
         .max_by_key(|e| e.entry.version)
         .cloned()
         .context("no directory has that entry")?;
-    if let Anchor::Released {
-        members,
-        revoked,
-        handovers,
-        names,
-    } = anchor
-    {
-        identity::anchored(&newest, handovers, members, revoked, names)?;
+    if let Anchor::Released(list) = anchor {
+        identity::anchored(&newest, &list.members, &list.revoked, &list.names)?;
     }
     Ok(newest)
 }
 
 /// The recoveries each directory took for `name` (identity::Handover), all
 /// of them: a proof is checked, not believed, so one more does no harm, and
-/// a directory that has none, or is not asked, just proves less.
+/// a directory that has none, or is not asked, just proves less. For a
+/// person's own recovery (identity::follows), never for anyone else.
 pub async fn handovers(
     dirs: &[String],
     name: &str,
@@ -270,24 +257,13 @@ pub async fn handovers(
     out
 }
 
-/// The entry for `name`, anchored to a member list (`Anchor::Released`):
-/// fetched, with every directory's handovers for it.
+/// The entry for `name`, anchored to a member list (`Anchor::Released`)
 pub async fn resolve_released(
     dirs: &[String],
     name: &str,
     list: &identity::MemberList,
 ) -> Result<SignedEntry> {
-    let found = fetch(dirs, name).await;
-    let handovers = handovers(dirs, name, &[]).await;
-    resolve(
-        &found,
-        Anchor::Released {
-            members: &list.members,
-            revoked: &list.revoked,
-            handovers: &handovers,
-            names: Some(&list.names),
-        },
-    )
+    resolve(&fetch(dirs, name).await, Anchor::Released(list))
 }
 
 /// The release key a member list must be signed by: fleet/release.pub as
@@ -491,16 +467,17 @@ mod tests {
         assert!(resolve(&found, Anchor::Root(&ok)).is_ok());
 
         // and the released member list, where there is one
-        let ids = [identity::member_id(&ok)];
-        let released = |members, revoked| Anchor::Released {
+        let id = identity::member_id(&ok);
+        let list = |members: Vec<String>, revoked: Vec<String>| identity::MemberList {
+            names: [(id.clone(), identity::name_tag(&id, "alice"))].into(),
             members,
             revoked,
-            handovers: &[],
-            names: None,
+            ..Default::default()
         };
-        assert!(resolve(&found, released(&ids, &[])).is_ok());
-        assert!(resolve(&found, released(&[], &[])).is_err());
-        assert!(resolve(&found, released(&ids, &ids)).is_err());
+        assert!(resolve(&found, Anchor::Released(&list(vec![id.clone()], vec![]))).is_ok());
+        assert!(resolve(&found, Anchor::Released(&list(vec![], vec![]))).is_err());
+        let shut = list(vec![id.clone()], vec![id.clone()]);
+        assert!(resolve(&found, Anchor::Released(&shut)).is_err());
     }
 
     /// An entry that does not verify is not an entry, however it arrived.
