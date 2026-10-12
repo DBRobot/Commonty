@@ -243,7 +243,7 @@ const MATRIX_ROWS = 4;
 // the matrices opened on this page, kept while it redraws
 const shown = new Set();
 
-function drawGraph(r, run, g, jobs, size) {
+function drawGraph(r, run, g, jobs) {
   const dag = el('div', { class: 'dag' });
   const edgesSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   edgesSvg.setAttribute('class', 'edges');
@@ -275,9 +275,6 @@ function drawGraph(r, run, g, jobs, size) {
   // each line bends. Lines going the same way share their path.
   const edges = g.edges;
   const layer = el('div', { class: 'cards' });
-  // a redraw keeps the last layout's size until this one is placed: a page
-  // that shrinks for that moment is scrolled to the top
-  if (size) Object.assign(layer.style, size);
   const cards = new Map(g.nodes.map((n) => [n.id, card(n)]));
   layer.append(edgesSvg, ...cards.values());
   dag.append(layer);
@@ -414,13 +411,11 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
     // drawn again as its jobs move (watch, below): where it was scrolled to stays
     const draw = () => {
       const was = pane.querySelector('.dag');
-      const sized = was?.querySelector('.cards');
-      const size = sized ? { width: sized.style.width, height: sized.style.height } : null;
       const x = was?.scrollLeft || 0;
       was?.stop?.();
       pane.replaceChildren(el('div', { class: 'box' },
       el('header', {}, el('b', { text: run.workflow_id }), el('span', { class: 'small muted', text: `on: ${run.event}` }), el('span', { class: 'spacer' }), el('span', { class: 'small muted', text: 'a job starts when every job before it has passed' })),
-      g ? drawGraph(r, run, g, jobs, size) : el('div', { class: 'empty', text: 'The workflow file could not be read; the jobs are under Jobs and logs.' })));
+      g ? drawGraph(r, run, g, jobs) : el('div', { class: 'empty', text: 'The workflow file could not be read; the jobs are under Jobs and logs.' })));
       const now = pane.querySelector('.dag');
       if (now) now.scrollLeft = x;
     };

@@ -196,7 +196,10 @@ impl Forge {
     /// each member by id, under the name `dd member add` confirmed
     fn list(&self, members: &[(String, &str)], revoked: &[String]) {
         let list = identity::MemberList {
-            counter: self.counter.fetch_add(1, Ordering::Relaxed) + 1,
+            // from the floor the build holds out for, as a real release's would be
+            counter: identity::fleet::MEMBER_LIST_FLOOR
+                + self.counter.fetch_add(1, Ordering::Relaxed)
+                + 1,
             members: members.iter().map(|(id, _)| id.clone()).collect(),
             revoked: revoked.to_vec(),
             names: members

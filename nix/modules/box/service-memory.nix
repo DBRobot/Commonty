@@ -51,9 +51,7 @@ let
   '';
 in
 {
-  # /var/lib/dd-facts is node-exporter's (observe/metrics.nix): a second
-  # rule naming another owner took it from the units that write there as
-  # node-exporter, and both boxes rolled release 249 back
+  systemd.tmpfiles.rules = [ "d /var/lib/dd-facts 0755 root root -" ];
   systemd.services.dd-service-memory = {
     description = "Measure what each service holds in memory, for placement";
     restartIfChanged = false;

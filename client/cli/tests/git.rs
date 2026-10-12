@@ -142,7 +142,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
     // and carol, whose entry no directory will serve
     let carol = identity::member_id("carol's root");
     let list = identity::MemberList {
-        counter: 1,
+        counter: identity::fleet::MEMBER_LIST_FLOOR + 1,
         members: vec![id.clone(), carol.clone()],
         names: [
             (id.clone(), identity::name_tag(&id, "sarah")),
