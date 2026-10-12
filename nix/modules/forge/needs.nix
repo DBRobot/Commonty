@@ -9,8 +9,18 @@
     };
     alwaysOn = true;
     grows = [ "code" ];
+    lease = true;
+    # its repositories and files, copied out of a snapshot (forgejo.nix)
+    buckets.forge = { };
+    # the forge, and its public repositories for anyone (door.nix)
+    hosts = [
+      "git"
+      "code"
+    ];
     units = [
+      "forgejo"
       "forgejo-admin"
+      "dd-forge-copy" # its repositories into the store, with failover on (follow.nix)
       "forgejo-protection"
       "forgejo-secrets"
       "dd-ci-cancel"

@@ -73,6 +73,171 @@ let
   # wherever this box has it
   placedSvc = s: needs ? ${s} && (needs.${s}.placed || needs.${s}.lease);
   full = "/run/dd-store/full";
+  corsRule = {
+    CORSRules = [
+      {
+        AllowedOrigins = [ "*" ];
+        AllowedMethods = [
+          "GET"
+          "PUT"
+          "POST"
+          "DELETE"
+          "HEAD"
+        ];
+        AllowedHeaders = [ "*" ];
+        ExposeHeaders = [
+          "etag"
+          "ETag"
+          "x-amz-request-id"
+        ];
+        MaxAgeSeconds = 3000;
+      }
+    ];
+  };
+  # the copies: this box's buckets, out to the stores they are kept in.
+  # Every 30 seconds what changed in the last quarter hour, so a takeover
+  # finds all but the last moments there; every half hour all of it, with
+  # a copy read back
+  copyUnit = unit: {
+    description =
+      if unit == "dd-store-copy" then
+        "Copy this box's store out to the stores its buckets are kept in"
+      else
+        "Copy what changed in this box's store out to the stores its buckets are kept in";
+    environment.MODE = if unit == "dd-store-copy" then "all" else "recent";
+    after = [ "dd-store-setup.service" ];
+    restartIfChanged = false;
+    path = [
+      pkgs.rclone
+      pkgs.curl
+      pkgs.age
+      pkgs.coreutils
+      pkgs.gawk
+      pkgs.gnugrep
+      pkgs.jq
+      pkgs.util-linux
+    ]
+    ++ cfg.agePlugins;
+    serviceConfig = {
+      Type = "oneshot";
+      StateDirectory = "dd-store-copy";
+    };
+    script = ''
+      set -uo pipefail
+      umask 077
+      # everything rclone needs is in its environment below
+      export RCLONE_CONFIG=/dev/null
+      mine=/var/lib/dd-store-copy
+      mkdir -p $mine/lost /run/dd-store
+      # one run of each kind at a time; the two side by side is fine
+      exec 9>/run/dd-store/copy-$MODE.lock
+      flock -n 9 || { echo "a $MODE copy still runs"; exit 0; }
+      if [ "$MODE" = recent ]; then recent="--max-age 15m"; else recent=""; fi
+      failed=0
+      # the plan's copies: kept, so a restart copies on as last agreed
+      if [ -s ${plan} ] && jq -e 'type == "object"' ${plan} >/dev/null 2>&1; then
+        cp ${plan} $mine/copies.json.new && mv $mine/copies.json.new $mine/copies.json
+      fi
+      # the other boxes that keep a bucket
+      targets() {
+        if [ -s $mine/copies.json ]; then
+          jq -r --arg b "$1" '.[$b] // [] | .[]' $mine/copies.json | grep -vx ${box} || true
+        else
+          # no plan seen yet: the first boxes by name
+          case "$1" in
+          ${lib.concatStrings (
+            lib.mapAttrsToList (
+              b: v: "  ${b}) echo ${lib.concatStringsSep " " (lib.take (v.copies - 1) sorted)} ;;\n"
+            ) cfg.buckets
+          )}
+          esac
+        fi
+      }
+      # whether this box writes it now
+      writes() {
+        case "$1" in
+        ${lib.concatStrings (
+          lib.mapAttrsToList (
+            b: v:
+            if v.service != null && placedSvc v.service then
+              "  ${b}) [ -e /run/dd-placed/${v.service} ] ;;\n"
+            else
+              "  ${b}) true ;;\n"
+          ) cfg.buckets
+        )}
+        *) false ;;
+        esac
+      }
+      url() {
+        case "$1" in
+        ${lib.concatStrings (lib.mapAttrsToList (p: v: "  ${p}) echo ${v.url} ;;\n") cfg.peers)}
+        *) return 1 ;;
+        esac
+      }
+      # its key there, sealed to this box at its store
+      key() {
+        [ -s $mine/$1.env ] && return 0
+        if curl -fsS --max-time 30 "$2/_keys/${box}.age" -o $mine/$1.age \
+          && age -d -i ${cfg.identity} $mine/$1.age > $mine/$1.env.new; then
+          mv $mine/$1.env.new $mine/$1.env
+        else
+          echo "$1: no key from its store yet"
+          return 1
+        fi
+      }
+      for b in ${lib.concatStringsSep " " copied}; do
+        writes $b || continue
+        for p in $(targets $b); do
+          there=$(url $p) || { echo "$p: keeps $b by the plan, and is no store this box knows"; failed=1; continue; }
+          key $p "$there" || { failed=1; continue; }
+          (
+            set -a; . $mine/$p.env; set +a
+            export RCLONE_CONFIG_THERE_TYPE=s3 RCLONE_CONFIG_THERE_PROVIDER=Other \
+              RCLONE_CONFIG_THERE_ENDPOINT=$there RCLONE_CONFIG_THERE_REGION=us-east-1 \
+              RCLONE_CONFIG_THERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+              RCLONE_CONFIG_THERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+              RCLONE_CONFIG_THERE_FORCE_PATH_STYLE=true
+            set -a; . ${state}/keys/$b.env; set +a
+            export RCLONE_CONFIG_HERE_TYPE=s3 RCLONE_CONFIG_HERE_PROVIDER=Other \
+              RCLONE_CONFIG_HERE_ENDPOINT=http://127.0.0.1:${toString cfg.port} RCLONE_CONFIG_HERE_REGION=us-east-1 \
+              RCLONE_CONFIG_HERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+              RCLONE_CONFIG_HERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+              RCLONE_CONFIG_HERE_FORCE_PATH_STYLE=true
+            # first, one object the last copy there sent, read back: a
+            # store that takes copies and keeps none is found out
+            if [ "$MODE" = all ] && [ -s $mine/$p.$b.ok ]; then
+              age=$(( $(date +%s) - $(cat $mine/$p.$b.ok) ))
+              obj=$(rclone lsf -R --files-only --min-age "''${age}s" "here:$b" 2>/dev/null | shuf -n1 || true)
+              if [ -n "$obj" ] && want=$(rclone cat "here:$b/$obj" | sha256sum); then
+                if got=$(rclone cat "there:$b/$obj" 2>/dev/null | sha256sum) && [ "$got" = "$want" ]; then
+                  rm -f $mine/lost/$p.$b
+                else
+                  echo "$p: $b/$obj read back is not what was sent: its copy there counts for nothing"
+                  touch $mine/lost/$p.$b
+                fi
+              fi
+            fi
+            # copy, never sync: nothing is deleted there
+            rclone copy --checksum --s3-no-check-bucket --fast-list $recent "here:$b" "there:$b"
+          ) && { [ "$MODE" = recent ] || date +%s > $mine/$p.$b.ok; } || { echo "$p: $b not copied this time"; failed=1; }
+        done
+      done
+      # what the plan reads of the copies read back (place.Decide)
+      [ "$MODE" = all ] || exit 0
+      out=$(mktemp)
+      for f in $mine/lost/*; do
+        [ -e "$f" ] || continue
+        n=''${f##*/}
+        echo "dd_store_lost{bucket=\"''${n#*.}\",box=\"''${n%%.*}\"} 1" >> $out
+      done
+      install -d /var/lib/dd-facts
+      chmod 0644 $out
+      mv $out /var/lib/dd-facts/store-copy.prom
+      # a box away or full is not this box failing: the timer comes back
+      [ "$failed" = 0 ] || echo "some copies wait for the next run"
+      exit 0
+    '';
+  };
 in
 {
   options.dd.store = {
@@ -137,6 +302,11 @@ in
               type = lib.types.str;
               default = "root";
               description = "who reads the bucket's key file, ${state}/keys/<bucket>.env";
+            };
+            cors = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "browsers send to it straight, with a presigned url (ente's photos): any origin, as the signature is the access control and a web worker's origin is null";
             };
             service = lib.mkOption {
               type = lib.types.nullOr lib.types.str;
@@ -256,10 +426,17 @@ in
             g bucket create ${b} 2>/dev/null || true
             key local-${b} > ${state}/keys/${b}.env.new
             id=$(awk -F= '/ACCESS_KEY_ID/ { print $2 }' ${state}/keys/${b}.env.new)
-            g bucket allow --read --write ${b} --key "$id" >/dev/null
+            # owner too where it sets its own cors, as only an owner may
+            g bucket allow --read --write ${lib.optionalString v.cors "--owner"} ${b} --key "$id" >/dev/null
             chown ${v.owner} ${state}/keys/${b}.env.new
             chmod 0400 ${state}/keys/${b}.env.new
             mv ${state}/keys/${b}.env.new ${state}/keys/${b}.env
+            ${lib.optionalString v.cors ''
+              # garage has no cli for cors: an s3 call with the bucket's key
+              ( set -a; . ${state}/keys/${b}.env
+                AWS_DEFAULT_REGION=us-east-1 ${pkgs.awscli2}/bin/aws --endpoint-url http://127.0.0.1:${toString cfg.port} \
+                  s3api put-bucket-cors --bucket ${b} --cors-configuration ${lib.escapeShellArg (builtins.toJSON corsRule)} )
+            ''}
           '') cfg.buckets
         )}
         # each other box's key here: written into what it copies, sealed to it
@@ -278,141 +455,21 @@ in
       '';
     };
 
-    # the copies: this box's buckets, out to the stores they are kept in
-    systemd.services.dd-store-copy = {
-      description = "Copy this box's store out to the stores its buckets are kept in";
-      after = [ "dd-store-setup.service" ];
-      restartIfChanged = false;
-      path = [
-        pkgs.rclone
-        pkgs.curl
-        pkgs.age
-        pkgs.coreutils
-        pkgs.gawk
-        pkgs.gnugrep
-        pkgs.jq
-      ]
-      ++ cfg.agePlugins;
-      serviceConfig = {
-        Type = "oneshot";
-        StateDirectory = "dd-store-copy";
-      };
-      script = ''
-        set -uo pipefail
-        umask 077
-        # everything rclone needs is in its environment below
-        export RCLONE_CONFIG=/dev/null
-        mine=/var/lib/dd-store-copy
-        mkdir -p $mine/lost
-        failed=0
-        # the plan's copies: kept, so a restart copies on as last agreed
-        if [ -s ${plan} ] && jq -e 'type == "object"' ${plan} >/dev/null 2>&1; then
-          cp ${plan} $mine/copies.json.new && mv $mine/copies.json.new $mine/copies.json
-        fi
-        # the other boxes that keep a bucket
-        targets() {
-          if [ -s $mine/copies.json ]; then
-            jq -r --arg b "$1" '.[$b] // [] | .[]' $mine/copies.json | grep -vx ${box} || true
-          else
-            # no plan seen yet: the first boxes by name
-            case "$1" in
-            ${lib.concatStrings (
-              lib.mapAttrsToList (
-                b: v: "  ${b}) echo ${lib.concatStringsSep " " (lib.take (v.copies - 1) sorted)} ;;\n"
-              ) cfg.buckets
-            )}
-            esac
-          fi
-        }
-        # whether this box writes it now
-        writes() {
-          case "$1" in
-          ${lib.concatStrings (
-            lib.mapAttrsToList (
-              b: v:
-              if v.service != null && placedSvc v.service then
-                "  ${b}) [ -e /run/dd-placed/${v.service} ] ;;\n"
-              else
-                "  ${b}) true ;;\n"
-            ) cfg.buckets
-          )}
-          *) false ;;
-          esac
-        }
-        url() {
-          case "$1" in
-          ${lib.concatStrings (lib.mapAttrsToList (p: v: "  ${p}) echo ${v.url} ;;\n") cfg.peers)}
-          *) return 1 ;;
-          esac
-        }
-        # its key there, sealed to this box at its store
-        key() {
-          [ -s $mine/$1.env ] && return 0
-          if curl -fsS --max-time 30 "$2/_keys/${box}.age" -o $mine/$1.age \
-            && age -d -i ${cfg.identity} $mine/$1.age > $mine/$1.env.new; then
-            mv $mine/$1.env.new $mine/$1.env
-          else
-            echo "$1: no key from its store yet"
-            return 1
-          fi
-        }
-        for b in ${lib.concatStringsSep " " copied}; do
-          writes $b || continue
-          for p in $(targets $b); do
-            there=$(url $p) || { echo "$p: keeps $b by the plan, and is no store this box knows"; failed=1; continue; }
-            key $p "$there" || { failed=1; continue; }
-            (
-              set -a; . $mine/$p.env; set +a
-              export RCLONE_CONFIG_THERE_TYPE=s3 RCLONE_CONFIG_THERE_PROVIDER=Other \
-                RCLONE_CONFIG_THERE_ENDPOINT=$there RCLONE_CONFIG_THERE_REGION=us-east-1 \
-                RCLONE_CONFIG_THERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
-                RCLONE_CONFIG_THERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
-                RCLONE_CONFIG_THERE_FORCE_PATH_STYLE=true
-              set -a; . ${state}/keys/$b.env; set +a
-              export RCLONE_CONFIG_HERE_TYPE=s3 RCLONE_CONFIG_HERE_PROVIDER=Other \
-                RCLONE_CONFIG_HERE_ENDPOINT=http://127.0.0.1:${toString cfg.port} RCLONE_CONFIG_HERE_REGION=us-east-1 \
-                RCLONE_CONFIG_HERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
-                RCLONE_CONFIG_HERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
-                RCLONE_CONFIG_HERE_FORCE_PATH_STYLE=true
-              # first, one object the last copy there sent, read back: a
-              # store that takes copies and keeps none is found out
-              if [ -s $mine/$p.$b.ok ]; then
-                age=$(( $(date +%s) - $(cat $mine/$p.$b.ok) ))
-                obj=$(rclone lsf -R --files-only --min-age "''${age}s" "here:$b" 2>/dev/null | shuf -n1 || true)
-                if [ -n "$obj" ] && want=$(rclone cat "here:$b/$obj" | sha256sum); then
-                  if got=$(rclone cat "there:$b/$obj" 2>/dev/null | sha256sum) && [ "$got" = "$want" ]; then
-                    rm -f $mine/lost/$p.$b
-                  else
-                    echo "$p: $b/$obj read back is not what was sent: its copy there counts for nothing"
-                    touch $mine/lost/$p.$b
-                  fi
-                fi
-              fi
-              # copy, never sync: nothing is deleted there
-              rclone copy --checksum --s3-no-check-bucket "here:$b" "there:$b"
-            ) && date +%s > $mine/$p.$b.ok || { echo "$p: $b not copied this time"; failed=1; }
-          done
-        done
-        # what the plan reads of the copies read back (place.Decide)
-        out=$(mktemp)
-        for f in $mine/lost/*; do
-          [ -e "$f" ] || continue
-          n=''${f##*/}
-          echo "dd_store_lost{bucket=\"''${n#*.}\",box=\"''${n%%.*}\"} 1" >> $out
-        done
-        install -d /var/lib/dd-facts
-        chmod 0644 $out
-        mv $out /var/lib/dd-facts/store-copy.prom
-        # a box away or full is not this box failing: the timer comes back
-        [ "$failed" = 0 ] || echo "some copies wait for the next run"
-        exit 0
-      '';
-    };
+    systemd.services.dd-store-copy = copyUnit "dd-store-copy";
+    systemd.services.dd-store-copy-recent = copyUnit "dd-store-copy-recent";
     systemd.timers.dd-store-copy = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnActiveSec = "2min";
-        OnUnitActiveSec = "5min";
+        OnUnitActiveSec = "30min";
+      };
+    };
+    systemd.timers.dd-store-copy-recent = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "1min";
+        OnUnitActiveSec = "30s";
+        AccuracySec = "5s";
       };
     };
 

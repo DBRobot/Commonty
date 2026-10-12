@@ -59,6 +59,7 @@
         "pgrestore"
         "pg-follow"
         "store"
+        "takeover"
         "photos"
         "llm"
         "vault"
@@ -977,16 +978,38 @@
               gateways = builtins.filter (n: self.nixosConfigurations.${n}.config.dd ? public) (
                 builtins.attrNames boxList
               );
+              fp = import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; };
+              failover = (nixpkgs.lib.importJSON ./fleet/policy.json).failover or false;
               fleet = {
                 RECORDS =
-                  assert nixpkgs.lib.assertMsg (
-                    builtins.length gateways <= 1
-                  ) "the DNS Worker keeps one gateway's names; these are all gateways: ${toString gateways}";
+                  assert nixpkgs.lib.assertMsg (builtins.length gateways <= 1 || failover)
+                    "the DNS Worker keeps one gateway's names unless failover is on; these are all gateways: ${toString gateways}";
                   if gateways == [ ] then
                     null
                   else
                     import ./nix/lib/fleet-names.nix self.nixosConfigurations.${builtins.head gateways}.config
                     // {
+                      # with no lease to go by, the gateway is the first by name
+                      home = builtins.head gateways;
+                      # the lease the gateway's names follow: the network's
+                      # control server's, and with it the gate's pages
+                      gateway = "headscale";
+                      addresses = nixpkgs.lib.filterAttrs (_: a: a != "") (
+                        nixpkgs.lib.mapAttrs (n: _: self.nixosConfigurations.${n}.config.dd.box.net) boxList
+                      );
+                      # each name of a service with one writer (needs hosts),
+                      # at the box holding its lease
+                      follow = builtins.listToAttrs (
+                        nixpkgs.lib.concatLists (
+                          nixpkgs.lib.mapAttrsToList (
+                            svc: n:
+                            map (h: {
+                              name = h;
+                              value = svc;
+                            }) n.hosts
+                          ) (nixpkgs.lib.filterAttrs (_: n: n.lease) fp.needs)
+                        )
+                      );
                       # every box's address on the fleet's network: an A at one
                       # of these is a record of ours
                       fleet = map (n: self.nixosConfigurations.${n}.config.dd.box.net) (builtins.attrNames boxList);

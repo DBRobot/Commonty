@@ -9,6 +9,9 @@
 // both from the signed config. A hello older than a minute is refused, so
 // nobody can sit on another node's address.
 //
+// Its agreed state's leases go to the DNS Worker, which binds this object
+// (/leases), and nowhere else.
+//
 // Bindings: RELAY (this class), WITNESS_KEY (secret, the witness's ed25519
 // seed; unset: no witness here).
 import './wasm_exec.js';
@@ -130,6 +133,17 @@ export class Relay {
       try { height = this.witness !== null ? JSON.parse(globalThis.controlState()).height : null; } catch { /* starting */ }
       return Response.json({ connected: this.socks.size, witness: this.witness !== null, height });
     }
+    // who holds each lease, by the witness's agreed state: for the DNS
+    // Worker, which binds this object (servers/system/dns); never reached
+    // from outside, as the front below passes only /relay and /health
+    if (url.pathname === '/leases') {
+      try {
+        const s = JSON.parse(globalThis.controlState());
+        return Response.json({ time: s.time, leases: s.leases || {} });
+      } catch {
+        return new Response('no state yet', { status: 503 });
+      }
+    }
     if (url.pathname !== '/relay' || req.headers.get('upgrade') !== 'websocket') return new Response('not here', { status: 404 });
     let id;
     try { id = BigInt(url.searchParams.get('id') || ''); } catch { return new Response('no id', { status: 400 }); }
@@ -162,7 +176,8 @@ export default {
     // only a WebSocket's hello comes here, with no body; anything sent with
     // one is read and turned away, as a body left unread faults the request
     // after it (a 503)
-    if (req.method !== 'GET') {
+    const path = new URL(req.url).pathname;
+    if (req.method !== 'GET' || (path !== '/relay' && path !== '/health')) {
       await req.text().catch(() => '');
       return new Response('not here', { status: 404 });
     }

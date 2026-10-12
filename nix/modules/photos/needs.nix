@@ -10,9 +10,23 @@
     alwaysOn = true;
     # one library of everyone's photos: its records are one database
     instances = 1;
+    # one writer: the box holding its lease, with its own keys (ente.nix)
+    lease = true;
     units = [
       "ente"
       "ente-health"
+    ];
+    # people's photos, encrypted on their devices
+    buckets.ente = { };
+    # museum's api and the apps that call it, and its store's name
+    hosts = [
+      "api"
+      "photos"
+      "accounts"
+      "albums"
+      "cast"
+      "locker"
+      "photos-store"
     ];
     base = {
       requires.disk.size.min = "1G";
@@ -44,6 +58,9 @@
     # the photos app is where a member types their password: whoever has
     # root on the box that serves it could change it
     servesCode = true;
+    # museum's keys with failover on: made wherever photos is carried, as
+    # the gate on every such box reads the sign-in code
+    units = [ "dd-ente-keys" ];
     base = {
       uses = {
         memory = "0";

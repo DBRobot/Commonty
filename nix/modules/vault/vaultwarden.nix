@@ -15,6 +15,10 @@ let
   public = hasPublic && config.dd.public.enable;
   issuer = cfg.issuer;
   homeIssuer = "https://home.${base}/_dd/oidc";
+  # with failover on (box/box.nix): its sign-in secret is made here for the
+  # gate here, and its files are in this box's own store
+  own = config.dd.failover or false;
+  keys = "/var/lib/dd-vault-keys";
 
   # Pinned: a nixpkgs bump that moves Vaultwarden stops here until someone
   # reads what changed and updates this line.
@@ -131,17 +135,60 @@ in
       (lib.optionalAttrs hasPublic { dd.public.hosts = [ "vault" ]; })
       # the bucket and its key are made by the garage on this box, when there
       # is one; a vault on a box without garage needs them made already
-      (lib.optionalAttrs (options.dd ? garage) {
-        dd.garage.setupEnvFiles = [ cfg.envFile ];
-        dd.garage.buckets.vaultwarden = {
-          key = {
-            name = "dd-vault";
-            envPrefix = "VAULT";
+      (lib.optionalAttrs (options.dd ? garage) (
+        lib.mkIf (!own) {
+          dd.garage.setupEnvFiles = [ cfg.envFile ];
+          dd.garage.buckets.vaultwarden = {
+            key = {
+              name = "dd-vault";
+              envPrefix = "VAULT";
+            };
+            allow = [
+              "read"
+              "write"
+            ];
           };
-          allow = [
-            "read"
-            "write"
+        }
+      ))
+      (lib.mkIf own {
+        # started with postgres by the plan: its role and database first
+        systemd.services.vaultwarden.after = [ "postgresql-setup.service" ];
+        systemd.services.vaultwarden.wants = [ "postgresql-setup.service" ];
+        dd.vault.envFile = "${keys}/env";
+        dd.vault.oidcSecretFile = "${keys}/oidc";
+        systemd.services.dd-vault-keys = {
+          description = "Make the vault's sign-in secret on this box";
+          wantedBy = [ "vaultwarden.service" ];
+          before = [
+            "vaultwarden.service"
+            "dd-verify.service"
           ];
+          after = [ "dd-store-setup.service" ];
+          requires = [ "dd-store-setup.service" ];
+          path = [
+            pkgs.openssl
+            pkgs.coreutils
+          ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            set -euo pipefail
+            umask 077
+            install -d -m 0750 -o root -g dd-verify ${keys}
+            [ -s ${keys}/oidc ] || { openssl rand -hex 32 > ${keys}/oidc.new && mv ${keys}/oidc.new ${keys}/oidc; }
+            chown root:dd-verify ${keys}/oidc
+            chmod 0440 ${keys}/oidc
+            . /var/lib/dd-store/keys/vaultwarden.env
+            {
+              echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
+              echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
+              echo "SSO_CLIENT_SECRET=$(cat ${keys}/oidc)"
+            } > ${keys}/env.new
+            chmod 0400 ${keys}/env.new
+            mv ${keys}/env.new ${keys}/env
+          '';
         };
       })
       {
@@ -175,7 +222,13 @@ in
             ROCKET_PORT = port;
             # the storage pool, wherever it is: this box's garage or a
             # storage box's over the tailnet
-            DATA_FOLDER = "s3://vaultwarden/data?endpoint=${config.dd.box.s3}&region=us-east-1&enable_virtual_host_style=false&default_storage_class=STANDARD";
+            DATA_FOLDER = "s3://vaultwarden/data?endpoint=${
+              if own then "http://127.0.0.1:${toString config.dd.store.port}" else config.dd.box.s3
+            }&region=us-east-1&enable_virtual_host_style=false&default_storage_class=STANDARD";
+            # the key its sessions are signed with: this box's, on its own
+            # disk, never in the bucket that is copied to other boxes. A box
+            # taking over makes its own; members sign in again, through SSO
+            RSA_KEY_FILENAME = "/var/lib/vaultwarden/rsa_key";
             TMP_FOLDER = "/var/lib/vaultwarden/tmp";
             TEMPLATES_FOLDER = "${templates}";
 

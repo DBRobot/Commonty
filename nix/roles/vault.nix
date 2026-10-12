@@ -1,4 +1,4 @@
-{ config, ... }:
+{ config, lib, ... }:
 {
   # Passwords: Vaultwarden, signed in through the gate, its files in garage.
   # Its garage key and the sign-in secret it shares with the gate come from
@@ -18,21 +18,26 @@
       rank = 45;
     }
   ];
-  sops.secrets = {
-    vault-key-id = { };
-    vault-key-secret = { };
-    vault-oidc-secret = { };
+  sops = lib.mkIf (!(config.dd.failover or false)) {
+    secrets = {
+      vault-key-id = { };
+      vault-key-secret = { };
+      vault-oidc-secret = { };
+    };
+    templates."vault.env".content = ''
+      VAULT_ID=${config.sops.placeholder.vault-key-id}
+      VAULT_SECRET=${config.sops.placeholder.vault-key-secret}
+      AWS_ACCESS_KEY_ID=${config.sops.placeholder.vault-key-id}
+      AWS_SECRET_ACCESS_KEY=${config.sops.placeholder.vault-key-secret}
+      SSO_CLIENT_SECRET=${config.sops.placeholder.vault-oidc-secret}
+    '';
   };
-  sops.templates."vault.env".content = ''
-    VAULT_ID=${config.sops.placeholder.vault-key-id}
-    VAULT_SECRET=${config.sops.placeholder.vault-key-secret}
-    AWS_ACCESS_KEY_ID=${config.sops.placeholder.vault-key-id}
-    AWS_SECRET_ACCESS_KEY=${config.sops.placeholder.vault-key-secret}
-    SSO_CLIENT_SECRET=${config.sops.placeholder.vault-oidc-secret}
-  '';
   dd.vault = {
     enable = true;
-    envFile = config.sops.templates."vault.env".path;
-    oidcSecretFile = config.sops.secrets.vault-oidc-secret.path;
+    # with failover on, made on the box (modules/vault/vaultwarden.nix)
+    envFile = lib.mkIf (!(config.dd.failover or false)) config.sops.templates."vault.env".path;
+    oidcSecretFile = lib.mkIf (
+      !(config.dd.failover or false)
+    ) config.sops.secrets.vault-oidc-secret.path;
   };
 }

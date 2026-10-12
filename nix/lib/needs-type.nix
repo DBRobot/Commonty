@@ -266,6 +266,11 @@ t.attrsOf (
         default = false;
         description = "one writer at a time: placed, and it runs only while its box holds the control plane's lease svc/<name>, which the boxes able to run it may hold (cmd/dd-control/placed.go)";
       };
+      hosts = lib.mkOption {
+        type = t.listOf t.str;
+        default = [ ];
+        description = "the names under the fleet's domain it answers at (photos, for photos.<domain>): with a lease, the DNS Worker points them at the box holding it";
+      };
       buckets = lib.mkOption {
         type = t.attrsOf (
           t.submodule {

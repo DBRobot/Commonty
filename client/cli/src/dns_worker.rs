@@ -50,15 +50,42 @@ fn bundle(flake: &str) -> Result<std::path::PathBuf> {
     Ok(String::from_utf8(out.stdout)?.trim().into())
 }
 
-async fn upload(http: &reqwest::Client, token: &str, s: &Setup, dir: &Path) -> Result<()> {
+/// the control plane's relay, whose witness has the agreed state: which box
+/// holds each lease, which the names follow (fleet/control-worker.json)
+fn control_script(root: &Path) -> Result<Option<String>> {
+    let p = root.join("fleet/control-worker.json");
+    if !p.exists() {
+        return Ok(None);
+    }
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(p)?)?;
+    Ok(v["script"].as_str().map(str::to_string))
+}
+
+async fn upload(
+    http: &reqwest::Client,
+    token: &str,
+    s: &Setup,
+    dir: &Path,
+    control: Option<&str>,
+) -> Result<()> {
+    let mut bindings = vec![
+        serde_json::json!({ "type": "plain_text", "name": "DOMAIN", "text": s.domain }),
+        serde_json::json!({ "type": "plain_text", "name": "ZONE", "text": s.zone }),
+        serde_json::json!({ "type": "plain_text", "name": "ACCOUNT", "text": s.account }),
+    ];
+    if let Some(script) = control {
+        bindings.push(serde_json::json!({
+            "type": "durable_object_namespace",
+            "name": "CONTROL",
+            "class_name": "Relay",
+            "script_name": script,
+        }));
+    }
     let metadata = serde_json::json!({
         "main_module": "worker.js",
         "compatibility_date": COMPATIBILITY,
-        "bindings": [
-            { "type": "plain_text", "name": "DOMAIN", "text": s.domain },
-            { "type": "plain_text", "name": "ZONE", "text": s.zone },
-        ],
-        // DNS_TOKEN was set once and is kept
+        "bindings": bindings,
+        // DNS_TOKEN and TUNNEL_TOKEN were set once and are kept
         "keep_bindings": ["secret_text"],
     });
     let mut form = reqwest::multipart::Form::new().part(
@@ -89,7 +116,8 @@ async fn upload(http: &reqwest::Client, token: &str, s: &Setup, dir: &Path) -> R
     if v["success"] != serde_json::Value::Bool(true) {
         bail!("Cloudflare did not take the DNS Worker: {}", v["errors"]);
     }
-    // the names are put in step every five minutes, from what was uploaded
+    // the names are put in step every minute, from what was uploaded and
+    // who holds each lease
     call(
         http,
         token,
@@ -98,7 +126,7 @@ async fn upload(http: &reqwest::Client, token: &str, s: &Setup, dir: &Path) -> R
             "/accounts/{}/workers/scripts/{}/schedules",
             s.account, s.script
         ),
-        Some(serde_json::json!([{ "cron": "*/5 * * * *" }])),
+        Some(serde_json::json!([{ "cron": "* * * * *" }])),
     )
     .await?;
     Ok(())
@@ -112,7 +140,15 @@ pub async fn deploy(root: &Path, keys: &impl auth::KeyStore, r#ref: &str) -> Res
         return Ok(());
     };
     let dir = bundle(&format!("git+file://{}?ref={ref}", root.display()))?;
-    upload(&reqwest::Client::new(), &token(keys)?, &s, &dir).await?;
+    let control = control_script(root)?;
+    upload(
+        &reqwest::Client::new(),
+        &token(keys)?,
+        &s,
+        &dir,
+        control.as_deref(),
+    )
+    .await?;
     eprintln!("== the DNS Worker is {}", dir.display());
     Ok(())
 }
@@ -148,7 +184,8 @@ pub async fn setup(root: &Path, keys: &impl auth::KeyStore, domain: &str) -> Res
     };
 
     let dir = bundle(&format!("path:{}", root.display()))?;
-    upload(&http, &token, &s, &dir).await?;
+    let control = control_script(root)?;
+    upload(&http, &token, &s, &dir, control.as_deref()).await?;
     eprintln!("== uploaded the DNS Worker");
 
     eprintln!(
@@ -194,6 +231,43 @@ pub async fn setup(root: &Path, keys: &impl auth::KeyStore, domain: &str) -> Res
          certificate of its own names, and the gateway no longer holds the zone's\n\
          token: once it has switched, delete that token at Cloudflare and\n\
          cloudflare-token from its sops file."
+    );
+    Ok(())
+}
+
+/// Once, for failover: the token the Worker makes each box's own tunnel
+/// with (Account > Cloudflare Tunnel > Edit, this account only). It goes
+/// straight to the Worker as a secret and is kept nowhere else; no box
+/// holds it. Each box then asks for its tunnel with a secret it makes
+/// (nix/modules/gate/door-ask.sh).
+pub async fn tunnels(root: &Path, keys: &impl auth::KeyStore) -> Result<()> {
+    let Some(s) = read_setup(root)? else {
+        bail!("no DNS Worker yet: `dd dns setup` first");
+    };
+    eprintln!(
+        "The tunnel token now: Account > Cloudflare Tunnel > Edit, this account only.\n\
+         It goes straight to the Worker and is kept nowhere else; no box holds it."
+    );
+    let t = match std::env::var("CF_TUNNEL_TOKEN") {
+        Ok(t) => t,
+        Err(_) => rpassword::prompt_password("Tunnel token: ")?,
+    };
+    ensure!(!t.trim().is_empty(), "no token given");
+    call(
+        &reqwest::Client::new(),
+        &token(keys)?,
+        reqwest::Method::PUT,
+        &format!(
+            "/accounts/{}/workers/scripts/{}/secrets",
+            s.account, s.script
+        ),
+        Some(
+            serde_json::json!({ "name": "TUNNEL_TOKEN", "text": t.trim(), "type": "secret_text" }),
+        ),
+    )
+    .await?;
+    eprintln!(
+        "== the Worker has the tunnel token; each box asks for its own tunnel at its next start"
     );
     Ok(())
 }

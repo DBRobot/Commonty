@@ -1,4 +1,4 @@
-{ config, ... }:
+{ config, lib, ... }:
 {
   imports = [
     ./_sops.nix
@@ -6,16 +6,19 @@
     ../modules/storage/ledger.nix
   ];
   sops.secrets = {
+    # the demo's ente password: it has no passkey to make one from
+    ente-demo-password.owner = "dd-verify";
+  }
+  // lib.optionalAttrs (!(config.dd.failover or false)) {
     # museum's verification code for addresses under users.<domain>: the
     # photos page sends it when it makes a person's account, so it is read
-    # by museum (as ente) and by the verifier (as dd-verify), one key twice
+    # by museum (as ente) and by the verifier (as dd-verify), one key twice.
+    # With failover on, these are made on the box (ente.nix)
     ente-ott.owner = "ente";
     ente-ott-verify = {
       key = "ente-ott";
       owner = "dd-verify";
     };
-    # the demo's ente password: it has no passkey to make one from
-    ente-demo-password.owner = "dd-verify";
     garage-key-id.owner = "ente";
     garage-key-secret.owner = "ente";
     ente-key-encryption.owner = "ente";
@@ -26,7 +29,11 @@
   dd.verify.photos = {
     api = "https://api.${config.dd.domain}";
     emailSuffix = "@users.${config.dd.domain}";
-    codeFile = config.sops.secrets.ente-ott-verify.path;
+    codeFile =
+      if (config.dd.failover or false) then
+        "/var/lib/dd-ente-keys/ott"
+      else
+        config.sops.secrets.ente-ott-verify.path;
     demoPasswordFile = config.sops.secrets.ente-demo-password.path;
   };
   # museum's id for the owner's photo account; the forge's admin is named
@@ -57,12 +64,16 @@
 
   # ente's bucket and key. The key is IMPORTED from sops rather than minted
   # here, so ente is configured with the same credentials at deploy time.
-  sops.templates."garage-ente-key.env".content = ''
-    GARAGE_KEY_ID=${config.sops.placeholder.garage-key-id}
-    GARAGE_KEY_SECRET=${config.sops.placeholder.garage-key-secret}
-  '';
-  dd.garage.setupEnvFiles = [ config.sops.templates."garage-ente-key.env".path ];
-  dd.garage.buckets.ente = {
+  sops.templates = lib.mkIf (!(config.dd.failover or false)) {
+    "garage-ente-key.env".content = ''
+      GARAGE_KEY_ID=${config.sops.placeholder.garage-key-id}
+      GARAGE_KEY_SECRET=${config.sops.placeholder.garage-key-secret}
+    '';
+  };
+  dd.garage.setupEnvFiles = lib.mkIf (!(config.dd.failover or false)) [
+    config.sops.templates."garage-ente-key.env".path
+  ];
+  dd.garage.buckets.ente = lib.mkIf (!(config.dd.failover or false)) {
     key = {
       name = "ente";
       envPrefix = "GARAGE_KEY";

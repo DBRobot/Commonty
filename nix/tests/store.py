@@ -98,7 +98,7 @@ assert get(b, "photos", "p3") == "no room for it there"
 
 # b drops what it was sent: the read back finds it out, and the plan hears
 b.succeed(
-    "set -a; . /var/lib/dd-store/keys/photos.env; AWS_DEFAULT_REGION=us-east-1 "
+    "set -a; . /var/lib/dd-store/keys/photos.env; export AWS_DEFAULT_REGION=us-east-1; "
     f"for o in p1 p2 p3; do {s3} s3 rm s3://photos/$o; done"
 )
 a.succeed("systemctl start dd-store-copy.service")

@@ -273,6 +273,10 @@ in
       recovery_target_timeline = "latest";
     };
     systemd.services.postgresql = {
+      # its key to the store is made by the store's setup, when the store
+      # is this box's own (storage/store.nix)
+      after = [ "dd-store-setup.service" ];
+      wants = [ "dd-store-setup.service" ];
       serviceConfig = {
         EnvironmentFile = cfg.envFile;
         ExecStartPre = lib.mkBefore [ "+${take}" ];

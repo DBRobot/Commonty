@@ -6,12 +6,20 @@
 import json
 import os
 import sys
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 ZONE, TOKEN = "zone1", "dns-token"
 PREFIX = "/client/v4/zones/%s/dns_records" % ZONE
+# the account's tunnels, and the token that may make them
+TUNNELS, TUNNEL_TOKEN = "/client/v4/accounts/acct1/cfd_tunnel", "tunnel-token"
+tunnels = {}
+made = {}
+# the agreed state's leases, as the control plane's relay gives them: POST
+# /control sets them and whether the agreement is fresh
+control = {"fresh": False, "leases": {}}
 records = {}
 n = [0]
 writes = [0]
@@ -51,8 +59,32 @@ class H(BaseHTTPRequestHandler):
             return False
         return True
 
+    def tunnel_authed(self):
+        if self.headers.get("authorization") != "Bearer " + TUNNEL_TOKEN:
+            self.reply(403, {"success": False, "errors": [{"message": "bad token"}]})
+            return False
+        return True
+
     def do_GET(self):
         u = urlparse(self.path)
+        if u.path == "/control":
+            now = int(time.time() * 1000)
+            t = now if control["fresh"] else now - 600_000
+            return self.reply(200, {"time": t, "leases": control["leases"]})
+        if u.path == "/tunnels":
+            return self.reply(200, tunnels)
+        if u.path == TUNNELS:
+            if not self.tunnel_authed():
+                return
+            q = parse_qs(u.query)
+            name = q.get("name", [None])[0]
+            return self.ok(
+                [
+                    {"id": i, "name": t["name"], "created_at": made[i]}
+                    for i, t in tunnels.items()
+                    if name is None or t["name"] == name
+                ]
+            )
         if u.path == "/records":
             return self.reply(200, sorted(records.values(), key=lambda r: r["id"]))
         if u.path == "/writes":
@@ -73,6 +105,18 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         # read whatever comes: the connection is kept for the next request
         raw = self.rfile.read(int(self.headers.get("content-length") or 0))
+        if self.path == "/control":
+            control.update(json.loads(raw))
+            return self.reply(200, {"ok": True})
+        if self.path == TUNNELS:
+            if not self.tunnel_authed():
+                return
+            body = json.loads(raw)
+            n[0] += 1
+            i = "tun%d" % n[0]
+            tunnels[i] = {"name": body["name"], "secret": body["tunnel_secret"]}
+            made[i] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            return self.ok({"id": i, "name": body["name"]})
         if self.path == "/seed":
             for r in json.loads(raw):
                 n[0] += 1
@@ -109,6 +153,14 @@ class H(BaseHTTPRequestHandler):
         self.ok(records[rid])
 
     def do_DELETE(self):
+        if self.path.startswith(TUNNELS + "/"):
+            if not self.tunnel_authed():
+                return
+            rest = self.path[len(TUNNELS) + 1 :]
+            if rest.endswith("/connections"):
+                return self.ok({})
+            tunnels.pop(rest, None)
+            return self.ok({"id": rest})
         if not self.path.startswith(PREFIX + "/"):
             return self.reply(404, {"success": False})
         if not self.authed():

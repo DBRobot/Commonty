@@ -72,6 +72,9 @@ let
   );
 in
 {
+  # with failover on, it follows its lease from box to box
+  imports = [ ./follow.nix ];
+
   options.dd.headscale = {
     enable = lib.mkEnableOption "the fleet's network control server on this box";
     # what the verifier reads to mint join keys, and what a box on this

@@ -343,6 +343,155 @@ check(
 )
 check("names, door shut: once in step, nothing more", converge(8788), 0)
 
+# Failover (the third Worker): a box's own tunnel, and the names following
+# the leases in the agreed state
+W3 = "http://127.0.0.1:8789"
+
+
+def door(what, box, extra=None, parts=(), signer=None, at=None):
+    at = int(time.time()) if at is None else at
+    msg = "\0".join(["commonty %s v1" % what, box, str(at)] + list(parts))
+    body = dict(extra or {}, box=box, at=at, sig=sign(keys[signer or box], msg))
+    req = urllib.request.Request(
+        "%s/api/%s" % (W3, what),
+        data=json.dumps(body).encode(),
+        method="POST",
+        headers={"content-type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+
+def lease(fresh, **holders):
+    leases = {
+        "svc/" + svc.replace("_", "-"): {"holder": b, "epoch": 1, "expires": 2**53}
+        for svc, b in holders.items()
+    }
+    req = urllib.request.Request(
+        "http://127.0.0.1:8899/control",
+        data=json.dumps({"fresh": fresh, "leases": leases}).encode(),
+        method="POST",
+    )
+    urllib.request.urlopen(req).read()
+
+
+S1 = base64.b64encode(b"\1" * 32).decode()
+S2 = base64.b64encode(b"\2" * 32).decode()
+code, _ = door("tunnel", "box2", {"secret": S1}, [S1], signer="box1")
+check(
+    "tunnel: another box's signature makes none",
+    (code, get("http://127.0.0.1:8899/tunnels")),
+    (403, {}),
+)
+code, got = door("tunnel", "box2", {"secret": S1}, [S2])
+check("tunnel: a signature over another secret makes none", code, 403)
+t0 = int(time.time())
+code, got = door("tunnel", "box2", {"secret": S1}, [S1], at=t0)
+t = get("http://127.0.0.1:8899/tunnels")
+check(
+    "tunnel: box2's own, with the secret it made",
+    (code, t.get(got.get("id"))),
+    (200, {"name": "commonty-box2", "secret": S1}),
+)
+first = got.get("id")
+code, _ = door("tunnel", "box2", {"secret": S1}, [S1], at=t0)
+check(
+    "tunnel: the same request again changes nothing",
+    (code, list(get("http://127.0.0.1:8899/tunnels"))),
+    (409, [first]),
+)
+# the box lost its secret and asks again, later
+code, got = door("tunnel", "box2", {"secret": S2}, [S2], at=t0 + 2)
+t = get("http://127.0.0.1:8899/tunnels")
+check(
+    "tunnel: asked again, the old one goes",
+    (code, first in t, t.get(got.get("id"), {}).get("secret")),
+    (200, False, S2),
+)
+B2 = "%s.cfargotunnel.com" % got.get("id")
+
+# no fresh agreement: nothing that moves is touched
+lease(False, headscale="box2", ente_museum="box2")
+before = names()
+converge(8789)
+check("failover, stale agreement: nothing moves", names(), before)
+
+lease(True, headscale="box2", ente_museum="box2")
+check("failover: the cron moved the names", converge(8789) > 0, True)
+now = names()
+check(
+    "failover: * at the gateway's lease's box",
+    now.get("*.commonty.test"),
+    [("A", "100.64.0.5", False)],
+)
+check(
+    "failover: a public name at its tunnel",
+    now.get("home.commonty.test"),
+    [("CNAME", B2, True)],
+)
+check(
+    "failover: a service's name at its lease's box",
+    now.get("photos.commonty.test"),
+    [("A", "100.64.0.5", False)],
+)
+
+# back to box1, asked by a box rather than waiting for the cron
+lease(True, headscale="box1", ente_museum="box1")
+code, _ = door("converge", "box1", signer="box2")
+check("converge: another box's signature is refused", code, 403)
+code, got = door("converge", "box1")
+check(
+    "converge: asked by a box, in step at once",
+    (code, got.get("changed", 0) > 0),
+    (200, True),
+)
+now = names()
+check(
+    "failover back: * at box1", now.get("*.commonty.test"), [("A", "100.64.0.2", False)]
+)
+check(
+    "failover back: box1 has no tunnel of its own, so the release's",
+    now.get("home.commonty.test"),
+    [("CNAME", T1, True)],
+)
+check(
+    "failover back: the service's name at box1",
+    now.get("photos.commonty.test"),
+    [("A", "100.64.0.2", False)],
+)
+
+# box1's own door, as its helper asks: a tunnel with a secret it made, kept
+# in its credentials; asked again with them there, nothing is asked
+d = subprocess.run(["mktemp", "-d"], capture_output=True, text=True).stdout.strip()
+p = subprocess.run(["bash", sys.argv[2], "tunnel", d], capture_output=True, text=True)
+print(p.stdout, p.stderr)
+creds = json.load(open(d + "/credentials.json")) if p.returncode == 0 else {}
+t = get("http://127.0.0.1:8899/tunnels")
+check(
+    "door helper: box1's tunnel, its secret kept here alone",
+    (t.get(creds.get("TunnelID"), {}).get("secret"), creds.get("AccountTag")),
+    (creds.get("TunnelSecret"), "acct1"),
+)
+check("door helper: made one", bool(creds), True)
+before = dict(t)
+subprocess.run(["bash", sys.argv[2], "tunnel", d], capture_output=True, text=True)
+check(
+    "door helper: once made, not asked again",
+    get("http://127.0.0.1:8899/tunnels"),
+    before,
+)
+converge(8789)
+check(
+    "door: box1's public name at its own tunnel now",
+    names().get("home.commonty.test"),
+    [("CNAME", "%s.cfargotunnel.com" % creds.get("TunnelID"), True)],
+)
+p = subprocess.run(["bash", sys.argv[2], "converge"], capture_output=True, text=True)
+check("door helper: converge", (p.returncode, "names in step" in p.stdout), (0, True))
+
 if fails:
     print("\n".join(fails))
     sys.exit(1)

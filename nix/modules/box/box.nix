@@ -10,6 +10,16 @@
   # fact to see, not a rule to enforce. Each such module registers itself
   # here; the box publishes the list as a metric and `dd box list` shows it,
   # so the work left is always in view and nothing is hidden behind a flag.
+  # Failover (fleet/policy.json failover): the services with one writer
+  # follow their leases between the boxes able to run them, each box with
+  # its own store and its own keys (docs/dev/control-plane.md). One switch
+  # for the whole fleet; off, they run where their roles put them, as
+  # before
+  options.dd.failover = lib.mkOption {
+    type = lib.types.bool;
+    default = (lib.importJSON ../../../fleet/policy.json).failover or false;
+    description = "the fleet's switch; a test sets it";
+  };
   options.dd.box.plaintext = lib.mkOption {
     type = lib.types.listOf lib.types.str;
     default = [ ];

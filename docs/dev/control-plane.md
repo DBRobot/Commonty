@@ -252,6 +252,11 @@ takes seconds, and no box keeps a live standby.
   and runs, but its archive and base backup wait until the other box is
   back.
 
+### Failover
+
+The services with one writer, the data they keep, and the names that
+point at them move between boxes by these leases: [failover](failover.md).
+
 ## Not in scope
 
 The control plane doesn't run commands, push configuration, hold secrets or
