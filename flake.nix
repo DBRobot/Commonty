@@ -921,8 +921,9 @@
                 }
               );
               # the home controller's card (docs/dev/home-controller.md): the
-              # seed's image, which the app's installer writes. aarch64, so
-              # it goes to the runners, which emulate it
+              # seed's image, which the app's installer writes. Its system is
+              # aarch64, so it goes to the runners, which emulate the little
+              # of it not cross-built (image.nix)
               home-controller =
                 need
                   {
@@ -932,7 +933,7 @@
                   (
                     pkgs.runCommand "commonty-home-controller-${version}" { } ''
                       mkdir -p $out
-                      cp ${self.nixosConfigurations.home-controller-seed.config.system.build.sdImage}/sd-image/*.img.zst \
+                      cp ${self.nixosConfigurations.home-controller-seed.config.system.build.cardImage}/sd-image/*.img.zst \
                         $out/commonty-home-controller-${version}.img.zst
                     ''
                   );

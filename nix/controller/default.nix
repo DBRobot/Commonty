@@ -15,7 +15,11 @@ let
   common = [
     ./system.nix
     {
-      _module.args = { inherit self tang; };
+      # the card's image steps only copy files, so they run on x86 (image.nix)
+      _module.args = {
+        inherit self tang;
+        pkgsX86 = nixpkgs.legacyPackages.x86_64-linux;
+      };
       nixpkgs.hostPlatform = "aarch64-linux";
     }
   ];
