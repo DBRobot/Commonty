@@ -34,7 +34,13 @@ esp() {
   mount -o ro "/dev/disk/by-partuuid/$uuid" "$w/esp" || return 1
   cp "$w/esp/dd/unlock/"* "$KEYS"/ 2>/dev/null
   umount "$w/esp"
-  [ -e "$KEYS/sig.priv" ] && { [ -e "$KEYS/half.priv" ] || { [ -n "$TPM_ONLY" ] && [ -e "$KEYS/bootstrap.priv" ]; }; }
+  # on its TPM alone, no signing key is asked for (a joined box makes its
+  # own at its first boot); otherwise it signs its ask to the Worker
+  if [ -n "$TPM_ONLY" ]; then
+    [ -e "$KEYS/half.priv" ] || [ -e "$KEYS/bootstrap.priv" ]
+  else
+    [ -e "$KEYS/sig.priv" ] && [ -e "$KEYS/half.priv" ]
+  fi
 }
 tries=0
 until esp; do
