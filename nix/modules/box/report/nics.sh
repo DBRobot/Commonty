@@ -67,9 +67,11 @@ nics=$(for d in "$sys"/class/net/*; do
       ;;
     */pci[0-9]*)
       bus=pci
+      # its pci function: itself, or above it (a virtio adapter's device)
       p=$dev
-      # a virtio adapter's device is under its pci function
-      [ -e "$p/vendor" ] || p=$(dirname "$p")
+      until [[ "$(basename "$p")" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] || [ "$p" = / ]; do
+        p=$(dirname "$p")
+      done
       ids="$(hex "$p/vendor"):$(hex "$p/device")"
       sub="$(hex "$p/subsystem_vendor"):$(hex "$p/subsystem_device")"
       [ "$sub" = ":" ] || ids="$ids $sub"
