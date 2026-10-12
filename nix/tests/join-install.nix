@@ -12,6 +12,18 @@
 }:
 let
   dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
+  # what the stand-in commit builds for the box: a small system, already in
+  # the machine's store, so nothing is fetched
+  installed =
+    (pkgs.nixos {
+      boot.loader.grub.enable = false;
+      fileSystems."/" = {
+        device = "tank/root";
+        fsType = "zfs";
+      };
+      networking.hostId = "dd000001";
+      system.stateVersion = "26.05";
+    }).config.system.build.toplevel;
 in
 {
   name = "join-install";
@@ -36,9 +48,8 @@ in
           8192
         ];
         virtualisation.memorySize = 2048;
-        # what the installer installs here: this machine's own system,
-        # already in its store
-        system.extraDependencies = [ config.system.build.toplevel ];
+        system.extraDependencies = [ installed ];
+        environment.etc."installed".text = "${installed}";
         environment.variables = lib.mkForce {
           RELEASE_URL = "http://forge/release/current.json";
           RELEASE_KEY = "/root/release.pub";

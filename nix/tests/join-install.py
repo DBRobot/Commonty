@@ -6,9 +6,9 @@ start_all()
 forge.wait_for_unit("nginx.service")
 blank.wait_for_unit("multi-user.target")
 
-# a stand-in for the fleet's repository: a flake whose joined box is this
-# machine's own system, already in its store
-system = blank.succeed("readlink -f /run/current-system").strip()
+# a stand-in for the fleet's repository: a flake whose joined box is a
+# system already in this machine's store
+system = blank.succeed("cat /etc/installed").strip()
 flake = (
     "{ outputs = { self }: { lib.joinedBox = { name, dir }: "
     f'{{ config.system.build.toplevel = builtins.storePath "{system}"; }}; }}; }}'
