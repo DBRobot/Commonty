@@ -244,8 +244,16 @@ jobs:
         on: ${{ fromJSON(needs.files_modified.outputs.builders) }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
+      # kept from garbage collection, the newest of each system, until the
+      # next run replaces it: a box's weekly collection otherwise takes the
+      # other box's system with it, and the next run builds it all again
+      # (node2 compiled node1's Wine, which no public cache has, for half
+      # an hour)
       - name: build ${{ matrix.host }} on ${{ matrix.on }}
-        run: nix build --print-out-paths .#nixosConfigurations.${{ matrix.host }}.config.system.build.toplevel | tee "$RUNNER_TEMP/toplevel"
+        run: |
+          mkdir -p "$HOME/ci-roots"
+          nix build --print-out-paths --out-link "$HOME/ci-roots/${{ matrix.host }}" \
+            .#nixosConfigurations.${{ matrix.host }}.config.system.build.toplevel | tee "$RUNNER_TEMP/toplevel"
       # the token on stdin, not curl's command line, which any process on
       # the box can read while it runs
       - name: record the path

@@ -61,7 +61,9 @@ pull request opened, pushed, or edited
 - **Jobs run on the boxes**, with nix already there, and build into each
   box's own store. What a run builds is already on the boxes when the
   release goes out, and `dd release publish` signs the paths CI recorded
-  instead of building them again.
+  instead of building them again. The newest build of each box's system
+  is kept from each box's garbage collection (`~/ci-roots/<box>` of the
+  runner), so a run after a collection does not build it all again.
 - **Jobs run where they fit.** A job heavier than a runner's usual one is
   a variant in the runner's needs
   ([`nix/modules/forge/needs.nix`](../../nix/modules/forge/needs.nix)):
