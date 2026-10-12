@@ -56,6 +56,8 @@ in
     ../modules/storage/backup.nix
     ../modules/box/agent.nix
     ../modules/observe/thanos.nix
+    # a joined box's metrics, to the observe box and its member alone
+    ../modules/observe/joined-metrics.nix
     ../modules/box/locate.nix
     ../modules/box/netspeed.nix
     ../modules/box/service-memory.nix

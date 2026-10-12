@@ -163,6 +163,7 @@
       "thanos-store",
       "thanos-compact",
       "metrics-page",
+      "joined-metrics",
       "prometheus",
       "dd-mail"
     ]

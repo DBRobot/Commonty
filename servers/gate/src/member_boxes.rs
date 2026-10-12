@@ -196,6 +196,27 @@ pub(crate) async fn joined_mine(State(app): State<Arc<App>>, headers: HeaderMap)
     axum::Json(rows).into_response()
 }
 
+/// The joined box a metrics request is for: `/joined/<its name>/api/v1/...`
+pub(crate) fn metrics_box(uri: &str) -> Option<String> {
+    let name = uri.strip_prefix("/joined/")?.split('/').next()?;
+    let ok = name.len() == 11
+        && name.starts_with('j')
+        && name[1..]
+            .bytes()
+            .all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'));
+    (ok && uri[8 + name.len()..].starts_with("/api/v1/")).then(|| name.to_string())
+}
+
+/// May this person read these metrics: a joined box's (`/joined/<name>/`)
+/// only if it is theirs, whoever else they are; the rest, if they see the
+/// fleet's boxes (`sees_box`: the owner of the observe box, or the admin)
+pub(crate) fn sees_metrics(user: &str, sees_box: bool, uri: &str, owned: &[Owned]) -> bool {
+    match metrics_box(uri) {
+        Some(name) => owned.iter().any(|o| o.name == name && o.user == user),
+        None => sees_box,
+    }
+}
+
 /// A pending backup's ticket, from a request's bearer: the member and the
 /// ticket id, when it is a join ticket good now.
 pub(crate) fn pending_ticket(app: &App, headers: &HeaderMap) -> Option<(String, String)> {
@@ -364,6 +385,52 @@ mod tests {
         assert!(!ticket_may("snapshots/x", ID));
         assert!(!ticket_may("pending", ID));
         assert!(!ticket_may(&format!("pending/{ID}/../../config"), ID));
+    }
+
+    #[test]
+    fn a_metrics_request_names_one_joined_box() {
+        assert_eq!(
+            metrics_box("/joined/j0123456789/api/v1/query?query=up").as_deref(),
+            Some("j0123456789")
+        );
+        assert_eq!(metrics_box("/api/v1/query?query=up"), None);
+        assert_eq!(metrics_box("/joined/node1/api/v1/query"), None);
+        assert_eq!(metrics_box("/joined/j0123456789/_dd/login"), None);
+        assert_eq!(metrics_box("/joined/J0123456789/api/v1/query"), None);
+    }
+
+    #[test]
+    fn a_joined_boxs_metrics_are_its_members_and_nobody_elses() {
+        let owned = [Owned {
+            name: "j0123456789".into(),
+            user: "ann".into(),
+            ticket: ID.into(),
+            at: 0,
+        }];
+        let q = "/joined/j0123456789/api/v1/query?query=up";
+        assert!(sees_metrics("ann", false, q, &owned));
+        // the fleet's admin sees every release box, and not this one
+        assert!(!sees_metrics("david", true, q, &owned));
+        assert!(!sees_metrics("bob", false, q, &owned));
+        assert!(!sees_metrics(
+            "ann",
+            false,
+            "/joined/jffffffffff/api/v1/query",
+            &owned
+        ));
+        // and the fleet's view is as it was
+        assert!(sees_metrics(
+            "david",
+            true,
+            "/api/v1/query?query=up",
+            &owned
+        ));
+        assert!(!sees_metrics(
+            "ann",
+            false,
+            "/api/v1/query?query=up",
+            &owned
+        ));
     }
 
     #[test]
