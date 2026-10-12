@@ -32,6 +32,12 @@
       SSO_CLIENT_SECRET=${config.sops.placeholder.vault-oidc-secret}
     '';
   };
+  # its files, copied into this box's own store ahead of failover
+  dd.store.migrate.vaultwarden = lib.mkIf (!(config.dd.failover or false)) {
+    envFile = config.sops.templates."vault.env".path;
+    id = "VAULT_ID";
+    secret = "VAULT_SECRET";
+  };
   dd.vault = {
     enable = true;
     # with failover on, made on the box (modules/vault/vaultwarden.nix)

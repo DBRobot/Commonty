@@ -2,9 +2,9 @@
 
 Status: two kinds side by side. The services still use the garage
 **cluster** that node1 and node2 share. Each box's own **store**
-([`storage/store.nix`](../../nix/modules/storage/store.nix)) is built and
-tested, and is off until it is turned on for a box and the buckets move
-(below).
+([`storage/store.nix`](../../nix/modules/storage/store.nix)) runs on every
+box beside it, and the buckets are copied into it; the services read it
+once failover is on (below).
 
 ## Why each box gets its own
 
@@ -55,14 +55,6 @@ until the other is back.
 
 ## Turning it on
 
-Both steps need David:
-
-1. **A dataset and a capacity per box** in `fleet/boxes.json`, beside its
-   `garage` block, and `dd.store` set from it in the flake.
-2. **Moving the buckets.** node2 has about 115G free and holds a copy of
-   everything in the cluster (about 276 GiB). The largest bucket is
-   backups-node1 at 88.5 GiB. The buckets can't be copied into the new
-   stores side by side with the cluster's copies. They move one at a time:
-   copy into each box's store, check every object, switch the service,
-   then delete that bucket from the cluster to make room for the next.
-   Each delete needs David's yes.
+Every box has a store, sized by its disk (`capacity = "auto"`), with
+nothing set up by hand. The move off the shared pool, and what is left to
+do once for the fleet: [failover](failover.md#turning-it-on-once-for-the-fleet).

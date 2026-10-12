@@ -255,14 +255,15 @@ in
         # this box joins its own network with the key it just made: a member's
         # device reaching the fleet arrives here, so this end has to be on it
         dd.net.enable = true;
-        # its own key, made here: one use, ten minutes
-        dd.net.getKey = ''
+        # its own key, made here: one use, ten minutes. With failover the
+        # server may be another box's: this box asks the gate, as any box
+        dd.net.getKey = lib.mkIf (!(config.dd.failover or false)) ''
           id=$(${config.services.headscale.package}/bin/headscale users list -o json \
             | jq -r '(. // []) | .[] | select(.name == "boxes") | .id')
           ${config.services.headscale.package}/bin/headscale preauthkeys create \
             --user "$id" --expiration 10m --tags tag:box > "$key"
         '';
-        dd.net.controlUrl = cfg.url;
+        dd.net.controlUrl = lib.mkIf (!(config.dd.failover or false)) cfg.url;
         systemd.services.commonty-net-up.after = [ "headscale-seed.service" ];
         systemd.services.commonty-net-up.wants = [ "headscale-seed.service" ];
 

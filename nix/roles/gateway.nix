@@ -5,9 +5,9 @@ let
   idSetup = ../../fleet/id-worker.json;
   # the gateway holds a token for the zone only until the DNS Worker does
   byToken = config.dd.dnsWorker == "";
-  canReadWorker = lib.hasInfix "\ncloudflare-workers-read:" (
-    "\n" + builtins.readFile (../../secrets + "/${config.networking.hostName}.yaml")
-  );
+  canReadWorker = config.dd.hasSecret "cloudflare-workers-read";
+  # the one tunnel's credentials, until each box has its own (dd.public.ownTunnel)
+  oneTunnel = config.dd.hasSecret "cloudflared-credentials";
   # a gate path on the bare name, under the same flood limits as on home
   docsGate = {
     proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";
@@ -87,7 +87,8 @@ in
     # the app download, and home for the rest (its server block below)
     bare = true;
     tunnel = "d0534bff-f478-48ab-a949-65e2e3c14c39";
-    credentialsFile = config.sops.secrets.cloudflared-credentials.path;
+    credentialsFile =
+      if oneTunnel then config.sops.secrets.cloudflared-credentials.path else "/dev/null";
     # the zone's token: until the DNS Worker holds it, not after
     tokenFile = if byToken then config.sops.templates."cloudflare.env".path else null;
   };
@@ -96,11 +97,13 @@ in
   services.tailscale.permitCertUid = "nginx"; # so nginx can fetch *.ts.net certs without root
 
   sops.secrets.cloudflare-token = lib.mkIf byToken { };
-  sops.secrets.cloudflared-credentials = { }; # systemd hands it to cloudflared as a credential
+  # systemd hands it to cloudflared as a credential
+  sops.secrets.cloudflared-credentials = lib.mkIf oneTunnel { };
   # TMDB's read token, for posters on Movies & TV: handed to signed-in
-  # pages, which look titles up from the member's own device
-  sops.secrets.tmdb-token.owner = "dd-verify";
-  dd.verify.tmdbKeyFile = config.sops.secrets.tmdb-token.path;
+  # pages, which look titles up from the member's own device. A box
+  # without one shows titles without posters
+  sops.secrets.tmdb-token = lib.mkIf (config.dd.hasSecret "tmdb-token") { owner = "dd-verify"; };
+  dd.verify.tmdbKeyFile = lib.mkIf (config.dd.hasSecret "tmdb-token") config.sops.secrets.tmdb-token.path;
   sops.templates."cloudflare.env" = lib.mkIf byToken {
     content = ''
       CF_DNS_API_TOKEN=${config.sops.placeholder.cloudflare-token}

@@ -46,7 +46,7 @@ let
         users.groups.dd-verify = { };
         dd.store = {
           enable = true;
-          capacity = "1G";
+          # as every box has it: what its disk has room for
           identity = "/etc/age-identity";
           agePlugins = [ ];
           peers.${other name} = {
