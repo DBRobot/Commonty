@@ -191,18 +191,28 @@ impl Gate {
         Ok(out)
     }
 
-    /// One pending backup gone for good, not to the trash: its box never
-    /// joined, and it was never the member's images.
+    /// One pending backup to its member's images' trash, as a delete there
+    /// would put it: its box never joined. The trash lets it go 30 days on,
+    /// and until then the member can still take it back.
     pub async fn drop_pending(&self, folder: &str) -> Result<usize> {
-        anyhow::ensure!(
-            folder.starts_with("images-") && folder.contains("/pending/") && folder.ends_with('/'),
-            "not a pending backup: {folder}"
-        );
-        let mut n = 0;
-        for e in self.list_all(folder).await? {
-            self.delete(&e.key).await?;
-            n += 1;
-        }
+        let Some((lib, path)) =
+            folder
+                .trim_end_matches('/')
+                .split_once('/')
+                .filter(|(lib, path)| {
+                    lib.starts_with("images-")
+                        && top_prefix(lib)
+                        && path.strip_prefix("pending/").is_some_and(|t| {
+                            t.len() == 32
+                                && t.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
+                        })
+                })
+        else {
+            anyhow::bail!("not a pending backup: {folder}");
+        };
+        let objects = self.objects_at(lib, path, true).await?;
+        let n = objects.len();
+        self.keep_in_trash(lib, path, &objects, false).await?;
         Ok(n)
     }
 
