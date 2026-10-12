@@ -76,8 +76,13 @@ let
         pkgs.pkg-config
       ];
       # the tray: tauri-cli looks for the Linux tray library on the machine
-      # it bundles on, whatever the target, and stops if it is not there
-      buildInputs = [ pkgs.libayatana-appindicator ];
+      # it bundles on, whatever the target, and stops if it is not there;
+      # pkg-config wants the GTK and GLib its .pc file requires as well
+      buildInputs = [
+        pkgs.libayatana-appindicator
+        pkgs.gtk3
+        pkgs.glib
+      ];
       SOURCE_DATE_EPOCH = "315532800";
       dontConfigure = true;
       dontFixup = true;
