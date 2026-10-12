@@ -149,7 +149,7 @@ function sections(q) {
     for (const h of [null, ...(n.subs || [])]) {
       const hay = `${title} ${(h || '').toLowerCase()} ${h ? '' : n.words || ''}`;
       let s = 0;
-      for (const w of ws) if (hay.includes(w) || (w.length > 3 && hay.includes(w.slice(0, -1)))) s += h && h.toLowerCase().includes(w) ? 2 : 1;
+      for (const w of ws) if (hay.includes(w) || (w.length > 3 && hay.includes(w.slice(0, -1)))) s += h?.toLowerCase().includes(w) ? 2 : 1;
       if (s) out.push({ n, h, s });
     }
   }
@@ -171,7 +171,7 @@ function cut(md, heading) {
 
 async function docsText(found) {
   return Promise.all(found.map(async ({ n, h }) => {
-    const r = await fetch('/_dd/docs/raw/' + n.doc.split('/').map(encodeURIComponent).join('/')).catch(() => null);
+    const r = await fetch(`/_dd/docs/raw/${n.doc.split('/').map(encodeURIComponent).join('/')}`).catch(() => null);
     const md = r?.ok ? await r.text() : '';
     return `[${n.id}] ${pathOf(n)}${h ? ` › ${h}` : ''}\n${cut(md, h)}`;
   }));
@@ -434,7 +434,7 @@ function build(opts) {
       // the section is ours, from what was looked up, never the model's word
       const section = a.from ? found.find((f) => f.n.id === a.from)?.h || null : null;
       if (!a.from && a.go.length === 1 && auto.checked) {
-        say({ who: 'it', text: `${a.say ? a.say + '\n' : ''}Took you to ${pathOf(byId[a.go[0]])}.`, how: 'asked the box’s model: it picked from the map' });
+        say({ who: 'it', text: `${a.say ? `${a.say}\n` : ''}Took you to ${pathOf(byId[a.go[0]])}.`, how: 'asked the box’s model: it picked from the map' });
         go(a.go[0]);
         return;
       }

@@ -38,7 +38,10 @@ function draw(slot, places) {
   edges.setAttribute('aria-hidden', 'true');
   cards.append(edges);
   const at = {};
-  for (const p of places) cards.append(at[p.id] = card(p));
+  for (const p of places) {
+    at[p.id] = card(p);
+    cards.append(at[p.id]);
+  }
   const dag = el('div', { class: 'dag', tabindex: '0', role: 'region', 'aria-label': 'The site map' }, cards);
   slot.replaceChildren(el('div', { class: 'box' },
     el('header', {}, el('b', { text: 'Every place on the site' }), el('span', { class: 'spacer' }),
