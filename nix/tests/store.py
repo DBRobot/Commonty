@@ -1,3 +1,5 @@
+import time
+
 # The store test: a box's store is its own, and its copies are elsewhere.
 start_all()
 for m in (a, b):
@@ -21,6 +23,21 @@ def put(m, bucket, name, body):
     )
 
 
+def copied(bucket, name, body):
+    """a copies until b has it: a copy that finds b not ready is next time"""
+    cmd = (
+        f"set -a; . /var/lib/dd-store/keys/{bucket}.env; "
+        f"AWS_DEFAULT_REGION=us-east-1 {s3} s3 cp s3://{bucket}/{name} -"
+    )
+    for _ in range(40):
+        a.succeed("systemctl start dd-store-copy.service")
+        status, out = b.execute(cmd)
+        if status == 0 and out.strip() == body:
+            return
+        time.sleep(3)
+    raise AssertionError(f"{bucket}/{name} never reached b")
+
+
 def get(m, bucket, name):
     return m.succeed(
         f"set -a; . /var/lib/dd-store/keys/{bucket}.env; "
@@ -41,8 +58,7 @@ b.fail(
 assert b.succeed("stat -c %a /var/lib/dd-store/from").strip() == "700"
 
 # the copy: photos goes to b, scratch does not
-a.succeed("systemctl start dd-store-copy.service")
-assert get(b, "photos", "p1") == "a photo, ciphertext"
+copied("photos", "p1", "a photo, ciphertext")
 b.fail(
     "set -a; . /var/lib/dd-store/keys/scratch.env; AWS_DEFAULT_REGION=us-east-1 "
     f"{s3} s3 ls s3://scratch/s1"
@@ -76,8 +92,7 @@ b.fail(
     f"{s3} s3 ls s3://photos/p2"
 )
 a.succeed("""echo '{"photos":["a","b"]}' > /run/dd-placed/copies.json""")
-a.succeed("systemctl start dd-store-copy.service")
-assert get(b, "photos", "p2") == "the plan keeps it here"
+copied("photos", "p2", "the plan keeps it here")
 
 # b nearly full: what a sends is refused, what b keeps still read
 b.succeed("systemctl stop dd-store-facts.timer; touch /run/dd-store/full")
@@ -93,8 +108,7 @@ a.succeed(
 assert get(b, "photos", "p2") == "the plan keeps it here"
 # room again: it goes
 b.succeed("rm /run/dd-store/full")
-a.succeed("systemctl start dd-store-copy.service")
-assert get(b, "photos", "p3") == "no room for it there"
+copied("photos", "p3", "no room for it there")
 
 # b drops what it was sent: the read back finds it out, and the plan hears
 b.succeed(
@@ -109,9 +123,9 @@ a.succeed(
     """grep -q 'dd_store_lost{bucket="photos",box="b"} 1' /var/lib/dd-facts/store-copy.prom"""
 )
 # sent again, read back whole: no longer lost
-a.succeed("systemctl start dd-store-copy.service")
+copied("photos", "p3", "no room for it there")
 a.succeed("! grep -q dd_store_lost /var/lib/dd-facts/store-copy.prom")
 
 # a is gone; b serves what a wrote
 a.crash()
-assert get(b, "photos", "p1") == "a photo, ciphertext"
+assert get(b, "photos", "p3") == "no room for it there"

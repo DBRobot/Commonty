@@ -38,9 +38,15 @@ a.succeed("systemctl start dd-headscale-copy.service")
 a.fail("journalctl -u dd-headscale-copy.service | grep -q 'not copied this time'")
 
 # a hands over, its copy out to b's and c's stores
-a.succeed("systemctl stop headscale.service")
+a.wait_until_succeeds("systemctl stop headscale.service", timeout=120)
 a.succeed("rm /run/dd-placed/headscale")
-a.succeed("systemctl start dd-store-copy.service")
+a.wait_until_succeeds(
+    # a copy that found the other store not ready says so: until none does
+    "systemctl start dd-store-copy.service && "
+    "! journalctl _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value dd-store-copy.service) "
+    "| grep -q 'not copied this time'",
+    timeout=180,
+)
 
 s3 = "aws --endpoint-url http://127.0.0.1:3910"
 fetch = (

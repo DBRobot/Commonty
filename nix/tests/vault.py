@@ -16,17 +16,15 @@ box.succeed("systemctl restart vaultwarden.service")
 box.wait_for_unit("vaultwarden.service")
 box.wait_until_succeeds("curl -sf http://127.0.0.1:8222/alive", timeout=120)
 
-# its files are in the bucket, not on the box: the key it makes at first
-# start is there
+# its files are in the bucket; the key its sessions are signed with is the
+# box's own, on its disk, never in the bucket that is copied to other boxes
 s3 = (
     "AWS_ACCESS_KEY_ID=GK0123456789abcdef01234567 "
     "AWS_SECRET_ACCESS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef "
     "AWS_DEFAULT_REGION=us-east-1 aws --endpoint-url http://127.0.0.1:3900"
 )
-box.wait_until_succeeds(
-    f"{s3} s3 ls s3://vaultwarden/data/ | grep -q rsa_key", timeout=60
-)
-box.fail("ls /var/lib/vaultwarden/rsa_key.pem")
+box.wait_until_succeeds("ls /var/lib/vaultwarden/rsa_key.pem", timeout=60)
+box.fail(f"{s3} s3 ls s3://vaultwarden/data/ | grep -q rsa_key")
 
 # and its records in postgres, where the hourly dumps take them from
 box.succeed("sudo -u postgres psql -d vaultwarden -tAc 'select count(*) from users'")

@@ -69,19 +69,33 @@ api(
     {"content": "aGVsbG8gZnJvbSBhCg==", "message": "on a"},
 )
 a.succeed("systemctl start dd-pg-base.service")
-a.succeed("systemctl start dd-forge-copy.service")
-assert "gone.git" in a.succeed("cat /var/lib/dd-forge/manifest")
+# (a copy taken before the new repositories were on disk lists them next time)
+a.wait_until_succeeds(
+    "systemctl start dd-forge-copy.service && grep -q gone.git /var/lib/dd-forge/manifest",
+    timeout=120,
+)
 # a repository deleted on a: gone from the next copy's list
 api(a, "DELETE", "/repos/tester/gone")
-a.succeed("systemctl start dd-forge-copy.service")
+a.wait_until_succeeds(
+    "systemctl start dd-forge-copy.service && ! grep -q gone.git /var/lib/dd-forge/manifest",
+    timeout=120,
+)
 manifest = a.succeed("cat /var/lib/dd-forge/manifest")
 assert "kept.git" in manifest and "gone.git" not in manifest, manifest
 a.fail("journalctl -u dd-forge-copy.service | grep -q 'not copied this time'")
 
 # a hands over: stopped, its last segment archived, everything copied to b
-a.succeed("systemctl stop forgejo.service postgresql.service")
+# stopped first, the flags after, as dd-control does: postgres archives its
+# last segment on the way down only while its flag says the lease is its
+a.wait_until_succeeds("systemctl stop forgejo.service postgresql.service", timeout=120)
 a.succeed("rm /run/dd-placed/postgresql /run/dd-placed/forgejo")
-a.succeed("systemctl start dd-store-copy.service")
+a.wait_until_succeeds(
+    # a copy that found the other store not ready says so: until none does
+    "systemctl start dd-store-copy.service && "
+    "! journalctl _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value dd-store-copy.service) "
+    "| grep -q 'not copied this time'",
+    timeout=180,
+)
 
 # b takes epoch 2 from its own store
 hold(b, 2)

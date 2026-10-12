@@ -61,9 +61,18 @@ a.wait_until_succeeds(
 # a hands over: a base backup and the key sealed for b, its last segment
 # archived, everything copied to b's store
 a.succeed("systemctl start dd-pg-base.service")
-a.succeed("systemctl stop ente.service postgresql.service")
+# stopped first, the flags after, as dd-control does: postgres archives its
+# last segment on the way down only while its flag says the lease is its.
+# A stop can be cancelled by a start racing it: ask again
+a.wait_until_succeeds("systemctl stop ente.service postgresql.service", timeout=120)
 a.succeed("rm /run/dd-placed/postgresql /run/dd-placed/ente-museum")
-a.succeed("systemctl start dd-store-copy.service")
+a.wait_until_succeeds(
+    # a copy that found the other store not ready says so: until none does
+    "systemctl start dd-store-copy.service && "
+    "! journalctl _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value dd-store-copy.service) "
+    "| grep -q 'not copied this time'",
+    timeout=180,
+)
 
 # b takes epoch 2 from its own store: postgres restored, museum on keys of
 # b's own that a never had
