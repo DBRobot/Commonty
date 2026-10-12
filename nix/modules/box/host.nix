@@ -35,6 +35,15 @@ let
   # the box that serves the members' libraries, the one built with them:
   # the one box that writes them (store.nix writer)
   libraryBox = lib.findFirst (_: true) null (placement.builtWith "libraries");
+  # the house's other boxes, by their owners' choices (box/net-hardware.nix):
+  # those on its Wi-Fi with a fixed address
+  houseBoxes = lib.mapAttrs (_: o: lib.head (lib.splitString "/" o.house.address)) (
+    lib.filterAttrs (
+      n: o: n != config.networking.hostName && (o.house or { }).ssid or null == house.ssid && (o.house or { }) ? address
+    ) (
+      lib.genAttrs fleet (n: lib.importJSON (../../../fleet/boxes + "/${n}/box.json"))
+    )
+  );
 in
 {
   imports = [
@@ -47,6 +56,7 @@ in
     (import ./capability.nix dir)
     ../storage/store.nix
     ../storage/postgres-follow.nix
+    ./net-hardware.nix
   ];
 
   config = lib.mkMerge [
@@ -59,6 +69,9 @@ in
       dd.box.metered = (box.internet or { }).metered or true;
       dd.box.disks = map (d: d.id) (hw.disks or [ ]);
       dd.box.gpus = map (g: { inherit (g) render driver encode; }) hw.gpus;
+      # its links, and the house's other boxes (box/net-hardware.nix)
+      dd.box.links.report = hw;
+      dd.box.links.houseBoxes = houseBoxes;
     }
     # Any GPU, whoever made it: Mesa's Vulkan drivers (Intel's, AMD's, and
     # NVK for NVIDIA from the GTX 16 series on) come with graphics on. Video
