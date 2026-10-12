@@ -3,7 +3,9 @@
 # and its member's.
 import json
 
-start_all()
+# boxNamed is never started: it is the system the box moves to
+fleet.start()
+box.start()
 fleet.wait_for_unit("nginx.service")
 
 # the fleet: relay, witness, three validators and their gates; ada, her

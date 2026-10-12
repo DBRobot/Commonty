@@ -428,6 +428,8 @@ in
         pkgs.gawk
         pkgs.age
       ]
+      # the other boxes' recipients are their TPMs'
+      ++ cfg.agePlugins
       ++ lib.optional (cfg.dataset != null) config.boot.zfs.package;
       serviceConfig = {
         Type = "oneshot";
@@ -572,7 +574,9 @@ in
         pkgs.age
         pkgs.curl
         pkgs.jq
-      ];
+      ]
+      # a joined box's recipient is its TPM's
+      ++ cfg.agePlugins;
       serviceConfig.Type = "oneshot";
       script = ''
         set -uo pipefail

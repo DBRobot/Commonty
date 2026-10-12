@@ -85,16 +85,20 @@ def up(url):
         return False
 
 
-def until(cond, timeout=180):
+def until(what, cond, timeout=180):
     end = time.time() + timeout
     while time.time() < end:
         if cond():
+            print(f"fleet: {what}", flush=True)
             return
         time.sleep(0.5)
-    raise SystemExit("timed out")
+    for f in sorted(os.listdir(T)):
+        if f.endswith(".log"):
+            print(f"--- {f}\n" + open(f).read()[-1500:], flush=True)
+    raise SystemExit(f"timed out: {what}")
 
 
-until(lambda: up("http://127.0.0.1:8789/health"))
+until("the relay up", lambda: up("http://127.0.0.1:8789/health"))
 for i in (1, 2, 3):
     os.makedirs(f"placed{i}", exist_ok=True)
     json.dump({}, open(f"carries{i}.json", "w"))
@@ -150,7 +154,10 @@ for i in (1, 2, 3):
     subprocess.Popen(
         ["./verify"], env=env, stdout=log(f"g{i}"), stderr=subprocess.STDOUT
     )
-until(lambda: all(up(f"http://127.0.0.1:428{i}/_dd/directory") for i in (1, 2, 3)))
+until(
+    "the gates up",
+    lambda: all(up(f"http://127.0.0.1:428{i}/_dd/directory") for i in (1, 2, 3)),
+)
 
 # ada, a member, with one device: her entry put to the directory
 root = ed.Ed25519PrivateKey.generate()
