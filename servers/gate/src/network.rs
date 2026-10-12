@@ -75,19 +75,31 @@ pub fn from_env() -> Result<Option<Door>> {
 
 /// {"node2": {"key": "<base64 SPKI P-256>", "recipient": "age1..."}}
 fn boxes_from(json: &str) -> Result<HashMap<String, BoxKeys>> {
-    use base64::Engine;
     let v: HashMap<String, serde_json::Value> = serde_json::from_str(json)?;
     v.into_iter()
-        .map(|(name, b)| {
-            let der = base64::engine::general_purpose::STANDARD
-                .decode(b["key"].as_str().context("key")?)
-                .with_context(|| format!("{name}'s key"))?;
-            let signs = VerifyingKey::from_public_key_der(&der)
-                .map_err(|e| anyhow::anyhow!("{name}'s key: {e}"))?;
-            let recipient = b["recipient"].as_str().context("recipient")?.to_string();
-            Ok((name, BoxKeys { signs, recipient }))
-        })
+        .map(|(name, b)| Ok((name.clone(), box_keys(&name, &b)?)))
         .collect()
+}
+
+/// one box's keys: {"key": "<base64 SPKI P-256>", "recipient": "age1..."}
+fn box_keys(name: &str, b: &serde_json::Value) -> Result<BoxKeys> {
+    use base64::Engine;
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(b["key"].as_str().context("key")?)
+        .with_context(|| format!("{name}'s key"))?;
+    let signs = VerifyingKey::from_public_key_der(&der)
+        .map_err(|e| anyhow::anyhow!("{name}'s key: {e}"))?;
+    let recipient = b["recipient"].as_str().context("recipient")?.to_string();
+    Ok(BoxKeys { signs, recipient })
+}
+
+/// a name a box joins under on its own key (state.JoinName): j and ten hex
+fn joined_name(name: &str) -> bool {
+    name.len() == 11
+        && name.starts_with('j')
+        && name[1..]
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
 /// what a box signs (servers/system/control/cmd/dd-control, joinMessage)
@@ -266,17 +278,25 @@ impl Door {
 /// single-use key, tagged a box, encrypted to the secrets key in that same
 /// TPM. Whoever carries the answer (the front door, Cloudflare) holds
 /// ciphertext only, and a copied request gets nothing a second time.
+///
+/// A box that joined on its own key (state/join.go) is looked up in the
+/// agreed state instead (`joined`), and its key is tagged a joined box:
+/// the network lets it reach the boxes' stores and nothing more.
 pub(crate) async fn box_key(
     door: &Door,
     name: &str,
     time: u64,
     sig: &str,
     now: u64,
+    joined: Option<&BoxKeys>,
 ) -> Result<String, (StatusCode, String)> {
-    let keys = door
-        .boxes
-        .get(name)
-        .ok_or((StatusCode::FORBIDDEN, "not a box of this fleet".into()))?;
+    let (keys, tag) = match door.boxes.get(name) {
+        Some(k) => (k, "tag:box"),
+        None => (
+            joined.ok_or((StatusCode::FORBIDDEN, "not a box of this fleet".into()))?,
+            "tag:joined",
+        ),
+    };
     if time.abs_diff(now) > SKEW {
         return Err((StatusCode::FORBIDDEN, "the time is off".into()));
     }
@@ -299,7 +319,7 @@ pub(crate) async fn box_key(
         asked.insert(name.to_string(), (now, time));
     }
     let bad = |e: anyhow::Error| (StatusCode::BAD_GATEWAY, format!("{e:#}"));
-    let (key, _) = door.mint("boxes", &["tag:box"]).await.map_err(bad)?;
+    let (key, _) = door.mint("boxes", &[tag]).await.map_err(bad)?;
     seal(&door.age, &keys.recipient, &key).map_err(bad)
 }
 
@@ -418,7 +438,31 @@ pub(crate) async fn box_join(State(app): State<Arc<App>>, Json(ask): Json<BoxAsk
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    match box_key(door, &ask.name, ask.time, &ask.sig, now).await {
+    // a box the release does not list: as the agreed state has it, if it
+    // joined (this box's dd-control)
+    let mut joined = None;
+    if !door.boxes.contains_key(&ask.name)
+        && joined_name(&ask.name)
+        && let Some(control) = &app.control
+    {
+        let st: Option<serde_json::Value> = async {
+            crate::http()
+                .get(format!("{}/state", control.trim_end_matches('/')))
+                .timeout(Duration::from_secs(10))
+                .send()
+                .await
+                .ok()?
+                .json()
+                .await
+                .ok()
+        }
+        .await;
+        joined = st
+            .as_ref()
+            .and_then(|s| s["joined"].get(&ask.name))
+            .and_then(|j| box_keys(&ask.name, j).ok());
+    }
+    match box_key(door, &ask.name, ask.time, &ask.sig, now, joined.as_ref()).await {
         Ok(sealed) => sealed.into_response(),
         Err((code, why)) => (code, why).into_response(),
     }
@@ -543,11 +587,21 @@ mod tests {
         let refused = |r: Result<String, (StatusCode, String)>| r.unwrap_err().0;
 
         assert_eq!(
-            refused(box_key(&door, "node9", now, &sign(&node2, "node9", now), now).await),
+            refused(box_key(&door, "node9", now, &sign(&node2, "node9", now), now, None).await),
             StatusCode::FORBIDDEN
         );
         assert_eq!(
-            refused(box_key(&door, "node2", now, &sign(&stranger, "node2", now), now).await),
+            refused(
+                box_key(
+                    &door,
+                    "node2",
+                    now,
+                    &sign(&stranger, "node2", now),
+                    now,
+                    None
+                )
+                .await
+            ),
             StatusCode::FORBIDDEN
         );
         assert_eq!(
@@ -557,7 +611,8 @@ mod tests {
                     "node2",
                     now - 600,
                     &sign(&node2, "node2", now - 600),
-                    now
+                    now,
+                    None
                 )
                 .await
             ),
@@ -565,11 +620,21 @@ mod tests {
         );
         // signed for another time than it claims
         assert_eq!(
-            refused(box_key(&door, "node2", now, &sign(&node2, "node2", now - 1), now).await),
+            refused(
+                box_key(
+                    &door,
+                    "node2",
+                    now,
+                    &sign(&node2, "node2", now - 1),
+                    now,
+                    None
+                )
+                .await
+            ),
             StatusCode::FORBIDDEN
         );
 
-        let sealed = box_key(&door, "node2", now, &sign(&node2, "node2", now), now)
+        let sealed = box_key(&door, "node2", now, &sign(&node2, "node2", now), now, None)
             .await
             .unwrap();
         assert_eq!(sealed, "sealed to age1node2: the-key");
@@ -580,7 +645,8 @@ mod tests {
                     "node2",
                     now + 5,
                     &sign(&node2, "node2", now + 5),
-                    now + 5
+                    now + 5,
+                    None
                 )
                 .await
             ),
@@ -588,14 +654,24 @@ mod tests {
         );
         // the same request a minute later still gets nothing
         assert_eq!(
-            refused(box_key(&door, "node2", now, &sign(&node2, "node2", now), now + 61).await),
+            refused(
+                box_key(
+                    &door,
+                    "node2",
+                    now,
+                    &sign(&node2, "node2", now),
+                    now + 61,
+                    None
+                )
+                .await
+            ),
             StatusCode::FORBIDDEN
         );
         // the DER a soft key writes is taken too
         let der: Signature = node2.sign(&join_message("node2", now + 61));
         let der = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(der.to_der().as_bytes());
         assert!(
-            box_key(&door, "node2", now + 61, &der, now + 61)
+            box_key(&door, "node2", now + 61, &der, now + 61, None)
                 .await
                 .is_ok()
         );

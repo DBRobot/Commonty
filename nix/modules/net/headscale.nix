@@ -33,6 +33,9 @@ let
   policy = pkgs.writeText "headscale-policy.json" (
     builtins.toJSON {
       tagOwners."tag:box" = [ "boxes@" ];
+      # a box that joined on its own key (state/join.go): a stranger, which
+      # keeps copies and nothing else
+      tagOwners."tag:joined" = [ "boxes@" ];
       # A person's devices reach a box's front door and its game servers.
       # A box's owner's devices reach that box, and only that box, for what
       # an admin needs: ssh, its dns, the cache push. Boxes reach each other
@@ -50,6 +53,18 @@ let
           action = "accept";
           src = [ "tag:box" ];
           dst = map (p: "tag:box:${p}") boxPorts;
+        }
+        # a joined box and the boxes reach each other's stores, at
+        # store.<box>.<domain> on 443, and nothing more
+        {
+          action = "accept";
+          src = [ "tag:box" ];
+          dst = [ "tag:joined:443" ];
+        }
+        {
+          action = "accept";
+          src = [ "tag:joined" ];
+          dst = [ "tag:box:443" ];
         }
       ]
       ++ lib.mapAttrsToList (addr: owner: {
