@@ -167,7 +167,8 @@ until(
     lambda: all(up(f"http://127.0.0.1:428{i}/_dd/directory") for i in (1, 2, 3)),
 )
 
-# ada's entry put to the directoryentry = {
+# ada's entry put to the directory
+entry = {
     "name": "ada",
     "root": pub(root),
     "recovery": pub(ed.Ed25519PrivateKey.generate()),
