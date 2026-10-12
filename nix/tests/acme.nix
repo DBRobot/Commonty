@@ -43,18 +43,21 @@ in
       names = import ../lib/https-names.nix lib config;
       worker = pkgs.runCommand "dns-worker-here" { } ''
         mkdir $out
-        cp ${self.packages.${pkgs.stdenv.hostPlatform.system}.dns-worker}/worker.js $out/
+        # the Worker and every module it imports (controller.js), as deployed
+        cp ${self.packages.${pkgs.stdenv.hostPlatform.system}.dns-worker}/* $out/
+        chmod -R u+w $out
         cat > $out/fleet.js <<EOF
         export const BOXES = {"box1": "$(cat ${key}/spki)"};
         export const NAMES = {"box1": ${builtins.toJSON names}};
         export const RECORDS = null;
+        export const MEMBERS = {};
         EOF
         cat > $out/wrangler.toml <<'EOF'
         name = "acme"
         main = "worker.js"
         compatibility_date = "2026-05-01"
         no_bundle = true
-        rules = [{ type = "ESModule", globs = ["**/*.js"] }]
+        rules = [{ type = "ESModule", globs = ["**/*.js"] }, { type = "CompiledWasm", globs = ["**/*.wasm"] }]
         [vars]
         ZONE = "zone1"
         CF_API = "http://127.0.0.1:8899/client/v4"
