@@ -75,7 +75,6 @@ let
           ente-health.unitConfig.ConditionPathExists = "/run/dd-placed/ente-museum";
         };
         systemd.tmpfiles.rules = [ "d /run/dd-placed 0755 root root -" ];
-        dd.photos.admin = 1;
         services.ente.web.enable = lib.mkForce false;
         # what the web module sets for museum when it is on
         services.ente.api.settings = {

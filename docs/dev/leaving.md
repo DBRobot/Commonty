@@ -142,8 +142,9 @@ gate (every box)   names/<name>.bin, notes on their libraries and their
 libraries          every object under each of their libraries' prefixes
                    and images-<name>, trash and all (the gate that holds
                    the bucket key)                                 dav.rs forget
-photos             their Ente account, through museum's admin delete with
-                   the ledger's admin login, every 5 minutes      dd forget-photos
+photos             their Ente account, deleted by museum itself once the
+                   box lists them in its dd_delete table; no
+                   admin account, every 5 minutes                 dd-forget-photos
 passwords          their Vaultwarden account, through upstream's admin
                    delete on loopback, with a token made at boot,
                    every 5 minutes                                dd-forget-passwords

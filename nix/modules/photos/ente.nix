@@ -43,16 +43,6 @@ in
   # its database is dumped where it lives (storage/postgres-backup.nix)
   imports = [ ../storage/postgres-backup.nix ];
 
-  options.dd.photos.ledger = lib.mkOption {
-    type = lib.types.nullOr lib.types.int;
-    default = null;
-    description = "museum's id for the storage ledger's own account (storage+ledger@users.<domain>): an admin too, so it can read each member's usage and set their photo limit to what is left of their allowance (dd storage-ledger). Null: no ledger.";
-  };
-  options.dd.photos.admin = lib.mkOption {
-    type = lib.types.int;
-    description = "museum's id for the fleet's owner: the one account that may call museum's admin api. Museum numbers accounts itself, so this is read off after the owner's account is made (dd status shows it).";
-  };
-
   config = lib.mkMerge [
     (lib.optionalAttrs (options.dd ? store) {
       # browsers upload to the bucket straight (see the role's cors)
@@ -102,7 +92,9 @@ in
               # reads both from the patched source)
               ../../../servers/photos/museum-delete-now.patch
               # each account's address kept beside it (<member>@users.<domain>,
-              # a name), so a box with keys of its own carries the accounts over
+              # a name), so a box with keys of its own carries the accounts over;
+              # and an account deleted by museum itself when the box lists its
+              # member as left, with no admin account (dd_jobs.go)
               ../../../servers/photos/museum-own-keys.patch
             ];
           });
@@ -295,11 +287,9 @@ in
             # is <name>@users.<domain>, made by the photos page with this code
             # instead of a mail nobody would receive. Museum honours it because
             # the nixos module runs it as ENVIRONMENT=local.
-            # who may call museum's admin api (dd photos-demo sets the demo's quota)
-            internal.admins = [
-              config.dd.photos.admin
-            ]
-            ++ lib.optional (config.dd.photos.ledger != null) config.dd.photos.ledger;
+            # nobody may call museum's admin api: what the fleet needs of it
+            # the box does in museum itself (storage/ledger.nix, dd_jobs.go)
+            internal.admins = [ ];
             internal.hardcoded-ott = {
               local-domain-suffix = "@users.${base}";
               local-domain-value._secret = secret "ott" "ente-ott";
@@ -313,6 +303,14 @@ in
           useACMEHost = base;
           forceSSL = true;
         })
+        // {
+          ${d "api"} = {
+            useACMEHost = base;
+            forceSSL = true;
+            # nobody is an admin; the admin api answers nobody either
+            locations."^~ /admin".return = "404";
+          };
+        }
         // {
           # The photos page makes or links a person's account against museum
           # on its own name: same origin, so the member's session comes along.
@@ -336,6 +334,8 @@ in
                 extraConfig = "rewrite ^ /_dd/use-app break;";
               };
               "/_dd/museum/".proxyPass = "http://127.0.0.1:${toString museumPort}/";
+              # nobody is an admin; the admin api answers nobody either
+              "^~ /_dd/museum/admin".return = "404";
               "~ ^/_dd/museum/users/(verify-email|change-email)$".proxyPass =
                 "http://127.0.0.1:${toString config.dd.verify.port}/_dd/photos/museum/$1";
             };

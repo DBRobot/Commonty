@@ -55,13 +55,8 @@ publishes the list as a metric. Nothing refuses it, and
 checks that labelling is all that happens: a label is a fix still owed,
 not a gate. The fix is to make the service stop reading plaintext.
 
-Two things here look like trust and are not:
+One thing here looks like trust and is not:
 
-- **`ownHardware` in `policy.json`** keeps a service on boxes whose
-  `box.json` owner is the fleet's owner. It is about whose hands the
-  hardware is in, for services that hand people the code that handles
-  their secrets (a page a master password is typed into). It says nothing
-  about the box being safe.
 - **`public` in `boxes.json`** says whether the box's gate answers at the
   fleet's public names. It changes how other boxes reach its directory,
   not what they believe from it.
@@ -211,7 +206,7 @@ the file names in [`nix/roles/`](../../nix/roles); `_` is a note.
   with        roles that must be on the same box: the code reaches them
               on localhost
   perFleet    exactly this many boxes run it (gateway: 1)
-  services    the needs' service names it runs, for policy.json ownHardware
+  services    the needs' service names it runs
   prefers     what makes it faster ({"gpuEncode": "H264"}); a note today,
               nothing checks it
   why         one line on why, for people
@@ -229,9 +224,7 @@ problems as sentences. `checks.role-fit`
 - it names a role `roles.json` does not have;
 - its report misses a `requires` (an unknown requirement is a problem
   too, so a typo cannot pass);
-- a `with` role is not on it, or a `box` field is not in its house;
-- it runs a role whose `services` include one in `ownHardware`, and its
-  `box.json` owner is not the policy's `owner`.
+- a `with` role is not on it, or a `box` field is not in its house.
 
 And the fleet fails when a `perFleet` role runs on another number of
 boxes.
@@ -263,7 +256,6 @@ people.<name>
 allowanceGb    each member's storage across every service and box
                                                      dd.storage.budgetGb
                                                      (storage/view.nix)
-ownHardware    services that run only on the owner's own boxes (role-fit)
 forgeMirrors   the forge's push mirrors: [{to, user, repo?}]; repo defaults
                to the fleet's own (roles/forge.nix); the token is the sops
                secret github-mirror-token

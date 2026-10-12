@@ -286,8 +286,7 @@ hand and held to `fleet/roles.json` by `checks.role-fit`
 `requires` against the box's signed `hardware.json` (`arch`, `uefi`,
 `tpmP256`, `wiredInitrd`, `memoryGiB`, `threads`, `cpuFlags`, `kvm`,
 `nestedKvm`), `box` against `box.json`, `with` (roles that must share the
-box), `perFleet`, and the policy's `ownHardware`
-([what each service needs from a box](hardware.md)).
+box) and `perFleet` ([what each service needs from a box](hardware.md)).
 
 ## Tests
 

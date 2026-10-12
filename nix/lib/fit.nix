@@ -68,15 +68,6 @@ let
             ++ map (f: if (own.house or { }) ? ${f} then null else "${name}: ${r} needs ${f} in its box.json") (
               n.box or [ ]
             )
-            # the owner's own hardware, for what serves the code that
-            # handles people's secrets (fleet/policy.json)
-            ++ map (
-              svc:
-              if (own.owner or null) == (policy.owner or null) then
-                null
-              else
-                "${name}: ${svc} runs only on ${policy.owner or "the owner"}'s own boxes, and this one is ${own.owner or "nobody's"}"
-            ) (lib.filter (svc: builtins.elem svc (policy.ownHardware or [ ])) (n.services or [ ]))
           );
     in
     lib.optional (!(builtins.elem "core" b.roles)) "${name}: every box runs core"

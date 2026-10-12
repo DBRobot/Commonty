@@ -25,7 +25,10 @@
       "thanos-sidecar",
       "restic-backup",
       "storage-view",
-      "zfs-datasets"
+      "zfs-datasets",
+      "nginx",
+      "acme",
+      "store"
     ]
   },
   "gateway": {

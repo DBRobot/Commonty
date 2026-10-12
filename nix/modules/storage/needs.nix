@@ -143,12 +143,14 @@
 
   storage-ledger = {
     what = "what each member keeps across every service, against their allowance";
-    # it holds a Photos admin login, which can set anyone's limit
-    trust = "owner";
+    # no admin login: museum's own database user counts Photos, sets the
+    # limits it works out, and lists a leaver for museum to delete
     units = [
       "dd-storage-ledger"
       "dd-storage-forget-login"
-      "dd-forget-photos" # Photos' share of deleting whoever left, with the ledger's admin login
+      "dd-photos-usage"
+      "dd-photos-limits"
+      "dd-forget-photos" # Photos' share of deleting whoever left
     ];
     instances = 1;
     base = {
@@ -158,15 +160,45 @@
         storage = "13K";
       };
       network = {
-        outbound = [ "api" ]; # museum's admin api, for photos
+        outbound = "none"; # museum's tables, on this box
         inbound = "none";
       };
       depends = {
         dd-verify.local = true; # the members and their libraries; it reads the ledger back
         storage-view.local = true; # the fleet's count, which it holds Photos to
-        ente-museum.local = false; # Photos' counts, from museum's api; the other services' come in their own boxes' heartbeats
+        ente-museum.local = true; # museum's own tables; the other services' counts come in their own boxes' heartbeats
       };
       privacy = "metadata"; # bytes per member, never contents
+    };
+  };
+
+  store = {
+    what = "this box's own store: a garage of one with a secret nobody else has, its buckets copied to other boxes' stores (storage/store.nix)";
+    # every box keeps copies for the others, and its own buckets
+    everyBox = true;
+    units = [
+      "dd-store"
+      "dd-store-setup"
+      "dd-store-copy"
+      "dd-store-copy-recent"
+      "dd-store-facts"
+      "dd-store-migrate" # the move off the old shared pool
+    ];
+    base = {
+      # node1, 2026-10-11: a fresh garage of one
+      uses = {
+        memory = "100M";
+        storage = "1G";
+      };
+      network = {
+        outbound = [ "store" ]; # the other boxes' stores
+        inbound = "network"; # the other boxes' copies, at store.<box>.<domain>
+      };
+      depends = {
+        nginx.local = true;
+        acme.local = true; # a certificate for store.<box>.<domain>
+      };
+      privacy = "none"; # what it keeps is encrypted before it arrives
     };
   };
 

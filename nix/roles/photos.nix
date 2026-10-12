@@ -42,13 +42,6 @@
       else
         null;
   };
-  # museum's id for the owner's photo account; the forge's admin is named
-  # the same way in forge.nix
-  dd.photos.admin = 1580559962386438;
-  # the storage ledger's account, made for it once (its password: sops
-  # ente-storage-password)
-  dd.photos.ledger = 1580559962386440;
-
   dd.home.services = [
     {
       name = "Photos";
