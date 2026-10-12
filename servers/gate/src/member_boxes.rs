@@ -179,6 +179,23 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
     axum::Json(serde_json::json!({ "boxes": rows })).into_response()
 }
 
+/// GET /_dd/network/joined: the same boxes, as the app's installer window
+/// reads them to move each one's pending backup into the member's images:
+/// `[{ "name", "ticket" }]`
+pub(crate) async fn joined_mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let Some(user) = app.identify(&headers, "access") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let rows: Vec<serde_json::Value> = current(&app)
+        .await
+        .1
+        .into_iter()
+        .filter(|o| o.user == user)
+        .map(|o| serde_json::json!({ "name": o.name, "ticket": o.ticket }))
+        .collect();
+    axum::Json(rows).into_response()
+}
+
 /// A pending backup's ticket, from a request's bearer: the member and the
 /// ticket id, when it is a join ticket good now.
 pub(crate) fn pending_ticket(app: &App, headers: &HeaderMap) -> Option<(String, String)> {
