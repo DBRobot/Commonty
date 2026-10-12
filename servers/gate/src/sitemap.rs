@@ -21,6 +21,8 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
         "home page start services tiles",
     )];
     let mut model = Value::Null;
+    let mut report = Value::Null;
+    let mut tiles = vec![];
     // the tiles a member sees, the demo's own doors for the demo; the fleet's
     // figures (Metrics) are in the menu for the people who run boxes, not here
     for s in services.iter().filter(|s| !s.menu_only) {
@@ -53,8 +55,21 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
                 .map(|o| format!("{o}/v1/chat/completions"))
                 .into();
         }
+        // where a member writes up a bug, in Code: the demo has no account to
+        if s.icon == "code" && !demo {
+            report = origin(&s.url)
+                .map(|o| format!("{o}/{REPORTS}/issues/new"))
+                .into();
+        }
+        tiles.push(target(
+            &format!("tile-{}", slug(&s.name)),
+            &format!("Open {}", s.name),
+            &format!("open {} tile", s.name),
+            None,
+        ));
         places.push(p);
     }
+    places[0]["targets"] = tiles.into();
     if !demo {
         let friends = crate::pages::page("friends").unwrap_or_default();
         let mut p = place(
@@ -77,6 +92,7 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
             "settings account preferences options",
         ));
         let page = crate::pages::page("settings").unwrap_or_default();
+        let mut tabs = vec![];
         for (tab, label, subs, words) in settings_tabs(page) {
             let mut p = place(
                 &format!("settings-{tab}"),
@@ -89,10 +105,142 @@ pub fn build(services: &[Service], role: Role, domain: &str, docs: &Value) -> Va
             p["group"] = "Settings".into();
             p["subs"] = subs.into();
             places.push(p);
+            if page.contains(&format!("data-guide=\"tab-{tab}\"")) {
+                tabs.push(target(
+                    &format!("tab-{tab}"),
+                    &format!("{label} tab"),
+                    &format!("{label} tab"),
+                    None,
+                ));
+            }
+        }
+        if let Some(s) = places.iter_mut().find(|p| p["id"] == "settings") {
+            s["targets"] = tabs.into();
+        }
+    }
+    for (at, name, label, words, hint) in TARGETS {
+        if let Some(p) = places.iter_mut().find(|p| p["id"] == *at) {
+            let t = target(name, label, words, (!hint.is_empty()).then_some(*hint));
+            match p["targets"].as_array_mut() {
+                Some(ts) => ts.push(t),
+                None => p["targets"] = json!([t]),
+            }
         }
     }
     places.extend(docs_places(docs, domain));
-    json!({ "places": places, "model": model })
+    json!({ "places": places, "model": model, "report": report })
+}
+
+/// The repository bugs in Commonty itself are written up in, on Code
+const REPORTS: &str = "david/commonty";
+
+/// The controls the assistant may point at, under the place they are on: a
+/// `data-guide` name our own pages give a button, what it is called there,
+/// its words, and where on the place it is when it is not on its first
+/// page. Only ours, never anything a member wrote. Settings' tabs and the
+/// home tiles are added from the pages themselves.
+const TARGETS: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "home",
+        "menu",
+        "Your menu",
+        "menu account name sign out settings",
+        "",
+    ),
+    ("home", "search", "Search", "search find docs", ""),
+    (
+        "settings-devices",
+        "add-device",
+        "Add a device",
+        "add new device phone computer code scan",
+        "",
+    ),
+    (
+        "settings-devices",
+        "show-names",
+        "Show names",
+        "show device names",
+        "",
+    ),
+    (
+        "settings-devices",
+        "sign-out-others",
+        "Sign out everywhere else",
+        "sign out everywhere else other",
+        "",
+    ),
+    (
+        "settings-network",
+        "change-wifi",
+        "Change Wi-Fi details",
+        "change wifi wi-fi password network",
+        "",
+    ),
+    (
+        "settings-backups",
+        "open-backups",
+        "Open them in the app",
+        "open backups disk images app",
+        "",
+    ),
+    (
+        "settings-backups",
+        "get-app",
+        "Get the app",
+        "get download install app",
+        "",
+    ),
+    (
+        "settings-this-device",
+        "show-assistant",
+        "Show the assistant",
+        "show turn off on hide assistant",
+        "",
+    ),
+    (
+        "settings-this-device",
+        "shortcut",
+        "Keyboard shortcut for the assistant",
+        "keyboard shortcut key ctrl",
+        "",
+    ),
+    (
+        "settings-leave",
+        "leave",
+        "Leave and delete everything",
+        "leave delete account quit",
+        "",
+    ),
+    ("svc-files", "upload", "Upload", "upload add files", ""),
+    (
+        "svc-files",
+        "new-folder",
+        "New folder",
+        "new folder make create",
+        "",
+    ),
+    (
+        "svc-code",
+        "new-repo",
+        "New repository",
+        "new repository repo create make",
+        "",
+    ),
+    (
+        "svc-code",
+        "new-issue",
+        "New issue",
+        "new issue open bug",
+        "in a repository, on its Issues tab",
+    ),
+];
+
+fn target(name: &str, label: &str, words: &str, hint: Option<&str>) -> Value {
+    let mut t = json!({ "name": name, "label": label, "words": words.to_lowercase() });
+    if let Some(h) = hint {
+        t["where"] = h.into();
+    }
+    t
 }
 
 fn place(id: &str, label: &str, parent: Option<&str>, kind: &str, url: &str, words: &str) -> Value {
@@ -453,6 +601,94 @@ mod tests {
         assert_eq!(by(&m, "svc-photos")["kind"], "page");
         assert!(ids.contains(&"doc:guide/leaving".to_string()));
         assert_eq!(m["model"], "https://llm.x/v1/chat/completions");
+    }
+
+    /// Whether some file of ours marks a control with this name, as markup
+    /// or as kit.js's el() writes it
+    fn marks(src: &str, name: &str) -> bool {
+        src.contains(&format!("data-guide=\"{name}\""))
+            || src.contains(&format!("'data-guide': '{name}'"))
+    }
+
+    fn ours(files: &[&str]) -> String {
+        files
+            .iter()
+            .map(|f| {
+                crate::pages::page(f)
+                    .map(str::to_string)
+                    .or_else(|| {
+                        crate::pages::static_file(f)
+                            .map(|(b, _, _)| String::from_utf8_lossy(b).into_owned())
+                    })
+                    .unwrap_or_else(|| panic!("no file {f}"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_control_on_the_map_is_one_our_pages_mark() {
+        let mut tiles = tiles();
+        tiles.push(tile("Files", "files", "https://files.x/_dd/files"));
+        let m = build(&tiles, Role::Member, "x", &docs());
+        let mut seen = 0;
+        for p in m["places"].as_array().unwrap() {
+            let id = p["id"].as_str().unwrap();
+            let files: &[&str] = match id {
+                "home" | "settings" => &["shell.js", "settings"],
+                "svc-files" => &["files"],
+                "svc-code" => &["git-home.js", "git-pulls.js"],
+                _ if id.starts_with("settings-") => &["settings", "settings.js", "backups.js"],
+                _ => &[],
+            };
+            let src = ours(files);
+            for t in p["targets"].as_array().into_iter().flatten() {
+                let name = t["name"].as_str().unwrap();
+                seen += 1;
+                assert!(
+                    name.chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                    "{name}"
+                );
+                if name.starts_with("tile-") {
+                    assert!(src.contains("'data-guide': `tile-${slug(s.name)}`"));
+                    continue;
+                }
+                assert!(
+                    marks(&src, name),
+                    "{id}.{name} is marked in none of {files:?}"
+                );
+            }
+        }
+        // the ones asked for, each under its place
+        let has = |at: &str, name: &str| {
+            by(&m, at)["targets"]
+                .as_array()
+                .is_some_and(|ts| ts.iter().any(|t| t["name"] == name))
+        };
+        for (at, name) in [
+            ("home", "menu"),
+            ("home", "tile-photos"),
+            ("home", "tile-passwords"),
+            ("settings", "tab-devices"),
+            ("settings", "tab-this-device"),
+            ("settings-devices", "add-device"),
+            ("settings-devices", "show-names"),
+            ("settings-backups", "open-backups"),
+            ("settings-backups", "get-app"),
+            ("settings-leave", "leave"),
+            ("settings-this-device", "shortcut"),
+            ("svc-files", "upload"),
+            ("svc-code", "new-repo"),
+            ("svc-code", "new-issue"),
+        ] {
+            assert!(has(at, name), "{at}.{name}");
+        }
+        assert!(seen > 20, "{seen}");
+        assert_eq!(m["report"], "https://git.x/david/commonty/issues/new");
+        // the demo writes up nothing, and has none of Settings' controls
+        let d = build(&tiles, Role::Demo, "x", &docs());
+        assert!(d["report"].is_null());
+        assert!(!d.to_string().contains("add-device"));
     }
 
     #[test]

@@ -27,13 +27,13 @@
   <main class="se">
     <h1>Settings</h1>
     <nav class="se-nav" aria-label="Settings">
-      <a href="#profile" data-tab="profile" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Profile</a>
-      <a href="#devices" data-tab="devices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>Devices</a>
-      <a href="#storage" data-tab="storage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Storage</a>
-      <a href="#network" data-tab="network"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>Network</a>
-      <a href="#backups" data-tab="backups"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15h18"/><circle cx="17" cy="17" r=".9" fill="currentColor"/></svg>Backups</a>
-      <a href="#this-device" data-tab="this-device"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2"/><path d="M10.5 18.5h3"/></svg>This device</a>
-      <a href="#leave" data-tab="leave"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/></svg>Leave</a>
+      <a href="#profile" data-tab="profile" data-guide="tab-profile" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Profile</a>
+      <a href="#devices" data-tab="devices" data-guide="tab-devices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>Devices</a>
+      <a href="#storage" data-tab="storage" data-guide="tab-storage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Storage</a>
+      <a href="#network" data-tab="network" data-guide="tab-network"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>Network</a>
+      <a href="#backups" data-tab="backups" data-guide="tab-backups"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15h18"/><circle cx="17" cy="17" r=".9" fill="currentColor"/></svg>Backups</a>
+      <a href="#this-device" data-tab="this-device" data-guide="tab-this-device"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2"/><path d="M10.5 18.5h3"/></svg>This device</a>
+      <a href="#leave" data-tab="leave" data-guide="tab-leave"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/></svg>Leave</a>
     </nav>
 
     <div class="se-pane" data-pane="profile">
@@ -65,10 +65,10 @@
         <header><h2 id="now">Signed in now</h2></header>
         <ul class="dv-list" id="dv-sessions"></ul>
         <p class="se-hint" id="dv-none" hidden>Nowhere yet.</p>
-        <footer><button class="danger" id="dv-others" hidden>Sign out everywhere else</button></footer>
+        <footer><button class="danger" id="dv-others" data-guide="sign-out-others" hidden>Sign out everywhere else</button></footer>
       </section>
       <section class="se-box" aria-labelledby="keys">
-        <header><h2 id="keys">Devices with a key</h2><span class="bk-spacer"></span><button class="quiet" id="dv-show">Show names</button><button id="dv-add" hidden>Add a device</button></header>
+        <header><h2 id="keys">Devices with a key</h2><span class="bk-spacer"></span><button class="quiet" id="dv-show" data-guide="show-names">Show names</button><button id="dv-add" data-guide="add-device" hidden>Add a device</button></header>
         <p class="se-hint" id="dv-hint">Names are kept locked; the Commonty app shows them.</p>
         <ul class="dv-list" id="dv-keys"></ul>
       </section>
@@ -102,7 +102,7 @@
         <ul class="dv-list" id="nw-boxes"></ul>
       </section>
       <section class="se-box" aria-labelledby="wifi-h">
-        <header><h2 id="wifi-h">Wi-Fi</h2><span class="bk-spacer"></span><button class="quiet" id="nw-change">Change Wi-Fi details</button></header>
+        <header><h2 id="wifi-h">Wi-Fi</h2><span class="bk-spacer"></span><button class="quiet" id="nw-change" data-guide="change-wifi">Change Wi-Fi details</button></header>
         <dl class="se-rows" id="nw-view">
           <div class="se-row"><dt>Network</dt><dd id="nw-ssid">…</dd></div>
           <div class="se-row"><dt>Password</dt><dd>•••••••••••</dd></div>
@@ -135,7 +135,8 @@
     <div class="se-pane" data-pane="this-device" hidden>
       <section class="se-box" aria-labelledby="td-h">
         <header><h2 id="td-h">The assistant</h2></header>
-        <div class="nw-switch"><div class="grow">Show the assistant<small id="td-guide-what">Ask Commonty, in the lower right corner, on this device. Turn it off and it's gone from every page here; turn it back on any time.</small></div><button class="switch" id="td-guide" role="switch" aria-checked="true" aria-label="Show the assistant" aria-describedby="td-guide-what"></button></div>
+        <div class="nw-switch"><div class="grow">Show the assistant<small id="td-guide-what">Ask Commonty, in the lower right corner, on this device. Turn it off and it's gone from every page here; turn it back on any time.</small></div><button class="switch" id="td-guide" role="switch" aria-checked="true" aria-label="Show the assistant" aria-describedby="td-guide-what" data-guide="show-assistant"></button></div>
+        <div class="nw-switch td-key"><div class="grow" id="td-key-what">Keyboard shortcut for the assistant<small id="td-key-hint" aria-live="polite">Opens Ask Commonty from any page on this device.</small></div><kbd id="td-key">Ctrl+K</kbd><button class="quiet" id="td-key-set" data-guide="shortcut" aria-describedby="td-key-what">Change</button><button class="quiet" id="td-key-reset" hidden>Reset</button></div>
       </section>
     </div>
 
@@ -188,7 +189,7 @@
         <p class="se-hint" id="lv-as-waiting" hidden>You are signed out, and this account is deleted straight away, so its name is free again. It cannot be undone.</p>
         <p class="se-hint" id="lv-device" hidden>Your account's key is on a device, not a passkey: leave from Settings in the Commonty app's own window there.</p>
         <p class="se-hint" id="lv-passkey" hidden>Your account's key is a passkey: leave from Settings on the website, signed in with it.</p>
-        <footer><button class="danger" id="lv-go">Leave and delete everything</button></footer>
+        <footer><button class="danger" id="lv-go" data-guide="leave">Leave and delete everything</button></footer>
       </section>
       <section class="se-box" aria-labelledby="lv-left-h" id="lv-left" hidden>
         <header><h2 id="lv-left-h" tabindex="-1">You have left</h2></header>
