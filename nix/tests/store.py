@@ -60,6 +60,58 @@ a.succeed(
 a.succeed("systemctl start dd-store-copy.service")
 assert get(b, "photos", "p1") == "a photo, ciphertext"
 
+# the store says its room, and what it keeps of each bucket
+a.succeed("systemctl start dd-store-facts.service")
+facts = a.succeed("cat /var/lib/dd-facts/store.prom")
+assert "dd_store_size_bytes 1073741824" in facts, facts
+assert 'dd_store_bucket_bytes{bucket="photos"}' in facts, facts
+a.succeed("test ! -e /run/dd-store/full")
+
+# the plan decides where copies go: photos kept on a alone, then on a and b
+a.succeed("""echo '{"photos":["a"]}' > /run/dd-placed/copies.json""")
+put(a, "photos", "p2", "the plan keeps it here")
+a.succeed("systemctl start dd-store-copy.service")
+b.fail(
+    "set -a; . /var/lib/dd-store/keys/photos.env; AWS_DEFAULT_REGION=us-east-1 "
+    f"{s3} s3 ls s3://photos/p2"
+)
+a.succeed("""echo '{"photos":["a","b"]}' > /run/dd-placed/copies.json""")
+a.succeed("systemctl start dd-store-copy.service")
+assert get(b, "photos", "p2") == "the plan keeps it here"
+
+# b nearly full: what a sends is refused, what b keeps still read
+b.succeed("systemctl stop dd-store-facts.timer; touch /run/dd-store/full")
+put(a, "photos", "p3", "no room for it there")
+a.succeed("systemctl start dd-store-copy.service")
+b.fail(
+    "set -a; . /var/lib/dd-store/keys/photos.env; AWS_DEFAULT_REGION=us-east-1 "
+    f"{s3} s3 ls s3://photos/p3"
+)
+a.succeed(
+    "journalctl -u dd-store-copy.service | grep -q 'b: photos not copied this time'"
+)
+assert get(b, "photos", "p2") == "the plan keeps it here"
+# room again: it goes
+b.succeed("rm /run/dd-store/full")
+a.succeed("systemctl start dd-store-copy.service")
+assert get(b, "photos", "p3") == "no room for it there"
+
+# b drops what it was sent: the read back finds it out, and the plan hears
+b.succeed(
+    "set -a; . /var/lib/dd-store/keys/photos.env; AWS_DEFAULT_REGION=us-east-1 "
+    f"for o in p1 p2 p3; do {s3} s3 rm s3://photos/$o; done"
+)
+a.succeed("systemctl start dd-store-copy.service")
+a.succeed(
+    "journalctl -u dd-store-copy.service | grep -q 'read back is not what was sent'"
+)
+a.succeed(
+    """grep -q 'dd_store_lost{bucket="photos",box="b"} 1' /var/lib/dd-facts/store-copy.prom"""
+)
+# sent again, read back whole: no longer lost
+a.succeed("systemctl start dd-store-copy.service")
+a.succeed("! grep -q dd_store_lost /var/lib/dd-facts/store-copy.prom")
+
 # a is gone; b serves what a wrote
 a.crash()
 assert get(b, "photos", "p1") == "a photo, ciphertext"

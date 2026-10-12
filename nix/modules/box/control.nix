@@ -62,6 +62,8 @@ in
           # services this box carries
           "-placement ${pkg.placement-inputs}"
           "-placed-carries /etc/dd-placed/carries.json"
+          # which boxes' stores keep each bucket, for this box's copier
+          (lib.optionalString (config.dd.store.enable or false) "-placed-copies /run/dd-placed/copies.json")
           # the gate hands in directory items here (servers/gate/src/directory.rs)
           (lib.optionalString config.dd.verify.enable "-submit /run/dd-control/submit.sock -submit-group dd-verify")
           # dd-attest hands in what it built for a build order here

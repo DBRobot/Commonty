@@ -31,10 +31,21 @@ until the other is back.
   the buckets it copies. It is sealed to that box's secrets key (its TPM)
   and served at `https://store.<box>.<domain>/_keys/<other>.age`: public,
   and only the box it is for can open it.
-- **Copies**: every 5 minutes, `dd-store-copy` copies each bucket to the
-  first boxes by name, as many as the bucket's `copies` asks (2 unless
-  said). A copy is added to, never pruned: what is deleted here stays
-  there. Deletes reaching the copies is a decision still to make.
+- **Copies**: every 5 minutes, `dd-store-copy` copies each bucket from the
+  box that writes it (where its service runs) to the other boxes that keep
+  it. Which boxes keep it is the control plane's: the plan
+  (`place.Decide`'s copies) keeps a bucket where it is written, then where
+  it is already, then on the boxes whose stores have the most room, and
+  only where it fits. Until a plan has been seen, the first boxes by name.
+  A copy is added to, never pruned: what is deleted here stays there.
+  Deletes reaching the copies is a decision still to make.
+- **Room**: each store says how big it is, what it has free and what it
+  keeps of each bucket, in its box's heartbeat. With a twentieth left it
+  refuses what other boxes send (`507`), and still serves what it keeps.
+  Its dataset's quota is its capacity, so its own services can't fill the
+  pool either. A service isn't placed where its buckets wouldn't fit, and
+  a box refuses to start one it hasn't the memory for; it says so, and the
+  plan gives the service to another box.
 - **What is stored is ciphertext**: photos, files and films are encrypted
   on members' devices, backups by restic, the postgres archive by wal-g.
   A box holding a copy holds nothing it can read.

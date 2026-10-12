@@ -13,6 +13,12 @@ package main
 // moves it. Its flag holds the lease's epoch and when it lapses, and the
 // service stops before then unless a renewal is seen agreed, fresh or not:
 // a box cut off stops its writer before anyone else may take the lease.
+//
+// A service is not started where it would not fit: when this box has less
+// memory free than it holds, the box refuses it and says so in its
+// heartbeat (refused/<svc>), and the plan gives it to another box. And the
+// plan's copies (which boxes' stores keep each bucket) go to a file the
+// store's copier reads (nix/modules/storage/store.nix).
 
 import (
 	"encoding/json"
@@ -55,7 +61,22 @@ type placer struct {
 	// and when it sent each request still unanswered
 	since map[string]int64
 	sent  map[string]map[uint64]int64
+	// GiB a service holds, as the release estimates it (place.Service)
+	memory map[string]float64
+	// bytes of memory free now (MemAvailable), or a test's
+	free func() float64
+	// a service refused for want of room: when (uptime), told for refuseFor
+	refused map[string]int64
+	// where the plan's copies are written; empty: not at all
+	copies string
 }
+
+// how long a box says it refused a service: the plan gives it elsewhere,
+// and it may come back once that has passed
+const refuseFor = 10 * time.Minute
+
+// what is kept free whatever a service asks
+const keepFree = 512 << 20
 
 // what a leased service's flag holds
 type held struct {
@@ -89,13 +110,59 @@ func systemctl(args ...string) error {
 // what it runs (a flag up)
 func (p *placer) facts() map[string]float64 {
 	f := map[string]float64{}
+	now := p.uptime()
 	for svc := range p.carries {
 		f["carries/"+svc] = 1
 		if p.up(svc) {
 			f["runs/"+svc] = 1
 		}
+		if at, ok := p.refused[svc]; ok && now-at < refuseFor.Milliseconds() {
+			f["refused/"+svc] = 1
+		}
 	}
 	return f
+}
+
+// fits: whether svc may start here now, by what it holds - the most any
+// box measured it holding, never under the release's estimate - against
+// what this box has free. A refusal is remembered and told.
+func (p *placer) fits(svc string, s *state.State) bool {
+	if p.free == nil {
+		return true
+	}
+	need := p.memory[svc] * (1 << 30)
+	for _, b := range s.Boxes {
+		need = max(need, b.Facts["svc/"+svc+"/mem"])
+	}
+	if free := p.free(); free > 0 && free-need < keepFree {
+		if _, ok := p.refused[svc]; !ok || p.uptime()-p.refused[svc] >= refuseFor.Milliseconds() {
+			log.Printf("placed: refusing %s: it holds %.1f GiB, %.1f GiB free here", svc, need/(1<<30), free/(1<<30))
+		}
+		p.refused[svc] = p.uptime()
+		return false
+	}
+	delete(p.refused, svc)
+	return true
+}
+
+// writeCopies puts the plan's copies where the store's copier reads them,
+// when they change
+func (p *placer) writeCopies(c map[string][]string) {
+	if p.copies == "" {
+		return
+	}
+	raw, _ := json.Marshal(c)
+	if old, err := os.ReadFile(p.copies); err == nil && string(old) == string(raw) {
+		return
+	}
+	tmp := p.copies + ".new"
+	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+		log.Printf("placed: copies: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, p.copies); err != nil {
+		log.Printf("placed: copies: %v", err)
+	}
 }
 
 func (p *placer) flag(svc string) string { return filepath.Join(p.dir, svc) }
@@ -179,6 +246,7 @@ func (p *placer) reconcile(plan place.Plan, s *state.State) {
 	if !in {
 		return
 	}
+	p.writeCopies(plan.Copies)
 	want := map[string]bool{}
 	for _, d := range mine {
 		want[d.Service] = true
@@ -190,6 +258,9 @@ func (p *placer) reconcile(plan place.Plan, s *state.State) {
 		}
 		switch {
 		case want[svc] && !p.up(svc):
+			if !p.fits(svc, s) {
+				continue
+			}
 			if err := p.raise(svc, nil); err != nil {
 				log.Printf("placed: %s: %v", svc, err)
 				continue
@@ -211,7 +282,7 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 			// agreed and fresh: someone else's, or nobody's
 			_ = p.stop(svc, "its lease is not this box's")
 		}
-		if want {
+		if want && p.fits(svc, s) {
 			p.send(svc, state.LeaseOp{Role: leaseOf(svc), Op: "acquire"})
 		}
 		return
@@ -255,6 +326,10 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 		return // a holder before it may still be stopping; or no time left
 	}
 	first := !p.up(svc)
+	if first && !p.fits(svc, s) {
+		// held and not started: the plan moves it, and it is given back
+		return
+	}
 	content, _ := json.Marshal(held{Epoch: l.Epoch, Until: until})
 	if err := p.raise(svc, content); err != nil {
 		log.Printf("placed: %s: %v", svc, err)

@@ -266,3 +266,122 @@ func TestAPlacedServiceRunsWhereItsBoxSaysItDoes(t *testing.T) {
 		t.Fatalf("web stayed by a role: %+v", p)
 	}
 }
+
+// stores on big (room), nas (room) and small (nearly full); photos writes
+// the bucket "ente", 40 GiB, kept on big so far
+func stores() (Inputs, *state.State) {
+	in, s := fleet()
+	in.Buckets = map[string]Bucket{"ente": {Copies: 2, Service: "photos"}}
+	set := func(name string, size, free, ente float64) {
+		f := s.Boxes[name].Facts
+		f["store_size_bytes"], f["store_free_bytes"] = size*gib, free*gib
+		if ente > 0 {
+			f["store/ente/bytes"] = ente * gib
+		}
+	}
+	set("big", 1000, 900, 40)
+	set("nas", 500, 400, 0)
+	set("small", 100, 50, 0)
+	return in, s
+}
+
+func TestABucketIsKeptWhereItIsWrittenAndWhereItFits(t *testing.T) {
+	in, s := stores()
+	p := Decide(in, s, 90_000)
+	if got := strings.Join(p.Copies["ente"], ","); got != "big,nas" {
+		t.Fatalf("copies %q, unplaced %v", got, p.Unplaced)
+	}
+}
+
+func TestACopyStaysWhereItIs(t *testing.T) {
+	in, s := stores()
+	s.Boxes["small"].Facts["store_free_bytes"] = 60 * gib
+	s.Boxes["small"].Facts["store/ente/bytes"] = 40 * gib
+	p := Decide(in, s, 90_000)
+	if got := strings.Join(p.Copies["ente"], ","); got != "big,small" {
+		t.Fatalf("a copy moved to the roomier box: %q", got)
+	}
+}
+
+func TestNoStoreWithRoomNoCopy(t *testing.T) {
+	in, s := stores()
+	s.Boxes["nas"].Facts["store_free_bytes"] = 80 * gib   // a tenth kept back: 30 to give
+	s.Boxes["small"].Facts["store_free_bytes"] = 45 * gib // 35 to give
+	p := Decide(in, s, 90_000)
+	if got := strings.Join(p.Copies["ente"], ","); got != "big" || p.Unplaced["copies/ente"] == "" {
+		t.Fatalf("copied where it does not fit: %q %v", got, p.Unplaced)
+	}
+}
+
+func TestAServiceGoesOnlyWhereItsBucketsFit(t *testing.T) {
+	in, s := stores()
+	// photos suits dead best, but dead is gone; big keeps the bucket. With
+	// big full, photos may not move to nas, which has no room for 40 GiB
+	in.Boxes["nas"].Can["photos"], in.Boxes["nas"].Can["postgres"] = 3, 3
+	s.Boxes["big"].Facts["store/ente/bytes"] = 0
+	s.Boxes["nas"].Facts["store_free_bytes"] = 60 * gib
+	s.Boxes["dead"].Facts["store/ente/bytes"] = 40 * gib
+	s.Boxes["dead"].LastSeen = s.Time - 1000
+	s.Boxes["dead"].Facts["store_size_bytes"], s.Boxes["dead"].Facts["store_free_bytes"] = 100*gib, 10*gib
+	p := Decide(in, s, 90_000)
+	if runs(p, "nas", "photos") {
+		t.Fatalf("photos placed where its 40 GiB does not fit: %+v", p.Boxes)
+	}
+}
+
+func TestABoxThatRefusedAServiceIsNotGivenIt(t *testing.T) {
+	in, s := fleet()
+	in.Services["web"] = Service{Enabled: true, Placed: true, MemoryGiB: 1}
+	in.Boxes["big"].Can["web"], in.Boxes["nas"].Can["web"] = 5, 1
+	s.Boxes["big"].Facts["carries/web"], s.Boxes["nas"].Facts["carries/web"] = 1, 1
+	s.Boxes["big"].Facts["refused/web"] = 1
+	p := Decide(in, s, 90_000)
+	if runs(p, "big", "web") || !runs(p, "nas", "web") {
+		t.Fatalf("given to the box that refused it: %+v", p.Boxes)
+	}
+}
+
+func TestABoxClaimingABigBucketCannotMakeItFitNowhere(t *testing.T) {
+	in, s := stores()
+	// small says it keeps 100 TB of it, and has no store to keep a copy
+	delete(s.Boxes["small"].Facts, "store_size_bytes")
+	s.Boxes["small"].Facts["store/ente/bytes"] = 100_000 * gib
+	p := Decide(in, s, 90_000)
+	if got := strings.Join(p.Copies["ente"], ","); got != "big,nas" {
+		t.Fatalf("one box's claim moved the copies: %q %v", got, p.Unplaced)
+	}
+}
+
+func TestACopyFoundMissingIsNotKeptThere(t *testing.T) {
+	in, s := stores()
+	s.Boxes["nas"].Facts["store/ente/bytes"] = 40 * gib
+	// small says nas lost it: small does not write it, so nothing changes
+	s.Boxes["small"].Facts["store/ente/lost/nas"] = 1
+	if got := strings.Join(Decide(in, s, 90_000).Copies["ente"], ","); got != "big,nas" {
+		t.Fatalf("a box that does not write it moved its copy: %q", got)
+	}
+	// big runs photos, so writes it, and found nas without it
+	in.Roles["photos"] = []string{"photos"}
+	s.Boxes["big"].Roles = []string{"photos"}
+	s.Boxes["big"].Facts["store/ente/lost/nas"] = 1
+	p := Decide(in, s, 90_000)
+	if got := strings.Join(p.Copies["ente"], ","); got != "big,small" {
+		t.Fatalf("kept on the store that lost it: %q", got)
+	}
+}
+
+func TestOnlyTheLeaseHolderSaysHowBigItsBucketIs(t *testing.T) {
+	in, s := stores()
+	sv := in.Services["photos"]
+	sv.Lease, sv.Placed = true, true
+	in.Services["photos"] = sv
+	// nas says it runs photos and that ente is 100 TB; the lease is big's
+	s.Boxes["nas"].Facts["runs/photos"] = 1
+	s.Boxes["nas"].Facts["store/ente/bytes"] = 100_000 * gib
+	s.Boxes["big"].Facts["runs/photos"] = 1
+	s.Leases["svc/photos"] = &state.Lease{Holder: "big", Epoch: 1, Expires: s.Time + 15_000}
+	p := Decide(in, s, 90_000)
+	if p.Unplaced["copies/ente"] != "" {
+		t.Fatalf("a claim of the box without the lease sized the bucket: %v", p.Unplaced)
+	}
+}

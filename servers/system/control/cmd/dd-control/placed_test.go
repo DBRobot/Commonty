@@ -219,3 +219,48 @@ func TestAWriterUnderAnOlderLeaseStartsAgain(t *testing.T) {
 		t.Fatalf("a writer kept running under epoch 1 with the lease at 2: %v", *calls)
 	}
 }
+
+func TestAServiceThatWouldNotFitIsRefusedAndTold(t *testing.T) {
+	p, calls := newPlacer(t)
+	p.memory, p.refused = map[string]float64{"web": 2}, map[string]int64{}
+	free := float64(1 << 30)
+	p.free = func() float64 { return free }
+	plan := place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: "web"}}}}
+	p.reconcile(plan, state.New())
+	if p.up("web") || len(*calls) != 0 || p.facts()["refused/web"] != 1 {
+		t.Fatalf("started with 1 GiB free for 2: %v %v", *calls, p.facts())
+	}
+	// what another box measured it holding counts too
+	free = 4 << 30
+	s := state.New()
+	s.Boxes["node2"] = &state.BoxState{Facts: map[string]float64{"svc/web/mem": 6 << 30}}
+	p.reconcile(plan, s)
+	if p.up("web") {
+		t.Fatal("started with 4 GiB free for what holds 6")
+	}
+	free = 8 << 30
+	p.reconcile(plan, s)
+	if !p.up("web") || p.facts()["refused/web"] != 0 {
+		t.Fatalf("not started with room: %v", p.facts())
+	}
+}
+
+func TestAWriterThatWouldNotFitAsksForNoLease(t *testing.T) {
+	p, calls, _, s := leasedPlacer(t)
+	p.memory, p.refused = map[string]float64{"db": 2}, map[string]int64{}
+	p.free = func() float64 { return 1 << 30 }
+	p.reconcile(wantDB, s)
+	if len(*calls) != 0 {
+		t.Fatalf("asked for a lease it could not use: %v", *calls)
+	}
+}
+
+func TestThePlansCopiesAreWritten(t *testing.T) {
+	p, _ := newPlacer(t)
+	p.copies = filepath.Join(t.TempDir(), "copies.json")
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {}}, Copies: map[string][]string{"ente": {"node1", "node2"}}}, state.New())
+	raw, err := os.ReadFile(p.copies)
+	if err != nil || string(raw) != `{"ente":["node1","node2"]}` {
+		t.Fatalf("%s %v", raw, err)
+	}
+}

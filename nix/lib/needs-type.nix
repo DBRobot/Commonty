@@ -266,6 +266,19 @@ t.attrsOf (
         default = false;
         description = "one writer at a time: placed, and it runs only while its box holds the control plane's lease svc/<name>, which the boxes able to run it may hold (cmd/dd-control/placed.go)";
       };
+      buckets = lib.mkOption {
+        type = t.attrsOf (
+          t.submodule {
+            options.copies = lib.mkOption {
+              type = t.ints.positive;
+              default = 2;
+              description = "in how many boxes' stores it is kept, the one it is written on included";
+            };
+          }
+        );
+        default = { };
+        description = "the buckets of the box's own store it writes (storage/store.nix): kept where the plan says, on boxes with room for them, and where it runs is one of them";
+      };
       perHouse = lib.mkOption {
         type = t.nullOr t.ints.positive;
         default = null;

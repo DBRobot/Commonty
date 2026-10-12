@@ -10,9 +10,16 @@
 #   buckets it copies, nothing else. Handed to that box sealed to its own
 #   secrets key (its TPM), at https://store.<this box>.<domain>/_keys/<it>.age,
 #   which only it can open; the name is on the fleet's network alone.
-# - Copies go out every 5 minutes to the first boxes by name, as many as
-#   the bucket's copies ask. Nothing is deleted on the other end: a copy is
-#   added to, never pruned.
+# - Copies go out every 5 minutes from the box that writes the bucket (where
+#   its service runs) to the boxes the plan keeps it on: the control plane
+#   picks them by room and keeps a copy where it is (place.Decide's Copies,
+#   which dd-control writes to /run/dd-placed/copies.json). Before any plan
+#   has been seen, the first boxes by name. Nothing is deleted on the other
+#   end: a copy is added to, never pruned.
+# - A store says how big it is, what it has free and what it keeps of each
+#   bucket (/var/lib/dd-facts/store.prom, in the box's heartbeat), and
+#   refuses what other boxes send once it is nearly full. Its dataset's
+#   quota is its capacity, so its own services cannot fill the pool either.
 {
   config,
   lib,
@@ -45,14 +52,27 @@ let
     admin.api_bind_addr = "127.0.0.1:${toString cfg.adminPort}";
   };
   garage = "${pkgs.garage}/bin/garage -c ${conf}";
-  # the other boxes copies go to, by name: the first n-1 of them
+  needs = import ../../lib/needs.nix { inherit lib; };
+  # every bucket a service writes, fleet-wide: any store may be picked to
+  # keep any of them
+  declared = lib.foldl' (a: b: a // b) { } (
+    lib.mapAttrsToList (
+      s: n:
+      lib.mapAttrs (_: b: {
+        inherit (b) copies;
+        service = s;
+      }) n.buckets
+    ) needs
+  );
   sorted = lib.sort lib.lessThan (builtins.attrNames cfg.peers);
-  targets = n: lib.take (n - 1) sorted;
-  bucketsTo =
-    p: lib.attrNames (lib.filterAttrs (_: b: builtins.elem p (targets b.copies)) cfg.buckets);
-  # which of the other boxes' buckets come here: every bucket of ours they
-  # might copy, since each names its own targets
-  received = lib.attrNames (lib.filterAttrs (_: b: b.copies > 1) cfg.buckets);
+  # what is copied anywhere, and so may come here from other boxes
+  copied = lib.attrNames (lib.filterAttrs (_: b: b.copies > 1) cfg.buckets);
+  # the plan, as dd-control writes it, and the last one this box saw
+  plan = "/run/dd-placed/copies.json";
+  # a placed service's bucket is written where the service runs; another's,
+  # wherever this box has it
+  placedSvc = s: needs ? ${s} && (needs.${s}.placed || needs.${s}.lease);
+  full = "/run/dd-store/full";
 in
 {
   options.dd.store = {
@@ -118,14 +138,29 @@ in
               default = "root";
               description = "who reads the bucket's key file, ${state}/keys/<bucket>.env";
             };
+            service = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "the service that writes it (its needs' buckets); null: this box writes it whenever it has it";
+            };
           };
         }
       );
       default = { };
     };
+    dataset = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "the ZFS dataset dataDir is; its quota is set to the capacity";
+    };
   };
 
   config = lib.mkIf cfg.enable {
+    dd.store.buckets = lib.mapAttrs (_: b: {
+      copies = lib.mkDefault b.copies;
+      service = lib.mkDefault b.service;
+    }) declared;
+
     users.users.dd-store = {
       isSystemUser = true;
       group = "dd-store";
@@ -138,6 +173,7 @@ in
       "d ${state}/keys 0755 root root -"
       "d ${sealed} 0755 root root -"
       "d ${state}/from 0700 root root -"
+      "d /run/dd-store 0755 root root -"
       "d ${cfg.dataDir} 0750 dd-store dd-store -"
     ];
     environment.systemPackages = [
@@ -187,7 +223,8 @@ in
         pkgs.gnugrep
         pkgs.gawk
         pkgs.age
-      ];
+      ]
+      ++ lib.optional (cfg.dataset != null) config.boot.zfs.package;
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -197,6 +234,11 @@ in
         g() { ${garage} "$@"; }
         for _ in $(seq 1 60); do g status >/dev/null 2>&1 && break; sleep 1; done
         node=$(g node id -q | cut -d@ -f1)
+        ${lib.optionalString (cfg.dataset != null) ''
+          # its own services cannot fill the pool past what it offers
+          q=$(numfmt --from=iec ${cfg.capacity})
+          [ "$(zfs get -Hp -o value quota ${cfg.dataset})" = "$q" ] || zfs set quota=$q ${cfg.dataset}
+        ''}
         if ! g layout show 2>/dev/null | grep -q "Current cluster layout version: [1-9]"; then
           g layout assign -z ${box} -c ${cfg.capacity} "$node"
           g layout apply --version 1
@@ -225,7 +267,7 @@ in
           lib.mapAttrsToList (p: v: ''
             key peer-${p} > ${state}/from/${p}.env
             id=$(awk -F= '/ACCESS_KEY_ID/ { print $2 }' ${state}/from/${p}.env)
-            for b in ${lib.concatStringsSep " " received}; do
+            for b in ${lib.concatStringsSep " " copied}; do
               g bucket allow --read --write "$b" --key "$id" >/dev/null
             done
             age -r ${lib.escapeShellArg v.recipient} -o ${sealed}/${p}.age.new ${state}/from/${p}.env
@@ -247,6 +289,8 @@ in
         pkgs.age
         pkgs.coreutils
         pkgs.gawk
+        pkgs.gnugrep
+        pkgs.jq
       ]
       ++ cfg.agePlugins;
       serviceConfig = {
@@ -259,51 +303,107 @@ in
         # everything rclone needs is in its environment below
         export RCLONE_CONFIG=/dev/null
         mine=/var/lib/dd-store-copy
+        mkdir -p $mine/lost
         failed=0
-        ${lib.concatStrings (
-          map (
-            p:
-            let
-              url = cfg.peers.${p}.url;
-            in
-            lib.optionalString (bucketsTo p != [ ]) ''
-              # its key here, sealed to this box at its store
-              if [ ! -s $mine/${p}.env ]; then
-                if curl -fsS --max-time 30 ${url}/_keys/${box}.age -o $mine/${p}.age \
-                  && age -d -i ${cfg.identity} $mine/${p}.age > $mine/${p}.env.new; then
-                  mv $mine/${p}.env.new $mine/${p}.env
-                else
-                  echo "${p}: no key from its store yet"
-                  failed=1
+        # the plan's copies: kept, so a restart copies on as last agreed
+        if [ -s ${plan} ] && jq -e 'type == "object"' ${plan} >/dev/null 2>&1; then
+          cp ${plan} $mine/copies.json.new && mv $mine/copies.json.new $mine/copies.json
+        fi
+        # the other boxes that keep a bucket
+        targets() {
+          if [ -s $mine/copies.json ]; then
+            jq -r --arg b "$1" '.[$b] // [] | .[]' $mine/copies.json | grep -vx ${box} || true
+          else
+            # no plan seen yet: the first boxes by name
+            case "$1" in
+            ${lib.concatStrings (
+              lib.mapAttrsToList (
+                b: v: "  ${b}) echo ${lib.concatStringsSep " " (lib.take (v.copies - 1) sorted)} ;;\n"
+              ) cfg.buckets
+            )}
+            esac
+          fi
+        }
+        # whether this box writes it now
+        writes() {
+          case "$1" in
+          ${lib.concatStrings (
+            lib.mapAttrsToList (
+              b: v:
+              if v.service != null && placedSvc v.service then
+                "  ${b}) [ -e /run/dd-placed/${v.service} ] ;;\n"
+              else
+                "  ${b}) true ;;\n"
+            ) cfg.buckets
+          )}
+          *) false ;;
+          esac
+        }
+        url() {
+          case "$1" in
+          ${lib.concatStrings (lib.mapAttrsToList (p: v: "  ${p}) echo ${v.url} ;;\n") cfg.peers)}
+          *) return 1 ;;
+          esac
+        }
+        # its key there, sealed to this box at its store
+        key() {
+          [ -s $mine/$1.env ] && return 0
+          if curl -fsS --max-time 30 "$2/_keys/${box}.age" -o $mine/$1.age \
+            && age -d -i ${cfg.identity} $mine/$1.age > $mine/$1.env.new; then
+            mv $mine/$1.env.new $mine/$1.env
+          else
+            echo "$1: no key from its store yet"
+            return 1
+          fi
+        }
+        for b in ${lib.concatStringsSep " " copied}; do
+          writes $b || continue
+          for p in $(targets $b); do
+            there=$(url $p) || { echo "$p: keeps $b by the plan, and is no store this box knows"; failed=1; continue; }
+            key $p "$there" || { failed=1; continue; }
+            (
+              set -a; . $mine/$p.env; set +a
+              export RCLONE_CONFIG_THERE_TYPE=s3 RCLONE_CONFIG_THERE_PROVIDER=Other \
+                RCLONE_CONFIG_THERE_ENDPOINT=$there RCLONE_CONFIG_THERE_REGION=us-east-1 \
+                RCLONE_CONFIG_THERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+                RCLONE_CONFIG_THERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+                RCLONE_CONFIG_THERE_FORCE_PATH_STYLE=true
+              set -a; . ${state}/keys/$b.env; set +a
+              export RCLONE_CONFIG_HERE_TYPE=s3 RCLONE_CONFIG_HERE_PROVIDER=Other \
+                RCLONE_CONFIG_HERE_ENDPOINT=http://127.0.0.1:${toString cfg.port} RCLONE_CONFIG_HERE_REGION=us-east-1 \
+                RCLONE_CONFIG_HERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+                RCLONE_CONFIG_HERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+                RCLONE_CONFIG_HERE_FORCE_PATH_STYLE=true
+              # first, one object the last copy there sent, read back: a
+              # store that takes copies and keeps none is found out
+              if [ -s $mine/$p.$b.ok ]; then
+                age=$(( $(date +%s) - $(cat $mine/$p.$b.ok) ))
+                obj=$(rclone lsf -R --files-only --min-age "''${age}s" "here:$b" 2>/dev/null | shuf -n1 || true)
+                if [ -n "$obj" ] && want=$(rclone cat "here:$b/$obj" | sha256sum); then
+                  if got=$(rclone cat "there:$b/$obj" 2>/dev/null | sha256sum) && [ "$got" = "$want" ]; then
+                    rm -f $mine/lost/$p.$b
+                  else
+                    echo "$p: $b/$obj read back is not what was sent: its copy there counts for nothing"
+                    touch $mine/lost/$p.$b
+                  fi
                 fi
               fi
-              if [ -s $mine/${p}.env ]; then
-                set -a; . $mine/${p}.env; set +a
-                export RCLONE_CONFIG_THERE_TYPE=s3 RCLONE_CONFIG_THERE_PROVIDER=Other \
-                  RCLONE_CONFIG_THERE_ENDPOINT=${url} RCLONE_CONFIG_THERE_REGION=us-east-1 \
-                  RCLONE_CONFIG_THERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
-                  RCLONE_CONFIG_THERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
-                  RCLONE_CONFIG_THERE_FORCE_PATH_STYLE=true
-                for b in ${lib.concatStringsSep " " (bucketsTo p)}; do
-                  set -a; . ${state}/keys/$b.env; set +a
-                  export RCLONE_CONFIG_HERE_TYPE=s3 RCLONE_CONFIG_HERE_PROVIDER=Other \
-                    RCLONE_CONFIG_HERE_ENDPOINT=http://127.0.0.1:${toString cfg.port} RCLONE_CONFIG_HERE_REGION=us-east-1 \
-                    RCLONE_CONFIG_HERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
-                    RCLONE_CONFIG_HERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
-                    RCLONE_CONFIG_HERE_FORCE_PATH_STYLE=true
-                  # copy, never sync: nothing is deleted there
-                  if rclone copy --checksum --s3-no-check-bucket "here:$b" "there:$b"; then
-                    date +%s > $mine/${p}.$b.ok
-                  else
-                    echo "${p}: $b not copied this time"
-                    failed=1
-                  fi
-                done
-              fi
-            ''
-          ) sorted
-        )}
-        # a box away is not this box failing: the timer comes back
+              # copy, never sync: nothing is deleted there
+              rclone copy --checksum --s3-no-check-bucket "here:$b" "there:$b"
+            ) && date +%s > $mine/$p.$b.ok || { echo "$p: $b not copied this time"; failed=1; }
+          done
+        done
+        # what the plan reads of the copies read back (place.Decide)
+        out=$(mktemp)
+        for f in $mine/lost/*; do
+          [ -e "$f" ] || continue
+          n=''${f##*/}
+          echo "dd_store_lost{bucket=\"''${n#*.}\",box=\"''${n%%.*}\"} 1" >> $out
+        done
+        install -d /var/lib/dd-facts
+        chmod 0644 $out
+        mv $out /var/lib/dd-facts/store-copy.prom
+        # a box away or full is not this box failing: the timer comes back
         [ "$failed" = 0 ] || echo "some copies wait for the next run"
         exit 0
       '';
@@ -316,6 +416,61 @@ in
       };
     };
 
+    # its room, for the plan: how big, how much free, and what it keeps of
+    # each bucket; and nearly full, it refuses other boxes' copies
+    systemd.services.dd-store-facts = {
+      description = "Say how much room this box's store has, and what it keeps";
+      after = [ "dd-store-setup.service" ];
+      restartIfChanged = false;
+      path = [
+        pkgs.coreutils
+        pkgs.gawk
+      ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        set -uo pipefail
+        g() { ${garage} "$@"; }
+        # no store up yet: nothing to say, and nothing failed
+        g status >/dev/null 2>&1 || exit 0
+        cap=$(numfmt --from=iec ${cfg.capacity})
+        avail=$(df -B1 --output=avail ${cfg.dataDir} | tail -1)
+        out=$(mktemp)
+        used=0
+        for b in ${lib.concatStringsSep " " (builtins.attrNames cfg.buckets)}; do
+          # read to the end: garage aborts on a pipe closed under it
+          n=$(g bucket info $b 2>/dev/null | awk '
+            BEGIN { u["B"] = 1; u["kiB"] = 2^10; u["MiB"] = 2^20; u["GiB"] = 2^30; u["TiB"] = 2^40 }
+            /^Size:/ && !done { printf "%.0f", $2 * u[$3]; done = 1 }') || true
+          [ -n "$n" ] || continue
+          used=$((used + n))
+          echo "dd_store_bucket_bytes{bucket=\"$b\"} $n" >> $out
+        done
+        free=$((cap - used))
+        [ "$avail" -lt "$free" ] && free=$avail
+        [ "$free" -lt 0 ] && free=0
+        echo "dd_store_size_bytes $cap" >> $out
+        echo "dd_store_free_bytes $free" >> $out
+        install -d /var/lib/dd-facts
+        chmod 0644 $out
+        mv $out /var/lib/dd-facts/store.prom
+        # a twentieth left: what other boxes send is refused here
+        if [ "$free" -lt $((cap / 20)) ]; then
+          [ -e ${full} ] || echo "store nearly full: $free of $cap bytes free; refusing copies"
+          touch ${full}
+        else
+          rm -f ${full}
+        fi
+        exit 0
+      '';
+    };
+    systemd.timers.dd-store-facts = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "1min";
+        OnUnitActiveSec = "1min";
+      };
+    };
+
     # other boxes reach this store, and their keys to it, by name on the
     # fleet's network
     services.nginx.virtualHosts."store.${box}.${base}" = {
@@ -324,7 +479,13 @@ in
       locations."/".proxyPass = "http://127.0.0.1:${toString cfg.port}";
       # s3 signs its requests; no cookie of anyone's goes to the store
       locations."/".ddCookie = "";
+      # nearly full, nothing more from other boxes: what they send is
+      # refused, what they read still served
       locations."/".extraConfig = ''
+        set $dd_store_refuse "";
+        if (-f ${full}) { set $dd_store_refuse "full"; }
+        if ($request_method ~ ^(PUT|POST)$) { set $dd_store_refuse "''${dd_store_refuse}-write"; }
+        if ($dd_store_refuse = "full-write") { return 507; }
         client_max_body_size 0;
         proxy_request_buffering off;
         proxy_set_header Host $host;

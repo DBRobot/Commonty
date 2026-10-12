@@ -49,6 +49,16 @@ in
       builtins.attrNames n.base.depends
     );
   }) needs;
+  # each bucket a service writes: how many stores keep it, and whose it is
+  buckets = lib.foldl' (a: b: a // b) { } (
+    lib.mapAttrsToList (
+      s: n:
+      lib.mapAttrs (_: b: {
+        inherit (b) copies;
+        service = s;
+      }) n.buckets
+    ) needs
+  );
   roles = lib.mapAttrs (_: r: r.services or [ ]) roles;
   # a move must win by base, and by perGiB for each GiB it carries: a
   # stateless service moves for a clearly better box, 100G of photos for
