@@ -11,6 +11,7 @@
 # own: devices take the new one when they next reach it.
 {
   config,
+  options,
   lib,
   pkgs,
   ...
@@ -50,7 +51,9 @@ let
     [ "$E" -gt 0 ]
     have=$(cat ${mine}/epoch 2>/dev/null || echo 0)
     [ "$have" = "$E" ] && { echo "epoch $E: this server, started again"; exit 0; }
-    copied=$(rclone cat here:headscale/epoch 2>/dev/null || echo 0)
+    # no copy yet reads as nothing, not a number: none
+    copied=$(rclone cat here:headscale/epoch 2>/dev/null | tr -dc 0-9 || true)
+    copied=''${copied:-0}
     if [ "$copied" -le "$have" ]; then
       echo "epoch $E: from this box's own database (the copy here is of epoch $copied, this of $have)"
       exit 0
@@ -90,54 +93,61 @@ in
     };
   };
 
-  config = lib.mkIf (hcfg.enable && (config.dd.failover or false) && (store.enable or false)) {
-    assertions = [
-      {
-        assertion = hcfg.follow.recipients != { };
-        message = "the network's copies are sealed to the boxes able to hold its lease: none given";
-      }
-    ];
-    dd.store.buckets.headscale = { };
-    systemd.tmpfiles.rules = [ "d ${mine} 0700 root root -" ];
-    systemd.services.headscale = {
-      after = [ "dd-store-setup.service" ];
-      wants = [ "dd-store-setup.service" ];
-      serviceConfig = {
-        ExecStartPre = lib.mkBefore [ "+${take}" ];
-        ExecStartPost = [ "+${started}" ];
+  config = lib.mkMerge [
+    # its bucket, where a store is there to hold it (a test may have none)
+    (lib.optionalAttrs (options.dd ? store) {
+      dd.store.buckets.headscale = lib.mkIf (
+        hcfg.enable && (config.dd.failover or false) && (store.enable or false)
+      ) { };
+    })
+    (lib.mkIf (hcfg.enable && (config.dd.failover or false) && (store.enable or false)) {
+      assertions = [
+        {
+          assertion = hcfg.follow.recipients != { };
+          message = "the network's copies are sealed to the boxes able to hold its lease: none given";
+        }
+      ];
+      systemd.tmpfiles.rules = [ "d ${mine} 0700 root root -" ];
+      systemd.services.headscale = {
+        after = [ "dd-store-setup.service" ];
+        wants = [ "dd-store-setup.service" ];
+        serviceConfig = {
+          ExecStartPre = lib.mkBefore [ "+${take}" ];
+          ExecStartPost = [ "+${started}" ];
+        };
       };
-    };
-    systemd.services.dd-headscale-copy = {
-      description = "Copy the network's database, sealed, into this box's store";
-      after = [ "headscale.service" ];
-      unitConfig.ConditionPathExists = flag;
-      restartIfChanged = false;
-      path = tools;
-      serviceConfig.Type = "oneshot";
-      script = ''
-        set -uo pipefail
-        ${env}
-        E=$(cat ${mine}/epoch 2>/dev/null || echo 0)
-        [ "$E" -gt 0 ] || { echo "the server has not started here yet"; exit 0; }
-        umask 077
-        sqlite3 ${state}/db.sqlite ".backup ${mine}/db.sqlite" || exit 0
-        if age ${recipients} -o ${mine}/db.sqlite.age ${mine}/db.sqlite \
-          && rclone copyto ${mine}/db.sqlite.age here:headscale/db.sqlite.age \
-          && echo "$E" | rclone rcat here:headscale/epoch; then
-          :
-        else
-          echo "not copied this time"
-        fi
-        rm -f ${mine}/db.sqlite
-        exit 0
-      '';
-    };
-    systemd.timers.dd-headscale-copy = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnActiveSec = "1min";
-        OnUnitActiveSec = "1min";
+      systemd.services.dd-headscale-copy = {
+        description = "Copy the network's database, sealed, into this box's store";
+        after = [ "headscale.service" ];
+        unitConfig.ConditionPathExists = flag;
+        restartIfChanged = false;
+        path = tools;
+        serviceConfig.Type = "oneshot";
+        script = ''
+          set -uo pipefail
+          ${env}
+          E=$(cat ${mine}/epoch 2>/dev/null || echo 0)
+          [ "$E" -gt 0 ] || { echo "the server has not started here yet"; exit 0; }
+          umask 077
+          sqlite3 ${state}/db.sqlite ".backup ${mine}/db.sqlite" || exit 0
+          if age ${recipients} -o ${mine}/db.sqlite.age ${mine}/db.sqlite \
+            && rclone copyto ${mine}/db.sqlite.age here:headscale/db.sqlite.age \
+            && echo "$E" | rclone rcat here:headscale/epoch; then
+            :
+          else
+            echo "not copied this time"
+          fi
+          rm -f ${mine}/db.sqlite
+          exit 0
+        '';
       };
-    };
-  };
+      systemd.timers.dd-headscale-copy = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnActiveSec = "1min";
+          OnUnitActiveSec = "1min";
+        };
+      };
+    })
+  ];
 }

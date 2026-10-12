@@ -23,6 +23,7 @@
       "dd-forge-copy" # its repositories into the store, with failover on (follow.nix)
       "forgejo-protection"
       "forgejo-secrets"
+      "dd-forge-dirs" # its directories on its dataset, once mounted
       "dd-ci-cancel"
       "dd-ci-resume"
       "dd-forge-notify"

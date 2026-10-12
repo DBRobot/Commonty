@@ -60,6 +60,8 @@
         "pg-follow"
         "store"
         "takeover"
+        "forge-follow"
+        "net-follow"
         "photos"
         "llm"
         "vault"
