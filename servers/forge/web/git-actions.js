@@ -27,6 +27,15 @@ const ns = (d) => (d > 1e9 ? d / 1e6 : d); // the forge gives nanoseconds
 const runsData = (r, page = 1, fresh = false) => api(`/repos/${r.full_name}/actions/runs${q({ page, limit: 25 })}`, { fresh });
 warmers.actions = (r) => runsData(r);
 
+// the newest run, for a link that cannot know its number (the assistant's)
+route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/latest$/, async ({ m, current }) => {
+  const r = await repo(m[1], m[2]);
+  if (!current()) return;
+  const { workflow_runs: runs = [] } = await runsData(r, 1, true);
+  if (!current()) return;
+  go(runs[0] ? `/${r.full_name}/actions/runs/${runs[0].index_in_repo}` : `/${r.full_name}/actions`, true);
+});
+
 route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
   const r = await repo(m[1], m[2]);
   if (!current()) return;

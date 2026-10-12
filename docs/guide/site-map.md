@@ -8,9 +8,9 @@ marked **app** open through the Commonty app.
 The map is drawn here for anyone signed in, member or demo.
 ```
 
-## Ask Commonty
+## Monty, the assistant
 
-The round button in the lower right corner of each page is Ask Commonty.
+The round button in the lower right corner of each page is Monty.
 It goes by this map, and can take you to any card on it and nowhere else.
 
 - **Say where to go:** "devices", "add a device", "wifi". When the words
@@ -29,17 +29,24 @@ It goes by this map, and can take you to any card on it and nowhere else.
   and since when.
 - **What's new?** The latest release notes. A dot on the button means
   there are some this device has not seen.
+- **A repository's pages:** "the latest actions run", "pull requests",
+  "branches". On a Git page it means that repository; anywhere else, the
+  fleet's own, unless you name another ("issues in tom/notes").
 - **Report a bug:** it asks what happened and what you expected, then
-  drafts an issue for you to read and change. **Open the issue in Git**
-  opens it in Git, filled in; you post it there yourself. Issues are
-  public, so leave out anything private. Not in the demo.
+  drafts an issue for you to read and change. Before you open it, it
+  looks the draft over for anything private (an email address, a web or
+  IP address, a phone number, a password, a key, a file path, your name)
+  and lists what it found; **Take them out** replaces each with
+  "[removed]", or **Open it as it is**. You post it in Git yourself.
+  Issues are public. Not in the demo.
 - **From anywhere:** Ctrl+K (Cmd+K on a Mac) opens it, ready to type.
   Change the keys under **This device** in [Settings](settings.md).
 - **Go there straight away:** the switch under the box. With one clear
   place, it takes you there at once; with several, it lists them.
 - **The down arrow** hides the box; the button opens it again. The
-  conversation stays while this tab is open, and is not kept anywhere
-  else.
+  conversation stays while this tab is open, and follows you from page
+  to page in it, Git and these docs too. It is kept in this browser
+  alone, for this tab: never sent anywhere to be kept.
 - **Tuck it away:** point just right of the button and press the arrow
   that shows; the button slides off the edge. The same spot brings it
   back.

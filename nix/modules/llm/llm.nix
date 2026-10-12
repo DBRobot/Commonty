@@ -14,17 +14,11 @@ let
   # only it may open, and llama-swap still wants a secret made at boot that
   # nginx sends with every request.
   run = "/run/dd-llm";
-  # Ask Commonty, in the corner of the site's pages (servers/web-shared/
+  # Monty, in the corner of the site's pages (servers/web-shared/
   # guide.js), asks the same model from those pages' own names: the
   # browser may read the answer there, for the model's list and its
   # answers alone, with the member's own session here
-  pages = lib.concatStringsSep "|" [
-    "home"
-    "files"
-    "git"
-    "games"
-    "metrics"
-  ];
+  pages = lib.concatStringsSep "|" (import ../../lib/guide-pages.nix);
 in
 {
   # reads plaintext: prompts and answers, which every box it runs on can

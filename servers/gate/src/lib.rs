@@ -2965,6 +2965,7 @@ pub async fn start(
         .route("/_dd/fleet.json", get(fleet_json))
         .route("/_dd/me", get(me))
         .route("/_dd/sitemap.json", get(site_map))
+        .route("/_dd/guide-keep", get(|| async { page("guide-keep") }))
         // Ente comes with the app: a browser here is handed to it
         .route("/_dd/photos", get(|| async { use_app() }))
         .route("/_dd/photos/move", get(photos::move_page))

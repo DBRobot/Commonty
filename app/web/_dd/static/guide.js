@@ -1,4 +1,4 @@
-// Ask Commonty: the assistant in the lower right corner of every signed-in
+// Monty: the assistant in the lower right corner of every signed-in
 // page. It knows the site map (/_dd/sitemap.json) and the docs, and nothing
 // on the page: it never reads the page or anything of the member's. What
 // it can do is say something, as plain words, and take someone to a place
@@ -28,6 +28,7 @@ const KEYS = {
   news: 'dd-guide-news',
   point: 'dd-guide-point',
   bug: 'dd-guide-bug',
+  at: 'dd-guide-at',
 };
 // a peek an hour after it is tucked away, then two hours apart at least,
 // twice a day at most
@@ -120,7 +121,7 @@ function useMap(m) {
   const places = m.places.filter((p) => typeof p.id === 'string' && typeof p.label === 'string');
   const targets = places.flatMap((p) => (Array.isArray(p.targets) ? p.targets : [])
     .filter((t) => typeof t?.name === 'string' && /^[a-z0-9-]{1,40}$/.test(t.name) && typeof t.label === 'string')
-    .map((t) => ({ id: `${p.id}.${t.name}`, label: t.label, parent: p.id, kind: p.kind, url: p.url, words: t.words || '', target: t.name, where: typeof t.where === 'string' ? t.where : null })));
+    .map((t) => ({ id: `${p.id}.${t.name}`, label: t.label, parent: p.id, kind: p.kind, url: p.url, slot: p.slot, words: t.words || '', target: t.name, where: typeof t.where === 'string' ? t.where : null })));
   all = [...places, ...targets];
   byId = Object.fromEntries(all.map((p) => [p.id, p]));
 }
@@ -139,6 +140,30 @@ function loadMap() {
     })
     .catch(() => {});
   return mapAsked;
+}
+
+/// `owner/name` and nothing else: what a `{repo}` place may be filled with
+const REPO = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}$/;
+// the Git pages' own first words, never a repository's owner
+const GIT_OWN = new Set(['settings', 'notifications', 'search', 'new', 'explore', 'api', 'user', 'assets', '_dd', '-']);
+
+/// The repository a `{repo}` place means: the one asked for, the one this
+/// Git page is showing, or the fleet's own
+function repoFor(asked) {
+  if (typeof asked === 'string' && REPO.test(asked)) return asked;
+  if (/^(demo-)?git\./.test(location.hostname)) {
+    const [, o, n] = location.pathname.split('/');
+    const r = `${o}/${n}`;
+    if (o && n && !GIT_OWN.has(o) && REPO.test(r)) return r;
+  }
+  return typeof map?.repo === 'string' && REPO.test(map.repo) ? map.repo : null;
+}
+
+/// where a place is: its address, a repository's filled in
+function urlOf(n, repo) {
+  if (n.slot !== 'repo') return n.url;
+  const r = repoFor(repo);
+  return r ? n.url.replace('{repo}', r) : null;
 }
 
 const pathOf = (p) => {
@@ -168,8 +193,10 @@ function match(q, kinds) {
       const label = n.label.toLowerCase();
       const hay = `${label} ${(n.group || '').toLowerCase()} ${n.words || ''} ${(n.subs || []).join(' ').toLowerCase()}`;
       let s = 0;
+      const named = label.split(/\s+/);
       for (const w of ws) {
         if (label === w || label.startsWith(w)) s += 3;
+        else if (named.includes(w)) s += 2.5;
         else if (hay.includes(w)) s += 1.4;
         else if (w.length > 3 && hay.includes(w.slice(0, -1))) s += 0.8;
       }
@@ -263,11 +290,12 @@ async function modelId(url, init) {
   return id;
 }
 
-const SYSTEM = `You are "Ask Commonty", the guide to the Commonty website. You can do two things only: answer questions about Commonty from the docs sections given to you, and point the member to places on the site from the list of places given to you.
-Reply with one JSON object and nothing else: {"say": "...", "go": ["place id", ...], "from": "docs place id"}
+const SYSTEM = `You are "Monty", the guide to the Commonty website. You can do two things only: answer questions about Commonty from the docs sections given to you, and point the member to places on the site from the list of places given to you.
+Reply with one JSON object and nothing else: {"say": "...", "go": ["place id", ...], "from": "docs place id", "repo": ""}
 - "say": plain words, at most three short sentences, in the language the question is written in (the docs are in English). No markdown, no links, no addresses, no code.
 - "go": up to three ids, copied exactly from the list of places, of the places that answer the question. Empty if none fits.
 - "from": the id in square brackets of the docs section you answered from, or "" if you did not use one.
+- "repo": for a place whose path has {repo} in it, the repository as owner/name if the member named one; "" means the one given below.
 If the docs given do not answer the question, say you could not find it in the docs. Never make up an id, a place or a fact.`;
 
 const ISSUE = `You help a member of the Commonty website write up a bug for its public issue tracker. Reply with one JSON object and nothing else: {"title": "...", "body": "..."}
@@ -275,10 +303,25 @@ const ISSUE = `You help a member of the Commonty website write up a bug for its 
 - "body": plain text with two short parts, "What happened:" and "What I expected:", from the member's own words. No markdown, no links, no code.
 Write in the language the member wrote in. Leave out anything private: names, email addresses, passwords, file names, addresses. Never add facts the member did not give.`;
 
+const PRIVACY = `You check a bug report before it is posted on a public issue tracker. List every piece of it that is private or could identify someone: people's names, usernames, email addresses, phone numbers, street addresses, places they live, passwords, keys, tokens, Wi-Fi names, device names, file and folder names, private links, account numbers.
+Reply with one JSON object and nothing else: {"private": ["...", ...]}, each item copied exactly, character for character, from the report. An empty list if there is nothing.`;
+
+/// What the model says is private in a draft, held to strings
+export function checkedPrivate(content) {
+  if (typeof content !== 'string') return [];
+  try {
+    const v = JSON.parse(content.slice(content.indexOf('{'), content.lastIndexOf('}') + 1));
+    return Array.isArray(v?.private) ? v.private.filter((x) => typeof x === 'string').slice(0, 20) : [];
+  } catch {
+    return [];
+  }
+}
+
 async function askModel(opts, q, found) {
-  const places = all.map((p) => `${p.id} = ${pathOf(p)}`).join('\n');
+  const places = all.map((p) => `${p.id} = ${pathOf(p)}${p.slot === 'repo' && !p.target ? ` ({repo}${p.url.split('{repo}')[1] || ''})` : ''}`).join('\n');
   const docs = (await docsText(found)).join('\n\n');
-  return complete(opts, SYSTEM, `Places:\n${places}\n\nDocs sections:\n${docs || '(none matched)'}\n\nQuestion: ${q}`, 400);
+  const repo = repoFor();
+  return complete(opts, SYSTEM, `Places:\n${places}\n\n${repo ? `{repo} is ${repo} unless the member names another.\n\n` : ''}Docs sections:\n${docs || '(none matched)'}\n\nQuestion: ${q}`, 400);
 }
 
 async function complete(opts, system, user, max) {
@@ -328,7 +371,8 @@ export function checked(content, places) {
   const go = [...new Set(Array.isArray(v.go) ? v.go.filter((id) => typeof id === 'string' && Object.hasOwn(places, id)) : [])].slice(0, GO);
   const from = typeof v.from === 'string' && Object.hasOwn(places, v.from) && places[v.from].kind === 'docs' ? v.from : null;
   if (!say && !go.length) return null;
-  return { say, go, from };
+  const repo = typeof v.repo === 'string' && REPO.test(v.repo.trim()) ? v.repo.trim() : null;
+  return { say, go, from, repo };
 }
 
 // words only: no control characters but the line break, at most n of them
@@ -351,6 +395,44 @@ export function checkedIssue(content) {
   const title = plain(v.title, TITLE).replace(/\s+/g, ' ');
   const body = plain(v.body, BODY);
   return title && body ? { title, body } : null;
+}
+
+// What looks private in a draft, found here before anything else is asked
+const PRIVATE = [
+  ['an email address', /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g],
+  ['a web address', /\bhttps?:\/\/\S+/gi],
+  ['an IP address', /\b(?:\d{1,3}\.){3}\d{1,3}\b/g],
+  ['a phone number', /(?<![\w.])\+?\d[\d ().-]{7,}\d(?![\w.])/g],
+  ['a password', /\b(?:password|passwd|passphrase|pass code|passcode|pin|wi-?fi key)\b\s*(?:is|was|:|=)\s*\S+/gi],
+  ['a key or token', /\b(?:sk|pk|ghp|gho|glpat|xox[abp]|AKIA)[-_]?[A-Za-z0-9_-]{10,}|\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,}\b/g],
+  ['a file path', /(?:~|\/home\/|\/Users\/|[A-Za-z]:\\Users\\)[^\s"']*/g],
+];
+
+/// What in a drafted issue may be private: the patterns above, the
+/// member's own names, and what the model pointed out, each only if it is
+/// really in the text
+export function privateBits(issue, names = [], said = []) {
+  const text = `${issue.title}\n${issue.body}`;
+  const out = [];
+  const add = (what, bit) => {
+    const b = typeof bit === 'string' ? bit.trim() : '';
+    if (b.length < 2 || b.length > 200 || !text.includes(b) || out.some((o) => o.text === b)) return;
+    out.push({ what, text: b });
+  };
+  for (const [what, re] of PRIVATE) for (const m of text.matchAll(re)) add(what, m[0]);
+  for (const n of names) {
+    if (typeof n !== 'string' || n.length < 2) continue;
+    const at = text.toLowerCase().indexOf(n.toLowerCase());
+    if (at >= 0) add('your name', text.slice(at, at + n.length));
+  }
+  for (const b of said) add('something private', b);
+  return out.slice(0, 12);
+}
+
+/// The draft with each private bit taken out
+export function withoutBits(issue, bits) {
+  const cut = (t) => bits.reduce((acc, b) => acc.split(b.text).join('[removed]'), t);
+  return { title: cut(issue.title), body: cut(issue.body) };
 }
 
 /// Where the issue opens, written up: the repository the map names, on
@@ -411,6 +493,49 @@ export function releasesSay(json, few = 3) {
   }).join('\n\n');
 }
 
+// ---- the conversation across the site's names
+
+/// Each of the site's names keeps its own storage, so the conversation for
+/// this tab is also kept in a frame of home that is never shown
+/// (guide-keep.js): in this browser and nowhere else, for this tab alone.
+function carrier(opts) {
+  if (opts.inApp || opts.servedByApp || typeof opts.home !== 'string') return null;
+  let origin;
+  try { origin = new URL(opts.home).origin; } catch { return null; }
+  const f = document.createElement('iframe');
+  f.src = `${origin}/_dd/guide-keep`;
+  f.hidden = true;
+  f.tabIndex = -1;
+  f.setAttribute('aria-hidden', 'true');
+  f.title = 'Monty';
+  const loaded = new Promise((ok) => {
+    f.addEventListener('load', () => ok(true), { once: true });
+    setTimeout(() => ok(false), 4000);
+  });
+  const waits = new Map();
+  let n = 0;
+  addEventListener('message', (e) => {
+    if (e.source !== f.contentWindow || e.origin !== origin || !e.data || typeof e.data !== 'object') return;
+    waits.get(e.data.id)?.(e.data);
+    waits.delete(e.data.id);
+  });
+  const ask = (msg, ms) => loaded.then((yes) => new Promise((ok) => {
+    if (!yes || !f.contentWindow) { ok(null); return; }
+    const id = ++n;
+    waits.set(id, ok);
+    f.contentWindow.postMessage({ ...msg, id }, origin);
+    setTimeout(() => { waits.delete(id); ok(null); }, ms);
+  }));
+  document.body.append(f);
+  let last = null;
+  return {
+    got: () => ask({ op: 'get' }, 3000).then((r) => (typeof r?.v === 'string' ? r.v : null)),
+    put: (v) => { last = ask({ op: 'put', v }, 1500); },
+    // before leaving for another name: what was put, kept
+    flush: () => last ?? Promise.resolve(),
+  };
+}
+
 // ---- the corner
 
 // drawn from parts, never from markup
@@ -441,14 +566,14 @@ function build(opts) {
     chatMark(), eyes, el('i', { class: 'o', 'aria-hidden': 'true' }), el('i', { class: 'new', 'aria-hidden': 'true' }));
   const tuck = el('button', { type: 'button', class: 'dd-tuck', 'aria-label': 'Tuck the assistant away' }, arrow('m3 5 5 5-5 5', '0 0 12 20'));
   const log = el('div', { class: 'log', role: 'log', 'aria-live': 'polite', tabindex: '0', 'aria-label': 'Conversation' });
-  const input = el('input', { type: 'text', placeholder: 'Ask, or say where to go', autocomplete: 'off', 'aria-label': 'Ask Commonty', maxlength: '300' });
+  const input = el('input', { type: 'text', placeholder: 'Ask, or say where to go', autocomplete: 'off', 'aria-label': 'Ask Monty', maxlength: '300' });
   const auto = el('input', { type: 'checkbox', id: 'dd-guide-auto' });
   auto.checked = local.get(KEYS.auto) === '1';
   auto.addEventListener('change', () => local.set(KEYS.auto, auto.checked ? '1' : '0'));
   const hide = el('button', { type: 'button', 'aria-label': 'Hide the assistant' }, arrow('m5 8 5 5 5-5', '0 0 20 20'));
   const form = el('form', {}, input, el('button', { type: 'submit', text: 'Send' }));
   const panel = el('section', { class: 'dd-guide', id: 'dd-guide', 'aria-labelledby': 'dd-guide-h' },
-    el('header', {}, el('h2', { id: 'dd-guide-h', text: 'Ask Commonty' }), hide),
+    el('header', {}, el('h2', { id: 'dd-guide-h', text: 'Monty' }), hide),
     log, form,
     el('label', { class: 'fine', for: 'dd-guide-auto' }, el('span', { class: 'sw' }, auto, el('i')), 'Go there straight away'));
   panel.hidden = true;
@@ -461,26 +586,40 @@ function build(opts) {
   btn.addEventListener('click', () => face.end(), { capture: true });
 
   // the conversation: this tab's, never a box's
+  const carry = carrier(opts);
   let convo = [];
   try { convo = JSON.parse(tab.get(KEYS.convo) || '[]'); } catch { convo = []; }
   if (!Array.isArray(convo)) convo = [];
-  const keep = () => tab.set(KEYS.convo, JSON.stringify(convo.slice(-40)));
+  // nothing is put until what the frame holds has been read
+  let synced = !carry;
+  const carried = () => {
+    if (!synced) return;
+    const at = Date.now();
+    tab.set(KEYS.at, String(at));
+    carry?.put(JSON.stringify({ at, convo: convo.slice(-40), open: !panel.hidden, bug }));
+  };
+  const keep = () => {
+    tab.set(KEYS.convo, JSON.stringify(convo.slice(-40)));
+    carried();
+  };
 
-  function go(id, section) {
+  async function go(id, section, repo) {
     const n = byId[id];
     if (!n) return;
-    let url = n.url;
+    const to = urlOf(n, repo);
+    if (!to) return;
+    let url = to;
     if (n.target) {
       // here already, and showing: point at it where it is
       if (find(n.target)) {
         point(n.target, { clear });
         return;
       }
-      tab.set(KEYS.point, JSON.stringify({ name: n.target, url: n.url, at: Date.now() }));
+      tab.set(KEYS.point, JSON.stringify({ name: n.target, url: to, at: Date.now() }));
       try {
         // to another of the site's names the note goes along in the address,
         // which the page there takes out again
-        const u = new URL(n.url);
+        const u = new URL(to);
         if (u.origin !== location.origin && n.kind === 'page' && !opts.inApp && !opts.servedByApp) {
           u.searchParams.set('dd-point', n.target);
           url = u.href;
@@ -494,6 +633,8 @@ function build(opts) {
       fetch(at).catch(() => {});
       return;
     }
+    // the conversation goes along to another of the site's names first
+    await carry?.flush();
     location.assign(at);
     // the same page at another tab (Settings): nothing loads, so point here
     if (n.target) pointSoon();
@@ -523,13 +664,14 @@ function build(opts) {
     btn.focus();
   }
 
-  function card(id, section) {
+  function card(id, section, repo) {
     const n = byId[id];
-    if (!n) return null;
+    const url = n && urlOf(n, repo);
+    if (!url) return null;
     const b = el('button', { type: 'button' }, dot(n.kind),
       el('span', { class: 'path' }, el('b', { text: pathOf(n) + (section ? ` › ${section}` : '') }),
-        el('span', { text: n.kind === 'app' ? 'opens through the Commonty app' : n.url.replace(/^https:\/\//, '') })));
-    b.addEventListener('click', () => go(id, section));
+        el('span', { text: n.kind === 'app' ? 'opens through the Commonty app' : url.replace(/^https:\/\//, '') })));
+    b.addEventListener('click', () => go(id, section, repo));
     return b;
   }
 
@@ -539,7 +681,7 @@ function build(opts) {
       return;
     }
     const box = el('div', { class: 'msg it', text: m.text });
-    const cards = (m.ids || []).map((id) => card(id, id === m.src ? m.section : null)).filter(Boolean);
+    const cards = (m.ids || []).map((id) => card(id, id === m.src ? m.section : null, m.repo)).filter(Boolean);
     if (cards.length) box.append(el('div', { class: 'dest' }, cards));
     if (m.signIn) {
       const b = el('button', { type: 'button' }, dot('page'), el('span', { class: 'path' }, el('b', { text: 'Sign in to Chat' }), el('span', { text: 'and come back here' })));
@@ -550,7 +692,14 @@ function build(opts) {
       box.append(el('div', { class: 'issue' },
         el('b', { text: m.issue.title }),
         el('span', { text: m.issue.body })));
-      const b = el('button', { type: 'button', class: 'out', text: 'Open the issue in Git' });
+      const bits = Array.isArray(m.bits) ? m.bits.filter((x) => typeof x?.text === 'string' && typeof x.what === 'string') : [];
+      if (bits.length) {
+        box.append(el('ul', { class: 'private', 'aria-label': 'Looks private' }, bits.map((x) => el('li', {}, el('span', { text: `${x.what}: ` }), el('b', { text: x.text })))));
+        const cut = el('button', { type: 'button', class: 'out', text: 'Take them out' });
+        cut.addEventListener('click', () => scrub(m));
+        box.append(cut);
+      }
+      const b = el('button', { type: 'button', class: 'out', text: bits.length ? 'Open it as it is' : 'Open the issue in Git' });
       b.addEventListener('click', () => openIssue(m.issue));
       box.append(b);
     }
@@ -620,7 +769,7 @@ function build(opts) {
   // then a draft they post themselves in Git. Nothing is posted from here.
   let bug = null;
   try { bug = JSON.parse(tab.get(KEYS.bug) || 'null'); } catch { bug = null; }
-  const keepBug = (b) => { bug = b; if (b) tab.set(KEYS.bug, JSON.stringify(b)); else tab.del(KEYS.bug); };
+  const keepBug = (b) => { bug = b; if (b) tab.set(KEYS.bug, JSON.stringify(b)); else tab.del(KEYS.bug); carried(); };
   const PUBLIC = 'Issues are public - don’t include anything private.';
 
   async function bugStep(q) {
@@ -645,7 +794,23 @@ function build(opts) {
       say({ who: 'it', text: 'I couldn’t write that up. Try again with a few more words.' });
       return;
     }
-    say({ who: 'it', text: `Here is a draft. Check it, change what you like, and submit it in Git. ${PUBLIC}`, issue, how: 'I post nothing myself' });
+    let said = [];
+    try {
+      said = checkedPrivate(await complete(opts, PRIVACY, `Title: ${issue.title}\n\n${issue.body}`, 300));
+    } catch { /* the patterns alone */ }
+    const bits = privateBits(issue, opts.names || [], said);
+    say({ who: 'it', text: bits.length
+      ? `Here is a draft. Before it goes anywhere: some of it looks private. Take it out, or check it yourself. ${PUBLIC}`
+      : `Here is a draft. I found nothing private in it. Check it, change what you like, and submit it in Git. ${PUBLIC}`, issue, bits, how: 'I post nothing myself' });
+  }
+
+  // the private bits taken out of a draft, in place
+  function scrub(m) {
+    m.issue = withoutBits(m.issue, m.bits);
+    m.bits = privateBits(m.issue, opts.names || []);
+    m.text = m.bits.length ? `Taken out. Some of it may still be private: check it. ${PUBLIC}` : `Taken out. Check it, change what you like, and submit it in Git. ${PUBLIC}`;
+    keep();
+    redraw();
   }
 
   function openIssue(issue) {
@@ -734,14 +899,14 @@ function build(opts) {
       // the section is ours, from what was looked up, never the model's word
       const section = a.from ? found.find((f) => f.n.id === a.from)?.h || null : null;
       if (!a.from && a.go.length === 1 && auto.checked) {
-        say({ who: 'it', text: `${a.say ? `${a.say}\n` : ''}Took you to ${pathOf(byId[a.go[0]])}.`, how: 'asked the box’s model: it picked from the map' });
-        go(a.go[0]);
+        say({ who: 'it', text: `${a.say ? `${a.say}\n` : ''}Took you to ${pathOf(byId[a.go[0]])}.`, repo: a.repo, how: 'asked the box’s model: it picked from the map' });
+        go(a.go[0], null, a.repo);
         return;
       }
-      say({ who: 'it', text: a.say || (ids.length > 1 ? 'A few places:' : 'Here:'), ids, src: a.from, section, how: a.from ? null : 'asked the box’s model: it picked from the map' });
+      say({ who: 'it', text: a.say || (ids.length > 1 ? 'A few places:' : 'Here:'), ids, src: a.from, section, repo: a.repo, how: a.from ? null : 'asked the box’s model: it picked from the map' });
       // one control of ours: pointed at, from the map's own name for it
       const t = byId[a.go[0]];
-      if (a.go.length === 1 && t?.target && (!t.where || find(t.target))) go(t.id);
+      if (a.go.length === 1 && t?.target && (!t.where || find(t.target))) go(t.id, null, a.repo);
     } catch (e) {
       wait.remove();
       if (e instanceof SignIn && endpoint(opts) && !opts.demo) {
@@ -774,6 +939,7 @@ function build(opts) {
     btn.setAttribute('aria-expanded', String(yes));
     btn.setAttribute('aria-label', yes ? 'Hide the assistant' : btn.classList.contains('has-new') ? 'Open the assistant - there is something new' : 'Open the assistant');
     tab.set(KEYS.open, yes ? '1' : '0');
+    carried();
     if (yes) {
       loadMap().then(() => { if (!panel.hidden) redraw(); });
       redraw();
@@ -893,6 +1059,26 @@ function build(opts) {
       ask(q);
     }
   }
+
+  // what this tab said on another of the site's names, newer than what this
+  // name kept: taken up, and the panel as it was there
+  carry?.got().then((v) => {
+    synced = true;
+    let c = null;
+    try { c = JSON.parse(v || 'null'); } catch { /* none */ }
+    if (!c || typeof c.at !== 'number' || !Array.isArray(c.convo) || !(c.at > (Number(tab.get(KEYS.at)) || 0))) {
+      // this name's is the newer: the frame takes it
+      if (convo.length) carried();
+      return;
+    }
+    convo = c.convo.filter((m) => m && typeof m === 'object' && typeof m.text === 'string' && (m.who === 'me' || m.who === 'it'));
+    tab.set(KEYS.convo, JSON.stringify(convo));
+    tab.set(KEYS.at, String(c.at));
+    bug = c.bug && typeof c.bug === 'object' && typeof c.bug.step === 'string' ? c.bug : null;
+    if (bug) tab.set(KEYS.bug, JSON.stringify(bug)); else tab.del(KEYS.bug);
+    if (c.open && panel.hidden && !body.classList.contains('dd-tucked')) open(true, false);
+    else if (!panel.hidden) redraw();
+  });
 
   // The shortcut, from anywhere. The usual one leaves alone what uses it
   // itself - writing in a box, the Git pages' code - and one set on this

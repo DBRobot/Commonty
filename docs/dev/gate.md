@@ -564,10 +564,15 @@ are files, never strings in Rust ([ui.md](ui.md)).
   `/_dd/sitemap.json`, for members and the demo, is every place they can
   open - the home tiles (`dd.home.services`, menu-only ones left out; the
   demo's own doors for the demo), Friends, Settings and its tabs read from
-  `settings.html` itself, Git's tabs from `git-repo.js`, and every docs
-  page with its `##` headings from the docs' index - and `model`, Chat's
-  `/v1/chat/completions`. Places only: nothing about who asked, no admin
-  or internal route. Ask Commonty, the assistant in each page's corner
+  `settings.html` itself, Git's tabs from `git-repo.js`, every view a
+  service has an address for (`VIEWS`: every route of the Git pages, a
+  test fails on one that is missing; a repository's views carry
+  `{repo}`, filled in by the assistant, the fleet's own `repo` unless
+  another is named), the tabs a page has without one (`SUBS`), and every
+  docs page with its `##` headings from the docs' index - and `model`,
+  Chat's `/v1/chat/completions`. The bare name answers it too, for the
+  docs' own pages (roles/gateway.nix). Places only: nothing about who asked, no admin
+  or internal route. Monty, the assistant in each page's corner
   ([guide.js](../../servers/web-shared/guide.js)), goes by it, and the
   docs draw it ([The site, drawn](../guide/site-map.md)). The model's
   answer is data: words shown as text, places as ids looked up in the
@@ -577,7 +582,11 @@ are files, never strings in Rust ([ui.md](ui.md)).
   doors, and the bare name) read `/v1/models` and `/v1/chat/completions`
   there and nothing else ([llm.nix](../../nix/modules/llm/llm.nix)).
   Without a session there, the page goes through that name's sign-in and
-  back (`/_dd/back`).
+  back (`/_dd/back`). The conversation follows the tab across the site's
+  names in a frame of home it never shows, `/_dd/guide-keep`
+  ([guide-keep.js](../../servers/web-shared/guide-keep.js)): that tab's
+  sessionStorage on home, answered only to the same names (checked in the
+  script, and in its `frame-ancestors`), never sent to a box.
 - `/_dd/config` gives `rpId` to any page, and the demo's library id and
   key to the demo.
 - **Caching**: static files and pages are `no-cache` with an ETag (the
@@ -1033,6 +1042,7 @@ path                                        method   what                       
 /_dd/me                                     GET      who, role, menu, tiles                    session or token; 403 without a role
 /_dd/sitemap.json                           GET      every place to open, Chat's model         member or demo; session or token
 /_dd/back?to=                               GET      back to a page after this name's sign-in  anyone; https, our page names only
+/_dd/guide-keep                             GET      Monty's conversation frame (no data)      anyone; framed by our page names only
 /_dd/config                                 GET      rpId (+ demo library)                     anyone
 /_dd/static/{file}                          GET      css, js, fonts, icons                     anyone
 /_dd/web/{file}                             GET      wasm bundle                               anyone
