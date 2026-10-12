@@ -423,10 +423,13 @@ fn publish(
         .ok()
         .and_then(|raw| serde_json::from_str::<identity::SignedMemberList>(&raw).ok())
         .filter(|s| trusted_key(&root).is_ok_and(|k| identity::verify_member_list(s, &k).is_ok()))
+        // the list the last release published, not an older one a forge
+        // could serve beside it to hide who this release drops
+        .filter(|s| s.list.counter + 1 == counter)
         .map(|s| s.list);
     if before.is_none() {
         eprintln!(
-            "== {published} could not be read, or is not signed by the release key: none was published yet, or the forge is not answering. What this release drops cannot be told, so it is taken to drop someone"
+            "== {published} could not be read, is not signed by the release key, or is not the last release's: none was published yet, or the forge is not answering. What this release drops cannot be told, so it is taken to drop someone"
         );
     }
     let floor = floor_in(&git(
