@@ -13,7 +13,9 @@
 let
   cfg = config.dd.net;
   base = config.dd.domain;
-  bridged = !config.services.headscale.enable;
+  # with failover, the control server may be on any box able to run it, or
+  # none: every box asks through the front door as any other does
+  bridged = !config.services.headscale.enable || (config.dd.failover or false);
   bridgeAt = "127.0.0.1:41643";
   control = self.packages.${pkgs.stdenv.hostPlatform.system}.dd-control;
 in

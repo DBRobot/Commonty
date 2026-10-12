@@ -18,127 +18,131 @@ let
   dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
 in
 {
-  config = lib.mkIf (cfg.budgetGb != null) {
-    sops.secrets.ente-storage-password.owner = user;
+  # it signs in to Photos with a password kept in this box's secrets: a box
+  # that took Photos over without one counts nothing until it has its own
+  config =
+    lib.mkIf (cfg.budgetGb != null && (config.dd.hasSecret or (_: true)) "ente-storage-password")
+      {
+        sops.secrets.ente-storage-password.owner = user;
 
-    # It once had a database login with grants on the forge's and the
-    # vault's tables; it reads their counts now (storage/usage.nix). The
-    # old login goes, grants and all.
-    systemd.services.dd-storage-forget-login = {
-      description = "Drop the storage ledger's old database login";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "postgresql.service" ];
-      path = [ config.services.postgresql.package ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        User = "postgres";
-      };
-      script = ''
-        [ "$(psql -tAc "select 1 from pg_roles where rolname = '${user}'")" = 1 ] || exit 0
-        for db in forgejo vaultwarden ente; do
-          [ "$(psql -tAc "select 1 from pg_database where datname = '$db'")" = 1 ] || continue
-          psql -d "$db" -v ON_ERROR_STOP=1 -q -c 'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "${user}"' -c 'DROP OWNED BY "${user}"'
-        done
-        psql -v ON_ERROR_STOP=1 -q -c 'DROP ROLE "${user}"'
-        echo "the ledger's database login is gone"
-      '';
-    };
+        # It once had a database login with grants on the forge's and the
+        # vault's tables; it reads their counts now (storage/usage.nix). The
+        # old login goes, grants and all.
+        systemd.services.dd-storage-forget-login = {
+          description = "Drop the storage ledger's old database login";
+          wantedBy = [ "multi-user.target" ];
+          after = [ "postgresql.service" ];
+          path = [ config.services.postgresql.package ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            User = "postgres";
+          };
+          script = ''
+            [ "$(psql -tAc "select 1 from pg_roles where rolname = '${user}'")" = 1 ] || exit 0
+            for db in forgejo vaultwarden ente; do
+              [ "$(psql -tAc "select 1 from pg_database where datname = '$db'")" = 1 ] || continue
+              psql -d "$db" -v ON_ERROR_STOP=1 -q -c 'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "${user}"' -c 'DROP OWNED BY "${user}"'
+            done
+            psql -v ON_ERROR_STOP=1 -q -c 'DROP ROLE "${user}"'
+            echo "the ledger's database login is gone"
+          '';
+        };
 
-    systemd.services.dd-storage-ledger = {
-      description = "Count what each member keeps, and hold Photos to what is left";
-      # its timer runs it; a switch never does
-      restartIfChanged = false;
-      after = [
-        "dd-verify.service"
-        "dd-storage-view.service"
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        User = user;
-        Group = user;
-        StateDirectory = "dd-storage";
-        StateDirectoryMode = "0750";
-        UMask = "0027";
-        NoNewPrivileges = true;
-        ProtectSystem = "strict";
-        ProtectHome = true;
-        PrivateTmp = true;
-        ExecStart = lib.escapeShellArgs [
-          dd
-          "storage-ledger"
-          "--ente-origin"
-          "https://api.${base}"
-          "--photos-suffix"
-          "@users.${base}"
-          "--password-file"
-          config.sops.secrets.ente-storage-password.path
-          "--budget-gb"
-          (toString cfg.budgetGb)
-          "--view"
-          "${dir}/ledger.json"
-          "--facts-out"
-          "${dir}/usage.facts"
-        ];
-        # into this box's heartbeat, not Prometheus: as root, where the facts are
-        ExecStartPost = [
-          "+${pkgs.coreutils}/bin/install -m 0644 ${dir}/usage.facts /var/lib/dd-facts/usage-ledger.facts"
-          "+${pkgs.coreutils}/bin/rm -f /var/lib/dd-facts/usage-ledger.prom"
-        ];
-      };
-    };
-    # Photos' share of deleting whoever left (docs/dev/leaving.md), with the same
-    # admin login (docs/dev/leaving.md)
-    systemd.services.dd-forget-photos = {
-      description = "Delete the Photos accounts of members who left";
-      after = [
-        "dd-verify.service"
-        "ente.service"
-      ];
-      restartIfChanged = false;
-      serviceConfig = {
-        Type = "oneshot";
-        User = user;
-        Group = user;
-        NoNewPrivileges = true;
-        ProtectSystem = "strict";
-        ProtectHome = true;
-        PrivateTmp = true;
-      };
-      # the gate or museum not answering yet is next time, not a failure
-      script = ''
-        ${
-          lib.escapeShellArgs [
-            dd
-            "forget-photos"
-            "--ente-origin"
-            "https://api.${base}"
-            "--photos-suffix"
-            "@users.${base}"
-            "--password-file"
-            config.sops.secrets.ente-storage-password.path
-          ]
-        } || echo "not this time; again in a few minutes"
-      '';
-    };
-    systemd.timers.dd-forget-photos = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnActiveSec = "5min";
-        # often: someone who leaves is due at once
-        OnUnitActiveSec = "5min";
-      };
-    };
+        systemd.services.dd-storage-ledger = {
+          description = "Count what each member keeps, and hold Photos to what is left";
+          # its timer runs it; a switch never does
+          restartIfChanged = false;
+          after = [
+            "dd-verify.service"
+            "dd-storage-view.service"
+          ];
+          serviceConfig = {
+            Type = "oneshot";
+            User = user;
+            Group = user;
+            StateDirectory = "dd-storage";
+            StateDirectoryMode = "0750";
+            UMask = "0027";
+            NoNewPrivileges = true;
+            ProtectSystem = "strict";
+            ProtectHome = true;
+            PrivateTmp = true;
+            ExecStart = lib.escapeShellArgs [
+              dd
+              "storage-ledger"
+              "--ente-origin"
+              "https://api.${base}"
+              "--photos-suffix"
+              "@users.${base}"
+              "--password-file"
+              config.sops.secrets.ente-storage-password.path
+              "--budget-gb"
+              (toString cfg.budgetGb)
+              "--view"
+              "${dir}/ledger.json"
+              "--facts-out"
+              "${dir}/usage.facts"
+            ];
+            # into this box's heartbeat, not Prometheus: as root, where the facts are
+            ExecStartPost = [
+              "+${pkgs.coreutils}/bin/install -m 0644 ${dir}/usage.facts /var/lib/dd-facts/usage-ledger.facts"
+              "+${pkgs.coreutils}/bin/rm -f /var/lib/dd-facts/usage-ledger.prom"
+            ];
+          };
+        };
+        # Photos' share of deleting whoever left (docs/dev/leaving.md), with the same
+        # admin login (docs/dev/leaving.md)
+        systemd.services.dd-forget-photos = {
+          description = "Delete the Photos accounts of members who left";
+          after = [
+            "dd-verify.service"
+            "ente.service"
+          ];
+          restartIfChanged = false;
+          serviceConfig = {
+            Type = "oneshot";
+            User = user;
+            Group = user;
+            NoNewPrivileges = true;
+            ProtectSystem = "strict";
+            ProtectHome = true;
+            PrivateTmp = true;
+          };
+          # the gate or museum not answering yet is next time, not a failure
+          script = ''
+            ${
+              lib.escapeShellArgs [
+                dd
+                "forget-photos"
+                "--ente-origin"
+                "https://api.${base}"
+                "--photos-suffix"
+                "@users.${base}"
+                "--password-file"
+                config.sops.secrets.ente-storage-password.path
+              ]
+            } || echo "not this time; again in a few minutes"
+          '';
+        };
+        systemd.timers.dd-forget-photos = {
+          wantedBy = [ "timers.target" ];
+          timerConfig = {
+            OnActiveSec = "5min";
+            # often: someone who leaves is due at once
+            OnUnitActiveSec = "5min";
+          };
+        };
 
-    systemd.timers.dd-storage-ledger = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        # from the timer starting, not boot: a switch that adds it starts it
-        # long after boot, and OnBootSec would fire at once
-        OnActiveSec = "2min";
-        OnUnitActiveSec = "1h";
-      };
-    };
+        systemd.timers.dd-storage-ledger = {
+          wantedBy = [ "timers.target" ];
+          timerConfig = {
+            # from the timer starting, not boot: a switch that adds it starts it
+            # long after boot, and OnBootSec would fire at once
+            OnActiveSec = "2min";
+            OnUnitActiveSec = "1h";
+          };
+        };
 
-  };
+      };
 }

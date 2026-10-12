@@ -11,6 +11,13 @@ for m in (a, b):
         """echo '{"ente":["a","b"],"postgres-wal":["a","b"]}' > /run/dd-placed/copies.json"""
     )
 
+# a store sized by its disk says so, room left for the box's own
+a.succeed("systemctl start dd-store-facts.service")
+size = int(
+    a.succeed("awk '/^dd_store_size_bytes/ {print $2}' /var/lib/dd-facts/store.prom")
+)
+assert 0 < size < 4 * 2**30, size
+
 email = "tom@users.test.invalid"
 as_json = "-H 'content-type: application/json'"
 

@@ -39,7 +39,9 @@ in
     default = [ ];
   };
 
-  config = lib.mkIf (cfg.mirrors != [ ]) {
+  # only where this box's secrets hold the token: a box that took the forge
+  # over pushes no mirror (the laptop's publish does, docs/dev/mirror.md)
+  config = lib.mkIf (cfg.mirrors != [ ] && (config.dd.hasSecret or (_: true)) "github-mirror-token") {
     # a fine-grained GitHub token with contents read/write on the mirrored
     # repositories; forgejo keeps its own encrypted copy once told
     sops.secrets.github-mirror-token = { };

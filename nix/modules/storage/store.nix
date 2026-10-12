@@ -248,7 +248,8 @@ in
     };
     capacity = lib.mkOption {
       type = lib.types.str;
-      description = "what this store offers, e.g. \"3T\"";
+      default = "auto";
+      description = "what this store offers, e.g. \"3T\"; auto: what it keeps and what its pool has free, less a fifth of the pool, kept for the box's other services and measured again every minute";
     };
     port = lib.mkOption {
       type = lib.types.port;
@@ -317,6 +318,22 @@ in
         }
       );
       default = { };
+    };
+    migrate = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            envFile = lib.mkOption {
+              type = lib.types.str;
+              description = "the env file with the bucket's key on the storage pool";
+            };
+            id = lib.mkOption { type = lib.types.str; };
+            secret = lib.mkOption { type = lib.types.str; };
+          };
+        }
+      );
+      default = { };
+      description = "buckets copied hourly from the old shared storage pool (dd.box.s3) into this store, until failover reads them here: copied, never deleted from either";
     };
     dataset = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
@@ -404,13 +421,21 @@ in
         g() { ${garage} "$@"; }
         for _ in $(seq 1 60); do g status >/dev/null 2>&1 && break; sleep 1; done
         node=$(g node id -q | cut -d@ -f1)
-        ${lib.optionalString (cfg.dataset != null) ''
+        ${lib.optionalString (cfg.dataset != null && cfg.capacity != "auto") ''
           # its own services cannot fill the pool past what it offers
           q=$(numfmt --from=iec ${cfg.capacity})
           [ "$(zfs get -Hp -o value quota ${cfg.dataset})" = "$q" ] || zfs set quota=$q ${cfg.dataset}
         ''}
         if ! g layout show 2>/dev/null | grep -q "Current cluster layout version: [1-9]"; then
-          g layout assign -z ${box} -c ${cfg.capacity} "$node"
+          # a store of one: what it is told it offers only weighs it
+          # against itself, so with auto, what the pool has now
+          ${
+            if cfg.capacity == "auto" then
+              "cap=$(( $(df -B1 --output=avail ${cfg.dataDir} | tail -1) / 1048576 ))M"
+            else
+              "cap=${cfg.capacity}"
+          }
+          g layout assign -z ${box} -c "$cap" "$node"
           g layout apply --version 1
         fi
         # a key's id and secret, made once, read back with its secret
@@ -473,6 +498,48 @@ in
       };
     };
 
+    # the move off the old shared pool: each bucket this box writes there,
+    # copied here every hour, so failover finds it in place
+    systemd.services.dd-store-migrate = lib.mkIf (cfg.migrate != { }) {
+      description = "Copy this box's buckets from the old storage pool into its own store";
+      after = [ "dd-store-setup.service" ];
+      restartIfChanged = false;
+      path = [ pkgs.rclone ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        set -uo pipefail
+        export RCLONE_CONFIG=/dev/null
+        ${lib.concatStrings (
+          lib.mapAttrsToList (b: m: ''
+            (
+              set -a; . ${m.envFile}; . ${state}/keys/${b}.env; set +a
+              export RCLONE_CONFIG_POOL_TYPE=s3 RCLONE_CONFIG_POOL_PROVIDER=Other \
+                RCLONE_CONFIG_POOL_ENDPOINT=${config.dd.box.s3} RCLONE_CONFIG_POOL_REGION=us-east-1 \
+                RCLONE_CONFIG_POOL_ACCESS_KEY_ID=''${${m.id}} RCLONE_CONFIG_POOL_SECRET_ACCESS_KEY=''${${m.secret}} \
+                RCLONE_CONFIG_POOL_FORCE_PATH_STYLE=true \
+                RCLONE_CONFIG_HERE_TYPE=s3 RCLONE_CONFIG_HERE_PROVIDER=Other \
+                RCLONE_CONFIG_HERE_ENDPOINT=http://127.0.0.1:${toString cfg.port} RCLONE_CONFIG_HERE_REGION=us-east-1 \
+                RCLONE_CONFIG_HERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID RCLONE_CONFIG_HERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+                RCLONE_CONFIG_HERE_FORCE_PATH_STYLE=true
+              # copy, never sync: nothing is deleted on either side
+              rclone copy --checksum --s3-no-check-bucket --fast-list pool:${b} here:${b} \
+                && rclone check --one-way --fast-list pool:${b} here:${b} \
+                && echo "${b}: all of it here" \
+                || echo "${b}: not all here yet"
+            )
+          '') cfg.migrate
+        )}
+        exit 0
+      '';
+    };
+    systemd.timers.dd-store-migrate = lib.mkIf (cfg.migrate != { }) {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "10min";
+        OnUnitActiveSec = "1h";
+      };
+    };
+
     # its room, for the plan: how big, how much free, and what it keeps of
     # each bucket; and nearly full, it refuses other boxes' copies
     systemd.services.dd-store-facts = {
@@ -489,7 +556,6 @@ in
         g() { ${garage} "$@"; }
         # no store up yet: nothing to say, and nothing failed
         g status >/dev/null 2>&1 || exit 0
-        cap=$(numfmt --from=iec ${cfg.capacity})
         avail=$(df -B1 --output=avail ${cfg.dataDir} | tail -1)
         out=$(mktemp)
         used=0
@@ -502,6 +568,19 @@ in
           used=$((used + n))
           echo "dd_store_bucket_bytes{bucket=\"$b\"} $n" >> $out
         done
+        ${
+          if cfg.capacity == "auto" then
+            ''
+              # what it keeps, and what its pool has free less a fifth of
+              # the pool: the rest is the box's other services'
+              pool=$(df -B1 --output=size ${cfg.dataDir} | tail -1)
+              spare=$((avail - pool / 5))
+              [ "$spare" -lt 0 ] && spare=0
+              cap=$((used + spare))
+            ''
+          else
+            "cap=$(numfmt --from=iec ${cfg.capacity})"
+        }
         free=$((cap - used))
         [ "$avail" -lt "$free" ] && free=$avail
         [ "$free" -lt 0 ] && free=0

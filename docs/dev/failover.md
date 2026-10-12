@@ -1,7 +1,8 @@
 # Failover
 
 Status: built and off. One switch turns it on for the whole fleet
-(`fleet/policy.json` `failover`), once the steps at the end are done.
+(`fleet/policy.json` `failover`), once the steps below are done. A box
+that joins later needs nothing done by hand.
 
 When the box running the fleet's services goes away, another box takes
 them over. No box holds another's secrets, nothing is shared between
@@ -82,25 +83,38 @@ The plan then gives the service to another box.
 The old box's own data is kept, so nothing is lost for good if it comes
 back.
 
-## Turning it on
+## A box that joins
 
-Each needs David:
+Nothing is set up by hand:
 
-1. **A store per box:** a `store` block in each box's
-   `fleet/boxes/<box>/box.json` (`capacity`, `dataset`, `dir`), with the
-   dataset in `datasets`.
-2. **The roles:** every box to fail over to carries the same roles as
-   node1's photos, vault, forge and gateway (`fleet/boxes.json`).
-3. **The tunnel token:** `dd dns tunnels`, once (Cloudflare Tunnel Edit on
-   the account). The Worker holds it; no box does.
-4. **Moving the buckets** from the shared cluster into the stores, one at
-   a time ([storage](storage.md#turning-it-on)). Each delete from the
-   cluster needs David's yes.
-5. **The switch:** `"failover": true` in `fleet/policy.json`.
+- **Its store**, on a dataset of its pool, as big as the pool allows less
+  a fifth kept for its other services, measured every minute.
+- **What it carries**: every role whose writers it is able to run, by its
+  own report and the owner's rules (`nix/lib/capability.nix`), whatever
+  `fleet/boxes.json` lists. The control plane decides what runs where.
+- **Its tunnel**, which it asks the DNS Worker for with a secret it makes.
+- **Its names**: `store.<box>.<domain>` and its certificate.
+- **The keys sealed to it** (postgres's archive, the network's database)
+  at the holder's next base backup or copy.
+- **Copies** come to its store once the plan finds room there.
 
-The release that turns it on restarts postgres and the services that
-follow it once on the box holding them. They start again as soon as the
-control plane grants their leases, in seconds.
+A secret that only another box's file holds (the demo's password, TMDB's
+token) is something it runs without: `dd.hasSecret`.
+
+## Turning it on, once for the fleet
+
+1. **The tunnel token**: `dd dns tunnels`, once. The Worker holds it; no
+   box does.
+2. **The move off the shared pool**: each box copies its buckets from the
+   old pool into its own store every hour (`dd-store-migrate`), copying and
+   never deleting. Once every bucket is all there, the switch.
+3. **The switch**: `"failover": true` in `fleet/policy.json`. The release
+   that turns it on restarts postgres and what follows it once, on the box
+   holding them; they start again as soon as the control plane grants
+   their leases.
+4. **Room on node2**: node2 still keeps its half of the old pool. Until
+   that is deleted, with David's yes, the photos don't fit in its store,
+   so photos can't fail over to it; the smaller buckets can.
 
 ## Known gaps
 

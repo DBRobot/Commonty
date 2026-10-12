@@ -1013,11 +1013,15 @@
                       # every box's address on the fleet's network: an A at one
                       # of these is a record of ours
                       fleet = map (n: self.nixosConfigurations.${n}.config.dd.box.net) (builtins.attrNames boxList);
-                      # a box with names of its own (metrics.<box>.<domain>):
+                      # a box with names of its own (metrics.<box>.<domain>,
+                      # store.<box>.<domain>):
                       # *.<box>.<domain> at its address on the fleet's network
                       boxes = nixpkgs.lib.mapAttrs (n: _: self.nixosConfigurations.${n}.config.dd.box.net) (
                         nixpkgs.lib.filterAttrs (
-                          n: _: self.nixosConfigurations.${n}.config.dd.boxMetrics.host != ""
+                          n: _:
+                          self.nixosConfigurations.${n}.config.dd.boxMetrics.host != ""
+                          # its store, which the other boxes copy to
+                          || self.nixosConfigurations.${n}.config.dd.store.enable
                         ) boxList
                       );
                     };
@@ -1456,8 +1460,28 @@
       # is derived from the same list.
       nixosConfigurations =
         let
-          boxes = builtins.fromJSON (builtins.readFile ./fleet/boxes.json);
           lib = nixpkgs.lib;
+          # With failover (fleet/policy.json), a box carries every role whose
+          # writers it is able to run, by its own report and the owner's
+          # rules (capability), whatever fleet/boxes.json lists: a box that
+          # joins is ready to take them over, and the control plane decides
+          # where each runs. No hand-written list to keep.
+          failover = (lib.importJSON ./fleet/policy.json).failover or false;
+          fp = import ./nix/lib/fleet-placement.nix { inherit lib; };
+          roleList = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ./fleet/roles.json);
+          writersOf =
+            r: lib.filter (s: fp.needs ? ${s} && fp.needs.${s}.lease) (roleList.${r}.services or [ ]);
+          ableTo =
+            name: r: writersOf r != [ ] && lib.all (s: fp.inputs.boxes.${name}.can ? ${s}) (writersOf r);
+          boxes = lib.mapAttrs (
+            name: box:
+            box
+            // lib.optionalAttrs failover {
+              roles =
+                box.roles
+                ++ lib.filter (r: !builtins.elem r box.roles && ableTo name r) (builtins.attrNames roleList);
+            }
+          ) (builtins.fromJSON (builtins.readFile ./fleet/boxes.json));
           directoryOf =
             name: box:
             if box.public then
