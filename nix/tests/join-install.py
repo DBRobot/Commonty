@@ -69,7 +69,7 @@ blank.succeed(f'[ "$(readlink -f /mnt/nix/var/nix/profiles/system)" = {system} ]
 assert blank.succeed("cat /mnt/var/lib/dd-agent/counter").strip() == "1"
 
 # an old release, signed as it was: refused
-forge.succeed(f'sed -i \'s/"issued": 1000/"issued": 50/\' /root/payload.json')
+forge.succeed('sed -i \'s/"issued": 1000/"issued": 50/\' /root/payload.json')
 forge.succeed(
     f"{env} {nix['dd']} release sign /root/payload.json --out /srv/release/current.json"
 )
