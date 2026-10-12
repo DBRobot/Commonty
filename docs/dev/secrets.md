@@ -78,7 +78,9 @@ photos      ente-key-encryption, ente-key-hash, ente-jwt-secret, ente-ott,
             garage-key-id/-secret        ente's own bucket key
 library     library-key-id/-secret       the libraries bucket
 vault       vault-key-id/-secret, vault-oidc-secret
-forge       github-mirror-token
+forge       github-mirror-token          no longer read by any box: the release machine
+                                         pushes the GitHub copy over ssh. To be deleted
+                                         from this file and revoked at GitHub
 adblock     pihole-api-password
 ```
 

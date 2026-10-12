@@ -10,6 +10,7 @@ mod librarycmd;
 mod mail_worker;
 mod mediacmd;
 mod member;
+mod mirror;
 mod policy;
 mod release_cmd;
 mod storage_ledger;

@@ -57,16 +57,16 @@
   };
 
   forgejo-mirror = {
-    what = "pushes the fleet's chosen repositories to their GitHub copies (fleet/policy.json)";
+    what = "takes away any push mirror to the fleet's GitHub copies, and the token it held: the copy is pushed from the release machine (fleet/policy.json)";
     units = [ "forgejo-mirrors" ];
     base = {
       uses = {
         memory = "64M";
         storage = "0";
-        estimated = true; # a few git pushes, every eight hours and on push
+        estimated = true; # a few calls to the forge's socket
       };
       network = {
-        outbound = [ "github.com" ];
+        outbound = "none";
         inbound = "localhost";
       };
       depends.forgejo.local = true; # it reads the forge's socket

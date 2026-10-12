@@ -241,3 +241,20 @@ for path in [
 ]:
     said = box.succeed(f"{nobody} 'http://forgejo{path}'")
     assert "example.org" not in said, (path, said)
+
+# The GitHub copy is pushed by the release machine, never by the forge: a
+# push mirror the forge was given once, with its token, is taken away, and
+# a mirror to anywhere else is left
+mirrors = f"http://forgejo/api/v1/repos/{nix['admin']}/commonty/push_mirrors"
+for to in ["http://127.0.0.1:9/example/copy.git", "http://127.0.0.1:9/example/other.git"]:
+    box.succeed(
+        f"""{as_admin} -X POST -d '{{"remote_address":"{to}","remote_username":"x","remote_password":"a-github-token","interval":"8h0m0s"}}' {mirrors} >/dev/null"""
+    )
+assert int(box.succeed(f"{sql} 'select count(*) from push_mirror'").strip()) == 2
+box.succeed("systemctl start forgejo-mirrors.service")
+left = box.succeed(f"{as_admin} {mirrors} | jq -r '.[].remote_address'").split()
+assert left == ["http://127.0.0.1:9/example/other.git"], left
+box.succeed("journalctl -u forgejo-mirrors.service | grep -q 'push mirror .* removed'")
+# and the unit reads no secret at all
+unit = box.succeed("systemctl cat forgejo-mirrors.service")
+assert "LoadCredential" not in unit and "secret" not in unit.lower(), unit

@@ -96,6 +96,13 @@ pub enum ReleaseCmd {
         #[arg(long)]
         install: bool,
     },
+    /// Push a branch, as the forge has it, to the GitHub copy
+    /// (fleet/policy.json forgeMirrors) over ssh with this machine's key.
+    /// `publish` does this itself; this is for when that push failed.
+    Mirror {
+        #[arg(long, default_value = "main")]
+        r#ref: String,
+    },
     /// The release the boxes see.
     Show {
         #[arg(long, default_value = DEFAULT_URL)]
@@ -145,6 +152,15 @@ pub fn run(cmd: ReleaseCmd, repo: &str, keys: &auth::Store) -> Result<()> {
             }
         }
         ReleaseCmd::Status { url } => status(repo, &url)?,
+        ReleaseCmd::Mirror { r#ref } => {
+            let root = repo_root(repo)?;
+            git(&root, &["fetch", "-q", "forge", &r#ref])?;
+            let rev = git(&root, &["rev-parse", &format!("refs/remotes/forge/{ref}")])?;
+            let failed = crate::mirror::push(&root, &rev, &r#ref);
+            if !failed.is_empty() {
+                bail!("not mirrored: {}", failed.join("; "));
+            }
+        }
         ReleaseCmd::App { tag, dry_run } => app(repo, keys, &tag, dry_run)?,
         ReleaseCmd::AndroidInit => android_init(repo, keys)?,
         ReleaseCmd::AppNext { r#ref } => app_next(repo, keys, &r#ref)?,
@@ -465,6 +481,10 @@ fn publish(
     // the forge's page for it, with what it brings, by kind
     if let Err(e) = forge_release(&root, url, &rev, counter, keys) {
         eprintln!("== the forge's release page was not made: {e:#}");
+    }
+    // the GitHub copy, from here with the owner's own key: no box holds one
+    for f in crate::mirror::push(&root, &rev, r#ref) {
+        eprintln!("== not mirrored: {f}\n   `dd release mirror --ref {ref}` when it can");
     }
     app_in_background(&root, r#ref);
     Ok(())

@@ -28,7 +28,7 @@ nix/modules/forge/
   forgejo-runner.nix                  the host runner: the fleet's own CI
   members-runner.nix                  the members' runner: Docker under gVisor
   runner-address.sh                   a runner waits for the forge before it registers
-  forgejo-mirror.nix                  push mirrors to GitHub
+  forgejo-mirror.nix                  no push mirror to GitHub (the release machine pushes)
   needs.nix                           what each part needs of a box
 servers/forge/web/                    the Git pages (pages/git-public.html: the public door's)
 servers/gate/src/forge_events.rs      the pages' live updates, from the gate
@@ -339,7 +339,7 @@ forgejo-secrets      Forgejo's own secrets; makes its state dirs as root first
 forgejo              after zfs-datasets, RequiresMountsFor the state dir
 forgejo-admin        the admin account, if missing
 forgejo-protection   main's rule (forgejo-setup.sh); "nothing to protect" until the repo exists
-forgejo-mirrors      each declared push mirror, made again when its token changes (forgejo-mirror.nix)
+forgejo-mirrors      takes away any push mirror to a declared copy, and its token (forgejo-mirror.nix)
 dd-forge-rules       no private repositories; host runners for the admin's alone (forgejo.nix)
 dd-forge-notify      the trigger for live updates (live.nix), after every Forgejo start
 dd-ci-cancel         the cancel route, always running
@@ -540,21 +540,16 @@ none of it and sees gVisor's kernel.
 
 ## The mirror
 
-[`forgejo-mirror.nix`](../../nix/modules/forge/forgejo-mirror.nix) makes
-sure each push mirror listed in `forgeMirrors` in
-[`fleet/policy.json`](../../fleet/policy.json) exists on the forge (the
-repository defaults to the fleet's own). Today that is one: the fleet's
-repository to `https://github.com/DBRobot/Home-Server.git` as `DBRobot`,
-with the token in sops as `github-mirror-token`. Forgejo pushes on every
-commit and every 8 hours, and keeps its own encrypted copy of the token
-once told.
+The forge pushes nothing to GitHub. The copies listed in `forgeMirrors`
+in [`fleet/policy.json`](../../fleet/policy.json) are pushed by the machine
+that publishes the release, over ssh with the owner's own key, as part of
+`dd release publish` ([its page](mirror.md)). No box holds a GitHub
+credential.
 
-The unit adds a mirror that is missing (by its address), and makes one
-again when the token in sops is not the one it last gave it: Forgejo's
-API cannot change a mirror's token, and keeps the token encrypted, so the
-unit keeps a hash of what it gave each mirror in
-`/var/lib/forgejo-mirrors`. A rotated token reaches Forgejo on the next
-release.
+[`forgejo-mirror.nix`](../../nix/modules/forge/forgejo-mirror.nix) is what
+is left on the forge: every six hours it takes away any push mirror to one
+of those copies. The forge kept the GitHub token it was given inside such a
+mirror, so removing the mirror removes the token from the box.
 
 GitHub suspended the account on 2026-10-04, and the mirror's pushes have
 failed since; nothing else notices or depends on it. The rest (the rename,

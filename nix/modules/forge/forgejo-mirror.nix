@@ -14,9 +14,12 @@ let
   sock = "/run/forgejo/forgejo.sock";
 in
 {
-  # Repositories mirrored out to GitHub after every push, so the public
-  # copy there stays current. The forge is the source; nothing depends on
-  # the copy (docs/dev/mirror.md).
+  # The GitHub copy is pushed by the machine that publishes the release,
+  # over ssh with the owner's own key (dd release publish; docs/dev/mirror.md),
+  # never by the forge: a push mirror here holds a GitHub token in the
+  # forge's database, and no box holds a credential of the owner's. What is
+  # left here takes away any push mirror to those copies, so the token the
+  # forge was once given goes with it.
   options.dd.forgejo.mirrors = lib.mkOption {
     type = lib.types.listOf (
       lib.types.submodule {
@@ -31,68 +34,40 @@ in
           };
           user = lib.mkOption {
             type = lib.types.str;
-            description = "GitHub login the token belongs to.";
+            default = "";
+            description = "no longer used: the copy is pushed over ssh as its owner";
           };
         };
       }
     );
     default = [ ];
+    description = "the fleet's copies elsewhere (fleet/policy.json forgeMirrors), which the forge must not push itself";
   };
 
   config = lib.mkIf (cfg.mirrors != [ ]) {
-    # a fine-grained GitHub token with contents read/write on the mirrored
-    # repositories; forgejo keeps its own encrypted copy once told
-    sops.secrets.github-mirror-token = { };
-
     systemd.services.forgejo-mirrors = {
-      description = "Make sure every declared push mirror exists, with the token in sops";
+      description = "Take away any push mirror to the fleet's copies, and the token it holds";
       after = [ "forgejo-admin.service" ];
       requires = [ "forgejo.service" ];
-      # a timer's, never a switch's: GitHub refusing a sync (the account is
-      # suspended) rolled release 232 back on node1
+      # a timer's, never a switch's
       restartIfChanged = false;
       path = [
         pkgs.curl
         pkgs.jq
       ];
-      serviceConfig = {
-        Type = "oneshot";
-        LoadCredential = "token:${config.sops.secrets.github-mirror-token.path}";
-        # what each mirror was last given, as a hash: forgejo keeps the
-        # token encrypted and its API cannot say which one it holds
-        StateDirectory = "forgejo-mirrors";
-      };
+      serviceConfig.Type = "oneshot";
       script = ''
         set -euo pipefail
         # a failed unit counts against the next release's probe: say it, try next time
         trap 'echo "mirror check failed at line $LINENO; next time"; exit 0' ERR
-        token=$(cat "$CREDENTIALS_DIRECTORY/token")
         # the forge not answering yet (restarting under a switch) is next time
-        as_admin_ok() { curl -fsS --unix-socket ${sock} -o /dev/null ${api}/version; }
-        as_admin_ok || { echo "forge not answering; next time"; exit 0; }
+        curl -fsS --unix-socket ${sock} -o /dev/null ${api}/version || { echo "forge not answering; next time"; exit 0; }
         as_admin() { curl -fsS --unix-socket ${sock} -H 'X-WEBAUTH-USER: ${cfg.admin}' "$@"; }
         ${lib.concatMapStringsSep "\n" (m: ''
-          # the API has no way to change a mirror's token: one given another
-          # token (a rotation in sops) is removed and made again
-          given=$(printf '%s\n' "${m.repo}" "${m.to}" "${m.user}" "$token" | sha256sum | cut -d' ' -f1)
-          kept="$STATE_DIRECTORY/$(printf '%s %s' "${m.repo}" "${m.to}" | sha256sum | cut -d' ' -f1)"
-          names=$(as_admin ${api}/repos/${m.repo}/push_mirrors | jq -r '.[] | select(.remote_address == "${m.to}") | .remote_name')
-          if [ -n "$names" ] && [ "$(cat "$kept" 2>/dev/null)" = "$given" ]; then
-            echo "${m.repo} -> ${m.to}: present"
-          else
-            for name in $names; do
-              as_admin -X DELETE ${api}/repos/${m.repo}/push_mirrors/"$name" >/dev/null
-            done
-            jq -n --arg addr "${m.to}" --arg user "${m.user}" --arg pw "$token" \
-              '{remote_address: $addr, remote_username: $user, remote_password: $pw, interval: "8h0m0s", sync_on_commit: true}' \
-              | as_admin -X POST -H 'content-type: application/json' -d @- ${api}/repos/${m.repo}/push_mirrors >/dev/null
-            echo "$given" >"$kept"
-            if as_admin -X POST ${api}/repos/${m.repo}/push_mirrors-sync >/dev/null; then
-              echo "${m.repo} -> ${m.to}: ''${names:+token changed, }added and first sync requested"
-            else
-              echo "${m.repo} -> ${m.to}: ''${names:+token changed, }added; the first sync was refused, next push tries again"
-            fi
-          fi
+          for name in $(as_admin ${api}/repos/${m.repo}/push_mirrors | jq -r '.[] | select(.remote_address == "${m.to}") | .remote_name'); do
+            as_admin -X DELETE ${api}/repos/${m.repo}/push_mirrors/"$name" >/dev/null
+            echo "${m.repo} -> ${m.to}: push mirror $name removed, and the token it held"
+          done
         '') cfg.mirrors}
       '';
     };

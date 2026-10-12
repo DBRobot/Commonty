@@ -264,13 +264,14 @@ allowanceGb    each member's storage across every service and box
                                                      dd.storage.budgetGb
                                                      (storage/view.nix)
 ownHardware    services that run only on the owner's own boxes (role-fit)
-forgeMirrors   the forge's push mirrors: [{to, user, repo?}]; repo defaults
-               to the fleet's own (roles/forge.nix); the token is the sops
-               secret github-mirror-token
+forgeMirrors   the fleet's copies elsewhere: [{to, repo?}]; repo defaults
+               to the fleet's own (roles/forge.nix). Pushed over ssh by the
+               machine that publishes a release; the forge keeps no push
+               mirror to them (forge/forgejo-mirror.nix)
 ```
 
 The one mirror listed is the GitHub copy. Its account is suspended, so
-its pushes fail and nothing depends on them ([mirror.md](mirror.md)).
+the push fails and nothing depends on it ([mirror.md](mirror.md)).
 
 ## The other files
 
