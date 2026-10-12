@@ -9,7 +9,8 @@ set -eu
 cls=/sys/class
 
 # --- what host.nix reads -----------------------------------------------
-disk=$(lsblk -no PKNAME "$(findmnt -no SOURCE "${BOOT:-/boot}")")
+# (none when /boot is no partition of its own: the rest is still reported)
+disk=$(lsblk -no PKNAME "$(findmnt -no SOURCE "${BOOT:-/boot}" || true)" 2>/dev/null || true)
 # a disk's stable name: its shortest by-id link that is not an alias
 byid() {
   local best="" n l
