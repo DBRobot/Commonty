@@ -542,7 +542,7 @@ fn dirs_cache() -> PathBuf {
 }
 
 /// The app's downloads, as the flake names them (legacyPackages.appRelease)
-const APP_BUILDS: &[&str] = &["linux", "windows", "dd-windows", "android"];
+const APP_BUILDS: &[&str] = &["linux", "windows", "dd-windows", "android", "box-installer"];
 
 /// Where each download of `version` lands when built from `rev`: what two
 /// boxes are asked to build, and, at a fixed version, what says whether
@@ -821,6 +821,8 @@ fn app_files(build: &str, version: &str) -> Vec<String> {
         "windows" => vec!["commonty-setup.exe".into()],
         "dd-windows" => vec!["dd.exe".into()],
         "android" => vec!["commonty-unsigned.apk".into()],
+        // the box installer's drive, which the app's installer window writes
+        "box-installer" => vec![format!("commonty-box-installer-{version}.img.zst")],
         _ => vec![],
     }
 }

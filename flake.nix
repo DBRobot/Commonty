@@ -906,6 +906,14 @@
                 }
               );
               # the proof each starts where a stranger would run it
+              # the box installer's drive (docs/dev/joining.md), which the
+              # app's installer window writes
+              box-installer = need { ramGB = 4; } (
+                pkgs.runCommand "commonty-box-installer-${version}" { } ''
+                  mkdir -p $out
+                  cp ${self.installers.${system}.box}/*.raw.zst $out/commonty-box-installer-${version}.img.zst
+                ''
+              );
               tests.linux = import ./nix/app-release/test-linux.nix { inherit pkgs linux; };
               tests.windows = import ./nix/app-release/test-windows.nix {
                 inherit pkgs;
@@ -1645,14 +1653,23 @@
       lib.joinedBox = fleetBoxes.joined;
       # the installer a blank machine boots to become a box of the fleet,
       # with nothing set up by hand (nix/installer)
-      installers.${system}.join =
-        (nixpkgs.lib.nixosSystem {
-          inherit system;
-          specialArgs = { inherit self; };
-          modules = [
-            "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
-            ./nix/installer/iso.nix
-          ];
-        }).config.system.build.isoImage;
+      installers.${system} = {
+        join =
+          (nixpkgs.lib.nixosSystem {
+            inherit system;
+            specialArgs = { inherit self; };
+            modules = [
+              "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
+              ./nix/installer/iso.nix
+            ];
+          }).config.system.build.isoImage;
+        # the drive the app's installer window writes (nix/installer/image.nix)
+        box =
+          (nixpkgs.lib.nixosSystem {
+            inherit system;
+            specialArgs = { inherit self; };
+            modules = [ ./nix/installer/image.nix ];
+          }).config.system.build.image;
+      };
     };
 }

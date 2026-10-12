@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up this box</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/s/setup.css">
+</head>
+<body class="hi">
+  <div class="hi-frame">
+    <nav class="hi-steps" aria-label="Steps">
+      <p class="hi-title">Set up this box</p>
+      <ol id="steps">
+        <li data-step="firmware" aria-current="step"><span class="n">1</span>Firmware</li>
+        <li data-step="network"><span class="n">2</span>Network</li>
+        <li data-step="disk"><span class="n">3</span>Disk</li>
+        <li data-step="backup"><span class="n">4</span>Back up</li>
+        <li data-step="install"><span class="n">5</span>Install</li>
+        <li data-step="done"><span class="n">6</span>Done</li>
+      </ol>
+    </nav>
+
+    <main class="hi-main">
+      <section data-pane="firmware">
+        <h1>Firmware</h1>
+        <p class="lead" id="fw-machine">Checking this machine…</p>
+        <ul class="hi-checks" id="fw-checks" aria-live="polite"></ul>
+        <p class="hi-warn" id="fw-tip">This machine should start again on its own after a power cut. Look for “After power loss” or “AC recovery” in its firmware settings, and set it to on.</p>
+        <p class="hi-block bad" id="fw-error" role="alert" hidden></p>
+        <p class="hi-row">
+          <button type="button" id="fw-set" hidden>Change these and restart</button>
+          <button type="button" class="quiet" id="fw-again">Check again</button>
+        </p>
+      </section>
+
+      <section data-pane="network" hidden>
+        <h1>Network</h1>
+        <p class="lead" id="net-lead">Looking for a connection…</p>
+        <p class="hi-row" id="net-drive-row" hidden>
+          <button type="button" id="net-drive">Join <span id="net-drive-name"></span></button>
+        </p>
+        <ul class="hi-disks" id="net-list" aria-live="polite" hidden></ul>
+        <form class="hi-pass" id="net-form" hidden>
+          <label for="net-psk">Password for <span id="net-ssid"></span></label>
+          <input id="net-psk" type="password" autocomplete="off">
+          <button type="submit">Join</button>
+        </form>
+        <p class="hi-block bad" id="net-error" role="alert" hidden></p>
+      </section>
+
+      <section data-pane="disk" hidden>
+        <h1>Choose the disk</h1>
+        <p class="lead">The box is installed on this disk. Everything on it is erased, after the next step offers to back it up.</p>
+        <ul class="hi-disks" id="disk-list" aria-live="polite">
+          <li class="hi-disk skel"><span></span><span class="short"></span></li>
+        </ul>
+        <p class="hi-block bad" id="disk-error" role="alert" hidden></p>
+      </section>
+
+      <section data-pane="backup" hidden>
+        <h1>Back up the disk first?</h1>
+        <p class="lead" id="bk-lead"></p>
+        <p class="hint">It's encrypted on this machine with a key only your devices hold, then kept with your disk images. If the box isn't set up within a week, the backup is deleted.</p>
+        <div class="hi-progress" id="bk-progress" hidden>
+          <div class="hi-progress-head"><span id="bk-phase">Backing up</span><span class="state-word" data-state="working" id="bk-state">Working</span></div>
+          <div class="hi-bar" role="progressbar" aria-labelledby="bk-phase" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="bk-bar"><i id="bk-fill"></i></div>
+          <p class="hi-numbers"><span id="bk-done">—</span><span id="bk-eta">—</span></p>
+        </div>
+        <p class="hi-block bad" id="bk-error" role="alert" hidden></p>
+        <p class="hi-row">
+          <button type="button" id="bk-yes">Back it up</button>
+          <button type="button" class="quiet" id="bk-no">Don't back up</button>
+        </p>
+      </section>
+
+      <section data-pane="install" hidden>
+        <h1>Install</h1>
+        <p class="lead" id="in-lead">This erases <span class="mono" id="in-disk"></span> and installs the box.</p>
+        <div class="hi-progress" id="in-progress" hidden>
+          <div class="hi-progress-head"><span id="in-phase">Starting</span><span class="state-word" data-state="working" id="in-state">Working</span></div>
+          <div class="hi-bar" role="progressbar" aria-labelledby="in-phase" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="in-bar"><i id="in-fill"></i></div>
+        </div>
+        <p class="hi-block bad" id="in-error" role="alert" hidden></p>
+        <p class="hi-row"><button type="button" id="in-go">Erase and install</button></p>
+      </section>
+
+      <section data-pane="done" hidden>
+        <h1>Done</h1>
+        <p class="lead">Take the drive out and restart. The box starts on its own, joins as yours, and shows up on your Devices page.</p>
+        <p class="hi-row"><button type="button" id="done-restart">Restart</button></p>
+      </section>
+
+      <nav class="hi-nav">
+        <button type="button" class="quiet" id="back">Back</button>
+        <span class="grow"></span>
+        <button type="button" id="next" disabled>Next</button>
+      </nav>
+    </main>
+  </div>
+  <script src="/s/setup.js"></script>
+</body>
+</html>

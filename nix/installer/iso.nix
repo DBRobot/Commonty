@@ -76,6 +76,8 @@ in
     DETECT = "${../modules/box/report/detect.sh}";
     # the commit this installer was made from: no release issued before it
     NOT_BEFORE = toString (self.lastModified or 0);
+    # where a disk's backup goes before it is wiped (backup.sh)
+    FILES = "https://files.${domain}";
   };
   # what it says at the console, before anyone types
   services.getty.helpLine = lib.mkForce ''

@@ -36,8 +36,60 @@ forge.succeed(
     f"{env} {nix['dd']} release sign /root/payload.json --out /srv/release/current.json"
 )
 
+# the member's join ticket, made as the app makes it; the fake gate takes it
+# for its own folder, where the app already left its sealed key
+tid = nix["ticketId"]
+forge.succeed(
+    "biscuit keypair --only-private-key > /root/tk && "
+    f'printf \'user("ada");\\nticket("{tid}");\\npurpose("join");\\n\' '
+    "| biscuit generate --private-key-file /root/tk - | tr -d '\\n' > /srv/ticket && "
+    'printf \'set $want "Bearer %s";\\n\' "$(cat /srv/ticket)" > /run/gate/want.conf && '
+    f"mkdir -p /srv/gate/{tid} && echo sealed > /srv/gate/{tid}/dd-devices.json && "
+    "systemctl reload nginx"
+)
+
+# the drive's commonty/, as the app wrote it
+blank.succeed(
+    "mkdir -p /root/drive && curl -sf http://forge/ticket > /root/drive/ticket"
+    " && head -c 32 /dev/urandom | base64 > /root/drive/backup.key"
+    ' && echo \'{"ssid": "house", "psk": "not-a-real-psk"}\' > /root/drive/wifi.json'
+    " && echo test > /root/drive/version"
+)
+blank.systemctl("restart dd-box-setup")
+blank.wait_for_open_port(8090)
+
+
+def api(path, body=None):
+    if body is None:
+        out = blank.succeed(f"curl -sf http://127.0.0.1:8090/api/{path}")
+    else:
+        out = blank.succeed(
+            f"curl -sf -H 'content-type: application/json' -d '{json.dumps(body)}' "
+            f"http://127.0.0.1:8090/api/{path}"
+        )
+    return json.loads(out)
+
+
+def finish(kind):
+    for _ in range(900):
+        j = api("job")
+        if j["kind"] == kind and j["state"] != "running":
+            assert j["state"] == "done", j
+            return j
+        blank.sleep(1)
+    raise AssertionError(f"{kind} did not finish")
+
+
 # a marker on the disk that must survive
 blank.succeed("echo keep | dd of=/dev/vdc bs=512 seek=2048 conv=notrunc 2>/dev/null")
+
+# what the screen says of this machine: UEFI, a TPM, Secure Boot off, its
+# disks seen; no firmware driver here, so nothing to change from it
+c = api("checks")
+assert c["checks"]["uefi"] and c["checks"]["tpm"], c
+assert not c["checks"]["secure_boot"] and not c["checks"]["raid"], c
+assert c["firmware"]["driver"] is None and c["firmware"]["change"] == [], c
+assert c["drive"]["ticket"] and c["drive"]["backupKey"], c
 
 # the disk this machine runs from is never one: named, refused
 out = blank.fail("DISK=/dev/vda dd-join-install 2>&1")
@@ -46,15 +98,30 @@ assert "not an internal disk here" in out, out
 out = blank.fail("dd-join-install 2>&1")
 assert "2 internal disks" in out, out
 
-# named: that one is wiped and installed to, the other is not
-# with the drive's Wi-Fi and the member's ticket, as the app wrote them
+# what is on the disk to be wiped: a filesystem with something in it
 blank.succeed(
-    'echo \'{"ssid": "house", "psk": "not-a-real-psk"}\' > /root/wifi.json'
-    " && echo ticket-bytes > /root/ticket"
+    "parted -s /dev/vdb mklabel gpt mkpart old ext4 1MiB 512MiB && udevadm settle"
+    " && mkfs.ext4 -q /dev/vdb1 && mkdir -p /tmp/old && mount /dev/vdb1 /tmp/old"
+    " && echo 'a letter' > /tmp/old/letter.txt && umount /tmp/old"
 )
-out = blank.succeed(
-    "DISK=/dev/vdb WIFI=/root/wifi.json TICKET=/root/ticket dd-join-install 2>&1"
-)
+disks = [d["name"] for d in api("disks")["disks"]]
+assert disks == ["/dev/vdb", "/dev/vdc"], disks
+
+# backed up through the screen: to the member's pending backup, on the
+# ticket alone, encrypted here with the drive's key; the app's file kept
+api("backup", {"disk": "/dev/vdb"})
+finish("backup")
+assert forge.succeed(f"cat /srv/gate/{tid}/dd-devices.json").strip() == "sealed"
+key = blank.succeed("cat /root/drive/backup.key").strip()
+forge.succeed(f"echo '{key}' > /root/bk")
+listing = forge.succeed(f"restic -r /srv/gate/{tid} --password-file /root/bk ls latest")
+assert "letter.txt" in listing, listing
+forge.fail(f"grep -rq 'a letter' /srv/gate/{tid}")
+
+# installed through the screen: that disk wiped and installed to, the
+# other not, with the drive's Wi-Fi and the member's ticket
+api("install", {"disk": "/dev/vdb"})
+out = "\n".join(finish("install")["stages"])
 print(out)
 assert "installed" in out, out
 name = blank.succeed(
@@ -84,7 +151,7 @@ assert (
 )
 blank.succeed("test -s /mnt/var/lib/dd/wifi.age")
 blank.fail("grep -rq not-a-real-psk /mnt/var/lib/dd")
-assert blank.succeed("cat /mnt/var/lib/dd/join-ticket").strip() == "ticket-bytes"
+blank.succeed("cmp /mnt/var/lib/dd/join-ticket /root/drive/ticket")
 # the system the release's commit built is the one on the disk
 blank.succeed(f'[ "$(readlink -f /mnt/nix/var/nix/profiles/system)" = {system} ]')
 # and its agent starts at that release: none signed before it takes it back

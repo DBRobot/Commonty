@@ -13,6 +13,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+pub mod setup;
+
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
 use ed25519_dalek::{Signature, Signer as _, SigningKey, Verifier as _, VerifyingKey};
