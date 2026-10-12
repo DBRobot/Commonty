@@ -98,11 +98,26 @@ printf '#!/bin/sh\nexit 1\n' > "$t/bin/iw"
 out=$(PATH="$t/bin:$PATH" SYS="$t/sys" bash "$nics")
 check '.stack == null and .nics[1].bands == null and .nics[0].initrd == false'
 
-# node1: a pci adapter in a vm's virtio form: its ids from the function above
+# node1: the same usb adapter on Intel's xhci, a Realtek card on pci
+rm -rf "$t/sys/class/net"/*
+x=/devices/pci0000:00/0000:00:14.0
+dev $x xhci_hcd class=0x0c0330 vendor=0x8086 device=0xa36d
+dev $x/usb2/2-2 r8152-cfgselector idVendor=0bda idProduct=8153 speed=5000 manufacturer=Realtek "product=USB 10/100/1000 LAN"
+dev $x/usb2/2-2/2-2:1.0 r8152
+link enp0s20f0u2 $x/usb2/2-2/2-2:1.0 00:e0:4c:68:00:01 1 1000
+w=/devices/pci0000:00/0000:00:1c.0/0000:01:00.0
+dev $w rtw88_8821ce class=0x028000 vendor=0x10ec device=0xc821 subsystem_vendor=0x103c subsystem_device=0x884d
+link wlo1 $w 00:00:00:00:00:01 1 "" phy0
+out=$(PATH="$t/bin:$PATH" SYS="$t/sys" bash "$nics")
+check '.nics[0].slot == "0000:00:14.0 2-2" and .nics[0].host == {driver: "xhci_hcd", ids: "8086:a36d"}'
+check '.nics[1] | .driver == "rtw88_8821ce" and .ids == "10ec:c821 103c:884d" and .bus == "pci"'
+
+# a vm's virtio adapter: its ids and slot from the pci function above it,
+# not the virtio device's own
 rm -rf "$t/sys/class/net"/*
 v=/devices/pci0000:00/0000:00:03.0
 dev $v virtio-pci class=0x020000 vendor=0x1af4 device=0x1000
-dev $v/virtio0 virtio_net
+dev $v/virtio0 virtio_net vendor=0x1af4 device=0x0001
 link eth0 $v/virtio0 52:54:00:12:34:56 1 -1
 out=$(PATH="$t/bin:$PATH" SYS="$t/sys" bash "$nics")
 check '.nics == [{name: "eth0", mac: "52:54:00:12:34:56", driver: "virtio_net", wireless: false, usb: false, initrd: false,
