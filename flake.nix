@@ -83,6 +83,7 @@
         "rollout"
         "placed"
         "wired-watch"
+        "net-detect"
       ];
       rust =
         let
