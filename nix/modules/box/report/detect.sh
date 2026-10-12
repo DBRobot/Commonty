@@ -3,12 +3,13 @@
 # (modules/box/host.nix) and placement will (docs/dev/hardware.md, section 1):
 # what never changes while it runs. What does (free space, heat, the
 # clock's offset) goes in its heartbeats instead.
-# Env: SECRETS_KEY (the TPM key's file), INITRD_MODULES (space separated).
+# Env: SECRETS_KEY (the TPM key's file), INITRD_MODULES (space separated),
+# BOOT (where the boot partition is mounted: /boot, or an installer's /mnt/boot).
 set -eu
 cls=/sys/class
 
 # --- what host.nix reads -----------------------------------------------
-disk=$(lsblk -no PKNAME "$(findmnt -no SOURCE /boot)")
+disk=$(lsblk -no PKNAME "$(findmnt -no SOURCE "${BOOT:-/boot}")")
 # a disk's stable name: its shortest by-id link that is not an alias
 byid() {
   local best="" n l

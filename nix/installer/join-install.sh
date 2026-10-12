@@ -83,7 +83,7 @@ say "this box joins the fleet as $name"
 # its report, for the disk it is on
 mkdir -p /mnt/var/lib/dd/box
 nixos-generate-config --root /mnt --no-filesystems --show-hardware-config > /mnt/var/lib/dd/box/hardware-configuration.nix
-SECRETS_KEY=/mnt/var/lib/dd/secrets-key.txt bash "$DETECT" \
+BOOT=/mnt/boot SECRETS_KEY=/mnt/var/lib/dd/secrets-key.txt bash "$DETECT" \
   | jq --arg d "$byid" '.bootDisk = $d' > /mnt/var/lib/dd/box/hardware.json
 jq -er .secretsKey /mnt/var/lib/dd/box/hardware.json > /mnt/var/lib/dd/secrets-recipient
 jq -n '{owner: null, house: {ssid: "", address: ""}, encrypted: false, extraPools: [], datasets: {}}' \
