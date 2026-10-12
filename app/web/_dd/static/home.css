@@ -1048,14 +1048,15 @@ main.home .guest-more p { margin: 0; max-width: 62ch; color: var(--ink-2); }
   :root:not([data-theme="light"]) :is(.dd-guide-btn, .dd-guide, .dd-tuck, .dd-ring, .dd-tour) { --gd-bar: #16304F; --gd-mark: #7FAEDD; --gd-sunk: #13171C; --gd-point: #7FAEDD; }
 }
 :root[data-theme="dark"] :is(.dd-guide-btn, .dd-guide, .dd-tuck, .dd-ring, .dd-tour) { --gd-bar: #16304F; --gd-mark: #7FAEDD; --gd-sunk: #13171C; --gd-point: #7FAEDD; }
-.dd-guide-btn { position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: 52px; height: 52px; margin: 0; padding: 0; border-radius: 50%; border: 0; background: var(--gd-bar); color: var(--gd-bar-ink); cursor: pointer; box-shadow: 0 4px 14px rgba(15, 25, 40, .28); display: grid; place-items: center; z-index: 40; transition: transform .25s ease, opacity .25s; }
+/* :root so a page's own `.xpage button` reset (Git, Metrics) cannot squash the circle */
+:root .dd-guide-btn { position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: 52px; height: 52px; margin: 0; padding: 0; border-radius: 50%; border: 0; background: var(--gd-bar); color: var(--gd-bar-ink); cursor: pointer; box-shadow: 0 4px 14px rgba(15, 25, 40, .28); display: grid; place-items: center; z-index: 40; transition: transform .25s ease, opacity .25s; }
 .dd-guide-btn:hover { background: var(--gd-bar); }
 .dd-guide-btn .icon { width: 24px; height: 24px; }
 .dd-guide-btn .icon .plus { stroke: var(--gd-mark); }
 body.dd-tucked .dd-guide-btn { transform: translateX(110px); opacity: 0; pointer-events: none; }
 /* the strip right of the button: an arrow on hover or focus tucks it away,
    and the same spot, with nothing showing, brings it back */
-.dd-tuck { position: fixed; right: 0; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: 24px; height: 52px; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; color: var(--ink-2); cursor: pointer; display: grid; place-items: center; z-index: 41; }
+:root .dd-tuck { position: fixed; right: 0; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: 24px; height: 52px; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; color: var(--ink-2); cursor: pointer; display: grid; place-items: center; z-index: 41; }
 .dd-tuck:hover { background: none; color: var(--ink); }
 .dd-tuck svg { width: 12px; height: 20px; opacity: 0; transition: opacity .15s, transform .2s; }
 .dd-tuck:hover svg, .dd-tuck:focus-visible svg { opacity: 1; }

@@ -115,6 +115,8 @@ let byId = {};
 // the places and, under each, the controls it lists: "settings-devices.add-device"
 let all = [];
 let mapAsked = null;
+// why the last ask for it failed: 'signin' or 'down'
+let mapWhy = 'down';
 const mapKey = 'kit:/_dd/sitemap.json';
 
 function useMap(m) {
@@ -134,13 +136,17 @@ function loadMap() {
     try { useMap(JSON.parse(localStorage.getItem(mapKey) || 'null')); } catch { /* none kept */ }
   }
   mapAsked ??= fetch('/_dd/sitemap.json')
-    .then((r) => (r.ok ? r.json() : null))
+    .then((r) => {
+      mapWhy = r.status === 401 || r.redirected ? 'signin' : 'down';
+      return r.ok ? r.json() : null;
+    })
     .then((m) => {
-      if (!m) return;
+      if (!m) throw new Error('no map');
       useMap(m);
       local.set(mapKey, JSON.stringify(m));
     })
-    .catch(() => {});
+    // a map that did not come is asked again next time, not given up on
+    .catch(() => { mapAsked = null; });
   return mapAsked;
 }
 
@@ -1115,8 +1121,9 @@ function build(opts) {
       await space();
       return;
     }
+    if (!map) await loadMap();
     if (!map) {
-      say({ who: 'it', text: 'The map of the site did not load. Try again in a moment.' });
+      say({ who: 'it', text: mapWhy === 'signin' ? 'You’re signed out on this page, so I can’t see the map of the site. Sign in again, then ask me.' : 'The map of the site did not load. Try again in a moment.' });
       return;
     }
     const near = match(q);
