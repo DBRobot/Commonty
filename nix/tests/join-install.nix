@@ -94,7 +94,7 @@ in
             if ($http_authorization != $want) { return 403; }
             limit_except GET HEAD PROPFIND PUT MKCOL { deny all; }
             client_max_body_size 0;
-            proxy_pass http://127.0.0.1:8081/;
+            proxy_pass http://127.0.0.1:8081;
           '';
         };
       };
@@ -105,7 +105,7 @@ in
       systemd.services.fake-gate = {
         wantedBy = [ "multi-user.target" ];
         preStart = "mkdir -p /srv/gate";
-        script = "exec ${pkgs.rclone}/bin/rclone serve webdav --addr 127.0.0.1:8081 /srv/gate";
+        script = "exec ${pkgs.rclone}/bin/rclone serve webdav --addr 127.0.0.1:8081 --baseurl /files/images/pending /srv/gate";
       };
       networking.firewall.allowedTCPPorts = [ 80 ];
       environment.systemPackages = [
