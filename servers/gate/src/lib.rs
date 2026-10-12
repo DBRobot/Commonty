@@ -930,12 +930,13 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
             .get("x-original-uri")
             .and_then(|v| v.to_str().ok())
             .unwrap_or_default();
-        let owned = if member_boxes::metrics_box(uri).is_some() {
+        let owned = if member_boxes::metrics_box(uri).is_some() && !app.is_admin(&user) {
             member_boxes::current(&app).await.1
         } else {
             vec![]
         };
-        if !member_boxes::sees_metrics(&user, app.sees_box(&user), uri, &owned) {
+        if !member_boxes::sees_metrics(&user, app.sees_box(&user), app.is_admin(&user), uri, &owned)
+        {
             return StatusCode::FORBIDDEN.into_response();
         }
     }
@@ -2319,22 +2320,26 @@ async fn metrics_sources(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
         )
         .collect();
     // the boxes this person set up, on the box that gathers their metrics
-    // (observe/joined-metrics.nix): theirs alone
+    // (observe/joined-metrics.nix): theirs, and every one for the admin
     if app.thanos.is_some() {
         let metrics = format!("metrics.{}", app.domain);
-        boxes.extend(
-            member_boxes::current(&app)
-                .await
-                .1
+        // the admin sees every joined box, a member their own
+        let (st, owned) = member_boxes::current(&app).await;
+        let names: Vec<String> = if app.is_admin(&user) {
+            st["joined"]
+                .as_object()
+                .map(|j| j.keys().cloned().collect())
+                .unwrap_or_default()
+        } else {
+            owned
                 .into_iter()
                 .filter(|o| o.user == user)
-                .map(|o| {
-                    serde_json::json!({
-                        "box": o.name,
-                        "url": format!("https://{metrics}/joined/{}", o.name),
-                    })
-                }),
-        );
+                .map(|o| o.name)
+                .collect()
+        };
+        boxes.extend(names.into_iter().map(
+            |n| serde_json::json!({ "box": n, "url": format!("https://{metrics}/joined/{n}") }),
+        ));
     }
     let mut r =
         Json(serde_json::json!({ "here": app.sees_box(&user), "boxes": boxes })).into_response();

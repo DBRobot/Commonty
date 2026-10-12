@@ -295,14 +295,21 @@ pub(crate) fn metrics_box(uri: &str) -> Option<String> {
 }
 
 /// May this person read these metrics: a joined box's (`/joined/<name>/`)
-/// only if it is theirs, whoever else they are; the rest, if they see the
-/// fleet's boxes (`sees_box`: the owner of the observe box, or the admin)
-pub(crate) fn sees_metrics(user: &str, sees_box: bool, uri: &str, owned: &[Owned]) -> bool {
+/// if it is theirs, or they are the fleet's admin, who sees every box; the
+/// rest, if they see the fleet's boxes (`sees_box`: the owner of the
+/// observe box, or the admin)
+pub(crate) fn sees_metrics(
+    user: &str,
+    sees_box: bool,
+    admin: bool,
+    uri: &str,
+    owned: &[Owned],
+) -> bool {
     if !plain_path(uri) {
         return false;
     }
     match metrics_box(uri) {
-        Some(name) => owned.iter().any(|o| o.name == name && o.user == user),
+        Some(name) => admin || owned.iter().any(|o| o.name == name && o.user == user),
         None => sees_box,
     }
 }
@@ -526,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn a_joined_boxs_metrics_are_its_members_and_nobody_elses() {
+    fn a_joined_boxs_metrics_are_its_members_and_the_admins() {
         let owned = [Owned {
             name: "j0123456789".into(),
             user: "ann".into(),
@@ -535,12 +542,16 @@ mod tests {
             key: String::new(),
         }];
         let q = "/joined/j0123456789/api/v1/query?query=up";
-        assert!(sees_metrics("ann", false, q, &owned));
-        // the fleet's admin sees every release box, and not this one
-        assert!(!sees_metrics("david", true, q, &owned));
-        assert!(!sees_metrics("bob", false, q, &owned));
+        assert!(sees_metrics("ann", false, false, q, &owned));
+        // the fleet's admin sees every box, this one too
+        assert!(sees_metrics("david", true, true, q, &owned));
+        // another member does not, nor the observe box's owner who is not
+        // the admin
+        assert!(!sees_metrics("bob", false, false, q, &owned));
+        assert!(!sees_metrics("olga", true, false, q, &owned));
         assert!(!sees_metrics(
             "ann",
+            false,
             false,
             "/joined/jffffffffff/api/v1/query",
             &owned
@@ -554,18 +565,20 @@ mod tests {
             "//joined/j0123456789/api/v1/query",
             "/joined/./j0123456789/api/v1/query",
         ] {
-            assert!(!sees_metrics("david", true, odd, &owned), "{odd}");
-            assert!(!sees_metrics("ann", false, odd, &owned), "{odd}");
+            assert!(!sees_metrics("david", true, true, odd, &owned), "{odd}");
+            assert!(!sees_metrics("ann", false, false, odd, &owned), "{odd}");
         }
         // and the fleet's view is as it was
         assert!(sees_metrics(
             "david",
+            true,
             true,
             "/api/v1/query?query=up",
             &owned
         ));
         assert!(!sees_metrics(
             "ann",
+            false,
             false,
             "/api/v1/query?query=up",
             &owned
