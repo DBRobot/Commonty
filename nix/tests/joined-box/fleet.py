@@ -203,7 +203,7 @@ exp = int(time.time()) + 7 * 24 * 3600
 def mint(datalog):
     return (
         subprocess.check_output(
-            ["biscuit", "generate", "--private-key", hexkey, "-"],
+            ["biscuit", "generate", "--private-key", "ed25519-private/" + hexkey, "-"],
             input=datalog.encode(),
         )
         .decode()
