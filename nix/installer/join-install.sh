@@ -116,7 +116,7 @@ if [ -n "${WIFI:-}" ] && [ -s "$WIFI" ]; then
 fi
 # the member it is set up for: its join ticket, used once on first boot
 if [ -n "${TICKET:-}" ] && [ -s "$TICKET" ]; then
-  install -m 0400 "$TICKET" /mnt/var/lib/dd/join-ticket
+  install -m 0600 "$TICKET" /mnt/var/lib/dd/join-ticket
 fi
 jq -n --arg ssid "$ssid" '{owner: null, house: {ssid: $ssid, address: "", sealedWifi: ($ssid != "")},
   encrypted: true, unlock: "tpm", extraPools: [], datasets: {}}' > /mnt/var/lib/dd/box/box.json
