@@ -271,9 +271,12 @@ not revoked and not gone by their own word. Cloudflare forwards it to the
 address each gave the mail Worker; no box ever holds that address.
 
 The mail leaves from the box with the vault role, which already writes to
-members ([member-mail.nix](../../nix/modules/member-mail.nix)): `dd` puts
-the change in `/var/lib/dd-announce/outbox` over ssh, and `dd-announce`
-(every five minutes) refuses it there too if it is under 30 days away,
-mails each member once, and keeps what it sent in `sent/`. `dd` then adds
-a line to [docs/policies/changes.md](../policies/changes.md): what
-changed, when it was announced, when it takes effect, and the commit.
+members ([member-mail.nix](../../nix/modules/member-mail.nix)). `dd`
+writes the change to `fleet/announcements/<id>.json` and adds a line to
+[docs/policies/changes.md](../policies/changes.md): what changed, when it
+was announced, when it takes effect, and the commit. Both are committed and
+released, so the announcement comes signed with the release: nobody logs
+in to a box to send it. `dd-announce` (every five minutes) refuses it there
+too if it is under 30 days away, mails each member it names once, and keeps
+what it sent in `sent/`, so a later release that still carries it sends
+nothing again.

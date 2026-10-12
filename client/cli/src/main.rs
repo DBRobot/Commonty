@@ -437,8 +437,9 @@ enum PasskeyCmd {
 
 #[derive(Subcommand)]
 enum PolicyCmd {
-    /// Mail the change in FILE to every member's <name>@<domain>, and add
-    /// it to docs/policies/changes.md. Refuses a date under 30 days away.
+    /// Mail the change in FILE to every member's <name>@<domain>, in the
+    /// next release (fleet/announcements), and add it to
+    /// docs/policies/changes.md. Refuses a date under 30 days away.
     Announce {
         file: std::path::PathBuf,
         /// YYYY-MM-DD, at least 30 days from today

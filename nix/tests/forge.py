@@ -328,3 +328,14 @@ box.wait_until_succeeds(
     f"{as_admin} {api}/actions/runs/{run['id']} | jq -e '.status == \"cancelled\"'",
     timeout=30,
 )
+
+# The runners' registration tokens are made by the box, never by a person:
+# each sealed to its runner box, which alone opens it
+box.succeed("systemctl start dd-runner-keys.service")
+for kind in ("host", "members"):
+    token = box.succeed(
+        f"age -d -i /etc/box1-identity /var/lib/dd-runner-keys/box1.{kind}.age"
+    ).strip()
+    assert token.startswith("TOKEN=") and len(token) > len("TOKEN=") + 10, (kind, token)
+    # sealed: the file holds no token in the clear
+    box.fail(f"grep -q '{token}' /var/lib/dd-runner-keys/box1.{kind}.age")

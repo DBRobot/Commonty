@@ -269,3 +269,22 @@ assert "access_token" not in again, again
 # a name that is not one is dropped and goes no further
 box.succeed("sudo -u dd-verify touch '/run/dd-ended/-x'")
 box.wait_until_succeeds("test ! -e '/run/dd-ended/-x'", timeout=30)
+
+
+# A policy change travels in the release (fleet/announcements), and the box
+# mails it from there once; under 30 days' notice it is refused, never sent
+box.succeed("mkdir -p /var/lib/test-announcements")
+box.succeed(
+    """echo '{"id": "2026-10-11-soon", "subject": "s", "body": "b", "to": ["tom"], "takes_effect": "2000-01-01"}' > /var/lib/test-announcements/soon.json"""
+)
+far = box.succeed("date -u -d '+40 days' +%F").strip()
+box.succeed(
+    f"""echo '{{"id": "2026-10-11-far", "subject": "s", "body": "b", "to": ["tom"], "takes_effect": "{far}"}}' > /var/lib/test-announcements/far.json"""
+)
+box.succeed("systemctl start dd-announce.service")
+box.succeed("test -e /var/lib/dd-announce/sent/2026-10-11-soon.refused.json")
+box.fail("test -e /var/lib/dd-announce/sent/2026-10-11-soon.names")
+# no mail Worker here: nothing goes, so it is not marked sent, and is tried
+# again next time rather than lost
+box.fail("test -e /var/lib/dd-announce/sent/2026-10-11-far.json")
+box.succeed("journalctl -u dd-announce | grep -q '2026-10-11-far: 1 not sent yet'")

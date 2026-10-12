@@ -122,14 +122,21 @@ in
         SupplementaryGroups = [ "docker" ];
         # the forge must answer first, and at this address (runner-address.sh)
         TimeoutStartSec = "10min";
-        ExecStartPre = lib.mkBefore [
-          (pkgs.writeShellScript "runner-address" (
-            ddScript ./runner-address.sh {
-              NAME = name;
-              URL = "https://git.${base}";
-            }
-          ))
-        ];
+        ExecStartPre = lib.mkBefore (
+          # its token, made by the forge's box and sealed to this one
+          # (runner-keys.nix), where the host runner's module is here too
+          lib.optional (
+            config.dd ? runner && config.dd.runner ? fetchToken
+          ) "+${config.dd.runner.fetchToken "members"}"
+          ++ [
+            (pkgs.writeShellScript "runner-address" (
+              ddScript ./runner-address.sh {
+                NAME = name;
+                URL = "https://git.${base}";
+              }
+            ))
+          ]
+        );
       };
     };
 

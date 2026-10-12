@@ -1,13 +1,14 @@
 //! `dd policy announce`: a change to the fleet's policies, mailed to every
 //! member at their <name>@<domain> at least 30 days before it takes effect,
-//! and written down in docs/policies/changes.md. The mail goes out from the
-//! box that writes to members (roles/_member-mail.nix); no address but the
-//! alias is ever in hand here or there (docs/dev/leaving.md, Announcing).
+//! and written down in docs/policies/changes.md. It travels in the signed
+//! release (fleet/announcements/<id>.json), and the box that writes to
+//! members mails it from there once (modules/member-mail.nix): nobody logs
+//! in to a box to send it. No address but the alias is ever in hand here or
+//! there (docs/dev/leaving.md, Announcing).
 
 use std::collections::BTreeSet;
-use std::io::Write as _;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
 
@@ -165,28 +166,22 @@ pub async fn announce(a: Announce<'_>) -> Result<()> {
     if a.dry_run {
         return Ok(());
     }
-    let addr = mail_box(root)?;
-    let mut child = Command::new("ssh")
-        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
-        .arg(format!("admin@{addr}"))
-        .arg(format!(
-            "sudo -n tee /var/lib/dd-announce/outbox/.{0}.json >/dev/null && sudo -n mv /var/lib/dd-announce/outbox/.{0}.json /var/lib/dd-announce/outbox/{0}.json",
-            job["id"].as_str().unwrap_or_default()
-        ))
-        .stdin(Stdio::piped())
-        .spawn()?;
-    child
-        .stdin
-        .take()
-        .context("ssh's stdin")?
-        .write_all(serde_json::to_string(&job)?.as_bytes())?;
+    // in the release: the box mails it once it is there, and refuses it
+    // there too under 30 days' notice
+    let dir = root.join("fleet/announcements");
+    std::fs::create_dir_all(&dir)?;
+    let out = dir.join(format!("{}.json", job["id"].as_str().unwrap_or_default()));
     ensure!(
-        child.wait()?.success(),
-        "{addr} did not take the announcement"
+        !out.exists(),
+        "{} is already there: one announcement a day per change",
+        out.display()
     );
+    std::fs::write(&out, serde_json::to_string_pretty(&job)? + "\n")
+        .with_context(|| format!("writing {}", out.display()))?;
     record(root, &sent, a.takes_effect, &title(&text), &commit)?;
     println!(
-        "handed to {addr}, which mails each one within five minutes (journalctl -u dd-announce there)\ncommit docs/policies/changes.md"
+        "written to {}\ncommit it and docs/policies/changes.md, and release: the box that writes to members mails each one within five minutes of switching (journalctl -u dd-announce there)",
+        out.display()
     );
     Ok(())
 }
@@ -224,22 +219,6 @@ async fn directory_now(
         }
     }
     Ok((entries, left))
-}
-
-/// a box with the vault role, whose units write to members, of this fleet
-fn mail_box(root: &Path) -> Result<String> {
-    let boxes: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(root.join("fleet/boxes.json"))?)?;
-    for (_, b) in boxes.as_object().into_iter().flatten() {
-        let roles = b["roles"].as_array().cloned().unwrap_or_default();
-        if roles.iter().any(|r| r == "vault")
-            && let Some(t) = b["net"].as_str()
-            && t.parse::<std::net::IpAddr>().is_ok()
-        {
-            return Ok(t.to_string());
-        }
-    }
-    bail!("no box in fleet/boxes.json writes to members (the vault role)")
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String> {

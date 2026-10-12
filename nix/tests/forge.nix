@@ -39,6 +39,7 @@ in
         pkgs.curl
         pkgs.jq
         pkgs.postgresql
+        pkgs.age
       ];
       # nginx in front, as on a box: a run is cancelled through it
       services.nginx.enable = true;
@@ -61,6 +62,11 @@ in
           color = "#4a5a8a";
         }
       ];
+      # a runner box's secrets key, a test's (on a real box, its TPM's): the
+      # forge seals its registration tokens to it (runner-keys.nix)
+      dd.forgejo.runnerBoxes.box1 = "age1gc25m409smgcklvytkksgew4ycjky4xtwvarsynwjxa9eg60jgpqfrlgp8";
+      environment.etc."box1-identity".text =
+        "AGE-SECRET-KEY-1RYQV6YMT4DPUURXLGDHLEP6P4QLM4NYQ4Z4E594SKSVYTXHZTF6QAJ94TJ";
       virtualisation.memorySize = 2048;
       virtualisation.diskSize = 4096;
     };

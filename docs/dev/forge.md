@@ -544,7 +544,9 @@ where            on the box, as forgejo-runner,     in a container under gVisor 
                  nix on the path, the box's store
 capacity         min(threads/4, memory GiB/6)       min(2, threads/4, memory GiB/4)
                  (box.json runnerCapacity)          4 cpus, 4 GiB, 1024 pids, 1 h per job
-token (sops)     forgejo-runner-token (scoped)      forgejo-members-runner-token (global)
+token            made by the forge's box, sealed    the same, global
+                 to the runner box; scoped to the
+                 repo's owner (runner-keys.nix)
 caches           act, nix and cargo-target kept;    none (cache.enabled = false);
                  untouched for 14 days goes         docker prunes what is a week old
 ```

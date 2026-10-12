@@ -8,6 +8,26 @@
 let
   base = config.dd.domain;
   name = config.networking.hostName;
+  # this box's registration token for a runner, from the forge's box,
+  # sealed to this box (runner-keys.nix, runner-token.sh)
+  fetchToken =
+    kind:
+    pkgs.writeShellScript "runner-token-${kind}" (
+      ddScript ./runner-token.sh {
+        PATH = lib.makeBinPath [
+          pkgs.curl
+          pkgs.age
+          pkgs.age-plugin-tpm
+          pkgs.gnugrep
+          pkgs.coreutils
+        ];
+        URL = "https://git.${base}";
+        NAME = name;
+        KIND = kind;
+        OUT = "/var/lib/dd-runner-token/${kind}.env";
+        IDENTITY = "/var/lib/dd/secrets-key.txt";
+      }
+    );
 in
 {
   # what one job takes: the biggest VM test is three VMs of 1.5G, and a
@@ -19,6 +39,10 @@ in
   options.dd.runner.jobMemoryGiB = lib.mkOption {
     type = lib.types.ints.positive;
     default = 6;
+  };
+  options.dd.runner.fetchToken = lib.mkOption {
+    type = lib.types.functionTo lib.types.package;
+    description = "kind -> the script that fetches this box's sealed registration token of that kind";
   };
   options.dd.runner.capacity = lib.mkOption {
     type = lib.types.ints.positive;
@@ -53,11 +77,11 @@ in
         enable = true;
         inherit name;
         url = "https://git.${base}";
-        # a registration token, minted once with `forgejo actions
-        # generate-runner-token --scope <owner>` and kept in sops; the runner
+        # a registration token, made by the forge's box and sealed to this
+        # box (runner-keys.nix), fetched before the runner starts; the runner
         # registers on first start and keeps its own credential in its state
-        # dir after
-        tokenFile = config.sops.templates."forgejo-runner.env".path;
+        # dir after. Nobody mints it by hand
+        tokenFile = "/var/lib/dd-runner-token/host.env";
         # nix: the job runs on a box with nix. And the box's own name, for a
         # job that must run on this box and no other: each box building every
         # box's system (entry_point.yml, build_host), so that what it later
@@ -103,6 +127,9 @@ in
     # repository, which failed CI on node2.
     systemd.tmpfiles.rules = [
       "e /var/lib/gitea-runner/cargo-target - - - 14d"
+      # where the fetched tokens are kept: root's alone, read by systemd
+      # itself before the unit drops to its user
+      "d /var/lib/dd-runner-token 0700 root root -"
     ];
     # (the nixos module registers again by itself when the token or the
     # labels change, so a new scope reaches the forge on the next start; a
@@ -121,6 +148,7 @@ in
         # the wait for the forge (its certificate arrives after a switch)
         TimeoutStartSec = "10min";
         ExecStartPre = lib.mkBefore [
+          "+${fetchToken "host"}"
           (pkgs.writeShellScript "runner-address" (
             ddScript ./runner-address.sh {
               NAME = name;
@@ -131,11 +159,7 @@ in
       };
     };
 
-    sops.secrets.forgejo-runner-token = { };
-    # read by systemd itself, before the unit drops to its dynamic user, so the
-    # file can stay root-only
-    sops.templates."forgejo-runner.env".content = ''
-      TOKEN=${config.sops.placeholder.forgejo-runner-token}
-    '';
+    # the members' runner fetches its own the same way (members-runner.nix)
+    dd.runner.fetchToken = fetchToken;
   };
 }

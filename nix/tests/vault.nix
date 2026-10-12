@@ -26,6 +26,9 @@ in
       ../modules/vault/vaultwarden.nix
     ];
     dd.verify.role = pkgs.lib.mkForce "full";
+    # announcements as a release would carry them, in a directory the test
+    # writes (modules/member-mail.nix)
+    dd.announce.dir = "/var/lib/test-announcements";
     dd.garage = {
       zone = "r-test";
       capacity = "1G";

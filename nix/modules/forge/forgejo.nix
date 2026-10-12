@@ -170,6 +170,8 @@ in
     ./door.nix
     # with failover on, it follows its lease from box to box
     ./follow.nix
+    # the runners' registration tokens, made here and sealed to each
+    ./runner-keys.nix
     ../storage/usage.nix
     ../storage/postgres-backup.nix
   ];

@@ -5,6 +5,7 @@
 # A service uses config.dd.mail.sendmail, with the group config.dd.mail.group.
 {
   config,
+  lib,
   pkgs,
   ...
 }:
@@ -15,13 +16,20 @@ in
 {
   imports = [ ./mail.nix ];
 
-  # `dd policy announce` leaves a change in the outbox, one json each
-  # (client/cli/src/policy.rs): mailed to each member's <name>@<domain>,
-  # once each, and refused here too under 30 days' notice
+  options.dd.announce.dir = lib.mkOption {
+    type = lib.types.str;
+    default = "/etc/dd-announce/release";
+    description = "where the release's announcements are (fleet/announcements); a test points it at a directory it writes";
+  };
+
+  # `dd policy announce` writes a change into the release, one json each
+  # (fleet/announcements, client/cli/src/policy.rs): mailed to each member's
+  # <name>@<domain> it names, once each, and refused here too under 30 days'
+  # notice. It comes signed with the release; nobody logs in to put it here
   config = {
+    environment.etc."dd-announce/release".source = ../../fleet/announcements;
     systemd.tmpfiles.rules = [
       "d /var/lib/dd-announce 0700 root root -"
-      "d /var/lib/dd-announce/outbox 0700 root root -"
       "d /var/lib/dd-announce/sent 0700 root root -"
     ];
     systemd.timers.dd-announce = {
@@ -48,14 +56,16 @@ in
         set +e
         cd /var/lib/dd-announce || exit 0
         soonest=$(date -u -d '+30 days' +%F)
-        for f in outbox/*.json; do
+        # each in the release, until it is sent (or refused): never twice
+        for f in ${config.dd.announce.dir}/*.json; do
           [ -e "$f" ] || continue
           id=$(jq -r .id "$f")
-          case "$id" in "" | *[!A-Za-z0-9-]*) echo "$f: no usable id; set aside"; mv "$f" "sent/bad-$(date +%s).json"; continue ;; esac
+          case "$id" in "" | *[!A-Za-z0-9-]*) echo "$f: no usable id; left"; continue ;; esac
+          [ -e "sent/$id.json" ] || [ -e "sent/$id.refused.json" ] && continue
           when=$(jq -r .takes_effect "$f")
           if ! [[ "$when" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || [[ "$when" < "$soonest" ]]; then
             echo "$id: takes effect $when, under 30 days' notice; not sent"
-            mv "$f" "sent/$id.refused.json"
+            cp "$f" "sent/$id.refused.json"
             continue
           fi
           touch "sent/$id.names"
@@ -75,7 +85,7 @@ in
             fi
           done
           if [ "$left" = 0 ]; then
-            mv "$f" "sent/$id.json"
+            cp "$f" "sent/$id.json"
             echo "$id: sent to $(wc -l < "sent/$id.names") member(s)"
           else
             echo "$id: $left not sent yet; again in five minutes"

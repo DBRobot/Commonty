@@ -64,9 +64,7 @@ storage     garage-rpc-secret            garage's cluster secret, shared by stor
             restic-password              this box's restic repository password
             thanos-key-id/-secret        the metrics bucket, for the sidecar
             cache-key-id/-secret         read key to the nix-cache bucket (also runner)
-runner      forgejo-runner-token         forge/forgejo-runner.nix
-            forgejo-members-runner-token the members' runner
-            nix-cache-signing-key        signs what this box uploads to the cache
+runner      nix-cache-signing-key        signs what this box uploads to the cache
 gateway     cloudflare-token             the zone's names (dd-dns) and the ACME challenge,
                                          only until `dd dns setup`: then unused,
                                          deleted at Cloudflare and from this file
@@ -84,6 +82,14 @@ adblock     pihole-api-password
 
 node1 runs every role and has every key above. node2 runs core, storage
 and runner, and has those keys only.
+
+The runners' registration tokens are in no box's file. The forge's box
+makes them and seals each to its runner box's secrets key
+([`runner-keys.nix`](../../nix/modules/forge/runner-keys.nix)); the
+runner box fetches its own and opens it before its runner starts
+([`runner-token.sh`](../../nix/modules/forge/runner-token.sh)). The old
+`forgejo-runner-token` and `forgejo-members-runner-token` keys still in
+node1's and node2's files are read by nothing.
 
 `secrets/fleet.yaml` is nested:
 
