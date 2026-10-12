@@ -274,7 +274,7 @@ async fn write_card<R: Runtime>(app: &AppHandle<R>, device: &str) -> Result<(), 
         .into_iter()
         .find(|d| d.id == device)
         .ok_or("that card is not in this computer any more")?;
-    let (file, version) = manifest().await?;
+    let (file, version) = manifest(CARD).await?;
     set(|p| {
         p.stage = "download".into();
         p.version = version.clone();
@@ -313,15 +313,18 @@ async fn write_card<R: Runtime>(app: &AppHandle<R>, device: &str) -> Result<(), 
 }
 
 #[derive(Debug, Clone)]
-struct File {
-    name: String,
-    url: String,
-    sha256: String,
+pub(crate) struct File {
+    pub(crate) name: String,
+    pub(crate) url: String,
+    pub(crate) sha256: String,
 }
 
+/// the controller's card, by the name it has in app.json
+const CARD: &str = "commonty-home-controller-";
+
 /// app.json from the releases branch, checked with the release key this
-/// app carries; the card is the one download named for the controller
-async fn manifest() -> Result<(File, String), String> {
+/// app carries; the image is the one download named `<prefix><version>.img.zst`
+pub(crate) async fn manifest(prefix: &str) -> Result<(File, String), String> {
     let key = option_env!("COMMONTY_RELEASE_KEY")
         .ok_or("this copy of the app carries no release key, so it cannot check a card")?;
     let key = identity::decode_public(key).map_err(|e| e.to_string())?;
@@ -344,18 +347,19 @@ async fn manifest() -> Result<(File, String), String> {
         .map_err(|e| e.to_string())?;
     let p = release::verify_doc(&raw, "app", &key)
         .map_err(|e| format!("the release list is not signed by the release key: {e}"))?;
-    pick(&p)
+    pick(&p, prefix)
 }
 
-/// the controller's card out of a checked manifest
-fn pick(p: &serde_json::Value) -> Result<(File, String), String> {
+/// one image out of a checked manifest: the controller's card, a box's
+/// installer (boxsetup.rs)
+pub(crate) fn pick(p: &serde_json::Value, prefix: &str) -> Result<(File, String), String> {
     let files = p["files"]
         .as_object()
         .ok_or("the release lists no downloads")?;
     let (name, f) = files
         .iter()
-        .find(|(n, _)| n.starts_with("commonty-home-controller-") && n.ends_with(".img.zst"))
-        .ok_or("this release has no home controller card yet")?;
+        .find(|(n, _)| n.starts_with(prefix) && n.ends_with(".img.zst"))
+        .ok_or("this release has no such image yet")?;
     let sha256 = f["sha256"]
         .as_str()
         .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
@@ -367,7 +371,7 @@ fn pick(p: &serde_json::Value) -> Result<(File, String), String> {
         .ok_or("the card's address is missing")?
         .to_string();
     let version = name
-        .trim_start_matches("commonty-home-controller-")
+        .trim_start_matches(prefix)
         .trim_end_matches(".img.zst")
         .to_string();
     Ok((
@@ -384,12 +388,33 @@ fn cache() -> PathBuf {
     crate::paths::data().join("cache").join("controller")
 }
 
-/// The image, in this app's cache: a copy from before when it is still the
-/// one the manifest names, else downloaded again and checked as it comes.
 async fn download(f: &File) -> Result<PathBuf, String> {
+    download_to(f, cache(), &|total, done, bps| {
+        set(|p| {
+            p.total = total;
+            p.done = done;
+            p.bytes_per_sec = bps;
+            p.eta = writer::eta_secs(&writer::Line {
+                phase: "download".into(),
+                done,
+                total,
+                bytes_per_sec: bps,
+            });
+        })
+    })
+    .await
+}
+
+/// The image, in `dir`: a copy from before when it is still the one the
+/// manifest names, else downloaded again and checked as it comes. `moved`
+/// hears the total, what has come and how fast.
+pub(crate) async fn download_to(
+    f: &File,
+    dir: PathBuf,
+    moved: &(dyn Fn(u64, u64, u64) + Sync),
+) -> Result<PathBuf, String> {
     use futures_util::StreamExt as _;
     use tokio::io::AsyncWriteExt as _;
-    let dir = cache();
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| e.to_string())?;
@@ -397,7 +422,7 @@ async fn download(f: &File) -> Result<PathBuf, String> {
     if hash_file(&at).await.as_deref() == Some(f.sha256.as_str()) {
         return Ok(at);
     }
-    // older cards go: one is a gigabyte or so
+    // older images go: one is a gigabyte or so
     if let Ok(mut d) = tokio::fs::read_dir(&dir).await {
         while let Ok(Some(e)) = d.next_entry().await {
             let _ = tokio::fs::remove_file(e.path()).await;
@@ -408,11 +433,11 @@ async fn download(f: &File) -> Result<PathBuf, String> {
         .get(&f.url)
         .send()
         .await
-        .map_err(|e| format!("the card did not download: {e}"))?
+        .map_err(|e| format!("the image did not download: {e}"))?
         .error_for_status()
-        .map_err(|e| format!("the card did not download: {e}"))?;
+        .map_err(|e| format!("the image did not download: {e}"))?;
     let total = r.content_length().unwrap_or(0);
-    set(|p| p.total = total);
+    moved(total, 0, 0);
     let part = dir.join(format!("{}.part", f.name));
     let mut out = tokio::fs::File::create(&part)
         .await
@@ -422,21 +447,12 @@ async fn download(f: &File) -> Result<PathBuf, String> {
     let started = std::time::Instant::now();
     let mut stream = r.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("the card did not download: {e}"))?;
+        let chunk = chunk.map_err(|e| format!("the image did not download: {e}"))?;
         h.update(&chunk);
         out.write_all(&chunk).await.map_err(|e| e.to_string())?;
         done += chunk.len() as u64;
         let bps = (done as f64 / started.elapsed().as_secs_f64().max(0.001)) as u64;
-        set(|p| {
-            p.done = done;
-            p.bytes_per_sec = bps;
-            p.eta = writer::eta_secs(&writer::Line {
-                phase: "download".into(),
-                done,
-                total,
-                bytes_per_sec: bps,
-            });
-        });
+        moved(total, done, bps);
     }
     out.flush().await.map_err(|e| e.to_string())?;
     drop(out);
@@ -444,7 +460,7 @@ async fn download(f: &File) -> Result<PathBuf, String> {
     if got != f.sha256 {
         let _ = tokio::fs::remove_file(&part).await;
         return Err(
-            "the card that downloaded is not the one the release signed; nothing was written"
+            "the image that downloaded is not the one the release signed; nothing was written"
                 .into(),
         );
     }
@@ -1033,19 +1049,29 @@ async fn done<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<Response<Ve
 
 /// The card's boot partition, found and mounted the platform's way once the
 /// writer has had the new table read.
-mod card {
+pub(crate) mod card {
     use super::writer::Disk;
 
     pub fn write_pair_key(disk: &Disk, key: &[u8; 32]) -> Result<(), String> {
+        write_files(disk, &[("pair", key)])
+            .map_err(|e| format!("the pairing key could not be written to the card: {e}"))
+    }
+
+    /// Files into commonty/ on the boot partition (the first): a Pi's
+    /// pairing key, or what a box's installer reads (boxsetup.rs)
+    pub fn write_files(disk: &Disk, files: &[(&str, &[u8])]) -> Result<(), String> {
         let (mount, ours) = mount(disk)?;
         let dir = mount.join("commonty");
         let wrote = (|| {
             std::fs::create_dir_all(&dir)?;
-            let f = dir.join("pair");
-            std::fs::write(&f, key)?;
-            std::fs::File::open(&f)?.sync_all()
+            for (name, bytes) in files {
+                let f = dir.join(name);
+                std::fs::write(&f, bytes)?;
+                std::fs::File::open(&f)?.sync_all()?;
+            }
+            Ok::<_, std::io::Error>(())
         })()
-        .map_err(|e| format!("the pairing key could not be written to the card: {e}"));
+        .map_err(|e| e.to_string());
         unmount(disk, &mount, ours);
         wrote
     }
@@ -1198,14 +1224,14 @@ mod tests {
                 "commonty-home-controller-0.1.30.img.zst": {"url": "https://x/c.img.zst", "sha256": "B".repeat(64)},
             }
         });
-        let (f, v) = pick(&p).unwrap();
+        let (f, v) = pick(&p, CARD).unwrap();
         assert_eq!(v, "0.1.30");
         assert_eq!(f.url, "https://x/c.img.zst");
         assert_eq!(f.sha256, "b".repeat(64));
         let none = serde_json::json!({"files": {"commonty-setup.exe": {"url": "https://x", "sha256": "a".repeat(64)}}});
-        assert!(pick(&none).is_err());
+        assert!(pick(&none, CARD).is_err());
         let plain = serde_json::json!({"files": {"commonty-home-controller-1.img.zst": {"url": "http://x", "sha256": "a".repeat(64)}}});
-        assert!(pick(&plain).is_err());
+        assert!(pick(&plain, CARD).is_err());
     }
 
     #[test]

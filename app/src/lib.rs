@@ -4,6 +4,8 @@
 //! call the commands below; nothing else reaches them.
 
 mod account;
+#[cfg(desktop)]
+mod boxsetup;
 mod browser;
 mod controllers;
 mod export;
@@ -17,6 +19,8 @@ mod photos;
 mod site;
 mod smarthome;
 mod vpn;
+#[cfg(desktop)]
+mod wifi;
 #[cfg(desktop)]
 mod writer;
 mod zip;

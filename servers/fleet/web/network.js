@@ -373,6 +373,20 @@ async function showControllers(who) {
   }
 }
 
+// a new box, from a computer: the app writes its installer to a USB drive
+// in a window of its own (app/src/boxsetup.rs)
+function setUpBox() {
+  if (!inApp || /Android|iPhone|iPad/.test(navigator.userAgent)) return;
+  const b = el('button', 'quiet');
+  b.id = 'nw-add-box';
+  b.textContent = 'Set up a box';
+  b.onclick = async () => {
+    const r = await appFetch('/_dd/app/boxsetup/open', { method: 'POST' });
+    if (!r.ok) say((await r.text()) || `the app said ${r.status}`, false);
+  };
+  $('nw-unlock').before(b);
+}
+
 async function controllers() {
   const who = await me();
   const kept = keptControllers(who.user);
@@ -437,6 +451,7 @@ export async function start() {
     $('nw-unlock').href = `https://mail.${domain}/boxes?name=${encodeURIComponent(who.user)}`;
   }).catch(() => {});
   ads();
+  setUpBox();
   controllers().catch((e) => sayHc(String(e.message || e)));
   try {
     await load();

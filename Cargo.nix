@@ -4514,6 +4514,11 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "archive";
+            packageId = "archive";
+            target = { target, features }: (!(("android" == target."os" or null) || ("ios" == target."os" or null)));
+          }
+          {
             name = "auth";
             packageId = "auth";
           }
@@ -4586,6 +4591,11 @@ rec {
             features = [ "rustls-tls" "json" "stream" ];
           }
           {
+            name = "rustic_core";
+            packageId = "rustic_core";
+            target = { target, features }: (!(("android" == target."os" or null) || ("ios" == target."os" or null)));
+          }
+          {
             name = "rustls";
             packageId = "rustls";
             usesDefaultFeatures = false;
@@ -4631,6 +4641,16 @@ rec {
             name = "tokio-util";
             packageId = "tokio-util";
             features = [ "io" ];
+          }
+          {
+            name = "url";
+            packageId = "url";
+            target = { target, features }: (!(("android" == target."os" or null) || ("ios" == target."os" or null)));
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
+            target = { target, features }: (!(("android" == target."os" or null) || ("ios" == target."os" or null)));
           }
         ];
         buildDependencies = [

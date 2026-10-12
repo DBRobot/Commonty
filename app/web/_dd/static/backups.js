@@ -466,7 +466,37 @@ export async function start() {
     $('bk-trash').hidden = false;
     $('bk-empty').onclick = askEmpty;
   }
+  if (inApp) fromBoxes();
   return images(tab());
+}
+
+// A new box's backup of its machine's old disk, made on its way in: the app
+// adds it to the images once the box has joined (app/src/boxsetup.rs)
+const BOX_SAID = {
+  waiting: () => 'A backup made by a new box is waiting for the box to join.',
+  adding: (b) => `Adding the backup ${b} made of its old disk.`,
+  failed: (b) => `The backup ${b} made of its old disk is not added yet.`,
+};
+
+async function fromBoxes() {
+  let list;
+  try {
+    const r = await appFetch('/_dd/app/boxsetup/pending');
+    if (!r.ok) return;
+    list = await r.json();
+  } catch { return; }
+  const notes = list
+    .filter((p) => BOX_SAID[p.state])
+    .map((p) => el('p', 'bk-note', BOX_SAID[p.state](p.box) + (p.error ? ` ${p.error}` : '')));
+  document.querySelectorAll('.bk-from-box').forEach((n) => n.remove());
+  for (const n of notes) {
+    n.classList.add('bk-from-box');
+    $('list').before(n);
+  }
+  // one just added: the list again, with it
+  if (list.some((p) => p.state === 'added')) {
+    started = show().catch((e) => say(String(e.message || e)));
+  }
 }
 
 /// The same images drawn into another place too (`view`: its msg and list
