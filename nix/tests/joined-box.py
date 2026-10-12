@@ -64,6 +64,9 @@ fleet.succeed(
 box.wait_for_unit("multi-user.target")
 assert box.succeed("hostname").strip() == "joining"
 box.fail("systemctl is-active dd-control")
+assert "ConditionResult=no" in box.succeed(
+    "systemctl show dd-control -p ConditionResult"
+)
 print(
     box.execute(
         "ip -4 addr; ip route; getent hosts fleet; curl -sS -o /dev/null http://fleet/test/config.json 2>&1"
@@ -92,6 +95,10 @@ box.succeed(
     " -o mountpoint=none tank/enc && systemctl restart zfs-datasets"
 )
 box.succeed("systemctl restart dd-join-prepare")
+# under its install name it does not try to join
+assert "ConditionResult=no" in box.succeed(
+    "systemctl show dd-control -p ConditionResult"
+)
 spki = box.succeed("cat /var/lib/dd/box-key.spki").strip()
 name = box.succeed(f"echo {spki} | base64 -d | sha256sum | cut -c1-10").strip()
 assert f"j{name}" == nix["keyName"], name

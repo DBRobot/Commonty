@@ -46,7 +46,8 @@ in
       # a box that joined, still under the name it was installed with: it
       # joins once it has built itself under its key's (dd-agent), whose
       # switch starts this
-      wantedBy = lib.optional (config.networking.hostName != "joining") "multi-user.target";
+      wantedBy = [ "multi-user.target" ];
+      unitConfig.ConditionHost = lib.mkIf (config.networking.hostName == "joining") "!joining";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       path = [
