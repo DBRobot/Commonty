@@ -1896,6 +1896,8 @@
           box-reports = import ./nix/tests/box-reports.nix args;
           # builds and CI held to a share of each box's memory, together
           work-memory-sizes = import ./nix/tests/work-memory-sizes.nix args;
+          # what a box finds of its network links, and the config made of it
+          net-report = import ./nix/tests/net-report.nix args;
           # anything deleted is gone from every box and backup within 90 days
           retention = import ./nix/tests/retention.nix args;
           # every unit our modules define is in some service's needs, and no
