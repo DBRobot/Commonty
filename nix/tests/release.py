@@ -8,6 +8,14 @@ forge.wait_for_unit("nginx.service")
 box.wait_for_unit("dd-verify.service")
 box.wait_for_open_port(4181)
 box.wait_for_unit("sshd.service")
+# the test runs the agent itself: its own timer, which a switch starts
+# again, must not run it between a publish and the test's run (on a slow
+# box it did, and the test's run then only said "tried already")
+box.succeed(
+    "mkdir -p /run/systemd/system/dd-agent.timer.d && "
+    "printf '[Timer]\\nOnActiveSec=\\nOnUnitActiveSec=\\nOnActiveSec=1d\\n' "
+    "> /run/systemd/system/dd-agent.timer.d/test.conf && systemctl daemon-reload"
+)
 
 # the release key lives on the forge machine here, standing in for the
 # laptop; the box gets the public half

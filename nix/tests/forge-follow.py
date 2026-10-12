@@ -36,8 +36,12 @@ def api(m, method, path, body=None, ok=True):
 
 
 def up(m):
-    m.succeed(
-        "systemctl start postgresql.service forgejo.service forgejo-admin.service"
+    # a take that finds no base backup copied here yet refuses, rightly:
+    # ask again until the copy has arrived
+    m.wait_until_succeeds(
+        "systemctl reset-failed postgresql.service forgejo.service forgejo-admin.service; "
+        "systemctl start postgresql.service forgejo.service forgejo-admin.service",
+        timeout=300,
     )
     m.wait_until_succeeds(f"test -S {sock}", timeout=180)
     m.wait_until_succeeds(
@@ -102,8 +106,10 @@ api(
     {"content": "aGVsbG8gZnJvbSBiCg==", "message": "on b"},
 )
 # and b's forge copies under epoch 2 now
-b.succeed("systemctl start dd-forge-copy.service")
-b.succeed(
+# (a copy that finds the store not ready yet is "next time": ask again)
+b.wait_until_succeeds(
+    "systemctl start dd-forge-copy.service && "
     "set -a; . /var/lib/dd-store/keys/forge.env; export AWS_DEFAULT_REGION=us-east-1; "
-    'test "$(aws --endpoint-url http://127.0.0.1:3910 s3 cp s3://forge/epoch -)" = 2'
+    'test "$(aws --endpoint-url http://127.0.0.1:3910 s3 cp s3://forge/epoch -)" = 2',
+    timeout=180,
 )
