@@ -66,7 +66,8 @@ mkdir -p "$w/unlock"
 tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
 # its key to join with: under a password kept on its encrypted disk, which
 # opens only under its signed boot once its first boot has sealed it
-( umask 077; od -An -vtx1 -N32 /dev/urandom | tr -d ' \n' > "$w/sig.auth" )
+# (16 bytes: a TPM takes a password no longer than its hash)
+( umask 077; od -An -vtx1 -N16 /dev/urandom | tr -d ' \n' > "$w/sig.auth" )
 tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -p "file:$w/sig.auth" \
   -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda|userwithauth' \
   -u "$w/unlock/sig.pub" -r "$w/unlock/sig.priv"
