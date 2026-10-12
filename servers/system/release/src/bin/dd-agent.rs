@@ -70,7 +70,9 @@ struct Args {
 /// A box that joined on its own key builds its system itself, from the
 /// commit the release key signed and its own report: no other box built
 /// it, so none vouches, and none needs to - it is this box's own build of
-/// signed source.
+/// signed source. Only a box the release does not list gets here: the
+/// source is set on joined boxes alone (nix/modules/box/agent.nix), and a
+/// box the release lists always takes its entry, vouched for as ever.
 fn build_joined(args: &Args, rev: &str, name: &str) -> Result<release::BoxRelease> {
     let source = args
         .joined_source

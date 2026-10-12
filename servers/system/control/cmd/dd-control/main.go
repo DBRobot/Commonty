@@ -876,12 +876,17 @@ func softSigner(path string) func([]byte) (string, error) {
 	}
 }
 
-// joinedAddrs: from headscale's node list, each node tagged a joined box
-// whose name a key joins under, and its IPv4 address
+var joinedName = regexp.MustCompile(`^j[0-9a-f]{10}$`)
+
+// joinedAddrs: from headscale's node list, each node tagged a joined box,
+// by the user the gate made it under (joined-<name>, when it handed the box
+// its key) - never by the hostname a node gives itself - and its IPv4
+// address
 func joinedAddrs(list []byte) map[string]uint32 {
 	var nodes []struct {
-		GivenName   string   `json:"givenName"`
-		Name        string   `json:"name"`
+		User struct {
+			Name string `json:"name"`
+		} `json:"user"`
 		IPAddresses []string `json:"ipAddresses"`
 		Tags        []string `json:"tags"`
 		ValidTags   []string `json:"validTags"`
@@ -892,11 +897,8 @@ func joinedAddrs(list []byte) map[string]uint32 {
 		return out
 	}
 	for _, nd := range nodes {
-		name := nd.GivenName
-		if name == "" {
-			name = nd.Name
-		}
-		if len(name) != 11 || name[0] != 'j' {
+		name, ok := strings.CutPrefix(nd.User.Name, "joined-")
+		if !ok || !joinedName.MatchString(name) {
 			continue
 		}
 		tagged := false

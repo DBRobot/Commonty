@@ -120,3 +120,16 @@ func TestOnlyABoxOfTheReleaseSaysWhereAJoinedBoxIs(t *testing.T) {
 		t.Fatal("an address off the fleet's network")
 	}
 }
+
+func TestAJoinedBoxOnlySendsHeartbeats(t *testing.T) {
+	f := newFleet(t)
+	k := strangerKey(1)
+	name, _, _ := JoinName(k)
+	f.block(1000, joinReq(k, 1))
+	for i, kind := range []string{"directory", "built"} {
+		r := Request{Kind: kind, Box: name, Seq: uint64(2 + i), Body: []byte(`{}`), Sig: "ok:" + k}
+		if f.block(2000, r) != 0 {
+			t.Fatalf("a joined box sent a %s", kind)
+		}
+	}
+}

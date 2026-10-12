@@ -290,11 +290,14 @@ pub(crate) async fn box_key(
     now: u64,
     joined: Option<&BoxKeys>,
 ) -> Result<String, (StatusCode, String)> {
-    let (keys, tag) = match door.boxes.get(name) {
-        Some(k) => (k, "tag:box"),
+    // a joined box under a user of its own, named for it: what says which
+    // node it is, never the hostname the node gives itself
+    let (keys, tag, user) = match door.boxes.get(name) {
+        Some(k) => (k, "tag:box", "boxes".to_string()),
         None => (
             joined.ok_or((StatusCode::FORBIDDEN, "not a box of this fleet".into()))?,
             "tag:joined",
+            format!("joined-{name}"),
         ),
     };
     if time.abs_diff(now) > SKEW {
@@ -319,7 +322,7 @@ pub(crate) async fn box_key(
         asked.insert(name.to_string(), (now, time));
     }
     let bad = |e: anyhow::Error| (StatusCode::BAD_GATEWAY, format!("{e:#}"));
-    let (key, _) = door.mint("boxes", &[tag]).await.map_err(bad)?;
+    let (key, _) = door.mint(&user, &[tag]).await.map_err(bad)?;
     seal(&door.age, &keys.recipient, &key).map_err(bad)
 }
 

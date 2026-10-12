@@ -181,6 +181,11 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 	if !verify(key, r.Bytes(), r.Sig) {
 		return ErrBadSig
 	}
+	// a box that joined on its own key says only how it is: no directory
+	// item, build result, lease or anything else
+	if _, listed := cfg.Boxes[r.Box]; !listed && r.Kind != "heartbeat" {
+		return fmt.Errorf("%s joined on its own key and only sends heartbeats", r.Box)
+	}
 	if b := s.Boxes[r.Box]; b != nil && r.Seq <= b.Seq {
 		return ErrStale
 	}
