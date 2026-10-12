@@ -134,3 +134,62 @@ assert kept == [hashlib.sha256(made["token"].encode()).hexdigest()], kept
 box.succeed(
     f"curl -sf -H 'X-Auth-Token: {made['token']}' http://127.0.0.1:8080/users/session-validity/v2"
 )
+
+
+# Nobody is museum's admin, and its admin api answers nobody through nginx
+api = "curl -sk --resolve api.test.invalid:443:127.0.0.1 https://api.test.invalid"
+assert box.succeed(f"{api}/admin/users -o /dev/null -w '%{{http_code}}'") == "404"
+assert (
+    box.succeed(
+        f"{curl} -o /dev/null -w '%{{http_code}}' {site}/_dd/museum/admin/users"
+    )
+    == "404"
+)
+
+
+# and museum itself takes nobody as its admin: not a member, not the
+# first account it ever made, even asked directly
+for t in (made["token"],):
+    assert (
+        box.succeed(
+            f"curl -s -o /dev/null -w '%{{http_code}}' -H 'X-Auth-Token: {t}' http://127.0.0.1:8080/admin/users"
+        )
+        == "401"
+    )
+
+
+def ente_sql(q):
+    return box.succeed(f'sudo -u ente psql -d ente -tAc "{q}"').strip()
+
+
+# what she keeps is counted from museum's own tables, as museum's own user
+box.wait_until_succeeds(
+    '[ -n "$(sudo -u postgres psql -d ente -tAc "select dd_email from users where dd_email = \'sarah@users.test.invalid\'")" ]',
+    timeout=90,
+)
+box.succeed("systemctl start dd-photos-usage.service")
+assert "sarah@users.test.invalid\t" in box.succeed(
+    "cat /var/lib/dd-photos-jobs/usage.tsv"
+)
+# and her limit set from what the ledger worked out, by the same user
+box.succeed(
+    "install -d -o dd-storage -g dd-storage -m 0750 /var/lib/dd-storage && "
+    "printf 'sarah@users.test.invalid\\t123456789\\n' > /var/lib/dd-storage/photo-limits.tsv && "
+    "chown dd-storage:dd-storage /var/lib/dd-storage/photo-limits.tsv"
+)
+box.succeed("systemctl start dd-photos-limits.service")
+assert (
+    ente_sql(
+        "select s.storage from subscriptions s join users u using (user_id) where u.dd_email = 'sarah@users.test.invalid'"
+    )
+    == "123456789"
+)
+
+# a member who left: listed by the box, deleted by museum itself, and her
+# address gone with her account, so no new keys bring it back
+ente_sql("insert into dd_delete (email) values ('sarah@users.test.invalid')")
+box.wait_until_succeeds(
+    '[ "$(sudo -u ente psql -d ente -tAc "select count(*) from users where dd_email = \'sarah@users.test.invalid\'")" = 0 ]',
+    timeout=120,
+)
+assert ente_sql("select count(*) from dd_delete") == "0"

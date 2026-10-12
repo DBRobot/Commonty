@@ -45,6 +45,9 @@ in
       imports = [
         ./box.nix
         ../modules/photos/ente.nix
+        # the ledger's jobs in museum's own tables, with no admin account
+        ../modules/storage/view.nix
+        ../modules/storage/ledger.nix
         # what the module reads of sops: each secret's path, here a file in
         # the store
         {
@@ -72,13 +75,13 @@ in
         "garage-key-secret"
       ] (_: { });
       dd.verify.role = lib.mkForce "full";
+      dd.storage.budgetGb = 1;
       dd.verify.photos = {
         # museum itself: no tls in here
         api = "http://127.0.0.1:8080";
         emailSuffix = "@users.test.invalid";
         codeFile = "${secrets}/ente-ott";
       };
-      dd.photos.admin = 1;
       services.ente.web.enable = lib.mkForce false;
       # what the web module sets for museum when it is on
       services.ente.api.settings = {

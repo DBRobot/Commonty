@@ -74,7 +74,7 @@ gateway     cloudflare-token             the zone's names (dd-dns) and the ACME 
             cloudflare-workers-read      the mail and DNS Worker checks (when configured)
             tmdb-token                   the gate's Movies & TV lookups
 photos      ente-key-encryption, ente-key-hash, ente-jwt-secret, ente-ott,
-            ente-demo-password, ente-storage-password,
+            ente-demo-password,
             garage-key-id/-secret        ente's own bucket key
 library     library-key-id/-secret       the libraries bucket
 vault       vault-key-id/-secret, vault-oidc-secret

@@ -166,8 +166,9 @@ libraries          every object under each of their libraries' prefixes
                    the home controllers they vouched for
                    (controllers/<label>/), with the gate's record of
                    them (the gate that holds the bucket key)       dav.rs forget, controller.rs
-photos             their Ente account, through museum's admin delete with
-                   the ledger's admin login, every 5 minutes      dd forget-photos
+photos             their Ente account, deleted by museum itself once the
+                   box lists them in its dd_delete table; no
+                   admin account, every 5 minutes                 dd-forget-photos
 passwords          their Vaultwarden account, through upstream's admin
                    delete on loopback, with a token made at boot,
                    every 5 minutes                                dd-forget-passwords

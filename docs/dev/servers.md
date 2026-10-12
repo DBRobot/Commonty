@@ -16,7 +16,7 @@ scripts/   what a person runs around a box: reports, reinstall, restore, the lap
 secrets/   each box's secrets, sops-encrypted
 fleet/     what the fleet is: the boxes, their roles, the members, and the
            owner's policy (policy.json: owner, domain, repo, allowanceGb,
-           people.<name>.{ssh,paperKey}, ownHardware, forgeMirrors)
+           people.<name>.{ssh,paperKey}, forgeMirrors)
 data/      data the services are built with (data/games/catalogue.json)
 ```
 
@@ -259,8 +259,7 @@ reach each other on localhost), `perFleet` for a role exactly that many
 boxes run. `checks.role-fit` ([`nix/lib/fit.nix`](../../nix/lib/fit.nix))
 fails when a box in `fleet/boxes.json` breaks any of it, or names a role
 `roles.json` does not have. `services` lists the needs' service names a
-role runs; one listed in the policy's `ownHardware` may only run on a box
-whose `box.json` owner is the fleet's owner, and `role-fit` checks it.
+role runs.
 
 Every box also keeps itself tidy ([`nix/roles/core.nix`](../../nix/roles/core.nix)
 and the modules it names):
