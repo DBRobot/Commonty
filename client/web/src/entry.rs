@@ -165,6 +165,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
+            signed_out: 0,
             version: 1,
             updated: 1,
         };
@@ -210,6 +211,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
+            signed_out: 0,
             version: 4,
             updated: 4,
         };
@@ -250,6 +252,7 @@ mod tests {
                 created: 1,
             }],
             terms: None,
+            signed_out: 0,
             version: 4,
             updated: 4,
         };

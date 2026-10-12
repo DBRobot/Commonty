@@ -231,6 +231,16 @@ from before is not, since any name of the domain can set one in a browser
 (its owner's own session, to sign the browser in as them). Signing out
 clears both.
 
+**Signing out everywhere** is the person's own word, in their entry:
+`signed_out`, a time, signed with the rest of it and carried to every box
+by the directory like any other version. Every box then ends each of the
+person's sessions it began before that time, and refuses any sign-in the
+id page made before it (`check_delegation`). It only moves forward: a
+later version may not take it back. The Devices tab's "sign out everywhere
+else" signs it with the passkey (`POST /_dd/signout/start`, then
+`/_dd/signout/sign`); an account whose root is a key on a device signs it
+there (`dd device sign-out`).
+
 **Metrics** are a box's owner's (`box.json` owner, `VERIFY_OWNER`) and the
 admin's (`policy.json` owner, `VERIFY_ADMIN`): `metrics.<domain>` and a
 box's own `metrics.<box>.<domain>` answer nobody else. **A box that

@@ -6,7 +6,7 @@ use identity::SignedEntry;
 
 pub use account::{
     ROOT, add_library, admit, admit_passkey, create, load_root, ours, recover, remove_device,
-    remove_passkey,
+    remove_passkey, sign_out_everywhere,
 };
 pub use directory::{fetch, http, newest};
 

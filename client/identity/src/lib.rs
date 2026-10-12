@@ -41,6 +41,10 @@ pub enum Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
 /// What a person publishes about themselves. Field order is the canonical
 /// form: serde keeps it, and the signature is over exactly these bytes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -79,6 +83,12 @@ pub struct Entry {
     /// Absent on entries made before it was asked, which stay valid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terms: Option<String>,
+    /// Every sign-in made before this (unix seconds) is over, on every box:
+    /// "sign out everywhere", in the person's own word, signed with the rest
+    /// of the entry - no box can say it for them, and every box reads it.
+    /// Absent when never said, so entries signed before it still verify.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub signed_out: u64,
     /// strictly increasing; a box never accepts an older or equal one
     pub version: u64,
     pub updated: u64,
@@ -717,6 +727,19 @@ pub fn accept(existing: Option<&SignedEntry>, new: &SignedEntry) -> Result<()> {
     if new.entry.name != old.entry.name {
         return Err(Error::Rejected("name mismatch".into()));
     }
+    // A sign-out is a time that has come: one set ahead would end every
+    // sign-in to come as well, and lock the person out of their own account.
+    // Two minutes for a clock running fast, as a sign-in's own time is given
+    // (session.rs) - no more than that is ever refused for it.
+    if new.entry.signed_out > now() + 120 {
+        return Err(Error::Rejected("a sign-out cannot be in the future".into()));
+    }
+    // and it only moves forward - a later version may not bring back the
+    // sign-ins an earlier one ended, a recovery no more than any other:
+    // taking an account back must not hand back the sessions it ended
+    if new.entry.signed_out < old.entry.signed_out {
+        return Err(Error::Rejected("a sign-out cannot be taken back".into()));
+    }
     if new.entry.version <= old.entry.version {
         return Err(Error::Rejected(format!(
             "version {} is not newer than {}",
@@ -1020,6 +1043,7 @@ mod tests {
                 proof: prove(&ck, &inv.invite.public_key, root, 200),
             }),
             terms: None,
+            signed_out: 0,
             version: 1,
             updated: 200,
         };
@@ -1052,6 +1076,7 @@ mod tests {
             libraries: vec![],
             grant: None,
             terms: None,
+            signed_out: 0,
             version: 1,
             updated: TERMS_ASKED_FROM - 1,
         };
@@ -1094,6 +1119,7 @@ mod tests {
             libraries: vec![],
             grant: None,
             terms: None,
+            signed_out: 0,
             version: 1,
             updated: 1,
         };
@@ -1164,6 +1190,7 @@ mod tests {
                 grant: None,
                 libraries: vec![],
                 terms: None,
+                signed_out: 0,
                 version,
                 updated: version,
             },
@@ -1301,6 +1328,7 @@ mod tests {
                 recovered_from: vec![],
                 devices: vec![dev(&generate())],
                 terms: None,
+                signed_out: 0,
                 version: 1,
                 updated: 1,
             };
@@ -1328,6 +1356,94 @@ mod tests {
         }
     }
 
+    /// Signing out everywhere: said, only forward, never ahead of time.
+    #[test]
+    fn a_sign_out_is_now_or_before_and_only_moves_forward() {
+        let root = generate();
+        let e1 = Entry {
+            passkeys: vec![],
+            grant: None,
+            libraries: vec![],
+            recovered_from: vec![],
+            terms: None,
+            name: "sarah".into(),
+            root: encode_public(&root.verifying_key()),
+            recovery: String::new(),
+            devices: vec![dev(&generate())],
+            signed_out: 0,
+            version: 1,
+            updated: 1,
+        };
+        let s1 = sign(e1.clone(), &root).unwrap();
+        accept(None, &s1).unwrap();
+        let next = |prev: &Entry, signed_out: u64| {
+            let mut e = prev.clone();
+            e.version += 1;
+            e.signed_out = signed_out;
+            sign(e, &root).unwrap()
+        };
+        let t = now();
+        let s2 = next(&e1, t);
+        accept(Some(&s1), &s2).expect("signed out now");
+        // taken back by the same root: refused
+        assert!(accept(Some(&s2), &next(&s2.entry, t - 100)).is_err());
+        assert!(accept(Some(&s2), &next(&s2.entry, 0)).is_err());
+        // set ahead, which would lock the person out of every sign-in to come
+        assert!(accept(Some(&s2), &next(&s2.entry, t + 3600)).is_err());
+        assert!(accept(Some(&s1), &next(&e1, u64::MAX)).is_err());
+        // moved forward again: fine
+        accept(Some(&s2), &next(&s2.entry, t + 1)).expect("later");
+    }
+
+    /// Taking an account back with the recovery key brings back no sign-in
+    /// a sign-out ended: a recovered entry that drops `signed_out` is
+    /// refused, and one that keeps it (or moves it on) stands.
+    #[test]
+    fn a_recovery_does_not_take_a_sign_out_back() {
+        let root = generate();
+        let recovery = generate();
+        let e1 = Entry {
+            passkeys: vec![],
+            grant: None,
+            libraries: vec![],
+            recovered_from: vec![],
+            terms: None,
+            name: "sarah".into(),
+            root: encode_public(&root.verifying_key()),
+            recovery: encode_public(&recovery.verifying_key()),
+            devices: vec![dev(&generate())],
+            signed_out: 0,
+            version: 1,
+            updated: 1,
+        };
+        let s1 = sign(e1.clone(), &root).unwrap();
+        accept(None, &s1).unwrap();
+        let t = now();
+        let mut e2 = e1.clone();
+        e2.version = 2;
+        e2.signed_out = t;
+        let s2 = sign(e2.clone(), &root).unwrap();
+        accept(Some(&s1), &s2).unwrap();
+        // the recovery: a new root, co-signed by the recovery key
+        let new_root = generate();
+        let back = |signed_out: u64| {
+            let mut e = e2.clone();
+            e.version = 3;
+            e.recovered_from = vec![e2.root.clone()];
+            e.root = encode_public(&new_root.verifying_key());
+            e.recovery = encode_public(&generate().verifying_key());
+            e.signed_out = signed_out;
+            sign_recovery(e, &new_root, &recovery).unwrap()
+        };
+        assert!(
+            accept(Some(&s2), &back(0)).is_err(),
+            "a recovery undid a sign-out"
+        );
+        assert!(accept(Some(&s2), &back(t - 1)).is_err());
+        accept(Some(&s2), &back(t)).expect("kept");
+        accept(Some(&s2), &back(now())).expect("moved on");
+    }
+
     #[test]
     fn birth_update_rotation_and_the_things_a_box_must_refuse() {
         let root = generate();
@@ -1343,6 +1459,7 @@ mod tests {
             recovered_from: vec![],
             devices: vec![dev(&d1)],
             terms: None,
+            signed_out: 0,
             version: 1,
             updated: 1,
         };
@@ -1442,6 +1559,7 @@ mod tests {
             }),
             libraries: vec![],
             terms: None,
+            signed_out: 0,
             version: 1,
             updated: 1,
         };
@@ -1550,6 +1668,7 @@ mod tests {
                 created: 1,
             }],
             terms: None,
+            signed_out: 0,
             version: 1,
             updated: 1,
         };

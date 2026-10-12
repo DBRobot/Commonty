@@ -997,6 +997,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
+            signed_out: 0,
             version: 1,
             updated: 1,
         };

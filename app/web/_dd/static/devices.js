@@ -73,6 +73,19 @@ function endMailElsewhere() {
   frame.contentWindow.postMessage('end-others', new URL(frame.src).origin);
 }
 
+// Every box, not only this one: the entry says every sign-in before now is
+// over, signed with the passkey, and each box reads it there. An account
+// whose key is on a device signs that on the device instead.
+async function signOutEverywhere() {
+  const r = await fetch('/_dd/signout/start', { method: 'POST' });
+  if (r.status === 409) return 'Signed out here. Your account\'s key is on your own computer: sign out everywhere from there to end every other box\'s sign-ins too.';
+  if (!r.ok) throw new Error(await r.text());
+  const { publicKey, ceremony } = await r.json();
+  const cred = await navigator.credentials.get({ publicKey: requestOptions(publicKey) });
+  await post('/_dd/signout/sign', assertion(cred), { 'x-dd-ceremony': ceremony });
+  return 'Signed out everywhere.';
+}
+
 async function endSessions(body, button) {
   button.disabled = true;
   const send = () => fetch('/_dd/signins/end', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -83,9 +96,14 @@ async function endSessions(body, button) {
       r = await send();
     }
     if (!r.ok) throw new Error(await r.text());
-    if (body.others) endMailElsewhere();
+    let said = '';
+    if (body.others) {
+      endMailElsewhere();
+      said = await signOutEverywhere();
+    }
     await load();
     render();
+    if (said) $('dv-msg').textContent = said;
   } catch (e) {
     button.disabled = false;
     $('dv-msg').textContent = e.name === 'NotAllowedError' ? 'Your passkey was not used.' : String(e.message || e);

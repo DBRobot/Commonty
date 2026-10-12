@@ -1312,6 +1312,7 @@ mod tests {
                 })
                 .collect(),
             terms: Some(identity::TERMS.into()),
+            signed_out: 0,
             version,
             updated: identity::now(),
         }

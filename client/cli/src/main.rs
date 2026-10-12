@@ -527,6 +527,10 @@ enum DeviceCmd {
     /// Devices shows it): it is signed out everywhere and cannot sign in
     /// again. Needs the root key on this machine.
     Remove { fingerprint: String },
+    /// Sign out everywhere: every sign-in made before now ends, on every box
+    /// and in every browser, the boxes' own included. Your devices keep their
+    /// keys and sign in again. Needs the root key on this machine.
+    SignOut,
 }
 
 #[derive(Subcommand)]
@@ -1789,6 +1793,19 @@ async fn main() -> Result<()> {
                     .context("no name here - `dd identity new` or `dd identity import`")?;
                 let signed = who::remove_device(&directories, &name, &root, &fingerprint).await?;
                 println!("device removed; version {}", signed.entry.version);
+            }
+            DeviceCmd::SignOut => {
+                let root = who::load_root(&keys)?.context(
+                    "no root key on this machine - `dd identity export` on one that has it",
+                )?;
+                let name = keys
+                    .get(USER)?
+                    .context("no name here - `dd identity new` or `dd identity import`")?;
+                let signed = who::sign_out_everywhere(&directories, &name, &root).await?;
+                println!(
+                    "signed out everywhere: every sign-in before now is over; version {}",
+                    signed.entry.version
+                );
             }
         },
 

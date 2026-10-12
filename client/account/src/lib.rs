@@ -412,6 +412,7 @@ pub async fn create(
         grant,
         libraries: vec![],
         terms: Some(terms.to_string()),
+        signed_out: 0,
         version: 1,
         updated: identity::now(),
     };
@@ -502,6 +503,26 @@ pub async fn admit(
         });
     }
     identity::drop_passkey_keys(&mut entry);
+    entry.version += 1;
+    entry.updated = identity::now();
+    let signed = identity::sign(entry, root)?;
+    publish(dirs, &signed).await?;
+    Ok(signed)
+}
+
+/// Every sign-in made before now is over, on every box: the entry says so,
+/// signed with the root, and each box reads it there. This device's own key
+/// is untouched; it signs in again as it always does.
+pub async fn sign_out_everywhere(
+    dirs: &[String],
+    name: &str,
+    root: &ed25519_dalek::SigningKey,
+) -> Result<SignedEntry> {
+    let cur = ours(dirs, name, root).await?;
+    let mut entry = cur.entry.clone();
+    // nothing published from now on keeps a key for a passkey
+    identity::drop_passkey_keys(&mut entry);
+    entry.signed_out = identity::now();
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
@@ -644,6 +665,9 @@ pub async fn recover(
         grant: cur.entry.grant.clone(),
         libraries: vec![],
         terms: cur.entry.terms.clone(),
+        // taking an account back ends every sign-in made before it - the
+        // ones whoever had it holds, and any a sign-out had ended already
+        signed_out: cur.entry.signed_out.max(identity::now()),
         version: cur.entry.version + 1,
         updated: identity::now(),
     };
@@ -747,6 +771,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
+            signed_out: 0,
             version: 1,
             updated: 1,
         }

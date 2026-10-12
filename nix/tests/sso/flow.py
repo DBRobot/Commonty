@@ -316,6 +316,38 @@ with sync_playwright() as p:
     )
     check("nor one posted by a box's page", status == 403)
 
+    # 3b. signed out everywhere: the entry says every sign-in before now is
+    # over (as `dd device sign-out` or the Devices tab would sign it), and
+    # each box reads it - sessions end, and the sign-in kept in this browser
+    # no longer hands off
+    import time as _t
+
+    path = "gate/keys/tester.json"
+    signed = json.load(open(path))
+    _t.sleep(1.1)
+    signed["entry"]["signed_out"] = int(_t.time())
+    json.dump(signed, open(path, "w"))
+    gone = page.evaluate("() => fetch('/_dd/me').then(r => r.json()).catch(() => null)")
+    check(
+        "signed out everywhere: this name's session is over",
+        (gone or {}).get("user") != "tester",
+    )
+    page.goto("https://files.commonty.test/_dd/me")
+    check(
+        "and the other name's",
+        "tester" not in (page.content() or "")
+        or page.url.startswith("https://id.commonty.test"),
+    )
+    before = len(prompts)
+    page.goto("https://home.commonty.test/_dd/login?rd=/_dd/me")
+    page.wait_for_url("https://home.commonty.test/_dd/sso", timeout=20000)
+    check(
+        "the sign-in kept from before is refused at the box",
+        "not accepted" in page.content() and len(prompts) == before,
+    )
+    del signed["entry"]["signed_out"]
+    json.dump(signed, open(path, "w"))
+
     # 4. signing out here forgets the browser's sign-in: the next name asks again
     page.goto("https://id.commonty.test/out?then=https://id.commonty.test/")
     page.wait_for_selector("#signin:not([hidden])")

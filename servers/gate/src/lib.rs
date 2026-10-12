@@ -810,16 +810,36 @@ impl App {
         if self.signins.is_ended(id) {
             return false;
         }
+        // an entry this box cannot read is no reason to keep a session: the
+        // sign-out it might say is unknown. None is an account not in the
+        // directory (a sign-up waiting), which has said nothing.
+        let entry = match self.entry(user) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("session of {user}: entry unreadable: {e:#}");
+                return false;
+            }
+        };
         if let Some(device) = self.signins.device_of(id) {
-            let still = self
-                .entry(user)
-                .ok()
-                .flatten()
+            let still = entry
+                .as_ref()
                 .is_some_and(|e| e.entry.devices.iter().any(|d| d.fingerprint == device));
             if !still {
                 self.signins.end(id);
                 return false;
             }
+        }
+        // signed out everywhere since this session began: the person's own
+        // word, in their entry, which every box reads
+        if let Some(e) = &entry
+            && e.entry.signed_out > 0
+            && self
+                .signins
+                .first_of(id)
+                .is_none_or(|first| first < e.entry.signed_out)
+        {
+            self.signins.end(id);
+            return false;
         }
         true
     }
@@ -1346,6 +1366,7 @@ async fn join_finish(
         libraries: vec![],
         // what they agreed to, signed by their passkey with the rest
         terms: Some(identity::TERMS.to_string()),
+        signed_out: 0,
         version: 1,
         updated: now,
     };
@@ -1371,6 +1392,105 @@ async fn join_finish(
         }
     }))
     .into_response()
+}
+
+/// POST /_dd/signout/start: sign out everywhere, said with the passkey -
+/// the entry, one version on, saying every sign-in before now is over. The
+/// browser signs it and /_dd/signout/sign takes it to the directory, which
+/// every box reads. A key on a device signs it there instead (409).
+async fn signout_start(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    let Some(user) = app.signed_in(cookie) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Some(signed) = app.entry(&user).ok().flatten() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !signed.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "device": true })),
+        )
+            .into_response();
+    }
+    let mut entry = signed.entry;
+    // nothing published from now on keeps a key for a passkey
+    identity::drop_passkey_keys(&mut entry);
+    entry.signed_out = identity::now();
+    entry.version += 1;
+    entry.updated = identity::now();
+    let challenge = match identity::challenge(&entry) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("sign out: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let allow: Vec<serde_json::Value> = entry
+        .passkeys
+        .iter()
+        .map(|p| serde_json::json!({ "type": "public-key", "id": p.id }))
+        .collect();
+    let ceremony = app.ceremony_put(Ceremony::JoinSign {
+        entry: Box::new(entry),
+    });
+    Json(serde_json::json!({
+        "ceremony": ceremony,
+        "publicKey": {
+            "challenge": B64_URL.encode(challenge),
+            "timeout": 60000,
+            "rpId": app.domain,
+            "allowCredentials": allow,
+            "userVerification": "preferred",
+        }
+    }))
+    .into_response()
+}
+
+/// POST /_dd/signout/sign: the passkey's signature over the entry from
+/// /_dd/signout/start, taken to the directory - published, or an error;
+/// never held here, where it would end nothing anywhere else. This
+/// browser keeps a session, begun after the sign-out.
+async fn signout_sign(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Json(cred): Json<PublicKeyCredential>,
+) -> Response {
+    let Some(Ceremony::JoinSign { entry }) = headers
+        .get("x-dd-ceremony")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|id| app.ceremony_take(id))
+    else {
+        return (StatusCode::BAD_REQUEST, "no ceremony").into_response();
+    };
+    let assertion = identity::Assertion {
+        authenticator_data: B64_URL.encode(&cred.response.authenticator_data),
+        client_data_json: B64_URL.encode(&cred.response.client_data_json),
+        signature: B64_URL.encode(&cred.response.signature),
+    };
+    let Ok(signature) = serde_json::to_vec(&assertion).map(|v| B64.encode(v)) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let user = entry.name.clone();
+    let signed = identity::SignedEntry {
+        entry: *entry,
+        signature,
+        recovery_signature: None,
+    };
+    if let Err((status, why)) = app.directory.admit(signed).await {
+        return (status, why).into_response();
+    }
+    let (set, id, exp) = app.sessions.issue_noted(&user);
+    let agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    app.signins.saw(&user, &id, exp, agent, None);
+    app.saw_passkey(&id);
+    let mut r = Json(serde_json::json!({ "user": user, "signed_out": true })).into_response();
+    r.headers_mut()
+        .insert("set-cookie", HeaderValue::from_str(&set).unwrap());
+    r
 }
 
 async fn join_sign(
@@ -1418,7 +1538,13 @@ async fn join_sign(
         return (status, why).into_response();
     }
     // the entry was just signed with the passkey made a moment ago
-    let (set, id, _) = app.sessions.issue_noted(&user);
+    let (set, id, exp) = app.sessions.issue_noted(&user);
+    let agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    // noted when it began: a sign-out signed just before it is not its end
+    app.signins.saw(&user, &id, exp, agent, None);
     app.saw_passkey(&id);
     let mut r = Json(serde_json::json!({ "user": user })).into_response();
     r.headers_mut()
@@ -2842,6 +2968,8 @@ pub async fn start(
         .route("/_dd/leave", get(leaving::mine))
         .route("/_dd/leave/start", post(leaving::start))
         .route("/_dd/leave/sign", post(leaving::sign))
+        .route("/_dd/signout/start", post(signout_start))
+        .route("/_dd/signout/sign", post(signout_sign))
         .route("/_dd/demo", get(demo_page).post(demo_post))
         .route("/_dd/web/{file}", get(web_file))
         .route("/_dd/static/{file}", get(static_file))
@@ -3580,6 +3708,7 @@ mod tests {
                     grant: None,
                     libraries: vec![],
                     terms: Some(identity::TERMS.into()),
+                    signed_out: 0,
                     version: 1,
                     updated: identity::now(),
                 },

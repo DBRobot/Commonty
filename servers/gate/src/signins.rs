@@ -131,6 +131,17 @@ impl SignIns {
     }
 
     /// The device a session was signed in by, if one was.
+    /// when this box first saw the session
+    pub fn first_of(&self, id: &str) -> Option<u64> {
+        self.state
+            .lock()
+            .unwrap()
+            .0
+            .sessions
+            .get(id)
+            .map(|s| s.first)
+    }
+
     pub fn device_of(&self, id: &str) -> Option<String> {
         self.state
             .lock()

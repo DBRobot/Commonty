@@ -54,6 +54,7 @@ impl Tester {
             grant: None,
             libraries: vec![],
             terms: None,
+            signed_out: 0,
             version,
             updated: version,
         };

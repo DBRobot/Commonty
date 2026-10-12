@@ -78,6 +78,10 @@ pub fn check_delegation(entry: &Entry, d: &Delegation, origin: &str, now: u64) -
     if d.exp < d.iat || d.exp - d.iat > LIFE + SKEW {
         return Err(Error::Rejected("longer than a sign-in lasts".into()));
     }
+    // signed out everywhere since: the person's own word, in the entry
+    if d.iat < entry.signed_out {
+        return Err(Error::Rejected("signed out everywhere since".into()));
+    }
     let challenge = delegation_challenge(&d.user, &d.key, &d.sid, d.iat, d.exp);
     crate::check_login(
         entry,
@@ -183,6 +187,7 @@ mod tests {
             libraries: vec![],
             recovered_from: vec![],
             terms: None,
+            signed_out: 0,
             version: 1,
             updated: 0,
         }
@@ -289,6 +294,15 @@ mod tests {
             "commonty.org",
         );
         assert!(check_delegation(&e, &long, ORIGIN, NOW).is_err());
+        // made before the person signed out everywhere
+        let mut later = e.clone();
+        later.signed_out = d.iat + 1;
+        assert!(check_delegation(&later, &d, ORIGIN, NOW).is_err());
+        later.signed_out = d.iat;
+        assert!(
+            check_delegation(&later, &d, ORIGIN, NOW).is_ok(),
+            "the same second is still after"
+        );
         // a sign-in id that could be anything
         let mut odd = d.clone();
         odd.sid = "a/b".into();
