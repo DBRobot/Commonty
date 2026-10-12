@@ -253,7 +253,11 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
         ("GET", p) if p.starts_with("/s/") => file(&a.web, &p[3..]),
         ("GET", "/api/checks") => {
             let c = setup::checks(Path::new("/sys"), Path::new("/dev"));
-            let p = setup::plan(&a.firmware, &setup::table(), &["tpm", "power", "virt"]);
+            let p = setup::plan(
+                &a.firmware,
+                &setup::table(),
+                &["tpm", "power", "virt", "setupmode"],
+            );
             let product = |f: &str| {
                 std::fs::read_to_string(format!("/sys/class/dmi/id/{f}"))
                     .map(|s| s.trim().to_string())
@@ -272,7 +276,11 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
             }))
         }
         ("POST", "/api/firmware") => {
-            let p = setup::plan(&a.firmware, &setup::table(), &["tpm", "power", "virt"]);
+            let p = setup::plan(
+                &a.firmware,
+                &setup::table(),
+                &["tpm", "power", "virt", "setupmode"],
+            );
             for c in &p.change {
                 std::fs::write(&c.path, &c.value)
                     .with_context(|| format!("setting {} to {}", c.attribute, c.value))?;

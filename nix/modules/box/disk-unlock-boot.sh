@@ -34,7 +34,7 @@ esp() {
   mount -o ro "/dev/disk/by-partuuid/$uuid" "$w/esp" || return 1
   cp "$w/esp/dd/unlock/"* "$KEYS"/ 2>/dev/null
   umount "$w/esp"
-  [ -e "$KEYS/sig.priv" ] && [ -e "$KEYS/half.priv" ]
+  [ -e "$KEYS/sig.priv" ] && { [ -e "$KEYS/half.priv" ] || { [ -n "$TPM_ONLY" ] && [ -e "$KEYS/bootstrap.priv" ]; }; }
 }
 tries=0
 until esp; do
@@ -106,11 +106,24 @@ done
 
 # The TPM's half, unsealed under PCR 7 as it was at enrolment
 tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
-tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/half.pub" -r "$KEYS/half.priv" -c "$w/half.ctx"
-tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
-tpm2_policypcr -Q -S "$w/h.ctx" -l sha256:7
-tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half" || true
-tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
+# a first-boot seal stopped after its re-key: its new half is the one
+if [ -n "$TPM_ONLY" ] && [ -e "$KEYS/rekeyed" ] && [ -e "$KEYS/half.priv.new" ]; then
+  mv "$KEYS/half.pub.new" "$KEYS/half.pub" && mv "$KEYS/half.priv.new" "$KEYS/half.priv"
+fi
+if [ -e "$KEYS/half.priv" ]; then
+  tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/half.pub" -r "$KEYS/half.priv" -c "$w/half.ctx"
+  tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
+  tpm2_policypcr -Q -S "$w/h.ctx" -l sha256:7
+  tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half" || true
+  tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
+else
+  # a box that joined, at its first boot: the installer's half, under no
+  # PCR, opens the disk this once; dd-unlock-seal then seals a new half
+  # under this signed boot and re-keys the pool, and this one opens nothing
+  say "dd-unlock: first boot: the installer's key, once"
+  tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/bootstrap.pub" -r "$KEYS/bootstrap.priv" -c "$w/half.ctx"
+  tpm2_unseal -c "$w/half.ctx" -o "$w/half" || true
+fi
 # no half, no key: never one made from the rest alone. A boot the TPM does
 # not know (another system, a changed command line) stops here, locked
 if [ "$(wc -c <"$w/half" 2>/dev/null || echo 0)" -ne 32 ]; then

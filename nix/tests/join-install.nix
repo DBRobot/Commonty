@@ -66,6 +66,7 @@ in
         system.name = "blank";
         virtualisation.useBootLoader = true;
         virtualisation.useEFIBoot = true;
+        virtualisation.useSecureBoot = true;
         virtualisation.useDefaultFilesystems = false;
         # blank's, already there: no image of its own to take them from
         virtualisation.efi.keepVariables = false;
@@ -126,6 +127,9 @@ in
         systemd.services.dd-box-setup.environment.SETUP_DRIVE = "/root/drive";
         virtualisation.tpm.enable = true;
         virtualisation.useEFIBoot = true;
+        # its firmware's Secure Boot in setup mode, no keys yet: the box
+        # enrolls its own
+        virtualisation.useSecureBoot = true;
         virtualisation.emptyDiskImages = [
           8192
           8192

@@ -109,11 +109,12 @@ def finish(kind):
 # a marker on the disk that must survive
 blank.succeed("echo keep | dd of=/dev/vdc bs=512 seek=2048 conv=notrunc 2>/dev/null")
 
-# what the screen says of this machine: UEFI, a TPM, Secure Boot off, its
-# disks seen; no firmware driver here, so nothing to change from it
+# what the screen says of this machine: UEFI, a TPM, Secure Boot in setup
+# mode, its disks seen; no firmware driver here, so nothing to change from it
 c = api("checks")
 assert c["checks"]["uefi"] and c["checks"]["tpm"], c
 assert not c["checks"]["secure_boot"] and not c["checks"]["raid"], c
+assert c["checks"]["setup_mode"], c
 assert c["firmware"]["driver"] is None and c["firmware"]["change"] == [], c
 assert c["drive"]["ticket"] and c["drive"]["backupKey"], c
 
@@ -123,6 +124,28 @@ assert "not an internal disk here" in out, out
 # two blank internal disks and none named: nothing is touched
 out = blank.fail("dd-join-install 2>&1")
 assert "2 internal disks" in out, out
+
+# an old release, signed as it was: refused
+forge.succeed('sed -i \'s/"issued": 1000/"issued": 50/\' /root/payload.json')
+forge.succeed(
+    f"{env} {nix['dd']} release sign /root/payload.json --out /srv/release/current.json"
+)
+out = blank.fail("DISK=/dev/vdc dd-join-install 2>&1")
+assert "no release the release key signed" in out, out
+assert "an old release, refused" in out, out
+# a release not signed by the release key: nothing installed
+forge.succeed('sed -i \'s/"counter": 1/"counter": 2/\' /srv/release/current.json')
+out = blank.fail("DISK=/dev/vdc dd-join-install 2>&1")
+assert "no release the release key signed" in out, out
+assert (
+    blank.succeed("dd if=/dev/vdc bs=512 skip=2048 count=1 2>/dev/null | head -c4")
+    == "keep"
+)
+# and the fleet's release as it was, for the install
+forge.succeed('sed -i \'s/"issued": 50/"issued": 1000/\' /root/payload.json')
+forge.succeed(
+    f"{env} {nix['dd']} release sign /root/payload.json --out /srv/release/current.json"
+)
 
 # what is on the disk to be wiped: a filesystem with something in it
 blank.succeed(
@@ -168,7 +191,6 @@ assert blank.succeed("jq -r .owner /mnt/var/lib/dd/box/box.json").strip() == "nu
 # its pool encrypted, under the key its TPM's half makes; nothing in the
 # clear but the pool itself
 assert blank.succeed("zfs get -H -o value encryption tank/enc").strip() == "aes-256-gcm"
-blank.succeed("test -s /mnt/boot/dd/unlock/half.priv")
 blank.fail("test -e /run/dd/disk.key")
 blank.succeed("jq -e '.encrypted and .unlock == \"tpm\"' /mnt/var/lib/dd/box/box.json")
 # the Wi-Fi sealed to the box, never in the clear on its disk; the ticket kept
@@ -183,34 +205,42 @@ blank.succeed(f'[ "$(readlink -f /mnt/nix/var/nix/profiles/system)" = {system} ]
 # and its agent starts at that release: none signed before it takes it back
 assert blank.succeed("cat /mnt/var/lib/dd-agent/counter").strip() == "1"
 
-# an old release, signed as it was: refused
-forge.succeed('sed -i \'s/"issued": 1000/"issued": 50/\' /root/payload.json')
-forge.succeed(
-    f"{env} {nix['dd']} release sign /root/payload.json --out /srv/release/current.json"
+# Secure Boot keys of its own, enrolled: setup mode is over, its boot signed
+assert "Secure Boot keys of its own enrolled" in out, out
+blank.succeed(
+    "[ \"$(od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c | tr -d ' ')\" = 0 ]"
 )
-out = blank.fail("DISK=/dev/vdc dd-join-install 2>&1")
-assert "no release the release key signed" in out, out
-assert "an old release, refused" in out, out
-# a release not signed by the release key: nothing installed
-forge.succeed('sed -i \'s/"counter": 1/"counter": 2/\' /srv/release/current.json')
-out = blank.fail("DISK=/dev/vdc dd-join-install 2>&1")
-assert "no release the release key signed" in out, out
-assert (
-    blank.succeed("dd if=/dev/vdc bs=512 skip=2048 count=1 2>/dev/null | head -c4")
-    == "keep"
+blank.succeed(
+    "test -s /mnt/var/lib/sbctl/keys/db/db.key && test -s /mnt/var/lib/dd/sig.auth"
 )
+blank.succeed("test -s /mnt/boot/dd/unlock/bootstrap.priv")
+blank.fail("test -e /mnt/boot/dd/unlock/half.priv")
 
-# the installed disk boots on its own: the initrd opens the pool with the
-# TPM's half alone, no network, nobody at the screen
+# its first boot, with Secure Boot on: the installer's half opens the pool
+# once, then a half sealed under this signed boot replaces it, and the pool
+# is re-keyed to it
 blank.succeed("umount -R /mnt && zpool export tank && sync")
 blank.shutdown()
 target.state_dir = blank.state_dir
 target.start()
 target.wait_for_unit("multi-user.target")
-assert target.succeed("zfs get -H -o value keystatus tank/enc").strip() == "available"
 target.succeed(
-    "journalctl -b -u dd-disk-key --no-pager | grep -q 'dd-unlock: unlocked'"
+    "[ \"$(od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c | tr -d ' ')\" = 1 ]"
 )
+target.succeed("journalctl -b -u dd-disk-key --no-pager | grep -q 'first boot'")
+target.wait_until_succeeds(
+    "journalctl -b -u dd-unlock-seal --no-pager | grep -q 'sealed under this box'"
+)
+target.succeed("test -s /boot/dd/unlock/half.priv")
+target.fail("test -e /boot/dd/unlock/bootstrap.priv")
+
+# and every boot after: the sealed half alone, nobody at the screen
+target.shutdown()
+target.start()
+target.wait_for_unit("multi-user.target")
+assert target.succeed("zfs get -H -o value keystatus tank/enc").strip() == "available"
+out = target.succeed("journalctl -b -u dd-disk-key --no-pager")
+assert "dd-unlock: unlocked" in out and "first boot" not in out, out
 
 # the same unlock, run again on the box, makes the key; under a boot the
 # TPM does not know (PCR 7 changed), it makes none: never a key from less

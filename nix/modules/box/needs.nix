@@ -115,6 +115,7 @@
     units = [
       "dd-disk-check"
       "dd-disk-key-forget"
+      "dd-unlock-seal"
     ];
     everyBox = true;
     base = {

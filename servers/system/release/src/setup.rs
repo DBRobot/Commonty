@@ -131,9 +131,10 @@ pub struct Checks {
     pub uefi: bool,
     /// a TPM 2.0 the kernel found
     pub tpm: bool,
-    /// Secure Boot on: the installer does not boot then, so this is the
-    /// firmware's word only
+    /// Secure Boot on (the firmware's word)
     pub secure_boot: bool,
+    /// Secure Boot in setup mode, its keys cleared: the box enrolls its own
+    pub setup_mode: bool,
     /// a disk controller in RAID mode (Intel RST): its disks are hidden
     pub raid: bool,
     /// virtual machines can run (KVM): games and CI need it
@@ -158,6 +159,7 @@ pub fn checks(sys: &Path, dev: &Path) -> Checks {
         uefi: sys.join("firmware/efi").is_dir(),
         tpm: read(&sys.join("class/tpm/tpm0/tpm_version_major")).as_deref() == Some("2"),
         secure_boot: efivar(sys, "SecureBoot") == Some(1),
+        setup_mode: efivar(sys, "SetupMode") == Some(1),
         raid,
         virt: dev.join("kvm").exists(),
     }
@@ -309,6 +311,7 @@ mod tests {
                 uefi: true,
                 tpm: true,
                 secure_boot: false,
+                setup_mode: false,
                 raid: true,
                 virt: false
             }

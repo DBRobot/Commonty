@@ -24,11 +24,18 @@ if [ -n "${SOFT_KEY:-}" ]; then
 else
   # as dd-control signs (servers/system/control/cmd/dd-control): the key
   # dd-unlock-enrol made, usable only under this box's signed boot (PCR 7)
-  tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx" &&
-    tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/sig.pub" -r "$KEYS/sig.priv" -c "$w/sig.ctx" &&
-    tpm2_startauthsession -Q --policy-session -S "$w/s.ctx" &&
-    tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 &&
-    tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p "session:$w/s.ctx" -o "$w/sig.bin" "$w/msg"
+  # (a box that joined: its key's password on its encrypted disk instead)
+  if [ -s /var/lib/dd/sig.auth ]; then
+    tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx" &&
+      tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/sig.pub" -r "$KEYS/sig.priv" -c "$w/sig.ctx" &&
+      tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p file:/var/lib/dd/sig.auth -o "$w/sig.bin" "$w/msg"
+  else
+    tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx" &&
+      tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/sig.pub" -r "$KEYS/sig.priv" -c "$w/sig.ctx" &&
+      tpm2_startauthsession -Q --policy-session -S "$w/s.ctx" &&
+      tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 &&
+      tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p "session:$w/s.ctx" -o "$w/sig.bin" "$w/msg"
+  fi
   r=$?
   tpm2_flushcontext "$w/s.ctx" >/dev/null 2>&1 || true
   tpm2_flushcontext -t >/dev/null 2>&1 || true

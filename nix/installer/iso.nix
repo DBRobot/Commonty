@@ -37,6 +37,7 @@ let
       pkgs.age-plugin-tpm
       pkgs.age
       pkgs.openssl
+      pkgs.sbctl
       pkgs.jq
       pkgs.util-linux
       pkgs.coreutils

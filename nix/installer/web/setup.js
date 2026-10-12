@@ -67,18 +67,18 @@ function clock(s) {
 const CHECK = {
   uefi: ['Starts by UEFI', 'Set the boot mode to UEFI (not Legacy or CSM) in the firmware settings.'],
   tpm: ['Has a TPM 2.0', 'Turn on the TPM: on Intel it is often called PTT, on AMD fTPM, under Security.'],
-  secureBoot: ['Secure Boot is off', 'Turn Secure Boot off, under Boot or Security.'],
+  setupMode: ['Secure Boot is ready for this box\'s own keys', 'Put Secure Boot in setup mode: under Boot or Security, “Reset to setup mode”, “Clear Secure Boot keys” or “Delete all keys”. The box then enrolls keys of its own and starts nothing else.'],
   raid: ['Its disks can be seen', 'Set the disk controller (SATA mode) to AHCI, not RAID or RST, under Storage.'],
   virt: ['Can run virtual machines', 'Turn on virtualisation: Intel VT-x or AMD-V (SVM), under CPU or Advanced.'],
 };
-const WANT = { tpm: 'tpm', virt: 'virt', power: 'power' };
+const WANT = { tpm: 'tpm', virt: 'virt', power: 'power', setupMode: 'setupmode' };
 
 async function firmware() {
   $('fw-error').hidden = true;
   let v;
   try { v = await api('checks'); } catch (e) { return fail('fw-error', e); }
   const c = v.checks;
-  const ok = { uefi: c.uefi, tpm: c.tpm, secureBoot: !c.secure_boot, raid: !c.raid, virt: c.virt };
+  const ok = { uefi: c.uefi, tpm: c.tpm, setupMode: c.setup_mode, raid: !c.raid, virt: c.virt };
   const fw = v.firmware;
   const changes = new Set(fw.change.map((x) => x.want));
   $('fw-machine').textContent = [v.maker, v.model].filter(Boolean).join(' ') || 'This machine';
@@ -102,8 +102,8 @@ async function firmware() {
   }));
   $('fw-tip').hidden = fw.already.includes('power') || changes.has('power');
   $('fw-set').hidden = fw.change.length === 0;
-  // a box needs UEFI, its TPM, and to see its disks; the rest it can do without
-  can('firmware', ok.uefi && ok.tpm && ok.secureBoot && ok.raid);
+  // a box needs UEFI, its TPM, setup mode, and to see its disks; the rest it can do without
+  can('firmware', ok.uefi && ok.tpm && ok.setupMode && ok.raid);
 }
 $('fw-again').onclick = firmware;
 $('fw-set').onclick = async () => {

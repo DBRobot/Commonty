@@ -234,6 +234,27 @@ in
         };
       };
 
+      # a box that joined, at its first boot with Secure Boot on: the disk's
+      # key sealed under this boot, the installer's half gone
+      systemd.services.dd-unlock-seal = lib.mkIf cfg.tpmOnly {
+        description = "Seal the disk's key under this box's own signed boot";
+        wantedBy = [ "multi-user.target" ];
+        after = [
+          "zfs-mount.service"
+          "local-fs.target"
+        ];
+        before = [ "dd-disk-key-forget.service" ];
+        unitConfig.ConditionPathExists = "/boot/dd/unlock/bootstrap.priv";
+        restartIfChanged = false;
+        path = tools ++ [ config.boot.zfs.package ];
+        environment.POOL = lib.head cfg.pools;
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = builtins.readFile ./disk-unlock-seal.sh;
+      };
+
       # the keys leave memory once every pool has them
       systemd.services.dd-disk-key-forget = {
         description = "Forget the disks' key once the pools are open";

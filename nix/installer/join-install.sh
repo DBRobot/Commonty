@@ -11,6 +11,7 @@
 # git+https://...), DETECT (detect.sh),
 # NOT_BEFORE (seconds: the oldest release it takes, when it was made),
 # DISK (to name the disk when there is more than one; it is wiped),
+# Secure Boot in setup mode (its keys cleared at the firmware's screen),
 # WIFI ({ssid, psk}, a file) and TICKET (the member's join ticket, a file),
 # both from the drive's commonty/ (docs/dev/joining.md).
 set -euo pipefail
@@ -21,6 +22,10 @@ trap 'echo "failed: line $LINENO: $BASH_COMMAND" >&2' ERR
 
 [ -e /dev/tpmrm0 ] || no "this machine has no TPM 2.0: a box's keys live in its TPM"
 [ -d /sys/firmware/efi ] || no "this machine did not boot by UEFI"
+# Secure Boot in setup mode: the box enrolls keys of its own, and its disk's
+# key is sealed under the boot they sign (docs/dev/joining.md)
+setupmode=$(od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null | tr -d ' ' || true)
+[ "$setupmode" = 1 ] || no "Secure Boot is not in setup mode: clear its keys (reset to setup mode) in the firmware settings"
 
 # the disk: internal, not removable, not on usb, and nothing of it mounted
 # - never what this installer, or anything else, runs from
@@ -52,20 +57,22 @@ w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
 
 # its keys, in its TPM, made before anything is wiped: the one it joins
-# with, usable only under this boot's PCR 7, and the half its disk key comes
-# from, sealed under the same
+# with, and the half its disk key comes from at its first boot. That half
+# is held under no PCR: this boot's PCR 7 is setup mode's, not the signed
+# boot the box will have. Its first boot with Secure Boot on seals a new
+# half under that, re-keys the pool, and removes this one (dd-unlock-seal)
 export TPM2TOOLS_TCTI=device:/dev/tpmrm0
 mkdir -p "$w/unlock"
 tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
-tpm2_startauthsession -Q -S "$w/s.ctx"
-tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"
-tpm2_flushcontext "$w/s.ctx"
-tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -L "$w/pcr.pol" \
-  -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda' \
+# its key to join with: under a password kept on its encrypted disk, which
+# opens only under its signed boot once its first boot has sealed it
+( umask 077; od -An -vtx1 -N32 /dev/urandom | tr -d ' \n' > "$w/sig.auth" )
+tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -p "file:$w/sig.auth" \
+  -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda|userwithauth' \
   -u "$w/unlock/sig.pub" -r "$w/unlock/sig.priv"
 ( umask 077; head -c 32 /dev/urandom > "$w/half" )
-tpm2_create -Q -C "$w/srk.ctx" -L "$w/pcr.pol" -a 'fixedtpm|fixedparent|noda' \
-  -i "$w/half" -u "$w/unlock/half.pub" -r "$w/unlock/half.priv"
+tpm2_create -Q -C "$w/srk.ctx" -a 'fixedtpm|fixedparent|noda|userwithauth' \
+  -i "$w/half" -u "$w/unlock/bootstrap.pub" -r "$w/unlock/bootstrap.priv"
 tpm2_load -Q -C "$w/srk.ctx" -u "$w/unlock/sig.pub" -r "$w/unlock/sig.priv" -c "$w/sig.ctx"
 tpm2_readpublic -Q -c "$w/sig.ctx" -f der -o "$w/spki.der"
 tpm2_flushcontext -t >/dev/null 2>&1 || true
@@ -74,7 +81,7 @@ tpm2_flushcontext -t >/dev/null 2>&1 || true
 name=j$(sha256sum < "$w/spki.der" | cut -c1-10)
 say "this box joins the fleet as $name"
 
-# the disk's key, as its initrd makes it at every boot from the half alone
+# the disk's key, as its initrd makes it from that half at the first boot
 # (disk-unlock-boot.sh, TPM_ONLY): a pulled disk opens nothing
 mkdir -p /run/dd
 ( umask 077
@@ -96,6 +103,7 @@ shred -u /run/dd/disk.key
 
 mkdir -p /mnt/boot/dd/unlock /mnt/var/lib/dd
 cp "$w/unlock/"* /mnt/boot/dd/unlock/
+install -m 0400 "$w/sig.auth" /mnt/var/lib/dd/sig.auth
 ( umask 077; age-plugin-tpm --generate -o /mnt/var/lib/dd/secrets-key.txt )
 base64 -w0 < "$w/spki.der" > /mnt/var/lib/dd/box-key.spki
 
@@ -126,7 +134,21 @@ jq -n --arg ssid "$ssid" '{owner: null, house: {ssid: $ssid, address: "", sealed
 say "building its system from $rev"
 sys=$(nix --extra-experimental-features "nix-command flakes" build --impure --no-link --print-out-paths \
   --store /mnt --extra-substituters 'daemon?trusted=true' --expr "let f = builtins.getFlake \"$SOURCE?rev=$rev\"; in (f.lib.joinedBox { name = \"$name\"; dir = builtins.path { path = /mnt/var/lib/dd/box; name = \"box\"; }; }).config.system.build.toplevel")
+# its Secure Boot keys, on its encrypted disk (/var/lib/sbctl, where
+# lanzaboote signs every release's boot with them), made before the
+# install so its boot is signed from the first
+mkdir -p /mnt/var/lib/sbctl "$w/sbctl"
+printf 'keydir: /mnt/var/lib/sbctl/keys\nguid: /mnt/var/lib/sbctl/GUID\nfiles_db: %s/files.json\nbundles_db: %s/bundles.json\n' \
+  "$w/sbctl" "$w/sbctl" > "$w/sbctl.conf"
+sbctl --config "$w/sbctl.conf" --disable-landlock create-keys
 nixos-install --root /mnt --system "$sys" --no-root-passwd --no-channel-copy
+# and enrolled, with Microsoft's beside them as node1's and node2's are:
+# firmware drivers on cards (graphics, network) are signed by Microsoft,
+# and without its keys some machines start with no screen. A system
+# Microsoft's keys start leaves PCR 7 unlike this box's own boot, so the
+# disk's key opens for neither it nor anything else
+sbctl --config "$w/sbctl.conf" --disable-landlock enroll-keys --microsoft
+say "Secure Boot keys of its own enrolled: it starts nothing else from now"
 # the release it runs is where its agent starts: one signed before it
 # never takes the box back
 mkdir -p /mnt/var/lib/dd-agent
