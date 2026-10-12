@@ -38,6 +38,14 @@ struct Args {
         default_value = "/sys/class/firmware-attributes"
     )]
     firmware: PathBuf,
+    /// the screen's secret: a file made at boot that only root and the
+    /// kiosk's user read; every request to /api/ carries it
+    #[arg(
+        long,
+        env = "SETUP_TOKEN_FILE",
+        default_value = "/run/dd-setup-token/token"
+    )]
+    token_file: PathBuf,
     /// print the id a join ticket's backup goes under, and exit
     #[arg(long)]
     ticket_id: Option<PathBuf>,
@@ -59,6 +67,7 @@ struct Job {
 
 struct App {
     args: Args,
+    token: String,
     job: Mutex<Job>,
     // the Wi-Fi the box is given: the drive's, or one typed here
     wifi: Mutex<Option<PathBuf>>,
@@ -74,9 +83,20 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    let token = std::fs::read_to_string(&args.token_file)
+        .context("the screen's secret")?
+        .trim()
+        .to_string();
+    if token.len() < 32 {
+        bail!("the screen's secret is too short");
+    }
+    if !args.listen.starts_with("127.0.0.1:") {
+        bail!("it answers on loopback only");
+    }
     let listener = TcpListener::bind(&args.listen).context("listening")?;
     let wifi = args.drive.join("wifi.json");
     let app = Arc::new(App {
+        token,
         wifi: Mutex::new(wifi.exists().then_some(wifi)),
         args,
         job: Mutex::new(Job::default()),
@@ -100,16 +120,37 @@ fn serve(app: &Arc<App>, mut s: TcpStream) -> Result<()> {
         parts.next().unwrap_or("/").to_string(),
     );
     let mut len = 0usize;
+    let (mut host, mut origin, mut token) = (None, None, None);
     loop {
         let mut h = String::new();
         if r.read_line(&mut h)? == 0 || h.trim().is_empty() {
             break;
         }
-        if let Some((k, v)) = h.split_once(':')
-            && k.eq_ignore_ascii_case("content-length")
-        {
-            len = v.trim().parse().unwrap_or(0).min(1 << 16);
+        if let Some((k, v)) = h.split_once(':') {
+            let v = v.trim().to_string();
+            match k.to_ascii_lowercase().as_str() {
+                "content-length" => len = v.parse().unwrap_or(0).min(1 << 16),
+                "host" => host = Some(v),
+                "origin" => origin = Some(v),
+                "x-setup-token" => token = Some(v),
+                _ => {}
+            }
         }
+    }
+    if let Err(why) = allowed(
+        app,
+        &path,
+        host.as_deref(),
+        origin.as_deref(),
+        token.as_deref(),
+    ) {
+        let out = json!({ "error": why }).to_string();
+        write!(
+            s,
+            "HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{out}",
+            out.len()
+        )?;
+        return Ok(());
     }
     let mut body = vec![0; len];
     r.read_exact(&mut body)?;
@@ -132,6 +173,38 @@ fn serve(app: &Arc<App>, mut s: TcpStream) -> Result<()> {
         out.len()
     )?;
     s.write_all(&out)?;
+    Ok(())
+}
+
+/// Only its own page drives it: addressed as itself (no other name that
+/// resolves here, which a page elsewhere could use to reach it), from its
+/// own origin when a browser says where from, and, for anything under
+/// /api/, with the screen's secret, which only the page the kiosk opened
+/// was given (in its address's fragment, never sent to anyone).
+fn allowed(
+    app: &App,
+    path: &str,
+    host: Option<&str>,
+    origin: Option<&str>,
+    token: Option<&str>,
+) -> Result<(), &'static str> {
+    let me = &app.args.listen;
+    if host != Some(me.as_str()) {
+        return Err("not addressed as this screen");
+    }
+    if origin.is_some_and(|o| o != format!("http://{me}")) {
+        return Err("not from this screen's page");
+    }
+    if path.starts_with("/api/") {
+        let given = token.unwrap_or("").as_bytes();
+        let want = app.token.as_bytes();
+        // the same time however much of it matches
+        let same = given.len() == want.len()
+            && given.iter().zip(want).fold(0u8, |a, (x, y)| a | (x ^ y)) == 0;
+        if !same {
+            return Err("not this screen's page");
+        }
+    }
     Ok(())
 }
 

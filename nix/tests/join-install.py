@@ -59,15 +59,41 @@ blank.systemctl("restart dd-box-setup")
 blank.wait_for_open_port(8090)
 
 
+token = blank.succeed("cat /run/dd-setup-token/token").strip()
+mine = f"-H 'x-setup-token: {token}'"
+
+
 def api(path, body=None):
     if body is None:
-        out = blank.succeed(f"curl -sf http://127.0.0.1:8090/api/{path}")
+        out = blank.succeed(f"curl -sf {mine} http://127.0.0.1:8090/api/{path}")
     else:
         out = blank.succeed(
-            f"curl -sf -H 'content-type: application/json' -d '{json.dumps(body)}' "
-            f"http://127.0.0.1:8090/api/{path}"
+            f"curl -sf {mine} -H 'content-type: application/json' "
+            f"-d '{json.dumps(body)}' http://127.0.0.1:8090/api/{path}"
         )
     return json.loads(out)
+
+
+# only its own page drives the screen: without the secret, addressed by
+# another name, or asked from another page, nothing
+def status(args):
+    return blank.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' {args} http://127.0.0.1:8090/api/checks"
+    ).strip()
+
+
+assert status("") == "403"
+assert status("-H 'x-setup-token: 00'") == "403"
+assert status(f"{mine} -H 'Host: rebound.example:8090'") == "403"
+assert status(f"{mine} -H 'Origin: http://portal.example'") == "403"
+assert status(f"{mine} -H 'Origin: http://127.0.0.1:8090'") == "200"
+assert (
+    blank.succeed(
+        "curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' "
+        '-d \'{"disk": "/dev/vdc"}\' http://127.0.0.1:8090/api/install'
+    ).strip()
+    == "403"
+)
 
 
 def finish(kind):

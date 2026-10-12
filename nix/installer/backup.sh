@@ -16,6 +16,7 @@ trap 'echo "failed: line $LINENO: $BASH_COMMAND" >&2' ERR
 id=$(dd-box-setup --ticket-id "$TICKET")
 
 w=$(mktemp -d)
+# shellcheck disable=SC2329 # run by the trap
 cleanup() {
   for m in "$w"/m/*; do umount "$m" 2>/dev/null || true; done
   zpool export -a 2>/dev/null || true

@@ -33,10 +33,29 @@ in
   config = {
     environment.systemPackages = [ backup ];
     networking.networkmanager.enable = true;
+    # the screen's secret, made at each boot: root's and the kiosk's alone.
+    # The kiosk opens the page with it; the page sends it with every ask
+    systemd.services.dd-box-setup-token = {
+      description = "Make the box installer screen's secret";
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        install -d -m 0750 -g ${if config.dd.setup.screen then "setup" else "root"} /run/dd-setup-token
+        umask 027
+        od -An -vtx1 -N32 /dev/urandom | tr -d ' \n' > /run/dd-setup-token/token
+        chgrp ${if config.dd.setup.screen then "setup" else "root"} /run/dd-setup-token/token
+      '';
+    };
     systemd.services.dd-box-setup = {
       description = "The box installer's steps, on loopback";
       wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
+      requires = [ "dd-box-setup-token.service" ];
+      after = [
+        "network.target"
+        "dd-box-setup-token.service"
+      ];
       path = [
         "/run/current-system/sw"
         "/run/wrappers"
@@ -62,10 +81,17 @@ in
     };
     # the screen: the steps, and nothing else to click away to
     users.users.setup = lib.mkIf config.dd.setup.screen { isNormalUser = true; };
+    systemd.services."cage-tty1" = lib.mkIf config.dd.setup.screen {
+      after = [ "dd-box-setup-token.service" ];
+      requires = [ "dd-box-setup-token.service" ];
+    };
     services.cage = lib.mkIf config.dd.setup.screen {
       enable = true;
       user = "setup";
-      program = "${pkgs.firefox}/bin/firefox --kiosk --private-window http://127.0.0.1:8090/";
+      program = pkgs.writeShellScript "dd-box-screen" ''
+        exec ${pkgs.firefox}/bin/firefox --kiosk --private-window \
+          "http://127.0.0.1:8090/#t=$(cat /run/dd-setup-token/token)"
+      '';
       environment.MOZ_ENABLE_WAYLAND = "1";
     };
   };

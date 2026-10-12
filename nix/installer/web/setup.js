@@ -5,6 +5,16 @@
 
 const $ = (id) => document.getElementById(id);
 const STEPS = ['firmware', 'network', 'disk', 'backup', 'install', 'done'];
+// the screen's secret, given in this page's address when the kiosk opened
+// it (never sent anywhere but in the header below); kept for a reload
+const TOKEN = (() => {
+  const m = location.hash.match(/^#t=([0-9a-f]+)$/);
+  try {
+    if (m) sessionStorage.setItem('t', m[1]);
+    history.replaceState(null, '', location.pathname);
+    return sessionStorage.getItem('t') || '';
+  } catch { return m ? m[1] : ''; }
+})();
 let at = 0;
 let disk = null;
 let backedUp = false;
@@ -12,8 +22,8 @@ const ready = {};
 
 async function api(path, body) {
   const r = await fetch('/api/' + path, body === undefined
-    ? { cache: 'no-store' }
-    : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    ? { cache: 'no-store', headers: { 'x-setup-token': TOKEN } }
+    : { method: 'POST', headers: { 'content-type': 'application/json', 'x-setup-token': TOKEN }, body: JSON.stringify(body) });
   const v = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(v.error || 'it did not answer');
   return v;
