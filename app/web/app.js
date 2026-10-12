@@ -40,6 +40,7 @@ function render(st) {
   }
   $("home-name").textContent = st.name;
   show("home");
+  browsers();
   net().then(goToSite);
 }
 
@@ -107,6 +108,28 @@ $("passkey-add").addEventListener("click", async () => {
   }
   b.disabled = false;
 });
+
+// the browsers this device let in (src/local.rs), each with a way to forget it
+const day = (t) => new Date(t * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+async function browsers() {
+  const list = await invoke("browsers").catch(() => []);
+  $("browsers-none").hidden = list.length > 0;
+  $("browsers").replaceChildren(...list.map((b) => {
+    const li = document.createElement("li");
+    const text = document.createElement("span");
+    text.textContent = `${b.name}, let in ${day(b.made)}, last used ${day(b.seen)}`;
+    const forget = document.createElement("button");
+    forget.className = "quiet";
+    forget.textContent = "Forget";
+    forget.addEventListener("click", async () => {
+      forget.disabled = true;
+      await invoke("browser_forget", { id: b.id }).catch(() => {});
+      browsers();
+    });
+    li.append(text, forget);
+    return li;
+  }));
+}
 
 // What this device showed last time draws at once, the answer from the
 // directories when it comes (kit.js load): the screen never waits on them.

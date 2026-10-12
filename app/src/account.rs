@@ -338,6 +338,8 @@ pub async fn recover(
 #[tauri::command]
 pub fn forget(keys: State<'_, Keys>) -> Result<(), String> {
     crate::net::forget_browser();
+    // and the browsers it let in: they ask again, of whoever signs in next
+    crate::local::forget_browsers();
     // the photo password, and the root this device vouched for, went with
     // the name they were for
     let _ = keys.0.clear(crate::photos::KEY);

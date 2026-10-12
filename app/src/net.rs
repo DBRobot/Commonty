@@ -287,6 +287,11 @@ pub fn resume(app: &tauri::AppHandle, control: &str) {
     });
 }
 
+/// whether this device has joined the network, so comes up on it at start
+pub fn joined() -> bool {
+    state_dir().is_ok_and(|d| d.join("joined").exists())
+}
+
 pub fn stop() {
     unsafe { commonty_net_stop() };
     directory::via(None);

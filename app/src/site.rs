@@ -45,9 +45,12 @@ pub fn handle<R: Runtime>(
 ) {
     let app = ctx.app_handle().clone();
     tauri::async_runtime::spawn(async move {
-        let r = serve(&app, req)
-            .await
-            .unwrap_or_else(|e| plain(StatusCode::BAD_GATEWAY, &e));
+        let path = req.uri().path().to_string();
+        let r = serve(&app, req).await.unwrap_or_else(|e| {
+            // said in the log too: a page shows only "the box said 502"
+            eprintln!("site: {path}: {e}");
+            plain(StatusCode::BAD_GATEWAY, &e)
+        });
         responder.respond(r);
     });
 }
@@ -87,6 +90,21 @@ fn runnable(kind: &str) -> bool {
         .any(|k| kind.contains(k))
 }
 
+/// What a box may answer a page's call with: data, never code. A folder's
+/// listing is XML and still data (WebDAV's 207, to a PROPFIND); refused,
+/// Files and Movies & TV listed nothing and said 502. It goes with the
+/// sandbox every answer gets, so nothing in it runs.
+pub(crate) fn data_from_box(method: &str, status: u16, kind: &str) -> bool {
+    let base = kind.split(';').next().unwrap_or("").trim();
+    !runnable(kind)
+        || (method == "PROPFIND" && status == 207 && matches!(base, "application/xml" | "text/xml"))
+}
+
+/// Signing in is the app's, not a box's: a page the app serves that is
+/// told 401 lands here, where the box's own sign-in page would be refused
+/// as code (502). The device's sign-in is what the boxes did not take.
+pub(crate) const SIGNED_OUT: &str = "The boxes did not take this device's sign-in. Open the Commonty app on this computer and check it is signed in, then open the page again.";
+
 /// The fleet's domain as this app knows it, for a page it serves: what the
 /// page's links to the fleet are held to (shell.js), never a box's word
 pub(crate) fn domain_meta() -> String {
@@ -97,9 +115,29 @@ pub(crate) fn domain_meta() -> String {
     format!("<meta name=\"dd-domain\" content=\"{d}\">")
 }
 
+/// The file the app carries at exactly `path`, or none. Tauri's own lookup
+/// falls back to `<path>.html`, `<path>/index.html` and then the app's own
+/// first screen, so a file the app does not have came back as that screen,
+/// 200 and HTML: a missing script or stylesheet on a page in a browser was
+/// the app's sign-in screen instead of a 404.
+pub(crate) fn carried<R: Runtime>(app: &AppHandle<R>, path: &str) -> Option<tauri::Asset> {
+    static KEYS: std::sync::OnceLock<std::collections::HashSet<String>> =
+        std::sync::OnceLock::new();
+    let keys = KEYS.get_or_init(|| {
+        app.asset_resolver()
+            .iter()
+            .map(|(k, _)| k.trim_start_matches('/').to_string())
+            .collect()
+    });
+    if !keys.contains(path.trim_start_matches('/')) {
+        return None;
+    }
+    app.asset_resolver().get(path.to_string())
+}
+
 /// One of the app's own pages, with the launch secret in it
 fn page_asset<R: Runtime>(app: &AppHandle<R>, path: &str) -> Response<Vec<u8>> {
-    match app.asset_resolver().get(path.to_string()) {
+    match carried(app, path) {
         Some(a) => {
             let html = String::from_utf8_lossy(&a.bytes).replacen(
                 "</head>",
@@ -121,7 +159,7 @@ fn page_asset<R: Runtime>(app: &AppHandle<R>, path: &str) -> Response<Vec<u8>> {
 }
 
 fn asset<R: Runtime>(app: &AppHandle<R>, path: &str) -> Response<Vec<u8>> {
-    match app.asset_resolver().get(path.to_string()) {
+    match carried(app, path) {
         Some(a) => Response::builder()
             .header(header::CONTENT_TYPE, a.mime_type)
             .header(header::CACHE_CONTROL, "no-cache")
@@ -286,6 +324,9 @@ async fn serve<R: Runtime>(
             .body(Vec::new())
             .unwrap_or_default());
     }
+    if matches!(path.as_str(), "/_dd/login" | "/_dd/logout") {
+        return Ok(plain(StatusCode::UNAUTHORIZED, SIGNED_OUT));
+    }
     if path.starts_with("/_dd/") {
         return proxy(app, req).await;
     }
@@ -362,15 +403,15 @@ async fn proxy<R: Runtime>(
     req: Request<Vec<u8>>,
 ) -> Result<Response<Vec<u8>>, String> {
     let base = media::gate::files_base(&crate::account::dirs()).map_err(|e| e.to_string())?;
+    crate::local::network_ready().await;
     let target = match req.uri().query() {
         Some(q) => format!("{base}{}?{q}", req.uri().path()),
         None => format!("{base}{}", req.uri().path()),
     };
     let method =
         reqwest::Method::from_bytes(req.method().as_str().as_bytes()).map_err(|e| e.to_string())?;
-    let mut out = directory::http()
-        .map_err(|e| e.to_string())?
-        .request(method, &target)
+    let mut out = crate::local::http()?
+        .request(method.clone(), &target)
         .bearer_auth(token(app)?);
     for h in [
         "content-type",
@@ -391,7 +432,9 @@ async fn proxy<R: Runtime>(
     if !body.is_empty() {
         out = out.body(body);
     }
-    let r = out.send().await.map_err(|e| e.to_string())?;
+    let r = crate::local::send(out)
+        .await
+        .map_err(|e| crate::local::why(&e))?;
     // What a box answers is data for the app's pages - json, files, media -
     // and never something the window would run or show as a page of its
     // own: that would speak with the app's voice, keys and all. So no html,
@@ -403,7 +446,7 @@ async fn proxy<R: Runtime>(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if runnable(&kind) {
+    if !data_from_box(method.as_str(), r.status().as_u16(), &kind) {
         return Ok(plain(
             StatusCode::BAD_GATEWAY,
             "the box answered with a page; the app shows only its own",
@@ -564,6 +607,7 @@ pub(crate) async fn library_value<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<Option<serde_json::Value>, String> {
     use base64::Engine as _;
+    crate::local::network_ready().await;
     let keys = app.state::<crate::account::Keys>();
     let (mut opener, user, _) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
     let dirs = crate::account::dirs();
@@ -594,6 +638,7 @@ pub(crate) async fn archive_value<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<Option<serde_json::Value>, String> {
     use base64::Engine as _;
+    crate::local::network_ready().await;
     let keys = app.state::<crate::account::Keys>();
     let (opener, _, token) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
     let base = media::gate::files_base(&crate::account::dirs()).map_err(|e| e.to_string())?;
@@ -713,6 +758,22 @@ mod tests {
         ] {
             assert!(super::runnable(k), "{k}");
         }
+        // a folder's listing, and only as the answer to a PROPFIND
+        assert!(super::data_from_box(
+            "PROPFIND",
+            207,
+            "application/xml; charset=utf-8"
+        ));
+        assert!(super::data_from_box("PROPFIND", 207, "text/xml"));
+        assert!(!super::data_from_box("GET", 207, "application/xml"));
+        assert!(!super::data_from_box("PROPFIND", 200, "application/xml"));
+        assert!(!super::data_from_box(
+            "PROPFIND",
+            207,
+            "application/xhtml+xml"
+        ));
+        assert!(!super::data_from_box("PROPFIND", 207, "image/svg+xml"));
+        assert!(!super::data_from_box("PROPFIND", 207, "text/html"));
         for k in [
             "application/json",
             "video/mp4",

@@ -102,23 +102,28 @@ a member. The app serves them from this computer
 ([`app/src/local.rs`](../../app/src/local.rs)), to its own window and to
 the member's own browser: Photos on port 41661, Passwords on 41662, and
 the site's pages (Files, Movies & TV, Chat, Settings) on 41660. A browser
-is let in only when the member allows it from the app's window, and the
-address the app opens the browser at holds no secret.
+is let in only when the member allows it from the app's window, once: the
+app remembers it until the member forgets it. The address the app opens
+the browser at holds no secret.
 
 The site's pages there are the very files the window carries
-(`app/carried`), served at `s-<session>.localhost:41660`; `/_dd/app/library`
-and `/_dd/app/archive` answer that browser's session alone (`handoff::admit`:
-the key is behind `Serve`, so behind the session's cookie), so do the Leave
-tab's downloads (`/_dd/app/export`, each job its own session's;
+(`app/carried`), served at `s-<own>.localhost:41660`; `/_dd/app/library`
+and `/_dd/app/archive` answer a let-in browser alone (`handoff::admit`:
+the key is behind `Serve`, so behind that browser's cookie), so do the Leave
+tab's downloads (`/_dd/app/export`, each job its own browser's;
 [leaving.md](leaving.md#taking-things-out)), every other
 call goes to the boxes with the device's token, Chat's to the model box,
 and nothing a box answers is code, nor any cookie but the vault's
-sign-in binding (`VW_SSO_BINDING`, host-only on the session's
-`v-<hex>.localhost`, sent back on `/identity/connect/` alone). Adding or
+sign-in binding (`VW_SSO_BINDING`, host-only on
+`v-<own>.localhost`, sent back on `/identity/connect/` alone). A folder's
+listing is the one XML that passes: WebDAV's 207, to a PROPFIND, with the
+sandbox every answer gets (`site::data_from_box`). The box's own sign-in
+page never does: `/_dd/login` and `/_dd/logout` are answered here, with a
+401 that says the device's sign-in was not taken. Adding or
 removing a device with the root stays the window's, and so does leaving
 (`/_dd/app/leaving`, signed with the root here), which deletes everything
 at once and cannot be undone ([leaving.md](leaving.md)). From one of these
-pages, Photos and Passwords open through `/_dd/app/go`, a session of their
+pages, Photos and Passwords open through `/_dd/app/go`, a door of their
 own for the same browser, without another click.
 
 ```
@@ -126,39 +131,67 @@ photos.<domain> in a browser ─ the gate's handoff page (/_dd/use-app)
   [Open Photos] ─ commonty://open?service=photos&path=/gallery
                      │ the OS starts the app, or hands the link to the copy
                      ▼ already running (single-instance)
-the app ─ arms Photos' pairing for 120 s, shows its window at "Allow this
-          browser", opens the default browser at
-          http://p-<install>.localhost:41661/_dd/app/pair      (nothing secret)
-the browser ─ pair.js: a random verifier, kept in the tab
-            ─ POST /_dd/app/pair/ask {hash: sha256(verifier)} ─▶ a 6-digit code
-the window ─ shows the same code; the member clicks "Allow this browser"
+the app ─ arms Photos' pairing for 120 s, opens the default browser at
+          http://s-<install>.localhost:41660/_dd/app/pair?service=photos
+          (nothing secret; every service pairs on the site's page)
+the browser ─ pair.js: let in before? (localStorage "dd-own" on this origin)
+              yes ─ POST /_dd/app/pair/known {host} ─▶ still this device's name
+                  ─ http://s-<own>.localhost:41660/_dd/app/resume?service=photos
+                  ─▶ (cross-site, so no Strict cookie yet) a page that opens
+                     itself again ─▶ the cookie checks: the link's page, through
+                     a door into Photos (below). No code, no click, no window.
+              no  ─ a random verifier, kept in the tab
+                  ─ POST /_dd/app/pair/ask {hash: sha256(verifier)} ─▶ a 6-digit code
+the window ─ comes up at "Allow this browser" with the same code (only when a
+             browser asks); the member clicks "Allow this browser"
 the browser ─ POST /_dd/app/pair/finish {verifier} ─▶ the hash matches and it
-              was allowed: a new session, its own name, a door secret
-            ─ http://p-<session>.localhost:41661/_dd/app/enter?k=<one-time, 60 s>
-              ─▶ dd_browser cookie (HttpOnly, SameSite=Strict, that name only),
+              was allowed: remembered (browsers.json), a door secret
+            ─ http://s-<own>.localhost:41660/_dd/app/enter?k=<one-time, 60 s>
+              ─▶ dd_browser cookie (HttpOnly, SameSite=Strict, 400 days),
                  a page that goes on by itself (so the next request is same-site)
+            ─ /_dd/app/resume?service=photos ─▶ a door into Photos the same way,
+              http://p-<own>.localhost:41661/_dd/app/enter?k=…, its own cookie
             ─ /_dd/photos: POST /_dd/app/photos-key, the password once
             ─ Ente's client, signed in
 ```
 
-- **The member's click.** The app's window shows "Allow this browser to
-  open Photos?" and the code. The browser's page shows the same code, and
-  tells the member to check it in the app. "Allow this browser" lets in
-  that one request, and "Not me" refuses it. If a second request comes
+- **The member's click, once.** The app's window shows "Allow this browser
+  to open Photos?" and the code. The browser's page shows the same code,
+  and tells the member to check it in the app. "Allow this browser" lets
+  in that one request, and "Not me" refuses it. If a second request comes
   while one is waiting, or after the click but before the browser
   finishes, both are refused. Both screens then say that two browsers
   asked at once, and the member opens it again from the page. Nothing can
-  ask unless a link armed the pairing in the last 120 seconds.
+  ask unless a link armed the pairing in the last 120 seconds. After that
+  the browser is remembered: later links open the page in it straight
+  away, across the app's restarts, with no code, no click and no window.
 - **Two kinds of name.** `<install>` is 32 random hex characters, made at
   the first run and kept in the data folder (`local-names`, 0600). It is
   **not secret** from other programs on the device: it is in the command
   line the browser is started with, and on Linux every user can read
-  that. So nothing is kept or let in there. It serves only the pairing
-  page and its two requests. `<session>` is new for each browser let in.
-  It goes to that browser alone, in the answer to its own same-origin
-  request, and is in no command line. The browser's cookie, and what Ente
-  or the vault keep in the browser, are under that name. The app's window
-  keeps `127.0.0.1`.
+  that. So nothing is let in there. It serves only the pairing page and
+  its asks. `<own>` is this device's name for the browsers it lets in:
+  32 hex characters of a hash of the device key (`handoff::own_label`), so
+  the same across restarts and new with a new device, and telling nothing
+  of the key. It goes to a browser only in the answer to its own
+  same-origin request, and is in no command line. The browser's cookie,
+  and what Ente or the vault keep in the browser, are under that name, so
+  they stay put across restarts. The app's window keeps `127.0.0.1`.
+- **A remembered browser** is a line in `browsers.json` (data folder,
+  0600, for the device key's fingerprint: a new key starts empty): an id,
+  "Chrome on Linux", when it was let in and last used, and for each
+  service the SHA-256 of its cookie's secret. The cookie is
+  `dd_browser=<id>.<secret>`, one secret per service's name. Up to 32
+  are kept; the one longest unused goes first. **This device** in the
+  app's window lists them, each with **Forget**; signing out in that
+  browser (the bar's Sign out) forgets it too, and signing out on the
+  device forgets them all. A forgotten browser's cookie opens nothing at
+  once, and its next link asks for a code again (`?again`).
+- **A tab opened from elsewhere** (a bookmark, a link, the pairing page)
+  carries no Strict cookie and says it is cross-site. A top-level GET of
+  a document then gets a page that opens itself again (`Admit::GoOn`),
+  and nothing else: the next request is same-origin, with the cookie.
+  Frames, fetches, forms and anything but a GET are refused as before.
 - **Browsers** resolve every `*.localhost` to loopback themselves (Chrome,
   Edge, Firefox) and treat it as a secure context, so WebCrypto works on
   the pairing page.
@@ -168,20 +201,20 @@ the browser ─ POST /_dd/app/pair/finish {verifier} ─▶ the hash matches and
   goes through it. Browsers also never proxy loopback names.
 - **The vault's sign-in.** The browser signs in at the gate with its own
   passkey on `home.<domain>`. Vaultwarden sends it back to
-  `v-<session>.localhost:41662/sso-connector.html`
-  ([the patch](packaged.md#passwords-vaultwarden)). That one page, and the
-  session's door, are served without the cookie, because the way in is
-  from another site and a Strict cookie is not sent then. What they load
-  after that is same-site and carries the cookie.
+  `v-<own>.localhost:41662/sso-connector.html`
+  ([the patch](packaged.md#passwords-vaultwarden)). That one page, a
+  door and `/_dd/app/resume` are served without the cookie, because the
+  way in is from another site and a Strict cookie is not sent then. What
+  they load after that is same-site and carries the cookie.
 - **The first time on a device**, Photos has no password in the keyring
   yet. The app takes it from the copy beside the member's disk images,
   signed by another of their devices; failing that it makes one and the
   Photos page makes the account with it, or moves an account a passkey
   made ([packaged.md](packaged.md#sign-in), photos.rs).
-- **Sessions live as long as the app.** After the app restarts, a browser
-  pairs again from the page. Old session names stay in the browser's
-  storage, but nothing on the device knows them except that browser
-  profile.
+- **The network comes up a few seconds after the window.** A page's
+  first calls wait for it on a device that has joined, and a call that
+  finds no way through yet is sent again (`local::send`), so a page opened
+  at once is not a 502. A 502 says why in the app's log.
 - **Links come in** by `tauri-plugin-deep-link`. The `.deb` desktop entry
   and the Windows installer register the scheme. An AppImage registers
   itself at start. On Android it is an intent filter in the manifest. On
@@ -197,9 +230,9 @@ another site fires commonty://      it can only make the app open the member's o
                                     nothing goes back to the site. Links are taken
                                     at most once a second, and only service=photos|vault|site
                                     with a plain path (a_link_names_a_service_and_a_path_on_it)
-a local program reads the           the address holds no secret
-  browser's command line            (the_launched_url_holds_no_secret); asking with
-                                    the install's name gets a code the member never
+a local program reads the           the address holds no secret, and never this device's
+  browser's command line            own name (the_launched_url_holds_no_secret); asking
+                                    with the install's name gets a code the member never
                                     allows, or makes two requests, and both are refused
                                     (two_requests_at_once_are_both_refused,
                                     a_second_request_after_the_click_still_refuses_both)
@@ -211,28 +244,38 @@ an allowed request, someone else    the session goes only to whoever shows the v
 another program took the port       neither the window nor a browser is sent to a port
                                     this app does not hold (no_browser_for_a_port_this_app_does_not_hold)
 a listener on another loopback      cookies ignore ports, but the browser's cookie is
-  port reading the cookie           under the session's own name, which no other
-                                    program knows, so the browser never sends it there
-the origin's storage read while     same: what Ente and the vault keep is under the
-  the app is not running            session's name, never the install's
+  port reading the cookie           under this device's own name, which no other
+                                    program is told, so the browser never sends it there
+the origin's storage read while     same: what Ente and the vault keep is under that
+  the app is not running            name, never the install's. But see "Remembered,
+                                    and what that costs" below
 DNS rebinding, other hosts          the Host header must be exactly 127.0.0.1:<port>,
-                                    the install's name, or a live session's name
+                                    the install's name, or this device's own name
                                     (only_the_exact_host_and_port_are_answered)
 CSRF from other pages               SameSite=Strict, and from a browser a change needs
                                     Origin equal to the page's own; anything said to
-                                    come from another site is refused, except the two
-                                    ways in (changes_come_only_from_this_origin,
-                                    only_a_browsers_ways_in_come_without_a_cookie)
-a session door reused or late       once, 60 s, for its own service, spent by a wrong try
-                                    (a_session_door_opens_once_in_time)
+                                    come from another site is refused, except the ways
+                                    in and a tab opening a page, which gets a page that
+                                    opens itself again (changes_come_only_from_this_origin,
+                                    only_a_browsers_ways_in_come_without_a_cookie,
+                                    a_page_opened_from_elsewhere_opens_itself_and_nothing_more)
+a website fires commonty:// at a    the member's own browser opens one of their pages,
+  remembered browser                as a link to it would; the site gets nothing back and
+                                    cannot read or drive the page (another origin)
+a door reused or late               once, 60 s, for its own service and browser
+                                    (a_door_opens_once_in_time_for_its_service)
+a forgotten browser                 its cookie opens nothing at once, its doors go, and
+                                    it asks for a code again (a_forgotten_browser_opens_nothing)
+a remembered browser after a        still let in, at the same name; a new device key
+  restart                           starts with none (a_browser_let_in_is_remembered_across_restarts)
 an open redirect through the path   a path on the service's own origin, in a short safe
                                     alphabet (then_is_a_path_on_this_origin_only,
                                     the_door_page_goes_on_to_its_path_and_nowhere_else)
 the Photos password in history      in no address: the page asks for it once, within
-  or synced history                 60 s of its door, same-origin, with its session's
+  or synced history                 60 s of its door, same-origin, with its browser's
                                     cookie (the_photos_password_is_handed_once_...)
 a key asked of a browser no one      the library, the archive and Photos' password are
-  let in                            behind Serve: the session's cookie, given after the
+  let in                            behind Serve: the browser's cookie, given after the
                                     member's click (keys_are_served_only_to_a_browser_the_member_let_in)
 a link to the site's pages          only Files, Movies & TV, Chat, Settings, home
                                     (a_link_can_ask_for_the_sites_own_pages_and_nothing_else)
@@ -241,7 +284,10 @@ a copy of a secret a box sealed     taken only signed by a device of the root-ch
 a javascript: link in the bar       the bar links only paths here and the fleet's own
                                     names, by the domain the app writes into its pages
 the box sends code                  refused, as for the window (site.rs,
-                                    a_box_sends_data_and_never_a_page)
+                                    a_box_sends_data_and_never_a_page,
+                                    a_folders_listing_passes_and_a_page_from_the_box_does_not)
+a file the app does not carry       a 404: Tauri's own lookup answered with the app's first
+                                    screen (site::carried)
 ```
 
 The default browser is trusted with what it is opened at, as it already is
@@ -250,6 +296,31 @@ chose to open web links. A program that can read the member's own files
 or the browser's profile can already read the app's keys too, as it could
 before. None of this stands against that.
 
+### Remembered, and what that costs
+
+Pairing once means something in the browser outlives the app's run: the
+cookie, and on the pairing page's origin the device's own name (pair.js,
+`dd-own`). What that adds, plainly:
+
+- **A program that takes the port while the app is closed.** Anything on
+  the computer can listen on 41660 when the app is not running. If the
+  member's browser is then sent to the install's pairing address (it is
+  in old command lines, so another account on the computer can know it,
+  and a web page that knows it can open it), that program reads `dd-own`
+  there, can send the browser on to the device's own name on the same
+  port, and gets the cookie. With it, once the app is back, it could ask
+  for the library's key. Before, there was nothing kept to find. What
+  stands against it: the app opens a browser only at a port it holds;
+  keep the app running; and **Forget** in
+  **This device** ends a cookie at once. The same program could read the
+  app's keys outright if it ran as the member, so this is about other
+  accounts and sandboxed apps on the same computer.
+- **The browser's history** has the device's own name in it, as it had a
+  session's before; that name now lasts. It is no key: the cookie is.
+- **A website** can still only fire a link: the member's own browser opens
+  one of their pages, as a bookmark would. Nothing comes back to the site,
+  and every own-request check above still holds.
+
 ## Where things are
 
 ```
@@ -257,7 +328,7 @@ app/src/      the window and its commands
   site.rs       the carried pages, and the proxy to the boxes
   local.rs      what holds keys in a page (Photos, Passwords, the site's
                 key pages), served to the window and the browser
-  handoff.rs    pairing a browser, its sessions and names, links, admit
+  handoff.rs    pairing a browser, the browsers it remembers, names, links, admit
   account.rs    sign-up, recovery, joining by code, a browser passkey
   photos.rs     Photos' password: made here, shared signed, the move
   export.rs     the Leave tab's zips: every photo, made here; a library's,

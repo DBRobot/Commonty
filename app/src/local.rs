@@ -13,10 +13,12 @@
 //! and a server streams where the scheme holds a whole file in memory.
 //! Anything else on this computer could knock on these ports, so nothing is
 //! answered without a cookie given at a door: the window's on 127.0.0.1
-//! (`/_dd/app/enter?k=<this launch's secret>`), a browser's on its own
-//! session's name, once the member has let that browser in from the app's
-//! window (handoff.rs). The site's pages are the window's on its own scheme
-//! (site.rs); here they are for a browser alone.
+//! (`/_dd/app/enter?k=<this launch's secret>`), a browser's on this
+//! device's own name for the browsers it lets in, once the member has let
+//! that browser in from the app's window (handoff.rs). A browser let in is
+//! remembered until the member forgets it, so it is asked once. The site's
+//! pages are the window's on its own scheme (site.rs); here they are for a
+//! browser alone.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -29,7 +31,7 @@ use axum::response::{IntoResponse, Response};
 use futures_util::TryStreamExt as _;
 use tauri::{AppHandle, Manager as _, Runtime};
 
-use crate::handoff::{self, Admit, Finish, Names, Once, Pairing, Sessions, Via, View, Which};
+use crate::handoff::{self, Admit, Browsers, Finish, Names, Once, Pairing, Via, View, Which};
 
 /// Whether this app holds each port. A window or a browser is only ever
 /// sent to a port this app is serving: if something else had one first, it
@@ -41,7 +43,8 @@ static SITE_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 
 /// Photos' pairing, Passwords' and the site's
 static PAIRS: LazyLock<Mutex<[Pairing; 3]>> = LazyLock::new(Default::default);
-static SESSIONS: LazyLock<Mutex<Sessions>> = LazyLock::new(Default::default);
+/// the browsers let in, kept in browsers.json for this device's key
+static BROWSERS: LazyLock<Mutex<Option<Browsers>>> = LazyLock::new(Default::default);
 /// what the window's next Photos page is handed, once
 static WINDOW_KEY: Mutex<Once> = Mutex::new(Once::new());
 /// when a commonty:// link last opened the browser
@@ -78,6 +81,101 @@ fn names() -> Option<&'static Names> {
             .ok()
     })
     .as_ref()
+}
+
+/// This device's key's fingerprint and its own name for let-in browsers
+/// (handoff::own_label), once it has a key; asked of the keystore once.
+fn own<R: Runtime>(app: &AppHandle<R>) -> Option<(String, String)> {
+    static OWN: Mutex<Option<(String, String)>> = Mutex::new(None);
+    let mut o = OWN.lock().ok()?;
+    if o.is_none() {
+        let keys = app.state::<crate::account::Keys>();
+        let kp = auth::device::load(&keys.0).ok().flatten()?;
+        let fp = identity::fingerprint(&auth::device::public_b64(&kp));
+        *o = Some((fp, handoff::own_label(&kp.private().to_bytes()[..])));
+    }
+    o.clone()
+}
+
+fn browsers_file() -> PathBuf {
+    crate::paths::data().join("browsers.json")
+}
+
+/// The browsers let in, read from their file the first time, for this
+/// device; `f` changes them, and what it changed is written back.
+fn with_browsers<R: Runtime, T>(
+    app: &AppHandle<R>,
+    f: impl FnOnce(&mut Browsers) -> (T, bool),
+) -> Option<T> {
+    let (device, _) = own(app)?;
+    let mut b = BROWSERS.lock().ok()?;
+    if b.as_ref().is_none_or(|b| b.device() != device) {
+        let kept = std::fs::read_to_string(browsers_file()).unwrap_or_default();
+        *b = Some(Browsers::from_json(&device, &kept));
+    }
+    let b = b.as_mut()?;
+    let (out, changed) = f(b);
+    if changed && let Err(e) = keep(&browsers_file(), &b.to_json()) {
+        eprintln!("local: browsers: {e}");
+    }
+    Some(out)
+}
+
+/// written whole, readable by this account alone
+fn keep(path: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let tmp = path.with_extension("json.new");
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        o.mode(0o600);
+    }
+    std::io::Write::write_all(&mut o.open(&tmp)?, text.as_bytes())?;
+    std::fs::rename(&tmp, path)
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// The browsers this device let in, for the app's own screen: which, when
+/// let in and last seen
+#[tauri::command]
+pub fn browsers(app: AppHandle) -> Vec<serde_json::Value> {
+    with_browsers(&app, |b| {
+        let l = b
+            .list()
+            .iter()
+            .map(|x| serde_json::json!({ "id": x.id, "name": x.name, "made": x.made, "seen": x.seen }))
+            .collect();
+        (l, false)
+    })
+    .unwrap_or_default()
+}
+
+/// A browser forgotten from the app's own screen: it asks again next time
+#[tauri::command]
+pub fn browser_forget(app: AppHandle, id: String) -> bool {
+    with_browsers(&app, |b| {
+        let gone = b.forget(&id);
+        (gone, gone)
+    })
+    .unwrap_or(false)
+}
+
+/// Signing out on this device: every browser it let in goes with it
+pub fn forget_browsers() {
+    if let Ok(mut b) = BROWSERS.lock() {
+        *b = None;
+    }
+    let _ = std::fs::remove_file(browsers_file());
 }
 
 struct Site<R: Runtime> {
@@ -166,16 +264,19 @@ async fn to_browser<R: Runtime>(app: &AppHandle<R>, link: &handoff::Link) -> Res
     use tauri_plugin_opener::OpenerExt as _;
     // a link can start the app: its servers come up a moment after
     for _ in 0..50 {
-        if holds(link.which) {
+        if holds(link.which) && holds(Which::Site) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     handoff::door_if_up(holds(link.which), link.which.port())?;
+    // every service pairs on the site's page
+    handoff::door_if_up(holds(Which::Site), Which::Site.port())?;
     let names = names().ok_or("no names for the browser")?;
     PAIRS.lock().map_err(|e| e.to_string())?[slot(link.which)]
         .arm(&handoff::then_for(link), Instant::now());
-    show_window(app, "/_dd/app/allow");
+    // the window comes up when a browser asks to be let in (pair), not
+    // here: a browser let in before goes straight to its page
     app.opener()
         .open_url(handoff::browser_url(names, link.which), None::<&str>)
         .map_err(|e| e.to_string())
@@ -263,6 +364,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn plain(status: StatusCode, text: &str) -> Response {
+    // what a page shows only as "the gate said 502", said in the log
+    if status == StatusCode::BAD_GATEWAY {
+        eprintln!("local: 502: {text}");
+    }
     (
         status,
         [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
@@ -301,23 +406,35 @@ async fn handle<R: Runtime>(State(site): State<Arc<Site<R>>>, req: Request) -> R
         return plain(StatusCode::INTERNAL_SERVER_ERROR, "no names for this app");
     };
     let h = req.headers();
-    let via = match SESSIONS.lock() {
-        Ok(s) => handoff::via(header_str(h, "host"), site.which, names, &s),
-        Err(_) => None,
-    };
-    let Some(via) = via else {
+    let own_name = own(&site.app).map(|(_, o)| o);
+    let Some(via) = handoff::via(
+        header_str(h, "host"),
+        site.which,
+        names,
+        own_name.as_deref(),
+    ) else {
         return plain(StatusCode::MISDIRECTED_REQUEST, "not this app's address");
     };
-    let own = format!("http://{}", header_str(h, "host").unwrap_or_default());
+    let own_origin = format!("http://{}", header_str(h, "host").unwrap_or_default());
     let path = req.uri().path().to_string();
     let method = req.method().as_str().to_string();
+    // which let-in browser this is, by its cookie
+    let who = match via {
+        Via::Browser => with_browsers(&site.app, |b| {
+            let id = b.check(site.which, cookie(h, handoff::BROWSER_COOKIE));
+            let changed = id.as_deref().is_some_and(|i| b.seen(i, now_secs()));
+            (id, changed)
+        })
+        .flatten(),
+        _ => None,
+    };
     let cookie_ok = match &via {
         Via::Window => cookie(h, handoff::WINDOW_COOKIE) == Some(crate::site::launch_secret()),
-        Via::Browser(label) => SESSIONS
-            .lock()
-            .is_ok_and(|s| s.valid(site.which, label, cookie(h, handoff::BROWSER_COOKIE))),
+        Via::Browser => who.is_some(),
         Via::Pair => false,
     };
+    let nav = header_str(h, "sec-fetch-mode") == Some("navigate")
+        && header_str(h, "sec-fetch-dest") == Some("document");
     match handoff::admit(
         site.which,
         &via,
@@ -326,7 +443,8 @@ async fn handle<R: Runtime>(State(site): State<Arc<Site<R>>>, req: Request) -> R
         &path,
         header_str(h, "origin"),
         header_str(h, "sec-fetch-site"),
-        &own,
+        nav,
+        &own_origin,
     ) {
         Admit::Refuse(code, why) => {
             return plain(
@@ -335,24 +453,50 @@ async fn handle<R: Runtime>(State(site): State<Arc<Site<R>>>, req: Request) -> R
             );
         }
         Admit::Pairing => return pair(&site, req, &path).await,
+        Admit::GoOn => {
+            let at = match req.uri().query() {
+                Some(q) => format!("{path}?{q}"),
+                None => path.clone(),
+            };
+            return go_on(handoff::safe_then(&at).unwrap_or("/"));
+        }
         Admit::Door => {
             return match &via {
-                Via::Browser(label) => enter_browser(&req, site.which, label),
+                Via::Browser => enter_browser(&site.app, &req, site.which),
                 _ => enter_window(&req),
             };
         }
         Admit::Serve => {}
     }
+    if via == Via::Browser && path == "/_dd/app/resume" {
+        let q = req.uri().query().unwrap_or("").to_string();
+        return resume(
+            &site,
+            names,
+            &q,
+            who.as_deref(),
+            header_str(h, "sec-fetch-site"),
+        )
+        .await;
+    }
     // a browser's or the window's own asks, the same on every server
     match (method.as_str(), path.as_str()) {
-        ("POST", "/_dd/app/door") => return door_for(&site, &via, req).await,
+        ("POST", "/_dd/app/door") => return door_for(&site, &via, who.as_deref(), req).await,
         // a link on the app's own pages to another of its services: the
         // same, followed at once (a page from anywhere else brings no cookie)
         ("GET", "/_dd/app/go") => {
             let q = req.uri().query().unwrap_or("");
             let service = handoff::query(q, "service").map(handoff::dec);
             let to = handoff::query(q, "path").map(handoff::dec);
-            return match go_for(&site, &via, service.as_deref(), to.as_deref()).await {
+            return match go_for(
+                &site,
+                &via,
+                who.as_deref(),
+                service.as_deref(),
+                to.as_deref(),
+            )
+            .await
+            {
                 Ok(go) => Response::builder()
                     .status(StatusCode::SEE_OTHER)
                     .header(header::LOCATION, go)
@@ -362,30 +506,125 @@ async fn handle<R: Runtime>(State(site): State<Arc<Site<R>>>, req: Request) -> R
                 Err((status, why)) => plain(status, &why),
             };
         }
+        // signing out in a browser let in: the app forgets it, and it is
+        // asked again next time
         ("POST", "/_dd/app/leave") => {
-            if let (Via::Browser(label), Ok(mut s)) = (&via, SESSIONS.lock()) {
-                s.end(label);
+            if let Some(id) = &who {
+                with_browsers(&site.app, |b| {
+                    let gone = b.forget(id);
+                    (gone, gone)
+                });
             }
             return json(StatusCode::OK, serde_json::json!({}));
         }
         _ => {}
     }
     match site.which {
-        Which::Photos => photos(&site, req, &path, &via).await,
+        Which::Photos => photos(&site, req, &path, &via, who.as_deref()).await,
         Which::Vault => vault(&site, req, &path).await,
-        Which::Site => site_pages(&site, req, &path, &via).await,
+        Which::Site => site_pages(&site, req, &path, who.as_deref()).await,
     }
 }
 
-/// Another service, for the browser or window already in: a session of its
-/// own there and its door, without the member's click again (they let this
+/// A page that opens `then` on this origin by itself, so the request after
+/// it comes from here and carries the Strict cookie
+fn go_on(then: &str) -> Response {
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header("referrer-policy", "no-referrer")
+        .header(
+            "content-security-policy",
+            "default-src 'none'; frame-ancestors 'none'",
+        )
+        .body(Body::from(handoff::enter_page(then)))
+        .unwrap_or_default()
+}
+
+/// A browser let in before, sent here by its pairing page (pair.js keeps
+/// this device's name for it there), or just let in: on to the page the
+/// link asked for, on whichever service it is, with no code and no click.
+/// One the app does not know, or has forgotten, goes back to the pairing
+/// page to ask again.
+async fn resume<R: Runtime>(
+    site: &Site<R>,
+    names: &Names,
+    query: &str,
+    who: Option<&str>,
+    fetch_site: Option<&str>,
+) -> Response {
+    let w = handoff::query(query, "service")
+        .and_then(Which::of)
+        .unwrap_or(site.which);
+    let Some(id) = who else {
+        // from the pairing page: another site, so without the cookie yet
+        if fetch_site != Some("same-origin") {
+            return go_on(&format!("/_dd/app/resume?service={}", w.name()));
+        }
+        return see_other(&format!(
+            "{}/_dd/app/pair?again&service={}",
+            names.origin(Which::Site),
+            w.name()
+        ));
+    };
+    let now = Instant::now();
+    let then = with_browsers(&site.app, |b| (b.take_pending(id, w, now), false))
+        .flatten()
+        .or_else(|| {
+            PAIRS
+                .lock()
+                .ok()
+                .and_then(|mut p| p[slot(w)].take_then(now))
+        })
+        .unwrap_or_else(|| {
+            handoff::then_for(&handoff::Link {
+                which: w,
+                path: None,
+            })
+        });
+    if w == site.which {
+        return see_other(handoff::safe_then(&then).unwrap_or("/"));
+    }
+    if let Err(e) = handoff::door_if_up(holds(w), w.port()) {
+        return plain(StatusCode::SERVICE_UNAVAILABLE, &e);
+    }
+    let hand = if w == Which::Photos {
+        match crate::photos::hand(&site.app).await {
+            Ok(h) => Some(h),
+            Err(e) => return plain(StatusCode::BAD_GATEWAY, &e),
+        }
+    } else {
+        None
+    };
+    match browser_door(site, id, w, &then, hand) {
+        Ok(go) => see_other(&go),
+        Err((status, why)) => plain(status, &why),
+    }
+}
+
+fn see_other(to: &str) -> Response {
+    Response::builder()
+        .status(StatusCode::SEE_OTHER)
+        .header(header::LOCATION, to)
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::empty())
+        .unwrap_or_default()
+}
+
+/// Another service, for the browser or window already in: a door into it
+/// for the same browser, without the member's click again (they let this
 /// browser in already). The page goes on to the address it is given.
-async fn door_for<R: Runtime>(site: &Site<R>, via: &Via, req: Request) -> Response {
+async fn door_for<R: Runtime>(
+    site: &Site<R>,
+    via: &Via,
+    who: Option<&str>,
+    req: Request,
+) -> Response {
     let Ok(body) = axum::body::to_bytes(req.into_body(), 4096).await else {
         return plain(StatusCode::BAD_REQUEST, "too much");
     };
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
-    match go_for(site, via, v["service"].as_str(), v["path"].as_str()).await {
+    match go_for(site, via, who, v["service"].as_str(), v["path"].as_str()).await {
         Ok(go) => json(StatusCode::OK, serde_json::json!({ "go": go })),
         Err((status, why)) => plain(status, &why),
     }
@@ -394,6 +633,7 @@ async fn door_for<R: Runtime>(site: &Site<R>, via: &Via, req: Request) -> Respon
 async fn go_for<R: Runtime>(
     site: &Site<R>,
     via: &Via,
+    who: Option<&str>,
     service: Option<&str>,
     path: Option<&str>,
 ) -> Result<String, (StatusCode, String)> {
@@ -421,15 +661,35 @@ async fn go_for<R: Runtime>(
             }
             door(w == Which::Vault, &then).map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e))?
         }
-        Via::Browser(_) => {
-            let (label, k) = SESSIONS
-                .lock()
-                .map(|mut s| s.create(w, &then, hand, Instant::now()))
-                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "no session".to_string()))?;
-            handoff::session_door(w, &label, &k)
+        Via::Browser => {
+            let id = who.ok_or((StatusCode::FORBIDDEN, "not let in".to_string()))?;
+            browser_door(site, id, w, &then, hand)?
         }
         Via::Pair => return Err((StatusCode::FORBIDDEN, "not let in".to_string())),
     })
+}
+
+/// a door into `w` on this device's own name, for browser `id`
+fn browser_door<R: Runtime>(
+    site: &Site<R>,
+    id: &str,
+    w: Which,
+    then: &str,
+    hand: Option<String>,
+) -> Result<String, (StatusCode, String)> {
+    let gone = || {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no device key here".to_string(),
+        )
+    };
+    let (_, label) = own(&site.app).ok_or_else(gone)?;
+    let k = with_browsers(&site.app, |b| {
+        (b.door(id, w, then, hand, Instant::now()), false)
+    })
+    .flatten()
+    .ok_or((StatusCode::FORBIDDEN, "not let in".to_string()))?;
+    Ok(handoff::session_door(w, &label, &k))
 }
 
 /// The window's door: the app's own window, holding this launch's secret,
@@ -476,22 +736,42 @@ async fn pair<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Response 
             }
             return app_asset(&site.app, &format!("_dd/static/{f}"));
         }
-        ("POST", "/_dd/app/pair/ask" | "/_dd/app/pair/finish") => {}
+        ("POST", "/_dd/app/pair/ask" | "/_dd/app/pair/finish" | "/_dd/app/pair/known") => {}
         _ => return plain(StatusCode::NOT_FOUND, "not here"),
     }
+    let agent = header_str(req.headers(), "user-agent")
+        .map(handoff::browser_name)
+        .unwrap_or_else(|| "A browser".into());
     let Ok(body) = axum::body::to_bytes(req.into_body(), 4096).await else {
         return plain(StatusCode::BAD_REQUEST, "too much");
     };
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+    // every service pairs on the site's page (handoff::browser_url), so a
+    // browser keeps one name, for all of them
+    let w = v["service"]
+        .as_str()
+        .and_then(Which::of)
+        .unwrap_or(site.which);
+    // whether the name a browser kept from being let in before is still
+    // this device's: then it goes there itself, and nothing is asked
+    if path == "/_dd/app/pair/known" {
+        let mine = own(&site.app)
+            .is_some_and(|(_, o)| v["host"].as_str() == Some(&handoff::host_port(Which::Site, &o)));
+        return json(StatusCode::OK, serde_json::json!({ "known": mine }));
+    }
     let now = Instant::now();
     let then = {
         let Ok(mut pairs) = PAIRS.lock() else {
             return plain(StatusCode::INTERNAL_SERVER_ERROR, "no pairing");
         };
-        let p = &mut pairs[slot(site.which)];
+        let p = &mut pairs[slot(w)];
         if path == "/_dd/app/pair/ask" {
             return match p.ask(v["hash"].as_str().unwrap_or(""), now) {
-                Ok(code) => json(StatusCode::OK, serde_json::json!({ "code": code })),
+                Ok(code) => {
+                    // the member's click, in the app's window
+                    show_window(&site.app, "/_dd/app/allow");
+                    json(StatusCode::OK, serde_json::json!({ "code": code }))
+                }
                 Err(why) => json(StatusCode::FORBIDDEN, serde_json::json!({ "why": why })),
             };
         }
@@ -501,36 +781,34 @@ async fn pair<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Response 
             Finish::In(then) => then,
         }
     };
-    // what the Photos page is handed once it is in (photos.rs)
-    let hand = if site.which == Which::Photos {
-        match crate::photos::hand(&site.app).await {
-            Ok(h) => Some(h),
-            Err(e) => return plain(StatusCode::BAD_GATEWAY, &e),
-        }
-    } else {
-        None
+    // Remembered from now on, on the site's own name first: from there it
+    // comes straight in next time, to this service or any other
+    let Some(id) = with_browsers(&site.app, |b| {
+        let id = b.add(&agent, now_secs());
+        b.pending(&id, w, &then, now);
+        (id, true)
+    }) else {
+        return plain(StatusCode::SERVICE_UNAVAILABLE, "no device key here");
     };
-    let Ok((label, k)) = SESSIONS
-        .lock()
-        .map(|mut s| s.create(site.which, &then, hand, now))
-    else {
-        return plain(StatusCode::INTERNAL_SERVER_ERROR, "no session");
-    };
-    json(
-        StatusCode::OK,
-        serde_json::json!({ "go": handoff::session_door(site.which, &label, &k) }),
-    )
+    let onto = format!("/_dd/app/resume?service={}", w.name());
+    match browser_door(site, &id, Which::Site, &onto, None) {
+        Ok(go) => json(StatusCode::OK, serde_json::json!({ "go": go })),
+        Err((status, why)) => plain(status, &why),
+    }
 }
 
-/// A browser's door on its session's own name: the one-time secret the
-/// pairing page was handed, spent here, for this browser's own cookie.
-fn enter_browser(req: &Request, which: Which, label: &str) -> Response {
+/// A browser's door on this device's own name: the one-time secret the
+/// pairing page was handed, spent here, for this browser's own cookie,
+/// kept as long as a browser keeps one.
+fn enter_browser<R: Runtime>(app: &AppHandle<R>, req: &Request, which: Which) -> Response {
     let q = req.uri().query().unwrap_or("");
     let k = handoff::query(q, "k").unwrap_or("");
-    let got = SESSIONS
-        .lock()
-        .ok()
-        .and_then(|mut s| s.enter(which, label, k, Instant::now()));
+    let got = with_browsers(app, |b| {
+        let got = b.enter(which, k, Instant::now());
+        let changed = got.is_some();
+        (got, changed)
+    })
+    .flatten();
     let Some((c, then)) = got else {
         return plain(
             StatusCode::FORBIDDEN,
@@ -545,8 +823,9 @@ fn enter_browser(req: &Request, which: Which, label: &str) -> Response {
         .header(
             header::SET_COOKIE,
             format!(
-                "{}={c}; Path=/; HttpOnly; SameSite=Strict",
-                handoff::BROWSER_COOKIE
+                "{}={c}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+                handoff::BROWSER_COOKIE,
+                handoff::BROWSER_LIFE_SECS
             ),
         )
         .body(Body::from(handoff::enter_page(&then)))
@@ -554,21 +833,21 @@ fn enter_browser(req: &Request, which: Which, label: &str) -> Response {
 }
 
 /// What the page that opens Photos is handed, once, to the window or the
-/// browser session the app let in with it (photos.rs, `hand`).
-fn photos_key(req: &Request, via: &Via) -> Response {
+/// browser the app let in with it (photos.rs, `hand`).
+fn photos_key<R: Runtime>(
+    app: &AppHandle<R>,
+    req: &Request,
+    via: &Via,
+    who: Option<&str>,
+) -> Response {
     if req.method() != "POST" {
         return plain(StatusCode::METHOD_NOT_ALLOWED, "POST");
     }
     let now = Instant::now();
     let hand = match via {
         Via::Window => WINDOW_KEY.lock().ok().and_then(|mut k| k.take(now)),
-        Via::Browser(label) => SESSIONS.lock().ok().and_then(|mut s| {
-            s.take_key(
-                Which::Photos,
-                label,
-                cookie(req.headers(), handoff::BROWSER_COOKIE),
-                now,
-            )
+        Via::Browser => who.and_then(|id| {
+            with_browsers(app, |b| (b.take_key(Which::Photos, id, now), false)).flatten()
         }),
         Via::Pair => None,
     };
@@ -578,7 +857,13 @@ fn photos_key(req: &Request, via: &Via) -> Response {
     }
 }
 
-async fn photos<R: Runtime>(site: &Site<R>, req: Request, path: &str, via: &Via) -> Response {
+async fn photos<R: Runtime>(
+    site: &Site<R>,
+    req: Request,
+    path: &str,
+    via: &Via,
+    who: Option<&str>,
+) -> Response {
     // the page that opens the account, and the app's own scripts and wasm
     if path == "/_dd/photos" || path == "/_dd/photos/" {
         return app_asset(&site.app, "photos-open.html");
@@ -592,7 +877,7 @@ async fn photos<R: Runtime>(site: &Site<R>, req: Request, path: &str, via: &Via)
         return app_asset(&site.app, "photos-confirm.js");
     }
     match (req.method().as_str(), path) {
-        (_, "/_dd/app/photos-key") => return photos_key(&req, via),
+        (_, "/_dd/app/photos-key") => return photos_key(&site.app, &req, via, who),
         ("POST", "/_dd/app/photos-keyed") => {
             let Ok(body) = axum::body::to_bytes(req.into_body(), 4096).await else {
                 return plain(StatusCode::BAD_REQUEST, "too much");
@@ -657,9 +942,14 @@ async fn photos<R: Runtime>(site: &Site<R>, req: Request, path: &str, via: &Via)
 /// key and the archive password from this device's keys, and every other
 /// call sent on to the boxes with this device's token. What a box answers
 /// is data: `forward` refuses anything a page would run.
-async fn site_pages<R: Runtime>(site: &Site<R>, req: Request, path: &str, via: &Via) -> Response {
+async fn site_pages<R: Runtime>(
+    site: &Site<R>,
+    req: Request,
+    path: &str,
+    who: Option<&str>,
+) -> Response {
     if let Some(p) = crate::site::page_for(path) {
-        return match site.app.asset_resolver().get(format!("_dd/pages/{p}.html")) {
+        return match crate::site::carried(&site.app, &format!("_dd/pages/{p}.html")) {
             Some(a) => Response::builder()
                 .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
                 .header(header::CACHE_CONTROL, "no-store")
@@ -700,7 +990,7 @@ async fn site_pages<R: Runtime>(site: &Site<R>, req: Request, path: &str, via: &
         }
         // taking everything out, from the Leave tab: this browser's own
         // downloads (export.rs)
-        p if p.starts_with("/_dd/app/export") => return export_route(site, via, req, p).await,
+        p if p.starts_with("/_dd/app/export") => return export_route(site, who, req, p).await,
         // a device is added or removed, and the account left (which deletes
         // everything at once), with the account's main key, from the app's
         // own window only (site.rs)
@@ -708,6 +998,9 @@ async fn site_pages<R: Runtime>(site: &Site<R>, req: Request, path: &str, via: &
             return plain(StatusCode::NOT_FOUND, "in the app's window");
         }
         _ => {}
+    }
+    if matches!(path, "/_dd/login" | "/_dd/logout") {
+        return plain(StatusCode::UNAUTHORIZED, crate::site::SIGNED_OUT);
     }
     let token = match crate::site::token(&site.app) {
         Ok(t) => t,
@@ -731,11 +1024,16 @@ async fn site_pages<R: Runtime>(site: &Site<R>, req: Request, path: &str, via: &
 /// The Leave tab's downloads, for the browser session that started them
 /// (export.rs): start one, open it, follow it, feed the library's zip in,
 /// end or stop it
-async fn export_route<R: Runtime>(site: &Site<R>, via: &Via, req: Request, path: &str) -> Response {
-    let Via::Browser(label) = via else {
+async fn export_route<R: Runtime>(
+    site: &Site<R>,
+    who: Option<&str>,
+    req: Request,
+    path: &str,
+) -> Response {
+    let Some(id) = who else {
         return plain(StatusCode::FORBIDDEN, "not let in");
     };
-    let owner = crate::export::Owner::Browser(label.clone());
+    let owner = crate::export::Owner::Browser(id.to_string());
     let q = req.uri().query().unwrap_or("").to_string();
     let id = handoff::query(&q, "id")
         .map(handoff::dec)
@@ -822,7 +1120,7 @@ async fn vault<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Response
 
 /// One of the app's own files (web/), served as the app carries it
 fn app_asset<R: Runtime>(app: &AppHandle<R>, path: &str) -> Response {
-    match app.asset_resolver().get(path.to_string()) {
+    match crate::site::carried(app, path) {
         Some(a) => Response::builder()
             .header(header::CONTENT_TYPE, a.mime_type)
             .header(header::CACHE_CONTROL, "no-cache")
@@ -878,7 +1176,7 @@ async fn client<R: Runtime>(site: &Site<R>, name: &str, path: &str, shell: bool)
         tries.push(format!("_clients/{name}/index.html"));
     }
     for t in tries {
-        if let Some(a) = site.app.asset_resolver().get(t.clone()) {
+        if let Some(a) = crate::site::carried(&site.app, &t) {
             // the resolver's own guess at a type is by the asset's name;
             // ours for the few it would get wrong (wasm, maps)
             let kind = match Path::new(&t).extension().and_then(|e| e.to_str()) {
@@ -937,6 +1235,90 @@ async fn file(root: Option<&Path>, path: &str, shell: bool) -> Response {
     plain(StatusCode::NOT_FOUND, "no such file")
 }
 
+/// One client for every call the pages make, through the network's proxy
+/// while it is up. A new one for each call was a new handshake through the
+/// proxy for each of a page's dozens of requests. Made again when the proxy
+/// changes (the network came up again on another port).
+pub(crate) fn http() -> Result<reqwest::Client, String> {
+    static C: Mutex<Option<(Option<String>, reqwest::Client)>> = Mutex::new(None);
+    let via = directory::proxy().map(|p| format!("{}\0{}\0{}", p.addr, p.user, p.password));
+    let mut c = C.lock().map_err(|e| e.to_string())?;
+    if let Some((v, client)) = c.as_ref()
+        && *v == via
+    {
+        return Ok(client.clone());
+    }
+    let client = directory::builder()
+        .and_then(|b| {
+            b.redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(Duration::from_secs(15))
+                .build()
+                .map_err(Into::into)
+        })
+        .map_err(|e| e.to_string())?;
+    *c = Some((via, client.clone()));
+    Ok(client)
+}
+
+/// The network comes up a few seconds after the window, and a page's first
+/// calls went straight out before it and failed ("error sending request",
+/// the bar's "the box said 502"). On a device that has joined, they wait
+/// for it, a while.
+pub(crate) async fn network_ready() {
+    if !crate::net::joined() {
+        return;
+    }
+    for _ in 0..60 {
+        if directory::proxy().is_some() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// A call to a box, sent again when it found no way through yet (the
+/// network still finding the box), if it has no body to send twice
+pub(crate) async fn send(mut out: reqwest::RequestBuilder) -> reqwest::Result<reqwest::Response> {
+    for _ in 0..3 {
+        let Some(again) = out.try_clone() else { break };
+        match out.send().await {
+            Err(e) if e.is_connect() => {
+                eprintln!(
+                    "local: {}: {}, again",
+                    e.url().map(|u| u.path()).unwrap_or(""),
+                    why(&e)
+                );
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                out = again;
+            }
+            r => return r,
+        }
+    }
+    out.send().await
+}
+
+/// an error and what lies under it: reqwest's own says only that a request
+/// was not sent
+pub(crate) fn why(e: &dyn std::error::Error) -> String {
+    let mut s = e.to_string();
+    let mut at = e.source();
+    while let Some(c) = at {
+        s.push_str(": ");
+        s.push_str(&c.to_string());
+        at = c.source();
+    }
+    s
+}
+
+/// whether a request carries a body: a length above nothing, or chunks
+pub(crate) fn has_body(h: &HeaderMap) -> bool {
+    h.contains_key(header::TRANSFER_ENCODING)
+        || h.get(header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+            .is_some_and(|n| n > 0)
+}
+
 /// The page's call, sent on to a box over the fleet's network and answered
 /// back as it came, streamed both ways. `bearer`: this device's token for
 /// the gate. `same_site`: the box is the page's own server (Vaultwarden),
@@ -952,17 +1334,15 @@ pub(crate) async fn forward(
         Some(q) => format!("{base}{}?{q}", req.uri().path()),
         None => format!("{base}{}", req.uri().path()),
     };
-    let client = match directory::builder().and_then(|b| {
-        b.redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(Into::into)
-    }) {
+    network_ready().await;
+    let client = match http() {
         Ok(c) => c,
-        Err(e) => return plain(StatusCode::BAD_GATEWAY, &e.to_string()),
+        Err(e) => return plain(StatusCode::BAD_GATEWAY, &e),
     };
     let Ok(method) = reqwest::Method::from_bytes(req.method().as_str().as_bytes()) else {
         return plain(StatusCode::METHOD_NOT_ALLOWED, "no such method");
     };
+    let method_name = method.as_str().to_string();
     let mut out = client.request(method, &target);
     // the vault's sign-in binding, and no other cookie (handoff.rs)
     if same_site
@@ -987,7 +1367,8 @@ pub(crate) async fn forward(
                 | "connection"
                 | "content-length"
                 | "transfer-encoding"
-        ) {
+        ) || (bearer.is_some() && k == header::AUTHORIZATION)
+        {
             continue;
         }
         out = out.header(k.as_str(), v.as_bytes());
@@ -995,11 +1376,15 @@ pub(crate) async fn forward(
     if let Some(t) = bearer {
         out = out.bearer_auth(t);
     }
-    let body = req.into_body().into_data_stream();
-    out = out.body(reqwest::Body::wrap_stream(body));
-    let r = match out.send().await {
+    // a body only where the page sent one: a GET or a PROPFIND with an
+    // empty stream went out chunked
+    if has_body(req.headers()) {
+        let body = req.into_body().into_data_stream();
+        out = out.body(reqwest::Body::wrap_stream(body));
+    }
+    let r = match send(out).await {
         Ok(r) => r,
-        Err(e) => return plain(StatusCode::BAD_GATEWAY, &e.to_string()),
+        Err(e) => return plain(StatusCode::BAD_GATEWAY, &why(&e)),
     };
     // What a box answers is data, never code: a page, a script or a
     // stylesheet from a box would run with the keys this page holds, which
@@ -1011,10 +1396,7 @@ pub(crate) async fn forward(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if ["html", "xml", "svg", "javascript", "ecmascript", "css"]
-        .iter()
-        .any(|k| kind.contains(k))
-    {
+    if !crate::site::data_from_box(&method_name, r.status().as_u16(), &kind) {
         return plain(
             StatusCode::BAD_GATEWAY,
             "the box answered with code; the app runs only its own",
@@ -1110,4 +1492,167 @@ pub fn vault_state<R: Runtime>(
         .header("cache-control", "no-store")
         .body(v.to_string().into_bytes())
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A box on a loopback port, as the pages' calls reach one: a folder's
+    /// listing, its own sign-in page, and what it was sent for anything else
+    async fn a_box() -> String {
+        let app = axum::Router::new().fallback(|req: Request| async move {
+            let (parts, body) = req.into_parts();
+            let body = axum::body::to_bytes(body, 1024).await.unwrap_or_default();
+            let h = |n: &str| {
+                parts
+                    .headers
+                    .get_all(n)
+                    .iter()
+                    .filter_map(|v| v.to_str().ok().map(str::to_string))
+                    .collect::<Vec<_>>()
+            };
+            match (parts.method.as_str(), parts.uri.path()) {
+                ("PROPFIND", _) => (
+                    StatusCode::MULTI_STATUS,
+                    [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+                    "<d:multistatus xmlns:d=\"DAV:\"/>".to_string(),
+                )
+                    .into_response(),
+                (_, "/_dd/login") => (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "text/html")],
+                    "<script>sign in</script>".to_string(),
+                )
+                    .into_response(),
+                (_, "/listing.xml") => (
+                    StatusCode::MULTI_STATUS,
+                    [(header::CONTENT_TYPE, "application/xml")],
+                    "<x/>".to_string(),
+                )
+                    .into_response(),
+                _ => json(
+                    StatusCode::OK,
+                    serde_json::json!({
+                        "authorization": h("authorization"),
+                        "cookie": h("cookie"),
+                        "chunked": h("transfer-encoding"),
+                        "length": h("content-length"),
+                        "body": String::from_utf8_lossy(&body),
+                    }),
+                ),
+            }
+        });
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let at = l.local_addr().unwrap();
+        tauri::async_runtime::spawn(async move { axum::serve(l, app).await });
+        format!("http://{at}")
+    }
+
+    fn ask(method: &str, path: &str, headers: &[(&str, &str)], body: &'static str) -> Request {
+        let mut r = axum::http::Request::builder().method(method).uri(path);
+        for (k, v) in headers {
+            r = r.header(*k, *v);
+        }
+        r.body(Body::from(body)).unwrap()
+    }
+
+    async fn text(r: Response) -> (StatusCode, String) {
+        let st = r.status();
+        let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        (st, String::from_utf8_lossy(&b).into_owned())
+    }
+
+    /// Files and Movies & TV list a folder with a PROPFIND, which a box
+    /// answers in XML: refused as code, every listing was a 502
+    #[test]
+    fn a_folders_listing_passes_and_a_page_from_the_box_does_not() {
+        tauri::async_runtime::block_on(async {
+            let base = a_box().await;
+            let r = forward(
+                &base,
+                Some("t"),
+                ask("PROPFIND", "/_dd/dav/l/", &[("depth", "1")], ""),
+                false,
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::MULTI_STATUS);
+            assert_eq!(
+                r.headers().get("content-security-policy").unwrap(),
+                "sandbox; default-src 'none'"
+            );
+            assert!(text(r).await.1.contains("multistatus"));
+            // XML to anything but a listing, and a page, are still code
+            let (st, why) =
+                text(forward(&base, Some("t"), ask("GET", "/listing.xml", &[], ""), false).await)
+                    .await;
+            assert_eq!(st, StatusCode::BAD_GATEWAY, "{why}");
+            let (st, _) =
+                text(forward(&base, Some("t"), ask("GET", "/_dd/login", &[], ""), false).await)
+                    .await;
+            assert_eq!(st, StatusCode::BAD_GATEWAY);
+        });
+    }
+
+    /// The box gets this device's token alone: not the browser's cookie,
+    /// not an Authorization of the page's own, and no body where the page
+    /// sent none
+    #[test]
+    fn a_call_goes_on_with_the_devices_token_and_its_own_body_alone() {
+        tauri::async_runtime::block_on(async {
+            let base = a_box().await;
+            let r = forward(
+                &base,
+                Some("device"),
+                ask(
+                    "GET",
+                    "/_dd/me",
+                    &[
+                        ("authorization", "Bearer page"),
+                        ("cookie", "dd_browser=secret"),
+                    ],
+                    "",
+                ),
+                false,
+            )
+            .await;
+            let (st, seen) = text(r).await;
+            assert_eq!(st, StatusCode::OK);
+            let seen: serde_json::Value = serde_json::from_str(&seen).unwrap();
+            assert_eq!(seen["authorization"], serde_json::json!(["Bearer device"]));
+            assert_eq!(seen["cookie"], serde_json::json!([]));
+            assert_eq!(
+                seen["chunked"],
+                serde_json::json!([]),
+                "a GET goes without a body"
+            );
+            let r = forward(
+                &base,
+                Some("device"),
+                ask("PUT", "/_dd/dav/l/x", &[("content-length", "3")], "abc"),
+                false,
+            )
+            .await;
+            let seen: serde_json::Value = serde_json::from_str(&text(r).await.1).unwrap();
+            assert_eq!(seen["body"], "abc");
+        });
+    }
+
+    #[test]
+    fn a_body_is_one_the_page_sent() {
+        let h = |pairs: &[(&str, &str)]| {
+            let mut m = HeaderMap::new();
+            for (k, v) in pairs {
+                m.insert(
+                    axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                    HeaderValue::from_str(v).unwrap(),
+                );
+            }
+            m
+        };
+        assert!(!has_body(&h(&[])));
+        assert!(!has_body(&h(&[("content-length", "0")])));
+        assert!(has_body(&h(&[("content-length", "12")])));
+        assert!(has_body(&h(&[("transfer-encoding", "chunked")])));
+    }
 }

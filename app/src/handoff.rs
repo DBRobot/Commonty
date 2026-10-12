@@ -35,8 +35,12 @@ pub const PAIR_LIFE: Duration = Duration::from_secs(120);
 pub const DOOR_LIFE: Duration = Duration::from_secs(60);
 /// how long after the door the Photos page may ask for its password, once
 pub const KEY_LIFE: Duration = Duration::from_secs(60);
-/// browsers let in at once; the oldest goes first past this
-const MAX_SESSIONS: usize = 64;
+/// browsers remembered at once; the one longest unseen goes first past this
+const MAX_BROWSERS: usize = 32;
+/// how long a let-in browser keeps its cookie: Chrome's own limit, 400 days
+pub const BROWSER_LIFE_SECS: u64 = 400 * 24 * 3600;
+/// doors open at once; a door is a minute's, so this is plenty
+const MAX_DOORS: usize = 64;
 
 /// the window's cookie (this launch's secret) and a browser's (its session)
 pub const WINDOW_COOKIE: &str = "dd_local";
@@ -90,12 +94,13 @@ pub fn site_page(path: &str) -> bool {
 
 /// which way a request came in, by its Host: the app's window on
 /// 127.0.0.1, a browser asking to be let in on the install's name, or a
-/// browser let in, on its session's own name
+/// browser on this device's own name for let-in browsers (which one, its
+/// cookie says)
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Via {
     Window,
     Pair,
-    Browser(String),
+    Browser,
 }
 
 fn random_hex(n: usize) -> String {
@@ -159,11 +164,27 @@ impl Names {
     }
 }
 
+/// This device's own name for the browsers it lets in, s-/p-/v-<own>.localhost:
+/// made from its device key, so the same across the app's restarts (the
+/// browser's cookie, and what Ente or the vault keep, stay where they
+/// were) and new with a new device. A hash, so it tells nothing of the key.
+/// No program but the browsers let in learns it: it is never in an address
+/// the app opens, only in an answer to a browser's own request.
+pub fn own_label(device_seed: &[u8]) -> String {
+    let mut h = sha2::Sha256::new();
+    h.update(b"commonty: the name a let-in browser opens the app's pages at\0");
+    h.update(device_seed);
+    h.finalize()[..16]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 /// The Host a request names, exactly: 127.0.0.1:<port> for the window, the
-/// install's name for pairing, a live session's name for a browser let in.
-/// Anything else (a rebound DNS name, localhost, another port, a session
-/// that is gone) is no one this server answers.
-pub fn via(host: Option<&str>, w: Which, names: &Names, sessions: &Sessions) -> Option<Via> {
+/// install's name for pairing, this device's own name for a browser let in.
+/// Anything else (a rebound DNS name, localhost, another port, an old name)
+/// is no one this server answers.
+pub fn via(host: Option<&str>, w: Which, names: &Names, own: Option<&str>) -> Option<Via> {
     let h = host?.strip_suffix(&format!(":{}", w.port()))?;
     if h == "127.0.0.1" {
         return Some(Via::Window);
@@ -171,13 +192,8 @@ pub fn via(host: Option<&str>, w: Which, names: &Names, sessions: &Sessions) -> 
     if h == names.host(w) {
         return Some(Via::Pair);
     }
-    let label = h
-        .strip_prefix(w.prefix())?
-        .strip_prefix('-')?
-        .strip_suffix(".localhost")?;
-    sessions
-        .has(w, label)
-        .then(|| Via::Browser(label.to_string()))
+    own.filter(|o| valid_label(o) && h == host_of(w, o))
+        .map(|_| Via::Browser)
 }
 
 /// The request comes from this origin's own pages. A browser always names
@@ -207,9 +223,10 @@ pub fn same_origin(
 /// pairing page sends it there), and the vault's sign-in coming back from
 /// the gate to the app's own page that passes the code on.
 pub fn way_in(w: Which, via: &Via, method: &str, path: &str) -> bool {
-    matches!(via, Via::Browser(_))
+    *via == Via::Browser
         && method == "GET"
-        && (path == "/_dd/app/enter" || (w == Which::Vault && path == "/sso-connector.html"))
+        && (matches!(path, "/_dd/app/enter" | "/_dd/app/resume")
+            || (w == Which::Vault && path == "/sso-connector.html"))
 }
 
 /// What a server of the app does with a request, before anything is read
@@ -224,13 +241,19 @@ pub enum Admit {
     /// a let-in browser, or the app's window: the service's own pages and
     /// what they ask, keys among them
     Serve,
+    /// a page opened from somewhere else (a link, a bookmark's tab, the
+    /// pairing page): nothing yet, only a page that opens itself again, so
+    /// it comes from this origin and with the Strict cookie
+    GoOn,
 }
 
 /// The one rule every request to the app's servers passes, for each way in
 /// (`via`). `cookie_ok`: the request carries the cookie of this way in -
-/// the window's launch secret, or the browser session's own. A key is only
+/// the window's launch secret, or a let-in browser's own. A key is only
 /// ever behind `Serve`, so only behind that cookie: a browser the member
 /// let in from the app's window (the pairing), or the window itself.
+/// `nav`: the browser opening a page in a tab (Sec-Fetch-Mode navigate,
+/// Sec-Fetch-Dest document), never a frame, a script or a fetch.
 #[allow(clippy::too_many_arguments)]
 pub fn admit(
     w: Which,
@@ -240,11 +263,19 @@ pub fn admit(
     path: &str,
     origin: Option<&str>,
     fetch_site: Option<&str>,
+    nav: bool,
     own: &str,
 ) -> Admit {
     let way = way_in(w, via, method, path);
     if !way && !same_origin(method, origin, fetch_site, own, *via == Via::Window) {
-        return Admit::Refuse(403, "not this page's own request");
+        // A tab opened at one of these pages from anywhere else used to be
+        // refused outright. It is shown nothing it was not already: the
+        // pairing page, or a page that opens itself again from here.
+        return match via {
+            Via::Pair if nav && method == "GET" => Admit::Pairing,
+            Via::Browser if nav && method == "GET" => Admit::GoOn,
+            _ => Admit::Refuse(403, "not this page's own request"),
+        };
     }
     match via {
         Via::Pair => Admit::Pairing,
@@ -252,9 +283,9 @@ pub fn admit(
         Via::Window if w == Which::Site => Admit::Refuse(404, "not here"),
         _ if path == "/_dd/app/enter" => Admit::Door,
         _ if cookie_ok => Admit::Serve,
-        Via::Browser(_) if way => Admit::Serve,
+        Via::Browser if way => Admit::Serve,
         Via::Window => Admit::Refuse(403, "open this from the Commonty app"),
-        Via::Browser(_) => Admit::Refuse(
+        Via::Browser => Admit::Refuse(
             403,
             "open this from its page on the site, through the Commonty app",
         ),
@@ -351,9 +382,14 @@ pub fn then_for(link: &Link) -> String {
 
 /// The address the browser is opened at. Other programs on the device can
 /// read it (a browser's command line), so it holds nothing secret: the
-/// install's pairing page, and no more.
+/// install's pairing page, and which service it is for. Every service
+/// pairs on the site's: what a browser keeps there (pair.js) is one place.
 pub fn browser_url(names: &Names, w: Which) -> String {
-    format!("{}/_dd/app/pair", names.origin(w))
+    format!(
+        "{}/_dd/app/pair?service={}",
+        names.origin(Which::Site),
+        w.name()
+    )
 }
 
 /// what a pairing page sends: the SHA-256 of its verifier, in hex
@@ -480,6 +516,17 @@ impl Pairing {
         }
     }
 
+    /// A browser let in before has come straight in: the page the link
+    /// asked for, and nothing left for another to ask with
+    pub fn take_then(&mut self, now: Instant) -> Option<String> {
+        if self.crowded || !self.live(now) {
+            return None;
+        }
+        let then = self.armed.take().map(|a| a.then);
+        self.close();
+        then
+    }
+
     pub fn refuse(&mut self) {
         self.close();
         self.crowded = false;
@@ -568,109 +615,256 @@ impl Once {
     }
 }
 
-/// A browser let in: its own name (p-/v-<label>.localhost), known only to
-/// it and the app, so its cookie and what it keeps are under a name no
-/// other program can send the browser to. The door's one-time secret, then
-/// its cookie.
-struct Session {
+/// A browser the member let in, remembered until they forget it (Settings
+/// in the app's window, or signing out in that browser). Its cookie on
+/// this device's own names is `<id>.<secret>`, one secret for each
+/// service; only their hashes are kept here.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Browser {
+    pub id: String,
+    /// what it said it was when let in ("Chrome on Linux")
+    pub name: String,
+    /// seconds since 1970
+    pub made: u64,
+    pub seen: u64,
+    #[serde(default)]
+    secrets: HashMap<String, String>,
+}
+
+/// A door: once, for a minute, into one service for one browser
+struct Door {
+    id: String,
     which: Which,
     then: String,
-    door: Option<(String, Instant)>,
-    cookie: Option<String>,
     pw: Option<String>,
-    key: Once,
     made: Instant,
 }
 
-#[derive(Default)]
-pub struct Sessions(HashMap<String, Session>);
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Kept {
+    device: String,
+    browsers: Vec<Browser>,
+}
 
-impl Sessions {
-    /// a session for a browser just let in: its label and door secret
-    pub fn create(
+/// The browsers this device let in, kept beside its other state
+/// (browsers.json, 0600) for the device they were let in by: a new device
+/// key starts with none.
+#[derive(Default)]
+pub struct Browsers {
+    device: String,
+    list: Vec<Browser>,
+    doors: HashMap<String, Door>,
+    keys: HashMap<(String, &'static str), Once>,
+    /// where a browser just let in goes once its site cookie is set
+    pending: HashMap<(String, &'static str), (String, Instant)>,
+}
+
+fn secret_hash(s: &str) -> String {
+    hash_of(s)
+}
+
+/// equal, in a time that does not say how much of it was
+fn same(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
+}
+
+impl Browsers {
+    /// what was kept, if it is this device's
+    pub fn from_json(device: &str, kept: &str) -> Browsers {
+        let list = serde_json::from_str::<Kept>(kept)
+            .ok()
+            .filter(|k| k.device == device)
+            .map(|k| k.browsers)
+            .unwrap_or_default();
+        Browsers {
+            device: device.to_string(),
+            list,
+            ..Default::default()
+        }
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(&Kept {
+            device: self.device.clone(),
+            browsers: self.list.clone(),
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn device(&self) -> &str {
+        &self.device
+    }
+
+    pub fn list(&self) -> &[Browser] {
+        &self.list
+    }
+
+    /// one just let in by the member's click: its id
+    pub fn add(&mut self, name: &str, now: u64) -> String {
+        if self.list.len() >= MAX_BROWSERS
+            && let Some(i) = self
+                .list
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, b)| b.seen)
+                .map(|(i, _)| i)
+        {
+            let gone = self.list.remove(i);
+            self.keys.retain(|(id, _), _| *id != gone.id);
+        }
+        let id = random_hex(16);
+        self.list.push(Browser {
+            id: id.clone(),
+            name: name.chars().take(64).collect(),
+            made: now,
+            seen: now,
+            secrets: HashMap::new(),
+        });
+        id
+    }
+
+    /// A door into `which` for a browser already let in: the one-time
+    /// secret its address carries
+    pub fn door(
         &mut self,
+        id: &str,
         which: Which,
         then: &str,
         pw: Option<String>,
         now: Instant,
-    ) -> (String, String) {
-        if self.0.len() >= MAX_SESSIONS
-            && let Some(old) = self
-                .0
-                .iter()
-                .min_by_key(|(_, s)| s.made)
-                .map(|(k, _)| k.clone())
-        {
-            self.0.remove(&old);
+    ) -> Option<String> {
+        if !self.list.iter().any(|b| b.id == id) {
+            return None;
         }
-        let label = random_hex(16);
+        self.doors
+            .retain(|_, d| now.duration_since(d.made) < DOOR_LIFE);
+        if self.doors.len() >= MAX_DOORS {
+            return None;
+        }
         let k = random_hex(32);
-        self.0.insert(
-            label.clone(),
-            Session {
+        self.doors.insert(
+            k.clone(),
+            Door {
+                id: id.to_string(),
                 which,
                 then: then.to_string(),
-                door: Some((k.clone(), now)),
-                cookie: None,
                 pw,
-                key: Once::new(),
                 made: now,
             },
         );
-        (label, k)
+        Some(k)
     }
 
-    /// a browser's own "leave": its name answers nothing from now on
-    pub fn end(&mut self, label: &str) {
-        self.0.remove(label);
-    }
-
-    pub fn has(&self, which: Which, label: &str) -> bool {
-        self.0.get(label).is_some_and(|s| s.which == which)
-    }
-
-    /// the session's door, once and in time: its cookie and the page after
-    pub fn enter(
-        &mut self,
-        which: Which,
-        label: &str,
-        k: &str,
-        now: Instant,
-    ) -> Option<(String, String)> {
-        let s = self.0.get_mut(label).filter(|s| s.which == which)?;
-        let (want, made) = s.door.take()?;
-        if want != k || now.duration_since(made) >= DOOR_LIFE {
+    /// The door, once and in time, for its own service: the browser's new
+    /// cookie there, and the page after
+    pub fn enter(&mut self, which: Which, k: &str, now: Instant) -> Option<(String, String)> {
+        let d = self.doors.remove(k)?;
+        if d.which != which || now.duration_since(d.made) >= DOOR_LIFE {
             return None;
         }
-        let c = random_hex(32);
-        s.cookie = Some(c.clone());
-        if let Some(pw) = s.pw.take() {
-            s.key.set(pw, now);
+        let b = self.list.iter_mut().find(|b| b.id == d.id)?;
+        let secret = random_hex(32);
+        b.secrets
+            .insert(which.name().to_string(), secret_hash(&secret));
+        if let Some(pw) = d.pw {
+            self.set_key(which, &d.id, pw, now);
         }
-        Some((c, s.then.clone()))
+        Some((format!("{}.{secret}", d.id), d.then))
     }
 
-    pub fn valid(&self, which: Which, label: &str, cookie: Option<&str>) -> bool {
-        self.0.get(label).is_some_and(|s| {
-            s.which == which && s.cookie.is_some() && s.cookie.as_deref() == cookie
-        })
+    /// which browser a cookie on `which`'s own name is, if any
+    pub fn check(&self, which: Which, cookie: Option<&str>) -> Option<String> {
+        let (id, secret) = cookie?.split_once('.')?;
+        let b = self.list.iter().find(|b| b.id == id)?;
+        let want = b.secrets.get(which.name())?;
+        same(want, &secret_hash(secret)).then(|| b.id.clone())
     }
 
-    pub fn take_key(
-        &mut self,
-        which: Which,
-        label: &str,
-        cookie: Option<&str>,
-        now: Instant,
-    ) -> Option<String> {
-        if !self.valid(which, label, cookie) {
-            return None;
+    /// seen now; whether that is worth writing down (an hour since)
+    pub fn seen(&mut self, id: &str, now: u64) -> bool {
+        match self.list.iter_mut().find(|b| b.id == id) {
+            Some(b) if now.saturating_sub(b.seen) >= 3600 => {
+                b.seen = now;
+                true
+            }
+            _ => false,
         }
-        self.0.get_mut(label)?.key.take(now)
+    }
+
+    pub fn set_key(&mut self, which: Which, id: &str, pw: String, now: Instant) {
+        let mut o = Once::new();
+        o.set(pw, now);
+        self.keys.insert((id.to_string(), which.name()), o);
+    }
+
+    pub fn take_key(&mut self, which: Which, id: &str, now: Instant) -> Option<String> {
+        self.keys
+            .get_mut(&(id.to_string(), which.name()))?
+            .take(now)
+    }
+
+    /// the page a browser just let in goes on to, once in (resume)
+    pub fn pending(&mut self, id: &str, which: Which, then: &str, now: Instant) {
+        self.pending
+            .retain(|_, (_, made)| now.duration_since(*made) < DOOR_LIFE);
+        self.pending
+            .insert((id.to_string(), which.name()), (then.to_string(), now));
+    }
+
+    pub fn take_pending(&mut self, id: &str, which: Which, now: Instant) -> Option<String> {
+        let (then, made) = self.pending.remove(&(id.to_string(), which.name()))?;
+        (now.duration_since(made) < DOOR_LIFE).then_some(then)
+    }
+
+    /// forgotten: its cookies open nothing from now on
+    pub fn forget(&mut self, id: &str) -> bool {
+        let before = self.list.len();
+        self.list.retain(|b| b.id != id);
+        self.keys.retain(|(i, _), _| i != id);
+        self.pending.retain(|(i, _), _| i != id);
+        self.doors.retain(|_, d| d.id != id);
+        self.list.len() != before
     }
 }
 
-/// the door a browser let in goes through: its session's own name
+/// "Chrome on Linux", from what a browser says it is: what the member sees
+/// in the app's list of browsers
+pub fn browser_name(agent: &str) -> String {
+    let browser = [
+        ("Edg/", "Edge"),
+        ("OPR/", "Opera"),
+        ("Firefox/", "Firefox"),
+        ("Chrome/", "Chrome"),
+        ("Chromium/", "Chromium"),
+        ("Safari/", "Safari"),
+    ]
+    .iter()
+    .find(|(k, _)| agent.contains(k))
+    .map_or("A browser", |(_, v)| v);
+    let os = [
+        ("Android", "Android"),
+        ("Windows", "Windows"),
+        ("iPhone", "iPhone"),
+        ("Mac OS X", "macOS"),
+        ("CrOS", "ChromeOS"),
+        ("Linux", "Linux"),
+    ]
+    .iter()
+    .find(|(k, _)| agent.contains(k))
+    .map(|(_, v)| *v);
+    match os {
+        Some(os) => format!("{browser} on {os}"),
+        None => browser.to_string(),
+    }
+}
+
+/// this device's own name for `w`'s let-in browsers, with its port: what a
+/// pairing page kept, to go there itself next time
+pub fn host_port(w: Which, label: &str) -> String {
+    format!("{}:{}", host_of(w, label), w.port())
+}
+
+/// the door a browser let in goes through, on this device's own name
 pub fn session_door(w: Which, label: &str, k: &str) -> String {
     format!(
         "http://{}:{}/_dd/app/enter?k={k}",
@@ -760,11 +954,13 @@ mod tests {
         let n = names();
         assert_eq!(
             browser_url(&n, Which::Photos),
-            format!("http://p-{LABEL}.localhost:41661/_dd/app/pair")
+            format!("http://s-{LABEL}.localhost:41660/_dd/app/pair?service=photos")
         );
         let u = browser_url(&n, Which::Vault);
-        assert_eq!(u, format!("http://v-{LABEL}.localhost:41662/_dd/app/pair"));
-        assert!(!u.contains('?') && !u.contains('#'), "{u}");
+        assert_eq!(
+            u,
+            format!("http://s-{LABEL}.localhost:41660/_dd/app/pair?service=vault")
+        );
         assert!(!u.contains(crate::site::launch_secret()));
     }
 
@@ -866,100 +1062,185 @@ mod tests {
         assert_eq!(code("FFFF"), None);
     }
 
-    #[test]
-    fn a_session_door_opens_once_in_time() {
-        let now = Instant::now();
-        let mut s = Sessions::default();
-        let (label, k) = s.create(Which::Photos, "/_dd/photos", Some("pw".into()), now);
-        assert!(s.has(Which::Photos, &label));
-        assert!(!s.has(Which::Vault, &label));
-        assert!(s.enter(Which::Photos, &label, "wrong", now).is_none());
-        assert!(
-            s.enter(Which::Photos, &label, &k, now).is_none(),
-            "spent by the wrong try"
-        );
-        let (label, k) = s.create(Which::Photos, "/_dd/photos", None, now);
-        assert!(
-            s.enter(Which::Photos, &label, &k, now + DOOR_LIFE)
-                .is_none()
-        );
-        let (label, k) = s.create(Which::Vault, "/", None, now);
-        assert!(s.enter(Which::Photos, &label, &k, now).is_none());
-        let (label, k) = s.create(Which::Vault, "/#/vault", None, now);
-        let (c, then) = s.enter(Which::Vault, &label, &k, now).unwrap();
-        assert_eq!(then, "/#/vault");
-        assert!(s.valid(Which::Vault, &label, Some(&c)));
-        assert!(!s.valid(Which::Vault, &label, Some("other")));
-        assert!(!s.valid(Which::Vault, &label, None));
-        assert!(s.enter(Which::Vault, &label, &k, now).is_none(), "once");
+    fn let_in(
+        b: &mut Browsers,
+        w: Which,
+        then: &str,
+        pw: Option<&str>,
+        now: Instant,
+    ) -> (String, String) {
+        let id = b.add("Chrome on Linux", 1000);
+        let k = b.door(&id, w, then, pw.map(Into::into), now).unwrap();
+        let (c, _) = b.enter(w, &k, now).unwrap();
+        (id, c)
     }
 
     #[test]
-    fn the_photos_password_is_handed_once_and_only_to_its_session() {
+    fn a_door_opens_once_in_time_for_its_service() {
         let now = Instant::now();
-        let mut s = Sessions::default();
-        let (label, k) = s.create(Which::Photos, "/_dd/photos", Some("pw".into()), now);
+        let mut b = Browsers::from_json("dev", "");
+        let id = b.add("Firefox on Windows", 1000);
+        assert!(b.door("not one", Which::Photos, "/", None, now).is_none());
+        let k = b
+            .door(&id, Which::Photos, "/_dd/photos", None, now)
+            .unwrap();
+        assert!(b.enter(Which::Photos, "wrong", now).is_none());
+        assert!(
+            b.enter(Which::Vault, &k, now).is_none(),
+            "another service's"
+        );
+        assert!(
+            b.enter(Which::Photos, &k, now).is_none(),
+            "spent by that try"
+        );
+        let k = b
+            .door(&id, Which::Photos, "/_dd/photos", None, now)
+            .unwrap();
+        assert!(b.enter(Which::Photos, &k, now + DOOR_LIFE).is_none());
+        let k = b.door(&id, Which::Vault, "/#/vault", None, now).unwrap();
+        let (c, then) = b.enter(Which::Vault, &k, now).unwrap();
+        assert_eq!(then, "/#/vault");
         assert_eq!(
-            s.take_key(Which::Photos, &label, None, now),
+            b.check(Which::Vault, Some(&c)).as_deref(),
+            Some(id.as_str())
+        );
+        assert_eq!(b.check(Which::Photos, Some(&c)), None, "its own service's");
+        assert_eq!(b.check(Which::Vault, Some(&format!("{id}.other"))), None);
+        assert_eq!(b.check(Which::Vault, Some(&id)), None);
+        assert_eq!(b.check(Which::Vault, None), None);
+        assert!(b.enter(Which::Vault, &k, now).is_none(), "once");
+    }
+
+    #[test]
+    fn the_photos_password_is_handed_once_and_only_to_its_browser() {
+        let now = Instant::now();
+        let mut b = Browsers::from_json("dev", "");
+        let id = b.add("Chrome on Linux", 1000);
+        let k = b
+            .door(&id, Which::Photos, "/_dd/photos", Some("pw".into()), now)
+            .unwrap();
+        assert_eq!(
+            b.take_key(Which::Photos, &id, now),
             None,
             "not before the door"
         );
-        let (c, _) = s.enter(Which::Photos, &label, &k, now).unwrap();
-        assert_eq!(s.take_key(Which::Photos, &label, Some("other"), now), None);
-        assert_eq!(s.take_key(Which::Vault, &label, Some(&c), now), None);
-        assert_eq!(
-            s.take_key(Which::Photos, &label, Some(&c), now).as_deref(),
-            Some("pw")
-        );
-        assert_eq!(s.take_key(Which::Photos, &label, Some(&c), now), None);
+        b.enter(Which::Photos, &k, now).unwrap();
+        let (other, _) = let_in(&mut b, Which::Photos, "/", None, now);
+        assert_eq!(b.take_key(Which::Photos, &other, now), None);
+        assert_eq!(b.take_key(Which::Vault, &id, now), None);
+        assert_eq!(b.take_key(Which::Photos, &id, now).as_deref(), Some("pw"));
+        assert_eq!(b.take_key(Which::Photos, &id, now), None);
     }
 
     #[test]
     fn the_photos_password_waits_only_a_minute() {
         let now = Instant::now();
-        let mut s = Sessions::default();
-        let (label, k) = s.create(Which::Photos, "/_dd/photos", Some("pw".into()), now);
-        let (c, _) = s.enter(Which::Photos, &label, &k, now).unwrap();
-        assert_eq!(
-            s.take_key(Which::Photos, &label, Some(&c), now + KEY_LIFE),
-            None
-        );
+        let mut b = Browsers::from_json("dev", "");
+        let (id, _) = let_in(&mut b, Which::Photos, "/", Some("pw"), now);
+        assert_eq!(b.take_key(Which::Photos, &id, now + KEY_LIFE), None);
     }
 
     #[test]
-    fn sessions_are_capped() {
-        let now = Instant::now();
-        let mut s = Sessions::default();
-        let mut first = String::new();
-        for i in 0..=MAX_SESSIONS {
-            let (label, _) = s.create(
-                Which::Vault,
-                "/",
-                None,
-                now + Duration::from_millis(i as u64),
-            );
-            if i == 0 {
-                first = label;
-            }
+    fn browsers_are_capped_and_the_longest_unseen_goes() {
+        let mut b = Browsers::from_json("dev", "");
+        let first = b.add("old", 1);
+        for i in 0..MAX_BROWSERS {
+            let id = b.add("newer", 100 + i as u64);
+            b.seen(&id, 100_000);
         }
-        assert_eq!(s.0.len(), MAX_SESSIONS);
-        assert!(!s.has(Which::Vault, &first));
+        assert_eq!(b.list().len(), MAX_BROWSERS);
+        assert!(!b.list().iter().any(|x| x.id == first));
+    }
+
+    /// Pair once: a browser let in is still let in after the app restarts
+    /// (what is kept is read back), with the same cookie, at the same name
+    #[test]
+    fn a_browser_let_in_is_remembered_across_restarts() {
+        let now = Instant::now();
+        let mut b = Browsers::from_json("dev", "");
+        let (id, c) = let_in(&mut b, Which::Site, "/_dd/files", None, now);
+        let kept = b.to_json();
+        assert!(
+            !kept.contains(c.split('.').nth(1).unwrap()),
+            "only the hash is kept"
+        );
+        let again = Browsers::from_json("dev", &kept);
+        assert_eq!(
+            again.check(Which::Site, Some(&c)).as_deref(),
+            Some(id.as_str())
+        );
+        // another device key (signed in again as a new device) starts afresh
+        assert!(Browsers::from_json("other", &kept).list().is_empty());
+        assert!(Browsers::from_json("dev", "not json").list().is_empty());
+        assert_eq!(own_label(b"seed"), own_label(b"seed"));
+        assert_ne!(own_label(b"seed"), own_label(b"another"));
+        assert!(valid_label(&own_label(b"seed")));
+    }
+
+    #[test]
+    fn a_forgotten_browser_opens_nothing() {
+        let now = Instant::now();
+        let mut b = Browsers::from_json("dev", "");
+        let (id, c) = let_in(&mut b, Which::Site, "/", None, now);
+        let (kept, _) = let_in(&mut b, Which::Site, "/", None, now);
+        let k = b
+            .door(&id, Which::Photos, "/", Some("pw".into()), now)
+            .unwrap();
+        assert!(b.forget(&id));
+        assert!(!b.forget(&id));
+        assert_eq!(b.check(Which::Site, Some(&c)), None);
+        assert!(
+            b.enter(Which::Photos, &k, now).is_none(),
+            "its doors go too"
+        );
+        assert!(b.door(&id, Which::Vault, "/", None, now).is_none());
+        assert!(b.list().iter().any(|x| x.id == kept), "the others stay");
+        let back = Browsers::from_json("dev", &b.to_json());
+        assert_eq!(back.check(Which::Site, Some(&c)), None);
+    }
+
+    #[test]
+    fn a_browser_let_in_before_takes_the_links_page_and_nothing_is_left_to_ask() {
+        let now = Instant::now();
+        let mut p = Pairing::default();
+        assert_eq!(p.take_then(now), None, "no link, no page");
+        p.arm("/_dd/files", now);
+        assert_eq!(p.take_then(now).as_deref(), Some("/_dd/files"));
+        assert!(p.ask(&hash_of("v"), now).is_err(), "the link is spent");
+        p.arm("/_dd/files", now);
+        assert_eq!(p.take_then(now + PAIR_LIFE), None);
+    }
+
+    #[test]
+    fn a_browser_is_named_for_the_member() {
+        let chrome = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+        assert_eq!(browser_name(chrome), "Chrome on Linux");
+        let edge = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
+        assert_eq!(browser_name(edge), "Edge on Windows");
+        let ff = "Mozilla/5.0 (Android 15; Mobile; rv:143.0) Gecko/143.0 Firefox/143.0";
+        assert_eq!(browser_name(ff), "Firefox on Android");
+        assert_eq!(browser_name(""), "A browser");
     }
 
     #[test]
     fn only_the_exact_host_and_port_are_answered() {
         let n = names();
-        let mut s = Sessions::default();
-        let (label, _) = s.create(Which::Photos, "/", None, Instant::now());
+        let own = own_label(b"this device");
         let p = Which::Photos;
-        assert_eq!(via(Some("127.0.0.1:41661"), p, &n, &s), Some(Via::Window));
+        let o = Some(own.as_str());
+        assert_eq!(via(Some("127.0.0.1:41661"), p, &n, o), Some(Via::Window));
         assert_eq!(
-            via(Some(&format!("p-{LABEL}.localhost:41661")), p, &n, &s),
+            via(Some(&format!("p-{LABEL}.localhost:41661")), p, &n, o),
             Some(Via::Pair)
         );
         assert_eq!(
-            via(Some(&format!("p-{label}.localhost:41661")), p, &n, &s),
-            Some(Via::Browser(label.clone()))
+            via(Some(&format!("p-{own}.localhost:41661")), p, &n, o),
+            Some(Via::Browser)
+        );
+        assert_eq!(
+            via(Some(&format!("p-{own}.localhost:41661")), p, &n, None),
+            None,
+            "no device key, no browsers"
         );
         for h in [
             None,
@@ -970,35 +1251,38 @@ mod tests {
             Some(format!("p-{LABEL}.localhost")),
             Some(format!("p-{LABEL}.localhost:41662")),
             Some(format!("v-{LABEL}.localhost:41661")),
-            Some(format!("v-{label}.localhost:41661")),
-            Some(format!("p-{label}.localhost:41662")),
+            Some(format!("v-{own}.localhost:41661")),
+            Some(format!("p-{own}.localhost:41662")),
             Some("P-0123456789ABCDEF0123456789ABCDEF.localhost:41661".into()),
             Some(format!("x.p-{LABEL}.localhost:41661")),
+            Some(format!("x.p-{own}.localhost:41661")),
             Some(format!("p-{}.localhost:41661", "f".repeat(32))),
             Some("[::1]:41661".into()),
         ] {
-            assert_eq!(via(h.as_deref(), p, &n, &s), None, "{h:?}");
+            assert_eq!(via(h.as_deref(), p, &n, o), None, "{h:?}");
         }
         assert_eq!(
             via(
                 Some(&format!("v-{LABEL}.localhost:41662")),
                 Which::Vault,
                 &n,
-                &s
+                o
             ),
             Some(Via::Pair)
         );
     }
 
     #[test]
-    fn a_session_name_is_not_the_install_name() {
-        let mut s = Sessions::default();
-        let (label, k) = s.create(Which::Photos, "/", None, Instant::now());
-        assert!(valid_label(&label) && label != LABEL);
-        let d = session_door(Which::Photos, &label, &k);
+    fn the_devices_own_name_is_not_the_install_name() {
+        let own = own_label(b"seed");
+        assert!(valid_label(&own) && own != LABEL);
         assert_eq!(
-            d,
-            format!("http://p-{label}.localhost:41661/_dd/app/enter?k={k}")
+            session_door(Which::Photos, &own, "k"),
+            format!("http://p-{own}.localhost:41661/_dd/app/enter?k=k")
+        );
+        assert_eq!(
+            host_port(Which::Site, &own),
+            format!("s-{own}.localhost:41660")
         );
     }
 
@@ -1154,10 +1438,13 @@ mod tests {
 
     #[test]
     fn only_a_browsers_ways_in_come_without_a_cookie() {
-        let b = Via::Browser("x".into());
+        let b = Via::Browser;
         assert!(way_in(Which::Vault, &b, "GET", "/sso-connector.html"));
         assert!(way_in(Which::Photos, &b, "GET", "/_dd/app/enter"));
         assert!(way_in(Which::Vault, &b, "GET", "/_dd/app/enter"));
+        assert!(way_in(Which::Site, &b, "GET", "/_dd/app/resume"));
+        assert!(!way_in(Which::Site, &b, "POST", "/_dd/app/resume"));
+        assert!(!way_in(Which::Site, &Via::Pair, "GET", "/_dd/app/resume"));
         assert!(!way_in(Which::Vault, &b, "POST", "/sso-connector.html"));
         assert!(!way_in(Which::Vault, &b, "GET", "/sso-connector.html/x"));
         assert!(!way_in(Which::Vault, &b, "GET", "/api/sync"));
@@ -1202,8 +1489,8 @@ mod tests {
     #[test]
     fn keys_are_served_only_to_a_browser_the_member_let_in() {
         let own = format!("http://s-{LABEL}.localhost:41660");
-        let b = Via::Browser(LABEL.into());
-        let ask = |via: &Via, cookie_ok, method, origin, site| {
+        let b = Via::Browser;
+        let ask = |via: &Via, cookie_ok, method, origin, site, nav| {
             admit(
                 Which::Site,
                 via,
@@ -1212,29 +1499,39 @@ mod tests {
                 "/_dd/app/library",
                 origin,
                 site,
+                nav,
                 &own,
             )
         };
         assert_eq!(
-            ask(&b, true, "GET", None, Some("same-origin")),
+            ask(&b, true, "GET", None, Some("same-origin"), false),
             Admit::Serve
         );
         // the pairing name serves its page and two asks, never this
-        assert_eq!(ask(&Via::Pair, true, "GET", None, None), Admit::Pairing);
+        assert_eq!(
+            ask(&Via::Pair, true, "GET", None, None, false),
+            Admit::Pairing
+        );
         assert!(matches!(
-            ask(&b, false, "GET", None, Some("same-origin")),
+            ask(&b, false, "GET", None, Some("same-origin"), false),
             Admit::Refuse(403, _)
         ));
         assert!(matches!(
-            ask(&b, true, "GET", None, Some("cross-site")),
+            ask(&b, true, "GET", None, Some("cross-site"), false),
+            Admit::Refuse(403, _)
+        ));
+        // opened in a tab from elsewhere: a page that opens itself again,
+        // and no key
+        assert_eq!(
+            ask(&b, true, "GET", None, Some("cross-site"), true),
+            Admit::GoOn
+        );
+        assert!(matches!(
+            ask(&b, true, "POST", Some("http://evil.example"), None, false),
             Admit::Refuse(403, _)
         ));
         assert!(matches!(
-            ask(&b, true, "POST", Some("http://evil.example"), None),
-            Admit::Refuse(403, _)
-        ));
-        assert!(matches!(
-            ask(&Via::Window, true, "GET", None, None),
+            ask(&Via::Window, true, "GET", None, None, false),
             Admit::Refuse(404, _)
         ));
         // its door is open without the cookie, and spends a one-time secret
@@ -1247,6 +1544,7 @@ mod tests {
                 "/_dd/app/enter",
                 None,
                 None,
+                false,
                 &own
             ),
             Admit::Door
@@ -1262,11 +1560,70 @@ mod tests {
                 "/_dd/app/photos-key",
                 None,
                 None,
+                false,
                 w,
             )
         };
         assert_eq!(win(true), Admit::Serve);
         assert!(matches!(win(false), Admit::Refuse(403, _)));
+    }
+
+    /// A tab opened at an app-served page from a link, a bookmark or the
+    /// pairing page is sent on to itself, so it arrives again from its own
+    /// origin with its cookie. Nothing else from another site gets past:
+    /// not a frame, not a fetch, not a form, not a change.
+    #[test]
+    fn a_page_opened_from_elsewhere_opens_itself_and_nothing_more() {
+        let own = format!("http://s-{LABEL}.localhost:41660");
+        let at = |via: &Via, method, site, nav| {
+            admit(
+                Which::Site,
+                via,
+                false,
+                method,
+                "/_dd/media",
+                None,
+                site,
+                nav,
+                &own,
+            )
+        };
+        for site in ["cross-site", "same-site"] {
+            assert_eq!(at(&Via::Browser, "GET", Some(site), true), Admit::GoOn);
+            assert_eq!(at(&Via::Pair, "GET", Some(site), true), Admit::Pairing);
+            assert!(matches!(
+                at(&Via::Browser, "GET", Some(site), false),
+                Admit::Refuse(403, _)
+            ));
+            assert!(matches!(
+                at(&Via::Browser, "POST", Some(site), true),
+                Admit::Refuse(403, _)
+            ));
+            assert!(matches!(
+                at(&Via::Pair, "POST", Some(site), true),
+                Admit::Refuse(403, _)
+            ));
+        }
+        // a let-in browser's tab comes back from its own page: the page,
+        // if its cookie is good
+        assert!(matches!(
+            at(&Via::Browser, "GET", Some("same-origin"), true),
+            Admit::Refuse(403, _)
+        ));
+        assert_eq!(
+            admit(
+                Which::Site,
+                &Via::Browser,
+                true,
+                "GET",
+                "/_dd/media",
+                None,
+                Some("same-origin"),
+                true,
+                &own
+            ),
+            Admit::Serve
+        );
     }
 
     #[test]

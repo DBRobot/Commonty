@@ -36,6 +36,10 @@ button.link:hover { background: none; color: var(--link-hover); }
 #page-home h2 { margin: 28px 0 6px; font-size: 17px; }
 #page-home .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0 4px; }
 #page-home .row > * { margin-top: 0; margin-bottom: 0; }
+/* the browsers let in, one a line, each with its Forget */
+.browsers { margin: 0 0 12px; padding: 0; list-style: none; }
+.browsers li { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); font-size: 15px; }
+.browsers li button { margin: 0; flex: none; }
 
 /* the shape of a screen, until the first one draws (docs/dev/ui.md) */
 .skel span { display: block; height: 12px; margin: 0 0 14px; border-radius: 2px; background: var(--line-2); }

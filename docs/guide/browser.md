@@ -22,29 +22,39 @@ Their code comes with the app you installed, never from a box, so a box
 cannot change it to steal a key. The app serves them to its own window,
 and to your browser on the same computer once you allow it.
 
+The first time, you allow your browser once:
+
 1. Open the page in your browser, for example Files. It says **This
    opens through the Commonty app**. Press **Open**.
-2. The app comes up and shows **Allow this browser**, with a 6-digit
-   code.
-3. Your browser shows a code too. Check the two codes match, then press
-   **Allow this browser** in the app. If they do not match, or you did
-   not ask, press **Not me**.
+2. Your browser shows a 6-digit code, and the app comes up with **Allow
+   this browser** and a code.
+3. Check the two codes match, then press **Allow this browser** in the
+   app. If they do not match, or you did not ask, press **Not me**.
 4. The page opens in your browser.
 
-From a page opened this way, the other key pages (Photos and Passwords
-too) open without asking again, until the app closes. After the app
-restarts, you allow the browser once more.
+After that the app remembers your browser. Pressing **Open** on any of
+these pages (Photos and Passwords too) opens it straight away, with no
+code, even after the app or the computer restarts.
+
+To stop a browser opening them, open the app's **This device** screen
+and press **Forget** beside it under **Browsers you let in**. Signing
+out in that browser forgets it too. A forgotten browser asks for a code
+again next time.
 
 If nothing opens, the app is not installed or not signed in on this
 computer. The page offers **Get the Commonty app**.
 
 Good to know:
 
-- The app only answers a request it was told to expect in the last two
-  minutes, and only after your click. If two browsers ask at once, both
-  are refused and you start again.
+- The app only lets a new browser in if you pressed **Open** in the last
+  two minutes, and only after your click. If two browsers ask at once,
+  both are refused and you start again.
 - The address your browser opens holds no secret. What it keeps is under
-  a name only that browser knows.
+  a name only the browsers you let in know.
+- The app has to be running for these pages to open. Keep it running:
+  while it is closed, another program on the computer could take its
+  place and try to catch your browser's pass. **Forget** ends a pass at
+  once if you are ever unsure.
 - The app trusts your browser with what it opens, as you already trust it
   with your passkeys. A program that can read your own files could read
   the app's keys too; none of this protects against that.

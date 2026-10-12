@@ -97,7 +97,9 @@ pub fn run() {
             account::recover,
             account::forget,
             net::net_status,
-            net::net_join
+            net::net_join,
+            local::browsers,
+            local::browser_forget
         ])
         .setup(|app| {
             paths::init(app.handle());
