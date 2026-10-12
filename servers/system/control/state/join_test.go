@@ -133,3 +133,34 @@ func TestAJoinedBoxOnlySendsHeartbeats(t *testing.T) {
 		}
 	}
 }
+
+func ticketJoin(key, ticket string, seq uint64) Request {
+	name, _, _ := JoinName(key)
+	b, _ := json.Marshal(JoinReq{Key: key, Recipient: "age1x", House: "h", Ticket: ticket})
+	return Request{Kind: "join", Box: name, Seq: seq, Body: b, Sig: "ok:" + key}
+}
+
+func TestATicketGoesWithOneBoxAndIsCarriedForTheGates(t *testing.T) {
+	f := newFleet(t)
+	a, b := strangerKey(1), strangerKey(2)
+	an, _, _ := JoinName(a)
+	if f.block(1000, ticketJoin(a, "En0KEwoEdXNlcg", 1)) != 1 || f.s.Joined[an].Ticket != "En0KEwoEdXNlcg" {
+		t.Fatalf("the ticket is not carried: %+v", f.s.Joined[an])
+	}
+	// the same ticket with another box is someone's copy of it
+	if f.block(2000, ticketJoin(b, "En0KEwoEdXNlcg", 1)) != 0 {
+		t.Fatal("one ticket came with two boxes")
+	}
+	// one too long is refused, and a box without one is a stranger as before
+	big := make([]byte, MaxTicket+1)
+	for i := range big {
+		big[i] = 'A'
+	}
+	if f.block(3000, ticketJoin(b, string(big), 1)) != 0 {
+		t.Fatal("an oversized ticket was taken")
+	}
+	bn, _, _ := JoinName(b)
+	if f.block(4000, joinReq(b, 1)) != 1 || f.s.Joined[bn].Ticket != "" {
+		t.Fatal("a stranger's join changed")
+	}
+}

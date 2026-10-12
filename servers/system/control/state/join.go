@@ -7,6 +7,13 @@ package state
 // copies the plan gives it, which are ciphertext. How many may join, and
 // how fast, is bounded, and one unheard for thirty days is gone again
 // (docs/dev/joining.md).
+//
+// A box a member set up carries the member's join ticket, a biscuit one of
+// their devices signed. The validators order it with the join and judge it
+// no more than they judge the directory: every gate checks it against the
+// member's signed entry, the same way from the same log, and only then
+// counts the box as that member's. Without a ticket, or with one no gate
+// accepts, the box is a stranger, and either way it can do no more than one.
 
 import (
 	"crypto/sha256"
@@ -29,6 +36,8 @@ type Joined struct {
 	// network's control server gave it (a netaddr request), never its own
 	// word: what its store's name points at
 	IPv4 uint32 `json:"ipv4,omitempty"`
+	// the member's join ticket it came with, as it came: the gates judge it
+	Ticket string `json:"ticket,omitempty"`
 }
 
 // NetAddr: where a joined box is on the fleet's network, said by a box of
@@ -46,6 +55,8 @@ type JoinReq struct {
 	Key       string `json:"key"`
 	Recipient string `json:"recipient"`
 	House     string `json:"house"`
+	// a member's join ticket (a base64 biscuit), or nothing for a stranger
+	Ticket string `json:"ticket,omitempty"`
 }
 
 const (
@@ -58,6 +69,8 @@ const (
 	// JoinedIDBase: joined boxes' relay addresses, above the release's and
 	// below the validators' and the relay's own
 	JoinedIDBase = 1 << 40
+	// MaxTicket bounds a join ticket: a biscuit of a few facts and checks
+	MaxTicket = 2048
 )
 
 var houseName = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
@@ -115,6 +128,19 @@ func (s *State) checkJoin(cfg *Config, verify Verify, r Request, now int64) erro
 	if j.Recipient == "" || len(j.Recipient) > 512 || !houseName.MatchString(j.House) {
 		return errors.New("a join names its recipient and its house")
 	}
+	if len(j.Ticket) > MaxTicket {
+		return fmt.Errorf("a ticket of %d bytes; at most %d", len(j.Ticket), MaxTicket)
+	}
+	// a ticket goes with one box: the same one again is someone's copy of
+	// it (the gates hold a ticket to one box by its id too, which a copy
+	// with a block added would get past this)
+	if j.Ticket != "" {
+		for _, o := range s.Joined {
+			if o.Ticket == j.Ticket {
+				return errors.New("that ticket came with another box")
+			}
+		}
+	}
 	if len(s.Joined) >= MaxJoined {
 		return fmt.Errorf("%d boxes have joined; no more", len(s.Joined))
 	}
@@ -135,7 +161,7 @@ func (s *State) applyJoin(r Request, now int64) {
 	if s.Joined == nil {
 		s.Joined = map[string]*Joined{}
 	}
-	s.Joined[r.Box] = &Joined{ID: id, Key: j.Key, Recipient: j.Recipient, House: j.House, At: now}
+	s.Joined[r.Box] = &Joined{ID: id, Key: j.Key, Recipient: j.Recipient, House: j.House, At: now, Ticket: j.Ticket}
 }
 
 func (s *State) checkNetAddr(cfg *Config, r Request) error {

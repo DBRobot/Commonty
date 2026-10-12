@@ -4,7 +4,7 @@
 // names from a file only your library key opens, which the box keeps
 // without being able to read it.
 
-import init, { file_seal, file_open, entry_without, entry_signed, entry_with_device, qr_svg } from '/_dd/web/dd_web.js';
+import init, { file_seal, file_open, entry_without, entry_without_box, entry_signed, entry_with_device, qr_svg } from '/_dd/web/dd_web.js';
 import { unlock } from './library.js';
 import { requestOptions, assertion, post, b64u, u8b64 } from './webauthn.js';
 import { me, inApp, servedByApp, appFetch, pageConfig, entryOf, forgetEntry } from './shell.js';
@@ -41,6 +41,7 @@ function el(tag, cls, text) {
 let who = null;
 let entry = null;
 let signins = null;
+let boxes = []; // the boxes this person set up (member_boxes.rs)
 let lib = null; // the library, once the app has handed its key
 let names = null; // { key: name }, once opened
 
@@ -48,12 +49,14 @@ let names = null; // { key: name }, once opened
 async function load(changed = true) {
   who = who || (await me());
   if (changed) forgetEntry(who.user);
-  const [d, s] = await Promise.all([
+  const [d, s, b] = await Promise.all([
     entryOf(who.user),
     fetch('/_dd/signins').then((r) => (r.ok ? r.json() : { sessions: [], keys: {} })),
+    fetch('/_dd/boxes/mine').then((r) => (r.ok ? r.json() : { boxes: [] })).catch(() => ({ boxes: [] })),
   ]);
   entry = d;
   signins = s;
+  boxes = b.boxes || [];
 }
 
 // the passkey, once more: what ends a session elsewhere asks for it
@@ -143,6 +146,67 @@ function keyRow(k, n) {
   return li;
 }
 
+// a box this person set up from the app (docs/dev/joining.md), as a row
+function boxRow(b) {
+  const li = el('li', 'dv-item');
+  const ico = el('span', 'dv-ico');
+  ico.innerHTML = ICON.laptop;
+  const text = el('div');
+  const bits = [`set up ${day(Math.floor(b.joined / 1000))}`];
+  if (b.lastSeen) bits.push(`seen ${ago(Math.floor(b.lastSeen / 1000))}`);
+  text.append(el('div', 'dv-name', b.name), el('div', 'dv-meta', bits.join(' · ')));
+  const actions = el('div', 'dv-actions');
+  // removing is signed by the account's main key, a passkey one here
+  if (entry.entry.root.startsWith('webauthn:') && !servedByApp) {
+    const rm = el('button', 'danger', 'Remove');
+    rm.onclick = () => removeBox(b);
+    actions.append(rm);
+  }
+  li.append(ico, text, actions);
+  return li;
+}
+
+function removeBox(b) {
+  $('rm-h').textContent = `Remove ${b.name}?`;
+  $('rm-what').textContent = 'It stops being yours on every box at once. It keeps nothing of yours it can read.';
+  $('rm-msg').hidden = true;
+  $('rm-yes').disabled = false;
+  $('rm-yes').textContent = 'Remove with passkey';
+  $('rm-yes').onclick = async () => {
+    $('rm-yes').disabled = true;
+    try {
+      await init();
+      const e = entry.entry;
+      const plan = JSON.parse(entry_without_box(JSON.stringify(entry), b.ticket, BigInt(Math.floor(Date.now() / 1000))));
+      const cfg = await pageConfig();
+      const a = await navigator.credentials.get({
+        publicKey: {
+          challenge: b64u(plan.challenge),
+          rpId: cfg.rpId,
+          allowCredentials: [{ type: 'public-key', id: b64u(e.root.split(':')[1]) }],
+          userVerification: 'preferred',
+        },
+      });
+      const signed = entry_signed(JSON.stringify(plan.entry), JSON.stringify({
+        authenticatorData: u8b64(a.response.authenticatorData),
+        clientDataJSON: u8b64(a.response.clientDataJSON),
+        signature: u8b64(a.response.signature),
+      }));
+      const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });
+      if (!r.ok) throw new Error(await r.text() || `the box said ${r.status}`);
+      $('remove').close();
+      await load();
+      render();
+    } catch (err) {
+      $('rm-msg').textContent = err.name === 'NotAllowedError' ? 'Your passkey was not used.' : String(err.message || err);
+      $('rm-msg').hidden = false;
+      $('rm-yes').disabled = false;
+    }
+  };
+  $('rm-no').onclick = () => $('remove').close();
+  $('remove').showModal();
+}
+
 function keys() {
   const e = entry.entry;
   const used = signins.keys || {};
@@ -174,6 +238,8 @@ function render() {
   let d = 0;
   let p = 0;
   $('dv-keys').replaceChildren(...keys().map((k) => keyRow(k, k.passkey ? ++p : ++d)));
+  $('dv-boxes').replaceChildren(...boxes.map(boxRow));
+  $('dv-boxes-box').hidden = boxes.length === 0;
   $('dv-show').hidden = names !== null;
   $('dv-hint').hidden = names !== null;
 }
@@ -251,6 +317,7 @@ function rename(name, k, fallback) {
 // passkey; an account whose main key is a device's gets no Remove.
 function remove(k, label) {
   $('rm-h').textContent = `Remove ${label}?`;
+  $('rm-what').textContent = "It is signed out everywhere and can't sign in again.";
   $('rm-msg').hidden = true;
   $('rm-yes').disabled = false;
   $('rm-yes').textContent = rootHere ? 'Remove' : 'Remove with passkey';

@@ -21,6 +21,7 @@ mod friends;
 mod home;
 mod leaving;
 pub mod library;
+mod member_boxes;
 pub mod network;
 mod oidc;
 pub mod pages;
@@ -104,6 +105,8 @@ struct App {
     thanos: Option<String>,
     /// this box's dd-control: the agreed state the fleet pages read
     control: Option<String>,
+    /// the joined boxes members set up, as last read (member_boxes.rs)
+    member_boxes: Mutex<member_boxes::Cache>,
     /// Ad blocking at home: Pi-hole's api on this box, and its household
     adblock: Option<adblock::Adblock>,
     /// the forge's changes as they happen (forge_events.rs)
@@ -673,6 +676,19 @@ pub(crate) fn verify_device_token(
     operation: &str,
     here: &str,
 ) -> Result<(String, String)> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    verify_device_token_at(entry_of, token, operation, here, now)
+}
+
+/// The same, at `now` (seconds): a join ticket is judged at the agreed
+/// time its box joined, so every gate judges it alike (member_boxes.rs).
+pub(crate) fn verify_device_token_at(
+    entry_of: impl Fn(&str) -> Result<Option<identity::SignedEntry>>,
+    token: &str,
+    operation: &str,
+    here: &str,
+    now: u64,
+) -> Result<(String, String)> {
     let unverified = UnverifiedBiscuit::from_base64(token).context("not a biscuit")?;
     // the user is named in the authority block; it has to be read before the
     // signature can be checked, because the key to check with depends on it
@@ -701,7 +717,6 @@ pub(crate) fn verify_device_token(
     }
     let biscuit = verified.ok_or_else(|| anyhow!("signature matches no device of {user}"))?;
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let mut authorizer = biscuit_auth::builder::AuthorizerBuilder::new()
         // the library allows the datalog run 1ms by default, wall clock;
         // on a loaded box that refused good tokens. The policy here is a
@@ -1346,6 +1361,7 @@ async fn join_finish(
         libraries: vec![],
         // what they agreed to, signed by their passkey with the rest
         terms: Some(identity::TERMS.to_string()),
+        removed_boxes: vec![],
         version: 1,
         updated: now,
     };
@@ -2646,6 +2662,7 @@ pub async fn start(
         demo_photos: Default::default(),
         storage: storage::Ledger::new(cfg.storage_ledger.clone()),
         fresh: Mutex::new(HashMap::new()),
+        member_boxes: Mutex::new(member_boxes::Cache::default()),
         friends: friends::Store::open(&state_dir)?,
     });
     // the directory's reads ask who this is the way every route does
@@ -2741,6 +2758,36 @@ pub async fn start(
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(next)).await;
+            }
+        });
+        // a member's box's old disk, backed up before it was set up, waits
+        // a week for the box to join; then it goes. Only on a read of the
+        // agreed state: with none, nothing can say which boxes joined
+        let a = app.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(600)).await;
+            loop {
+                if let (Some(g), Some(joined)) =
+                    (&a.library, member_boxes::joined_tickets(&a).await)
+                {
+                    match g.pending().await {
+                        Ok(p) => {
+                            let first = p.iter().map(|(t, (_, at))| (t.clone(), *at)).collect();
+                            for t in member_boxes::expired(&first, &joined, identity::now()) {
+                                match g.drop_pending(&p[&t].0).await {
+                                    Ok(n) => eprintln!(
+                                        "library: a pending backup of {n} object(s) whose box never joined, gone"
+                                    ),
+                                    Err(e) => {
+                                        eprintln!("library: dropping a pending backup: {e:#}")
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("library: listing pending backups: {e:#}"),
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(3600)).await;
             }
         });
     }
@@ -2977,6 +3024,7 @@ pub async fn start(
         // the encrypted libraries' gate: WebDAV over each library's prefix
         // a member's disk images, in the bucket (library.rs); nginx sends
         // files.<domain>/images/ here
+        .route("/_dd/boxes/mine", get(member_boxes::mine))
         .route("/_dd/images", axum::routing::any(library::images_root))
         .route("/_dd/images/", axum::routing::any(library::images_root))
         .route(
@@ -3580,6 +3628,7 @@ mod tests {
                     grant: None,
                     libraries: vec![],
                     terms: Some(identity::TERMS.into()),
+                    removed_boxes: vec![],
                     version: 1,
                     updated: identity::now(),
                 },

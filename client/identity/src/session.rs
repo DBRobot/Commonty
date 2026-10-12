@@ -183,6 +183,7 @@ mod tests {
             libraries: vec![],
             recovered_from: vec![],
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 0,
         }

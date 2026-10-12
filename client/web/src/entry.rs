@@ -125,6 +125,37 @@ pub fn entry_without(
     run().map_err(|e| JsValue::from_str(&e))
 }
 
+/// The entry with a box this person set up removed - the one that came
+/// with join ticket `ticket` (docs/dev/joining.md) - and the challenge its
+/// root passkey has to sign: `{ "entry": …, "challenge": base64url }`.
+fn without_box(signed: &str, ticket: &str, now: u64) -> R<String> {
+    let s: SignedEntry = serde_json::from_str(signed).map_err(|e| e.to_string())?;
+    if !s.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
+        return Err("this entry's root is a device key: the app removes the box".into());
+    }
+    if ticket.len() != 32 || !ticket.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return Err("not a join ticket's id".into());
+    }
+    let mut e = s.entry;
+    if !e.removed_boxes.iter().any(|t| t == ticket) {
+        e.removed_boxes.push(ticket.to_string());
+    }
+    identity::drop_passkey_keys(&mut e);
+    e.version += 1;
+    e.updated = now;
+    let c = identity::challenge(&e).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "entry": e, "challenge": B64_URL.encode(c) }).to_string())
+}
+
+#[wasm_bindgen]
+pub fn entry_without_box(signed: &str, ticket: &str, now: u64) -> Result<String, JsValue> {
+    let run = || -> R<String> {
+        verified(signed)?;
+        without_box(signed, ticket, now)
+    };
+    run().map_err(|e| JsValue::from_str(&e))
+}
+
 /// The entry, signed with the passkey's answer (base64url parts, as the
 /// browser hands them over): what the directory takes.
 #[wasm_bindgen]
@@ -165,6 +196,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         };
@@ -210,6 +242,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
+            removed_boxes: vec![],
             version: 4,
             updated: 4,
         };
@@ -250,6 +283,7 @@ mod tests {
                 created: 1,
             }],
             terms: None,
+            removed_boxes: vec![],
             version: 4,
             updated: 4,
         };
