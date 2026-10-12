@@ -64,3 +64,23 @@ rm -f "$dir/rekeyed"
 sync
 shred -u /run/dd-seal/disk.key
 echo "dd-unlock-seal: the disk's key is sealed under this box's signed boot"
+
+# the box's own key to join with, under the same boot (PCR 7), as node1's
+# and node2's: made now, never before its signed boot existed. Its name
+# comes from it (state.JoinName)
+if [ ! -s "$dir/sig.pub" ]; then
+  tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
+  tpm2_startauthsession -Q -S "$w/s.ctx"
+  tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"
+  tpm2_flushcontext "$w/s.ctx"
+  tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -L "$w/pcr.pol" \
+    -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda' \
+    -u "$dir/sig.pub" -r "$dir/sig.priv"
+  tpm2_load -Q -C "$w/srk.ctx" -u "$dir/sig.pub" -r "$dir/sig.priv" -c "$w/sig.ctx"
+  tpm2_readpublic -Q -c "$w/sig.ctx" -f der -o "$w/spki.der"
+  tpm2_flushcontext -t >/dev/null 2>&1 || true
+  mkdir -p /var/lib/dd
+  (umask 022 && base64 -w0 <"$w/spki.der" >/var/lib/dd/box-key.spki)
+  sync
+  echo "dd-unlock-seal: its key to join with, made under the same boot: j$(sha256sum <"$w/spki.der" | cut -c1-10)"
+fi

@@ -308,6 +308,12 @@ fn run(args: &Args) -> Result<String> {
     fs::create_dir_all(&args.state)?;
     let name = match &args.r#box {
         Some(b) => b.clone(),
+        // a box that joined on its own key is named by it (state.JoinName);
+        // it was installed before the key was made, under another name
+        None if args.joined_source.is_some() => match fs::read_to_string(JOINED_KEY) {
+            Ok(k) => joined_name(&k)?,
+            Err(_) => bail!("no key to join with yet ({JOINED_KEY}): nothing to build"),
+        },
         None => hostname()?,
     };
     let trusted = release::decode_public(
@@ -391,7 +397,10 @@ fn run(args: &Args) -> Result<String> {
     // One that names something else for this box is not a re-publish, and
     // taking it would let one counter mean two systems.
     let applied = fs::read_to_string(args.state.join("applied")).ok();
-    if !same_release(counter, last, applied.as_deref(), &current, &mine.path) {
+    // (a system a box built itself, from the signed commit, is that commit's
+    // for this box: a joined box renamed by its key builds a new path under
+    // the same counter)
+    if !self_built && !same_release(counter, last, applied.as_deref(), &current, &mine.path) {
         record(args, &name, last, "refused");
         bail!(
             "release {counter} names {} for {name}, but this box applied {counter} as something else",
@@ -846,6 +855,27 @@ fn record(args: &Args, name: &str, counter: u64, result: &str) {
     }
 }
 
+/// where a box that joined keeps its key's public half (SPKI, base64)
+const JOINED_KEY: &str = "/var/lib/dd/box-key.spki";
+
+/// j and ten hex of the sha256 of the key: the name it joins under
+/// (servers/system/control/state/join.go JoinName)
+fn joined_name(spki_b64: &str) -> Result<String> {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(spki_b64.trim())
+        .context("the key to join with is not base64")?;
+    let h = sha2::Sha256::digest(der);
+    Ok(format!(
+        "j{}",
+        h[..5]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    ))
+}
+
 fn hostname() -> Result<String> {
     Ok(fs::read_to_string("/proc/sys/kernel/hostname")?
         .trim()
@@ -869,6 +899,12 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_joined_boxs_name_is_its_keys() {
+        // sha256("abc") starts ba7816bf8f
+        assert_eq!(super::joined_name("YWJj").unwrap(), "jba7816bf8f");
+    }
+
     use super::*;
 
     #[test]

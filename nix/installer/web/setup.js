@@ -240,7 +240,12 @@ $('in-go').onclick = async () => {
   try { await api('install', { disk: disk.name }); } catch (e) { return fail('in-error', e); }
   $('in-go').disabled = true;
   $('in-progress').hidden = false;
-  follow('in', () => show(STEPS.indexOf('done')));
+  // straight into its first start: that is where it seals its disk and
+  // makes its key
+  follow('in', () => {
+    show(STEPS.indexOf('done'));
+    setTimeout(() => api('restart', {}).catch(() => {}), 5000);
+  });
 };
 $('done-restart').onclick = () => api('restart', {}).catch(() => {});
 

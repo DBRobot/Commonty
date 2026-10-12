@@ -173,18 +173,15 @@ api("install", {"disk": "/dev/vdb"})
 out = "\n".join(finish("install")["stages"])
 print(out)
 assert "installed" in out, out
-name = blank.succeed(
-    "cat /mnt/var/lib/dd/box-key.spki | base64 -d | sha256sum | cut -c1-10"
-).strip()
-assert f"joins the fleet as j{name}" in out, out
+assert "joins the fleet on its first start" in out, out
 assert (
     blank.succeed("dd if=/dev/vdc bs=512 skip=2048 count=1 2>/dev/null | head -c4")
     == "keep"
 )
-# its keys are in its TPM, its report and recipient where the box reads them
-blank.succeed(
-    "test -s /mnt/boot/dd/unlock/sig.priv -a -s /mnt/var/lib/dd/secrets-key.txt"
-)
+# its secrets key in its TPM, its report and recipient where the box reads
+# them; no key to join with yet: none exists before its signed boot
+blank.succeed("test -s /mnt/var/lib/dd/secrets-key.txt")
+blank.fail("test -e /mnt/boot/dd/unlock/sig.priv -o -e /mnt/var/lib/dd/box-key.spki")
 blank.succeed("jq -e '.bootDisk' /mnt/var/lib/dd/box/hardware.json")
 blank.succeed("grep -q '^age1' /mnt/var/lib/dd/secrets-recipient")
 assert blank.succeed("jq -r .owner /mnt/var/lib/dd/box/box.json").strip() == "null"
@@ -210,9 +207,7 @@ assert "Secure Boot keys of its own enrolled" in out, out
 blank.succeed(
     "[ \"$(od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c | tr -d ' ')\" = 0 ]"
 )
-blank.succeed(
-    "test -s /mnt/var/lib/sbctl/keys/db/db.key && test -s /mnt/var/lib/dd/sig.auth"
-)
+blank.succeed("test -s /mnt/var/lib/sbctl/keys/db/db.key")
 blank.succeed("test -s /mnt/boot/dd/unlock/bootstrap.priv")
 blank.fail("test -e /mnt/boot/dd/unlock/half.priv")
 
@@ -234,6 +229,30 @@ target.wait_until_succeeds(
 target.succeed("test -s /boot/dd/unlock/half.priv")
 target.fail("test -e /boot/dd/unlock/bootstrap.priv")
 
+# its key to join with, made then, under that boot (PCR 7): the one its
+# join presents (box-key.spki), and its name from it
+seal = target.succeed("journalctl -b -u dd-unlock-seal --no-pager")
+spki = target.succeed(
+    "export TPM2TOOLS_TCTI=device:/dev/tpmrm0 w=$(mktemp -d) && cd $w"
+    " && tpm2_createprimary -Q -C o -G ecc256 -c srk.ctx"
+    " && tpm2_load -Q -C srk.ctx -u /boot/dd/unlock/sig.pub -r /boot/dd/unlock/sig.priv -c sig.ctx"
+    " && tpm2_readpublic -Q -c sig.ctx -f der -o spki.der && base64 -w0 < spki.der"
+).strip()
+assert target.succeed("cat /var/lib/dd/box-key.spki").strip() == spki
+name = target.succeed(
+    "base64 -d < /var/lib/dd/box-key.spki | sha256sum | cut -c1-10"
+).strip()
+assert f"made under the same boot: j{name}" in seal, seal
+sign = (
+    "export TPM2TOOLS_TCTI=device:/dev/tpmrm0 w=$(mktemp -d) && cd $w && echo hi > m"
+    " && tpm2_createprimary -Q -C o -G ecc256 -c srk.ctx"
+    " && tpm2_load -Q -C srk.ctx -u /boot/dd/unlock/sig.pub -r /boot/dd/unlock/sig.priv -c sig.ctx"
+    " && tpm2_startauthsession -Q --policy-session -S s.ctx"
+    " && tpm2_policypcr -Q -S s.ctx -l sha256:7"
+    " && tpm2_sign -Q -c sig.ctx -g sha256 -s ecdsa -f plain -p session:s.ctx -o sig m"
+)
+target.succeed(sign)
+
 # and every boot after: the sealed half alone, nobody at the screen
 target.shutdown()
 target.start()
@@ -252,3 +271,5 @@ target.succeed(
 out = target.fail("dd-unlock-now 2>&1")
 assert "the pools stay locked" in out, out
 target.fail("test -e /run/dd/disk.key")
+# nor does its key sign for it
+target.fail(sign)

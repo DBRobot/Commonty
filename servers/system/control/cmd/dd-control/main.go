@@ -126,12 +126,6 @@ func (r *relay) run(receive func(from uint64, kind byte, p []byte), connected fu
 	}
 }
 
-// sigAuth is where a box that joined keeps its key's password, on its
-// encrypted disk: its key was made before its signed boot existed, so the
-// disk, which opens only under that boot, holds what unlocks it
-// (nix/installer/join-install.sh, docs/dev/joining.md)
-var sigAuth = "/var/lib/dd/sig.auth"
-
 // tpmSign signs with the box's TPM-held key, under its signed boot (PCR 7),
 // the key dd-unlock-enrol made on the boot partition.
 func tpmSign(keys string, msg []byte) (string, error) {
@@ -150,13 +144,6 @@ func tpmSign(keys string, msg []byte) (string, error) {
 		{"tpm2_startauthsession", "-Q", "--policy-session", "-S", p("s.ctx")},
 		{"tpm2_policypcr", "-Q", "-S", p("s.ctx"), "-l", "sha256:7"},
 		{"tpm2_sign", "-Q", "-c", p("sig.ctx"), "-g", "sha256", "-s", "ecdsa", "-f", "plain", "-p", "session:" + p("s.ctx"), "-o", p("sig.bin"), p("msg")},
-	}
-	if _, err := os.Stat(sigAuth); err == nil {
-		steps = [][]string{
-			steps[0],
-			steps[1],
-			{"tpm2_sign", "-Q", "-c", p("sig.ctx"), "-g", "sha256", "-s", "ecdsa", "-f", "plain", "-p", "file:" + sigAuth, "-o", p("sig.bin"), p("msg")},
-		}
 	}
 	var failed error
 	for _, s := range steps {

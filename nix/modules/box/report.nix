@@ -42,7 +42,12 @@ in
     systemd.services.dd-join-prepare = lib.mkIf config.dd.box.joined {
       description = "This box's key to join the fleet, and its report to build from";
       wantedBy = [ "multi-user.target" ];
-      after = [ "dd-box-report.service" ];
+      # a box on its TPM alone makes its key at its first boot, after its
+      # disk's key is sealed (disk-unlock-seal.sh)
+      after = [
+        "dd-box-report.service"
+      ]
+      ++ lib.optional config.dd.unlock.tpmOnly "dd-unlock-seal.service";
       requires = [ "dd-box-report.service" ];
       before = [ "dd-control.service" ];
       requiredBy = [ "dd-control.service" ];
@@ -63,6 +68,12 @@ in
         trap 'rm -rf "$w"' EXIT
         mkdir -p $K
         tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
+        sb=$(od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null | tr -d ' ' || true)
+        if [ ! -s $K/sig.pub ] && [ "$sb" != 1 ]; then
+          # a key made under any boot but a signed one would sign for any
+          echo "no key to join with until Secure Boot is on"
+          exit 1
+        fi
         if [ ! -s $K/sig.pub ]; then
           tpm2_startauthsession -Q -S "$w/s.ctx"
           tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"

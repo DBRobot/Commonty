@@ -56,31 +56,23 @@ say "the fleet's release is commit $rev"
 w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
 
-# its keys, in its TPM, made before anything is wiped: the one it joins
-# with, and the half its disk key comes from at its first boot. That half
-# is held under no PCR: this boot's PCR 7 is setup mode's, not the signed
-# boot the box will have. Its first boot with Secure Boot on seals a new
-# half under that, re-keys the pool, and removes this one (dd-unlock-seal)
+# the half its disk key comes from at its first boot, in its TPM, made
+# before anything is wiped. It is held under no PCR: this boot's PCR 7 is
+# setup mode's, not the signed boot the box will have. Its first boot with
+# Secure Boot on seals a new half under that, re-keys the pool, removes
+# this one, and makes the box's own key to join with under the same
+# (dd-unlock-seal): nothing that names or signs for the box exists before
+# its signed boot does
 export TPM2TOOLS_TCTI=device:/dev/tpmrm0
 mkdir -p "$w/unlock"
 tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
-# its key to join with: under a password kept on its encrypted disk, which
-# opens only under its signed boot once its first boot has sealed it
-# (16 bytes: a TPM takes a password no longer than its hash)
-( umask 077; od -An -vtx1 -N16 /dev/urandom | tr -d ' \n' > "$w/sig.auth" )
-tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -p "file:$w/sig.auth" \
-  -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda|userwithauth' \
-  -u "$w/unlock/sig.pub" -r "$w/unlock/sig.priv"
 ( umask 077; head -c 32 /dev/urandom > "$w/half" )
 tpm2_create -Q -C "$w/srk.ctx" -a 'fixedtpm|fixedparent|noda|userwithauth' \
   -i "$w/half" -u "$w/unlock/bootstrap.pub" -r "$w/unlock/bootstrap.priv"
-tpm2_load -Q -C "$w/srk.ctx" -u "$w/unlock/sig.pub" -r "$w/unlock/sig.priv" -c "$w/sig.ctx"
-tpm2_readpublic -Q -c "$w/sig.ctx" -f der -o "$w/spki.der"
 tpm2_flushcontext -t >/dev/null 2>&1 || true
-# its name, from its key alone (state.JoinName): j and the first five
-# bytes of the key's sha256
-name=j$(sha256sum < "$w/spki.der" | cut -c1-10)
-say "this box joins the fleet as $name"
+# its name comes from its key (state.JoinName), made at its first start;
+# until then it is built under this one, and builds itself again named
+name=joining
 
 # the disk's key, as its initrd makes it from that half at the first boot
 # (disk-unlock-boot.sh, TPM_ONLY): a pulled disk opens nothing
@@ -104,9 +96,7 @@ shred -u /run/dd/disk.key
 
 mkdir -p /mnt/boot/dd/unlock /mnt/var/lib/dd
 cp "$w/unlock/"* /mnt/boot/dd/unlock/
-install -m 0400 "$w/sig.auth" /mnt/var/lib/dd/sig.auth
 ( umask 077; age-plugin-tpm --generate -o /mnt/var/lib/dd/secrets-key.txt )
-base64 -w0 < "$w/spki.der" > /mnt/var/lib/dd/box-key.spki
 
 # its report, for the disk it is on
 mkdir -p /mnt/var/lib/dd/box
@@ -155,4 +145,4 @@ say "Secure Boot keys of its own enrolled: it starts nothing else from now"
 mkdir -p /mnt/var/lib/dd-agent
 echo "$counter $sys" > /mnt/var/lib/dd-agent/applied
 echo "$counter" > /mnt/var/lib/dd-agent/counter
-say "installed. Take the installer out and restart: $name joins the fleet on its own."
+say "installed. It joins the fleet on its first start, on its own."
