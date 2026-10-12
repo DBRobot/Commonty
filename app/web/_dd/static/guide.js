@@ -29,6 +29,7 @@ const KEYS = {
   point: 'dd-guide-point',
   bug: 'dd-guide-bug',
   at: 'dd-guide-at',
+  nod: 'dd-guide-nod',
 };
 // a peek an hour after it is tucked away, then two hours apart at least,
 // twice a day at most
@@ -317,11 +318,34 @@ export function checkedPrivate(content) {
   }
 }
 
+// Monty Python: asked about, answered in full; otherwise a nod only very
+// rarely - the odds are ours, not the model's - and only if it fits
+const PYTHON = /\b(monty python|python(?:['’]s)? (?:sketch|sketches|film|films|movie|team|troupe)|pythons\b|holy grail|life of brian|meaning of life|flying circus|spanish inquisition|dead parrot|norwegian blue|silly walks?|knights? who says? ni|black knight|john cleese|michael palin|eric idle|graham chapman|terry gilliam|terry jones|lumberjack song|spamalot|bright side of life|airspeed velocity|unladen swallow|ex-parrot|nobody expects)\b/i;
+const NOD_ODDS = 1 / 30;
+const NOD_APART = 7 * DAY;
+
+const PYTHON_SYSTEM = `You are "Monty", the assistant on the Commonty website, named after the end of its name - and you know Monty Python thoroughly: the troupe and each member, Flying Circus series by series and sketch by sketch, the films, the albums and books, the stage shows, Spamalot, the quotes, who played whom, the dates and the trivia.
+The member asked about Monty Python. Answer it accurately and with a little of the spirit. If you are not sure of a fact, say so rather than make it up.
+Reply with one JSON object and nothing else: {"say": "..."}
+- "say": plain words, at most five sentences, in the language the question is written in. No markdown, no links, no code.`;
+
+const NO_NOD = '\nNever mention Monty Python.';
+const NOD = '\nThis once you may add one short Monty Python reference, a few words at most, but only if it is truly relevant to this question and its answer; if nothing fits naturally, add none. The answer itself comes first and must stay correct.';
+
+/// Whether this answer may carry a Monty Python nod: about one in thirty,
+/// and never twice in a week on a device
+export function mayNod(now = Date.now(), roll = Math.random()) {
+  const last = Number(local.get(KEYS.nod)) || 0;
+  if (now - last < NOD_APART || roll >= NOD_ODDS) return false;
+  local.set(KEYS.nod, String(now));
+  return true;
+}
+
 async function askModel(opts, q, found) {
   const places = all.map((p) => `${p.id} = ${pathOf(p)}${p.slot === 'repo' && !p.target ? ` ({repo}${p.url.split('{repo}')[1] || ''})` : ''}`).join('\n');
   const docs = (await docsText(found)).join('\n\n');
   const repo = repoFor();
-  return complete(opts, SYSTEM, `Places:\n${places}\n\n${repo ? `{repo} is ${repo} unless the member names another.\n\n` : ''}Docs sections:\n${docs || '(none matched)'}\n\nQuestion: ${q}`, 400);
+  return complete(opts, SYSTEM + (mayNod() ? NOD : NO_NOD), `Places:\n${places}\n\n${repo ? `{repo} is ${repo} unless the member names another.\n\n` : ''}Docs sections:\n${docs || '(none matched)'}\n\nQuestion: ${q}`, 400);
 }
 
 async function complete(opts, system, user, max) {
@@ -849,6 +873,30 @@ function build(opts) {
     tour(keyName(shortcut()), () => btn.focus());
   }
 
+  // asked about Monty Python: the model's own knowledge, no docs, no places
+  async function python(q) {
+    busy = true;
+    form.setAttribute('aria-busy', 'true');
+    const wait = el('div', { class: 'msg it', text: '…', role: 'status', 'aria-label': 'Looking it up' });
+    log.append(wait);
+    log.scrollTop = log.scrollHeight;
+    try {
+      const a = checked(await complete(opts, PYTHON_SYSTEM, q, 400), {});
+      wait.remove();
+      say({ who: 'it', text: a?.say || 'I’m not dead yet, but I couldn’t answer that just now. Ask me again.', how: a?.say ? 'from what the box’s model knows, not the docs' : null });
+    } catch (e) {
+      wait.remove();
+      if (e instanceof SignIn && endpoint(opts) && !opts.demo) {
+        say({ who: 'it', text: 'To answer questions I need to sign in to Chat on this device first. It takes a moment and brings you back here.', signIn: true });
+        return;
+      }
+      say({ who: 'it', text: 'I can’t reach the model just now. Try again in a moment.' });
+    } finally {
+      busy = false;
+      form.removeAttribute('aria-busy');
+    }
+  }
+
   let busy = false;
   async function ask(q) {
     if (busy) return;
@@ -873,6 +921,10 @@ function build(opts) {
     }
     if (STATUS(q)) {
       say({ who: 'it', text: await statusSay(q), how: 'from the services’ status' });
+      return;
+    }
+    if (PYTHON.test(q)) {
+      await python(q);
       return;
     }
     if (!map) {
