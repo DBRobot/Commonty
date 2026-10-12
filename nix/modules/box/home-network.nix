@@ -153,8 +153,16 @@ in
               # its public address
               method = "auto";
               route-metric = 20;
+              # the cable's servers, not the router's: it hands out node1's
+              # Pi-hole first, and a box on its wifi because node1 is slow
+              # waited on every lookup
+              dns = "1.1.1.1;9.9.9.9;";
+              ignore-auto-dns = true;
             };
-            ipv6.method = "auto";
+            ipv6 = {
+              method = "auto";
+              ignore-auto-dns = true;
+            };
           };
         };
     };
