@@ -131,6 +131,30 @@ async function browsers() {
   }));
 }
 
+// starting by itself at login (or at boot, on a phone), on unless turned off
+const phone = /Android/.test(navigator.userAgent);
+if (phone) {
+  $("bg-text").textContent = "Commonty keeps running with a quiet notification, so your pages still open in your browser.";
+  $("bg-label").textContent = "Start Commonty when the phone starts";
+}
+invoke("background_status").then((st) => {
+  $("bg-login").checked = st.on;
+  $("bg").hidden = !st.can;
+}).catch(() => {});
+$("bg-login").addEventListener("change", async () => {
+  const box = $("bg-login");
+  $("bg-error").hidden = true;
+  box.disabled = true;
+  try {
+    await invoke("background_set", { on: box.checked });
+  } catch (e) {
+    box.checked = !box.checked;
+    $("bg-error").textContent = String(e);
+    $("bg-error").hidden = false;
+  }
+  box.disabled = false;
+});
+
 // What this device showed last time draws at once, the answer from the
 // directories when it comes (kit.js load): the screen never waits on them.
 async function refresh() {

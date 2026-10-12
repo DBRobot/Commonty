@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- the bar's mark (app/web/index.html), for the status bar: one colour -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="22"
+    android:viewportHeight="22">
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.6"
+        android:pathData="M1,1h9v9h-9z M12,1h9v9h-9z M1,12h9v9h-9z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,12h9v9h-9z" />
+</vector>

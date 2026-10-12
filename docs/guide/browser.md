@@ -51,13 +51,35 @@ Good to know:
   both are refused and you start again.
 - The address your browser opens holds no secret. What it keeps is under
   a name only the browsers you let in know.
-- The app has to be running for these pages to open. Keep it running:
-  while it is closed, another program on the computer could take its
-  place and try to catch your browser's pass. **Forget** ends a pass at
-  once if you are ever unsure.
+- The app has to be running for these pages to open, and it is unless
+  you choose **Quit**. While it is closed, another program on the
+  computer could take its place and try to catch your browser's pass.
+  **Forget** ends a pass at once if you are ever unsure.
 - The app trusts your browser with what it opens, as you already trust it
   with your passkeys. A program that can read your own files could read
   the app's keys too; none of this protects against that.
+
+## The app keeps running
+
+So these pages always have something to open them, the app keeps running
+when you close its window:
+
+- **On a computer**, it stays as an icon next to the clock. Click it, or
+  choose **Open Commonty** from its menu, to bring the window back.
+  **Quit** in the same menu stops it. It also starts by itself, without a
+  window, when you sign in to the computer. If your desktop shows no
+  icons next to the clock, open Commonty again to get its window back.
+- **On an Android phone**, it keeps running with a quiet notification,
+  and starts again when the phone restarts. After a restart, tap the
+  notification once to connect. The first time, the app asks to show
+  notifications and to be left out of battery saving; saying no is fine,
+  but Android may then stop it after a while.
+
+To stop it starting by itself, open the app's screen for this device
+(**This device** under your name in the app) and turn off **Start
+Commonty when you sign in to this computer** (on a phone, **when the
+phone starts**). On a phone that also stops it running in the
+background.
 
 ## On a phone
 

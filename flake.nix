@@ -800,8 +800,10 @@
               (old.postFixup or "")
               + "\n"
               + ''
+                # the tray icon's library is looked for only when it is used
                 wrapProgram $out/bin/commonty \
-                  --set WEBKIT_DISABLE_DMABUF_RENDERER 1
+                  --set WEBKIT_DISABLE_DMABUF_RENDERER 1 \
+                  --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.libayatana-appindicator ]}
                 # On NVIDIA's own driver off NixOS the webview found no GL it
                 # could load and drew in software: scrolling Photos lagged
                 # behind the browser. nixglhost hands it the machine's driver.

@@ -3,6 +3,8 @@
 Settings is under your name in the bar, or **Settings** in the app. It has
 seven tabs. The parts that hold your keys (your device names and disk
 images) open through the Commonty app ([Using a browser](browser.md)).
+Whether the app starts by itself is not here but on the app's own
+**This device** screen ([The app keeps running](browser.md#the-app-keeps-running)).
 
 ## Profile
 

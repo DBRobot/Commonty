@@ -28,7 +28,8 @@ media = { path = "../client/media" }
 ente = { path = "../client/ente" }
 # the one-time key a photo password comes to the app sealed to
 library = { path = "../client/library" }
-tauri = { version = "2", features = [] }
+# the tray icon the app stays in with its window closed (background.rs)
+tauri = { version = "2", features = ["tray-icon"] }
 # the system browser, for setting up a passkey there
 tauri-plugin-opener = "2"
 # commonty:// links: Photos' or Passwords' site in a browser hands over to the app (local.rs)

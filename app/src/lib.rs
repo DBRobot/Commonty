@@ -4,6 +4,7 @@
 //! call the commands below; nothing else reaches them.
 
 mod account;
+mod background;
 mod browser;
 mod export;
 mod handoff;
@@ -71,17 +72,26 @@ pub fn run() {
     // (the deep-link feature), and a plain second launch shows this window
     #[cfg(any(target_os = "linux", windows))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _| {
-        use tauri::Manager as _;
-        if !argv.iter().any(|a| a.starts_with("commonty://"))
-            && let Some(w) = app.get_webview_window("main")
+        if !argv
+            .iter()
+            .any(|a| a.starts_with("commonty://") || a == background::FLAG)
         {
-            let _ = w.show();
-            let _ = w.set_focus();
+            background::show(app);
         }
     }));
+    // closing the window hides it: the app goes on serving the browser
+    // until the tray's Quit
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(|w, e| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = e {
+            api.prevent_close();
+            let _ = w.hide();
+        }
+    });
     builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(vpn::init())
+        .plugin(background::init())
         .plugin(tauri_plugin_opener::init())
         // the site's own pages, carried in the app and served to itself
         .register_asynchronous_uri_scheme_protocol(site::SCHEME, site::handle)
@@ -99,10 +109,22 @@ pub fn run() {
             net::net_status,
             net::net_join,
             local::browsers,
-            local::browser_forget
+            local::browser_forget,
+            background::background_status,
+            background::background_set
         ])
         .setup(|app| {
             paths::init(app.handle());
+            // the window is made hidden (tauri.conf.json): a start at login
+            // stays in the tray, and a link shows it at the page it needs
+            #[cfg(desktop)]
+            {
+                background::tray(app.handle());
+                if !background::hidden_start() {
+                    background::show(app.handle());
+                }
+            }
+            background::at_launch(app.handle());
             // what holds keys in a page, served to the app's windows and the
             // member's browser from its own release (local.rs)
             local::start(app.handle());

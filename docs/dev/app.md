@@ -29,6 +29,51 @@ Its code is in [`app/`](../../app/); how it is built and released is
   GNOME's proxy setting), through a proxy the app runs. On a phone, a VPN
   does the same for the whole device.
 
+## It keeps running
+
+The key pages a browser opens are served by the app, so a browser sent to
+them while the app is not running finds nothing. The app therefore stays
+running until the member quits it
+([`app/src/background.rs`](../../app/src/background.rs)):
+
+- **Closing the window hides it.** The tray icon's menu has Open Commonty
+  and Quit; Quit, or the system ending the process, is the only way it
+  stops. The tray is Tauri's own (`tray-icon` feature). On Linux it needs
+  libayatana-appindicator: the `.deb` depends on it, the AppImage carries
+  it, and the Nix build puts it on the library path. Where none loads (a
+  GNOME without the AppIndicator extension shows no icon either), there
+  is no tray, and launching the app again brings the window back.
+- **It starts at login, hidden.** At every start the app writes its login
+  entry, or removes it, as the setting says: an XDG autostart file
+  (`~/.config/autostart/commonty.desktop`) on Linux, naming the AppImage's
+  own file when it is one, and the per-user `Run` key on Windows (the
+  uninstaller removes it, an update keeps it). Both start it with
+  `--background`: no window, the tray and the servers alone. No macOS
+  build exists, so nothing is written there. The window is made hidden
+  (`tauri.conf.json`) and shown in `setup` unless the start was
+  `--background` or a `commonty://` link.
+- **A link wakes it.** A `commonty://` link to a running app goes to it
+  through single-instance; started cold by the link, it comes up hidden.
+  Either way the window shows only at "Allow this browser", the click a
+  new browser's pairing needs; a browser let in before opens its page
+  with no window at all.
+- **The setting** is "Start Commonty when you sign in to this computer"
+  on the app's own screen for this device, on unless turned off. It is
+  the file `start-at-login` in the data folder (`off` turns it off),
+  which the Android side reads too.
+- **Android** keeps the process alive with a foreground service
+  ([`KeepRunning.kt`](../../app/gen/android/app/src/main/java/org/commonty/app/KeepRunning.kt)),
+  type `specialUse` (none of Android's own types is serving pages to the
+  phone's browser), with a silent notification. The app's screen starts
+  it, and `StartAtBoot.kt` starts it after a reboot or an update when the
+  setting is on; turning the setting off stops it. The Rust side only
+  starts with the app's screen, which Android does not let a background
+  app open, so after a reboot the notification says "Commonty is ready"
+  until the member taps it, and "Commonty is running" from then on. A link
+  from the browser opens the screen anyway. The first time, the app asks
+  for notifications (Android 13 and later) and once, in its own words, to
+  be left out of battery saving; it carries on either way.
+
 ## How it is kept safe
 
 The app holds keys that speak for a person. What reaches them is narrow:
@@ -311,8 +356,8 @@ cookie, and on the pairing page's origin the device's own name (pair.js,
   port, and gets the cookie. With it, once the app is back, it could ask
   for the library's key. Before, there was nothing kept to find. What
   stands against it: the app opens a browser only at a port it holds;
-  keep the app running; and **Forget** in
-  **This device** ends a cookie at once. The same program could read the
+  the app keeps running unless quit ([above](#it-keeps-running)); and
+  **Forget** in **This device** ends a cookie at once. The same program could read the
   app's keys outright if it ran as the member, so this is about other
   accounts and sandboxed apps on the same computer.
 - **The browser's history** has the device's own name in it, as it had a
@@ -335,6 +380,7 @@ app/src/      the window and its commands
                 made in the page and carried to a download or a file
   zip.rs        a zip written as it goes
   net.rs        the engine, through four C calls
+  background.rs the tray, the login entry and its setting, Android's service
   browser.rs    the system browser's proxy setting
   vpn.rs        Android's VPN
 app/net/      the engine (Go): tsnet, its proxies, the bridge through
@@ -352,9 +398,10 @@ the machine's name, or `phone-xxxx` where there is none.
 They are only what the site cannot do: choosing a name, joining with a
 code from another device, signing up with an invite, recovering an
 account, connecting to the network, setting up a passkey in this
-computer's browser, allowing a browser to open Photos or Passwords, and
-signing out on this device. Everything else - devices, passkeys,
-storage, the services - is the site's own pages, which the app carries.
+computer's browser, allowing a browser to open Photos or Passwords,
+whether the app starts by itself, and signing out on this device.
+Everything else - devices, passkeys, storage, the services - is the
+site's own pages, which the app carries.
 
 ## Checks
 

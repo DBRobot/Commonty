@@ -4564,6 +4564,7 @@ rec {
           {
             name = "tauri";
             packageId = "tauri";
+            features = [ "tray-icon" ];
           }
           {
             name = "tauri-plugin-deep-link";
@@ -25152,7 +25153,7 @@ rec {
           "wry" = [ "webview2-com" "webkit2gtk" "tauri-runtime-wry" ];
           "x11" = [ "tauri-runtime-wry?/x11" ];
         };
-        resolvedDefaultFeatures = [ "common-controls-v6" "compression" "dbus" "default" "dynamic-acl" "tauri-runtime-wry" "webkit2gtk" "webview2-com" "wry" "x11" ];
+        resolvedDefaultFeatures = [ "common-controls-v6" "compression" "dbus" "default" "dynamic-acl" "tauri-runtime-wry" "tray-icon" "webkit2gtk" "webview2-com" "wry" "x11" ];
       };
       "tauri-build" = rec {
         crateName = "tauri-build";

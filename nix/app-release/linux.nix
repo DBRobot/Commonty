@@ -26,6 +26,9 @@ let
       "libgtk-3-dev"
       "librsvg2-dev"
       "libssl-dev"
+      # the tray icon: tauri finds it here, makes the .deb depend on it and
+      # carries it in the AppImage
+      "libayatana-appindicator3-dev"
       # what the AppImage carries for the players (bundleMediaFramework);
       # bad is what streams (MSE), libav decodes H.264 and AAC
       "gstreamer1.0-plugins-base"
