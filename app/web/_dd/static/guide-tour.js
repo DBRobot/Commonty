@@ -92,6 +92,7 @@ const TOURS = [
     at: (l) => l.pathname === '/_dd/settings',
     steps: [
       ['tab-profile', () => 'Your account, and how you sign in.'],
+      ['tab-email', () => 'Your address, where it goes, and aliases you can give to sites.'],
       ['tab-devices', () => 'Every browser and app signed in as you, and adding a new device.'],
       ['tab-storage', () => 'How much of your space each service uses.'],
       ['tab-network', () => 'Your home’s boxes and its Wi-Fi.'],
