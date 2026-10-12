@@ -41,11 +41,12 @@ in
     # a green check just built is already here, and a deploy is a switch.
     #
     # Host mode means a job is code running on this box as forgejo-runner.
-    # So the host runners take the admin's repositories and no one else's:
-    # the forge's database moves any runner registered for every repository
-    # to the admin's scope, whatever token registered it (dd-forge-rules in
-    # nix/modules/forge/forgejo.nix). A pull request from someone else's
-    # fork runs only once the admin approves it (Forgejo's own rule).
+    # So the host runners take the fleet's own repositories and no one
+    # else's: the forge's database moves any runner registered for every
+    # repository to the fleet repository's owner's scope, whatever token
+    # registered it (dd-forge-rules in nix/modules/forge/forgejo.nix). A pull
+    # request from someone else's fork runs only once the repository's own
+    # owner approves it (Forgejo's own rule); no person is the site admin.
     services.gitea-actions-runner = {
       package = pkgs.forgejo-runner;
       instances.${name} = {
@@ -53,7 +54,7 @@ in
         inherit name;
         url = "https://git.${base}";
         # a registration token, minted once with `forgejo actions
-        # generate-runner-token --scope <admin>` and kept in sops; the runner
+        # generate-runner-token --scope <owner>` and kept in sops; the runner
         # registers on first start and keeps its own credential in its state
         # dir after
         tokenFile = config.sops.templates."forgejo-runner.env".path;

@@ -1370,6 +1370,15 @@ async fn join_start(
         )
             .into_response();
     }
+    // the forge's own identity (nix/modules/forge/forgejo.nix), which no
+    // person is
+    if user == "commonty-box" {
+        return (
+            StatusCode::BAD_REQUEST,
+            "that name is the boxes'; pick another",
+        )
+            .into_response();
+    }
     match app.entry(&user) {
         Ok(None) => {}
         Ok(Some(_)) => return (StatusCode::CONFLICT, "that name is taken").into_response(),

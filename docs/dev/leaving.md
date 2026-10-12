@@ -201,8 +201,9 @@ a coming back; or a suspension date 90 days ago or more (`LEAVE_WINDOW`),
 for any root the entry has had, in the member list it was deployed with.
 The front door's gate asks it (`VERIFY_MAIL_FORGET`).
 
-Forgejo's admin account is never deleted this way; the forge says so and
-keeps it until another admin is named. A Passwords account that is the
+Every person's forge account is deleted this way, the fleet's owner's
+too: the forge's admin is the box's own identity (`commonty-box`), which
+is no member's and is never deleted. A Passwords account that is the
 last owner of a shared organization, or a forge account that last owns an
 organization, is refused by the service: the unit logs it and tries again
 every hour until someone hands the organization over.

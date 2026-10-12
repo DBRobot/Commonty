@@ -26,9 +26,8 @@ in
       rank = 50;
     }
   ];
-  # the fleet's owner administers its forge; the mirrors are the fleet's
-  # choice too (fleet/policy.json)
-  dd.forgejo.admin = policy.owner;
+  # No person administers the forge: the box's own identity does its jobs
+  # (dd.forgejo.admin). The mirrors are the fleet's choice (fleet/policy.json)
   dd.backup.paths = [ config.dd.forgejo.stateDir ]; # repositories, lfs, custom config; its db is in the postgres dumps
   dd.forgejo.mirrors = map (m: m // { repo = m.repo or config.dd.repo; }) (
     policy.forgeMirrors or [ ]

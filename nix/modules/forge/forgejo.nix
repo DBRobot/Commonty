@@ -59,6 +59,10 @@ let
       auth_request_set $auth_user $upstream_http_x_auth_request_preferred_username;
       # the demo is nobody here: public repos, no account made for it
       proxy_set_header X-WEBAUTH-USER $forge_user;
+      # nobody acts as another through the forge's sudo: the header and
+      # the query both (the box's own units reach the socket, not this)
+      proxy_set_header Sudo "";
+      if ($arg_sudo) { return 403; }
       # nobody: still let them in, as nobody. Public repos are public and
       # forgejo shows private ones to no one it does not know.
       error_page 401 = @anonymous;
@@ -90,6 +94,7 @@ let
     '';
   };
   admin = lib.replaceStrings [ "'" ] [ "''" ] cfg.admin;
+  runnerOwner = lib.replaceStrings [ "'" ] [ "''" ] cfg.hostRunnerOwner;
   # What the forge's database holds to, whatever asked for otherwise; put
   # in after every Forgejo start, as live.nix's trigger is, so a table an
   # upgrade rebuilt gets it back.
@@ -111,11 +116,12 @@ let
     CREATE TRIGGER dd_no_private_repo BEFORE INSERT OR UPDATE ON repository
       FOR EACH ROW EXECUTE FUNCTION dd_no_private_repo();
 
-    -- A host runner runs a job on the box itself, so it takes the admin's
-    -- repositories and no one else's. Whatever token registered it, a
-    -- runner for every repository may carry the members' label alone (the
-    -- sandboxed runner, members-runner.nix); any other is moved to the
-    -- admin's own scope, or with no admin yet to a scope no repository has.
+    -- A host runner runs a job on the box itself, so it takes the fleet's
+    -- own repositories (its repository's owner's) and no one else's.
+    -- Whatever token registered it, a runner for every repository may carry
+    -- the members' label alone (the sandboxed runner, members-runner.nix);
+    -- any other is moved to that owner's scope, or with no such account yet
+    -- to a scope no repository has.
     CREATE OR REPLACE FUNCTION dd_runner_scope() RETURNS trigger LANGUAGE plpgsql AS $f$
     DECLARE
       labels jsonb;
@@ -134,7 +140,7 @@ let
         SELECT coalesce(bool_and(split_part(l, ':', 1) = 'members'), false) INTO members_only
           FROM jsonb_array_elements_text(labels) AS l;
         IF NOT members_only THEN
-          NEW.owner_id := coalesce((SELECT id FROM "user" WHERE lower_name = lower('${admin}')), -1);
+          NEW.owner_id := coalesce((SELECT id FROM "user" WHERE lower_name = lower('${runnerOwner}')), -1);
         END IF;
       END IF;
       RETURN NEW;
@@ -144,6 +150,16 @@ let
       FOR EACH ROW EXECUTE FUNCTION dd_runner_scope();
     -- and the runners already registered
     UPDATE action_runner SET owner_id = owner_id WHERE owner_id = 0 AND repo_id = 0;
+    -- A runner the old rule gave the old admin (a person, who was also the
+    -- repository's owner) keeps that scope: it is the same account.
+
+    -- No person is the forge's admin: the box's own identity is, and nobody
+    -- signs in as it (nginx maps no one to it). Whoever else was made one -
+    -- the fleet's owner was, before - is not, at every start.
+    UPDATE "user" SET is_admin = false
+      WHERE is_admin AND lower_name <> lower('${admin}');
+    UPDATE "user" SET is_admin = true
+      WHERE NOT is_admin AND lower_name = lower('${admin}');
   '';
 in
 {
@@ -158,9 +174,11 @@ in
     ../storage/postgres-backup.nix
   ];
 
-  # The one account that administers the forge. Every other account is made
-  # on first visit by the reverse-proxy login below; this one is made ahead
-  # of time so that the same login lands on an admin.
+  # The one account that administers the forge: the box's own identity, for
+  # the box's units over the socket (branch protection, leavers, CI cancels,
+  # mirrors). No person is it: the reverse-proxy login maps no one to its
+  # name, and member names are what the directory gives, which this is not
+  # among. Every person's account is made on first visit by that login.
   options.dd.forgejo.stateDir = lib.mkOption {
     type = lib.types.str;
     default = "/vault/forgejo";
@@ -168,7 +186,13 @@ in
   };
   options.dd.forgejo.admin = lib.mkOption {
     type = lib.types.str;
-    description = "Directory name of the person who administers this forge.";
+    default = "commonty-box";
+    description = "the forge's own identity, which the box's units act as; never a person's name";
+  };
+  options.dd.forgejo.hostRunnerOwner = lib.mkOption {
+    type = lib.types.str;
+    default = lib.head (lib.splitString "/" config.dd.repo);
+    description = "whose repositories the host runners take: the fleet's own repository's owner. Not an admin";
   };
 
   config = lib.mkMerge [
@@ -244,7 +268,7 @@ in
             # A workflow is code that runs on a box. Every repo may have one:
             # a member's lands on the members' runner
             # (nix/modules/forge/members-runner.nix), sandboxed, and the host
-            # runners take the admin's repos alone (dd-forge-rules).
+            # runners take the fleet's own repos alone (dd-forge-rules).
           };
           # What a member may attach to an issue or a release: files that are
           # data, never a page. An .svg or .html served from this name runs as
@@ -318,11 +342,12 @@ in
         unitConfig.RequiresMountsFor = cfg.stateDir;
       };
 
-      # The admin account, made before it is ever logged into. The password is
-      # random and never used: the password form is off, the header is the
-      # login. Idempotent - "already exists" is the normal case.
+      # The box's own identity, the forge's admin, made before anything acts
+      # as it. The password is random and never used: the password form is
+      # off, the header is the login, and nginx gives no one this name.
+      # Idempotent - "already exists" is the normal case.
       systemd.services.forgejo-admin = {
-        description = "Make sure the forge's admin account exists";
+        description = "Make sure the forge's own admin identity exists";
         after = [ "forgejo.service" ];
         requires = [ "forgejo.service" ];
         wantedBy = [ "multi-user.target" ];
@@ -503,6 +528,9 @@ in
         map $auth_user $forge_user {
           default $auth_user;
           demo "";
+          # the box's own identity is nobody's: a person by that name, were
+          # the directory ever to give it, is nobody here
+          "${cfg.admin}" "";
         }
         map $forge_user $forge_cookie {
           "" "";
@@ -551,6 +579,9 @@ in
         # same list (FORGE in servers/forge/web/git-core.js): change both.
         locations."~ ^/(api|assets|avatars|repo-avatars|attachments|user|login|-|\\.well-known)(/|$)" =
           toForge;
+        # the admin api is the box's own units', over the socket: never
+        # through here, whoever asks
+        locations."^~ /api/v1/admin".return = "404";
         locations."~ ^/[^/]+/[^/]+\\.git(/|$)" = toForge;
         locations."~ ^/[^/]+/[^/]+/(info/refs|info/lfs|git-upload-pack|git-receive-pack)" = toForge;
         locations."~ ^/[^/]+/[^/]+/(raw|archive|media|releases/download|attachments)/" = toForge;

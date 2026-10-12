@@ -1,5 +1,8 @@
-# The forge test: it comes up, its admin exists, main is protected by every ci job.
+# The forge test: it comes up, its admin is the box's own identity and no
+# person, main is protected by every ci job.
+
 import base64
+import json
 
 box.wait_for_unit("forgejo.service")
 # forgejo serves on a socket, not a port: nothing else on the box may
@@ -24,11 +27,12 @@ done("forgejo-protection.service")
 box.succeed("journalctl -u forgejo-protection | grep -q 'nothing to protect'")
 
 # the repository is the one thing the forge does not make for itself (it is
-# pushed to); here it is made through the api, then the protection applies
+# pushed to); here its owner, a person, makes it through the api, then the
+# box's identity protects it
 box.succeed(
     "curl -sf --unix-socket %s -X POST -H 'X-WEBAUTH-USER: %s' -H 'content-type: application/json' "
     '-d \'{"name":"commonty","default_branch":"main","auto_init":true}\' '
-    "http://forgejo/api/v1/user/repos >/dev/null" % (nix["sock"], nix["admin"])
+    "http://forgejo/api/v1/user/repos >/dev/null" % (nix["sock"], nix["owner"])
 )
 box.succeed("systemctl restart forgejo-protection.service")
 done("forgejo-protection.service")
@@ -38,14 +42,14 @@ users = box.succeed(
     "curl -sf --unix-socket %s -H 'X-WEBAUTH-USER: %s' http://forgejo/api/v1/admin/users"
     % (nix["sock"], nix["admin"])
 )
-assert nix["admin"] in users, users
-assert '"is_admin":true' in users, "the admin is an admin"
+admins = sorted(u["login"] for u in json.loads(users) if u["is_admin"])
+assert admins == [nix["admin"]], f"no person is an admin: {admins}"
 
 # main is protected: by ci_ok, the job that waits on every other
 # (.forgejo/workflows/entry_point.yml), on a branch up to date with main
 prot = box.succeed(
     "curl -sf --unix-socket %s -H 'X-WEBAUTH-USER: %s' http://forgejo/api/v1/repos/%s/commonty/branch_protections/main"
-    % (nix["sock"], nix["admin"], nix["admin"])
+    % (nix["sock"], nix["admin"], nix["owner"])
 )
 import json
 
@@ -64,37 +68,50 @@ box.wait_for_unit("dd-forge-rules.service")
 box.fail(
     "curl -sf --unix-socket %s -X POST -H 'X-WEBAUTH-USER: %s' -H 'content-type: application/json' "
     '-d \'{"name":"secret","private":true}\' '
-    "http://forgejo/api/v1/user/repos" % (nix["sock"], nix["admin"])
+    "http://forgejo/api/v1/user/repos" % (nix["sock"], nix["owner"])
 )
 box.fail(
     "curl -sf --unix-socket %s -X PATCH -H 'X-WEBAUTH-USER: %s' -H 'content-type: application/json' "
     "-d '{\"private\":true}' http://forgejo/api/v1/repos/%s/commonty"
-    % (nix["sock"], nix["admin"], nix["admin"])
+    % (nix["sock"], nix["owner"], nix["owner"])
 )
 assert not json.loads(
     box.succeed(
         "curl -sf --unix-socket %s -H 'X-WEBAUTH-USER: %s' http://forgejo/api/v1/repos/%s/commonty"
-        % (nix["sock"], nix["admin"], nix["admin"])
+        % (nix["sock"], nix["owner"], nix["owner"])
     )
 )["private"]
 
-# a runner registered for every repository is the admin's, unless all it
-# runs is members' sandboxed jobs
+# a runner registered for every repository is the fleet repository's
+# owner's (not the admin's), unless all it runs is members' sandboxed jobs
 sql = "sudo -u postgres psql -d forgejo -tAc"
 box.succeed(
     f'{sql} "insert into action_runner (uuid, name, owner_id, repo_id, token_hash, agent_labels) values '
     "('00000000-0000-0000-0000-000000000001', 'host', 0, 0, 'h1', '[\\\"nix\\\"]'), "
     "('00000000-0000-0000-0000-000000000002', 'members', 0, 0, 'h2', '[\\\"members\\\"]')\""
 )
-admin_id = box.succeed(
-    f'{sql} "select id from \\"user\\" where lower_name = lower(\'{nix["admin"]}\')"'
+owner_id = box.succeed(
+    f'{sql} "select id from \\"user\\" where lower_name = lower(\'{nix["owner"]}\')"'
 ).strip()
 assert (
     box.succeed(
         f"{sql} \"select owner_id from action_runner where name = 'host'\""
     ).strip()
-    == admin_id
+    == owner_id
 )
+
+# a person made an admin anyhow is not one after the next start: the rules
+# take it back, and keep the box's identity
+box.succeed(
+    f'{sql} "update \\"user\\" set is_admin = true where lower_name = \'{nix["owner"]}\'"'
+)
+box.succeed("systemctl restart dd-forge-rules.service")
+admins = box.succeed(
+    f'{sql} "select string_agg(lower_name, \',\') from \\"user\\" where is_admin"'
+).strip()
+assert admins == nix["admin"], admins
+# (that nginx keeps everyone from the admin api and from sudo is checked
+# on every box's real config: checks.nginx, nginx-door.py)
 assert (
     box.succeed(
         f"{sql} \"select owner_id from action_runner where name = 'members'\""
@@ -110,7 +127,7 @@ box.succeed("systemctl start dd-ci-resume.service")
 # no ci secret in the repo: the cancel route needs none
 secrets = box.succeed(
     "curl -sf --unix-socket %s -H 'X-WEBAUTH-USER: %s' http://forgejo/api/v1/repos/%s/commonty/actions/secrets"
-    % (nix["sock"], nix["admin"], nix["admin"])
+    % (nix["sock"], nix["admin"], nix["owner"])
 )
 assert "DD_CI" not in secrets, secrets
 
@@ -164,7 +181,7 @@ jar = (
 
 forge = (
     "curl -sf --unix-socket %s -H 'X-WEBAUTH-USER: %s' http://forgejo/api/v1/repos/%s/commonty"
-    % (nix["sock"], nix["admin"], nix["admin"])
+    % (nix["sock"], nix["owner"], nix["owner"])
 )
 repo = json.loads(box.succeed(forge))
 sha = json.loads(box.succeed(forge + "/branches/main"))["commit"]["id"]
@@ -212,9 +229,9 @@ def status(path):
 
 
 # a public repository: read, and cloned, by nobody
-assert status(f"/api/v1/repos/{nix['admin']}/commonty") == "200"
+assert status(f"/api/v1/repos/{nix['owner']}/commonty") == "200"
 assert (
-    status(f"/{nix['admin']}/commonty.git/info/refs?service=git-upload-pack") == "200"
+    status(f"/{nix['owner']}/commonty.git/info/refs?service=git-upload-pack") == "200"
 )
 # a repository nobody may see is not there for nobody, by name or in a
 # search: an organisation only members see, and its repository
@@ -235,11 +252,11 @@ assert status("/inner/hidden.git/info/refs?service=git-upload-pack") in (
 )
 # an account's own address is nobody's, whatever it is set to
 box.succeed(
-    f"{sql} \"update \\\"user\\\" set email = 'tester@example.org', keep_email_private = false where lower_name = lower('{nix['admin']}')\""
+    f"{sql} \"update \\\"user\\\" set email = 'tester@example.org', keep_email_private = false where lower_name = lower('{nix['owner']}')\""
 )
 for path in [
-    f"/api/v1/repos/{nix['admin']}/commonty",
-    f"/api/v1/users/{nix['admin']}/repos",
+    f"/api/v1/repos/{nix['owner']}/commonty",
+    f"/api/v1/users/{nix['owner']}/repos",
     "/api/v1/repos/search?q=commonty",
 ]:
     said = box.succeed(f"{nobody} 'http://forgejo{path}'")
@@ -251,7 +268,7 @@ for path in [
 box.wait_for_unit("nginx.service")
 site = "https://git.test.invalid"
 git = "curl -sk --resolve git.test.invalid:443:127.0.0.1 --resolve code.test.invalid:443:127.0.0.1"
-api = f"http://forgejo/api/v1/repos/{nix['admin']}/commonty"
+api = f"http://forgejo/api/v1/repos/{nix['owner']}/commonty"
 wait = base64.b64encode(
     b"on: push\njobs:\n  wait:\n    runs-on: no-runner-has-this\n    steps:\n      - run: true\n"
 ).decode()
@@ -264,7 +281,7 @@ box.wait_until_succeeds(
     f"{as_admin} '{api}/actions/runs?limit=50' | {pick}", timeout=60
 )
 run = json.loads(box.succeed(f"{as_admin} '{api}/actions/runs?limit=50' | {pick}"))
-cancel = f"{site}/{nix['admin']}/commonty/actions/runs/{run['index_in_repo']}/cancel"
+cancel = f"{site}/{nix['owner']}/commonty/actions/runs/{run['index_in_repo']}/cancel"
 sarah = f"-H 'Cookie: {jar}'"
 # what a browser on the Git page sends with its own POST
 page = f"-H 'Sec-Fetch-Site: same-origin' -H 'Origin: {site}'"

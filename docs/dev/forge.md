@@ -115,10 +115,24 @@ forge too. A location changes what it sends through `ddCookie`
 (strip-cookie.nix), never a `proxy_set_header Cookie` of its own: nginx
 sends every one it is given, so a second line would put the cookie back.
 
-The **admin** is the fleet's owner (`policy.owner` in
-[`fleet/policy.json`](../../fleet/policy.json)). `forgejo-admin` makes that
-account ahead of time with a random password nobody uses, so the same
-header lands on an admin.
+**No person is the forge's admin**, the fleet's owner included. The admin
+is the box's own identity, `commonty-box` (`dd.forgejo.admin`), which only
+the box's units act as, over the socket: branch protection, deleting
+whoever left, cancelling and resuming CI, the push mirrors.
+`forgejo-admin` makes it ahead of time with a random password nobody uses.
+Nobody signs in as it:
+
+- nginx maps no one to its name (`$forge_user`), so a person by that name
+  would be nobody here, and the gate refuses it as a member's name;
+- on `git.<domain>`, `/api/v1/admin` is 404, the `Sudo` header is dropped
+  and a `sudo` query refused (403), whoever asks;
+- `dd-forge-rules`, at every start, takes admin from every other account
+  and keeps it on the box's identity, so an account made an admin by hand,
+  or the fleet's owner's from before, is not one after the next start.
+
+What a person could once do as admin, the box does on a request the
+member it affects has made (deleting a leaver's account), or a
+repository's own owner does (approving a fork's run, below).
 
 ### Why the socket, and why its group matters
 
@@ -142,7 +156,8 @@ forgejo-protection, forgejo-mirrors   run as root
 ```
 
 The runner's user, which is what a CI job runs as, is not in it. Adding a
-unit to the `forgejo` group gives it the admin; treat it that way. The old
+unit to the `forgejo` group gives it the box's admin identity; treat it
+that way. The old
 port, 3001, has nothing listening, and the forge VM test checks that.
 
 ## Which addresses are ours
@@ -339,10 +354,10 @@ forge needs around it is made again on every start, idempotently:
 ```
 forgejo-secrets      Forgejo's own secrets; makes its state dirs as root first
 forgejo              after zfs-datasets, RequiresMountsFor the state dir
-forgejo-admin        the admin account, if missing
+forgejo-admin        the box's own admin identity, if missing
 forgejo-protection   main's rule (forgejo-setup.sh); "nothing to protect" until the repo exists
 forgejo-mirrors      each declared push mirror, made again when its token changes (forgejo-mirror.nix)
-dd-forge-rules       no private repositories; host runners for the admin's alone (forgejo.nix)
+dd-forge-rules       no private repositories; host runners for the fleet's repos alone; no person an admin (forgejo.nix)
 dd-forge-notify      the trigger for live updates (live.nix), after every Forgejo start
 dd-ci-cancel         the cancel route, always running
 dd-ci-resume         oneshot on a timer
@@ -528,7 +543,7 @@ where            on the box, as forgejo-runner,     in a container under gVisor 
                  nix on the path, the box's store
 capacity         min(threads/4, memory GiB/6)       min(2, threads/4, memory GiB/4)
                  (box.json runnerCapacity)          4 cpus, 4 GiB, 1024 pids, 1 h per job
-token (sops)     forgejo-runner-token (admin's)     forgejo-members-runner-token (global)
+token (sops)     forgejo-runner-token (scoped)      forgejo-members-runner-token (global)
 caches           act, nix and cargo-target kept;    none (cache.enabled = false);
                  untouched for 14 days goes         docker prunes what is a week old
 ```
@@ -539,12 +554,16 @@ signed into the nix cache with the box's key (`storage/cache.nix`). That
 also means a job is code running on the box as `forgejo-runner`; the
 module says so, and is labelled `forgejo-runner (runs contributed code)`.
 Two rules keep that safe: the runner's user is not in the `forgejo`
-group (above), and the host runners take the admin's repositories alone.
-The forge enforces the second, whatever token registered a runner: a
-trigger in its database (`dd-forge-rules`) moves any runner registered
-for every repository to the admin's own scope, unless `members` is its
-only label. A pull request from someone else's fork of the admin's
-repository runs only once the admin approves it (Forgejo's own rule).
+group (above), and the host runners take the fleet's own repositories
+alone: those of the fleet repository's owner (`dd.forgejo.hostRunnerOwner`,
+the owner in `dd.repo`), which is a scope, not an admin. The forge
+enforces the second, whatever token registered a runner: a trigger in its
+database (`dd-forge-rules`) moves any runner registered for every
+repository to that owner's scope, unless `members` is its only label. A
+runner the old rule gave the old admin keeps its scope: the old admin was
+that same owner. A pull request from someone else's fork runs only once
+someone who may write to the repository's Actions approves it, which is
+its own owner (Forgejo's rule for fork runs; no site admin is needed).
 `nix.settings.eval-cache` is off on a runner box: it remembered derivation
 paths a garbage collection had removed. The `<box>:host` label is how
 `build_host` builds every box's system on every box
@@ -609,9 +628,15 @@ order ([`forge.py`](../../nix/tests/forge.py)):
 2. `forgejo-admin` and `forgejo-protection` finish; with no repository,
    protection says "nothing to protect".
 3. Once a repository exists, main's rule is `ci_ok`, up to date, no
-   approvals, and no direct pushes; the admin is an admin.
+   approvals, and no direct pushes; the only admin is the box's identity,
+   and the repository's owner is a person, not an admin.
 4. A private repository is refused, made or changed; a runner registered
-   for every repository is moved to the admin, unless it is the members'.
+   for every repository is moved to the fleet repository's owner, unless
+   it is the members'. An account made an admin by hand is not one after
+   `dd-forge-rules` runs again. (That `git.<domain>` answers 404 to
+   `/api/v1/admin`, refuses a `sudo` query and drops the `Sudo` header is
+   checked on every box's real nginx config: `checks.nginx`,
+   [`nginx-door.py`](../../nix/tests/nginx-door.py).)
 5. ci-resume's timer is set, and a pass over no runs fails nothing.
 6. No `DD_CI` secret; the cancel route answers 202 to a run id and 404 to
    anything else, and logs a run that does not exist as not found.

@@ -1,6 +1,7 @@
-# The forge, booted: its setup units make the admin and protect main. The
-# layout move once left the admin's name unexpanded in that setup and no
-# test here booted a forge to notice; now one does.
+# The forge, booted: its setup units make the box's own admin identity and
+# protect main. The layout move once left the admin's name unexpanded in
+# that setup and no test here booted a forge to notice; now one does. No
+# person is its admin: the repository's owner is a member like any other.
 { pkgs, self, ... }:
 let
   # a certificate for the box's names, where a real box has its wildcard
@@ -22,7 +23,6 @@ in
         ./box.nix
         ../modules/forge/forgejo.nix
       ];
-      dd.forgejo.admin = "tester";
       # the full gate: the Git pages' live changes come through it
       dd.verify.role = pkgs.lib.mkForce "full";
       # the forge's state dir is a dataset on a box; here a directory, and a
@@ -66,7 +66,10 @@ in
     };
   scriptEnv = {
     dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
-    admin = "tester";
+    # the box's own identity (the module's default) and the person who owns
+    # the fleet's repository (box.nix: dd.repo)
+    admin = "commonty-box";
+    owner = "tester";
     port = 3001; # nothing listens here now; the test checks that
     sock = "/run/forgejo/forgejo.sock";
   };
