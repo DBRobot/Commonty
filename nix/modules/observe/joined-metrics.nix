@@ -110,6 +110,9 @@ in
         "d ${state}/tokens 0700 root root -"
         "f ${map} 0640 root nginx -"
       ];
+      # the map's keys are whole Authorization lines, longer than the
+      # default buckets hold
+      services.nginx.mapHashBucketSize = lib.mkDefault 128;
       services.nginx.appendHttpConfig = ''
         # a joined box, by its metrics token (dd-metrics-joined); none, nobody
         map $http_authorization $dd_metrics_box {
