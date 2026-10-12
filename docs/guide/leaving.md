@@ -28,9 +28,10 @@ each one downloads straight from there:
 
 Each download shows how far it has got and about how long is left, and
 **Cancel** stops it. In the app's own window the zips are saved in your
-Downloads folder; in a browser they arrive as ordinary downloads. These
-downloads work from the Commonty app, or from a browser you let in from
-it ([Using a browser](browser.md)).
+Downloads folder; in a browser they arrive as ordinary downloads. In a
+browser, press **Open them** first: they use the keys on your devices,
+so the app on this computer opens the tab in the same browser
+([Using a browser](browser.md)).
 
 You can also take things out at any time without leaving: download from
 Files, Photos or Backups as usual.

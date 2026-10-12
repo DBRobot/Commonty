@@ -7,7 +7,7 @@
 
 import { begin, unlock, list, fetchPlain, save, put, trash, mkdir, transcode, stopTranscode, playsPlaylists, playlistPlayer, human } from './library.js';
 import { parse, open, lookUp, lookUpSeason, frame, stillFromFile, thisDevice } from './shelf.js';
-import { me, inApp } from './shell.js';
+import { me, inApp, throughApp } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 begin();
@@ -891,6 +891,7 @@ async function start() {
   }
   if (r.app) {
     $('msg').hidden = true;
+    $('link').firstElementChild.replaceChildren(throughApp('Your library is locked with a key only your devices hold, so the Commonty app opens it here in this browser.', 'Open Movies & TV', '/_dd/media'));
     $('link').hidden = false;
     return;
   }

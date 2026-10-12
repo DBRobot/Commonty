@@ -14,7 +14,7 @@
 // Downloads folder from the app's window), to a file the person picks, or,
 // where neither can be had, into a Blob of pieces a browser keeps on disk.
 import { requestOptions, assertion, post } from './webauthn.js';
-import { docsUrl, inApp, servedByApp, appFetch } from './shell.js';
+import { docsUrl, inApp, servedByApp, appFetch, toApp, noApp, throughApp } from './shell.js';
 import { unlock, walk, pieces, human, save } from './library.js';
 import { images } from './backups.js';
 import { ZipWriter } from './zip.js';
@@ -272,7 +272,7 @@ async function filesZip(ui) {
       ui.end('There is no library to take: nothing to download.');
       return;
     }
-    if (!got.ok) throw new Error('your library opens in the Commonty app');
+    if (!got.ok) throw new Error('your library opens through the Commonty app');
     const lib = got.ok;
     // a file picked by the person is asked for while the click still counts
     if (!relayed) sink = await sinkFor('files');
@@ -391,10 +391,13 @@ let taken = false;
 function take() {
   if (taken) return;
   taken = true;
+  // on a page a box served: the app opens this tab in this browser
   if (!byApp) {
+    const there = () => toApp('/_dd/settings#leave', () => $('lv-not-app').replaceChildren(noApp()));
+    $('lv-not-app').replaceChildren(throughApp('These use the keys on your devices, so the Commonty app opens them here in this browser.', 'Open them', '/_dd/settings#leave'));
     $('lv-not-app').hidden = false;
-    for (const id of ['lv-files-go', 'lv-photos-go', 'lv-vault']) $(id).disabled = true;
-    $('lv-images-msg').textContent = 'From the Commonty app, or a browser you let in from it.';
+    for (const id of ['lv-files-go', 'lv-photos-go', 'lv-vault']) $(id).onclick = there;
+    $('lv-images-msg').textContent = 'Listed here once the Commonty app opens this tab.';
     return;
   }
   const files = row('files');
