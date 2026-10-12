@@ -154,6 +154,11 @@ in
     # only (the gate answers 401 to anyone else), so nothing a stranger may not have
     locations."= /_dd/sitemap.json" = docsGate;
     locations."= /_dd/joke" = docsGate;
+    # what Monty looks up of a member's own, for the docs' own pages too:
+    # the gate answers only a member (401/403 to anyone else)
+    locations."= /_dd/house" = docsGate;
+    locations."= /_dd/fleet.json" = docsGate;
+    locations."= /_dd/storage/mine" = docsGate;
   };
 
   # garage's public face: ente's browser uploads and any other s3 client

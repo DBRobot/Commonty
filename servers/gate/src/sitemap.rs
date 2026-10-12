@@ -378,6 +378,33 @@ const VIEWS: &[(&str, &str, &str, &str, &str, &str, bool)] = &[
     ),
     (
         "code",
+        "code-repo-run",
+        "A run",
+        "code-repo-actions",
+        "/{repo}/actions/runs/{n}",
+        "run job log",
+        true,
+    ),
+    (
+        "code",
+        "code-repo-pull",
+        "A pull request",
+        "code-repo-pulls",
+        "/{repo}/pulls/{n}",
+        "pull request pr",
+        true,
+    ),
+    (
+        "code",
+        "code-repo-issue",
+        "An issue",
+        "code-repo-issues",
+        "/{repo}/issues/{n}",
+        "issue",
+        true,
+    ),
+    (
+        "code",
         "code-repo-latest-run",
         "The latest run",
         "code-repo-actions",
@@ -847,10 +874,10 @@ mod tests {
                 r"/^\/([^/]+)\/([^/]+)\/issues\/new$/",
                 "code-repo-new-issue",
             ),
-            (r"/^\/([^/]+)\/([^/]+)\/issues\/(\d+)$/", "code-repo-issues"),
+            (r"/^\/([^/]+)\/([^/]+)\/issues\/(\d+)$/", "code-repo-issue"),
             (
                 r"/^\/([^/]+)\/([^/]+)\/pulls?\/(\d+)(?:\/(commits|checks|files))?$/",
-                "code-repo-pulls",
+                "code-repo-pull",
             ),
             (
                 r"/^\/([^/]+)\/([^/]+)\/compare(?:\/(.+?)\.\.\.(.+))?$/",
@@ -891,7 +918,7 @@ mod tests {
             (r"/^\/([^/]+)\/([^/]+)\/actions$/", "code-repo-actions"),
             (
                 r"/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/",
-                "code-repo-actions",
+                "code-repo-run",
             ),
         ];
         let m = build(&tiles(), Role::Member, "x", &docs());

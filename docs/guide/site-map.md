@@ -32,13 +32,24 @@ It goes by this map, and can take you to any card on it and nowhere else.
 - **A repository's pages:** "the latest actions run", "pull requests",
   "branches". On a Git page it means that repository; anywhere else, the
   fleet's own, unless you name another ("issues in tom/notes").
+- **What can I do here?** It says which page you are on, what you can
+  do there, and offers the tour and the docs for it.
+- **Your Git:** "is the CI red?", "why did it fail?", "any PRs waiting on
+  me?" It looks at the repository's latest runs, the failed job and the
+  pull requests waiting on you or still open, and links to each. For
+  "why", the model reads the end of the failed job's log and says what
+  went wrong.
+- **Your boxes and your space:** "is my box OK?" says which boxes are
+  answering, up to date and backed up; "how much space do I have left?"
+  says what you have used of your allowance.
 - **Report a bug:** it asks what happened and what you expected, then
   drafts an issue for you to read and change. Before you open it, it
   looks the draft over for anything private (an email address, a web or
   IP address, a phone number, a password, a key, a file path, your name)
   and lists what it found; **Take them out** replaces each with
   "[removed]", or **Open it as it is**. You post it in Git yourself.
-  Issues are public. Not in the demo.
+  The draft ends with the page you were on, the release and your browser,
+  so the bug can be found again. Issues are public. Not in the demo.
 - **From anywhere:** Ctrl+K (Cmd+K on a Mac) opens it, ready to type.
   Change the keys under **This device** in [Settings](settings.md).
 - **Go there straight away:** the switch under the box. With one clear
@@ -58,8 +69,14 @@ It goes by this map, and can take you to any card on it and nowhere else.
 
 ## What it can and cannot do
 
-- It **cannot see the page** you are on, or anything of yours. It knows
-  only what you type to it, this map and these docs.
+- It **cannot see the page** you are on: it knows which page it is from
+  its address, never what is on it.
+- It **looks up some of yours, read only, as you**: your Git (runs,
+  pull requests, a failed job's log), whether your boxes are answering,
+  updated and backed up, and how much of your allowance you have used.
+  Nothing your devices alone can open: no file, film, photo, device or
+  disk-image names, no passwords. Only a failed job's log goes to the
+  model; the rest it says itself.
 - It **cannot do anything for you** but go to a place on the map and
   point at a button there: it never clicks, types or sends anything (a
   bug report is posted by you, in Git), and nothing it writes can run

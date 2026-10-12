@@ -387,6 +387,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "guide-look.js",
+        "servers/web-shared/guide-look.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "guide-keep.js",
         "servers/web-shared/guide-keep.js",
         "text/javascript; charset=utf-8",
@@ -1119,6 +1124,7 @@ mod tests {
             "guide-face.js",
             "guide-tour.js",
             "guide-keep.js",
+            "guide-look.js",
             "docs-map.js",
         ] {
             let js = text(f);
@@ -1162,6 +1168,20 @@ mod tests {
         ));
         assert!(!k.contains("localStorage") && !k.contains("fetch("));
         assert!(g.contains("e.source !== f.contentWindow || e.origin !== origin"));
+        // what it looks up of a member's own is read, never written: no
+        // method but GET, and nothing Locked (privacy.md)
+        let l = text("guide-look.js");
+        assert!(!l.contains("method:") && !l.contains("'POST'"));
+        for not in [
+            "/_dd/devices",
+            "/_dd/files",
+            "/_dd/media",
+            "vault.",
+            "/_dd/backups",
+            "/_dd/app/",
+        ] {
+            assert!(!l.contains(not), "guide-look.js reads {not}");
+        }
         assert!(text("shell.js").contains("import { start as guide } from './guide.js';"));
         assert!(text("shell.js").contains("export function here("));
     }
