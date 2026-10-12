@@ -26,6 +26,14 @@ let
     # a curl config, so a million fetches run in one process, 64 at a time;
     # a range already here is not fetched again
     ${pkgs.python3}/bin/python3 ${./pwned-list.py} . > ../fetch.cfg
+    # the list's server not answering (no network yet, a box offline) is
+    # next time, not a million failed fetches
+    if [ -s ../fetch.cfg ] && ! curl --fail --silent --max-time 20 -o /dev/null \
+      --user-agent "commonty-pwned-mirror" https://api.pwnedpasswords.com/range/00000; then
+      rm -f ../fetch.cfg
+      echo "the breach list's server does not answer; next time" >&2
+      exit 0
+    fi
     if [ -s ../fetch.cfg ]; then
       curl --parallel --parallel-max 64 --fail --silent --show-error --retry 5 \
         --user-agent "commonty-pwned-mirror" -K ../fetch.cfg
