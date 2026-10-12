@@ -56,6 +56,7 @@ in
           SOURCE = "git+http://forge/flake.git";
           LAYOUT = "${../../fleet/layout.nix}";
           DETECT = "${../modules/box/report/detect.sh}";
+          NOT_BEFORE = "100";
         };
       };
   };

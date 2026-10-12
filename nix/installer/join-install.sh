@@ -9,6 +9,7 @@
 # fleet on its own key, as a stranger, and takes releases from then on.
 # Environment: RELEASE_URL, RELEASE_KEY (a file), SOURCE (the repository,
 # git+https://...), LAYOUT (fleet/layout.nix), DETECT (detect.sh),
+# NOT_BEFORE (seconds: the oldest release it takes, when it was made),
 # DISK (to name the disk when there is more than one; it is wiped).
 set -euo pipefail
 say() { echo "== $*"; }
@@ -17,11 +18,11 @@ no() { echo "not installing: $*" >&2; exit 1; }
 [ -e /dev/tpmrm0 ] || no "this machine has no TPM 2.0: a box's keys live in its TPM"
 [ -d /sys/firmware/efi ] || no "this machine did not boot by UEFI"
 
-# the disk: internal, not removable, not what this installer runs from
-from=$(findmnt -no SOURCE /iso 2>/dev/null || findmnt -no SOURCE / 2>/dev/null || true)
-from=$(lsblk -no PKNAME "$from" 2>/dev/null | head -1 || true)
-mapfile -t disks < <(lsblk -dnpo NAME,TYPE,RM,TRAN | awk -v from="/dev/$from" \
-  '$2 == "disk" && $3 == 0 && $4 != "usb" && $1 != from { print $1 }')
+# the disk: internal, not removable, not on usb, and nothing of it mounted
+# - never what this installer, or anything else, runs from
+mounted() { lsblk -nrpo MOUNTPOINTS "$1" | grep -q .; }
+mapfile -t disks < <(lsblk -dnpo NAME,TYPE,RM,TRAN | awk '$2 == "disk" && $3 == 0 && $4 != "usb" { print $1 }' \
+  | while read -r d; do mounted "$d" || echo "$d"; done)
 if [ -n "${DISK:-}" ]; then
   printf '%s\n' "${disks[@]}" | grep -qx -- "$DISK" || no "$DISK is not an internal disk here: ${disks[*]:-none}"
   disk=$DISK
@@ -35,8 +36,11 @@ byid=$(find /dev/disk/by-id -lname "*/$(basename "$disk")" | grep -v -- '-part' 
 say "installing to $disk ($byid); everything on it goes"
 
 # the release, as the release key signed it: the commit to build
-rev=$(dd-agent --url "$RELEASE_URL" --key-file "$RELEASE_KEY" --state /tmp/dd-agent --print-rev) \
-  || no "no release the release key signed at $RELEASE_URL"
+# not one issued before the commit this installer was made from: an old
+# release, signed as it was, never installs old code on a new box
+read -r rev counter < <(dd-agent --url "$RELEASE_URL" --key-file "$RELEASE_KEY" --state /tmp/dd-agent \
+  --print-rev --not-before "$NOT_BEFORE") || true
+[ -n "${counter:-}" ] || no "no release the release key signed at $RELEASE_URL"
 say "the fleet's release is commit $rev"
 
 w=$(mktemp -d)
@@ -81,4 +85,9 @@ say "building its system from $rev"
 sys=$(nix --extra-experimental-features "nix-command flakes" build --impure --no-link --print-out-paths \
   --store /mnt --expr "let f = builtins.getFlake \"$SOURCE?rev=$rev\"; in (f.lib.joinedBox { name = \"$name\"; dir = builtins.path { path = /mnt/var/lib/dd/box; name = \"box\"; }; }).config.system.build.toplevel")
 nixos-install --root /mnt --system "$sys" --no-root-passwd --no-channel-copy
+# the release it runs is where its agent starts: one signed before it
+# never takes the box back
+mkdir -p /mnt/var/lib/dd-agent
+echo "$counter $sys" > /mnt/var/lib/dd-agent/applied
+echo "$counter" > /mnt/var/lib/dd-agent/counter
 say "installed. Take the installer out and restart: $name joins the fleet on its own."

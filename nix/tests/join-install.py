@@ -28,7 +28,7 @@ pub = forge.succeed(
     f"{env} {nix['dd']} release init --repo /root/repo | tail -1"
 ).strip()
 blank.succeed(f"echo '{pub}' > /root/release.pub")
-payload = json.dumps({"counter": 1, "rev": rev, "issued": 1, "boxes": {}})
+payload = json.dumps({"counter": 1, "rev": rev, "issued": 1000, "boxes": {}})
 forge.succeed(f"cat > /root/payload.json <<'EOF'\n{payload}\nEOF")
 forge.succeed(
     f"{env} {nix['dd']} release sign /root/payload.json --out /srv/release/current.json"
@@ -37,8 +37,11 @@ forge.succeed(
 # a marker on the disk that must survive
 blank.succeed("echo keep | dd of=/dev/vdc bs=512 seek=2048 conv=notrunc 2>/dev/null")
 
-# two internal disks and none named: nothing is touched
-out = blank.fail("sudo -E dd-join-install 2>&1")
+# the disk this machine runs from is never one: named, refused
+out = blank.fail("DISK=/dev/vda dd-join-install 2>&1")
+assert "not an internal disk here" in out, out
+# two blank internal disks and none named: nothing is touched
+out = blank.fail("dd-join-install 2>&1")
 assert "2 internal disks" in out, out
 
 # named: that one is wiped and installed to, the other is not
@@ -62,7 +65,17 @@ blank.succeed("grep -q '^age1' /mnt/var/lib/dd/secrets-recipient")
 assert blank.succeed("jq -r .owner /mnt/var/lib/dd/box/box.json").strip() == "null"
 # the system the release's commit built is the one on the disk
 blank.succeed(f'[ "$(readlink -f /mnt/nix/var/nix/profiles/system)" = {system} ]')
+# and its agent starts at that release: none signed before it takes it back
+assert blank.succeed("cat /mnt/var/lib/dd-agent/counter").strip() == "1"
 
+# an old release, signed as it was: refused
+forge.succeed(f'sed -i \'s/"issued": 1000/"issued": 50/\' /root/payload.json')
+forge.succeed(
+    f"{env} {nix['dd']} release sign /root/payload.json --out /srv/release/current.json"
+)
+out = blank.fail("DISK=/dev/vdc dd-join-install 2>&1")
+assert "no release the release key signed" in out, out
+assert "an old release, refused" in out, out
 # a release not signed by the release key: nothing installed
 forge.succeed('sed -i \'s/"counter": 1/"counter": 2/\' /srv/release/current.json')
 out = blank.fail("DISK=/dev/vdc dd-join-install 2>&1")

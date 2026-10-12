@@ -65,10 +65,16 @@ struct Args {
     /// built for (hardware.json, hardware-configuration.nix, box.json)
     #[arg(long, env = "DD_AGENT_JOINED_DIR", default_value = "/var/lib/dd/box")]
     joined_dir: PathBuf,
-    /// print the commit the current release signed, once its signature
-    /// checks, and change nothing: what an installer builds a new box from
+    /// print the commit the current release signed and its counter, once
+    /// its signature checks, and change nothing: what an installer builds
+    /// a new box from, and where that box's agent starts
     #[arg(long)]
     print_rev: bool,
+    /// with print_rev: refuse a release issued before this (seconds since
+    /// the epoch): an installer's own date, so an old release, signed as
+    /// it was, never installs old code on a new box
+    #[arg(long, default_value_t = 0)]
+    not_before: u64,
 }
 
 /// A box that joined on its own key builds its system itself, from the
@@ -335,7 +341,13 @@ fn run(args: &Args) -> Result<String> {
     };
     let counter = signed.payload.counter;
     if args.print_rev {
-        return Ok(signed.payload.rev.clone());
+        anyhow::ensure!(
+            signed.payload.issued >= args.not_before,
+            "release {counter} was issued at {}, before {}: an old release, refused",
+            signed.payload.issued,
+            args.not_before
+        );
+        return Ok(format!("{} {counter}", signed.payload.rev));
     }
 
     let last = read_counter(&args.state);

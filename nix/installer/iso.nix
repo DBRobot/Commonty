@@ -57,6 +57,8 @@ in
     SOURCE = "git+https://code.${domain}/${repo}";
     LAYOUT = "${../../fleet/layout.nix}";
     DETECT = "${../modules/box/report/detect.sh}";
+    # the commit this installer was made from: no release issued before it
+    NOT_BEFORE = toString (self.lastModified or 0);
   };
   # what it says at the console, before anyone types
   services.getty.helpLine = lib.mkForce ''
