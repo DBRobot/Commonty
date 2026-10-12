@@ -1,0 +1,8 @@
+[
+  {
+    "driver": "r8152",
+    "host": "xhci_hcd",
+    "why": "a Realtek USB Ethernet adapter on an xhci controller: the controller can lose the adapter's transfer ring (\"Set TR Deq Ptr cmd failed\"), and the cable then passes nothing with its carrier still up. node2, 2026-10-11: silent from 18:12 until a hard reset at 19:38",
+    "instead": "a PCIe or onboard port, or the adapter on a powered hub; meanwhile the wired watchdog resets it and moves the box to its Wi-Fi"
+  }
+]
