@@ -19,6 +19,7 @@ pub mod fleet;
 mod forge_events;
 mod friends;
 mod home;
+mod joke;
 mod leaving;
 pub mod library;
 pub mod network;
@@ -1897,6 +1898,36 @@ async fn site_map(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     }
 }
 
+/// What Monty answers a question about Monty Python from (joke.rs): for
+/// members and the demo, like the site map
+async fn joke_lookup(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let Some(user) = app.identify(&headers, "access") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if !matches!(
+        app.role(&user),
+        Some(pages::Role::Member | pages::Role::Demo)
+    ) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let words: String = q
+        .get("q")
+        .map(String::as_str)
+        .unwrap_or("")
+        .chars()
+        .take(300)
+        .collect();
+    (
+        [("cache-control", "private, no-cache")],
+        Json(joke::answer(&words)),
+    )
+        .into_response()
+}
+
 /// Chat (servers/chat): the demo's, with its counted prompts and nothing
 /// kept, is served here. A member's keeps their chats sealed in their
 /// library, so the member's app serves it to their browser (use_app).
@@ -2965,6 +2996,7 @@ pub async fn start(
         .route("/_dd/fleet.json", get(fleet_json))
         .route("/_dd/me", get(me))
         .route("/_dd/sitemap.json", get(site_map))
+        .route("/_dd/joke", get(joke_lookup))
         .route("/_dd/guide-keep", get(|| async { page("guide-keep") }))
         // Ente comes with the app: a browser here is handed to it
         .route("/_dd/photos", get(|| async { use_app() }))
@@ -3481,6 +3513,34 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(home.status(), 200);
+    }
+
+    /// The joke's parts are for members and the demo, like the site map
+    #[tokio::test]
+    async fn the_joke_is_a_members_and_the_demos() {
+        let tom = Person::new("tom");
+        let (url, s) = gate(
+            "joke",
+            Some(Members::list(vec![tom.id()])),
+            vec![demo_tile()],
+        )
+        .await;
+        let http = client();
+        let ask = |c: Option<String>| {
+            let mut r = http.get(format!("{url}/_dd/joke?q=black%20knight"));
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            async move { r.send().await.unwrap() }
+        };
+        assert_eq!(ask(None).await.status(), 401);
+        assert_eq!(ask(Some(cookie(&s.issue("stranger")))).await.status(), 403);
+        tom.publish(&url).await;
+        let r = ask(Some(cookie(&s.issue("tom")))).await;
+        assert_eq!(r.status(), 200);
+        let j: serde_json::Value = r.json().await.unwrap();
+        assert!(j["found"].as_array().is_some_and(|f| !f.is_empty()), "{j}");
+        assert_eq!(j["from"]["license"], "CC BY-SA 3.0");
     }
 
     /// The site map is for members and the demo, each their own; nobody

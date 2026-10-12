@@ -153,6 +153,7 @@ in
     # the assistant's map, for the docs' own pages: members and the demo
     # only (the gate answers 401 to anyone else), so nothing a stranger may not have
     locations."= /_dd/sitemap.json" = docsGate;
+    locations."= /_dd/joke" = docsGate;
   };
 
   # garage's public face: ente's browser uploads and any other s3 client

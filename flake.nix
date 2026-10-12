@@ -202,7 +202,10 @@
               || builtins.match "servers/([^/]+/)?web(/.*)?" rel != null
               || builtins.match "servers/web-shared(/.*)?" rel != null
               # the docs, which the gate serves as they are (servers/gate/src/docs.rs)
-              || builtins.match "docs(/.*)?" rel != null;
+              || builtins.match "docs(/.*)?" rel != null
+              # what Monty answers some questions from (servers/gate/src/joke.rs)
+              || rel == "data"
+              || builtins.match "data/the-joke(/.*)?" rel != null;
           };
           # What a dependency build sees: the lockfile and the manifests, with
           # crane's stand-in for every target, and nothing else. Each
