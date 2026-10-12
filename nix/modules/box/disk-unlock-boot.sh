@@ -109,7 +109,7 @@ tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
 tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/half.pub" -r "$KEYS/half.priv" -c "$w/half.ctx"
 tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
 tpm2_policypcr -Q -S "$w/h.ctx" -l sha256:7
-tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half"
+tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half" || true
 tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
 # no half, no key: never one made from the rest alone. A boot the TPM does
 # not know (another system, a changed command line) stops here, locked
