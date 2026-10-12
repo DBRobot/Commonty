@@ -34,7 +34,7 @@ pub const RELEASE_KEY: &str = "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=";
 /// take any list ever published. `dd release publish` refuses a release
 /// that revokes someone unless this is at least its counter, so every
 /// client built from it holds out for that list or a newer one.
-pub const MEMBER_LIST_FLOOR: u64 = 0;
+pub const MEMBER_LIST_FLOOR: u64 = 252;
 /// where boxes read the release from
 pub const RELEASES: &str = concat!(
     "https://git.",
