@@ -64,8 +64,16 @@ fleet.succeed(
 box.wait_for_unit("multi-user.target")
 assert box.succeed("hostname").strip() == "joining"
 box.fail("systemctl is-active dd-control")
+print(
+    box.execute(
+        "ip -4 addr; ip route; getent hosts fleet; curl -sS -o /dev/null http://fleet/test/config.json 2>&1"
+    )[1]
+)
+box.wait_until_succeeds(
+    "curl -sf -o /dev/null http://fleet/test/config.json", timeout=120
+)
 box.succeed(
-    "mkdir -p /run/dd-test && curl -sf http://fleet/test/config.json > /run/dd-test/config.json"
+    "mkdir -p /run/dd-test /var/lib/dd && curl -sf http://fleet/test/config.json > /run/dd-test/config.json"
     f" && echo '{pub}' > /run/dd-test/release.pub"
     " && curl -sf http://fleet/test/ticket > /var/lib/dd/join-ticket && chmod 600 /var/lib/dd/join-ticket"
 )

@@ -49,6 +49,7 @@ let
       environment.systemPackages = [
         pkgs.tpm2-tools
         pkgs.openssl
+        pkgs.curl
       ];
     };
 in
