@@ -111,6 +111,13 @@ tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
 tpm2_policypcr -Q -S "$w/h.ctx" -l sha256:7
 tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half"
 tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
+# no half, no key: never one made from the rest alone. A boot the TPM does
+# not know (another system, a changed command line) stops here, locked
+if [ "$(wc -c <"$w/half" 2>/dev/null || echo 0)" -ne 32 ]; then
+  say "dd-unlock: the TPM would not open its half under this boot; the pools stay locked"
+  rm -rf "$w"
+  exit 1
+fi
 
 # The key: HKDF over both halves, named for this box; the second pool's key
 # from it. Neither half alone says anything about it. A box on its TPM

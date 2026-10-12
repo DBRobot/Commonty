@@ -142,6 +142,8 @@ in
     (lib.mkIf cfg.enable {
       boot.initrd.systemd.enable = true;
       boot.initrd.systemd.tpm2.enable = true;
+      # a boot that stops before the pools open stops there: no shell
+      boot.initrd.systemd.emergencyAccess = lib.mkForce false;
       # the house cable, as the running box has it (home-network.nix): wifi
       # would want its password, which is on the locked disk
       boot.initrd.availableKernelModules = [

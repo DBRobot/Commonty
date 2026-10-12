@@ -118,3 +118,14 @@ assert target.succeed("zfs get -H -o value keystatus tank/enc").strip() == "avai
 target.succeed(
     "journalctl -b -u dd-disk-key --no-pager | grep -q 'dd-unlock: unlocked'"
 )
+
+# the same unlock, run again on the box, makes the key; under a boot the
+# TPM does not know (PCR 7 changed), it makes none: never a key from less
+target.succeed("dd-unlock-now && test -s /run/dd/disk.key && shred -u /run/dd/*.key")
+target.succeed(
+    "TPM2TOOLS_TCTI=device:/dev/tpmrm0 tpm2_pcrextend "
+    "7:sha256=0000000000000000000000000000000000000000000000000000000000000001"
+)
+out = target.fail("dd-unlock-now 2>&1")
+assert "the pools stay locked" in out, out
+target.fail("test -e /run/dd/disk.key")
