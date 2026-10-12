@@ -181,12 +181,51 @@ pub(crate) async fn current(app: &Arc<App>) -> (serde_json::Value, Vec<Owned>) {
     (st, owned)
 }
 
-/// The tickets whose boxes joined: their pending backups stay. None when
-/// the agreed state could not be read, when nothing may go.
-pub(crate) async fn joined_tickets(app: &Arc<App>) -> Option<BTreeSet<String>> {
-    let (st, owned) = current(app).await;
-    st.is_object()
-        .then(|| owned.into_iter().map(|o| o.ticket).collect())
+/// The tickets any joined box came with: their pending backups stay. Read
+/// from the tickets as they are, whether or not anyone owns the box now -
+/// an entry not read yet, a device since removed, a member suspended keep
+/// a backup as surely as an owned box does. None, and nothing may go, when
+/// the agreed state is not a fresh read (current's) or any joined box's
+/// ticket can't be read.
+/// With them, the time to judge a week by: the earlier of this box's clock
+/// and the agreed time, and only when the two are within ten minutes.
+pub(crate) async fn joined_tickets(app: &Arc<App>) -> Option<(BTreeSet<String>, u64)> {
+    let st = state(app).await;
+    let agreed = st.get("time")?.as_u64()? / 1000;
+    let now = identity::now();
+    if now.abs_diff(agreed) > 600 {
+        return None;
+    }
+    Some((tickets_in(&st)?, now.min(agreed)))
+}
+
+fn tickets_in(st: &serde_json::Value) -> Option<BTreeSet<String>> {
+    // a state without its boxes is no state
+    st.get("boxes")?.as_object()?;
+    let joined = match st.get("joined") {
+        None | Some(serde_json::Value::Null) => return Some(BTreeSet::new()),
+        Some(j) => j.as_object()?,
+    };
+    let mut out = BTreeSet::new();
+    for j in joined.values() {
+        match j.get("ticket") {
+            None => continue,
+            Some(t) => {
+                let t = t.as_str()?;
+                if t.is_empty() {
+                    continue;
+                }
+                let source = UnverifiedBiscuit::from_base64(t)
+                    .ok()?
+                    .print_block_source(0)
+                    .ok()?;
+                // a ticket that names none of the right shape: unsure, so
+                // nothing goes
+                out.insert(ticket_id(&source)?);
+            }
+        }
+    }
+    Some(out)
 }
 
 /// GET /_dd/boxes/mine: the boxes this member set up, with how each is as
@@ -531,6 +570,42 @@ mod tests {
             "/api/v1/query?query=up",
             &owned
         ));
+    }
+
+    #[test]
+    fn the_purge_keeps_everything_unless_it_is_sure() {
+        let kp = device();
+        let t = ticket(&kp, "ann", ID, identity::now() + 60);
+        // the box joined, owned by nobody now (no entry for ann): kept
+        let st = serde_json::json!({ "boxes": {}, "joined": { "jaaaaaaaaaa": { "ticket": t } } });
+        assert_eq!(tickets_in(&st), Some(BTreeSet::from([ID.to_string()])));
+        // no state, or one without its boxes: nothing goes
+        assert_eq!(tickets_in(&serde_json::Value::Null), None);
+        assert_eq!(tickets_in(&serde_json::json!({ "joined": {} })), None);
+        // one joined box whose ticket can't be read: nothing goes
+        for bad in [
+            serde_json::json!("not a biscuit"),
+            serde_json::json!(7),
+            serde_json::json!(ticket(&kp, "ann", "short", identity::now() + 60)),
+        ] {
+            let st = serde_json::json!({ "boxes": {}, "joined": {
+                "jaaaaaaaaaa": { "ticket": t },
+                "jbbbbbbbbbb": { "ticket": bad },
+            } });
+            assert_eq!(tickets_in(&st), None);
+        }
+        // a joined map that is not one: nothing goes
+        assert_eq!(
+            tickets_in(&serde_json::json!({ "boxes": {}, "joined": [] })),
+            None
+        );
+        // strangers, and no joined boxes at all, are sure answers
+        let st = serde_json::json!({ "boxes": {}, "joined": { "jaaaaaaaaaa": {} } });
+        assert_eq!(tickets_in(&st), Some(BTreeSet::new()));
+        assert_eq!(
+            tickets_in(&serde_json::json!({ "boxes": {} })),
+            Some(BTreeSet::new())
+        );
     }
 
     #[test]

@@ -2800,16 +2800,16 @@ pub async fn start(
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(600)).await;
             loop {
-                if let (Some(g), Some(joined)) =
+                if let (Some(g), Some((joined, now))) =
                     (&a.library, member_boxes::joined_tickets(&a).await)
                 {
                     match g.pending().await {
                         Ok(p) => {
                             let first = p.iter().map(|(t, (_, at))| (t.clone(), *at)).collect();
-                            for t in member_boxes::expired(&first, &joined, identity::now()) {
+                            for t in member_boxes::expired(&first, &joined, now) {
                                 match g.drop_pending(&p[&t].0).await {
                                     Ok(n) => eprintln!(
-                                        "library: a pending backup of {n} object(s) whose box never joined, gone"
+                                        "library: a pending backup of {n} object(s) whose box never joined, to the images' trash"
                                     ),
                                     Err(e) => {
                                         eprintln!("library: dropping a pending backup: {e:#}")
