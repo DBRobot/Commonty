@@ -60,6 +60,8 @@ in
         virtualisation.useBootLoader = true;
         virtualisation.useEFIBoot = true;
         virtualisation.useDefaultFilesystems = false;
+        # blank's, already there: no image of its own to take them from
+        virtualisation.efi.keepVariables = false;
         virtualisation.diskImage = "./empty0.qcow2";
         virtualisation.tpm.enable = true;
         virtualisation.memorySize = 2048;
