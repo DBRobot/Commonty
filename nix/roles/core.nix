@@ -141,6 +141,9 @@ in
   # made a user by hand here (checked on both boxes); users are what the
   # repo says they are.
   users.mutableUsers = false;
+  # a box that joined on its own key is nobody's: nobody logs in to it, by
+  # keyboard or ssh, which is what it should be
+  users.allowNoPasswordLogin = config.dd.box.owner == null;
 
   users.users.admin = {
     isNormalUser = true;
