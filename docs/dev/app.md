@@ -383,6 +383,11 @@ app/src/      the window and its commands
   background.rs the tray, the login entry and its setting, Android's service
   browser.rs    the system browser's proxy setting
   installer.rs  setting up a home controller, a window of its own (desktop)
+  boxsetup.rs   setting up a box: its installer on a USB drive with a
+                join ticket, the backup's password and the Wi-Fi; the
+                box's backup into the member's images once it joins
+                (docs/dev/joining.md), a window of its own (desktop)
+  wifi.rs       this computer's Wi-Fi and its password, for that drive
   writer.rs     dd-hub-writer, run elevated, and its progress
   controllers.rs  the household's home controllers, locked with the library key
   smarthome.rs  Smart home: a loopback server held to the controller's key
