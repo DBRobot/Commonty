@@ -44,9 +44,9 @@ in
       ];
       description = "The control plane: heartbeats and the agreed state";
       # a box that joined, still under the name it was installed with: it
-      # joins once it has built itself under its key's (dd-agent)
-      unitConfig.ConditionHost = lib.mkIf config.dd.box.joined "!joining";
-      wantedBy = [ "multi-user.target" ];
+      # joins once it has built itself under its key's (dd-agent), whose
+      # switch starts this
+      wantedBy = lib.optional (config.networking.hostName != "joining") "multi-user.target";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       path = [

@@ -99,7 +99,7 @@ assert f"j{name}" == nix["keyName"], name
 # its agent: named by the key, it takes the release's commit, builds its
 # system under that name, and moves to it
 box.succeed("systemctl start dd-agent", timeout=900)
-assert box.succeed("hostname").strip() == nix["keyName"]
+assert box.succeed("cat /etc/hostname").strip() == nix["keyName"]
 assert box.succeed("readlink -f /run/current-system").strip() == named
 
 # and joins: on its own key, under its name, with its member's ticket
