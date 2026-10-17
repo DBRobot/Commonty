@@ -414,7 +414,7 @@ impl Manager {
             let mut f = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .custom_flags(Self::nofollow())
+                .custom_flags(Self::guest_open_flags())
                 .open(&tmp)?;
             f.write_all(&body)?;
         }
@@ -422,9 +422,12 @@ impl Manager {
         Ok(())
     }
 
-    /// O_NOFOLLOW, without pulling in libc for one constant
-    fn nofollow() -> i32 {
-        0o400000
+    /// No symlink followed, and never waiting on the file: a guest can make
+    /// any of its files a FIFO, and a plain open() of one blocks until a
+    /// writer comes, which stalled the whole manager. libc's constants, as
+    /// O_NOFOLLOW differs between x86_64 and aarch64
+    fn guest_open_flags() -> i32 {
+        libc::O_NOFOLLOW | libc::O_NONBLOCK
     }
 
     /// A file the guest writes, read the way anything a guest writes has to
@@ -435,7 +438,7 @@ impl Manager {
         use std::io::{Read as _, Seek as _, SeekFrom};
         let mut f = match std::fs::OpenOptions::new()
             .read(true)
-            .custom_flags(Self::nofollow())
+            .custom_flags(Self::guest_open_flags())
             .open(path)
         {
             Ok(f) => f,
@@ -1130,6 +1133,18 @@ mod tests {
         let link = d.join("status");
         std::os::unix::fs::symlink("/dev/zero", &link).unwrap();
         assert_eq!(Manager::tail_of(&link, 64), "");
+
+        // a FIFO with nobody writing: read at once as nothing, not waited on
+        let fifo = d.join("fifo");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(Manager::tail_of(&fifo, 64)).unwrap());
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(5))
+                .expect("a FIFO blocked the read"),
+            ""
+        );
 
         let _ = std::fs::remove_dir_all(&d);
     }

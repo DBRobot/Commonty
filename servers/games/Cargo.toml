@@ -10,6 +10,7 @@ name = "dd-games"
 path = "src/main.rs"
 
 [dependencies]
+libc = "0.2"
 axum = { version = "0.8", features = ["form", "query"] }
 askama = "0.16"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net"] }
