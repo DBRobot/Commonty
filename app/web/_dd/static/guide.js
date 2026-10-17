@@ -715,10 +715,13 @@ function build(opts) {
   auto.addEventListener('change', () => local.set(KEYS.auto, auto.checked ? '1' : '0'));
   const hide = el('button', { type: 'button', 'aria-label': 'Hide the assistant' }, arrow('m5 8 5 5 5-5', '0 0 20 20'));
   const form = el('form', {}, input, el('button', { type: 'submit', text: 'Send' }));
+  const wipe = el('button', { type: 'button', class: 'wipe', text: 'Clear', title: 'Clear the conversation (or type /clear)', 'aria-label': 'Clear the conversation' });
   const panel = el('section', { class: 'dd-guide', id: 'dd-guide', 'aria-labelledby': 'dd-guide-h' },
     el('header', {}, el('h2', { id: 'dd-guide-h', text: 'Monty' }), hide),
     log, form,
-    el('label', { class: 'fine', for: 'dd-guide-auto' }, el('span', { class: 'sw' }, auto, el('i')), 'Go there straight away'));
+    el('div', { class: 'foot' },
+      el('label', { class: 'fine', for: 'dd-guide-auto' }, el('span', { class: 'sw' }, auto, el('i')), 'Go there straight away'),
+      wipe));
   panel.hidden = true;
   body.append(btn, tuck, panel);
 
@@ -918,6 +921,19 @@ function build(opts) {
   let bug = null;
   try { bug = JSON.parse(tab.get(KEYS.bug) || 'null'); } catch { bug = null; }
   const keepBug = (b) => { bug = b; if (b) tab.set(KEYS.bug, JSON.stringify(b)); else tab.del(KEYS.bug); carried(); };
+
+  // a fresh start: the conversation, a bug half written up and a question
+  // waiting to be asked again, here and in the frame that carries them
+  function clearAll() {
+    convo = [];
+    tab.del(KEYS.retry);
+    keepBug(null);
+    keep();
+    redraw();
+    input.value = '';
+    input.focus();
+  }
+  wipe.addEventListener('click', clearAll);
   const PUBLIC = 'Issues are public - don’t include anything private.';
 
   async function bugStep(q) {
@@ -1156,6 +1172,10 @@ function build(opts) {
 
   let busy = false;
   async function ask(q) {
+    if (/^\/clear$/i.test(q.trim())) {
+      clearAll();
+      return;
+    }
     if (busy) return;
     say({ who: 'me', text: q });
     await loadMap();

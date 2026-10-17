@@ -1198,7 +1198,10 @@ body.dd-tucked.dd-peek .dd-guide-btn .hat { animation: dd-eyes 4.6s both; }
 .dd-guide input[type="text"] { flex: 1; min-width: 0; height: 40px; margin: 0; border: 1px solid var(--field); border-radius: var(--radius); padding: 0 11px; font: 14px var(--font); background: var(--surface); color: var(--ink); }
 .dd-guide form button { margin: 0; height: 40px; padding: 0 14px; border: 0; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font: 600 14px var(--font); cursor: pointer; }
 .dd-guide form button:hover { background: var(--accent-hover); }
-.dd-guide .fine { display: flex; align-items: center; gap: 9px; padding: 0 12px 10px; margin: 0; font-size: 13px; font-weight: 400; color: var(--ink-2); cursor: pointer; }
+.dd-guide .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 10px; }
+.dd-guide .fine { display: flex; align-items: center; gap: 9px; padding: 0; margin: 0; font-size: 13px; font-weight: 400; color: var(--ink-2); cursor: pointer; }
+.dd-guide .foot .wipe { margin: 0; height: auto; padding: 4px 8px; border: 0; border-radius: var(--radius); background: none; color: var(--ink-2); font: 13px var(--font); cursor: pointer; }
+.dd-guide .foot .wipe:hover { background: var(--gd-sunk); color: var(--ink); }
 .dd-guide .sw { position: relative; width: 34px; height: 20px; flex: none; }
 .dd-guide .sw input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: pointer; }
 .dd-guide .sw i { position: absolute; inset: 0; border-radius: 10px; background: var(--field); transition: background .15s; pointer-events: none; }
