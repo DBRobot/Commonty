@@ -798,7 +798,7 @@ pub fn check_envelope_assertion(
     let passkey = trusted
         .iter()
         .find(|p| p.id == id)
-        .ok_or_else(|| Error::Key("the root names a passkey not on file".into()))?;
+        .ok_or_else(|| Error::Key("the root names a passkey the entry does not carry".into()))?;
     if cose_digest(&passkey.cred) != digest {
         return Err(Error::Key(
             "the root does not name this passkey's key".into(),
@@ -824,7 +824,12 @@ fn check_assertion_with(signed: &SignedEntry, trusted: &[Passkey]) -> Result<()>
     // one passkey check for every signed thing: an entry's v1 or v2 signature
     // goes through the same one an envelope of any kind does
     let (_, sig_b64) = signed.signed()?;
-    check_envelope_assertion(&signed.entry.root, trusted, sig_b64, &signed.passkey_challenge()?)
+    check_envelope_assertion(
+        &signed.entry.root,
+        trusted,
+        sig_b64,
+        &signed.passkey_challenge()?,
+    )
 }
 
 /// A sign-in: `a` is the passkey `id` of `entry` answering `challenge`, made
