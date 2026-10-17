@@ -2,12 +2,14 @@
 # How big a computer this box can take, for placement (docs/dev/instances.md):
 # its memory less what it keeps for itself, its threads less one, the room
 # where the disks go. And what each computer here holds, for a move's cost.
-# Zeros without KVM: nothing is placed here.
+# Zeros without KVM, or while the box drains: nothing is placed here.
 set -euo pipefail
 
 out=/var/lib/dd-facts/vm.prom
 mem=0 threads=0 disk=0
-if [ -e /dev/kvm ]; then
+# a box being drained (its owner's word, or leaving the fleet) takes nothing new
+draining=$(cat /var/lib/dd-facts/*.prom 2>/dev/null | awk '$1 == "dd_box_draining" && $2 == 1' | head -1)
+if [ -e /dev/kvm ] && [ -z "$draining" ]; then
   total=$(awk '/^MemTotal:/ {print $2 * 1024}' /proc/meminfo)
   mem=$((total - RESERVE_BYTES))
   [ "$mem" -gt 0 ] || mem=0
