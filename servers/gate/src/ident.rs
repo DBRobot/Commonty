@@ -232,6 +232,71 @@ pub fn entry_differences(
     d
 }
 
+/// A v2 envelope (contract §1), as far as the gate needs to know it: that
+/// it is one, its kind, and the name its body is about. The gate checks no
+/// signature: the control plane judges it.
+pub struct Envelope {
+    pub kind: String,
+    body: serde_json::Value,
+    raw: Vec<u8>,
+}
+
+impl Envelope {
+    /// a JSON object with "v": 2 (a v1 item never has a "v")
+    pub fn is_one(bytes: &[u8]) -> bool {
+        serde_json::from_slice::<serde_json::Value>(bytes)
+            .ok()
+            .and_then(|v| v.get("v").and_then(|x| x.as_u64()))
+            == Some(2)
+    }
+
+    pub fn parse(bytes: &[u8]) -> Result<Self, String> {
+        use base64::Engine;
+        let v: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|e| format!("not json: {e}"))?;
+        if v.get("v").and_then(|x| x.as_u64()) != Some(2) {
+            return Err("not a v2 envelope".into());
+        }
+        let kind = v
+            .get("kind")
+            .and_then(|k| k.as_str())
+            .ok_or("an envelope with no kind")?
+            .to_string();
+        if v.get("sig")
+            .and_then(|s| s.as_str())
+            .is_none_or(str::is_empty)
+        {
+            return Err("an envelope with no signature".into());
+        }
+        let b = base64::engine::general_purpose::STANDARD
+            .decode(
+                v.get("body")
+                    .and_then(|b| b.as_str())
+                    .ok_or("an envelope with no body")?,
+            )
+            .map_err(|e| format!("body is not base64: {e}"))?;
+        let body: serde_json::Value =
+            serde_json::from_slice(&b).map_err(|e| format!("body is not json: {e}"))?;
+        Ok(Self {
+            kind,
+            body,
+            raw: bytes.to_vec(),
+        })
+    }
+
+    /// the name the item is about: an entry's or a leaving's `name`
+    pub fn name(&self) -> Option<&str> {
+        self.body.get("name").and_then(|n| n.as_str())
+    }
+
+    /// the item's name in the log, for a writer waiting on its outcome:
+    /// sha256 of the bytes as submitted
+    pub fn hash(&self) -> String {
+        use sha2::Digest;
+        format!("{:x}", sha2::Sha256::digest(&self.raw))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +307,37 @@ mod tests {
         assert_eq!(From::parse("shadow"), Some(From::Shadow));
         assert_eq!(From::parse("agreed"), Some(From::Agreed));
         assert_eq!(From::parse("judge"), None);
+    }
+
+    fn env(kind: &str, body: serde_json::Value) -> Vec<u8> {
+        use base64::Engine;
+        serde_json::to_vec(&serde_json::json!({
+            "v": 2, "kind": kind,
+            "body": base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&body).unwrap()),
+            "sig": "c2ln",
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn an_envelope_is_told_from_a_v1_item() {
+        let e = env("entry", serde_json::json!({"name": "ann", "version": 2}));
+        assert!(Envelope::is_one(&e));
+        assert!(!Envelope::is_one(
+            br#"{"entry": {"name": "ann"}, "signature": "x"}"#
+        ));
+        let p = Envelope::parse(&e).unwrap();
+        assert_eq!(p.kind, "entry");
+        assert_eq!(p.name(), Some("ann"));
+        assert_eq!(p.hash().len(), 64);
+    }
+
+    #[test]
+    fn a_broken_envelope_is_refused() {
+        assert!(
+            Envelope::parse(br#"{"v": 2, "kind": "entry", "body": "!!", "sig": "x"}"#).is_err()
+        );
+        assert!(Envelope::parse(br#"{"v": 2, "kind": "entry", "body": "e30="}"#).is_err());
+        assert!(Envelope::parse(br#"{"v": 2, "body": "e30=", "sig": "x"}"#).is_err());
     }
 }
