@@ -382,6 +382,89 @@ pub async fn publish(dirs: &[String], signed: &SignedEntry) -> Result<Vec<(Strin
     Ok(out)
 }
 
+/// An entry signed both ways while the boxes move to one judge
+/// (docs/dev/identity-state.md): the v1 form every gate takes today, and the
+/// v2 envelope a gate that says so takes instead. Signing both costs a device
+/// key nothing; a passkey signs one, so it has `v1` or `v2` and not both.
+pub struct Signed {
+    pub v1: Option<SignedEntry>,
+    pub v2: Option<identity::envelope::Envelope>,
+}
+
+impl Signed {
+    pub fn both(v1: SignedEntry, v2: identity::envelope::Envelope) -> Signed {
+        Signed {
+            v1: Some(v1),
+            v2: Some(v2),
+        }
+    }
+
+    /// what goes to a directory, given whether it takes v2
+    pub fn for_directory(&self, v2: bool) -> Option<serde_json::Value> {
+        match (v2, &self.v2, &self.v1) {
+            (true, Some(e), _) => serde_json::to_value(e).ok(),
+            (_, _, Some(s)) => serde_json::to_value(s).ok(),
+            // a v2-only signature to a directory that takes only v1: nothing
+            // it can read, and the caller hears so
+            _ => None,
+        }
+    }
+}
+
+/// The box behind a directory URL: `https://x/_dd/directory` → `https://x`
+pub fn box_of(dir: &str) -> &str {
+    let d = dir.trim_end_matches('/');
+    d.strip_suffix("/_dd/directory").unwrap_or(d)
+}
+
+/// Whether a directory takes v2 envelopes: its box's `/_dd/config` says
+/// `"envelope": 2`. Anything else - no answer, no field, an older box - is
+/// v1, so a client never sends what a box cannot read.
+pub async fn takes_v2(http: &reqwest::Client, dir: &str) -> bool {
+    let url = format!("{}/_dd/config", box_of(dir));
+    match http.get(&url).send().await {
+        Ok(r) if r.status().is_success() => r
+            .json::<serde_json::Value>()
+            .await
+            .map(|v| says_v2(&v))
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// the config's word on envelopes
+pub fn says_v2(config: &serde_json::Value) -> bool {
+    config.get("envelope").and_then(|v| v.as_u64()) == Some(2)
+}
+
+/// `publish`, in whichever form each directory takes
+pub async fn publish_signed(
+    dirs: &[String],
+    signed: &Signed,
+    name: &str,
+) -> Result<Vec<(String, Took)>> {
+    let http = http()?;
+    let mut out = Vec::new();
+    for d in dirs {
+        let v2 = takes_v2(&http, d).await;
+        let Some(body) = signed.for_directory(v2) else {
+            out.push((d.clone(), Took::Refused("this box does not yet take the account's new signature; try again after its next update".into())));
+            continue;
+        };
+        let url = format!("{}/{}", d.trim_end_matches('/'), name);
+        let took = match http.put(&url).json(&body).send().await {
+            Ok(r) if r.status().is_success() => Took::Accepted,
+            Ok(r) => {
+                let s = r.status();
+                Took::Refused(format!("{s} {}", r.text().await.unwrap_or_default().trim()))
+            }
+            Err(e) => Took::Unreachable(e.to_string()),
+        };
+        out.push((d.clone(), took));
+    }
+    Ok(out)
+}
+
 /// publish, and fail unless every directory took it
 pub async fn publish_all(dirs: &[String], signed: &SignedEntry) -> Result<Vec<(String, Took)>> {
     let out = publish(dirs, signed).await?;
@@ -401,6 +484,15 @@ pub async fn publish_all(dirs: &[String], signed: &SignedEntry) -> Result<Vec<(S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_box_takes_v2_only_when_its_config_says_so() {
+        assert!(says_v2(&serde_json::json!({"envelope": 2})));
+        assert!(!says_v2(&serde_json::json!({"envelope": 1})));
+        assert!(!says_v2(&serde_json::json!({})));
+        assert_eq!(box_of("https://x.test/_dd/directory/"), "https://x.test");
+        assert_eq!(box_of("https://x.test"), "https://x.test");
+    }
     use identity::{Device, Entry, encode_public, fingerprint, generate, sign};
 
     fn entry(name: &str, k: &identity::SigningKey, version: u64) -> SignedEntry {

@@ -480,6 +480,9 @@ enum MemberCmd {
     },
     /// Every member id, with the name behind it where a directory has one.
     List,
+    /// How far the move to the new signature format has got: the members
+    /// whose entry is still signed the old way (docs/dev/identity-state.md).
+    Signatures,
 }
 
 #[derive(Subcommand)]
@@ -1438,6 +1441,14 @@ async fn main() -> Result<()> {
                 member::unsuspend(&repo, &who, &directories, confirm.as_deref()).await?
             }
             MemberCmd::List => member::list(&repo, &directories).await?,
+            MemberCmd::Signatures => {
+                let (old, new) =
+                    release_cmd::signatures(std::path::Path::new(&repo), &auth::open(&service()))?;
+                println!("{new} signed the new way, {} still the old way", old.len());
+                for n in old {
+                    println!("  {n}");
+                }
+            }
         },
         Command::Box { cmd, repo } => match cmd {
             BoxCmd::Public { name } => {

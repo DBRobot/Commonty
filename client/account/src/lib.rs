@@ -39,6 +39,62 @@ pub async fn publish(dirs: &[String], signed: &SignedEntry) -> Result<Vec<(Strin
     Ok(took)
 }
 
+/// The same publish, with the entry also signed as a v2 envelope
+/// (docs/dev/identity-state.md): each directory gets the form it takes.
+pub async fn publish_both(
+    dirs: &[String],
+    signed: &directory::Signed,
+) -> Result<Vec<(String, Took)>> {
+    let name = match (&signed.v1, &signed.v2) {
+        (Some(s), _) => s.entry.name.clone(),
+        (None, Some(e)) => e.read::<Entry>()?.name,
+        (None, None) => bail!("nothing signed"),
+    };
+    let took = directory::publish_signed(dirs, signed, &name).await?;
+    let bad: Vec<String> = took
+        .iter()
+        .filter_map(|(d, t)| match t {
+            Took::Accepted => None,
+            Took::Refused(why) => Some(format!("{d}: refused ({why})")),
+            Took::Unreachable(why) => Some(format!("{d}: unreachable ({why})")),
+        })
+        .collect();
+    if !bad.is_empty() {
+        bail!(
+            "{} of {} directories did not take the update:\n  {}",
+            bad.len(),
+            dirs.len(),
+            bad.join("\n  ")
+        );
+    }
+    Ok(took)
+}
+
+/// `signed`, sealed as a v2 envelope too, by the same root: the same entry,
+/// both ways
+pub fn with_v2(
+    signed: &SignedEntry,
+    root: &ed25519_dalek::SigningKey,
+) -> Result<directory::Signed> {
+    let env = identity::envelope::seal_json(identity::envelope::ENTRY, &signed.entry, root)?;
+    Ok(directory::Signed::both(signed.clone(), env))
+}
+
+/// The same for a new root handed over by the recovery key: the recovery
+/// key signs the v2 message as well
+pub fn with_v2_recovery(
+    signed: &SignedEntry,
+    root: &ed25519_dalek::SigningKey,
+    recovery: &ed25519_dalek::SigningKey,
+) -> Result<directory::Signed> {
+    use base64::Engine as _;
+    use ed25519_dalek::Signer as _;
+    let mut env = identity::envelope::seal_json(identity::envelope::ENTRY, &signed.entry, root)?;
+    let sig = recovery.sign(&env.message()?);
+    env.recovery_sig = Some(base64::engine::general_purpose::STANDARD.encode(sig.to_bytes()));
+    Ok(directory::Signed::both(signed.clone(), env))
+}
+
 /// A code, as a person was handed it: the invite it derives, fetched from
 /// a directory and checked against the release key there, and the proof
 /// for a root, ready to go into that root's entry as its grant.
@@ -332,23 +388,27 @@ pub fn open_for_device(
 /// root here, to every directory given; the first that takes it puts it in
 /// the fleet's log, and every box deletes what is theirs at once.
 pub async fn leave(dirs: &[String], name: &str, root: &ed25519_dalek::SigningKey) -> Result<()> {
-    let s = identity::sign_leave(
-        identity::Leave {
-            name: name.to_string(),
-            root: identity::encode_public(&root.verifying_key()),
-            at: identity::now(),
-            back: false,
-        },
-        root,
-    )?;
+    let statement = identity::Leave {
+        name: name.to_string(),
+        root: identity::encode_public(&root.verifying_key()),
+        at: identity::now(),
+        back: false,
+    };
+    // both ways, as an entry is: a box that takes v2 gets the envelope
+    let v2 = identity::envelope::seal_json(identity::envelope::LEAVE, &statement, root)?;
+    let s = identity::sign_leave(statement, root)?;
     let http = directory::http()?;
     let mut why = Vec::new();
     for d in dirs {
-        let base = d.trim_end_matches('/');
-        let base = base.strip_suffix("/_dd/directory").unwrap_or(base);
+        let base = directory::box_of(d);
+        let body = if directory::takes_v2(&http, d).await {
+            serde_json::to_value(&v2)?
+        } else {
+            serde_json::to_value(&s)?
+        };
         match http
             .put(format!("{base}/_dd/leaving/{name}"))
-            .json(&s)
+            .json(&body)
             .send()
             .await
         {
@@ -361,6 +421,53 @@ pub async fn leave(dirs: &[String], name: &str, root: &ed25519_dalek::SigningKey
         }
     }
     bail!("no directory took it:\n  {}", why.join("\n  "))
+}
+
+/// keyring account: set once this device has re-signed its member's entry as
+/// a v2 envelope (docs/dev/identity-state.md), so it is done once
+pub const SIGNED_V2: &str = "entry-signed-v2";
+
+/// The move to one judge: the member's current entry, the same in every
+/// field but its version and time, signed again so a box that takes v2
+/// envelopes holds it as one. Nothing is re-signed until some directory
+/// takes v2, and never twice. Only a device holding the root does this,
+/// silently; a passkey root confirms in the browser instead.
+pub async fn resign_v2(keys: &impl KeyStore, dirs: &[String], name: &str) -> Result<bool> {
+    if keys.get(SIGNED_V2)?.is_some() {
+        return Ok(false);
+    }
+    let Some(root) = load_root(keys)? else {
+        return Ok(false);
+    };
+    let http = directory::http()?;
+    let mut any = false;
+    for d in dirs {
+        if directory::takes_v2(&http, d).await {
+            any = true;
+            break;
+        }
+    }
+    if !any {
+        return Ok(false);
+    }
+    let cur = ours(dirs, name, &root).await?;
+    let entry = next_version(&cur.entry, identity::now());
+    let signed = identity::sign(entry, &root)?;
+    publish_both(dirs, &with_v2(&signed, &root)?).await?;
+    keys.set(SIGNED_V2, "1")?;
+    Ok(true)
+}
+
+/// What a re-signing publishes: the entry as it was, its version one up and
+/// its time now. Keys, devices, passkeys, libraries, grant and terms are
+/// untouched; only the passkeys' keys the entry never keeps are dropped, as
+/// every update drops them.
+pub fn next_version(e: &Entry, now: u64) -> Entry {
+    let mut e = e.clone();
+    identity::drop_passkey_keys(&mut e);
+    e.version += 1;
+    e.updated = now;
+    e
 }
 
 pub fn load_root(keys: &impl KeyStore) -> Result<Option<ed25519_dalek::SigningKey>> {
@@ -384,7 +491,7 @@ pub async fn add_library(
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
-    publish(dirs, &signed).await?;
+    publish_both(dirs, &with_v2(&signed, root)?).await?;
     Ok(signed)
 }
 
@@ -453,14 +560,16 @@ pub async fn create(
         updated: identity::now(),
     };
     let signed = identity::sign(entry, &root)?;
-    publish(dirs, &signed).await.map_err(|e| {
-        let why = format!("{e:#}");
-        if why.contains("refused") || why.contains("taken") {
-            anyhow::anyhow!("{why}\n{}", taken())
-        } else {
-            e
-        }
-    })?;
+    publish_both(dirs, &with_v2(&signed, &root)?)
+        .await
+        .map_err(|e| {
+            let why = format!("{e:#}");
+            if why.contains("refused") || why.contains("taken") {
+                anyhow::anyhow!("{why}\n{}", taken())
+            } else {
+                e
+            }
+        })?;
     keys.set(ROOT, &identity::encode_secret(&root))?;
     keys.set(ROOT_PIN, &identity::encode_public(&root.verifying_key()))?;
     Ok(identity::encode_secret(&recovery))
@@ -542,7 +651,7 @@ pub async fn admit(
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
-    publish(dirs, &signed).await?;
+    publish_both(dirs, &with_v2(&signed, root)?).await?;
     Ok(signed)
 }
 
@@ -581,7 +690,7 @@ pub async fn remove_device(
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
-    publish(dirs, &signed).await?;
+    publish_both(dirs, &with_v2(&signed, root)?).await?;
     Ok(signed)
 }
 
@@ -634,7 +743,7 @@ pub async fn reseal(
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
-    publish(dirs, &signed).await?;
+    publish_both(dirs, &with_v2(&signed, root)?).await?;
     Ok(Some(signed))
 }
 
@@ -734,7 +843,7 @@ pub async fn recover(
         });
     }
     let signed = identity::sign_recovery(entry, &root, &recovery)?;
-    publish(dirs, &signed).await?;
+    publish_both(dirs, &with_v2_recovery(&signed, &root, &recovery)?).await?;
     keys.set(ROOT, &identity::encode_secret(&root))?;
     keys.set(ROOT_PIN, &identity::encode_public(&root.verifying_key()))?;
     Ok((identity::encode_secret(&next_recovery), cur))
@@ -759,7 +868,7 @@ pub async fn admit_passkey(
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
-    publish(dirs, &signed).await?;
+    publish_both(dirs, &with_v2(&signed, root)?).await?;
     Ok(signed)
 }
 
@@ -780,7 +889,7 @@ pub async fn remove_passkey(
     entry.version += 1;
     entry.updated = identity::now();
     let signed = identity::sign(entry, root)?;
-    publish(dirs, &signed).await?;
+    publish_both(dirs, &with_v2(&signed, root)?).await?;
     Ok(signed)
 }
 
@@ -924,5 +1033,80 @@ mod tests {
         assert!(directory::resolve(&found(bent), directory::Anchor::Root(&pin)).is_err());
         let good = identity::sign(e, &root).unwrap();
         assert!(directory::resolve(&found(good), directory::Anchor::Root(&pin)).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod v2_tests {
+    use super::*;
+
+    fn vectors() -> serde_json::Value {
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../servers/system/control/state/ident/testdata/vectors.json"
+        );
+        serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap()
+    }
+
+    fn key(n: u8) -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&[n; 32])
+    }
+
+    /// What the app and dd publish is, byte for byte, what the judge's own
+    /// vectors hold for the same entry and keys (the Go judge checks those)
+    #[test]
+    fn the_v2_an_update_publishes_is_the_judges_vector() {
+        let v = vectors();
+        let want: identity::envelope::Envelope =
+            serde_json::from_value(v["v2"]["ada"]["envelope"].clone()).unwrap();
+        let entry: Entry = want.read().unwrap();
+        let signed = identity::sign(entry, &key(2)).unwrap();
+        let both = with_v2(&signed, &key(2)).unwrap();
+        assert_eq!(both.v2.as_ref().unwrap(), &want);
+        assert_eq!(both.v1.as_ref().unwrap().signature, signed.signature);
+    }
+
+    #[test]
+    fn a_recovery_signs_the_v2_message_with_the_paper_key_as_the_vector_does() {
+        let v = vectors();
+        let want: identity::envelope::Envelope =
+            serde_json::from_value(v["v2"]["ada_recovered"]["envelope"].clone()).unwrap();
+        let entry: Entry = want.read().unwrap();
+        let signed = identity::sign_recovery(entry, &key(5), &key(3)).unwrap();
+        let both = with_v2_recovery(&signed, &key(5), &key(3)).unwrap();
+        assert_eq!(both.v2.as_ref().unwrap(), &want);
+    }
+
+    /// Re-signing for the move changes nothing but the version and the time
+    #[test]
+    fn a_resigned_entry_is_the_same_entry_one_version_on() {
+        let v = vectors();
+        let env: identity::envelope::Envelope =
+            serde_json::from_value(v["v2"]["ada"]["envelope"].clone()).unwrap();
+        let before: Entry = env.read().unwrap();
+        let after = next_version(&before, before.updated + 60);
+        assert_eq!(after.version, before.version + 1);
+        assert_eq!(after.updated, before.updated + 60);
+        let strip = |e: &Entry| {
+            let mut e = e.clone();
+            e.version = 0;
+            e.updated = 0;
+            serde_json::to_value(e).unwrap()
+        };
+        assert_eq!(strip(&after), strip(&before));
+    }
+
+    #[test]
+    fn a_box_that_takes_only_v1_never_gets_a_v2_only_signature() {
+        let only_v2 = directory::Signed {
+            v1: None,
+            v2: Some(identity::envelope::seal(
+                identity::envelope::ENTRY,
+                b"{}".to_vec(),
+                &key(2),
+            )),
+        };
+        assert!(only_v2.for_directory(false).is_none());
+        assert!(only_v2.for_directory(true).is_some());
     }
 }
