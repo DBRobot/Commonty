@@ -92,12 +92,23 @@ async fn upload(
         "metadata",
         reqwest::multipart::Part::text(metadata.to_string()).mime_str("application/json")?,
     );
-    for n in ["worker.js", "fleet.js"] {
+    // every module the Worker's package holds: worker.js imports
+    // controller.js, which imports the mail crate's dd_mail.js and its wasm.
+    // Two names by hand left controller.js out, and Cloudflare refused every
+    // deploy from release 271 on ("No such module"), keeping a Worker that
+    // knew none of the names added since
+    let mut names: Vec<String> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    for n in &names {
+        let Some(mime) = module_mime(n) else { continue };
         form = form.part(
-            n,
+            n.clone(),
             reqwest::multipart::Part::bytes(std::fs::read(dir.join(n))?)
-                .file_name(n)
-                .mime_str("application/javascript+module")?,
+                .file_name(n.clone())
+                .mime_str(mime)?,
         );
     }
     let v: serde_json::Value = http
@@ -134,6 +145,18 @@ async fn upload(
 
 /// Upload the Worker the release at `ref` carries. Nothing to do before
 /// `dd dns setup` has been run.
+/// How Cloudflare takes a module of the Worker's package, by its name; none
+/// for a file that is not one
+fn module_mime(name: &str) -> Option<&'static str> {
+    if name.ends_with(".js") {
+        Some("application/javascript+module")
+    } else if name.ends_with(".wasm") {
+        Some("application/wasm")
+    } else {
+        None
+    }
+}
+
 pub async fn deploy(root: &Path, keys: &impl auth::KeyStore, r#ref: &str) -> Result<()> {
     let Some(s) = read_setup(root)? else {
         eprintln!("== no DNS Worker set up yet (`dd dns setup`); nothing uploaded");
@@ -270,4 +293,18 @@ pub async fn tunnels(root: &Path, keys: &impl auth::KeyStore) -> Result<()> {
         "== the Worker has the tunnel token; each box asks for its own tunnel at its next start"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod module_tests {
+    use super::module_mime;
+
+    #[test]
+    fn every_module_the_worker_imports_goes_up() {
+        for n in ["worker.js", "fleet.js", "controller.js", "dd_mail.js"] {
+            assert_eq!(module_mime(n), Some("application/javascript+module"), "{n}");
+        }
+        assert_eq!(module_mime("dd_mail_bg.wasm"), Some("application/wasm"));
+        assert_eq!(module_mime("README"), None);
+    }
 }

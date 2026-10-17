@@ -411,6 +411,9 @@ in
         pkgs.gawk
         pkgs.age
       ]
+      # it seals each other box's key to that box's secrets key, which is a
+      # TPM's: without the plugin age cannot, and release 277 rolled back
+      ++ cfg.agePlugins
       ++ lib.optional (cfg.dataset != null) config.boot.zfs.package;
       serviceConfig = {
         Type = "oneshot";
