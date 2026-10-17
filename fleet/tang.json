@@ -1,1 +1,6 @@
-{}
+{
+  "node1": {
+    "url": "http://192.168.1.20:7654",
+    "thp": "rGd_UP572ar1o-T8LWtwIk7_yYuVKigd0224R4AlCXI"
+  }
+}
