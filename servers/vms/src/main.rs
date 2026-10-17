@@ -197,6 +197,19 @@ async fn static_file(Path(name): Path<String>) -> Response {
         .into_response()
 }
 
+/// this box's memory less what it keeps, in MiB, as vm-facts.sh counts it
+fn box_memory(reserve: u64) -> u64 {
+    std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|m| {
+            m.lines()
+                .find_map(|l| l.strip_prefix("MemTotal:"))
+                .and_then(|v| v.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
+        })
+        .map(|kib| (kib / 1024).saturating_sub(reserve))
+        .unwrap_or(0)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut m = Manager::new(
@@ -207,6 +220,10 @@ async fn main() -> Result<()> {
             disk: num("DD_VMS_DISK_GIB", 200),
             port_base: num("DD_VMS_PORT_BASE", 27200),
             port_count: num("DD_VMS_PORT_COUNT", 200),
+            box_memory: box_memory(num("DD_VMS_RESERVE_MIB", 2048)),
+            box_threads: std::thread::available_parallelism()
+                .map(|n| (n.get() as u32).saturating_sub(1).max(1))
+                .unwrap_or(1),
         },
         env("DD_VMS_BOX_OWNER")?,
         env("DD_VMS_ADDRESS")?,

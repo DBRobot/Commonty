@@ -29,6 +29,10 @@ pub struct Limits {
     pub disk: u64,
     pub port_base: u16,
     pub port_count: u16,
+    /// MiB and threads this box can give one computer (vm-facts.sh says the
+    /// same to placement): a small box runs small ones
+    pub box_memory: u64,
+    pub box_threads: u32,
 }
 
 pub const MIN_MEMORY: u64 = 512;
@@ -389,6 +393,13 @@ impl Manager {
     }
 
     fn fits(&self, owner: &str, except: Option<&str>, c: &Config) -> Result<()> {
+        if c.memory > self.limits.box_memory || c.threads > self.limits.box_threads {
+            bail!(
+                "this box can take a computer of up to {} MiB and {} threads",
+                self.limits.box_memory,
+                self.limits.box_threads
+            );
+        }
         let (m, t) = self.used(owner, except);
         if m + c.memory > self.limits.memory {
             bail!(
@@ -733,6 +744,8 @@ mod tests {
                 disk: 200,
                 port_base: 27200,
                 port_count: 4,
+                box_memory: 30000,
+                box_threads: 7,
             },
             "david".into(),
             "100.64.0.2".into(),
@@ -875,6 +888,18 @@ mod tests {
         )
         .unwrap();
         m.make("tom", "c", "a", true).unwrap();
+    }
+
+    #[test]
+    fn a_small_box_takes_small_computers() {
+        let (mut m, _) = scratch("small");
+        m.limits.box_memory = 6144;
+        m.limits.box_threads = 3;
+        m.save_config("tom", config("big", 8192, 2)).unwrap();
+        let e = m.make("tom", "big", "a", true).unwrap_err().to_string();
+        assert!(e.contains("this box can take"), "{e}");
+        m.save_config("tom", config("small", 2048, 2)).unwrap();
+        m.make("tom", "small", "a", true).unwrap();
     }
 
     #[test]

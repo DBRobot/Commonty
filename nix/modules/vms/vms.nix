@@ -136,6 +136,11 @@ in
       type = lib.types.ints.positive;
       default = 8;
     };
+    reserveMiB = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = 2048;
+      description = "memory the box keeps for itself and its services, never given to a computer";
+    };
     reach = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       readOnly = true;
@@ -224,6 +229,7 @@ in
         DD_VMS_PORT_COUNT = toString cfg.portCount;
         DD_VMS_MEMORY_MIB = toString cfg.memoryMiB;
         DD_VMS_THREADS = toString cfg.threads;
+        DD_VMS_RESERVE_MIB = toString cfg.reserveMiB;
         DD_VMS_ADDRESS = config.dd.box.net;
         # whose box: "my boxes only" runs here for them alone. A fleet box
         # (no owner of its own) is the fleet owner's
@@ -337,6 +343,29 @@ in
       timerConfig = {
         OnActiveSec = "5min";
         OnUnitActiveSec = "1h";
+      };
+    };
+
+    # how big a computer this box can take, and what each here holds: into
+    # the heartbeat, for placement (vm-facts.sh)
+    systemd.services.dd-vm-facts = {
+      description = "Say how big a computer this box can take";
+      path = [
+        pkgs.coreutils
+        pkgs.gawk
+      ];
+      restartIfChanged = false;
+      serviceConfig.Type = "oneshot";
+      script = ddScript ./vm-facts.sh {
+        DIR = dir;
+        RESERVE_BYTES = cfg.reserveMiB * 1024 * 1024;
+      };
+    };
+    systemd.timers.dd-vm-facts = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "1min";
+        OnUnitActiveSec = "1min";
       };
     };
 

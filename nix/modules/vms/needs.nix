@@ -12,12 +12,13 @@
       "dd-vms"
       "vms-access"
       "dd-vms-usage"
+      "dd-vm-facts"
     ];
     base = {
       requires = {
         arch = [ "x86_64" ]; # the guest image, for now
         kvm = true;
-        disk.size.min = "50G";
+        disk.size.min = "20G"; # one small computer; each asks its own size of the box it lands on
       };
       uses = {
         memory = "1M";

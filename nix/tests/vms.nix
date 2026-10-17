@@ -17,6 +17,8 @@
       ../modules/vms/vms.nix
     ];
     dd.vms.enable = true;
+    # a small box: its 1G computer fits beside what it keeps for itself
+    dd.vms.reserveMiB = 512;
     # the guests' filter is the firewall's (nix/modules/guests/egress.nix)
     networking.firewall.enable = lib.mkForce true;
     environment.systemPackages = [
