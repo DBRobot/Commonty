@@ -671,6 +671,43 @@ fn on_box(addr: &str, cmd: &str) -> Result<String> {
     Ok(String::from_utf8(out.stdout)?)
 }
 
+/// How far the move to v2 envelopes has got (docs/dev/identity-state.md):
+/// the agreed identity state, read on a box of this machine's owner, as
+/// (members still signed the old way, members on v2). Only for the person
+/// whose box it is: it asks over ssh, as every release step does.
+pub(crate) fn signatures(root: &Path, keys: &impl auth::KeyStore) -> Result<(Vec<String>, usize)> {
+    let boxes: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("fleet/boxes.json"))?)?;
+    let owner = keys
+        .get(crate::USER)?
+        .context("no member name here (`dd login`)")?;
+    let owners = box_owners(root, &boxes);
+    let home = own_box(&boxes, &owners, &owner)?;
+    let state: serde_json::Value =
+        serde_json::from_str(&on_box(&home, "curl -sf http://127.0.0.1:4195/identity")?)?;
+    Ok(count_signatures(&state))
+}
+
+/// the names whose agreed item is still v1, and how many are v2
+pub(crate) fn count_signatures(state: &serde_json::Value) -> (Vec<String>, usize) {
+    let mut old = Vec::new();
+    let mut new = 0;
+    for (name, m) in state["members"].as_object().into_iter().flatten() {
+        // the item as agreed, verbatim: a v2 envelope says `"v": 2`
+        let item = match &m["item"] {
+            serde_json::Value::String(s) => serde_json::from_str(s).unwrap_or_default(),
+            v => v.clone(),
+        };
+        if item.get("v").and_then(|v| v.as_u64()) == Some(2) {
+            new += 1;
+        } else {
+            old.push(name.clone());
+        }
+    }
+    old.sort();
+    (old, new)
+}
+
 /// Each box's owner, from its own file (fleet/boxes/<box>/box.json)
 fn box_owners(root: &Path, boxes: &serde_json::Value) -> BTreeMap<String, String> {
     boxes
@@ -2415,6 +2452,18 @@ fn device_systems(root: &Path) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn members_still_on_v1_are_counted_by_their_agreed_item() {
+        let state = serde_json::json!({"members": {
+            "ada": {"item": {"v": 2, "kind": "entry", "body": "e30=", "sig": "x"}},
+            "bob": {"item": {"entry": {"name": "bob"}, "signature": "x"}},
+            "cy": {"item": "{\"v\":2,\"kind\":\"entry\"}"},
+        }});
+        let (old, new) = count_signatures(&state);
+        assert_eq!(old, vec!["bob".to_string()]);
+        assert_eq!(new, 2);
+    }
     use release::ATTEST_NAMESPACE;
 
     #[test]

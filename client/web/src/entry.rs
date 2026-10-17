@@ -82,8 +82,25 @@ fn with_device(signed: &str, public_key: &str, now: u64) -> R<String> {
     identity::drop_passkey_keys(&mut e);
     e.version += 1;
     e.updated = now;
-    let c = identity::challenge(&e).map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "entry": e, "challenge": B64_URL.encode(c) }).to_string())
+    plan(&e)
+}
+
+/// What a passkey signs for `e`, both ways: `challenge` for today's entry
+/// (v1), and `body` with `challenge_v2` for a v2 envelope - the body's bytes
+/// exactly as they will be signed, and sha256 of the envelope's message
+/// (docs/dev/identity-state.md). The page asks the passkey for the one its
+/// box takes (`/_dd/config`'s `envelope`), never both.
+fn plan(e: &identity::Entry) -> R<String> {
+    let c = identity::challenge(e).map_err(|e| e.to_string())?;
+    let body = serde_json::to_vec(e).map_err(|e| e.to_string())?;
+    let c2 = identity::envelope::passkey_challenge(identity::envelope::ENTRY, &body);
+    Ok(serde_json::json!({
+        "entry": e,
+        "challenge": B64_URL.encode(c),
+        "body": B64.encode(&body),
+        "challenge_v2": B64_URL.encode(c2),
+    })
+    .to_string())
 }
 
 #[wasm_bindgen]
@@ -119,8 +136,7 @@ pub fn entry_without(
     let run = || -> R<String> {
         verified(signed)?;
         let e = change(signed, device.as_deref(), passkey.as_deref(), now)?;
-        let c = identity::challenge(&e).map_err(|e| e.to_string())?;
-        Ok(serde_json::json!({ "entry": e, "challenge": B64_URL.encode(c) }).to_string())
+        plan(&e)
     };
     run().map_err(|e| JsValue::from_str(&e))
 }
@@ -143,9 +159,88 @@ pub fn entry_signed(entry: &str, assertion: &str) -> Result<String, JsValue> {
     run().map_err(|e| JsValue::from_str(&e))
 }
 
+/// The entry as it is, signed again with its root passkey for the move to
+/// v2 envelopes: the same in every field but version and time. The plan the
+/// page has the passkey sign (`body`, `challenge_v2`).
+#[wasm_bindgen]
+pub fn entry_resign(signed: &str, now: u64) -> Result<String, JsValue> {
+    let run = || -> R<String> {
+        verified(signed)?;
+        let s: SignedEntry = serde_json::from_str(signed).map_err(|e| e.to_string())?;
+        if !s.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
+            return Err("this account's main key is a device's: its device signs it again".into());
+        }
+        let mut e = s.entry;
+        identity::drop_passkey_keys(&mut e);
+        e.version += 1;
+        e.updated = now;
+        plan(&e)
+    };
+    run().map_err(|e| JsValue::from_str(&e))
+}
+
+/// A v2 envelope: the plan's `body`, exactly as signed, and the passkey's
+/// answer to its `challenge_v2` (base64url parts, as the browser hands
+/// them over) - what a box that takes v2 takes.
+#[wasm_bindgen]
+pub fn entry_envelope(body: &str, assertion: &str) -> Result<String, JsValue> {
+    let run = || -> R<String> {
+        let a: Assertion = serde_json::from_str(assertion).map_err(|e| e.to_string())?;
+        // the body is ours: it parses as an entry, or nothing is signed
+        let raw = B64
+            .decode(body)
+            .map_err(|_| "the body is not base64".to_string())?;
+        serde_json::from_slice::<identity::Entry>(&raw).map_err(|e| e.to_string())?;
+        let env = identity::envelope::Envelope {
+            v: 2,
+            kind: identity::envelope::ENTRY.into(),
+            body: body.to_string(),
+            sig: B64.encode(serde_json::to_vec(&a).map_err(|e| e.to_string())?),
+            recovery_sig: None,
+        };
+        serde_json::to_string(&env).map_err(|e| e.to_string())
+    };
+    run().map_err(|e| JsValue::from_str(&e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The plan's v2 body is the entry's bytes as the envelope carries them,
+    /// and its challenge is sha256 of the envelope's message: what the judge
+    /// checks a passkey's answer against
+    #[test]
+    fn a_v2_plan_signs_the_body_the_envelope_carries() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[4; 32]);
+        let e = identity::Entry {
+            name: "pia".into(),
+            root: "webauthn:abc:def".into(),
+            recovery: String::new(),
+            recovered_from: vec![],
+            devices: vec![],
+            passkeys: vec![],
+            grant: None,
+            libraries: vec![],
+            terms: None,
+            version: 3,
+            updated: 9,
+        };
+        let _ = key;
+        let p: serde_json::Value = serde_json::from_str(&plan(&e).unwrap()).unwrap();
+        let body = B64.decode(p["body"].as_str().unwrap()).unwrap();
+        assert_eq!(serde_json::from_slice::<identity::Entry>(&body).unwrap(), e);
+        let want = identity::envelope::passkey_challenge(identity::envelope::ENTRY, &body);
+        assert_eq!(
+            B64_URL.decode(p["challenge_v2"].as_str().unwrap()).unwrap(),
+            want
+        );
+        // and v1's challenge is still today's
+        assert_eq!(
+            B64_URL.decode(p["challenge"].as_str().unwrap()).unwrap(),
+            identity::challenge(&e).unwrap()
+        );
+    }
 
     #[test]
     fn a_device_root_is_left_to_dd_and_the_root_passkey_stays() {
