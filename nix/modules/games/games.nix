@@ -84,6 +84,8 @@ let
   '';
 in
 {
+  imports = [ ../guests/egress.nix ];
+
   # Game servers a member starts for themselves. The release says what can
   # run and how: a catalogue of games, one guest machine (game-guest.nix), a
   # template unit that boots it. That a given server exists is not in the
@@ -176,6 +178,8 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    dd.guests.enable = true;
+
     # A server's ports are open to the people invited to it and to no one
     # else, on the Commonty network only (never the owner's tailnet). All of
     # that network's traffic passes through a chain of its own, one rule per
@@ -404,6 +408,8 @@ in
       serviceConfig = {
         User = "dd-games";
         Group = "dd-games";
+        # what it may reach out to (nix/modules/guests/egress.nix)
+        SupplementaryGroups = [ config.dd.guests.group ];
         ExecStart = "${run} %i";
         ExecStop = "${stop} %i";
         TimeoutStopSec = 90;
