@@ -238,6 +238,8 @@ pub fn entry_differences(
 pub struct Envelope {
     pub kind: String,
     body: serde_json::Value,
+    body_b64: String,
+    body_bytes: Vec<u8>,
     raw: Vec<u8>,
 }
 
@@ -268,18 +270,21 @@ impl Envelope {
         {
             return Err("an envelope with no signature".into());
         }
+        let body_b64 = v
+            .get("body")
+            .and_then(|b| b.as_str())
+            .ok_or("an envelope with no body")?
+            .to_string();
         let b = base64::engine::general_purpose::STANDARD
-            .decode(
-                v.get("body")
-                    .and_then(|b| b.as_str())
-                    .ok_or("an envelope with no body")?,
-            )
+            .decode(&body_b64)
             .map_err(|e| format!("body is not base64: {e}"))?;
         let body: serde_json::Value =
             serde_json::from_slice(&b).map_err(|e| format!("body is not json: {e}"))?;
         Ok(Self {
             kind,
             body,
+            body_b64,
+            body_bytes: b,
             raw: bytes.to_vec(),
         })
     }
@@ -287,6 +292,21 @@ impl Envelope {
     /// the name the item is about: an entry's or a leaving's `name`
     pub fn name(&self) -> Option<&str> {
         self.body.get("name").and_then(|n| n.as_str())
+    }
+
+    /// the body as it travels, base64
+    pub fn body_b64(&self) -> &str {
+        &self.body_b64
+    }
+
+    /// sha256 of what was signed (identity::envelope::message: the kind and
+    /// the body's bytes): one item however its outer JSON is written
+    pub fn signed_hash(&self) -> String {
+        use sha2::Digest;
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(identity::envelope::message(&self.kind, &self.body_bytes))
+        )
     }
 
     /// the item's name in the log, for a writer waiting on its outcome:

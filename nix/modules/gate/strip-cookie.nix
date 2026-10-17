@@ -26,6 +26,13 @@ let
         (lib.mkIf (config.proxyPass != null && lib.hasInfix gatePort config.proxyPass) (
           lib.mkAfter "proxy_set_header X-Original-Host $host;"
         ))
+        # and who is asking, as nginx saw the connection - on the public
+        # door, the visitor's address the tunnel reports (real_ip, trusted
+        # from the tunnel alone) - set here so whatever a client sent under
+        # that name is overwritten. The gate's limits count by it
+        (lib.mkIf (config.proxyPass != null && lib.hasInfix gatePort config.proxyPass) (
+          lib.mkAfter "proxy_set_header X-Dd-Peer $remote_addr;"
+        ))
       ];
     };
 in
