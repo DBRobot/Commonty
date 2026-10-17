@@ -51,9 +51,11 @@ pub enum VmCmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Start it; it stays up across reboots until stopped
     Start {
         name: String,
     },
+    /// Shut it down cleanly; /home and its system are kept
     Stop {
         name: String,
     },
