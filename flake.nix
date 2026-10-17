@@ -52,6 +52,7 @@
         "thanos"
         "members-runner"
         "games"
+        "vms"
         "forge"
         "transcode"
         "network"
