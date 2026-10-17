@@ -178,5 +178,15 @@
       "pihole",
       "tang"
     ]
+  },
+  "compute": {
+    "requires": {
+      "kvm": true,
+      "memoryGiB": 24
+    },
+    "why": "members' computers are KVM guests; one member's may take 16G",
+    "services": [
+      "dd-vms"
+    ]
   }
 }

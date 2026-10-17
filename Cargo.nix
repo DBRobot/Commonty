@@ -28880,6 +28880,10 @@ rec {
             features = [ "json" ];
           }
           {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];

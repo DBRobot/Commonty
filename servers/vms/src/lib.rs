@@ -217,6 +217,24 @@ fn random_id() -> Result<String> {
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
+/// A file a guest wrote, from its report share: the guest's root can put
+/// anything there, a link to another member's files, a pipe, a huge file.
+/// Read only a plain file, not followed, at most `max` bytes.
+fn read_guest(path: &Path, max: u64) -> Option<Vec<u8>> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    if !f.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut b = Vec::new();
+    f.take(max).read_to_end(&mut b).ok()?;
+    Some(b)
+}
+
 /// written beside, then moved: a reader never sees half a file
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = path.with_extension("tmp");
@@ -587,9 +605,7 @@ impl Manager {
             "failed" => "failed",
             _ => "stopped",
         };
-        let applied = std::fs::read(self.instance_dir(&r.id).join("report/apply.json"))
-            .ok()
-            .filter(|b| b.len() < 4096)
+        let applied = read_guest(&self.instance_dir(&r.id).join("report/apply.json"), 4096)
             .and_then(|b| serde_json::from_slice(&b).ok());
         View {
             address: format!("{}:{}", self.address, r.port),
@@ -610,11 +626,9 @@ impl Manager {
     /// The guest's own words about its last apply, cut short; shown to its owner.
     pub fn apply_log(&self, owner: &str, id: &str) -> Result<String> {
         self.record(owner, id)?;
-        let mut s = String::new();
-        if let Ok(f) = std::fs::File::open(self.instance_dir(id).join("report/apply.log")) {
-            f.take(8192).read_to_string(&mut s).ok();
-        }
-        Ok(s)
+        let b =
+            read_guest(&self.instance_dir(id).join("report/apply.log"), 8192).unwrap_or_default();
+        Ok(String::from_utf8_lossy(&b).into_owned())
     }
 
     /// Every instance whose record says up, after a reboot or a restart of
@@ -785,6 +799,23 @@ mod tests {
         m.delete("tom", &a.id).unwrap();
         assert!(m.instances("tom").is_empty());
         assert!(m.record("tom", "../../etc/x").is_err());
+    }
+
+    #[test]
+    fn a_guests_report_is_never_followed() {
+        let (m, _) = scratch("report");
+        m.save_config("tom", config("c", 1024, 1)).unwrap();
+        let a = m.make("tom", "c", "a", true).unwrap();
+        let rep = m.instance_dir(&a.id).join("report");
+        std::fs::create_dir_all(&rep).unwrap();
+        // another member's record, linked in by the guest
+        std::os::unix::fs::symlink(m.record_path(&a.id), rep.join("apply.log")).unwrap();
+        assert_eq!(m.apply_log("tom", &a.id).unwrap(), "");
+        std::os::unix::fs::symlink(m.record_path(&a.id), rep.join("apply.json")).unwrap();
+        assert!(m.view(a.clone()).applied.is_none());
+        std::fs::remove_file(rep.join("apply.json")).unwrap();
+        std::fs::write(rep.join("apply.json"), r#"{"ok": true}"#).unwrap();
+        assert!(m.view(a).applied.is_some());
     }
 
     #[test]

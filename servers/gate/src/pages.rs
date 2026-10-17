@@ -512,6 +512,7 @@ const ICONS: &[(&str, &str)] = &[
     ("code", "servers/web-shared/icons/code.svg"),
     ("metrics", "servers/web-shared/icons/metrics.svg"),
     ("games", "servers/web-shared/icons/games.svg"),
+    ("computer", "servers/web-shared/icons/computer.svg"),
     ("passwords", "servers/web-shared/icons/passwords.svg"),
     ("plain", "servers/web-shared/icons/plain.svg"),
 ];
