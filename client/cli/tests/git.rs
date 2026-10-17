@@ -95,6 +95,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         directory_readers: vec![],
         names: vec!["127.0.0.1".into()],
         control: None,
+        identity_from: Default::default(),
         house_peers: vec![],
         members: None,
         release_pub: None,

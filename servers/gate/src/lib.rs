@@ -20,6 +20,7 @@ pub mod fleet;
 mod forge_events;
 mod friends;
 mod home;
+pub mod ident;
 mod joke;
 mod leaving;
 pub mod library;
@@ -172,6 +173,9 @@ pub struct Config {
     /// address, its submit socket, and its config (the voting boxes);
     /// None: this box's directory alone
     pub control: Option<(String, PathBuf, PathBuf)>,
+    /// where who-is-who comes from (VERIFY_IDENTITY_FROM, ident.rs):
+    /// replay, shadow or agreed; agreed and shadow need `control`
+    pub identity_from: ident::From,
     /// None: the directory alone. Some(domain): the full verifier, with the
     /// browser login scoped to that domain.
     pub domain: Option<String>,
@@ -577,14 +581,40 @@ impl App {
         if user == pages::DEMO_USER {
             return self.demo();
         }
+        use ident::From;
+        let agreed = || {
+            self.directory
+                .agreed_member(user)
+                .is_some_and(|m| m.is_member())
+        };
+        match self.directory.ident_from {
+            From::Agreed => agreed(),
+            From::Replay => self.replay_member(user),
+            From::Shadow => {
+                let r = self.replay_member(user);
+                if self
+                    .directory
+                    .ident
+                    .as_ref()
+                    .is_some_and(|a| a.state().is_some())
+                    && r != agreed()
+                {
+                    eprintln!("identity shadow: {user}: member: replay {r}, agreed {}", !r);
+                }
+                r
+            }
+        }
+    }
+
+    /// Membership as this box's replay judges it: a root on the list, or an
+    /// invite the owner signed, followed across recoveries
+    fn replay_member(&self, user: &str) -> bool {
         let Some(m) = &self.members else {
             return true;
         };
-        let Some(e) = self.entry(user).ok().flatten() else {
+        let Some(e) = self.directory.replay_or_held(user) else {
             return false;
         };
-        // a root on the list, or an invite the owner signed, followed across
-        // recoveries (the directory replayed each one)
         !self.directory.leaving.has_left(user)
             && identity::is_member(&e.entry, &m.members, &m.revoked, self.directory.release())
     }
@@ -596,7 +626,7 @@ impl App {
     fn guest(&self, user: &str) -> bool {
         user != pages::DEMO_USER
             && !self.member(user)
-            && !self.directory.leaving.has_left(user)
+            && !self.directory.has_left(user)
             && self.friends.guest(user).is_some()
             && self
                 .friends
@@ -625,8 +655,24 @@ impl App {
     /// leaving, if they said it, ends it at once.
     pub(crate) fn suspension(&self, user: &str) -> Option<(String, u64)> {
         let m = self.members.as_ref()?;
-        if user == pages::DEMO_USER || self.directory.leaving.has_left(user) {
+        if user == pages::DEMO_USER || self.directory.has_left(user) {
             return None;
+        }
+        // agreed: the judge said suspended, and why; the window still runs
+        // from when the list removed them (the release's list, which the
+        // gate is configured with as every box is)
+        if self.directory.ident_from == ident::From::Agreed {
+            let a = self.directory.agreed_member(user)?;
+            if a.status != "suspended" {
+                return None;
+            }
+            let why = a.suspended.clone().unwrap_or_default();
+            let until = a
+                .ids
+                .iter()
+                .find_map(|id| m.removed.get(id))?
+                .saturating_add(leaving::window());
+            return (identity::now() < until).then_some((why, until));
         }
         let e = self.entry(user).ok().flatten()?;
         identity::member_ids(&e.entry).into_iter().find_map(|id| {
@@ -2078,7 +2124,7 @@ async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Re
         // Profile and Devices
         Some(user) if name == "settings" && app.guest(&user) => page(name),
         // someone who left sees where they stand
-        Some(user) if app.directory.leaving.has_left(&user) => {
+        Some(user) if app.directory.has_left(&user) => {
             if name == "settings" {
                 page(name)
             } else {
@@ -2650,9 +2696,22 @@ pub async fn start(
         );
         directory = directory.agreed(control.clone(), submit.clone(), voters, me)?;
     }
+    anyhow::ensure!(
+        cfg.identity_from == ident::From::Replay || cfg.control.is_some(),
+        "VERIFY_IDENTITY_FROM={:?} reads the control plane, and VERIFY_CONTROL is not set",
+        cfg.identity_from
+    );
+    directory = directory.identity_from(
+        cfg.identity_from,
+        cfg.control.as_ref().map(|(c, _, _)| c.as_str()),
+    );
     let directory = Arc::new(directory);
     if cfg.control.is_some() {
         tokio::spawn(directory.clone().follow());
+    }
+    if let Some(a) = &directory.ident {
+        eprintln!("identity: {:?}, from the agreed state", cfg.identity_from);
+        tokio::spawn(a.clone().follow());
     }
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
     let addr = listener.local_addr()?;
@@ -3424,6 +3483,7 @@ mod tests {
             directory_readers,
             names: vec!["127.0.0.1".into()],
             control: None,
+            identity_from: Default::default(),
             domain: Some(DOMAIN.into()),
             oidc: None,
             home,

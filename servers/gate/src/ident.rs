@@ -1,0 +1,246 @@
+//! Who is who, as the control plane judged it (docs/dev/identity-state.md):
+//! the agreed identity state dd-control serves at /identity. The gate reads
+//! it instead of judging the directory itself, once `VERIFY_IDENTITY_FROM`
+//! says so:
+//!
+//! - `replay` (today): the gate's own replay of the log (directory.rs);
+//! - `shadow`: both, the replay's answer served, every difference logged;
+//! - `agreed`: the agreed state alone.
+//!
+//! The state is kept here as last fetched, refreshed in the background
+//! (`?since=<height>` answers 304 when nothing changed), so a lookup on a
+//! request is a read of memory, never a wait on the control plane.
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum From {
+    #[default]
+    Replay,
+    Shadow,
+    Agreed,
+}
+
+impl From {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "" | "replay" => Some(Self::Replay),
+            "shadow" => Some(Self::Shadow),
+            "agreed" => Some(Self::Agreed),
+            _ => None,
+        }
+    }
+}
+
+/// One person, as the agreed state has them (contract §2). Fields this
+/// gate does not read are left out; unknown ones are ignored.
+#[derive(Clone, Debug, Deserialize, Default)]
+pub struct Member {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub ids: Vec<String>,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub left: u64,
+    #[serde(default)]
+    pub suspended: Option<String>,
+    #[serde(default)]
+    pub boxes: Vec<String>,
+    /// the item as agreed, verbatim: a v1 `{"entry": SignedEntry}` or a v2
+    /// envelope whose body is the entry's fields
+    #[serde(default)]
+    pub item: serde_json::Value,
+}
+
+impl Member {
+    /// The person's entry, from the item that was agreed. Nothing is
+    /// checked here: the judge did that, once.
+    pub fn entry(&self) -> Option<identity::SignedEntry> {
+        if let Some(e) = self.item.get("entry") {
+            return serde_json::from_value(e.clone()).ok();
+        }
+        if self.item.get("v").and_then(|v| v.as_u64()) == Some(2)
+            && self.item.get("kind").and_then(|k| k.as_str()) == Some("entry")
+        {
+            use base64::Engine;
+            let body = base64::engine::general_purpose::STANDARD
+                .decode(self.item.get("body")?.as_str()?)
+                .ok()?;
+            let entry: identity::Entry = serde_json::from_slice(&body).ok()?;
+            return Some(identity::SignedEntry {
+                entry,
+                signature: self.item.get("sig")?.as_str()?.to_string(),
+                recovery_signature: self
+                    .item
+                    .get("recovery_sig")
+                    .and_then(|s| s.as_str())
+                    .map(str::to_string),
+            });
+        }
+        None
+    }
+    pub fn is_member(&self) -> bool {
+        self.status == "member"
+    }
+    pub fn has_left(&self) -> bool {
+        self.status == "left"
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Default)]
+pub struct State {
+    #[serde(default)]
+    pub height: u64,
+    #[serde(default)]
+    pub members: HashMap<String, Member>,
+}
+
+/// The agreed identity state as last read from dd-control.
+pub struct Agreed {
+    url: String,
+    http: reqwest::Client,
+    state: Mutex<Option<Arc<State>>>,
+}
+
+impl Agreed {
+    /// `control` is dd-control's address on this box (VERIFY_CONTROL)
+    pub fn new(control: &str) -> Self {
+        Self {
+            url: format!("{}/identity", control.trim_end_matches('/')),
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("an http client"),
+            state: Mutex::new(None),
+        }
+    }
+
+    /// None until the first read has come back: a reader then knows
+    /// nothing, which is not the same as knowing a name is nobody's
+    pub fn state(&self) -> Option<Arc<State>> {
+        self.state.lock().unwrap().clone()
+    }
+
+    pub fn member(&self, name: &str) -> Option<Member> {
+        self.state()?.members.get(name).cloned()
+    }
+
+    /// One read: the whole state, or nothing new since the height held
+    pub async fn refresh(&self) -> anyhow::Result<bool> {
+        let since = self.state().map(|s| s.height);
+        let mut req = self.http.get(&self.url);
+        if let Some(h) = since {
+            req = req.query(&[("since", h)]);
+        }
+        let res = req.send().await?;
+        if res.status() == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok(false);
+        }
+        let res = res.error_for_status()?;
+        let s: State = res.json().await?;
+        *self.state.lock().unwrap() = Some(Arc::new(s));
+        Ok(true)
+    }
+
+    /// Kept fresh for as long as the gate runs: a second between reads,
+    /// longer after a failure
+    pub async fn follow(self: Arc<Self>) {
+        let mut wait = Duration::from_secs(1);
+        loop {
+            match self.refresh().await {
+                Ok(_) => wait = Duration::from_secs(1),
+                Err(e) => {
+                    eprintln!("identity: dd-control did not answer: {e:#}");
+                    wait = (wait * 2).min(Duration::from_secs(30));
+                }
+            }
+            tokio::time::sleep(wait).await;
+        }
+    }
+
+    #[cfg(test)]
+    pub fn set(&self, s: State) {
+        *self.state.lock().unwrap() = Some(Arc::new(s));
+    }
+}
+
+/// What two answers about one person differ in, for the shadow log: field
+/// names and values that are public (names, versions, fingerprints, key
+/// ids), never a secret
+pub fn entry_differences(
+    replay: Option<&identity::SignedEntry>,
+    agreed: Option<&identity::SignedEntry>,
+) -> Vec<String> {
+    let (r, a) = match (replay, agreed) {
+        (None, None) => return vec![],
+        (Some(_), None) => return vec!["entry: replay has one, agreed none".into()],
+        (None, Some(_)) => return vec!["entry: agreed has one, replay none".into()],
+        (Some(r), Some(a)) => (&r.entry, &a.entry),
+    };
+    let mut d = vec![];
+    if r.root != a.root {
+        d.push("root".into());
+    }
+    if r.recovery != a.recovery {
+        d.push("recovery".into());
+    }
+    if r.version != a.version {
+        d.push(format!(
+            "version: replay {}, agreed {}",
+            r.version, a.version
+        ));
+    }
+    if r.recovered_from != a.recovered_from {
+        d.push("recovered_from".into());
+    }
+    let fps = |e: &identity::Entry| {
+        let mut v: Vec<String> = e.devices.iter().map(|x| x.fingerprint.clone()).collect();
+        v.sort();
+        v
+    };
+    if fps(r) != fps(a) {
+        d.push(format!("devices: replay {:?}, agreed {:?}", fps(r), fps(a)));
+    }
+    let pks = |e: &identity::Entry| {
+        let mut v: Vec<String> = e.passkeys.iter().map(|x| x.id.clone()).collect();
+        v.sort();
+        v
+    };
+    if pks(r) != pks(a) {
+        d.push(format!(
+            "passkeys: replay {:?}, agreed {:?}",
+            pks(r),
+            pks(a)
+        ));
+    }
+    if r.grant.is_some() != a.grant.is_some() {
+        d.push("grant".into());
+    }
+    let libs = |e: &identity::Entry| {
+        let mut v: Vec<String> = e.libraries.iter().map(|x| x.id.clone()).collect();
+        v.sort();
+        v
+    };
+    if libs(r) != libs(a) {
+        d.push("libraries".into());
+    }
+    d
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modes_parse() {
+        assert_eq!(From::parse(""), Some(From::Replay));
+        assert_eq!(From::parse("shadow"), Some(From::Shadow));
+        assert_eq!(From::parse("agreed"), Some(From::Agreed));
+        assert_eq!(From::parse("judge"), None);
+    }
+}
