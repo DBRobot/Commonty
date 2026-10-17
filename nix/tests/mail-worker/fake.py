@@ -163,7 +163,10 @@ class H(BaseHTTPRequestHandler):
                     if k in b:
                         state["identity"][k] = b[k]
                 if "entry" in b:
-                    state["identity"]["entry"] = FIX[b["entry"]]
+                    # "dir": the entry the directory serves now
+                    state["identity"]["entry"] = (
+                        state["entry"] if b["entry"] == "dir" else FIX[b["entry"]]
+                    )
                 return self.send({"ok": True})
             if p == "/client/v4/accounts/A/email/routing/addresses":
                 e = b["email"]
