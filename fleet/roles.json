@@ -28,7 +28,8 @@
       "zfs-datasets",
       "nginx",
       "acme",
-      "store"
+      "store",
+      "timer-watch"
     ]
   },
   "gateway": {

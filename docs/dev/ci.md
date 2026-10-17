@@ -234,6 +234,14 @@ fail during a switch:
 `checks.needs-units` fails the flake on any timer of ours that uses
 `OnBootSec`, so the first of these is held before it merges.
 
+A switch can also leave a calendar timer active with no next run
+(`systemctl list-timers` shows NEXT as `-`): node2's nightly backup timer
+did, in the switches of 2026-10-12, and no backup ran for five days.
+`dd-timer-watch` (box/timer-watch.nix) restarts any such timer within the
+hour on every box and counts it (`dd_timers_restarted`), and the
+stale-backup check backs up again before it mails anyone
+(storage/backup.nix).
+
 Releases 212, 213 and 224 rolled back for exactly this (`dd-build`,
 `dd-ci-resume`, and `dd-storage-view`, on `OnBootSec`, hitting dd-control
 restarting under the same switch). When a box stays on an old release, its

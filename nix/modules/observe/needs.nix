@@ -162,6 +162,24 @@
     };
   };
 
+  timer-watch = {
+    what = "restarts any calendar timer that has lost its next run, hourly, and counts it as a fact (box/timer-watch.nix)";
+    units = [ "dd-timer-watch" ];
+    everyBox = true;
+    base = {
+      uses = {
+        memory = "8M";
+        storage = "0";
+        estimated = true; # a systemctl loop, once an hour
+      };
+      network = {
+        outbound = "none";
+        inbound = "none";
+      };
+      privacy = "none";
+    };
+  };
+
   fleet-alerts = {
     what = "mails what is wrong on any box (disks, pools, backups), read from the fleet view";
     # a box that is down cannot say so: this has to stay up

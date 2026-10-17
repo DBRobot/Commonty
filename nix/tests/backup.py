@@ -14,16 +14,38 @@ for m in (a, b):
     m.succeed("systemctl restart garage-setup.service")
 # both boxes hold the applied layout before the buckets and keys are made
 for m in (a, b):
-    m.wait_until_succeeds(f"set -a; . {nix['rpc']}; garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l")
+    m.wait_until_succeeds(
+        f"set -a; . {nix['rpc']}; garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l"
+    )
 for m in (a, b):
-    m.succeed("systemctl restart garage-setup.service") # buckets and keys, now that the layout exists
+    m.succeed(
+        "systemctl restart garage-setup.service"
+    )  # buckets and keys, now that the layout exists
 
 # a backs up, b backs up
-a.succeed("mkdir -p /srv/state && echo 'the thing worth having tomorrow' > /srv/state/file && head -c 2000000 /dev/urandom > /srv/state/blob")
+a.succeed(
+    "mkdir -p /srv/state && echo 'the thing worth having tomorrow' > /srv/state/file && head -c 2000000 /dev/urandom > /srv/state/blob"
+)
 b.succeed("mkdir -p /srv/state && echo 'b has state too' > /srv/state/file")
 a.succeed("systemctl start restic-backups-dd.service")
 b.succeed("systemctl start restic-backups-dd.service")
 a.succeed("grep -q dd_backup_last_success_seconds /var/lib/dd-facts/backup.prom")
+
+# a backup gone stale heals itself before it mails anyone: its nightly timer
+# stopped (as node2's lost its next run, 2026-10-12) and the last good backup
+# a week old, the check starts the timer again and backs up now
+a.succeed("systemctl stop restic-backups-dd.timer")
+a.succeed(
+    "sed -i 's/^\\(dd_backup_last_success_seconds{[^}]*}\\) .*/\\1 1/' /var/lib/dd-facts/backup.prom"
+)
+a.succeed("systemctl start dd-backup-stale.service")
+a.succeed("systemctl is-active restic-backups-dd.timer")
+a.succeed(
+    "[ $(awk '/^dd_backup_last_success_seconds/ {print $2}' /var/lib/dd-facts/backup.prom) -gt $(( $(date +%s) - 3600 )) ]"
+)
+# and the timer watch runs clean, with a count the fleet view reads
+a.succeed("systemctl start dd-timer-watch.service")
+a.succeed("grep -q '^dd_timers_restarted 0' /var/lib/dd-facts/timers.prom")
 
 # every block is on both boxes
 a.wait_until_succeeds("[ $(find /srv/garage -type f | wc -l) -ge 3 ]")

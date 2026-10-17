@@ -17,6 +17,7 @@ let
       ./box.nix
       ../modules/storage/garage.nix
       ../modules/storage/backup.nix
+      ../modules/box/timer-watch.nix
     ];
     dd.garage = {
       zone = "r-test";

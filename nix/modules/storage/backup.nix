@@ -187,18 +187,33 @@ in
         description = "Fail if the last good backup is over 26 hours old";
         startAt = "09:00";
         onFailure = lib.optional mail "dd-alert@dd-backup-stale.service";
-        serviceConfig.Type = "oneshot";
+        serviceConfig = {
+          Type = "oneshot";
+          # a backup it runs itself can take a while
+          TimeoutStartSec = "6h";
+        };
         script = ''
-          last=$(${pkgs.gawk}/bin/awk '/^dd_backup_last_success_seconds/ {print $2}' ${facts}/backup.prom 2>/dev/null || echo 0)
-          # that file is written by node-exporter, which is not root, and
-          # this unit is. Bash expands command substitutions inside an
-          # arithmetic context, so a value that is not a number is a way to
-          # run one.
-          case "$last" in "" | *[!0-9]*) last=0 ;; esac
-          age=$(( $(date +%s) - last ))
-          if [ "$age" -gt $((26 * 3600)) ]; then
-            echo "last good backup was $((age / 3600)) hours ago"; exit 1
+          stale() {
+            last=$(${pkgs.gawk}/bin/awk '/^dd_backup_last_success_seconds/ {print $2}' ${facts}/backup.prom 2>/dev/null || echo 0)
+            # that file is written by node-exporter, which is not root, and
+            # this unit is. Bash expands command substitutions inside an
+            # arithmetic context, so a value that is not a number is a way to
+            # run one.
+            case "$last" in "" | *[!0-9]*) last=0 ;; esac
+            age=$(( $(date +%s) - last ))
+            [ "$age" -gt $((26 * 3600)) ]
+          }
+          stale || exit 0
+          # too old: the nightly timer may have lost its next run (node2's
+          # did, 2026-10-12). Its timer again, and a backup now; mailed only
+          # if that one did not make it either
+          echo "last good backup was $((age / 3600)) hours ago: restarting the timer and backing up now"
+          ${pkgs.systemd}/bin/systemctl restart restic-backups-dd.timer || true
+          ${pkgs.systemd}/bin/systemctl start restic-backups-dd.service || true
+          if stale; then
+            echo "still: last good backup was $((age / 3600)) hours ago"; exit 1
           fi
+          echo "backed up again"
         '';
       };
 

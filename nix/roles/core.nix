@@ -50,6 +50,7 @@ in
     ../modules/observe/thanos.nix
     ../modules/box/locate.nix
     ../modules/box/netspeed.nix
+    ../modules/box/timer-watch.nix
     ../modules/box/service-memory.nix
     ../modules/net/box.nix
     ../modules/net/owner.nix
