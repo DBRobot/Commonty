@@ -18,6 +18,7 @@
 //! same way and none can make one: the authenticator signs, the box only
 //! asked.
 
+pub mod envelope;
 pub mod fleet;
 pub mod session;
 
