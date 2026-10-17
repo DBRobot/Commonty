@@ -58,7 +58,7 @@ language checks a v2 item with a hash, a signature check and a JSON parse.
 | `entry` | the root the body names; a changed root also by the recovery key on file (`recovery_sig`) | `name, root, recovery, recovered_from[], devices[{fingerprint, public_key, added}], passkeys[{id, cred, added, rp_id?}], grant?, libraries[], terms?, version, updated` - the fields of `identity::Entry` |
 | `leave` | the root on file for `name` | `name, root, at, back?` |
 | `invite` | the release key | `public_key, issued, expires` |
-| `enlist` | the root on file for the member | `member` (sha256 hex of the root), `box` (the joining box's name), `key` (its TPM key, SPKI base64), `ticket` (32 hex), `expires` |
+| `enlist` | the root on file for the member | `member` (sha256 hex of the root), `box` (the joining box's name), `key` (its TPM key, SPKI base64), `ticket` (32 hex), `expires`, `at` |
 | `unenlist` | the root on file for the member | `member, box, at` |
 
 A grant inside an entry body keeps today's form - `{invite: {invite:
@@ -98,7 +98,7 @@ The judge keeps, per name:
 
 ```json
 {
-  "height": 1234, "time": 1792270000000,
+  "height": 1234, "time": 1792270000000, "changed": 1200,
   "members": {
     "<name>": {
       "id": "<sha256 hex of the current root>",
@@ -111,26 +111,38 @@ The judge keeps, per name:
       "libraries": [...],
       "grant": {...},
       "version": 3, "updated": 0, "agreed": 1792270000000,
-      "status": "member | invited | none | left | suspended | revoked",
-      "left": 0, "suspended": "<reason>",
+      "status": "member | none | left | suspended | revoked",
+      "left": 1792270000000, "suspended": "<reason>", "removed": 1792270000000,
       "boxes": ["<box name>"],
       "item": "<the v1 item or v2 envelope as agreed, verbatim>"
     }
   },
   "handovers": {"<name>": [{"before": "<item>", "after": "<item>"}]},
-  "invites": {"<public key>": {"issued": 0, "expires": 0, "item": "..."}},
+  "invites": {"<public key>": {"issued": 0, "expires": 0, "item": {}}},
   "outcomes": {"<item hash>": "ok | refused: <why>"}
 }
 ```
 
-- **status**:
-  - `member`: some id is on the release's `members` and none on `revoked`;
-    or a grant the release key signed; or an enlisted qualifying box
-    (docs/dev/joining.md).
-  - `revoked` / `suspended`: an id is on `revoked`; `suspended` when the
-    release's `suspended` gives a reason.
-  - `left`: their own `leave` (not `back`) was agreed.
-  - `none`: an entry that is none of the above (signed up, not let in).
+- **times**: every time the judge adds (`time`, `agreed`, `left`,
+  `removed`) is in ms; `updated` and `version` are the entry's own.
+- **status**, in this order (the gate's `member()` and `suspension()`):
+  - `left`: their own `leave` (not `back`) was agreed; `left` is when.
+  - `suspended`: an id of theirs is on `revoked`, the release's `suspended`
+    gives a reason for it and `removed` a date, and the agreed time is
+    within 90 days of that date (leaving.rs WINDOW). Past the window:
+    `revoked`.
+  - `revoked`: an id is on `revoked`. Nothing below lets them back in - not
+    `members` naming another of their ids, not a grant, not a box.
+  - `member`: an id is on `members`; or a grant the release key signed; or
+    an enlisted box of theirs.
+  - `none`: none of the above (signed up, not let in).
+- **removed**: the release's `removed` date for any of their ids (the
+  newest), whatever their status: what a reader that forgets a removed
+  member counts from (the mail Worker).
+- **ids**: the current root's id first, then the roots it recovered from,
+  newest first.
+- **boxes**: enlistments that stand: not expired, by a root that is still
+  theirs, and they have not left.
 - **item**: what was agreed, so any reader that wants to can check the
   signature itself.
 - **outcomes**: what became of each item, by its hash, for the writer
@@ -139,12 +151,19 @@ The judge keeps, per name:
 ### How readers get it
 
 - **On a box**: `GET http://127.0.0.1:4195/identity` (dd-control) returns the
-  whole state above; `?name=<name>` one member; `?since=<height>` returns
-  `304` when nothing changed since.
+  whole state above; `?name=<name>` returns `{height, time, changed, name,
+  member}` for one (404 when the name has no entry); `?since=<changed>`
+  returns `304` while the answer is the same as when `changed` was given
+  (`changed` is the height the answer last changed at on that server; a
+  reader keeps the `changed` it last got, per server).
 - **Cloudflare Workers** (mail, DNS): the control relay's Durable Object
-  serves `/identity` beside `/leases`, from the witness's agreed state, to
-  Workers that bind it. Never reachable from outside (the front passes only
-  `/relay` and `/health`).
+  serves `/identity` beside `/leases`, the same queries and answers, from the
+  witness's agreed state (cmd/witness exports `controlIdentity`), to Workers
+  that bind it. Never reachable from outside (the front passes only
+  `/relay` and `/health`). 503 until the witness runs.
+- The judged state is a view kept beside the agreed state, not part of it:
+  each server judges the agreed log itself (state/ident Replayer), so a
+  judge bug cannot split the validators while the gates still decide.
 
 ## 3. The rules, once
 
@@ -173,7 +192,23 @@ moved, not changed. Each item is judged at its agreed time `at`.
 - **leave**: signed by the root on file for the name; its `at` within 5
   minutes ahead of / 24 hours behind the agreed time; the newest statement
   stands, the same one twice is a no-op, an older one is refused.
-- **enlist / unenlist**: docs/dev/joining.md (the hardware rules live there).
+- **enlist / unenlist**: signed by the root on file whose id is `member`;
+  `at` within 5 minutes ahead of / 24 hours behind the agreed time, and
+  newer than the last enlist or unenlist taken for that box (kept after an
+  unenlist), so an old one sent again changes nothing; an enlist must not
+  have expired. A box already someone's is refused while that enlistment
+  stands (see **boxes** above); unenlist only by its owner. Which boxes
+  qualify (their hardware) is docs/dev/joining.md's; the judge counts every
+  standing enlistment today.
+- **an item that says more than its signature** is refused: unknown fields,
+  a key twice, keys in another case, `null` for a field left out, floats,
+  anything that does not read back to the same value that is checked.
+- **before the log**: a box's gate puts the entries and unexpired invites it
+  held before the log into it once (directory.rs `migrate`), as ordinary v1
+  items, signatures as they were. They are judged like any other: a claim,
+  acknowledged, first in log order. No original agreed time is carried;
+  nothing before the log was agreed. Leaves held before the log
+  (leaving.json) are not carried over; on the real fleet there are none.
 - **the release's member list** (`fleet/members.json` in the release, and
   the release key) is part of the control plane's config, as the box list is.
 
@@ -184,3 +219,34 @@ at exactly the members, keys, statuses and outcomes the gates' replay ends
 at (`go test ./state/ident -run Shadow` with a log fetched from a box, and
 the gate's `shadow_dump` test on the same file). Any difference is a bug in
 one of the two, written down here and fixed before the switch.
+`TestShadowFixture` holds the judge to the gate's dump of a made-up log of
+every case (testdata/shadow-gate.json; regenerate it with the gate's
+`shadow_dump` whenever vectors.rs changes its `shadow_log`).
+
+Results:
+
+- 2026-10-17, the real log (node1, 10 items: david's pre-log entry from
+  each box, migrated, and the acks): identical. Both boxes' pre-log
+  directories held only that one entry, both say every pre-log entry is in
+  the log, their invites had all expired before the log began, and no box
+  has a leaving.json. fleet/members.json lists one member.
+- The made-up log (35 items): identical.
+
+### Where the gate and the judge part, on purpose or not
+
+- The gate checks guest expiry and suspension against its own clock
+  (`identity::now()` in commit, entry, claims_free, suspension), so two
+  gates can disagree for a moment. The judge uses the agreed time only.
+- Ed25519: the gate verifies with ed25519-dalek's default (non-strict)
+  `verify`, the judge with Go's `crypto/ed25519`. They agree on everything
+  an honest signer makes; on crafted edge cases (small-order keys or `R`)
+  they may not. Not tested beyond the vectors.
+- Floats: the gate's `serde_json::Value` keeps `1.0` as a float; the judge
+  refuses any number that is not a 64-bit integer.
+- No re-invite after removal: in the gate an id on `revoked` is out for
+  good, whatever later grant it holds. The judge does the same. Whether a
+  removed member re-invited later (`grant.redeemed` after `removed`) should
+  count is a decision, not a rule either side has.
+- The envelope (v2) signs the body's bytes as they were written, not a
+  length-prefixed binary form: JSON every language reads, and nothing is
+  rebuilt to check a signature.
