@@ -261,6 +261,47 @@ pub fn controller_name(
     Ok(e.entry.name)
 }
 
+/// The member's word for `<label>.home.<domain>`, checked against the
+/// root `entry` names - an entry the control plane has already judged and
+/// agreed (docs/dev/identity-state.md), so neither its own signature nor the
+/// member list is checked again here, only this word. The member is who it
+/// returns.
+pub fn controller_word(
+    entry: &str,
+    label: &str,
+    controller: &str,
+    sig: &str,
+    domain: &str,
+) -> R<String> {
+    let e = parse(entry)?;
+    if !valid_label(label) {
+        return Err("not a controller's label".into());
+    }
+    if identity::decode_public(controller).is_err() {
+        return Err("not a controller's key".into());
+    }
+    identity::controller_name_signed(
+        &e.entry,
+        &format!("{label}.home.{domain}"),
+        controller,
+        sig,
+        &[format!("https://home.{domain}")],
+    )
+    .map_err(|_| "not signed by that member's root".to_string())?;
+    Ok(e.entry.name)
+}
+
+#[wasm_bindgen(js_name = controllerWord)]
+pub fn controller_word_js(
+    entry: &str,
+    label: &str,
+    controller: &str,
+    sig: &str,
+    domain: &str,
+) -> Result<String, JsValue> {
+    controller_word(entry, label, controller, sig, domain).map_err(|e| JsValue::from_str(&e))
+}
+
 #[wasm_bindgen(js_name = controllerName)]
 pub fn controller_name_js(
     entry: &str,
@@ -659,6 +700,44 @@ mod tests {
                 &word,
                 "commonty.org",
                 &t.members()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn the_agreed_entrys_root_alone_names_a_controller() {
+        use base64::engine::general_purpose::STANDARD as B64;
+        use ed25519_dalek::Signer as _;
+        let t = Tester::new();
+        let entry = serde_json::to_string(&t.entry(3)).unwrap();
+        let controller = identity::encode_public(
+            &ed25519_dalek::SigningKey::from_bytes(&[5; 32]).verifying_key(),
+        );
+        let label = &identity::controller_label(&controller).unwrap();
+        let sign = |k: &ed25519_dalek::SigningKey| {
+            B64.encode(
+                k.sign(&controller_name_message(label, "commonty.org", &controller))
+                    .to_bytes(),
+            )
+        };
+        // the member's root: their name
+        let name = controller_word(&entry, label, &controller, &sign(&t.root), "commonty.org");
+        assert_eq!(name.unwrap(), "tester");
+        // any other key's word names nothing
+        let other = sign(&ed25519_dalek::SigningKey::from_bytes(&[8; 32]));
+        assert!(controller_word(&entry, label, &controller, &other, "commonty.org").is_err());
+        // nor a word for another fleet, nor a label that is no controller's
+        assert!(
+            controller_word(&entry, label, &controller, &sign(&t.root), "elsewhere.org").is_err()
+        );
+        assert!(
+            controller_word(
+                &entry,
+                "living-room-pi",
+                &controller,
+                &sign(&t.root),
+                "commonty.org"
             )
             .is_err()
         );

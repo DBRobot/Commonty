@@ -51,7 +51,7 @@ pkgs.runCommand "mail-worker-e2e"
       { type = "Text", globs = ["**/*.html", "**/*.css", "**/change.js", "**/row.js", "**/passkey.js", "**/boxes.js", "**/aliases-page.js"] },
       { type = "Data", globs = ["**/*.woff2"] },
       { type = "CompiledWasm", globs = ["**/*.wasm"] },
-      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js", "**/leaving.js", "**/send.js", "**/aliases.js"] },
+      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js", "**/leaving.js", "**/send.js", "**/aliases.js", "**/identity.js"] },
     ]
     kv_namespaces = [{ binding = "PINNED", id = "local" }]
     send_email = [{ name = "SEND", allowed_sender_addresses = ["noreply@commonty.test", "alerts@commonty.test"] }]
@@ -71,22 +71,40 @@ pkgs.runCommand "mail-worker-e2e"
     # the read key: 32 bytes of 5, as the fake directory expects (fake.py)
     printf 'SESSION_KEY=e2e-session-key-0123456789\nCF_TOKEN=fake\nDIRECTORY_KEY=BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU=\n' > w/.dev.vars
 
+    # and two more of it reading who is a member from the agreed identity
+    # state (docs/dev/identity-state.md, fake.py's /identity): agreed alone,
+    # and shadow, which still goes by its own judgment
+    for m in agreed:8790 shadow:8791; do
+      d=w-''${m%%:*}
+      cp -r w $d
+      sed -i "s|^ORIGIN = .*|ORIGIN = \"http://localhost:''${m##*:}\"\nIDENTITY_FROM = \"''${m%%:*}\"\nIDENTITY_URL = \"http://127.0.0.1:8899/identity\"|; s|^name = .*|name = \"mail-e2e-''${m%%:*}\"|" $d/wrangler.toml
+    done
+
     python3 $t/fake.py $tester > fake.log 2>&1 &
     fake=$!
     (cd w && wrangler dev --port 8787 --ip 127.0.0.1 > ../wrangler.log 2>&1) &
     worker=$!
-    for i in $(seq 1 120); do
-      curl -sf -o /dev/null http://127.0.0.1:8787/change && break
-      sleep 0.5
+    (cd w-agreed && wrangler dev --port 8790 --inspector-port 9240 --ip 127.0.0.1 > ../wrangler-agreed.log 2>&1) &
+    worker_a=$!
+    (cd w-shadow && wrangler dev --port 8791 --inspector-port 9241 --ip 127.0.0.1 > ../wrangler-shadow.log 2>&1) &
+    worker_s=$!
+    for port in 8787 8790 8791; do
+      for i in $(seq 1 120); do
+        curl -sf -o /dev/null http://127.0.0.1:$port/change && break
+        sleep 0.5
+      done
+      curl -sf -o /dev/null http://127.0.0.1:$port/change || { cat wrangler*.log; exit 1; }
     done
-    curl -sf -o /dev/null http://127.0.0.1:8787/change || { cat wrangler.log; exit 1; }
 
     status=0
     DEBUG=pw:browser python3 $t/flow.py $tester 2> browser.log || status=$?
-    kill $worker $fake 2>/dev/null || true
+    [ $status -ne 0 ] || python3 $t/identity.py $PWD/wrangler-shadow.log || status=$?
+    kill $worker $worker_a $worker_s $fake 2>/dev/null || true
     if [ $status -ne 0 ]; then
       echo "--- browser log"; grep -iE "crash|error|fatal|signal" browser.log | tail -20
       echo "--- worker log"; tail -40 wrangler.log
+      echo "--- agreed worker log"; tail -20 wrangler-agreed.log
+      echo "--- shadow worker log"; tail -20 wrangler-shadow.log
       exit $status
     fi
     touch $out

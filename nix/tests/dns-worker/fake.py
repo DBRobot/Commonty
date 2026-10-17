@@ -12,6 +12,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 ZONE, TOKEN = "zone1", "dns-token"
+# the agreed identity state's word on the mail Worker's tester (TESTER, its
+# fixture), as the control relay's /identity gives it; POST /identity-set
+# changes their status
+TESTER = json.load(open(os.environ["TESTER"])) if os.environ.get("TESTER") else None
+identity = {"status": "member"}
 PREFIX = "/client/v4/zones/%s/dns_records" % ZONE
 # the account's tunnels, and the token that may make them
 TUNNELS, TUNNEL_TOKEN = "/client/v4/accounts/acct1/cfd_tunnel", "tunnel-token"
@@ -73,6 +78,20 @@ class H(BaseHTTPRequestHandler):
             return self.reply(200, {"time": t, "leases": control["leases"]})
         if u.path == "/tunnels":
             return self.reply(200, tunnels)
+        if u.path == "/identity":
+            name = parse_qs(u.query).get("name", [""])[0]
+            if not TESTER or name != "tester":
+                return self.reply(404, {})
+            e = TESTER["v3"]
+            return self.reply(
+                200,
+                {
+                    "root": e["entry"]["root"],
+                    "kind": "ed25519",
+                    "status": identity["status"],
+                    "item": {"entry": e},
+                },
+            )
         if u.path == TUNNELS:
             if not self.tunnel_authed():
                 return
@@ -107,6 +126,9 @@ class H(BaseHTTPRequestHandler):
         raw = self.rfile.read(int(self.headers.get("content-length") or 0))
         if self.path == "/control":
             control.update(json.loads(raw))
+            return self.reply(200, {"ok": True})
+        if self.path == "/identity-set":
+            identity.update(json.loads(raw))
             return self.reply(200, {"ok": True})
         if self.path == TUNNELS:
             if not self.tunnel_authed():
@@ -180,4 +202,6 @@ class H(BaseHTTPRequestHandler):
         self.ok({"id": rid})
 
 
-ThreadingHTTPServer(("127.0.0.1", 8899), H).serve_forever()
+ThreadingHTTPServer(
+    ("127.0.0.1", int(os.environ.get("PORT", "8899"))), H
+).serve_forever()

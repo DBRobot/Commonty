@@ -1137,6 +1137,8 @@
                 wasm-bindgen --target web --no-typescript --out-dir $out ${rust.mailWasm}/lib/dd_mail.wasm
                 cp ${./servers/system/dns/worker.js} $out/worker.js
                 cp ${./servers/system/dns/controller.js} $out/controller.js
+                # who is a member, read from the agreed state (one file, the mail Worker's)
+                cp ${./client/mail/worker/identity.js} $out/identity.js
                 {
                   cat ${pkgs.writeText "fleet.js" ''
                     export const BOXES = ${builtins.toJSON fleet.BOXES};

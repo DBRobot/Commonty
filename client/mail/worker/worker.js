@@ -20,6 +20,7 @@
 import { initSync, admit, login, readProof, forgetDue } from './dd_mail.js';
 import wasm from './dd_mail_bg.wasm';
 import { MEMBERS, RELEASE, ALIASES } from './fleet.js';
+import { mode, agreedMember, isMember, entryOf, differ } from './identity.js';
 import { boxApi, memberApi } from './unlock.js';
 import { forgetApi } from './leaving.js';
 import { sendApi } from './send.js';
@@ -163,9 +164,42 @@ async function asserted(env, b, name) {
   return true;
 }
 
-// The member's entry, as the directory has it, held to the newest this
-// Worker has accepted. Throws for a name that is not a member.
+// The member's entry, its passkeys what a sign-in is checked against.
+// Throws for a name that is not a member. Kept (entry:<name>) either way:
+// that is what says this member has state here, for their leaving
+// (leaving.js).
 async function entry(env, name) {
+  const how = mode(env);
+  if (how === 'agreed') {
+    const m = await agreedMember(env, name);
+    if (!isMember(m)) throw new Error('no such member');
+    const take = entryOf(m);
+    if ((await env.PINNED.get(`entry:${name}`)) !== take) await env.PINNED.put(`entry:${name}`, take);
+    return take;
+  }
+  let take, why;
+  try {
+    take = await replayed(env, name);
+  } catch (e) {
+    why = e;
+  }
+  if (how === 'shadow') {
+    let m = null;
+    try {
+      m = await agreedMember(env, name);
+    } catch (e) {
+      console.warn(JSON.stringify({ 'identity-shadow': 'unread', name, error: String(e.message || e) }));
+    }
+    const ver = (t) => (t ? JSON.parse(t).entry.version : null);
+    differ('member', name, { member: !why, version: ver(take) }, { member: isMember(m), version: isMember(m) ? ver(entryOf(m)) : null });
+  }
+  if (why) throw why;
+  return take;
+}
+
+// the entry, as the directory has it, held to the newest this Worker has
+// accepted, judged here (replay and shadow)
+async function replayed(env, name) {
   // the boxes show an entry to the key the release names (fleet/mail.json)
   const headers = env.DIRECTORY_KEY ? { 'x-dd-key-proof': readProof(env.DIRECTORY_KEY, name, now()) } : {};
   const r = await fetch(`${env.DIRECTORY || `https://home.${env.DOMAIN}/_dd/directory/`}${encodeURIComponent(name)}`, { headers });
@@ -457,7 +491,7 @@ export default {
       // the release, decides (leaving.js)
       // Passwords making an alias: its own key, from any origin (aliases.js)
       if (path === '/api/alias/random/new') return passwordsApi(req, env, url, { ALIASES, memberName, listsShared: sharedLists, now, holds: (n, i, t) => holds(env, n, i, t) });
-      if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, readProof, MEMBERS, ALIASES, aliasOf, zone, lists, stateIn, cf, forgetAliases });
+      if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, readProof, MEMBERS, ALIASES, aliasOf, zone, lists, stateIn, cf, forgetAliases, mode, agreedMember, differ });
       if (req.method !== 'GET' && origin !== (env.ORIGIN || `https://mail.${env.DOMAIN}`)) {
         return json({ error: 'not from here' }, 403);
       }
