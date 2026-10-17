@@ -65,6 +65,15 @@ assert "probe1" not in box.succeed(
 )
 assert '"owner": "tom"' in box.succeed("cat /var/lib/dd-games/records/probe1.json")
 
+# the guest can't reach what listens on the box's loopback, though the box can
+box.succeed("curl -s -o /dev/null -m 5 http://127.0.0.1:4181/")
+reach = box.succeed("curl -sf -m 5 http://127.0.0.1:27015/reach.txt").strip()
+assert reach == "refused", reach
+refused = box.succeed(
+    'iptables -nvxL dd-guests-out | awk \'$3 == "REJECT" && $9 == "127.0.0.0/8" {print $1}\''
+).strip()
+assert int(refused) > 0, refused
+
 # its world is files on the box
 box.succeed(f"echo hello > {world}/world.txt")
 assert "hello" in box.succeed("curl -sf http://127.0.0.1:27015/world.txt")

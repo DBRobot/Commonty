@@ -4,7 +4,12 @@
 # one, the guest boots and serves on the port it was given, a switch leaves
 # its process alone, a reboot brings it back with its world, another member
 # cannot touch it, and a stop is a clean one.
-{ pkgs, self, ... }:
+{
+  pkgs,
+  lib,
+  self,
+  ...
+}:
 {
   name = "games";
   node.specialArgs = { inherit self; };
@@ -16,6 +21,8 @@
       ../modules/games/games.nix
     ];
     dd.games.enable = true;
+    # the guests' filter is the firewall's (nix/modules/guests/egress.nix)
+    networking.firewall.enable = lib.mkForce true;
     # a stand-in egg: nothing to install, python serves the world directory
     dd.games.catalogue = pkgs.writeText "catalogue.json" (
       builtins.toJSON {
@@ -28,7 +35,9 @@
             game = null;
             cover = false;
             wine = false;
-            startup = "python3 -u -m http.server {{SERVER_PORT}} --directory world";
+            # first, whether the guest reaches the box's loopback (the gate
+            # listens there), which QEMU's user network hands it at 10.0.2.2
+            startup = "python3 -c \"import socket; s = socket.socket(); s.settimeout(10); print('open' if s.connect_ex(('10.0.2.2', 4181)) == 0 else 'refused')\" > world/reach.txt; python3 -u -m http.server {{SERVER_PORT}} --directory world";
             ready = "Serving HTTP";
             stop = "^C";
             files = { };
