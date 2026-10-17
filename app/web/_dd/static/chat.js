@@ -102,7 +102,9 @@ async function loadModels() {
   }
   if (!r.ok) throw new Error(`the box said ${r.status}`);
   const d = await r.json();
-  models = (d.data || []).map((m) => ({ id: m.id, name: m.name || m.id, description: m.description || '' }));
+  models = (d.data || []).map((m) => ({ id: m.id, name: m.name || m.id, description: m.description || '', chat: (m.meta?.llamaswap?.default_for || []).includes('chat') }));
+  // the box's choice for the chat first (llama-cpp.nix defaultFor), the rest as listed
+  models.sort((a, b) => b.chat - a.chat);
   await loadAwake();
 }
 

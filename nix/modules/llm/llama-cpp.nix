@@ -39,6 +39,11 @@ let
     lib.concatMapStrings (m: "${m.localName}\n") (lib.attrValues cfg.models)
   );
   url = m: "https://huggingface.co/${m.repo}/resolve/${m.rev}/${m.file}";
+  ids = lib.attrNames cfg.models;
+  residents = lib.filter (id: cfg.models.${id}.resident) ids;
+  others = lib.filter (id: !cfg.models.${id}.resident) ids;
+  # the matrix's short names: m0, m1... in the models' order
+  short = id: "m${toString (lib.lists.findFirstIndex (x: x == id) 0 ids)}";
   run = "/run/dd-llm";
   port = 8081; # 8080 is taken by ente's museum
 
@@ -91,6 +96,21 @@ let
           default = [ ];
           description = "other names clients may already ask for it by";
         };
+        resident = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = "loaded when llama-swap starts and never unloaded, beside whichever other model is loaded: small enough that waiting for it to wake would cost more than its memory";
+        };
+        defaultFor = lib.mkOption {
+          type = lib.types.listOf (
+            lib.types.enum [
+              "chat"
+              "monty"
+            ]
+          );
+          default = [ ];
+          description = "who asks for this one unless told otherwise: the chat page's picker, and Monty (guide.js), from its metadata in /v1/models";
+        };
       };
     }
   );
@@ -112,17 +132,18 @@ in
   };
   options.dd.llm.memoryHigh = lib.mkOption {
     type = lib.types.strMatching "[0-9]+[KMGT]";
-    default = "28G";
+    # the 35B's 22G and the resident 4B's 3G, with their caches
+    default = "31G";
     description = "where the box starts reclaiming from the model servers; to be worked out from the model and context once the KV cache per 1000 tokens is measured";
   };
   options.dd.llm.memoryMax = lib.mkOption {
     type = lib.types.strMatching "[0-9]+[KMGT]";
-    default = "32G";
+    default = "35G";
     description = "the model servers' hard memory limit";
   };
   options.dd.llm.models = lib.mkOption {
     type = lib.types.attrsOf model;
-    description = "The models this box offers, by the id a request names. Each is fetched once, pinned by revision and hash, and started when first asked for; one at a time, since one fills the machine.";
+    description = "The models this box offers, by the id a request names. Each is fetched once, pinned by revision and hash, and started when first asked for; one big one at a time, since one fills the machine, and any resident ones beside it.";
   };
 
   config = {
@@ -148,6 +169,25 @@ in
         "-fa on"
         "-ub 1024"
         "-b 2048"
+      ];
+      defaultFor = [ "chat" ];
+    };
+    # Monty's: picking a place from a short list and three plain sentences
+    # need no 35B, and a 3G model can stay loaded, so his first question
+    # never waits two minutes for the big one to wake. Offered in the
+    # chat's picker too.
+    dd.llm.models."qwen3.5-4b" = {
+      name = "Qwen3.5 4B";
+      description = "Small and always awake: quick answers to simple questions.";
+      repo = "unsloth/Qwen3.5-4B-GGUF";
+      rev = "e87f176479d0855a907a41277aca2f8ee7a09523";
+      file = "Qwen3.5-4B-UD-Q4_K_XL.gguf";
+      sha256 = "b252c5610a42ca82d20fe2a12813e9d069eed89292907e26c783eeb0bc961bc7";
+      resident = true;
+      defaultFor = [ "monty" ];
+      split = [
+        "-ngl 99"
+        "-fa on"
       ];
     };
 
@@ -331,7 +371,8 @@ in
         sendLoadingState = false;
         models = lib.mapAttrs (id: m: {
           inherit (m) name description aliases;
-          ttl = m.idle;
+          ttl = if m.resident then 0 else m.idle;
+          metadata.default_for = m.defaultFor;
           # the model server listens on 127.0.0.1 alone; "localhost" could
           # be tried as ::1 first
           proxy = "http://127.0.0.1:\${PORT}";
@@ -360,6 +401,18 @@ in
             ++ m.args
           );
         }) cfg.models;
+      }
+      // lib.optionalAttrs (residents != [ ]) {
+        # the resident ones run beside any other; the others swap among
+        # themselves as before
+        matrix = {
+          vars = lib.listToAttrs (lib.imap0 (i: id: lib.nameValuePair "m${toString i}" id) ids);
+          sets.together = lib.concatStringsSep " & " (
+            lib.optional (others != [ ]) "(${lib.concatStringsSep " | " (map short others)})"
+            ++ map short residents
+          );
+        };
+        hooks.on_startup.preload = residents;
       };
     };
   };

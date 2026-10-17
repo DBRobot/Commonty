@@ -22,7 +22,7 @@ const KEYS = {
   convo: 'dd-guide-convo',
   open: 'dd-guide-open',
   retry: 'dd-guide-retry',
-  model: 'dd-guide-model',
+  model: 'dd-guide-model-2', // -2: chosen by the box's default_for since the 4B
   key: 'dd-guide-key',
   toured: 'dd-guide-toured',
   release: 'dd-guide-release',
@@ -349,7 +349,10 @@ async function modelId(url, init) {
   const r = await fetch(url.replace(/\/chat\/completions$/, '/models'), init);
   if (r.type === 'opaqueredirect' || r.status === 401) throw new SignIn();
   if (!r.ok) throw new Unreachable(String(r.status));
-  const id = (await r.json()).data?.[0]?.id;
+  // the box's choice for Monty (llama-cpp.nix defaultFor): the small one
+  // that stays loaded, so a question never waits for a big one to wake
+  const list = (await r.json()).data || [];
+  const id = (list.find((m) => (m?.meta?.llamaswap?.default_for || []).includes('monty')) || list[0])?.id;
   if (typeof id !== 'string') throw new Unreachable('no model');
   tab.set(KEYS.model, id);
   return id;

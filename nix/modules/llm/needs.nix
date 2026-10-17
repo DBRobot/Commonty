@@ -23,11 +23,18 @@
         # written no faster (memory bandwidth, not compute)
         gpu.api = "vulkan";
         disk.kind = "ssd";
+        # the resident 4B (Monty's, always loaded) is held whichever big
+        # model is: here, since the reserve counts only the largest variant
+        memory = {
+          fixed = "3G";
+          perKContext = null;
+          locked = true;
+        };
       };
-      # node1, 2026-10-04: llama-swap alone, no model loaded
+      # node1, 2026-10-04: llama-swap alone, no model loaded; and the 4B's file
       uses = {
         memory = "13M";
-        storage = "0";
+        storage = "3G";
       };
       network = {
         outbound = [ "huggingface.co" ];
