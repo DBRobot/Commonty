@@ -77,6 +77,50 @@ pub struct Directory {
     /// the agreed identity state, read from dd-control: set for shadow and
     /// agreed
     pub ident: Option<Arc<crate::ident::Agreed>>,
+    /// v2 envelopes this box sent on, and when each name and each source
+    /// last did: what keeps the shared log's budget from being anyone's to
+    /// spend (submit_envelope)
+    envelopes: std::sync::Mutex<EnvelopeLimits>,
+}
+
+/// Each name, and each source, has its own small allowance a minute; a flood
+/// from one spends only its own. An item already sent on is not sent again.
+#[derive(Default)]
+struct EnvelopeLimits {
+    by_name: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
+    by_source: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
+    sent: std::collections::VecDeque<String>,
+}
+
+/// a v2 envelope's most: the control plane takes no bigger item
+pub const ENVELOPE_MAX: usize = 64 * 1024;
+/// envelopes a minute for one name, and from one source
+pub const ENVELOPES_PER_NAME: usize = 6;
+pub const ENVELOPES_PER_SOURCE: usize = 20;
+/// how many sent envelopes are remembered, to refuse one twice
+const ENVELOPES_REMEMBERED: usize = 4096;
+
+impl EnvelopeLimits {
+    /// room for one more from `key` under `most` a minute; taken if so
+    fn take(
+        map: &mut std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
+        key: &str,
+        most: usize,
+        now: std::time::Instant,
+    ) -> bool {
+        let q = map.entry(key.to_string()).or_default();
+        while q
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > Duration::from_secs(60))
+        {
+            q.pop_front();
+        }
+        if q.len() >= most {
+            return false;
+        }
+        q.push_back(now);
+        true
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -132,6 +176,7 @@ impl Directory {
             agreed: None,
             ident_from: crate::ident::From::Replay,
             ident: None,
+            envelopes: Default::default(),
         })
     }
 
@@ -829,14 +874,33 @@ async fn put_invite(
     }
 }
 
+/// who sent a request, for the envelope limits: the address nginx saw
+/// (X-Real-IP, which it sets on every request it passes); a request that
+/// did not come through nginx is this box's own
+pub fn source_of(headers: &HeaderMap) -> String {
+    headers
+        .get("x-real-ip")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+        .unwrap_or_else(|| "local".into())
+}
+
 async fn put_entry(
     State(d): State<Arc<Directory>>,
     Path(name): Path<String>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
+    // nothing bigger than the control plane takes, read or not
+    if body.len() > ENVELOPE_MAX {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "too big").into_response();
+    }
     // a v2 envelope goes to the control plane as it came (ident.rs)
     if crate::ident::Envelope::is_one(&body) {
-        return match d.submit_envelope("entry", &name, &body).await {
+        return match d
+            .submit_envelope("entry", &name, &source_of(&headers), &body)
+            .await
+        {
             Ok(hash) => (
                 StatusCode::ACCEPTED,
                 Json(serde_json::json!({ "submitted": true, "item": hash })),
@@ -1244,6 +1308,7 @@ impl Directory {
         &self,
         kind: &str,
         name: &str,
+        source: &str,
         bytes: &[u8],
     ) -> std::result::Result<String, (StatusCode, String)> {
         if !self.takes_v2() {
@@ -1252,6 +1317,9 @@ impl Directory {
                 "this box takes v1 items only for now (/_dd/config has no envelope)".into(),
             ));
         }
+        if bytes.len() > ENVELOPE_MAX {
+            return Err((StatusCode::PAYLOAD_TOO_LARGE, "too big".into()));
+        }
         let env = crate::ident::Envelope::parse(bytes).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
         if env.kind != kind {
             return Err((
@@ -1259,16 +1327,118 @@ impl Directory {
                 format!("a {} envelope, put where a {kind} goes", env.kind),
             ));
         }
-        if env.name() != Some(name) {
+        if env.name() != Some(name) || !identity::valid_name(name) {
             return Err((
                 StatusCode::BAD_REQUEST,
                 "name in path and body differ".into(),
             ));
         }
-        self.submit_raw(bytes.to_vec())
-            .await
-            .map_err(|e| (StatusCode::BAD_GATEWAY, format!("the control plane: {e:#}")))?;
-        Ok(env.hash())
+        // whose it is: signed by the key that speaks for the name, as a v1
+        // item must be before this box takes it. Not judged - the control
+        // plane does that - but nothing unsigned, or signed by someone
+        // else, reaches the shared log through this box
+        self.envelope_signed(kind, name, bytes)
+            .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
+        let hash = env.hash();
+        {
+            let now = std::time::Instant::now();
+            let mut l = self.envelopes.lock().unwrap();
+            if l.sent.iter().any(|h| h == &hash) {
+                return Err((StatusCode::CONFLICT, "that item was sent already".into()));
+            }
+            if !EnvelopeLimits::take(&mut l.by_source, source, ENVELOPES_PER_SOURCE, now) {
+                return Err((
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "too many from here; wait a minute".into(),
+                ));
+            }
+            if !EnvelopeLimits::take(&mut l.by_name, name, ENVELOPES_PER_NAME, now) {
+                return Err((
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "too many for this name; wait a minute".into(),
+                ));
+            }
+            l.sent.push_back(hash.clone());
+            while l.sent.len() > ENVELOPES_REMEMBERED {
+                l.sent.pop_front();
+            }
+        }
+        if let Err(e) = self.submit_raw(bytes.to_vec()).await {
+            // not sent: the same item may be tried again
+            self.envelopes.lock().unwrap().sent.retain(|h| h != &hash);
+            return Err((StatusCode::BAD_GATEWAY, format!("the control plane: {e:#}")));
+        }
+        Ok(hash)
+    }
+
+    /// An envelope's signature, by the key that speaks for `name` now: for
+    /// an entry, the root on file (a changed root: the new root and the
+    /// recovery key on file both), or for a name nobody holds, the root the
+    /// entry names, with the terms agreed - a sign-up, as v1 takes one; for
+    /// a leaving, the root on file
+    fn envelope_signed(
+        &self,
+        kind: &str,
+        name: &str,
+        bytes: &[u8],
+    ) -> std::result::Result<(), String> {
+        use identity::envelope::{Envelope, passkey_challenge};
+        let env: Envelope =
+            serde_json::from_slice(bytes).map_err(|e| format!("not an envelope: {e}"))?;
+        let body = env.body_bytes().map_err(|e| e.to_string())?;
+        let on_file = self.entry(name).map_err(|e| e.to_string())?;
+        let check = |root: &str,
+                     sig: &str,
+                     trusted: &[identity::Passkey]|
+         -> std::result::Result<(), String> {
+            if root.starts_with(identity::WEBAUTHN_ROOT) {
+                identity::check_envelope_assertion(
+                    root,
+                    trusted,
+                    sig,
+                    &passkey_challenge(kind, &body),
+                )
+                .map_err(|e| e.to_string())
+            } else {
+                let key = identity::decode_public(root).map_err(|e| e.to_string())?;
+                identity::envelope::verify_ed25519(
+                    sig,
+                    &env.message().map_err(|e| e.to_string())?,
+                    &key,
+                )
+                .map_err(|e| e.to_string())
+            }
+        };
+        match kind {
+            "entry" => {
+                let new: identity::Entry =
+                    serde_json::from_slice(&body).map_err(|e| format!("not an entry: {e}"))?;
+                match on_file {
+                    None => {
+                        identity::agreed_terms(&new).map_err(|e| e.to_string())?;
+                        check(&new.root, &env.sig, &new.passkeys)
+                    }
+                    Some(cur) if cur.entry.root == new.root => {
+                        check(&cur.entry.root, &env.sig, &cur.entry.passkeys)
+                    }
+                    Some(cur) => {
+                        // a new root: its own signature, and the recovery
+                        // key on file says so too
+                        check(&new.root, &env.sig, &new.passkeys)?;
+                        let rs = env
+                            .recovery_sig
+                            .as_deref()
+                            .ok_or("a new root needs the recovery key's signature")?;
+                        check(&cur.entry.recovery, rs, &[])
+                    }
+                }
+            }
+            "leave" => {
+                let cur = on_file.ok_or("nobody by that name")?;
+                check(&cur.entry.root, &env.sig, &cur.entry.passkeys)
+            }
+            _ => Err(format!("{kind} is not put here")),
+        }
     }
 
     /// bytes to this box's dd-control, over its socket, as they are
@@ -2377,122 +2547,6 @@ mod tests {
         assert_eq!(hits.load(Ordering::Relaxed), 2);
     }
 
-    /// The gate's replay of a real log, written out for the Go judge's
-    /// shadow check to compare with (docs/dev/identity-state.md §4). Runs
-    /// only when asked:
-    ///   SHADOW_LOG=<dd-control /directory?since=0 output>
-    ///   SHADOW_OUT=<where the JSON goes>
-    ///   SHADOW_VOTERS=node1,node2   SHADOW_MEMBERS=<fleet/members.json>
-    ///   SHADOW_RELEASE=<the release key, base64>
-    ///   cargo test -p verify --lib shadow_dump -- --nocapture
-    #[test]
-    fn shadow_dump() {
-        let Ok(log) = std::env::var("SHADOW_LOG") else {
-            return;
-        };
-        let out = std::env::var("SHADOW_OUT").expect("SHADOW_OUT");
-        let voters: Vec<String> = std::env::var("SHADOW_VOTERS")
-            .unwrap_or_default()
-            .split(',')
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect();
-        let members = std::env::var("SHADOW_MEMBERS")
-            .ok()
-            .map(|p| crate::Members::parse(&std::fs::read_to_string(p).unwrap()).unwrap());
-        let release = std::env::var("SHADOW_RELEASE")
-            .ok()
-            .map(|k| identity::decode_public(k.trim()).unwrap());
-        let dir = scratch("shadow-dump").join("entries");
-        let d = Directory::open(dir.clone(), release)
-            .unwrap()
-            .agreed(
-                "http://127.0.0.1:1".into(),
-                "/nonexistent".into(),
-                voters,
-                "shadow".into(),
-            )
-            .unwrap();
-        let page: LogPage = serde_json::from_slice(&std::fs::read(&log).unwrap()).unwrap();
-        let mut r = Replay::default();
-        for it in page.items {
-            let at = (it.time / 1000).max(0) as u64;
-            d.replay_one(&mut r, &it.from, it.item, at);
-        }
-        let mut names: Vec<String> = std::fs::read_dir(&dir)
-            .unwrap()
-            .filter_map(|e| {
-                e.ok()?
-                    .file_name()
-                    .to_str()?
-                    .strip_suffix(".json")
-                    .map(str::to_string)
-            })
-            .collect();
-        names.sort();
-        let mut dump = serde_json::Map::new();
-        for n in names {
-            let Some(e) = d.replay_entry(&n).unwrap() else {
-                continue;
-            };
-            let left = d.leaving.has_left(&n);
-            let ids = identity::member_ids(&e.entry);
-            let status = match &members {
-                _ if left => "left".to_string(),
-                None => "member".to_string(),
-                Some(m) if identity::is_member(&e.entry, &m.members, &m.revoked, d.release()) => {
-                    "member".to_string()
-                }
-                Some(m) if ids.iter().any(|i| m.revoked.contains(i)) => {
-                    if ids.iter().any(|i| m.suspended.contains_key(i)) {
-                        "suspended".to_string()
-                    } else {
-                        "revoked".to_string()
-                    }
-                }
-                Some(_) => "none".to_string(),
-            };
-            let mut fps: Vec<&str> = e
-                .entry
-                .devices
-                .iter()
-                .map(|x| x.fingerprint.as_str())
-                .collect();
-            fps.sort();
-            let mut pks: Vec<&str> = e.entry.passkeys.iter().map(|x| x.id.as_str()).collect();
-            pks.sort();
-            dump.insert(
-                n,
-                serde_json::json!({
-                    "ids": ids,
-                    "root": e.entry.root,
-                    "version": e.entry.version,
-                    "devices": fps,
-                    "passkeys": pks,
-                    "status": status,
-                }),
-            );
-        }
-        let outcomes: serde_json::Map<String, serde_json::Value> = r
-            .outcome
-            .iter()
-            .map(|(h, res)| {
-                let v = match res {
-                    Ok(()) => "ok".to_string(),
-                    Err(e) => format!("refused: {e}"),
-                };
-                (h.clone(), v.into())
-            })
-            .collect();
-        std::fs::write(
-            &out,
-            serde_json::to_vec_pretty(&serde_json::json!({"members": dump, "outcomes": outcomes}))
-                .unwrap(),
-        )
-        .unwrap();
-        eprintln!("shadow dump: {} people -> {out}", dump.len());
-    }
-
     // --- v2 envelopes, passed through to the control plane ---
 
     /// a dd-control stand-in on a socket: answers 202, keeps what it got
@@ -2527,16 +2581,6 @@ mod tests {
         got
     }
 
-    fn v2(kind: &str, body: serde_json::Value) -> Vec<u8> {
-        use base64::Engine;
-        // spaced and ordered oddly on purpose: what arrives is what goes on
-        format!(
-            "{{ \"sig\":\"c2ln\",  \"kind\":\"{kind}\", \"v\":2, \"body\":\"{}\" }}",
-            base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&body).unwrap())
-        )
-        .into_bytes()
-    }
-
     fn agreed_dir(
         what: &str,
         from: crate::ident::From,
@@ -2558,45 +2602,98 @@ mod tests {
         (d, got)
     }
 
+    async fn put_v2(d: &Arc<Directory>, name: &str, source: &str, bytes: Vec<u8>) -> StatusCode {
+        let mut h = HeaderMap::new();
+        h.insert("x-real-ip", source.parse().unwrap());
+        put_entry(State(d.clone()), Path(name.into()), h, bytes.into())
+            .await
+            .status()
+    }
+
+    fn sealed(e: &Entry, k: &ed25519_dalek::SigningKey) -> Vec<u8> {
+        serde_json::to_vec(&identity::envelope::seal_json("entry", e, k).unwrap()).unwrap()
+    }
+
+    fn leave_by(name: &str, k: &ed25519_dalek::SigningKey) -> Vec<u8> {
+        serde_json::to_vec(
+            &identity::envelope::seal_json("leave", &serde_json::json!({"name": name, "at": 1}), k)
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
+    type Got = std::sync::Arc<std::sync::Mutex<Vec<u8>>>;
+
+    /// a box reading the agreed state, where `ann` is on file with key `k`
+    fn with_ann(what: &str) -> (Arc<Directory>, Got, ed25519_dalek::SigningKey) {
+        let (d, got) = agreed_dir(what, crate::ident::From::Agreed);
+        let k = generate();
+        let e = sign(entry("ann", &k, &[], 1), &k).unwrap();
+        let s: crate::ident::State = serde_json::from_value(serde_json::json!({
+            "height": 1,
+            "members": {"ann": {"status": "member", "item": {"entry": e}}}
+        }))
+        .unwrap();
+        d.ident.as_ref().unwrap().set(s);
+        (Arc::new(d), got, k)
+    }
+
     #[tokio::test]
-    async fn a_v2_entry_goes_to_the_control_plane_as_it_came() {
-        let (d, got) = agreed_dir("v2-entry", crate::ident::From::Shadow);
-        let d = Arc::new(d);
-        let e = v2("entry", serde_json::json!({"name": "ann", "version": 2}));
-        let res = put_entry(State(d.clone()), Path("ann".into()), e.clone().into()).await;
-        assert_eq!(res.status(), StatusCode::ACCEPTED);
+    async fn a_signed_v2_entry_goes_to_the_control_plane_as_it_came() {
+        let (d, got, k) = with_ann("v2-ok");
+        let e = sealed(&entry("ann", &k, &[], 2), &k);
+        assert_eq!(
+            put_v2(&d, "ann", "a", e.clone()).await,
+            StatusCode::ACCEPTED
+        );
         assert_eq!(*got.lock().unwrap(), e);
+        // a sign-up: a name nobody holds, signed by the root it names
+        let k2 = generate();
+        let s = sealed(&entry("bea", &k2, &[], 1), &k2);
+        assert_eq!(
+            put_v2(&d, "bea", "a", s.clone()).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(*got.lock().unwrap(), s);
     }
 
     #[tokio::test]
-    async fn a_v2_envelope_for_the_wrong_name_or_kind_is_refused() {
-        let (d, got) = agreed_dir("v2-wrong", crate::ident::From::Agreed);
-        let d = Arc::new(d);
-        let e = v2("entry", serde_json::json!({"name": "eve"}));
-        let res = put_entry(State(d.clone()), Path("ann".into()), e.into()).await;
-        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-        let l = v2("leave", serde_json::json!({"name": "ann"}));
-        let res = put_entry(State(d.clone()), Path("ann".into()), l.into()).await;
-        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    async fn an_unsigned_or_forged_envelope_never_reaches_the_log() {
+        let (d, got, k) = with_ann("v2-forged");
+        let mut env =
+            identity::envelope::seal_json("entry", &entry("ann", &k, &[], 2), &k).unwrap();
+        env.sig = "c2ln".into();
+        let b = serde_json::to_vec(&env).unwrap();
+        assert_eq!(put_v2(&d, "ann", "a", b).await, StatusCode::FORBIDDEN);
+        env.sig = String::new();
+        let b = serde_json::to_vec(&env).unwrap();
+        assert_eq!(put_v2(&d, "ann", "a", b).await, StatusCode::BAD_REQUEST);
         assert!(got.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
-    async fn a_box_that_replays_takes_no_v2() {
-        let (d, got) = agreed_dir("v2-replay", crate::ident::From::Replay);
-        assert!(!d.takes_v2());
-        let d = Arc::new(d);
-        let e = v2("entry", serde_json::json!({"name": "ann"}));
-        let res = put_entry(State(d), Path("ann".into()), e.into()).await;
-        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    async fn someone_elses_name_is_refused() {
+        let (d, got, _k) = with_ann("v2-theirs");
+        // eve signs an entry for ann with her own key: a new root, with no
+        // word from ann's recovery key
+        let eve = generate();
+        let e = sealed(&entry("ann", &eve, &[], 2), &eve);
+        assert_eq!(put_v2(&d, "ann", "a", e).await, StatusCode::FORBIDDEN);
+        // nor may she say ann has left
+        let ctx = Arc::new(crate::leaving::Ctx {
+            d: d.clone(),
+            m: None,
+            demo: None,
+        });
+        let res = crate::leaving::put_for_test(ctx, "ann", leave_by("ann", &eve)).await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
         assert!(got.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
-    async fn a_v2_leaving_goes_through_too() {
-        let (d, got) = agreed_dir("v2-leave", crate::ident::From::Shadow);
-        let d = Arc::new(d);
-        let l = v2("leave", serde_json::json!({"name": "ann", "at": 1}));
+    async fn ann_may_say_she_has_left() {
+        let (d, got, k) = with_ann("v2-leave");
+        let l = leave_by("ann", &k);
         let ctx = Arc::new(crate::leaving::Ctx {
             d,
             m: None,
@@ -2605,5 +2702,67 @@ mod tests {
         let res = crate::leaving::put_for_test(ctx, "ann", l.clone()).await;
         assert_eq!(res.status(), StatusCode::ACCEPTED);
         assert_eq!(*got.lock().unwrap(), l);
+    }
+
+    #[tokio::test]
+    async fn the_same_item_twice_is_sent_once() {
+        let (d, _got, k) = with_ann("v2-twice");
+        let e = sealed(&entry("ann", &k, &[], 2), &k);
+        assert_eq!(
+            put_v2(&d, "ann", "a", e.clone()).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(put_v2(&d, "ann", "b", e).await, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn a_flood_spends_its_own_allowance_and_nobody_elses() {
+        let (d, _got, k) = with_ann("v2-flood");
+        // one source signs up name after name: its allowance runs out
+        let mut last = StatusCode::ACCEPTED;
+        for n in 0..=ENVELOPES_PER_SOURCE {
+            let key = generate();
+            let name = format!("flood{n}");
+            last = put_v2(
+                &d,
+                &name,
+                "flooder",
+                sealed(&entry(&name, &key, &[], 1), &key),
+            )
+            .await;
+        }
+        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+        // ann, from elsewhere, still gets through
+        let e = sealed(&entry("ann", &k, &[], 2), &k);
+        assert_eq!(put_v2(&d, "ann", "home", e).await, StatusCode::ACCEPTED);
+        // and one name, from many places, has its own limit
+        let mut last = StatusCode::ACCEPTED;
+        for v in 3..(3 + ENVELOPES_PER_NAME as u64) {
+            let e = sealed(&entry("ann", &k, &[], v), &k);
+            last = put_v2(&d, "ann", &format!("s{v}"), e).await;
+        }
+        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn an_envelope_too_big_is_refused() {
+        let (d, got, _k) = with_ann("v2-big");
+        let big = vec![b' '; ENVELOPE_MAX + 1];
+        assert_eq!(
+            put_v2(&d, "ann", "a", big).await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_box_that_replays_takes_no_v2() {
+        let (d, got) = agreed_dir("v2-replay", crate::ident::From::Replay);
+        assert!(!d.takes_v2());
+        let d = Arc::new(d);
+        let k = generate();
+        let e = sealed(&entry("ann", &k, &[], 1), &k);
+        assert_eq!(put_v2(&d, "ann", "a", e).await, StatusCode::BAD_REQUEST);
+        assert!(got.lock().unwrap().is_empty());
     }
 }
