@@ -20,8 +20,10 @@ func TestStanding(t *testing.T) {
 	day := uint64(24 * 3600)
 	const at = 1_791_700_500
 	s := New()
-	s.Enlisted["j01"] = &Enlisted{Member: "ada", Box: "j01", Expires: at + day}
-	s.Enlisted["j02"] = &Enlisted{Member: "bea", Box: "j02", Expires: at + day}
+	s.Entries[ada.Entry.Name] = &Held{Signed: ada, Item: ada.Raw}
+	s.Entries[bea.Entry.Name] = &Held{Signed: bea, Item: bea.Raw}
+	s.Enlisted["j01"] = &Enlisted{Member: ada.Entry.Name, ID: adaID, Box: "j01", Expires: at + day}
+	s.Enlisted["j02"] = &Enlisted{Member: bea.Entry.Name, ID: beaID, Box: "j02", Expires: at + day}
 	cases := []struct {
 		what string
 		e    *Entry
@@ -69,7 +71,7 @@ func TestStanding(t *testing.T) {
 		}
 	}
 	// their own leaving beats everything, suspension too
-	s.Said["ada"] = &Said{Leave: Leave{Name: "ada"}, Agreed: at}
+	s.Said[ada.Entry.Name] = &Said{Leave: Leave{Name: "ada"}, Agreed: at}
 	cfg := &Config{Release: v.Release}
 	cfg.Members.Members = []string{adaID}
 	cfg.Members.Revoked = []string{adaID}

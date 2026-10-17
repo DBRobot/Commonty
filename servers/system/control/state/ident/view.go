@@ -35,54 +35,73 @@ func NewReplayer(cfg *Config, voters []string) *Replayer {
 // Catch judges items[r.next:] and returns the state; items is the whole
 // log so far
 func (r *Replayer) Catch(items []Item) *State {
+	return r.CatchN(len(items), func(i int) Item { return items[i] })
+}
+
+// CatchN is Catch over a log of n items read one at a time, so a caller
+// holding its own kind of item copies only the new ones
+func (r *Replayer) CatchN(n int, item func(int) Item) *State {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(items) < r.next {
+	if n < r.next {
 		// a shorter log than seen: start over, never keep a judgment of
 		// items that are not there
 		r.s, r.next = New(), 0
 	}
-	for _, it := range items[r.next:] {
+	for i := r.next; i < n; i++ {
+		it := item(i)
 		at := uint64(0)
 		if it.Time > 0 {
 			at = uint64(it.Time / 1000)
 		}
 		r.s.Judge(r.cfg, r.vote, it.Box, it.Item, at)
 	}
-	r.next = len(items)
+	r.next = n
 	return r.s
 }
 
 // Member is one person as readers see them
 type Member struct {
-	ID        string          `json:"id"`
-	IDs       []string        `json:"ids"`
-	Root      string          `json:"root"`
-	Kind      string          `json:"kind"` // ed25519 | passkey
-	Recovery  string          `json:"recovery"`
-	Devices   []Device        `json:"devices"`
-	Passkeys  []Passkey       `json:"passkeys"`
-	Libraries []Library       `json:"libraries"`
-	Grant     *Grant          `json:"grant,omitempty"`
-	Version   uint64          `json:"version"`
-	Updated   uint64          `json:"updated"`
-	Agreed    uint64          `json:"agreed"`
-	Status    string          `json:"status"` // member | none | left | suspended | revoked
-	Left      uint64          `json:"left,omitempty"`
-	Suspended string          `json:"suspended,omitempty"`
-	Boxes     []string        `json:"boxes"`
-	Format    int             `json:"format"` // 1 | 2
-	Item      json.RawMessage `json:"item"`
+	ID        string    `json:"id"`
+	IDs       []string  `json:"ids"`
+	Root      string    `json:"root"`
+	Kind      string    `json:"kind"` // ed25519 | passkey
+	Recovery  string    `json:"recovery"`
+	Devices   []Device  `json:"devices"`
+	Passkeys  []Passkey `json:"passkeys"`
+	Libraries []Library `json:"libraries"`
+	Grant     *Grant    `json:"grant,omitempty"`
+	Version   uint64    `json:"version"`
+	Updated   uint64    `json:"updated"` // the entry's own, seconds
+	Agreed    uint64    `json:"agreed"`  // ms, as every time the judge adds
+	Status    string    `json:"status"`  // member | none | left | suspended | revoked
+	Left      uint64    `json:"left,omitempty"`
+	Suspended string    `json:"suspended,omitempty"`
+	// the release's removal date for any of their ids (fleet/members.json
+	// removed), what a reader's forgetting counts from
+	Removed uint64          `json:"removed,omitempty"`
+	Boxes   []string        `json:"boxes"`
+	Format  int             `json:"format"` // 1 | 2
+	Item    json.RawMessage `json:"item"`
 }
 
 // View is the whole of what /identity serves
 type View struct {
-	Height    uint64                     `json:"height"`
-	Time      int64                      `json:"time"`
-	Members   map[string]*Member         `json:"members"`
-	Handovers map[string][]Handover      `json:"handovers"`
-	Invites   map[string]json.RawMessage `json:"invites"`
-	Outcomes  map[string]string          `json:"outcomes"`
+	Height uint64 `json:"height"`
+	Time   int64  `json:"time"`
+	// the height this answer last changed at: what ?since= is held to
+	Changed   uint64                `json:"changed"`
+	Members   map[string]*Member    `json:"members"`
+	Handovers map[string][]Handover `json:"handovers"`
+	Invites   map[string]*Open      `json:"invites"`
+	Outcomes  map[string]string     `json:"outcomes"`
+}
+
+// Open is an invite not yet expired
+type Open struct {
+	Issued  uint64          `json:"issued"`
+	Expires uint64          `json:"expires"`
+	Item    json.RawMessage `json:"item"`
 }
 
 // SuspendWindow is leaving.rs WINDOW: how long a suspension keeps
@@ -132,7 +151,7 @@ func (s *State) Status(cfg *Config, e *Entry, at uint64, boxCounts func(box stri
 func (s *State) boxesOf(name string, at uint64) []string {
 	var out []string
 	for b, en := range s.Enlisted {
-		if en.Member == name && en.Expires > at {
+		if en.Member == name && s.owns(en, at) {
 			out = append(out, b)
 		}
 	}
@@ -148,7 +167,7 @@ func (s *State) View(cfg *Config, height uint64, timeMs int64, boxCounts func(st
 	if timeMs > 0 {
 		at = uint64(timeMs / 1000)
 	}
-	v := &View{Height: height, Time: timeMs, Members: map[string]*Member{}, Handovers: s.Handovers, Invites: map[string]json.RawMessage{}, Outcomes: s.Outcomes}
+	v := &View{Height: height, Time: timeMs, Members: map[string]*Member{}, Handovers: s.Handovers, Invites: map[string]*Open{}, Outcomes: s.Outcomes}
 	for _, n := range s.names() {
 		h := s.entry(n, at)
 		if h == nil {
@@ -167,8 +186,8 @@ func (s *State) View(cfg *Config, height uint64, timeMs int64, boxCounts func(st
 		m := &Member{
 			ID: MemberID(e.Root), IDs: e.MemberIDs(), Root: e.Root, Kind: kind, Recovery: e.Recovery,
 			Devices: nz(e.Devices), Passkeys: nz(e.Passkeys), Libraries: nz(e.Libraries), Grant: e.Grant,
-			Version: e.Version, Updated: e.Updated, Agreed: h.Agreed, Status: st, Left: left, Suspended: why,
-			Boxes: nz(s.boxesOf(n, at)), Format: format, Item: h.Item,
+			Version: e.Version, Updated: e.Updated, Agreed: h.Agreed * 1000, Status: st, Left: left * 1000, Suspended: why,
+			Removed: removedOf(cfg, e) * 1000, Boxes: nz(s.boxesOf(n, at)), Format: format, Item: h.Item,
 		}
 		v.Members[n] = m
 	}
@@ -181,18 +200,27 @@ func (s *State) View(cfg *Config, height uint64, timeMs int64, boxCounts func(st
 			} `json:"invite"`
 		}
 		_ = json.Unmarshal(raw, &probe)
-		exp := probe.Invite.Invite.Expires
+		inv := probe.Invite.Invite
 		if probe.V == 2 {
-			var inv Invite
-			if b, err := b64.DecodeString(probe.Body); err == nil && json.Unmarshal(b, &inv) == nil {
-				exp = inv.Expires
+			inv = Invite{}
+			if b, err := b64.DecodeString(probe.Body); err == nil {
+				_ = json.Unmarshal(b, &inv)
 			}
 		}
-		if exp > at {
-			v.Invites[k] = raw
+		if inv.Expires > at {
+			v.Invites[k] = &Open{Issued: inv.Issued, Expires: inv.Expires, Item: raw}
 		}
 	}
 	return v
+}
+
+// removedOf: the release's removal date for any id of theirs, newest
+func removedOf(cfg *Config, e *Entry) uint64 {
+	var t uint64
+	for _, id := range e.MemberIDs() {
+		t = max(t, cfg.Members.Removed[id])
+	}
+	return t
 }
 
 func nz[T any](xs []T) []T {

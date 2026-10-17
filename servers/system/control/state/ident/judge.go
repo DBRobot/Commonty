@@ -52,6 +52,7 @@ type Said struct {
 // Enlisted is a box a member's root named as theirs
 type Enlisted struct {
 	Member  string          `json:"member"` // the name
+	ID      string          `json:"id"`     // the root that enlisted it
 	Box     string          `json:"box"`
 	Key     string          `json:"key"`
 	Ticket  string          `json:"ticket"`
@@ -73,9 +74,12 @@ type State struct {
 	Acks      map[string][]string        `json:"acks,omitempty"` // claim hash -> voters, sorted
 	Said      map[string]*Said           `json:"said,omitempty"`
 	Handovers map[string][]Handover      `json:"handovers,omitempty"`
-	Enlisted  map[string]*Enlisted       `json:"enlisted,omitempty"`     // box -> its enlistment
-	Outcomes  map[string]string          `json:"outcomes,omitempty"`     // item hash -> "ok" | the refusal
-	Order     []string                   `json:"outcomeOrder,omitempty"` // outcome hashes, oldest first
+	Enlisted  map[string]*Enlisted       `json:"enlisted,omitempty"`
+	// per box, the newest enlist or unenlist taken: an older one, signed
+	// before, never counts again
+	BoxAt    map[string]uint64 `json:"box_at,omitempty"`       // box -> its enlistment
+	Outcomes map[string]string `json:"outcomes,omitempty"`     // item hash -> "ok" | the refusal
+	Order    []string          `json:"outcomeOrder,omitempty"` // outcome hashes, oldest first
 }
 
 // UnmarshalJSON: the state machine copies its state through JSON every
@@ -104,6 +108,9 @@ func (s *State) UnmarshalJSON(b []byte) error {
 	}
 	if s.Enlisted == nil {
 		s.Enlisted = map[string]*Enlisted{}
+	}
+	if s.BoxAt == nil {
+		s.BoxAt = map[string]uint64{}
 	}
 	if s.Outcomes == nil {
 		s.Outcomes = map[string]string{}
@@ -141,7 +148,7 @@ func New() *State {
 	return &State{
 		Entries: map[string]*Held{}, Invites: map[string]json.RawMessage{}, Acks: map[string][]string{},
 		Said: map[string]*Said{}, Handovers: map[string][]Handover{}, Enlisted: map[string]*Enlisted{},
-		Outcomes: map[string]string{},
+		BoxAt: map[string]uint64{}, Outcomes: map[string]string{},
 	}
 }
 
@@ -569,7 +576,9 @@ func (s *State) record(l Leave, verify func(*Entry) error, raw json.RawMessage, 
 
 // enlist / unenlist: a member's root names a box as theirs, or no longer.
 // What makes an enlisted box count (its hardware) is the control plane's
-// (docs/dev/joining.md); here, only that the member said it.
+// (docs/dev/joining.md); here, only that the member said it. Each is dated,
+// timely like a leave, and newer than the last taken for that box, so an
+// old one sent again changes nothing.
 func (s *State) enlist(env Envelope, body []byte, raw json.RawMessage, at uint64) error {
 	var e struct {
 		Member  string `json:"member"`
@@ -577,7 +586,7 @@ func (s *State) enlist(env Envelope, body []byte, raw json.RawMessage, at uint64
 		Key     string `json:"key,omitempty"`
 		Ticket  string `json:"ticket,omitempty"`
 		Expires uint64 `json:"expires,omitempty"`
-		At      uint64 `json:"at,omitempty"`
+		At      uint64 `json:"at"`
 	}
 	if err := strict(body, &e); err != nil {
 		return fmt.Errorf("not an item: %w", err)
@@ -585,6 +594,9 @@ func (s *State) enlist(env Envelope, body []byte, raw json.RawMessage, at uint64
 	again, _ := json.Marshal(&e)
 	if err := sameAs(body, again); err != nil {
 		return err
+	}
+	if e.Box == "" {
+		return errors.New("no box named")
 	}
 	var who *Held
 	for _, n := range s.names() {
@@ -599,21 +611,51 @@ func (s *State) enlist(env Envelope, body []byte, raw json.RawMessage, at uint64
 	if err := VerifyRoot(&env, &who.Signed.Entry); err != nil {
 		return fmt.Errorf("refused: %w", err)
 	}
+	if e.At > at+leaveAhead {
+		return errors.New("dated ahead of now")
+	}
+	if e.At+leaveBehind < at {
+		return errors.New("too old to be taken")
+	}
+	if e.At <= s.BoxAt[e.Box] {
+		return errors.New("older than the last word on that box")
+	}
+	name := who.Signed.Entry.Name
+	cur := s.Enlisted[e.Box]
+	if cur != nil && !s.owns(cur, at) {
+		cur = nil
+	}
 	if env.Kind == "unenlist" {
-		if cur := s.Enlisted[e.Box]; cur != nil && cur.Member == who.Signed.Entry.Name {
-			delete(s.Enlisted, e.Box)
-			return nil
+		if cur == nil || cur.Member != name {
+			return errors.New("that box is not theirs")
 		}
-		return errors.New("that box is not theirs")
+		delete(s.Enlisted, e.Box)
+		s.BoxAt[e.Box] = e.At
+		return nil
 	}
 	if e.Expires <= at {
 		return errors.New("that enlistment has expired")
 	}
-	if cur := s.Enlisted[e.Box]; cur != nil && cur.Member != who.Signed.Entry.Name {
+	if cur != nil && cur.Member != name {
 		return errors.New("that box is someone else's")
 	}
-	s.Enlisted[e.Box] = &Enlisted{Member: who.Signed.Entry.Name, Box: e.Box, Key: e.Key, Ticket: e.Ticket, Expires: e.Expires, Agreed: at, Item: raw}
+	s.Enlisted[e.Box] = &Enlisted{Member: name, ID: e.Member, Box: e.Box, Key: e.Key, Ticket: e.Ticket, Expires: e.Expires, Agreed: at, Item: raw}
+	s.BoxAt[e.Box] = e.At
 	return nil
+}
+
+// owns: an enlistment still stands - not expired, its member not gone, and
+// the name still held by the person whose root enlisted it (a guest's name
+// that lapsed and went to someone else takes none of it along)
+func (s *State) owns(en *Enlisted, at uint64) bool {
+	if en.Expires <= at {
+		return false
+	}
+	if said := s.Said[en.Member]; said != nil && !said.Leave.Back {
+		return false
+	}
+	h := s.entry(en.Member, at)
+	return h != nil && contains(h.Signed.Entry.MemberIDs(), en.ID)
 }
 
 func contains(xs []string, x string) bool {

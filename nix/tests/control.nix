@@ -42,6 +42,9 @@ pkgs.runCommand "control-e2e"
         cfg["validators"].append({"id": i, "name": n, "key": pub})
     w = ed25519.Ed25519PrivateKey.generate()
     cfg["validators"].append({"id": 4, "name": "cloudflare", "key": base64.b64encode(w.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)).decode()})
+    # the identity judge's part: a release key, and nobody on the list
+    rel = ed25519.Ed25519PrivateKey.generate()
+    cfg["identity"] = {"release": base64.b64encode(rel.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)).decode(), "members": {"members": [], "revoked": []}}
     json.dump(cfg, open("config.json", "w"))
     open("w/config.js", "w").write("export default " + json.dumps(cfg) + ";\n")
     open("w/.dev.vars", "w").write("WITNESS_KEY=" + base64.b64encode(w.private_bytes(S.Encoding.Raw, S.PrivateFormat.Raw, S.NoEncryption())).decode() + "\n")
