@@ -108,8 +108,8 @@ browser: compute.<domain>        CLI: dd vm ...
     keep aside, less 2G;
   - `dd_vm_max_threads`: its threads, less one;
   - `dd_vm_max_disk_bytes`: what `tank/enc/vms` has free under its quota.
-  Computed on the box every minute (`dd-vm-facts`). A box with no KVM
-  writes zeros.
+  Computed on the box every minute (`dd-vm-facts`). A box with no KVM, or
+  one draining or failing, writes zeros.
 - **Where it may run**: the boxes whose facts fit it and, for "my boxes
   only", the owner's boxes in the identity state (`members.<name>.boxes`).
   The consent is a placement input, in the needs type's "who may run it".
@@ -164,8 +164,65 @@ grow an instance; a running one isn't stopped.
    session).
 5. Snapshots, the key, failover restore.
 
+## The records: proposed kinds for the identity contract
+
+Instance records are signed items judged by the one judge
+([identity state](identity-state.md) §1, v2 envelopes), not a judge of
+their own. The API only carries what the member's app, dd or browser
+signed. Proposed here; the placement session folds it into the contract
+once the core judge lands.
+
+| kind | signed by | body (JSON fields) |
+|---|---|---|
+| `instance` | the root on file for `owner` | `owner, id, name, mem, threads, disk, consent, anywhere?, nix, access[], up, version, updated` |
+| `instance-delete` | the root on file for `owner` | `owner, id, at` |
+
+- `id`: 16 hex, made by the signer; `name`: `[a-z0-9-]{1,32}`, unique per
+  owner.
+- `mem`, `disk`: bytes; `threads`: count.
+- `consent`: `own | any`. `anywhere`: `{"confirmed": <ms>}`, the time the
+  member said yes to the warning; `any` without it is refused.
+- `nix`: the guest module's text, at most 64 KiB.
+- `access[]`: `{port, who: "me" | "<member name>"}`; SSH (22) for `me` is
+  always there and needn't be listed.
+- `version`: one more than the agreed record's, as entries do; `updated`:
+  ms. A new `instance` for the same `id` replaces it; that is how start,
+  stop and every config change go.
+
+The judge refuses an item unless:
+
+- the owner's status is `member`;
+- `mem` ≥ 512M, `threads` ≥ 1, `disk` ≥ 8G;
+- the owner's instances together, this one as it would be, keep within
+  `fleet/policy.json` `vms` (`memory = "16G"`, `threads = 8`), counted
+  over every instance they have, running or not;
+- `disk` ≤ the owner's `allowanceGb` (the ledger checks the rest when the
+  disk is made: the judge doesn't know what else they keep);
+- every `who` names a member;
+- the body has nothing it doesn't know but keeps it, as for entries.
+
+It also hands each new instance its port: the lowest free one in the pool
+(`fleet/policy.json` `vms.ports`), in agreed order, so every reader agrees.
+
+Agreed state gains:
+
+```json
+"instances": {
+  "<id>": {"owner": "...", "name": "...", "mem": 0, "threads": 0, "disk": 0,
+           "consent": "own | any", "port": 0, "up": true, "nix": "...",
+           "access": [], "version": 1, "agreed": 0, "item": "..."}
+}
+```
+
+A member who leaves, or is suspended or revoked, keeps their records, and
+`Decide` places none of them until they are a member again. Deleting an
+instance's disk and snapshots is the owner's `instance-delete`, never a
+change of status.
+
 ## Open
 
-- Where the instance API runs. It writes agreed state, so it is a client
-  of the control plane like the identity judge. One API on every box, or
-  on the box holding a lease?
+- Where the instance API runs. It only carries signed items to the log
+  and reads agreed state, so any box's gate can; on every box, behind
+  `compute.<domain>`, like the other pages.
+- Root signatures for every start and stop: a passkey prompt each time in
+  the browser. Should a device key be allowed to sign `up` changes alone?
