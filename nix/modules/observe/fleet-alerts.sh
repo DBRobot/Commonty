@@ -28,8 +28,11 @@ lines=$(
 )
 [ -s "$STATE" ] || echo '""' >"$STATE"
 before=$(jq -r . "$STATE")
-# the same trouble is mailed once; a change (new, or more of it) again
-if [ -n "$lines" ] && [ "$lines" != "$before" ]; then
+# the same trouble is mailed once; a change (new, or more of it) again. A
+# backup's age grows every hour and is the same trouble: compared without it
+# (it mailed every hour for days, 2026-10-12 to 17, about one stale backup)
+same() { sed -E 's/last good backup [0-9]+ hours ago/last good backup over a day ago/'; }
+if [ -n "$lines" ] && [ "$(printf '%s' "$lines" | same)" != "$(printf '%s' "$before" | same)" ]; then
   # not sent: nothing is remembered, and the next run tries again
   if ! printf 'Subject: fleet: something needs a look\n\n%s\n' "$lines" | "$SENDMAIL" "$TO"; then
     echo "not mailed; again next time"
