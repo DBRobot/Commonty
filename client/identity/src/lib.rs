@@ -144,7 +144,19 @@ pub struct Reader {
     pub keys: Vec<SealedKey>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// An entry and its root's signature, in either form it is written in:
+///
+/// - v1: `{entry, signature, recovery_signature}`, the signature over
+///   `canonical(entry)` - serde's bytes, so only this crate can check it;
+/// - v2: an envelope (docs/dev/identity-state.md, `envelope.rs`) of kind
+///   `entry`, the signature over the body's bytes exactly as signed, which
+///   any language checks with a hash and a signature check.
+///
+/// Both read into this one type, so every reader (gate, Workers, the app,
+/// dd, the door) checks either with the same `verify` and `accept`. A v2 one
+/// keeps its body: `entry` is that body, read, and `signature` holds
+/// `v2:<body base64>:<signature>`; it is written back out as the envelope.
+#[derive(Debug, Clone)]
 pub struct SignedEntry {
     pub entry: Entry,
     /// base64 ed25519 signature over the canonical json of `entry`, by the
@@ -154,7 +166,6 @@ pub struct SignedEntry {
     pub signature: String,
     /// When the root changed: the same bytes signed by the recovery key that
     /// was on file before. The box that holds the previous entry checks it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery_signature: Option<String>,
 }
 
@@ -405,11 +416,108 @@ pub fn sign_recovery(
     Ok(signed)
 }
 
-fn check(sig_b64: &str, entry: &Entry, key: &VerifyingKey) -> Result<()> {
+/// In `SignedEntry::signature`: an entry that came as a v2 envelope
+const V2_SIG: &str = "v2:";
+
+/// v1 as written
+#[derive(Serialize, Deserialize)]
+struct V1Entry {
+    entry: Entry,
+    signature: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recovery_signature: Option<String>,
+}
+
+impl SignedEntry {
+    /// An entry's envelope, read: the body becomes `entry`, kept as signed
+    pub fn from_envelope(e: &envelope::Envelope) -> Result<SignedEntry> {
+        if e.v != 2 || e.kind != envelope::ENTRY {
+            return Err(Error::Rejected("not an entry's envelope".into()));
+        }
+        let entry: Entry = e.read()?;
+        Ok(SignedEntry {
+            entry,
+            signature: format!("{V2_SIG}{}:{}", e.body, e.sig),
+            recovery_signature: e.recovery_sig.clone(),
+        })
+    }
+
+    /// Its envelope, if it came as one
+    pub fn envelope(&self) -> Option<envelope::Envelope> {
+        let (body, sig) = self.signature.strip_prefix(V2_SIG)?.split_once(':')?;
+        Some(envelope::Envelope {
+            v: 2,
+            kind: envelope::ENTRY.into(),
+            body: body.into(),
+            sig: sig.into(),
+            recovery_sig: self.recovery_signature.clone(),
+        })
+    }
+
+    /// The bytes its signatures are over, and the root's signature itself
+    fn signed(&self) -> Result<(Vec<u8>, &str)> {
+        match self.signature.strip_prefix(V2_SIG) {
+            Some(rest) => {
+                let (body, sig) = rest.split_once(':').ok_or(Error::Signature)?;
+                let body = B64
+                    .decode(body)
+                    .map_err(|_| Error::Rejected("the body is not base64".into()))?;
+                Ok((envelope::message(envelope::ENTRY, &body), sig))
+            }
+            None => Ok((canonical(&self.entry)?, &self.signature)),
+        }
+    }
+
+    /// What a passkey root answered: v1 the labelled hash of the canonical
+    /// entry, v2 the hash of the envelope's message
+    fn passkey_challenge(&self) -> Result<Vec<u8>> {
+        use sha2::Digest as _;
+        match self.signature.strip_prefix(V2_SIG) {
+            Some(_) => Ok(sha2::Sha256::digest(self.signed()?.0).to_vec()),
+            None => challenge(&self.entry),
+        }
+    }
+}
+
+impl Serialize for SignedEntry {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        match self.envelope() {
+            Some(e) => e.serialize(s),
+            None => V1Entry {
+                entry: self.entry.clone(),
+                signature: self.signature.clone(),
+                recovery_signature: self.recovery_signature.clone(),
+            }
+            .serialize(s),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SignedEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let v = serde_json::Value::deserialize(d)?;
+        if v.get("v").is_some() {
+            let e: envelope::Envelope = serde_json::from_value(v).map_err(D::Error::custom)?;
+            return SignedEntry::from_envelope(&e).map_err(D::Error::custom);
+        }
+        let e: V1Entry = serde_json::from_value(v).map_err(D::Error::custom)?;
+        // a v1 signature that looks like a v2 one would be read as one
+        if e.signature.starts_with(V2_SIG) {
+            return Err(D::Error::custom("a v1 signature is base64"));
+        }
+        Ok(SignedEntry {
+            entry: e.entry,
+            signature: e.signature,
+            recovery_signature: e.recovery_signature,
+        })
+    }
+}
+
+fn check(sig_b64: &str, msg: &[u8], key: &VerifyingKey) -> Result<()> {
     let sig = B64.decode(sig_b64).map_err(|_| Error::Signature)?;
     let sig = Signature::from_slice(&sig).map_err(|_| Error::Signature)?;
-    key.verify(&canonical(entry)?, &sig)
-        .map_err(|_| Error::Signature)
+    key.verify(msg, &sig).map_err(|_| Error::Signature)
 }
 
 pub const WEBAUTHN_ROOT: &str = "webauthn:";
@@ -673,8 +781,8 @@ pub fn challenge(entry: &Entry) -> Result<Vec<u8>> {
     Ok(h.finalize().to_vec())
 }
 
-fn check_assertion(sig_b64: &str, entry: &Entry) -> Result<()> {
-    check_assertion_with(sig_b64, entry, &entry.passkeys)
+fn check_assertion(signed: &SignedEntry) -> Result<()> {
+    check_assertion_with(signed, &signed.entry.passkeys)
 }
 
 /// The assertion over `entry`, checked with the key found in `trusted`.
@@ -684,7 +792,9 @@ fn check_assertion(sig_b64: &str, entry: &Entry) -> Result<()> {
 /// read. So the key it names has to come from what is already on file; taken
 /// from the entry under check it would only say that whoever wrote the entry
 /// also chose the key, which is no statement at all.
-fn check_assertion_with(sig_b64: &str, entry: &Entry, trusted: &[Passkey]) -> Result<()> {
+fn check_assertion_with(signed: &SignedEntry, trusted: &[Passkey]) -> Result<()> {
+    let entry = &signed.entry;
+    let (_, sig_b64) = signed.signed()?;
     let (id, digest) = root_parts(&entry.root)
         .ok_or_else(|| Error::Key("a passkey root must commit to its key".into()))?;
     let passkey = trusted
@@ -701,7 +811,7 @@ fn check_assertion_with(sig_b64: &str, entry: &Entry, trusted: &[Passkey]) -> Re
     }
     let a: Assertion = serde_json::from_slice(&B64.decode(sig_b64).map_err(|_| Error::Signature)?)
         .map_err(|_| Error::Signature)?;
-    assertion_over(passkey, &a, &challenge(entry)?)
+    assertion_over(passkey, &a, &signed.passkey_challenge()?)
 }
 
 /// A sign-in: `a` is the passkey `id` of `entry` answering `challenge`, made
@@ -878,13 +988,10 @@ pub fn controller_name_signed(
 /// Is the entry signed by the root it names? True of every valid entry.
 pub fn verify(signed: &SignedEntry) -> Result<()> {
     if signed.entry.root.starts_with(WEBAUTHN_ROOT) {
-        return check_assertion(&signed.signature, &signed.entry);
+        return check_assertion(signed);
     }
-    check(
-        &signed.signature,
-        &signed.entry,
-        &decode_public(&signed.entry.root)?,
-    )
+    let (msg, sig) = signed.signed()?;
+    check(sig, &msg, &decode_public(&signed.entry.root)?)
 }
 
 /// The rule a box applies before storing `new` in place of `existing`.
@@ -945,7 +1052,7 @@ pub fn accept(existing: Option<&SignedEntry>, new: &SignedEntry) -> Result<()> {
             }
             (None, _) => return Err(Error::Key("the entry on file has no root passkey".into())),
         }
-        check_assertion_with(&new.signature, &new.entry, &old.entry.passkeys)?;
+        check_assertion_with(new, &old.entry.passkeys)?;
     } else {
         verify(new)?;
     }
@@ -990,7 +1097,9 @@ pub fn accept(existing: Option<&SignedEntry>, new: &SignedEntry) -> Result<()> {
     if old.entry.recovery.is_empty() {
         return Err(Error::Rejected("a passkey root has no recovery key".into()));
     }
-    check(rs, &new.entry, &decode_public(&old.entry.recovery)?)
+    // over the same bytes the root signed: v1 the canonical entry, v2 the
+    // envelope's message
+    check(rs, &new.signed()?.0, &decode_public(&old.entry.recovery)?)
 }
 
 /// A person leaving the fleet, in their own root's words
