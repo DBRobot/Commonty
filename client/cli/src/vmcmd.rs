@@ -348,8 +348,21 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
             let addr = i["address"].as_str().unwrap_or("");
             let (host, port) = addr.rsplit_once(':').context("it has no address")?;
             let user = i["owner"].as_str().unwrap_or("");
+            // the box's word, and a box is not trusted: nothing it says may
+            // reach ssh as an option
+            let port: u16 = port.parse().context("its port is not a port")?;
+            let plain = |s: &str, extra: &[u8]| {
+                !s.is_empty()
+                    && !s.starts_with('-')
+                    && s.bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || extra.contains(&b))
+            };
+            if !plain(user, b"-_") || !plain(host, b".:-") {
+                bail!("the box gave an address ssh shouldn't be handed: {user}@{host}");
+            }
             let status = std::process::Command::new("ssh")
-                .args(["-p", port, &format!("{user}@{host}")])
+                .args(["-p", &port.to_string(), "--", &format!("{user}@{host}")])
+                // what to run there: after the destination, a command, never options
                 .args(args)
                 .status()
                 .context("running ssh")?;
