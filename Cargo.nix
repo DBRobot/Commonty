@@ -9405,6 +9405,10 @@ rec {
             features = [ "form" "query" ];
           }
           {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
             name = "reqwest";
             packageId = "reqwest 0.12.28";
             usesDefaultFeatures = false;
