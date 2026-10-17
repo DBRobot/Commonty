@@ -219,7 +219,17 @@ $('dv-confirm-go').onclick = async () => {
   msg.hidden = true;
   try {
     await init();
-    const plan = JSON.parse(entry_resign(JSON.stringify(entry), BigInt(Math.floor(Date.now() / 1000))));
+    // the entry as it stands now, fresh from the box, never the page's copy:
+    // signing an older copy one version on would bring back what a later
+    // change took out. Anything else than exactly the entry shown: stop
+    forgetEntry(who.user);
+    const fresh = await entryOf(who.user);
+    if (!fresh || !fresh.entry || fresh.signature !== entry.signature || fresh.entry.version !== entry.entry.version) {
+      await load();
+      render();
+      throw new Error('Your account changed since this page opened. It is shown as it is now; confirm again.');
+    }
+    const plan = JSON.parse(entry_resign(JSON.stringify(fresh), BigInt(Math.floor(Date.now() / 1000))));
     const cfg = await pageConfig();
     const signed = await signPlan(plan, cfg, entry.entry.root.split(':')[1]);
     const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });

@@ -450,12 +450,59 @@ pub async fn resign_v2(keys: &impl KeyStore, dirs: &[String], name: &str) -> Res
     if !any {
         return Ok(false);
     }
-    let cur = ours(dirs, name, &root).await?;
+    // only the entry as it stands now, fresh from every box, and only when
+    // they all agree on it: re-signing an old copy one version on would
+    // bring back what a later change took out. Anything uncertain is
+    // skipped and tried again on a later start
+    let found = directory::fetch_proven(dirs, name, &[&root]).await;
+    let seen = keys.get(ENTRY_SEEN)?.and_then(|v| v.parse::<u64>().ok());
+    let mine = identity::encode_public(&root.verifying_key());
+    let Some(cur) = agreed_current(&found, &mine, seen) else {
+        return Ok(false);
+    };
+    keys.set(ENTRY_SEEN, &cur.entry.version.to_string())?;
     let entry = next_version(&cur.entry, identity::now());
     let signed = identity::sign(entry, &root)?;
     publish_both(dirs, &with_v2(&signed, &root)?).await?;
+    keys.set(ENTRY_SEEN, &signed.entry.version.to_string())?;
     keys.set(SIGNED_V2, "1")?;
     Ok(true)
+}
+
+/// keyring account: the highest version of this member's entry this device
+/// has seen agreed, so an older copy is never taken for the current one
+pub const ENTRY_SEEN: &str = "entry-version-seen";
+
+/// The entry every directory holds, if they all hold the same one: each
+/// answered, each with an entry, all the same version and signature, signed
+/// by its own root, whose root is the one here, and no older than this
+/// device has seen. None for anything less - a box unreachable, behind or
+/// ahead, a recovery elsewhere - and the caller does nothing.
+pub fn agreed_current(
+    found: &[(String, Result<Option<SignedEntry>>)],
+    root: &str,
+    seen: Option<u64>,
+) -> Option<SignedEntry> {
+    let mut one: Option<&SignedEntry> = None;
+    for (_, r) in found {
+        let s = match r {
+            Ok(Some(s)) => s,
+            _ => return None,
+        };
+        match one {
+            None => one = Some(s),
+            Some(o) if o.entry.version == s.entry.version && o.signature == s.signature => {}
+            Some(_) => return None,
+        }
+    }
+    let s = one?;
+    if identity::verify(s).is_err() || s.entry.root != root {
+        return None;
+    }
+    if seen.is_some_and(|v| s.entry.version < v) {
+        return None;
+    }
+    Some(s.clone())
 }
 
 /// What a re-signing publishes: the entry as it was, its version one up and
@@ -1094,6 +1141,67 @@ mod v2_tests {
             serde_json::to_value(e).unwrap()
         };
         assert_eq!(strip(&after), strip(&before));
+    }
+
+    fn ada_signed(version: u64, devices: usize) -> SignedEntry {
+        let v = vectors();
+        let env: identity::envelope::Envelope =
+            serde_json::from_value(v["v2"]["ada"]["envelope"].clone()).unwrap();
+        let mut e: Entry = env.read().unwrap();
+        e.version = version;
+        e.devices.truncate(devices);
+        identity::sign(e, &key(2)).unwrap()
+    }
+
+    fn said(v: Vec<SignedEntry>) -> Vec<(String, Result<Option<SignedEntry>>)> {
+        v.into_iter()
+            .enumerate()
+            .map(|(i, s)| (format!("d{i}"), Ok(Some(s))))
+            .collect()
+    }
+
+    fn root() -> String {
+        identity::encode_public(&key(2).verifying_key())
+    }
+
+    #[test]
+    fn every_box_agreeing_on_the_current_entry_is_resigned_as_it_is() {
+        let cur = ada_signed(5, 1);
+        let got = agreed_current(&said(vec![cur.clone(), cur.clone()]), &root(), Some(5)).unwrap();
+        assert_eq!(got.signature, cur.signature);
+        let next = next_version(&got.entry, got.entry.updated + 1);
+        assert_eq!(next.devices, cur.entry.devices);
+        assert_eq!(next.version, 6);
+    }
+
+    #[test]
+    fn a_box_behind_or_ahead_means_no_resign() {
+        // one box still on the copy before a device was removed: not re-signed
+        let removed = ada_signed(6, 0);
+        let stale = ada_signed(5, 1);
+        assert!(
+            agreed_current(&said(vec![removed.clone(), stale.clone()]), &root(), None).is_none()
+        );
+        // a box ahead of the others: the same
+        assert!(agreed_current(&said(vec![stale, removed]), &root(), None).is_none());
+    }
+
+    #[test]
+    fn an_older_copy_than_this_device_has_seen_is_never_resigned() {
+        // every box answering with the copy before a device was removed,
+        // which this device has seen superseded (a replay): nothing
+        let stale = ada_signed(5, 1);
+        assert!(agreed_current(&said(vec![stale.clone(), stale]), &root(), Some(6)).is_none());
+    }
+
+    #[test]
+    fn an_unreachable_box_or_another_root_means_no_resign() {
+        let cur = ada_signed(5, 1);
+        let mut found = said(vec![cur.clone()]);
+        found.push(("d9".into(), Err(anyhow::anyhow!("unreachable"))));
+        assert!(agreed_current(&found, &root(), None).is_none());
+        let other = identity::encode_public(&key(5).verifying_key());
+        assert!(agreed_current(&said(vec![cur]), &other, None).is_none());
     }
 
     #[test]
