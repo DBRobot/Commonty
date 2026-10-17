@@ -10,9 +10,10 @@
 // "key=<the controller's ed25519 key>", and <label>.home.<domain> A at the
 // controller's address on the fleet's network. Nothing names the member.
 
-import { initSync, controllerName, signedBy } from './dd_mail.js';
+import { initSync, controllerName, controllerWord, signedBy } from './dd_mail.js';
 import wasm from './dd_mail_bg.wasm';
 import { MEMBERS } from './fleet.js';
+import { mode, agreedMember, isMember, entryOf, differ } from './identity.js';
 
 let ready = false;
 const load = () => {
@@ -52,6 +53,41 @@ async function point(dns, env, label, address) {
   else if (a.content !== address) await dns(env, 'PUT', `/${a.id}`, body);
 }
 
+// The member whose root gave `controller` its name `label`, or a throw. Who
+// is a member, and their root now, are the control plane's to say
+// (IDENTITY_FROM, identity.js); only the word itself is checked here. The
+// entry the request brings says whose word it claims to be, and nothing more
+// once the agreed state is what counts.
+async function memberWord(env, entry, label, controller, sig) {
+  const how = mode(env);
+  let own, ownWhy;
+  if (how !== 'agreed') {
+    try {
+      own = controllerName(entry, label, controller, sig, env.DOMAIN, MEMBERS);
+    } catch (e) {
+      ownWhy = String(e);
+    }
+  }
+  let agreed, agreedWhy;
+  if (how !== 'replay') {
+    try {
+      const name = JSON.parse(entry).entry.name;
+      const m = await agreedMember(env, name);
+      if (!isMember(m)) throw new Error('not a member');
+      agreed = controllerWord(entryOf(m), label, controller, sig, env.DOMAIN);
+    } catch (e) {
+      agreedWhy = String(e.message || e);
+    }
+  }
+  if (how === 'shadow') differ('controller', own || agreed || '', { name: own || null }, { name: agreed || null });
+  if (how === 'agreed') {
+    if (agreedWhy) throw new Error(agreedWhy);
+    return agreed;
+  }
+  if (ownWhy) throw new Error(ownWhy);
+  return own;
+}
+
 // POST /api/controller {label, controller, entry, sig, address, at, own}
 //   sig: the member's root over commonty controller name v1\0<name>\0<controller>
 //   own: the controller over commonty controller address v1\0<label>\0<address>\0<at>
@@ -70,9 +106,9 @@ export async function controllerApi(body, dns, env, json) {
     const known = await keyOf(dns, env, label);
     if (known && known !== controller) return json({ error: 'that name is another controller\'s' }, 409);
     try {
-      controllerName(entry, label, controller, sig, env.DOMAIN, MEMBERS);
+      await memberWord(env, entry, label, controller, sig);
     } catch (e) {
-      return json({ error: String(e) }, 403);
+      return json({ error: String(e.message || e) }, 403);
     }
     if (!signedBy(controller, said, String(own))) return json({ error: 'not signed by that controller' }, 403);
     if (!known) {
@@ -100,7 +136,7 @@ export async function controllerSigned(dns, env, { controller, at, op, name, val
   const known = await keyOf(dns, env, controller);
   if (!known || key !== known || typeof entry !== 'string' || typeof name_sig !== 'string') return false;
   try {
-    controllerName(entry, controller, known, name_sig, env.DOMAIN, MEMBERS);
+    await memberWord(env, entry, controller, known, name_sig);
   } catch {
     return false;
   }

@@ -4,6 +4,31 @@
 // member's own signed statement, checked here against the entry pinned for
 // them, or the release's removal (forgetDue, client/mail/src/lib.rs).
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+// after the release's removal of someone, how long before their address
+// goes: forgetDue's window (client/mail/src/lib.rs LEAVE_WINDOW)
+const WINDOW = 90 * 24 * 3600;
+
+// May their address go, by the agreed state (docs/dev/identity-state.md)? At
+// once for their own leaving (status "left"); the window after the release's
+// removal of them, for "revoked" or "suspended", by any root they have had.
+// The agreement has judged both; this only reads it.
+export function dueByAgreement(m, members, now) {
+  if (!m) return 'not in the agreed state';
+  if (m.status === 'left') {
+    // the agreed state keeps times in ms; a statement's own `at` is seconds
+    const left = Number(m.left || 0);
+    return (left > 1e12 ? left / 1000 : left) <= now ? null : 'they have not left yet';
+  }
+  if (m.status === 'revoked' || m.status === 'suspended') {
+    const removed = (members && members.removed) || {};
+    for (const id of m.ids || [m.id]) {
+      const at = removed[id];
+      if (typeof at === 'number' && at + WINDOW <= now) return null;
+    }
+    return 'removed, and the window is not over';
+  }
+  return 'they have not left';
+}
 
 export async function forgetApi(req, env, body, json, h) {
   if (req.method !== 'POST') return json({ error: 'POST' }, 405);
@@ -12,17 +37,28 @@ export async function forgetApi(req, env, body, json, h) {
   const pinned = await env.PINNED.get(`entry:${name}`);
   // never pinned: they never set an address here
   if (!pinned) return json({ gone: true });
-  // read as the entry is, with the Worker's read key (worker.js entry)
-  const headers = env.DIRECTORY_KEY ? { 'x-dd-key-proof': h.readProof(env.DIRECTORY_KEY, name, Math.floor(Date.now() / 1000)) } : {};
-  const r = await fetch(`https://home.${env.DOMAIN}/_dd/leaving/${encodeURIComponent(name)}`, { headers });
-  const said = r.ok ? await r.text() : undefined;
-  // a recovery since pinning: the new root signs the statement
-  const e = await fetch(`${env.DIRECTORY || `https://home.${env.DOMAIN}/_dd/directory/`}${encodeURIComponent(name)}`, { headers });
-  const fresh = e.ok ? await e.text() : undefined;
-  try {
-    h.forgetDue(name, pinned, fresh, said, h.MEMBERS, Math.floor(Date.now() / 1000));
-  } catch (err) {
-    return json({ error: String(err.message || err) }, 403);
+  const how = h.mode(env);
+  const now = Math.floor(Date.now() / 1000);
+  let agreedWhy;
+  if (how !== 'replay') {
+    let m = null;
+    try {
+      m = await h.agreedMember(env, name);
+      agreedWhy = dueByAgreement(m, h.MEMBERS, now);
+    } catch (err) {
+      agreedWhy = `unread: ${String(err.message || err)}`;
+    }
+    if (how === 'agreed' && agreedWhy) return json({ error: agreedWhy }, 403);
+  }
+  if (how !== 'agreed') {
+    let ownWhy = null;
+    try {
+      await replayDue(env, name, pinned, now, h);
+    } catch (err) {
+      ownWhy = String(err.message || err);
+    }
+    if (how === 'shadow') h.differ('forget', name, { due: !ownWhy }, { due: !agreedWhy });
+    if (ownWhy) return json({ error: ownWhy }, 403);
   }
   const z = await h.zone(env);
   const l = await h.lists(env);
@@ -46,4 +82,17 @@ export async function forgetApi(req, env, body, json, h) {
   await env.PINNED.delete(`ended:${name}`);
   await env.PINNED.delete(`entry:${name}`);
   return json({ gone: true });
+}
+
+// judged here (replay and shadow): their statement, against the entry pinned
+// for them or one that follows from it, or the release's removal
+async function replayDue(env, name, pinned, now, h) {
+  // read as the entry is, with the Worker's read key (worker.js entry)
+  const headers = env.DIRECTORY_KEY ? { 'x-dd-key-proof': h.readProof(env.DIRECTORY_KEY, name, now) } : {};
+  const r = await fetch(`https://home.${env.DOMAIN}/_dd/leaving/${encodeURIComponent(name)}`, { headers });
+  const said = r.ok ? await r.text() : undefined;
+  // a recovery since pinning: the new root signs the statement
+  const e = await fetch(`${env.DIRECTORY || `https://home.${env.DOMAIN}/_dd/directory/`}${encodeURIComponent(name)}`, { headers });
+  const fresh = e.ok ? await e.text() : undefined;
+  h.forgetDue(name, pinned, fresh, said, h.MEMBERS, now);
 }

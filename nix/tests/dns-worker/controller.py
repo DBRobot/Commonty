@@ -14,7 +14,13 @@ import urllib.request
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-WORKER = "http://127.0.0.1:8787"
+import os
+
+# the Worker and its fake Cloudflare: the replay Worker by default, or, with
+# AGREED set, one that takes who is a member from the agreed identity state
+# (docs/dev/identity-state.md) and its own fake - every check the same
+WORKER = os.environ.get("WORKER", "http://127.0.0.1:8787")
+FAKE = os.environ.get("FAKE", "http://127.0.0.1:8899")
 tester = json.load(open(sys.argv[1]))
 entry = json.dumps(tester["v3"])
 root = Ed25519PrivateKey.from_private_bytes(bytes([7] * 32))
@@ -61,7 +67,7 @@ def post(path, body):
 
 
 def records():
-    with urllib.request.urlopen("http://127.0.0.1:8899/records") as r:
+    with urllib.request.urlopen(FAKE + "/records") as r:
         return sorted(
             (x["type"], x["name"], x["content"].strip('"'))
             for x in json.loads(r.read())
@@ -197,7 +203,7 @@ seed = [
     for i in range(64)
 ]
 req = urllib.request.Request(
-    "http://127.0.0.1:8899/seed",
+    FAKE + "/seed",
     data=json.dumps(seed).encode(),
     method="POST",
     headers={"content-type": "application/json"},
@@ -210,6 +216,27 @@ check(
     429,
 )
 check("and its owner's own still moves", moved[0], 200)
+
+if os.environ.get("AGREED"):
+    # the agreed state, not the request's entry, says who is a member: one
+    # who is not names nothing, and their controller's name moves no more
+    req = urllib.request.Request(
+        FAKE + "/identity-set",
+        data=json.dumps({"status": "suspended"}).encode(),
+        method="POST",
+        headers={"content-type": "application/json"},
+    )
+    urllib.request.urlopen(req).read()
+    check(
+        "agreed: a suspended member's word moves nothing",
+        register(address="100.64.0.11")[0],
+        403,
+    )
+    check(
+        "agreed: nor gets their controller a challenge",
+        challenge(NAME, controller)[0],
+        403,
+    )
 
 if fails:
     print("\n".join(fails))

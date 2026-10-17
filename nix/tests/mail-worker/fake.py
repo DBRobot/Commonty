@@ -12,6 +12,10 @@ FIX = json.load(open(sys.argv[1]))
 # removes the first and never touches the second
 state = {
     "entry": FIX["v3"],
+    # the agreed identity state's word on tester (docs/dev/identity-state.md),
+    # set by the test (POST /identity-set): a status, when they left, and
+    # which entry the agreed item carries
+    "identity": {"status": "member", "left": 0, "entry": FIX["v3"]},
     "addrs": {},
     "sent": [],
     "n": 0,
@@ -95,6 +99,26 @@ class H(BaseHTTPRequestHandler):
             return (
                 self.send(state["entry"]) if p == "/dir/tester" else self.send({}, 404)
             )
+        # the control relay's /identity, one name at a time: tester as the
+        # test has set it, nobody else
+        if p == "/identity":
+            q = dict(x.split("=", 1) for x in self.path.split("?", 1)[1].split("&"))
+            if q.get("name") != "tester":
+                return self.send({}, 404)
+            i = state["identity"]
+            return self.send(
+                {
+                    "id": "ea292baabb9406356e3e0af160bf0705bd376b2bd98529cae0c4f20f0cb9a179",
+                    "ids": [
+                        "ea292baabb9406356e3e0af160bf0705bd376b2bd98529cae0c4f20f0cb9a179"
+                    ],
+                    "root": i["entry"]["entry"]["root"],
+                    "kind": "ed25519",
+                    "status": i["status"],
+                    "left": i["left"],
+                    "item": {"entry": i["entry"]},
+                }
+            )
         if p == "/client/v4/zones":
             return self.send(
                 {"success": True, "result": [{"id": "Z", "account": {"id": "A"}}]}
@@ -134,6 +158,13 @@ class H(BaseHTTPRequestHandler):
         p = self.path
         b = self.body()
         with lock:
+            if p == "/identity-set":
+                for k in ("status", "left"):
+                    if k in b:
+                        state["identity"][k] = b[k]
+                if "entry" in b:
+                    state["identity"]["entry"] = FIX[b["entry"]]
+                return self.send({"ok": True})
             if p == "/client/v4/accounts/A/email/routing/addresses":
                 e = b["email"]
                 if e in state["addrs"]:

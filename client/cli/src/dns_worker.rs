@@ -52,7 +52,7 @@ fn bundle(flake: &str) -> Result<std::path::PathBuf> {
 
 /// the control plane's relay, whose witness has the agreed state: which box
 /// holds each lease, which the names follow (fleet/control-worker.json)
-fn control_script(root: &Path) -> Result<Option<String>> {
+pub(crate) fn control_script(root: &Path) -> Result<Option<String>> {
     let p = root.join("fleet/control-worker.json");
     if !p.exists() {
         return Ok(None);
@@ -61,15 +61,44 @@ fn control_script(root: &Path) -> Result<Option<String>> {
     Ok(v["script"].as_str().map(str::to_string))
 }
 
+/// Where the Workers take who is a member from (docs/dev/identity-state.md):
+/// `identityFrom` in fleet/policy.json - replay (they judge it, as before),
+/// shadow (judge it and read the agreed state, saying where they differ),
+/// agreed (read it only). Replay when unset. Agreed needs the control relay
+pub(crate) fn identity_from(root: &Path, control: Option<&str>) -> Result<String> {
+    let p = root.join("fleet/policy.json");
+    let v: serde_json::Value = if p.exists() {
+        serde_json::from_slice(&std::fs::read(p)?)?
+    } else {
+        serde_json::Value::Null
+    };
+    identity_mode(v["identityFrom"].as_str(), control.is_some())
+}
+
+fn identity_mode(set: Option<&str>, relay: bool) -> Result<String> {
+    let m = set.unwrap_or("replay");
+    ensure!(
+        matches!(m, "replay" | "shadow" | "agreed"),
+        "fleet/policy.json identityFrom is {m}: replay, shadow or agreed"
+    );
+    ensure!(
+        m == "replay" || relay,
+        "identityFrom {m} reads the control relay, and fleet/control-worker.json names none"
+    );
+    Ok(m.to_string())
+}
+
 async fn upload(
     http: &reqwest::Client,
     token: &str,
     s: &Setup,
     dir: &Path,
     control: Option<&str>,
+    identity: &str,
 ) -> Result<()> {
     let mut bindings = vec![
         serde_json::json!({ "type": "plain_text", "name": "DOMAIN", "text": s.domain }),
+        serde_json::json!({ "type": "plain_text", "name": "IDENTITY_FROM", "text": identity }),
         serde_json::json!({ "type": "plain_text", "name": "ZONE", "text": s.zone }),
         serde_json::json!({ "type": "plain_text", "name": "ACCOUNT", "text": s.account }),
     ];
@@ -164,12 +193,14 @@ pub async fn deploy(root: &Path, keys: &impl auth::KeyStore, r#ref: &str) -> Res
     };
     let dir = bundle(&format!("git+file://{}?ref={ref}", root.display()))?;
     let control = control_script(root)?;
+    let identity = identity_from(root, control.as_deref())?;
     upload(
         &reqwest::Client::new(),
         &token(keys)?,
         &s,
         &dir,
         control.as_deref(),
+        &identity,
     )
     .await?;
     eprintln!("== the DNS Worker is {}", dir.display());
@@ -208,7 +239,8 @@ pub async fn setup(root: &Path, keys: &impl auth::KeyStore, domain: &str) -> Res
 
     let dir = bundle(&format!("path:{}", root.display()))?;
     let control = control_script(root)?;
-    upload(&http, &token, &s, &dir, control.as_deref()).await?;
+    let identity = identity_from(root, control.as_deref())?;
+    upload(&http, &token, &s, &dir, control.as_deref(), &identity).await?;
     eprintln!("== uploaded the DNS Worker");
 
     eprintln!(
@@ -306,5 +338,21 @@ mod module_tests {
         }
         assert_eq!(module_mime("dd_mail_bg.wasm"), Some("application/wasm"));
         assert_eq!(module_mime("README"), None);
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::identity_mode;
+
+    #[test]
+    fn the_workers_take_members_as_the_release_says() {
+        assert_eq!(identity_mode(None, false).unwrap(), "replay");
+        assert_eq!(identity_mode(Some("shadow"), true).unwrap(), "shadow");
+        assert_eq!(identity_mode(Some("agreed"), true).unwrap(), "agreed");
+        // reading the agreed state needs the relay to read it from
+        assert!(identity_mode(Some("agreed"), false).is_err());
+        assert!(identity_mode(Some("shadow"), false).is_err());
+        assert!(identity_mode(Some("trust me"), true).is_err());
     }
 }
