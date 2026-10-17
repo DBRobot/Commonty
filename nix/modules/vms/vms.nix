@@ -27,7 +27,8 @@ let
     inherit pkgs lib;
     inherit (guestSystem) config;
     name = "dd-vm-image";
-    format = "qcow2";
+    # compressed: copied once per computer, and through the build cache
+    format = "qcow2-compressed";
     partitionTableType = "legacy";
     diskSize = "auto";
     additionalSpace = "2G";
