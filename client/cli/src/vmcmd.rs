@@ -40,9 +40,7 @@ pub enum VmCmd {
         anywhere: bool,
     },
     /// Delete a config; computers made from it keep running
-    Forget {
-        name: String,
-    },
+    Forget { name: String },
     /// A new computer from a saved config
     Make {
         config: String,
@@ -52,13 +50,9 @@ pub enum VmCmd {
         yes: bool,
     },
     /// Start it; it stays up across reboots until stopped
-    Start {
-        name: String,
-    },
+    Start { name: String },
     /// Shut it down cleanly; /home and its system are kept
-    Stop {
-        name: String,
-    },
+    Stop { name: String },
     /// Its config again: packages and keys now, size and ports at its next start
     Apply {
         name: String,
@@ -66,17 +60,11 @@ pub enum VmCmd {
         yes: bool,
     },
     /// Its system back to the first disk; /home is kept (stopped only)
-    Reset {
-        name: String,
-    },
+    Reset { name: String },
     /// Gone, with both its disks (stopped only)
-    Delete {
-        name: String,
-    },
+    Delete { name: String },
     /// What its last apply said
-    Log {
-        name: String,
-    },
+    Log { name: String },
     /// SSH into it
     Ssh {
         name: String,

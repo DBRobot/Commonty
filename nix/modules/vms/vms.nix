@@ -233,12 +233,16 @@ in
           else
             (lib.importJSON ../../../fleet/policy.json).owner;
         DD_VMS_ACCESS = "/run/dd-vms/access.json";
+        # the storage ledger's count, where this box keeps one (storage/view.nix)
+        DD_VMS_LEDGER = "/var/lib/dd-storage/ledger.json";
       };
       serviceConfig = {
         User = "dd-vms";
         Group = "dd-vms";
         RuntimeDirectory = "dd-vms";
         RuntimeDirectoryMode = "0750";
+        # to read the ledger, where there is one
+        SupplementaryGroups = lib.optional (config.users.groups ? dd-storage) "dd-storage";
         ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.vms}/bin/dd-vms";
         Restart = "on-failure";
         NoNewPrivileges = true;
@@ -313,6 +317,28 @@ in
     systemd.services.firewall.postStart = lib.mkIf cfg.manager (
       lib.mkAfter "systemctl start --no-block vms-access.service || true"
     );
+
+    # what each member's computers keep here, into the facts for their allowance
+    systemd.services.dd-vms-usage = {
+      description = "Count what each member's computers keep";
+      path = [
+        pkgs.jq
+        pkgs.coreutils
+      ];
+      restartIfChanged = false;
+      serviceConfig.Type = "oneshot";
+      script = ddScript ../guests/usage.sh {
+        DIR = dir;
+        KIND = "computers";
+      };
+    };
+    systemd.timers.dd-vms-usage = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "5min";
+        OnUnitActiveSec = "1h";
+      };
+    };
 
     # SSH and forwards are open on the Commonty network only, to whom the
     # owner lets in; the chain is filled once there is a manager (step 2)

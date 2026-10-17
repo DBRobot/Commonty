@@ -37,15 +37,27 @@ pub struct Usage {
     pub code: u64,
     #[serde(default)]
     pub passwords: u64,
+    /// game servers and the worlds kept from them
+    #[serde(default)]
+    pub games: u64,
+    /// members' own computers: what their disks hold
+    #[serde(default)]
+    pub computers: u64,
 }
 
 impl Usage {
     pub fn total(&self) -> u64 {
         // saturating: a box can claim any count up to u64::MAX, and a sum
         // that wrapped would make a full allowance look empty
-        [self.libraries, self.code, self.passwords]
-            .into_iter()
-            .fold(self.photos, u64::saturating_add)
+        [
+            self.libraries,
+            self.code,
+            self.passwords,
+            self.games,
+            self.computers,
+        ]
+        .into_iter()
+        .fold(self.photos, u64::saturating_add)
     }
 }
 

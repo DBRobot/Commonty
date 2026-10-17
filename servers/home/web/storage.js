@@ -9,6 +9,8 @@ const services = [
   ['libraries', 'Files & Movies', '#2f6fd6'],
   ['code', 'Code', '#4a5a8a'],
   ['passwords', 'Passwords', '#1b8aa0'],
+  ['games', 'Games', '#7a4fb5'],
+  ['computers', 'Computers', '#3b6f8f'],
 ];
 
 function size(b) {

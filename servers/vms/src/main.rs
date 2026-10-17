@@ -199,7 +199,7 @@ async fn static_file(Path(name): Path<String>) -> Response {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let m = Arc::new(Manager::new(
+    let mut m = Manager::new(
         env_or("DD_VMS_DIR", "/var/lib/dd-vms").into(),
         Limits {
             memory: num("DD_VMS_MEMORY_MIB", 16384),
@@ -211,7 +211,9 @@ async fn main() -> Result<()> {
         env("DD_VMS_BOX_OWNER")?,
         env("DD_VMS_ADDRESS")?,
         Box::new(Systemd),
-    )?);
+    )?;
+    m.ledger = std::env::var("DD_VMS_LEDGER").ok().map(Into::into);
+    let m = Arc::new(m);
     eprintln!("vms: {} computer(s) brought back up", m.restore());
     // what the firewall's filler reads, rewritten every few seconds
     if let Ok(access) = std::env::var("DD_VMS_ACCESS") {

@@ -176,6 +176,9 @@ pub struct Manager {
     pub box_owner: String,
     /// this box on the Commonty network
     pub address: String,
+    /// the storage ledger's count (storage/view.nix), for the allowance;
+    /// none on a box without it
+    pub ledger: Option<PathBuf>,
     units: Box<dyn Units>,
     lock: Mutex<()>,
 }
@@ -259,6 +262,7 @@ impl Manager {
             limits,
             box_owner,
             address,
+            ledger: None,
             units,
             lock: Mutex::new(()),
         })
@@ -403,6 +407,36 @@ impl Manager {
         Ok(())
     }
 
+    /// Over their allowance, as the ledger last counted every service: no
+    /// new computer, no bigger disk. One running isn't stopped. No ledger
+    /// here, or no count yet: nothing to hold to.
+    fn within_allowance(&self, owner: &str) -> Result<()> {
+        let Some(path) = &self.ledger else {
+            return Ok(());
+        };
+        let Some(v) = std::fs::read(path)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        else {
+            return Ok(());
+        };
+        let budget = v["budget"].as_u64().unwrap_or(u64::MAX);
+        let used: u64 = v["members"][owner]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(_, n)| n.as_u64())
+            .fold(0, u64::saturating_add);
+        if used >= budget {
+            bail!(
+                "you use {} GB of your {} GB allowance: make room first",
+                used / 1_000_000_000,
+                budget / 1_000_000_000
+            );
+        }
+        Ok(())
+    }
+
     fn where_ok(&self, owner: &str, c: &Config, anywhere: Option<u64>) -> Result<()> {
         match c.consent {
             Consent::Own if owner != self.box_owner => {
@@ -445,6 +479,7 @@ impl Manager {
         self.check(owner, &c)?;
         let anywhere = (c.consent == Consent::Any && yes).then(now_ms);
         self.where_ok(owner, &c, anywhere)?;
+        self.within_allowance(owner)?;
         let _g = self.lock.lock().unwrap();
         let records = self.records();
         if records.iter().any(|r| r.owner == owner && r.name == name) {
@@ -499,6 +534,9 @@ impl Manager {
         self.fits(owner, Some(id), &c)?;
         if c.disk < r.disk {
             bail!("a disk only grows: this one is {} GiB", r.disk);
+        }
+        if c.disk > r.disk {
+            self.within_allowance(owner)?;
         }
         // its own ports count as taken: the ones it keeps are its own, and a
         // new one must not be its SSH
@@ -816,6 +854,27 @@ mod tests {
         std::fs::remove_file(rep.join("apply.json")).unwrap();
         std::fs::write(rep.join("apply.json"), r#"{"ok": true}"#).unwrap();
         assert!(m.view(a).applied.is_some());
+    }
+
+    #[test]
+    fn over_the_allowance_no_new_computer() {
+        let (mut m, _) = scratch("allowance");
+        let ledger = m.dir.join("ledger.json");
+        std::fs::write(
+            &ledger,
+            r#"{"budget": 1000, "members": {"tom": {"photos": 600, "computers": 400}}}"#,
+        )
+        .unwrap();
+        m.ledger = Some(ledger.clone());
+        m.save_config("tom", config("c", 1024, 1)).unwrap();
+        let e = m.make("tom", "c", "a", true).unwrap_err().to_string();
+        assert!(e.contains("allowance"), "{e}");
+        std::fs::write(
+            &ledger,
+            r#"{"budget": 1000, "members": {"tom": {"photos": 600}}}"#,
+        )
+        .unwrap();
+        m.make("tom", "c", "a", true).unwrap();
     }
 
     #[test]

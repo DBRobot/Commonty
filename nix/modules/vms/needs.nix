@@ -11,6 +11,7 @@
       "dd-vm@*"
       "dd-vms"
       "vms-access"
+      "dd-vms-usage"
     ];
     base = {
       requires = {

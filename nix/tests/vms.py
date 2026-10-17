@@ -79,6 +79,11 @@ box.wait_until_succeeds(f"test -s {d}/instances/{i}/report/apply.json", timeout=
 applied = json.loads(box.succeed(f"cat {d}/instances/{i}/report/apply.json"))
 assert applied["ok"], api("tom", "GET", f"/api/instances/{i}/log")[1]
 
+# what its disks hold counts toward tom's allowance: into the box's facts
+box.succeed("systemctl start dd-vms-usage.service")
+used = box.succeed("cat /var/lib/dd-facts/usage-computers.facts")
+assert used.startswith("usage/computers/tom ") and int(used.split()[1]) > 0, used
+
 # the firewall's filler is told of it
 box.wait_until_succeeds(f"grep -q '{port}' /run/dd-vms/access.json", timeout=30)
 
