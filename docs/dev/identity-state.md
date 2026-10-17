@@ -184,3 +184,32 @@ at exactly the members, keys, statuses and outcomes the gates' replay ends
 at (`go test ./state/ident -run Shadow` with a log fetched from a box, and
 the gate's `shadow_dump` test on the same file). Any difference is a bug in
 one of the two, written down here and fixed before the switch.
+
+## 5. Readers outside the gate and the Workers
+
+Two kinds of reader, and they read differently on purpose:
+
+- **On a box** (the gate, the library, placement): reads the agreed state
+  (§2) and judges nothing. The library and the media gate only use
+  `identity`'s helpers (fingerprints, library ids); they never judged.
+- **A person's own device, and the home controller** (the app, `dd`, the
+  git remote, the browser, the door): checks signatures itself and takes no
+  box's word, since a box may hand it a forged entry to read what it writes
+  (a library key of the box's own making, say). It does not re-judge the
+  fleet's rules: it checks the signature over the bytes signed, and holds the
+  entry to an anchor it already has (a root it pinned, or the release's
+  member list), exactly as before.
+
+Both forms read into the one `identity::SignedEntry`: a v2 envelope keeps
+its body as signed (`signature` holds `v2:<body>:<sig>`, and it is written
+back out as the envelope), so `verify`, `accept`, `anchored` and
+`directory::resolve` check either form with no change to any caller.
+
+| component | judged | now | dead |
+|---|---|---|---|
+| client/directory `resolve` | signature + agreement + anchor | same, v1 or v2 | nothing |
+| client/account, client/media, app | through `resolve` / `verify` | same, v1 or v2 | nothing |
+| client/gitremote | signature, directories agree on the root | same, v1 or v2 | nothing |
+| client/web (browser) | signature of its own entry | same, v1 or v2 | nothing |
+| servers/smarthome/door | `accept` against the root it pinned at pairing | same, v1 or v2 | nothing: the home trusts no box, and reads no agreed state |
+| servers/library, client/media gate | nothing (helpers only) | unchanged | nothing |

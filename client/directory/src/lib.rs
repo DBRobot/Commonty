@@ -434,6 +434,38 @@ mod tests {
             .collect()
     }
 
+    /// An entry served as a v2 envelope (docs/dev/identity-state.md) is
+    /// held to the same anchors as a v1 one: a client checks its signature
+    /// itself, whichever form a box hands it, and never takes a box's word.
+    #[test]
+    fn an_entry_in_either_form_is_held_to_the_same_anchor() {
+        let hers = generate();
+        let v1 = entry("alice", &hers, 3);
+        let mut next = v1.entry.clone();
+        next.version = 4;
+        let env = identity::envelope::seal_json(identity::envelope::ENTRY, &next, &hers).unwrap();
+        let v2: SignedEntry = serde_json::from_value(serde_json::to_value(&env).unwrap()).unwrap();
+
+        let found = said(vec![("a", v1.clone()), ("b", v2.clone())]);
+        assert_eq!(
+            resolve(&found, Anchor::FirstSight).unwrap().entry.version,
+            4
+        );
+        let mine = encode_public(&hers.verifying_key());
+        assert!(resolve(&found, Anchor::Root(&mine)).is_ok());
+
+        // a box that rewrites the body under the same signature is refused
+        let mut bent = env.clone();
+        next.devices.clear();
+        bent.body = identity::envelope::seal_json(identity::envelope::ENTRY, &next, &hers)
+            .unwrap()
+            .body;
+        let bent: SignedEntry =
+            serde_json::from_value(serde_json::to_value(&bent).unwrap()).unwrap();
+        let e = resolve(&said(vec![("a", bent)]), Anchor::Root(&mine)).unwrap_err();
+        assert!(format!("{e}").contains("does not verify"), "{e}");
+    }
+
     /// A directory is storage. The version number is its own claim, so the
     /// highest one is an invitation rather than an answer.
     #[test]
