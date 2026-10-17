@@ -15,9 +15,10 @@ const WINDOW = 90 * 24 * 3600;
 export function dueByAgreement(m, members, now) {
   if (!m) return 'not in the agreed state';
   if (m.status === 'left') {
-    // the agreed state keeps times in ms; a statement's own `at` is seconds
+    // the agreed state keeps times in ms (seconds would not reach 1e11 for
+    // three thousand years); a statement's own `at` is seconds
     const left = Number(m.left || 0);
-    return (left > 1e12 ? left / 1000 : left) <= now ? null : 'they have not left yet';
+    return (left >= 1e11 ? left / 1000 : left) <= now ? null : 'they have not left yet';
   }
   if (m.status === 'revoked' || m.status === 'suspended') {
     const removed = (members && members.removed) || {};

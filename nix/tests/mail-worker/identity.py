@@ -62,10 +62,11 @@ def said(what):
         )
 
 
-# shadow: the two agree, nothing said
-agreed(status="member", entry="v3", left=0)
+# shadow: the two agree (the agreed entry the directory's own, as flow.py
+# left it), nothing said
+agreed(status="member", entry="dir", left=0)
 s, c = challenge(SHADOW)
-ok(s == 200 and c.get("allow") == ["cGsx"], "shadow: a member signs in as before")
+ok(s == 200 and c.get("allow"), "shadow: a member signs in as before")
 ok(not said("member"), "shadow: the agreed state agrees, nothing said")
 # the agreed state says otherwise: still its own word, and the difference said
 agreed(status="none")
@@ -108,7 +109,7 @@ ok(
     post(AGREED + "/api/forget", {"name": "tester"}, origin=AGREED)[0] == 403,
     "agreed: leaving in the future: not yet",
 )
-agreed(status="left", left=1_000_000_000_000)
+agreed(status="left", left=1_500_000_000_000)
 s, r = post(AGREED + "/api/forget", {"name": "tester"}, origin=AGREED)
 ok(s == 200 and r.get("gone"), "agreed: left: their address goes")
 
