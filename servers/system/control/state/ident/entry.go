@@ -82,17 +82,25 @@ func FromV1(raw json.RawMessage) (*Signed, error) {
 	if err := strict(raw, &se); err != nil {
 		return nil, err
 	}
-	return &Signed{Entry: se.Entry, Sig: se.Signature, RecoverySig: se.RecoverySignature, Raw: raw}, nil
+	sg := &Signed{Entry: se.Entry, Sig: se.Signature, RecoverySig: se.RecoverySignature, Raw: raw}
+	rebuilt, err := sg.v1Bytes()
+	if err != nil {
+		return nil, err
+	}
+	if err := sameAs(raw, rebuilt); err != nil {
+		return nil, err
+	}
+	return sg, nil
 }
 
 // FromEnvelope reads a v2 entry envelope. The body is read only to know the
 // entry; nothing counts until Verify passes.
 func FromEnvelope(raw json.RawMessage) (*Signed, error) {
-	var env Envelope
-	if err := strict(raw, &env); err != nil {
+	env, err := ReadEnvelope(raw)
+	if err != nil {
 		return nil, err
 	}
-	if env.V != 2 || env.Kind != "entry" {
+	if env.Kind != "entry" {
 		return nil, errors.New("not a v2 entry")
 	}
 	body, err := env.BodyBytes()
@@ -101,6 +109,14 @@ func FromEnvelope(raw json.RawMessage) (*Signed, error) {
 	}
 	s := &Signed{Sig: env.Sig, RecoverySig: env.RecoverySig, body: body, Raw: raw}
 	if err := strict(body, &s.Entry); err != nil {
+		return nil, err
+	}
+	// the body says exactly the entry judged, nothing more or other
+	c, err := s.Entry.Canonical()
+	if err != nil {
+		return nil, err
+	}
+	if err := sameAs(body, c); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -389,4 +405,20 @@ func VerifyRoot(env *Envelope, onFile *Entry) error {
 		return errors.New("bad key: the entry on file has no root passkey")
 	}
 	return VerifyEd25519(onFile.Root, m, env.Sig)
+}
+
+// ReadEnvelope reads a v2 envelope, holding it to its JSON
+func ReadEnvelope(raw json.RawMessage) (*Envelope, error) {
+	var env Envelope
+	if err := strict(raw, &env); err != nil {
+		return nil, err
+	}
+	if env.V != 2 {
+		return nil, errors.New("not a v2 item")
+	}
+	again, _ := json.Marshal(&env)
+	if err := sameAs(raw, again); err != nil {
+		return nil, err
+	}
+	return &env, nil
 }

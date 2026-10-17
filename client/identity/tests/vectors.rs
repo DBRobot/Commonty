@@ -225,7 +225,27 @@ fn all() -> serde_json::Value {
     )
     .unwrap();
 
+    // random entries: every awkward string serde writes, nested values with
+    // awkward keys, the Go rebuild held to each byte
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let random: Vec<serde_json::Value> = (0..300)
+        .map(|i| {
+            let e = random_entry(&mut rng, i);
+            let signed = SignedEntry {
+                entry: e.clone(),
+                signature: B64.encode([i as u8; 64]),
+                recovery_signature: (i % 7 == 0).then(|| B64.encode([1u8; 64])),
+            };
+            json!({"logged": logged("entry", &signed),
+                   "canonical": B64.encode(canonical(&e).unwrap())})
+        })
+        .collect();
+
+    let shadow = shadow_log(&release, &pk);
+
     json!({
+        "shadow_log": shadow,
+        "random": random,
         "release": encode_public(&release.verifying_key()),
         "v1": {
             "entries": [
@@ -259,6 +279,452 @@ fn all() -> serde_json::Value {
             "enlist": {"envelope": enlist_v2, "key": ada2.root},
         }
     })
+}
+
+/// A log that exercises every rule of the gate's replay, for the shadow
+/// check: replayed by the gate (shadow_dump) and by the judge, the answers
+/// must be the same (testdata/shadow-gate.json is the gate's)
+fn shadow_log(release: &SigningKey, pk: &Pk) -> serde_json::Value {
+    let mut items = vec![];
+    let mut t: i64 = 1_791_700_000_000;
+    let mut put = |boxn: &str, item: serde_json::Value, t: &mut i64| {
+        *t += 1000;
+        items.push(json!({"time": *t, "box": boxn, "item": item}));
+    };
+    let ack = |item: &serde_json::Value| json!({ "ack": item_hash(item) });
+    let ent = |name: &str,
+               root: &SigningKey,
+               paper: &SigningKey,
+               dev: &SigningKey,
+               libs: &[&str],
+               v: u64| Entry {
+        name: name.into(),
+        root: encode_public(&root.verifying_key()),
+        recovery: encode_public(&paper.verifying_key()),
+        recovered_from: vec![],
+        devices: vec![device(dev, 1)],
+        passkeys: vec![],
+        grant: None,
+        libraries: libs
+            .iter()
+            .map(|id| Library {
+                id: (*id).into(),
+                keys: vec![],
+                readers: vec![],
+                created: 1,
+            })
+            .collect(),
+        terms: Some("2026-10-11".into()),
+        version: v,
+        updated: 1_791_700_000 + v,
+    };
+    let (ann, ann_p, ann_d, ann2) = (key(20), key(21), key(22), key(23));
+    let (bob, cat1, cat2, eve, gil) = (key(30), key(31), key(32), key(33), key(34));
+    let lib_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    // ann claims; both voters ack; it lands
+    let a1 = logged(
+        "entry",
+        sign(ent("ann", &ann, &ann_p, &ann_d, &[lib_a], 1), &ann).unwrap(),
+    );
+    put("node1", a1.clone(), &mut t);
+    put("node1", ack(&a1), &mut t);
+    put("node2", ack(&a1), &mut t);
+    // an ack from a box that does not vote counts for nothing
+    let b1 = logged(
+        "entry",
+        sign(ent("bob", &bob, &bob, &bob, &[], 1), &bob).unwrap(),
+    );
+    put("node2", b1.clone(), &mut t);
+    put("node1", ack(&b1), &mut t);
+    put("node3", ack(&b1), &mut t);
+    // two claims to one name: the first acked in log order takes it
+    let c1 = logged(
+        "entry",
+        sign(ent("cat", &cat1, &cat1, &cat1, &[], 1), &cat1).unwrap(),
+    );
+    let c2 = logged(
+        "entry",
+        sign(ent("cat", &cat2, &cat2, &cat2, &[], 1), &cat2).unwrap(),
+    );
+    put("node1", c1.clone(), &mut t);
+    put("node2", c2.clone(), &mut t);
+    for b in ["node1", "node2"] {
+        put(b, ack(&c2), &mut t);
+        put(b, ack(&c1), &mut t);
+    }
+    // ann's update lands; the same version again, and a forgery, do not
+    let mut a2e = ent("ann", &ann, &ann_p, &ann_d, &[lib_a], 2);
+    a2e.devices.push(device(&key(24), 2));
+    put(
+        "node1",
+        logged("entry", sign(a2e.clone(), &ann).unwrap()),
+        &mut t,
+    );
+    put(
+        "node2",
+        logged("entry", sign(a2e.clone(), &ann).unwrap()),
+        &mut t,
+    );
+    let mut forged = sign(ent("ann", &ann, &ann_p, &ann_d, &[lib_a], 3), &ann).unwrap();
+    forged.entry.version = 4;
+    put("node1", logged("entry", forged), &mut t);
+    // ann recovers: a new root, the paper key co-signing
+    let mut a3e = a2e.clone();
+    a3e.root = encode_public(&ann2.verifying_key());
+    a3e.recovered_from = vec![a2e.root.clone()];
+    a3e.version = 3;
+    put(
+        "node2",
+        logged("entry", sign_recovery(a3e.clone(), &ann2, &ann_p).unwrap()),
+        &mut t,
+    );
+    // without the paper key, a new root is refused
+    let mut a4e = a3e.clone();
+    a4e.root = encode_public(&eve.verifying_key());
+    a4e.recovered_from = vec![a2e.root.clone(), a3e.root.clone()];
+    a4e.version = 4;
+    put("node1", logged("entry", sign(a4e, &eve).unwrap()), &mut t);
+    // invites: the release key's lands, an expired one and another key's do not
+    let code = code_key("qrstu-vwxyz");
+    let inv = sign_invite(
+        Invite {
+            public_key: encode_public(&code.verifying_key()),
+            issued: 1_791_600_000,
+            expires: 1_792_000_000,
+        },
+        release,
+    )
+    .unwrap();
+    put("node1", logged("invite", &inv), &mut t);
+    put(
+        "node1",
+        logged(
+            "invite",
+            sign_invite(
+                Invite {
+                    public_key: "eA==".into(),
+                    issued: 1,
+                    expires: 2,
+                },
+                release,
+            )
+            .unwrap(),
+        ),
+        &mut t,
+    );
+    put(
+        "node2",
+        logged(
+            "invite",
+            sign_invite(
+                Invite {
+                    public_key: "eQ==".into(),
+                    issued: 1_791_600_000,
+                    expires: 1_792_000_000,
+                },
+                &eve,
+            )
+            .unwrap(),
+        ),
+        &mut t,
+    );
+    // dan joins by the invite; fin, another root, cannot use it again
+    let dan = key(40);
+    let mut de = ent("dan", &dan, &dan, &dan, &[], 1);
+    de.grant = Some(Grant {
+        invite: inv.clone(),
+        redeemed: 1_791_700_000,
+        proof: prove(&code, &inv.invite.public_key, &de.root, 1_791_700_000),
+    });
+    let d1 = logged("entry", sign(de, &dan).unwrap());
+    put("node1", d1.clone(), &mut t);
+    put("node1", ack(&d1), &mut t);
+    put("node2", ack(&d1), &mut t);
+    let fin = key(41);
+    let mut fe = ent("fin", &fin, &fin, &fin, &[], 1);
+    fe.grant = Some(Grant {
+        invite: inv.clone(),
+        redeemed: 1_791_700_000,
+        proof: prove(&code, &inv.invite.public_key, &fe.root, 1_791_700_000),
+    });
+    put("node2", logged("entry", sign(fe, &fin).unwrap()), &mut t);
+    // a library someone else holds is not gil's to claim
+    put(
+        "node1",
+        logged(
+            "entry",
+            sign(ent("gil", &gil, &gil, &gil, &[lib_a], 1), &gil).unwrap(),
+        ),
+        &mut t,
+    );
+    // a passkey root claims
+    let mut be = Entry {
+        name: "bea".into(),
+        root: pk.root(),
+        recovery: String::new(),
+        recovered_from: vec![],
+        devices: vec![],
+        passkeys: vec![pk.passkey()],
+        grant: None,
+        libraries: vec![],
+        terms: Some("2026-10-11".into()),
+        version: 1,
+        updated: 1_791_700_000,
+    };
+    be.updated += 1;
+    let bs = SignedEntry {
+        signature: pk.assert(&challenge(&be).unwrap()),
+        entry: be,
+        recovery_signature: None,
+    };
+    let bea1 = logged("entry", &bs);
+    put("node2", bea1.clone(), &mut t);
+    put("node1", ack(&bea1), &mut t);
+    put("node2", ack(&bea1), &mut t);
+    // ann leaves, in her new root's words; an older word and the old root's do not stand
+    let at = (t / 1000) as u64;
+    put(
+        "node1",
+        logged(
+            "leave",
+            sign_leave(
+                Leave {
+                    name: "ann".into(),
+                    root: a3e.root.clone(),
+                    at,
+                    back: false,
+                },
+                &ann2,
+            )
+            .unwrap(),
+        ),
+        &mut t,
+    );
+    put(
+        "node2",
+        logged(
+            "leave",
+            sign_leave(
+                Leave {
+                    name: "ann".into(),
+                    root: a3e.root.clone(),
+                    at: at - 10,
+                    back: false,
+                },
+                &ann2,
+            )
+            .unwrap(),
+        ),
+        &mut t,
+    );
+    put(
+        "node1",
+        logged(
+            "leave",
+            sign_leave(
+                Leave {
+                    name: "ann".into(),
+                    root: a2e.root.clone(),
+                    at,
+                    back: false,
+                },
+                &ann,
+            )
+            .unwrap(),
+        ),
+        &mut t,
+    );
+    // a leave for nobody, and a statement too old to be taken
+    put(
+        "node2",
+        logged(
+            "leave",
+            sign_leave(
+                Leave {
+                    name: "zed".into(),
+                    root: a3e.root.clone(),
+                    at,
+                    back: false,
+                },
+                &ann2,
+            )
+            .unwrap(),
+        ),
+        &mut t,
+    );
+    put(
+        "node2",
+        logged(
+            "leave",
+            sign_leave(
+                Leave {
+                    name: "dan".into(),
+                    root: encode_public(&dan.verifying_key()),
+                    at: 1_000,
+                    back: false,
+                },
+                &dan,
+            )
+            .unwrap(),
+        ),
+        &mut t,
+    );
+    // junk
+    put("node1", json!({"foo": 1}), &mut t);
+    put("node1", json!({"entry": {"entry": 1}}), &mut t);
+    json!({ "items": items, "next": items.len() })
+}
+
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+    fn string(&mut self) -> String {
+        const POOL: &[char] = &[
+            'a',
+            'z',
+            '0',
+            ' ',
+            '"',
+            '\\',
+            '/',
+            '<',
+            '>',
+            '&',
+            '\'',
+            '\u{0}',
+            '\u{1}',
+            '\u{8}',
+            '\t',
+            '\n',
+            '\u{b}',
+            '\u{c}',
+            '\r',
+            '\u{1f}',
+            '\u{7f}',
+            '\u{80}',
+            'é',
+            'ß',
+            '漢',
+            '\u{2028}',
+            '\u{2029}',
+            '\u{feff}',
+            '\u{fffd}',
+            '😀',
+            '\u{10ffff}',
+            '-',
+            '_',
+            '.',
+            ':',
+            '+',
+            '=',
+        ];
+        (0..self.below(12))
+            .map(|_| POOL[self.below(POOL.len() as u64) as usize])
+            .collect()
+    }
+    fn value(&mut self, depth: u32) -> serde_json::Value {
+        match if depth > 2 {
+            self.below(4)
+        } else {
+            self.below(6)
+        } {
+            0 => serde_json::Value::Null,
+            1 => json!(self.below(2) == 0),
+            2 => json!(self.string()),
+            3 => match self.below(3) {
+                0 => json!(self.next()),
+                1 => json!(-(self.below(1 << 40) as i64)),
+                _ => json!(self.below(1000)),
+            },
+            4 => serde_json::Value::Array(
+                (0..self.below(4)).map(|_| self.value(depth + 1)).collect(),
+            ),
+            _ => serde_json::Value::Object(
+                (0..self.below(4))
+                    .map(|_| (self.string(), self.value(depth + 1)))
+                    .collect(),
+            ),
+        }
+    }
+}
+
+fn random_entry(r: &mut Rng, i: usize) -> Entry {
+    let opt = |r: &mut Rng| r.below(2) == 0;
+    let n = |r: &mut Rng, k: u64| r.below(k);
+    let devices = (0..n(r, 3))
+        .map(|_| Device {
+            fingerprint: r.string(),
+            public_key: r.string(),
+            added: r.next(),
+        })
+        .collect();
+    let passkeys = (0..n(r, 3))
+        .map(|_| Passkey {
+            id: r.string(),
+            cred: r.value(0),
+            added: r.next(),
+            rp_id: opt(r).then(|| r.string()),
+            library_key: opt(r).then(|| r.string()),
+        })
+        .collect();
+    let libraries = (0..n(r, 3))
+        .map(|_| Library {
+            id: r.string(),
+            keys: (0..n(r, 3))
+                .map(|_| SealedKey {
+                    to: r.string(),
+                    sealed: r.string(),
+                })
+                .collect(),
+            readers: (0..n(r, 2))
+                .map(|_| Reader {
+                    name: r.string(),
+                    keys: (0..n(r, 2))
+                        .map(|_| SealedKey {
+                            to: r.string(),
+                            sealed: r.string(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            created: r.next(),
+        })
+        .collect();
+    let grant = opt(r).then(|| Grant {
+        invite: SignedInvite {
+            invite: Invite {
+                public_key: r.string(),
+                issued: r.next(),
+                expires: r.next(),
+            },
+            signer: r.string(),
+            signature: r.string(),
+        },
+        redeemed: r.next(),
+        proof: r.string(),
+    });
+    Entry {
+        name: format!("n{i}"),
+        root: r.string(),
+        recovery: r.string(),
+        recovered_from: (0..n(r, 3)).map(|_| r.string()).collect(),
+        devices,
+        passkeys,
+        grant,
+        libraries,
+        terms: opt(r).then(|| r.string()),
+        version: r.next(),
+        updated: r.next(),
+    }
 }
 
 /// the gate's item hash (servers/gate/src/directory.rs): sha256 of the
