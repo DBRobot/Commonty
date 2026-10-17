@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -220,4 +221,101 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// Every random entry Rust wrote, read from the log's form and rebuilt to
+// exactly Rust's bytes
+func TestRandomEntriesRebuildByteForByte(t *testing.T) {
+	raw, _ := os.ReadFile("testdata/vectors.json")
+	var v struct {
+		Random []struct {
+			Logged    json.RawMessage `json:"logged"`
+			Canonical string          `json:"canonical"`
+		} `json:"random"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Random) < 100 {
+		t.Fatalf("only %d random entries", len(v.Random))
+	}
+	for i, r := range v.Random {
+		var item struct {
+			Entry json.RawMessage `json:"entry"`
+		}
+		if err := json.Unmarshal(r.Logged, &item); err != nil {
+			t.Fatal(err)
+		}
+		s, err := FromV1(item.Entry)
+		if err != nil {
+			t.Fatalf("%d: %v", i, err)
+		}
+		got, err := s.Entry.Canonical()
+		if err != nil {
+			t.Fatalf("%d: %v", i, err)
+		}
+		if string(got) != string(unb64(t, r.Canonical)) {
+			t.Fatalf("%d: differ\n got %q\nwant %q", i, got, unb64(t, r.Canonical))
+		}
+	}
+}
+
+// An item that says more, or other, than what is signed in it is refused
+func TestAnItemSayingMoreThanItsSignatureIsRefused(t *testing.T) {
+	v := load(t)
+	var item struct {
+		Entry json.RawMessage `json:"entry"`
+	}
+	if err := json.Unmarshal(v.V1.Entries[0].Logged, &item); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FromV1(item.Entry); err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(item.Entry, &m)
+	cases := map[string]func() []byte{
+		"an extra field": func() []byte {
+			e := m["entry"].(map[string]any)
+			e["admin"] = true
+			defer delete(e, "admin")
+			b, _ := json.Marshal(m)
+			return b
+		},
+		"a key in another case": func() []byte {
+			e := m["entry"].(map[string]any)
+			e["NAME"] = e["name"]
+			delete(e, "name")
+			defer func() { e["name"] = e["NAME"]; delete(e, "NAME") }()
+			b, _ := json.Marshal(m)
+			return b
+		},
+		"null for a field left out": func() []byte {
+			e := m["entry"].(map[string]any)
+			e["grant"] = nil
+			defer delete(e, "grant")
+			b, _ := json.Marshal(m)
+			return b
+		},
+		"a key twice": func() []byte {
+			b, _ := json.Marshal(m)
+			return []byte(strings.Replace(string(b), `"signature":`, `"signature":"x","signature":`, 1))
+		},
+		"a float": func() []byte {
+			b, _ := json.Marshal(m)
+			return []byte(strings.Replace(string(b), `"version":1`, `"version":1.0`, 1))
+		},
+	}
+	for what, make := range cases {
+		if _, err := FromV1(make()); err == nil {
+			t.Errorf("%s was taken", what)
+		}
+	}
+	// and at the top: an item kind in another case is no item
+	s := New()
+	upper := []byte(strings.Replace(string(v.V1.Entries[0].Logged), `"entry":`, `"ENTRY":`, 1))
+	s.Judge(&Config{}, []string{"node1"}, "node1", upper, 1)
+	if o := s.Outcomes[ItemHash(upper)]; o == "ok" || o == "" {
+		t.Fatalf("an item kind in another case: %q", o)
+	}
 }
