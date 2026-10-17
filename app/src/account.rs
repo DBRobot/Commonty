@@ -63,7 +63,7 @@ fn gate_base() -> String {
 }
 
 #[tauri::command]
-pub async fn status(keys: State<'_, Keys>) -> Result<Status, String> {
+pub async fn status(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<Status, String> {
     let (kp, _fresh) = auth::device::load_or_create(&keys.0).map_err(|e| e.to_string())?;
     let fingerprint = identity::fingerprint(&auth::device::public_b64(&kp));
     let name = keys
@@ -88,6 +88,19 @@ pub async fn status(keys: State<'_, Keys>) -> Result<Status, String> {
         .devices
         .iter()
         .any(|d| d.fingerprint == fingerprint);
+    if st.admitted {
+        // once, in the background: the account's entry signed again in the
+        // format the boxes are moving to (docs/dev/identity-state.md). It
+        // does nothing until a box takes it, nothing a second time, and
+        // nothing on a device without the account's root
+        tauri::async_runtime::spawn(async move {
+            use tauri::Manager as _;
+            let keys = app.state::<Keys>();
+            if let Err(e) = ::account::resign_v2(&keys.0, &dirs(), &name).await {
+                eprintln!("re-signing the account's entry: {e:#}");
+            }
+        });
+    }
     Ok(st)
 }
 

@@ -4,7 +4,7 @@
 // names from a file only your library key opens, which the box keeps
 // without being able to read it.
 
-import init, { file_seal, file_open, entry_without, entry_signed, entry_with_device, qr_svg } from '/_dd/web/dd_web.js';
+import init, { file_seal, file_open, entry_without, entry_signed, entry_with_device, entry_resign, entry_envelope, qr_svg } from '/_dd/web/dd_web.js';
 import { unlock } from './library.js';
 import { requestOptions, assertion, post, b64u, u8b64 } from './webauthn.js';
 import { me, inApp, servedByApp, appFetch, pageConfig, entryOf, forgetEntry } from './shell.js';
@@ -43,6 +43,27 @@ let entry = null;
 let signins = null;
 let lib = null; // the library, once the app has handed its key
 let names = null; // { key: name }, once opened
+
+// The passkey's answer to a plan (entry_without, entry_with_device,
+// entry_resign), in the form this box takes: a v2 envelope when its config
+// says `envelope: 2`, today's signed entry otherwise. One passkey prompt.
+async function signPlan(plan, cfg, rootId) {
+  const v2 = cfg.envelope === 2;
+  const a = await navigator.credentials.get({
+    publicKey: {
+      challenge: b64u(v2 ? plan.challenge_v2 : plan.challenge),
+      rpId: cfg.rpId,
+      allowCredentials: [{ type: 'public-key', id: b64u(rootId) }],
+      userVerification: 'preferred',
+    },
+  });
+  const answer = JSON.stringify({
+    authenticatorData: u8b64(a.response.authenticatorData),
+    clientDataJSON: u8b64(a.response.clientDataJSON),
+    signature: u8b64(a.response.signature),
+  });
+  return v2 ? entry_envelope(plan.body, answer) : entry_signed(JSON.stringify(plan.entry), answer);
+}
 
 // again after a change: the entry is read fresh, not as the page first had it
 async function load(changed = true) {
@@ -176,7 +197,42 @@ function render() {
   $('dv-keys').replaceChildren(...keys().map((k) => keyRow(k, k.passkey ? ++p : ++d)));
   $('dv-show').hidden = names !== null;
   $('dv-hint').hidden = names !== null;
+  drawConfirm();
 }
+
+// The move to v2 envelopes (docs/dev/identity-state.md): an account whose
+// main key is a passkey confirms its entry once, here, when its box takes
+// v2 and the entry it holds is still signed the old way (`signature`, no
+// `v`). A device-key account is signed again by the app on its own.
+async function drawConfirm() {
+  const box = $('dv-confirm');
+  const old = entry && entry.signature !== undefined && entry.v === undefined;
+  const passkeyRoot = entry && entry.entry && entry.entry.root.startsWith('webauthn:');
+  if (!old || !passkeyRoot || servedByApp) { box.hidden = true; return; }
+  const cfg = await pageConfig();
+  box.hidden = cfg.envelope !== 2;
+}
+
+$('dv-confirm-go').onclick = async () => {
+  const msg = $('dv-confirm-msg');
+  $('dv-confirm-go').disabled = true;
+  msg.hidden = true;
+  try {
+    await init();
+    const plan = JSON.parse(entry_resign(JSON.stringify(entry), BigInt(Math.floor(Date.now() / 1000))));
+    const cfg = await pageConfig();
+    const signed = await signPlan(plan, cfg, entry.entry.root.split(':')[1]);
+    const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });
+    if (!r.ok) throw new Error(await r.text() || `the box said ${r.status}`);
+    await load();
+    render();
+  } catch (err) {
+    msg.textContent = err.name === 'NotAllowedError' ? 'Your passkey was not used. Nothing changed.' : String(err.message || err);
+    msg.hidden = false;
+  } finally {
+    $('dv-confirm-go').disabled = false;
+  }
+};
 
 // The names: a file only the library key opens, kept by the box as bytes.
 async function openNames() {
@@ -271,19 +327,7 @@ function remove(k, label) {
       const plan = JSON.parse(entry_without(JSON.stringify(entry), k.passkey ? undefined : k.fingerprint, k.passkey || undefined, BigInt(Math.floor(Date.now() / 1000))));
       const cfg = await pageConfig();
       const rootId = e.root.split(':')[1];
-      const a = await navigator.credentials.get({
-        publicKey: {
-          challenge: b64u(plan.challenge),
-          rpId: cfg.rpId,
-          allowCredentials: [{ type: 'public-key', id: b64u(rootId) }],
-          userVerification: 'preferred',
-        },
-      });
-      const signed = entry_signed(JSON.stringify(plan.entry), JSON.stringify({
-        authenticatorData: u8b64(a.response.authenticatorData),
-        clientDataJSON: u8b64(a.response.clientDataJSON),
-        signature: u8b64(a.response.signature),
-      }));
+      const signed = await signPlan(plan, cfg, rootId);
       const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });
       if (!r.ok) throw new Error(await r.text() || `the box said ${r.status}`);
       endMailElsewhere();
@@ -401,19 +445,7 @@ async function addApprove() {
       // key goes with it (an account like this keeps none in its entry)
       const plan = JSON.parse(entry_with_device(JSON.stringify(entry), pk, BigInt(Math.floor(Date.now() / 1000))));
       const cfg = await pageConfig();
-      const a = await navigator.credentials.get({
-        publicKey: {
-          challenge: b64u(plan.challenge),
-          rpId: cfg.rpId,
-          allowCredentials: [{ type: 'public-key', id: b64u(entry.entry.root.split(':')[1]) }],
-          userVerification: 'preferred',
-        },
-      });
-      const signed = entry_signed(JSON.stringify(plan.entry), JSON.stringify({
-        authenticatorData: u8b64(a.response.authenticatorData),
-        clientDataJSON: u8b64(a.response.clientDataJSON),
-        signature: u8b64(a.response.signature),
-      }));
+      const signed = await signPlan(plan, cfg, entry.entry.root.split(':')[1]);
       const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });
       if (!r.ok) throw new Error(await r.text() || `the box said ${r.status}`);
     }
