@@ -175,6 +175,26 @@ async function jobsOf(r, run, fresh = false) {
     const ended = s.status !== 'pending' ? s.created_at : null;
     jobs.set(name, { index: Number(m[2]), name, leaf: name.split(' / ').pop(), state, description: s.description, started, ended });
   }
+  // and where each job ended, from the forge's latest status for each: its
+  // list of every status pages unsteadily (run 698's pages skipped the one
+  // that said its home-controller test passed, and the job read cancelled)
+  if (DONE.includes(run.status)) {
+    for (let page = 1; page <= 4; page++) {
+      const c = await api(`/repos/${r.full_name}/commits/${run.commit_sha}/status${q({ page, limit: 50 })}`, { fresh }).catch(() => null);
+      const latest = c?.statuses || [];
+      for (const s of latest) {
+        const m = (s.target_url || '').match(/\/actions\/runs\/(\d+)\/jobs\/(\d+)/);
+        if (!m || Number(m[1]) !== run.index_in_repo || s.status === 'pending') continue;
+        const name = s.context.replace(/ \((pull_request|push|schedule|workflow_dispatch)\)$/, '');
+        const j = jobs.get(name);
+        if (!j) continue;
+        j.state = /been skipped/i.test(s.description || '') ? 'skipped' : s.status;
+        j.description = s.description;
+        j.ended = s.created_at;
+      }
+      if (latest.length < 50) break;
+    }
+  }
   // a run that has stopped leaves nothing running: what never said it
   // finished was cancelled with it
   if (DONE.includes(run.status)) {
