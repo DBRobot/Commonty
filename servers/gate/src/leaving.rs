@@ -759,7 +759,7 @@ pub(crate) async fn start(
     if q.back {
         return (StatusCode::CONFLICT, NO_COMING_BACK).into_response();
     }
-    if app.directory.leaving.has_left(&user) {
+    if app.directory.has_left(&user) {
         return (StatusCode::CONFLICT, "you have left already").into_response();
     }
     // anyone may leave - a member, a guest, an account still waiting - but
