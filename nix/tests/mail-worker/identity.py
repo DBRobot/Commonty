@@ -3,7 +3,7 @@
 # (judges, reads, says where they differ, goes by its own) and one in agreed
 # (goes by the agreed state alone), against fake.py's /identity. Run by
 # mail-worker.nix after flow.py.
-import json, sys, urllib.error, urllib.request
+import json, sys, time, urllib.error, urllib.request
 
 F = "http://127.0.0.1:8899"
 SHADOW, AGREED = "http://localhost:8791", "http://localhost:8790"
@@ -55,11 +55,19 @@ def sign(c):
     )[1]
 
 
-def said(what):
-    with open(shadow_log) as f:
-        return any(
-            "identity-shadow" in l and f'"{what}"' in l and '"tester"' in l for l in f
-        )
+def said(what, wait=8):
+    # wrangler writes the Worker's log a moment after the request is answered
+    end = time.time() + wait
+    while True:
+        with open(shadow_log) as f:
+            if any(
+                "identity-shadow" in l and f'"{what}"' in l and '"tester"' in l
+                for l in f
+            ):
+                return True
+        if time.time() > end:
+            return False
+        time.sleep(0.5)
 
 
 # shadow: the two agree (the agreed entry the directory's own, as flow.py
@@ -67,7 +75,7 @@ def said(what):
 agreed(status="member", entry="dir", left=0)
 s, c = challenge(SHADOW)
 ok(s == 200 and c.get("allow"), "shadow: a member signs in as before")
-ok(not said("member"), "shadow: the agreed state agrees, nothing said")
+ok(not said("member", wait=2), "shadow: the agreed state agrees, nothing said")
 # the agreed state says otherwise: still its own word, and the difference said
 agreed(status="none")
 s, c = challenge(SHADOW)
