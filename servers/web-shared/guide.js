@@ -240,8 +240,13 @@ function match(q, kinds) {
     .filter((x) => x.s >= 0.9)
     .sort((a, b) => b.s - a.s)
     .slice(0, GO)
-    .map((x) => x.n);
+    .map((x) => { fits.set(x.n, x.s); return x.n; });
 }
+// how well each place last matched, for clearWinner
+const fits = new WeakMap();
+
+/// the one place that fits clearly better than the rest, if one does
+const clearWinner = (hits) => (hits.length === 1 || fits.get(hits[0]) >= (fits.get(hits[1]) || 0) * 1.25 ? hits[0] : null);
 
 // what is asked for that is not a place: a tour, a bug, the services, the news
 const TOUR = /\b(show me around|give me a tour|a tour|tour of|walk me through|show me how this page works)\b/i;
@@ -257,7 +262,7 @@ const RUNS = (q) => !NAV.test(q) && /\b(ci|runs?|builds?|pipelines?|workflows?|a
 const WHY = /\bwhy\b.{0,60}\b(fail\w*|red|broke\w*|break\w*|error\w*)\b|\bwhat (went|is|was) wrong\b/i;
 const PRS = (q) => !NAV.test(q) && /\b(prs?|pull requests?|reviews?)\b/i.test(q) && /\b(waiting|review|me|my|mine|open|need|any)\b/i.test(q);
 const BOX = (q) => !/\bgames?\b/i.test(q) && /\b(my )?(box|boxes|node ?\d+|servers?)\b/i.test(q)
-  && /\b(ok|okay|alright|all right|fine|healthy|up|down|online|offline|working|backed up|backups?|updated?|status|how (is|are))\b/i.test(q);
+  && /\b(ok|okay|alright|all right|fine|healthy|up|down|online|offline|working|backed up|backups?|updated?|status|state|issues?|problems?|wrong|errors?|how (is|are))\b/i.test(q);
 const SPACE = (q) => /\b(how much|space|storage|allowance|quota|room)\b/i.test(q) && (isQuestion(q) || /\bhow much\b/i.test(q)) && !NAV.test(q);
 const HERE = /\b(what can i do here|what('?s| is) (this|on this) page|what does this page do|where am i|how does this page work|help (me )?(with|on) this page|what is this)\b/i;
 const FAVOURITE = /\b(favou?rite|best|preferred)\b.{0,30}\b(language|lang)\b|\bwhat (programming |coding )?language do you (like|love|prefer|use)\b/i;
@@ -833,9 +838,10 @@ function build(opts) {
       if (!t.where || find(t.target)) go(t.id);
       return;
     }
-    if (hits.length === 1 && auto.checked) {
-      say({ who: 'it', text: `Took you to ${pathOf(hits[0])}.`, how });
-      go(hits[0].id);
+    const best = clearWinner(hits);
+    if (best && auto.checked) {
+      say({ who: 'it', text: `Took you to ${pathOf(best)}.`, ids: hits.slice(1).map((n) => n.id), how });
+      go(best.id);
       return;
     }
     say({ who: 'it', text: hits.length > 1 ? 'A few places:' : 'Here:', ids: hits.map((n) => n.id), how });

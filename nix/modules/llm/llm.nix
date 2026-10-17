@@ -97,6 +97,12 @@ in
         add_header Access-Control-Allow-Origin $dd_model_cors always;
         add_header Access-Control-Allow-Credentials true always;
         add_header Vary Origin always;
+        # llama-swap echoes any Origin back; with ours that is the header
+        # twice, which a browser refuses outright. The allow-list above is the only say
+        proxy_hide_header Access-Control-Allow-Origin;
+        proxy_hide_header Access-Control-Allow-Credentials;
+        proxy_hide_header Access-Control-Allow-Methods;
+        proxy_hide_header Access-Control-Allow-Headers;
         auth_request /_dd/verify;
         # the caller's own bearer never reaches llama-server: it is replaced
         # by the one llama-server was started with
