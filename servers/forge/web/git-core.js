@@ -309,6 +309,16 @@ export function watch(repoId, until, on) {
   let timer = null;
   const got = [];
   const stop = () => { src.close(); clearTimeout(timer); };
+  // the stream drops when the forge or the gate restarts (a release does
+  // both), and what changed meanwhile is never sent: on coming back, ask
+  // again as if everything had changed
+  let lost = false;
+  src.onerror = () => { lost = true; };
+  src.onopen = () => {
+    if (!lost) return;
+    lost = false;
+    if (until()) on([{ kind: 'reconnect' }]); else stop();
+  };
   src.onmessage = (e) => {
     if (!until()) { stop(); return; }
     try { got.push(JSON.parse(e.data)); } catch { return; }

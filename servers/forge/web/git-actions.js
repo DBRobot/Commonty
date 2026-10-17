@@ -117,7 +117,7 @@ route(/^\/([^/]+)\/([^/]+)\/actions$/, async ({ m, params, current }) => {
     } catch { /* the next change asks again */ }
   }
   watch(r.id, () => current() && list.isConnected, (changes) => {
-    if (changes.some((c) => c.kind === 'run' || c.kind === 'job')) refresh();
+    if (changes.some((c) => c.kind === 'reconnect' || c.kind === 'run' || c.kind === 'job')) refresh();
   });
 });
 
@@ -503,6 +503,13 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
 
   let timer = null;
   const alive = () => current() && pane.isConnected;
+  // and while the run is live, asked every 15 s whatever the stream says: a
+  // stream that died quietly left a finished run counting up for half an hour
+  const poll = () => setTimeout(async () => {
+    if (!alive() || DONE.includes(run.status)) return;
+    await refresh();
+    poll();
+  }, 15000);
   if (view === 'graph') {
     // drawn once; as its jobs move (watch, below) each card is drawn again in place
     const dag = g ? drawGraph(r, run, g, jobs) : null;
@@ -519,8 +526,9 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
       } catch { /* the next change asks again */ }
     };
     watch(r.id, alive, (changes) => {
-      if (changes.some((c) => c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) refresh();
+      if (changes.some((c) => c.kind === 'reconnect' || c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) refresh();
     });
+    poll();
     return;
   }
 
@@ -550,8 +558,9 @@ route(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)(?:\/jobs\/(\d+))?$/, async ({ m
     } catch { /* the next change asks again */ }
   };
   watch(r.id, alive, (changes) => {
-    if (changes.some((c) => c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) refresh();
+    if (changes.some((c) => c.kind === 'reconnect' || c.run === run.id || (c.kind === 'status' && c.sha === run.commit_sha))) refresh();
   });
+  poll();
   // the latest attempt: each one the forge has a log for, asked all at once
   const tries = await Promise.all([2, 3, 4, 5].map((n) => fetch(`/${r.full_name}/actions/runs/${index}/jobs/${job}/attempt/${n}/logs`, { method: 'HEAD', credentials: 'same-origin' }).then((x) => x.ok).catch(() => false)));
   if (!alive()) return;
