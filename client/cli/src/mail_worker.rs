@@ -104,19 +104,29 @@ fn bundle(root: &Path, r#ref: &str) -> Result<std::path::PathBuf> {
 fn kind(name: &str) -> &'static str {
     match name {
         "worker.js" | "dd_mail.js" | "fleet.js" | "unlock.js" | "leaving.js" | "send.js"
-        | "aliases.js" => "application/javascript+module",
+        | "aliases.js" | "identity.js" => "application/javascript+module",
         n if n.ends_with(".wasm") => "application/wasm",
         n if n.ends_with(".woff2") => "application/octet-stream",
         _ => "text/plain",
     }
 }
 
-async fn upload(http: &reqwest::Client, token: &str, s: &Setup, dir: &Path) -> Result<usize> {
-    let metadata = serde_json::json!({
+async fn upload(
+    http: &reqwest::Client,
+    token: &str,
+    s: &Setup,
+    dir: &Path,
+    control: Option<&str>,
+    identity: &str,
+) -> Result<usize> {
+    let mut metadata = serde_json::json!({
         "main_module": "worker.js",
         "compatibility_date": COMPATIBILITY,
         "bindings": [
             { "type": "plain_text", "name": "DOMAIN", "text": s.domain },
+            // who is a member: judged here, or read from the control plane's
+            // agreed state (identity.js, dns_worker::identity_from)
+            { "type": "plain_text", "name": "IDENTITY_FROM", "text": identity },
             // its own name: the zone's catch-all sends members' aliases here
             { "type": "plain_text", "name": "WORKER", "text": s.script },
             { "type": "kv_namespace", "name": "PINNED", "namespace_id": s.kv },
@@ -134,6 +144,18 @@ async fn upload(http: &reqwest::Client, token: &str, s: &Setup, dir: &Path) -> R
         // CF_TOKEN and SESSION_KEY were set once and are kept
         "keep_bindings": ["secret_text"],
     });
+    // the control relay, whose witness has the agreed state (/identity)
+    if let Some(script) = control {
+        metadata["bindings"]
+            .as_array_mut()
+            .expect("bindings")
+            .push(serde_json::json!({
+                "type": "durable_object_namespace",
+                "name": "CONTROL",
+                "class_name": "Relay",
+                "script_name": script,
+            }));
+    }
     let mut form = reqwest::multipart::Form::new().part(
         "metadata",
         reqwest::multipart::Part::text(metadata.to_string()).mime_str("application/json")?,
@@ -218,7 +240,17 @@ pub async fn deploy(root: &Path, keys: &impl auth::KeyStore, r#ref: &str) -> Res
     };
     let dir = bundle(root, r#ref)?;
     let token = token(keys)?;
-    let n = upload(&reqwest::Client::new(), &token, &s, &dir).await?;
+    let control = crate::dns_worker::control_script(root)?;
+    let identity = crate::dns_worker::identity_from(root, control.as_deref())?;
+    let n = upload(
+        &reqwest::Client::new(),
+        &token,
+        &s,
+        &dir,
+        control.as_deref(),
+        &identity,
+    )
+    .await?;
     eprintln!("== the mail Worker is {} ({n} files)", dir.display());
     Ok(())
 }
@@ -298,7 +330,9 @@ pub async fn setup(
     eprintln!("== wrote fleet/mail.json");
 
     let dir = bundle(root, r#ref)?;
-    upload(&http, &token, &s, &dir).await?;
+    let control = crate::dns_worker::control_script(root)?;
+    let identity = crate::dns_worker::identity_from(root, control.as_deref())?;
+    upload(&http, &token, &s, &dir, control.as_deref(), &identity).await?;
     eprintln!("== uploaded the Worker");
 
     let secret = |name: &str, text: String| serde_json::json!({ "name": name, "text": text, "type": "secret_text" });
