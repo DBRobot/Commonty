@@ -673,6 +673,34 @@ pub fn challenge(entry: &Entry) -> Result<Vec<u8>> {
     Ok(h.finalize().to_vec())
 }
 
+/// A passkey's signature over a v2 envelope (envelope.rs): `root` is the
+/// `webauthn:` root that signs, `trusted` the passkeys already on file (for a
+/// first claim, the entry's own, as `accept` takes them), and `challenge`
+/// `envelope::passkey_challenge` of the envelope. The same checks as an
+/// entry's v1 signature: the root names a key on file, and the assertion is
+/// over this challenge.
+pub fn check_envelope_assertion(
+    root: &str,
+    trusted: &[Passkey],
+    sig_b64: &str,
+    challenge: &[u8],
+) -> Result<()> {
+    let (id, digest) = root_parts(root)
+        .ok_or_else(|| Error::Key("a passkey root must commit to its key".into()))?;
+    let passkey = trusted
+        .iter()
+        .find(|p| p.id == id)
+        .ok_or_else(|| Error::Key("the root names a passkey not on file".into()))?;
+    if cose_digest(&passkey.cred) != digest {
+        return Err(Error::Key(
+            "the root does not name this passkey's key".into(),
+        ));
+    }
+    let a: Assertion = serde_json::from_slice(&B64.decode(sig_b64).map_err(|_| Error::Signature)?)
+        .map_err(|_| Error::Signature)?;
+    assertion_over(passkey, &a, challenge)
+}
+
 fn check_assertion(sig_b64: &str, entry: &Entry) -> Result<()> {
     check_assertion_with(sig_b64, entry, &entry.passkeys)
 }

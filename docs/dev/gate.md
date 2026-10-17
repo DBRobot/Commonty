@@ -550,8 +550,17 @@ signed item once and the gate reads the result. `VERIFY_IDENTITY_FROM`
 **v2 envelopes.** Where the control plane judges (shadow or agreed, on the
 agreed log), `/_dd/config` says `"envelope": 2`, and `PUT
 /_dd/directory/<name>` and `PUT /_dd/leaving/<name>` take a v2 envelope as
-well as a v1 item: checked only to be one, of the path's kind and for the
-path's name, then submitted to the control plane as the bytes it came in,
+well as a v1 item. Before it goes on, the gate checks what it would of a
+v1 item - not judging it, which is the control plane's: at most 64 KiB; of
+the path's kind and for the path's name; signed by the key that speaks for
+that name now (the root on file; a changed root also by the recovery key
+on file; a name nobody holds, by the root it names, with the terms agreed,
+as a v1 sign-up; a leaving, by the root on file - `identity::envelope` and
+`identity::check_envelope_assertion` for a passkey); not sent already (the
+same bytes twice answer 409); and within its own allowance - 6 a minute
+for one name and 20 from one source (nginx's X-Real-IP), each counted
+apart, so a flood spends only its own and never the log's shared budget.
+Then it is submitted to the control plane as the bytes it came in,
 answered `202 {"submitted": true, "item": <sha256 of those bytes>}`. A box
 that still replays answers 400 to an envelope.
 

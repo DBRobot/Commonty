@@ -675,18 +675,30 @@ async fn statement(
 
 #[cfg(test)]
 pub(crate) async fn put_for_test(c: Arc<Ctx>, name: &str, body: Vec<u8>) -> Response {
-    put(State(c), Path(name.to_string()), body.into()).await
+    put(
+        State(c),
+        Path(name.to_string()),
+        Default::default(),
+        body.into(),
+    )
+    .await
 }
 
 /// PUT /_dd/leaving/{name}: a statement `dd leave` signed with a device root
 async fn put(
     State(c): State<Arc<Ctx>>,
     Path(name): Path<String>,
+    headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
+    // nothing bigger than the control plane takes, read or not
+    if body.len() > crate::directory::ENVELOPE_MAX {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "too big").into_response();
+    }
     // a v2 envelope goes to the control plane as it came (ident.rs)
     if crate::ident::Envelope::is_one(&body) {
-        return match c.d.submit_envelope("leave", &name, &body).await {
+        let source = crate::directory::source_of(&headers);
+        return match c.d.submit_envelope("leave", &name, &source, &body).await {
             Ok(hash) => (
                 StatusCode::ACCEPTED,
                 axum::Json(serde_json::json!({ "submitted": true, "item": hash })),
