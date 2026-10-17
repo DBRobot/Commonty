@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -221,9 +220,10 @@ func (b *w) any(v any) error {
 	return nil
 }
 
-// number as serde_json reads and writes it: an integer that fits stays as
-// written; anything else becomes an f64 and is written the shortest way that
-// reads back, with a ".0" when it is whole
+// number as serde_json writes an integer it read: as written. Anything
+// else (a fraction, an exponent, past 64 bits) is refused: rebuilding
+// serde_json's float formatting exactly is not worth the risk, and nothing a
+// person signs carries one. Stricter than the gate, never looser.
 func number(n json.Number) (string, error) {
 	s := string(n)
 	if !strings.ContainsAny(s, ".eE") {
@@ -234,15 +234,7 @@ func number(n json.Number) (string, error) {
 			return s, nil
 		}
 	}
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil || math.IsInf(f, 0) || math.IsNaN(f) {
-		return "", errors.New("a number serde_json would not read")
-	}
-	out := strconv.FormatFloat(f, 'g', -1, 64)
-	if !strings.ContainsAny(out, ".e") {
-		out += ".0"
-	}
-	return out, nil
+	return "", errors.New("a number that is not a 64-bit integer")
 }
 
 // Canonical is identity::canonical: the bytes an entry's v1 signature is over
@@ -492,4 +484,127 @@ func ItemHash(raw json.RawMessage) string {
 	}
 	h := sha256.Sum256(b)
 	return hexs(h[:])
+}
+
+// noDuplicates refuses JSON with a key twice in one object, at any depth:
+// serde refuses a struct's field twice, and Go's decoder would quietly take
+// the last, so the two would read one item two ways
+func noDuplicates(raw []byte) error {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	type frame struct {
+		obj  bool
+		keys map[string]bool
+		key  bool // next token in an object is a key
+	}
+	var st []*frame
+	for {
+		t, err := d.Token()
+		if err != nil {
+			if err.Error() == "EOF" {
+				return nil
+			}
+			return err
+		}
+		var top *frame
+		if len(st) > 0 {
+			top = st[len(st)-1]
+		}
+		if top != nil && top.obj && top.key {
+			k, ok := t.(string)
+			if !ok {
+				if dl, ok := t.(json.Delim); ok && dl == '}' {
+					st = st[:len(st)-1]
+					if len(st) > 0 {
+						st[len(st)-1].key = st[len(st)-1].obj
+					}
+					continue
+				}
+				return errors.New("a key that is not a string")
+			}
+			if top.keys[k] {
+				return fmt.Errorf("the key %q twice", k)
+			}
+			top.keys[k] = true
+			top.key = false
+			continue
+		}
+		switch dl := t.(type) {
+		case json.Delim:
+			switch dl {
+			case '{':
+				st = append(st, &frame{obj: true, keys: map[string]bool{}, key: true})
+				continue
+			case '[':
+				st = append(st, &frame{})
+				continue
+			case '}', ']':
+				st = st[:len(st)-1]
+			}
+		}
+		// a value finished: an object's next token is a key again
+		if len(st) > 0 && st[len(st)-1].obj {
+			st[len(st)-1].key = true
+		}
+	}
+}
+
+// sameAs holds a parsed item to the JSON it was read from: what the rules
+// judge (rebuilt) must be exactly what the item says (raw), as values -
+// nothing the struct does not know, no key in another case, no null where
+// the signer leaves a field out. Otherwise a signature could pass over
+// bytes that say one thing while the item read says another.
+func sameAs(raw, rebuilt []byte) error {
+	if err := noDuplicates(raw); err != nil {
+		return fmt.Errorf("not an item: %w", err)
+	}
+	a, err := CanonicalValue(raw)
+	if err != nil {
+		return fmt.Errorf("not an item: %w", err)
+	}
+	b, err := CanonicalValue(rebuilt)
+	if err != nil {
+		return fmt.Errorf("not an item: %w", err)
+	}
+	if !bytes.Equal(a, b) {
+		return errors.New("not an item: it says more, or other, than what is signed in it")
+	}
+	return nil
+}
+
+// signedEntryBytes: a SignedEntry as serde writes it
+func (s *Signed) v1Bytes() ([]byte, error) {
+	c, err := s.Entry.Canonical()
+	if err != nil {
+		return nil, err
+	}
+	var b w
+	b.WriteString(`{"entry":`)
+	b.Write(c)
+	b.WriteString(`,"signature":`)
+	b.str(s.Sig)
+	if s.RecoverySig != nil {
+		b.WriteString(`,"recovery_signature":`)
+		b.str(*s.RecoverySig)
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
+}
+
+// leaveItemBytes: a SignedLeave as serde writes it
+func (s *SignedLeave) bytes() []byte {
+	var b w
+	b.WriteString(`{"leave":`)
+	b.Write(s.Leave.Bytes())
+	b.WriteString(`,"signature":`)
+	b.str(s.Signature)
+	b.WriteByte('}')
+	return b.Bytes()
+}
+
+// inviteItemBytes: a SignedInvite as serde writes it
+func (s *SignedInvite) bytes() []byte {
+	var b w
+	b.signedInvite(s)
+	return b.Bytes()
 }

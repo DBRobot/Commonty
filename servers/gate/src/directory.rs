@@ -1818,6 +1818,91 @@ mod tests {
         (hash, ack)
     }
 
+    /// The shadow check (docs/dev/identity-state.md): a log fetched from a
+    /// box (`GET /directory?since=0`), replayed through these rules, and
+    /// what they decided written out for the control plane's judge to be
+    /// held to. SHADOW_LOG, SHADOW_OUT, SHADOW_RELEASE (base64 key),
+    /// SHADOW_VOTERS (comma separated). Without SHADOW_LOG it does nothing.
+    #[test]
+    fn shadow_dump() {
+        let Ok(log) = std::env::var("SHADOW_LOG") else {
+            return;
+        };
+        let page: serde_json::Value = serde_json::from_slice(&std::fs::read(log).unwrap()).unwrap();
+        let release = std::env::var("SHADOW_RELEASE")
+            .ok()
+            .map(|k| identity::decode_public(&k).unwrap());
+        let voters: Vec<String> = std::env::var("SHADOW_VOTERS")
+            .unwrap_or_else(|_| "node1,node2".into())
+            .split(',')
+            .map(str::to_string)
+            .collect();
+        let dir = scratch("shadow");
+        let d = Directory::open(dir.join("directory"), release)
+            .unwrap()
+            .agreed(
+                "http://127.0.0.1:1".into(),
+                dir.join("submit.sock"),
+                voters,
+                "shadow".into(),
+            )
+            .unwrap();
+        let mut hashes = vec![];
+        {
+            let a = d.agreed.as_ref().unwrap();
+            let mut r = a.replay.lock().unwrap();
+            for it in page["items"].as_array().unwrap() {
+                let at = (it["time"].as_i64().unwrap() / 1000).max(0) as u64;
+                let v = it["item"].clone();
+                hashes.push(item_hash(&v));
+                d.replay_one(&mut r, it["box"].as_str().unwrap(), v, at);
+                r.next += 1;
+            }
+        }
+        let a = d.agreed.as_ref().unwrap();
+        let r = a.replay.lock().unwrap();
+        let mut entries = serde_json::Map::new();
+        for l in d.list().unwrap() {
+            let e = d.entry(&l.name).unwrap().unwrap().entry;
+            entries.insert(
+                l.name.clone(),
+                serde_json::json!({
+                    "root": e.root, "version": e.version, "recovered_from": e.recovered_from,
+                    "devices": e.devices.iter().map(|x| &x.public_key).collect::<Vec<_>>(),
+                    "passkeys": e.passkeys.iter().map(|x| &x.id).collect::<Vec<_>>(),
+                    "libraries": e.libraries.iter().map(|x| &x.id).collect::<Vec<_>>(),
+                    "grant": e.grant.is_some(),
+                    "handovers": d.handovers(&l.name).len(),
+                }),
+            );
+        }
+        let said: serde_json::Map<String, serde_json::Value> = d
+            .leaving
+            .said_names()
+            .into_iter()
+            .filter_map(|n| {
+                let s = d.leaving.said(&n)?;
+                Some((n, serde_json::json!({"at": s.statement.leave.at, "back": s.statement.leave.back, "agreed": s.agreed})))
+            })
+            .collect();
+        let outcomes: serde_json::Map<String, serde_json::Value> = hashes
+            .iter()
+            .filter_map(|h| Some((h.clone(), serde_json::json!(r.outcome.get(h)?.is_ok()))))
+            .collect();
+        let out = serde_json::json!({
+            "entries": entries,
+            "pending": r.pending.iter().map(|p| p.hash.clone()).collect::<Vec<_>>(),
+            "said": said,
+            "outcomes": outcomes,
+        });
+        std::fs::write(
+            std::env::var("SHADOW_OUT").unwrap(),
+            serde_json::to_vec_pretty(&out).unwrap(),
+        )
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn outcome(d: &Directory, hash: &str) -> Option<std::result::Result<(), String>> {
         d.agreed
             .as_ref()

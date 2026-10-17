@@ -1,0 +1,90 @@
+{
+  "entries": {
+    "ann": {
+      "devices": [
+        "URw0oaLLUh3xa7JGuN6OeZfOI1x+drIqPXUDokgZ3Yo=",
+        "U0cJYlWKbgg5AirmXGsnI7MncuXAxfR3bLjmo+ELovM="
+      ],
+      "grant": false,
+      "handovers": 1,
+      "libraries": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "passkeys": [],
+      "recovered_from": [
+        "IIKL9cW9ystoSGMzbCAvtVmdpIvlWWYVdCFwcFvsqfc="
+      ],
+      "root": "Md6+VdN8cidosTcTHKpghwgLLgtguUvXhdFFdc+kmLw=",
+      "version": 3
+    },
+    "bea": {
+      "devices": [],
+      "grant": false,
+      "handovers": 0,
+      "libraries": [],
+      "passkeys": [
+        "CQkJCQkJCQkJCQkJCQkJCQ"
+      ],
+      "recovered_from": [],
+      "root": "webauthn:CQkJCQkJCQkJCQkJCQkJCQ:oddMLpaEswWk8T7Zwnp1U4Ypo7Likmra_XvWkuSmDu8",
+      "version": 1
+    },
+    "cat": {
+      "devices": [
+        "TtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqg="
+      ],
+      "grant": false,
+      "handovers": 0,
+      "libraries": [],
+      "passkeys": [],
+      "recovered_from": [],
+      "root": "TtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqg=",
+      "version": 1
+    },
+    "dan": {
+      "devices": [
+        "6S62BU/pvGgqG887dZ9lqzikz72BxNHzNC5Myc3tiws="
+      ],
+      "grant": true,
+      "handovers": 0,
+      "libraries": [],
+      "passkeys": [],
+      "recovered_from": [],
+      "root": "6S62BU/pvGgqG887dZ9lqzikz72BxNHzNC5Myc3tiws=",
+      "version": 1
+    }
+  },
+  "outcomes": {
+    "01e844d8a9dda5bd5612215df762943aa314294f3a9117c07bae9073007ac910": true,
+    "14c6148449239932767c1a102afbe93d0c9e72d0554411b65adea36168bddcc8": false,
+    "32a5b25ec7d57ac8f6ce982840d2d4033fac2b96e958fdb4b6efa1f3a907861b": false,
+    "3386188428d6180f88b46c1aa2659692c5f528569f23fa47aca8d51fe38934fa": false,
+    "36bd45802628eea841f7729c66a1a7c947a5bcff186f23f116952a0ec17bf85d": false,
+    "37a76343c8e3c695feeaadfe52329673ff129c65f99f55ae6056c9254f4c481d": false,
+    "37f6b1dd3337e8bd3fe96b72572b9236396fd08a7ea464eee9e74e9588d219c7": true,
+    "38f324e21472d9560751116e8946084a8e8e88b760f93849e24d236d58c9b6d9": false,
+    "393437b0f700f7df5f72eaf70f4b6f8853e1c864045d9de2032d2dc0e6904a2c": true,
+    "39a151a5a1d1653de3193254db41fc5860d06d79e25094b578025af900bfa82b": true,
+    "427ad1120e71645bf8a822d27738d1d729f0d6156bdc39853ac55c4ce82cfbe8": false,
+    "465b631f48b91231727908cf7aa42f917bd4d645154b3026432a169c07fb9131": false,
+    "6e4a71f7c8f4978ded75b4191251c992f10bfcc52253eeb7cd61e30114374e00": false,
+    "76818fde042c1fdd7a9f8fbdeff8e36821478194a1af56e434b02c144d76ef8f": true,
+    "8ce51ce05324305cd1bc86e047cb1d3824e2b9ecf20fd0888a4654675d9c9ab8": false,
+    "a0c17ade0d68da1e80a71beb564627ed3ac9f7b505d181dc28568fad332641c3": true,
+    "c9d6eaec007195e47f845d08957a001009ffc37c7e049176bd2e34097c3196bd": false,
+    "d3c0685721a197d742360db0bb8faac41ccf4d75749366cd161557c2123fb5df": false,
+    "d65ce1c0afc66922626e81dca88a3dcab321b46209c957d45a82e4edfc0ca98c": true,
+    "dd035eac3ae98771705a6a8a2905e264d7f4561900383c138ae9087d3e108580": false,
+    "ff3e068d4371fee79ef6d50652757a7f4633a2cbc03db39c3701651d4c80c15e": false
+  },
+  "pending": [
+    "37150f8157a17ceb59026203e69b34a31042b034ea99047ade74d4321e2719cc"
+  ],
+  "said": {
+    "ann": {
+      "agreed": 1791700029,
+      "at": 1791700028,
+      "back": false
+    }
+  }
+}
