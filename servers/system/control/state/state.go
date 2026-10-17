@@ -7,6 +7,7 @@
 package state
 
 import (
+	"commonty/control/state/ident"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,22 @@ type Config struct {
 	// who votes: one per house, and the witnesses
 	Validators []Validator `json:"validators"`
 	Rules      Rules       `json:"rules"`
+	// the release key and member list the identity judge reads
+	// (state/ident); absent: no /identity
+	Identity *ident.Config `json:"identity,omitempty"`
+}
+
+// BoxVoters: the validators that are boxes, whose gates acknowledge a new
+// name (the witness has no gate and no say), sorted
+func (c *Config) BoxVoters() []string {
+	var out []string
+	for _, v := range c.Validators {
+		if _, ok := c.Boxes[v.Name]; ok {
+			out = append(out, v.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 type Box struct {

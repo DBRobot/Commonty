@@ -144,6 +144,15 @@ export class Relay {
         return new Response('no state yet', { status: 503 });
       }
     }
+    // the agreed identity state, judged by the witness from the directory
+    // log (docs/dev/identity-state.md): for the mail and DNS Workers, the
+    // same way and from nowhere else
+    if (url.pathname === '/identity') {
+      if (typeof globalThis.controlIdentity !== 'function') return new Response('no identity here', { status: 503 });
+      const [status, body] = globalThis.controlIdentity(url.searchParams.get('name') || '', Number(url.searchParams.get('since') || 0));
+      if (status === 304) return new Response(null, { status });
+      return new Response(body, { status, headers: { 'content-type': 'application/json' } });
+    }
     if (url.pathname !== '/relay' || req.headers.get('upgrade') !== 'websocket') return new Response('not here', { status: 404 });
     let id;
     try { id = BigInt(url.searchParams.get('id') || ''); } catch { return new Response('no id', { status: 400 }); }

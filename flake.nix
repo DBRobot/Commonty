@@ -699,6 +699,12 @@
                   }) withKeys
                 );
                 inherit (ctl) validators;
+                # what the identity judge reads (state/ident): the release
+                # key and the member list, as released
+                identity = {
+                  release = nixpkgs.lib.removeSuffix "\n" (builtins.readFile ./fleet/release.pub);
+                  members = builtins.fromJSON (builtins.readFile ./fleet/members.json);
+                };
                 rules = ctl.rules // {
                   leases = (ctl.rules.leases or { }) // leases;
                 };
