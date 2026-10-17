@@ -176,6 +176,7 @@ once the core judge lands.
 |---|---|---|
 | `instance` | the root on file for `owner` | `owner, id, name, mem, threads, disk, consent, anywhere?, nix, access[], up, version, updated` |
 | `instance-delete` | the root on file for `owner` | `owner, id, at` |
+| `instance-power` | the owner's root, or any of their devices in the agreed state | `id, up, at` |
 
 - `id`: 16 hex, made by the signer; `name`: `[a-z0-9-]{1,32}`, unique per
   owner.
@@ -186,8 +187,14 @@ once the core judge lands.
 - `access[]`: `{port, who: "me" | "<member name>"}`; SSH (22) for `me` is
   always there and needn't be listed.
 - `version`: one more than the agreed record's, as entries do; `updated`:
-  ms. A new `instance` for the same `id` replaces it; that is how start,
-  stop and every config change go.
+  ms. A new `instance` for the same `id` replaces it; that is how every
+  config change goes.
+- `instance-power` only starts and stops, so a device can sign it with no
+  passkey prompt. It is refused if the device isn't among the owner's
+  devices at that height, if `at` is more than 5 minutes from the agreed
+  time, or if `at` isn't after the instance's last one (kept beside it as
+  `power_at`), so it can't be replayed. Sizes, consent, access and delete
+  stay with the root.
 
 The judge refuses an item unless:
 
@@ -210,7 +217,7 @@ Agreed state gains:
 "instances": {
   "<id>": {"owner": "...", "name": "...", "mem": 0, "threads": 0, "disk": 0,
            "consent": "own | any", "port": 0, "up": true, "nix": "...",
-           "access": [], "version": 1, "agreed": 0, "item": "..."}
+           "access": [], "version": 1, "power_at": 0, "agreed": 0, "item": "..."}
 }
 ```
 
@@ -224,5 +231,4 @@ change of status.
 - Where the instance API runs. It only carries signed items to the log
   and reads agreed state, so any box's gate can; on every box, behind
   `compute.<domain>`, like the other pages.
-- Root signatures for every start and stop: a passkey prompt each time in
-  the browser. Should a device key be allowed to sign `up` changes alone?
+- `instance-power` signed by a device: proposed, David to confirm.
