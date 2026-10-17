@@ -1,6 +1,21 @@
 # Remote computers
 
-Status: design, agreed with David 2026-10-17. Nothing built.
+Status: steps 1 and 2 built (branch vms-1017), on a box's own records.
+Steps 3 to 5 (the allowance, agreed-state records and placement,
+snapshots and failover) are not.
+
+What exists:
+
+```
+nix/modules/vms/vms.nix          the dd-vm@ template, the manager's service, the page, the inbound chain
+nix/modules/vms/guest/base.nix   the guest: own disk and store, /home disk, the owner from the share, dd-apply
+nix/modules/vms/guest/member.nix the Nix file a new computer starts with
+nix/modules/guests/egress.nix    what guests (games' and these) may reach: not the box, not the house
+servers/vms/                     the manager (Rust, axum): configs, records, limits, ports; web/ the page
+client/cli/src/vmcmd.rs          dd vm
+nix/roles/compute.nix            the role and its tile
+nix/tests/vms.nix, vms.py        the VM test
+```
 
 A member keeps a computer of their own on the fleet: a VM with its own
 disk, reached over the Commonty network, that reaches the web. They make
