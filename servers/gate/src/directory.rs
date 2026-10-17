@@ -89,14 +89,23 @@ pub struct Directory {
 struct EnvelopeLimits {
     by_name: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
     by_source: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
+    by_key: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
+    /// sha256 of what each sent envelope signed (its kind and body), newest
+    /// last: an item is the same item however its outer JSON is written
     sent: std::collections::VecDeque<String>,
+    /// where `sent` is kept across a restart; None: not kept
+    sent_file: Option<PathBuf>,
 }
 
 /// a v2 envelope's most: the control plane takes no bigger item
 pub const ENVELOPE_MAX: usize = 64 * 1024;
-/// envelopes a minute for one name, and from one source
+/// envelopes a minute for one name, from one source, and by one signing key
 pub const ENVELOPES_PER_NAME: usize = 6;
 pub const ENVELOPES_PER_SOURCE: usize = 20;
+pub const ENVELOPES_PER_KEY: usize = 6;
+/// how many names, sources or keys each table holds at once: past it, the
+/// quiet ones go, and while every one is busy a new one waits
+pub const ENVELOPE_TABLE_MAX: usize = 4096;
 /// how many sent envelopes are remembered, to refuse one twice
 const ENVELOPES_REMEMBERED: usize = 4096;
 
@@ -108,11 +117,16 @@ impl EnvelopeLimits {
         most: usize,
         now: std::time::Instant,
     ) -> bool {
+        let minute = Duration::from_secs(60);
+        if !map.contains_key(key) && map.len() >= ENVELOPE_TABLE_MAX {
+            // the quiet ones go; if none is quiet, nobody new this minute
+            map.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) <= minute));
+            if map.len() >= ENVELOPE_TABLE_MAX {
+                return false;
+            }
+        }
         let q = map.entry(key.to_string()).or_default();
-        while q
-            .front()
-            .is_some_and(|t| now.duration_since(*t) > Duration::from_secs(60))
-        {
+        while q.front().is_some_and(|t| now.duration_since(*t) > minute) {
             q.pop_front();
         }
         if q.len() >= most {
@@ -120,6 +134,40 @@ impl EnvelopeLimits {
         }
         q.push_back(now);
         true
+    }
+
+    fn remember(&mut self, hash: String) {
+        self.sent.push_back(hash);
+        while self.sent.len() > ENVELOPES_REMEMBERED {
+            self.sent.pop_front();
+        }
+        self.save();
+    }
+
+    fn forget(&mut self, hash: &str) {
+        self.sent.retain(|h| h != hash);
+        self.save();
+    }
+
+    fn save(&self) {
+        if let Some(f) = &self.sent_file {
+            let tmp = f.with_extension("tmp");
+            if std::fs::write(&tmp, serde_json::to_vec(&self.sent).unwrap_or_default()).is_ok() {
+                let _ = std::fs::rename(&tmp, f);
+            }
+        }
+    }
+
+    fn load(file: PathBuf) -> Self {
+        let sent = std::fs::read(&file)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        Self {
+            sent,
+            sent_file: Some(file),
+            ..Default::default()
+        }
     }
 }
 
@@ -229,6 +277,13 @@ impl Directory {
     /// plane's agreed identity state at `control` (dd-control on this box)
     pub fn identity_from(mut self, from: crate::ident::From, control: Option<&str>) -> Self {
         self.ident_from = from;
+        // the envelopes already sent on, kept across a restart
+        let sent = self
+            .dir
+            .parent()
+            .map(|p| p.join("envelopes-sent.json"))
+            .unwrap_or_else(|| self.dir.join("envelopes-sent.json"));
+        self.envelopes = std::sync::Mutex::new(EnvelopeLimits::load(sent));
         if from != crate::ident::From::Replay
             && let Some(c) = control
         {
@@ -874,13 +929,16 @@ async fn put_invite(
     }
 }
 
-/// who sent a request, for the envelope limits: the address nginx saw
-/// (X-Real-IP, which it sets on every request it passes); a request that
-/// did not come through nginx is this box's own
+/// who sent a request, for the envelope limits: the address nginx saw the
+/// connection from, in X-Dd-Peer, which nginx sets on every request it
+/// passes to the gate over whatever a client sent (strip-cookie.nix). Never
+/// X-Real-IP or X-Forwarded-For: those are the client's to say. A request
+/// that did not come through nginx is this box's own
 pub fn source_of(headers: &HeaderMap) -> String {
     headers
-        .get("x-real-ip")
+        .get("x-dd-peer")
         .and_then(|v| v.to_str().ok())
+        .filter(|v| !v.is_empty() && v.len() <= 64)
         .map(str::to_string)
         .unwrap_or_else(|| "local".into())
 }
@@ -1333,39 +1391,62 @@ impl Directory {
                 "name in path and body differ".into(),
             ));
         }
+        // the same item - the same kind and body, whatever the outer JSON
+        // says - is sent once, from here, across restarts, and never once
+        // the agreed state has it
+        let hash = env.signed_hash();
+        if self
+            .envelopes
+            .lock()
+            .unwrap()
+            .sent
+            .iter()
+            .any(|h| h == &hash)
+            || self.agreed_has(name, &env)
+        {
+            return Err((StatusCode::CONFLICT, "that item was sent already".into()));
+        }
+        // the sender's allowance, before any signature work: what a flood
+        // from one place costs is its own
+        if !EnvelopeLimits::take(
+            &mut self.envelopes.lock().unwrap().by_source,
+            source,
+            ENVELOPES_PER_SOURCE,
+            std::time::Instant::now(),
+        ) {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many from here; wait a minute".into(),
+            ));
+        }
         // whose it is: signed by the key that speaks for the name, as a v1
         // item must be before this box takes it. Not judged - the control
         // plane does that - but nothing unsigned, or signed by someone
-        // else, reaches the shared log through this box
-        self.envelope_signed(kind, name, bytes)
+        // else, reaches the shared log through this box. The name's and the
+        // key's allowances count only signed items, so nobody spends a
+        // member's by sending forgeries in their name
+        let signer = self
+            .envelope_signed(kind, name, bytes)
             .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
-        let hash = env.hash();
         {
             let now = std::time::Instant::now();
             let mut l = self.envelopes.lock().unwrap();
             if l.sent.iter().any(|h| h == &hash) {
                 return Err((StatusCode::CONFLICT, "that item was sent already".into()));
             }
-            if !EnvelopeLimits::take(&mut l.by_source, source, ENVELOPES_PER_SOURCE, now) {
-                return Err((
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "too many from here; wait a minute".into(),
-                ));
-            }
-            if !EnvelopeLimits::take(&mut l.by_name, name, ENVELOPES_PER_NAME, now) {
+            if !EnvelopeLimits::take(&mut l.by_name, name, ENVELOPES_PER_NAME, now)
+                || !EnvelopeLimits::take(&mut l.by_key, &signer, ENVELOPES_PER_KEY, now)
+            {
                 return Err((
                     StatusCode::TOO_MANY_REQUESTS,
                     "too many for this name; wait a minute".into(),
                 ));
             }
-            l.sent.push_back(hash.clone());
-            while l.sent.len() > ENVELOPES_REMEMBERED {
-                l.sent.pop_front();
-            }
+            l.remember(hash.clone());
         }
         if let Err(e) = self.submit_raw(bytes.to_vec()).await {
             // not sent: the same item may be tried again
-            self.envelopes.lock().unwrap().sent.retain(|h| h != &hash);
+            self.envelopes.lock().unwrap().forget(&hash);
             return Err((StatusCode::BAD_GATEWAY, format!("the control plane: {e:#}")));
         }
         Ok(hash)
@@ -1381,7 +1462,7 @@ impl Directory {
         kind: &str,
         name: &str,
         bytes: &[u8],
-    ) -> std::result::Result<(), String> {
+    ) -> std::result::Result<String, String> {
         use identity::envelope::{Envelope, passkey_challenge};
         let env: Envelope =
             serde_json::from_slice(bytes).map_err(|e| format!("not an envelope: {e}"))?;
@@ -1416,10 +1497,12 @@ impl Directory {
                 match on_file {
                     None => {
                         identity::agreed_terms(&new).map_err(|e| e.to_string())?;
-                        check(&new.root, &env.sig, &new.passkeys)
+                        check(&new.root, &env.sig, &new.passkeys)?;
+                        Ok(new.root)
                     }
                     Some(cur) if cur.entry.root == new.root => {
-                        check(&cur.entry.root, &env.sig, &cur.entry.passkeys)
+                        check(&cur.entry.root, &env.sig, &cur.entry.passkeys)?;
+                        Ok(new.root)
                     }
                     Some(cur) => {
                         // a new root: its own signature, and the recovery
@@ -1429,16 +1512,28 @@ impl Directory {
                             .recovery_sig
                             .as_deref()
                             .ok_or("a new root needs the recovery key's signature")?;
-                        check(&cur.entry.recovery, rs, &[])
+                        check(&cur.entry.recovery, rs, &[])?;
+                        Ok(new.root)
                     }
                 }
             }
             "leave" => {
                 let cur = on_file.ok_or("nobody by that name")?;
-                check(&cur.entry.root, &env.sig, &cur.entry.passkeys)
+                check(&cur.entry.root, &env.sig, &cur.entry.passkeys)?;
+                Ok(cur.entry.root)
             }
             _ => Err(format!("{kind} is not put here")),
         }
+    }
+
+    /// Whether the agreed state already holds this very item for `name`:
+    /// its kind and body as signed
+    fn agreed_has(&self, name: &str, env: &crate::ident::Envelope) -> bool {
+        self.agreed_member(name).is_some_and(|m| {
+            m.item.get("v").and_then(|v| v.as_u64()) == Some(2)
+                && m.item.get("kind").and_then(|k| k.as_str()) == Some(env.kind.as_str())
+                && m.item.get("body").and_then(|b| b.as_str()) == Some(env.body_b64())
+        })
     }
 
     /// bytes to this box's dd-control, over its socket, as they are
@@ -2604,7 +2699,7 @@ mod tests {
 
     async fn put_v2(d: &Arc<Directory>, name: &str, source: &str, bytes: Vec<u8>) -> StatusCode {
         let mut h = HeaderMap::new();
-        h.insert("x-real-ip", source.parse().unwrap());
+        h.insert("x-dd-peer", source.parse().unwrap());
         put_entry(State(d.clone()), Path(name.into()), h, bytes.into())
             .await
             .status()
@@ -2764,5 +2859,96 @@ mod tests {
         let e = sealed(&entry("ann", &k, &[], 1), &k);
         assert_eq!(put_v2(&d, "ann", "a", e).await, StatusCode::BAD_REQUEST);
         assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_header_the_client_writes_is_not_who_they_are() {
+        let (d, _got, _k) = with_ann("v2-spoof");
+        // the same connection, a new X-Real-IP / X-Forwarded-For each time
+        let mut last = StatusCode::ACCEPTED;
+        for n in 0..=ENVELOPES_PER_SOURCE {
+            let key = generate();
+            let name = format!("spoof{n}");
+            let mut h = HeaderMap::new();
+            h.insert("x-dd-peer", "198.51.100.9".parse().unwrap());
+            h.insert("x-real-ip", format!("10.0.0.{n}").parse().unwrap());
+            h.insert("x-forwarded-for", format!("10.1.0.{n}").parse().unwrap());
+            let b = sealed(&entry(&name, &key, &[], 1), &key);
+            last = put_entry(State(d.clone()), Path(name), h, b.into())
+                .await
+                .status();
+        }
+        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+        let mut h = HeaderMap::new();
+        h.insert("x-real-ip", "203.0.113.1".parse().unwrap());
+        assert_eq!(source_of(&h), "local");
+    }
+
+    #[tokio::test]
+    async fn an_item_reworded_or_resent_after_a_restart_is_still_the_same_item() {
+        let (d, _got, k) = with_ann("v2-replay-item");
+        let env = identity::envelope::seal_json("entry", &entry("ann", &k, &[], 2), &k).unwrap();
+        let b = serde_json::to_vec(&env).unwrap();
+        assert_eq!(put_v2(&d, "ann", "a", b).await, StatusCode::ACCEPTED);
+        // the same item, its outer JSON written another way
+        let mut v = serde_json::to_value(&env).unwrap();
+        v["extra"] = serde_json::json!("x");
+        let reworded = format!("  {}", serde_json::to_string(&v).unwrap()).into_bytes();
+        assert_eq!(put_v2(&d, "ann", "b", reworded).await, StatusCode::CONFLICT);
+        // and after a restart of the gate, still refused (the same folder,
+        // not a fresh one: scratch() would empty it)
+        let base =
+            std::env::temp_dir().join(format!("dd-dir-v2-replay-item-{}", std::process::id()));
+        let d2 = Arc::new(
+            Directory::open(base.join("entries"), None)
+                .unwrap()
+                .agreed(
+                    "http://127.0.0.1:1".into(),
+                    base.join("submit.sock"),
+                    vec!["box".into()],
+                    "box".into(),
+                )
+                .unwrap()
+                .identity_from(crate::ident::From::Agreed, Some("http://127.0.0.1:1")),
+        );
+        let b = serde_json::to_vec(&env).unwrap();
+        assert_eq!(put_v2(&d2, "ann", "c", b).await, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn an_item_the_agreed_state_holds_is_not_sent_again() {
+        let (d, got) = agreed_dir("v2-agreed-has", crate::ident::From::Agreed);
+        let k = generate();
+        let env = identity::envelope::seal_json("entry", &entry("ann", &k, &[], 1), &k).unwrap();
+        let s: crate::ident::State = serde_json::from_value(serde_json::json!({
+            "height": 1,
+            "members": {"ann": {"status": "member", "item": env}}
+        }))
+        .unwrap();
+        d.ident.as_ref().unwrap().set(s);
+        let d = Arc::new(d);
+        let b = serde_json::to_vec(&env).unwrap();
+        assert_eq!(put_v2(&d, "ann", "a", b).await, StatusCode::CONFLICT);
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_limit_tables_stay_bounded() {
+        let now = std::time::Instant::now();
+        let old = now - Duration::from_secs(120);
+        let mut m = std::collections::HashMap::new();
+        for n in 0..ENVELOPE_TABLE_MAX {
+            m.insert(format!("k{n}"), std::collections::VecDeque::from([old]));
+        }
+        // quiet ones go to make room
+        assert!(EnvelopeLimits::take(&mut m, "new", 1, now));
+        assert_eq!(m.len(), 1);
+        // all busy: nobody new until a minute passes
+        let mut m = std::collections::HashMap::new();
+        for n in 0..ENVELOPE_TABLE_MAX {
+            m.insert(format!("k{n}"), std::collections::VecDeque::from([now]));
+        }
+        assert!(!EnvelopeLimits::take(&mut m, "new", 1, now));
+        assert_eq!(m.len(), ENVELOPE_TABLE_MAX);
     }
 }
