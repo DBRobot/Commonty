@@ -220,7 +220,7 @@ fn all() -> serde_json::Value {
         envelope::ENLIST,
         &json!({"member": member_id(&ada2.root), "box": "j0123456789",
                 "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE", "ticket": "00112233445566778899aabbccddeeff",
-                "expires": 1_792_000_000u64}),
+                "expires": 1_792_000_000u64, "at": 1_791_700_000u64}),
         &ada_new_root,
     )
     .unwrap();

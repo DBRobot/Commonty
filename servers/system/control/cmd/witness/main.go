@@ -7,6 +7,7 @@
 package main
 
 import (
+	"commonty/control/state/ident"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -84,6 +85,26 @@ func main() {
 		b, _ := json.Marshal(v.State())
 		return string(b)
 	}))
+	// the agreed identity state, for the Workers that bind the relay:
+	// controlIdentity(name, since) -> [status, body]
+	if cfg.Identity != nil {
+		ids := ident.NewServer(cfg.Identity, cfg.BoxVoters())
+		js.Global().Set("controlIdentity", js.FuncOf(func(_ js.Value, a []js.Value) any {
+			name, since := "", uint64(0)
+			if len(a) > 0 && a[0].Type() == js.TypeString {
+				name = a[0].String()
+			}
+			if len(a) > 1 && a[1].Type() == js.TypeNumber {
+				since = uint64(a[1].Float())
+			}
+			s := v.State()
+			code, b := ids.Answer(len(s.Directory), func(i int) ident.Item {
+				d := s.Directory[i]
+				return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+			}, s.Height, s.Time, name, since)
+			return js.ValueOf([]any{code, string(b)})
+		}))
+	}
 	if err := v.Start(); err != nil {
 		panic(err)
 	}

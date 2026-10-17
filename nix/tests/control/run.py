@@ -302,6 +302,38 @@ eve = ed.Ed25519PrivateKey.generate()
 c, _ = http("PUT", "http://127.0.0.1:4283/_dd/directory/ann", signed("ann", eve, 3))
 ok(c in (403, 409), f"someone else's update to ann is refused ({c})")
 
+# ---- the agreed identity state: judged on each box from the same log
+
+
+def identity(i, q=""):
+    c, b = http("GET", f"http://127.0.0.1:419{i}/identity{q}", timeout=5)
+    return c, (json.loads(b) if c == 200 else None)
+
+
+def ann_v2(i):
+    c, v = identity(i)
+    return c == 200 and v["members"].get("ann", {}).get("version") == 2
+
+
+until("ann's version 2 judged on every box", lambda: all(ann_v2(i) for i in (1, 2, 3)), 30)
+views = [identity(i)[1] for i in (1, 2, 3)]
+anns = [v["members"]["ann"] for v in views if v]
+ok(
+    len(anns) == 3
+    and all(a == anns[0] for a in anns)
+    and anns[0]["root"] == pub(ann)
+    and anns[0]["status"] == "none",
+    "every box's /identity has ann the same: version 2, her root, not let in",
+)
+ok(
+    all(set(v["members"]) == {"ann"} for v in views if v),
+    "and nobody else: eve's update was no one's",
+)
+c, one = identity(1, "?name=ann")
+ok(c == 200 and one["member"]["version"] == 2, f"?name= answers for one ({c})")
+c, _ = identity(1, f"?since={views[0]['changed']}")
+ok(c == 304, f"?since= the last change: 304 ({c})")
+
 # ---- build results: handed in on one box's socket, in the agreed log on all
 
 

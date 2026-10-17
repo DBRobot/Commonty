@@ -7,6 +7,7 @@
 package main
 
 import (
+	"commonty/control/state/ident"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -738,6 +739,23 @@ func main() {
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "next": len(s.Directory), "height": s.Height})
 	})
+	// the agreed identity state (docs/dev/identity-state.md): judged here
+	// from the directory log, so every box serves the same
+	if cfg.Identity != nil {
+		ids := ident.NewServer(cfg.Identity, cfg.BoxVoters())
+		http.HandleFunc("/identity", func(w http.ResponseWriter, req *http.Request) {
+			q := req.URL.Query()
+			since, _ := strconv.ParseUint(q.Get("since"), 10, 64)
+			s := n.State()
+			code, b := ids.Answer(len(s.Directory), func(i int) ident.Item {
+				d := s.Directory[i]
+				return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+			}, s.Height, s.Time, q.Get("name"), since)
+			w.Header().Set("content-type", "application/json")
+			w.WriteHeader(code)
+			_, _ = w.Write(b)
+		})
+	}
 	// the build results from item `since` on, the same way
 	http.HandleFunc("/built", func(w http.ResponseWriter, req *http.Request) {
 		since, _ := strconv.Atoi(req.URL.Query().Get("since"))
