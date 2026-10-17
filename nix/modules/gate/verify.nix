@@ -56,6 +56,15 @@ in
     type = lib.types.listOf lib.types.str;
     description = "the subdomains the gate stands in front of; every one gets the sign-in redirect and the auth subrequest. Lists from every module add up.";
   };
+  options.dd.verify.identityFrom = lib.mkOption {
+    type = lib.types.enum [
+      "replay"
+      "shadow"
+      "agreed"
+    ];
+    default = "replay";
+    description = "Where the gate learns who is who (docs/dev/identity-state.md): its own replay of the directory log; shadow, both with the replay served and every difference logged; or agreed, the control plane's judged state alone. shadow and agreed need the agreed log (dd-control on the box).";
+  };
   options.dd.verify.enable = lib.mkOption {
     type = lib.types.bool;
     default = true;
@@ -322,6 +331,12 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = cfg.identityFrom == "replay" || agreed;
+        message = "dd.verify.identityFrom = ${cfg.identityFrom} reads the control plane's agreed state, and this box has no dd-control";
+      }
+    ];
     users.users.${user} = {
       isSystemUser = true;
       group = user;
@@ -374,6 +389,7 @@ in
         VERIFY_CONTROL = "http://127.0.0.1:4195";
         VERIFY_CONTROL_SUBMIT = "/run/dd-control/submit.sock";
         VERIFY_CONTROL_CONFIG = "/etc/dd-control/config.json";
+        VERIFY_IDENTITY_FROM = cfg.identityFrom;
       }
       // lib.optionalAttrs (cfg.memberList != null) {
         VERIFY_MEMBER_LIST = cfg.memberList;

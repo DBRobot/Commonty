@@ -51,6 +51,12 @@ async fn main() -> Result<()> {
             .filter(|k| !k.is_empty())
             .map(str::to_string)
             .collect(),
+        identity_from: {
+            let v = std::env::var("VERIFY_IDENTITY_FROM").unwrap_or_default();
+            verify::ident::From::parse(&v).ok_or_else(|| {
+                anyhow::anyhow!("VERIFY_IDENTITY_FROM: replay, shadow or agreed, not {v:?}")
+            })?
+        },
         control: std::env::var("VERIFY_CONTROL")
             .ok()
             .filter(|c| !c.is_empty())

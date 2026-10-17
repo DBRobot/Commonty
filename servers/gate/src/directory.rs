@@ -71,6 +71,12 @@ pub struct Directory {
     >,
     /// who has left by their own word, and what this box did about it
     pub leaving: crate::leaving::Store,
+    /// where who-is-who comes from (VERIFY_IDENTITY_FROM, ident.rs): this
+    /// box's replay, the control plane's agreed state, or both compared
+    pub ident_from: crate::ident::From,
+    /// the agreed identity state, read from dd-control: set for shadow and
+    /// agreed
+    pub ident: Option<Arc<crate::ident::Agreed>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -124,6 +130,8 @@ impl Directory {
                 .build()?,
             writing: std::sync::Mutex::new(()),
             agreed: None,
+            ident_from: crate::ident::From::Replay,
+            ident: None,
         })
     }
 
@@ -172,8 +180,88 @@ impl Directory {
         Ok(self)
     }
 
-    /// The person's own signed entry, as last accepted by this box.
+    /// Where who-is-who comes from: in shadow and agreed, the control
+    /// plane's agreed identity state at `control` (dd-control on this box)
+    pub fn identity_from(mut self, from: crate::ident::From, control: Option<&str>) -> Self {
+        self.ident_from = from;
+        if from != crate::ident::From::Replay
+            && let Some(c) = control
+        {
+            self.ident = Some(Arc::new(crate::ident::Agreed::new(c)));
+        }
+        self
+    }
+
+    /// The person as the agreed state has them; None when this box does
+    /// not read it, or has not read it yet
+    pub fn agreed_member(&self, name: &str) -> Option<crate::ident::Member> {
+        self.ident.as_ref()?.member(name)
+    }
+
+    /// Whether the agreed state has been read at all: until it has, it
+    /// knows nothing, which is not "nobody"
+    fn agreed_known(&self) -> bool {
+        self.ident.as_ref().is_some_and(|a| a.state().is_some())
+    }
+
+    /// The person's own signed entry: this box's replay, the agreed state,
+    /// or the replay's checked against the agreed state (ident.rs)
     pub fn entry(&self, name: &str) -> Result<Option<identity::SignedEntry>> {
+        use crate::ident::From;
+        match self.ident_from {
+            From::Replay => self.replay_entry(name),
+            From::Agreed => {
+                if !identity::valid_name(name) || !self.agreed_known() {
+                    return Ok(None);
+                }
+                Ok(self.agreed_member(name).and_then(|m| m.entry()))
+            }
+            From::Shadow => {
+                let r = self.replay_entry(name)?;
+                if identity::valid_name(name) && self.agreed_known() {
+                    let a = self.agreed_member(name).and_then(|m| m.entry());
+                    for d in crate::ident::entry_differences(r.as_ref(), a.as_ref()) {
+                        eprintln!("identity shadow: {name}: {d}");
+                    }
+                }
+                Ok(r)
+            }
+        }
+    }
+
+    /// Whether the person has left by their own word: as entry() decides
+    pub fn has_left(&self, name: &str) -> bool {
+        use crate::ident::From;
+        let r = || self.leaving.has_left(name);
+        match self.ident_from {
+            From::Replay => r(),
+            From::Agreed => self.agreed_member(name).is_some_and(|m| m.has_left()),
+            From::Shadow => {
+                let replay = r();
+                if self.agreed_known() {
+                    let agreed = self.agreed_member(name).is_some_and(|m| m.has_left());
+                    if replay != agreed {
+                        eprintln!(
+                            "identity shadow: {name}: left: replay {replay}, agreed {agreed}"
+                        );
+                    }
+                }
+                replay
+            }
+        }
+    }
+
+    /// The replay's entry, or this box's held sign-up: what membership as
+    /// the replay judges it reads, whatever the gate serves
+    pub fn replay_or_held(&self, name: &str) -> Option<identity::SignedEntry> {
+        self.replay_entry(name)
+            .ok()
+            .flatten()
+            .or_else(|| self.held(name))
+    }
+
+    /// The person's own signed entry, as last accepted by this box's replay.
+    fn replay_entry(&self, name: &str) -> Result<Option<identity::SignedEntry>> {
         // the name is a path component here, and this is reached from a PUT
         // before the accept rule has had a look at it
         if !identity::valid_name(name) {
@@ -2091,5 +2179,250 @@ mod tests {
             "the same entry, version 7, taken as it was"
         );
         assert_eq!(d.agreed_entry("ann", 12).unwrap().entry.version, 7);
+    }
+
+    // --- who-is-who from the agreed state (ident.rs) ---
+
+    fn agreed_with(
+        dir: PathBuf,
+        from: crate::ident::From,
+        members: serde_json::Value,
+    ) -> Directory {
+        let d = Directory::open(dir, None)
+            .unwrap()
+            .identity_from(from, Some("http://127.0.0.1:1"));
+        let s: crate::ident::State =
+            serde_json::from_value(serde_json::json!({"height": 7, "members": members})).unwrap();
+        d.ident.as_ref().unwrap().set(s);
+        d
+    }
+
+    #[test]
+    fn agreed_reads_the_agreed_state_and_nothing_else() {
+        let dir = scratch("agreed");
+        let k = generate();
+        let e = sign(entry("ann", &k, &[], 3), &k).unwrap();
+        // a replay file that says otherwise is not read in agreed
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = sign(entry("ann", &k, &[], 1), &k).unwrap();
+        std::fs::write(dir.join("ann.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+        let d = agreed_with(
+            dir,
+            crate::ident::From::Agreed,
+            serde_json::json!({
+                "ann": {"id": "a", "ids": ["a"], "status": "member", "item": {"entry": e}},
+                "eve": {"id": "e", "ids": ["e"], "status": "left", "item": {"entry": e}},
+            }),
+        );
+        assert_eq!(d.entry("ann").unwrap().unwrap().entry.version, 3);
+        assert!(d.entry("bob").unwrap().is_none());
+        assert!(!d.has_left("ann"));
+        assert!(d.has_left("eve"));
+        assert!(d.agreed_member("ann").unwrap().is_member());
+    }
+
+    #[test]
+    fn agreed_knows_nothing_until_it_has_read() {
+        let d = Directory::open(scratch("unread"), None)
+            .unwrap()
+            .identity_from(crate::ident::From::Agreed, Some("http://127.0.0.1:1"));
+        assert!(d.entry("ann").unwrap().is_none());
+        assert!(!d.has_left("ann"));
+    }
+
+    #[test]
+    fn a_v2_envelope_reads_as_the_entry_it_carries() {
+        use base64::Engine;
+        let k = generate();
+        let e = entry("ann", &k, &["lib1"], 5);
+        let body = serde_json::to_vec(&e).unwrap();
+        let m: crate::ident::Member = serde_json::from_value(serde_json::json!({
+            "status": "member",
+            "item": {
+                "v": 2, "kind": "entry",
+                "body": base64::engine::general_purpose::STANDARD.encode(&body),
+                "sig": "c2ln"
+            }
+        }))
+        .unwrap();
+        let got = m.entry().unwrap();
+        assert_eq!(got.entry, e);
+        assert_eq!(got.signature, "c2ln");
+    }
+
+    #[test]
+    fn shadow_serves_the_replay_and_names_each_difference() {
+        let dir = scratch("shadow");
+        std::fs::create_dir_all(&dir).unwrap();
+        let k = generate();
+        let mine = sign(entry("ann", &k, &[], 1), &k).unwrap();
+        std::fs::write(dir.join("ann.json"), serde_json::to_vec(&mine).unwrap()).unwrap();
+        let theirs = sign(entry("ann", &k, &[], 2), &k).unwrap();
+        let d = agreed_with(
+            dir,
+            crate::ident::From::Shadow,
+            serde_json::json!({"ann": {"status": "member", "item": {"entry": theirs}}}),
+        );
+        // the replay's answer is what is served
+        assert_eq!(d.entry("ann").unwrap().unwrap().entry.version, 1);
+        let diff = crate::ident::entry_differences(Some(&mine), Some(&theirs));
+        assert!(diff.iter().any(|x| x.starts_with("version")), "{diff:?}");
+        assert!(diff.iter().any(|x| x.starts_with("devices")), "{diff:?}");
+        // and the same entry both ways differs in nothing
+        assert!(crate::ident::entry_differences(Some(&mine), Some(&mine)).is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_agreed_state_is_read_once_then_only_when_it_changed() {
+        use axum::{extract::Query, http::StatusCode, routing::get};
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let h = hits.clone();
+        let app = axum::Router::new().route(
+            "/identity",
+            get(
+                move |Query(q): Query<std::collections::HashMap<String, String>>| {
+                    let h = h.clone();
+                    async move {
+                        h.fetch_add(1, Ordering::Relaxed);
+                        if q.get("since").map(String::as_str) == Some("9") {
+                            return StatusCode::NOT_MODIFIED.into_response();
+                        }
+                        axum::Json(serde_json::json!({
+                            "height": 9,
+                            "members": {"ann": {"status": "member", "item": {}}}
+                        }))
+                        .into_response()
+                    }
+                },
+            ),
+        );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, app).await });
+        let a = crate::ident::Agreed::new(&format!("http://{addr}"));
+        assert!(a.state().is_none());
+        assert!(a.refresh().await.unwrap());
+        assert_eq!(a.state().unwrap().height, 9);
+        assert!(a.member("ann").unwrap().is_member());
+        // nothing new: 304, the state kept
+        assert!(!a.refresh().await.unwrap());
+        assert_eq!(a.state().unwrap().height, 9);
+        assert_eq!(hits.load(Ordering::Relaxed), 2);
+    }
+
+    /// The gate's replay of a real log, written out for the Go judge's
+    /// shadow check to compare with (docs/dev/identity-state.md §4). Runs
+    /// only when asked:
+    ///   SHADOW_LOG=<dd-control /directory?since=0 output>
+    ///   SHADOW_OUT=<where the JSON goes>
+    ///   SHADOW_VOTERS=node1,node2   SHADOW_MEMBERS=<fleet/members.json>
+    ///   SHADOW_RELEASE=<the release key, base64>
+    ///   cargo test -p verify --lib shadow_dump -- --nocapture
+    #[test]
+    fn shadow_dump() {
+        let Ok(log) = std::env::var("SHADOW_LOG") else {
+            return;
+        };
+        let out = std::env::var("SHADOW_OUT").expect("SHADOW_OUT");
+        let voters: Vec<String> = std::env::var("SHADOW_VOTERS")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        let members = std::env::var("SHADOW_MEMBERS")
+            .ok()
+            .map(|p| crate::Members::parse(&std::fs::read_to_string(p).unwrap()).unwrap());
+        let release = std::env::var("SHADOW_RELEASE")
+            .ok()
+            .map(|k| identity::decode_public(k.trim()).unwrap());
+        let dir = scratch("shadow-dump").join("entries");
+        let d = Directory::open(dir.clone(), release)
+            .unwrap()
+            .agreed(
+                "http://127.0.0.1:1".into(),
+                "/nonexistent".into(),
+                voters,
+                "shadow".into(),
+            )
+            .unwrap();
+        let page: LogPage = serde_json::from_slice(&std::fs::read(&log).unwrap()).unwrap();
+        let mut r = Replay::default();
+        for it in page.items {
+            let at = (it.time / 1000).max(0) as u64;
+            d.replay_one(&mut r, &it.from, it.item, at);
+        }
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| {
+                e.ok()?
+                    .file_name()
+                    .to_str()?
+                    .strip_suffix(".json")
+                    .map(str::to_string)
+            })
+            .collect();
+        names.sort();
+        let mut dump = serde_json::Map::new();
+        for n in names {
+            let Some(e) = d.replay_entry(&n).unwrap() else {
+                continue;
+            };
+            let left = d.leaving.has_left(&n);
+            let ids = identity::member_ids(&e.entry);
+            let status = match &members {
+                _ if left => "left".to_string(),
+                None => "member".to_string(),
+                Some(m) if identity::is_member(&e.entry, &m.members, &m.revoked, d.release()) => {
+                    "member".to_string()
+                }
+                Some(m) if ids.iter().any(|i| m.revoked.contains(i)) => {
+                    if ids.iter().any(|i| m.suspended.contains_key(i)) {
+                        "suspended".to_string()
+                    } else {
+                        "revoked".to_string()
+                    }
+                }
+                Some(_) => "none".to_string(),
+            };
+            let mut fps: Vec<&str> = e
+                .entry
+                .devices
+                .iter()
+                .map(|x| x.fingerprint.as_str())
+                .collect();
+            fps.sort();
+            let mut pks: Vec<&str> = e.entry.passkeys.iter().map(|x| x.id.as_str()).collect();
+            pks.sort();
+            dump.insert(
+                n,
+                serde_json::json!({
+                    "ids": ids,
+                    "root": e.entry.root,
+                    "version": e.entry.version,
+                    "devices": fps,
+                    "passkeys": pks,
+                    "status": status,
+                }),
+            );
+        }
+        let outcomes: serde_json::Map<String, serde_json::Value> = r
+            .outcome
+            .iter()
+            .map(|(h, res)| {
+                let v = match res {
+                    Ok(()) => "ok".to_string(),
+                    Err(e) => format!("refused: {e}"),
+                };
+                (h.clone(), v.into())
+            })
+            .collect();
+        std::fs::write(
+            &out,
+            serde_json::to_vec_pretty(&serde_json::json!({"members": dump, "outcomes": outcomes}))
+                .unwrap(),
+        )
+        .unwrap();
+        eprintln!("shadow dump: {} people -> {out}", dump.len());
     }
 }

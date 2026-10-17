@@ -148,6 +148,7 @@ impl Box_ {
             directory_readers,
             names: vec!["127.0.0.1".into()],
             control: None,
+            identity_from: Default::default(),
             house_peers: vec![],
             domain: full.then(|| "localhost".to_string()),
         })
@@ -2547,6 +2548,7 @@ async fn download_page_of(release_pub: String, manifest_url: String) -> (u16, St
         directory_readers: vec![],
         names: vec!["127.0.0.1".into()],
         control: None,
+        identity_from: Default::default(),
         house_peers: vec![],
         domain: Some("localhost".to_string()),
     })
@@ -3097,6 +3099,7 @@ async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
         directory_readers: vec![],
         names: vec!["127.0.0.1".into()],
         control: None,
+        identity_from: Default::default(),
         house_peers: vec![],
         domain: Some("localhost".to_string()),
     })
@@ -3379,6 +3382,7 @@ async fn gate_for(
         directory_readers: vec![],
         names: vec!["127.0.0.1".into()],
         control: None,
+        identity_from: Default::default(),
         house_peers: vec![],
         domain: Some("localhost".to_string()),
     })
@@ -3663,6 +3667,7 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
         directory_readers: vec![],
         names: vec!["127.0.0.1".into()],
         control: None,
+        identity_from: Default::default(),
         house_peers: vec![],
         domain: None,
     })
