@@ -832,8 +832,29 @@ async fn put_invite(
 async fn put_entry(
     State(d): State<Arc<Directory>>,
     Path(name): Path<String>,
-    Json(signed): Json<identity::SignedEntry>,
+    body: axum::body::Bytes,
 ) -> Response {
+    // a v2 envelope goes to the control plane as it came (ident.rs)
+    if crate::ident::Envelope::is_one(&body) {
+        return match d.submit_envelope("entry", &name, &body).await {
+            Ok(hash) => (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({ "submitted": true, "item": hash })),
+            )
+                .into_response(),
+            Err((status, why)) => (status, why).into_response(),
+        };
+    }
+    let signed: identity::SignedEntry = match serde_json::from_slice(&body) {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("not an entry: {e}"),
+            )
+                .into_response();
+        }
+    };
     if signed.entry.name != name {
         return (StatusCode::BAD_REQUEST, "name in path and entry differ").into_response();
     }
@@ -1205,9 +1226,55 @@ impl Directory {
 
     /// one item to this box's dd-control, over its socket
     async fn submit(&self, v: &serde_json::Value) -> Result<()> {
+        self.submit_raw(serde_json::to_vec(v)?).await
+    }
+
+    /// Whether this box takes a v2 envelope (docs/dev/identity-state.md
+    /// §1): only where the control plane judges, which is where the gate
+    /// reads its judgement - shadow or agreed, on the agreed log
+    pub fn takes_v2(&self) -> bool {
+        self.agreed.is_some() && self.ident_from != crate::ident::From::Replay
+    }
+
+    /// A v2 envelope, put here: checked to be one, of the kind the path
+    /// says and for the name the path says, and handed to the control plane
+    /// as the bytes it came in. Judging it is the control plane's; nothing
+    /// here re-encodes it, and nothing here keeps it.
+    pub async fn submit_envelope(
+        &self,
+        kind: &str,
+        name: &str,
+        bytes: &[u8],
+    ) -> std::result::Result<String, (StatusCode, String)> {
+        if !self.takes_v2() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "this box takes v1 items only for now (/_dd/config has no envelope)".into(),
+            ));
+        }
+        let env = crate::ident::Envelope::parse(bytes).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+        if env.kind != kind {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("a {} envelope, put where a {kind} goes", env.kind),
+            ));
+        }
+        if env.name() != Some(name) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "name in path and body differ".into(),
+            ));
+        }
+        self.submit_raw(bytes.to_vec())
+            .await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, format!("the control plane: {e:#}")))?;
+        Ok(env.hash())
+    }
+
+    /// bytes to this box's dd-control, over its socket, as they are
+    async fn submit_raw(&self, body: Vec<u8>) -> Result<()> {
         let a = self.agreed.as_ref().expect("agreed mode");
         let sock = a.submit.clone();
-        let body = serde_json::to_vec(v)?;
         tokio::task::spawn_blocking(move || -> Result<()> {
             use std::io::{Read as _, Write as _};
             let mut c = std::os::unix::net::UnixStream::connect(&sock)
@@ -2424,5 +2491,119 @@ mod tests {
         )
         .unwrap();
         eprintln!("shadow dump: {} people -> {out}", dump.len());
+    }
+
+    // --- v2 envelopes, passed through to the control plane ---
+
+    /// a dd-control stand-in on a socket: answers 202, keeps what it got
+    fn fake_submit(path: &std::path::Path) -> std::sync::Arc<std::sync::Mutex<Vec<u8>>> {
+        use std::io::{BufRead as _, Read as _, Write as _};
+        let got = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let g = got.clone();
+        let _ = std::fs::remove_file(path);
+        let l = std::os::unix::net::UnixListener::bind(path).unwrap();
+        std::thread::spawn(move || {
+            for c in l.incoming() {
+                let mut c = c.unwrap();
+                let mut r = std::io::BufReader::new(c.try_clone().unwrap());
+                let mut len = 0usize;
+                loop {
+                    let mut line = String::new();
+                    r.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap();
+                    }
+                }
+                let mut body = vec![0; len];
+                r.read_exact(&mut body).unwrap();
+                *g.lock().unwrap() = body;
+                c.write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n")
+                    .unwrap();
+            }
+        });
+        got
+    }
+
+    fn v2(kind: &str, body: serde_json::Value) -> Vec<u8> {
+        use base64::Engine;
+        // spaced and ordered oddly on purpose: what arrives is what goes on
+        format!(
+            "{{ \"sig\":\"c2ln\",  \"kind\":\"{kind}\", \"v\":2, \"body\":\"{}\" }}",
+            base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&body).unwrap())
+        )
+        .into_bytes()
+    }
+
+    fn agreed_dir(
+        what: &str,
+        from: crate::ident::From,
+    ) -> (Directory, std::sync::Arc<std::sync::Mutex<Vec<u8>>>) {
+        let base = scratch(what);
+        std::fs::create_dir_all(&base).unwrap();
+        let sock = base.join("submit.sock");
+        let got = fake_submit(&sock);
+        let d = Directory::open(base.join("entries"), None)
+            .unwrap()
+            .agreed(
+                "http://127.0.0.1:1".into(),
+                sock,
+                vec!["box".into()],
+                "box".into(),
+            )
+            .unwrap()
+            .identity_from(from, Some("http://127.0.0.1:1"));
+        (d, got)
+    }
+
+    #[tokio::test]
+    async fn a_v2_entry_goes_to_the_control_plane_as_it_came() {
+        let (d, got) = agreed_dir("v2-entry", crate::ident::From::Shadow);
+        let d = Arc::new(d);
+        let e = v2("entry", serde_json::json!({"name": "ann", "version": 2}));
+        let res = put_entry(State(d.clone()), Path("ann".into()), e.clone().into()).await;
+        assert_eq!(res.status(), StatusCode::ACCEPTED);
+        assert_eq!(*got.lock().unwrap(), e);
+    }
+
+    #[tokio::test]
+    async fn a_v2_envelope_for_the_wrong_name_or_kind_is_refused() {
+        let (d, got) = agreed_dir("v2-wrong", crate::ident::From::Agreed);
+        let d = Arc::new(d);
+        let e = v2("entry", serde_json::json!({"name": "eve"}));
+        let res = put_entry(State(d.clone()), Path("ann".into()), e.into()).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let l = v2("leave", serde_json::json!({"name": "ann"}));
+        let res = put_entry(State(d.clone()), Path("ann".into()), l.into()).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_box_that_replays_takes_no_v2() {
+        let (d, got) = agreed_dir("v2-replay", crate::ident::From::Replay);
+        assert!(!d.takes_v2());
+        let d = Arc::new(d);
+        let e = v2("entry", serde_json::json!({"name": "ann"}));
+        let res = put_entry(State(d), Path("ann".into()), e.into()).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_v2_leaving_goes_through_too() {
+        let (d, got) = agreed_dir("v2-leave", crate::ident::From::Shadow);
+        let d = Arc::new(d);
+        let l = v2("leave", serde_json::json!({"name": "ann", "at": 1}));
+        let ctx = Arc::new(crate::leaving::Ctx {
+            d,
+            m: None,
+            demo: None,
+        });
+        let res = crate::leaving::put_for_test(ctx, "ann", l.clone()).await;
+        assert_eq!(res.status(), StatusCode::ACCEPTED);
+        assert_eq!(*got.lock().unwrap(), l);
     }
 }
