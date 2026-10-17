@@ -1786,6 +1786,11 @@ async fn web_file(
 /// credentials belong to. Public, and true of the box either way.
 async fn page_config(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let mut cfg = serde_json::json!({ "rpId": app.domain.clone() });
+    // the signed format this box takes (docs/dev/identity-state.md §1):
+    // said only where the control plane judges v2; absent, v1
+    if app.directory.takes_v2() {
+        cfg["envelope"] = serde_json::json!(2);
+    }
     // The demo has no passkey, because a passkey lives in one browser on
     // one device and the demo is one account every visitor shares. Its
     // library key comes from the box instead, the way the demo's photos

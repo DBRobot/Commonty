@@ -533,6 +533,35 @@ next, and when, is [leaving.md](leaving.md).
 
 - The gate, on every request (entries are cached by file time and size).
 
+### Who is who, read from the control plane
+
+Being moved (docs/dev/identity-state.md): the control plane judges every
+signed item once and the gate reads the result. `VERIFY_IDENTITY_FROM`
+(`dd.verify.identityFrom`) says where the gate's answers come from:
+
+- `replay` (the default for now): the gate's own replay of the log, as
+  above;
+- `shadow`: both; the replay's answer is served and every difference is
+  logged (`identity shadow: <name>: <field>`), names and public fields only;
+- `agreed`: dd-control's `/identity` alone (ident.rs). It is read in the
+  background, `?since` answering 304 when nothing changed, so a request
+  never waits on it; until the first read, it knows nobody.
+
+**v2 envelopes.** Where the control plane judges (shadow or agreed, on the
+agreed log), `/_dd/config` says `"envelope": 2`, and `PUT
+/_dd/directory/<name>` and `PUT /_dd/leaving/<name>` take a v2 envelope as
+well as a v1 item: checked only to be one, of the path's kind and for the
+path's name, then submitted to the control plane as the bytes it came in,
+answered `202 {"submitted": true, "item": <sha256 of those bytes>}`. A box
+that still replays answers 400 to an envelope.
+
+`GET /_dd/directory/<name>` still answers v1-shaped (`{entry, signature}`),
+which the app's `devices.js` tells from an envelope by its `signature` and
+no `v`. When the GETs answer envelopes instead - once every entry is v2 -
+readers must take the entry from the envelope's base64 `body` and
+`devices.js` must stop reading `.signature`; nothing on the boxes checks a
+signature on a GET either way.
+
 ## Pages
 
 The gate serves every signed-in page, and the HTML, CSS and JavaScript
