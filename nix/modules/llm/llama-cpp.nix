@@ -208,6 +208,9 @@ in
             "zfs-mount.service"
           ];
           wants = [ "network-online.target" ];
+          # a changed fetch is not run again inside a switch: a download
+          # that failed there would roll the release back. Its timer runs it
+          restartIfChanged = false;
           path = with pkgs; [
             curl
             coreutils
