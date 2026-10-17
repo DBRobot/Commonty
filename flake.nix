@@ -1638,6 +1638,12 @@
               builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "game" b.roles) boxes)
             )
           );
+          # and for members' computers: each compute box's pool (dd.vms.reach)
+          fleetVmPorts = lib.unique (
+            lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.vms.reach) (
+              builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "compute" b.roles) boxes)
+            )
+          );
           mkBox =
             name: box:
             lib.nixosSystem {
@@ -1681,6 +1687,7 @@
                 }
                 (lib.optionalAttrs (builtins.elem "gateway" box.roles) {
                   dd.headscale.gamePorts = fleetGamePorts;
+                  dd.headscale.vmPorts = fleetVmPorts;
                   dd.headscale.owners = lib.mapAttrs' (
                     n: b: lib.nameValuePair b.net (lib.importJSON ./fleet/boxes/${n}/box.json).owner
                   ) (lib.filterAttrs (n: b: b ? net && builtins.pathExists ./fleet/boxes/${n}/box.json) boxes);
