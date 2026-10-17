@@ -1,8 +1,8 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "v0.1.49-1-1791816657",
-    "issued": 1791816658,
+    "id": "v0.1.49-1-1792255341",
+    "issued": 1792255342,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -64,5 +64,5 @@
     "rev": "40075fc3413e738d552a17c3224bb50557834c75"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "hHN5Os2M92jOSYAvmnJM2SAmiKUNzfG3navriTLWRIIPuC4ky2mzxvV0srDUKihXCHMDI+WJI7Aac8a7vFUVDw=="
+  "signature": "g1QeEYeeSf1VYbSwopE2jNtD2pK5zQZJHsQ/A48ns3VOtp8TgdYg/jeineasNorThGgY7CZOMq0dYWbmxaAIAA=="
 }
