@@ -218,7 +218,7 @@ const slug = (text) => text.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').trim
 const STOP = new Set(['the', 'to', 'me', 'take', 'go', 'how', 'do', 'where', 'is', 'my', 'page', 'and', 'of', 'in', 'on', 'for', 'can', 'a', 'an', 'i', 'it', 'what', 'show', 'open', 'find', 'get', 'with', 'there', 'want', 'button']);
 const words = (s) => s.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, ' ').split(/\s+/).filter((w) => w.length > 1 && !STOP.has(w));
 
-function match(q, kinds) {
+function scored(q, kinds) {
   const ws = words(q);
   if (!ws.length || !map) return [];
   return all
@@ -237,10 +237,25 @@ function match(q, kinds) {
       // a place before a control of it, when the words fit both alike
       return { n, s: (s / ws.length) * (n.target ? 0.95 : 1) };
     })
+    .sort((a, b) => b.s - a.s);
+}
+
+function match(q, kinds) {
+  return scored(q, kinds)
     .filter((x) => x.s >= 0.9)
-    .sort((a, b) => b.s - a.s)
     .slice(0, GO)
     .map((x) => { fits.set(x.n, x.s); return x.n; });
+}
+
+/// The places the model is shown: the ones the question's words come near,
+/// this page and what it is under, and the site's own pages. Not the whole
+/// map - the box's model reads about ninety words a second, and the whole
+/// map is most of a minute before it says anything.
+function nearPlaces(q) {
+  const keep = new Set(scored(q).filter((x) => x.s > 0).slice(0, 24).map((x) => x.n));
+  for (let h = byId[hereId()]; h; h = byId[h.parent]) keep.add(h);
+  for (const n of all) if (!n.parent && !n.target && n.kind !== 'docs') keep.add(n);
+  return all.filter((n) => keep.has(n) && !n.url?.includes('{n}'));
 }
 // how well each place last matched, for clearWinner
 const fits = new WeakMap();
@@ -298,7 +313,7 @@ function cut(md, heading) {
   }
   let to = lines.length;
   for (let i = from + 1; i < lines.length; i++) if (/^##?\s/.test(lines[i])) { to = i; break; }
-  return lines.slice(from, to).join('\n').slice(0, 2500);
+  return lines.slice(from, to).join('\n').slice(0, 1500);
 }
 
 async function docsText(found) {
@@ -393,15 +408,17 @@ export function mayNod(now = Date.now(), roll = Math.random()) {
   return true;
 }
 
-async function askModel(opts, q, found) {
-  const places = all.filter((p) => !p.url?.includes('{n}')).map((p) => `${p.id} = ${pathOf(p)}${p.slot === 'repo' && !p.target ? ` ({repo}${p.url.split('{repo}')[1] || ''})` : ''}`).join('\n');
-  const docs = (await docsText(found)).join('\n\n');
+async function askModel(opts, q, found, onText) {
+  const places = nearPlaces(q).map((p) => `${p.id} = ${pathOf(p)}${p.slot === 'repo' && !p.target ? ` ({repo}${p.url.split('{repo}')[1] || ''})` : ''}`).join('\n');
+  const docs = (await docsText(found.slice(0, 2))).join('\n\n');
   const repo = repoFor();
   const here = byId[hereId()];
-  return complete(opts, SYSTEM + (mayNod() ? NOD : NO_NOD), `Places:\n${places}\n\n${here ? `The member is on: ${pathOf(here)} (${here.id}).\n\n` : ''}${repo ? `{repo} is ${repo} unless the member names another.\n\n` : ''}Docs sections:\n${docs || '(none matched)'}\n\nQuestion: ${q}`, 400);
+  return complete(opts, SYSTEM + (mayNod() ? NOD : NO_NOD), `Places:\n${places}\n\n${here ? `The member is on: ${pathOf(here)} (${here.id}).\n\n` : ''}${repo ? `{repo} is ${repo} unless the member names another.\n\n` : ''}Docs sections:\n${docs || '(none matched)'}\n\nQuestion: ${q}`, 400, onText);
 }
 
-async function complete(opts, system, user, max) {
+/// the model's answer; with onText, as it comes, its "say" so far given
+/// to onText word by word
+async function complete(opts, system, user, max, onText) {
   const url = endpoint(opts);
   if (!url) throw new Unreachable('none');
   const init = { credentials: 'include', redirect: 'manual' };
@@ -412,7 +429,7 @@ async function complete(opts, system, user, max) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       model,
-      stream: false,
+      stream: typeof onText === 'function',
       temperature: 0.2,
       max_tokens: max,
       response_format: { type: 'json_object' },
@@ -427,8 +444,54 @@ async function complete(opts, system, user, max) {
   if (r.status === 403 && opts.demo) throw new Unreachable('The demo gets ten questions an hour, and this hour’s are used. Try again later.');
   if (r.status === 429) throw new Unreachable('Too many questions at once. Try again in a moment.');
   if (!r.ok) throw new Unreachable(String(r.status));
-  const j = await r.json();
-  return j.choices?.[0]?.message?.content;
+  if (typeof onText !== 'function') {
+    const j = await r.json();
+    return j.choices?.[0]?.message?.content;
+  }
+  // server-sent events: a line "data: {...}" for each few words
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let text = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const l of lines) {
+      const d = l.startsWith('data:') ? l.slice(5).trim() : '';
+      if (!d || d === '[DONE]') continue;
+      try { text += JSON.parse(d).choices?.[0]?.delta?.content || ''; } catch { /* a line cut short */ }
+    }
+    onText(sayOf(text));
+  }
+  return text;
+}
+
+/// The "say" of an answer still being written: as much of the string as
+/// has come, its escapes undone; "" until it starts
+export function sayOf(s) {
+  const m = /"say"\s*:\s*"/.exec(s);
+  if (!m) return '';
+  let out = '';
+  for (let i = m.index + m[0].length; i < s.length; i++) {
+    const c = s[i];
+    if (c === '"') break;
+    if (c !== '\\') { out += c; continue; }
+    const e = s[i + 1];
+    if (e === undefined) break;
+    if (e === 'u') {
+      const h = s.slice(i + 2, i + 6);
+      if (h.length < 4) break;
+      out += String.fromCharCode(parseInt(h, 16));
+      i += 5;
+      continue;
+    }
+    out += { n: '\n', t: ' ', r: '' }[e] ?? e;
+    i++;
+  }
+  return out;
 }
 
 /// What the model said, held to what it may say: words as words, places
@@ -937,21 +1000,39 @@ function build(opts) {
     tour(keyName(shortcut()), () => btn.focus());
   }
 
+  // the dots while an answer is coming, its words as they arrive, and a
+  // word about why when it is slow
+  function waiting() {
+    const w = el('div', { class: 'msg it thinking', role: 'status', 'aria-label': 'Thinking' },
+      el('span', { class: 'dots', 'aria-hidden': 'true' }, el('i'), el('i'), el('i')));
+    log.append(w);
+    log.scrollTop = log.scrollHeight;
+    const slow = setTimeout(() => {
+      if (w.isConnected && w.classList.contains('thinking')) w.append(el('span', { class: 'slow', text: 'Still thinking. After a quiet spell the model has to wake up first, which takes a minute.' }));
+    }, 12000);
+    w.say = (t) => {
+      if (!t) return;
+      clearTimeout(slow);
+      w.classList.remove('thinking');
+      w.textContent = t;
+      log.scrollTop = log.scrollHeight;
+    };
+    return w;
+  }
+
   // asked about Monty Python: the model's own knowledge, no docs, no places
   async function python(q) {
     busy = true;
     form.setAttribute('aria-busy', 'true');
-    const wait = el('div', { class: 'msg it', text: '…', role: 'status', 'aria-label': 'Looking it up' });
-    log.append(wait);
-    log.scrollTop = log.scrollHeight;
+    const wait = waiting();
     try {
       // the few parts of the joke that fit (servers/gate/src/joke.rs), when the box has them
       const { json } = await fetchJson(`/_dd/joke?q=${encodeURIComponent(q)}`);
       const found = (Array.isArray(json?.found) ? json.found : [])
         .filter((f) => typeof f?.title === 'string' && typeof f.text === 'string')
-        .slice(0, 3);
-      const from = found.map((f) => `[${f.title}${f.section ? ` › ${f.section}` : ''}]\n${f.text.slice(0, 2500)}`).join('\n\n');
-      const a = checked(await complete(opts, PYTHON_SYSTEM, `${from ? `From the Monty Python Wiki:\n${from}\n\n` : ''}Question: ${q}`, 400), {});
+        .slice(0, 2);
+      const from = found.map((f) => `[${f.title}${f.section ? ` › ${f.section}` : ''}]\n${f.text.slice(0, 1000)}`).join('\n\n');
+      const a = checked(await complete(opts, PYTHON_SYSTEM, `${from ? `From the Monty Python Wiki:\n${from}\n\n` : ''}Question: ${q}`, 300, wait.say), {});
       wait.remove();
       const credit = found.length && typeof json.from?.name === 'string' ? `from ${plain(json.from.name, 80)} (${plain(json.from.license, 20)}) and what the box’s model knows` : 'from what the box’s model knows, not the docs';
       say({ who: 'it', text: a?.say || 'I’m not dead yet, but I couldn’t answer that just now. Ask me again.', how: a?.say ? credit : null });
@@ -973,9 +1054,7 @@ function build(opts) {
   async function working(f) {
     busy = true;
     form.setAttribute('aria-busy', 'true');
-    const wait = el('div', { class: 'msg it', text: '…', role: 'status', 'aria-label': 'Looking it up' });
-    log.append(wait);
-    log.scrollTop = log.scrollHeight;
+    const wait = waiting();
     try { await f(); } finally {
       wait.remove();
       busy = false;
@@ -1140,11 +1219,9 @@ function build(opts) {
     const found = sections(q);
     busy = true;
     form.setAttribute('aria-busy', 'true');
-    const wait = el('div', { class: 'msg it', text: '…', role: 'status', 'aria-label': 'Looking it up' });
-    log.append(wait);
-    log.scrollTop = log.scrollHeight;
+    const wait = waiting();
     try {
-      const a = checked(await askModel(opts, q, found), byId);
+      const a = checked(await askModel(opts, q, found, wait.say), byId);
       wait.remove();
       if (!a) throw new Unreachable('malformed');
       const ids = [...a.go];

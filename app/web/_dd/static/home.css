@@ -1165,6 +1165,14 @@ body.dd-tucked.dd-peek .dd-guide-btn .hat { animation: dd-eyes 4.6s both; }
 .dd-guide .msg { max-width: 86%; padding: 8px 11px; border-radius: 10px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dd-guide .msg.me { align-self: flex-end; background: var(--gd-bar); color: var(--gd-bar-ink); border-bottom-right-radius: 3px; }
 .dd-guide .msg.it { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+/* an answer coming: three dots that rise in turn, then its words as they arrive */
+.dd-guide .msg.thinking .dots { display: inline-flex; gap: 4px; padding: 5px 2px; }
+.dd-guide .msg.thinking .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-2); animation: dd-think 1.2s ease-in-out infinite both; }
+.dd-guide .msg.thinking .dots i:nth-child(2) { animation-delay: .15s; }
+.dd-guide .msg.thinking .dots i:nth-child(3) { animation-delay: .3s; }
+.dd-guide .msg.thinking .slow { display: block; margin-top: 4px; font-size: 12.5px; color: var(--ink-2); }
+@keyframes dd-think { 0%, 70%, 100% { opacity: .3; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .dd-guide .msg.thinking .dots i { animation: none; opacity: .6; } }
 .dd-guide .dest { margin-top: 8px; display: grid; gap: 6px; white-space: normal; }
 .dd-guide .dest button { margin: 0; height: auto; text-align: left; display: flex; gap: 8px; align-items: center; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; cursor: pointer; font: 13px var(--font); color: var(--ink); }
 .dd-guide .dest button:hover { border-color: var(--pick); background: var(--surface); color: var(--ink); }
