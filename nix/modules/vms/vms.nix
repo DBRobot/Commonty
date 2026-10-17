@@ -1,12 +1,16 @@
 {
   config,
+  ddScript,
   pkgs,
   lib,
+  self,
   ...
 }:
 let
   cfg = config.dd.vms;
+  base = config.dd.domain;
   dir = "/var/lib/dd-vms";
+  sock = "/run/dd-vms/dd-vms.sock";
   # the guest's own nixpkgs, without the box's overlays: the guest rebuilds
   # from plain nixpkgs (guest/base.nix), so the host's first system is the
   # one the guest would build
@@ -117,6 +121,26 @@ in
       type = lib.types.ints.positive;
       default = 200;
     };
+    manager = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "the manager and its page (compute.<domain>); a test of the guest alone turns it off";
+    };
+    memoryMiB = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 16384;
+      description = "what one member's computers, together, may take (fleet/policy.json vms, for now)";
+    };
+    threads = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 8;
+    };
+    reach = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      readOnly = true;
+      default = [ "${toString cfg.portBase}-${toString (cfg.portBase + cfg.portCount - 1)}" ];
+      description = "the ports a member's device may reach on this box, as headscale's policy writes them";
+    };
     image = lib.mkOption {
       type = lib.types.package;
       readOnly = true;
@@ -180,28 +204,114 @@ in
       };
     };
 
-    # every instance whose record says up, at boot; the manager does this
-    # once there is one
-    systemd.services.dd-vms-up = {
-      description = "Start members' computers that should be up";
+    # The manager: configs, records, and the units they run as. Like the
+    # games manager it believes x-dd-user, so it listens on a socket only
+    # nginx's group opens
+    systemd.services.dd-vms = lib.mkIf cfg.manager {
+      description = "Members' computers: the manager behind compute.${base}";
       wantedBy = [ "multi-user.target" ];
       after = [
+        "network-online.target"
         "firewall.service"
-        "systemd-tmpfiles-setup.service"
       ];
+      wants = [ "network-online.target" ];
+      path = [ pkgs.systemd ];
+      environment = {
+        DD_VMS_DIR = dir;
+        DD_VMS_BIND = sock;
+        DD_VMS_PORT_BASE = toString cfg.portBase;
+        DD_VMS_PORT_COUNT = toString cfg.portCount;
+        DD_VMS_MEMORY_MIB = toString cfg.memoryMiB;
+        DD_VMS_THREADS = toString cfg.threads;
+        DD_VMS_ADDRESS = config.dd.box.net;
+        # whose box: "my boxes only" runs here for them alone. A fleet box
+        # (no owner of its own) is the fleet owner's
+        DD_VMS_BOX_OWNER =
+          if config.dd.box.owner != null then
+            config.dd.box.owner
+          else
+            (lib.importJSON ../../../fleet/policy.json).owner;
+        DD_VMS_ACCESS = "/run/dd-vms/access.json";
+      };
+      serviceConfig = {
+        User = "dd-vms";
+        Group = "dd-vms";
+        RuntimeDirectory = "dd-vms";
+        RuntimeDirectoryMode = "0750";
+        ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.vms}/bin/dd-vms";
+        Restart = "on-failure";
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ReadWritePaths = [ dir ];
+        ProtectHome = true;
+        PrivateTmp = true;
+      };
+    };
+    security.polkit.enable = lib.mkIf cfg.manager true;
+    security.polkit.extraConfig = lib.mkIf cfg.manager ''
+      polkit.addRule(function(action, subject) {
+        if (action.id == "org.freedesktop.systemd1.manage-units" &&
+            subject.user == "dd-vms" &&
+            /^dd-vm@[0-9a-f]{16}\.service$/.test(action.lookup("unit")) &&
+            ["start", "stop"].indexOf(action.lookup("verb")) >= 0) {
+          return polkit.Result.YES;
+        }
+      });
+    '';
+    users.users.nginx = lib.mkIf (cfg.manager && config.services.nginx.enable) {
+      extraGroups = [ "dd-vms" ];
+    };
+    services.nginx.virtualHosts."compute.${base}" = lib.mkIf cfg.manager {
+      useACMEHost = base;
+      forceSSL = true;
+      locations."/" = {
+        proxyPass = "http://unix:${sock}:";
+        extraConfig = ''
+          auth_request /_dd/verify;
+          auth_request_set $auth_user $upstream_http_x_auth_request_preferred_username;
+          proxy_set_header X-DD-User $auth_user;
+          auth_request_set $auth_role $upstream_http_x_dd_role;
+          proxy_set_header X-DD-Role $auth_role;
+          proxy_set_header Authorization "";
+          client_max_body_size 128k;
+          error_page 401 = @login;
+          error_page 403 = @waiting;
+        '';
+      };
+    };
+
+    # Who may reach each computer: its owner's devices and the friends its
+    # config names, asked of the gate every fifteen seconds, as for games
+    # (games-access.sh, the same script on its own chain)
+    systemd.services.vms-access = lib.mkIf cfg.manager {
+      description = "Open each member's computer to its owner's and invited devices";
+      after = [ "firewall.service" ];
       path = [
         pkgs.jq
-        pkgs.systemd
+        pkgs.curl
+        pkgs.iptables
+        pkgs.coreutils
+        pkgs.diffutils
       ];
       serviceConfig.Type = "oneshot";
-      script = ''
-        for rec in ${dir}/records/*.json; do
-          [ -e "$rec" ] || continue
-          [ "$(jq -r '.up // false' "$rec")" = true ] || continue
-          systemctl start --no-block "dd-vm@$(basename "$rec" .json).service"
-        done
-      '';
+      script = ddScript ../games/games-access.sh {
+        ACCESS = "/run/dd-vms/access.json";
+        GATE = "http://127.0.0.1:${toString config.dd.verify.port}";
+        STATE = "/run/vms-access";
+        CHAIN = "dd-vms";
+      };
     };
+    systemd.timers.vms-access = lib.mkIf cfg.manager {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "30s";
+        OnUnitActiveSec = "15s";
+        AccuracySec = "1s";
+      };
+    };
+    systemd.services.firewall.postStart = lib.mkIf cfg.manager (
+      lib.mkAfter "systemctl start --no-block vms-access.service || true"
+    );
 
     # SSH and forwards are open on the Commonty network only, to whom the
     # owner lets in; the chain is filled once there is a manager (step 2)

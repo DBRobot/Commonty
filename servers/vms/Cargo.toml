@@ -1,0 +1,17 @@
+[package]
+name = "vms"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Members' own computers: the manager behind compute.<domain>"
+
+[[bin]]
+name = "dd-vms"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"

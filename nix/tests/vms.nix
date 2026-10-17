@@ -2,7 +2,12 @@
 # it boots its own disk, the owner signs in with their key, the system it
 # built from its Nix file is the one the host made, /home outlives a
 # restart, and it can't reach the box's loopback.
-{ pkgs, lib, self, ... }:
+{
+  pkgs,
+  lib,
+  self,
+  ...
+}:
 {
   name = "vms";
   node.specialArgs = { inherit self; };

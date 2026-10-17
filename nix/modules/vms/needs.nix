@@ -9,7 +9,8 @@
     };
     units = [
       "dd-vm@*"
-      "dd-vms-up"
+      "dd-vms"
+      "vms-access"
     ];
     base = {
       requires = {
@@ -25,7 +26,11 @@
         outbound = "internet"; # from inside the guests
         inbound = "network"; # SSH and forwards, over the Commonty network only
       };
-      depends.commonty-net.local = true;
+      depends = {
+        nginx.local = true;
+        dd-verify.local = true;
+        commonty-net.local = true; # the firewall opens computers on commonty0
+      };
       privacy = "plaintext"; # members' disks and memory, on the box that runs them
     };
   };

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Computers</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/static/vms.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main id="main">
+    <div class="top">
+      <h1>Computers</h1>
+      <p class="used" id="used"><span class="ph">— of 16 GiB · — of 8 threads</span></p>
+    </div>
+    <p class="note" id="note" hidden></p>
+
+    <section aria-labelledby="h-instances">
+      <h2 id="h-instances">Your computers</h2>
+      <div id="instances" class="list">
+        <div class="row ph" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-configs">
+      <div class="top">
+        <h2 id="h-configs">Configs</h2>
+        <button type="button" class="quiet" id="new-config">New config</button>
+      </div>
+      <div id="configs" class="list">
+        <div class="row ph" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <dialog id="editor" aria-labelledby="ed-title">
+      <form id="ed-form" method="dialog">
+        <h2 id="ed-title">Config</h2>
+        <label for="ed-name">Name</label>
+        <input id="ed-name" name="name" required pattern="[a-z0-9][a-z0-9-]{0,31}" autocomplete="off">
+        <div class="three">
+          <div><label for="ed-memory">Memory, MiB</label><input id="ed-memory" name="memory" type="number" min="512" step="256" value="4096" required></div>
+          <div><label for="ed-threads">Threads</label><input id="ed-threads" name="threads" type="number" min="1" value="2" required></div>
+          <div><label for="ed-disk">Disk, GiB</label><input id="ed-disk" name="disk" type="number" min="8" value="32" required></div>
+        </div>
+        <fieldset>
+          <legend>Where it may run</legend>
+          <label class="pick"><input type="radio" name="consent" value="own" checked> Only on my boxes</label>
+          <label class="pick"><input type="radio" name="consent" value="any"> On anyone's box</label>
+        </fieldset>
+        <label for="ed-keys">SSH keys, one per line</label>
+        <textarea id="ed-keys" name="keys" rows="3" spellcheck="false" placeholder="ssh-ed25519 AAAA… you@laptop"></textarea>
+        <label for="ed-ports">More ports to open, besides SSH</label>
+        <input id="ed-ports" name="ports" inputmode="numeric" placeholder="8080 3000" autocomplete="off">
+        <label for="ed-players">Who else may reach it (your friends)</label>
+        <input id="ed-players" name="players" placeholder="ann bob" autocomplete="off">
+        <label for="ed-nix">Packages and services: a NixOS module</label>
+        <textarea id="ed-nix" name="nix" rows="10" spellcheck="false"></textarea>
+        <p class="error" id="ed-error" role="alert" hidden></p>
+        <div class="actions">
+          <button type="button" class="quiet" id="ed-cancel">Cancel</button>
+          <button type="submit" id="ed-save">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="maker" aria-labelledby="mk-title">
+      <form id="mk-form" method="dialog">
+        <h2 id="mk-title">New computer</h2>
+        <label for="mk-name">Name</label>
+        <input id="mk-name" name="name" required pattern="[a-z0-9][a-z0-9-]{0,31}" autocomplete="off">
+        <div id="mk-warn" class="warn" hidden>
+          <p><strong>This runs on someone else's box.</strong> Whoever has that box in their
+            house can read this computer's disk and memory: your files, and anything you
+            sign in to on it, such as Claude.</p>
+          <label class="pick"><input type="checkbox" id="mk-yes"> I understand; run it on someone else's box</label>
+        </div>
+        <p class="error" id="mk-error" role="alert" hidden></p>
+        <div class="actions">
+          <button type="button" class="quiet" id="mk-cancel">Cancel</button>
+          <button type="submit" id="mk-go">Make it</button>
+        </div>
+      </form>
+    </dialog>
+  </main>
+  <script type="module" src="/static/vms.js"></script>
+  <script type="module" src="/_dd/static/shell.js"></script>
+</body>
+</html>

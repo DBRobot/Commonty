@@ -321,6 +321,7 @@
             "verify"
             "release"
             "games"
+            "vms"
             "transcode"
             "git-remote-dd"
           ];
@@ -829,6 +830,8 @@
           verify = perCrate "verify";
           # the manager behind the Games tile (nix/modules/games/games.nix)
           games = perCrate "games";
+          # the manager behind members' computers (nix/modules/vms/vms.nix)
+          vms = perCrate "vms";
           # one file, one viewer, in memory: the compute side of the
           # encrypted libraries (modules/library/transcode.nix)
           transcode = perCrate "transcode";

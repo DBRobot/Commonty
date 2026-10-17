@@ -1,0 +1,92 @@
+/* The Computers page: what it adds to home.css (loaded before this). The
+   colours, type, bar, buttons, fields and state words are home.css's. */
+
+main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding-inline: 16px;
+  padding-block: 32px 72px;
+}
+h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+h2 { margin: 0 0 14px; font-size: 18px; }
+h3 { margin: 0 0 6px; font-size: 16px; }
+section { margin-bottom: 36px; }
+
+.top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.used { margin: 0; color: var(--ink-2); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+code.mono { background: var(--code); padding: 2px 6px; border-radius: var(--radius); overflow-wrap: anywhere; }
+
+.list { display: grid; gap: 10px; }
+.row {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.row.ph { height: 76px; background: var(--line-2); border-color: var(--line-2); }
+.ph { color: transparent; }
+.what { min-width: 0; flex: 1 1 320px; }
+.meta { margin: 4px 0 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; color: var(--ink-2); }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.actions button { min-height: 40px; }
+
+.note {
+  margin: 0 0 22px;
+  padding: 12px 16px;
+  border: 1px solid var(--broken);
+  background: var(--broken-bg);
+  border-radius: var(--radius);
+}
+
+dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 24px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+dialog::backdrop { background: color-mix(in srgb, var(--ink) 40%, transparent); }
+dialog form { display: grid; gap: 6px; }
+dialog label { margin-top: 10px; }
+dialog input, dialog textarea { width: 100%; box-sizing: border-box; }
+textarea {
+  font: 14px/1.45 var(--mono);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--field);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  resize: vertical;
+}
+textarea:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
+.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 520px) { .three { grid-template-columns: 1fr; } }
+fieldset { margin: 14px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
+legend { padding: 0 4px; color: var(--ink-2); }
+label.pick { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+label.pick input { width: auto; height: auto; }
+.warn {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--attention-bg);
+  border: 1px solid var(--attention);
+  border-radius: var(--radius);
+}
+.warn p { margin: 0; }
+.error { margin: 10px 0 0; color: var(--broken); }
+dialog .actions { justify-content: flex-end; margin-top: 18px; }
