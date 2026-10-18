@@ -1,0 +1,24 @@
+[package]
+name = "davbridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A member's calendars and address books as CalDAV and CardDAV on this computer, for the calendar and contacts programs already on it"
+
+[dependencies]
+media = { path = "../media" }
+library = { path = "../library" }
+anyhow = "1"
+async-trait = "0.1"
+axum = "0.8"
+base64 = "0.22"
+quick-xml = "0.42"
+sha2 = "0.10"
+md-5 = "0.11"
+subtle = "2"
+tokio = { version = "1", features = ["sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

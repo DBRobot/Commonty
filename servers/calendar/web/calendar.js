@@ -5,7 +5,7 @@
 
 import { $, el } from './kit.js';
 import * as I from './ical.js';
-import { collections, items, save, remove, make, first, fileName, forAccount } from './vdir.js';
+import { collections, items, save, remove, make, first, fileName, forAccount, otherApps } from './vdir.js';
 import { unlock, libraries, share } from './library.js';
 import { me } from './shell.js';
 
@@ -737,6 +737,7 @@ $('prev').addEventListener('click', () => { const w = I.wall(anchor, tz); anchor
 $('next').addEventListener('click', () => { const w = I.wall(anchor, tz); anchor = span === 'month' ? I.zoned(w.y, w.m + 1, 1, 0, 0, 0, tz) : addDays(anchor, 7); draw(); });
 for (const b of document.querySelectorAll('.seg button')) b.addEventListener('click', () => { span = b.dataset.span; keepJSON('dd-cal-span', span); draw(); });
 $('new-event').addEventListener('click', () => openEdit(null));
+otherApps($('other-apps'), $('ask'), 'calendars');
 $('show-birthdays').addEventListener('change', (e) => { birthdays = e.target.checked; keepJSON('dd-cal-birthdays', birthdays); if (birthdays) loadPeople(); draw(); });
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, textarea, select, dialog')) return;

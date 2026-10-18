@@ -26,6 +26,7 @@
     <div class="drive-head">
       <h1>Calendar</h1>
       <div class="drive-actions" id="actions" hidden>
+        <button id="other-apps" class="quiet" type="button" hidden>Other apps</button>
         <button id="import" class="quiet" type="button">Import .ics</button>
         <input id="import-file" type="file" accept=".ics,text/calendar" multiple hidden>
         <button id="new-event" type="button">New event</button>
@@ -127,8 +128,8 @@
     <form method="dialog" id="ask-form">
       <h2 id="ask-h"></h2>
       <p id="ask-text"></p>
-      <div id="ask-body"></div>
-      <div class="ask-actions" id="ask-actions"></div>
+      <div id="ask-body" data-body></div>
+      <div class="ask-actions" id="ask-actions" data-actions></div>
     </form>
   </dialog>
 

@@ -1364,9 +1364,11 @@ version = "0.1.0"
 dependencies = [
  "account",
  "anyhow",
+ "async-trait",
  "auth",
  "axum",
  "base64 0.22.1",
+ "davbridge",
  "directory",
  "ed25519-dalek",
  "ente",
@@ -1946,6 +1948,25 @@ name = "data-encoding"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
+
+[[package]]
+name = "davbridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "http-body-util",
+ "library",
+ "md-5",
+ "media",
+ "quick-xml",
+ "sha2 0.10.9",
+ "subtle",
+ "tokio",
+ "tower",
+]
 
 [[package]]
 name = "dbus"

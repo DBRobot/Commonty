@@ -93,6 +93,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "davbridge" = rec {
+      packageId = "davbridge";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "davbridge";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "dd" = rec {
       packageId = "dd";
       build = internal.buildRustCrateWithFeatures {
@@ -4553,6 +4563,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
             name = "auth";
             packageId = "auth";
           }
@@ -4563,6 +4577,10 @@ rec {
           {
             name = "base64";
             packageId = "base64 0.22.1";
+          }
+          {
+            name = "davbridge";
+            packageId = "davbridge";
           }
           {
             name = "directory";
@@ -6391,6 +6409,76 @@ rec {
           "std" = [ "alloc" ];
         };
         resolvedDefaultFeatures = [ "alloc" "default" "std" ];
+      };
+      "davbridge" = rec {
+        crateName = "davbridge";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./client/davbridge; };
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "axum";
+            packageId = "axum";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "library";
+            packageId = "library";
+          }
+          {
+            name = "md-5";
+            packageId = "md-5";
+          }
+          {
+            name = "media";
+            packageId = "media";
+          }
+          {
+            name = "quick-xml";
+            packageId = "quick-xml";
+          }
+          {
+            name = "sha2";
+            packageId = "sha2 0.10.9";
+          }
+          {
+            name = "subtle";
+            packageId = "subtle";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "sync" "time" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "http-body-util";
+            packageId = "http-body-util";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "macros" "rt-multi-thread" "net" ];
+          }
+          {
+            name = "tower";
+            packageId = "tower";
+            features = [ "util" ];
+          }
+        ];
+
       };
       "dbus" = rec {
         crateName = "dbus";

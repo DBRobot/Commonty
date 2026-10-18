@@ -247,6 +247,11 @@ async fn serve<R: Runtime>(
             ),
         });
     }
+    // where the other programs on this computer find the calendars, and
+    // their password: the app's window only (dav.rs)
+    if path == "/_dd/app/dav" {
+        return Ok(no_store(&crate::dav::details()));
+    }
     if path == "/_dd/app/libraries" {
         return Ok(match libraries_value(app).await? {
             Some(v) => no_store(&v),

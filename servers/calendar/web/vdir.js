@@ -8,6 +8,7 @@
 // only for what changed.
 
 import { libraries, list, readText, saveText, trashFrom, mkdir } from './library.js';
+import { inApp, appFetch } from './shell.js';
 
 // one store per account, so another account signed in on this device
 // never draws what this one kept
@@ -197,4 +198,62 @@ export async function first(libs, root, list, name) {
 /// a fresh one, as CalDAV programs name them.
 export function fileName(uid, ext) {
   return /^[A-Za-z0-9@._-]{1,120}$/.test(uid) ? `${uid}${ext}` : `${crypto.randomUUID?.() || Date.now()}${ext}`;
+}
+
+/// The Other apps button, in the app's window: where Thunderbird, GNOME's
+/// and Apple's calendars and contacts find these on this computer, and the
+/// password they sign in with (app/src/dav.rs). `which`: 'calendars' or
+/// 'contacts'.
+export function otherApps(button, dialog, which) {
+  if (!inApp) return;
+  button.hidden = false;
+  button.addEventListener('click', async () => {
+    const h = dialog.querySelector('h2');
+    const body = dialog.querySelector('[data-body]');
+    const acts = dialog.querySelector('[data-actions]');
+    h.textContent = which === 'calendars' ? 'Your calendars in other apps' : 'Your contacts in other apps';
+    body.replaceChildren();
+    acts.replaceChildren();
+    let d;
+    try {
+      const r = await appFetch('/_dd/app/dav');
+      d = await r.json();
+    } catch (e) { d = { error: e.message }; }
+    const row = (label, value) => {
+      const v = document.createElement('code');
+      v.textContent = value;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'quiet small';
+      b.textContent = 'Copy';
+      b.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(value); b.textContent = 'Copied'; } catch { b.textContent = 'Select it'; }
+        setTimeout(() => { b.textContent = 'Copy'; }, 1600);
+      });
+      const l = document.createElement('div');
+      l.className = 'dav-row';
+      const t = document.createElement('span');
+      t.textContent = label;
+      l.append(t, v, b);
+      return l;
+    };
+    if (d.error) {
+      const p = document.createElement('p');
+      p.textContent = `Not available on this computer: ${d.error}`;
+      body.append(p);
+    } else {
+      const p = document.createElement('p');
+      p.textContent = which === 'calendars'
+        ? 'In your calendar app, add a CalDAV account with these. It works while Commonty runs on this computer.'
+        : 'In your contacts app, add a CardDAV account with these. It works while Commonty runs on this computer.';
+      body.append(p, row('Address', which === 'calendars' ? d.calendars : d.contacts), row('Name', d.user), row('Password', d.password));
+    }
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = 'Done';
+    close.addEventListener('click', () => dialog.close());
+    acts.append(close);
+    dialog.onclose = null;
+    dialog.showModal();
+  });
 }

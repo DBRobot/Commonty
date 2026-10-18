@@ -41,3 +41,12 @@ it, the page says so and shows it as it now is, and your change is not
 saved; make it again.
 
 A deleted event stays in your library's trash for 30 days.
+
+## In other apps
+
+Your calendar work in the calendar app already on your computer
+(Thunderbird, GNOME, Apple's), through the Commonty app. In the
+Commonty app's window, open Calendar and press **Other apps**: add a CalDAV
+account in your calendar app with the address, name and password shown.
+It works while Commonty runs on that computer. On an Android phone,
+DAVx5 takes the same.

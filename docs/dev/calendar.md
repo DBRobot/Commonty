@@ -143,6 +143,55 @@ against the owner's allowance, and only the owner deletes for good. A
 library shared without `writes` is seen and not changed; the page hides
 its edit controls and the gate refuses the writes.
 
+## Other programs on the computer
+
+The app serves the same calendars and address books as CalDAV and CardDAV
+on 127.0.0.1:41664 ([client/davbridge](../../client/davbridge/src/lib.rs),
+started by [app/src/dav.rs](../../app/src/dav.rs)), so Thunderbird, GNOME's
+and Apple's calendars and contacts, and DAVx5 on an Android phone, use them
+as an ordinary account. Every event is opened and sealed in the app, as the
+pages do it; the box sees the same as for the pages.
+
+```
+/.well-known/caldav, /.well-known/carddav, /dav/   the member (principal)
+/dav/calendars/<id>/           a calendar: its folder in the main library,
+                               or <folder>~<library> for another library's
+/dav/calendars/<id>/<file>     one event file
+/dav/contacts/...              address books, the same way
+```
+
+- **Signing in**: Digest (RFC 7616, SHA-256 or MD5) as `commonty` with
+  this computer's own password, made once and kept in the app's data
+  folder (`calendar-password`, this account alone). The password itself
+  never crosses, so a program of another account that takes the port
+  while the app is closed learns only a digest of a long random one. A
+  challenge carries its time, a random part and a mac under the password
+  and a secret of this run of the bridge, so one from an earlier run is
+  never good again; it lasts ten minutes, only `qop=auth` is taken, and
+  each answer's count must be higher than the last for that challenge,
+  so an answer heard once cannot be sent again. The Calendar and Contacts pages
+  show the password under **Other apps** in the app's window, never in a
+  browser it let in.
+- **Only this computer's programs**: a request must name
+  `127.0.0.1:41664` or `localhost:41664` as its Host (a name someone
+  else's DNS points here is refused), and one from a page in a browser
+  (an `Origin`, or `Sec-Fetch-Site` other than `none`) is refused.
+- **What it speaks**: PROPFIND (principal, homes, collections, items),
+  REPORT `calendar-multiget`, `addressbook-multiget`, `calendar-query`
+  and `addressbook-query` (a component filter is applied; a time range is
+  left to the program), `sync-collection` (the versions each recent token
+  stood for are kept in memory, so changes and deletions since one are
+  sent; an unknown token is `valid-sync-token`, and the program reads it
+  all again), GET, PUT and DELETE with `If-Match` / `If-None-Match`
+  passed through to the gate, MKCALENDAR and extended MKCOL (a new folder
+  in the main library), and PROPPATCH of the name and colour.
+- **A calendar shared to be seen** answers without the write privilege,
+  and refuses PUT and DELETE.
+
+Its tests (`cargo test -p davbridge`) ask what the programs ask, against a
+store in memory; `cargo run -p davbridge --example memory -- 41699 <pw>`
+serves one to try a program against.
+
 ## Birthdays
 
 Calendar's **Birthdays** reads the member's contacts on the device and

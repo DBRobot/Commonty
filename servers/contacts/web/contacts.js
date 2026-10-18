@@ -5,7 +5,7 @@
 
 import { $, el } from './kit.js';
 import * as I from './ical.js';
-import { collections, items, save, remove, make, first, fileName, forAccount } from './vdir.js';
+import { collections, items, save, remove, make, first, fileName, forAccount, otherApps } from './vdir.js';
 import { unlock, save as download } from './library.js';
 import { me } from './shell.js';
 
@@ -314,6 +314,7 @@ $('export').addEventListener('click', () => {
 });
 
 $('new-person').addEventListener('click', () => openEdit(null));
+otherApps($('other-apps'), $('ask'), 'contacts');
 $('search').addEventListener('input', (e) => { q = e.target.value.trim(); drawList(); });
 
 async function start() {

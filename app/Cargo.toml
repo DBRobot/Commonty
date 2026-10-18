@@ -24,6 +24,9 @@ identity = { path = "../client/identity" }
 directory = { path = "../client/directory" }
 account = { path = "../client/account" }
 media = { path = "../client/media" }
+# the calendars and address books for other programs on this computer (dav.rs)
+davbridge = { path = "../client/davbridge" }
+async-trait = "0.1"
 # every original out of Photos, as one zip, on the way to leaving (export.rs)
 ente = { path = "../client/ente" }
 # the one-time key a photo password comes to the app sealed to

@@ -26,6 +26,10 @@ main.cal-page .seg button[aria-pressed="true"] { background: var(--pick); color:
 main.cal-page .rail button.rail-add, main.cal-page .rail button.rail-add:hover { height: 34px; color: var(--link); font-size: 14px; }
 main.cal-page .rail button.sharing, main.cal-page .rail button.sharing:hover { width: auto; height: 26px; padding: 0 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 12px; }
 .share-rows { display: grid; gap: 6px; }
+.dav-row { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 14px; }
+.dav-row span { font-weight: 600; }
+.dav-row code { padding: 6px 8px; border-radius: 3px; background: var(--code); font: 13px var(--mono); overflow-wrap: anywhere; user-select: all; }
+#ask .dav-row button { height: 32px; margin: 0; padding: 0 10px; font-size: 13px; }
 #ask button.small, #ask button.small:hover { justify-self: start; height: 34px; margin: 0; padding: 0 12px; font-size: 14px; }
 .share-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 34px; gap: 8px; align-items: center; }
 #ask .share-row button, #ask .share-row button:hover { width: 34px; height: 34px; margin: 0; padding: 0; font-size: 18px; }

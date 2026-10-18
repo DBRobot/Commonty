@@ -7,6 +7,7 @@ mod account;
 mod background;
 mod browser;
 mod controllers;
+mod dav;
 mod export;
 mod handoff;
 #[cfg(desktop)]
@@ -139,6 +140,8 @@ pub fn run() {
             links(app.handle());
             // Smart home, the same way (smarthome.rs)
             smarthome::start(app.handle());
+            // calendars and address books for the other programs here (dav.rs)
+            dav::start(app.handle());
             // GTK draws the title bar itself on Wayland, with the buttons its
             // settings name. Built with Nix, the app brings GNOME's own
             // default - a close button alone - and never sees the one the

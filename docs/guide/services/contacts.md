@@ -33,3 +33,12 @@ Birthdays show in [Calendar](calendar.md) when you tick **Birthdays**
 there.
 
 A deleted contact stays in your library's trash for 30 days.
+
+## In other apps
+
+Your contacts work in the contacts app already on your computer
+(Thunderbird, GNOME, Apple's), through the Commonty app. In the
+Commonty app's window, open Contacts and press **Other apps**: add a CardDAV
+account in your contacts app with the address, name and password shown.
+It works while Commonty runs on that computer. On an Android phone,
+DAVx5 takes the same.
