@@ -6,9 +6,11 @@
 # Beside them goes the list of what the snapshot held, and the epoch.
 #
 # A box taking the lease restores from its own store's copy when that is
-# newer than what it has: only what the list names, so a repository deleted
-# since is not brought back, and what it had before is set aside, never
-# deleted. Its own config and secrets stay its own.
+# newer than what it has: only what the list names, and of the repositories
+# only those its records (restored first, from postgres's archive, which is
+# newer than the list can be) still hold, so a repository deleted since is
+# not brought back; what it had before is set aside, never deleted. Its own
+# config and secrets stay its own.
 {
   config,
   options,
@@ -48,7 +50,11 @@ let
     pkgs.jq
     pkgs.coreutils
     pkgs.findutils
+    pkgs.gawk
+    pkgs.gnugrep
+    pkgs.util-linux
     config.boot.zfs.package
+    config.services.postgresql.package
   ];
 
   # before the forge starts at an epoch: the files it starts from
@@ -70,6 +76,22 @@ let
     fi
     echo "epoch $E: restoring the copy of epoch $copied"
     rclone copyto here:forge/manifest ${state}/manifest
+    # the repositories the records hold, read once postgres has replayed its
+    # archive: the list is up to two minutes older, and one deleted since
+    # must not come back
+    q() { runuser -u postgres -- psql -d ${config.services.forgejo.database.name} -v ON_ERROR_STOP=1 -tAc "$1"; }
+    [ "$(q 'select pg_is_in_recovery()')" = f ] || { echo "epoch $E: postgres is still restoring"; exit 1; }
+    q "select u.lower_name || '/' || r.lower_name from repository r join \"user\" u on u.id = r.owner_id" \
+      > ${state}/repos
+    awk -F/ 'FILENAME == ARGV[1] { held[$0]; next }
+      $1 == "repositories" && NF > 3 && $3 ~ /\.git$/ {
+        n = $3; sub(/(\.wiki)?\.git$/, "", n)
+        if (!(($2 "/" n) in held)) { gone[$2 "/" $3]; next }
+      }
+      { print }
+      END { for (r in gone) print "not brought back, deleted since the list: " r > "/dev/stderr" }' \
+      ${state}/repos ${state}/manifest > ${state}/manifest.held
+    mv ${state}/manifest.held ${state}/manifest
     aside="${dir}/.before-e$E.$(date +%Y%m%d%H%M%S)"
     mkdir "$aside"
     for d in ${dir}/* ${dir}/.[!.]*; do
