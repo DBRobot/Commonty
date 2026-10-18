@@ -117,6 +117,13 @@ let
             "store.${name}.test.invalid" = {
               useACMEHost = lib.mkForce null;
               forceSSL = lib.mkForce false;
+              onlySSL = lib.mkForce false;
+              listen = lib.mkForce [
+                {
+                  addr = "0.0.0.0";
+                  port = 80;
+                }
+              ];
             };
           }
         ];

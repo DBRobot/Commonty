@@ -603,6 +603,7 @@ pub async fn create(
         grant,
         libraries: vec![],
         terms: Some(terms.to_string()),
+        removed_boxes: vec![],
         version: 1,
         updated: identity::now(),
     };
@@ -869,6 +870,7 @@ pub async fn recover(
         grant: cur.entry.grant.clone(),
         libraries: vec![],
         terms: cur.entry.terms.clone(),
+        removed_boxes: cur.entry.removed_boxes.clone(),
         version: cur.entry.version + 1,
         updated: identity::now(),
     };
@@ -972,6 +974,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         }

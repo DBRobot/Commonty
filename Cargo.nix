@@ -20141,6 +20141,11 @@ rec {
             path = "src/bin/dd-attest.rs";
             requiredFeatures = [ ];
           }
+          {
+            name = "dd-box-setup";
+            path = "src/bin/dd-box-setup.rs";
+            requiredFeatures = [ ];
+          }
         ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./servers/system/release; };
         dependencies = [
@@ -20151,6 +20156,10 @@ rec {
           {
             name = "base64";
             packageId = "base64 0.22.1";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
           }
           {
             name = "clap";

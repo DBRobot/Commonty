@@ -50,6 +50,7 @@
       "dd-ports-check"
       "dd-netspeed"
       "dd-service-memory"
+      "dd-join-prepare" # a box that joined on its own key: its key and report to build from
     ];
     everyBox = true;
     base = {
@@ -114,6 +115,7 @@
     units = [
       "dd-disk-check"
       "dd-disk-key-forget"
+      "dd-unlock-seal"
     ];
     everyBox = true;
     base = {
@@ -164,6 +166,7 @@
       "NetworkManager-ensure-profiles"
       "dd-wifi-apply"
       "dd-wifi-status"
+      "dd-wifi-unseal"
     ];
     everyBox = true;
     base = {

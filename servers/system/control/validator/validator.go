@@ -339,8 +339,20 @@ func (v *Validator) VerifyRequest(raw []byte) (bft.RequestInfo, error) {
 	if err := json.Unmarshal(raw, &q); err != nil {
 		return bft.RequestInfo{}, err
 	}
-	box, ok := v.o.Config.Boxes[q.Box]
-	if !ok || !state.P256(box.Key, q.Bytes(), q.Sig) {
+	// a join is signed by the key it brings; anything else by a box of the
+	// release or one that joined
+	key, ok := "", false
+	if q.Kind == "join" {
+		var j state.JoinReq
+		if json.Unmarshal(q.Body, &j) == nil {
+			key, ok = j.Key, true
+		}
+	} else {
+		v.mu.Lock()
+		key, ok = v.st.BoxKey(v.o.Config, q.Box)
+		v.mu.Unlock()
+	}
+	if !ok || !state.P256(key, q.Bytes(), q.Sig) {
 		return bft.RequestInfo{}, errors.New("not signed by a box of this fleet")
 	}
 	return v.RequestID(raw), nil

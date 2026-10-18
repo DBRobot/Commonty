@@ -181,6 +181,7 @@
       "dd-store-copy-recent"
       "dd-store-facts"
       "dd-store-migrate" # the move off the old shared pool
+      "dd-store-joined" # keys for the boxes that joined on their own keys
     ];
     base = {
       # node1, 2026-10-11: a fresh garage of one

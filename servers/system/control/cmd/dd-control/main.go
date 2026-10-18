@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -23,6 +24,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/user"
@@ -60,8 +62,11 @@ type relay struct {
 	self uint64
 	// signs the hello that says who this connection is
 	hello func(msg []byte) (string, error)
-	mu    sync.Mutex
-	conn  *websocket.Conn
+	// a box the release does not list: its key, which the relay checks its
+	// address against (state.JoinName)
+	key  string
+	mu   sync.Mutex
+	conn *websocket.Conn
 }
 
 func (r *relay) Send(to uint64, kind byte, p []byte) {
@@ -87,7 +92,11 @@ func (r *relay) run(receive func(from uint64, kind byte, p []byte), connected fu
 			wait = min(wait*2, 30*time.Second)
 			continue
 		}
-		c, _, err := websocket.Dial(context.Background(), fmt.Sprintf("%s?id=%d&at=%d&sig=%s", r.url, r.self, at, sig), nil)
+		u := fmt.Sprintf("%s?id=%d&at=%d&sig=%s", r.url, r.self, at, sig)
+		if r.key != "" {
+			u += "&key=" + url.QueryEscape(r.key)
+		}
+		c, _, err := websocket.Dial(context.Background(), u, nil)
 		if err != nil {
 			log.Printf("relay: %v; again in %s", err, wait)
 			time.Sleep(wait)
@@ -409,6 +418,11 @@ func main() {
 	every := flag.Duration("heartbeat", 30*time.Second, "how often to heartbeat")
 	placedCarries := flag.String("placed-carries", "", "the placed services this box carries and their units (nix/modules/box/placed.nix); empty: none, and nothing is switched")
 	placedDir := flag.String("placed-dir", "/run/dd-placed", "where a placed service's flag is, the condition its units start on")
+	joinKey := flag.String("join-key", "", "a box the release does not list: a file with its TPM-held key (SPKI, base64), with which it joins the agreed state under the name the key gives (state/join.go); -box must be that name")
+	joinRecipient := flag.String("join-recipient", "", "with -join-key: its secrets key's age recipient, what copies' keys are sealed to")
+	joinRecipientFile := flag.String("join-recipient-file", "", "with -join-key: a file holding -join-recipient")
+	joinHouse := flag.String("join-house", "", "with -join-key: its house, as it found it (dd-locate)")
+	joinTicket := flag.String("join-ticket-file", "", "with -join-key: a file with the member's join ticket the box was set up with (a base64 biscuit); absent or empty, it joins as a stranger")
 	placedCopies := flag.String("placed-copies", "", "where to write the plan's copies, which boxes' stores keep each bucket (nix/modules/storage/store.nix); empty: nowhere")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
@@ -471,8 +485,38 @@ func main() {
 		log.Fatal(err)
 	}
 	me, ok := cfg.Boxes[*box]
+	// a box the release does not list joins on its own key
+	var joining *state.JoinReq
 	if !ok {
-		log.Fatalf("%s is not in the config", *box)
+		if *joinKey == "" {
+			log.Fatalf("%s is not in the config, and has no key to join with (-join-key)", *box)
+		}
+		k, err := os.ReadFile(*joinKey)
+		if err != nil {
+			log.Fatal(err)
+		}
+		spki := strings.TrimSpace(string(k))
+		name, id, err := state.JoinName(spki)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if name != *box {
+			log.Fatalf("this box's key joins as %s, not %s", name, *box)
+		}
+		if *joinRecipientFile != "" {
+			b, err := os.ReadFile(*joinRecipientFile)
+			if err != nil {
+				log.Fatal(err)
+			}
+			*joinRecipient = strings.TrimSpace(string(b))
+		}
+		me = state.Box{ID: id, House: *joinHouse, Key: spki}
+		joining = &state.JoinReq{Key: spki, Recipient: *joinRecipient, House: *joinHouse}
+		if *joinTicket != "" {
+			if t, err := os.ReadFile(*joinTicket); err == nil {
+				joining.Ticket = strings.TrimSpace(string(t))
+			}
+		}
 	}
 	var mine *state.Validator
 	for i := range cfg.Validators {
@@ -489,6 +533,9 @@ func main() {
 		sign = softSigner(*softKey)
 	}
 	r := &relay{url: *relayURL, self: self, hello: sign}
+	if joining != nil {
+		r.key = joining.Key
+	}
 
 	var n node
 	var ask func()
@@ -576,6 +623,52 @@ func main() {
 			n.Receive(self, wire.Submit, b) // our own validator too
 		}
 		return q.Seq, nil
+	}
+
+	// on the box running the network's control server: where each box that
+	// joined on its own key is on the network, as headscale gave it, into
+	// the agreed state - its store's name points there, never at what the
+	// box says of itself
+	if joining == nil {
+		go func() {
+			for {
+				time.Sleep(time.Minute)
+				out, err := exec.Command("headscale", "nodes", "list", "-o", "json").Output()
+				if err != nil {
+					continue // no network server here
+				}
+				s := n.State()
+				if s == nil {
+					continue
+				}
+				for name, ip := range joinedAddrs(out) {
+					if j := s.Joined[name]; j != nil && j.IPv4 != ip {
+						body, _ := json.Marshal(state.NetAddr{Name: name, IPv4: ip})
+						if _, err := submit("netaddr", body); err != nil {
+							log.Printf("netaddr: %v", err)
+						}
+					}
+				}
+			}
+		}()
+	}
+
+	// a box the release does not list asks to join until the agreed state
+	// has it; its heartbeats count from then
+	if joining != nil {
+		body, _ := json.Marshal(joining)
+		go func() {
+			for {
+				if s := n.State(); s != nil && s.Joined[*box] != nil {
+					log.Printf("joined the fleet as %s", *box)
+					return
+				}
+				if _, err := submit("join", body); err != nil {
+					log.Printf("join: %v", err)
+				}
+				time.Sleep(time.Minute)
+			}
+		}()
 	}
 
 	// the placed services this box carries, switched by the plan below
@@ -805,4 +898,46 @@ func softSigner(path string) func([]byte) (string, error) {
 		}
 		return base64.RawURLEncoding.EncodeToString(sig), nil
 	}
+}
+
+var joinedName = regexp.MustCompile(`^j[0-9a-f]{10}$`)
+
+// joinedAddrs: from headscale's node list, each node tagged a joined box,
+// by the user the gate made it under (joined-<name>, when it handed the box
+// its key) - never by the hostname a node gives itself - and its IPv4
+// address
+func joinedAddrs(list []byte) map[string]uint32 {
+	var nodes []struct {
+		User struct {
+			Name string `json:"name"`
+		} `json:"user"`
+		IPAddresses []string `json:"ipAddresses"`
+		Tags        []string `json:"tags"`
+		ValidTags   []string `json:"validTags"`
+		ForcedTags  []string `json:"forcedTags"`
+	}
+	out := map[string]uint32{}
+	if json.Unmarshal(list, &nodes) != nil {
+		return out
+	}
+	for _, nd := range nodes {
+		name, ok := strings.CutPrefix(nd.User.Name, "joined-")
+		if !ok || !joinedName.MatchString(name) {
+			continue
+		}
+		tagged := false
+		for _, t := range append(append(nd.Tags, nd.ValidTags...), nd.ForcedTags...) {
+			tagged = tagged || t == "tag:joined"
+		}
+		if !tagged {
+			continue
+		}
+		for _, a := range nd.IPAddresses {
+			if ip := net.ParseIP(a).To4(); ip != nil {
+				out[name] = binary.BigEndian.Uint32(ip)
+				break
+			}
+		}
+	}
+	return out
 }

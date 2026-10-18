@@ -112,6 +112,15 @@ export async function holders(env) {
     for (const [role, l] of Object.entries(v.leases || {})) {
       if (l && typeof l.holder === 'string' && l.holder && l.expires > v.time) out[role] = l.holder;
     }
+    // a box that joined on its own key: its name, and its address on the
+    // fleet's network if it is one (100.64.0.0/10)
+    const joined = {};
+    for (const [name, j] of Object.entries(v.joined || {})) {
+      const n = j && j.ipv4;
+      if (!/^j[0-9a-f]{10}$/.test(name) || !Number.isInteger(n) || n >>> 22 !== (100 << 2) + 1) continue;
+      joined[name] = [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
+    }
+    Object.defineProperty(out, 'joined', { value: joined });
     return out;
   } catch {
     return null;
@@ -291,13 +300,20 @@ export async function converge(env) {
     want[`${h}.${zone}`] = ['A', addressOf(targetOf(h)), false, MOVING_TTL];
   }
   for (const [b, a] of Object.entries(boxes)) want[`*.${b}.${zone}`] = ['A', a, false];
+  // the boxes that joined on their own keys: their stores' names
+  for (const [b, a] of Object.entries((held && held.joined) || {})) want[`*.${b}.${zone}`] = ['A', a, false, MOVING_TTL];
   // no fresh agreement: what moves stays as it is
   const moves = new Set([zone, `*.${zone}`, ...hosts.map((h) => `${h}.${zone}`), ...Object.keys(follow).map((h) => `${h}.${zone}`)]);
   if (stay) for (const name of moves) delete want[name];
 
   // a record this Worker made: an A at one of the fleet's addresses, or a
   // CNAME to one of its tunnels
-  const mine = (r) => (r.type === 'A' && addresses.has(r.content)) || (r.type === 'CNAME' && tunnelsOurs.has(r.content));
+  // and an A on the fleet's network under a joined box's name
+  const joinedName = new RegExp(`^\\*\\.j[0-9a-f]{10}\\.${zone.replace(/\./g, '\\.')}$`);
+  const fleetIP = (ip) => /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.\d+\.\d+$/.test(ip);
+  const mine = (r) =>
+    (r.type === 'A' && (addresses.has(r.content) || (joinedName.test(r.name) && fleetIP(r.content)))) ||
+    (r.type === 'CNAME' && tunnelsOurs.has(r.content));
   const remove = async (name, r, why) => {
     await dns(env, 'DELETE', `/${r.id}`);
     done.push(`removed ${name} ${r.type} (${why})`);
@@ -310,7 +326,7 @@ export async function converge(env) {
   for (const [name, records] of Object.entries(have)) {
     if (Object.hasOwn(want, name) || (stay && moves.has(name))) continue;
     for (const r of records) if (r.type === 'CNAME' && tunnelsOurs.has(r.content)) await remove(name, r, 'no longer public');
-    if (boxWildcard.test(name)) for (const r of records) if (r.type === 'A' && addresses.has(r.content)) await remove(name, r, 'no longer a box with names');
+    if (boxWildcard.test(name)) for (const r of records) if (r.type === 'A' && mine(r) && !stay) await remove(name, r, 'no longer a box with names');
   }
   for (const [name, spec] of Object.entries(want)) {
     const current = have[name] || [];

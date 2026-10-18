@@ -332,7 +332,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [acme, console, directory, metrics, metrics-ui, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, photos, llm, vault, adblock, unlock, leaving, home-controller, pg-follow, store, takeover, forge-follow, net-follow]
+        test: [acme, console, directory, metrics, metrics-ui, backup, release, thanos, members-runner, games, forge, transcode, network, library, pgrestore, photos, llm, vault, adblock, unlock, leaving, home-controller, pg-follow, store, takeover, forge-follow, net-follow, join-install, joined-box]
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: ${{ matrix.test }}

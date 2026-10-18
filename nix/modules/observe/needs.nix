@@ -98,6 +98,31 @@
     };
   };
 
+  joined-metrics = {
+    what = "the metrics the boxes members set up send, each box apart, for its member alone";
+    units = [
+      "thanos-receive-joined"
+      "thanos-query-joined"
+      "dd-metrics-joined"
+      # on a joined box: its token to send them with
+      "dd-metrics-key"
+    ];
+    instances = 1;
+    base = {
+      uses = {
+        memory = "64M";
+        storage = "1G";
+        estimated = true; # a receive and a query; one joined box's share each
+      };
+      network = {
+        outbound = "none";
+        inbound = "network"; # the joined boxes, on the store's port
+      };
+      depends.nginx.local = true;
+      privacy = "metadata";
+    };
+  };
+
   thanos-compact = {
     what = "merges and thins the history in the bucket";
     # two at once would fight over the same blocks

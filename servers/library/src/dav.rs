@@ -37,6 +37,21 @@ fn trash_place(lib: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
 }
 /// a library's id, or `images-<name>`: the bucket's top level, and nothing
 /// that could reach past one person's folder
+/// an S3 LastModified (2026-10-12T03:51:55.000Z) as unix seconds
+fn unix_of(t: &str) -> Option<u64> {
+    let n = |a: usize, b: usize| t.get(a..b)?.parse::<i64>().ok();
+    let (y, mo, d) = (n(0, 4)?, n(5, 7)?, n(8, 10)?);
+    let (h, mi, s) = (n(11, 13)?, n(14, 16)?, n(17, 19)?);
+    // days from the civil date (Howard Hinnant's algorithm)
+    let y = if mo <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if mo > 2 { mo - 3 } else { mo + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    u64::try_from(days * 86400 + h * 3600 + mi * 60 + s).ok()
+}
+
 fn top_prefix(id: &str) -> bool {
     let images = id.strip_prefix("images-").is_some_and(|n| {
         !n.is_empty()
@@ -140,6 +155,64 @@ impl Gate {
                 }
             }
         }
+        Ok(n)
+    }
+
+    /// Every member's pending backups (images-<name>/pending/<ticket>/, a
+    /// box's old disk waiting for the box to join, docs/dev/joining.md):
+    /// each ticket's folder and when it was first written, unix seconds.
+    pub async fn pending(&self) -> Result<std::collections::BTreeMap<String, (String, u64)>> {
+        let mut out = std::collections::BTreeMap::new();
+        let (_, tops) = self.list_level("").await?;
+        for top in tops {
+            let id = top.trim_end_matches('/');
+            if !id.starts_with("images-") || !top_prefix(id) {
+                continue;
+            }
+            let (_, tickets) = self.list_level(&format!("{id}/pending/")).await?;
+            for t in tickets {
+                let Some(ticket) = t.trim_end_matches('/').rsplit('/').next() else {
+                    continue;
+                };
+                if ticket.len() != 32 || !ticket.bytes().all(|c| c.is_ascii_hexdigit()) {
+                    continue;
+                }
+                let first = self
+                    .list_all(&t)
+                    .await?
+                    .iter()
+                    .filter_map(|e| unix_of(&e.modified))
+                    .min();
+                if let Some(first) = first {
+                    out.insert(ticket.to_string(), (t.clone(), first));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// One pending backup to its member's images' trash, as a delete there
+    /// would put it: its box never joined. The trash lets it go 30 days on,
+    /// and until then the member can still take it back.
+    pub async fn drop_pending(&self, folder: &str) -> Result<usize> {
+        let Some((lib, path)) =
+            folder
+                .trim_end_matches('/')
+                .split_once('/')
+                .filter(|(lib, path)| {
+                    lib.starts_with("images-")
+                        && top_prefix(lib)
+                        && path.strip_prefix("pending/").is_some_and(|t| {
+                            t.len() == 32
+                                && t.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
+                        })
+                })
+        else {
+            anyhow::bail!("not a pending backup: {folder}");
+        };
+        let objects = self.objects_at(lib, path, true).await?;
+        let n = objects.len();
+        self.keep_in_trash(lib, path, &objects, false).await?;
         Ok(n)
     }
 
@@ -569,6 +642,29 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
         Ok(r) => r,
         Err(e) => (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response(),
     }
+}
+
+/// What a join ticket may do here (docs/dev/joining.md), decided the way
+/// `serve` routes it, so the two cannot disagree: a path `clean` makes the
+/// ticket's own folder or under it, and a method that reads or adds there -
+/// as a piece of an upload (x-dd-upload: PUT a part, POST start or finish),
+/// or plainly (GET, HEAD, PROPFIND, PUT, MKCOL). Never a delete, a move, a
+/// copy or a change of properties, whatever header comes with it.
+pub fn ticket_allows(method: &Method, headers: &HeaderMap, raw: &str, folder: &str) -> bool {
+    let Some(path) = clean(raw) else {
+        return false;
+    };
+    let inside = path
+        .strip_prefix(folder)
+        .is_some_and(|r| r.is_empty() || r.starts_with('/'));
+    let action = match piece(headers) {
+        Some(_) => matches!(method.as_str(), "PUT" | "POST"),
+        None => matches!(
+            method.as_str(),
+            "GET" | "HEAD" | "PROPFIND" | "PUT" | "MKCOL"
+        ),
+    };
+    inside && action
 }
 
 /// The upload header, as `serve` reads it: a request with one is a piece of
@@ -1083,6 +1179,47 @@ fn percent_decode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ticket_does_what_serve_would_do_in_its_folder_alone() {
+        let f = "pending/0123456789abcdef0123456789abcdef";
+        let none = HeaderMap::new();
+        let mut up = HeaderMap::new();
+        up.insert("x-dd-upload", "abc".parse().unwrap());
+        let ok = |m: &str, h: &HeaderMap, p: &str| ticket_allows(&m.parse().unwrap(), h, p, f);
+        assert!(ok("PUT", &none, &format!("{f}/data/ab")));
+        assert!(ok("PROPFIND", &none, f));
+        assert!(ok("GET", &none, &format!("/{f}/")));
+        assert!(ok("POST", &up, &format!("{f}/data/ab")));
+        // a delete, a move, a copy, whatever header comes with it
+        for m in ["DELETE", "MOVE", "COPY", "PROPPATCH", "POST"] {
+            assert!(!ok(m, &none, &format!("{f}/config")), "{m}");
+        }
+        assert!(!ok("DELETE", &up, &format!("{f}/config")));
+        assert!(!ok("GET", &up, &format!("{f}/config")));
+        // nowhere but its own folder, however the path is written
+        for p in [
+            format!("{f}x/config"),
+            format!("{f}/../config"),
+            format!("{f}/./x"),
+            format!("{f}//x"),
+            format!("{f}\\..\\x"),
+            "pending/0123456789ABCDEF0123456789ABCDEF/x".to_string(),
+            "config".to_string(),
+            "pending".to_string(),
+            String::new(),
+        ] {
+            assert!(!ok("PUT", &none, &p), "{p}");
+        }
+    }
+
+    #[test]
+    fn a_listing_time_is_its_unix_second() {
+        assert_eq!(unix_of("1970-01-01T00:00:00.000Z"), Some(0));
+        assert_eq!(unix_of("2023-11-14T22:13:20.000Z"), Some(1_700_000_000));
+        assert_eq!(unix_of("2024-02-29T12:00:00Z"), Some(1_709_208_000));
+        assert_eq!(unix_of("garbage"), None);
+    }
 
     /// A bucket in a thread, enough S3 for the trash: HEAD, a listing,
     /// DELETE. A listing waits a little, so two deletes at once would both

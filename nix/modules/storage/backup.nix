@@ -83,11 +83,13 @@ in
       description = "S3 endpoint: the storage pool at this box's address for it (dd.box.s3): its own garage, or a storage box's over the fleet's network";
     };
     envFile = lib.mkOption {
-      type = lib.types.path;
-      description = "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY of this box's backup key.";
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY of this box's backup key; null: no backup (a box that joined on its own key keeps nothing of its own worth one)";
     };
     passwordFile = lib.mkOption {
-      type = lib.types.path;
+      type = lib.types.nullOr lib.types.path;
+      default = null;
       description = "The restic repository password; nothing but this box and the release signer's sops key has it.";
     };
   };
@@ -123,7 +125,7 @@ in
         '';
       };
     }
-    (lib.mkIf (cfg.paths != [ ]) {
+    (lib.mkIf (cfg.paths != [ ] && cfg.passwordFile != null && cfg.envFile != null) {
       # What this box covers, from boot, whether or not a run has ever
       # worked. Written by the backup only, it would say "nothing here is
       # backed up" about a box whose backups have never once succeeded,

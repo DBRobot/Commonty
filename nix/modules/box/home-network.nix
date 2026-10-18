@@ -90,13 +90,16 @@ in
       script = builtins.readFile ./wifi-status.sh;
     };
     # the gate writes the request and reads the status and result
-    systemd.services.dd-verify.serviceConfig.ReadWritePaths = lib.mkIf (cfg.wifi != null) [ "/run/dd-wifi" ];
+    systemd.services.dd-verify.serviceConfig.ReadWritePaths = lib.mkIf (cfg.wifi != null) [
+      "/run/dd-wifi"
+    ];
     # a box without Wi-Fi has no folder for a change: it reports and passes
     # changes on, and no password is ever written down on it
     systemd.services.dd-verify.environment.VERIFY_HOUSE = lib.mkIf (cfg.wifi != null) "/run/dd-wifi";
     # Settings, where a Wi-Fi change is signed: every box checks the
     # signature was made there and on no other page
-    systemd.services.dd-verify.environment.VERIFY_HOUSE_ORIGINS = "https://home.${config.dd.domain} https://files.${config.dd.domain}";
+    systemd.services.dd-verify.environment.VERIFY_HOUSE_ORIGINS =
+      "https://home.${config.dd.domain} https://files.${config.dd.domain}";
 
     networking.networkmanager.ensureProfiles = {
       environmentFiles = [ cfg.pskFile ];
@@ -110,13 +113,22 @@ in
               autoconnect-priority = 100;
             };
             ethernet.mac-address = cfg.wired;
-            ipv4 = {
-              method = "manual";
-              address1 = cfg.address;
-              gateway = cfg.gateway;
-              dns = "1.1.1.1;9.9.9.9;";
-              route-metric = 10;
-            };
+            # a box with no fixed address (one that joined on its own key,
+            # in a house nobody told it about) asks the router for one
+            ipv4 =
+              if cfg.address == "" then
+                {
+                  method = "auto";
+                  route-metric = 10;
+                }
+              else
+                {
+                  method = "manual";
+                  address1 = cfg.address;
+                  gateway = cfg.gateway;
+                  dns = "1.1.1.1;9.9.9.9;";
+                  route-metric = 10;
+                };
             ipv6.method = "auto";
           };
         }

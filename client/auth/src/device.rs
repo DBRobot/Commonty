@@ -134,8 +134,76 @@ pub fn mint_at(
     token.build(kp).map_err(err)?.to_base64().map_err(err)
 }
 
+/// How long a join ticket is good for: the drive it is written to can sit
+/// a week before the box is set up.
+pub const JOIN_TICKET_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
+
+/// A member's join ticket (docs/dev/joining.md): a token for the one
+/// operation `join`, naming a ticket id of 16 random bytes. A box set up
+/// with it joins as this member's, and it writes that box's backup under
+/// /_dd/images/pending/<id>/ and nowhere else; it opens nothing of the
+/// member's, as any purpose-built token opens nothing else. The ticket and
+/// its id, hex.
+pub fn mint_join_ticket(kp: &KeyPair, user: &str) -> Result<(String, String)> {
+    // 16 bytes from the OS's generator: the seed of a key made for nothing
+    // else, which is what the generator gave it
+    let id: String = generate()
+        .private()
+        .to_bytes()
+        .iter()
+        .take(16)
+        .map(|x| format!("{x:02x}"))
+        .collect();
+    let exp = (SystemTime::now() + JOIN_TICKET_TTL)
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let err = |e: biscuit_auth::error::Token| crate::Error::Token(format!("mint: {e}"));
+    let token = Biscuit::builder()
+        .fact(format!("user({user:?})").as_str())
+        .map_err(err)?
+        .fact(format!("device({:?})", fingerprint(kp)).as_str())
+        .map_err(err)?
+        .fact(format!("ticket({id:?})").as_str())
+        .map_err(err)?
+        .fact("purpose(\"join\")")
+        .map_err(err)?
+        .check(format!("check if time($t), $t < {exp}").as_str())
+        .map_err(err)?
+        .check("check if operation(\"join\")")
+        .map_err(err)?;
+    Ok((token.build(kp).map_err(err)?.to_base64().map_err(err)?, id))
+}
+
 /// Short, stable name for a key, the same one the directory entry shows.
 pub fn fingerprint(kp: &KeyPair) -> String {
     let b = kp.public().to_bytes();
     b.iter().take(6).map(|x| format!("{x:02x}")).collect()
+}
+
+#[cfg(test)]
+mod join_ticket_tests {
+    use super::*;
+
+    #[test]
+    fn a_join_ticket_names_its_member_its_id_and_join_alone() {
+        let kp = generate();
+        let (t, id) = mint_join_ticket(&kp, "ann").unwrap();
+        assert_eq!(id.len(), 32);
+        assert!(id.bytes().all(|c| c.is_ascii_hexdigit()));
+        let src = biscuit_auth::UnverifiedBiscuit::from_base64(&t)
+            .unwrap()
+            .print_block_source(0)
+            .unwrap();
+        for want in [
+            "user(\"ann\")".to_string(),
+            format!("ticket(\"{id}\")"),
+            "purpose(\"join\")".to_string(),
+            "check if operation(\"join\")".to_string(),
+        ] {
+            assert!(src.contains(&want), "{want} not in {src}");
+        }
+        // two tickets are never one
+        assert_ne!(mint_join_ticket(&kp, "ann").unwrap().1, id);
+    }
 }

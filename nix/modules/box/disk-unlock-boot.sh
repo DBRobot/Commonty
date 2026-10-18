@@ -11,7 +11,8 @@
 #
 # From the unit: BOX, URL, OUT (a directory), and how long to wait:
 # ENROL_WAIT (s, for the boot partition), WAIT_WAITING (s, while a member
-# has not let it in), WAIT_REFUSED (s, while it is marked stolen).
+# has not let it in), WAIT_REFUSED (s, while it is marked stolen), TPM_ONLY
+# (set: a box that joined on its own, whose key is the TPM's half alone).
 set -u
 umask 077
 mkdir -p "$OUT"
@@ -33,7 +34,13 @@ esp() {
   mount -o ro "/dev/disk/by-partuuid/$uuid" "$w/esp" || return 1
   cp "$w/esp/dd/unlock/"* "$KEYS"/ 2>/dev/null
   umount "$w/esp"
-  [ -e "$KEYS/sig.priv" ] && [ -e "$KEYS/half.priv" ]
+  # on its TPM alone, no signing key is asked for (a joined box makes its
+  # own at its first boot); otherwise it signs its ask to the Worker
+  if [ -n "$TPM_ONLY" ]; then
+    [ -e "$KEYS/half.priv" ] || [ -e "$KEYS/bootstrap.priv" ]
+  else
+    [ -e "$KEYS/sig.priv" ] && [ -e "$KEYS/half.priv" ]
+  fi
 }
 tries=0
 until esp; do
@@ -74,6 +81,7 @@ say() { echo "$*" >/dev/console 2>/dev/null || true; echo "$*"; }
 
 wait=2
 share=
+[ -z "$TPM_ONLY" ] || share=tpm-only
 while [ -z "$share" ]; do
   mac=$(router)
   at=$(date +%s)
@@ -104,18 +112,45 @@ done
 
 # The TPM's half, unsealed under PCR 7 as it was at enrolment
 tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
-tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/half.pub" -r "$KEYS/half.priv" -c "$w/half.ctx"
-tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
-tpm2_policypcr -Q -S "$w/h.ctx" -l sha256:7
-tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half"
-tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
+# a first-boot seal stopped after its re-key: its new half is the one
+if [ -n "$TPM_ONLY" ] && [ -e "$KEYS/rekeyed" ] && [ -e "$KEYS/half.priv.new" ]; then
+  mv "$KEYS/half.pub.new" "$KEYS/half.pub" && mv "$KEYS/half.priv.new" "$KEYS/half.priv"
+fi
+if [ -e "$KEYS/half.priv" ]; then
+  tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/half.pub" -r "$KEYS/half.priv" -c "$w/half.ctx"
+  tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
+  tpm2_policypcr -Q -S "$w/h.ctx" -l sha256:7
+  tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half" || true
+  tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
+else
+  # a box that joined, at its first boot: the installer's half, under no
+  # PCR, opens the disk this once; dd-unlock-seal then seals a new half
+  # under this signed boot and re-keys the pool, and this one opens nothing
+  say "dd-unlock: first boot: the installer's key, once"
+  tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/bootstrap.pub" -r "$KEYS/bootstrap.priv" -c "$w/half.ctx"
+  tpm2_unseal -c "$w/half.ctx" -o "$w/half" || true
+fi
+# no half, no key: never one made from the rest alone. A boot the TPM does
+# not know (another system, a changed command line) stops here, locked
+if [ "$(wc -c <"$w/half" 2>/dev/null || echo 0)" -ne 32 ]; then
+  say "dd-unlock: the TPM would not open its half under this boot; the pools stay locked"
+  rm -rf "$w"
+  exit 1
+fi
 
 # The key: HKDF over both halves, named for this box; the second pool's key
-# from it. Neither half alone says anything about it.
-ikm=$( { cat "$w/half"; printf '%s' "$share" | tr -- '-_' '+/' | sed 's/$/=/' | base64 -d 2>/dev/null; } | od -An -v -tx1 | tr -d ' \n')
+# from it. Neither half alone says anything about it. A box on its TPM
+# alone: over the half, under one name (join-install.sh makes the same)
+salt=$BOX
+if [ -n "$TPM_ONLY" ]; then
+  ikm=$(od -An -v -tx1 <"$w/half" | tr -d ' \n')
+  salt=dd-tpm-only
+else
+  ikm=$( { cat "$w/half"; printf '%s' "$share" | tr -- '-_' '+/' | sed 's/$/=/' | base64 -d 2>/dev/null; } | od -An -v -tx1 | tr -d ' \n')
+fi
 hkdf() {
   openssl kdf -keylen 32 -kdfopt digest:SHA256 -kdfopt "hexkey:$1" \
-    -kdfopt "salt:$BOX" -kdfopt "info:$2" -binary HKDF
+    -kdfopt "salt:$salt" -kdfopt "info:$2" -binary HKDF
 }
 hkdf "$ikm" dd-disk-v1 >"$OUT/disk.key"
 hkdf "$ikm" dd-vault-v1 >"$OUT/vault.key"

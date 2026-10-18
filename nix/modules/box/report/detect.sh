@@ -3,12 +3,14 @@
 # (modules/box/host.nix) and placement will (docs/dev/hardware.md, section 1):
 # what never changes while it runs. What does (free space, heat, the
 # clock's offset) goes in its heartbeats instead.
-# Env: SECRETS_KEY (the TPM key's file), INITRD_MODULES (space separated).
+# Env: SECRETS_KEY (the TPM key's file), INITRD_MODULES (space separated),
+# BOOT (where the boot partition is mounted: /boot, or an installer's /mnt/boot).
 set -eu
 cls=/sys/class
 
 # --- what host.nix reads -----------------------------------------------
-disk=$(lsblk -no PKNAME "$(findmnt -no SOURCE /boot)")
+# (none when /boot is no partition of its own: the rest is still reported)
+disk=$(lsblk -no PKNAME "$(findmnt -no SOURCE "${BOOT:-/boot}" || true)" 2>/dev/null || true)
 # a disk's stable name: its shortest by-id link that is not an alias
 byid() {
   local best="" n l
@@ -48,7 +50,7 @@ fi
 # --- firmware ------------------------------------------------------------
 efivar() { # an EFI global variable's one-byte value, or empty
   local f=/sys/firmware/efi/efivars/$1-8be4df61-93ca-11d2-aa0d-00e098032b8c
-  [ -r "$f" ] && od -An -tu1 -j4 -N1 "$f" | tr -d ' '
+  if [ -r "$f" ]; then od -An -tu1 -j4 -N1 "$f" | tr -d ' '; fi
 }
 uefi=false; [ -d /sys/firmware/efi ] && uefi=true
 sb=$(efivar SecureBoot); setup=$(efivar SetupMode)

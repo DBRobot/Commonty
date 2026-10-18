@@ -24,6 +24,7 @@ pub mod ident;
 mod joke;
 mod leaving;
 pub mod library;
+mod member_boxes;
 pub mod network;
 mod oidc;
 pub mod pages;
@@ -108,6 +109,8 @@ struct App {
     thanos: Option<String>,
     /// this box's dd-control: the agreed state the fleet pages read
     control: Option<String>,
+    /// the joined boxes members set up, as last read (member_boxes.rs)
+    member_boxes: Mutex<member_boxes::Cache>,
     /// Ad blocking at home: Pi-hole's api on this box, and its household
     adblock: Option<adblock::Adblock>,
     /// the forge's changes as they happen (forge_events.rs)
@@ -754,6 +757,19 @@ pub(crate) fn verify_device_token(
     operation: &str,
     here: &str,
 ) -> Result<(String, String)> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    verify_device_token_at(entry_of, token, operation, here, now)
+}
+
+/// The same, at `now` (seconds): a join ticket is judged at the agreed
+/// time its box joined, so every gate judges it alike (member_boxes.rs).
+pub(crate) fn verify_device_token_at(
+    entry_of: impl Fn(&str) -> Result<Option<identity::SignedEntry>>,
+    token: &str,
+    operation: &str,
+    here: &str,
+    now: u64,
+) -> Result<(String, String)> {
     let unverified = UnverifiedBiscuit::from_base64(token).context("not a biscuit")?;
     // the user is named in the authority block; it has to be read before the
     // signature can be checked, because the key to check with depends on it
@@ -782,7 +798,6 @@ pub(crate) fn verify_device_token(
     }
     let biscuit = verified.ok_or_else(|| anyhow!("signature matches no device of {user}"))?;
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let mut authorizer = biscuit_auth::builder::AuthorizerBuilder::new()
         // the library allows the datalog run 1ms by default, wall clock;
         // on a loaded box that refused good tokens. The policy here is a
@@ -995,8 +1010,24 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     // a box's metrics are its owner's and the admin's; this box's Thanos
     // holds every box's, which is the admin's alone (or this box's owner's,
     // who is the admin on the box that gathers them)
-    if is_metrics_host(&app.domain, &asked_host(&headers)) && !app.sees_box(&user) {
-        return StatusCode::FORBIDDEN.into_response();
+    if is_metrics_host(&app.domain, &asked_host(&headers)) {
+        // a joined box's own metrics (/joined/<its name>/api/v1/...) are
+        // its member's, and nobody else's, the fleet's admin included: the
+        // gates say whose it is (member_boxes.rs), nginx then asks for its
+        // series alone (observe/joined-metrics.nix)
+        let uri = headers
+            .get("x-original-uri")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        let owned = if member_boxes::metrics_box(uri).is_some() && !app.is_admin(&user) {
+            member_boxes::current(&app).await.1
+        } else {
+            vec![]
+        };
+        if !member_boxes::sees_metrics(&user, app.sees_box(&user), app.is_admin(&user), uri, &owned)
+        {
+            return StatusCode::FORBIDDEN.into_response();
+        }
     }
     // A disk image goes from Backups in Settings only after the passkey, and
     // the box holds the page to that: a tab left signed in is not enough.
@@ -1446,6 +1477,7 @@ async fn join_finish(
         libraries: vec![],
         // what they agreed to, signed by their passkey with the rest
         terms: Some(identity::TERMS.to_string()),
+        removed_boxes: vec![],
         version: 1,
         updated: now,
     };
@@ -2446,7 +2478,7 @@ async fn metrics_sources(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
     if user == pages::DEMO_USER || !app.member(&user) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let boxes: Vec<serde_json::Value> = app
+    let mut boxes: Vec<serde_json::Value> = app
         .boxes_seen(&user)
         .into_iter()
         .filter(|(_, b)| !b.metrics.is_empty() && fleet_host(&app.domain, &b.metrics))
@@ -2454,6 +2486,28 @@ async fn metrics_sources(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
             |(name, b)| serde_json::json!({ "box": name, "url": format!("https://{}", b.metrics) }),
         )
         .collect();
+    // the boxes this person set up, on the box that gathers their metrics
+    // (observe/joined-metrics.nix): theirs, and every one for the admin
+    if app.thanos.is_some() {
+        let metrics = format!("metrics.{}", app.domain);
+        // the admin sees every joined box, a member their own
+        let (st, owned) = member_boxes::current(&app).await;
+        let names: Vec<String> = if app.is_admin(&user) {
+            st["joined"]
+                .as_object()
+                .map(|j| j.keys().cloned().collect())
+                .unwrap_or_default()
+        } else {
+            owned
+                .into_iter()
+                .filter(|o| o.user == user)
+                .map(|o| o.name)
+                .collect()
+        };
+        boxes.extend(names.into_iter().map(
+            |n| serde_json::json!({ "box": n, "url": format!("https://{metrics}/joined/{n}") }),
+        ));
+    }
     let mut r =
         Json(serde_json::json!({ "here": app.sees_box(&user), "boxes": boxes })).into_response();
     r.headers_mut()
@@ -2832,6 +2886,7 @@ pub async fn start(
         demo_photos: Default::default(),
         storage: storage::Ledger::new(cfg.storage_ledger.clone()),
         fresh: Mutex::new(HashMap::new()),
+        member_boxes: Mutex::new(member_boxes::Cache::default()),
         friends: friends::Store::open(&state_dir)?,
         controllers: controller::Store::open(Some(state_dir.join("controller-backups.json"))),
     });
@@ -2928,6 +2983,36 @@ pub async fn start(
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(next)).await;
+            }
+        });
+        // a member's box's old disk, backed up before it was set up, waits
+        // a week for the box to join; then it goes. Only on a read of the
+        // agreed state: with none, nothing can say which boxes joined
+        let a = app.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(600)).await;
+            loop {
+                if let (Some(g), Some((joined, now))) =
+                    (&a.library, member_boxes::joined_tickets(&a).await)
+                {
+                    match g.pending().await {
+                        Ok(p) => {
+                            let first = p.iter().map(|(t, (_, at))| (t.clone(), *at)).collect();
+                            for t in member_boxes::expired(&first, &joined, now) {
+                                match g.drop_pending(&p[&t].0).await {
+                                    Ok(n) => eprintln!(
+                                        "library: a pending backup of {n} object(s) whose box never joined, to the images' trash"
+                                    ),
+                                    Err(e) => {
+                                        eprintln!("library: dropping a pending backup: {e:#}")
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("library: listing pending backups: {e:#}"),
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(3600)).await;
             }
         });
     }
@@ -3190,6 +3275,8 @@ pub async fn start(
         // the encrypted libraries' gate: WebDAV over each library's prefix
         // a member's disk images, in the bucket (library.rs); nginx sends
         // files.<domain>/images/ here
+        .route("/_dd/boxes/mine", get(member_boxes::mine))
+        .route("/_dd/network/joined", get(member_boxes::joined_mine))
         .route("/_dd/images", axum::routing::any(library::images_root))
         .route("/_dd/images/", axum::routing::any(library::images_root))
         .route(
@@ -3915,6 +4002,7 @@ mod tests {
                     grant: None,
                     libraries: vec![],
                     terms: Some(identity::TERMS.into()),
+                    removed_boxes: vec![],
                     version: 1,
                     updated: identity::now(),
                 },

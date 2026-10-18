@@ -4,6 +4,9 @@
   pkgs,
   ...
 }:
+let
+  file = ../../secrets + "/${config.networking.hostName}.yaml";
+in
 {
   # whether this box's own file holds a secret: its names are in the clear
   # there, its values not. What a box has no secret for it runs without (a
@@ -12,15 +15,14 @@
     type = lib.types.functionTo lib.types.bool;
     readOnly = true;
     default =
-      name:
-      lib.hasInfix "\n${name}:" (
-        "\n" + builtins.readFile (../../secrets + "/${config.networking.hostName}.yaml")
-      );
+      name: builtins.pathExists file && lib.hasInfix "\n${name}:" ("\n" + builtins.readFile file);
   };
   config = {
     # Every role that declares a secret imports this; core does, so every box
     # has sops, each reading its own file only.
-    sops.defaultSopsFile = ../../secrets + "/${config.networking.hostName}.yaml";
+    # (a box with no file of its own - one that joined, building its own
+    # config - has no secrets, and runs without what needs one)
+    sops.defaultSopsFile = lib.mkIf (builtins.pathExists file) file;
     # The box decrypts with the key in its TPM (modules/box/report.nix makes
     # it): the file is a handle only this box's TPM can use, so a copy of it,
     # or of the disk, opens nothing. The ssh host key opens nothing either.

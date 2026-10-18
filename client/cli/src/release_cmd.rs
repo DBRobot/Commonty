@@ -598,6 +598,7 @@ const APP_BUILDS: &[&str] = &[
     "dd-windows",
     "android",
     "home-controller",
+    "box-installer",
 ];
 
 /// Where each download of `version` lands when built from `rev`: what two
@@ -916,6 +917,8 @@ fn app_files(build: &str, version: &str) -> Vec<String> {
         "android" => vec!["commonty-unsigned.apk".into()],
         // the home controller's card, which the app's installer writes
         "home-controller" => vec![format!("commonty-home-controller-{version}.img.zst")],
+        // the box installer's drive, which the app's installer window writes
+        "box-installer" => vec![format!("commonty-box-installer-{version}.img.zst")],
         _ => vec![],
     }
 }

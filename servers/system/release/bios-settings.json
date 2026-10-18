@@ -1,0 +1,113 @@
+{
+  "note": "The firmware settings the box installer may change, by the kernel driver that offers them (/sys/class/firmware-attributes/<driver>). A setting is changed only when its attribute lists the value in possible_values and no BIOS password is set; anything else is shown to the person to change at the firmware's own screen. Names from each maker's own reference (source); not yet tried on every model. setupmode clears Secure Boot's keys, so the box can enroll its own; where a maker offers no such setting here, the person does it at the firmware's screen.",
+  "drivers": [
+    {
+      "driver": "dell-wmi-sysman",
+      "source": "https://www.dell.com/support/manuals/en-us/command-configure/dellcommandconfigure_rg/",
+      "settings": {
+        "tpm": [
+          {
+            "attribute": "TpmSecurity",
+            "value": "Enabled"
+          },
+          {
+            "attribute": "TpmActivation",
+            "value": "Enabled"
+          }
+        ],
+        "power": [
+          {
+            "attribute": "AcPwrRcvry",
+            "value": "On"
+          }
+        ],
+        "virt": [
+          {
+            "attribute": "Virtualization",
+            "value": "Enabled"
+          }
+        ]
+      }
+    },
+    {
+      "driver": "thinklmi",
+      "source": "https://docs.lenovocdrt.com/guides/tbct/",
+      "settings": {
+        "tpm": [
+          {
+            "attribute": "SecurityChip",
+            "value": "Enable"
+          }
+        ],
+        "power": [
+          {
+            "attribute": "AfterPowerLoss",
+            "value": "Power On"
+          },
+          {
+            "attribute": "ACPowerRecovery",
+            "value": "Power On"
+          }
+        ],
+        "virt": [
+          {
+            "attribute": "VirtualizationTechnology",
+            "value": "Enable"
+          },
+          {
+            "attribute": "AMDVirtualizationTechnology",
+            "value": "Enable"
+          }
+        ],
+        "setupmode": [
+          {
+            "attribute": "ResetSystemToSetupMode",
+            "value": "Enable"
+          },
+          {
+            "attribute": "ClearAllSecureBootKeys",
+            "value": "Enable"
+          }
+        ]
+      }
+    },
+    {
+      "driver": "hp-bioscfg",
+      "source": "https://ftp.hp.com/pub/caps-softpaq/cmit/whitepapers/BIOS_Configuration_Utility_User_Guide.pdf",
+      "settings": {
+        "tpm": [
+          {
+            "attribute": "TPM State",
+            "value": "Enable"
+          },
+          {
+            "attribute": "TPM Device",
+            "value": "Available"
+          }
+        ],
+        "power": [
+          {
+            "attribute": "After Power Loss",
+            "value": "Power On"
+          }
+        ],
+        "virt": [
+          {
+            "attribute": "Virtualization Technology (VTx)",
+            "value": "Enable"
+          },
+          {
+            "attribute": "SVM CPU Virtualization",
+            "value": "Enable"
+          }
+        ],
+        "setupmode": [
+          {
+            "attribute": "Clear Secure Boot Keys",
+            "value": "Clear"
+          }
+        ]
+      }
+    }
+  ]
+}
