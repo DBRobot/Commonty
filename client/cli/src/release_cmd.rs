@@ -708,6 +708,23 @@ pub(crate) fn count_signatures(state: &serde_json::Value) -> (Vec<String>, usize
     (old, new)
 }
 
+/// the same, asked again for a few minutes when it fails: a release
+/// switching the box restarts what answers there for a few seconds, and a
+/// wait of hours should not end on that
+fn on_box_patient(addr: &str, cmd: &str) -> Result<String> {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    loop {
+        match on_box(addr, cmd) {
+            Ok(out) => return Ok(out),
+            Err(e) if std::time::Instant::now() < until => {
+                eprintln!("   {e:#}; asking again in 10 s");
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Each box's owner, from its own file (fleet/boxes/<box>/box.json)
 fn box_owners(root: &Path, boxes: &serde_json::Value) -> BTreeMap<String, String> {
     boxes
@@ -1983,7 +2000,7 @@ fn order_builds(
     file: &str,
 ) -> Result<Built> {
     let read = |since: u64| -> Result<(Vec<serde_json::Value>, u64)> {
-        let v: serde_json::Value = serde_json::from_str(&on_box(
+        let v: serde_json::Value = serde_json::from_str(&on_box_patient(
             home,
             &format!("curl -sf http://127.0.0.1:4195/built?since={since}"),
         )?)?;
@@ -1994,8 +2011,10 @@ fn order_builds(
     };
     let mut exclude: Vec<String> = Vec::new();
     for round in 1..=2 {
-        let state: serde_json::Value =
-            serde_json::from_str(&on_box(home, "curl -sf http://127.0.0.1:4195/state")?)?;
+        let state: serde_json::Value = serde_json::from_str(&on_box_patient(
+            home,
+            "curl -sf http://127.0.0.1:4195/state",
+        )?)?;
         let fleet = build_order::candidates(boxes, owners, &state);
         let mut jobs = Vec::new();
         let mut by = BTreeMap::new();
