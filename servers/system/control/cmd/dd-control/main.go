@@ -239,6 +239,10 @@ func facts() map[string]float64 {
 	if _, err := os.Stat("/dev/kvm"); err == nil {
 		f["kvm"] = 1
 	}
+	// a remote computer's guest is x86_64 (docs/dev/remote-computers.md)
+	if runtime.GOARCH == "amd64" {
+		f["x86_64"] = 1
+	}
 	// what the fleet pages show of a box, from what the box's own units
 	// write (/var/lib/dd-facts): the release it runs, how its agent's last
 	// run ended, its last good backup. Here, a box's word reaches the
@@ -249,9 +253,9 @@ func facts() map[string]float64 {
 	// and its own store (nix/modules/storage/store.nix): its size, what is
 	// free, and what it keeps of each bucket, for where the copies go
 	// and what it can run, judged by the release's rules on its report as
-	// it is now (nix/modules/box/capability.nix); and whether its owner is
-	// draining it (dd-drain)
-	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom", "/var/lib/dd-facts/can.prom", "/var/lib/dd-facts/draining.prom") {
+	// it is now (nix/modules/box/capability.nix); whether its owner is
+	// draining it (dd-drain); and its room for remote computers
+	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom", "/var/lib/dd-facts/can.prom", "/var/lib/dd-facts/draining.prom", "/var/lib/dd-facts/computers.prom") {
 		f[name] = v
 	}
 	// what members keep here: not .prom, so none of it reaches Prometheus
@@ -372,6 +376,16 @@ func promFacts(files ...string) map[string]float64 {
 			case "dd_box_draining":
 				// any file saying so drains it
 				out["draining"] = max(out["draining"], v)
+			case "dd_computer_max_mem_bytes", "dd_computer_max_threads", "dd_computer_max_disk_bytes":
+				// the whole room for computers; placement takes off what it puts there
+				out[strings.TrimPrefix(name, "dd_")] = v
+			case "dd_computer_used_bytes":
+				// dd_computer_used_bytes{computer="<id>"} as computer/<id>/used_bytes: what a move carries
+				id, ok := strings.CutPrefix(fs[0], `dd_computer_used_bytes{computer="`)
+				id, ok2 := strings.CutSuffix(id, `"}`)
+				if ok && ok2 && len(fs) == 2 && usageName(id) && len(out) < maxFacts {
+					out["computer/"+id+"/used_bytes"] = v
+				}
 			case "dd_can_live":
 				out["can_live"] = v
 			case "dd_can":
@@ -708,8 +722,23 @@ func main() {
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(n.State())
 	})
-	// what the fleet would run, from the agreed state now; a dry run - no
-	// box acts on it yet
+	// members' remote computers (docs/dev/remote-computers.md): judged here from
+	// the same log, beside identity, so every box serves the same
+	var rc *computers.Server
+	if cfg.Identity != nil && cfg.Computers != nil {
+		rc = computers.NewServer(cfg.Identity, cfg.Computers, cfg.BoxVoters())
+	}
+	logItem := func(s *state.State) func(int) ident.Item {
+		return func(i int) ident.Item {
+			d := s.Directory[i]
+			return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+		}
+	}
+	// no plan here: no computer runs here either
+	if *placement == "" {
+		placed.lowerComputers("no placement inputs")
+	}
+	// what the fleet would run, from the agreed state now
 	if *placement != "" {
 		raw, err := os.ReadFile(*placement)
 		if err != nil {
@@ -719,9 +748,29 @@ func main() {
 		if err := json.Unmarshal(raw, &in); err != nil {
 			log.Fatalf("%s: %v", *placement, err)
 		}
+		// the release's inputs and the computers agreed at the same state
+		decide := func(s *state.State) place.Plan {
+			i := in
+			if rc != nil {
+				i.Computers = rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time)
+			}
+			return place.Decide(i, s, cfg.Rules.GoneAfter)
+		}
+		placed.agreed = func(s *state.State) (map[string]bool, error) {
+			if rc == nil {
+				return nil, errors.New("the release has no rules for computers")
+			}
+			up := map[string]bool{}
+			for _, c := range rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time) {
+				if c.Up {
+					up[place.ComputerService(c.ID)] = true
+				}
+			}
+			return up, nil
+		}
 		http.HandleFunc("/plan", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("content-type", "application/json")
-			_ = json.NewEncoder(w).Encode(place.Decide(in, n.State(), cfg.Rules.GoneAfter))
+			_ = json.NewEncoder(w).Encode(decide(n.State()))
 		})
 		// and carried out here, for what this box carries: only from a plan
 		// made of agreement still fresh. Without it, what runs keeps running,
@@ -730,16 +779,17 @@ func main() {
 			placed.leased[svc] = in.Services[svc].Lease
 			placed.memory[svc] = max(in.Services[svc].MemoryGiB, in.Services[svc].ReserveGiB)
 		}
-		if len(carried) > 0 || *placedCopies != "" {
+		if len(carried) > 0 || *placedCopies != "" || rc != nil {
 			go func() {
 				for {
 					time.Sleep(placeEvery)
 					placed.fence()
 					s := n.State()
 					if time.Now().UnixMilli()-s.Time > freshFor.Milliseconds() {
+						placed.lowerComputers("the agreed state is not fresh")
 						continue
 					}
-					placed.reconcile(place.Decide(in, s, cfg.Rules.GoneAfter), s)
+					placed.reconcile(decide(s), s)
 				}
 			}()
 		}
@@ -763,27 +813,18 @@ func main() {
 			q := req.URL.Query()
 			since, _ := strconv.ParseUint(q.Get("since"), 10, 64)
 			s := n.State()
-			code, b := ids.Answer(len(s.Directory), func(i int) ident.Item {
-				d := s.Directory[i]
-				return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
-			}, s.Height, s.Time, q.Get("name"), since)
+			code, b := ids.Answer(len(s.Directory), logItem(s), s.Height, s.Time, q.Get("name"), since)
 			w.Header().Set("content-type", "application/json")
 			w.WriteHeader(code)
 			_, _ = w.Write(b)
 		})
 	}
-	// members' remote computers (docs/dev/remote-computers.md): judged here from
-	// the same log, beside identity, so every box serves the same
-	if cfg.Identity != nil && cfg.Computers != nil {
-		rc := computers.NewServer(cfg.Identity, cfg.Computers, cfg.BoxVoters())
+	if rc != nil {
 		http.HandleFunc("/computers", func(w http.ResponseWriter, req *http.Request) {
 			q := req.URL.Query()
 			since, _ := strconv.ParseUint(q.Get("since"), 10, 64)
 			s := n.State()
-			code, b := rc.Answer(len(s.Directory), func(i int) ident.Item {
-				d := s.Directory[i]
-				return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
-			}, s.Height, s.Time, q.Get("owner"), q.Get("owners") == "1", since)
+			code, b := rc.Answer(len(s.Directory), logItem(s), s.Height, s.Time, q.Get("owner"), q.Get("owners") == "1", since)
 			w.Header().Set("content-type", "application/json")
 			w.WriteHeader(code)
 			_, _ = w.Write(b)

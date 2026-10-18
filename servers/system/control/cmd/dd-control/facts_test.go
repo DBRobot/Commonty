@@ -80,3 +80,13 @@ func TestTheHeartbeatCarriesWhatTheBoxCanRunAndWhetherItDrains(t *testing.T) {
 		t.Fatalf("facts: %v", f)
 	}
 }
+
+func TestTheHeartbeatCarriesTheRoomForComputers(t *testing.T) {
+	d := t.TempDir()
+	c := filepath.Join(d, "computers.prom")
+	_ = os.WriteFile(c, []byte("dd_computer_max_mem_bytes 8589934592\ndd_computer_max_threads 7\ndd_computer_max_disk_bytes 107374182400\ndd_computer_used_bytes{computer=\"0123456789abcdef\"} 4096\ndd_computer_used_bytes{computer=\"../x\"} 1\n"), 0o644)
+	f := promFacts(c)
+	if f["computer_max_mem_bytes"] != 8589934592 || f["computer_max_threads"] != 7 || f["computer_max_disk_bytes"] != 107374182400 || f["computer/0123456789abcdef/used_bytes"] != 4096 || len(f) != 4 {
+		t.Fatalf("facts: %v", f)
+	}
+}

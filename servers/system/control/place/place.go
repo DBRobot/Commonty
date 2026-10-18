@@ -17,6 +17,7 @@ import (
 	"sort"
 
 	"commonty/control/state"
+	"commonty/control/state/computers"
 )
 
 // Inputs is what the release says (flake: placement-inputs).
@@ -28,6 +29,9 @@ type Inputs struct {
 	Damping Damping             `json:"damping"`
 	// bucket -> how many stores keep it, and the service that writes it
 	Buckets map[string]Bucket `json:"buckets"`
+	// members' remote computers as agreed (state/computers, /computers):
+	// not the release's, so dd-control sets them each round
+	Computers []*computers.Listed `json:"-"`
 }
 
 // Bucket is one a service writes to its box's own store
@@ -48,6 +52,14 @@ type Box struct {
 	// what its owner's box.json or the policy keep off it whatever its
 	// hardware (trust, a metered line): a box's own word never adds these
 	Barred []string `json:"barred"`
+	// whose box it is (its box.json owner): a computer whose owner keeps it
+	// to their own boxes goes only where this is them
+	Owner string `json:"owner"`
+	// its hardware by its signed report: what its own word of its room for
+	// computers is never taken past
+	MemoryGiB float64 `json:"memoryGiB"`
+	Threads   float64 `json:"threads"`
+	PoolGiB   float64 `json:"poolGiB"`
 }
 
 type Service struct {
@@ -105,7 +117,13 @@ type Decision struct {
 	Why     string  `json:"why"`
 }
 
-const gib = 1 << 30
+const (
+	gib = 1 << 30
+	mib = 1 << 20
+)
+
+// ComputerService is the placed service a remote computer is
+func ComputerService(id string) string { return "computer-" + id }
 
 // Decide plans the fleet. goneAfter is how long (ms of agreed time) a box
 // may go unheard and still count as alive.
@@ -139,6 +157,11 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		}
 		for svc, sv := range in.Services {
 			if sv.Placed && s.Boxes[name].Facts["runs/"+svc] > 0 {
+				runs(svc, name)
+			}
+		}
+		for _, c := range in.Computers {
+			if svc := ComputerService(c.ID); s.Boxes[name].Facts["runs/"+svc] > 0 {
 				runs(svc, name)
 			}
 		}
@@ -579,6 +602,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 	for _, svc := range wanted {
 		decide(svc)
 	}
+	placeComputers(in, s, &p, live, now, draining, in.Damping.PerGiB)
 
 	// the copies, once the services are placed: a bucket stays in the
 	// stores that keep it, and goes to more only where it fits

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"sync"
 
 	"commonty/control/state/ident"
@@ -157,14 +158,9 @@ func NewServer(cfg *ident.Config, lim *Limits, voters []string) *Server {
 	return &Server{cfg: cfg, r: NewReplayer(cfg, lim, voters)}
 }
 
-// Answer: the log is n items; owner, if not empty, asks for one member's
-// alone; since, as /identity's, answers 304 while nothing changed
-func (sv *Server) Answer(n int, item func(int) ident.Item, height uint64, timeMs int64, owner string, owners bool, since uint64) (int, []byte) {
-	// one at a time from the catching up to the answer: the states are the
-	// replayer's own, and another request catching up would change them
-	// under this one's reading
-	sv.mu.Lock()
-	defer sv.mu.Unlock()
+// current is the view at a log of n items, made again only when the log
+// or the minute changes; the caller holds sv.mu
+func (sv *Server) current(n int, item func(int) ident.Item, height uint64, timeMs int64) *View {
 	// a status can change with the time alone (a suspension's window), so a
 	// view is kept for a minute at most
 	key := [2]uint64{uint64(n), uint64(timeMs / 60000)}
@@ -178,7 +174,32 @@ func (sv *Server) Answer(n int, item func(int) ident.Item, height uint64, timeMs
 		}
 		sv.key, sv.view = key, v
 	}
-	v := *sv.view
+	return sv.view
+}
+
+// Computers is every computer as /computers lists it, for placement in the
+// same process; the view's own, not to be changed
+func (sv *Server) Computers(n int, item func(int) ident.Item, height uint64, timeMs int64) []*Listed {
+	sv.mu.Lock()
+	defer sv.mu.Unlock()
+	v := sv.current(n, item, height, timeMs)
+	out := make([]*Listed, 0, len(v.Computers))
+	for _, c := range v.Computers {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// Answer: the log is n items; owner, if not empty, asks for one member's
+// alone; since, as /identity's, answers 304 while nothing changed
+func (sv *Server) Answer(n int, item func(int) ident.Item, height uint64, timeMs int64, owner string, owners bool, since uint64) (int, []byte) {
+	// one at a time from the catching up to the answer: the states are the
+	// replayer's own, and another request catching up would change them
+	// under this one's reading
+	sv.mu.Lock()
+	defer sv.mu.Unlock()
+	v := *sv.current(n, item, height, timeMs)
 	v.Height, v.Time, v.Changed = height, timeMs, sv.changed
 	if since != 0 && since >= sv.changed {
 		return http.StatusNotModified, nil

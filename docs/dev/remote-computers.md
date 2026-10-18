@@ -135,15 +135,44 @@ browser: compute.<domain>        CLI: dd computer ...
     keep aside, less 2G;
   - `dd_computer_max_threads`: its threads, less one;
   - `dd_computer_max_disk_bytes`: what `tank/enc/computers` has free under its quota.
+  - `dd_computer_used_bytes{computer="<id>"}`: what each computer keeps
+    here, what a move here would not carry.
   Computed on the box every minute (`dd-computer-facts`). A box with no KVM, or
-  one draining or failing, writes zeros.
-- **Where it may run**: the boxes whose facts fit it and, for "my boxes
-  only", the owner's boxes in the identity state (`members.<name>.boxes`).
-  The consent is a placement input, in the needs type's "who may run it".
-- **When it moves**: only when its box fails. Its needs say
-  `moves = "on-failure"`; `place.Decide` keeps it with its lease holder
-  while that box is alive and it fits, however much better another box
-  scores. With "my boxes only" and one box, it waits for that box.
+  one draining or failing, writes zeros. These are the whole room;
+  placement takes off what it puts there.
+- **These facts are the box's own word** until boxes attest them. So
+  they only ever size a box already trusted to host (below), never past
+  the hardware its signed report gives the release (memory, threads, its
+  largest pool) nor what its heartbeat measures (memory, cores). A box
+  that lies can draw computers to itself among those boxes, or push them
+  away, and nothing more.
+- **Where it may run**: only boxes of the release whose table gives them
+  `computers` (the needs entry the follower adds: KVM, x86_64) and whose
+  owner or the policy does not bar it; never a stranger's box, and never
+  a box on its own word. Among those, the ones whose facts fit it and,
+  for "my boxes only", the ones whose box.json owner is the computer's
+  owner. A member's enlisted boxes join this once they are placed at all
+  (joining), and only those that qualify on their own key.
+- **When it moves**: only when its box fails. `place.Decide`
+  ([computers.go](../../servers/system/control/place/computers.go))
+  keeps it on the live box that runs it however much better another box
+  scores, and whatever room that box now says it has (one that no longer
+  fits is in the plan's `doesNotFit`); a draining box keeps what it runs
+  until it leaves and gets no new one. A new box is the one that fits
+  and carries least of its disk over, then the one with most memory
+  left. What it carries is what the box of the release that last ran it
+  said it kept (`dd_computer_used_bytes`), less what the new box says it
+  keeps; no third box's word counts. With "my boxes only" and one box, it
+  waits for that box.
+- **On the box**: dd-control raises `/run/dd-placed/computer-<id>` for
+  each computer the plan gives the box and the agreed state has up, and
+  reports `runs/computer-<id>` while it is up. It fails closed: with no
+  plan, a plan this box is not in, agreed state older than 30 seconds,
+  the agreed computers unread, or a computer not agreed up, the flag
+  comes down. The follower starts
+  `dd-computer@<id>` on the flag and stops it when the flag goes. The
+  flag is a plain one for now: the lease `svc/computer-<id>` needs a
+  lease rule the validators know, and comes with the follower.
 - **What it loses**: a move restores the newest snapshot, so up to 15
   minutes of changes and a copy round (5 minutes). The old box's dataset
   is kept, named for when, and never deleted without the owner's yes.

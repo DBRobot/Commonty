@@ -9,7 +9,8 @@
 #   boxes.<name> = { hw = hardware.json; own = box.json; site = siteId; region = regionId; }
 #
 # Returns { boxes.<name> = { joins; why; can.<svc> = { score; for }; cannot.<svc> = [ why ];
-#                           barred = [ svc ] (by its owner's choices or the policy, not hardware) };
+#                           barred = [ svc ] (by its owner's choices or the policy, not hardware);
+#                           owner (box.json's); memory; threads; pool (its report's) };
 #           services.<svc> = [ { box; score; } ] best first;
 #           sizes.<svc> = { memory; reserve; floor; } in GiB, as judged here }
 {
@@ -253,6 +254,15 @@ let
       );
       cannot = lib.filterAttrs (_: w: w != [ ]) why;
       barred = lib.filter (s: lacksBy ownerLacks name s != [ ]) others;
+      # its box.json owner: whose box a member's "own" computer may use;
+      # and its hardware by its signed report, past which no word of its own
+      # about its room is taken (GiB, a count, its largest pool in GiB)
+      inherit (facts name)
+        owner
+        memory
+        threads
+        pool
+        ;
     }
   );
 in

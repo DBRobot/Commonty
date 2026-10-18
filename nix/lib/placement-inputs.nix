@@ -35,7 +35,10 @@ in
     can = lib.mapAttrs (_: c: c.score) capability.boxes.${n}.can;
     # what its owner's box.json or the policy keep off it: a box's own
     # judgment in its heartbeat (box/capability.nix) never adds these
-    inherit (capability.boxes.${n}) barred;
+    # and whose box it is, for a member's computer kept to their own boxes
+    inherit (capability.boxes.${n}) barred owner threads;
+    memoryGiB = capability.boxes.${n}.memory;
+    poolGiB = capability.boxes.${n}.pool;
   }) list;
   services = lib.mapAttrs (s: n: {
     enabled = n.everyBox || (builtins.elem s brought && on n);

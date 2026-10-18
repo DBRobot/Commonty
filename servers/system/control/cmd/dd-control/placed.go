@@ -19,6 +19,10 @@ package main
 // heartbeat (refused/<svc>), and the plan gives it to another box. And the
 // plan's copies (which boxes' stores keep each bucket) go to a file the
 // store's copier reads (nix/modules/storage/store.nix).
+//
+// A remote computer the plan gives this box gets its flag,
+// /run/dd-placed/computer-<id>, and nothing more: the computers' follower
+// starts dd-computer@<id> on it and stops it when the flag goes.
 
 import (
 	"encoding/json"
@@ -27,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"time"
 
@@ -69,6 +74,9 @@ type placer struct {
 	refused map[string]int64
 	// where the plan's copies are written; empty: not at all
 	copies string
+	// the computers agreed up now (computer-<id>), from the same state as
+	// the plan; nil, or an error, and no computer flag stays up here
+	agreed func(s *state.State) (map[string]bool, error)
 }
 
 // how long a box says it refused a service: the plan gives it elsewhere,
@@ -106,10 +114,72 @@ func systemctl(args ...string) error {
 	return nil
 }
 
+// a remote computer's flag: its id is 16 lowercase hex (state/computers)
+var computerFlag = regexp.MustCompile(`^computer-[0-9a-f]{16}$`)
+
+// the computers whose flags are up here
+func (p *placer) computers() []string {
+	out := []string{}
+	es, _ := os.ReadDir(p.dir)
+	for _, e := range es {
+		if computerFlag.MatchString(e.Name()) {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
+
+// lowerComputers takes every computer flag down: what this box cannot
+// show is agreed for it now does not run here (the follower stops it)
+func (p *placer) lowerComputers(why string) {
+	for _, svc := range p.computers() {
+		if err := os.Remove(p.flag(svc)); err != nil && !os.IsNotExist(err) {
+			log.Printf("placed: %s: %v", svc, err)
+			continue
+		}
+		log.Printf("placed: %s no longer runs here (%s)", svc, why)
+	}
+}
+
+// reconcileComputers raises a computer's flag only where this plan gives
+// it to this box and the agreed state has it up; every other comes down
+func (p *placer) reconcileComputers(want map[string]bool, s *state.State) {
+	if p.agreed == nil {
+		p.lowerComputers("no computers agreed here")
+		return
+	}
+	up, err := p.agreed(s)
+	if err != nil || up == nil {
+		p.lowerComputers(fmt.Sprintf("the agreed computers are not known: %v", err))
+		return
+	}
+	for svc := range want {
+		if computerFlag.MatchString(svc) && up[svc] && !p.up(svc) {
+			if err := p.raise(svc, nil); err != nil {
+				log.Printf("placed: %s: %v", svc, err)
+				continue
+			}
+			log.Printf("placed: %s runs here now", svc)
+		}
+	}
+	for _, svc := range p.computers() {
+		if !want[svc] || !up[svc] {
+			if err := os.Remove(p.flag(svc)); err != nil && !os.IsNotExist(err) {
+				log.Printf("placed: %s: %v", svc, err)
+				continue
+			}
+			log.Printf("placed: %s no longer runs here (the plan has it elsewhere, or not up)", svc)
+		}
+	}
+}
+
 // facts this box reports about its placed services: what it carries, and
 // what it runs (a flag up)
 func (p *placer) facts() map[string]float64 {
 	f := map[string]float64{}
+	for _, svc := range p.computers() {
+		f["runs/"+svc] = 1
+	}
 	now := p.uptime()
 	for svc := range p.carries {
 		f["carries/"+svc] = 1
@@ -244,6 +314,9 @@ func (p *placer) fence() {
 func (p *placer) reconcile(plan place.Plan, s *state.State) {
 	mine, in := plan.Boxes[p.box]
 	if !in {
+		// what runs keeps running, but no computer: without the lease a
+		// computer's next box would take, two must never run at once
+		p.lowerComputers("this box is not in the plan")
 		return
 	}
 	p.writeCopies(plan.Copies)
@@ -251,6 +324,7 @@ func (p *placer) reconcile(plan place.Plan, s *state.State) {
 	for _, d := range mine {
 		want[d.Service] = true
 	}
+	p.reconcileComputers(want, s)
 	for _, svc := range p.names() {
 		if p.leased[svc] {
 			p.reconcileLeased(svc, want[svc], s)

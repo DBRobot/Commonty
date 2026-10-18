@@ -180,6 +180,29 @@ each service holds, the roles each box runs. It is greedy, not optimal:
   stays until the box leaves. A copy it keeps already stays listed only
   while no other store has room for it.
 
+- Members' remote computers ([remote computers](remote-computers.md))
+  are placed after the release's services, each as the service
+  `computer-<id>`, from the computers agreed at the same state that are
+  `up` (dd-control's own `/computers`, never judged again here). A
+  computer is plaintext to its host, so only a box of the release whose
+  table gives it `computers` and whose owner does not bar them may hold
+  one: never a stranger, never a box on its own word, and a box's word
+  that it runs one keeps it only there. Each
+  goes on one live x86_64 box with KVM whose `computers.prom` room
+  (memory, threads, disk) holds it, less what the plan has put there
+  already; a computer's disk counts only what it may still grow into on
+  a box that keeps some of it. `own` goes only on boxes whose release
+  owner (box.json) is the computer's owner; an enlistment is the member's
+  word alone and places nothing.
+  Those running on a live box stay first, as `moves = "on-failure"`;
+  then, by id, the rest go where moving them carries least
+  (`dd_computer_used_bytes`), then where most memory is left. A box
+  gives a computer only its flag, `/run/dd-placed/computer-<id>`,
+  and unlike a service's it fails closed: with no fresh plan this box
+  is in, or the computer not agreed up, it comes down. Its room
+  (`computers.prom`) is the box's word, never taken past the hardware of
+  its signed report.
+
 So when the needs or a box's capability change, the next round plans
 again: needs with the release that changes them, a box's hardware at its
 next boot, with no release.

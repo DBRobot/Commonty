@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -262,5 +263,72 @@ func TestThePlansCopiesAreWritten(t *testing.T) {
 	raw, err := os.ReadFile(p.copies)
 	if err != nil || string(raw) != `{"ente":["node1","node2"]}` {
 		t.Fatalf("%s %v", raw, err)
+	}
+}
+
+const (
+	compA = "computer-0123456789abcdef"
+	compB = "computer-fedcba9876543210"
+)
+
+// a placer with computers a and b agreed up
+func computerPlacer(t *testing.T) (*placer, *[]string) {
+	p, calls := newPlacer(t)
+	p.agreed = func(*state.State) (map[string]bool, error) { return map[string]bool{compA: true, compB: true}, nil }
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: compA}, {Service: compB}, {Service: "computer-../x"}}}}, state.New())
+	if !p.up(compA) || !p.up(compB) {
+		t.Fatalf("flags %v %v", p.up(compA), p.up(compB))
+	}
+	return p, calls
+}
+
+func TestAComputerGetsItsFlagAndNothingElse(t *testing.T) {
+	p, calls := computerPlacer(t)
+	if len(*calls) != 0 {
+		t.Fatalf("calls %v", *calls)
+	}
+	if f := p.facts(); f["runs/"+compA] != 1 || f["runs/"+compB] != 1 || len(f) != 4 {
+		t.Fatalf("facts %v", f)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(p.dir), "x")); err == nil {
+		t.Fatalf("a flag outside the flags' directory")
+	}
+	// a plan without b takes its flag down
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: compA}}}}, state.New())
+	if !p.up(compA) || p.up(compB) || len(*calls) != 0 {
+		t.Fatalf("flags %v %v, calls %v", p.up(compA), p.up(compB), *calls)
+	}
+}
+
+func TestAComputerFlagFailsClosed(t *testing.T) {
+	both := place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: compA}, {Service: compB}}}}
+	for name, step := range map[string]func(p *placer){
+		"the agreed computers cannot be read": func(p *placer) {
+			p.agreed = func(*state.State) (map[string]bool, error) { return nil, errors.New("no view") }
+			p.reconcile(both, state.New())
+		},
+		"no agreed computers at all": func(p *placer) {
+			p.agreed = nil
+			p.reconcile(both, state.New())
+		},
+		"a plan this box is not in": func(p *placer) {
+			p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node2": {}}}, state.New())
+		},
+		"no plan, the state not fresh": func(p *placer) {
+			p.lowerComputers("the agreed state is not fresh")
+		},
+	} {
+		p, _ := computerPlacer(t)
+		step(p)
+		if p.up(compA) || p.up(compB) {
+			t.Fatalf("%s: flags %v %v", name, p.up(compA), p.up(compB))
+		}
+	}
+	// planned here, but not agreed up: down, and never raised
+	p, _ := computerPlacer(t)
+	p.agreed = func(*state.State) (map[string]bool, error) { return map[string]bool{compA: true}, nil }
+	p.reconcile(both, state.New())
+	if !p.up(compA) || p.up(compB) {
+		t.Fatalf("flags %v %v", p.up(compA), p.up(compB))
 	}
 }
