@@ -740,15 +740,20 @@ fn item_hash(v: &serde_json::Value) -> String {
 #[test]
 fn vectors() {
     let v = serde_json::to_string_pretty(&all()).unwrap() + "\n";
-    let committed = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../servers/system/control/state/ident/testdata/vectors.json"
-    );
+    // in the per-crate test build the flake hands the path in, so the check
+    // runs there too instead of finding nothing and passing
+    let committed = std::env::var("IDENT_VECTORS").unwrap_or_else(|_| {
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../servers/system/control/state/ident/testdata/vectors.json"
+        )
+        .to_string()
+    });
     if let Ok(out) = std::env::var("IDENT_VECTORS_OUT") {
         std::fs::write(out, &v).unwrap();
         return;
     }
-    if let Ok(had) = std::fs::read_to_string(committed) {
+    if let Ok(had) = std::fs::read_to_string(&committed) {
         assert_eq!(
             had, v,
             "the vectors changed: regenerate them (IDENT_VECTORS_OUT)"

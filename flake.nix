@@ -419,7 +419,12 @@
                   "verify"
                   "dd"
                 ]) " VERIFY_PAGES_DIR=${pages}"
-                + pkgs.lib.optionalString (n == "smarthome-door") " DOOR_PAGES_DIR=${pages}";
+                + pkgs.lib.optionalString (n == "smarthome-door") " DOOR_PAGES_DIR=${pages}"
+                # the control plane's judge's vectors, which the signers are held to
+                + pkgs.lib.optionalString (builtins.elem n [
+                  "identity"
+                  "account"
+                ]) " IDENT_VECTORS=${./servers/system/control/state/ident/testdata/vectors.json}";
               testPostRun = "";
             }).test;
           # every crate but the app, whose tests are its own check (tests-app)

@@ -1088,10 +1088,15 @@ mod v2_tests {
     use super::*;
 
     fn vectors() -> serde_json::Value {
-        let p = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../servers/system/control/state/ident/testdata/vectors.json"
-        );
+        // the judge's vectors, outside this crate: in the per-crate test
+        // build the flake hands their path in (IDENT_VECTORS)
+        let p = std::env::var("IDENT_VECTORS").unwrap_or_else(|_| {
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../servers/system/control/state/ident/testdata/vectors.json"
+            )
+            .to_string()
+        });
         serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap()
     }
 
