@@ -81,3 +81,17 @@ export function footer() {
   else document.body.append(foot);
 }
 footer();
+
+// The bare name once sent every address, its front page too, to home with a
+// 301, which a browser keeps for good: typing the bare name still landed here,
+// at sign-in. Asking for the front page past the cache, once, replaces the
+// kept 301 with the page.
+function forgetOld301() {
+  const base = bareName();
+  if (inApp || location.hostname !== `home.${base}`) return;
+  try { if (localStorage.getItem('dd-front-asked')) return; } catch { return; }
+  fetch(`https://${base}/`, { cache: 'reload', mode: 'no-cors', credentials: 'omit' })
+    .then(() => { try { localStorage.setItem('dd-front-asked', '1'); } catch {} })
+    .catch(() => {});
+}
+forgetOld301();

@@ -1003,6 +1003,9 @@ mod tests {
             assert!(foot.contains(path), "{path}");
         }
         assert!(!foot.contains("commonty.org"));
+        // home asks the bare name's front page past the cache once, which
+        // replaces a 301 a browser kept from before the front page
+        assert!(foot.contains("cache: 'reload'"));
     }
 
     /// A page's script that imports a sibling the gate does not serve

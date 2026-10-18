@@ -34,8 +34,9 @@ let
     "img-src 'self' data: blob: https:"
     "media-src 'self' blob: https://*.${base}"
     # Movies & TV looks titles up at TMDB from the page, and fetches the
-    # posters it finds there to keep them
-    "connect-src 'self' https://*.${base} wss://*.${base} https://api.themoviedb.org https://image.tmdb.org"
+    # posters it finds there to keep them. The bare name too: home asks it
+    # once for its front page (footer.js)
+    "connect-src 'self' https://${base} https://*.${base} wss://*.${base} https://api.themoviedb.org https://image.tmdb.org"
     "font-src 'self' data:"
     "frame-src 'self' blob: https://*.${base}"
     "worker-src 'self' blob:"
