@@ -148,6 +148,7 @@ async fn act(
         "stop" => m.set_up(&user, &id, false),
         "apply" => m.apply(&user, &id, yes).map(|_| ()),
         "reset" => m.reset(&user, &id),
+        "rekey" => m.rekey(&user, &id),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     done(r)
@@ -159,6 +160,29 @@ async fn delete(State(m): State<App>, h: HeaderMap, Path(id): Path<String>) -> R
         Err(r) => return r.into_response(),
     };
     done(m.delete(&user, &id))
+}
+
+/// its private key, to its owner: a file to save as ~/.ssh/commonty-<name>
+async fn key(State(m): State<App>, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let user = match member(&h) {
+        Ok(u) => u,
+        Err(r) => return r.into_response(),
+    };
+    match m.private_key(&user, &id) {
+        Ok((name, k)) => (
+            [
+                (header::CONTENT_TYPE, "application/x-pem-file".to_string()),
+                (
+                    header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"commonty-{name}\""),
+                ),
+                (header::CACHE_CONTROL, "no-store".to_string()),
+            ],
+            k,
+        )
+            .into_response(),
+        Err(e) => refused(e),
+    }
 }
 
 async fn log(State(m): State<App>, h: HeaderMap, Path(id): Path<String>) -> Response {
@@ -267,6 +291,7 @@ async fn main() -> Result<()> {
         .route("/api/instances", post(make))
         .route("/api/instances/{id}", axum::routing::delete(delete))
         .route("/api/instances/{id}/log", get(log))
+        .route("/api/instances/{id}/key", get(key))
         .route("/api/instances/{id}/{verb}", post(act))
         .with_state(m);
     // as the games manager: a unix socket only nginx's group opens, since

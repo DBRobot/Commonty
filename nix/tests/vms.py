@@ -21,8 +21,6 @@ def api(user, method, path, body=None, role="member"):
 
 box.wait_for_unit("dd-vms.service")
 box.wait_until_succeeds("test -S /run/dd-vms/dd-vms.sock", timeout=60)
-box.succeed("ssh-keygen -q -t ed25519 -N '' -f /root/key")
-key = box.succeed("cat /root/key.pub").strip()
 
 # nobody: nothing. A guest: no computers.
 assert api("", "GET", "/api/state")[0] == 401
@@ -30,7 +28,6 @@ config = {
     "memory": 1024,
     "threads": 1,
     "disk": 8,
-    "keys": [key],
     "consent": "own",
 }
 assert api("gus", "PUT", "/api/configs/dev", config, role="guest")[0] == 403
@@ -50,6 +47,14 @@ code, text = api(
 assert code == 200, text
 made = json.loads(text)
 i, port = made["id"], made["port"]
+# its own key, as its owner downloads it; nobody else gets it
+code, private = api("tom", "GET", f"/api/instances/{i}/key")
+assert code == 200 and private.startswith("-----BEGIN OPENSSH PRIVATE KEY-----"), (
+    private
+)
+assert api("ann", "GET", f"/api/instances/{i}/key")[0] == 422
+box.succeed(f"cat > /root/key <<'K'\n{private}\nK")
+box.succeed("chmod 600 /root/key")
 assert made["anywhere"], made
 # over the totals: tom's computers together (1.5G here; 16G on a box)
 code, text = api(

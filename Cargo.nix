@@ -28880,6 +28880,14 @@ rec {
             features = [ "json" ];
           }
           {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+          }
+          {
             name = "libc";
             packageId = "libc";
           }

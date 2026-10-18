@@ -48,8 +48,7 @@ pub enum VmCmd {
         /// yes to running on someone else's box, without being asked
         #[arg(long)]
         yes: bool,
-        /// an SSH public key file for this one (repeat for more); a config
-        /// with no key of its own, like generic, takes ~/.ssh/id_ed25519.pub
+        /// another SSH public key to let in besides its own (repeat for more)
         #[arg(long = "key")]
         keys: Vec<PathBuf>,
     },
@@ -69,7 +68,9 @@ pub enum VmCmd {
     Delete { name: String },
     /// What its last apply said
     Log { name: String },
-    /// SSH into it
+    /// Save its own key as ~/.ssh/commonty-<name>, for plain ssh
+    Key { name: String },
+    /// SSH into it, with its own key
     Ssh {
         name: String,
         #[arg(trailing_var_arg = true)]
@@ -157,6 +158,47 @@ async fn verb(api: &Api, name: &str, verb: &str, said: &str) -> Result<()> {
     .await?;
     println!("{name}: {said}");
     Ok(())
+}
+
+/// Its own key, fetched and kept as ~/.ssh/commonty-<name> (0600), as the
+/// page's download names it; fetched again each time, so a new key is used
+async fn save_key(api: &Api, i: &Value) -> Result<PathBuf> {
+    let name = i["name"].as_str().unwrap_or("");
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        bail!("the box gave a name that isn't one: {name}");
+    }
+    let id = i["id"].as_str().unwrap_or("");
+    let key = api
+        .send(
+            reqwest::Method::GET,
+            &format!("/api/instances/{id}/key"),
+            None,
+        )
+        .await?;
+    if !key.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----") {
+        bail!("the box sent something that isn't a key");
+    }
+    let dir = PathBuf::from(std::env::var_os("HOME").context("no HOME")?).join(".ssh");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("commonty-{name}"));
+    let tmp = dir.join(format!(".commonty-{name}.tmp"));
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let _ = std::fs::remove_file(&tmp);
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(key.as_bytes())?;
+    }
+    std::fs::rename(&tmp, &path)?;
+    Ok(path)
 }
 
 pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> {
@@ -275,14 +317,7 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
                 .and_then(|a| a.iter().find(|c| c["name"] == config.as_str()).cloned())
                 .with_context(|| format!("you have no config called {config}"))?;
             let anywhere = cfg["consent"] == "any";
-            let mut files = keys;
-            if files.is_empty() && cfg["keys"].as_array().is_none_or(|k| k.is_empty()) {
-                let own = std::env::var_os("HOME")
-                    .map(|h| PathBuf::from(h).join(".ssh/id_ed25519.pub"))
-                    .filter(|p| p.exists())
-                    .context("the config has no SSH key: give one with --key <file.pub>")?;
-                files.push(own);
-            }
+            let files = keys;
             let mut ks = Vec::new();
             for p in files {
                 let k = std::fs::read_to_string(&p)
@@ -362,8 +397,13 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
                 .await?
             );
         }
+        VmCmd::Key { name } => {
+            let i = api.find(&name).await?;
+            println!("{}", save_key(&api, &i).await?.display());
+        }
         VmCmd::Ssh { name, args } => {
             let i = api.find(&name).await?;
+            let key = save_key(&api, &i).await?;
             let addr = i["address"].as_str().unwrap_or("");
             let (host, port) = addr.rsplit_once(':').context("it has no address")?;
             let user = i["owner"].as_str().unwrap_or("");
@@ -380,7 +420,10 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
                 bail!("the box gave an address ssh shouldn't be handed: {user}@{host}");
             }
             let status = std::process::Command::new("ssh")
-                .args(["-p", &port.to_string(), "--", &format!("{user}@{host}")])
+                .arg("-i")
+                .arg(&key)
+                .args(["-o", "IdentitiesOnly=yes", "-p", &port.to_string(), "--"])
+                .arg(format!("{user}@{host}"))
                 // what to run there: after the destination, a command, never options
                 .args(args)
                 .status()

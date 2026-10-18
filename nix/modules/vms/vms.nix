@@ -76,7 +76,7 @@ let
     done
     # what the guest reads, written from the host's record each start: the
     # share is read-only to the guest
-    jq '{name: .owner, keys: (.keys // [])}' "$rec" > "$d"/config/owner.json
+    jq '{name: .owner, keys: ([.key // empty] + (.keys // []) | map(select(. != "")))}' "$rec" > "$d"/config/owner.json
     jq -r '.nix // "{ ... }: { }"' "$rec" > "$d"/config/member.nix
     rm -f "$qmp" "$serial"
     if [ -w /dev/kvm ]; then accel="accel=kvm -cpu host"; else accel="accel=tcg -cpu max"; fi

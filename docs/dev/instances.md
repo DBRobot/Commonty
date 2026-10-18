@@ -38,8 +38,9 @@ host, a template unit, a firewall chain refilled from who may reach it.
   (`environment.systemPackages`, services, users' shells). Saving it
   rebuilds the guest's system. `/home` is a disk of its own and survives
   every rebuild.
-- **Who may reach it**: the member's own devices, always, on SSH; and
-  more ports for themselves or named friends.
+- **Who may reach it**: the member's own devices, always, on SSH, with
+  the computer's own key (below); and more ports for themselves or named
+  friends.
 - **Where it may run**: on their own boxes only, or on anyone's. Anyone's
   says first, and has to be confirmed before the instance is made:
 
@@ -53,10 +54,17 @@ host, a template unit, a firewall chain refilled from who may reach it.
 A config is a saved thing apart from the instances made from it: make
 three the same, change the config, rebuild one. Every member has one
 from the start, `generic` (4G, 2 threads, 32G, build tools and the
-usual languages), with no SSH key of its own: making a remote computer
-from it asks for the key (the page asks; `dd vm make` takes
-`~/.ssh/id_ed25519.pub`). Saving a config called `generic` replaces it
-for that member.
+usual languages). Saving a config called `generic` replaces it for
+that member.
+
+Nobody types an SSH key. Each remote computer makes its own key pair when
+it is made: the public half is let in, the private half is kept beside
+its disks on the box (`instances/<id>/ssh/key`, out of the guest's
+shares, so it moves and goes with them) and handed only to its owner:
+`dd vm ssh <name>` fetches it into `~/.ssh/commonty-<name>` and uses it,
+and the page offers it as a download. "New key" makes another and the
+old one stops working. The box already runs the computer, so holding its
+key tells it nothing new.
 
 ## How it fits together
 

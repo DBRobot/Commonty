@@ -22,9 +22,10 @@ const state = (s) => {
   return el('span', { class: 'state-word', 'data-state': tone, text: word });
 };
 const up = (i) => i.state === 'running' || i.state === 'starting';
+// with its own key, saved where the download and dd put it
 const sshOf = (i) => {
   const [host, port] = i.address.split(':');
-  return `ssh -p ${port} ${i.owner}@${host}`;
+  return `ssh -i ~/.ssh/commonty-${i.name} -p ${port} ${i.owner}@${host}`;
 };
 
 function note(text) {
@@ -175,8 +176,14 @@ function computer(id) {
     el('div', { class: 'col' },
       el('section', { class: 'panel sec' },
         el('h2', { text: 'Connect' }),
-        el('p', { class: 'dim', text: 'With the Commonty network on, from a device of yours:' }),
+        el('p', { class: 'dim', text: 'With the Commonty network on. From a terminal with dd, nothing to set up:' }),
+        copyable(`dd vm ssh ${i.name}`),
+        el('p', { class: 'dim', text: 'Or with plain ssh, once its key is saved as ~/.ssh/commonty-' + i.name + ':' }),
         copyable(sshOf(i)),
+        el('div', { class: 'row' },
+          el('a', { class: 'btn quiet-l', href: `/api/instances/${i.id}/key`, download: `commonty-${i.name}`, text: 'Download its key' }),
+          confirming('New key', 'A new key is made and the old one stops working at once. Saved copies of the old one become useless.', () => act(() => call('POST', `/api/instances/${i.id}/rekey`, {})))),
+        el('p', { class: 'dim small-t', text: 'Its own key, made for this remote computer alone. After downloading: chmod 600 ~/.ssh/commonty-' + i.name }),
         i.forwards.length
           ? el('table', { class: 'ports' },
             el('thead', {}, el('tr', {}, el('th', { text: 'On the computer' }), el('th', { text: 'Reach it at' }))),
@@ -246,7 +253,7 @@ function configs() {
             el('h2', {}, el('a', { href: `#/configs/${encodeURIComponent(c.name)}`, text: c.name })),
             c.consent === 'any' ? el('span', { class: 'state-word', 'data-state': 'attention', text: "Anyone's box" }) : el('span', { class: 'state-word', 'data-state': 'off', text: 'My boxes' })),
           el('p', { class: 'mono dim', text: spec(c) }),
-          el('p', { class: 'dim', text: `${c.keys.length ? `${c.keys.length} SSH ${c.keys.length === 1 ? 'key' : 'keys'}` : 'Key asked when made'} · ${c.ports.length ? `ports ${c.ports.join(', ')}` : 'SSH only'} · ${made} made` }),
+          el('p', { class: 'dim', text: `${c.ports.length ? `Ports ${c.ports.join(', ')}` : 'SSH only'} · ${made} made` }),
           el('div', { class: 'card-foot' },
             el('a', { href: `#/configs/${encodeURIComponent(c.name)}`, text: 'Edit' }),
             el('a', { class: 'btn', href: `#/new/${encodeURIComponent(c.name)}`, text: 'Make one' })));
@@ -291,7 +298,6 @@ function editor(name) {
     el('p', { class: 'hint', text: `All your remote computers together: up to ${gib(L.memory)} and ${L.threads} threads. A disk only grows, never shrinks.` }));
   const access = el('section', { class: 'panel sec' },
     el('h2', { text: 'Access' }),
-    field('ed-keys', 'SSH keys, one per line', el('textarea', { id: 'ed-keys', rows: 3, spellcheck: 'false', placeholder: 'ssh-ed25519 AAAA… you@laptop', text: c.keys.join('\n') })),
     el('div', { class: 'two' },
       field('ed-ports', 'Ports to open besides SSH', el('input', { id: 'ed-ports', inputmode: 'numeric', placeholder: '8080 3000', autocomplete: 'off', value: c.ports.join(' ') }),
         'Each gets a port on the box; the computer page says which.'),
@@ -325,7 +331,8 @@ function editor(name) {
       threads: Number($('ed-threads').value),
       disk: Number($('ed-disk').value),
       consent: f.querySelector('input[name=consent]:checked').value,
-      keys: $('ed-keys').value.split('\n').map((k) => k.trim()).filter(Boolean),
+      // each computer makes its own key; any a config had before stay
+      keys: c.keys,
       ports: split($('ed-ports').value).map(Number),
       players: split($('ed-players').value),
       nix: $('ed-nix').value,
@@ -345,12 +352,8 @@ function maker(pick) {
   head('New remote computer', [['Remote computers', '#/'], ['New']]);
   let chosen = now.configs.find((c) => c.name === pick) || now.configs[0];
   const warnSlot = el('div');
-  const keySlot = el('div');
   const showWarn = () => {
     warnSlot.replaceChildren(chosen.consent === 'any' ? warning() : '');
-    keySlot.replaceChildren(chosen.keys.length ? '' : field('mk-keys', 'Your SSH key',
-      el('textarea', { id: 'mk-keys', rows: 2, spellcheck: 'false', required: true, placeholder: 'ssh-ed25519 AAAA… you@laptop' }),
-      "This config has no key of its own: paste the public key of the device you'll sign in from (cat ~/.ssh/id_ed25519.pub)."));
   };
   const list = el('div', { class: 'pick-list' }, now.configs.map((c) => {
     const r = el('input', { type: 'radio', name: 'cfg', value: c.name, checked: c === chosen });
@@ -365,7 +368,6 @@ function maker(pick) {
       el('p', { class: 'hint' }, 'Or ', el('a', { href: '#/configs/new', text: 'write a new config' }), '.')),
     el('section', { class: 'panel sec' }, el('h2', { text: 'Its name' }),
       field('mk-name', 'Name', el('input', { id: 'mk-name', required: true, pattern: '[a-z0-9][a-z0-9-]{0,31}', autocomplete: 'off', placeholder: 'dev' }), 'Lowercase letters, digits and dashes.'),
-      keySlot,
       warnSlot),
     el('div', { class: 'savebar' }, el('a', { href: '#/', text: 'Cancel' }), el('button', { type: 'submit', text: 'Make it' })));
   f.addEventListener('submit', (ev) => {
@@ -373,8 +375,7 @@ function maker(pick) {
     const yes = chosen.consent === 'any' && !!$('yes-any')?.checked;
     if (chosen.consent === 'any' && !yes) { note("Say yes to the warning first: it runs on someone else's box."); return; }
     act(async () => {
-      const keys = ($('mk-keys')?.value || '').split('\n').map((k) => k.trim()).filter(Boolean);
-      const made = await call('POST', '/api/instances', { config: chosen.name, name: $('mk-name').value, yes, keys });
+      const made = await call('POST', '/api/instances', { config: chosen.name, name: $('mk-name').value, yes });
       location.hash = `#/c/${made.id}`;
     });
   });

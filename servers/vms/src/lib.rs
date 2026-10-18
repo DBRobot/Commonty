@@ -113,6 +113,9 @@ pub struct Record {
     pub nix: String,
     #[serde(default)]
     pub keys: Vec<String>,
+    /// its own key's public half; the private half is beside its disk
+    #[serde(default)]
+    pub key: String,
     #[serde(default)]
     pub players: Vec<String>,
     #[serde(default)]
@@ -122,6 +125,16 @@ pub struct Record {
     pub anywhere: Option<u64>,
     pub up: bool,
     pub created: u64,
+}
+
+impl Record {
+    /// every key let in: its own, and any its config adds
+    pub fn all_keys(&self) -> Vec<String> {
+        std::iter::once(self.key.clone())
+            .filter(|k| !k.is_empty())
+            .chain(self.keys.iter().cloned())
+            .collect()
+    }
 }
 
 /// What the page and the CLI are shown of an instance.
@@ -252,6 +265,62 @@ fn read_guest(path: &Path, max: u64) -> Option<Vec<u8>> {
     let mut b = Vec::new();
     f.take(max).read_to_end(&mut b).ok()?;
     Some(b)
+}
+
+/// An SSH key pair for one remote computer: the public line for its
+/// authorized keys, and the private key in OpenSSH's own format, which ssh
+/// reads as it is (no passphrase: it is kept on the box, beside the disk
+/// it opens, and handed only to the owner).
+pub fn ssh_key(comment: &str) -> Result<(String, String)> {
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let mut seed = [0u8; 32];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut seed)?;
+    let pk = ed25519_dalek::SigningKey::from_bytes(&seed)
+        .verifying_key()
+        .to_bytes();
+    // RFC 4251 strings: a length, then the bytes
+    fn string(out: &mut Vec<u8>, b: &[u8]) {
+        out.extend_from_slice(&(b.len() as u32).to_be_bytes());
+        out.extend_from_slice(b);
+    }
+    let mut public = Vec::new();
+    string(&mut public, b"ssh-ed25519");
+    string(&mut public, &pk);
+    let mut check = [0u8; 4];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut check)?;
+    let mut private = Vec::new();
+    private.extend_from_slice(&check);
+    private.extend_from_slice(&check);
+    string(&mut private, b"ssh-ed25519");
+    string(&mut private, &pk);
+    let mut both = seed.to_vec();
+    both.extend_from_slice(&pk);
+    string(&mut private, &both);
+    string(&mut private, comment.as_bytes());
+    let mut pad = 1u8;
+    while private.len() % 8 != 0 {
+        private.push(pad);
+        pad += 1;
+    }
+    let mut blob = b"openssh-key-v1\0".to_vec();
+    string(&mut blob, b"none");
+    string(&mut blob, b"none");
+    string(&mut blob, b"");
+    blob.extend_from_slice(&1u32.to_be_bytes());
+    string(&mut blob, &public);
+    string(&mut blob, &private);
+    let body = b64.encode(&blob);
+    let mut pem = String::from("-----BEGIN OPENSSH PRIVATE KEY-----\n");
+    for line in body.as_bytes().chunks(70) {
+        pem.push_str(std::str::from_utf8(line).unwrap_or_default());
+        pem.push('\n');
+    }
+    pem.push_str("-----END OPENSSH PRIVATE KEY-----\n");
+    Ok((
+        format!("ssh-ed25519 {} {comment}", b64.encode(&public)),
+        pem,
+    ))
 }
 
 /// written beside, then moved: a reader never sees half a file
@@ -541,9 +610,6 @@ impl Manager {
                 .map(|k| k.trim().to_string())
                 .filter(|k| !k.is_empty()),
         );
-        if c.keys.is_empty() {
-            bail!("add an SSH key: it's how you sign in to a remote computer");
-        }
         self.check(owner, &c)?;
         let anywhere = (c.consent == Consent::Any && yes).then(now_ms);
         self.where_ok(owner, &c, anywhere)?;
@@ -555,8 +621,10 @@ impl Manager {
         }
         self.fits(owner, None, &c)?;
         let ports = self.ports(&records, 1 + c.ports.len())?;
+        let id = random_id()?;
+        let key = self.new_key(&id, owner, name)?;
         let r = Record {
-            id: random_id()?,
+            id,
             owner: owner.to_string(),
             name: name.to_string(),
             config: c.name.clone(),
@@ -572,6 +640,7 @@ impl Manager {
                 .collect(),
             nix: c.nix,
             keys: c.keys,
+            key,
             players: c.players,
             consent: c.consent,
             anywhere,
@@ -648,7 +717,7 @@ impl Manager {
         }
         write_atomic(
             &d.join("owner.json"),
-            &serde_json::to_vec(&serde_json::json!({"name": r.owner, "keys": r.keys}))?,
+            &serde_json::to_vec(&serde_json::json!({"name": r.owner, "keys": r.all_keys()}))?,
         )?;
         let nix = if r.nix.trim().is_empty() {
             "{ ... }: { }\n"
@@ -656,6 +725,50 @@ impl Manager {
             &r.nix
         };
         write_atomic(&d.join("member.nix"), nix.as_bytes())
+    }
+
+    /// where a computer's own key is: beside its disks, out of the guest's
+    /// shares, so it moves and is deleted with them
+    fn key_path(&self, id: &str) -> PathBuf {
+        self.instance_dir(id).join("ssh").join("key")
+    }
+
+    fn new_key(&self, id: &str, owner: &str, name: &str) -> Result<String> {
+        let (public, private) = ssh_key(&format!("{owner}@{name}"))?;
+        let path = self.key_path(id);
+        std::fs::create_dir_all(path.parent().context("no parent")?)?;
+        let tmp = path.with_extension("tmp");
+        {
+            use std::io::Write as _;
+            use std::os::unix::fs::OpenOptionsExt as _;
+            let _ = std::fs::remove_file(&tmp);
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            f.write_all(private.as_bytes())?;
+        }
+        std::fs::rename(&tmp, &path)?;
+        Ok(public)
+    }
+
+    /// Its private key, for its owner alone: what `dd vm ssh` and the
+    /// page's download hand to ssh.
+    pub fn private_key(&self, owner: &str, id: &str) -> Result<(String, String)> {
+        let r = self.record(owner, id)?;
+        let k = std::fs::read_to_string(self.key_path(id)).context("it has no key yet")?;
+        Ok((r.name, k))
+    }
+
+    /// A new key, the old one no longer let in: for a key that went
+    /// somewhere it shouldn't have.
+    pub fn rekey(&self, owner: &str, id: &str) -> Result<()> {
+        let _g = self.lock.lock().unwrap();
+        let mut r = self.record(owner, id)?;
+        r.key = self.new_key(id, owner, &r.name)?;
+        self.put(&r)?;
+        self.write_share(&r)
     }
 
     pub fn set_up(&self, owner: &str, id: &str, up: bool) -> Result<()> {
@@ -974,22 +1087,53 @@ mod tests {
     }
 
     #[test]
-    fn everyone_has_the_generic_config_and_a_key_is_asked_for() {
+    fn everyone_has_the_generic_config_and_each_computer_its_own_key() {
         let (m, _) = scratch("generic");
         assert!(m.configs("ann").contains_key(GENERIC));
         assert_eq!(m.configs("ann")[GENERIC].consent, Consent::Any);
         assert_eq!(m.configs("david")[GENERIC].consent, Consent::Own);
-        let e = m
-            .make("ann", GENERIC, "a", true, &[])
-            .unwrap_err()
-            .to_string();
-        assert!(e.contains("SSH key"), "{e}");
-        let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample ann@phone".to_string();
-        let r = m
-            .make("ann", GENERIC, "a", true, std::slice::from_ref(&key))
-            .unwrap();
-        assert_eq!(r.keys, vec![key]);
+        let r = m.make("ann", GENERIC, "a", true, &[]).unwrap();
+        // its own key: the public half let in, the private half its owner's
+        assert!(r.key.starts_with("ssh-ed25519 ") && r.key.ends_with(" ann@a"));
+        assert_eq!(r.all_keys(), vec![r.key.clone()]);
+        let (name, private) = m.private_key("ann", &r.id).unwrap();
+        assert_eq!(name, "a");
+        assert!(private.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"));
+        assert!(m.private_key("tom", &r.id).is_err());
+        let mode = std::os::unix::fs::PermissionsExt::mode(
+            &std::fs::metadata(m.key_path(&r.id)).unwrap().permissions(),
+        );
+        assert_eq!(mode & 0o777, 0o600);
+        m.rekey("ann", &r.id).unwrap();
+        assert_ne!(m.record("ann", &r.id).unwrap().key, r.key);
         assert!(m.delete_config("ann", GENERIC).is_err());
+    }
+
+    /// ssh itself reads the key and gets the same public half back, where
+    /// there is an ssh-keygen to ask (not in a build's sandbox)
+    #[test]
+    fn ssh_reads_the_key() {
+        let (public, private) = ssh_key("tom@dev").unwrap();
+        let d = std::env::temp_dir().join(format!("dd-vms-key-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("key");
+        std::fs::write(&f, &private).unwrap();
+        std::fs::set_permissions(&f, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        let Ok(out) = std::process::Command::new("ssh-keygen")
+            .arg("-y")
+            .arg("-f")
+            .arg(&f)
+            .output()
+        else {
+            return;
+        };
+        std::fs::remove_dir_all(&d).ok();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), public);
     }
 
     #[test]
