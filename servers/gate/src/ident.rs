@@ -296,6 +296,12 @@ impl Envelope {
         self.body.get("name").and_then(|n| n.as_str())
     }
 
+    /// one string field of the body, as it came: where an item goes,
+    /// before its signature is checked; never believed on its own
+    pub fn field(&self, key: &str) -> Option<&str> {
+        self.body.get(key).and_then(|n| n.as_str())
+    }
+
     /// the body as it travels, base64
     pub fn body_b64(&self) -> &str {
         &self.body_b64

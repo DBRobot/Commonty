@@ -77,6 +77,8 @@ pub struct Directory {
     /// the agreed identity state, read from dd-control: set for shadow and
     /// agreed
     pub ident: Option<Arc<crate::ident::Agreed>>,
+    /// whose each remote computer is, read from dd-control beside it
+    pub computers: Option<Arc<crate::computers::Owners>>,
     /// what stands in front of the directory's and leaving's PUTs
     /// (docs/dev/gate.md, "Who is who"): one limiter by visitor, the
     /// per-name allowance, and the v2 items already sent on
@@ -281,6 +283,7 @@ impl Directory {
             agreed: None,
             ident_from: crate::ident::From::Replay,
             ident: None,
+            computers: None,
             guard: Default::default(),
         })
     }
@@ -345,6 +348,7 @@ impl Directory {
             && let Some(c) = control
         {
             self.ident = Some(Arc::new(crate::ident::Agreed::new(c)));
+            self.computers = Some(Arc::new(crate::computers::Owners::new(c)));
         }
         self
     }
@@ -874,6 +878,10 @@ pub fn router(d: Arc<Directory>) -> Router {
     Router::new()
         .route("/_dd/directory", get(list))
         .route("/_dd/directory/{name}", get(get_entry).put(put_entry))
+        .route(
+            "/_dd/computers/{kind}",
+            axum::routing::put(crate::computers::put),
+        )
         .route("/_dd/directory/{name}/recoveries", get(get_recoveries))
         .route("/_dd/members", get(get_members))
         .route("/_dd/invite/{key}", get(get_invite).put(put_invite))
@@ -1444,7 +1452,6 @@ impl Directory {
         name: &str,
         bytes: &[u8],
     ) -> std::result::Result<String, (StatusCode, String)> {
-        let unavailable = |e: String| (StatusCode::SERVICE_UNAVAILABLE, e);
         if !self.takes_v2() {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -1464,38 +1471,173 @@ impl Directory {
                 "name in path and body differ".into(),
             ));
         }
-        // the same kind and body signed is the same item, however its outer
-        // JSON is written; a list that cannot be read lets nothing through
         let hash = env.signed_hash();
+        self.not_seen(&hash, bytes)?;
+        // signed by the key that speaks for the name: checked, not judged
+        let signer = self
+            .envelope_signed(kind, name, bytes)
+            .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
+        self.send_verified(name, &signer, hash, bytes).await
+    }
+
+    /// A remote computer's item (servers/gate/src/computers.rs): of a kind
+    /// put there, the signed-in person's own, signed by their root - or,
+    /// to start or stop one, by a device of theirs - before it is sent on.
+    /// The owner of a start or stop comes from the agreed /computers, as
+    /// last read: not read yet, nothing goes through.
+    pub async fn submit_computer(
+        &self,
+        kind: &str,
+        headers: &HeaderMap,
+        bytes: &[u8],
+    ) -> std::result::Result<String, (StatusCode, String)> {
+        if !self.takes_v2() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "this box takes v1 items only for now (/_dd/config has no envelope)".into(),
+            ));
+        }
+        let Some(&(_, owned)) = crate::computers::KINDS.iter().find(|(k, _)| *k == kind) else {
+            return Err((StatusCode::NOT_FOUND, format!("{kind} is not put here")));
+        };
+        let env = crate::ident::Envelope::parse(bytes).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+        if env.kind != kind {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("a {} envelope, put where a {kind} goes", env.kind),
+            ));
+        }
+        let me = self
+            .identify(headers)
+            .ok_or((StatusCode::UNAUTHORIZED, "sign in first".to_string()))?;
+        // where it goes, read before the signature is: only to know whose
+        // key to check it with, never believed
+        let owner = if owned {
+            env.field("owner")
+                .ok_or((StatusCode::BAD_REQUEST, "no owner named".to_string()))?
+                .to_string()
+        } else {
+            let id = env
+                .field("id")
+                .ok_or((StatusCode::BAD_REQUEST, "no computer named".to_string()))?;
+            let owners = self.computers.as_ref().ok_or((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "this box does not read the computers yet".to_string(),
+            ))?;
+            owners
+                .owner_of(id)
+                .map_err(|()| {
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "the computers are not read yet; try again".to_string(),
+                    )
+                })?
+                .ok_or((StatusCode::NOT_FOUND, "no such remote computer".to_string()))?
+        };
+        if owner != me || !identity::valid_name(&owner) {
+            return Err((StatusCode::FORBIDDEN, "not your remote computer".into()));
+        }
+        let hash = env.signed_hash();
+        self.not_seen(&hash, bytes)?;
+        let signer = self
+            .computer_signed(kind, &owner, !owned, bytes)
+            .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
+        self.send_verified(&owner, &signer, hash, bytes).await
+    }
+
+    /// the owner's root on file signed it; or, where a device may (a start
+    /// or stop), one of their devices on file now
+    fn computer_signed(
+        &self,
+        kind: &str,
+        owner: &str,
+        device_may: bool,
+        bytes: &[u8],
+    ) -> std::result::Result<String, String> {
+        use identity::envelope::{Envelope, passkey_challenge};
+        let env: Envelope =
+            serde_json::from_slice(bytes).map_err(|e| format!("not an envelope: {e}"))?;
+        let body = env.body_bytes().map_err(|e| e.to_string())?;
+        let cur = self
+            .entry(owner)
+            .map_err(|e| e.to_string())?
+            .ok_or("nobody by that name")?;
+        let msg = env.message().map_err(|e| e.to_string())?;
+        let root = &cur.entry.root;
+        let by_root = if root.starts_with(identity::WEBAUTHN_ROOT) {
+            identity::check_envelope_assertion(
+                root,
+                &cur.entry.passkeys,
+                &env.sig,
+                &passkey_challenge(kind, &body),
+            )
+            .is_ok()
+        } else {
+            identity::decode_public(root)
+                .ok()
+                .is_some_and(|k| identity::envelope::verify_ed25519(&env.sig, &msg, &k).is_ok())
+        };
+        if by_root {
+            return Ok(root.clone());
+        }
+        if device_may {
+            for d in &cur.entry.devices {
+                if let Ok(k) = identity::decode_public(&d.public_key)
+                    && identity::envelope::verify_ed25519(&env.sig, &msg, &k).is_ok()
+                {
+                    return Ok(d.public_key.clone());
+                }
+            }
+        }
+        Err("not signed by them".into())
+    }
+
+    /// Not sent already, by the shared item hash: the same kind and body
+    /// signed is the same item, however its outer JSON is written. A list
+    /// that cannot be read lets nothing through. Nor an item the agreed state
+    /// says is in the log already, however long ago (from the state as last
+    /// read, never a wait for it).
+    pub(crate) fn not_seen(
+        &self,
+        hash: &str,
+        bytes: &[u8],
+    ) -> std::result::Result<(), (StatusCode, String)> {
+        let unavailable = |e: String| (StatusCode::SERVICE_UNAVAILABLE, e);
         if self
             .guard
             .lock()
             .unwrap()
             .sent
-            .has(&hash, identity::now())
+            .has(hash, identity::now())
             .map_err(unavailable)?
         {
             return Err((StatusCode::CONFLICT, "that item was sent already".into()));
         }
-        // nor an item the agreed state says is in the log already, however
-        // long ago: from the state as last read, never a wait for it
         if self.in_agreed_log(bytes) {
             return Err((
                 StatusCode::CONFLICT,
                 "that item is in the log already".into(),
             ));
         }
-        // signed by the key that speaks for the name: checked, not judged
-        let signer = self
-            .envelope_signed(kind, name, bytes)
-            .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
+        Ok(())
+    }
+
+    /// An item whose signature passed, to the control plane: the name's and
+    /// the key's allowance first (only items that verified count: a forgery
+    /// in a member's name spends nothing of theirs), then sent once
+    pub(crate) async fn send_verified(
+        &self,
+        name: &str,
+        signer: &str,
+        hash: String,
+        bytes: &[u8],
+    ) -> std::result::Result<String, (StatusCode, String)> {
+        let unavailable = |e: String| (StatusCode::SERVICE_UNAVAILABLE, e);
         {
             let mut g = self.guard.lock().unwrap();
-            // the name's allowance counts only items that verified: a
-            // forgery in a member's name spends nothing of theirs
             let now = std::time::Instant::now();
             if !g.by_name.take(name, ENVELOPES_PER_NAME, now)
-                || !g.by_key.take(&signer, ENVELOPES_PER_KEY, now)
+                || !g.by_key.take(signer, ENVELOPES_PER_KEY, now)
             {
                 return Err((
                     StatusCode::TOO_MANY_REQUESTS,
@@ -3052,6 +3194,213 @@ mod tests {
         assert!(w.take("new", 1, now));
         assert_eq!(w.0.len(), WINDOW_MAX);
         assert!(!w.0.contains_key("k0"));
+    }
+
+    // --- remote computers' items (computers.rs): the same road in
+
+    /// a box reading the agreed state, `ann` on file with root `k` and
+    /// device `dev`, signed in as whoever x-test-user says
+    fn computers_for_ann(
+        what: &str,
+    ) -> (
+        Arc<Directory>,
+        Got,
+        ed25519_dalek::SigningKey,
+        ed25519_dalek::SigningKey,
+    ) {
+        let (d, got) = agreed_dir(what, crate::ident::From::Agreed);
+        let k = generate();
+        let dev = generate();
+        let mut e = entry("ann", &k, &[], 1);
+        let p = encode_public(&dev.verifying_key());
+        e.devices = vec![Device {
+            fingerprint: fingerprint(&p),
+            public_key: p,
+            added: 1,
+        }];
+        let e = sign(e, &k).unwrap();
+        let s: crate::ident::State = serde_json::from_value(serde_json::json!({
+            "height": 1,
+            "members": {"ann": {"status": "member", "item": {"entry": e}}}
+        }))
+        .unwrap();
+        d.ident.as_ref().unwrap().set(s);
+        d.set_caller(Box::new(|h: &HeaderMap| {
+            h.get("x-test-user")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        }));
+        (Arc::new(d), got, k, dev)
+    }
+
+    fn computer_item(
+        kind: &str,
+        body: serde_json::Value,
+        k: &ed25519_dalek::SigningKey,
+    ) -> Vec<u8> {
+        serde_json::to_vec(&identity::envelope::seal_json(kind, &body, k).unwrap()).unwrap()
+    }
+
+    async fn put_computer(
+        d: &Arc<Directory>,
+        kind: &str,
+        user: Option<&str>,
+        source: &str,
+        bytes: Vec<u8>,
+    ) -> StatusCode {
+        let mut h = HeaderMap::new();
+        h.insert("x-dd-peer", source.parse().unwrap());
+        if let Some(u) = user {
+            h.insert("x-test-user", u.parse().unwrap());
+        }
+        crate::computers::put(
+            State(d.clone()),
+            Path(kind.into()),
+            h,
+            axum::body::Body::from(bytes),
+        )
+        .await
+        .status()
+    }
+
+    fn a_computer(owner: &str, version: u64) -> serde_json::Value {
+        serde_json::json!({"owner": owner, "id": "00000000000000a1", "name": "dev", "config": "default",
+            "memory": 1024, "threads": 1, "disk": 8, "nix": "", "ports": [], "players": [],
+            "consent": "any", "anywhere": true, "version": version})
+    }
+
+    #[tokio::test]
+    async fn a_computer_goes_in_signed_by_its_owner_signed_in() {
+        let (d, got, k, _) = computers_for_ann("computers-owner");
+        let item = computer_item("computer", a_computer("ann", 1), &k);
+        // nobody signed in
+        assert_eq!(
+            put_computer(&d, "computer", None, "a", item.clone()).await,
+            StatusCode::UNAUTHORIZED
+        );
+        // someone else signed in
+        assert_eq!(
+            put_computer(&d, "computer", Some("bob"), "a", item.clone()).await,
+            StatusCode::FORBIDDEN
+        );
+        assert!(got.lock().unwrap().is_empty());
+        // the owner: through, as it came
+        assert_eq!(
+            put_computer(&d, "computer", Some("ann"), "a", item.clone()).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(*got.lock().unwrap(), item);
+        // the same again: refused by the shared list
+        assert_eq!(
+            put_computer(&d, "computer", Some("ann"), "b", item).await,
+            StatusCode::CONFLICT
+        );
+    }
+
+    #[tokio::test]
+    async fn a_forgery_never_reaches_the_log() {
+        let (d, got, _, dev) = computers_for_ann("computers-forged");
+        // a device may not make a computer, only start or stop one
+        let by_device = computer_item("computer", a_computer("ann", 1), &dev);
+        assert_eq!(
+            put_computer(&d, "computer", Some("ann"), "a", by_device).await,
+            StatusCode::FORBIDDEN
+        );
+        let stranger = computer_item("computer", a_computer("ann", 2), &generate());
+        assert_eq!(
+            put_computer(&d, "computer", Some("ann"), "a", stranger).await,
+            StatusCode::FORBIDDEN
+        );
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_start_or_stop_is_checked_against_the_owners_devices_now() {
+        let (d, got, _, dev) = computers_for_ann("computers-power");
+        let power = |k: &ed25519_dalek::SigningKey, at: u64| {
+            computer_item(
+                "computer-power",
+                serde_json::json!({"id": "00000000000000a1", "up": false, "at": at}),
+                k,
+            )
+        };
+        // the computers not read yet: nothing goes through
+        assert_eq!(
+            put_computer(&d, "computer-power", Some("ann"), "a", power(&dev, 1)).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        d.computers
+            .as_ref()
+            .unwrap()
+            .set(std::collections::HashMap::from([(
+                "00000000000000a1".to_string(),
+                "ann".to_string(),
+            )]));
+        // a key that is no device of hers
+        assert_eq!(
+            put_computer(
+                &d,
+                "computer-power",
+                Some("ann"),
+                "a",
+                power(&generate(), 2)
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        // someone else signed in, with her device's signature
+        assert_eq!(
+            put_computer(&d, "computer-power", Some("bob"), "a", power(&dev, 3)).await,
+            StatusCode::FORBIDDEN
+        );
+        assert!(got.lock().unwrap().is_empty());
+        // her device: through
+        assert_eq!(
+            put_computer(&d, "computer-power", Some("ann"), "a", power(&dev, 4)).await,
+            StatusCode::ACCEPTED
+        );
+        // a computer nobody has
+        let other = computer_item(
+            "computer-power",
+            serde_json::json!({"id": "00000000000000ff", "up": true, "at": 5}),
+            &dev,
+        );
+        assert_eq!(
+            put_computer(&d, "computer-power", Some("ann"), "a", other).await,
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn only_these_kinds_and_each_where_it_goes() {
+        let (d, got, k, _) = computers_for_ann("computers-kinds");
+        let item = computer_item("computer", a_computer("ann", 1), &k);
+        assert_eq!(
+            put_computer(&d, "entry", Some("ann"), "a", item.clone()).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            put_computer(&d, "computer-delete", Some("ann"), "a", item).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_body_is_bounded_and_the_name_allowance_counts() {
+        let (d, _got, k, _) = computers_for_ann("computers-limits");
+        let big = vec![b'x'; ENVELOPE_MAX + 1];
+        assert_eq!(
+            put_computer(&d, "computer", Some("ann"), "a", big).await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        let mut last = StatusCode::OK;
+        for v in 1..=(ENVELOPES_PER_NAME as u64 + 1) {
+            // each from its own visitor: the name's allowance, not the visitor's
+            let item = computer_item("computer", a_computer("ann", v), &k);
+            last = put_computer(&d, "computer", Some("ann"), &format!("v{v}"), item).await;
+        }
+        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[tokio::test]

@@ -198,6 +198,15 @@ everywhere. No box decides anything about a computer.
 | `computer-power` | the owner's root or any of their current devices | `id, up, at` |
 | `computer-delete` | the owner's root | `owner, id, at` |
 
+- **In:** a page or `dd computer` puts an item at the gate,
+  `PUT /_dd/computers/{kind}` ([computers.rs](../../servers/gate/src/computers.rs)).
+  The gate takes it only from its owner, signed in, and only once their
+  root's signature checks (or, to start or stop one, a device on their
+  entry now; the owner of a start or stop comes from `/computers`, and
+  until the gate has read that nothing goes through), then the same
+  limits and list of items sent as the directory's PUTs, and hands it to
+  dd-control as it came. A forgery never reaches the log; the judge
+  decides everything else.
 - Sizes: `memory` MiB, `disk` GiB, `threads` a count. `ports` are guest
   ports besides SSH (22 is always there). `consent` is `own` or `any`;
   `anywhere` (true or false) is the owner's yes to the warning: required

@@ -12,6 +12,7 @@
 
 pub mod adblock;
 mod adddevice;
+mod computers;
 mod controller;
 mod demo_photos;
 mod directory;
@@ -2717,6 +2718,9 @@ pub async fn start(
     if let Some(a) = &directory.ident {
         eprintln!("identity: {:?}, from the agreed state", cfg.identity_from);
         tokio::spawn(a.clone().follow());
+    }
+    if let Some(c) = &directory.computers {
+        tokio::spawn(c.clone().follow());
     }
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
     let addr = listener.local_addr()?;

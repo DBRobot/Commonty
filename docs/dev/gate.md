@@ -1194,6 +1194,12 @@ path                                        method   what                       
 /_dd/leaving/{name}                         PUT      a statement `dd leave` signed             the root's signature
 /internal/leaving                           GET      who left, when, due, done by whom         local (the deleting units)
 /internal/leaving/done                      POST     a service deleted its share               local
+-- remote computers (computers.rs, remote-computers.md)
+/_dd/computers/{kind}                       PUT      one signed item for the control plane:    signed in as its owner; signed by their
+                                                     computer-config, computer,                root (a start or stop: or a device of
+                                                     computer-power, computer-delete           theirs on file now); then as the
+                                                                                               directory's PUTs (one limiter, 64 KiB,
+                                                                                               name and key allowances, sent once)
 -- the rest
 /_dd/fleet.json                             GET      boxes' release, agent, backup             member (session or token)
 /_dd/git/events                             GET      forge changes (SSE)                       member (session or token)
