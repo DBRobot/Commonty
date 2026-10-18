@@ -308,7 +308,7 @@ export function watch(repoId, until, on) {
   const src = new EventSource(`/_dd/git/events${q({ repo: repoId })}`);
   let timer = null;
   const got = [];
-  const stop = () => { src.close(); clearTimeout(timer); };
+  const stop = () => { src.close(); clearTimeout(timer); document.removeEventListener('visibilitychange', onShow); };
   // the stream drops when the forge or the gate restarts (a release does
   // both), and what changed meanwhile is never sent: on coming back, ask
   // again as if everything had changed
@@ -319,6 +319,13 @@ export function watch(repoId, until, on) {
     lost = false;
     if (until()) on([{ kind: 'reconnect' }]); else stop();
   };
+  // a tab in the background is frozen or throttled by the browser, and what
+  // changed meanwhile may never have arrived: on coming back to it, ask again
+  const onShow = () => {
+    if (document.visibilityState !== 'visible') return;
+    if (until()) on([{ kind: 'reconnect' }]); else { document.removeEventListener('visibilitychange', onShow); stop(); }
+  };
+  document.addEventListener('visibilitychange', onShow);
   src.onmessage = (e) => {
     if (!until()) { stop(); return; }
     try { got.push(JSON.parse(e.data)); } catch { return; }
