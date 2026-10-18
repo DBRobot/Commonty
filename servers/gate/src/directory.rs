@@ -1482,6 +1482,22 @@ impl Directory {
         self.send_verified(name, &signer, hash, bytes).await
     }
 
+    /// An envelope PUT whose kind and whom it speaks for are settled
+    /// elsewhere (member_boxes.rs): refused if already sent or in the log,
+    /// the signature checked by `signed` (the key that signed), then sent
+    pub async fn submit_verified(
+        &self,
+        name: &str,
+        env: &crate::ident::Envelope,
+        bytes: &[u8],
+        signed: impl FnOnce() -> std::result::Result<String, String>,
+    ) -> std::result::Result<String, (StatusCode, String)> {
+        let hash = env.signed_hash();
+        self.not_seen(&hash, bytes)?;
+        let signer = signed().map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
+        self.send_verified(name, &signer, hash, bytes).await
+    }
+
     /// A remote computer's item (servers/gate/src/computers.rs): of a kind
     /// put there, the signed-in person's own, signed by their root - or,
     /// to start or stop one, by a device of theirs - before it is sent on.

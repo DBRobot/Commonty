@@ -16,6 +16,45 @@ pub const LEAVE: &str = "leave";
 pub const INVITE: &str = "invite";
 pub const ENLIST: &str = "enlist";
 pub const UNENLIST: &str = "unenlist";
+pub const EXTEND: &str = "extend";
+
+/// A member's root naming a box as theirs: the box joined with `ticket`
+/// (the id of a join ticket of theirs), `at` its own date (seconds). The
+/// judge (state/ident enlist) holds the rest.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Enlist {
+    /// member_id of the root signing it
+    pub member: String,
+    #[serde(rename = "box")]
+    pub box_name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ticket: String,
+    pub at: u64,
+}
+
+impl Enlist {
+    /// The body for `kind` (ENLIST or UNENLIST: an unenlist names no ticket)
+    pub fn new(kind: &str, root: &str, box_name: &str, ticket: &str, at: u64) -> Self {
+        Self {
+            member: crate::member_id(root),
+            box_name: box_name.to_string(),
+            ticket: if kind == ENLIST {
+                ticket.to_string()
+            } else {
+                String::new()
+            },
+            at,
+        }
+    }
+}
+
+/// The fleet's admin keeping `name`'s access until `until` (seconds)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Extend {
+    pub name: String,
+    pub until: u64,
+    pub at: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Envelope {

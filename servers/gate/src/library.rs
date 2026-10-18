@@ -302,7 +302,9 @@ async fn images(app: Arc<App>, raw: String, req: Request) -> Response {
     // a member's join ticket, from the drive a box was set up with: its own
     // pending backup (pending/<its id>/) and nothing else, never a delete
     if let Some((user, ticket)) = crate::member_boxes::pending_ticket(&app, headers) {
-        if app.role(&user) != Some(crate::pages::Role::Member)
+        // the backup is made before the box is theirs: anyone signed up and
+        // not shut out, as setting up a box is how they come to have access
+        if !app.registered(&user)
             || !library_gate::dav::ticket_allows(
                 req.method(),
                 headers,
