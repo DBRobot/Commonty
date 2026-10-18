@@ -32,25 +32,31 @@ pub struct Owners {
     url: String,
     http: reqwest::Client,
     // None until the first read: nothing known is not "nobody's"
-    owners: Mutex<Option<(u64, HashMap<String, String>)>>,
+    owners: Mutex<Option<Read>>,
 }
 
+struct Read {
+    changed: u64,
+    owners: HashMap<String, String>,
+    // the items the judge has taken, by item hash: one in the log already,
+    // however long ago, is not sent again
+    judged: std::collections::HashSet<String>,
+}
+
+/// /computers?owners=1: who owns what, and what was judged; no more
 #[derive(serde::Deserialize)]
 struct View {
     changed: u64,
-    computers: HashMap<String, Listed>,
-}
-
-#[derive(serde::Deserialize)]
-struct Listed {
-    owner: String,
+    owners: HashMap<String, String>,
+    #[serde(default)]
+    outcomes: HashMap<String, String>,
 }
 
 impl Owners {
     /// `control` is dd-control's address on this box
     pub fn new(control: &str) -> Self {
         Self {
-            url: format!("{}/computers", control.trim_end_matches('/')),
+            url: format!("{}/computers?owners=1", control.trim_end_matches('/')),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .redirect(reqwest::redirect::Policy::none())
@@ -64,12 +70,21 @@ impl Owners {
     pub fn owner_of(&self, id: &str) -> Result<Option<String>, ()> {
         match &*self.owners.lock().unwrap() {
             None => Err(()),
-            Some((_, m)) => Ok(m.get(id).cloned()),
+            Some(r) => Ok(r.owners.get(id).cloned()),
         }
     }
 
+    /// whether the judge took this item already (by its item hash)
+    pub fn judged(&self, hash: &str) -> bool {
+        self.owners
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|r| r.judged.contains(hash))
+    }
+
     async fn refresh(&self) -> anyhow::Result<()> {
-        let since = self.owners.lock().unwrap().as_ref().map(|(c, _)| *c);
+        let since = self.owners.lock().unwrap().as_ref().map(|r| r.changed);
         let mut req = self.http.get(&self.url);
         if let Some(c) = since {
             req = req.query(&[("since", c)]);
@@ -79,12 +94,11 @@ impl Owners {
             return Ok(());
         }
         let v: View = res.error_for_status()?.json().await?;
-        let m = v
-            .computers
-            .into_iter()
-            .map(|(id, c)| (id, c.owner))
-            .collect();
-        *self.owners.lock().unwrap() = Some((v.changed, m));
+        *self.owners.lock().unwrap() = Some(Read {
+            changed: v.changed,
+            owners: v.owners,
+            judged: v.outcomes.into_keys().collect(),
+        });
         Ok(())
     }
 
@@ -104,8 +118,12 @@ impl Owners {
     }
 
     #[cfg(test)]
-    pub fn set(&self, m: HashMap<String, String>) {
-        *self.owners.lock().unwrap() = Some((1, m));
+    pub fn set(&self, owners: HashMap<String, String>, judged: &[&str]) {
+        *self.owners.lock().unwrap() = Some(Read {
+            changed: 1,
+            owners,
+            judged: judged.iter().map(|s| s.to_string()).collect(),
+        });
     }
 }
 

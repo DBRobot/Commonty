@@ -60,6 +60,7 @@ language checks a v2 item with a hash, a signature check and a JSON parse.
 | `invite` | the release key | `public_key, issued, expires` |
 | `enlist` | the root on file for the member | `member` (sha256 hex of the root), `box` (the joining box's name), `key` (its TPM key, SPKI base64), `ticket` (32 hex), `expires`, `at` |
 | `unenlist` | the root on file for the member | `member, box, at` |
+| `computer-config`, `computer`, `computer-power`, `computer-delete` | see [remote computers](remote-computers.md#the-records) | judged beside this, by state/computers: the identity judge passes these kinds through and records no outcome for them |
 
 A grant inside an entry body keeps today's form - `{invite: {invite:
 {public_key, issued, expires}, signer, signature}, redeemed, proof}` -

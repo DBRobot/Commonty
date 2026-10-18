@@ -16,7 +16,7 @@ import (
 	"commonty/control/state/ident"
 )
 
-// Limits are the policy's (fleet/policy.json vms): what one member's
+// Limits are the policy's (fleet/policy.json computers): what one member's
 // computers may take together, and the pool their ports come from
 type Limits struct {
 	Memory    uint64 `json:"memory"`  // MiB, every computer of theirs, running or not
@@ -29,8 +29,10 @@ type Limits struct {
 const (
 	MinMemory = 512 // MiB
 	MinDisk   = 8   // GiB
-	MaxNix    = 64 * 1024
-	MaxPorts  = 8 // one computer's, besides SSH
+	// what fits a whole item under the gate's 64 KiB (ENVELOPE_MAX), the
+	// body as base64 and the rest of it beside: 44 KiB, with room
+	MaxNix   = 44 * 1024
+	MaxPorts = 8 // one computer's, besides SSH
 	// what one member may hold, so nobody fills the state or the pool
 	MaxConfigs     = 32  // saved, deleted ones counted
 	MaxPlayers     = 32  // let in, per config or computer
@@ -248,6 +250,12 @@ func (s *State) Judge(id *ident.State, cfg *ident.Config, lim *Limits, raw json.
 		s.outcome(hash, err)
 		return
 	}
+	// no paper key speaks for a computer, and a signature that means nothing
+	// would make the same item another
+	if env.RecoverySig != nil {
+		s.outcome(hash, errors.New("a recovery signature has no place here"))
+		return
+	}
 	switch env.Kind {
 	case "computer-config":
 		s.outcome(hash, s.config(id, cfg, lim, env, body, at))
@@ -448,12 +456,13 @@ func (s *State) del(id *ident.State, cfg *ident.Config, env *ident.Envelope, bod
 	if h == nil || h.Owner != d.Owner {
 		return errors.New("no such remote computer")
 	}
-	// a member who left still deletes their own
-	hd := id.Entries[d.Owner]
-	if hd == nil || hd.Signed == nil {
-		return errors.New("no such member")
+	// a member's own, by their root; one who left has theirs deleted by
+	// the leaving window (docs/dev/leaving.md), not by an item
+	e, err := s.owner(id, cfg, d.Owner, at)
+	if err != nil {
+		return err
 	}
-	if err := ident.VerifyRoot(env, &hd.Signed.Entry); err != nil {
+	if err := ident.VerifyRoot(env, e); err != nil {
 		return fmt.Errorf("refused: %w", err)
 	}
 	if d.At > at+powerAhead || d.At+powerAgo < at {

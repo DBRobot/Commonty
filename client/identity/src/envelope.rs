@@ -91,6 +91,35 @@ pub fn passkey_challenge(kind: &str, body: &[u8]) -> Vec<u8> {
     sha2::Sha256::digest(message(kind, body)).to_vec()
 }
 
+/// Signed by `root`, as an entry's root is written: a passkey root by an
+/// assertion over the envelope (checked against `passkeys`, the entry's),
+/// an ed25519 root by its own signature. The one check every kind signed
+/// by a root uses, here and in the judge (state/ident VerifyRoot).
+pub fn verify_root(env: &Envelope, root: &str, passkeys: &[crate::Passkey]) -> Result<()> {
+    verify_root_sig(env, &env.sig, root, passkeys)
+}
+
+/// verify_root over another signature the envelope carries (an entry's
+/// recovery_sig, by the recovery key on file)
+pub fn verify_root_sig(
+    env: &Envelope,
+    sig: &str,
+    root: &str,
+    passkeys: &[crate::Passkey],
+) -> Result<()> {
+    if root.starts_with(crate::WEBAUTHN_ROOT) {
+        crate::check_envelope_assertion(
+            root,
+            passkeys,
+            sig,
+            &passkey_challenge(&env.kind, &env.body_bytes()?),
+        )
+    } else {
+        let key = crate::decode_public(root)?;
+        verify_ed25519(sig, &env.message()?, &key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

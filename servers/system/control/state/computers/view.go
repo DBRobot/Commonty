@@ -147,6 +147,10 @@ type Server struct {
 	mu      sync.Mutex
 	last    [32]byte
 	changed uint64
+	// the view as last made, for as long as the log and the minute are the
+	// same: every box's gate asks every second, and nothing changes between
+	key  [2]uint64
+	view *View
 }
 
 func NewServer(cfg *ident.Config, lim *Limits, voters []string) *Server {
@@ -155,22 +159,37 @@ func NewServer(cfg *ident.Config, lim *Limits, voters []string) *Server {
 
 // Answer: the log is n items; owner, if not empty, asks for one member's
 // alone; since, as /identity's, answers 304 while nothing changed
-func (sv *Server) Answer(n int, item func(int) ident.Item, height uint64, timeMs int64, owner string, since uint64) (int, []byte) {
+func (sv *Server) Answer(n int, item func(int) ident.Item, height uint64, timeMs int64, owner string, owners bool, since uint64) (int, []byte) {
 	// one at a time from the catching up to the answer: the states are the
 	// replayer's own, and another request catching up would change them
 	// under this one's reading
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
-	id, s := sv.r.CatchN(n, item)
-	v := s.View(id, sv.cfg, height, timeMs)
-	v.Height, v.Time = 0, 0
-	b, _ := json.Marshal(v)
-	if h := sha256.Sum256(b); h != sv.last || sv.changed == 0 {
-		sv.last, sv.changed = h, height
+	// a status can change with the time alone (a suspension's window), so a
+	// view is kept for a minute at most
+	key := [2]uint64{uint64(n), uint64(timeMs / 60000)}
+	if sv.view == nil || key != sv.key {
+		id, s := sv.r.CatchN(n, item)
+		v := s.View(id, sv.cfg, 0, timeMs)
+		v.Height, v.Time = 0, 0
+		b, _ := json.Marshal(v)
+		if h := sha256.Sum256(b); h != sv.last || sv.changed == 0 {
+			sv.last, sv.changed = h, height
+		}
+		sv.key, sv.view = key, v
 	}
+	v := *sv.view
 	v.Height, v.Time, v.Changed = height, timeMs, sv.changed
 	if since != 0 && since >= sv.changed {
 		return http.StatusNotModified, nil
+	}
+	if owners {
+		m := map[string]string{}
+		for k, c := range v.Computers {
+			m[k] = c.Owner
+		}
+		b, _ := json.Marshal(map[string]any{"height": height, "time": timeMs, "changed": sv.changed, "owners": m, "outcomes": v.Outcomes})
+		return http.StatusOK, b
 	}
 	if owner != "" {
 		mine := map[string]*Listed{}
@@ -183,9 +202,9 @@ func (sv *Server) Answer(n int, item func(int) ident.Item, height uint64, timeMs
 		if cs == nil {
 			cs = map[string]*Config{}
 		}
-		b, _ = json.Marshal(map[string]any{"height": height, "time": timeMs, "changed": sv.changed, "owner": owner, "configs": cs, "computers": mine})
+		b, _ := json.Marshal(map[string]any{"height": height, "time": timeMs, "changed": sv.changed, "owner": owner, "configs": cs, "computers": mine})
 		return http.StatusOK, b
 	}
-	b, _ = json.Marshal(v)
+	b, _ := json.Marshal(&v)
 	return http.StatusOK, b
 }

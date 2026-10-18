@@ -322,7 +322,7 @@ func TestServe(t *testing.T) {
 	f.add(seal(t, "computer", body(t, make1("ann", "00000000000000b1", "lab", 2048, 1, 1)), ann.root))
 	sv := NewServer(f.cfg, f.lim, voters)
 	item := func(i int) ident.Item { return f.log[i] }
-	code, b := sv.Answer(len(f.log), item, 7, f.at, "tom", 0)
+	code, b := sv.Answer(len(f.log), item, 7, f.at, "tom", false, 0)
 	var mine struct {
 		Changed   uint64             `json:"changed"`
 		Computers map[string]*Listed `json:"computers"`
@@ -330,7 +330,7 @@ func TestServe(t *testing.T) {
 	if code != 200 || json.Unmarshal(b, &mine) != nil || len(mine.Computers) != 1 || mine.Computers["00000000000000a1"] == nil {
 		t.Fatalf("%d %s", code, b)
 	}
-	if code, _ := sv.Answer(len(f.log), item, 8, f.at, "", mine.Changed); code != 304 {
+	if code, _ := sv.Answer(len(f.log), item, 8, f.at, "", false, mine.Changed); code != 304 {
 		t.Fatalf("unchanged: %d", code)
 	}
 }
@@ -352,7 +352,7 @@ func TestServeAtOnce(t *testing.T) {
 		go func(g int) {
 			defer func() { done <- struct{}{} }()
 			for n := len(f.log) - 20; n <= len(f.log); n++ {
-				sv.Answer(n, func(i int) ident.Item { return f.log[i] }, uint64(n), f.at, "", 0)
+				sv.Answer(n, func(i int) ident.Item { return f.log[i] }, uint64(n), f.at, "", false, 0)
 			}
 		}(g)
 	}
@@ -492,5 +492,74 @@ func TestASuspendedOwner(t *testing.T) {
 	stop := Power{ID: c.ID, Up: true, At: f.now()}
 	if got := f.add(seal(t, "computer-power", body(t, stop), tom.device)); got == "ok" {
 		t.Fatal("suspended, still starting it")
+	}
+}
+
+// a recovery signature beside the root's: refused, not taken as the same
+// item made different
+func TestNoRecoverySignature(t *testing.T) {
+	tom := who("tom", 1)
+	f := newFleet(t, tom)
+	f.claim(tom)
+	b := body(t, make1("tom", "00000000000000a1", "dev", 1024, 1, 1))
+	env := ident.Envelope{V: 2, Kind: "computer", Body: b64.EncodeToString(b), Sig: b64.EncodeToString(ed25519.Sign(tom.root, ident.Message("computer", b)))}
+	junk := b64.EncodeToString(ed25519.Sign(tom.recovery, ident.Message("computer", b)))
+	env.RecoverySig = &junk
+	raw, _ := json.Marshal(env)
+	if got := f.add(raw); got == "ok" {
+		t.Fatal("taken with a recovery signature")
+	}
+}
+
+// the Nix file: up to 44 KiB, so a whole item fits the gate's 64 KiB
+func TestTheNixFileFitsTheGate(t *testing.T) {
+	tom := who("tom", 1)
+	f := newFleet(t, tom)
+	f.claim(tom)
+	c := make1("tom", "00000000000000a1", "dev", 1024, 1, 1)
+	c.Nix = fmt.Sprintf("%*s", MaxNix+1, "x")
+	if got := f.add(seal(t, "computer", body(t, c), tom.root)); got == "ok" {
+		t.Fatal("over 44 KiB")
+	}
+	c.Nix = fmt.Sprintf("%*s", MaxNix, "x")
+	raw := seal(t, "computer", body(t, c), tom.root)
+	if len(raw) > 64*1024 {
+		t.Fatalf("the largest item is %d bytes, past the gate's 64 KiB", len(raw))
+	}
+	if got := f.add(raw); got != "ok" {
+		t.Fatal(got)
+	}
+}
+
+// a member who left deletes nothing by an item: the leaving window does
+func TestALeaverDeletesNothing(t *testing.T) {
+	tom := who("tom", 1)
+	f := newFleet(t, tom)
+	f.claim(tom)
+	c := make1("tom", "00000000000000a1", "dev", 1024, 1, 1)
+	f.add(seal(t, "computer", body(t, c), tom.root))
+	f.cfg.Members.Members = nil
+	del := Delete{Owner: "tom", ID: c.ID, At: f.now()}
+	if got := f.add(seal(t, "computer-delete", body(t, del), tom.root)); got == "ok" {
+		t.Fatal("not a member, and deleted one")
+	}
+}
+
+// what the gate reads: who owns what, and what was judged, and no more
+func TestOwners(t *testing.T) {
+	tom := who("tom", 1)
+	f := newFleet(t, tom)
+	f.claim(tom)
+	raw := seal(t, "computer", body(t, make1("tom", "00000000000000a1", "dev", 1024, 1, 1)), tom.root)
+	f.add(raw)
+	sv := NewServer(f.cfg, f.lim, voters)
+	code, b := sv.Answer(len(f.log), func(i int) ident.Item { return f.log[i] }, 3, f.at, "", true, 0)
+	var o struct {
+		Owners    map[string]string `json:"owners"`
+		Outcomes  map[string]string `json:"outcomes"`
+		Computers any               `json:"computers"`
+	}
+	if code != 200 || json.Unmarshal(b, &o) != nil || o.Owners["00000000000000a1"] != "tom" || o.Outcomes[ident.ItemHash(raw)] != "ok" || o.Computers != nil {
+		t.Fatalf("%d %s", code, b)
 	}
 }

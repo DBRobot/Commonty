@@ -1500,6 +1500,14 @@ impl Directory {
         let Some(&(_, owned)) = crate::computers::KINDS.iter().find(|(k, _)| *k == kind) else {
             return Err((StatusCode::NOT_FOUND, format!("{kind} is not put here")));
         };
+        // who anyone is comes from the agreed state: not read yet, nothing
+        // can be checked, and nothing goes through
+        if !self.agreed_known() {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "the agreed state is not read yet; try again".into(),
+            ));
+        }
         let env = crate::ident::Envelope::parse(bytes).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
         if env.kind != kind {
             return Err((
@@ -1540,47 +1548,38 @@ impl Directory {
         let hash = env.signed_hash();
         self.not_seen(&hash, bytes)?;
         let signer = self
-            .computer_signed(kind, &owner, !owned, bytes)
+            .computer_signed(&owner, !owned, bytes)
             .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
         self.send_verified(&owner, &signer, hash, bytes).await
     }
 
-    /// the owner's root on file signed it; or, where a device may (a start
-    /// or stop), one of their devices on file now
+    /// the owner's root as the agreed state has it signed it; or, where a
+    /// device may (a start or stop), one of their devices on it now
     fn computer_signed(
         &self,
-        kind: &str,
         owner: &str,
         device_may: bool,
         bytes: &[u8],
     ) -> std::result::Result<String, String> {
-        use identity::envelope::{Envelope, passkey_challenge};
+        use identity::envelope::Envelope;
         let env: Envelope =
             serde_json::from_slice(bytes).map_err(|e| format!("not an envelope: {e}"))?;
-        let body = env.body_bytes().map_err(|e| e.to_string())?;
+        // no paper key speaks for a computer; a signature that means nothing
+        // would still make the item another, past the list of items sent
+        if env.recovery_sig.is_some() {
+            return Err("a recovery signature has no place here".into());
+        }
         let cur = self
-            .entry(owner)
-            .map_err(|e| e.to_string())?
+            .agreed_member(owner)
+            .and_then(|m| m.entry())
             .ok_or("nobody by that name")?;
-        let msg = env.message().map_err(|e| e.to_string())?;
         let root = &cur.entry.root;
-        let by_root = if root.starts_with(identity::WEBAUTHN_ROOT) {
-            identity::check_envelope_assertion(
-                root,
-                &cur.entry.passkeys,
-                &env.sig,
-                &passkey_challenge(kind, &body),
-            )
-            .is_ok()
-        } else {
-            identity::decode_public(root)
-                .ok()
-                .is_some_and(|k| identity::envelope::verify_ed25519(&env.sig, &msg, &k).is_ok())
-        };
-        if by_root {
+        let by_root = identity::envelope::verify_root(&env, root, &cur.entry.passkeys);
+        if by_root.is_ok() {
             return Ok(root.clone());
         }
         if device_may {
+            let msg = env.message().map_err(|e| e.to_string())?;
             for d in &cur.entry.devices {
                 if let Ok(k) = identity::decode_public(&d.public_key)
                     && identity::envelope::verify_ed25519(&env.sig, &msg, &k).is_ok()
@@ -1588,8 +1587,9 @@ impl Directory {
                     return Ok(d.public_key.clone());
                 }
             }
+            return Err("not signed by them or a device of theirs".into());
         }
-        Err("not signed by them".into())
+        by_root.map(|()| root.clone()).map_err(|e| e.to_string())
     }
 
     /// Not sent already, by the shared item hash: the same kind and body
@@ -1663,13 +1663,19 @@ impl Directory {
     /// log's item hash) as judged already. Not read yet: no answer, and the
     /// sent list stands alone
     fn in_agreed_log(&self, bytes: &[u8]) -> bool {
-        let Some(state) = self.ident.as_ref().and_then(|a| a.state()) else {
-            return false;
-        };
         let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
             return false;
         };
-        state.outcomes.contains_key(&identity::item_hash(&v))
+        let hash = identity::item_hash(&v);
+        // a remote computer's item is judged beside identity, and its outcome
+        // kept there (state/computers)
+        if self.computers.as_ref().is_some_and(|c| c.judged(&hash)) {
+            return true;
+        }
+        let Some(state) = self.ident.as_ref().and_then(|a| a.state()) else {
+            return false;
+        };
+        state.outcomes.contains_key(&hash)
     }
 
     /// Room for one more PUT from this visitor: the one limiter in front of
@@ -1694,32 +1700,13 @@ impl Directory {
         name: &str,
         bytes: &[u8],
     ) -> std::result::Result<String, String> {
-        use identity::envelope::{Envelope, passkey_challenge};
+        use identity::envelope::Envelope;
         let env: Envelope =
             serde_json::from_slice(bytes).map_err(|e| format!("not an envelope: {e}"))?;
         let body = env.body_bytes().map_err(|e| e.to_string())?;
         let on_file = self.entry(name).map_err(|e| e.to_string())?;
-        let check = |root: &str,
-                     sig: &str,
-                     trusted: &[identity::Passkey]|
-         -> std::result::Result<(), String> {
-            if root.starts_with(identity::WEBAUTHN_ROOT) {
-                identity::check_envelope_assertion(
-                    root,
-                    trusted,
-                    sig,
-                    &passkey_challenge(kind, &body),
-                )
-                .map_err(|e| e.to_string())
-            } else {
-                let key = identity::decode_public(root).map_err(|e| e.to_string())?;
-                identity::envelope::verify_ed25519(
-                    sig,
-                    &env.message().map_err(|e| e.to_string())?,
-                    &key,
-                )
-                .map_err(|e| e.to_string())
-            }
+        let check = |root: &str, sig: &str, trusted: &[identity::Passkey]| {
+            identity::envelope::verify_root_sig(&env, sig, root, trusted).map_err(|e| e.to_string())
         };
         match kind {
             "entry" => {
@@ -3329,13 +3316,10 @@ mod tests {
             put_computer(&d, "computer-power", Some("ann"), "a", power(&dev, 1)).await,
             StatusCode::SERVICE_UNAVAILABLE
         );
-        d.computers
-            .as_ref()
-            .unwrap()
-            .set(std::collections::HashMap::from([(
-                "00000000000000a1".to_string(),
-                "ann".to_string(),
-            )]));
+        d.computers.as_ref().unwrap().set(
+            std::collections::HashMap::from([("00000000000000a1".to_string(), "ann".to_string())]),
+            &[],
+        );
         // a key that is no device of hers
         assert_eq!(
             put_computer(
@@ -3401,6 +3385,109 @@ mod tests {
             last = put_computer(&d, "computer", Some("ann"), &format!("v{v}"), item).await;
         }
         assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn a_config_and_a_delete_go_in_the_same_way() {
+        let (d, got, k, dev) = computers_for_ann("computers-config-delete");
+        let config = serde_json::json!({"owner": "ann", "name": "big", "memory": 1024, "threads": 1,
+            "disk": 8, "nix": "", "ports": [], "players": [], "consent": "any", "version": 1});
+        let item = computer_item("computer-config", config.clone(), &k);
+        assert_eq!(
+            put_computer(&d, "computer-config", Some("bob"), "a", item.clone()).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            put_computer(&d, "computer-config", Some("ann"), "a", item.clone()).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(*got.lock().unwrap(), item);
+        let del = serde_json::json!({"owner": "ann", "id": "00000000000000a1", "at": 1});
+        // a delete takes the root: a device of hers may not
+        assert_eq!(
+            put_computer(
+                &d,
+                "computer-delete",
+                Some("ann"),
+                "a",
+                computer_item("computer-delete", del.clone(), &dev)
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            put_computer(
+                &d,
+                "computer-delete",
+                Some("ann"),
+                "a",
+                computer_item("computer-delete", del, &k)
+            )
+            .await,
+            StatusCode::ACCEPTED
+        );
+    }
+
+    #[tokio::test]
+    async fn nothing_goes_in_before_the_agreed_state_is_read() {
+        let (d, got) = agreed_dir("computers-unread", crate::ident::From::Agreed);
+        d.set_caller(Box::new(|h: &HeaderMap| {
+            h.get("x-test-user")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        }));
+        let d = Arc::new(d);
+        let item = computer_item("computer", a_computer("ann", 1), &generate());
+        assert_eq!(
+            put_computer(&d, "computer", Some("ann"), "a", item).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_item_judged_long_ago_is_not_sent_again() {
+        let (d, got, k, _) = computers_for_ann("computers-judged");
+        let item = computer_item("computer", a_computer("ann", 1), &k);
+        // the sent list forgot it (a day on); the judge's outcomes have not
+        let hash = identity::item_hash(&serde_json::from_slice(&item).unwrap());
+        d.computers
+            .as_ref()
+            .unwrap()
+            .set(Default::default(), &[hash.as_str()]);
+        assert_eq!(
+            put_computer(&d, "computer", Some("ann"), "a", item).await,
+            StatusCode::CONFLICT
+        );
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_recovery_signature_is_refused() {
+        let (d, got, k, _) = computers_for_ann("computers-recovery-sig");
+        let mut env = identity::envelope::seal_json("computer", &a_computer("ann", 1), &k).unwrap();
+        env.recovery_sig = Some(env.sig.clone());
+        let item = serde_json::to_vec(&env).unwrap();
+        assert_eq!(
+            put_computer(&d, "computer", Some("ann"), "a", item).await,
+            StatusCode::FORBIDDEN
+        );
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    /// the largest item the judge takes (a 44 KiB Nix file) fits under the
+    /// gate's 64 KiB, its body as base64
+    #[tokio::test]
+    async fn the_largest_computer_fits_the_gate() {
+        let (d, _got, k, _) = computers_for_ann("computers-largest");
+        let mut c = a_computer("ann", 1);
+        c["nix"] = serde_json::Value::String("x".repeat(44 * 1024));
+        let item = computer_item("computer", c, &k);
+        assert!(item.len() <= ENVELOPE_MAX, "{}", item.len());
+        assert_eq!(
+            put_computer(&d, "computer", Some("ann"), "a", item).await,
+            StatusCode::ACCEPTED
+        );
     }
 
     #[tokio::test]

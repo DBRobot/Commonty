@@ -768,7 +768,7 @@ func main() {
 			code, b := rc.Answer(len(s.Directory), func(i int) ident.Item {
 				d := s.Directory[i]
 				return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
-			}, s.Height, s.Time, q.Get("owner"), since)
+			}, s.Height, s.Time, q.Get("owner"), q.Get("owners") == "1", since)
 			w.Header().Set("content-type", "application/json")
 			w.WriteHeader(code)
 			_, _ = w.Write(b)
