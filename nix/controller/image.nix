@@ -22,6 +22,20 @@ let
   args = lib.concatStringsSep " " (
     lib.tail (lib.splitString " " config.boot.loader.generic-extlinux-compatible.populateCmd)
   );
+  # nixpkgs fixes the filesystem's uuid but lets mkfs pick a random
+  # directory hash seed, so two boxes made different bytes; the seed is the
+  # uuid too
+  uuid = "44444444-4444-4444-8888-888888888888";
+  mkfs = "mkfs.ext4 -L ${config.sdImage.rootVolumeLabel} -U ${uuid}";
+  rootFs = pkgsX86.callPackage (modulesPath + "/../lib/make-ext4-fs.nix") {
+    inherit (config.sdImage) storePaths compressImage;
+    inherit uuid;
+    volumeLabel = config.sdImage.rootVolumeLabel;
+    populateImageCommands = ''
+      mkdir -p ./files/boot
+      ${extlinux} ${args} -c ${config.system.build.toplevel} -d ./files/boot
+    '';
+  };
 in
 {
   imports = [ (modulesPath + "/installer/sd-card/sd-image-aarch64.nix") ];
@@ -29,14 +43,11 @@ in
   sdImage = {
     expandOnBoot = false;
     compressImage = true;
-    rootFilesystemImage = pkgsX86.callPackage (modulesPath + "/../lib/make-ext4-fs.nix") {
-      inherit (config.sdImage) storePaths compressImage;
-      volumeLabel = config.sdImage.rootVolumeLabel;
-      populateImageCommands = ''
-        mkdir -p ./files/boot
-        ${extlinux} ${args} -c ${config.system.build.toplevel} -d ./files/boot
-      '';
-    };
+    rootFilesystemImage = rootFs.overrideAttrs (o: {
+      buildCommand =
+        assert lib.hasInfix mkfs o.buildCommand;
+        lib.replaceStrings [ mkfs ] [ "${mkfs} -E hash_seed=${uuid}" ] o.buildCommand;
+    });
   };
   system.build.cardImage =
     let
