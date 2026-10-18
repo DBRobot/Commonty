@@ -53,6 +53,8 @@ pub enum Consent {
 /// A saved config: what instances are made from.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Config {
+    /// the address names it (PUT /api/configs/<name>); the body needn't
+    #[serde(default)]
     pub name: String,
     /// MiB
     pub memory: u64,
