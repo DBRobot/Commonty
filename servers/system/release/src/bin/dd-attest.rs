@@ -78,13 +78,21 @@ fn check_flake(flake: &str, rev: &str) -> Result<()> {
 fn main() -> Result<()> {
     let a = Args::parse();
     if !a.order.is_empty() {
-        // each on its own: one that cannot be read does not hold up another
+        // each on its own: one that cannot be read does not hold up another.
+        // In the order given, a release's first: a later one (the nightly
+        // check) gives way to a new order at an earlier url, as it does to
+        // its own being replaced
         let mut failed = 0;
+        let mut ahead: Vec<(&str, Option<String>)> = Vec::new();
         for url in &a.order {
-            if let Err(e) = order(url, &a.key_file, &a.submit) {
+            if let Err(e) = order(url, &a.key_file, &a.submit, &ahead) {
                 eprintln!("{url}: {e:#}");
                 failed += 1;
             }
+            let id = trusted_key(&a.key_file)
+                .ok()
+                .and_then(|k| order_id(url, &k));
+            ahead.push((url, id));
         }
         ensure!(failed == 0, "{failed} order(s) not done");
         return Ok(());
@@ -228,10 +236,15 @@ fn eval_job(flake: &str, rev: &str, job: &Job, field: &str) -> Result<String> {
         .to_string())
 }
 
-fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
+fn trusted_key(key_file: &str) -> Result<ed25519_dalek::VerifyingKey> {
+    release::decode_public(fs::read_to_string(key_file)?.trim())
+        .map_err(|e| anyhow::anyhow!("{key_file}: {e}"))
+}
+
+/// `ahead`: the orders before this one, each with the id it had once done
+fn order(url: &str, key_file: &str, submit: &str, ahead: &[(&str, Option<String>)]) -> Result<()> {
     let me = hostname()?;
-    let trusted = release::decode_public(fs::read_to_string(key_file)?.trim())
-        .map_err(|e| anyhow::anyhow!("{key_file}: {e}"))?;
+    let trusted = trusted_key(key_file)?;
     // No order, or none to be had right now (the forge down, or switching
     // under us): nothing to do, and nothing wrong. The next run looks again.
     let raw = match ureq::get(url).call() {
@@ -270,10 +283,17 @@ fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
     // a newer order replaces this one: building on for the old one kept the
     // new one waiting an hour, so a job not started is left and one under
     // way is stopped, said nowhere and not marked done
-    let gone = || superseded(url, &trusted, &id);
+    let gone = || {
+        superseded(url, &trusted, &id)
+            || ahead
+                .iter()
+                .any(|(u, was)| order_id(u, &trusted).is_some_and(|now| Some(&now) != was.as_ref()))
+    };
     for job in todo {
         if gone() {
-            eprintln!("== order {id}: replaced by a newer one; the next run takes that");
+            eprintln!(
+                "== order {id}: replaced, or a newer one goes first; the next run takes that"
+            );
             return Ok(());
         }
         eprintln!("== order {id}: {}", job.name);
@@ -313,7 +333,7 @@ fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
         })();
         if replaced {
             eprintln!(
-                "== order {id}: replaced by a newer one during {}; the next run takes that",
+                "== order {id}: replaced, or a newer one goes first, during {}; the next run takes that",
                 job.name
             );
             return Ok(());
@@ -353,16 +373,15 @@ fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
 /// Whether the order at `url` is now another, newer one. Not being able to
 /// read it says nothing: the build goes on.
 fn superseded(url: &str, trusted: &ed25519_dalek::VerifyingKey, id: &str) -> bool {
-    let Ok(mut r) = ureq::get(url).call() else {
-        return false;
-    };
-    let Ok(raw) = r.body_mut().read_to_string() else {
-        return false;
-    };
-    release::verify_doc(&raw, "build-order", trusted)
-        .ok()
-        .and_then(|o| o["id"].as_str().map(|now| now != id))
-        .unwrap_or(false)
+    order_id(url, trusted).is_some_and(|now| now != id)
+}
+
+/// the id of the signed order at `url` now, if it can be read
+fn order_id(url: &str, trusted: &ed25519_dalek::VerifyingKey) -> Option<String> {
+    let mut r = ureq::get(url).call().ok()?;
+    let raw = r.body_mut().read_to_string().ok()?;
+    let o = release::verify_doc(&raw, "build-order", trusted).ok()?;
+    o["id"].as_str().map(str::to_string)
 }
 
 /// `nix-store --realise`, asking `gone` every minute while it builds: true
