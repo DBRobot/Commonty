@@ -560,7 +560,17 @@ async function attach(it, from, current = () => true) {
       if (d.fatal || (buffer && bufferErrors++ % 10 === 0)) {
         reportPlayer(it, { kind: 'hls', type: d.type, details: d.details, fatal: !!d.fatal, recovered, error: d.error?.name });
       }
-      if (!d.fatal || hls !== h) return;
+      if (hls !== h) return;
+      // the playlist itself gone - a 404, or the box down - is the box having
+      // lost the film, not a film still growing (only its pieces 404 then):
+      // asked again at once, not after the player's half minute of retries
+      const code = d.response?.code || 0;
+      if ((d.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR || d.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR)
+        && (code === 404 || code >= 500)) {
+        rejoin(it);
+        return;
+      }
+      if (!d.fatal) return;
       // the player's own way back from a media error, once
       if (d.type === Hls.ErrorTypes.MEDIA_ERROR && !recovered) {
         recovered = true;
