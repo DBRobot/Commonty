@@ -265,7 +265,8 @@ moved, not changed. Each item is judged at its agreed time `at`.
   is left, suspended or revoked enlists nothing. A box already someone's is
   refused while that enlistment stands (see **boxes** above); unenlist only
   by its owner. Which boxes count for access is the view's (state/ident
-  access.go, docs/dev/joining.md "Access").
+  access.go, docs/dev/joining.md "Access"; their proof of real hardware
+  [attestation.md](attestation.md)).
 - **extend**: signed by the root on file for the release's admin; dated
   like a leave, the newest standing; an `until` already past takes it back.
   It keeps a member's access while their enlisted boxes are gone, until
