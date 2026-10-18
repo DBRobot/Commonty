@@ -1146,6 +1146,71 @@ pub struct SignedLeave {
 
 /// What a root signs to leave: the statement under a label of
 /// its own, so no signature over an entry or a sign-in counts as one.
+/// An item's hash: sha256 of what was signed and the signatures over it,
+/// so one signed item has one hash however its outer JSON is written
+/// (docs/dev/identity-state.md, "Item hash"). The control plane's judge keys
+/// what became of each item on it, and a gate refuses an item already sent
+/// or already judged by it. The signatures are in it so a forgery over the
+/// same body never shares a hash with the real item, and its refusal never
+/// stands for it.
+///
+/// - a v2 envelope: its message, `commonty <kind> v2` NUL body; then NUL and
+///   `sig`, and NUL and `recovery_sig` when there is one
+/// - a v1 entry: its canonical entry, NUL, `signature` (and NUL and
+///   `recovery_signature`); a v1 invite: the invite, NUL, `signature`; a v1
+///   leave: the leave, NUL, `signature` - each as serde writes it
+/// - anything else (a box's ack, or what reads as none of these): the
+///   item's own JSON, keys sorted
+pub fn item_hash(v: &serde_json::Value) -> String {
+    use sha2::Digest as _;
+    let signed: Option<Vec<u8>> = (|| {
+        let with = |mut b: Vec<u8>, sigs: &[Option<&str>]| {
+            for s in sigs.iter().flatten() {
+                b.push(0);
+                b.extend_from_slice(s.as_bytes());
+            }
+            b
+        };
+        if v.get("v").and_then(|x| x.as_u64()) == Some(2) {
+            let e: envelope::Envelope = serde_json::from_value(v.clone()).ok()?;
+            let m = e.message().ok()?;
+            return Some(with(m, &[Some(&e.sig), e.recovery_sig.as_deref()]));
+        }
+        let o = v.as_object().filter(|o| o.len() == 1)?;
+        let (k, x) = o.iter().next()?;
+        match k.as_str() {
+            "entry" => {
+                let s: SignedEntry = serde_json::from_value(x.clone()).ok()?;
+                let c = canonical(&s.entry).ok()?;
+                Some(with(
+                    c,
+                    &[Some(&s.signature), s.recovery_signature.as_deref()],
+                ))
+            }
+            "invite" => {
+                let s: SignedInvite = serde_json::from_value(x.clone()).ok()?;
+                Some(with(
+                    serde_json::to_vec(&s.invite).ok()?,
+                    &[Some(&s.signature)],
+                ))
+            }
+            "leave" => {
+                let s: SignedLeave = serde_json::from_value(x.clone()).ok()?;
+                Some(with(
+                    serde_json::to_vec(&s.leave).ok()?,
+                    &[Some(&s.signature)],
+                ))
+            }
+            _ => None,
+        }
+    })();
+    let bytes = signed.unwrap_or_else(|| serde_json::to_vec(v).unwrap_or_default());
+    sha2::Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 pub fn leave_challenge(l: &Leave) -> Result<Vec<u8>> {
     use sha2::Digest as _;
     let mut h = sha2::Sha256::new();

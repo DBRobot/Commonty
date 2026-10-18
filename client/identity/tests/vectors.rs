@@ -243,6 +243,9 @@ fn all() -> serde_json::Value {
 
     let shadow = shadow_log(&release, &pk);
 
+    // ada's v2 entry with another (forged) signature over the same body
+    let mut rewrapped = serde_json::to_value(&ada_v2).unwrap();
+    rewrapped["sig"] = json!("cmV3cmFwcGVk");
     json!({
         "shadow_log": shadow,
         "random": random,
@@ -270,6 +273,18 @@ fn all() -> serde_json::Value {
                     "hash": item_hash(&logged("ack", "deadbeef"))},
             "item_hash": item_hash(&logged("entry", &ada1_signed)),
         },
+        // the item hash (identity::item_hash, Go's ItemHash): sha256 of what
+        // was signed and its signatures. Another signature over the same body
+        // (the last) is another item, with another hash
+        "item_hashes": [
+            {"item": logged("entry", &ada1_signed), "hash": identity::item_hash(&logged("entry", &ada1_signed))},
+            {"item": logged("invite", &invite), "hash": identity::item_hash(&logged("invite", &invite))},
+            {"item": logged("leave", &leave), "hash": identity::item_hash(&logged("leave", &leave))},
+            {"item": logged("ack", "deadbeef"), "hash": identity::item_hash(&logged("ack", "deadbeef"))},
+            {"item": serde_json::to_value(&ada_v2).unwrap(), "hash": identity::item_hash(&serde_json::to_value(&ada_v2).unwrap())},
+            {"item": serde_json::to_value(&leave_v2).unwrap(), "hash": identity::item_hash(&serde_json::to_value(&leave_v2).unwrap())},
+            {"item": rewrapped.clone(), "hash": identity::item_hash(&rewrapped)},
+        ],
         "v2": {
             "ada": {"envelope": ada_v2, "key": ada1.root},
             "ada_recovered": {"envelope": ada2_v2, "key": ada2.root, "recovery": ada1.recovery},

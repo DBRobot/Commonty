@@ -152,11 +152,11 @@ func TestV1BytesAreRustsBytes(t *testing.T) {
 	if err := VerifyLeave(&v.V1.Leave.Signed, &signed[v.V1.Leave.OnFile].Entry); err != nil {
 		t.Fatal(err)
 	}
-	// the gate's item hash
-	if h := ItemHash(v.V1.Ack.Logged); h != v.V1.Ack.Hash {
+	// the gate's log name for an item (what acks name)
+	if h := LogName(v.V1.Ack.Logged); h != v.V1.Ack.Hash {
 		t.Fatalf("ack hash %s, want %s", h, v.V1.Ack.Hash)
 	}
-	if h := ItemHash(v.V1.Entries[0].Logged); h != v.V1.ItemHash {
+	if h := LogName(v.V1.Entries[0].Logged); h != v.V1.ItemHash {
 		t.Fatalf("entry hash %s, want %s", h, v.V1.ItemHash)
 	}
 }
@@ -317,5 +317,31 @@ func TestAnItemSayingMoreThanItsSignatureIsRefused(t *testing.T) {
 	s.Judge(&Config{}, []string{"node1"}, "node1", upper, 1)
 	if o := s.Outcomes[ItemHash(upper)]; o == "ok" || o == "" {
 		t.Fatalf("an item kind in another case: %q", o)
+	}
+}
+
+// TestItemHashes: Go's ItemHash is Rust's identity::item_hash, item by item,
+// and a statement re-wrapped keeps its hash
+func TestItemHashes(t *testing.T) {
+	raw, err := os.ReadFile("testdata/vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		ItemHashes []struct {
+			Item json.RawMessage `json:"item"`
+			Hash string          `json:"hash"`
+		} `json:"item_hashes"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.ItemHashes) < 7 {
+		t.Fatalf("only %d item hash vectors", len(v.ItemHashes))
+	}
+	for i, x := range v.ItemHashes {
+		if h := ItemHash(x.Item); h != x.Hash {
+			t.Errorf("item %d: %s, want %s", i, h, x.Hash)
+		}
 	}
 }

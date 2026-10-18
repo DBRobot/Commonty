@@ -54,10 +54,26 @@ func dump(s *State, items []Item, at uint64) map[string]any {
 		said[n] = map[string]any{"at": float64(x.Leave.At), "back": x.Leave.Back, "agreed": float64(x.Agreed)}
 	}
 	outcomes := map[string]any{}
+	// the gate's replay keeps an outcome per log item; the judge one per
+	// statement (its item hash). A statement that came in more than one
+	// wrapping is one verdict here and several there, by design
+	// (identity-state.md, "Item hash"): compared only where a statement
+	// came once
+	logNames := map[string]map[string]bool{}
 	for _, it := range items {
-		h := ItemHash(it.Item)
-		if o, ok := s.Outcomes[h]; ok {
-			outcomes[h] = o == "ok"
+		k := ItemHash(it.Item)
+		if logNames[k] == nil {
+			logNames[k] = map[string]bool{}
+		}
+		logNames[k][LogName(it.Item)] = true
+	}
+	for _, it := range items {
+		k := ItemHash(it.Item)
+		if len(logNames[k]) > 1 {
+			continue
+		}
+		if o, ok := s.Outcomes[k]; ok {
+			outcomes[LogName(it.Item)] = o == "ok"
 		}
 	}
 	return map[string]any{"entries": entries, "pending": pending, "said": said, "outcomes": outcomes}
@@ -106,6 +122,23 @@ func shadow(t *testing.T, raw []byte, cfg *Config, voters []string, rustf, out s
 	mb, _ := json.Marshal(mine)
 	var m2 map[string]any
 	_ = json.Unmarshal(mb, &m2)
+	// the gate's outcomes for a statement that came in more than one
+	// wrapping are left out on its side too (see dump)
+	if go_, ok := theirs["outcomes"].(map[string]any); ok {
+		several := map[string]map[string]bool{}
+		for _, it := range page.Items {
+			k := ItemHash(it.Item)
+			if several[k] == nil {
+				several[k] = map[string]bool{}
+			}
+			several[k][LogName(it.Item)] = true
+		}
+		for _, it := range page.Items {
+			if len(several[ItemHash(it.Item)]) > 1 {
+				delete(go_, LogName(it.Item))
+			}
+		}
+	}
 	for _, k := range []string{"entries", "pending", "said", "outcomes"} {
 		if !reflect.DeepEqual(m2[k], theirs[k]) {
 			a, _ := json.MarshalIndent(m2[k], "", " ")

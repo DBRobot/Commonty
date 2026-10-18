@@ -477,13 +477,101 @@ func strict(raw []byte, v any) error {
 
 // ItemHash is the gate's item_hash: sha256 hex of the item as serde_json
 // writes a Value - the same whichever way the log escaped it
-func ItemHash(raw json.RawMessage) string {
+func LogName(raw json.RawMessage) string {
 	b, err := CanonicalValue(raw)
 	if err != nil {
 		b = raw
 	}
 	h := sha256.Sum256(b)
 	return hexs(h[:])
+}
+
+// ItemHash is an item's hash: sha256 of what was signed and the signatures
+// over it, so one signed item has one hash however its outer JSON is written
+// (docs/dev/identity-state.md, "Item hash"; identity::item_hash in Rust is
+// the same rule, held to it by the vectors). Outcomes are keyed on it, and a
+// gate refuses an item already judged by it. The signatures are in it so a
+// forgery over the same body never shares the real item's hash.
+//   - a v2 envelope: Message(kind, body), NUL sig[, NUL recovery_sig]
+//   - a v1 entry: its canonical entry, NUL signature[, NUL
+//     recovery_signature]; an invite: the invite, NUL signature; a leave:
+//     the leave, NUL signature - each as serde writes it
+//   - anything else (an ack, or none of these): LogName's bytes
+func ItemHash(raw json.RawMessage) string {
+	if b := signedBytes(raw); b != nil {
+		h := sha256.Sum256(b)
+		return hexs(h[:])
+	}
+	return LogName(raw)
+}
+
+func signedBytes(raw json.RawMessage) []byte {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(raw, &top) != nil {
+		return nil
+	}
+	if v, ok := top["v"]; ok {
+		var n int
+		if json.Unmarshal(v, &n) != nil || n != 2 {
+			return nil
+		}
+		var e Envelope
+		if json.Unmarshal(raw, &e) != nil {
+			return nil
+		}
+		body, err := e.BodyBytes()
+		if err != nil {
+			return nil
+		}
+		sigs := []string{e.Sig}
+		if e.RecoverySig != nil {
+			sigs = append(sigs, *e.RecoverySig)
+		}
+		return withSigs(Message(e.Kind, body), sigs...)
+	}
+	if len(top) != 1 {
+		return nil
+	}
+	for k, x := range top {
+		switch k {
+		case "entry":
+			sg, err := FromV1(x)
+			if err != nil {
+				return nil
+			}
+			c, err := sg.Entry.Canonical()
+			if err != nil {
+				return nil
+			}
+			sigs := []string{sg.Sig}
+			if sg.RecoverySig != nil {
+				sigs = append(sigs, *sg.RecoverySig)
+			}
+			return withSigs(c, sigs...)
+		case "invite":
+			var si SignedInvite
+			if strict(x, &si) != nil {
+				return nil
+			}
+			return withSigs(si.Invite.Bytes(), si.Signature)
+		case "leave":
+			var sl SignedLeave
+			if strict(x, &sl) != nil {
+				return nil
+			}
+			return withSigs(sl.Leave.Bytes(), sl.Signature)
+		}
+	}
+	return nil
+}
+
+func withSigs(b []byte, sigs ...string) []byte {
+	out := append([]byte{}, b...)
+	for _, s := range sigs {
+		out = append(out, 0)
+		out = append(out, s...)
+	}
+	return out
 }
 
 // noDuplicates refuses JSON with a key twice in one object, at any depth:

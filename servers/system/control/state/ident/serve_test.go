@@ -17,7 +17,7 @@ func TestIdentityAnswers(t *testing.T) {
 	first := ann.entry(t, 1, ann.root, nil)
 	add(first, "node1")
 	for _, v := range voters {
-		add(jsonBody(t, map[string]string{"ack": ItemHash(first)}), v)
+		add(jsonBody(t, map[string]string{"ack": LogName(first)}), v)
 	}
 	cfg := &Config{Release: pub(key(99))}
 	id := MemberID(pub(ann.root))
