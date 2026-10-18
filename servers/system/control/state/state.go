@@ -7,6 +7,7 @@
 package state
 
 import (
+	"commonty/control/state/computers"
 	"commonty/control/state/ident"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,9 @@ type Config struct {
 	// the release key and member list the identity judge reads
 	// (state/ident); absent: no /identity
 	Identity *ident.Config `json:"identity,omitempty"`
+	// what members' remote computers may take (state/computers); absent:
+	// no /computers
+	Computers *computers.Limits `json:"computers,omitempty"`
 }
 
 // BoxVoters: the validators that are boxes, whose gates acknowledge a new

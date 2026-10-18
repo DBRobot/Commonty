@@ -148,6 +148,10 @@ func (s *State) Status(cfg *Config, e *Entry, at uint64, boxCounts func(box stri
 	return "none", 0, ""
 }
 
+// BoxesOf: the boxes a member's enlistments stand for at `at`, for the
+// other judges beside this one (state/computers: "my boxes only")
+func (s *State) BoxesOf(name string, at uint64) []string { return s.boxesOf(name, at) }
+
 func (s *State) boxesOf(name string, at uint64) []string {
 	var out []string
 	for b, en := range s.Enlisted {

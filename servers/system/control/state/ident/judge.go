@@ -456,6 +456,9 @@ func (s *State) judgeV2(cfg *Config, voters []string, from string, raw json.RawM
 		}, raw, at))
 	case "enlist", "unenlist":
 		s.outcome(hash, s.enlist(env, body, raw, at))
+	case "computer-config", "computer", "computer-power", "computer-delete":
+		// members' remote computers: judged by state/computers, beside this, in
+		// the same pass over the log; no outcome of identity's
 	default:
 		s.outcome(hash, fmt.Errorf("no such item: %q", env.Kind))
 	}
