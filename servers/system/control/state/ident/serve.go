@@ -29,9 +29,11 @@ func NewServer(cfg *Config, voters []string) *Server {
 // state's. name, if not empty, asks for that member alone; since, if not 0,
 // is the `changed` the reader last saw.
 func (sv *Server) Answer(n int, item func(int) Item, height uint64, timeMs int64, name string, since uint64) (int, []byte) {
-	s := sv.r.CatchN(n, item)
+	// one lock over judging and reading: CatchN moves the replayer's state,
+	// and a second request judging while this one reads it was a data race
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
+	s := sv.r.CatchN(n, item)
 	v := s.View(sv.cfg, height, timeMs, nil)
 	// what changed is everything but where and when it was asked
 	v.Height, v.Time = 0, 0

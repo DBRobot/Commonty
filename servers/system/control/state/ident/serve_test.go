@@ -61,3 +61,35 @@ func TestIdentityAnswers(t *testing.T) {
 		t.Fatalf("%v", m)
 	}
 }
+
+// Requests come at once (the gate, the Workers' relay, placement): judging
+// and reading under one lock, or the race detector stops the run.
+func TestIdentityAnswersAtOnce(t *testing.T) {
+	l := newLog(t)
+	ann := &person{name: "ann", root: key(1), recovery: key(2), device: key(3)}
+	var items []Item
+	add := func(raw json.RawMessage, box string) {
+		l.at++
+		items = append(items, Item{Time: int64(l.at) * 1000, Box: box, Item: raw})
+	}
+	first := ann.entry(t, 1, ann.root, nil)
+	add(first, "node1")
+	for _, v := range voters {
+		add(jsonBody(t, map[string]string{"ack": LogName(first)}), v)
+	}
+	cfg := &Config{Release: pub(key(99))}
+	cfg.Members.Members = []string{MemberID(pub(ann.root))}
+	sv := NewServer(cfg, []string{"node2", "node1"})
+	done := make(chan struct{})
+	for g := 0; g < 8; g++ {
+		go func(g int) {
+			defer func() { done <- struct{}{} }()
+			for n := 1; n <= len(items); n++ {
+				sv.Answer(n, func(i int) Item { return items[i] }, uint64(n), items[n-1].Time, "", 0)
+			}
+		}(g)
+	}
+	for g := 0; g < 8; g++ {
+		<-done
+	}
+}
