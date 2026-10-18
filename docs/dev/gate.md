@@ -558,18 +558,19 @@ on file; a name nobody holds, by the root it names, with the terms agreed,
 as a v1 sign-up; a leaving, by the root on file - `identity::envelope` and
 `identity::check_envelope_assertion` for a passkey); not sent already -
 the same kind and body signed, however its outer JSON is written, answers
-409, from a list of the last 4096 kept across restarts
-(`envelopes-sent.json`), and so does an item the agreed state already
-holds; and within its own allowances, each counted apart so a flood spends
+409, from a list kept a day and across restarts (`envelopes-sent.json`, at
+most 65536, which no source's allowance comes near filling in a day), and so
+does an item the agreed state already holds; and within its own allowances, each counted apart so a flood spends
 only its own and never the log's shared budget: 20 a minute from one
-source, counted before any signature work, and 6 a minute for one name and
+source, counted before a byte of the item is read, and 6 a minute for one name and
 6 for one signing key, counted only for items that verified, so forgeries
 in a member's name spend nothing of theirs. The source is `X-Dd-Peer`,
 which nginx sets on every request to the gate from the connection it saw -
 the visitor's address the tunnel reports, on the public door - over
 anything a client sent; X-Real-IP and X-Forwarded-For are never read. Each
 table holds at most 4096 sources, names or keys: the quiet ones go first,
-and while all are busy a new one waits a minute.
+then the one quiet longest, so a flood of new names never shuts a newcomer
+out.
 Then it is submitted to the control plane as the bytes it came in,
 answered `202 {"submitted": true, "item": <sha256 of those bytes>}`. A box
 that still replays answers 400 to an envelope.

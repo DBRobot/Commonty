@@ -90,9 +90,10 @@ struct EnvelopeLimits {
     by_name: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
     by_source: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
     by_key: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
-    /// sha256 of what each sent envelope signed (its kind and body), newest
-    /// last: an item is the same item however its outer JSON is written
-    sent: std::collections::VecDeque<String>,
+    /// sha256 of what each sent envelope signed (its kind and body), with
+    /// when (unix seconds), oldest first: an item is the same item however
+    /// its outer JSON is written. Kept a day, whatever else arrives
+    sent: std::collections::VecDeque<(String, u64)>,
     /// where `sent` is kept across a restart; None: not kept
     sent_file: Option<PathBuf>,
 }
@@ -106,8 +107,11 @@ pub const ENVELOPES_PER_KEY: usize = 6;
 /// how many names, sources or keys each table holds at once: past it, the
 /// quiet ones go, and while every one is busy a new one waits
 pub const ENVELOPE_TABLE_MAX: usize = 4096;
-/// how many sent envelopes are remembered, to refuse one twice
-const ENVELOPES_REMEMBERED: usize = 4096;
+/// how long, and how many, sent envelopes are remembered, to refuse one
+/// twice: a day, so junk sent in between cannot push a real one out sooner -
+/// filling it takes far more than any source's allowance in a day
+const ENVELOPES_REMEMBERED: usize = 1 << 16;
+const ENVELOPE_REMEMBER_SECS: u64 = 24 * 3600;
 
 impl EnvelopeLimits {
     /// room for one more from `key` under `most` a minute; taken if so
@@ -119,10 +123,17 @@ impl EnvelopeLimits {
     ) -> bool {
         let minute = Duration::from_secs(60);
         if !map.contains_key(key) && map.len() >= ENVELOPE_TABLE_MAX {
-            // the quiet ones go; if none is quiet, nobody new this minute
+            // the quiet ones go - their minute is over, nothing of theirs is
+            // lost - and if all are busy, the one quiet longest: a flood of
+            // new names never shuts a newcomer out
             map.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) <= minute));
-            if map.len() >= ENVELOPE_TABLE_MAX {
-                return false;
+            if map.len() >= ENVELOPE_TABLE_MAX
+                && let Some(oldest) = map
+                    .iter()
+                    .min_by_key(|(_, q)| q.back().copied())
+                    .map(|(k, _)| k.clone())
+            {
+                map.remove(&oldest);
             }
         }
         let q = map.entry(key.to_string()).or_default();
@@ -136,8 +147,21 @@ impl EnvelopeLimits {
         true
     }
 
-    fn remember(&mut self, hash: String) {
-        self.sent.push_back(hash);
+    fn sent_already(&self, hash: &str, now: u64) -> bool {
+        self.sent
+            .iter()
+            .any(|(h, at)| h == hash && now.saturating_sub(*at) <= ENVELOPE_REMEMBER_SECS)
+    }
+
+    fn remember(&mut self, hash: String, now: u64) {
+        while self
+            .sent
+            .front()
+            .is_some_and(|(_, at)| now.saturating_sub(*at) > ENVELOPE_REMEMBER_SECS)
+        {
+            self.sent.pop_front();
+        }
+        self.sent.push_back((hash, now));
         while self.sent.len() > ENVELOPES_REMEMBERED {
             self.sent.pop_front();
         }
@@ -145,7 +169,7 @@ impl EnvelopeLimits {
     }
 
     fn forget(&mut self, hash: &str) {
-        self.sent.retain(|h| h != hash);
+        self.sent.retain(|(h, _)| h != hash);
         self.save();
     }
 
@@ -1378,6 +1402,19 @@ impl Directory {
         if bytes.len() > ENVELOPE_MAX {
             return Err((StatusCode::PAYLOAD_TOO_LARGE, "too big".into()));
         }
+        // the sender's allowance, before reading a byte of it: what a flood
+        // from one place costs - parsing, hashing, signature work - is its own
+        if !EnvelopeLimits::take(
+            &mut self.envelopes.lock().unwrap().by_source,
+            source,
+            ENVELOPES_PER_SOURCE,
+            std::time::Instant::now(),
+        ) {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many from here; wait a minute".into(),
+            ));
+        }
         let env = crate::ident::Envelope::parse(bytes).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
         if env.kind != kind {
             return Err((
@@ -1399,25 +1436,10 @@ impl Directory {
             .envelopes
             .lock()
             .unwrap()
-            .sent
-            .iter()
-            .any(|h| h == &hash)
+            .sent_already(&hash, identity::now())
             || self.agreed_has(name, &env)
         {
             return Err((StatusCode::CONFLICT, "that item was sent already".into()));
-        }
-        // the sender's allowance, before any signature work: what a flood
-        // from one place costs is its own
-        if !EnvelopeLimits::take(
-            &mut self.envelopes.lock().unwrap().by_source,
-            source,
-            ENVELOPES_PER_SOURCE,
-            std::time::Instant::now(),
-        ) {
-            return Err((
-                StatusCode::TOO_MANY_REQUESTS,
-                "too many from here; wait a minute".into(),
-            ));
         }
         // whose it is: signed by the key that speaks for the name, as a v1
         // item must be before this box takes it. Not judged - the control
@@ -1431,7 +1453,7 @@ impl Directory {
         {
             let now = std::time::Instant::now();
             let mut l = self.envelopes.lock().unwrap();
-            if l.sent.iter().any(|h| h == &hash) {
+            if l.sent_already(&hash, identity::now()) {
                 return Err((StatusCode::CONFLICT, "that item was sent already".into()));
             }
             if !EnvelopeLimits::take(&mut l.by_name, name, ENVELOPES_PER_NAME, now)
@@ -1442,7 +1464,7 @@ impl Directory {
                     "too many for this name; wait a minute".into(),
                 ));
             }
-            l.remember(hash.clone());
+            l.remember(hash.clone(), identity::now());
         }
         if let Err(e) = self.submit_raw(bytes.to_vec()).await {
             // not sent: the same item may be tried again
@@ -2933,7 +2955,7 @@ mod tests {
     }
 
     #[test]
-    fn the_limit_tables_stay_bounded() {
+    fn the_limit_tables_stay_bounded_and_never_shut_a_newcomer_out() {
         let now = std::time::Instant::now();
         let old = now - Duration::from_secs(120);
         let mut m = std::collections::HashMap::new();
@@ -2943,12 +2965,48 @@ mod tests {
         // quiet ones go to make room
         assert!(EnvelopeLimits::take(&mut m, "new", 1, now));
         assert_eq!(m.len(), 1);
-        // all busy: nobody new until a minute passes
+        // all busy: the one quiet longest goes, and the newcomer is in
         let mut m = std::collections::HashMap::new();
         for n in 0..ENVELOPE_TABLE_MAX {
-            m.insert(format!("k{n}"), std::collections::VecDeque::from([now]));
+            let at = now - Duration::from_secs(30) + Duration::from_millis(n as u64);
+            m.insert(format!("k{n}"), std::collections::VecDeque::from([at]));
         }
-        assert!(!EnvelopeLimits::take(&mut m, "new", 1, now));
+        assert!(EnvelopeLimits::take(&mut m, "new", 1, now));
         assert_eq!(m.len(), ENVELOPE_TABLE_MAX);
+        assert!(!m.contains_key("k0"));
+        assert!(m.contains_key("new"));
+    }
+
+    #[test]
+    fn a_sent_item_is_kept_a_day_whatever_comes_after() {
+        let mut l = EnvelopeLimits::default();
+        let t = 1_000_000;
+        l.remember("real".into(), t);
+        // a flood of other items within the day pushes nothing out
+        for n in 0..10_000 {
+            l.remember(format!("junk{n}"), t + 60);
+        }
+        assert!(l.sent_already("real", t + 3600));
+        // after a day it is gone, and not before
+        assert!(!l.sent_already("real", t + ENVELOPE_REMEMBER_SECS + 1));
+    }
+
+    #[tokio::test]
+    async fn a_source_pays_before_its_bytes_are_read() {
+        let (d, got, _k) = with_ann("v2-parse");
+        // broken envelopes, which would cost parsing: the source's
+        // allowance counts them all the same
+        let mut last = StatusCode::BAD_REQUEST;
+        for _ in 0..=ENVELOPES_PER_SOURCE {
+            last = put_v2(
+                &d,
+                "ann",
+                "noisy",
+                br#"{"v": 2, "kind": "entry", "body": "!!", "sig": "x"}"#.to_vec(),
+            )
+            .await;
+        }
+        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+        assert!(got.lock().unwrap().is_empty());
     }
 }
