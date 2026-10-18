@@ -14,6 +14,7 @@ mod member;
 mod policy;
 mod release_cmd;
 mod storage_ledger;
+mod tpm_roots;
 mod ui;
 mod vault;
 mod who;

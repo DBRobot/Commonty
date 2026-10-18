@@ -41,6 +41,7 @@ import (
 
 	"commonty/control/place"
 	"commonty/control/state"
+	"commonty/control/tpm"
 	"commonty/control/validator"
 	"commonty/control/wire"
 
@@ -569,6 +570,7 @@ func main() {
 	report := flag.String("sign-report", "", "sign the box's report in this directory (hardware.json, hardware-configuration.nix) as -box, into report.sig, and exit")
 	join := flag.Bool("sign-join", false, "print a request for a join key to the fleet's network, signed as -box now, and exit")
 	computerJoin := flag.String("sign-computer-join", "", "print a request for a network key for the remote computer with this id, which this box runs, signed as -box now, and exit")
+	attestBegin := flag.Bool("attest-begin", false, "print this box's attestation Begin (state/attest) for its request to enlist, and exit")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -609,6 +611,17 @@ func main() {
 			log.Fatal(err)
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"box": *box, "time": now, "sig": sig})
+		return
+	}
+
+	if *attestBegin {
+		t := tpm.Default()
+		t.Keys = *tpmKeys
+		b, err := t.Begin()
+		if err != nil {
+			log.Fatal(err)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(b)
 		return
 	}
 
@@ -888,6 +901,10 @@ func main() {
 			time.Sleep(*every)
 		}
 	}()
+
+	att := &attesting{box: *box, voters: cfg.BoxVoters(), tpm: tpm.Default(), state: n.State, submit: submit, sent: map[string]int64{}}
+	att.tpm.Keys = *tpmKeys
+	go att.loop(10 * time.Second)
 
 	// The gate's way in: a directory item, sent as this box's request. Only
 	// the gate may open the socket; the validators bound what any box adds

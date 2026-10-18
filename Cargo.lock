@@ -2023,6 +2023,7 @@ dependencies = [
  "verify",
  "webauthn-authenticator-rs",
  "webauthn-rs",
+ "x509-parser",
  "zeroize",
 ]
 

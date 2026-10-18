@@ -8,6 +8,7 @@ package state
 
 import (
 	"commonty/control/state/computers"
+	"commonty/control/state/attest"
 	"commonty/control/state/ident"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,8 @@ type Config struct {
 	// what members' remote computers may take (state/computers); absent:
 	// no /computers
 	Computers *computers.Limits `json:"computers,omitempty"`
+	// the TPM makers' roots a box's attestation chains to (state/attest)
+	Attest *attest.Config `json:"attest,omitempty"`
 }
 
 // BoxVoters: the validators that are boxes, whose gates acknowledge a new
@@ -76,7 +79,7 @@ type LeaseRule struct {
 
 // Request is what a box asks for, signed by its TPM-held key over Bytes().
 type Request struct {
-	Kind string          `json:"kind"` // heartbeat | lease | directory | built | join | netaddr | rollout
+	Kind string          `json:"kind"` // heartbeat | lease | directory | built | join | netaddr | rollout | attest-challenge | attest-response
 	Box  string          `json:"box"`
 	Seq  uint64          `json:"seq"` // strictly increasing per box
 	Body json.RawMessage `json:"body"`
@@ -194,6 +197,8 @@ type State struct {
 	JoinCount  int                `json:"joinCount,omitempty"`
 	// the newest release's staged rollout (rollout.go)
 	Rollout *Rollout `json:"rollout,omitempty"`
+	// boxes proving they are real hardware, and what those that did proved
+	Attest *attest.State `json:"attest,omitempty"`
 }
 
 func New() *State {
@@ -214,7 +219,7 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 	if r.Kind == "join" {
 		return s.checkJoin(cfg, verify, r, now)
 	}
-	key, ok := s.BoxKey(cfg, r.Box)
+	key, ok := s.keyOf(cfg, r)
 	if !ok {
 		return ErrUnknownBox
 	}
@@ -271,8 +276,74 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 		return nil
 	case "rollout":
 		return s.checkRollout(cfg, r.Box, r.Body, now)
+	case "attest-challenge":
+		if len(r.Body) > attest.MaxChallenge {
+			return fmt.Errorf("a challenge of %d bytes; at most %d", len(r.Body), attest.MaxChallenge)
+		}
+		var c attest.Challenge
+		if err := json.Unmarshal(r.Body, &c); err != nil {
+			return err
+		}
+		if s.Attest == nil {
+			return fmt.Errorf("%s is not attesting", c.Box)
+		}
+		return s.Attest.CheckChallenge(cfg.BoxVoters(), r.Box, c, now)
+	case "attest-response":
+		if len(r.Body) > attest.MaxResponse {
+			return fmt.Errorf("a response of %d bytes; at most %d", len(r.Body), attest.MaxResponse)
+		}
+		var a attest.Response
+		if err := json.Unmarshal(r.Body, &a); err != nil {
+			return err
+		}
+		if s.Attest == nil {
+			return fmt.Errorf("%s is not attesting", r.Box)
+		}
+		_, err := s.Attest.CheckResponse(cfg.Attest, cfg.BoxVoters(), r.Box, a, now)
+		return err
 	}
 	return fmt.Errorf("no such request: %q", r.Kind)
+}
+
+// keyOf: the key r must be signed by - a box of the release's or a joined one, or, for
+// its attest-response, the join key a box attesting started with
+func (s *State) keyOf(cfg *Config, r Request) (string, bool) {
+	if key, ok := s.BoxKey(cfg, r.Box); ok {
+		return key, true
+	}
+	if r.Kind == "attest-response" && s.Attest != nil {
+		if p := s.Attest.Pending[r.Box]; p != nil {
+			return p.Key, true
+		}
+	}
+	return "", false
+}
+
+// CheckAttestOpen says whether box may start attesting with b, its join
+// key (SPKI, base64) being key. The enlistment's judge calls it on a
+// request to enlist, and AttestOpen once that is applied.
+func (s *State) CheckAttestOpen(cfg *Config, box, key string, b attest.Begin, now int64) error {
+	st := s.Attest
+	if st == nil {
+		st = attest.New()
+	}
+	_, err := st.CheckOpen(cfg.Attest, box, key, b, now)
+	return err
+}
+
+func (s *State) AttestOpen(cfg *Config, box, key string, b attest.Begin, now int64) {
+	if s.Attest == nil {
+		s.Attest = attest.New()
+	}
+	s.Attest.Open(cfg.Attest, box, key, b, now)
+}
+
+// Attested: what box proved, or nil
+func (s *State) Attested(box string) *attest.Record {
+	if s.Attest == nil {
+		return nil
+	}
+	return s.Attest.Done[box]
 }
 
 func (s *State) checkLease(cfg *Config, box string, op LeaseOp, now int64) error {
@@ -382,6 +453,14 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 		s.Built = append(s.Built, BuiltItem{Height: s.Height, Time: now, Box: r.Box, Item: append(json.RawMessage(nil), r.Body...)})
 	case "rollout":
 		s.applyRollout(cfg, r.Box, r.Body, now)
+	case "attest-challenge":
+		var c attest.Challenge
+		_ = json.Unmarshal(r.Body, &c)
+		s.Attest.ApplyChallenge(c)
+	case "attest-response":
+		var a attest.Response
+		_ = json.Unmarshal(r.Body, &a)
+		s.Attest.ApplyResponse(cfg.Attest, cfg.BoxVoters(), r.Box, a, now)
 	}
 }
 
@@ -400,6 +479,9 @@ func (s *State) Block(cfg *Config, verify Verify, reqs []Request, now int64) (ap
 		}
 	}
 	s.dropGone(s.Time)
+	if s.Attest != nil {
+		s.Attest.Expire(s.Time)
+	}
 	for _, r := range reqs {
 		if s.Check(cfg, verify, r, s.Time) == nil {
 			s.Apply(cfg, r, s.Time)
