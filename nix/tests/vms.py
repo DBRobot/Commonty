@@ -51,11 +51,9 @@ assert code == 200, text
 made = json.loads(text)
 i, port = made["id"], made["port"]
 assert made["anywhere"], made
-# over the totals: 16G across everything tom has
-big = dict(config, memory=16384)
-assert api("tom", "PUT", "/api/configs/big", big)[0] == 200
+# over the totals: tom's computers together (1.5G here; 16G on a box)
 code, text = api(
-    "tom", "POST", "/api/instances", {"config": "big", "name": "b", "yes": True}
+    "tom", "POST", "/api/instances", {"config": "dev", "name": "b", "yes": True}
 )
 assert code == 422 and "together" in text, text
 
