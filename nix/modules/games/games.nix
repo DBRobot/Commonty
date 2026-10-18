@@ -373,6 +373,28 @@ in
       timerConfig.OnActiveSec = "5min";
     };
 
+    # what each member's game servers and kept worlds keep here, into the facts for their allowance
+    systemd.services.dd-games-usage = {
+      description = "Count what each member's game servers and kept worlds keep";
+      path = [
+        pkgs.jq
+        pkgs.coreutils
+      ];
+      restartIfChanged = false;
+      serviceConfig.Type = "oneshot";
+      script = ddScript ../guests/usage.sh {
+        DIR = dir;
+        KIND = "games";
+      };
+    };
+    systemd.timers.dd-games-usage = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "5min";
+        OnUnitActiveSec = "1h";
+      };
+    };
+
     systemd.services."dd-game@" = {
       description = "Game server %i";
       # a deploy is not a reason for a game to go down

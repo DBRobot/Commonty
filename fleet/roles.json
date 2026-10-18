@@ -178,5 +178,15 @@
       "pihole",
       "tang"
     ]
+  },
+  "compute": {
+    "requires": {
+      "kvm": true,
+      "memoryGiB": 4
+    },
+    "why": "members' computers are KVM guests, each its own size: a box takes those that fit (its vm.prom says how big), so a small box still runs small ones",
+    "services": [
+      "dd-vms"
+    ]
   }
 }

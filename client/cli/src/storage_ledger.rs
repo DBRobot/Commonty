@@ -90,6 +90,7 @@ pub async fn run(l: Ledger) -> Result<()> {
         let elsewhere = |k: &str| view["members"][name][k].as_u64().unwrap_or(0);
         let code = elsewhere("code");
         let passwords = elsewhere("passwords");
+        let guests = elsewhere("games").saturating_add(elsewhere("computers"));
         let email = format!("{name}{}", l.photos_suffix);
         let r = admin(format!("/admin/user?email={}", urlencode(&email)))
             .send()
@@ -108,7 +109,14 @@ pub async fn run(l: Ledger) -> Result<()> {
             let want = if members[name]["suspended"].as_bool() == Some(true) {
                 used_photos.max(1)
             } else {
-                photos_limit(l.budget, libraries + code + passwords, used_photos)
+                photos_limit(
+                    l.budget,
+                    libraries
+                        .saturating_add(code)
+                        .saturating_add(passwords)
+                        .saturating_add(guests),
+                    used_photos,
+                )
             };
             if fresh && id != 0 && now != want {
                 let r = http
@@ -138,7 +146,7 @@ pub async fn run(l: Ledger) -> Result<()> {
         }
         counted.insert(
             name.clone(),
-            json!({ "photos": used_photos, "libraries": libraries, "code": code, "passwords": passwords }),
+            json!({ "photos": used_photos, "libraries": libraries, "code": code, "passwords": passwords, "guests": guests }),
         );
     }
 
@@ -213,11 +221,14 @@ pub async fn view(
 /// release's list, for its count of that kind to be believed. A box can only
 /// add to the count - nothing it says lowers anyone's - and only for what it
 /// runs: one that claims to count Photos without running Photos is not heard.
-const KINDS: [(&str, &str); 4] = [
+const KINDS: [(&str, &str); 6] = [
     ("photos", "photos"),
     ("libraries", "photos"),
     ("code", "forge"),
     ("passwords", "vault"),
+    // game servers and kept worlds, members' computers: what their disks hold
+    ("games", "game"),
+    ("computers", "compute"),
 ];
 
 fn sum(state: &Value, budget: u64, roles: &BTreeMap<String, Vec<String>>) -> Result<Value> {
