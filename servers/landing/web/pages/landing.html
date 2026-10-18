@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Commonty</title>
-  <meta name="description" content="Your files, photos, films and passwords, locked on your own devices and kept on computers your friends own.">
+  <meta name="description" content="Your files, photos, movies and passwords, locked on your own devices and kept on computers your friends own. No subscriptions, and free for members who add a computer.">
   <link rel="icon" type="image/svg+xml" href="/_dd/static/favicon.svg">
   <link rel="preload" href="/_dd/static/public-sans.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/_dd/static/home.css">
@@ -36,7 +36,7 @@
     <section class="opening" aria-labelledby="h1">
       <div>
         <h1 id="h1">Keep it <span>yours.</span></h1>
-        <p>Your files, photos, films and passwords, locked on your own devices and kept on computers your friends own. Nobody else can read them. Not even us.</p>
+        <p>Your files, photos, movies and passwords, locked on your own devices and kept on computers your friends own. No monthly subscriptions, and nobody else can read them. Not even us.</p>
         <div class="acts">
           <a class="button" href="/download">Get Commonty</a>
           <a class="textlink" href="/_dd/demo" data-home="/_dd/demo">Try the demo</a>
@@ -110,7 +110,7 @@
     <div class="text">
       <span class="kicker">End-to-end encrypted</span>
       <h2 id="i1">Locked before it leaves your hands</h2>
-      <p>Your files, photos, films and passwords are encrypted on your phone or computer, with keys that never leave it. The computers that keep them hold only locked copies.</p>
+      <p>Your files, photos, movies and passwords are encrypted on your phone or computer, with keys that never leave it. The computers that keep them hold only locked copies.</p>
       <p>No one who runs a box can open them. There is no back door for us either.</p>
     </div>
     <!-- a phone with its key; what reaches the box is noise -->
@@ -147,7 +147,7 @@
     <div class="text">
       <span class="kicker">Zero trust</span>
       <h2 id="i2">Kept by friends, trusted by no one</h2>
-      <p>Commonty runs on computers in members' homes, each holding a share of everyone's locked data. No company in the middle, and no data centre selling what it learns.</p>
+      <p>Commonty runs on computers in members' homes, each holding a share of everyone's locked data. No company in the middle, and no data center selling what it learns.</p>
       <p>No box is trusted, not even ours. One that is stolen or hacked can only hand over what it cannot read.</p>
     </div>
     <!-- houses in a ring, linked; one marked stolen still shows only locks -->
@@ -173,11 +173,45 @@
     </div>
   </section>
 
+  <section class="idea wrap" aria-labelledby="i3">
+    <div class="text">
+      <span class="kicker">No subscriptions</span>
+      <h2 id="i3">Stop paying every month for your own data</h2>
+      <p>A cloud drive, photo storage, a password manager, a media server, an AI chat. Each is another monthly bill, and each keeps your data on its own terms.</p>
+      <p>Commonty does all of them, for nothing. You save the money, and your data is yours again: locked by you and kept by friends, not held by a company.</p>
+    </div>
+    <!-- a month's statement of subscriptions, each one struck out; what is left to pay is nothing -->
+    <div class="art" aria-hidden="true">
+      <svg viewBox="0 0 520 380" fill="none">
+        <circle cx="260" cy="190" r="160" fill="var(--sky-2)"/>
+        <rect x="120" y="36" width="280" height="310" rx="6" class="paper" stroke="#9CC3EA" stroke-width="2"/>
+        <rect x="120" y="36" width="280" height="40" rx="6" fill="#1D4470"/><rect x="120" y="60" width="280" height="16" fill="#1D4470"/>
+        <text x="140" y="62" font-family="IBM Plex Mono, monospace" font-size="13" fill="#FFFFFF">every month</text>
+        <g font-family="IBM Plex Mono, monospace" font-size="13" fill="var(--ink-3)">
+          <text x="140" y="112">cloud drive</text>
+          <text x="140" y="150">photo storage</text>
+          <text x="140" y="188">password manager</text>
+          <text x="140" y="226">media server</text>
+          <text x="140" y="264">AI chat</text>
+        </g>
+        <g fill="var(--ink-3)" opacity=".5">
+          <rect x="332" y="103" width="48" height="10"/><rect x="332" y="141" width="48" height="10"/><rect x="332" y="179" width="48" height="10"/><rect x="332" y="217" width="48" height="10"/><rect x="332" y="255" width="48" height="10"/>
+        </g>
+        <g stroke="#B3401F" stroke-width="2.5">
+          <path d="M326 108h60"/><path d="M326 146h60"/><path d="M326 184h60"/><path d="M326 222h60"/><path d="M326 260h60"/>
+        </g>
+        <path d="M136 288h248" stroke="var(--ink-3)" stroke-width="1.5" opacity=".5"/>
+        <text x="140" y="322" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" fill="var(--green)">with Commonty</text>
+        <text x="380" y="322" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="22" font-weight="700" fill="var(--green)">$0</text>
+      </svg>
+    </div>
+  </section>
+
   <section class="carousel" aria-labelledby="svc-h">
     <div class="wrap head">
       <div>
         <span class="kicker">One sign-in for all of it</span>
-        <h2 id="svc-h">Everything you use, kept the same way</h2>
+        <h2 id="svc-h">Everything you pay for now, kept the same way</h2>
       </div>
       <div class="nav">
         <button type="button" id="hold" aria-pressed="false" aria-label="Pause the services"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="bars" d="M7 5v10M13 5v10" fill="none" stroke="currentColor" stroke-width="2"/><path class="tri" d="M7 5v10l8-5Z" fill="currentColor"/></svg></button>
@@ -191,22 +225,22 @@
           <li class="svc-card"><a href="/docs/guide/services/files">
             <svg class="svc-pic" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="var(--sky-2)"/><rect x="18" y="30" width="60" height="44" fill="#9CC3EA"/><path d="M18 30h22l6 8H18Z" fill="#1D4470"/><rect x="58" y="52" width="26" height="20" rx="2" fill="#E0A21B"/><path d="M64 52v-5a7 7 0 0 1 14 0v5" stroke="#E0A21B" stroke-width="3"/></svg>
             <h3>Files</h3>
-            <p>Every folder you own, on every device you use.</p>
+            <p>Every folder you own, on every device you use, with no cloud drive to pay for.</p>
           </a></li>
           <li class="svc-card"><a href="/docs/guide/services/movies">
             <svg class="svc-pic" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="var(--sky-2)"/><rect x="14" y="24" width="72" height="48" rx="3" fill="#1D4470"/><path d="M44 38v20l16-10Z" fill="#FFFFFF"/><rect x="14" y="76" width="72" height="4" fill="#9CC3EA"/><rect x="14" y="76" width="30" height="4" fill="#E0A21B"/></svg>
             <h3>Movies &amp; TV</h3>
-            <p>Your film collection, playing on any screen in the house.</p>
+            <p>Your own movie collection, playing on any screen in the house, with no media server to pay for.</p>
           </a></li>
           <li class="svc-card"><a href="/docs/guide/services/photos">
             <svg class="svc-pic" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="var(--sky-2)"/><rect x="16" y="20" width="32" height="32" fill="#9CC3EA"/><rect x="52" y="20" width="32" height="32" fill="#DDEEE5"/><rect x="16" y="56" width="32" height="24" fill="#1D5C42"/><rect x="52" y="56" width="32" height="24" fill="#F6ECD9"/><circle cx="28" cy="32" r="5" fill="#FFFFFF"/><path d="M16 52l12-12 10 8 10-10v14Z" fill="#1D4470" opacity=".6"/></svg>
             <h3>Photos</h3>
-            <p>Back up your camera roll and share albums with family.</p>
+            <p>Back up your camera roll and share albums with family, without paying for storage.</p>
           </a></li>
           <li class="svc-card"><a href="/docs/guide/services/passwords">
             <svg class="svc-pic" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="var(--sky-2)"/><rect x="22" y="38" width="56" height="42" rx="3" fill="#1D4470"/><path d="M34 38v-8a16 16 0 0 1 32 0v8" stroke="#1D4470" stroke-width="5"/><circle cx="38" cy="59" r="3.5" fill="#E0A21B"/><circle cx="50" cy="59" r="3.5" fill="#E0A21B"/><circle cx="62" cy="59" r="3.5" fill="#E0A21B"/></svg>
             <h3>Passwords</h3>
-            <p>Every password in one vault that only you can open.</p>
+            <p>Every password in one vault that only you can open, and no yearly plan.</p>
           </a></li>
           <li class="svc-card"><a href="/docs/guide/services/chat">
             <svg class="svc-pic" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="var(--sky-2)"/><rect x="12" y="24" width="56" height="28" rx="6" fill="#1D4470"/><path d="M22 52l-4 10 14-10Z" fill="#1D4470"/><rect x="34" y="50" width="54" height="26" rx="6" fill="#DDEEE5"/><rect x="42" y="58" width="36" height="4" fill="#1D5C42"/><rect x="42" y="66" width="24" height="4" fill="#1D5C42" opacity=".6"/><rect x="20" y="33" width="34" height="4" fill="#FFFFFF"/><rect x="20" y="41" width="22" height="4" fill="#FFFFFF" opacity=".6"/></svg>
@@ -243,18 +277,61 @@
     </div>
   </section>
 
+  <section class="idea flip wrap" aria-labelledby="i4">
+    <div class="text">
+      <span class="kicker">Membership</span>
+      <h2 id="i4">Free for everyone who adds a box</h2>
+      <p>Membership is completely free for contributors. Anyone can sign up, but an account opens the services in one of two ways: an invite from David, or a computer of yours that joins the network.</p>
+      <p>You stay a member while any of your boxes is still in the network. You lose it only by your own doing: taking all your boxes out, or all of them being gone for 30 days. A box that goes down through the network's fault never counts against you.</p>
+      <p>Once a box joins, it works for everyone, and nobody has root on it, not even you.</p>
+      <h3 class="needs-h">What the box needs</h3>
+      <ul class="needs">
+        <li>A TPM 2.0 chip and UEFI. Any kind of processor.</li>
+        <li>For general computing: at least 4 cores and 8 GB of memory. A Raspberry Pi doesn't count.</li>
+        <li>Or a specialist box: a NAS with 1 TB of storage or more, or a computer with a GPU.</li>
+        <li>Wired or Wi-Fi. Wired is better.</li>
+      </ul>
+      <p class="more"><a href="/docs/guide/hosting">How hosting a box works</a></p>
+    </div>
+    <!-- your box joins the ring of houses, and a free pass comes back -->
+    <div class="art" aria-hidden="true">
+      <svg viewBox="0 0 520 400" fill="none">
+        <circle cx="300" cy="200" r="160" fill="var(--sky-2)"/>
+        <circle cx="330" cy="200" r="104" stroke="#9CC3EA" stroke-width="2" stroke-dasharray="6 8"/>
+        <g transform="translate(294 66)"><path d="M0 34 36 6l36 28v46H0Z" fill="#1D4470"/><rect x="20" y="44" width="32" height="26" fill="#1D5C42"/><rect x="25" y="50" width="22" height="3.5" fill="#DDEEE5"/><rect x="25" y="57" width="22" height="3.5" fill="#DDEEE5"/><circle class="blink" cx="45" cy="65" r="2.2" fill="#E0A21B"/></g>
+        <g transform="translate(398 200)"><path d="M0 34 36 6l36 28v46H0Z" fill="#1D4470"/><rect x="20" y="44" width="32" height="26" fill="#1D5C42"/><rect x="25" y="50" width="22" height="3.5" fill="#DDEEE5"/><rect x="25" y="57" width="22" height="3.5" fill="#DDEEE5"/><circle class="blink d1" cx="45" cy="65" r="2.2" fill="#E0A21B"/></g>
+        <g transform="translate(294 250)"><path d="M0 34 36 6l36 28v46H0Z" fill="#1D4470"/><rect x="20" y="44" width="32" height="26" fill="#1D5C42"/><rect x="25" y="50" width="22" height="3.5" fill="#DDEEE5"/><rect x="25" y="57" width="22" height="3.5" fill="#DDEEE5"/><circle class="blink d3" cx="45" cy="65" r="2.2" fill="#E0A21B"/></g>
+        <!-- your box, on its way in -->
+        <g transform="translate(36 160)">
+          <rect width="96" height="80" rx="5" fill="#1D5C42"/>
+          <rect x="12" y="14" width="72" height="7" fill="#DDEEE5"/><rect x="12" y="27" width="72" height="7" fill="#DDEEE5"/>
+          <circle class="blink d2" cx="78" cy="64" r="3.5" fill="#E0A21B"/>
+        </g>
+        <text x="84" y="268" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--ink-3)">your box</text>
+        <path class="flow" d="M140 200 H 232" stroke="#1D4470" stroke-width="3"/>
+        <!-- the pass back: member, free -->
+        <g transform="translate(150 296)">
+          <rect width="120" height="50" rx="4" class="paper" stroke="#1D5C42" stroke-width="2"/>
+          <rect width="10" height="50" fill="#1D5C42"/>
+          <text x="24" y="21" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--ink-3)">member</text>
+          <text x="24" y="40" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="700" fill="var(--green)">free</text>
+        </g>
+      </svg>
+    </div>
+  </section>
+
   <section class="why wrap" aria-labelledby="why-h">
     <h2 id="why-h">Why Commonty?</h2>
     <div class="grid">
       <div>
         <svg class="why-ic" viewBox="0 0 52 52" aria-hidden="true"><rect width="52" height="52" rx="4" fill="var(--sky-2)"/><rect x="15" y="23" width="22" height="16" rx="2" fill="#1D4470"/><path d="M20 23v-4a6 6 0 0 1 12 0v4" stroke="#1D4470" stroke-width="3" fill="none"/></svg>
         <h3>End-to-end encrypted</h3>
-        <p>Files, films, photos, passwords and chats are locked on your device. Only you hold the keys.</p>
+        <p>Files, movies, photos, passwords and chats are locked on your device. Only you hold the keys.</p>
       </div>
       <div>
         <svg class="why-ic" viewBox="0 0 52 52" aria-hidden="true"><rect width="52" height="52" rx="4" fill="var(--mint)"/><path d="M12 25 26 13l14 12v14H12Z" fill="#1D5C42"/><rect x="22" y="29" width="8" height="10" fill="#DDEEE5"/></svg>
         <h3>Kept in members' homes</h3>
-        <p>On boxes people own, not in a data centre that sells what it learns.</p>
+        <p>On boxes people own, not in a data center that sells what it learns.</p>
       </div>
       <div>
         <svg class="why-ic" viewBox="0 0 52 52" aria-hidden="true"><rect width="52" height="52" rx="4" fill="#F6ECD9"/><path d="M12 26s5-8 14-8 14 8 14 8-5 8-14 8-14-8-14-8Z" stroke="#8A5A12" stroke-width="3" fill="none"/><path d="M14 38 38 14" stroke="#8A5A12" stroke-width="3"/></svg>
@@ -273,8 +350,8 @@
       </div>
       <div>
         <svg class="why-ic" viewBox="0 0 52 52" aria-hidden="true"><rect width="52" height="52" rx="4" fill="#F6ECD9"/><circle cx="20" cy="21" r="5" fill="#8A5A12"/><circle cx="33" cy="22" r="4" fill="#E0A21B"/><path d="M11 37c1-6 5-9 9-9s8 3 9 9Z" fill="#8A5A12"/><path d="M27 37c1-5 3-8 6-8s6 3 7 8Z" fill="#E0A21B"/></svg>
-        <h3>Run by its members</h3>
-        <p>Free for the people who host it, with no company in the middle.</p>
+        <h3>No subscriptions</h3>
+        <p>Free for members who add a box, and run by them, with no company in the middle.</p>
       </div>
     </div>
   </section>
@@ -282,6 +359,7 @@
   <section class="cta" aria-labelledby="cta-h">
     <div class="wrap">
       <h2 id="cta-h">Your data, back in your hands.</h2>
+      <p>Cancel the subscriptions and take back control.</p>
       <a class="button" href="/download">Get Commonty</a>
     </div>
   </section>

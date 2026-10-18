@@ -68,6 +68,11 @@ body.landing {
 .landing .kicker { font: 500 13px var(--mono); color: var(--green); text-transform: uppercase; letter-spacing: .1em; }
 .landing .idea h2 { margin: 10px 0 16px; font-size: clamp(32px, 3.8vw, 46px); line-height: 1.06; font-weight: 800; letter-spacing: -0.03em; text-wrap: balance; }
 .landing .idea p { margin: 0 0 14px; color: var(--ink-2); font-size: 18px; max-width: 30em; }
+.landing .idea .needs-h { margin: 24px 0 10px; font: 500 13px var(--mono); color: var(--green); text-transform: uppercase; letter-spacing: .1em; }
+.landing .needs { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 8px; max-width: 30em; }
+.landing .needs li { position: relative; padding-left: 20px; color: var(--ink-2); font-size: 17px; }
+.landing .needs li::before { content: ""; position: absolute; left: 0; top: .62em; width: 8px; height: 8px; background: var(--green); }
+.landing .idea .more { font-weight: 600; }
 
 .landing .why { padding-block: 136px 0; }
 .landing .why h2 { margin: 0 0 52px; font-size: clamp(32px, 3.8vw, 46px); line-height: 1.6; font-weight: 800; letter-spacing: -0.03em; text-align: center; }
@@ -79,7 +84,8 @@ body.landing {
 
 .landing .cta { margin-top: 136px; background: var(--navy); color: #FFFFFF; text-align: center; }
 .landing .cta .wrap { padding-block: 88px; }
-.landing .cta h2 { margin: 0 0 26px; font-size: clamp(32px, 4vw, 50px); line-height: 1.6; font-weight: 800; letter-spacing: -0.03em; }
+.landing .cta h2 { margin: 0 0 10px; font-size: clamp(32px, 4vw, 50px); line-height: 1.6; font-weight: 800; letter-spacing: -0.03em; }
+.landing .cta p { margin: 0 0 28px; font-size: 20px; color: rgba(255, 255, 255, .82); }
 .landing .cta .button { background: #FFFFFF; color: #1D4470; }
 
 /* the footer follows the navy band; elsewhere it carries a rule */
