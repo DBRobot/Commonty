@@ -274,12 +274,55 @@ func facts() map[string]float64 {
 	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom", "/var/lib/dd-facts/can.prom", "/var/lib/dd-facts/draining.prom", "/var/lib/dd-facts/computers.prom") {
 		f[name] = v
 	}
+	for name, v := range reportFacts("/var/lib/dd/report/hardware.json", "/sys/firmware/devicetree/base/model") {
+		f[name] = v
+	}
 	// what members keep here: not .prom, so none of it reaches Prometheus
 	usage, _ := filepath.Glob("/var/lib/dd-facts/usage-*.facts")
 	for name, v := range usageFacts(usage...) {
 		f[name] = v
 	}
 	return f
+}
+
+// reportFacts: what a member's box qualifies by (ident.Qualify), from the
+// box's own signed report (nix/modules/box/report.nix, detect.sh): its TPM's
+// version, UEFI, its GPUs that are cards of their own (nvidia, amdgpu), and
+// whether the board is a Raspberry Pi (its device tree's model)
+func reportFacts(report, model string) map[string]float64 {
+	out := map[string]float64{}
+	if b, err := os.ReadFile(report); err == nil {
+		var r struct {
+			Firmware struct {
+				UEFI bool `json:"uefi"`
+				TPM  *struct {
+					Version float64 `json:"version"`
+				} `json:"tpm"`
+			} `json:"firmware"`
+			GPUs []struct {
+				Driver string `json:"driver"`
+			} `json:"gpus"`
+		}
+		if json.Unmarshal(b, &r) == nil {
+			if r.Firmware.UEFI {
+				out["uefi"] = 1
+			}
+			if r.Firmware.TPM != nil {
+				out["tpm_major"] = r.Firmware.TPM.Version
+			}
+			n := 0
+			for _, g := range r.GPUs {
+				if g.Driver == "nvidia" || g.Driver == "amdgpu" {
+					n++
+				}
+			}
+			out["gpus"] = float64(n)
+		}
+	}
+	if b, err := os.ReadFile(model); err == nil && strings.Contains(string(b), "Raspberry Pi") {
+		out["raspberry_pi"] = 1
+	}
+	return out
 }
 
 // promFacts reads the few samples the heartbeat carries from text-format
@@ -852,6 +895,10 @@ func main() {
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(n.State())
 	})
+	var ids *ident.Server
+	if cfg.Identity != nil {
+		ids = ident.NewServer(cfg.Identity, cfg.BoxVoters())
+	}
 	// members' remote computers (docs/dev/remote-computers.md): judged here from
 	// the same log, beside identity, so every box serves the same
 	var rc *computers.Server
@@ -880,7 +927,7 @@ func main() {
 			if rc != nil {
 				i.Computers = rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time)
 			}
-			return place.Decide(i, s, cfg.Rules.GoneAfter)
+			return place.Decide(i, s, cfg.Rules.GoneAfter, memberBoxes(ids, s))
 		}
 		placed.limits = cfg.Computers
 		placed.agreed = func(s *state.State) (map[string]*computers.Listed, error) {
@@ -933,13 +980,12 @@ func main() {
 	})
 	// the agreed identity state (docs/dev/identity-state.md): judged here
 	// from the directory log, so every box serves the same
-	if cfg.Identity != nil {
-		ids := ident.NewServer(cfg.Identity, cfg.BoxVoters())
+	if ids != nil {
 		http.HandleFunc("/identity", func(w http.ResponseWriter, req *http.Request) {
 			q := req.URL.Query()
 			since, _ := strconv.ParseUint(q.Get("since"), 10, 64)
 			s := n.State()
-			code, b := ids.Answer(len(s.Directory), logItem(s), s.Height, s.Time, q.Get("name"), since)
+			code, b := ids.Answer(len(s.Directory), logItem(s), s.Height, s.Time, s.IdentBoxes(), q.Get("name"), since)
 			w.Header().Set("content-type", "application/json")
 			w.WriteHeader(code)
 			_, _ = w.Write(b)
@@ -983,6 +1029,30 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+}
+
+// memberBoxes: the boxes members have enlisted that qualify, from the
+// agreed identity state at s - placement's peers beside the release's
+func memberBoxes(ids *ident.Server, s *state.State) map[string]bool {
+	out := map[string]bool{}
+	if ids == nil {
+		return out
+	}
+	v := ids.View(len(s.Directory), func(i int) ident.Item {
+		d := s.Directory[i]
+		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+	}, s.Height, s.Time, s.IdentBoxes())
+	for _, m := range v.Members {
+		if m.Status != "member" {
+			continue
+		}
+		for _, b := range m.Enlisted {
+			if b.Qualifies != "" {
+				out[b.Box] = true
+			}
+		}
+	}
+	return out
 }
 
 func splitRoles(s string) []string {

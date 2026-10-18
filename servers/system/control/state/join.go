@@ -9,17 +9,18 @@ package state
 // (docs/dev/joining.md).
 //
 // A box a member set up carries the member's join ticket, a biscuit one of
-// their devices signed. The validators order it with the join and judge it
-// no more than they judge the directory: every gate checks it against the
-// member's signed entry, the same way from the same log, and only then
-// counts the box as that member's. Without a ticket, or with one no gate
-// accepts, the box is a stranger, and either way it can do no more than one.
+// their devices signed. The validators judge none of it here: the join
+// puts the box's key and ticket in the directory log ({"joined": ...},
+// under the box's name), where the identity judge (state/ident) reads it
+// when the member's root enlists the box. Until then, and without a
+// ticket, the box is a stranger.
 
 import (
+	"bytes"
+	"commonty/control/state/ident"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,7 +86,7 @@ func JoinName(spki string) (string, uint64, error) {
 	h := sha256.Sum256(der)
 	var b [8]byte
 	copy(b[3:], h[:5])
-	return "j" + hex.EncodeToString(h[:5]), JoinedIDBase | binary.BigEndian.Uint64(b[:]), nil
+	return ident.BoxName(spki), JoinedIDBase | binary.BigEndian.Uint64(b[:]), nil
 }
 
 // BoxKey is a box's key: from the release's list, else a joined box's
@@ -162,6 +163,45 @@ func (s *State) applyJoin(r Request, now int64) {
 		s.Joined = map[string]*Joined{}
 	}
 	s.Joined[r.Box] = &Joined{ID: id, Key: j.Key, Recipient: j.Recipient, House: j.House, At: now, Ticket: j.Ticket}
+	if j.Ticket != "" {
+		rec, _ := json.Marshal(map[string]map[string]string{"joined": {"key": j.Key, "ticket": j.Ticket}})
+		s.Directory = append(s.Directory, DirItem{Height: s.Height, Time: now, Box: r.Box, Item: rec})
+	}
+}
+
+// joinedRecord: whether a directory item a box sends says "joined" at its
+// top, which only the state machine writes
+func joinedRecord(body []byte) bool {
+	d := json.NewDecoder(bytes.NewReader(body))
+	if t, err := d.Token(); err != nil || t != json.Delim('{') {
+		return false
+	}
+	for d.More() {
+		k, err := d.Token()
+		if err != nil {
+			return true
+		}
+		if k == "joined" {
+			return true
+		}
+		var skip json.RawMessage
+		if d.Decode(&skip) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// IdentBoxes: what the identity view reads of each box (ident.Boxes), from
+// this state
+func (s *State) IdentBoxes() ident.Boxes {
+	return func(name string) (ident.BoxInfo, bool) {
+		b := s.Boxes[name]
+		if b == nil {
+			return ident.BoxInfo{}, false
+		}
+		return ident.BoxInfo{LastSeen: b.LastSeen, Facts: b.Facts}, true
+	}
 }
 
 func (s *State) checkNetAddr(cfg *Config, r Request) error {
@@ -181,14 +221,17 @@ func (s *State) checkNetAddr(cfg *Config, r Request) error {
 	return nil
 }
 
-// dropGone forgets strangers unheard for JoinedGoneAfter
+// dropGone forgets strangers unheard for JoinedGoneAfter, but not one whose
+// last word was a release that failed on it: a box down by our fault keeps
+// its place (and its member's access, ident.OurFault)
 func (s *State) dropGone(now int64) {
 	for name, j := range s.Joined {
 		last := j.At
-		if b := s.Boxes[name]; b != nil && b.LastSeen > last {
+		b := s.Boxes[name]
+		if b != nil && b.LastSeen > last {
 			last = b.LastSeen
 		}
-		if now-last > JoinedGoneAfter {
+		if now-last > JoinedGoneAfter && (b == nil || !ident.OurFault(b.Facts)) {
 			delete(s.Joined, name)
 			delete(s.Boxes, name)
 		}

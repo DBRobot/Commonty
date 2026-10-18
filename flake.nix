@@ -778,10 +778,12 @@
                 );
                 inherit (ctl) validators;
                 # what the identity judge reads (state/ident): the release
-                # key and the member list, as released
+                # key, the member list, and the admin who alone extends a
+                # member's grace (fleet/policy.json owner), as released
                 identity = {
                   release = nixpkgs.lib.removeSuffix "\n" (builtins.readFile ./fleet/release.pub);
                   members = builtins.fromJSON (builtins.readFile ./fleet/members.json);
+                  admin = (builtins.fromJSON (builtins.readFile ./fleet/policy.json)).owner;
                 };
                 # what members' remote computers may take, and their ports'
                 # pool (state/computers): fleet/policy.json computers

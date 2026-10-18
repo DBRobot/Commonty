@@ -103,3 +103,22 @@ func TestOnlyJoinedTaggedNodesGiveAddresses(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+func TestWhatABoxQualifiesByComesFromItsOwnReport(t *testing.T) {
+	d := t.TempDir()
+	r, m := filepath.Join(d, "hardware.json"), filepath.Join(d, "model")
+	_ = os.WriteFile(r, []byte(`{"firmware":{"uefi":true,"tpm":{"version":2}},"gpus":[{"driver":"i915"},{"driver":"nvidia"}]}`), 0o644)
+	f := reportFacts(r, m)
+	if f["uefi"] != 1 || f["tpm_major"] != 2 || f["gpus"] != 1 || f["raspberry_pi"] != 0 {
+		t.Fatalf("facts: %v", f)
+	}
+	_ = os.WriteFile(r, []byte(`{"firmware":{"uefi":false,"tpm":null},"gpus":[{"driver":"v3d"}]}`), 0o644)
+	_ = os.WriteFile(m, []byte("Raspberry Pi 5 Model B Rev 1.0\x00"), 0o644)
+	f = reportFacts(r, m)
+	if f["uefi"] != 0 || f["tpm_major"] != 0 || f["gpus"] != 0 || f["raspberry_pi"] != 1 {
+		t.Fatalf("facts: %v", f)
+	}
+	if f := reportFacts(filepath.Join(d, "none"), filepath.Join(d, "none")); len(f) != 0 {
+		t.Fatalf("facts: %v", f)
+	}
+}

@@ -22,8 +22,10 @@ func TestStanding(t *testing.T) {
 	s := New()
 	s.Entries[ada.Entry.Name] = &Held{Signed: ada, Item: ada.Raw}
 	s.Entries[bea.Entry.Name] = &Held{Signed: bea, Item: bea.Raw}
-	s.Enlisted["j01"] = &Enlisted{Member: ada.Entry.Name, ID: adaID, Box: "j01", Expires: at + day}
-	s.Enlisted["j02"] = &Enlisted{Member: bea.Entry.Name, ID: beaID, Box: "j02", Expires: at + day}
+	s.Enlisted["j01"] = &Enlisted{Member: ada.Entry.Name, ID: adaID, Box: "j01"}
+	s.Enlisted["j02"] = &Enlisted{Member: bea.Entry.Name, ID: beaID, Box: "j02"}
+	// both boxes qualify, and were last heard at `at`
+	boxes := func(string) (BoxInfo, bool) { return BoxInfo{LastSeen: at * 1000, Facts: computeBox}, true }
 	cases := []struct {
 		what string
 		e    *Entry
@@ -34,7 +36,7 @@ func TestStanding(t *testing.T) {
 		{"on the list", &ada.Entry, func(c *Config) { c.Members.Members = []string{adaID} }, at, "member"},
 		{"let in by an invite", &bea.Entry, func(c *Config) {}, at, "member"},
 		{"neither, but a box of theirs", &ada.Entry, func(c *Config) {}, at, "member"},
-		{"no box counts", &ada.Entry, func(c *Config) {}, at + 2*day, "none"},
+		{"its box gone a month", &ada.Entry, func(c *Config) {}, at + Grace + day, "none"},
 		{"revoked, with an invite and a box", &bea.Entry, func(c *Config) { c.Members.Revoked = []string{beaID} }, at, "revoked"},
 		{"removed and revoked, its invite older", &bea.Entry, func(c *Config) {
 			c.Members.Revoked = []string{beaID}
@@ -66,7 +68,7 @@ func TestStanding(t *testing.T) {
 	for _, c := range cases {
 		cfg := &Config{Release: v.Release}
 		c.cfg(cfg)
-		if got, _, _ := s.Status(cfg, c.e, c.at, nil); got != c.want {
+		if got, _, _ := s.Status(cfg, c.e, c.at, boxes); got != c.want {
 			t.Errorf("%s: %s, want %s", c.what, got, c.want)
 		}
 	}
@@ -75,7 +77,7 @@ func TestStanding(t *testing.T) {
 	cfg := &Config{Release: v.Release}
 	cfg.Members.Members = []string{adaID}
 	cfg.Members.Revoked = []string{adaID}
-	if got, _, _ := s.Status(cfg, &ada.Entry, at, nil); got != "left" {
+	if got, _, _ := s.Status(cfg, &ada.Entry, at, boxes); got != "left" {
 		t.Errorf("left: %s", got)
 	}
 }

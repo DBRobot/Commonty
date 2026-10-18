@@ -232,6 +232,9 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 		if !json.Valid(r.Body) {
 			return errors.New("a directory item is json")
 		}
+		if joinedRecord(r.Body) {
+			return errors.New("only a join says a box joined")
+		}
 		if b := s.Boxes[r.Box]; b != nil && now-b.DirWindow < 60_000 && b.DirCount >= DirPerMinute {
 			return fmt.Errorf("%s has sent %d directory items this minute", r.Box, b.DirCount)
 		}

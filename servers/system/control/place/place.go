@@ -126,8 +126,10 @@ const (
 func ComputerService(id string) string { return "computer-" + id }
 
 // Decide plans the fleet. goneAfter is how long (ms of agreed time) a box
-// may go unheard and still count as alive.
-func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
+// may go unheard and still count as alive. members: the joined boxes a
+// member has enlisted and that qualify (the agreed identity state's), which
+// keep copies as a box of the release does.
+func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool) Plan {
 	p := Plan{Boxes: map[string][]Decision{}, Unplaced: map[string]string{}, Copies: map[string][]string{}, DoesNotFit: map[string][]string{}}
 	live := []string{}
 	for name := range in.Boxes {
@@ -653,10 +655,10 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 			}
 		}
 		// a holder able to take the service over first, then a box of
-		// the release, then one that joined: a box's own word that it
-		// keeps a copy never pushes out a box the release names
+		// the release or a member's, then a stranger: a stranger's word
+		// that it keeps a copy never pushes out either
 		takesOver := func(name string) bool { _, ok := in.Boxes[name].Can[bk.Service]; return ok }
-		listed := func(name string) bool { _, ok := in.Boxes[name]; return ok }
+		listed := func(name string) bool { _, ok := in.Boxes[name]; return ok || members[name] }
 		sort.SliceStable(have, func(i, j int) bool {
 			if a, b := takesOver(have[i]), takesOver(have[j]); a != b {
 				return a

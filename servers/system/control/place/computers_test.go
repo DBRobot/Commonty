@@ -69,7 +69,7 @@ func TestAComputerIsPlacedOnlyWhereItFits(t *testing.T) {
 		computer(idB, "ann", 4*1024, 8, 50, "any"),
 		computer(idC, "ann", 4*1024, 2, 500, "any"),
 	}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	for _, id := range []string{idA, idB, idC} {
 		if h := holder(p, id); h != "node1" {
 			t.Fatalf("%s on %q, want node1: %+v", id, h, p)
@@ -77,7 +77,7 @@ func TestAComputerIsPlacedOnlyWhereItFits(t *testing.T) {
 	}
 	// past every box's room: nowhere, and said why
 	in.Computers = []*computers.Listed{computer(idA, "ann", 64*1024, 2, 50, "any")}
-	p = Decide(in, s, 90_000)
+	p = Decide(in, s, 90_000, nil)
 	if holder(p, idA) != "" || p.Unplaced[ComputerService(idA)] == "" {
 		t.Fatalf("placed past every box's room: %+v", p)
 	}
@@ -88,7 +88,7 @@ func TestNoKVMOrNotX86NoComputer(t *testing.T) {
 	s.Boxes["node1"].Facts["kvm"] = 0
 	s.Boxes["node2"].Facts["computer_max_mem_bytes"] = 0 // what a box with no KVM writes
 	in.Computers = []*computers.Listed{computer(idA, "ann", 1024, 1, 10, "any")}
-	if p := Decide(in, s, 90_000); holder(p, idA) != "" {
+	if p := Decide(in, s, 90_000, nil); holder(p, idA) != "" {
 		t.Fatalf("placed on %s", holder(p, idA))
 	}
 }
@@ -97,16 +97,16 @@ func TestConsentOwnStaysOnTheOwnersBoxes(t *testing.T) {
 	in, s := compute()
 	// node1 suits it better; ann's own box is node2
 	in.Computers = []*computers.Listed{computer(idA, "ann", 2048, 1, 10, "own")}
-	if h := holder(Decide(in, s, 90_000), idA); h != "node2" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "node2" {
 		t.Fatalf("own: on %q, want node2", h)
 	}
 	in.Computers = []*computers.Listed{computer(idA, "ann", 2048, 1, 10, "any")}
-	if h := holder(Decide(in, s, 90_000), idA); h != "node1" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "node1" {
 		t.Fatalf("any: on %q, want the roomier node1", h)
 	}
 	// own, and the owner's only box has no room: it waits
 	in.Computers = []*computers.Listed{computer(idA, "ann", 16*1024, 1, 10, "own", "node2")}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if holder(p, idA) != "" || !strings.Contains(p.Unplaced[ComputerService(idA)], "owner") {
 		t.Fatalf("own with no room: %+v", p)
 	}
@@ -116,7 +116,7 @@ func TestAComputerStaysWhileItsHolderHeartbeats(t *testing.T) {
 	in, s := compute()
 	in.Computers = []*computers.Listed{computer(idA, "ann", 2048, 1, 10, "any")}
 	s.Boxes["node2"].Facts["runs/"+ComputerService(idA)] = 1
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if h := holder(p, idA); h != "node2" {
 		t.Fatalf("moved off a live holder to %q", h)
 	}
@@ -133,13 +133,13 @@ func TestAComputerMovesWhenItsHolderDiesToABoxThatFits(t *testing.T) {
 	// node2 kept an older copy of its disk: carrying less, it wins over the
 	// roomier node1
 	s.Boxes["node2"].Facts["computer/"+idA+"/used_bytes"] = 39 * gib
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if h := holder(p, idA); h != "node2" {
 		t.Fatalf("on %q, want node2, which has most of it: %+v", h, p)
 	}
 	// with none kept anywhere, the roomier box
 	delete(s.Boxes["node2"].Facts, "computer/"+idA+"/used_bytes")
-	if h := holder(Decide(in, s, 90_000), idA); h != "node1" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "node1" {
 		t.Fatalf("on %q, want node1", h)
 	}
 }
@@ -149,7 +149,7 @@ func TestAComputerThatNoLongerFitsStaysAndIsFlagged(t *testing.T) {
 	in.Computers = []*computers.Listed{computer(idA, "ann", 6*1024, 2, 50, "any")}
 	s.Boxes["node2"].Facts["runs/"+ComputerService(idA)] = 1
 	s.Boxes["node2"].Facts["computer_max_mem_bytes"] = 4 * gib
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if holder(p, idA) != "node2" {
 		t.Fatalf("moved: %+v", p)
 	}
@@ -163,7 +163,7 @@ func TestADrainingBoxGetsNoComputerAndKeepsItsOwn(t *testing.T) {
 	s.Boxes["node1"].Facts["draining"] = 1
 	in.Computers = []*computers.Listed{computer(idA, "ann", 2048, 1, 10, "any"), computer(idB, "ann", 2048, 1, 10, "any")}
 	s.Boxes["node1"].Facts["runs/"+ComputerService(idB)] = 1
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if h := holder(p, idA); h != "node2" {
 		t.Fatalf("new one on %q, want node2", h)
 	}
@@ -178,7 +178,7 @@ func TestAComputerThatIsOffIsNotPlaced(t *testing.T) {
 	c.Up = false
 	in.Computers = []*computers.Listed{c}
 	s.Boxes["node1"].Facts["runs/"+ComputerService(idA)] = 1
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if holder(p, idA) != "" || p.Unplaced[ComputerService(idA)] != "" {
 		t.Fatalf("an off computer was placed: %+v", p)
 	}
@@ -194,17 +194,17 @@ func TestABoxsRoomLessWhatIsPlacedThere(t *testing.T) {
 	small := computer(idB, "ann", 2*1024, 1, 40, "own", "node2")
 	big := computer(idC, "ann", 4*1024, 1, 10, "own", "node2")
 	in.Computers = []*computers.Listed{big, running, small}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if holder(p, idA) != "node2" || holder(p, idB) != "node2" || holder(p, idC) != "" {
 		t.Fatalf("a=%q b=%q c=%q", holder(p, idA), holder(p, idB), holder(p, idC))
 	}
 	// disk: 100G free, less the 10G the running one may still grow into
 	small.Disk = 91
-	if p := Decide(in, s, 90_000); holder(p, idB) != "" {
+	if p := Decide(in, s, 90_000, nil); holder(p, idB) != "" {
 		t.Fatalf("placed past the disk left")
 	}
 	small.Disk = 90
-	if p := Decide(in, s, 90_000); holder(p, idB) != "node2" {
+	if p := Decide(in, s, 90_000, nil); holder(p, idB) != "node2" {
 		t.Fatalf("not placed in the disk left")
 	}
 }
@@ -212,9 +212,9 @@ func TestABoxsRoomLessWhatIsPlacedThere(t *testing.T) {
 func TestComputersPlanTheSameEveryTime(t *testing.T) {
 	in, s := compute()
 	in.Computers = []*computers.Listed{computer(idC, "ann", 2048, 1, 10, "any"), computer(idA, "bob", 2048, 1, 10, "any"), computer(idB, "cy", 2048, 1, 10, "any")}
-	a := Decide(in, s, 90_000)
+	a := Decide(in, s, 90_000, nil)
 	in.Computers[0], in.Computers[2] = in.Computers[2], in.Computers[0]
-	b := Decide(in, s, 90_000)
+	b := Decide(in, s, 90_000, nil)
 	for _, id := range []string{idA, idB, idC} {
 		if holder(a, id) != holder(b, id) {
 			t.Fatalf("%s: %q then %q", id, holder(a, id), holder(b, id))
@@ -228,7 +228,7 @@ func TestAStrangerGetsNoComputer(t *testing.T) {
 	in, s := compute()
 	s.Boxes["stranger"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{"kvm": 1, "x86_64": 1, "can_live": 1, "can/" + ComputersService: 9, "computer_max_mem_bytes": 1 << 50, "computer_max_threads": 1024, "computer_max_disk_bytes": 1 << 60}}
 	in.Computers = []*computers.Listed{computer(idA, "ann", 64*1024, 2, 50, "any")}
-	if h := holder(Decide(in, s, 90_000), idA); h != "" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "" {
 		t.Fatalf("placed on %q", h)
 	}
 }
@@ -240,14 +240,14 @@ func TestOnlyABoxTheReleaseLetsHoldComputersGetsOne(t *testing.T) {
 	b := in.Boxes["node1"]
 	b.Can = map[string]float64{}
 	in.Boxes["node1"] = b
-	if h := holder(Decide(in, s, 90_000), idA); h != "node2" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "node2" {
 		t.Fatalf("on %q, want node2", h)
 	}
 	// nor where its owner's box.json or the policy bar them
 	b = in.Boxes["node2"]
 	b.Barred = []string{ComputersService}
 	in.Boxes["node2"] = b
-	if h := holder(Decide(in, s, 90_000), idA); h != "" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "" {
 		t.Fatalf("on %q, want nowhere", h)
 	}
 }
@@ -261,7 +261,7 @@ func TestABoxsOwnWordNeverMakesItAHostForComputers(t *testing.T) {
 	s.Boxes["node1"].Facts["can/"+ComputersService] = 5
 	delete(in.Boxes, "node2")
 	in.Computers = []*computers.Listed{computer(idA, "ann", 2048, 1, 10, "any")}
-	if h := holder(Decide(in, s, 90_000), idA); h != "" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "" {
 		t.Fatalf("on %q, which only its own heartbeat says can", h)
 	}
 }
@@ -270,11 +270,11 @@ func TestOwnGoesOnlyOnABoxTheReleaseSaysIsTheOwners(t *testing.T) {
 	in, s := compute()
 	// ann named node1 hers by her word alone; the release says it is david's
 	in.Computers = []*computers.Listed{computer(idA, "ann", 2048, 1, 10, "own", "node1")}
-	if h := holder(Decide(in, s, 90_000), idA); h != "node2" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "node2" {
 		t.Fatalf("on %q, want ann's node2 by the release", h)
 	}
 	in.Computers = []*computers.Listed{computer(idA, "david", 2048, 1, 10, "own")}
-	if h := holder(Decide(in, s, 90_000), idA); h != "node1" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "node1" {
 		t.Fatalf("on %q, want david's node1", h)
 	}
 }
@@ -289,7 +289,7 @@ func TestAStrangerSayingItRunsAComputerDoesNotKeepIt(t *testing.T) {
 	b.Barred = []string{ComputersService}
 	in.Boxes["node2"] = b
 	in.Boxes["stranger"] = Box{Site: "z"} // listed, but not for computers
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if h := holder(p, idA); h != "node1" {
 		t.Fatalf("on %q, want node1: %+v", h, p)
 	}
@@ -331,7 +331,7 @@ func TestABoxsRoomIsNeverPastItsHardware(t *testing.T) {
 		}
 		in.Computers = []*computers.Listed{c}
 		lie(&in, s)
-		if h := holder(Decide(in, s, 90_000), idA); h != "" {
+		if h := holder(Decide(in, s, 90_000, nil), idA); h != "" {
 			t.Fatalf("%s: placed on %q past its hardware", name, h)
 		}
 	}
@@ -346,12 +346,12 @@ func TestOnlyTheHolderAndTheCandidateSayWhatAMoveCarries(t *testing.T) {
 	s.Boxes["node2"].Facts["computer/"+idA+"/used_bytes"] = 39 * gib
 	// pi, which cannot take it, says it keeps 40G of it
 	s.Boxes["pi"].Facts["computer/"+idA+"/used_bytes"] = 40 * gib
-	if h := holder(Decide(in, s, 90_000), idA); h != "node1" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "node1" {
 		t.Fatalf("on %q: a third box's word steered it", h)
 	}
 	// nor a box not of the release that says it ran it
 	s.Boxes["stranger"] = &state.BoxState{LastSeen: 0, Facts: map[string]float64{"runs/" + ComputerService(idA): 1, "computer/" + idA + "/used_bytes": 40 * gib}}
-	if h := holder(Decide(in, s, 90_000), idA); h != "node1" {
+	if h := holder(Decide(in, s, 90_000, nil), idA); h != "node1" {
 		t.Fatalf("on %q: a stranger's word steered it", h)
 	}
 }

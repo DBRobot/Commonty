@@ -98,9 +98,28 @@ func (l *log) must(what, got string, ok bool) {
 
 func newLog(t *testing.T) *log { return &log{t: t, s: New(), at: 1_791_700_000} }
 
-func enlistBody(member, box string, at, expires uint64) []byte {
-	return []byte(fmt.Sprintf(`{"member":%q,"box":%q,"key":"k","ticket":"00","expires":%d,"at":%d}`, member, box, expires, at))
+func enlistBody(member, box, ticket string, at uint64) []byte {
+	return []byte(fmt.Sprintf(`{"member":%q,"box":%q,"ticket":%q,"at":%d}`, member, box, ticket, at))
 }
+
+// a joined box: its key (a stand-in SPKI) and the name it gives
+func joinedBox(n byte) (name, spki string) {
+	spki = b64.EncodeToString([]byte{0x30, n, n, n})
+	return BoxName(spki), spki
+}
+
+// join: the state machine's record of box n joining with p's ticket id,
+// good until exp
+func (l *log) join(n byte, p *person, id string, exp uint64) string {
+	name, spki := joinedBox(n)
+	l.at++
+	rec := jsonBody(l.t, map[string]map[string]string{"joined": {"key": spki, "ticket": joinTicket(p.name, id, exp).token(p.device)}})
+	l.s.Judge(&Config{Release: pub(key(99))}, voters, name, rec, l.at)
+	return name
+}
+
+// tid: a ticket id of its own for each n
+func tid(n byte) string { return fmt.Sprintf("%032x", n) }
 
 func unenlistBody(member, box string, at uint64) []byte {
 	return []byte(fmt.Sprintf(`{"member":%q,"box":%q,"at":%d}`, member, box, at))
@@ -123,9 +142,10 @@ func TestOnlyTheRightfulSignerIsHeard(t *testing.T) {
 	// the old root is no one now: its leave, its enlist
 	leave := jsonBody(t, Leave{Name: "ann", Root: pub(was.root), At: l.at})
 	l.must("a leave by the old root", l.put(seal(t, "leave", leave, was.root, nil)), false)
-	l.must("an enlist by the old root", l.put(seal(t, "enlist", enlistBody(MemberID(pub(was.root)), "j1", l.at, l.at+3600), was.root, nil)), false)
-	l.must("an enlist by the old root, naming the new", l.put(seal(t, "enlist", enlistBody(MemberID(pub(ann.root)), "j1", l.at, l.at+3600), was.root, nil)), false)
-	l.must("an enlist by her root", l.put(seal(t, "enlist", enlistBody(MemberID(pub(ann.root)), "j1", l.at, l.at+3600), ann.root, nil)), true)
+	j1 := l.join(1, ann, tid(1), l.at+3600)
+	l.must("an enlist by the old root", l.put(seal(t, "enlist", enlistBody(MemberID(pub(was.root)), j1, tid(1), l.at), was.root, nil)), false)
+	l.must("an enlist by the old root, naming the new", l.put(seal(t, "enlist", enlistBody(MemberID(pub(ann.root)), j1, tid(1), l.at), was.root, nil)), false)
+	l.must("an enlist by her root", l.put(seal(t, "enlist", enlistBody(MemberID(pub(ann.root)), j1, tid(1), l.at), ann.root, nil)), true)
 	// someone else's leave in her name
 	leave = jsonBody(t, Leave{Name: "ann", Root: pub(eve.root), At: l.at})
 	l.must("a leave by another", l.put(seal(t, "leave", leave, eve.root, nil)), false)
@@ -157,27 +177,35 @@ func TestNothingSaidOnceCountsTwice(t *testing.T) {
 		t.Fatal("the old leave, sent again, took her out")
 	}
 	// a box: enlisted, unenlisted, and each sent again
-	en := seal(t, "enlist", enlistBody(id, "j1", l.at, l.at+3600), ann.root, nil)
+	j1 := l.join(1, ann, tid(1), l.at+3600)
+	en := seal(t, "enlist", enlistBody(id, j1, tid(1), l.at), ann.root, nil)
 	l.must("enlist", l.put(en), true)
-	un := seal(t, "unenlist", unenlistBody(id, "j1", l.at), ann.root, nil)
+	un := seal(t, "unenlist", unenlistBody(id, j1, l.at), ann.root, nil)
 	l.must("unenlist", l.put(un), true)
 	l.must("the old enlist again", l.put(en), false)
-	if l.s.Enlisted["j1"] != nil {
+	if l.s.Enlisted[j1] != nil {
 		t.Fatal("the old enlist, sent again, enlisted the box")
 	}
-	en2 := seal(t, "enlist", enlistBody(id, "j1", l.at, l.at+3600), ann.root, nil)
+	// its ticket is used: a fresh enlist with it is refused too
+	l.must("enlisted anew on the used ticket", l.put(seal(t, "enlist", enlistBody(id, j1, tid(1), l.at), ann.root, nil)), false)
+	// the box joins again (a new install) with a new ticket
+	l.join(1, ann, tid(2), l.at+3600)
+	en2 := seal(t, "enlist", enlistBody(id, j1, tid(2), l.at), ann.root, nil)
 	l.must("enlisted anew", l.put(en2), true)
 	l.put(un)
-	if l.s.Enlisted["j1"] == nil {
+	if l.s.Enlisted[j1] == nil {
 		t.Fatal("the old unenlist, sent again, took the box away")
 	}
 	// the same words under another hash (a fresh signature): still old
-	un2 := seal(t, "unenlist", unenlistBody(id, "j1", l.at-5), ann.root, nil)
+	un2 := seal(t, "unenlist", unenlistBody(id, j1, l.at-5), ann.root, nil)
 	l.must("an unenlist dated before the enlist", l.put(un2), false)
-	// undated, stale, expired
-	l.must("undated", l.put(seal(t, "enlist", []byte(fmt.Sprintf(`{"member":%q,"box":"j2","expires":%d}`, id, l.at+3600)), ann.root, nil)), false)
-	l.must("a day old", l.put(seal(t, "enlist", enlistBody(id, "j2", l.at-2*leaveBehind, l.at+3600), ann.root, nil)), false)
-	l.must("expired", l.put(seal(t, "enlist", enlistBody(id, "j2", l.at, l.at), ann.root, nil)), false)
+	// undated, stale, an expired ticket
+	j2 := l.join(2, ann, tid(3), l.at+3600)
+	l.must("undated", l.put(seal(t, "enlist", []byte(fmt.Sprintf(`{"member":%q,"box":%q,"ticket":%q}`, id, j2, tid(3))), ann.root, nil)), false)
+	l.must("a day old", l.put(seal(t, "enlist", enlistBody(id, j2, tid(3), l.at-2*leaveBehind), ann.root, nil)), false)
+	j3 := l.join(3, ann, tid(4), l.at+1)
+	l.at += 5
+	l.must("an expired ticket", l.put(seal(t, "enlist", enlistBody(id, j3, tid(4), l.at), ann.root, nil)), false)
 }
 
 func TestWhatHangsOffARootFollowsIt(t *testing.T) {
@@ -187,9 +215,10 @@ func TestWhatHangsOffARootFollowsIt(t *testing.T) {
 	bob := &person{name: "bob", root: key(5), recovery: key(6), device: key(7)}
 	l.claim(ann.entry(t, 1, ann.root, nil))
 	l.claim(bob.entry(t, 1, bob.root, nil))
-	l.must("ann's box", l.put(seal(t, "enlist", enlistBody(MemberID(pub(ann.root)), "j1", l.at, l.at+7200), ann.root, nil)), true)
+	j1 := l.join(1, ann, tid(1), l.at+7200)
+	l.must("ann's box", l.put(seal(t, "enlist", enlistBody(MemberID(pub(ann.root)), j1, tid(1), l.at), ann.root, nil)), true)
 	// bob cannot take it while it is hers
-	l.must("bob takes ann's box", l.put(seal(t, "enlist", enlistBody(MemberID(pub(bob.root)), "j1", l.at, l.at+7200), bob.root, nil)), false)
+	l.must("bob takes ann's box", l.put(seal(t, "enlist", enlistBody(MemberID(pub(bob.root)), j1, tid(1), l.at), bob.root, nil)), false)
 	// a recovery: the box is still hers, the person is the same
 	was := *ann
 	ann.old, ann.root = []string{pub(was.root)}, key(4)
@@ -197,7 +226,8 @@ func TestWhatHangsOffARootFollowsIt(t *testing.T) {
 	if got := l.s.boxesOf("ann", l.at); len(got) != 1 {
 		t.Fatalf("after a recovery: %v", got)
 	}
-	// leaving: the box is no one's at once, and bob may enlist it
+	// leaving: the box is no one's at once, and bob may enlist it, set up
+	// again with his ticket
 	l.must("ann leaves", l.put(seal(t, "leave", jsonBody(t, Leave{Name: "ann", Root: pub(ann.root), At: l.at}), ann.root, nil)), true)
 	if got := l.s.boxesOf("ann", l.at); len(got) != 0 {
 		t.Fatalf("after leaving: %v", got)
@@ -205,7 +235,8 @@ func TestWhatHangsOffARootFollowsIt(t *testing.T) {
 	if st, _, _ := l.s.Status(cfg, &l.s.Entries["ann"].Signed.Entry, l.at, nil); st != "left" {
 		t.Fatal(st)
 	}
-	l.must("bob enlists it now", l.put(seal(t, "enlist", enlistBody(MemberID(pub(bob.root)), "j1", l.at, l.at+7200), bob.root, nil)), true)
+	l.join(1, bob, tid(2), l.at+7200)
+	l.must("bob enlists it now", l.put(seal(t, "enlist", enlistBody(MemberID(pub(bob.root)), j1, tid(2), l.at), bob.root, nil)), true)
 	if got := l.s.boxesOf("bob", l.at); len(got) != 1 {
 		t.Fatalf("bob's: %v", got)
 	}
@@ -218,7 +249,8 @@ func TestALapsedGuestNameComesClean(t *testing.T) {
 	g1 := &person{name: "guest-x", root: key(1), recovery: key(2), device: key(3)}
 	g2 := &person{name: "guest-x", root: key(5), recovery: key(6), device: key(7)}
 	l.must("first guest", l.claim(g1.entry(t, l.at, g1.root, nil)), true)
-	l.must("their box", l.put(seal(t, "enlist", enlistBody(MemberID(pub(g1.root)), "j1", l.at, l.at+7200), g1.root, nil)), true)
+	j1 := l.join(1, g1, tid(1), l.at+7200)
+	l.must("their box", l.put(seal(t, "enlist", enlistBody(MemberID(pub(g1.root)), j1, tid(1), l.at), g1.root, nil)), true)
 	l.at += guestTTL + 60
 	l.must("the name again, by another", l.claim(g2.entry(t, l.at, g2.root, nil)), true)
 	if got := l.s.boxesOf("guest-x", l.at); len(got) != 0 {

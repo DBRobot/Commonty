@@ -27,14 +27,15 @@ func NewServer(cfg *Config, voters []string) *Server {
 
 // Answer: the log is n items, item(i) each; height and time (ms) the agreed
 // state's. name, if not empty, asks for that member alone; since, if not 0,
-// is the `changed` the reader last saw.
-func (sv *Server) Answer(n int, item func(int) Item, height uint64, timeMs int64, name string, since uint64) (int, []byte) {
+// is the `changed` the reader last saw. boxes is the agreed state's word on
+// each box, as of the same height.
+func (sv *Server) Answer(n int, item func(int) Item, height uint64, timeMs int64, boxes Boxes, name string, since uint64) (int, []byte) {
 	// one lock over judging and reading: CatchN moves the replayer's state,
 	// and a second request judging while this one reads it was a data race
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
 	s := sv.r.CatchN(n, item)
-	v := s.View(sv.cfg, height, timeMs, nil)
+	v := s.View(sv.cfg, height, timeMs, boxes)
 	// what changed is everything but where and when it was asked
 	v.Height, v.Time = 0, 0
 	b, _ := json.Marshal(v)
@@ -55,4 +56,11 @@ func (sv *Server) Answer(n int, item func(int) Item, height uint64, timeMs int64
 	}
 	b, _ = json.Marshal(v)
 	return http.StatusOK, b
+}
+
+// View: the view itself, for a reader on the same box (placement)
+func (sv *Server) View(n int, item func(int) Item, height uint64, timeMs int64, boxes Boxes) *View {
+	sv.mu.Lock()
+	defer sv.mu.Unlock()
+	return sv.r.CatchN(n, item).View(sv.cfg, height, timeMs, boxes)
 }

@@ -49,7 +49,7 @@ func runs(p Plan, box, svc string) bool {
 
 func TestSpreadGoesOnEveryLiveBoxThatCan(t *testing.T) {
 	in, s := fleet()
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	for _, b := range []string{"big", "small", "nas"} {
 		if !runs(p, b, "garage") {
 			t.Fatalf("garage not on %s: %+v", b, p)
@@ -62,7 +62,7 @@ func TestSpreadGoesOnEveryLiveBoxThatCan(t *testing.T) {
 
 func TestOnePerHouse(t *testing.T) {
 	in, s := fleet()
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	n := 0
 	for _, b := range []string{"big", "small"} {
 		if runs(p, b, "pihole") {
@@ -76,7 +76,7 @@ func TestOnePerHouse(t *testing.T) {
 
 func TestWhatMustShareABoxComesWithIt(t *testing.T) {
 	in, s := fleet()
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "big", "photos") || !runs(p, "big", "postgres") {
 		t.Fatalf("photos and its postgres together on the box that can: %+v", p.Boxes["big"])
 	}
@@ -98,7 +98,7 @@ func TestACostlyMoveIsDamped(t *testing.T) {
 	// games run on the nas now; big suits them more, but not by enough to
 	// carry 100G
 	s.Boxes["nas"].Roles = []string{"games"}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "nas", "games") || runs(p, "big", "games") {
 		t.Fatalf("games should stay on the nas: %+v", p)
 	}
@@ -116,7 +116,7 @@ func TestACostlyMoveIsDamped(t *testing.T) {
 	sv.StorageGiB = 0
 	in.Services["games"] = sv
 	in.Boxes["big"].Can["games"] = 5
-	p = Decide(in, s, 90_000)
+	p = Decide(in, s, 90_000, nil)
 	if !runs(p, "big", "games") {
 		t.Fatalf("games should move to big when nothing is carried: %+v", p)
 	}
@@ -125,7 +125,7 @@ func TestACostlyMoveIsDamped(t *testing.T) {
 func TestNoRoomNoPlace(t *testing.T) {
 	in, s := fleet()
 	in.Boxes["small"].Can["games"] = 9 // small suits them best, but holds 8G * 0.85
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if runs(p, "small", "games") {
 		t.Fatalf("games on a box without the room: %+v", p.Boxes["small"])
 	}
@@ -133,7 +133,7 @@ func TestNoRoomNoPlace(t *testing.T) {
 
 func TestTheSameStateTheSamePlan(t *testing.T) {
 	in, s := fleet()
-	a, b := Decide(in, s, 90_000), Decide(in, s, 90_000)
+	a, b := Decide(in, s, 90_000, nil), Decide(in, s, 90_000, nil)
 	for box := range a.Boxes {
 		if len(a.Boxes[box]) != len(b.Boxes[box]) {
 			t.Fatalf("plans differ on %s", box)
@@ -150,7 +150,7 @@ func TestEveryBoxCountsAgainstRoom(t *testing.T) {
 	in, s := fleet()
 	in.Services["report"] = Service{Enabled: true, EveryBox: true, MemoryGiB: 6}
 	in.Boxes["nas"].Can["games"] = 9
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	for _, b := range []string{"big", "small", "nas"} {
 		if !runs(p, b, "report") {
 			t.Fatalf("report not on %s", b)
@@ -167,7 +167,7 @@ func TestAHouseKeepsItsDNSWhereItIs(t *testing.T) {
 	in.Boxes["small"].Can["pihole"] = 1.1 // a little better than big, not by the margin
 	s.Boxes["big"].Roles = []string{"dns"}
 	in.Roles["dns"] = []string{"pihole"}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "big", "pihole") || runs(p, "small", "pihole") {
 		t.Fatalf("pihole should stay on big: big %+v small %+v", p.Boxes["big"], p.Boxes["small"])
 	}
@@ -178,7 +178,7 @@ func TestAHouseMovesItsDNSWhenFarBetter(t *testing.T) {
 	in.Boxes["small"].Can["pihole"] = 2
 	s.Boxes["big"].Roles = []string{"dns"}
 	in.Roles["dns"] = []string{"pihole"}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if runs(p, "big", "pihole") || !runs(p, "small", "pihole") {
 		t.Fatalf("pihole should move to small: big %+v small %+v", p.Boxes["big"], p.Boxes["small"])
 	}
@@ -189,7 +189,7 @@ func TestWhatABoxMeasuredOverridesTheEstimate(t *testing.T) {
 	// the estimate fits the nas; what games really hold does not
 	in.Boxes["nas"].Can["games"] = 9
 	s.Boxes["big"].Facts["svc/games/mem"] = 15 * gib
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if runs(p, "nas", "games") {
 		t.Fatalf("games on the nas, which cannot hold the 15G measured: %+v", p.Boxes["nas"])
 	}
@@ -199,7 +199,7 @@ func TestWhatABoxMeasuredOverridesTheEstimate(t *testing.T) {
 	sv := in.Services["games"]
 	sv.ReserveGiB = 15
 	in.Services["games"] = sv
-	p = Decide(in, s, 90_000)
+	p = Decide(in, s, 90_000, nil)
 	if runs(p, "nas", "games") {
 		t.Fatalf("games on the nas past what they reserve: %+v", p.Boxes["nas"])
 	}
@@ -213,7 +213,7 @@ func TestOneDatabaseItsUsersFollow(t *testing.T) {
 	// asend suits the nas far better, and is decided first by name, but it
 	// must be beside the one vault, which suits big
 	in.Services["asend"] = Service{Enabled: true, MemoryGiB: 0.1, Local: []string{"vault"}}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "big", "vault") || !runs(p, "big", "asend") || runs(p, "nas", "vault") || runs(p, "nas", "asend") {
 		t.Fatalf("vault and send together on big: big %+v nas %+v", p.Boxes["big"], p.Boxes["nas"])
 	}
@@ -222,7 +222,7 @@ func TestOneDatabaseItsUsersFollow(t *testing.T) {
 	sv.Local = []string{"postgres"}
 	in.Services["vault"] = sv
 	in.Boxes["nas"].Can["vault"] = 9
-	p = Decide(in, s, 90_000)
+	p = Decide(in, s, 90_000, nil)
 	if runs(p, "nas", "postgres") || runs(p, "nas", "vault") {
 		t.Fatalf("a second postgres: %+v", p.Boxes["nas"])
 	}
@@ -234,11 +234,11 @@ func TestAPlacedServiceGoesOnlyWhereItIsCarried(t *testing.T) {
 	sv.Placed = true
 	in.Services["photos"] = sv
 	// big suits it, but has not got it
-	if p := Decide(in, s, 90_000); runs(p, "big", "photos") {
+	if p := Decide(in, s, 90_000, nil); runs(p, "big", "photos") {
 		t.Fatalf("photos placed where it is not carried: %+v", p)
 	}
 	s.Boxes["big"].Facts["carries/photos"] = 1
-	if p := Decide(in, s, 90_000); !runs(p, "big", "photos") {
+	if p := Decide(in, s, 90_000, nil); !runs(p, "big", "photos") {
 		t.Fatalf("photos not placed where it is carried: %+v", p)
 	}
 }
@@ -254,7 +254,7 @@ func TestAPlacedServiceRunsWhereItsBoxSaysItDoes(t *testing.T) {
 	// small already runs it: the damping keeps it there over a small gain
 	in.Damping = Damping{Base: 1}
 	s.Boxes["small"].Facts["runs/web"] = 1
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "small", "web") || runs(p, "nas", "web") {
 		t.Fatalf("web moved off the box running it: %+v", p)
 	}
@@ -262,7 +262,7 @@ func TestAPlacedServiceRunsWhereItsBoxSaysItDoes(t *testing.T) {
 	s.Boxes["small"].Facts["runs/web"] = 0
 	in.Roles["web"] = []string{"web"}
 	s.Boxes["small"].Roles = []string{"web"}
-	if p := Decide(in, s, 90_000); !runs(p, "nas", "web") {
+	if p := Decide(in, s, 90_000, nil); !runs(p, "nas", "web") {
 		t.Fatalf("web stayed by a role: %+v", p)
 	}
 }
@@ -287,7 +287,7 @@ func stores() (Inputs, *state.State) {
 
 func TestABucketIsKeptWhereItIsWrittenAndWhereItFits(t *testing.T) {
 	in, s := stores()
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if got := strings.Join(p.Copies["ente"], ","); got != "big,nas" {
 		t.Fatalf("copies %q, unplaced %v", got, p.Unplaced)
 	}
@@ -297,7 +297,7 @@ func TestACopyStaysWhereItIs(t *testing.T) {
 	in, s := stores()
 	s.Boxes["small"].Facts["store_free_bytes"] = 60 * gib
 	s.Boxes["small"].Facts["store/ente/bytes"] = 40 * gib
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if got := strings.Join(p.Copies["ente"], ","); got != "big,small" {
 		t.Fatalf("a copy moved to the roomier box: %q", got)
 	}
@@ -307,7 +307,7 @@ func TestNoStoreWithRoomNoCopy(t *testing.T) {
 	in, s := stores()
 	s.Boxes["nas"].Facts["store_free_bytes"] = 80 * gib   // a tenth kept back: 30 to give
 	s.Boxes["small"].Facts["store_free_bytes"] = 45 * gib // 35 to give
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if got := strings.Join(p.Copies["ente"], ","); got != "big" || p.Unplaced["copies/ente"] == "" {
 		t.Fatalf("copied where it does not fit: %q %v", got, p.Unplaced)
 	}
@@ -323,7 +323,7 @@ func TestAServiceGoesOnlyWhereItsBucketsFit(t *testing.T) {
 	s.Boxes["dead"].Facts["store/ente/bytes"] = 40 * gib
 	s.Boxes["dead"].LastSeen = s.Time - 1000
 	s.Boxes["dead"].Facts["store_size_bytes"], s.Boxes["dead"].Facts["store_free_bytes"] = 100*gib, 10*gib
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if runs(p, "nas", "photos") {
 		t.Fatalf("photos placed where its 40 GiB does not fit: %+v", p.Boxes)
 	}
@@ -335,7 +335,7 @@ func TestABoxThatRefusedAServiceIsNotGivenIt(t *testing.T) {
 	in.Boxes["big"].Can["web"], in.Boxes["nas"].Can["web"] = 5, 1
 	s.Boxes["big"].Facts["carries/web"], s.Boxes["nas"].Facts["carries/web"] = 1, 1
 	s.Boxes["big"].Facts["refused/web"] = 1
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if runs(p, "big", "web") || !runs(p, "nas", "web") {
 		t.Fatalf("given to the box that refused it: %+v", p.Boxes)
 	}
@@ -346,7 +346,7 @@ func TestABoxClaimingABigBucketCannotMakeItFitNowhere(t *testing.T) {
 	// small says it keeps 100 TB of it, and has no store to keep a copy
 	delete(s.Boxes["small"].Facts, "store_size_bytes")
 	s.Boxes["small"].Facts["store/ente/bytes"] = 100_000 * gib
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if got := strings.Join(p.Copies["ente"], ","); got != "big,nas" {
 		t.Fatalf("one box's claim moved the copies: %q %v", got, p.Unplaced)
 	}
@@ -357,14 +357,14 @@ func TestACopyFoundMissingIsNotKeptThere(t *testing.T) {
 	s.Boxes["nas"].Facts["store/ente/bytes"] = 40 * gib
 	// small says nas lost it: small does not write it, so nothing changes
 	s.Boxes["small"].Facts["store/ente/lost/nas"] = 1
-	if got := strings.Join(Decide(in, s, 90_000).Copies["ente"], ","); got != "big,nas" {
+	if got := strings.Join(Decide(in, s, 90_000, nil).Copies["ente"], ","); got != "big,nas" {
 		t.Fatalf("a box that does not write it moved its copy: %q", got)
 	}
 	// big runs photos, so writes it, and found nas without it
 	in.Roles["photos"] = []string{"photos"}
 	s.Boxes["big"].Roles = []string{"photos"}
 	s.Boxes["big"].Facts["store/ente/lost/nas"] = 1
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if got := strings.Join(p.Copies["ente"], ","); got != "big,small" {
 		t.Fatalf("kept on the store that lost it: %q", got)
 	}
@@ -380,7 +380,7 @@ func TestOnlyTheLeaseHolderSaysHowBigItsBucketIs(t *testing.T) {
 	s.Boxes["nas"].Facts["store/ente/bytes"] = 100_000 * gib
 	s.Boxes["big"].Facts["runs/photos"] = 1
 	s.Leases["svc/photos"] = &state.Lease{Holder: "big", Epoch: 1, Expires: s.Time + 15_000}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if p.Unplaced["copies/ente"] != "" {
 		t.Fatalf("a claim of the box without the lease sized the bucket: %v", p.Unplaced)
 	}
@@ -410,7 +410,7 @@ func sticky() (Inputs, *state.State) {
 
 func TestAHealthyHolderIsNeverMovedByABetterBox(t *testing.T) {
 	in, s := sticky()
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "small", "web") || runs(p, "nas", "web") || !strings.Contains(why(p, "small", "web"), "stays") {
 		t.Fatalf("web moved off a live box: %+v", p)
 	}
@@ -421,7 +421,7 @@ func TestAHealthyHolderIsNeverMovedByABetterBox(t *testing.T) {
 	sv := in.Services["web"]
 	sv.Moves = ""
 	in.Services["web"] = sv
-	if p := Decide(in, s, 90_000); !runs(p, "nas", "web") {
+	if p := Decide(in, s, 90_000, nil); !runs(p, "nas", "web") {
 		t.Fatalf("web stayed without on-failure: %+v", p)
 	}
 }
@@ -429,7 +429,7 @@ func TestAHealthyHolderIsNeverMovedByABetterBox(t *testing.T) {
 func TestADeadHolderIsMoved(t *testing.T) {
 	in, s := sticky()
 	s.Boxes["small"].LastSeen = 0
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "nas", "web") {
 		t.Fatalf("web not moved off a dead box: %+v", p)
 	}
@@ -439,7 +439,7 @@ func TestAShrunkBoxKeepsItsServiceAndIsFlagged(t *testing.T) {
 	in, s := sticky()
 	s.Boxes["small"].Facts["ram_bytes"] = 1 * gib // 0.85G: garage fits, web beside it not
 	in.Boxes["small"].Can["web"] = 0              // and it scores nothing
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "small", "web") || runs(p, "nas", "web") {
 		t.Fatalf("web moved off a live box that shrank: %+v", p)
 	}
@@ -448,7 +448,7 @@ func TestAShrunkBoxKeepsItsServiceAndIsFlagged(t *testing.T) {
 	}
 	// a release that no longer lets it run there: it still stays
 	delete(in.Boxes["small"].Can, "web")
-	if p := Decide(in, s, 90_000); !runs(p, "small", "web") {
+	if p := Decide(in, s, 90_000, nil); !runs(p, "small", "web") {
 		t.Fatalf("web moved once the box could not run it: %+v", p)
 	}
 }
@@ -461,7 +461,7 @@ func TestADrainingBoxIsGivenNothingNewAndWhatMovesLeaves(t *testing.T) {
 	s.Boxes["small"].Facts["runs/web"] = 0
 	s.Boxes["nas"].Facts["runs/web"] = 1
 	s.Boxes["nas"].Facts["draining"] = 1
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if runs(p, "nas", "games") || !runs(p, "big", "games") {
 		t.Fatalf("games stayed on a draining box: %+v", p)
 	}
@@ -479,18 +479,18 @@ func TestADrainingBoxIsGivenNothingNewAndWhatMovesLeaves(t *testing.T) {
 func TestADrainingStoreGetsNoNewCopyAndGivesItsOwnUp(t *testing.T) {
 	in, s := stores()
 	s.Boxes["nas"].Facts["draining"] = 1
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if got := strings.Join(p.Copies["ente"], ","); got != "big,small" {
 		t.Fatalf("copies %q, unplaced %v", got, p.Unplaced)
 	}
 	// one it keeps already moves where there is room, and stays while
 	// there is none
 	s.Boxes["nas"].Facts["store/ente/bytes"] = 40 * gib
-	if got := strings.Join(Decide(in, s, 90_000).Copies["ente"], ","); got != "big,small" {
+	if got := strings.Join(Decide(in, s, 90_000, nil).Copies["ente"], ","); got != "big,small" {
 		t.Fatalf("copies %q", got)
 	}
 	s.Boxes["small"].Facts["store_free_bytes"] = 20 * gib
-	if got := strings.Join(Decide(in, s, 90_000).Copies["ente"], ","); got != "big,nas" {
+	if got := strings.Join(Decide(in, s, 90_000, nil).Copies["ente"], ","); got != "big,nas" {
 		t.Fatalf("copies %q", got)
 	}
 }
@@ -498,14 +498,14 @@ func TestADrainingStoreGetsNoNewCopyAndGivesItsOwnUp(t *testing.T) {
 func TestABoxWhoseHeartbeatGainsHardwareIsEligibleNextRound(t *testing.T) {
 	in, s := fleet()
 	in.Services["llm"] = Service{Enabled: true, Instances: 1, MemoryGiB: 7}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if _, ok := p.Unplaced["llm"]; !ok {
 		t.Fatalf("llm placed with no box able: %+v", p)
 	}
 	// nas got a GPU: its report, judged on the box, says it can now
 	f := s.Boxes["nas"].Facts
 	f["can_live"], f["can/llm"], f["can/garage"], f["can/pihole"] = 1, 2, 3, 1
-	p = Decide(in, s, 90_000)
+	p = Decide(in, s, 90_000, nil)
 	if !runs(p, "nas", "llm") {
 		t.Fatalf("llm not on the box that can now: %+v", p)
 	}
@@ -515,11 +515,11 @@ func TestABoxWhoseHeartbeatGainsHardwareIsEligibleNextRound(t *testing.T) {
 	}
 	// small got more memory: 8G holds 0.85 * 8 = 6.8G, under llm; now 32G
 	in.Boxes["small"].Can["llm"] = 5
-	if p := Decide(in, s, 90_000); runs(p, "small", "llm") {
+	if p := Decide(in, s, 90_000, nil); runs(p, "small", "llm") {
 		t.Fatalf("llm on a box without the room: %+v", p.Boxes["small"])
 	}
 	s.Boxes["small"].Facts["ram_bytes"] = 32 * gib
-	if p := Decide(in, s, 90_000); !runs(p, "small", "llm") {
+	if p := Decide(in, s, 90_000, nil); !runs(p, "small", "llm") {
 		t.Fatalf("llm not on the box that grew: %+v", p)
 	}
 }
@@ -533,13 +533,13 @@ func TestABoxsOwnWordAddsNothingItsOwnerBarsNorALease(t *testing.T) {
 	in.Boxes["nas"] = b
 	f := s.Boxes["nas"].Facts
 	f["can_live"], f["can/llm"], f["can/db"], f["carries/db"] = 1, 9, 9, 1
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if runs(p, "nas", "llm") || runs(p, "nas", "db") {
 		t.Fatalf("a box's word added what the release keeps off it: %+v", p.Boxes["nas"])
 	}
 	// a lease the release lets it hold, it may be given
 	in.Boxes["nas"].Can["db"] = 0.1
-	if p := Decide(in, s, 90_000); !runs(p, "nas", "db") {
+	if p := Decide(in, s, 90_000, nil); !runs(p, "nas", "db") {
 		t.Fatalf("db: %+v", p)
 	}
 }
@@ -552,7 +552,7 @@ func TestAJoinedBoxKeepsCopiesAndRunsNothing(t *testing.T) {
 	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
 		"store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib, "ram_bytes": 64 * gib,
 	}}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if len(p.Boxes["jabc"]) != 0 {
 		t.Fatalf("a stranger was given a service: %+v", p.Boxes["jabc"])
 	}
@@ -569,7 +569,7 @@ func TestACopyGoesFirstToABoxThatCouldTakeTheServiceOver(t *testing.T) {
 	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
 		"store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib,
 	}}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if got := strings.Join(p.Copies["ente"], ","); got != "big,small" {
 		t.Fatalf("copies %q: the box that could take photos over comes first", got)
 	}
@@ -582,8 +582,28 @@ func TestAStrangerSayingItKeepsACopyPushesOutNoBoxOfTheRelease(t *testing.T) {
 	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
 		"store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib, "store/ente/bytes": 40 * gib,
 	}}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if got := strings.Join(p.Copies["ente"], ","); got != "big,nas" {
 		t.Fatalf("copies %q: the stranger's claim took the release box's slot", got)
+	}
+}
+
+func TestAMembersBoxKeepsItsCopyAsABoxOfTheReleaseDoes(t *testing.T) {
+	in, s := stores()
+	s.Boxes["nas"].Facts["store/ente/bytes"] = 40 * gib
+	s.Joined = map[string]*state.Joined{"jabc": {Key: "k"}}
+	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
+		"store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib, "store/ente/bytes": 50 * gib,
+	}}
+	p := Decide(in, s, 90_000, map[string]bool{"jabc": true})
+	if got := strings.Join(p.Copies["ente"], ","); got != "big,jabc" {
+		t.Fatalf("copies %q: the member's box holding more lost its copy", got)
+	}
+	if len(p.Boxes["jabc"]) != 0 {
+		t.Fatalf("a member's box was given a service: %+v", p.Boxes["jabc"])
+	}
+	// a stranger with the same holding does not
+	if got := strings.Join(Decide(in, s, 90_000, nil).Copies["ente"], ","); got != "big,nas" {
+		t.Fatalf("copies %q", got)
 	}
 }

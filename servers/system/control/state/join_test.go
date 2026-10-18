@@ -164,3 +164,57 @@ func TestATicketGoesWithOneBoxAndIsCarriedForTheGates(t *testing.T) {
 		t.Fatal("a stranger's join changed")
 	}
 }
+
+func TestAJoinWithATicketIsInTheDirectoryLogUnderItsName(t *testing.T) {
+	f := newFleet(t)
+	k := strangerKey(1)
+	name, _, _ := JoinName(k)
+	r := joinReq(k, 1)
+	r.Body, _ = json.Marshal(JoinReq{Key: k, Recipient: "age1x", House: "h", Ticket: "T"})
+	if f.block(1000, r) != 1 || len(f.s.Directory) != 1 {
+		t.Fatalf("%+v", f.s.Directory)
+	}
+	d := f.s.Directory[0]
+	if d.Box != name || string(d.Item) != `{"joined":{"key":"`+k+`","ticket":"T"}}` {
+		t.Fatalf("%s %s", d.Box, d.Item)
+	}
+	// a stranger's join, with none, puts nothing there
+	if f.block(2000, joinReq(strangerKey(2), 1)) != 1 || len(f.s.Directory) != 1 {
+		t.Fatal("a join with no ticket was logged")
+	}
+	// and no box's gate can say one
+	for i, body := range []string{
+		`{"joined":{"key":"x","ticket":"T"}}`,
+		`{"entry":{},"joined":{}}`,
+		`{"joined":{}}`,
+	} {
+		req := Request{Kind: "directory", Box: "node1", Seq: uint64(10 + i), Body: json.RawMessage(body), Sig: "ok:k1"}
+		if f.block(3000+int64(i), req) != 0 {
+			t.Fatalf("a gate put %s", body)
+		}
+	}
+	ok := Request{Kind: "directory", Box: "node1", Seq: 20, Body: json.RawMessage(`{"ack":"x"}`), Sig: "ok:k1"}
+	if f.block(4000, ok) != 1 {
+		t.Fatal("an ordinary item refused")
+	}
+}
+
+func TestABoxDownByOurFaultIsNotForgotten(t *testing.T) {
+	f := newFleet(t)
+	k := strangerKey(1)
+	name, _, _ := JoinName(k)
+	f.block(1000, joinReq(k, 1))
+	b, _ := json.Marshal(Heartbeat{Facts: map[string]float64{"agent_ok": 0}})
+	f.block(2000, Request{Kind: "heartbeat", Box: name, Seq: 2, Body: b, Sig: "ok:" + k})
+	f.block(2000 + JoinedGoneAfter + 1)
+	if f.s.Joined[name] == nil || f.s.Boxes[name] == nil {
+		t.Fatal("a box whose release failed on it was forgotten")
+	}
+	got := f.s.IdentBoxes()
+	if info, ok := got(name); !ok || info.LastSeen != 2000 {
+		t.Fatal(info, ok)
+	}
+	if _, ok := got("nobody"); ok {
+		t.Fatal("a box that is not there")
+	}
+}
