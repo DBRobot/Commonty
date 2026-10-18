@@ -66,6 +66,12 @@ impl Member {
     /// The person's entry, from the item that was agreed. Nothing is
     /// checked here: the judge did that, once.
     pub fn entry(&self) -> Option<identity::SignedEntry> {
+        // the judge keeps a v1 item as the signed entry itself
+        // (state/ident FromV1's Raw), the contract says `{"entry": ...}`:
+        // either reads
+        if self.item.get("signature").is_some() {
+            return serde_json::from_value(self.item.clone()).ok();
+        }
         if let Some(e) = self.item.get("entry") {
             return serde_json::from_value(e.clone()).ok();
         }
@@ -392,6 +398,39 @@ mod tests {
         assert_eq!(p.kind, "entry");
         assert_eq!(p.name(), Some("ann"));
         assert_eq!(p.hash().len(), 64);
+    }
+
+    #[test]
+    fn a_v1_item_reads_as_the_judge_keeps_it_and_as_the_contract_says() {
+        let k = identity::generate();
+        let e = identity::sign(
+            identity::Entry {
+                name: "ann".into(),
+                root: identity::encode_public(&k.verifying_key()),
+                recovery: String::new(),
+                recovered_from: vec![],
+                devices: vec![],
+                passkeys: vec![],
+                grant: None,
+                libraries: vec![],
+                terms: None,
+                removed_boxes: vec![],
+                version: 1,
+                updated: 1,
+            },
+            &k,
+        )
+        .unwrap();
+        for item in [
+            serde_json::to_value(&e).unwrap(),
+            serde_json::json!({ "entry": e }),
+        ] {
+            let m = Member {
+                item,
+                ..Default::default()
+            };
+            assert_eq!(m.entry().unwrap().entry.name, "ann");
+        }
     }
 
     #[test]
