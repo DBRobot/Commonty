@@ -1,8 +1,8 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "v0.1.57-1-1792301526",
-    "issued": 1792301527,
+    "id": "v0.1.54-1-1792303741",
+    "issued": 1792303742,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -12,30 +12,30 @@
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/j1j4dcnhmkmgqwdbwk4535mha9qh7cvx-commonty-android-0.1.57",
-        "version": "0.1.57"
+        "path": "/nix/store/v44jicdgj65lxkp4bj9i9ixn49hws8z1-commonty-android-0.1.54",
+        "version": "0.1.54"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ],
         "name": "dd-windows",
         "part": "dd-windows",
-        "path": "/nix/store/j8r7g76b9wjw9dwm64wvdvkacsfwazkg-dd-windows-0.1.57",
-        "version": "0.1.57"
+        "path": "/nix/store/4bx54b40zbrdk1xv725348ni7fnxvhnh-dd-windows-0.1.54",
+        "version": "0.1.54"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ],
         "name": "home-controller",
         "part": "home-controller",
-        "path": "/nix/store/i8r8qsdn8bn1dyjlzz6x53m9lfad3jiy-commonty-home-controller-0.1.57",
-        "version": "0.1.57"
+        "path": "/nix/store/d8npal2kzs0if6b5j6cnhvhg3r409bsq-commonty-home-controller-0.1.54",
+        "version": "0.1.54"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -45,24 +45,24 @@
         ],
         "name": "linux",
         "part": "linux",
-        "path": "/nix/store/b818pvag4x8hbjj23r07ypdn7chxf9w1-commonty-linux-0.1.57",
-        "version": "0.1.57"
+        "path": "/nix/store/1srvah99i09ay0kjh4j276cfnn8ms6hr-commonty-linux-0.1.54",
+        "version": "0.1.54"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/dlr8k57c0h74gvix5dp058447dxm7p6y-commonty-windows-0.1.57",
-        "version": "0.1.57"
+        "path": "/nix/store/6aiy0zf3aikc18mzsmd7cm4p0wf8zsh7-commonty-windows-0.1.54",
+        "version": "0.1.54"
       }
     ],
     "kind": "build-order",
-    "rev": "cd3246f519c34a9f32ce477de05a64abccd4150a"
+    "rev": "a32f7c6a8d32ec1c870ae6a2b12c382fc88752a9"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "qZBnudAqDckR7tPZI6nWEktgc1mDWOjOFR+XHLlSzy4OgYFuJ2b3KkIEtDyZjt7rip4m6xRAn62l/QR+Q6dGCw=="
+  "signature": "kSsP3lXGvIxfQ8Zc9njuuM+hjwDoa152DmEWE9WqwbEA9e1U4Qb19wiLXBrQdPoqY1HIoCLPfI/WFyIyfPleBA=="
 }
