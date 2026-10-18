@@ -76,12 +76,9 @@ function copyable(text) {
 function head(title, crumbs, ...acts) {
   $('title').textContent = title;
   document.title = title === 'Remote computers' ? title : `${title} · Remote computers`;
-  $('crumbs').replaceChildren(
-    ...crumbs.flatMap(([label, href], n) => [
-      n ? el('span', { class: 'sep', 'aria-hidden': 'true', text: '/' }) : null,
-      href ? el('a', { href, text: label }) : el('span', { class: 'here', text: label }),
-    ]).filter(Boolean),
-  );
+  // no trail: one arrow back to where this page was opened from
+  const up = crumbs.filter(([, href]) => href).pop();
+  $('back').replaceChildren(up ? el('a', { href: up[1], class: 'back', 'aria-label': `Back to ${up[0]}`, text: '←' }) : '');
   $('head-acts').replaceChildren(...acts);
 }
 
