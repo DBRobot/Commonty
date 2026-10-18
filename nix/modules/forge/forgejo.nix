@@ -36,6 +36,7 @@ let
     ".appimage"
     ".apk"
     ".exe"
+    ".zst"
   ];
   base = config.dd.domain;
   host = "git.${base}";
@@ -248,15 +249,15 @@ in
           # What a member may attach to an issue or a release: files that are
           # data, never a page. An .svg or .html served from this name runs as
           # whoever opens it, so neither is on the list. A release takes the
-          # app's packages too, and room for them: the AppImage is the
-          # biggest, at about 160 MB.
+          # app's packages too, and room for them: the biggest is the home
+          # controller's card image, at about 1.9 GB.
           attachment = {
             ALLOWED_TYPES = attachable;
             MAX_SIZE = 100;
           };
           "repository.release" = {
             ALLOWED_TYPES = releasable;
-            FILE_MAX_SIZE = 400;
+            FILE_MAX_SIZE = 4096;
           };
           mailer.ENABLED = false;
           # a webhook goes out to the world, never to this box, the house or
