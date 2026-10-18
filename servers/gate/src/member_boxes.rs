@@ -1,8 +1,7 @@
-//! A member's own boxes (docs/dev/joining.md): a box set up from the
-//! member's app comes with their join ticket, which the control plane
-//! carries with the joined box and judges no more than it judges the
-//! directory. Every gate checks it the same way, against the member's
-//! signed entry, so every box agrees whose it is, and none vouches alone.
+//! A member's own boxes (docs/dev/joining.md). Whose a joined box is,
+//! is the agreed identity state's word: each member's `boxes`, the boxes
+//! the judge has them enlisted with (state/ident). No gate judges a join
+//! ticket for it, so every box agrees whose it is, and none vouches alone.
 //!
 //! What being a member's gives the box is the member's: it is on their
 //! Devices tab, they see how it is, and the backup made of its old disk
@@ -23,11 +22,13 @@ use crate::App;
 /// write: as long as the ticket it was written with is good for
 pub(crate) const PENDING_SECS: u64 = 7 * 24 * 3600;
 
-/// A joined box that is a member's: the ticket it came with verifies.
+/// A joined box that is a member's: the agreed identity state has them
+/// enlisted with it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct Owned {
     pub name: String,
     pub user: String,
+    /// the id of the ticket it joined with: its pending backup's folder
     pub ticket: String,
     /// when it joined, agreed ms
     pub at: i64,
@@ -35,9 +36,12 @@ pub(crate) struct Owned {
     pub key: String,
 }
 
-/// A join ticket, as a box came with it: signed by a device in the
-/// member's entry, minted for `join`, and good at `at` (seconds). The
-/// member and the ticket's id.
+/// A join ticket, as a pending backup's upload brings it: signed by a
+/// device in the member's entry, minted for `join`, and good at `at`
+/// (seconds). The member and the ticket's id. It says who may write that
+/// one backup, never whose a box is.
+// TODO(enlist): an upload credential the enlistment gives, in place of
+// the ticket
 pub(crate) fn verify_ticket(
     entry_of: impl Fn(&str) -> anyhow::Result<Option<identity::SignedEntry>>,
     token: &str,
@@ -46,11 +50,18 @@ pub(crate) fn verify_ticket(
     let (user, _) = crate::verify_device_token_at(entry_of, token, "join", "", at)?;
     // the authority block alone: what the member's device signed, never a
     // block a holder added after
-    let source = UnverifiedBiscuit::from_base64(token)?
-        .print_block_source(0)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let id = ticket_id(&source).ok_or_else(|| anyhow::anyhow!("not one ticket fact"))?;
+    let id = ticket_of(token).ok_or_else(|| anyhow::anyhow!("not one ticket fact"))?;
     Ok((user, id))
+}
+
+/// The ticket id a token's authority block names, unchecked: a name for a
+/// pending folder, nothing more.
+fn ticket_of(token: &str) -> Option<String> {
+    let source = UnverifiedBiscuit::from_base64(token)
+        .ok()?
+        .print_block_source(0)
+        .ok()?;
+    ticket_id(&source)
 }
 
 /// The one `ticket("<32 lowercase hex>");` fact of an authority block's
@@ -75,51 +86,45 @@ fn ticket_id(source: &str) -> Option<String> {
     }
 }
 
-/// Whose each joined box is, from the agreed state's `joined`: in the
-/// order they joined, a ticket counts for the first box it verifies for
-/// and no other, and not once its member has removed that box.
+/// Whose each joined box is: `enlisted` is box -> member, from the agreed
+/// identity state's members' `boxes`. A joined box no member has enlisted
+/// is nobody's; an enlisted box not in the control state's `joined` is
+/// not here yet.
 pub(crate) fn owners(
     joined: &serde_json::Value,
-    entry_of: impl Fn(&str) -> anyhow::Result<Option<identity::SignedEntry>> + Copy,
+    enlisted: &BTreeMap<String, String>,
 ) -> Vec<Owned> {
-    let mut boxes: Vec<(i64, &String, &str)> = joined
+    let mut out: Vec<Owned> = joined
         .as_object()
         .into_iter()
         .flatten()
         .filter_map(|(name, j)| {
-            let t = j["ticket"].as_str().filter(|t| !t.is_empty())?;
-            Some((j["at"].as_i64().unwrap_or(0), name, t))
+            let user = enlisted.get(name)?;
+            Some(Owned {
+                name: name.clone(),
+                user: user.clone(),
+                // TODO(enlist): the ticket as enlisted (Enlisted.Ticket),
+                // once the identity view carries it
+                ticket: j["ticket"].as_str().and_then(ticket_of).unwrap_or_default(),
+                at: j["at"].as_i64().unwrap_or(0),
+                key: j["key"].as_str().unwrap_or_default().to_string(),
+            })
         })
         .collect();
-    boxes.sort();
-    let mut used = BTreeSet::new();
-    let mut out = Vec::new();
-    for (at, name, token) in boxes {
-        let Ok((user, ticket)) = verify_ticket(entry_of, token, (at.max(0) / 1000) as u64) else {
-            continue;
-        };
-        if !used.insert(ticket.clone()) {
-            continue;
-        }
-        let removed = entry_of(&user)
-            .ok()
-            .flatten()
-            .is_some_and(|e| e.entry.removed_boxes.contains(&ticket));
-        if removed {
-            continue;
-        }
-        out.push(Owned {
-            name: name.clone(),
-            user,
-            ticket,
-            at,
-            key: joined[name.as_str()]["key"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-        });
-    }
+    out.sort_by(|a, b| (a.at, &a.name).cmp(&(b.at, &b.name)));
     out
+}
+
+/// box -> member, from the agreed identity state; empty when this box does
+/// not read it (identityFrom replay) or has not read it yet
+fn enlisted(app: &App) -> BTreeMap<String, String> {
+    let Some(st) = app.directory.ident.as_ref().and_then(|a| a.state()) else {
+        return BTreeMap::new();
+    };
+    st.members
+        .iter()
+        .flat_map(|(name, m)| m.boxes.iter().map(move |b| (b.clone(), name.clone())))
+        .collect()
 }
 
 /// The agreed state, as last read from this box's dd-control: read again
@@ -169,12 +174,11 @@ async fn state(app: &Arc<App>) -> serde_json::Value {
 }
 
 /// The agreed state and whose each joined box is, worked out afresh on
-/// every call from it and the members' entries as they are now: a box its
-/// member removed, a member who left or is suspended, a device since taken
-/// out of the entry - each counts from the next request on.
+/// every call: a box unenlisted, a member who left or is suspended,
+/// counts from the next request on.
 pub(crate) async fn current(app: &Arc<App>) -> (serde_json::Value, Vec<Owned>) {
     let st = state(app).await;
-    let owned = owners(&st["joined"], |u| app.entry(u))
+    let owned = owners(&st["joined"], &enlisted(app))
         .into_iter()
         .filter(|o| app.role(&o.user) == Some(crate::pages::Role::Member))
         .collect();
@@ -215,13 +219,10 @@ fn tickets_in(st: &serde_json::Value) -> Option<BTreeSet<String>> {
                 if t.is_empty() {
                     continue;
                 }
-                let source = UnverifiedBiscuit::from_base64(t)
-                    .ok()?
-                    .print_block_source(0)
-                    .ok()?;
                 // a ticket that names none of the right shape: unsure, so
                 // nothing goes
-                out.insert(ticket_id(&source)?);
+                // TODO(enlist): the enlisted tickets, from the identity view
+                out.insert(ticket_of(t)?);
             }
         }
     }
@@ -404,37 +405,37 @@ mod tests {
     const ID: &str = "0123456789abcdef0123456789abcdef";
 
     #[test]
-    fn a_ticket_is_its_members_for_one_box_and_not_once_removed() {
+    fn a_box_is_the_member_its_enlisted_with() {
         let kp = device();
-        let now = identity::now();
-        let t = ticket(&kp, "ann", ID, now + PENDING_SECS);
-        let forged = ticket(&device(), "ann", ID, now + PENDING_SECS);
-        let ann = entry_with("ann", &kp, vec![]);
-        let of = |u: &str| Ok((u == "ann").then(|| ann.clone()));
-        let at = now as i64 * 1000;
+        let t = ticket(&kp, "ann", ID, identity::now() + 60);
         let joined = serde_json::json!({
-            "jaaaaaaaaaa": { "at": at, "ticket": t },
-            // the same ticket again, later: someone's copy of it
-            "jbbbbbbbbbb": { "at": at + 1, "ticket": t },
-            // signed by a key that is none of ann's devices
-            "jcccccccccc": { "at": at - 1, "ticket": forged },
-            "jdddddddddd": { "at": at },
+            "jaaaaaaaaaa": { "at": 2, "ticket": t, "key": "K" },
+            // a ticket alone makes no box anyone's
+            "jbbbbbbbbbb": { "at": 1, "ticket": t },
+            "jcccccccccc": { "at": 3 },
         });
-        let o = owners(&joined, of);
-        assert_eq!(o.len(), 1, "{o:?}");
+        let enlisted = BTreeMap::from([
+            ("jaaaaaaaaaa".to_string(), "ann".to_string()),
+            ("jcccccccccc".to_string(), "bob".to_string()),
+            // enlisted, not joined yet
+            ("jdddddddddd".to_string(), "ann".to_string()),
+        ]);
+        let o = owners(&joined, &enlisted);
         assert_eq!(
-            (o[0].name.as_str(), o[0].user.as_str()),
-            ("jaaaaaaaaaa", "ann")
+            o.iter()
+                .map(|o| (
+                    o.name.as_str(),
+                    o.user.as_str(),
+                    o.ticket.as_str(),
+                    o.key.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            [
+                ("jaaaaaaaaaa", "ann", ID, "K"),
+                ("jcccccccccc", "bob", "", "")
+            ]
         );
-        assert_eq!(o[0].ticket, ID);
-        // a box joining after the ticket's week is nobody's
-        let late = serde_json::json!({
-            "jaaaaaaaaaa": { "at": at + (PENDING_SECS as i64 + 1) * 1000, "ticket": t }
-        });
-        assert!(owners(&late, of).is_empty());
-        // removed by its member: nobody's
-        let gone = entry_with("ann", &kp, vec![ID.into()]);
-        assert!(owners(&joined, |u: &str| Ok((u == "ann").then(|| gone.clone()))).is_empty());
+        assert!(owners(&joined, &BTreeMap::new()).is_empty());
     }
 
     #[test]
@@ -503,21 +504,6 @@ mod tests {
         let ann = entry_with("ann", &kp, vec![]);
         let of = |u: &str| Ok((u == "ann").then(|| ann.clone()));
         assert!(verify_ticket(of, &t, identity::now()).is_err());
-    }
-
-    #[test]
-    fn a_ticket_counts_only_with_a_device_still_in_the_entry() {
-        let kp = device();
-        let t = ticket(&kp, "ann", ID, identity::now() + 60);
-        let joined = serde_json::json!({ "jaaaaaaaaaa": { "at": identity::now() as i64 * 1000, "ticket": t, "key": "K" } });
-        let ann = entry_with("ann", &kp, vec![]);
-        let o = owners(&joined, |u: &str| Ok((u == "ann").then(|| ann.clone())));
-        assert_eq!(o[0].key, "K");
-        // the device that signed it, taken out of ann's entry since
-        let other = entry_with("ann", &device(), vec![]);
-        assert!(owners(&joined, |u: &str| Ok((u == "ann").then(|| other.clone()))).is_empty());
-        // and a member with no entry at all owns nothing
-        assert!(owners(&joined, |_: &str| Ok(None)).is_empty());
     }
 
     #[test]

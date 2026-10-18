@@ -254,6 +254,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
+            removed_boxes: vec![],
             version: 3,
             updated: 9,
         };

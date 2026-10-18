@@ -525,6 +525,7 @@ pub(crate) mod tests {
             passkeys: vec![],
             grant: None,
             libraries: vec![],
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         }

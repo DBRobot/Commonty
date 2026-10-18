@@ -139,6 +139,7 @@ fn all() -> serde_json::Value {
             created: 1_700_000_002,
         }],
         terms: Some("2026-10-11".into()),
+        removed_boxes: vec![],
         version: 1,
         updated: 1_791_700_000,
     };
@@ -172,6 +173,7 @@ fn all() -> serde_json::Value {
         grant: None,
         libraries: vec![],
         terms: Some("2026-10-11".into()),
+        removed_boxes: vec![],
         version: 1,
         updated: 1_791_700_200,
     };
@@ -330,6 +332,7 @@ fn shadow_log(release: &SigningKey, pk: &Pk) -> serde_json::Value {
             })
             .collect(),
         terms: Some("2026-10-11".into()),
+        removed_boxes: vec![],
         version: v,
         updated: 1_791_700_000 + v,
     };
@@ -483,6 +486,7 @@ fn shadow_log(release: &SigningKey, pk: &Pk) -> serde_json::Value {
         grant: None,
         libraries: vec![],
         terms: Some("2026-10-11".into()),
+        removed_boxes: vec![],
         version: 1,
         updated: 1_791_700_000,
     };
@@ -737,6 +741,7 @@ fn random_entry(r: &mut Rng, i: usize) -> Entry {
         grant,
         libraries,
         terms: opt(r).then(|| r.string()),
+        removed_boxes: vec![],
         version: r.next(),
         updated: r.next(),
     }

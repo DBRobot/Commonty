@@ -713,6 +713,7 @@ fn made_entry(
         grant: None,
         libraries,
         terms: Some(identity::TERMS.into()),
+        removed_boxes: vec![],
         version: 1,
         updated: identity::now(),
     }

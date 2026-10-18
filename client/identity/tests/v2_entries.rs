@@ -28,6 +28,7 @@ fn entry(name: &str, root: &SigningKey, version: u64) -> Entry {
         libraries: vec![],
         grant: None,
         terms: None,
+        removed_boxes: vec![],
         version,
         updated: version,
     }
@@ -219,6 +220,7 @@ fn passkey_entry(pk: &Pk, version: u64) -> Entry {
         libraries: vec![],
         grant: None,
         terms: None,
+        removed_boxes: vec![],
         version,
         updated: version,
     }
