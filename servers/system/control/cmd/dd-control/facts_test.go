@@ -98,3 +98,16 @@ func TestWhatABoxQualifiesByComesFromItsOwnReport(t *testing.T) {
 		t.Fatalf("facts: %v", f)
 	}
 }
+
+func TestOnlyAReleaseThatFailedIsAgentOkZero(t *testing.T) {
+	d := t.TempDir()
+	agent := filepath.Join(d, "dd_agent.prom")
+	for result, want := range map[string]float64{"ok": 1, "refused": 0, "rollback": 0, "held": -1, "none": -1, "absent": -1, "": -1} {
+		_ = os.WriteFile(agent, []byte("dd_agent_info{box=\"j0123456789\",path=\"/nix/store/x\",result=\""+result+"\"} 1\n"), 0o644)
+		v, said := promFacts(agent)["agent_ok"]
+		// -1: no word on how a release went, which is never "our fault"
+		if want < 0 && said || want >= 0 && (!said || v != want) {
+			t.Fatalf("result %q: agent_ok %v (said %v), want %v", result, v, said, want)
+		}
+	}
+}

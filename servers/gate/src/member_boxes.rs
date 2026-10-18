@@ -176,31 +176,45 @@ pub(crate) async fn current(app: &Arc<App>) -> (serde_json::Value, Vec<Owned>) {
     (st, owned)
 }
 
-/// The joined boxes that came with a ticket naming `user` and no one has
+/// The joined boxes that came with a ticket of `user`'s and no one has
 /// enlisted: theirs to enlist, as far as the box's ticket says - which the
-/// judge checks, not this
+/// judge checks again. The ticket is signed by a device of theirs, its id
+/// enlisted no box yet, and the box is the first to join with that id: a
+/// box's ticket is in the agreed state for every box to read, so a later
+/// one came with a copy of it (a block appended, the same authority block)
 fn waiting(
     st: &serde_json::Value,
     user: &str,
     enlisted: &HashMap<String, crate::ident::Owner>,
+    entry_of: impl Fn(&str) -> anyhow::Result<Option<identity::SignedEntry>>,
+    now: u64,
 ) -> Vec<serde_json::Value> {
-    let mut out: Vec<serde_json::Value> = st["joined"]
-        .as_object()
+    let used: BTreeSet<&str> = enlisted.values().map(|o| o.ticket.as_str()).collect();
+    let mut first: BTreeMap<String, (i64, &str, &serde_json::Value)> = BTreeMap::new();
+    for (name, j) in st["joined"].as_object().into_iter().flatten() {
+        let Some(t) = j["ticket"].as_str() else {
+            continue;
+        };
+        let Ok((u, id)) = verify_ticket(&entry_of, t, now) else {
+            continue;
+        };
+        if u != user || used.contains(id.as_str()) || enlisted.contains_key(name) {
+            continue;
+        }
+        let at = j["at"].as_i64().unwrap_or(i64::MAX);
+        let e = first.entry(id).or_insert((at, name, j));
+        if (at, name.as_str()) < (e.0, e.1) {
+            *e = (at, name, j);
+        }
+    }
+    let mut out: Vec<serde_json::Value> = first
         .into_iter()
-        .flatten()
-        .filter(|(name, _)| !enlisted.contains_key(*name))
-        .filter_map(|(name, j)| {
-            let source = UnverifiedBiscuit::from_base64(j["ticket"].as_str()?)
-                .ok()?
-                .print_block_source(0)
-                .ok()?;
-            (crate::peek_user(&source).as_deref() == Some(user)).then(|| {
-                serde_json::json!({
-                    "name": name,
-                    "ticket": ticket_id(&source).unwrap_or_default(),
-                    "joined": j["at"],
-                    "enlisted": false,
-                })
+        .map(|(id, (_, name, j))| {
+            serde_json::json!({
+                "name": name,
+                "ticket": id,
+                "joined": j["at"],
+                "enlisted": false,
             })
         })
         .collect();
@@ -254,7 +268,13 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
             })
         })
         .collect();
-    let waiting = waiting(&st, &user, &enlisted(&app).unwrap_or_default());
+    let waiting = waiting(
+        &st,
+        &user,
+        &enlisted(&app).unwrap_or_default(),
+        |u| app.entry(u),
+        identity::now(),
+    );
     axum::Json(serde_json::json!({ "boxes": rows, "waiting": waiting })).into_response()
 }
 
@@ -272,7 +292,13 @@ pub(crate) async fn joined_mine(State(app): State<Arc<App>>, headers: HeaderMap)
         .filter(|o| o.user == user)
         .map(|o| serde_json::json!({ "name": o.name, "ticket": o.ticket, "enlisted": true }))
         .collect();
-    rows.extend(waiting(&st, &user, &enlisted(&app).unwrap_or_default()));
+    rows.extend(waiting(
+        &st,
+        &user,
+        &enlisted(&app).unwrap_or_default(),
+        |u| app.entry(u),
+        identity::now(),
+    ));
     axum::Json(rows).into_response()
 }
 
@@ -330,11 +356,20 @@ pub(crate) async fn put_item(
     let Some(on_file) = view.members.get(&user).and_then(|m| m.entry()) else {
         return StatusCode::FORBIDDEN.into_response();
     };
-    // theirs: an enlistment names the signed-in member's root; an extension
-    // is the admin's alone
+    // theirs: an enlistment names the signed-in member's root, and a box
+    // the agreed view has as theirs to unenlist, or as nobody's to enlist;
+    // an extension is the admin's alone
+    let owner = env
+        .field("box")
+        .and_then(|b| view.enlisted.get(b))
+        .map(|o| o.owner.as_str());
     let theirs = match kind.as_str() {
         EXTEND => app.admin.as_deref() == Some(user.as_str()),
-        _ => env.field("member") == Some(identity::member_id(&on_file.entry.root).as_str()),
+        _ if env.field("member") != Some(identity::member_id(&on_file.entry.root).as_str()) => {
+            false
+        }
+        UNENLIST => owner == Some(user.as_str()),
+        _ => owner.is_none(),
     };
     if !theirs {
         return (StatusCode::FORBIDDEN, "not theirs to say").into_response();
@@ -558,13 +593,71 @@ mod tests {
             "jcccccccccc": { "at": 3, "ticket": ticket(&kp, "ann", ID, identity::now() + 60) },
             "jdddddddddd": { "at": 4 },
         }});
-        let enlisted = HashMap::from([("jcccccccccc".to_string(), owner("ann", ID))]);
-        let w = waiting(&st, "ann", &enlisted);
+        let enlisted = HashMap::from([("jcccccccccc".to_string(), owner("ann", OTHER))]);
+        let (ann, bob) = (entry_with("ann", &kp), entry_with("bob", &kp));
+        let of = |u: &str| {
+            Ok(match u {
+                "ann" => Some(ann.clone()),
+                "bob" => Some(bob.clone()),
+                _ => None,
+            })
+        };
+        let w = waiting(&st, "ann", &enlisted, of, identity::now());
         assert_eq!(w.len(), 1, "{w:?}");
         assert_eq!(w[0]["name"], "jaaaaaaaaaa");
         assert_eq!(w[0]["ticket"], ID);
         assert_eq!(w[0]["enlisted"], false);
-        assert!(waiting(&st, "eve", &enlisted).is_empty());
+        assert!(waiting(&st, "eve", &enlisted, of, identity::now()).is_empty());
+    }
+
+    const OTHER: &str = "ffeeddccbbaa99887766554433221100";
+
+    #[test]
+    fn a_box_with_a_copy_of_a_members_ticket_is_not_theirs_to_enlist() {
+        // the ticket a box joined with is in the agreed state for every box
+        // to read: a stranger appends a block, which makes another token of
+        // the same authority block, and joins with it after the real box
+        let kp = device();
+        let t = ticket(&kp, "ann", ID, identity::now() + 600);
+        let copy = Biscuit::from_base64(&t, kp.public())
+            .unwrap()
+            .append(
+                biscuit_auth::builder::BlockBuilder::new()
+                    .check("check if time($t), $t > 0")
+                    .unwrap(),
+            )
+            .unwrap()
+            .to_base64()
+            .unwrap();
+        // one ann's id never signed: another key's, naming her
+        let forged = ticket(&device(), "ann", OTHER, identity::now() + 600);
+        // and one whose ticket enlisted a box already
+        let used = ticket(
+            &kp,
+            "ann",
+            "00112233445566778899aabbccddeeff",
+            identity::now() + 600,
+        );
+        let st = serde_json::json!({ "joined": {
+            "jbbbbbbbbbb": { "at": 5, "ticket": t },
+            "j0000000000": { "at": 9, "ticket": copy },
+            "j1111111111": { "at": 1, "ticket": forged },
+            "j2222222222": { "at": 2, "ticket": used },
+        }});
+        let enlisted = HashMap::from([(
+            "jffffffffff".to_string(),
+            owner("ann", "00112233445566778899aabbccddeeff"),
+        )]);
+        let ann = entry_with("ann", &kp);
+        let of = |u: &str| Ok((u == "ann").then(|| ann.clone()));
+        let w = waiting(&st, "ann", &enlisted, of, identity::now());
+        assert_eq!(
+            w.iter()
+                .map(|r| r["name"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["jbbbbbbbbbb"],
+            "{w:?}"
+        );
     }
 
     #[test]
@@ -1007,8 +1100,21 @@ mod tests {
             .await,
             409
         );
-        // an unenlist of hers
+        // an unenlist of a box the agreed view does not have as hers
         let un = item("unenlist", enlist("unenlist", &ann_k, now + 2), &ann_k);
+        assert_eq!(
+            put(&url, "unenlist", Some(&ca), "p4", un.clone()).await,
+            403
+        );
+        // once it is hers: hers to unenlist, and nobody's to enlist again
+        view.lock().unwrap().as_mut().unwrap()["enlisted"] =
+            serde_json::json!({"jaaaaaaaaaa": {"ticket": ID, "owner": "ann", "since": 1}});
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        let bob_un = item("unenlist", enlist("unenlist", &bob_k, now + 2), &bob_k);
+        assert_eq!(put(&url, "unenlist", Some(&cb), "p4", bob_un).await, 403);
+        let bob_en = item("enlist", enlist("enlist", &bob_k, now + 2), &bob_k);
+        assert_eq!(put(&url, "enlist", Some(&cb), "p4", bob_en).await, 403);
+        assert_eq!(got.lock().unwrap().len(), 1);
         assert_eq!(put(&url, "unenlist", Some(&ca), "p4", un).await, 202);
         // an extension: the admin's alone
         let ext = |k: &ed25519_dalek::SigningKey| {
@@ -1025,6 +1131,8 @@ mod tests {
         // an item the agreed log judged already
         let again = item("enlist", enlist("enlist", &ann_k, now + 3), &ann_k);
         let hash = identity::item_hash(&serde_json::from_slice(&again).unwrap());
+        // (the box nobody's again: unenlisted)
+        view.lock().unwrap().as_mut().unwrap()["enlisted"] = serde_json::json!({});
         view.lock().unwrap().as_mut().unwrap()["outcomes"] = serde_json::json!({ hash: "ok" });
         tokio::time::sleep(Duration::from_millis(2500)).await;
         assert_eq!(put(&url, "enlist", Some(&ca), "p6", again).await, 409);
