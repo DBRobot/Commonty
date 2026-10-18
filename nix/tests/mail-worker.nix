@@ -14,6 +14,7 @@ let
   python = pkgs.python3.withPackages (ps: [
     ps.playwright
     ps.cryptography
+    ps.dkimpy
   ]);
 in
 pkgs.runCommand "mail-worker-e2e"
@@ -23,6 +24,7 @@ pkgs.runCommand "mail-worker-e2e"
       pkgs.wrangler
       pkgs.curl
       pkgs.jq
+      pkgs.nodejs
     ];
     PLAYWRIGHT_BROWSERS_PATH = pkgs.playwright-driver.browsers;
     PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
@@ -35,12 +37,18 @@ pkgs.runCommand "mail-worker-e2e"
     tester=${../../client/mail/tests/tester.json}
     mkdir w
     cp -rL --no-preserve=mode ${bundle}/. w/
+    # the locking and the reading of mail, by themselves first (node --test)
+    # one folder, as the pages have them at /_dd/static/
+    mkdir -p unit/mods unit/tests
+    cp ${../../client/mail/worker}/mail-{hpke,mime,ids,object}.js ${../../servers/mail/web}/mail-*.js unit/mods/
+    cp ${../../client/mail/tests}/*.test.mjs unit/tests/
+    node --test unit/tests/*.test.mjs
     # the made-up member is the only one on the list, and the release key is
     # RFC 8032's first test key: the Worker decodes it, and grants nothing by it;
     # its aliases: security to it, and two the Worker must refuse (a
     # member's address already, "other", and one that is no alias) - fake.py
     # starts with a rule for a dropped one, "old", and other's own
-    printf 'export const MEMBERS = %s;\nexport const RELEASE = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";\nexport const BOXES = {"testbox": %s};\nexport const ALIASES = {"security": "tester", "other": "tester", "Bad.One": "tester"};\nexport const OWNER = "tester";\n' \
+    printf 'export const MEMBERS = %s;\nexport const RELEASE = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";\nexport const BOXES = {"testbox": %s};\nexport const ALIASES = {"security": "tester", "other": "tester", "Bad.One": "tester"};\nexport const OWNER = "tester";\nexport const MAIL_BOXES = ["testbox"];\n' \
       "$(jq -c '.members' $tester)" "$(jq -c '.box_spki' $tester)" > w/fleet.js
     cat > w/wrangler.toml <<'TOML'
     name = "mail-e2e"
@@ -48,11 +56,12 @@ pkgs.runCommand "mail-worker-e2e"
     compatibility_date = "2026-05-01"
     no_bundle = true
     rules = [
-      { type = "Text", globs = ["**/*.html", "**/*.css", "**/change.js", "**/row.js", "**/passkey.js", "**/boxes.js", "**/aliases-page.js"] },
+      { type = "Text", globs = ["**/*.html", "**/*.css", "**/change.js", "**/row.js", "**/passkey.js", "**/boxes.js", "**/aliases-page.js", "**/inbox-page.js"] },
       { type = "Data", globs = ["**/*.woff2"] },
       { type = "CompiledWasm", globs = ["**/*.wasm"] },
-      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js", "**/leaving.js", "**/send.js", "**/aliases.js", "**/identity.js"] },
+      { type = "ESModule", globs = ["**/worker.js", "**/dd_mail.js", "**/fleet.js", "**/unlock.js", "**/leaving.js", "**/send.js", "**/aliases.js", "**/identity.js", "**/inbox.js", "**/dkim.js", "**/mail-hpke.js", "**/mail-mime.js", "**/mail-ids.js", "**/mail-object.js"] },
     ]
+    durable_objects.bindings = [{ name = "HOLD", class_name = "Hold" }]
     kv_namespaces = [{ binding = "PINNED", id = "local" }]
     send_email = [{ name = "SEND", allowed_sender_addresses = ["noreply@commonty.test", "alerts@commonty.test"] }]
     [vars]
@@ -66,10 +75,32 @@ pkgs.runCommand "mail-worker-e2e"
     # a day is two seconds here, so an alias that turns off "after a day" can
     # be seen to (aliases.js)
     ALIAS_DAY = "2"
+    # three signed sendings a day, so the fourth can be seen refused (dkim.js)
+    SEND_PER_DAY = "3"
+    # a small message is "too big to lock" here, so that can be seen (inbox.js)
+    LOCK_MAX = "4000"
+    DKIM_SELECTOR = "cm1"
+    # a table of its own: after every top-level key
+    [[migrations]]
+    tag = "hold-v1"
+    new_sqlite_classes = ["Hold"]
     TOML
     sed -i 's/^    //' w/wrangler.toml
     # the read key: 32 bytes of 5, as the fake directory expects (fake.py)
     printf 'SESSION_KEY=e2e-session-key-0123456789\nCF_TOKEN=fake\nDIRECTORY_KEY=BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU=\n' > w/.dev.vars
+    # a DKIM key made here; flow.py checks signatures against its public half
+    python3 -c '
+    import base64
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization as S
+    k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    open("w/.dev.vars", "a").write("DKIM_KEY=" + base64.b64encode(k.private_bytes(S.Encoding.DER, S.PrivateFormat.PKCS8, S.NoEncryption())).decode() + "\n")
+    open("dkim.pub", "w").write(base64.b64encode(k.public_key().public_bytes(S.Encoding.DER, S.PublicFormat.SubjectPublicKeyInfo)).decode())
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    m = Ed25519PrivateKey.generate()
+    open("w/.dev.vars", "a").write("MAIL_SIGN=" + base64.b64encode(m.private_bytes(S.Encoding.DER, S.PrivateFormat.PKCS8, S.NoEncryption())).decode() + "\n")
+    open("mailsign.pub", "w").write(base64.b64encode(m.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)).decode())
+    '
 
     # and two more of it reading who is a member from the agreed identity
     # state (docs/dev/identity-state.md, fake.py's /identity): agreed alone,

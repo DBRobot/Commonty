@@ -978,6 +978,619 @@ with sync_playwright() as p:
     )
     codes = [mailcall("alerts", b"Subject: n\n\nn\n")[0] for _ in range(2)]
     ok(codes == [200, 429], f"a seventh from the box in the hour: refused {codes}")
+
+    # A member's locked inbox (inbox.js). The key is made here as the app
+    # makes it; what the Worker locks is opened by HPKE written apart from
+    # hpke.js (cryptography's X25519 and AES-GCM), so the two must agree.
+    import hmac
+    from cryptography.hazmat.primitives.asymmetric.x25519 import (
+        X25519PrivateKey,
+        X25519PublicKey,
+    )
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    def hk_extract(salt, ikm):
+        return hmac.new(salt or bytes(32), ikm, hashlib.sha256).digest()
+
+    def hk_expand(prk, info, n):
+        out, t, i = b"", b"", 1
+        while len(out) < n:
+            t = hmac.new(prk, t + info + bytes([i]), hashlib.sha256).digest()
+            out += t
+            i += 1
+        return out[:n]
+
+    KEM = b"KEM" + (0x20).to_bytes(2, "big")
+    SUITE = (
+        b"HPKE"
+        + (0x20).to_bytes(2, "big")
+        + (1).to_bytes(2, "big")
+        + (2).to_bytes(2, "big")
+    )
+
+    def lx(suite, salt, label, ikm):
+        return hk_extract(salt, b"HPKE-v1" + suite + label + ikm)
+
+    def le(suite, prk, label, info, n):
+        return hk_expand(
+            prk, n.to_bytes(2, "big") + b"HPKE-v1" + suite + label + info, n
+        )
+
+    def hpke_open(sk, info, blob):
+        assert blob[:4] == b"CML1", "not a locked message"
+        enc, ct = blob[4:36], blob[36:]
+        pk = sk.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)
+        dh = sk.exchange(X25519PublicKey.from_public_bytes(enc))
+        ss = le(KEM, lx(KEM, b"", b"eae_prk", dh), b"shared_secret", enc + pk, 32)
+        ctx = (
+            b"\0"
+            + lx(SUITE, b"", b"psk_id_hash", b"")
+            + lx(SUITE, b"", b"info_hash", info.encode())
+        )
+        secret = lx(SUITE, ss, b"secret", b"")
+        key = le(SUITE, secret, b"key", ctx, 32)
+        nonce = le(SUITE, secret, b"base_nonce", ctx, 12)
+        return AESGCM(key).decrypt(nonce, ct, b"")
+
+    # signed in just now, with the passkey the entry has by this point (cGsy)
+    s, c, _ = call("/api/challenge", {"name": "tester"})
+    s, _, ck = call(
+        "/api/login",
+        {"token": c["token"], "id": "cGsy", "assertion": sign(c["challenge"])},
+    )
+    isess = ck.split(";")[0] if ck else ""
+    ok(s == 200 and isess, "signed in for the inbox")
+    mailsk = X25519PrivateKey.generate()
+    mailpk = b64u(mailsk.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw))
+    # the made-up member's own device, as their entry names it (fixture.rs)
+    devsk = Ed25519PrivateKey.from_private_bytes(bytes([7] * 32))
+    devpub = base64.b64encode(
+        devsk.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)
+    ).decode()
+    dev = {"fp": "test", "key": devpub}
+    keysig = lambda pk, sk=devsk: base64.b64encode(
+        sk.sign(f"commonty mail key v1\0tester\0{pk}".encode())
+    ).decode()
+
+    s, v, _ = call("/api/inbox", cookie=isess)
+    ok(s == 200 and v["on"] is False and v["fwd"] is True, f"no inbox yet {v}")
+    ok(
+        call("/api/inbox", {"pk": mailpk, "sig": keysig(mailpk), "device": dev})[0]
+        == 401,
+        "no session: no inbox",
+    )
+    ok(
+        call("/api/inbox", {"pk": "short", "device": dev}, cookie=isess)[0] == 400,
+        "a key that is not one: refused",
+    )
+    # a link someone else made: their device, or the member's device with their key
+    other_dev = Ed25519PrivateKey.generate()
+    odpub = base64.b64encode(
+        other_dev.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)
+    ).decode()
+    ok(
+        call(
+            "/api/inbox",
+            {
+                "pk": mailpk,
+                "sig": keysig(mailpk, other_dev),
+                "device": {"fp": "evil1", "key": odpub},
+            },
+            cookie=isess,
+        )[0]
+        == 403,
+        "a device not in their entry: refused",
+    )
+    evilpk = b64u(
+        X25519PrivateKey.generate()
+        .public_key()
+        .public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)
+    )
+    ok(
+        call(
+            "/api/inbox",
+            {"pk": evilpk, "sig": keysig(mailpk), "device": dev},
+            cookie=isess,
+        )[0]
+        == 403,
+        "a key their device did not sign: refused",
+    )
+    s, v, _ = call(
+        "/api/inbox", {"pk": mailpk, "sig": keysig(mailpk), "device": dev}, cookie=isess
+    )
+    ok(
+        s == 200 and v["on"] and v["fwd"] and v["devices"] == [dev["fp"]],
+        f"inbox on {s} {v}",
+    )
+    other = b64u(
+        X25519PrivateKey.generate()
+        .public_key()
+        .public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)
+    )
+    ok(
+        call(
+            "/api/inbox",
+            {"pk": other, "sig": keysig(other), "device": dev},
+            cookie=isess,
+        )[0]
+        == 409,
+        "another key while one is on: refused",
+    )
+    st = fake("/state")["rules"].values()
+    mine = [r for r in st if r["matchers"][0]["value"] == "tester@commonty.test"]
+    ok(
+        any(
+            r["name"] == "Commonty inbox tester"
+            and r["actions"] == [{"type": "worker", "value": ["mail-e2e"]}]
+            and r["enabled"]
+            for r in mine
+        )
+        and any(
+            r["name"] == "Commonty member tester"
+            and r["enabled"] is False
+            and r["actions"][0]["value"] == ["second@example.com"]
+            for r in mine
+        ),
+        f"their address now comes here, their rule kept off as where it forwards {mine}",
+    )
+
+    hclock = [int(time.time() * 1000) - 60000]
+
+    def holdcall(path, method="GET", key=None, at=None):
+        hclock[0] += 1
+        t = at if at is not None else hclock[0]
+        m = f"commonty mail hold v1\0testbox\0{t}\0{method}\0{path}\0{hashlib.sha256(b'').hexdigest()}"
+        sig = b64u((key or boxkey).sign(m.encode(), EC.ECDSA(H.SHA256())))
+        req = urllib.request.Request(
+            W + path,
+            data=b"" if method == "POST" else None,
+            method=method,
+            headers={"x-dd-box": "testbox", "x-dd-at": str(t), "x-dd-sig": sig},
+        )
+        try:
+            r = urllib.request.urlopen(req)
+            body = r.read()
+            return r.status, body
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def held():
+        s, body = holdcall("/api/hold/list?after=")
+        return json.loads(body)["items"] if s == 200 else None
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    signer = Ed25519PublicKey.from_public_bytes(
+        base64.b64decode(open("mailsign.pub").read())
+    )
+
+    def unpack(blob):
+        assert blob[:4] == b"CMA1", "not a locked object"
+        hl = int.from_bytes(blob[4:8], "big")
+        h = json.loads(blob[8 : 8 + hl])
+        sl = int.from_bytes(blob[8 + hl : 12 + hl], "big")
+        return h, blob[12 + hl : 12 + hl + sl], blob[12 + hl + sl :]
+
+    def take(item):
+        blob = b"".join(
+            holdcall(f"/api/hold/get?id={item['id']}&n={n}")[1]
+            for n in range(item["parts"])
+        )
+        h, S, R = unpack(blob)
+        # signed by the Worker, over what it sealed, for this id
+        sha = lambda b: (
+            base64.urlsafe_b64encode(hashlib.sha256(b).digest()).rstrip(b"=").decode()
+        )
+        assert (
+            h["kind"] == "in"
+            and h["id"] == item["id"]
+            and h["hs"] == sha(S)
+            and h["hr"] == sha(R)
+            and h["by"] == "worker"
+        ), h
+        signer.verify(
+            base64.b64decode(h["sig"]),
+            f"commonty mail object v1\0in\0{h['id']}\0{h['hs']}\0{h['hr']}".encode(),
+        )
+        summ = json.loads(
+            hpke_open(mailsk, f"commonty mail v1 summary {item['id']}", S)
+        )
+        raw = hpke_open(mailsk, f"commonty mail v1 raw {item['id']}", R)
+        return summ, raw
+
+    ok(held() == [], "nothing held yet")
+    n0 = forwarded()
+    ok(
+        mail(
+            "tester@commonty.test",
+            head="Subject-Extra: x\r\n",
+            body="the locked body\r\n",
+        )
+        == 200,
+        "mail to their address taken",
+    )
+    items = held()
+    ok(
+        items and len(items) == 1 and items[0]["member"] == "tester",
+        f"held for them {items}",
+    )
+    summ, raw = take(items[0])
+    ok(
+        summ["subject"] == "hi"
+        and summ["from"]["address"] == "shop@example.org"
+        and summ["alias"] is None
+        and summ["id"] == items[0]["id"],
+        f"its summary opens with their key {summ}",
+    )
+    ok(
+        b"the locked body" in raw and raw.startswith(b"From: shop@example.org"),
+        "the whole message opens with their key",
+    )
+    ok(forwarded() == n0 + 1, "and it went on to their address as well")
+    hpke_err = None
+    try:
+        hpke_open(
+            mailsk,
+            f"commonty mail v1 raw {items[0]['id']}x",
+            unpack(holdcall(f"/api/hold/get?id={items[0]['id']}&n=0")[1])[2],
+        )
+    except Exception as e:
+        hpke_err = e
+    ok(hpke_err is not None, "locked to its own id: it does not open as another")
+    ok(
+        holdcall(f"/api/hold/ack?id={items[0]['id']}", "POST")[0] == 200,
+        "the box says it has it",
+    )
+    ok(held() == [], "and it is held no more")
+
+    # unsigned, signed by another key, an old time again: refused
+    req = urllib.request.Request(W + "/api/hold/list?after=")
+    try:
+        urllib.request.urlopen(req)
+        ok(False, "unsigned hold list refused")
+    except urllib.error.HTTPError as e:
+        ok(e.code == 403, "unsigned: refused")
+    ok(
+        holdcall("/api/hold/list?after=", key=EC.generate_private_key(EC.SECP256R1()))[
+            0
+        ]
+        == 403,
+        "another key: refused",
+    )
+    ok(
+        holdcall("/api/hold/list?after=", at=hclock[0] - 5)[0] == 403,
+        "an older time than its last: refused",
+    )
+    ok(
+        holdcall("/api/hold/list?after=", at=int(time.time() * 1000) - 3600_000)[0]
+        == 403,
+        "an hour old: refused",
+    )
+
+    # their alias's mail is held too, and says which alias
+    # one of theirs that is on (the day's ten new ones were spent above)
+    alias = next(
+        x["address"]
+        for x in call("/api/aliases", cookie=isess)[1]["aliases"]
+        if x["on"]
+    )
+    ok(mail(alias) == 200, "mail to an alias taken")
+    items = held()
+    summ, _ = take(items[0])
+    ok(
+        summ["alias"] == alias.split("@")[0],
+        f"held, with the alias it came to {summ.get('alias')}",
+    )
+    holdcall(f"/api/hold/ack?id={items[0]['id']}", "POST")
+
+    # the sender's word on itself is not Cloudflare's: only the results under
+    # Cloudflare's own name, on top, count
+    ok(
+        mail(
+            "tester@commonty.test",
+            head="Authentication-Results: mx.cloudflare.net; spf=fail; dmarc=fail\r\nARC-Authentication-Results: i=1; dmarc=pass\r\n",
+        )
+        == 200,
+        "a forged sender",
+    )
+    summ, _ = take(held()[0])
+    ok(summ["auth"]["dmarc"] == "fail", f"its DMARC failure kept {summ['auth']}")
+    holdcall(f"/api/hold/ack?id={held()[0]['id']}", "POST")
+    ok(
+        mail(
+            "tester@commonty.test",
+            head="ARC-Authentication-Results: i=1; mx.cloudflare.net; dmarc=pass\r\nAuthentication-Results: evil.example; dmarc=pass\r\n",
+        )
+        == 200,
+        "a sender's own results",
+    )
+    summ, _ = take(held()[0])
+    ok(summ["auth"]["dmarc"] == "", f"not taken at its word {summ['auth']}")
+    holdcall(f"/api/hold/ack?id={held()[0]['id']}", "POST")
+
+    # too big to lock (LOCK_MAX 4000 here): a locked note in the inbox, and
+    # the message whole to their address, even with forwarding off later
+    n0 = forwarded()
+    ok(mail("tester@commonty.test", body="x" * 6000 + "\r\n") == 200, "a big one taken")
+    items = held()
+    summ, note = take(items[0])
+    ok(
+        summ.get("tooBig")
+        and summ["subject"] == "hi"
+        and b"more than can be locked" in note
+        and b"xxxx" not in note,
+        f"held as a note of what came {summ.get('snippet')}",
+    )
+    ok(forwarded() == n0 + 1, "and sent on whole")
+    holdcall(f"/api/hold/ack?id={items[0]['id']}", "POST")
+
+    # forwarding off: held, not sent on
+    ok(
+        call("/api/inbox/forward", {"fwd": False}, cookie=isess)[1].get("fwd") is False,
+        "forwarding turned off",
+    )
+    n0 = forwarded()
+    ok(
+        mail("tester@commonty.test") == 200 and len(held()) == 1 and forwarded() == n0,
+        "held and not forwarded",
+    )
+    holdcall(f"/api/hold/ack?id={held()[0]['id']}", "POST")
+    ok(mail(alias) == 200 and len(held()) == 1 and forwarded() == n0, "an alias's too")
+    holdcall(f"/api/hold/ack?id={held()[0]['id']}", "POST")
+    ok(
+        mail("tester@commonty.test", body="y" * 6000 + "\r\n") == 200
+        and forwarded() == n0 + 1,
+        "too big, with forwarding off: sent on all the same",
+    )
+    holdcall(f"/api/hold/ack?id={held()[0]['id']}", "POST")
+
+    # the device: another member's key to lock to, and DKIM for mail it sends
+    def devcall(path, body=None, key=None, fp=None, name="tester", at=None):
+        t = at if at is not None else int(time.time())
+        data = json.dumps(body).encode() if body is not None else b""
+        method = "POST" if body is not None else "GET"
+        m = f"commonty mail device v1\0{name}\0{fp or dev['fp']}\0{t}\0{method}\0{path}\0{hashlib.sha256(data).hexdigest()}"
+        sig = base64.b64encode((key or devsk).sign(m.encode())).decode()
+        req = urllib.request.Request(
+            W + path,
+            data=data if body is not None else None,
+            method=method,
+            headers={
+                "content-type": "application/json",
+                "x-dd-name": name,
+                "x-dd-device": fp or dev["fp"],
+                "x-dd-at": str(t),
+                "x-dd-sig": sig,
+            },
+        )
+        try:
+            r = urllib.request.urlopen(req)
+            return r.status, json.load(r)
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+
+    s, v = devcall("/api/mailkey/tester")
+    ok(
+        s == 200 and v["pk"] == mailpk and v["devices"][0]["fp"] == dev["fp"],
+        f"a member's key, to a device of theirs {s}",
+    )
+    ok(
+        [w["pub"] for w in v.get("worker", [])] == [open("mailsign.pub").read()],
+        "and the key the Worker signs with",
+    )
+    ok(
+        devcall("/api/mailkey/tester", key=Ed25519PrivateKey.generate())[0] == 401,
+        "signed by a device not confirmed here: refused",
+    )
+    ok(
+        devcall("/api/mailkey/tester", at=int(time.time()) - 3600)[0] == 401,
+        "an hour-old signature: refused",
+    )
+    ok(devcall("/api/mailkey/nobody")[0] == 404, "no inbox, no key")
+    s, v = devcall("/api/addresses")
+    ok(
+        s == 200
+        and v["address"] == "tester@commonty.test"
+        and alias in [x["address"] for x in v["aliases"]],
+        f"what they may send from {v}",
+    )
+    ok(
+        devcall("/api/addresses", key=Ed25519PrivateKey.generate())[0] == 401,
+        "not a device of theirs: refused",
+    )
+
+    import dkim as dkimpy
+
+    pub = open("dkim.pub").read()
+
+    def dns(name, timeout=5):
+        return (
+            f"v=DKIM1; k=rsa; p={pub}".encode()
+            if name.decode().startswith("cm1._domainkey.commonty.test")
+            else None
+        )
+
+    def signed(
+        frm, to="friend@example.net", subj="Lunch?", body=b"See you at noon.\r\n"
+    ):
+        bh = base64.b64encode(
+            hashlib.sha256(body.rstrip(b"\r\n") + b"\r\n").digest()
+        ).decode()
+        hdrs = [
+            ["From", frm],
+            ["To", to],
+            ["Date", "Sun, 18 Oct 2026 10:00:00 +0000"],
+            ["Message-ID", f"<{time.time_ns()}@commonty.test>"],
+            ["MIME-Version", "1.0"],
+            ["Content-Type", "text/plain; charset=utf-8"],
+        ]
+        s, v = devcall("/api/dkim", {"headers": hdrs, "bh": bh})
+        if s != 200:
+            return s, None
+        msg = (
+            v["header"]
+            + "\r\n"
+            + "".join(f"{n}: {x}\r\n" for n, x in hdrs)
+            + f"Subject: {subj}\r\n\r\n"
+        ).encode() + body
+        return s, msg
+
+    s, msg = signed("Tester <tester@commonty.test>")
+    ok(
+        s == 200 and dkimpy.verify(msg, dnsfunc=dns),
+        f"from their address: a DKIM signature that verifies {s}",
+    )
+    ok(
+        b" h=from:to:date:message-id:mime-version:content-type:from:to:cc:reply-to:date:message-id:in-reply-to:references:sender;"
+        in msg
+        and b"subject" not in msg.split(b"\r\n")[0].lower(),
+        "the subject is neither signed nor sent here; the rest signed once more than there are",
+    )
+    fake2 = b"From: victim@commonty.test\r\n" + msg
+    ok(
+        not dkimpy.verify(fake2, dnsfunc=dns),
+        "a second From added above: the signature breaks",
+    )
+    for bad in [
+        '"someone@commonty.test" <tester@commonty.test>',
+        "=?utf-8?q?someone=40commonty.test?= <tester@commonty.test>",
+        "tester@commonty.test, someone@commonty.test",
+    ]:
+        ok(signed(bad)[0] == 400, f"a From that shows another address: refused {bad}")
+    s, msg = signed(f"Tester <{alias}>")
+    ok(
+        s == 200 and dkimpy.verify(msg, dnsfunc=dns),
+        f"from an alias of theirs: signed {s}",
+    )
+    ok(
+        signed("someone@commonty.test")[0] == 403,
+        "from another member's address: refused",
+    )
+    ok(signed("tester@example.com")[0] == 403, "from another domain: refused")
+    ok(
+        signed("brave.otter.1234@commonty.test")[0] == 403,
+        "from an alias not theirs: refused",
+    )
+    # the same signed request sent again: refused
+    body = {
+        "headers": [["From", "tester@commonty.test"], ["To", "x@example.net"]],
+        "bh": "A" * 43 + "=",
+    }
+    t = int(time.time())
+    data = json.dumps(body).encode()
+    m = f"commonty mail device v1\0tester\0{dev['fp']}\0{t}\0POST\0/api/dkim\0{hashlib.sha256(data).hexdigest()}"
+    hd = {
+        "content-type": "application/json",
+        "x-dd-name": "tester",
+        "x-dd-device": dev["fp"],
+        "x-dd-at": str(t),
+        "x-dd-sig": base64.b64encode(devsk.sign(m.encode())).decode(),
+    }
+    first = urllib.request.urlopen(
+        urllib.request.Request(W + "/api/dkim", data=data, method="POST", headers=hd)
+    ).status
+    try:
+        urllib.request.urlopen(
+            urllib.request.Request(
+                W + "/api/dkim", data=data, method="POST", headers=hd
+            )
+        )
+        again = 200
+    except urllib.error.HTTPError as e:
+        again = e.code
+    ok(
+        (first, again) == (200, 401),
+        f"a signed request sent twice: the second refused {first} {again}",
+    )
+    ok(
+        signed("tester@commonty.test")[0] == 429,
+        "a fourth today (SEND_PER_DAY 3): refused",
+    )
+    ok(
+        devcall(
+            "/api/dkim",
+            {
+                "headers": [["From", "tester@commonty.test"], ["X-Evil", "1"]],
+                "bh": "A" * 43 + "=",
+            },
+        )[0]
+        == 400,
+        "a header not on the list: refused",
+    )
+
+    # off: their rule back on, the inbox's gone, nothing held for them
+    mail("tester@commonty.test")
+    s, v, _ = call("/api/inbox/off", {}, cookie=isess)
+    ok(s == 200 and v["on"] is False, f"inbox off {s} {v}")
+    mine = [
+        r
+        for r in fake("/state")["rules"].values()
+        if r["matchers"][0]["value"] == "tester@commonty.test"
+    ]
+    ok(
+        len(mine) == 1
+        and mine[0]["enabled"] is not False
+        and mine[0]["name"] == "Commonty member tester",
+        f"their own rule forwards again {mine}",
+    )
+    ok(held() == [], "what was waiting for a box is gone")
+    ok(
+        devcall("/api/mailkey/tester")[0] == 401,
+        "their device is no longer one to believe",
+    )
+
+    # the page the app opens to turn it on (inbox.html): the code both show,
+    # the passkey on this Worker's own page
+    import urllib.parse
+
+    frag = urllib.parse.urlencode(
+        {
+            "name": "tester",
+            "pk": mailpk,
+            "fp": dev["fp"],
+            "key": dev["key"],
+            "sig": keysig(mailpk),
+            "back": "https://files.commonty.test/_dd/mail",
+        }
+    )
+    # the entry is at v5 by now, where the passkey is cGsy
+    ictx = b.new_context(viewport={"width": 1000, "height": 760})
+    ictx.expose_function("__sign", lambda c: {**sign(c), "id": "cGsy"})
+    ictx.add_init_script(STUB)
+    ip = ictx.new_page()
+    ierrs = []
+    ip.on("pageerror", lambda e: ierrs.append(str(e)))
+    ip.goto(f"{W}/inbox#{frag}")
+    want = hashlib.sha256(f"tester\0{dev['fp']}\0{mailpk}".encode()).hexdigest()[:12]
+    want = "-".join(want[i : i + 4] for i in range(0, 12, 4))
+    for _ in range(50):
+        if ip.inner_text("#code"):
+            break
+        time.sleep(0.1)
+    ok(
+        ip.inner_text("#code") == want,
+        f"the code is the device's and the key's {ip.inner_text('#code')} {want}",
+    )
+    ok("tester@commonty.test" in ip.inner_text("#addr"), "says whose address")
+    ip.uncheck("#fwd")
+    ip.click("#pass")
+    try:
+        ip.wait_for_selector("#s2:not([hidden])", timeout=10000)
+    except Exception:
+        ok(False, f"turned on from the page: {ip.inner_text('#s1-msg')}")
+    s, v, _ = call("/api/inbox", cookie=isess)
+    ok(
+        v["on"] and v["fwd"] is False and v["pk"] == mailpk,
+        f"turned on from the page, no copy forwarded {v}",
+    )
+    ok(not ierrs, f"no errors on the inbox page {ierrs}")
+    ip.goto(f"{W}/inbox")
+    ok(
+        not ip.is_hidden("#s0") and ip.is_hidden("#s1"),
+        "opened by hand, it says to open it from Mail",
+    )
+    call("/api/inbox/off", {}, cookie=isess)
     b.close()
 if failed:
     sys.exit(f"{len(failed)} failed")

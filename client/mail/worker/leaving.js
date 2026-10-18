@@ -78,6 +78,13 @@ export async function forgetApi(req, env, body, json, h) {
     const used = l.rules.some((x) => x.id !== s.rule.id && !((h.ALIASES || {})[h.aliasOf(x)] === name) && (x.actions || []).some((a) => (a.value || []).some((v) => (v || '').toLowerCase() === (s.email || '').toLowerCase())));
     if (s.destination && !used) await h.cf(env, 'DELETE', `/accounts/${z.account}/email/routing/addresses/${s.destination.tag || s.destination.id}`);
   }
+  // their inbox's rule, its key, and mail no box has taken yet
+  for (const r of l.rules) {
+    if ((r.name || '') !== `${h.INBOX_RULE}${name}`) continue;
+    const g = await h.cf(env, 'DELETE', `/zones/${z.id}/email/routing/rules/${r.id}`);
+    if (!g.success) return json({ error: 'Cloudflare did not answer; try again later' }, 503);
+  }
+  await h.forgetInbox(env, name);
   // their own aliases: deleted, and nothing left saying they were theirs
   await h.forgetAliases(env, name);
   await env.PINNED.delete(`ended:${name}`);

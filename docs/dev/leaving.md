@@ -177,8 +177,11 @@ forge              their own repositories, then their account; what they
 games              every server and kept world of theirs          games forget
 mail               their <name>@<domain> rule, its destination if no other
                    rule uses it, their aliases (each address kept
-                   from anyone else, with no name on it), and what
-                   the Worker pinned                               mail Worker leaving.js
+                   from anyone else, with no name on it), their
+                   inbox's rule and key, mail no box has taken yet,
+                   and what the Worker pinned                      mail Worker leaving.js
+mailbox            every locked object of theirs in the mail bucket,
+                   every 5 minutes                                gate leaving.rs
 usage              their usage facts stop when there is nothing left to count
 ```
 

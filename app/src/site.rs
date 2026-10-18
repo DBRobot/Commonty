@@ -32,6 +32,7 @@ pub(crate) fn page_for(path: &str) -> Option<&'static str> {
         "/_dd/files" => "files",
         "/_dd/media" => "media",
         "/_dd/chat" => "chat",
+        "/_dd/mail" => "mail",
         "/_dd/settings" | "/_dd/backups" | "/_dd/devices" | "/_dd/network" | "/_dd/boxes"
         | "/_dd/storage" => "settings",
         _ => return None,
@@ -223,6 +224,26 @@ async fn serve<R: Runtime>(
     }
     if path == "/_dd/app/library" {
         return library(app).await;
+    }
+    // Mail (mail.rs): the member's mail key, the Worker asked as this
+    // device, mail signed for another member, and mail sent from here
+    if path.starts_with("/_dd/app/mail/") {
+        let post = req.method() == "POST";
+        let r = match (path.as_str(), post) {
+            ("/_dd/app/mail/key", false) => crate::mail::key(app, false).await,
+            ("/_dd/app/mail/key", true) => crate::mail::key(app, true).await,
+            ("/_dd/app/mail/worker", true) => crate::mail::ask(app, req.body()).await,
+            ("/_dd/app/mail/vouch", true) => crate::mail::vouch(app, req.body()).await,
+            ("/_dd/app/mail/send", true) => crate::mail::send(app, req.body()).await,
+            _ => Err((404, "not in the app".into())),
+        };
+        return Ok(match r {
+            Ok(v) => no_store(&v),
+            Err((s, why)) => plain(
+                StatusCode::from_u16(s).unwrap_or(StatusCode::BAD_GATEWAY),
+                &why,
+            ),
+        });
     }
     if path == "/_dd/app/archive" {
         return Ok(match archive_value(app).await? {
@@ -535,6 +556,8 @@ async fn proxy<R: Runtime>(
         "etag",
         "last-modified",
         "cache-control",
+        // who the box says sent another member's locked mail (mail.rs)
+        "x-dd-from",
     ] {
         if let Some(v) = r.headers().get(h).and_then(|v| v.to_str().ok()) {
             back = back.header(h, v);

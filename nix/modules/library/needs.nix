@@ -52,6 +52,34 @@
     };
   };
 
+  mail-inbox = {
+    what = "members' mail, locked to their key by the mail Worker before any box has it, kept in the storage pool; and the pipe their app sends mail through";
+    # ciphertext: mail the Worker locked, and TLS the member's app runs
+    traffic = {
+      class = "low";
+      upMbps = 2;
+    };
+    alwaysOn = true;
+    units = [ "dd-mail-hold-sign*" ];
+    base = {
+      uses = {
+        memory = "0";
+        storage = "0";
+      };
+      network = {
+        # port 25 of whichever server a member's mail goes to, and s3 and
+        # mail.<domain>
+        outbound = "internet";
+        inbound = "network";
+      };
+      depends = {
+        dd-verify.local = true;
+        garage.local = false;
+      };
+      privacy = "none"; # locked to the member's key before it arrives
+    };
+  };
+
   dd-transcode = {
     what = "plays a film a member's device cannot, decrypting it in memory only";
     # it decrypts the film it transcodes, for any member

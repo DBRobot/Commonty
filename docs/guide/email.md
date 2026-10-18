@@ -25,7 +25,9 @@ that passkey is removed.
   takes effect.
 - Anything anyone sends to `<name>@<domain>`.
 
-You cannot send mail from this address. It only forwards.
+On its own, this address only forwards. Turn on [Mail](services/mail.md)
+to keep your mail locked in Commonty and to send from this address and
+your aliases.
 
 ## Aliases
 

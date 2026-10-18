@@ -40,3 +40,14 @@ servers/fleet/web/network.js          static/network.js
 servers/chat/web/chat.js              static/chat.js
 servers/chat/web/chat.css             static/chat.css
 servers/chat/web/pages/chat.html      pages/chat.html
+servers/mail/web/mail.js              static/mail.js
+servers/mail/web/mail.css             static/mail.css
+servers/mail/web/mail-mailbox.js      static/mail-mailbox.js
+servers/mail/web/mail-search.js       static/mail-search.js
+servers/mail/web/mail-filter.js       static/mail-filter.js
+servers/mail/web/mail-compose.js      static/mail-compose.js
+client/mail/worker/mail-hpke.js       static/mail-hpke.js
+client/mail/worker/mail-mime.js       static/mail-mime.js
+client/mail/worker/mail-ids.js        static/mail-ids.js
+client/mail/worker/mail-object.js     static/mail-object.js
+servers/mail/web/pages/mail.html      pages/mail.html

@@ -25,6 +25,7 @@ pub mod ident;
 mod joke;
 mod leaving;
 pub mod library;
+pub mod mail;
 pub mod network;
 mod oidc;
 pub mod pages;
@@ -95,6 +96,8 @@ struct App {
     sso: Mutex<HashMap<String, sso::Waiting>>,
     /// the encrypted libraries' gate (library.rs), on a box with the bucket
     library: Option<library::Gate>,
+    /// members' locked mail, on a box with the mail bucket (mail.rs)
+    mail: Option<mail::Mail>,
     /// whose entry named a reader of each library last time (library.rs)
     library_owners: Mutex<HashMap<String, String>>,
     network: Option<network::Door>,
@@ -200,6 +203,8 @@ pub struct Config {
     pub photos: Option<Photos>,
     /// the library gate, if this box holds the libraries bucket
     pub library: Option<library::Gate>,
+    /// members' locked mail (mail.rs), if this box keeps the mail bucket
+    pub mail: Option<mail::Mail>,
     pub network: Option<network::Door>,
     /// The library the demo account reads: an id and its key, both in the
     /// open on purpose (see the option in modules/library/libraries.nix).
@@ -1814,6 +1819,22 @@ async fn files_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
     library_page(&app, &headers, "files", "/_dd/files")
 }
 
+/// Mail: its code holds the member's mail key, so the app serves it, as it
+/// does Files; a browser is handed to the app (mail.rs keeps the mail)
+async fn mail_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    match app.signed_in(cookie) {
+        Some(user)
+            if (app.member(&user) || app.suspension(&user).is_some())
+                && user != pages::DEMO_USER =>
+        {
+            use_app()
+        }
+        Some(_) => Redirect::to("/_dd/home").into_response(),
+        None => Redirect::to("/_dd/login?rd=/_dd/mail").into_response(),
+    }
+}
+
 /// Movies & TV: the library's Movies and Shows, the same way as Files.
 async fn media_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     library_page(&app, &headers, "media", "/_dd/media")
@@ -2821,6 +2842,7 @@ pub async fn start(
         boxes: cfg.boxes.clone(),
         sso: Mutex::new(HashMap::new()),
         library: cfg.library,
+        mail: cfg.mail,
         library_owners: Mutex::new(HashMap::new()),
         network: cfg.network,
         demo_library: cfg.demo_library,
@@ -2839,6 +2861,10 @@ pub async fn start(
         friends: friends::Store::open(&state_dir)?,
         controllers: controller::Store::open(Some(state_dir.join("controller-backups.json"))),
     });
+    // members' locked mail, taken from the mail Worker as it comes (mail.rs)
+    if app.mail.is_some() {
+        tokio::spawn(mail::run(app.clone()));
+    }
     // the directory's reads ask who this is the way every route does
     let weak = Arc::downgrade(&app);
     directory.set_caller(Box::new(move |h| {
@@ -3039,6 +3065,7 @@ pub async fn start(
         // what any page needs before it can ask a passkey for anything
         .route("/_dd/config", get(page_config))
         .route("/_dd/files", get(files_page))
+        .route("/_dd/mail", get(mail_page))
         .route("/_dd/media", get(media_page))
         // the boxes are on Settings' Network tab now
         .route(
@@ -3200,6 +3227,19 @@ pub async fn start(
             "/_dd/images/{*path}",
             axum::routing::any(library::images_path),
         )
+        // a member's locked mail (mail.rs): their own objects, mail for
+        // another member, and the pipe their app sends through
+        .route("/_dd/mail/list/{kind}", get(mail::list))
+        .route(
+            "/_dd/mail/o/{kind}/{id}",
+            axum::routing::any(mail::object).layer(axum::extract::DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/_dd/mail/deliver/{to}/{id}",
+            axum::routing::post(mail::deliver)
+                .layer(axum::extract::DefaultBodyLimit::max(mail::MAX)),
+        )
+        .route("/_dd/mail/pipe", get(mail::pipe))
         .route("/_dd/dav/{lib}", axum::routing::any(library::handle_root))
         .route("/_dd/dav/{lib}/", axum::routing::any(library::handle_root))
         .route(
@@ -3482,6 +3522,18 @@ mod tests {
         directory_readers: Vec<String>,
         library: Option<library::Gate>,
     ) -> (String, session::Sessions) {
+        gate_mail(what, members, home, directory_readers, library, None).await
+    }
+
+    /// the same, holding the mail bucket too (mail.rs)
+    async fn gate_mail(
+        what: &str,
+        members: Option<Members>,
+        home: Vec<pages::Service>,
+        directory_readers: Vec<String>,
+        library: Option<library::Gate>,
+        mail: Option<mail::Mail>,
+    ) -> (String, session::Sessions) {
         let d = std::env::temp_dir().join(format!("dd-gate-{what}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
@@ -3501,6 +3553,7 @@ mod tests {
             web_dir: None,
             photos: None,
             library,
+            mail,
             network: None,
             demo_library: None,
             app_manifest: None,
@@ -4539,5 +4592,170 @@ mod tests {
         assert!(!valid_user("../etc"));
         assert!(!valid_user(".hidden"));
         assert!(!valid_user("Bad"));
+    }
+
+    #[tokio::test]
+    async fn a_members_mail_is_theirs_alone() {
+        let (tom, ann, sue, eve) = (
+            Person::new("tom"),
+            Person::new("ann"),
+            Person::new("sue"),
+            Person::new("eve"),
+        );
+        let mut members = Members::list(vec![tom.id(), ann.id()]);
+        // sue was suspended just now: she may take hers, and add nothing
+        members.revoked.push(sue.id());
+        members.suspended.insert(sue.id(), "a test".into());
+        members.removed.insert(sue.id(), identity::now());
+        let (endpoint, _store) = mail::tests::fake_s3().await;
+        let (url, s) = gate_mail(
+            "mail",
+            Some(members),
+            vec![],
+            vec![],
+            None,
+            Some(mail::tests::mail_at(&endpoint)),
+        )
+        .await;
+        for p in [&tom, &ann, &sue, &eve] {
+            p.publish(&url).await;
+        }
+        let as_ = |who: &str| Some(cookie(&s.issue(who)));
+        let send = |method: &str, path: &str, c: Option<String>, body: Vec<u8>| {
+            let mut r = client()
+                .request(method.parse().unwrap(), format!("{url}{path}"))
+                .body(body);
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            async move { r.send().await.unwrap() }
+        };
+        let id = "0mvd7o78x0n2r1k185a2v";
+        let at = format!("/_dd/mail/o/in/{id}");
+        assert_eq!(send("GET", &at, None, vec![]).await.status(), 401);
+        assert_eq!(
+            send("PUT", &at, as_("tom"), b"locked".to_vec())
+                .await
+                .status(),
+            204
+        );
+        let r = send("GET", &at, as_("tom"), vec![]).await;
+        assert_eq!(r.status(), 200);
+        assert_eq!(r.bytes().await.unwrap().as_ref(), b"locked");
+        // another member's are under their own name: not tom's
+        assert_eq!(send("GET", &at, as_("ann"), vec![]).await.status(), 404);
+        let list: serde_json::Value = send("GET", "/_dd/mail/list/in", as_("ann"), vec![])
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(list, serde_json::json!([]));
+        let list: serde_json::Value = send("GET", "/_dd/mail/list/in", as_("tom"), vec![])
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(list[0]["id"], id);
+        assert_eq!(send("DELETE", &at, as_("ann"), vec![]).await.status(), 204);
+        assert_eq!(
+            send("GET", &at, as_("tom"), vec![]).await.status(),
+            200,
+            "ann deleting hers leaves tom's"
+        );
+        // suspended: reads her own, writes nothing; a stranger nothing at all
+        assert_eq!(
+            send("GET", "/_dd/mail/list/in", as_("sue"), vec![])
+                .await
+                .status(),
+            200
+        );
+        assert_eq!(
+            send("PUT", &at, as_("sue"), b"x".to_vec()).await.status(),
+            403
+        );
+        assert_eq!(
+            send("GET", "/_dd/mail/list/in", as_("eve"), vec![])
+                .await
+                .status(),
+            403
+        );
+        assert_eq!(
+            send("PUT", "/_dd/mail/o/secrets/x", as_("tom"), b"x".to_vec())
+                .await
+                .status(),
+            400
+        );
+        assert_eq!(
+            send(
+                "PUT",
+                &format!("/_dd/mail/o/in/..%2Fann%2Fin%2F{id}"),
+                as_("tom"),
+                b"x".to_vec()
+            )
+            .await
+            .status(),
+            400
+        );
+        // to another member: only once they have Mail on, and never over an id
+        let to_ann = format!("/_dd/mail/deliver/ann/{id}");
+        assert_eq!(
+            send("POST", &to_ann, as_("tom"), b"locked to ann".to_vec())
+                .await
+                .status(),
+            404
+        );
+        assert_eq!(
+            send("PUT", "/_dd/mail/o/key/doc", as_("ann"), b"{}".to_vec())
+                .await
+                .status(),
+            204
+        );
+        assert_eq!(
+            send("POST", &to_ann, as_("tom"), b"locked to ann".to_vec())
+                .await
+                .status(),
+            204
+        );
+        assert_eq!(
+            send("POST", &to_ann, as_("tom"), b"locked again!".to_vec())
+                .await
+                .status(),
+            409
+        );
+        let r = send("GET", &at, as_("ann"), vec![]).await;
+        assert_eq!(r.headers().get("x-dd-from").unwrap(), "tom");
+        assert_eq!(r.bytes().await.unwrap().as_ref(), b"locked to ann");
+        assert_eq!(
+            send(
+                "POST",
+                "/_dd/mail/deliver/eve/0mvd7o78x0n2r1k185a2w",
+                as_("tom"),
+                b"locked x".to_vec()
+            )
+            .await
+            .status(),
+            404
+        );
+        assert_eq!(
+            send("POST", &to_ann, as_("sue"), b"locked to ann".to_vec())
+                .await
+                .status(),
+            403
+        );
+        // the pipe: the app's alone, never a page's
+        let pipe = client()
+            .get(format!(
+                "{url}/_dd/mail/pipe?domain=example.com&host=mx.example.com"
+            ))
+            .header("cookie", as_("tom").unwrap())
+            .header("origin", "https://evil.example")
+            .header("connection", "Upgrade")
+            .header("upgrade", "websocket")
+            .header("sec-websocket-version", "13")
+            .header("sec-websocket-key", B64.encode([7u8; 16]))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(pipe.status(), 403);
     }
 }

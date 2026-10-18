@@ -100,6 +100,7 @@ in `nix/tests/` unless it says otherwise; "crate tests" run in
 | `gate` | the front door | `src/`, `templates/`, `web/`; `gate/verify.nix` | crate tests, `directory`, `network`, `library`, `checks.nginx` | [gate.md](gate.md) |
 | `home` | the home, settings, friends and add-a-device pages | pages; gate `home.rs`, `friends.rs`, `adddevice.rs`, `storage.rs` | crate tests | [gate.md](gate.md) |
 | `library` | the libraries bucket behind the gate: presigned urls, listing, trash, WebDAV; members' disk images (`/_dd/images`) | `src/` (in the gate); `library/libraries.nix` | `library`, crate tests | [libraries.md](libraries.md) |
+| `mail` | the Mail page: a member's locked inbox, opened on their device | page; `library/mail.nix`; gate `mail.rs`; the mail Worker (`client/mail`), `client/mailsend`, the app's `mail.rs` | `mail-worker`, `mail-page`, crate tests | [mail.md](mail.md) |
 | `media` | the Movies & TV page and its player | page; `media/webdav-media.nix` | `library`, `transcode` | [libraries.md](libraries.md) |
 | `observe` | the Metrics page over Thanos | page; `observe/metrics-ui.nix` | `metrics`, `thanos`, `metrics-ui` | - |
 | `smarthome` | Smart home: the door in front of Home Assistant on a household's home controller (a Pi, not a box), and Home Assistant's Commonty theme | `door/` (crate smarthome-door), `web/`, `theme/`; `smarthome/home-assistant.nix`, `smarthome/door.nix`, `smarthome/tang.nix`, `smarthome/cache-door.nix`; the system in `nix/controller` | `home-controller`, `dns-worker`, crate tests | [home-controller.md](home-controller.md) |

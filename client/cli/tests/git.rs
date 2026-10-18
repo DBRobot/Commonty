@@ -73,6 +73,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
     let listed = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
     let box_dir = scratch("box").join("keys");
     let (addr, _task) = verify::start(verify::Config {
+        mail: None,
         home: vec![],
         fleet: Default::default(),
         thanos: None,

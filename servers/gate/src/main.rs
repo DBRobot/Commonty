@@ -143,6 +143,7 @@ async fn main() -> Result<()> {
             Err(_) => None,
         },
         library: verify::library::from_env()?,
+        mail: verify::mail::from_env()?,
         network: verify::network::from_env()?,
         tmdb: match std::env::var("VERIFY_TMDB_KEY_FILE") {
             Ok(f) => Some(std::fs::read_to_string(f)?.trim().to_string()),

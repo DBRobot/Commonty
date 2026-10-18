@@ -112,10 +112,12 @@ pub struct PutGuard {
 /// keys: when full, the quiet go first, then the one quiet longest, so a
 /// flood of new keys never shuts a newcomer out
 #[derive(Default)]
-struct Window(std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>);
+pub(crate) struct Window(
+    std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
+);
 
 impl Window {
-    fn take(&mut self, key: &str, most: usize, now: std::time::Instant) -> bool {
+    pub(crate) fn take(&mut self, key: &str, most: usize, now: std::time::Instant) -> bool {
         let minute = Duration::from_secs(60);
         let m = &mut self.0;
         if !m.contains_key(key) && m.len() >= WINDOW_MAX {
@@ -361,7 +363,7 @@ impl Directory {
 
     /// Whether the agreed state has been read at all: until it has, it
     /// knows nothing, which is not "nobody"
-    fn agreed_known(&self) -> bool {
+    pub(crate) fn agreed_known(&self) -> bool {
         self.ident.as_ref().is_some_and(|a| a.state().is_some())
     }
 

@@ -6,7 +6,14 @@
 // config): the gateway's address on the fleet's network, or a proxied
 // CNAME to the tunnel while the door is open. Every five minutes the zone is
 // put in step with it. Only an A at that address or a CNAME to that tunnel
-// is ever changed; mail, TXT, CAA, anyone else's record: never.
+// is ever changed; mail, TXT, CAA, anyone else's record: never - but for
+// the domain's mail key, below.
+//
+// Mail. The release's DKIM key (fleet/mail.json dkim, `dd mail dkim`) at
+// <selector>._domainkey, so a member's mail sent from their own device is
+// known to be the domain's; and a DMARC record when the domain has none.
+// Only a record of exactly those names and kinds, and one this Worker made
+// (its comment says so) is ever changed.
 //
 // Certificates. A box proves to Let's Encrypt that it serves a name by a
 // TXT record at _acme-challenge.<name>, and only this Worker writes one: a
@@ -35,8 +42,12 @@
 // the account, nothing more) for the boxes' own tunnels; CF_API (a test's
 // fake).
 
-import { BOXES, NAMES, RECORDS } from './fleet.js';
+import * as fleet from './fleet.js';
 import { controllerApi, controllerSigned } from './controller.js';
+
+const { BOXES, NAMES, RECORDS } = fleet;
+// a fleet.js from before mail has no MAIL
+const MAIL = fleet.MAIL ?? null;
 
 // lego asks again after a failure; a recorded request is good this long
 const SKEW = 300;
@@ -354,12 +365,48 @@ export async function converge(env) {
   return done;
 }
 
+const MAIL_NOTE = 'commonty mail';
+
+// the mail key's record and DMARC's, as fleet.js MAIL has them
+export async function convergeMail(env) {
+  if (!MAIL || !MAIL.zone) return [];
+  const done = [];
+  const want = [];
+  if (MAIL.dkim && /^[a-z0-9-]{1,32}$/.test(MAIL.dkim.selector || '') && /^[A-Za-z0-9+/=]{100,1000}$/.test(MAIL.dkim.p || '')) {
+    want.push({ name: `${MAIL.dkim.selector}._domainkey.${MAIL.zone}`, kind: 'v=DKIM1', content: `v=DKIM1; k=rsa; p=${MAIL.dkim.p}`, replace: true });
+  }
+  if (MAIL.dmarc && /^v=DMARC1;/.test(MAIL.dmarc)) want.push({ name: `_dmarc.${MAIL.zone}`, kind: 'v=DMARC1', content: MAIL.dmarc, replace: false });
+  for (const w of want) {
+    try {
+      const have = (await dns(env, 'GET', `?type=TXT&name=${encodeURIComponent(w.name)}&per_page=100`)).filter((r) => r.type === 'TXT' && r.name === w.name);
+      const same = have.filter((r) => unquote(r.content).replace(/" "/g, '').startsWith(w.kind));
+      if (same.some((r) => unquote(r.content).replace(/" "/g, '') === w.content)) continue;
+      const ours = same.find((r) => (r.comment || '') === MAIL_NOTE);
+      if (ours) {
+        await dns(env, 'PUT', `/${ours.id}`, { type: 'TXT', name: w.name, content: w.content, ttl: 3600, comment: MAIL_NOTE });
+        done.push(`updated ${w.name} TXT`);
+      } else if (same.length && !w.replace) {
+        // the domain's own DMARC, set by someone: theirs to keep
+        continue;
+      } else if (same.length) {
+        done.push(`left ${w.name} alone: it has a ${w.kind} record this Worker did not make`);
+      } else {
+        await dns(env, 'POST', '', { type: 'TXT', name: w.name, content: w.content, ttl: 3600, comment: MAIL_NOTE });
+        done.push(`added ${w.name} TXT`);
+      }
+    } catch (e) {
+      done.push(`${w.name}: ${e.message || e}`);
+    }
+  }
+  return done;
+}
+
 export default {
   fetch: handle,
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(
-      converge(env).then((done) => {
-        for (const d of done) console.log(d);
+      Promise.all([converge(env), convergeMail(env)]).then(([done, mail]) => {
+        for (const d of [...done, ...mail]) console.log(d);
       }),
     );
   },

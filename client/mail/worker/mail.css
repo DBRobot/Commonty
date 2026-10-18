@@ -148,3 +148,11 @@ body.al-frame { background: transparent; margin: 0; }
   .al-act { gap: 8px; padding-top: 2px; }
   .al-find { width: 100%; order: 5; }
 }
+
+/* turning on a locked inbox (inbox.html): the code the app shows too */
+.fl-code { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.fl-code span { font-size: 13px; color: var(--ink-2); }
+.fl-code b { font-size: 22px; letter-spacing: .04em; color: var(--ink); }
+.fl-code small { font-size: 13px; color: var(--ink-2); }
+.fl-check { display: flex; gap: 10px; align-items: center; font-weight: 500 !important; }
+.fl-check input { width: 18px !important; height: 18px !important; }

@@ -4,5 +4,9 @@
   "zone": "82b660d468529424bc6c816a91ef1a8e",
   "kv": "6612cf33f9e240568e3019d03f6a5afa",
   "script": "commonty-mail",
-  "reader": "vBV/V1YXc7brDTEuWDJo75HdKjTM0GVEtSvC/5cr66Q="
+  "reader": "vBV/V1YXc7brDTEuWDJo75HdKjTM0GVEtSvC/5cr66Q=",
+  "dkim": {
+    "selector": "cm1",
+    "public": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvdHQ6R0v5Dtr3Z2JY29EfjGCG8ZAQkktV4JriLUvBEcdspKHySPXbvQoGtARca0G2PdOkMgf37tSo80UkKKIAxz4Un5Rg7zJNbRHhFXs4ozddzm1hK8By+yk9oXPJ1HjGeO5dXXwuAHItfyMU/OHTl+tKbCO2IROVa3bjV3EYBsR4f+Bwkocgj7vIP+WnYllyMsCQYkApL7NZVHOXoVVgbD5e57KO/xa0DebejpIZ6qhykGH6ewVlQYkfTE4Uo9pzgwT8Kv09Juvz+z6v1Wb1QGVvdVhcJL0FU0GfV4C6y+mgSbtl92zcUbvBivEcVxopTFYmCFA7y2w85JHQ9ufAQIDAQAB"
+  }
 }

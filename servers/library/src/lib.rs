@@ -285,6 +285,93 @@ impl Gate {
         Ok(body)
     }
 
+    /// One object's bytes, or None when there is none (the mail store,
+    /// servers/gate/src/mail.rs, keeps blobs a text body would mangle)
+    pub async fn get_bytes(
+        &self,
+        object: &str,
+    ) -> Result<Option<(Vec<u8>, Vec<(String, String)>)>> {
+        let url = self.presign_for("GET", object, 60);
+        let r = reqwest::Client::new().get(&url).send().await?;
+        if r.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !r.status().is_success() {
+            return Err(anyhow!("s3 {}", r.status()));
+        }
+        let meta = r
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| {
+                let k = k.as_str().strip_prefix("x-amz-meta-")?;
+                Some((k.to_string(), v.to_str().ok()?.to_string()))
+            })
+            .collect();
+        Ok(Some((r.bytes().await?.to_vec(), meta)))
+    }
+
+    /// One object written whole, with metadata of its own (x-amz-meta-*)
+    pub async fn put_bytes(
+        &self,
+        object: &str,
+        body: Vec<u8>,
+        meta: &[(&str, &str)],
+    ) -> Result<()> {
+        let names: Vec<String> = meta
+            .iter()
+            .map(|(k, _)| format!("x-amz-meta-{k}"))
+            .collect();
+        let extra: Vec<(&str, &str)> = names
+            .iter()
+            .map(|k| k.as_str())
+            .zip(meta.iter().map(|(_, v)| *v))
+            .collect();
+        let len = body.len().to_string();
+        let mut with = extra.clone();
+        with.push(("content-length", &len));
+        self.call_with(
+            reqwest::Method::PUT,
+            &format!("/{}", uri_encode(object, true)),
+            "",
+            &with,
+            body,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_object(&self, object: &str) -> Result<()> {
+        self.call(
+            reqwest::Method::DELETE,
+            &format!("/{}", uri_encode(object, true)),
+            "",
+            &[],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// The objects under `prefix` after `after`, in key order, at most
+    /// `max`: (key, size)
+    pub async fn list(&self, prefix: &str, after: &str, max: usize) -> Result<Vec<(String, u64)>> {
+        let mut q = vec![
+            ("list-type", "2".to_string()),
+            ("max-keys", max.to_string()),
+            ("prefix", prefix.to_string()),
+        ];
+        if !after.is_empty() {
+            q.push(("start-after", after.to_string()));
+        }
+        q.sort();
+        let qs = q
+            .iter()
+            .map(|(k, v)| format!("{}={}", uri_encode(k, false), uri_encode(v, false)))
+            .collect::<Vec<_>>()
+            .join("&");
+        let xml = self.call(reqwest::Method::GET, "", &qs, &[]).await?;
+        Ok(contents(&xml))
+    }
+
     pub(crate) async fn copy(&self, from: &str, to: &str) -> Result<()> {
         let source = format!("/{}/{}", self.bucket, uri_encode(from, true));
         self.call(
@@ -304,6 +391,27 @@ impl Gate {
     }
 }
 
+/// (Key, Size) of each <Contents> in a ListObjectsV2 answer
+fn contents(xml: &str) -> Vec<(String, u64)> {
+    let tag = |s: &str, t: &str| -> Option<String> {
+        let a = s.find(&format!("<{t}>"))? + t.len() + 2;
+        let b = s[a..].find(&format!("</{t}>"))? + a;
+        Some(s[a..b].to_string())
+    };
+    xml.split("<Contents>")
+        .skip(1)
+        .filter_map(|c| {
+            let key = tag(c, "Key")?
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&apos;", "'")
+                .replace("&amp;", "&");
+            Some((key, tag(c, "Size")?.parse().ok()?))
+        })
+        .collect()
+}
+
 /// what a token holder is to a library: the gate decides who is which
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Role {
@@ -316,6 +424,19 @@ pub mod dav;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_listing_read() {
+        let xml = "<ListBucketResult><Contents><Key>tester/in/0a</Key><Size>12</Size></Contents><Contents><Key>tester/in/a&amp;b</Key><Size>3</Size></Contents></ListBucketResult>";
+        assert_eq!(
+            contents(xml),
+            vec![
+                ("tester/in/0a".to_string(), 12),
+                ("tester/in/a&b".to_string(), 3)
+            ]
+        );
+        assert!(contents("<ListBucketResult/>").is_empty());
+    }
 
     #[test]
     fn civil_dates() {

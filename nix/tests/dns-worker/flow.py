@@ -492,6 +492,54 @@ check(
 p = subprocess.run(["bash", sys.argv[2], "converge"], capture_output=True, text=True)
 check("door helper: converge", (p.returncode, "names in step" in p.stdout), (0, True))
 
+# mail: the release's DKIM key and a DMARC record, and nothing else's touched
+txt = {x["name"]: x for x in get("http://127.0.0.1:8899/records") if x["type"] == "TXT"}
+dk = txt.get("cm1._domainkey.commonty.test", {})
+unq = lambda s: s[1:-1] if s.startswith('"') and s.endswith('"') else s
+check(
+    "mail: the DKIM key published",
+    (
+        unq(dk.get("content", "")).startswith("v=DKIM1; k=rsa; p=AAAA"),
+        dk.get("comment"),
+    ),
+    (True, "commonty mail"),
+)
+check(
+    "mail: DMARC published",
+    unq(txt.get("_dmarc.commonty.test", {}).get("content", "")),
+    "v=DMARC1; p=none; adkim=s; aspf=r",
+)
+check("mail: once in step, nothing more is written", converge(8789), 0)
+seed(
+    [
+        {
+            "type": "TXT",
+            "name": "_dmarc.commonty.test",
+            "content": "v=DMARC1; p=reject",
+            "proxied": False,
+        }
+    ]
+)
+for r in get("http://127.0.0.1:8899/records"):
+    if (
+        r["type"] == "TXT"
+        and r["name"] == "_dmarc.commonty.test"
+        and r.get("comment") == "commonty mail"
+    ):
+        req = urllib.request.Request(
+            "http://127.0.0.1:8899/client/v4/zones/zone1/dns_records/" + r["id"],
+            method="DELETE",
+            headers={"authorization": "Bearer dns-token"},
+        )
+        urllib.request.urlopen(req).read()
+converge(8789)
+mine = [
+    unq(x["content"])
+    for x in get("http://127.0.0.1:8899/records")
+    if x["type"] == "TXT" and x["name"] == "_dmarc.commonty.test"
+]
+check("mail: a DMARC record someone else made is theirs", mine, ["v=DMARC1; p=reject"])
+
 if fails:
     print("\n".join(fails))
     sys.exit(1)

@@ -21,6 +21,7 @@
 // if a listing missed one.
 
 import { OWNER } from './fleet.js';
+import { mailKey, holdMail } from './inbox.js';
 
 const MAX = 100;
 // the addresses a member is offered in a day, the same ten however often
@@ -84,6 +85,29 @@ async function listOf(env, member) {
 
 // on, and not past the time it was to turn off
 const live = (a, now) => !!a.on && !(a.e && now >= a.e);
+
+// a member's aliases that take mail now, with their labels: what Mail
+// offers to send from (inbox.js)
+export async function liveAliases(env, member) {
+  const now = Math.floor(Date.now() / 1000);
+  const forgot = Number((await env.PINNED.get(`forgot:${member}`)) || 0);
+  const out = [];
+  for (const local of await listOf(env, member)) {
+    const a = await read(env, `alias:${local}`, null);
+    if (a && a.m === member && !(forgot >= a.t) && live(a, now)) out.push({ address: `${local}@${env.DOMAIN}`, label: a.l || '' });
+  }
+  return out;
+}
+
+// may `member` send as <local>@<domain>: an alias of theirs, on, and not
+// forgotten (the mail Worker's DKIM signing, dkim.js)
+export async function aliasOwned(env, member, local) {
+  if (!LOCAL.test(local || '')) return false;
+  const a = await read(env, `alias:${local}`, null);
+  if (!a || a.m !== member) return false;
+  const [owned, forgot] = await Promise.all([env.PINNED.get(`owner:${member}:${local}`), env.PINNED.get(`forgot:${member}`)]);
+  return owned !== null && !(Number(forgot || 0) >= a.t) && live(a, Math.floor(Date.now() / 1000));
+}
 // a day, in seconds; shorter only in the test (nix/tests/mail-worker.nix)
 const dayLen = (env) => {
   const d = Number(env.ALIAS_DAY);
@@ -272,8 +296,16 @@ export async function aliasMail(message, env, h) {
   if (owned === null || Number(forgot || 0) >= a.t) return message.setReject('No such address here');
   if (!live(a, Math.floor(Date.now() / 1000))) return message.setReject('This address is turned off');
   const s = h.stateIn(await h.listsShared(env), env, a.m);
-  if (!s.email || !s.confirmed) return message.setReject('This address has nowhere to go yet');
-  await message.forward(s.email);
+  // their inbox, if they have one: locked and held, and forwarded as well
+  // if they want it (or if it could not be held)
+  const key = await mailKey(env, a.m);
+  const held = key ? await holdMail(env, a.m, key, message, local) : false;
+  if (key && held && !key.fwd) {
+    // kept, and not forwarded
+  } else {
+    if (!s.email || !s.confirmed) return held ? undefined : message.setReject('This address has nowhere to go yet');
+    await message.forward(s.email);
+  }
   // which headers Cloudflare adds, and where, for the owner's own aliases:
   // their names alone, to see where its checks of the sender can be read
   if (a.m === OWNER) console.log(`alias: header names ${[...message.headers.keys()].join(' ')}`);

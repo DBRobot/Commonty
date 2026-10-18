@@ -29,6 +29,7 @@ These pages are in four parts:
 
 ## Services
 
+- [Mail](guide/services/mail.md)
 - [Files](guide/services/files.md)
 - [Movies & TV](guide/services/movies.md)
 - [Photos](guide/services/photos.md)
@@ -58,6 +59,7 @@ These pages are in four parts:
 - [Game servers](dev/games.md)
 - [Data the services are built with](dev/data.md)
 - [Encrypted libraries](dev/libraries.md)
+- [Mail](dev/mail.md)
 - [Leaving, and announcing a change](dev/leaving.md)
 - [Programs we package](dev/packaged.md)
 - [Pull requests, CI and releases](dev/ci.md)

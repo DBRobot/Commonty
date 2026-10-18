@@ -491,6 +491,24 @@ pub(crate) async fn tick(app: &App) {
                 );
             }
         }
+        // their locked mail (mail.rs): every object under their name
+        if let Some(m) = &app.mail
+            && identity::valid_name(&l.name)
+            && !w.done.contains("mailbox")
+        {
+            match m.forget(&l.name).await {
+                Ok(n) => {
+                    app.directory
+                        .leaving
+                        .mark(&l.name, l.left, |w| _ = w.done.insert("mailbox".into()));
+                    eprintln!(
+                        "leaving: member {}: their mail is gone ({n} object(s))",
+                        l.id
+                    );
+                }
+                Err(e) => eprintln!("leaving: member {}: their mail: {e:#}", l.id),
+            }
+        }
         if let Some(url) = &mail
             && !w.done.contains("mail")
         {

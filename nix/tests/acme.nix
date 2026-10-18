@@ -50,6 +50,7 @@ in
         export const BOXES = {"box1": "$(cat ${key}/spki)"};
         export const NAMES = {"box1": ${builtins.toJSON names}};
         export const RECORDS = null;
+        export const MAIL = null;
         export const MEMBERS = {};
         EOF
         cat > $out/wrangler.toml <<'EOF'

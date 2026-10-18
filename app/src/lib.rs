@@ -12,6 +12,7 @@ mod handoff;
 #[cfg(desktop)]
 mod installer;
 mod local;
+mod mail;
 mod net;
 mod paths;
 mod photos;

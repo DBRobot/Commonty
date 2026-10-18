@@ -507,6 +507,7 @@ impl Role {
 const ICONS: &[(&str, &str)] = &[
     ("photos", "servers/web-shared/icons/photos.svg"),
     ("videos", "servers/web-shared/icons/videos.svg"),
+    ("mail", "servers/web-shared/icons/mail.svg"),
     ("files", "servers/web-shared/icons/files.svg"),
     ("chat", "servers/web-shared/icons/chat.svg"),
     ("code", "servers/web-shared/icons/code.svg"),

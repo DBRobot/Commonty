@@ -12,7 +12,7 @@ not Nix: what the box found on itself and what its owner chose
     storage   a node of the garage cluster; the box's own backup key
     photos    ente
     media     Movies & TV and Files tiles, uploads, per-user directories
-    library   members' encrypted libraries behind the gate, and the transcoder
+    library   members' encrypted libraries and their locked mail behind the gate, and the transcoder
     llm       llama-cpp, its Chat page and web search
     game      game servers a member starts, each in a guest of its own
     forge     forgejo and the github mirror

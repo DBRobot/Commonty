@@ -451,7 +451,23 @@ pwused:<member>         when it last made one: apart, so a use never writes
 pwsite:<member>:<site>  the alias Passwords just made there, for ten minutes
 forgot:<member>         when they left, for a day: their aliases made before it are dead
 alias:<local>           {gone}: deleted, its member forgotten, never given out again
+mailkey:<member>        {pk, sign: [{fp, key}], fwd, at}: their locked inbox's
+                        key, the devices that may ask as them, forwarding on
+signkeys                [{kid, pub, since}]: every key MAIL_SIGN has had
 ```
+
+**The locked inbox** ([Mail](mail.md)) is `inbox.js`. A member turns it on
+at `/inbox`, with their passkey on this Worker's page, naming the key their
+app made and the device that may send. Their address's rule then sends
+mail here: their own rule is kept, turned off, as where it forwards, and
+`Commonty inbox <name>` routes the address to the Worker. Mail to it, and
+to their aliases, is locked and put in the Hold Durable Object until a box
+takes it. A box asks at `/api/hold/*`, signed by its TPM, with a time newer
+than its last. A member's device asks at `/api/mailkey/<name>`,
+`/api/addresses` and `/api/dkim`, signed with the key they confirmed
+(`commonty mail device v1\0<name>\0<fp>\0<time>\0<method>\0<path>\0<sha256>`).
+`dkim.js` signs only the headers it lists and the body's hash, for a From
+of theirs, 200 a day; its key is the `DKIM_KEY` secret (`dd mail dkim`).
 
 Mail goes on only while the alias's record and its owner key both say so,
 and the alias was made after any `forgot:` of its member's: KV has no

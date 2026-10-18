@@ -942,6 +942,9 @@ async fn photos<R: Runtime>(
     client(site, "photos", path, true).await
 }
 
+/// what a page the app hands a browser may load and run
+const PAGE_POLICY: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https:; media-src 'self' blob:; connect-src 'self' https://api.themoviedb.org https://image.tmdb.org; frame-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'";
+
 /// The site's pages that hold a key, for a browser the member let in: the
 /// copies the app carries (web/_dd, the site's own files), the library's
 /// key and the archive password from this device's keys, and every other
@@ -958,6 +961,10 @@ async fn site_pages<R: Runtime>(
             Some(a) => Response::builder()
                 .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
                 .header(header::CACHE_CONTROL, "no-store")
+                // the app window's own policy (tauri.conf.json): no script
+                // but the app's files, so nothing in a message, a draft or
+                // a name a box wrote ever runs where the keys are
+                .header("content-security-policy", PAGE_POLICY)
                 .body(Body::from(String::from_utf8_lossy(&a.bytes).replacen(
                     "</head>",
                     &format!("{}</head>", crate::site::domain_meta()),
@@ -992,6 +999,29 @@ async fn site_pages<R: Runtime>(
                 crate::site::archive_value(&site.app).await,
                 "your disk images do not open on this device yet",
             );
+        }
+        // Mail, as in the app's window (mail.rs): this browser was let in
+        p if p.starts_with("/_dd/app/mail/") => {
+            let post = req.method() == axum::http::Method::POST;
+            let p = p.to_string();
+            let Ok(body) = axum::body::to_bytes(req.into_body(), 40 << 20).await else {
+                return plain(StatusCode::PAYLOAD_TOO_LARGE, "too much");
+            };
+            let r = match (p.as_str(), post) {
+                ("/_dd/app/mail/key", false) => crate::mail::key(&site.app, false).await,
+                ("/_dd/app/mail/key", true) => crate::mail::key(&site.app, true).await,
+                ("/_dd/app/mail/worker", true) => crate::mail::ask(&site.app, &body).await,
+                ("/_dd/app/mail/vouch", true) => crate::mail::vouch(&site.app, &body).await,
+                ("/_dd/app/mail/send", true) => crate::mail::send(&site.app, &body).await,
+                _ => Err((404, "not in the app".into())),
+            };
+            return match r {
+                Ok(v) => json(StatusCode::OK, v),
+                Err((s, why)) => plain(
+                    StatusCode::from_u16(s).unwrap_or(StatusCode::BAD_GATEWAY),
+                    &why,
+                ),
+            };
         }
         // taking everything out, from the Leave tab: this browser's own
         // downloads (export.rs)

@@ -203,8 +203,8 @@ impl Ledger {
 }
 
 /// GET /internal/storage/members: for the ledger, on this box alone (nginx
-/// passes /_dd/ and nothing else): every member, and what their libraries
-/// and disk images hold in the bucket, trash included until it is emptied
+/// passes /_dd/ and nothing else): every member, and what their libraries,
+/// disk images and mail hold in the buckets, trash included until it is emptied
 pub(crate) async fn members(State(app): State<Arc<App>>) -> Response {
     let Ok(listed) = app.directory.list() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -239,6 +239,27 @@ pub(crate) async fn members(State(app): State<Arc<App>>) -> Response {
                     Ok(objects) => bytes += objects.iter().map(|o| o.size).sum::<u64>(),
                     Err(e) => {
                         eprintln!("storage: listing library {id}: {e:#}");
+                        return StatusCode::BAD_GATEWAY.into_response();
+                    }
+                }
+            }
+        }
+        // and their locked mail (mail.rs), counted with their files
+        if let Some(m) = app.mail.as_ref() {
+            let prefix = format!("{}/", l.name);
+            let mut after = String::new();
+            loop {
+                match m.s3.list(&prefix, &after, 1000).await {
+                    Ok(page) if page.is_empty() => break,
+                    Ok(page) => {
+                        bytes += page.iter().map(|(_, n)| *n).sum::<u64>();
+                        after = page.last().map(|(k, _)| k.clone()).unwrap_or_default();
+                        if page.len() < 1000 {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("storage: listing {}'s mail: {e:#}", l.name);
                         return StatusCode::BAD_GATEWAY.into_response();
                     }
                 }

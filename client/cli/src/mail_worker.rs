@@ -22,6 +22,8 @@ const SCRIPT: &str = "commonty-mail";
 const KV_TITLE: &str = "commonty-mail-pinned";
 // the same date the end-to-end check runs it at (nix/tests/mail-worker.nix)
 const COMPATIBILITY: &str = "2026-05-01";
+/// where receivers find the domain's DKIM key: cm1._domainkey.<domain>
+pub(crate) const DKIM_SELECTOR: &str = "cm1";
 
 /// fleet/mail.json: where the Worker is. Nothing secret.
 #[derive(Serialize, Deserialize)]
@@ -35,6 +37,18 @@ pub struct Setup {
     /// reader-key`): boxes show single entries to it and to no stranger
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reader: Option<String>,
+    /// the public half of the domain's DKIM key (`dd mail dkim`), which the
+    /// DNS Worker publishes at <selector>._domainkey; its secret half is
+    /// the Worker's DKIM_KEY and nowhere else
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dkim: Option<Dkim>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Dkim {
+    pub selector: String,
+    /// base64 SubjectPublicKeyInfo
+    pub public: String,
 }
 
 pub(crate) fn token(keys: &impl auth::KeyStore) -> Result<String> {
@@ -104,11 +118,31 @@ fn bundle(root: &Path, r#ref: &str) -> Result<std::path::PathBuf> {
 fn kind(name: &str) -> &'static str {
     match name {
         "worker.js" | "dd_mail.js" | "fleet.js" | "unlock.js" | "leaving.js" | "send.js"
-        | "aliases.js" | "identity.js" => "application/javascript+module",
+        | "aliases.js" | "identity.js" | "inbox.js" | "dkim.js" | "mail-hpke.js"
+        | "mail-mime.js" | "mail-ids.js" | "mail-object.js" => "application/javascript+module",
         n if n.ends_with(".wasm") => "application/wasm",
         n if n.ends_with(".woff2") => "application/octet-stream",
         _ => "text/plain",
     }
+}
+
+/// the Durable Object migration the script has had, so the Hold
+/// (inbox.js) is made by the first upload that has it and never again
+const HOLD_TAG: &str = "hold-v1";
+async fn migration_tag(http: &reqwest::Client, token: &str, s: &Setup) -> Result<Option<String>> {
+    let v = call(
+        http,
+        token,
+        reqwest::Method::GET,
+        &format!("/accounts/{}/workers/scripts", s.account),
+        None,
+    )
+    .await?;
+    Ok(v["result"]
+        .as_array()
+        .and_then(|a| a.iter().find(|x| x["id"].as_str() == Some(&s.script)))
+        .and_then(|x| x["migration_tag"].as_str())
+        .map(str::to_string))
 }
 
 async fn upload(
@@ -140,6 +174,10 @@ async fn upload(
                     format!("alerts@{}", s.domain),
                 ],
             },
+            // members' locked mail until a box takes it (inbox.js)
+            { "type": "durable_object_namespace", "name": "HOLD", "class_name": "Hold" },
+            // the DKIM key's name in DNS; the key itself is the secret DKIM_KEY
+            { "type": "plain_text", "name": "DKIM_SELECTOR", "text": DKIM_SELECTOR },
         ],
         // CF_TOKEN and SESSION_KEY were set once and are kept
         "keep_bindings": ["secret_text"],
@@ -155,6 +193,16 @@ async fn upload(
                 "class_name": "Relay",
                 "script_name": script,
             }));
+    }
+    match migration_tag(http, token, s).await? {
+        Some(t) if t == HOLD_TAG => {}
+        old => {
+            let mut m = serde_json::json!({ "new_tag": HOLD_TAG, "new_sqlite_classes": ["Hold"] });
+            if let Some(t) = old {
+                m["old_tag"] = serde_json::Value::String(t);
+            }
+            metadata["migrations"] = m;
+        }
     }
     let mut form = reqwest::multipart::Form::new().part(
         "metadata",
@@ -227,6 +275,72 @@ pub async fn reader_key(root: &Path, keys: &impl auth::KeyStore) -> Result<()> {
         "== the Worker signs its directory reads with the new key; fleet/mail.json names it.\n\
          Commit it and publish a release: from then on the boxes show an entry to\n\
          members, its own keys and the Worker, and to nobody else."
+    );
+    Ok(())
+}
+
+/// `dd mail dkim`: the domain's DKIM key, made here. The secret goes
+/// straight to the Worker as DKIM_KEY and is kept nowhere else; the public
+/// half goes into fleet/mail.json, which the next release's DNS Worker
+/// publishes. Made again, the old key stops verifying once that is out.
+/// It also makes MAIL_SIGN, the key the Worker signs locked mail with; a
+/// new one leaves the old ones believed (the Worker keeps their public
+/// halves).
+pub async fn dkim(root: &Path, keys: &impl auth::KeyStore) -> Result<()> {
+    use rsa::pkcs8::{EncodePrivateKey as _, EncodePublicKey as _};
+    let Some(mut s) = read_setup(root)? else {
+        bail!("no mail Worker set up yet - `dd mail setup`");
+    };
+    let token = token(keys)?;
+    eprintln!("making a 2048-bit RSA key ...");
+    let key = rsa::RsaPrivateKey::new(&mut rand_core::OsRng, 2048)?;
+    let secret = zeroize::Zeroizing::new(
+        base64::engine::general_purpose::STANDARD.encode(key.to_pkcs8_der()?.as_bytes()),
+    );
+    let public = base64::engine::general_purpose::STANDARD
+        .encode(key.to_public_key().to_public_key_der()?.as_bytes());
+    call(
+        &reqwest::Client::new(),
+        &token,
+        reqwest::Method::PUT,
+        &format!("/accounts/{}/workers/scripts/{}/secrets", s.account, s.script),
+        Some(serde_json::json!({ "name": "DKIM_KEY", "text": secret.as_str(), "type": "secret_text" })),
+    )
+    .await?;
+    // and the key the Worker signs the mail it locks with (inbox.js): an
+    // Ed25519 seed as PKCS#8, made here, to the Worker alone. Its public
+    // half the Worker keeps itself and tells members' devices
+    let mut seed = zeroize::Zeroizing::new([0u8; 32]);
+    getrandom::fill(&mut seed[..]).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut pkcs8 = zeroize::Zeroizing::new(vec![
+        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04,
+        0x20,
+    ]);
+    pkcs8.extend_from_slice(&seed[..]);
+    let sign =
+        zeroize::Zeroizing::new(base64::engine::general_purpose::STANDARD.encode(&pkcs8[..]));
+    call(
+        &reqwest::Client::new(),
+        &token,
+        reqwest::Method::PUT,
+        &format!("/accounts/{}/workers/scripts/{}/secrets", s.account, s.script),
+        Some(serde_json::json!({ "name": "MAIL_SIGN", "text": sign.as_str(), "type": "secret_text" })),
+    )
+    .await?;
+    s.dkim = Some(Dkim {
+        selector: DKIM_SELECTOR.into(),
+        public,
+    });
+    std::fs::write(
+        root.join("fleet/mail.json"),
+        serde_json::to_string_pretty(&s)? + "\n",
+    )?;
+    eprintln!(
+        "== the Worker signs members' mail with the new key; fleet/mail.json has its public half.\n\
+         It also signs the mail it locks with a new key of its own, which members' devices learn from it.\n\
+         Commit it and publish a release: the DNS Worker then publishes {DKIM_SELECTOR}._domainkey.{} and,\n\
+         when the domain has none, a DMARC record that sends mail claiming the domain unsigned to spam.",
+        s.domain
     );
     Ok(())
 }
@@ -322,6 +436,7 @@ pub async fn setup(
         kv,
         script: SCRIPT.to_string(),
         reader: None,
+        dkim: None,
     };
     std::fs::write(
         root.join("fleet/mail.json"),

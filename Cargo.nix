@@ -193,6 +193,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "mailsend" = rec {
+      packageId = "mailsend";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "mailsend";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "media" = rec {
       packageId = "media";
       build = internal.buildRustCrateWithFeatures {
@@ -2121,6 +2131,11 @@ rec {
             packageId = "axum-core";
           }
           {
+            name = "base64";
+            packageId = "base64 0.22.1";
+            optional = true;
+          }
+          {
             name = "bytes";
             packageId = "bytes";
           }
@@ -2203,6 +2218,11 @@ rec {
             optional = true;
           }
           {
+            name = "sha1";
+            packageId = "sha1";
+            optional = true;
+          }
+          {
             name = "sync_wrapper";
             packageId = "sync_wrapper";
           }
@@ -2212,6 +2232,11 @@ rec {
             rename = "tokio";
             optional = true;
             features = [ "time" ];
+          }
+          {
+            name = "tokio-tungstenite";
+            packageId = "tokio-tungstenite";
+            optional = true;
           }
           {
             name = "tower";
@@ -2252,6 +2277,10 @@ rec {
             features = [ "macros" "rt" "rt-multi-thread" "net" "test-util" ];
           }
           {
+            name = "tokio-tungstenite";
+            packageId = "tokio-tungstenite";
+          }
+          {
             name = "tower";
             packageId = "tower";
             rename = "tower";
@@ -2278,7 +2307,7 @@ rec {
           "tracing" = [ "dep:tracing" "axum-core/tracing" ];
           "ws" = [ "dep:hyper" "tokio" "dep:tokio-tungstenite" "dep:sha1" "dep:base64" ];
         };
-        resolvedDefaultFeatures = [ "default" "form" "http1" "json" "matched-path" "original-uri" "query" "tokio" "tower-log" "tracing" ];
+        resolvedDefaultFeatures = [ "default" "form" "http1" "json" "matched-path" "original-uri" "query" "tokio" "tower-log" "tracing" "ws" ];
       };
       "axum-core" = rec {
         crateName = "axum-core";
@@ -4572,6 +4601,10 @@ rec {
             packageId = "library";
           }
           {
+            name = "mailsend";
+            packageId = "mailsend";
+          }
+          {
             name = "media";
             packageId = "media";
           }
@@ -4629,9 +4662,23 @@ rec {
             features = [ "sync" "time" "net" "fs" "io-util" "process" ];
           }
           {
+            name = "tokio-tungstenite";
+            packageId = "tokio-tungstenite";
+            usesDefaultFeatures = false;
+          }
+          {
             name = "tokio-util";
             packageId = "tokio-util";
             features = [ "io" ];
+          }
+          {
+            name = "x25519-dalek";
+            packageId = "x25519-dalek 2.0.1";
+            features = [ "static_secrets" ];
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
           }
         ];
         buildDependencies = [
@@ -6401,6 +6448,11 @@ rec {
             packageId = "media";
           }
           {
+            name = "rand_core";
+            packageId = "rand_core 0.6.4";
+            features = [ "getrandom" ];
+          }
+          {
             name = "release";
             packageId = "release";
           }
@@ -6413,6 +6465,10 @@ rec {
           {
             name = "rpassword";
             packageId = "rpassword";
+          }
+          {
+            name = "rsa";
+            packageId = "rsa";
           }
           {
             name = "secrecy";
@@ -14172,6 +14228,61 @@ rec {
         libName = "lru_slab";
         authors = [
           "Benjamin Saunders <ben.e.saunders@gmail.com>"
+        ];
+
+      };
+      "mailsend" = rec {
+        crateName = "mailsend";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./client/mailsend; };
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "rustls";
+            packageId = "rustls";
+            usesDefaultFeatures = false;
+            features = [ "ring" "std" ];
+          }
+          {
+            name = "sha2";
+            packageId = "sha2 0.10.9";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "io-util" "time" ];
+          }
+          {
+            name = "tokio-rustls";
+            packageId = "tokio-rustls";
+            usesDefaultFeatures = false;
+            features = [ "ring" ];
+          }
+          {
+            name = "webpki-roots";
+            packageId = "webpki-roots";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "macros" "rt-multi-thread" "io-util" "time" ];
+          }
+          {
+            name = "tokio-rustls";
+            packageId = "tokio-rustls";
+            usesDefaultFeatures = false;
+            features = [ "ring" ];
+          }
         ];
 
       };
@@ -27152,6 +27263,67 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "sync" "time" "tokio-util" ];
       };
+      "tokio-tungstenite" = rec {
+        crateName = "tokio-tungstenite";
+        version = "0.29.0";
+        edition = "2018";
+        sha256 = "0p4i0a9fwhn92y4ybc0z75pc8hn2hjjgnlymminqb1c5h9ga0wlg";
+        libName = "tokio_tungstenite";
+        authors = [
+          "Daniel Abramov <dabramov@snapview.de>"
+          "Alexey Galakhov <agalakhov@snapview.de>"
+        ];
+        dependencies = [
+          {
+            name = "futures-util";
+            packageId = "futures-util";
+            usesDefaultFeatures = false;
+            features = [ "sink" "std" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" ];
+          }
+          {
+            name = "tungstenite";
+            packageId = "tungstenite";
+            usesDefaultFeatures = false;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-std" "macros" "net" "rt-multi-thread" "time" ];
+          }
+        ];
+        features = {
+          "__rustls-tls" = [ "rustls" "rustls-pki-types" "tokio-rustls" "stream" "tungstenite/__rustls-tls" "handshake" ];
+          "connect" = [ "stream" "tokio/net" "handshake" ];
+          "default" = [ "connect" "handshake" ];
+          "handshake" = [ "tungstenite/handshake" ];
+          "native-tls" = [ "native-tls-crate" "tokio-native-tls" "stream" "tungstenite/native-tls" "handshake" ];
+          "native-tls-crate" = [ "dep:native-tls-crate" ];
+          "native-tls-vendored" = [ "native-tls" "native-tls-crate/vendored" "tungstenite/native-tls-vendored" ];
+          "rustls" = [ "dep:rustls" ];
+          "rustls-native-certs" = [ "dep:rustls-native-certs" ];
+          "rustls-pki-types" = [ "dep:rustls-pki-types" ];
+          "rustls-tls-native-roots" = [ "__rustls-tls" "rustls-native-certs" ];
+          "rustls-tls-webpki-roots" = [ "__rustls-tls" "webpki-roots" ];
+          "tokio-native-tls" = [ "dep:tokio-native-tls" ];
+          "tokio-rustls" = [ "dep:tokio-rustls" ];
+          "url" = [ "tungstenite/url" ];
+          "webpki-roots" = [ "dep:webpki-roots" ];
+        };
+        resolvedDefaultFeatures = [ "connect" "default" "handshake" "stream" ];
+      };
       "tokio-util" = rec {
         crateName = "tokio-util";
         version = "0.7.19";
@@ -28034,6 +28206,80 @@ rec {
         ];
 
       };
+      "tungstenite" = rec {
+        crateName = "tungstenite";
+        version = "0.29.0";
+        edition = "2021";
+        sha256 = "1f7673dhqbfxc0f2ccyiyqhv882nkialnzm5qb3vkbwky8m1a0bc";
+        authors = [
+          "Alexey Galakhov"
+          "Daniel Abramov"
+        ];
+        dependencies = [
+          {
+            name = "bytes";
+            packageId = "bytes";
+          }
+          {
+            name = "data-encoding";
+            packageId = "data-encoding";
+            optional = true;
+          }
+          {
+            name = "http";
+            packageId = "http";
+            optional = true;
+          }
+          {
+            name = "httparse";
+            packageId = "httparse";
+            optional = true;
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.9.5";
+          }
+          {
+            name = "sha1";
+            packageId = "sha1";
+            optional = true;
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.20";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "rand";
+            packageId = "rand 0.9.5";
+          }
+        ];
+        features = {
+          "__rustls-tls" = [ "rustls" "rustls-pki-types" ];
+          "data-encoding" = [ "dep:data-encoding" ];
+          "default" = [ "handshake" ];
+          "handshake" = [ "data-encoding" "http" "httparse" "sha1" ];
+          "http" = [ "dep:http" ];
+          "httparse" = [ "dep:httparse" ];
+          "native-tls" = [ "native-tls-crate" ];
+          "native-tls-crate" = [ "dep:native-tls-crate" ];
+          "native-tls-vendored" = [ "native-tls" "native-tls-crate/vendored" ];
+          "rustls" = [ "dep:rustls" ];
+          "rustls-native-certs" = [ "dep:rustls-native-certs" ];
+          "rustls-pki-types" = [ "dep:rustls-pki-types" ];
+          "rustls-tls-native-roots" = [ "__rustls-tls" "rustls-native-certs" ];
+          "rustls-tls-webpki-roots" = [ "__rustls-tls" "webpki-roots" ];
+          "sha1" = [ "dep:sha1" ];
+          "url" = [ "dep:url" ];
+          "webpki-roots" = [ "dep:webpki-roots" ];
+        };
+        resolvedDefaultFeatures = [ "data-encoding" "handshake" "http" "httparse" "sha1" ];
+      };
       "turboshake" = rec {
         crateName = "turboshake";
         version = "0.7.1";
@@ -28733,6 +28979,7 @@ rec {
           {
             name = "axum";
             packageId = "axum";
+            features = [ "ws" ];
           }
           {
             name = "base64";

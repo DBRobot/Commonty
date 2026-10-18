@@ -120,6 +120,7 @@ impl Box_ {
         member_list: Option<String>,
     ) -> Self {
         let (addr, _task) = verify::start(verify::Config {
+            mail: None,
             home,
             members,
             release_pub,
@@ -2520,6 +2521,7 @@ fn serve(body: std::sync::Arc<std::sync::Mutex<String>>) -> String {
 
 async fn download_page_of(release_pub: String, manifest_url: String) -> (u16, String) {
     let (addr, _task) = verify::start(verify::Config {
+        mail: None,
         home: vec![],
         members: Some(verify::Members::list(vec![])),
         release_pub: Some(release_pub),
@@ -3063,6 +3065,7 @@ async fn the_photos_code_is_filled_in_here_and_never_handed_out() {
         .to_string();
     let dir = scratch("photos").join("keys");
     let (addr, _task) = verify::start(verify::Config {
+        mail: None,
         home: vec![],
         members: Some(verify::Members::list(vec![id])),
         release_pub: None,
@@ -3350,6 +3353,7 @@ async fn gate_for(
     tokio::task::JoinHandle<anyhow::Result<()>>,
 ) {
     verify::start(verify::Config {
+        mail: None,
         home: vec![],
         members: Some(verify::Members::list(vec![member_id])),
         release_pub: None,
@@ -3639,6 +3643,7 @@ async fn a_wifi_change_counts_only_with_the_members_passkey() {
     // and a box that runs only the directory, as node2 does
     unsafe { std::env::set_var("VERIFY_HOUSE", &house2) };
     let (addr2, _task2) = verify::start(verify::Config {
+        mail: None,
         home: vec![],
         members: Some(verify::Members::list(vec![id])),
         release_pub: None,

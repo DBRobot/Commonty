@@ -25,9 +25,15 @@ import { boxApi, memberApi } from './unlock.js';
 import { forgetApi } from './leaving.js';
 import { sendApi } from './send.js';
 import { aliasApi, aliasMail, forgetAliases, aliasHolds, keepCatchAll, passwordsApi } from './aliases.js';
+import { inboxApi, inboxMail, keyApi, addressesApi, holdApi, forgetInbox, mailKey, INBOX_RULE, Hold } from './inbox.js';
+import { dkimApi } from './dkim.js';
+
+export { Hold };
 import aliasesHtml from './aliases.html';
 import aliasesPageJs from './aliases-page.js';
 import boxesHtml from './boxes.html';
+import inboxHtml from './inbox.html';
+import inboxPageJs from './inbox-page.js';
 import boxesJs from './boxes.js';
 import changeHtml from './change.html';
 import rowHtml from './row.html';
@@ -57,6 +63,7 @@ const STATIC = {
   '/_dd/static/row.js': [rowJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/aliases-page.js': [aliasesPageJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/boxes.js': [boxesJs, 'text/javascript; charset=utf-8'],
+  '/_dd/static/inbox-page.js': [inboxPageJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/passkey.js': [passkeyJs, 'text/javascript; charset=utf-8'],
   '/_dd/static/mail.css': [mailCss, 'text/css; charset=utf-8'],
   '/_dd/static/home.css': [homeCss, 'text/css; charset=utf-8'],
@@ -250,9 +257,12 @@ async function lists(env) {
 }
 const target = (rule) => (rule?.actions || []).find((a) => a.type === 'forward')?.value?.[0] || null;
 const same = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase();
+// a member's own rule says where their mail goes. With an inbox on it is
+// kept, turned off, beside the inbox's rule that sends their mail here
 function stateIn(l, env, name) {
   const address = `${name}@${env.DOMAIN}`;
-  const rule = l.rules.find((r) => (r.matchers || []).some((m) => m.field === 'to' && m.value === address)) || null;
+  const mine = (r) => (r.matchers || []).some((m) => m.field === 'to' && m.value === address) && !(r.name || '').startsWith(INBOX_RULE);
+  const rule = l.rules.find((r) => (r.name || '') === `Commonty member ${name}` && mine(r)) || l.rules.find(mine) || null;
   const to = target(rule);
   const d = to ? l.addresses.find((a) => same(a.email, to)) : null;
   return { rule, email: to, confirmed: !!d?.verified, destination: d || null };
@@ -331,6 +341,37 @@ async function keepAliases(env, l) {
   try { await syncAliases(env, l); } catch (err) { console.log(`aliases: ${err.message || err}`); }
 }
 
+// An inbox on: the member's rule off, and one sending their address here; off,
+// the other way round. Mail is never sent nowhere between the two.
+async function route(env, name, on) {
+  const z = await zone(env);
+  const l = await lists(env);
+  const s = stateIn(l, env, name);
+  const inbox = l.rules.find((r) => (r.name || '') === `${INBOX_RULE}${name}`);
+  if (on) {
+    if (!inbox) {
+      const d = await cf(env, 'POST', `/zones/${z.id}/email/routing/rules`, {
+        name: `${INBOX_RULE}${name}`,
+        enabled: true,
+        matchers: [{ type: 'literal', field: 'to', value: `${name}@${env.DOMAIN}` }],
+        actions: [{ type: 'worker', value: [env.WORKER] }],
+      });
+      if (!d.success) throw new Error('Cloudflare did not take the rule');
+    }
+    if (s.rule && s.rule.enabled !== false) await cf(env, 'PUT', `/zones/${z.id}/email/routing/rules/${s.rule.id}`, { ...memberRule(env, name, s.email), enabled: false });
+  } else {
+    if (s.rule && s.rule.enabled === false) await cf(env, 'PUT', `/zones/${z.id}/email/routing/rules/${s.rule.id}`, memberRule(env, name, s.email));
+    if (inbox) await cf(env, 'DELETE', `/zones/${z.id}/email/routing/rules/${inbox.id}`);
+  }
+  shared = null;
+}
+const memberRule = (env, name, email) => ({
+  name: `Commonty member ${name}`,
+  enabled: true,
+  matchers: [{ type: 'literal', field: 'to', value: `${name}@${env.DOMAIN}` }],
+  actions: [{ type: 'forward', value: [email] }],
+});
+
 async function setEmail(env, name, email) {
   const z = await zone(env);
   const l = await lists(env);
@@ -342,12 +383,8 @@ async function setEmail(env, name, email) {
   // the account already holds confirmed gets none, and none is waited for
   const had = l.addresses.find((a) => same(a.email, email));
   if (!had) await cf(env, 'POST', `/accounts/${z.account}/email/routing/addresses`, { email });
-  const body = {
-    name: `Commonty member ${name}`,
-    enabled: true,
-    matchers: [{ type: 'literal', field: 'to', value: `${name}@${env.DOMAIN}` }],
-    actions: [{ type: 'forward', value: [email] }],
-  };
+  // with an inbox on, their rule stays off: it only says where to forward
+  const body = { ...memberRule(env, name, email), enabled: !(await mailKey(env, name)) };
   const d = before.rule
     ? await cf(env, 'PUT', `/zones/${z.id}/email/routing/rules/${before.rule.id}`, body)
     : await cf(env, 'POST', `/zones/${z.id}/email/routing/rules`, body);
@@ -438,6 +475,10 @@ async function api(req, env, path, sent) {
   if (path === '/api/aliases' || path.startsWith('/api/aliases/')) {
     return aliasApi(req, env, path, body(), me, json, { ALIASES, memberName, listsShared: sharedLists, now, confirmed: (b) => asserted(env, b, me.n), holds: (n, i, t) => holds(env, n, i, t) });
   }
+  // their locked inbox (inbox.js): turning it on or off wants the passkey
+  if (path === '/api/inbox' || path.startsWith('/api/inbox/')) {
+    return inboxApi(req, env, path, body, json, me, { fresh: (m) => now() - (m.p || 0) < FRESH, route, entry });
+  }
   if (req.method === 'POST' && path === '/api/end-others') {
     const t = Date.now();
     await env.PINNED.put(`ended:${me.n}`, String(t));
@@ -463,9 +504,17 @@ async function api(req, env, path, sent) {
 }
 
 export default {
-  // mail to an address with no rule of its own: maybe a member's alias
+  // mail to a member's address once their inbox is on; anything else has no
+  // rule of its own: maybe a member's alias
   async email(message, env) {
-    return aliasMail(message, env, { stateIn, listsShared: sharedLists });
+    const h = { stateIn, listsShared: sharedLists };
+    const [local, domain] = String(message.to || '').toLowerCase().split('@');
+    // only the inbox's rule sends a member's own address here; an alias is
+    // never a member's name (aliases.js)
+    if (domain === env.DOMAIN && NAME.test(local || '') && (await mailKey(env, local))) {
+      return inboxMail(message, env, h);
+    }
+    return aliasMail(message, env, h);
   },
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -479,6 +528,8 @@ export default {
     }
     // a box's mail: signed by its TPM, from no page at all
     if (path === '/send') return sendApi(req, env, json, { entry, lists, stateIn });
+    // a box taking locked mail to keep: signed by its TPM (inbox.js)
+    if (path.startsWith('/api/hold/')) return holdApi(req, env, url, json);
     if (path.startsWith('/api/')) {
       // the pages here are the only callers
       const origin = req.headers.get('origin');
@@ -491,7 +542,12 @@ export default {
       // the release, decides (leaving.js)
       // Passwords making an alias: its own key, from any origin (aliases.js)
       if (path === '/api/alias/random/new') return passwordsApi(req, env, url, { ALIASES, memberName, listsShared: sharedLists, now, holds: (n, i, t) => holds(env, n, i, t) });
-      if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, readProof, MEMBERS, ALIASES, aliasOf, zone, lists, stateIn, cf, forgetAliases, mode, agreedMember, differ });
+      if (path === '/api/forget') return forgetApi(req, env, parse(sent), json, { forgetDue, readProof, MEMBERS, ALIASES, aliasOf, zone, lists, stateIn, cf, forgetAliases, mode, agreedMember, differ, forgetInbox, INBOX_RULE });
+      // a member's app, signed with a device they confirmed here (inbox.js):
+      // another member's key to lock to, and a signature for mail it sends
+      if (path.startsWith('/api/mailkey/')) return keyApi(req, env, path, new TextEncoder().encode(sent), json, entry);
+      if (path === '/api/addresses') return addressesApi(req, env, path, new TextEncoder().encode(sent), json, entry);
+      if (path === '/api/dkim') return dkimApi(req, env, path, new TextEncoder().encode(sent), json, { stateIn, listsShared: sharedLists, entry });
       if (req.method !== 'GET' && origin !== (env.ORIGIN || `https://mail.${env.DOMAIN}`)) {
         return json({ error: 'not from here' }, 403);
       }
@@ -510,6 +566,8 @@ export default {
     if (path === '/aliases') return page(aliasesHtml, env, `https://*.${env.DOMAIN}`);
     // the boxes: approve one in a new place, or mark one stolen
     if (path === '/boxes') return page(boxesHtml, env);
+    // turning on a locked inbox, opened by the member's app (inbox.js)
+    if (path === '/inbox') return page(inboxHtml, env);
     return Response.redirect(`https://home.${env.DOMAIN}/_dd/settings`, 302);
   },
 };

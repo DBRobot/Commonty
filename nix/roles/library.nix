@@ -8,6 +8,7 @@
     ./_sops.nix
     ../modules/library/libraries.nix
     ../modules/library/transcode.nix
+    ../modules/library/mail.nix
   ];
   sops.secrets.library-key-id = { };
   sops.secrets.library-key-secret = { };
@@ -20,4 +21,6 @@
     keyFile = config.sops.templates."library-key.env".path;
   };
   dd.transcode.enable = true;
+  # members' locked mail, beside their libraries (modules/library/mail.nix)
+  dd.mailInbox.enable = true;
 }

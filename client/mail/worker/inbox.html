@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Turn on Commonty Mail</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/mail.css">
+</head>
+<body data-domain="{{domain}}">
+  <a class="skip-to" href="#main">Skip to content</a>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="https://home.{{domain}}/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+    </div>
+  </header>
+  <main id="main" class="fl">
+    <section class="fl-card" id="s1">
+      <span class="fl-mail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>
+      <h1>Lock your mail to your devices</h1>
+      <p class="fl-bad"><b>Only go on if you pressed Turn on Mail in your Commonty app just now.</b> If you came here from a link or a page that asked you to, close this page.</p>
+      <p>Mail to <b id="addr"></b> and to your aliases will be locked as it arrives, to the key your Commonty app just made. Only your devices can open it. Your box keeps it, and cannot read it.</p>
+      <div class="fl-code">
+        <span>Your app shows this code</span>
+        <b class="mono" id="code"></b>
+        <small>If it shows a different one, stop here: this page was not opened by your app.</small>
+      </div>
+      <label class="fl-check"><input type="checkbox" id="fwd" checked> Keep sending a copy to your own address as well</label>
+      <div class="row"><button id="pass">Turn on with passkey</button></div>
+      <p class="fl-bad" id="s1-msg" role="alert" hidden></p>
+    </section>
+
+    <section class="fl-card" id="s2" hidden>
+      <span class="fl-mail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+      <h1>Your mail is locked</h1>
+      <p>New mail goes to Mail in your Commonty app. You can close this page.</p>
+      <div class="row"><a class="button" id="back" href="#">Back to Mail</a></div>
+    </section>
+
+    <section class="fl-card" id="s0" hidden>
+      <h1>Open this from Mail</h1>
+      <p>This page turns on your locked inbox for the key your Commonty app made. Open Mail in the app and choose Turn on.</p>
+    </section>
+  </main>
+  <script type="module" src="/_dd/static/inbox-page.js"></script>
+</body>
+</html>

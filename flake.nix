@@ -1088,7 +1088,26 @@
               );
               fp = import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; };
               failover = (nixpkgs.lib.importJSON ./fleet/policy.json).failover or false;
+              mailSetup =
+                if builtins.pathExists ./fleet/mail.json then nixpkgs.lib.importJSON ./fleet/mail.json else { };
               fleet = {
+                # the domain's mail key and DMARC (worker.js convergeMail):
+                # what `dd mail dkim` wrote into fleet/mail.json, if it has
+                MAIL =
+                  if mailSetup ? dkim then
+                    {
+                      zone = mailSetup.domain;
+                      dkim = {
+                        inherit (mailSetup.dkim) selector;
+                        p = mailSetup.dkim.public;
+                      };
+                      # mail claiming the domain without its signature goes to
+                      # spam: what a member sends straight through the pipe,
+                      # skipping the Worker's DKIM, is not believed
+                      dmarc = "v=DMARC1; p=quarantine; adkim=r; aspf=r";
+                    }
+                  else
+                    null;
                 RECORDS =
                   assert nixpkgs.lib.assertMsg (builtins.length gateways <= 1 || failover)
                     "the DNS Worker keeps one gateway's names unless failover is on; these are all gateways: ${toString gateways}";
@@ -1158,6 +1177,7 @@
                     export const BOXES = ${builtins.toJSON fleet.BOXES};
                     export const NAMES = ${builtins.toJSON fleet.NAMES};
                     export const RECORDS = ${builtins.toJSON fleet.RECORDS};
+                    export const MAIL = ${builtins.toJSON fleet.MAIL};
                   ''}
                   # who may name a home controller: the release's members
                   echo "export const MEMBERS = $(jq -c . ${./fleet/members.json} | jq -R .);"
@@ -1208,6 +1228,8 @@
                   echo "export const OWNER = $(jq -c '.owner' ${./fleet/policy.json});"
                   # each box's TPM-held unlock key, where it has one (unlock.js)
                   echo "export const BOXES = $(jq -c 'with_entries(select(.value.unlockKey) | .value = .value.unlockKey)' ${./fleet/boxes.json});"
+                  # the boxes that keep members' mail, and so may take it (inbox.js)
+                  echo "export const MAIL_BOXES = $(jq -c '[to_entries[] | select((.value.roles // []) | index("library")) | .key]' ${./fleet/boxes.json});"
                 } > $out/fleet.js
               '';
 
@@ -1537,6 +1559,8 @@
             );
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
+          # the Mail page in a browser, as the app serves it, against a fake app and box
+          mail-page = import ./nix/tests/mail-page.nix args;
           safe-rd = import ./nix/tests/safe-rd.nix args;
           sso = import ./nix/tests/sso.nix args;
           dns-worker = import ./nix/tests/dns-worker.nix args;

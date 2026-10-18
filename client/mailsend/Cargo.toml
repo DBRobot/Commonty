@@ -1,0 +1,19 @@
+[package]
+name = "mailsend"
+description = "a member's mail out to another domain: DKIM's part of it, and SMTP with its own TLS through a pipe the box carries but cannot read"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+sha2 = "0.10"
+tokio = { version = "1", features = ["io-util", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+webpki-roots = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }

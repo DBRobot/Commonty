@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mail</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/mail.css">
+</head>
+<body class="mail-page">
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+
+  <section class="mail-gate" id="gate">
+    <div class="mail-card" id="g-wait"><p class="lead">Opening your mail…</p></div>
+    <div class="mail-card" id="g-app" hidden>
+      <h1>Mail opens in the Commonty app</h1>
+      <p class="lead">Your mail is locked to a key only your devices hold, and the app is what holds it. Open Mail in the app, or <a href="/_dd/download">get the app</a>.</p>
+    </div>
+    <div class="mail-card" id="g-on" hidden>
+      <h1>Commonty Mail</h1>
+      <p class="lead">Mail to your address and your aliases, locked as it arrives to a key only your devices hold. Your box keeps it and cannot read it. Search, spam and everything else happen here, on your device.</p>
+      <p class="lead">Your own address keeps getting a copy unless you turn that off.</p>
+      <div class="row"><button id="turn-on" type="button">Turn on Mail</button></div>
+      <p class="mail-bad" id="g-on-msg" role="alert" hidden></p>
+    </div>
+    <div class="mail-card" id="g-confirm" hidden>
+      <h1>Confirm with your passkey</h1>
+      <p class="lead">A page from your mail service opens to confirm the key is yours. Check it shows this code:</p>
+      <p class="mail-code mono" id="g-code"></p>
+      <div class="row"><a class="button" id="confirm" target="_blank" rel="noopener" href="#">Confirm with passkey</a></div>
+      <p class="mail-wait"><i aria-hidden="true"></i>This page goes on by itself once you have.</p>
+    </div>
+  </section>
+
+  <main class="mail" id="app" hidden>
+    <aside class="mail-side" aria-label="Folders">
+      <button class="mail-new" id="new" type="button" data-guide="mail-new"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New email</button>
+      <ul class="mail-folders" id="folders"></ul>
+      <div>
+        <h3>Addresses</h3>
+        <ul class="mail-addrs" id="addrs"></ul>
+      </div>
+      <div class="mail-foot">
+        <button class="mail-link" id="import" type="button" data-guide="mail-import">Bring in old mail</button>
+        <input id="mbox" type="file" accept=".mbox,application/mbox,text/plain" hidden>
+        <p id="import-msg" role="status"></p>
+      </div>
+    </aside>
+    <section class="mail-list" aria-label="Messages">
+      <div class="mail-search"><input id="q" type="search" placeholder="Search mail" aria-label="Search mail" autocomplete="off" data-guide="mail-search"></div>
+      <div class="mail-rows" id="rows" role="listbox" aria-label="Messages"></div>
+    </section>
+    <article class="mail-read" id="read" aria-live="polite"></article>
+  </main>
+  <button class="mail-fab" id="new2" type="button">New email</button>
+  <div class="mail-toast" id="toast" role="status" hidden></div>
+  <script type="module" src="/_dd/static/mail.js"></script>
+</body>
+</html>

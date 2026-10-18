@@ -14,6 +14,7 @@ paths = [
   '''^servers/smarthome/door/src/testdata/''',
   '''^servers/system/control/state/ident/testdata/''',
   '''^client/identity/tests/vectors\.rs$''',
+  '''^client/mailsend/tests/testdata/''',
   '''^data/games/catalogue\.json$''',
   '''^nix/modules/library/libraries\.nix$''',
 ]

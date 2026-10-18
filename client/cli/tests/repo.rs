@@ -108,6 +108,7 @@ async fn encrypted_remote_end_to_end() {
     ensure_helper();
     let dir = scratch("box").join("keys");
     let (addr, _task) = verify::start(verify::Config {
+        mail: None,
         home: vec![],
         fleet: Default::default(),
         thanos: None,
@@ -439,6 +440,7 @@ async fn encrypted_remote_end_to_end() {
 async fn a_forge_cannot_pass_one_repository_off_as_another() {
     ensure_helper();
     let (addr, _task) = verify::start(verify::Config {
+        mail: None,
         home: vec![],
         fleet: Default::default(),
         thanos: None,

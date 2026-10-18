@@ -578,6 +578,11 @@ enum MailCmd {
     /// alone, the public half into fleet/mail.json, which a release takes to
     /// every box. From that release on, no entry is anyone else's to read.
     ReaderKey,
+    /// The domain's DKIM key, for mail members send from their own devices,
+    /// and the key the Worker signs the mail it locks with: the secrets to
+    /// the Worker alone, the DKIM key's public half into fleet/mail.json,
+    /// which a release has the DNS Worker publish
+    Dkim,
 }
 
 #[derive(Subcommand)]
@@ -1385,6 +1390,7 @@ async fn main() -> Result<()> {
                 }
                 MailCmd::Deploy { r#ref } => mail_worker::deploy(&root, &keys, &r#ref).await?,
                 MailCmd::ReaderKey => mail_worker::reader_key(&root, &keys).await?,
+                MailCmd::Dkim => mail_worker::dkim(&root, &keys).await?,
             }
         }
 
