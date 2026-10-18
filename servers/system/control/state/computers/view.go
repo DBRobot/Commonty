@@ -156,9 +156,12 @@ func NewServer(cfg *ident.Config, lim *Limits, voters []string) *Server {
 // Answer: the log is n items; owner, if not empty, asks for one member's
 // alone; since, as /identity's, answers 304 while nothing changed
 func (sv *Server) Answer(n int, item func(int) ident.Item, height uint64, timeMs int64, owner string, since uint64) (int, []byte) {
-	id, s := sv.r.CatchN(n, item)
+	// one at a time from the catching up to the answer: the states are the
+	// replayer's own, and another request catching up would change them
+	// under this one's reading
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
+	id, s := sv.r.CatchN(n, item)
 	v := s.View(id, sv.cfg, height, timeMs)
 	v.Height, v.Time = 0, 0
 	b, _ := json.Marshal(v)
