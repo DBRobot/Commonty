@@ -1,6 +1,7 @@
 package state
 
 import (
+	"commonty/control/state/ident"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -215,6 +216,11 @@ func TestABoxDownByOurFaultIsNotForgotten(t *testing.T) {
 	got := f.s.IdentBoxes()
 	if info, ok := got(name); !ok || info.LastSeen != 2000 || info.Fleet != 6 {
 		t.Fatal(info, ok)
+	}
+	// not for ever: past ident.OurFaultFor it goes like any other
+	f.block(2000 + ident.OurFaultFor*1000 + 1)
+	if f.s.Joined[name] != nil {
+		t.Fatal("a box down by our fault, by its own word, kept its place for good")
 	}
 	if _, ok := got("nobody"); ok {
 		t.Fatal("a box that is not there")

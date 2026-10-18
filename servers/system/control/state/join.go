@@ -236,7 +236,8 @@ func (s *State) checkNetAddr(cfg *Config, r Request) error {
 
 // dropGone forgets strangers unheard for JoinedGoneAfter, but not one whose
 // last word was a release that failed on it: a box down by our fault keeps
-// its place (and its member's access, ident.OurFault)
+// its place (and its member's access, ident.OurFault) until
+// ident.OurFaultFor
 func (s *State) dropGone(now int64) {
 	fleet := s.fleetRelease()
 	for name, j := range s.Joined {
@@ -245,7 +246,8 @@ func (s *State) dropGone(now int64) {
 		if b != nil && b.LastSeen > last {
 			last = b.LastSeen
 		}
-		if now-last > JoinedGoneAfter && (b == nil || !ident.OurFault(b.Facts, fleet)) {
+		ours := b != nil && ident.OurFault(b.Facts, fleet)
+		if now-last > JoinedGoneAfter && !ours || now-last > ident.OurFaultFor*1000 {
 			delete(s.Joined, name)
 			delete(s.Boxes, name)
 		}
