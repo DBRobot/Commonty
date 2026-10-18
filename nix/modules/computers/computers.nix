@@ -252,7 +252,7 @@ in
         RuntimeDirectoryMode = "0750";
         # to read the ledger, where there is one
         SupplementaryGroups = lib.optional (config.users.groups ? dd-storage) "dd-storage";
-        ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.vms}/bin/dd-computers";
+        ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.computers}/bin/dd-computers";
         Restart = "on-failure";
         NoNewPrivileges = true;
         ProtectSystem = "strict";

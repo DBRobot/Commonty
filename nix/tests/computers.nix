@@ -9,7 +9,7 @@
   ...
 }:
 {
-  name = "vms";
+  name = "computers";
   node.specialArgs = { inherit self; };
   nodes.box = {
     imports = [
