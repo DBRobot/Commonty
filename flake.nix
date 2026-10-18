@@ -129,6 +129,8 @@
                       || (name != "verify" && builtins.match ".*/web(-shared)?/.*" rel != null)
                       # where askama looks for templates beyond the crate's own
                       || builtins.match ".*/askama\\.toml" rel != null
+                      # the BIOS table release compiles in (setup.rs)
+                      || rel == "servers/system/release/bios-settings.json"
                       || appFile
                     )
                   );
