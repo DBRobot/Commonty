@@ -173,6 +173,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
             grant: None,
             libraries: vec![],
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         },

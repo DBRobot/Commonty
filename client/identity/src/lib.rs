@@ -1610,6 +1610,7 @@ mod tests {
             passkeys: vec![],
             libraries: vec![],
             grant: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         };
@@ -2049,6 +2050,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         };

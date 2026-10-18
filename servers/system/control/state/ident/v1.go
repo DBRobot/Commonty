@@ -31,6 +31,7 @@ type Entry struct {
 	Grant         *Grant    `json:"grant,omitempty"`
 	Libraries     []Library `json:"libraries,omitempty"`
 	Terms         *string   `json:"terms,omitempty"`
+	RemovedBoxes  []string  `json:"removed_boxes,omitempty"` // carried as signed; ownership is enlistment's
 	Version       uint64    `json:"version"`
 	Updated       uint64    `json:"updated"`
 }
