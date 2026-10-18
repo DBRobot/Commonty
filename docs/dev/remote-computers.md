@@ -194,14 +194,14 @@ everywhere. No box decides anything about a computer.
 | kind | signed by | body (JSON) |
 |---|---|---|
 | `computer-config` | the owner's root | `owner, name, memory, threads, disk, nix, ports[], players[], consent, version, gone?` |
-| `computer` | the owner's root | `owner, id, name, config, memory, threads, disk, nix, ports[], players[], consent, anywhere?, version` |
+| `computer` | the owner's root | `owner, id, name, config, memory, threads, disk, nix, ports[], players[], consent, anywhere, version` |
 | `computer-power` | the owner's root or any of their current devices | `id, up, at` |
 | `computer-delete` | the owner's root | `owner, id, at` |
 
 - Sizes: `memory` MiB, `disk` GiB, `threads` a count. `ports` are guest
   ports besides SSH (22 is always there). `consent` is `own` or `any`;
-  `anywhere` is when (ms) the owner said yes to the warning, required for
-  `any`. `id` is 16 hex, made by the signer; `name` is
+  `anywhere` (true or false) is the owner's yes to the warning: required
+  for `any`, refused for `own`. `own` needs at least one box of theirs. `id` is 16 hex, made by the signer; `name` is
   `[a-z0-9][a-z0-9-]{0,31}`, one per owner. Every field is written,
   empty lists as `[]`: a body that says more or less than its kind is
   refused.
@@ -212,8 +212,12 @@ everywhere. No box decides anything about a computer.
 - The judge refuses an item unless the owner's status is `member` (a
   delete only needs their root); sizes are within `fleet/policy.json`
   `computers` (`memory`, `threads`, `disk`); the owner's computers together,
-  running or not and this one as it would be, keep within `memory` and
-  `threads`; a disk only grows; every player is a member.
+  running or not and this one as it would be, keep within `memory`, `threads`
+  and `disk`; a disk only grows; every player is a member, at most 32,
+  none twice. Per member, so nobody fills the state or the pool: at most
+  32 configs and 256 computers ever made (deleted ones counted), and 16
+  ports across their computers, SSH counted. A deleted computer's id
+  never comes back. A guest name past its time counts as no one.
 - Ports: a new computer's SSH port, and each forward it adds, is the
   lowest free in the pool (`computers.portBase`, `portCount`), in agreed order,
   so every box agrees; an update keeps the ports it had; a delete frees

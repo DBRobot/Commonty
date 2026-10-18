@@ -56,8 +56,13 @@ func who(name string, seed byte) person {
 }
 
 func (p person) entry(t *testing.T) json.RawMessage {
+	return p.entryAt(t, 1, []ident.Device{{Fingerprint: "f", PublicKey: pub(p.device), Added: 1}})
+}
+
+// entryAt: their entry at version v, with these devices
+func (p person) entryAt(t *testing.T, v uint64, devices []ident.Device) json.RawMessage {
 	e := ident.Entry{Name: p.name, Root: pub(p.root), Recovery: pub(p.recovery),
-		Devices: []ident.Device{{Fingerprint: "f", PublicKey: pub(p.device), Added: 1}}, Version: 1, Updated: 1}
+		Devices: devices, Version: v, Updated: v}
 	b, err := e.Canonical()
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +117,7 @@ func (f *fleet) view() *View {
 
 func make1(owner, id, name string, mem, thr, version uint64) Computer {
 	return Computer{Owner: owner, ID: id, Name: name, Config: "default", Memory: mem, Threads: thr, Disk: 32,
-		Nix: "", Ports: []uint64{}, Players: []string{}, Consent: "any", Anywhere: 1, Version: version}
+		Nix: "", Ports: []uint64{}, Players: []string{}, Consent: "any", Anywhere: true, Version: version}
 }
 
 func TestOnlyMembersByTheirRoot(t *testing.T) {
@@ -170,11 +175,11 @@ func TestTotalsPortsAndConsent(t *testing.T) {
 	}
 	// anyone's box without the yes
 	n := make1("ann", "00000000000000c1", "c", 1024, 1, 1)
-	n.Anywhere = 0
+	n.Anywhere = false
 	if got := f.add(seal(t, "computer", body(t, n), ann.root)); got == "ok" {
 		t.Fatal("anyone's box without the yes")
 	}
-	n.Anywhere = 5
+	n.Anywhere = true
 	if got := f.add(seal(t, "computer", body(t, n), ann.root)); got != "ok" {
 		t.Fatal(got)
 	}
@@ -276,7 +281,7 @@ func TestConfigs(t *testing.T) {
 	f := newFleet(t, tom, ann)
 	f.claim(tom)
 	f.claim(ann)
-	c := Config{Owner: "tom", Name: "big", Memory: 8192, Threads: 4, Disk: 64, Nix: "{ }", Ports: []uint64{}, Players: []string{"ann"}, Consent: "own", Version: 1}
+	c := Config{Owner: "tom", Name: "big", Memory: 8192, Threads: 4, Disk: 64, Nix: "{ }", Ports: []uint64{}, Players: []string{"ann"}, Consent: "any", Version: 1}
 	if got := f.add(seal(t, "computer-config", body(t, c), tom.root)); got != "ok" {
 		t.Fatal(got)
 	}
@@ -353,5 +358,139 @@ func TestServeAtOnce(t *testing.T) {
 	}
 	for g := 0; g < 8; g++ {
 		<-done
+	}
+}
+
+func TestTheReviewsCases(t *testing.T) {
+	tom, ann := who("tom", 1), who("ann", 10)
+	f := newFleet(t, tom, ann)
+	f.claim(tom)
+	f.claim(ann)
+
+	// a device taken off their entry starts and stops nothing
+	c := make1("tom", "00000000000000a1", "dev", 2048, 1, 1)
+	if got := f.add(seal(t, "computer", body(t, c), tom.root)); got != "ok" {
+		t.Fatal(got)
+	}
+	other := key(77)
+	raw := tom.entryAt(t, 2, []ident.Device{{Fingerprint: "g", PublicKey: pub(other), Added: 2}})
+	f.add(raw)
+	if id, _ := f.r.CatchN(len(f.log), func(i int) ident.Item { return f.log[i] }); id.Outcomes[ident.ItemHash(raw)] != "ok" {
+		t.Fatal(id.Outcomes[ident.ItemHash(raw)])
+	}
+	stop := Power{ID: c.ID, Up: false, At: f.now()}
+	if got := f.add(seal(t, "computer-power", body(t, stop), tom.device)); got == "ok" {
+		t.Fatal("a removed device stopped it")
+	}
+	if got := f.add(seal(t, "computer-power", body(t, stop), other)); got != "ok" {
+		t.Fatal(got)
+	}
+
+	// the same id, someone else's
+	steal := make1("ann", c.ID, "mine", 1024, 1, 9)
+	if got := f.add(seal(t, "computer", body(t, steal), ann.root)); got == "ok" {
+		t.Fatal("ann took tom's id")
+	}
+
+	// my boxes only, with no box: refused
+	own := make1("ann", "00000000000000b1", "own", 1024, 1, 1)
+	own.Consent, own.Anywhere = "own", false
+	if got := f.add(seal(t, "computer", body(t, own), ann.root)); got == "ok" {
+		t.Fatal("own, with no box")
+	}
+
+	// disk is a total too: 200 across them
+	big := make1("ann", "00000000000000c1", "big", 1024, 1, 1)
+	big.Disk = 150
+	if got := f.add(seal(t, "computer", body(t, big), ann.root)); got != "ok" {
+		t.Fatal(got)
+	}
+	big2 := make1("ann", "00000000000000c2", "big2", 1024, 1, 1)
+	big2.Disk = 60
+	if got := f.add(seal(t, "computer", body(t, big2), ann.root)); got == "ok" {
+		t.Fatal("over 200 GiB together")
+	}
+
+	// players: no more than 32, none twice
+	two := make1("ann", "00000000000000c3", "two", 1024, 1, 1)
+	two.Players = []string{"tom", "tom"}
+	if got := f.add(seal(t, "computer", body(t, two), ann.root)); got == "ok" {
+		t.Fatal("a player twice")
+	}
+	many := make([]string, MaxPlayers+1)
+	for i := range many {
+		many[i] = fmt.Sprintf("p%d", i)
+	}
+	two.Players = many
+	if got := f.add(seal(t, "computer", body(t, two), ann.root)); got == "ok" {
+		t.Fatal("too many players")
+	}
+
+	// a config's name in a computer is a name
+	odd := make1("ann", "00000000000000c4", "odd", 1024, 1, 1)
+	odd.Config = "../x"
+	if got := f.add(seal(t, "computer", body(t, odd), ann.root)); got == "ok" {
+		t.Fatal("a config name that isn't one")
+	}
+}
+
+func TestEachCap(t *testing.T) {
+	tom := who("tom", 1)
+	f := newFleet(t, tom)
+	f.lim.PortCount = 100
+	f.claim(tom)
+	// configs: 32, deleted ones counted
+	for i := 0; i < MaxConfigs; i++ {
+		c := Config{Owner: "tom", Name: fmt.Sprintf("c%d", i), Memory: 512, Threads: 1, Disk: 8, Ports: []uint64{}, Players: []string{}, Consent: "any", Version: 1}
+		if got := f.add(seal(t, "computer-config", body(t, c), tom.root)); got != "ok" {
+			t.Fatal(i, got)
+		}
+	}
+	gone := Config{Owner: "tom", Name: "c0", Ports: []uint64{}, Players: []string{}, Version: 2, Gone: true}
+	f.add(seal(t, "computer-config", body(t, gone), tom.root))
+	one := Config{Owner: "tom", Name: "more", Memory: 512, Threads: 1, Disk: 8, Ports: []uint64{}, Players: []string{}, Consent: "any", Version: 1}
+	if got := f.add(seal(t, "computer-config", body(t, one), tom.root)); got == "ok" {
+		t.Fatal("past the configs' cap")
+	}
+	// ports: 16 across their computers, SSH counted
+	c := make1("tom", "00000000000000a1", "a", 512, 1, 1)
+	c.Disk = 8
+	c.Ports = []uint64{1, 2, 3, 4, 5, 6, 7, 8}
+	if got := f.add(seal(t, "computer", body(t, c), tom.root)); got != "ok" {
+		t.Fatal(got)
+	}
+	d := make1("tom", "00000000000000a2", "b", 512, 1, 1)
+	d.Disk = 8
+	d.Ports = []uint64{1, 2, 3, 4, 5, 6} // 9 + 7: 16
+	if got := f.add(seal(t, "computer", body(t, d), tom.root)); got != "ok" {
+		t.Fatal(got)
+	}
+	e := make1("tom", "00000000000000a3", "c", 512, 1, 1)
+	e.Disk = 8
+	if got := f.add(seal(t, "computer", body(t, e), tom.root)); got == "ok" {
+		t.Fatal("past 16 ports")
+	}
+}
+
+func TestASuspendedOwner(t *testing.T) {
+	tom := who("tom", 1)
+	f := newFleet(t, tom)
+	f.claim(tom)
+	c := make1("tom", "00000000000000a1", "dev", 2048, 1, 1)
+	f.add(seal(t, "computer", body(t, c), tom.root))
+	id := ident.MemberID(pub(tom.root))
+	f.cfg.Members.Revoked = []string{id}
+	f.cfg.Members.Suspended = map[string]string{id: "abuse"}
+	f.cfg.Members.Removed = map[string]uint64{id: f.now()}
+	if v := f.view(); v.Computers[c.ID].Up {
+		t.Fatal("suspended, still up")
+	}
+	c.Version = 2
+	if got := f.add(seal(t, "computer", body(t, c), tom.root)); got == "ok" {
+		t.Fatal("suspended, still changing it")
+	}
+	stop := Power{ID: c.ID, Up: true, At: f.now()}
+	if got := f.add(seal(t, "computer-power", body(t, stop), tom.device)); got == "ok" {
+		t.Fatal("suspended, still starting it")
 	}
 }

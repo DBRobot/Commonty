@@ -68,7 +68,7 @@ type Listed struct {
 	Nix      string    `json:"nix"`
 	Players  []string  `json:"players"`
 	Consent  string    `json:"consent"`
-	Anywhere uint64    `json:"anywhere,omitempty"`
+	Anywhere bool      `json:"anywhere"`
 	Port     uint64    `json:"port"`
 	Forwards []Forward `json:"forwards"`
 	// what its owner asked: up or not

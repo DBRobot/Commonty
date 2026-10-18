@@ -187,6 +187,9 @@ func (s *State) outcome(hash string, err error) {
 	}
 }
 
+// Entry is entry, for the judges beside this one (state/computers)
+func (s *State) Entry(name string, at uint64) *Held { return s.entry(name, at) }
+
 // entry is the name's agreed entry at `at`: a guest past its time is gone
 func (s *State) entry(name string, at uint64) *Held {
 	if !ValidName(name) {

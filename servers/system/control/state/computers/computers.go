@@ -21,18 +21,23 @@ import (
 type Limits struct {
 	Memory    uint64 `json:"memory"`  // MiB, every computer of theirs, running or not
 	Threads   uint64 `json:"threads"` // likewise
-	Disk      uint64 `json:"disk"`    // GiB, one computer's
+	Disk      uint64 `json:"disk"`    // GiB, likewise
 	PortBase  uint64 `json:"portBase"`
 	PortCount uint64 `json:"portCount"`
 }
 
 const (
-	MinMemory  = 512 // MiB
-	MinDisk    = 8   // GiB
-	MaxNix     = 64 * 1024
-	MaxPorts   = 8
-	powerAhead = 300
-	powerAgo   = 3600
+	MinMemory = 512 // MiB
+	MinDisk   = 8   // GiB
+	MaxNix    = 64 * 1024
+	MaxPorts  = 8 // one computer's, besides SSH
+	// what one member may hold, so nobody fills the state or the pool
+	MaxConfigs     = 32  // saved, deleted ones counted
+	MaxPlayers     = 32  // let in, per config or computer
+	MaxMemberPorts = 16  // SSH and forwards, every computer of theirs
+	MaxMade        = 256 // computers ever, deleted ones counted
+	powerAhead     = 300
+	powerAgo       = 3600
 )
 
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
@@ -55,19 +60,20 @@ type Config struct {
 
 // Computer is one computer, as its owner signed it
 type Computer struct {
-	Owner    string   `json:"owner"`
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Config   string   `json:"config"`
-	Memory   uint64   `json:"memory"`
-	Threads  uint64   `json:"threads"`
-	Disk     uint64   `json:"disk"`
-	Nix      string   `json:"nix"`
-	Ports    []uint64 `json:"ports"`
-	Players  []string `json:"players"`
-	Consent  string   `json:"consent"`
-	Anywhere uint64   `json:"anywhere,omitempty"` // ms: their yes to anyone's box
-	Version  uint64   `json:"version"`
+	Owner   string   `json:"owner"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Config  string   `json:"config"`
+	Memory  uint64   `json:"memory"`
+	Threads uint64   `json:"threads"`
+	Disk    uint64   `json:"disk"`
+	Nix     string   `json:"nix"`
+	Ports   []uint64 `json:"ports"`
+	Players []string `json:"players"`
+	Consent string   `json:"consent"`
+	// their yes to the warning, for anyone's box
+	Anywhere bool   `json:"anywhere"`
+	Version  uint64 `json:"version"`
 }
 
 // Power starts or stops one; a device of the owner's may sign it
@@ -106,7 +112,8 @@ type State struct {
 	Configs   map[string]map[string]*Config `json:"configs"` // owner -> name -> config
 	Computers map[string]*Held              `json:"computers"`
 	// ids deleted, for good: an old item for one, sent again, never brings
-	// it back (ids are made fresh by the signer, never reused)
+	// it back (ids are made fresh by the signer, never reused). Bounded:
+	// a member makes at most MaxMade computers, deleted ones counted
 	Deleted  map[string]string `json:"deleted"` // id -> owner
 	Outcomes map[string]string `json:"outcomes"`
 	Order    []string          `json:"outcomeOrder"`
@@ -144,7 +151,7 @@ func Kind(kind string) bool {
 
 // who signed: the owner's entry, and whether they are a member now
 func (s *State) owner(id *ident.State, cfg *ident.Config, name string, at uint64) (*ident.Entry, error) {
-	h := id.Entries[name]
+	h := id.Entry(name, at)
 	if h == nil || h.Signed == nil {
 		return nil, errors.New("no such member")
 	}
@@ -202,7 +209,15 @@ func (s *State) shape(id *ident.State, cfg *ident.Config, lim *Limits, owner str
 		}
 		seen[p] = true
 	}
+	if len(players) > MaxPlayers {
+		return fmt.Errorf("at most %d people let in", MaxPlayers)
+	}
+	let := map[string]bool{}
 	for _, p := range players {
+		if let[p] {
+			return fmt.Errorf("%s twice", p)
+		}
+		let[p] = true
 		if p == owner || !nameRe.MatchString(p) {
 			return fmt.Errorf("not someone to let in: %s", p)
 		}
@@ -212,6 +227,9 @@ func (s *State) shape(id *ident.State, cfg *ident.Config, lim *Limits, owner str
 	}
 	if consent != "own" && consent != "any" {
 		return errors.New("where it runs is own or any")
+	}
+	if consent == "own" && len(id.BoxesOf(owner, at)) == 0 {
+		return errors.New("they have no box of their own: only anyone's box")
 	}
 	return nil
 }
@@ -257,8 +275,12 @@ func (s *State) config(id *ident.State, cfg *ident.Config, lim *Limits, env *ide
 	if !nameRe.MatchString(c.Name) {
 		return errors.New("a name is lowercase letters, digits and dashes, up to 32")
 	}
-	if cur := s.Configs[c.Owner][c.Name]; cur != nil && c.Version <= cur.Version {
+	cur := s.Configs[c.Owner][c.Name]
+	if cur != nil && c.Version <= cur.Version {
 		return errors.New("older than the config on file")
+	}
+	if cur == nil && len(s.Configs[c.Owner]) >= MaxConfigs {
+		return fmt.Errorf("at most %d configs, deleted ones counted", MaxConfigs)
 	}
 	if !c.Gone {
 		if err := s.shape(id, cfg, lim, c.Owner, c.Memory, c.Threads, c.Disk, c.Nix, c.Ports, c.Players, c.Consent, at); err != nil {
@@ -284,8 +306,8 @@ func (s *State) computer(id *ident.State, cfg *ident.Config, lim *Limits, env *i
 	if err := ident.VerifyRoot(env, e); err != nil {
 		return fmt.Errorf("refused: %w", err)
 	}
-	if !idRe.MatchString(n.ID) || !nameRe.MatchString(n.Name) {
-		return errors.New("an id is 16 hex, a name lowercase letters, digits and dashes")
+	if !idRe.MatchString(n.ID) || !nameRe.MatchString(n.Name) || !nameRe.MatchString(n.Config) {
+		return errors.New("an id is 16 hex; a name and a config's name lowercase letters, digits and dashes")
 	}
 	if _, gone := s.Deleted[n.ID]; gone {
 		return errors.New("that remote computer was deleted")
@@ -310,22 +332,42 @@ func (s *State) computer(id *ident.State, cfg *ident.Config, lim *Limits, env *i
 	if err := s.shape(id, cfg, lim, n.Owner, n.Memory, n.Threads, n.Disk, n.Nix, n.Ports, n.Players, n.Consent, at); err != nil {
 		return err
 	}
-	if n.Consent == "any" && n.Anywhere == 0 {
+	if n.Consent == "any" && !n.Anywhere {
 		return errors.New("running on someone else's box needs their yes first")
 	}
-	if n.Consent == "own" {
-		n.Anywhere = 0
+	if n.Consent == "own" && n.Anywhere {
+		return errors.New("a yes to anyone's box, for one that stays on theirs")
 	}
 	// every computer of theirs, running or not, this one as it would be
-	var mem, thr uint64
+	var mem, thr, disk, ports, made uint64
 	for _, other := range s.Computers {
 		if other.Owner == n.Owner && other.ID != n.ID {
 			mem += other.Memory
 			thr += other.Threads
+			disk += other.Disk
+			ports += 1 + uint64(len(other.Forwards))
 		}
 	}
-	if mem+n.Memory > lim.Memory || thr+n.Threads > lim.Threads {
-		return fmt.Errorf("their remote computers would take %d MiB and %d threads together; the limit is %d MiB and %d", mem+n.Memory, thr+n.Threads, lim.Memory, lim.Threads)
+	if mem+n.Memory > lim.Memory || thr+n.Threads > lim.Threads || disk+n.Disk > lim.Disk {
+		return fmt.Errorf("their remote computers would take %d MiB, %d threads and %d GiB together; the limit is %d MiB, %d and %d GiB", mem+n.Memory, thr+n.Threads, disk+n.Disk, lim.Memory, lim.Threads, lim.Disk)
+	}
+	if ports+1+uint64(len(n.Ports)) > MaxMemberPorts {
+		return fmt.Errorf("at most %d ports across their remote computers, SSH counted", MaxMemberPorts)
+	}
+	if cur == nil {
+		for _, o := range s.Computers {
+			if o.Owner == n.Owner {
+				made++
+			}
+		}
+		for _, o := range s.Deleted {
+			if o == n.Owner {
+				made++
+			}
+		}
+		if made >= MaxMade {
+			return fmt.Errorf("at most %d remote computers made, deleted ones counted", MaxMade)
+		}
 	}
 	// ports: its SSH and the forwards it keeps stay; new ones are the
 	// lowest free in the pool, in agreed order, so every reader agrees
