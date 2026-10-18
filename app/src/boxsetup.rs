@@ -97,6 +97,11 @@ pub async fn route<R: Runtime>(
             let Some(id) = id else {
                 return Ok(refuse(StatusCode::NOT_FOUND, "no drive was written here"));
             };
+            // its box, joined, made the member's first: until then it is
+            // nobody's, and the backup stays where it is
+            if let Err(e) = enlist(app, std::slice::from_ref(&id)).await {
+                eprintln!("boxsetup: enlisting the box: {e}");
+            }
             match pending(app).await {
                 Ok(all) => json(&all.into_iter().find(|p| p.id == id)),
                 Err(e) => Ok(refuse(StatusCode::BAD_GATEWAY, &e)),
@@ -423,6 +428,9 @@ pub async fn pending<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<Pending>, Str
     if ids.is_empty() {
         return Ok(vec![]);
     }
+    if let Err(e) = enlist(app, &ids).await {
+        eprintln!("boxsetup: enlisting boxes: {e}");
+    }
     let joined = joined(app).await.unwrap_or_default();
     let mut out = Vec::new();
     for id in ids {
@@ -469,18 +477,20 @@ fn pending_ids(listing: &str) -> Vec<String> {
     ids
 }
 
-/// ticket id -> box name, for this member's boxes that joined with a
-/// ticket: the gate's, from the agreed state
-// INTERFACE the fleet side (member-join) serves: GET <door>/_dd/network/joined
-// with the member's device token, [{"name": "j…", "ticket": "<id>"}].
-async fn joined<R: Runtime>(app: &AppHandle<R>) -> Result<HashMap<String, String>, String> {
-    #[derive(Deserialize)]
-    struct J {
-        name: String,
-        ticket: String,
-    }
+/// What the gate says of this member's boxes (`GET <door>/_dd/network/joined`,
+/// member_boxes.rs): each that joined with a ticket of theirs, and whether
+/// it is theirs yet
+#[derive(Deserialize)]
+struct Joined {
+    name: String,
+    ticket: String,
+    #[serde(default)]
+    enlisted: bool,
+}
+
+async fn joined_rows<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<Joined>, String> {
     let base = media::gate::door_base(&crate::account::dirs()).map_err(|e| e.to_string())?;
-    let list: Vec<J> = directory::http()
+    directory::http()
         .map_err(|e| e.to_string())?
         .get(format!("{base}/_dd/network/joined"))
         .bearer_auth(crate::site::token(app)?)
@@ -491,8 +501,36 @@ async fn joined<R: Runtime>(app: &AppHandle<R>) -> Result<HashMap<String, String
         .map_err(|e| e.to_string())?
         .json()
         .await
-        .map_err(|e| e.to_string())?;
-    Ok(list.into_iter().map(|j| (j.ticket, j.name)).collect())
+        .map_err(|e| e.to_string())
+}
+
+/// ticket id -> box name, for this member's boxes: the ones theirs, which
+/// their pending backups move in for
+async fn joined<R: Runtime>(app: &AppHandle<R>) -> Result<HashMap<String, String>, String> {
+    Ok(joined_rows(app)
+        .await?
+        .into_iter()
+        .filter(|j| j.enlisted)
+        .map(|j| (j.ticket, j.name))
+        .collect())
+}
+
+/// The boxes that joined with one of `tickets` (the drive this window wrote,
+/// the member's pending backups) and are not theirs yet, enlisted with the
+/// account's main key, where it is on this device. Elsewhere Settings >
+/// Devices adds them, with the passkey.
+async fn enlist<R: Runtime>(app: &AppHandle<R>, tickets: &[String]) -> Result<(), String> {
+    let keys = app.state::<crate::account::Keys>();
+    let Some(root) = account::load_root(&keys.0).map_err(|e| e.to_string())? else {
+        return Ok(());
+    };
+    for j in joined_rows(app).await? {
+        if !j.enlisted && tickets.contains(&j.ticket) {
+            crate::site::send_box_item(app, identity::envelope::ENLIST, &root, &j.name, &j.ticket)
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 /// The pending backup into the member's images, named "from <box>", then

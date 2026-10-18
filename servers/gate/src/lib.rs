@@ -47,7 +47,7 @@ use axum::{
     extract::{Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header::AUTHORIZATION},
     response::{Html, IntoResponse, Redirect, Response},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -585,10 +585,12 @@ impl App {
             return self.demo();
         }
         use ident::From;
+        // the agreed view's access alone: an invite or a box that counts;
+        // not read yet, nobody's in
         let agreed = || {
             self.directory
                 .agreed_member(user)
-                .is_some_and(|m| m.is_member())
+                .is_some_and(|m| m.has_access())
         };
         match self.directory.ident_from {
             From::Agreed => agreed(),
@@ -607,6 +609,30 @@ impl App {
                 r
             }
         }
+    }
+
+    /// Signed up and not shut out - left, suspended or removed - whatever
+    /// their access: their boxes on Devices, and the backup a box they set
+    /// up makes on its way in, which is how a box comes to give them access
+    fn registered(&self, user: &str) -> bool {
+        if user == pages::DEMO_USER {
+            return false;
+        }
+        if self.directory.ident_from == ident::From::Agreed {
+            return self
+                .directory
+                .agreed_member(user)
+                .is_some_and(|m| m.not_banned());
+        }
+        let Some(e) = self.directory.replay_or_held(user) else {
+            return false;
+        };
+        !self.directory.has_left(user)
+            && self.members.as_ref().is_none_or(|m| {
+                !identity::member_ids(&e.entry)
+                    .iter()
+                    .any(|id| m.revoked.contains(id))
+            })
     }
 
     /// Membership as this box's replay judges it: a root on the list, or an
@@ -3276,6 +3302,7 @@ pub async fn start(
         // a member's disk images, in the bucket (library.rs); nginx sends
         // files.<domain>/images/ here
         .route("/_dd/boxes/mine", get(member_boxes::mine))
+        .route("/_dd/boxes/{kind}", put(member_boxes::put_item))
         .route("/_dd/network/joined", get(member_boxes::joined_mine))
         .route("/_dd/images", axum::routing::any(library::images_root))
         .route("/_dd/images/", axum::routing::any(library::images_root))

@@ -4,7 +4,7 @@
 // names from a file only your library key opens, which the box keeps
 // without being able to read it.
 
-import init, { file_seal, file_open, entry_without, entry_without_box, entry_signed, entry_with_device, entry_resign, entry_envelope, qr_svg } from '/_dd/web/dd_web.js';
+import init, { file_seal, file_open, entry_without, box_item_plan, box_item_envelope, entry_signed, entry_with_device, entry_resign, entry_envelope, qr_svg } from '/_dd/web/dd_web.js';
 import { unlock } from './library.js';
 import { requestOptions, assertion, post, b64u, u8b64 } from './webauthn.js';
 import { me, inApp, servedByApp, appFetch, pageConfig, entryOf, forgetEntry } from './shell.js';
@@ -42,6 +42,7 @@ let who = null;
 let entry = null;
 let signins = null;
 let boxes = []; // the boxes this person set up (member_boxes.rs)
+let waiting = []; // boxes that joined with a ticket of theirs, not yet theirs
 let lib = null; // the library, once the app has handed its key
 let names = null; // { key: name }, once opened
 
@@ -78,6 +79,7 @@ async function load(changed = true) {
   entry = d;
   signins = s;
   boxes = b.boxes || [];
+  waiting = b.waiting || [];
 }
 
 // the passkey, once more: what ends a session elsewhere asks for it
@@ -177,8 +179,9 @@ function boxRow(b) {
   if (b.lastSeen) bits.push(`seen ${ago(Math.floor(b.lastSeen / 1000))}`);
   text.append(el('div', 'dv-name', b.name), el('div', 'dv-meta', bits.join(' · ')));
   const actions = el('div', 'dv-actions');
-  // removing is signed by the account's main key, a passkey one here
-  if (entry.entry.root.startsWith('webauthn:') && !servedByApp) {
+  // removing is signed by the account's main key: a passkey one here, a
+  // device one in the app on the device holding it
+  if (canSignBoxes()) {
     const rm = el('button', 'danger', 'Remove');
     rm.onclick = () => removeBox(b);
     actions.append(rm);
@@ -187,37 +190,85 @@ function boxRow(b) {
   return li;
 }
 
+// a box that joined with a ticket of this person's and waits for their main
+// key to make it theirs
+function waitingRow(b) {
+  const li = el('li', 'dv-item');
+  const ico = el('span', 'dv-ico');
+  ico.innerHTML = ICON.laptop;
+  const text = el('div');
+  text.append(el('div', 'dv-name', b.name), el('div', 'dv-meta', `joined ${day(Math.floor(b.joined / 1000))} · waiting for you to add it`));
+  const actions = el('div', 'dv-actions');
+  if (canSignBoxes()) {
+    const add = el('button', '', rootHere ? 'Add' : 'Add with passkey');
+    add.onclick = async () => {
+      add.disabled = true;
+      try {
+        await sendBoxItem('enlist', b);
+        await settle(() => boxes.some((x) => x.name === b.name));
+      } catch (err) {
+        add.disabled = false;
+        text.append(el('div', 'dv-meta', err.name === 'NotAllowedError' ? 'Your passkey was not used.' : String(err.message || err)));
+      }
+    };
+    actions.append(add);
+  }
+  li.append(ico, text, actions);
+  return li;
+}
+
+const canSignBoxes = () => rootHere || (entry.entry.root.startsWith('webauthn:') && !servedByApp);
+
+// A box item, signed by the account's main key: by the app where it holds a
+// device key, else by the passkey here, then to the box
+async function sendBoxItem(kind, b) {
+  if (rootHere) {
+    const r = await appFetch(`/_dd/app/${kind}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ box: b.name, ticket: b.ticket || '' }) });
+    if (!r.ok) throw new Error(await r.text() || `the app said ${r.status}`);
+    return;
+  }
+  await init();
+  const plan = JSON.parse(box_item_plan(kind, JSON.stringify(entry), b.name, b.ticket || '', BigInt(Math.floor(Date.now() / 1000))));
+  const cfg = await pageConfig();
+  const a = await navigator.credentials.get({
+    publicKey: {
+      challenge: b64u(plan.challenge),
+      rpId: cfg.rpId,
+      allowCredentials: [{ type: 'public-key', id: b64u(entry.entry.root.split(':')[1]) }],
+      userVerification: 'preferred',
+    },
+  });
+  const env = box_item_envelope(kind, plan.body, JSON.stringify({
+    authenticatorData: u8b64(a.response.authenticatorData),
+    clientDataJSON: u8b64(a.response.clientDataJSON),
+    signature: u8b64(a.response.signature),
+  }));
+  const r = await fetch(`/_dd/boxes/${kind}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: env });
+  if (!r.ok) throw new Error(await r.text() || `the box said ${r.status}`);
+}
+
+// the fleet agrees on it within seconds: the list again until it shows
+async function settle(done) {
+  for (let i = 0; i < 15; i++) {
+    await new Promise((ok) => setTimeout(ok, 1000));
+    await load(false);
+    if (done()) break;
+  }
+  render();
+}
+
 function removeBox(b) {
   $('rm-h').textContent = `Remove ${b.name}?`;
-  $('rm-what').textContent = 'It stops being yours on every box at once. It keeps nothing of yours it can read.';
+  $('rm-what').textContent = 'It stops being yours on every box at once, and keeps nothing of yours it can read. If it was your last box and you came in by a box, the services close to you.';
   $('rm-msg').hidden = true;
   $('rm-yes').disabled = false;
-  $('rm-yes').textContent = 'Remove with passkey';
+  $('rm-yes').textContent = rootHere ? 'Remove' : 'Remove with passkey';
   $('rm-yes').onclick = async () => {
     $('rm-yes').disabled = true;
     try {
-      await init();
-      const e = entry.entry;
-      const plan = JSON.parse(entry_without_box(JSON.stringify(entry), b.ticket, BigInt(Math.floor(Date.now() / 1000))));
-      const cfg = await pageConfig();
-      const a = await navigator.credentials.get({
-        publicKey: {
-          challenge: b64u(plan.challenge),
-          rpId: cfg.rpId,
-          allowCredentials: [{ type: 'public-key', id: b64u(e.root.split(':')[1]) }],
-          userVerification: 'preferred',
-        },
-      });
-      const signed = entry_signed(JSON.stringify(plan.entry), JSON.stringify({
-        authenticatorData: u8b64(a.response.authenticatorData),
-        clientDataJSON: u8b64(a.response.clientDataJSON),
-        signature: u8b64(a.response.signature),
-      }));
-      const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });
-      if (!r.ok) throw new Error(await r.text() || `the box said ${r.status}`);
+      await sendBoxItem('unenlist', b);
       $('remove').close();
-      await load();
-      render();
+      await settle(() => !boxes.some((x) => x.name === b.name));
     } catch (err) {
       $('rm-msg').textContent = err.name === 'NotAllowedError' ? 'Your passkey was not used.' : String(err.message || err);
       $('rm-msg').hidden = false;
@@ -259,8 +310,8 @@ function render() {
   let d = 0;
   let p = 0;
   $('dv-keys').replaceChildren(...keys().map((k) => keyRow(k, k.passkey ? ++p : ++d)));
-  $('dv-boxes').replaceChildren(...boxes.map(boxRow));
-  $('dv-boxes-box').hidden = boxes.length === 0;
+  $('dv-boxes').replaceChildren(...boxes.map(boxRow), ...waiting.map(waitingRow));
+  $('dv-boxes-box').hidden = boxes.length + waiting.length === 0;
   $('dv-show').hidden = names !== null;
   $('dv-hint').hidden = names !== null;
   drawConfirm();

@@ -16,6 +16,45 @@ pub const LEAVE: &str = "leave";
 pub const INVITE: &str = "invite";
 pub const ENLIST: &str = "enlist";
 pub const UNENLIST: &str = "unenlist";
+pub const EXTEND: &str = "extend";
+
+/// A member's root naming a box as theirs: the box joined with `ticket`
+/// (the id of a join ticket of theirs), `at` its own date (seconds). The
+/// judge (state/ident enlist) holds the rest.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Enlist {
+    /// member_id of the root signing it
+    pub member: String,
+    #[serde(rename = "box")]
+    pub box_name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ticket: String,
+    pub at: u64,
+}
+
+impl Enlist {
+    /// The body for `kind` (ENLIST or UNENLIST: an unenlist names no ticket)
+    pub fn new(kind: &str, root: &str, box_name: &str, ticket: &str, at: u64) -> Self {
+        Self {
+            member: crate::member_id(root),
+            box_name: box_name.to_string(),
+            ticket: if kind == ENLIST {
+                ticket.to_string()
+            } else {
+                String::new()
+            },
+            at,
+        }
+    }
+}
+
+/// The fleet's admin keeping `name`'s access until `until` (seconds)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Extend {
+    pub name: String,
+    pub until: u64,
+    pub at: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Envelope {
@@ -89,6 +128,35 @@ pub fn verify_ed25519(sig_b64: &str, msg: &[u8], key: &VerifyingKey) -> Result<(
 pub fn passkey_challenge(kind: &str, body: &[u8]) -> Vec<u8> {
     use sha2::Digest as _;
     sha2::Sha256::digest(message(kind, body)).to_vec()
+}
+
+/// Signed by `root`, as an entry's root is written: a passkey root by an
+/// assertion over the envelope (checked against `passkeys`, the entry's),
+/// an ed25519 root by its own signature. The one check every kind signed
+/// by a root uses, here and in the judge (state/ident VerifyRoot).
+pub fn verify_root(env: &Envelope, root: &str, passkeys: &[crate::Passkey]) -> Result<()> {
+    verify_root_sig(env, &env.sig, root, passkeys)
+}
+
+/// verify_root over another signature the envelope carries (an entry's
+/// recovery_sig, by the recovery key on file)
+pub fn verify_root_sig(
+    env: &Envelope,
+    sig: &str,
+    root: &str,
+    passkeys: &[crate::Passkey],
+) -> Result<()> {
+    if root.starts_with(crate::WEBAUTHN_ROOT) {
+        crate::check_envelope_assertion(
+            root,
+            passkeys,
+            sig,
+            &passkey_challenge(&env.kind, &env.body_bytes()?),
+        )
+    } else {
+        let key = crate::decode_public(root)?;
+        verify_ed25519(sig, &env.message()?, &key)
+    }
 }
 
 #[cfg(test)]

@@ -141,33 +141,61 @@ pub fn entry_without(
     run().map_err(|e| JsValue::from_str(&e))
 }
 
-/// The entry with a box this person set up removed - the one that came
-/// with join ticket `ticket` (docs/dev/joining.md) - and the challenge its
-/// root passkey has to sign: `{ "entry": …, "challenge": base64url }`.
-fn without_box(signed: &str, ticket: &str, now: u64) -> R<String> {
+/// A box item for the root passkey to sign: an `enlist` of a box that joined
+/// with the ticket `ticket`, or an `unenlist` (docs/dev/joining.md) - its
+/// body as the envelope carries it, and the challenge, sha256 of the
+/// envelope's message: `{ "body": base64, "challenge": base64url }`.
+fn box_plan(kind: &str, signed: &str, box_name: &str, ticket: &str, now: u64) -> R<String> {
+    use identity::envelope::{ENLIST, Enlist, UNENLIST, passkey_challenge};
+    if kind != ENLIST && kind != UNENLIST {
+        return Err(format!("{kind} is not a box item"));
+    }
     let s: SignedEntry = serde_json::from_str(signed).map_err(|e| e.to_string())?;
     if !s.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
-        return Err("this entry's root is a device key: the app removes the box".into());
+        return Err("this entry's root is a device key: the app signs it".into());
     }
-    if ticket.len() != 32 || !ticket.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return Err("not a join ticket's id".into());
-    }
-    let mut e = s.entry;
-    if !e.removed_boxes.iter().any(|t| t == ticket) {
-        e.removed_boxes.push(ticket.to_string());
-    }
-    identity::drop_passkey_keys(&mut e);
-    e.version += 1;
-    e.updated = now;
-    let c = identity::challenge(&e).map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "entry": e, "challenge": B64_URL.encode(c) }).to_string())
+    let body = serde_json::to_vec(&Enlist::new(kind, &s.entry.root, box_name, ticket, now))
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "body": B64.encode(&body),
+        "challenge": B64_URL.encode(passkey_challenge(kind, &body)),
+    })
+    .to_string())
 }
 
 #[wasm_bindgen]
-pub fn entry_without_box(signed: &str, ticket: &str, now: u64) -> Result<String, JsValue> {
+pub fn box_item_plan(
+    kind: &str,
+    signed: &str,
+    box_name: &str,
+    ticket: &str,
+    now: u64,
+) -> Result<String, JsValue> {
     let run = || -> R<String> {
         verified(signed)?;
-        without_box(signed, ticket, now)
+        box_plan(kind, signed, box_name, ticket, now)
+    };
+    run().map_err(|e| JsValue::from_str(&e))
+}
+
+/// The box item's envelope: its plan's `body` and the passkey's answer to
+/// its challenge (base64url parts, as the browser hands them over)
+#[wasm_bindgen]
+pub fn box_item_envelope(kind: &str, body: &str, assertion: &str) -> Result<String, JsValue> {
+    let run = || -> R<String> {
+        let a: Assertion = serde_json::from_str(assertion).map_err(|e| e.to_string())?;
+        let raw = B64
+            .decode(body)
+            .map_err(|_| "the body is not base64".to_string())?;
+        serde_json::from_slice::<identity::envelope::Enlist>(&raw).map_err(|e| e.to_string())?;
+        let env = identity::envelope::Envelope {
+            v: 2,
+            kind: kind.to_string(),
+            body: body.to_string(),
+            sig: B64.encode(serde_json::to_vec(&a).map_err(|e| e.to_string())?),
+            recovery_sig: None,
+        };
+        serde_json::to_string(&env).map_err(|e| e.to_string())
     };
     run().map_err(|e| JsValue::from_str(&e))
 }
@@ -237,6 +265,43 @@ pub fn entry_envelope(body: &str, assertion: &str) -> Result<String, JsValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A box item's plan is the body the judge reads (state/ident enlist)
+    /// and the challenge over the envelope's message for that kind
+    #[test]
+    fn a_box_item_signs_what_the_judge_reads() {
+        let signed = serde_json::json!({"entry": {"name": "pia", "root": "webauthn:abc:def",
+            "recovery": "", "devices": [], "version": 1, "updated": 1}, "signature": "x"})
+        .to_string();
+        let id = "00112233445566778899aabbccddeeff";
+        for (kind, want) in [
+            (
+                "enlist",
+                format!(
+                    r#"{{"member":"{}","box":"jaaaaaaaaaa","ticket":"{id}","at":7}}"#,
+                    identity::member_id("webauthn:abc:def")
+                ),
+            ),
+            (
+                "unenlist",
+                format!(
+                    r#"{{"member":"{}","box":"jaaaaaaaaaa","at":7}}"#,
+                    identity::member_id("webauthn:abc:def")
+                ),
+            ),
+        ] {
+            let p: serde_json::Value =
+                serde_json::from_str(&box_plan(kind, &signed, "jaaaaaaaaaa", id, 7).unwrap())
+                    .unwrap();
+            let body = B64.decode(p["body"].as_str().unwrap()).unwrap();
+            assert_eq!(String::from_utf8(body.clone()).unwrap(), want);
+            assert_eq!(
+                B64_URL.decode(p["challenge"].as_str().unwrap()).unwrap(),
+                identity::envelope::passkey_challenge(kind, &body)
+            );
+        }
+        assert!(box_plan("entry", &signed, "jaaaaaaaaaa", id, 7).is_err());
+    }
 
     /// The plan's v2 body is the entry's bytes as the envelope carries them,
     /// and its challenge is sha256 of the envelope's message: what the judge

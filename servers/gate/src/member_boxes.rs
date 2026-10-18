@@ -7,7 +7,7 @@
 //! Devices tab, they see how it is, and the backup made of its old disk
 //! is kept for them. It runs nothing a stranger does not.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -39,9 +39,8 @@ pub(crate) struct Owned {
 /// A join ticket, as a pending backup's upload brings it: signed by a
 /// device in the member's entry, minted for `join`, and good at `at`
 /// (seconds). The member and the ticket's id. It says who may write that
-/// one backup, never whose a box is.
-// TODO(enlist): an upload credential the enlistment gives, in place of
-// the ticket
+/// one backup, never whose a box is, and only until a box is enlisted
+/// with it (pending_ticket).
 pub(crate) fn verify_ticket(
     entry_of: impl Fn(&str) -> anyhow::Result<Option<identity::SignedEntry>>,
     token: &str,
@@ -86,26 +85,24 @@ fn ticket_id(source: &str) -> Option<String> {
     }
 }
 
-/// Whose each joined box is: `enlisted` is box -> member, from the agreed
-/// identity state's members' `boxes`. A joined box no member has enlisted
-/// is nobody's; an enlisted box not in the control state's `joined` is
-/// not here yet.
+/// Whose each joined box is: `enlisted` is the agreed identity state's
+/// box -> whose and with which ticket. A joined box no member has enlisted
+/// is nobody's; an enlisted box not in the control state's `joined` is not
+/// here yet.
 pub(crate) fn owners(
     joined: &serde_json::Value,
-    enlisted: &BTreeMap<String, String>,
+    enlisted: &HashMap<String, crate::ident::Owner>,
 ) -> Vec<Owned> {
     let mut out: Vec<Owned> = joined
         .as_object()
         .into_iter()
         .flatten()
         .filter_map(|(name, j)| {
-            let user = enlisted.get(name)?;
+            let o = enlisted.get(name)?;
             Some(Owned {
                 name: name.clone(),
-                user: user.clone(),
-                // TODO(enlist): the ticket as enlisted (Enlisted.Ticket),
-                // once the identity view carries it
-                ticket: j["ticket"].as_str().and_then(ticket_of).unwrap_or_default(),
+                user: o.owner.clone(),
+                ticket: o.ticket.clone(),
                 at: j["at"].as_i64().unwrap_or(0),
                 key: j["key"].as_str().unwrap_or_default().to_string(),
             })
@@ -115,16 +112,10 @@ pub(crate) fn owners(
     out
 }
 
-/// box -> member, from the agreed identity state; empty when this box does
-/// not read it (identityFrom replay) or has not read it yet
-fn enlisted(app: &App) -> BTreeMap<String, String> {
-    let Some(st) = app.directory.ident.as_ref().and_then(|a| a.state()) else {
-        return BTreeMap::new();
-    };
-    st.members
-        .iter()
-        .flat_map(|(name, m)| m.boxes.iter().map(move |b| (b.clone(), name.clone())))
-        .collect()
+/// The agreed identity state's enlistments; None when this box does not
+/// read it (identityFrom replay) or has not read it yet
+fn enlisted(app: &App) -> Option<HashMap<String, crate::ident::Owner>> {
+    Some(app.directory.ident.as_ref()?.state()?.enlisted.clone())
 }
 
 /// The agreed state, as last read from this box's dd-control: read again
@@ -178,19 +169,49 @@ async fn state(app: &Arc<App>) -> serde_json::Value {
 /// counts from the next request on.
 pub(crate) async fn current(app: &Arc<App>) -> (serde_json::Value, Vec<Owned>) {
     let st = state(app).await;
-    let owned = owners(&st["joined"], &enlisted(app))
+    let owned = owners(&st["joined"], &enlisted(app).unwrap_or_default())
         .into_iter()
-        .filter(|o| app.role(&o.user) == Some(crate::pages::Role::Member))
+        .filter(|o| app.registered(&o.user))
         .collect();
     (st, owned)
 }
 
-/// The tickets any joined box came with: their pending backups stay. Read
-/// from the tickets as they are, whether or not anyone owns the box now -
-/// an entry not read yet, a device since removed, a member suspended keep
-/// a backup as surely as an owned box does. None, and nothing may go, when
-/// the agreed state is not a fresh read (current's) or any joined box's
-/// ticket can't be read.
+/// The joined boxes that came with a ticket naming `user` and no one has
+/// enlisted: theirs to enlist, as far as the box's ticket says - which the
+/// judge checks, not this
+fn waiting(
+    st: &serde_json::Value,
+    user: &str,
+    enlisted: &HashMap<String, crate::ident::Owner>,
+) -> Vec<serde_json::Value> {
+    let mut out: Vec<serde_json::Value> = st["joined"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(name, _)| !enlisted.contains_key(*name))
+        .filter_map(|(name, j)| {
+            let source = UnverifiedBiscuit::from_base64(j["ticket"].as_str()?)
+                .ok()?
+                .print_block_source(0)
+                .ok()?;
+            (crate::peek_user(&source).as_deref() == Some(user)).then(|| {
+                serde_json::json!({
+                    "name": name,
+                    "ticket": ticket_id(&source).unwrap_or_default(),
+                    "joined": j["at"],
+                    "enlisted": false,
+                })
+            })
+        })
+        .collect();
+    out.sort_by_key(|r| r["name"].as_str().unwrap_or_default().to_string());
+    out
+}
+
+/// The tickets boxes were enlisted with (the agreed identity state's,
+/// never a joined box's word): their pending backups stay. None, and
+/// nothing may go, when the agreed state is not a fresh read (current's)
+/// or the identity state has not been read.
 /// With them, the time to judge a week by: the earlier of this box's clock
 /// and the agreed time, and only when the two are within ten minutes.
 pub(crate) async fn joined_tickets(app: &Arc<App>) -> Option<(BTreeSet<String>, u64)> {
@@ -200,33 +221,16 @@ pub(crate) async fn joined_tickets(app: &Arc<App>) -> Option<(BTreeSet<String>, 
     if now.abs_diff(agreed) > 600 {
         return None;
     }
-    Some((tickets_in(&st)?, now.min(agreed)))
+    Some((tickets_in(&st, enlisted(app).as_ref())?, now.min(agreed)))
 }
 
-fn tickets_in(st: &serde_json::Value) -> Option<BTreeSet<String>> {
+fn tickets_in(
+    st: &serde_json::Value,
+    enlisted: Option<&HashMap<String, crate::ident::Owner>>,
+) -> Option<BTreeSet<String>> {
     // a state without its boxes is no state
     st.get("boxes")?.as_object()?;
-    let joined = match st.get("joined") {
-        None | Some(serde_json::Value::Null) => return Some(BTreeSet::new()),
-        Some(j) => j.as_object()?,
-    };
-    let mut out = BTreeSet::new();
-    for j in joined.values() {
-        match j.get("ticket") {
-            None => continue,
-            Some(t) => {
-                let t = t.as_str()?;
-                if t.is_empty() {
-                    continue;
-                }
-                // a ticket that names none of the right shape: unsure, so
-                // nothing goes
-                // TODO(enlist): the enlisted tickets, from the identity view
-                out.insert(ticket_of(t)?);
-            }
-        }
-    }
-    Some(out)
+    Some(enlisted?.values().map(|o| o.ticket.clone()).collect())
 }
 
 /// GET /_dd/boxes/mine: the boxes this member set up, with how each is as
@@ -250,24 +254,106 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
             })
         })
         .collect();
-    axum::Json(serde_json::json!({ "boxes": rows })).into_response()
+    let waiting = waiting(&st, &user, &enlisted(&app).unwrap_or_default());
+    axum::Json(serde_json::json!({ "boxes": rows, "waiting": waiting })).into_response()
 }
 
-/// GET /_dd/network/joined: the same boxes, as the app's installer window
-/// reads them to move each one's pending backup into the member's images:
-/// `[{ "name", "ticket" }]`
+/// GET /_dd/network/joined: the same boxes, as the app reads them to move
+/// each one's pending backup into the member's images (`enlisted`), and
+/// the boxes that joined with a ticket of theirs and wait for their root to
+/// enlist them: `[{ "name", "ticket", "enlisted" }]`
 pub(crate) async fn joined_mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let Some(user) = app.identify(&headers, "access") else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let rows: Vec<serde_json::Value> = current(&app)
-        .await
-        .1
+    let (st, owned) = current(&app).await;
+    let mut rows: Vec<serde_json::Value> = owned
         .into_iter()
         .filter(|o| o.user == user)
-        .map(|o| serde_json::json!({ "name": o.name, "ticket": o.ticket }))
+        .map(|o| serde_json::json!({ "name": o.name, "ticket": o.ticket, "enlisted": true }))
         .collect();
+    rows.extend(waiting(&st, &user, &enlisted(&app).unwrap_or_default()));
     axum::Json(rows).into_response()
+}
+
+/// PUT /_dd/boxes/{kind}: a member's root-signed `enlist` or `unenlist` of
+/// a box, or the fleet admin's `extend` of a member's grace, into the
+/// control plane's log. The directory's PUT, step for step: the one
+/// per-visitor limiter, a body of 64 KiB at most, the kind the path names,
+/// signed in, the item theirs, its signature checked against the root the
+/// agreed identity state has for them now, then the shared path
+/// (duplicates by the item hash, allowances counted after the signature).
+/// Judging it is the control plane's.
+pub(crate) async fn put_item(
+    State(app): State<Arc<App>>,
+    axum::extract::Path(kind): axum::extract::Path<String>,
+    headers: HeaderMap,
+    body: axum::body::Body,
+) -> Response {
+    let d = &app.directory;
+    let body = match crate::directory::read_put(d, &headers, body).await {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    use identity::envelope::{ENLIST, EXTEND, UNENLIST};
+    if ![ENLIST, UNENLIST, EXTEND].contains(&kind.as_str()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let Some(user) = app.identify(&headers, "access") else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Some(view) = d.ident.as_ref().and_then(|a| a.state()) else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "who is who is not read yet",
+        )
+            .into_response();
+    };
+    if !d.takes_v2() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "this box sends no envelopes yet",
+        )
+            .into_response();
+    }
+    let env = match crate::ident::Envelope::parse(&body) {
+        Ok(e) => e,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    if env.kind != kind {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("a {} envelope, put where a {kind} goes", env.kind),
+        )
+            .into_response();
+    }
+    let Some(on_file) = view.members.get(&user).and_then(|m| m.entry()) else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+    // theirs: an enlistment names the signed-in member's root; an extension
+    // is the admin's alone
+    let theirs = match kind.as_str() {
+        EXTEND => app.admin.as_deref() == Some(user.as_str()),
+        _ => env.field("member") == Some(identity::member_id(&on_file.entry.root).as_str()),
+    };
+    if !theirs {
+        return (StatusCode::FORBIDDEN, "not theirs to say").into_response();
+    }
+    let check = || -> std::result::Result<String, String> {
+        let e: identity::envelope::Envelope =
+            serde_json::from_slice(&body).map_err(|e| format!("not an envelope: {e}"))?;
+        identity::envelope::verify_root(&e, &on_file.entry.root, &on_file.entry.passkeys)
+            .map_err(|e| e.to_string())?;
+        Ok(on_file.entry.root.clone())
+    };
+    match d.submit_verified(&user, &env, &body, check).await {
+        Ok(hash) => (
+            StatusCode::ACCEPTED,
+            axum::Json(serde_json::json!({ "submitted": true, "item": hash })),
+        )
+            .into_response(),
+        Err((status, why)) => (status, why).into_response(),
+    }
 }
 
 /// A request path as nginx matched it is the same path the gate reads:
@@ -326,13 +412,23 @@ pub(crate) fn pending_ticket(app: &App, headers: &HeaderMap) -> Option<(String, 
     if !source.contains("purpose(\"join\")") {
         return None;
     }
-    match verify_ticket(|u| app.entry(u), tok, identity::now()) {
-        Ok(t) => Some(t),
+    let (user, id) = match verify_ticket(|u| app.entry(u), tok, identity::now()) {
+        Ok(t) => t,
         Err(e) => {
             eprintln!("join ticket refused: {e:#}");
-            None
+            return None;
+        }
+    };
+    // a ticket a box was enlisted with is used: its backup is done, and it
+    // opens nothing more. A box that reads the identity state and has not
+    // yet takes none
+    if app.directory.ident.is_some() {
+        let used = enlisted(app)?.values().any(|o| o.ticket == id);
+        if used {
+            return None;
         }
     }
+    Some((user, id))
 }
 
 /// The pending backups under each member's images, by ticket id: those
@@ -378,7 +474,7 @@ mod tests {
             .unwrap()
     }
 
-    fn entry_with(name: &str, kp: &KeyPair, removed: Vec<String>) -> identity::SignedEntry {
+    fn entry_with(name: &str, kp: &KeyPair) -> identity::SignedEntry {
         let root = identity::generate();
         let pk = base64::engine::general_purpose::STANDARD.encode(kp.public().to_bytes());
         let e = identity::Entry {
@@ -395,7 +491,7 @@ mod tests {
             grant: None,
             libraries: vec![],
             terms: None,
-            removed_boxes: removed,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         };
@@ -404,21 +500,36 @@ mod tests {
 
     const ID: &str = "0123456789abcdef0123456789abcdef";
 
+    fn owner(user: &str, ticket: &str) -> crate::ident::Owner {
+        crate::ident::Owner {
+            ticket: ticket.into(),
+            owner: user.into(),
+            since: 1,
+        }
+    }
+
     #[test]
     fn a_box_is_the_member_its_enlisted_with() {
         let kp = device();
         let t = ticket(&kp, "ann", ID, identity::now() + 60);
+        let other = ticket(
+            &kp,
+            "ann",
+            "ffeeddccbbaa99887766554433221100",
+            identity::now() + 60,
+        );
         let joined = serde_json::json!({
-            "jaaaaaaaaaa": { "at": 2, "ticket": t, "key": "K" },
+            // the ticket is the enlistment's, never the one the box came with
+            "jaaaaaaaaaa": { "at": 2, "ticket": other, "key": "K" },
             // a ticket alone makes no box anyone's
             "jbbbbbbbbbb": { "at": 1, "ticket": t },
             "jcccccccccc": { "at": 3 },
         });
-        let enlisted = BTreeMap::from([
-            ("jaaaaaaaaaa".to_string(), "ann".to_string()),
-            ("jcccccccccc".to_string(), "bob".to_string()),
+        let enlisted = HashMap::from([
+            ("jaaaaaaaaaa".to_string(), owner("ann", ID)),
+            ("jcccccccccc".to_string(), owner("bob", "")),
             // enlisted, not joined yet
-            ("jdddddddddd".to_string(), "ann".to_string()),
+            ("jdddddddddd".to_string(), owner("ann", ID)),
         ]);
         let o = owners(&joined, &enlisted);
         assert_eq!(
@@ -435,14 +546,32 @@ mod tests {
                 ("jcccccccccc", "bob", "", "")
             ]
         );
-        assert!(owners(&joined, &BTreeMap::new()).is_empty());
+        assert!(owners(&joined, &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn a_box_waits_for_its_member_by_its_tickets_word() {
+        let kp = device();
+        let st = serde_json::json!({ "joined": {
+            "jaaaaaaaaaa": { "at": 2, "ticket": ticket(&kp, "ann", ID, identity::now() + 60) },
+            "jbbbbbbbbbb": { "at": 1, "ticket": ticket(&kp, "bob", ID, identity::now() + 60) },
+            "jcccccccccc": { "at": 3, "ticket": ticket(&kp, "ann", ID, identity::now() + 60) },
+            "jdddddddddd": { "at": 4 },
+        }});
+        let enlisted = HashMap::from([("jcccccccccc".to_string(), owner("ann", ID))]);
+        let w = waiting(&st, "ann", &enlisted);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert_eq!(w[0]["name"], "jaaaaaaaaaa");
+        assert_eq!(w[0]["ticket"], ID);
+        assert_eq!(w[0]["enlisted"], false);
+        assert!(waiting(&st, "eve", &enlisted).is_empty());
     }
 
     #[test]
     fn a_ticket_opens_nothing_else() {
         let kp = device();
         let t = ticket(&kp, "ann", ID, identity::now() + 60);
-        let ann = entry_with("ann", &kp, vec![]);
+        let ann = entry_with("ann", &kp);
         let of = |u: &str| Ok((u == "ann").then(|| ann.clone()));
         for op in ["access", "enrol", identity::DIRECTORY_READ] {
             assert!(
@@ -501,7 +630,7 @@ mod tests {
             .unwrap()
             .to_base64()
             .unwrap();
-        let ann = entry_with("ann", &kp, vec![]);
+        let ann = entry_with("ann", &kp);
         let of = |u: &str| Ok((u == "ann").then(|| ann.clone()));
         assert!(verify_ticket(of, &t, identity::now()).is_err());
     }
@@ -575,34 +704,23 @@ mod tests {
     fn the_purge_keeps_everything_unless_it_is_sure() {
         let kp = device();
         let t = ticket(&kp, "ann", ID, identity::now() + 60);
-        // the box joined, owned by nobody now (no entry for ann): kept
-        let st = serde_json::json!({ "boxes": {}, "joined": { "jaaaaaaaaaa": { "ticket": t } } });
-        assert_eq!(tickets_in(&st), Some(BTreeSet::from([ID.to_string()])));
-        // no state, or one without its boxes: nothing goes
-        assert_eq!(tickets_in(&serde_json::Value::Null), None);
-        assert_eq!(tickets_in(&serde_json::json!({ "joined": {} })), None);
-        // one joined box whose ticket can't be read: nothing goes
-        for bad in [
-            serde_json::json!("not a biscuit"),
-            serde_json::json!(7),
-            serde_json::json!(ticket(&kp, "ann", "short", identity::now() + 60)),
-        ] {
-            let st = serde_json::json!({ "boxes": {}, "joined": {
-                "jaaaaaaaaaa": { "ticket": t },
-                "jbbbbbbbbbb": { "ticket": bad },
-            } });
-            assert_eq!(tickets_in(&st), None);
-        }
-        // a joined map that is not one: nothing goes
+        let enlisted = HashMap::from([("jaaaaaaaaaa".to_string(), owner("ann", ID))]);
+        // the enlisted tickets are kept, whatever ticket a box says it came with
+        let st = serde_json::json!({ "boxes": {}, "joined": { "jaaaaaaaaaa": { "ticket": "x" }, "jbbbbbbbbbb": { "ticket": t } } });
         assert_eq!(
-            tickets_in(&serde_json::json!({ "boxes": {}, "joined": [] })),
+            tickets_in(&st, Some(&enlisted)),
+            Some(BTreeSet::from([ID.to_string()]))
+        );
+        // no state, one without its boxes, or no identity state: nothing goes
+        assert_eq!(tickets_in(&serde_json::Value::Null, Some(&enlisted)), None);
+        assert_eq!(
+            tickets_in(&serde_json::json!({ "joined": {} }), Some(&enlisted)),
             None
         );
-        // strangers, and no joined boxes at all, are sure answers
-        let st = serde_json::json!({ "boxes": {}, "joined": { "jaaaaaaaaaa": {} } });
-        assert_eq!(tickets_in(&st), Some(BTreeSet::new()));
+        assert_eq!(tickets_in(&st, None), None);
+        // nothing enlisted is a sure answer
         assert_eq!(
-            tickets_in(&serde_json::json!({ "boxes": {} })),
+            tickets_in(&serde_json::json!({ "boxes": {} }), Some(&HashMap::new())),
             Some(BTreeSet::new())
         );
     }
@@ -615,5 +733,384 @@ mod tests {
         p.insert("new".to_string(), PENDING_SECS);
         let joined = BTreeSet::from(["kept".to_string()]);
         assert_eq!(expired(&p, &joined, PENDING_SECS), vec!["old".to_string()]);
+    }
+
+    // --- PUT /_dd/boxes/{kind}, and access, on a whole gate reading the
+    // agreed identity state from a stand-in dd-control
+
+    type View = Arc<std::sync::Mutex<Option<serde_json::Value>>>;
+    type Got = Arc<std::sync::Mutex<Vec<Vec<u8>>>>;
+
+    /// a dd-control stand-in's submit socket: answers 202, keeps each item
+    fn submit_socket(path: &std::path::Path) -> Got {
+        use std::io::{BufRead as _, Read as _, Write as _};
+        let got: Got = Default::default();
+        let g = got.clone();
+        let _ = std::fs::remove_file(path);
+        let l = std::os::unix::net::UnixListener::bind(path).unwrap();
+        std::thread::spawn(move || {
+            for c in l.incoming() {
+                let mut c = c.unwrap();
+                let mut r = std::io::BufReader::new(c.try_clone().unwrap());
+                let mut len = 0usize;
+                loop {
+                    let mut line = String::new();
+                    r.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap();
+                    }
+                }
+                let mut body = vec![0; len];
+                r.read_exact(&mut body).unwrap();
+                g.lock().unwrap().push(body);
+                c.write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n")
+                    .unwrap();
+            }
+        });
+        got
+    }
+
+    /// a gate in agreed mode whose dd-control serves `view` as /identity
+    /// (500 while it is None); tom is the fleet's admin
+    async fn agreed_gate(what: &str, view: View) -> (String, crate::session::Sessions, Got) {
+        use axum::routing::get;
+        let d = std::env::temp_dir().join(format!("dd-boxes-{what}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let v = view.clone();
+        let control = axum::Router::new()
+            .route(
+                "/identity",
+                get(move || {
+                    let v = v.lock().unwrap().clone();
+                    async move {
+                        match v {
+                            Some(v) => axum::Json(v).into_response(),
+                            None => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/state",
+                get(|| async {
+                    axum::Json(serde_json::json!({
+                        "height": 1, "time": identity::now() * 1000, "boxes": {},
+                        "joined": {"jaaaaaaaaaa": {"at": 1, "key": "K"}}
+                    }))
+                }),
+            )
+            .route(
+                "/directory",
+                get(|| async {
+                    axum::Json(serde_json::json!({"items": [], "next": 0, "height": 1}))
+                }),
+            );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let caddr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, control).await });
+        let sock = d.join("submit.sock");
+        let got = submit_socket(&sock);
+        let cfg = d.join("control.json");
+        std::fs::write(
+            &cfg,
+            r#"{"boxes": {"box": {}}, "validators": [{"name": "box"}]}"#,
+        )
+        .unwrap();
+        let (addr, _) = crate::start(crate::Config {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            dir: d.join("keys"),
+            house_peers: vec![],
+            directory_readers: vec![],
+            names: vec!["127.0.0.1".into()],
+            control: Some((format!("http://{caddr}"), sock, cfg)),
+            identity_from: crate::ident::From::Agreed,
+            domain: Some("commonty.test".into()),
+            oidc: None,
+            home: vec![],
+            members: None,
+            release_pub: None,
+            web_dir: None,
+            photos: None,
+            library: None,
+            network: None,
+            demo_library: None,
+            app_manifest: None,
+            member_list: None,
+            fleet: Default::default(),
+            thanos: None,
+            adblock: None,
+            forge_events: None,
+            storage_ledger: None,
+            tmdb: None,
+            search: None,
+            id_origin: None,
+            box_only: false,
+            owner: None,
+            admin: Some("tom".into()),
+            boxes: Default::default(),
+        })
+        .await
+        .unwrap();
+        let sessions = crate::session::Sessions::open(&d, "commonty.test", false).unwrap();
+        (format!("http://{addr}"), sessions, got)
+    }
+
+    fn root_entry(name: &str, k: &ed25519_dalek::SigningKey) -> identity::SignedEntry {
+        let e = identity::Entry {
+            name: name.into(),
+            root: identity::encode_public(&k.verifying_key()),
+            recovery: identity::encode_public(&identity::generate().verifying_key()),
+            recovered_from: vec![],
+            devices: vec![],
+            passkeys: vec![],
+            grant: None,
+            libraries: vec![],
+            terms: None,
+            removed_boxes: vec![],
+            version: 1,
+            updated: 1,
+        };
+        identity::sign(e, k).unwrap()
+    }
+
+    fn member(e: &identity::SignedEntry, status: &str, access: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": identity::member_id(&e.entry.root), "status": status, "access": access,
+            "item": {"entry": e},
+        })
+    }
+
+    fn item(kind: &str, body: serde_json::Value, k: &ed25519_dalek::SigningKey) -> Vec<u8> {
+        serde_json::to_vec(&identity::envelope::seal_json(kind, &body, k).unwrap()).unwrap()
+    }
+
+    fn enlist(kind: &str, k: &ed25519_dalek::SigningKey, at: u64) -> serde_json::Value {
+        let root = identity::encode_public(&k.verifying_key());
+        serde_json::to_value(identity::envelope::Enlist::new(
+            kind,
+            &root,
+            "jaaaaaaaaaa",
+            ID,
+            at,
+        ))
+        .unwrap()
+    }
+
+    async fn put(url: &str, kind: &str, cookie: Option<&str>, peer: &str, body: Vec<u8>) -> u16 {
+        let mut r = reqwest::Client::new()
+            .put(format!("{url}/_dd/boxes/{kind}"))
+            .header("x-dd-peer", peer)
+            .body(body);
+        if let Some(c) = cookie {
+            r = r.header("cookie", c);
+        }
+        r.send().await.unwrap().status().as_u16()
+    }
+
+    fn cookie_of(set: &str) -> String {
+        set.split(';').next().unwrap().to_string()
+    }
+
+    async fn until_read(url: &str, c: &str) {
+        // the gate reads /identity in the background: wait for its first read
+        for _ in 0..100 {
+            let r = reqwest::Client::new()
+                .get(format!("{url}/_dd/me"))
+                .header("cookie", c)
+                .send()
+                .await
+                .unwrap();
+            if r.status() == 200 {
+                tokio::time::sleep(Duration::from_millis(1200)).await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn an_enlistment_goes_through_the_directorys_checks_in_order() {
+        let ann_k = identity::generate();
+        let bob_k = identity::generate();
+        let tom_k = identity::generate();
+        let (ann, bob, tom) = (
+            root_entry("ann", &ann_k),
+            root_entry("bob", &bob_k),
+            root_entry("tom", &tom_k),
+        );
+        let view: View = Arc::new(std::sync::Mutex::new(Some(serde_json::json!({
+            "height": 1,
+            "members": {"ann": member(&ann, "none", "none"), "bob": member(&bob, "member", "invite"), "tom": member(&tom, "member", "invite")},
+        }))));
+        let (url, s, got) = agreed_gate("put-checks", view.clone()).await;
+        let (ca, cb, ct) = (
+            cookie_of(&s.issue("ann")),
+            cookie_of(&s.issue("bob")),
+            cookie_of(&s.issue("tom")),
+        );
+        until_read(&url, &ca).await;
+        let now = identity::now();
+        let good = item("enlist", enlist("enlist", &ann_k, now), &ann_k);
+        // not a kind put here; not signed in
+        assert_eq!(put(&url, "entry", Some(&ca), "p1", good.clone()).await, 404);
+        assert_eq!(put(&url, "enlist", None, "p1", good.clone()).await, 401);
+        // the kind the path names
+        assert_eq!(
+            put(&url, "unenlist", Some(&ca), "p1", good.clone()).await,
+            400
+        );
+        // theirs: bob signed in, sending ann's
+        assert_eq!(
+            put(&url, "enlist", Some(&cb), "p1", good.clone()).await,
+            403
+        );
+        // signed by the root on file: eve's key, ann's name on it
+        let eve = identity::generate();
+        let mut forged = enlist("enlist", &ann_k, now);
+        forged["at"] = serde_json::json!(now + 1);
+        for n in 0..(crate::directory::ENVELOPES_PER_NAME * 2) {
+            let peer = format!("f{n}");
+            assert_eq!(
+                put(
+                    &url,
+                    "enlist",
+                    Some(&ca),
+                    &peer,
+                    item("enlist", forged.clone(), &eve)
+                )
+                .await,
+                403
+            );
+        }
+        assert!(got.lock().unwrap().is_empty());
+        // her own: through, as it came, and her allowance untouched by the forgeries
+        assert_eq!(
+            put(&url, "enlist", Some(&ca), "p2", good.clone()).await,
+            202
+        );
+        assert_eq!(got.lock().unwrap().last().unwrap(), &good);
+        // the same item again, however it is written
+        let mut v: serde_json::Value = serde_json::from_slice(&good).unwrap();
+        v["extra"] = serde_json::json!(1);
+        assert_eq!(
+            put(
+                &url,
+                "enlist",
+                Some(&ca),
+                "p3",
+                serde_json::to_vec(&v).unwrap()
+            )
+            .await,
+            409
+        );
+        // an unenlist of hers
+        let un = item("unenlist", enlist("unenlist", &ann_k, now + 2), &ann_k);
+        assert_eq!(put(&url, "unenlist", Some(&ca), "p4", un).await, 202);
+        // an extension: the admin's alone
+        let ext = |k: &ed25519_dalek::SigningKey| {
+            item(
+                "extend",
+                serde_json::json!({"name": "ann", "until": now + 86400, "at": now}),
+                k,
+            )
+        };
+        assert_eq!(put(&url, "extend", Some(&cb), "p5", ext(&bob_k)).await, 403);
+        assert_eq!(put(&url, "extend", Some(&ct), "p5", ext(&bob_k)).await, 403);
+        assert_eq!(put(&url, "extend", Some(&ct), "p5", ext(&tom_k)).await, 202);
+        assert_eq!(got.lock().unwrap().len(), 3);
+        // an item the agreed log judged already
+        let again = item("enlist", enlist("enlist", &ann_k, now + 3), &ann_k);
+        let hash = identity::item_hash(&serde_json::from_slice(&again).unwrap());
+        view.lock().unwrap().as_mut().unwrap()["outcomes"] = serde_json::json!({ hash: "ok" });
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert_eq!(put(&url, "enlist", Some(&ca), "p6", again).await, 409);
+        // the limiter first: past it, nothing is read or checked
+        for _ in 0..crate::directory::PUTS_PER_SOURCE {
+            put(&url, "nothing", None, "busy", vec![]).await;
+        }
+        assert_eq!(
+            put(&url, "enlist", Some(&ca), "busy", good.clone()).await,
+            429
+        );
+        // and a body past 64 KiB is cut off
+        assert_eq!(
+            put(
+                &url,
+                "enlist",
+                Some(&ca),
+                "big",
+                vec![b' '; crate::directory::ENVELOPE_MAX + 1]
+            )
+            .await,
+            413
+        );
+        assert_eq!(got.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn no_identity_state_no_enlistment_and_no_access() {
+        let view: View = Default::default();
+        let (url, s, got) = agreed_gate("put-unread", view).await;
+        let k = identity::generate();
+        let c = cookie_of(&s.issue("ann"));
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let b = item("enlist", enlist("enlist", &k, identity::now()), &k);
+        assert_eq!(put(&url, "enlist", Some(&c), "p", b).await, 503);
+        assert!(got.lock().unwrap().is_empty());
+        let r = reqwest::Client::new()
+            .get(format!("{url}/verify"))
+            .header("cookie", &c)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 403);
+    }
+
+    #[tokio::test]
+    async fn services_open_for_an_invite_or_a_box_and_nothing_else() {
+        let ks: Vec<_> = (0..5).map(|_| identity::generate()).collect();
+        let names = ["ivy", "bo", "nan", "rex", "lou"];
+        let es: Vec<_> = names
+            .iter()
+            .zip(&ks)
+            .map(|(n, k)| root_entry(n, k))
+            .collect();
+        let view: View = Arc::new(std::sync::Mutex::new(Some(serde_json::json!({
+            "height": 1,
+            "members": {
+                "ivy": member(&es[0], "member", "invite"),
+                "bo": member(&es[1], "member", "box"),
+                // signed up, and nothing more
+                "nan": member(&es[2], "none", "none"),
+                // removed: whatever else
+                "rex": member(&es[3], "revoked", "none"),
+                "lou": member(&es[4], "left", "none"),
+            },
+        }))));
+        let (url, s, _got) = agreed_gate("access", view).await;
+        let first = cookie_of(&s.issue("ivy"));
+        until_read(&url, &first).await;
+        for (name, want) in [
+            ("ivy", 200),
+            ("bo", 200),
+            ("nan", 403),
+            ("rex", 403),
+            ("lou", 403),
+            ("nobody", 403),
+        ] {
+            let c = cookie_of(&s.issue(name));
+            let r = reqwest::Client::new()
+                .get(format!("{url}/verify"))
+                .header("cookie", &c)
+                .header("x-original-host", "files.commonty.test")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status().as_u16(), want, "{name}");
+        }
     }
 }

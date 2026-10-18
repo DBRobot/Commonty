@@ -54,6 +54,12 @@ pub struct Member {
     /// envelope whose body is the entry's fields
     #[serde(default)]
     pub item: serde_json::Value,
+    /// what they may use: "invite", "box" or "none" (state/ident access.go)
+    #[serde(default)]
+    pub access: String,
+    /// their enlisted boxes, each with whether it keeps their access
+    #[serde(default)]
+    pub enlisted: Vec<serde_json::Value>,
 }
 
 impl Member {
@@ -86,6 +92,15 @@ impl Member {
     pub fn is_member(&self) -> bool {
         self.status == "member"
     }
+    /// The fleet's services are theirs: an invite, or a box that counts
+    pub fn has_access(&self) -> bool {
+        self.access == "invite" || self.access == "box"
+    }
+    /// Signed up and not shut out (left, suspended, removed): whatever
+    /// their access, what is theirs alone (their boxes, a home controller)
+    pub fn not_banned(&self) -> bool {
+        self.status == "member" || self.status == "none"
+    }
     pub fn has_left(&self) -> bool {
         self.status == "left"
     }
@@ -101,6 +116,21 @@ pub struct State {
     /// ItemHash, the gate's item_hash): an item here is in the log already
     #[serde(default)]
     pub outcomes: HashMap<String, String>,
+    /// box -> whose it is and the ticket it was enlisted with
+    #[serde(default)]
+    pub enlisted: HashMap<String, Owner>,
+}
+
+/// An enlisted box's member and the ticket it was enlisted with
+#[derive(Clone, Debug, Deserialize, Default, PartialEq, Eq)]
+pub struct Owner {
+    #[serde(default)]
+    pub ticket: String,
+    #[serde(default)]
+    pub owner: String,
+    /// enlisted, agreed ms
+    #[serde(default)]
+    pub since: u64,
 }
 
 /// The agreed identity state as last read from dd-control.
@@ -293,7 +323,12 @@ impl Envelope {
 
     /// the name the item is about: an entry's or a leaving's `name`
     pub fn name(&self) -> Option<&str> {
-        self.body.get("name").and_then(|n| n.as_str())
+        self.field("name")
+    }
+
+    /// a string field of the body
+    pub fn field(&self, k: &str) -> Option<&str> {
+        self.body.get(k).and_then(|n| n.as_str())
     }
 
     /// the body as it travels, base64

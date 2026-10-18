@@ -248,6 +248,14 @@ async fn serve<R: Runtime>(
     if path == "/_dd/app/remove" && req.method() == "POST" {
         return remove(app, req.body()).await;
     }
+    // a box made the account's, or no longer, signed by its main key here
+    if let Some(kind) = path
+        .strip_prefix("/_dd/app/")
+        .filter(|k| matches!(*k, "enlist" | "unenlist"))
+        && req.method() == "POST"
+    {
+        return box_item(app, kind, req.body()).await;
+    }
     // the Leave tab's downloads, written to the Downloads folder here
     // (export.rs): the window's scheme cannot stream a download
     if path.starts_with("/_dd/app/export") {
@@ -670,6 +678,70 @@ async fn remove<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<Response<
     };
     done.map_err(|e| format!("{e:#}"))?;
     Ok(json_response(&serde_json::json!({ "ok": true })))
+}
+
+async fn box_item<R: Runtime>(
+    app: &AppHandle<R>,
+    kind: &str,
+    body: &[u8],
+) -> Result<Response<Vec<u8>>, String> {
+    let keys = app.state::<crate::account::Keys>();
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+    let Some(root) = account::load_root(&keys.0).map_err(|e| e.to_string())? else {
+        return Ok(plain(
+            StatusCode::FORBIDDEN,
+            "the account's main key is not on this device",
+        ));
+    };
+    let Some(name) = v["box"].as_str() else {
+        return Ok(plain(StatusCode::BAD_REQUEST, "which box?"));
+    };
+    send_box_item(
+        app,
+        kind,
+        &root,
+        name,
+        v["ticket"].as_str().unwrap_or_default(),
+    )
+    .await?;
+    Ok(json_response(&serde_json::json!({ "ok": true })))
+}
+
+/// A box item (docs/dev/joining.md) signed by the account's main key and put
+/// to the member's door: `enlist` of a box that joined with the ticket
+/// `ticket`, or `unenlist`. Sent already is sent.
+pub(crate) async fn send_box_item<R: Runtime>(
+    app: &AppHandle<R>,
+    kind: &str,
+    root: &ed25519_dalek::SigningKey,
+    box_name: &str,
+    ticket: &str,
+) -> Result<(), String> {
+    let body = identity::envelope::Enlist::new(
+        kind,
+        &identity::encode_public(&root.verifying_key()),
+        box_name,
+        ticket,
+        identity::now(),
+    );
+    let env = identity::envelope::seal_json(kind, &body, root).map_err(|e| e.to_string())?;
+    let base = media::gate::door_base(&crate::account::dirs()).map_err(|e| e.to_string())?;
+    let r = directory::http()
+        .map_err(|e| e.to_string())?
+        .put(format!("{base}/_dd/boxes/{kind}"))
+        .bearer_auth(token(app)?)
+        .json(&env)
+        .send()
+        .await
+        .map_err(|e| format!("the box did not answer: {e}"))?;
+    if r.status().is_success() || r.status() == reqwest::StatusCode::CONFLICT {
+        return Ok(());
+    }
+    let status = r.status();
+    Err(match r.text().await {
+        Ok(t) if !t.is_empty() => t,
+        _ => format!("the box said {status}"),
+    })
 }
 
 async fn library<R: Runtime>(app: &AppHandle<R>) -> Result<Response<Vec<u8>>, String> {

@@ -1444,7 +1444,6 @@ impl Directory {
         name: &str,
         bytes: &[u8],
     ) -> std::result::Result<String, (StatusCode, String)> {
-        let unavailable = |e: String| (StatusCode::SERVICE_UNAVAILABLE, e);
         if !self.takes_v2() {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -1464,6 +1463,25 @@ impl Directory {
                 "name in path and body differ".into(),
             ));
         }
+        self.submit_verified(name, &env, bytes, || {
+            self.envelope_signed(kind, name, bytes)
+        })
+        .await
+    }
+
+    /// The rest of every envelope PUT, once its kind and whom it speaks for
+    /// are settled: an item already sent or in the log refused by the one
+    /// item hash, the signature checked (`signed`, the key that signed),
+    /// the name's and the key's allowances counted only after it, then the
+    /// control plane
+    pub async fn submit_verified(
+        &self,
+        name: &str,
+        env: &crate::ident::Envelope,
+        bytes: &[u8],
+        signed: impl FnOnce() -> std::result::Result<String, String>,
+    ) -> std::result::Result<String, (StatusCode, String)> {
+        let unavailable = |e: String| (StatusCode::SERVICE_UNAVAILABLE, e);
         // the same kind and body signed is the same item, however its outer
         // JSON is written; a list that cannot be read lets nothing through
         let hash = env.signed_hash();
@@ -1486,9 +1504,7 @@ impl Directory {
             ));
         }
         // signed by the key that speaks for the name: checked, not judged
-        let signer = self
-            .envelope_signed(kind, name, bytes)
-            .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
+        let signer = signed().map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
         {
             let mut g = self.guard.lock().unwrap();
             // the name's allowance counts only items that verified: a
