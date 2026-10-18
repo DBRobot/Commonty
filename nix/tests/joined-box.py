@@ -126,10 +126,16 @@ j = joined()
 assert j["ticket"] == box.succeed("cat /var/lib/dd/join-ticket").strip(), j
 assert j["key"] == spki, j
 
-# the member's gate: the box is hers
+# not hers on its ticket alone: ada's root enlists it
 token = fleet.succeed("cat /root/f/token").strip()
-fleet.wait_until_succeeds(
+mine = (
     f"curl -sf -H 'Authorization: Bearer {token}' http://127.0.0.1:4281/_dd/boxes/mine"
-    f" | jq -e '.boxes[] | select(.name == \"{nix['keyName']}\")'",
+)
+assert json.loads(fleet.succeed(mine))["boxes"] == []
+fleet.succeed(f"cd /root/f && python3 {nix['fleet']} enlist {nix['keyName']} {spki}")
+
+# the member's gate: the box is hers
+fleet.wait_until_succeeds(
+    f"{mine} | jq -e '.boxes[] | select(.name == \"{nix['keyName']}\")'",
     timeout=120,
 )
