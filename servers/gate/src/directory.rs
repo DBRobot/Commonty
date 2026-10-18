@@ -2396,7 +2396,7 @@ mod tests {
         });
         std::fs::write(
             std::env::var("SHADOW_OUT").unwrap(),
-            serde_json::to_vec_pretty(&out).unwrap(),
+            serde_json::to_string_pretty(&out).unwrap() + "\n",
         )
         .unwrap();
         let _ = std::fs::remove_dir_all(&dir);

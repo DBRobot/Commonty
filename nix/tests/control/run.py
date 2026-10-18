@@ -315,7 +315,9 @@ def ann_v2(i):
     return c == 200 and v["members"].get("ann", {}).get("version") == 2
 
 
-until("ann's version 2 judged on every box", lambda: all(ann_v2(i) for i in (1, 2, 3)), 30)
+until(
+    "ann's version 2 judged on every box", lambda: all(ann_v2(i) for i in (1, 2, 3)), 30
+)
 views = [identity(i)[1] for i in (1, 2, 3)]
 anns = [v["members"]["ann"] for v in views if v]
 ok(
