@@ -1241,11 +1241,26 @@ fn statement(
 /// what is checked or signed in it cannot be swapped by another user of
 /// the machine, as it could in a shared /tmp at a name known in advance
 fn private_dir(prefix: &str) -> Result<PathBuf> {
-    use sha2::Digest as _;
-    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
+    private_dir_in(&base, prefix)
+}
+
+/// The same, on the disk: the runtime dir is a small RAM disk, and a
+/// download can be a card image of gigabytes, held twice while unpacked
+fn private_disk_dir(prefix: &str) -> Result<PathBuf> {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir);
+    std::fs::create_dir_all(&base)?;
+    private_dir_in(&base, prefix)
+}
+
+fn private_dir_in(base: &Path, prefix: &str) -> Result<PathBuf> {
+    use sha2::Digest as _;
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     for _ in 0..8 {
         let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut seed = [0u8; 16];
@@ -2319,7 +2334,7 @@ fn app(repo: &str, keys: &auth::Store, tag: &str, dry_run: bool) -> Result<()> {
         .next()
         .and_then(|h| h.strip_prefix("git."))
         .context("the forge is not at git.<domain>")?;
-    let dir = private_dir("dd-app")?;
+    let dir = private_disk_dir("dd-app")?;
     let result = (|| -> Result<(serde_json::Value, Vec<(PathBuf, String)>)> {
         let mut files = serde_json::Map::new();
         let mut upload = Vec::new();
