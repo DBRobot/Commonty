@@ -135,7 +135,8 @@ function loadMap() {
   if (!map) {
     try { useMap(JSON.parse(localStorage.getItem(mapKey) || 'null')); } catch { /* none kept */ }
   }
-  mapAsked ??= fetch('/_dd/sitemap.json')
+  // no-cache: past a 301 this name once gave for it (nix/roles/gateway.nix)
+  mapAsked ??= fetch('/_dd/sitemap.json', { cache: 'no-cache' })
     .then((r) => {
       mapWhy = r.status === 401 || r.redirected ? 'signin' : 'down';
       return r.ok ? r.json() : null;
@@ -601,7 +602,7 @@ const when = (secs) => (typeof secs === 'number' && secs > 0
   : null);
 
 async function fetchJson(path) {
-  const r = await fetch(path, { credentials: 'same-origin' }).catch(() => null);
+  const r = await fetch(path, { credentials: 'same-origin', cache: 'no-cache' }).catch(() => null);
   if (!r) return { error: 'down' };
   if (r.status === 404) return { error: 'missing' };
   if (!r.ok) return { error: 'down' };

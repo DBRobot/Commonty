@@ -12,7 +12,8 @@ const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, 'g');
 const clean = (s, n = 200) => (typeof s === 'string' ? [...s].filter((c) => c >= ' ' && c !== '\x7f').join('').trim().slice(0, n) : '');
 
 async function json(url, init = {}) {
-  const r = await fetch(url, { credentials: 'include', headers: { accept: 'application/json' }, ...init }).catch(() => null);
+  // no-cache, as the map (guide.js): a kept redirect is asked again
+  const r = await fetch(url, { credentials: 'include', cache: 'no-cache', headers: { accept: 'application/json' }, ...init }).catch(() => null);
   if (!r) return { error: 'down' };
   if (r.status === 401) return { error: 'signin' };
   if (r.status === 403 || r.status === 404) return { error: 'missing' };

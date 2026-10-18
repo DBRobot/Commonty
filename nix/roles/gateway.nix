@@ -127,7 +127,10 @@ in
     };
     # the app itself is on home, where sign-in and join already point
     locations."= /download".return = "301 https://home.${config.dd.domain}/_dd/download";
-    locations."/".return = "301 https://home.${config.dd.domain}$request_uri";
+    # 302, never 301: a browser keeps a 301 for good, so a path this name
+    # serves later (the assistant's map) would still go to home, without
+    # the member's cookie there, from every browser that once asked
+    locations."/".return = "302 https://home.${config.dd.domain}$request_uri";
     # the files the downloads page links, from the forge's release of that
     # tag: as nobody, so this name reaches only what a stranger may fetch
     # from a public repository, and only a release's files
