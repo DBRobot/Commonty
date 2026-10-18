@@ -41,7 +41,11 @@ pub struct Usage {
 
 impl Usage {
     pub fn total(&self) -> u64 {
-        self.photos + self.libraries + self.code + self.passwords
+        // saturating: a box can claim any count up to u64::MAX, and a sum
+        // that wrapped would make a full allowance look empty
+        [self.libraries, self.code, self.passwords]
+            .into_iter()
+            .fold(self.photos, u64::saturating_add)
     }
 }
 
@@ -100,13 +104,23 @@ impl Ledger {
     /// what a member keeps now: the ledger's count, and what changed since
     fn used(&self, c: &Counted, user: &str) -> u64 {
         let (up, freed) = self.since(user, c.updated);
-        (c.members.get(user).map(Usage::total).unwrap_or(0) + up).saturating_sub(freed)
+        c.members
+            .get(user)
+            .map(Usage::total)
+            .unwrap_or(0)
+            .saturating_add(up)
+            .saturating_sub(freed)
     }
 
     /// their libraries' part of it, for Settings
     pub fn libraries(&self, c: &Counted, user: &str) -> u64 {
         let (up, freed) = self.since(user, c.updated);
-        (c.members.get(user).map(|u| u.libraries).unwrap_or(0) + up).saturating_sub(freed)
+        c.members
+            .get(user)
+            .map(|u| u.libraries)
+            .unwrap_or(0)
+            .saturating_add(up)
+            .saturating_sub(freed)
     }
 
     /// Room for `more` bytes in this member's libraries? With no ledger (a
@@ -121,7 +135,9 @@ impl Ledger {
         if c.budget == 0 {
             return true;
         }
-        let used = self.used(&c, user) + self.held.lock().unwrap().get(user).copied().unwrap_or(0);
+        let used = self
+            .used(&c, user)
+            .saturating_add(self.held.lock().unwrap().get(user).copied().unwrap_or(0));
         used.saturating_add(more) <= c.budget
     }
 
@@ -136,7 +152,7 @@ impl Ledger {
         };
         let mut held = self.held.lock().unwrap();
         let busy = held.get(user).copied().unwrap_or(0);
-        let used = self.used(&c, user) + busy;
+        let used = self.used(&c, user).saturating_add(busy);
         let left = c.budget.saturating_sub(used);
         let take = match want {
             Some(w) if w <= left => w,
@@ -144,7 +160,7 @@ impl Ledger {
             None if left > 0 => left,
             None => return None,
         };
-        held.insert(user.to_string(), busy + take);
+        held.insert(user.to_string(), busy.saturating_add(take));
         Some(Held {
             user: user.to_string(),
             limit: Some(take),
@@ -275,6 +291,24 @@ mod tests {
         let p = dir.join(format!("{n}.json"));
         std::fs::write(&p, json).unwrap();
         (Ledger::new(Some(p.clone())), p)
+    }
+
+    /// A box claiming the most there is, in one kind, never wraps the sum
+    /// round to room to spare
+    #[test]
+    fn a_huge_count_is_full_not_empty() {
+        let u = Usage {
+            photos: 10,
+            code: u64::MAX,
+            ..Default::default()
+        };
+        assert_eq!(u.total(), u64::MAX);
+        let (l, _) = ledger(
+            r#"{"updated": 1, "budget": 1000,
+                "members": {"tom": {"photos": 10, "code": 18446744073709551615}}}"#,
+        );
+        assert!(!l.room("tom", 1));
+        assert!(l.hold("tom", Some(1)).is_none());
     }
 
     #[test]

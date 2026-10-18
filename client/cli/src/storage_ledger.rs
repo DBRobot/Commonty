@@ -108,7 +108,11 @@ pub async fn run(l: Ledger) -> Result<()> {
             let want = if members[name]["suspended"].as_bool() == Some(true) {
                 used_photos.max(1)
             } else {
-                photos_limit(l.budget, libraries + code + passwords, used_photos)
+                photos_limit(
+                    l.budget,
+                    libraries.saturating_add(code).saturating_add(passwords),
+                    used_photos,
+                )
             };
             if fresh && id != 0 && now != want {
                 let r = http
