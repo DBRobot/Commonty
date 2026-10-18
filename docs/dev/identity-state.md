@@ -219,7 +219,8 @@ moved, not changed. Each item is judged at its agreed time `at`.
   unenlist), so an old one sent again changes nothing; an enlist must not
   have expired. A box already someone's is refused while that enlistment
   stands (see **boxes** above); unenlist only by its owner. Which boxes
-  qualify (their hardware) is docs/dev/joining.md's; the judge counts every
+  qualify (their hardware) is docs/dev/joining.md's, their proof of real
+  hardware [attestation.md](attestation.md)'s; the judge counts every
   standing enlistment today.
 - **an item that says more than its signature** is refused: unknown fields,
   a key twice, keys in another case, `null` for a field left out, floats,

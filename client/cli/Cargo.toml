@@ -37,6 +37,9 @@ serde_json = "1"
 base64 = "0.22"
 # `dd signup` talks to the signup service; the same crate auth already uses.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
+# the TPM makers' roots checked before a release ships them (tpm_roots.rs);
+# already in the tree through webauthn
+x509-parser = "0.16"
 
 [dev-dependencies]
 # the boxes the end-to-end tests run in-process

@@ -67,6 +67,7 @@
         "vault"
         "adblock"
         "unlock"
+        "attest"
         "leaving"
         "home-controller"
       ];
@@ -713,6 +714,19 @@
                 rules = ctl.rules // {
                   leases = (ctl.rules.leases or { }) // leases;
                 };
+                # the TPM makers' roots a box's attestation chains to
+                # (state/attest), by TCG vendor id: fleet/tpm-roots
+                attest.roots =
+                  let
+                    dir = ./fleet/tpm-roots;
+                    vendors = nixpkgs.lib.filterAttrs (_: t: t == "directory") (builtins.readDir dir);
+                  in
+                  nixpkgs.lib.mapAttrs (
+                    v: _:
+                    map (f: builtins.readFile (dir + "/${v}/${f}")) (
+                      builtins.filter (nixpkgs.lib.hasSuffix ".pem") (builtins.attrNames (builtins.readDir (dir + "/${v}")))
+                    )
+                  ) vendors;
               };
               src = pkgs.lib.fileset.toSource {
                 root = ./servers/system/control;
@@ -723,14 +737,15 @@
                   ./servers/system/control/state
                   ./servers/system/control/validator
                   ./servers/system/control/wire
+                  ./servers/system/control/tpm
                   ./servers/system/control/cmd
                 ];
               };
+              vendorHash = "sha256-u/ZqaWhogP9sIydZKA9BOP/MdlN93RrcPnNIYKqsxWw=";
               dd-control = pkgs.buildGoModule {
                 pname = "dd-control";
                 version = "0.1.0";
-                inherit src;
-                vendorHash = "sha256-sYPGMtJetj/Ou1Q52s2tfRJkNcaiPlhuqIiq/H/1UjY=";
+                inherit src vendorHash;
                 subPackages = [ "cmd/dd-control" ];
                 # every package's tests, not only the program's (state,
                 # validator and place went untested by the build)
@@ -744,6 +759,14 @@
             {
               configFile = pkgs.writeText "control-config.json" (builtins.toJSON config);
               inherit dd-control;
+              # attestation end to end against a test's swtpm (nix/tests/attest.nix)
+              attest-check = pkgs.buildGoModule {
+                pname = "attest-check";
+                version = "0.1.0";
+                inherit src vendorHash;
+                subPackages = [ "cmd/attest-check" ];
+                doCheck = false;
+              };
               # wasm for the relay's Durable Object, from the same vendored
               # modules (buildGoModule lists packages for the build machine,
               # which leaves out a js-only one)
@@ -1027,6 +1050,7 @@
             echo "export default $(cat ${control.configFile});" > $out/config.js
           '';
           dd-control = control.dd-control;
+          attest-check = control.attest-check;
           control-config = control.configFile;
           # what the control plane places from: each box's capability and
           # what the fleet wants of each service (nix/lib/placement-inputs.nix)

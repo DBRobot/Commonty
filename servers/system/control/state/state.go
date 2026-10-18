@@ -7,6 +7,7 @@
 package state
 
 import (
+	"commonty/control/state/attest"
 	"commonty/control/state/ident"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,8 @@ type Config struct {
 	// the release key and member list the identity judge reads
 	// (state/ident); absent: no /identity
 	Identity *ident.Config `json:"identity,omitempty"`
+	// the TPM makers' roots a box's attestation chains to (state/attest)
+	Attest *attest.Config `json:"attest,omitempty"`
 }
 
 // BoxVoters: the validators that are boxes, whose gates acknowledge a new
@@ -65,7 +68,7 @@ type LeaseRule struct {
 
 // Request is what a box asks for, signed by its TPM-held key over Bytes().
 type Request struct {
-	Kind string          `json:"kind"` // heartbeat | lease | directory | built
+	Kind string          `json:"kind"` // heartbeat | lease | directory | built | attest-challenge | attest-response
 	Box  string          `json:"box"`
 	Seq  uint64          `json:"seq"` // strictly increasing per box
 	Body json.RawMessage `json:"body"`
@@ -167,6 +170,8 @@ type State struct {
 	Directory []DirItem `json:"directory,omitempty"`
 	// the build results, in agreed order (BuiltItem)
 	Built []BuiltItem `json:"built,omitempty"`
+	// boxes proving they are real hardware, and what those that did proved
+	Attest *attest.State `json:"attest,omitempty"`
 }
 
 func New() *State {
@@ -184,11 +189,11 @@ var (
 
 // Check says whether r may be applied at agreed time now. It changes nothing.
 func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
-	box, ok := cfg.Boxes[r.Box]
+	key, ok := s.keyOf(cfg, r)
 	if !ok {
 		return ErrUnknownBox
 	}
-	if !verify(box.Key, r.Bytes(), r.Sig) {
+	if !verify(key, r.Bytes(), r.Sig) {
 		return ErrBadSig
 	}
 	if b := s.Boxes[r.Box]; b != nil && r.Seq <= b.Seq {
@@ -226,8 +231,74 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 			return fmt.Errorf("%s has sent %d build results this minute", r.Box, b.BuiltCount)
 		}
 		return nil
+	case "attest-challenge":
+		if len(r.Body) > attest.MaxChallenge {
+			return fmt.Errorf("a challenge of %d bytes; at most %d", len(r.Body), attest.MaxChallenge)
+		}
+		var c attest.Challenge
+		if err := json.Unmarshal(r.Body, &c); err != nil {
+			return err
+		}
+		if s.Attest == nil {
+			return fmt.Errorf("%s is not attesting", c.Box)
+		}
+		return s.Attest.CheckChallenge(cfg.BoxVoters(), r.Box, c, now)
+	case "attest-response":
+		if len(r.Body) > attest.MaxResponse {
+			return fmt.Errorf("a response of %d bytes; at most %d", len(r.Body), attest.MaxResponse)
+		}
+		var a attest.Response
+		if err := json.Unmarshal(r.Body, &a); err != nil {
+			return err
+		}
+		if s.Attest == nil {
+			return fmt.Errorf("%s is not attesting", r.Box)
+		}
+		_, err := s.Attest.CheckResponse(cfg.Attest, cfg.BoxVoters(), r.Box, a, now)
+		return err
 	}
 	return fmt.Errorf("no such request: %q", r.Kind)
+}
+
+// keyOf: the key r must be signed by - a box of the release's, or, for
+// its attest-response, the join key a box attesting started with
+func (s *State) keyOf(cfg *Config, r Request) (string, bool) {
+	if box, ok := cfg.Boxes[r.Box]; ok {
+		return box.Key, true
+	}
+	if r.Kind == "attest-response" && s.Attest != nil {
+		if p := s.Attest.Pending[r.Box]; p != nil {
+			return p.Key, true
+		}
+	}
+	return "", false
+}
+
+// CheckAttestOpen says whether box may start attesting with b, its join
+// key (SPKI, base64) being key. The enlistment's judge calls it on a
+// request to enlist, and AttestOpen once that is applied.
+func (s *State) CheckAttestOpen(cfg *Config, box, key string, b attest.Begin, now int64) error {
+	st := s.Attest
+	if st == nil {
+		st = attest.New()
+	}
+	_, err := st.CheckOpen(cfg.Attest, box, key, b, now)
+	return err
+}
+
+func (s *State) AttestOpen(cfg *Config, box, key string, b attest.Begin, now int64) {
+	if s.Attest == nil {
+		s.Attest = attest.New()
+	}
+	s.Attest.Open(cfg.Attest, box, key, b, now)
+}
+
+// Attested: what box proved, or nil
+func (s *State) Attested(box string) *attest.Record {
+	if s.Attest == nil {
+		return nil
+	}
+	return s.Attest.Done[box]
 }
 
 func (s *State) checkLease(cfg *Config, box string, op LeaseOp, now int64) error {
@@ -305,6 +376,14 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 		}
 		b.BuiltCount++
 		s.Built = append(s.Built, BuiltItem{Height: s.Height, Time: now, Box: r.Box, Item: append(json.RawMessage(nil), r.Body...)})
+	case "attest-challenge":
+		var c attest.Challenge
+		_ = json.Unmarshal(r.Body, &c)
+		s.Attest.ApplyChallenge(c)
+	case "attest-response":
+		var a attest.Response
+		_ = json.Unmarshal(r.Body, &a)
+		s.Attest.ApplyResponse(cfg.Attest, cfg.BoxVoters(), r.Box, a, now)
 	}
 }
 
@@ -320,6 +399,9 @@ func (s *State) Block(cfg *Config, verify Verify, reqs []Request, now int64) (ap
 		if lease.Expires <= s.Time {
 			delete(s.Leases, l)
 		}
+	}
+	if s.Attest != nil {
+		s.Attest.Expire(s.Time)
 	}
 	for _, r := range reqs {
 		if s.Check(cfg, verify, r, s.Time) == nil {

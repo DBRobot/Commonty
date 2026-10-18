@@ -6446,6 +6446,10 @@ rec {
             packageId = "url";
           }
           {
+            name = "x509-parser";
+            packageId = "x509-parser";
+          }
+          {
             name = "zeroize";
             packageId = "zeroize";
           }

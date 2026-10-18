@@ -199,6 +199,11 @@ fn publish(
         false => crate::member::Members::default(),
     };
     named_all(&listed)?;
+    // the TPM makers' roots every box's attestation chains to
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs() as i64;
+    crate::tpm_roots::check(&crate::tpm_roots::at(&root, &rev)?, now)?;
 
     let boxes: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("fleet/boxes.json"))?)?;
