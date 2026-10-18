@@ -1,4 +1,5 @@
 mod build_order;
+mod computercmd;
 mod consent;
 mod control_worker;
 mod derive;
@@ -15,7 +16,6 @@ mod release_cmd;
 mod storage_ledger;
 mod ui;
 mod vault;
-mod vmcmd;
 mod who;
 
 use anyhow::{Context, Result};
@@ -141,9 +141,9 @@ enum Command {
         directories: Vec<String>,
     },
     /// Your remote computers: configs, and the VMs made from them.
-    Vm {
+    Computer {
         #[command(subcommand)]
-        cmd: vmcmd::VmCmd,
+        cmd: computercmd::ComputerCmd,
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES, global = true)]
         directories: Vec<String>,
     },
@@ -1130,7 +1130,9 @@ async fn main() -> Result<()> {
         }
 
         Command::Library { cmd, directories } => librarycmd::run(cmd, &keys, &directories).await?,
-        Command::Vm { cmd, directories } => vmcmd::run(cmd, &keys, &directories).await?,
+        Command::Computer { cmd, directories } => {
+            computercmd::run(cmd, &keys, &directories).await?
+        }
         Command::Media {
             at,
             directories,

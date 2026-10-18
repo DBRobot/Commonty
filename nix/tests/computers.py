@@ -2,8 +2,8 @@
 
 import json
 
-d = "/var/lib/dd-vms"
-sock = "--unix-socket /run/dd-vms/dd-vms.sock"
+d = "/var/lib/dd-computers"
+sock = "--unix-socket /run/dd-computers/dd-computers.sock"
 
 
 def api(user, method, path, body=None, role="member"):
@@ -19,8 +19,8 @@ def api(user, method, path, body=None, role="member"):
     return int(code), text
 
 
-box.wait_for_unit("dd-vms.service")
-box.wait_until_succeeds("test -S /run/dd-vms/dd-vms.sock", timeout=60)
+box.wait_for_unit("dd-computers.service")
+box.wait_until_succeeds("test -S /run/dd-computers/dd-computers.sock", timeout=60)
 
 # nobody: nothing. A guest: no computers.
 assert api("", "GET", "/api/state")[0] == 401
@@ -88,12 +88,12 @@ applied = json.loads(box.succeed(f"cat {d}/instances/{i}/report/apply.json"))
 assert applied["ok"], api("tom", "GET", f"/api/instances/{i}/log")[1]
 
 # what its disks hold counts toward tom's allowance: into the box's facts
-box.succeed("systemctl start dd-vms-usage.service")
+box.succeed("systemctl start dd-computers-usage.service")
 used = box.succeed("cat /var/lib/dd-facts/usage-computers.facts")
 assert used.startswith("usage/computers/tom ") and int(used.split()[1]) > 0, used
 
 # the firewall's filler is told of it
-box.wait_until_succeeds(f"grep -q '{port}' /run/dd-vms/access.json", timeout=30)
+box.wait_until_succeeds(f"grep -q '{port}' /run/dd-computers/access.json", timeout=30)
 
 # out of the box: its loopback (here, a listener the box itself reaches) is
 # refused, and so is anything private
@@ -106,26 +106,26 @@ box.fail(f"{ssh} curl -sf -m 5 -o /dev/null http://192.168.1.1/")
 box.succeed(f"{ssh} 'echo kept > ~/kept'")
 assert api("tom", "POST", f"/api/instances/{i}/stop")[0] == 200
 box.wait_until_succeeds(
-    f"systemctl show -p ActiveState dd-vm@{i}.service | grep -q inactive", timeout=120
+    f"systemctl show -p ActiveState dd-computer@{i}.service | grep -q inactive", timeout=120
 )
-assert "Result=success" in box.succeed(f"systemctl show -p Result dd-vm@{i}.service")
+assert "Result=success" in box.succeed(f"systemctl show -p Result dd-computer@{i}.service")
 assert api("tom", "POST", f"/api/instances/{i}/start")[0] == 200
 box.wait_until_succeeds(f"{ssh} true", timeout=600)
 assert box.succeed(f"{ssh} cat kept").strip() == "kept"
 
 # a restart of the manager (a deploy) leaves it running
-pid = box.succeed(f"systemctl show -p MainPID --value dd-vm@{i}.service").strip()
-box.succeed("systemctl restart dd-vms.service")
-box.wait_until_succeeds("test -S /run/dd-vms/dd-vms.sock", timeout=60)
+pid = box.succeed(f"systemctl show -p MainPID --value dd-computer@{i}.service").strip()
+box.succeed("systemctl restart dd-computers.service")
+box.wait_until_succeeds("test -S /run/dd-computers/dd-computers.sock", timeout=60)
 assert (
-    box.succeed(f"systemctl show -p MainPID --value dd-vm@{i}.service").strip() == pid
+    box.succeed(f"systemctl show -p MainPID --value dd-computer@{i}.service").strip() == pid
 )
 
 # deleted only once stopped, and then it's gone with its disks
 assert api("tom", "DELETE", f"/api/instances/{i}")[0] == 422
 assert api("tom", "POST", f"/api/instances/{i}/stop")[0] == 200
 box.wait_until_succeeds(
-    f"systemctl show -p ActiveState dd-vm@{i}.service | grep -q inactive", timeout=120
+    f"systemctl show -p ActiveState dd-computer@{i}.service | grep -q inactive", timeout=120
 )
 assert api("tom", "DELETE", f"/api/instances/{i}")[0] == 200
 box.fail(f"test -e {d}/instances/{i}")

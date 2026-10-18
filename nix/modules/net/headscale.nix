@@ -61,7 +61,7 @@ let
         {
           action = "accept";
           src = [ "autogroup:member" ];
-          dst = [ "tag:box:443" ] ++ map (p: "tag:box:${p}") (cfg.gamePorts ++ cfg.vmPorts);
+          dst = [ "tag:box:443" ] ++ map (p: "tag:box:${p}") (cfg.gamePorts ++ cfg.computerPorts);
         }
         {
           action = "accept";
@@ -108,10 +108,10 @@ in
       default = lib.optionals (config.dd ? games) config.dd.games.reach;
       description = "the ports a member's device may reach on a box for games: every games box's range, and every port a game insists on (the flake gives the fleet's; alone, this box's own)";
     };
-    vmPorts = lib.mkOption {
+    computerPorts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      # alone, this box's own (dd.vms.reach)
-      default = lib.optionals (config.dd ? vms) config.dd.vms.reach;
+      # alone, this box's own (dd.computers.reach)
+      default = lib.optionals (config.dd ? vms) config.dd.computers.reach;
       description = "the ports a member's device may reach on a box for members' computers: every compute box's pool (the flake gives the fleet's; alone, this box's own)";
     };
     owners = lib.mkOption {

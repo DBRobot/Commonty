@@ -179,7 +179,7 @@ function computer(id) {
       el('section', { class: 'panel sec' },
         el('h2', { text: 'Connect' }),
         el('p', { class: 'dim', text: 'With the Commonty network on. From a terminal with dd, nothing to set up:' }),
-        copyable(`dd vm ssh ${i.name}`),
+        copyable(`dd computer ssh ${i.name}`),
         el('p', { class: 'dim', text: 'Or with plain ssh, once its key is saved as ~/.ssh/commonty-' + i.name + ':' }),
         copyable(sshOf(i)),
         el('div', { class: 'row' },

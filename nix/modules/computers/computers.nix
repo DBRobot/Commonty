@@ -7,10 +7,10 @@
   ...
 }:
 let
-  cfg = config.dd.vms;
+  cfg = config.dd.computers;
   base = config.dd.domain;
-  dir = "/var/lib/dd-vms";
-  sock = "/run/dd-vms/dd-vms.sock";
+  dir = "/var/lib/dd-computers";
+  sock = "/run/dd-computers/dd-computers.sock";
   # the guest's own nixpkgs, without the box's overlays: the guest rebuilds
   # from plain nixpkgs (guest/base.nix), so the host's first system is the
   # one the guest would build
@@ -26,7 +26,7 @@ let
   image = import "${pkgs.path}/nixos/lib/make-disk-image.nix" {
     inherit pkgs lib;
     inherit (guestSystem) config;
-    name = "dd-vm-image";
+    name = "dd-computer-image";
     # compressed: copied once per computer, and through the build cache
     format = "qcow2-compressed";
     partitionTableType = "legacy";
@@ -48,7 +48,7 @@ let
   # One instance, by id, from the host's record: its size, its ports, the
   # owner's name, keys and Nix file. The disks are made the first time and
   # grown when the record grows; never shrunk.
-  run = pkgs.writeShellScript "dd-vm-run" ''
+  run = pkgs.writeShellScript "dd-computer-run" ''
     set -eu
     id="$1"
     d=${dir}/instances/"$id"
@@ -96,7 +96,7 @@ let
       -serial chardev:console
   '';
   # as a game's: the guest powers down, then qemu is told to quit
-  stop = pkgs.writeShellScript "dd-vm-stop" ''
+  stop = pkgs.writeShellScript "dd-computer-stop" ''
     qmp=${dir}/control/"$1".qmp
     [ -S "$qmp" ] || exit 0
     printf '%s\n' '{"execute":"qmp_capabilities"}' '{"execute":"system_powerdown"}' \
@@ -114,7 +114,7 @@ in
   # record on this box, with a disk for its system and one for /home. As
   # with games, that an instance exists is the box's state, not the repo's,
   # and a deploy never restarts one.
-  options.dd.vms = {
+  options.dd.computers = {
     enable = lib.mkEnableOption "members' own computers";
     portBase = lib.mkOption {
       type = lib.types.port;
@@ -168,23 +168,23 @@ in
     dd.guests.enable = true;
     dd.box.plaintext = [ "members' computers (their disks and memory)" ];
 
-    users.users.dd-vms = {
+    users.users.dd-computers = {
       uid = 952;
       isSystemUser = true;
-      group = "dd-vms";
+      group = "dd-computers";
       extraGroups = [ "kvm" ];
       home = dir;
     };
-    users.groups.dd-vms.gid = 952;
+    users.groups.dd-computers.gid = 952;
     systemd.tmpfiles.rules = [
-      "d ${dir} 0750 dd-vms dd-vms -"
-      "d ${dir}/instances 0750 dd-vms dd-vms -"
+      "d ${dir} 0750 dd-computers dd-computers -"
+      "d ${dir}/instances 0750 dd-computers dd-computers -"
       # what the host goes by, out of every guest's reach
-      "d ${dir}/records 0750 dd-vms dd-vms -"
-      "d ${dir}/control 0750 dd-vms dd-vms -"
+      "d ${dir}/records 0750 dd-computers dd-computers -"
+      "d ${dir}/control 0750 dd-computers dd-computers -"
     ];
 
-    systemd.services."dd-vm@" = {
+    systemd.services."dd-computer@" = {
       description = "Member's computer %i";
       after = [ "firewall.service" ];
       wants = [ "firewall.service" ];
@@ -192,8 +192,8 @@ in
       stopIfChanged = false;
       unitConfig.X-StopOnRemoval = false;
       serviceConfig = {
-        User = "dd-vms";
-        Group = "dd-vms";
+        User = "dd-computers";
+        Group = "dd-computers";
         # what it may reach out to (nix/modules/guests/egress.nix)
         SupplementaryGroups = [ config.dd.guests.group ];
         ExecStart = "${run} %i";
@@ -216,7 +216,7 @@ in
     # The manager: configs, records, and the units they run as. Like the
     # games manager it believes x-dd-user, so it listens on a socket only
     # nginx's group opens
-    systemd.services.dd-vms = lib.mkIf cfg.manager {
+    systemd.services.dd-computers = lib.mkIf cfg.manager {
       description = "Members' computers: the manager behind compute.${base}";
       wantedBy = [ "multi-user.target" ];
       after = [
@@ -226,33 +226,33 @@ in
       wants = [ "network-online.target" ];
       path = [ pkgs.systemd ];
       environment = {
-        DD_VMS_DIR = dir;
-        DD_VMS_BIND = sock;
-        DD_VMS_PORT_BASE = toString cfg.portBase;
-        DD_VMS_PORT_COUNT = toString cfg.portCount;
-        DD_VMS_MEMORY_MIB = toString cfg.memoryMiB;
-        DD_VMS_THREADS = toString cfg.threads;
-        DD_VMS_RESERVE_MIB = toString cfg.reserveMiB;
-        DD_VMS_ADDRESS = config.dd.box.net;
+        DD_COMPUTERS_DIR = dir;
+        DD_COMPUTERS_BIND = sock;
+        DD_COMPUTERS_PORT_BASE = toString cfg.portBase;
+        DD_COMPUTERS_PORT_COUNT = toString cfg.portCount;
+        DD_COMPUTERS_MEMORY_MIB = toString cfg.memoryMiB;
+        DD_COMPUTERS_THREADS = toString cfg.threads;
+        DD_COMPUTERS_RESERVE_MIB = toString cfg.reserveMiB;
+        DD_COMPUTERS_ADDRESS = config.dd.box.net;
         # whose box: "my boxes only" runs here for them alone. A fleet box
         # (no owner of its own) is the fleet owner's
-        DD_VMS_BOX_OWNER =
+        DD_COMPUTERS_BOX_OWNER =
           if config.dd.box.owner != null then
             config.dd.box.owner
           else
             (lib.importJSON ../../../fleet/policy.json).owner;
-        DD_VMS_ACCESS = "/run/dd-vms/access.json";
+        DD_COMPUTERS_ACCESS = "/run/dd-computers/access.json";
         # the storage ledger's count, where this box keeps one (storage/view.nix)
-        DD_VMS_LEDGER = "/var/lib/dd-storage/ledger.json";
+        DD_COMPUTERS_LEDGER = "/var/lib/dd-storage/ledger.json";
       };
       serviceConfig = {
-        User = "dd-vms";
-        Group = "dd-vms";
-        RuntimeDirectory = "dd-vms";
+        User = "dd-computers";
+        Group = "dd-computers";
+        RuntimeDirectory = "dd-computers";
         RuntimeDirectoryMode = "0750";
         # to read the ledger, where there is one
         SupplementaryGroups = lib.optional (config.users.groups ? dd-storage) "dd-storage";
-        ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.vms}/bin/dd-vms";
+        ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.vms}/bin/dd-computers";
         Restart = "on-failure";
         NoNewPrivileges = true;
         ProtectSystem = "strict";
@@ -265,15 +265,15 @@ in
     security.polkit.extraConfig = lib.mkIf cfg.manager ''
       polkit.addRule(function(action, subject) {
         if (action.id == "org.freedesktop.systemd1.manage-units" &&
-            subject.user == "dd-vms" &&
-            /^dd-vm@[0-9a-f]{16}\.service$/.test(action.lookup("unit")) &&
+            subject.user == "dd-computers" &&
+            /^dd-computer@[0-9a-f]{16}\.service$/.test(action.lookup("unit")) &&
             ["start", "stop"].indexOf(action.lookup("verb")) >= 0) {
           return polkit.Result.YES;
         }
       });
     '';
     users.users.nginx = lib.mkIf (cfg.manager && config.services.nginx.enable) {
-      extraGroups = [ "dd-vms" ];
+      extraGroups = [ "dd-computers" ];
     };
     services.nginx.virtualHosts."compute.${base}" = lib.mkIf cfg.manager {
       useACMEHost = base;
@@ -297,7 +297,7 @@ in
     # Who may reach each computer: its owner's devices and the friends its
     # config names, asked of the gate every fifteen seconds, as for games
     # (games-access.sh, the same script on its own chain)
-    systemd.services.vms-access = lib.mkIf cfg.manager {
+    systemd.services.computers-access = lib.mkIf cfg.manager {
       description = "Open each member's computer to its owner's and invited devices";
       after = [ "firewall.service" ];
       path = [
@@ -309,13 +309,13 @@ in
       ];
       serviceConfig.Type = "oneshot";
       script = ddScript ../games/games-access.sh {
-        ACCESS = "/run/dd-vms/access.json";
+        ACCESS = "/run/dd-computers/access.json";
         GATE = "http://127.0.0.1:${toString config.dd.verify.port}";
-        STATE = "/run/vms-access";
-        CHAIN = "dd-vms";
+        STATE = "/run/computers-access";
+        CHAIN = "dd-computers";
       };
     };
-    systemd.timers.vms-access = lib.mkIf cfg.manager {
+    systemd.timers.computers-access = lib.mkIf cfg.manager {
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnActiveSec = "30s";
@@ -324,11 +324,11 @@ in
       };
     };
     systemd.services.firewall.postStart = lib.mkIf cfg.manager (
-      lib.mkAfter "systemctl start --no-block vms-access.service || true"
+      lib.mkAfter "systemctl start --no-block computers-access.service || true"
     );
 
     # what each member's computers keep here, into the facts for their allowance
-    systemd.services.dd-vms-usage = {
+    systemd.services.dd-computers-usage = {
       description = "Count what each member's computers keep";
       path = [
         pkgs.jq
@@ -341,7 +341,7 @@ in
         KIND = "computers";
       };
     };
-    systemd.timers.dd-vms-usage = {
+    systemd.timers.dd-computers-usage = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnActiveSec = "5min";
@@ -350,8 +350,8 @@ in
     };
 
     # how big a computer this box can take, and what each here holds: into
-    # the heartbeat, for placement (vm-facts.sh)
-    systemd.services.dd-vm-facts = {
+    # the heartbeat, for placement (computer-facts.sh)
+    systemd.services.dd-computer-facts = {
       description = "Say how big a computer this box can take";
       path = [
         pkgs.coreutils
@@ -359,12 +359,12 @@ in
       ];
       restartIfChanged = false;
       serviceConfig.Type = "oneshot";
-      script = ddScript ./vm-facts.sh {
+      script = ddScript ./computer-facts.sh {
         DIR = dir;
         RESERVE_BYTES = cfg.reserveMiB * 1024 * 1024;
       };
     };
-    systemd.timers.dd-vm-facts = {
+    systemd.timers.dd-computer-facts = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnActiveSec = "1min";
@@ -376,9 +376,9 @@ in
     # owner lets in; the chain is filled once there is a manager (step 2)
     networking.firewall.extraCommands = ''
       for ipt in iptables ip6tables; do
-        $ipt -N dd-vms 2>/dev/null || true
-        $ipt -D nixos-fw -i commonty0 -p tcp --dport ${range} -j dd-vms 2>/dev/null || true
-        $ipt -I nixos-fw 1 -i commonty0 -p tcp --dport ${range} -j dd-vms
+        $ipt -N dd-computers 2>/dev/null || true
+        $ipt -D nixos-fw -i commonty0 -p tcp --dport ${range} -j dd-computers 2>/dev/null || true
+        $ipt -I nixos-fw 1 -i commonty0 -p tcp --dport ${range} -j dd-computers
       done
     '';
   };

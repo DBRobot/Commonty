@@ -8,7 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
-use vms::{Config, Limits, Manager, Systemd};
+use computers::{Config, Limits, Manager, Systemd};
 
 fn env(k: &str) -> Result<String> {
     std::env::var(k).with_context(|| format!("{k} is not set"))
@@ -210,11 +210,14 @@ async fn page(h: HeaderMap) -> Response {
 
 async fn static_file(Path(name): Path<String>) -> Response {
     let (body, kind) = match name.as_str() {
-        "vms.js" => (
-            include_str!("../web/vms.js"),
+        "computers.js" => (
+            include_str!("../web/computers.js"),
             "text/javascript; charset=utf-8",
         ),
-        "vms.css" => (include_str!("../web/vms.css"), "text/css; charset=utf-8"),
+        "computers.css" => (
+            include_str!("../web/computers.css"),
+            "text/css; charset=utf-8",
+        ),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     (
@@ -227,7 +230,7 @@ async fn static_file(Path(name): Path<String>) -> Response {
         .into_response()
 }
 
-/// this box's memory less what it keeps, in MiB, as vm-facts.sh counts it
+/// this box's memory less what it keeps, in MiB, as computer-facts.sh counts it
 fn box_memory(reserve: u64) -> u64 {
     std::fs::read_to_string("/proc/meminfo")
         .ok()
@@ -243,27 +246,27 @@ fn box_memory(reserve: u64) -> u64 {
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut m = Manager::new(
-        env_or("DD_VMS_DIR", "/var/lib/dd-vms").into(),
+        env_or("DD_COMPUTERS_DIR", "/var/lib/dd-computers").into(),
         Limits {
-            memory: num("DD_VMS_MEMORY_MIB", 16384),
-            threads: num("DD_VMS_THREADS", 8),
-            disk: num("DD_VMS_DISK_GIB", 200),
-            port_base: num("DD_VMS_PORT_BASE", 27200),
-            port_count: num("DD_VMS_PORT_COUNT", 200),
-            box_memory: box_memory(num("DD_VMS_RESERVE_MIB", 2048)),
+            memory: num("DD_COMPUTERS_MEMORY_MIB", 16384),
+            threads: num("DD_COMPUTERS_THREADS", 8),
+            disk: num("DD_COMPUTERS_DISK_GIB", 200),
+            port_base: num("DD_COMPUTERS_PORT_BASE", 27200),
+            port_count: num("DD_COMPUTERS_PORT_COUNT", 200),
+            box_memory: box_memory(num("DD_COMPUTERS_RESERVE_MIB", 2048)),
             box_threads: std::thread::available_parallelism()
                 .map(|n| (n.get() as u32).saturating_sub(1).max(1))
                 .unwrap_or(1),
         },
-        env("DD_VMS_BOX_OWNER")?,
-        env("DD_VMS_ADDRESS")?,
+        env("DD_COMPUTERS_BOX_OWNER")?,
+        env("DD_COMPUTERS_ADDRESS")?,
         Box::new(Systemd),
     )?;
-    m.ledger = std::env::var("DD_VMS_LEDGER").ok().map(Into::into);
+    m.ledger = std::env::var("DD_COMPUTERS_LEDGER").ok().map(Into::into);
     let m = Arc::new(m);
     eprintln!("vms: {} computer(s) brought back up", m.restore());
     // what the firewall's filler reads, rewritten every few seconds
-    if let Ok(access) = std::env::var("DD_VMS_ACCESS") {
+    if let Ok(access) = std::env::var("DD_COMPUTERS_ACCESS") {
         let w = m.clone();
         tokio::spawn(async move {
             loop {
@@ -296,7 +299,7 @@ async fn main() -> Result<()> {
         .with_state(m);
     // as the games manager: a unix socket only nginx's group opens, since
     // the user comes from a header
-    let bind = env_or("DD_VMS_BIND", "127.0.0.1:4183");
+    let bind = env_or("DD_COMPUTERS_BIND", "127.0.0.1:4183");
     eprintln!("vms listening on {bind}");
     if bind.starts_with('/') {
         let _ = std::fs::remove_file(&bind);

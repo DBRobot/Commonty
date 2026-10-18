@@ -14,13 +14,13 @@
   nodes.box = {
     imports = [
       ./box.nix
-      ../modules/vms/vms.nix
+      ../modules/computers/computers.nix
     ];
-    dd.vms.enable = true;
+    dd.computers.enable = true;
     # a small box: its 1G computer fits beside what it keeps for itself
-    dd.vms.reserveMiB = 512;
+    dd.computers.reserveMiB = 512;
     # a member's total, small enough that a second 1G computer goes over it
-    dd.vms.memoryMiB = 1536;
+    dd.computers.memoryMiB = 1536;
     # the guests' filter is the firewall's (nix/modules/guests/egress.nix)
     networking.firewall.enable = lib.mkForce true;
     environment.systemPackages = [

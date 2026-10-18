@@ -2,7 +2,7 @@
 //!
 //! A member saves configs - size, packages as a Nix file, who may reach it,
 //! where it may run - and makes instances from them. An instance is a record
-//! on this box and a unit, `dd-vm@<id>`, that boots it (nix/modules/vms).
+//! on this box and a unit, `dd-computer@<id>`, that boots it (nix/modules/vms).
 //! This service keeps both: it checks a member's instances together stay
 //! within the policy's totals, hands each its ports, writes what the guest
 //! reads from the record, and on its own start brings back every instance
@@ -29,7 +29,7 @@ pub struct Limits {
     pub disk: u64,
     pub port_base: u16,
     pub port_count: u16,
-    /// MiB and threads this box can give one computer (vm-facts.sh says the
+    /// MiB and threads this box can give one computer (computer-facts.sh says the
     /// same to placement): a small box runs small ones
     pub box_memory: u64,
     pub box_threads: u32,
@@ -93,7 +93,7 @@ pub struct Forward {
     pub host: u16,
 }
 
-/// One instance, as this box keeps it. The unit reads it (vms.nix, dd-vm-run):
+/// One instance, as this box keeps it. The unit reads it (computers.nix, dd-computer-run):
 /// `memory`, `threads`, `disk`, `port`, `forwards`, `owner`, `keys`, `nix`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Record {
@@ -163,7 +163,7 @@ pub struct Systemd;
 impl Systemd {
     fn ctl(&self, verb: &str, id: &str) -> Result<String> {
         let out = std::process::Command::new("systemctl")
-            .args([verb, "--no-block", &format!("dd-vm@{id}.service")])
+            .args([verb, "--no-block", &format!("dd-computer@{id}.service")])
             .output()
             .context("systemctl")?;
         if !out.status.success() {
@@ -190,7 +190,7 @@ impl Units for Systemd {
                 "-p",
                 "ActiveState",
                 "--value",
-                &format!("dd-vm@{id}.service"),
+                &format!("dd-computer@{id}.service"),
             ])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -753,7 +753,7 @@ impl Manager {
         Ok(public)
     }
 
-    /// Its private key, for its owner alone: what `dd vm ssh` and the
+    /// Its private key, for its owner alone: what `dd computer ssh` and the
     /// page's download hand to ssh.
     pub fn private_key(&self, owner: &str, id: &str) -> Result<(String, String)> {
         let r = self.record(owner, id)?;
@@ -863,7 +863,7 @@ impl Manager {
         n
     }
 
-    /// What the firewall's filler reads (vms-access, games-access.sh): each
+    /// What the firewall's filler reads (computers-access, games-access.sh): each
     /// running instance's owner, who else may reach it, and its host ports.
     pub fn access(&self) -> serde_json::Value {
         let servers: Vec<_> = self
@@ -903,7 +903,7 @@ mod tests {
     }
 
     fn scratch(what: &str) -> (Manager, Fake) {
-        let d = std::env::temp_dir().join(format!("dd-vms-{what}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("dd-computers-{what}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         let f = Fake::default();
         let m = Manager::new(
@@ -1114,7 +1114,7 @@ mod tests {
     #[test]
     fn ssh_reads_the_key() {
         let (public, private) = ssh_key("tom@dev").unwrap();
-        let d = std::env::temp_dir().join(format!("dd-vms-key-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("dd-computers-key-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         let f = d.join("key");
         std::fs::write(&f, &private).unwrap();

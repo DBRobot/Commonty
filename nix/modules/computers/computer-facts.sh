@@ -5,7 +5,7 @@
 # Zeros without KVM, or while the box drains: nothing is placed here.
 set -euo pipefail
 
-out=/var/lib/dd-facts/vm.prom
+out=/var/lib/dd-facts/computers.prom
 mem=0 threads=0 disk=0
 # a box being drained (its owner's word, or leaving the fleet) takes nothing new
 # (draining.prom, root's, written by what drains it; one file, not any)
@@ -22,14 +22,14 @@ if [ -e /dev/kvm ] && [ "$draining" = no ]; then
   disk=$(df -B1 --output=avail "$DIR" | tail -1 | tr -d ' ')
 fi
 {
-  echo "dd_vm_max_mem_bytes $mem"
-  echo "dd_vm_max_threads $threads"
-  echo "dd_vm_max_disk_bytes $disk"
+  echo "dd_computer_max_mem_bytes $mem"
+  echo "dd_computer_max_threads $threads"
+  echo "dd_computer_max_disk_bytes $disk"
   for d in "$DIR"/instances/*/; do
     [ -d "$d" ] || continue
     id=$(basename "$d")
     [[ $id =~ ^[0-9a-f]{16}$ ]] || continue
-    echo "dd_vm_used_bytes{vm=\"$id\"} $(du -sxB1 "$d" | cut -f1)"
+    echo "dd_computer_used_bytes{vm=\"$id\"} $(du -sxB1 "$d" | cut -f1)"
   done
 } >"$out.tmp"
 chmod 0644 "$out.tmp"

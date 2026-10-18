@@ -1,4 +1,4 @@
-//! `dd vm`: your remote computers (docs/dev/instances.md), through
+//! `dd computer`: your remote computers (docs/dev/remote-computers.md), through
 //! the same API as their page, compute.<domain>, with this device's token.
 
 use std::io::Write as _;
@@ -9,7 +9,7 @@ use clap::Subcommand;
 use serde_json::{Value, json};
 
 #[derive(Subcommand)]
-pub enum VmCmd {
+pub enum ComputerCmd {
     /// Your remote computers and configs, and what they take of your limits
     List,
     /// Save a config: what remote computers are made from
@@ -201,7 +201,7 @@ async fn save_key(api: &Api, i: &Value) -> Result<PathBuf> {
     Ok(path)
 }
 
-pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> {
+pub async fn run(cmd: ComputerCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> {
     let (_, _, token) = media::gate::Opener::load(keys)?;
     let door = media::gate::door_base(dirs)?;
     let base = match door.split_once("://home.") {
@@ -217,7 +217,7 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
     };
     use reqwest::Method as M;
     match cmd {
-        VmCmd::List => {
+        ComputerCmd::List => {
             let s = api.state().await?;
             println!(
                 "using {} of {} and {} of {} threads",
@@ -264,7 +264,7 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
                 );
             }
         }
-        VmCmd::Config {
+        ComputerCmd::Config {
             name,
             memory,
             threads,
@@ -300,12 +300,12 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
                 .await?;
             println!("config {name} saved");
         }
-        VmCmd::Forget { name } => {
+        ComputerCmd::Forget { name } => {
             api.send(M::DELETE, &format!("/api/configs/{name}"), None)
                 .await?;
             println!("config {name} deleted");
         }
-        VmCmd::Make {
+        ComputerCmd::Make {
             config,
             name,
             yes,
@@ -342,13 +342,13 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
                 .await?,
             )?;
             println!(
-                "{name} is starting: dd vm ssh {name}  ({})",
+                "{name} is starting: dd computer ssh {name}  ({})",
                 made["address"].as_str().unwrap_or("")
             );
         }
-        VmCmd::Start { name } => verb(&api, &name, "start", "starting").await?,
-        VmCmd::Stop { name } => verb(&api, &name, "stop", "stopping").await?,
-        VmCmd::Reset { name } => {
+        ComputerCmd::Start { name } => verb(&api, &name, "start", "starting").await?,
+        ComputerCmd::Stop { name } => verb(&api, &name, "stop", "stopping").await?,
+        ComputerCmd::Reset { name } => {
             verb(
                 &api,
                 &name,
@@ -357,7 +357,7 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
             )
             .await?
         }
-        VmCmd::Apply { name, yes } => {
+        ComputerCmd::Apply { name, yes } => {
             let i = api.find(&name).await?;
             let id = i["id"].as_str().unwrap_or("");
             let s = api.state().await?;
@@ -375,7 +375,7 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
             .await?;
             println!("{name}: applied; its packages rebuild now, its size at its next start");
         }
-        VmCmd::Delete { name } => {
+        ComputerCmd::Delete { name } => {
             let i = api.find(&name).await?;
             api.send(
                 M::DELETE,
@@ -385,7 +385,7 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
             .await?;
             println!("{name} deleted");
         }
-        VmCmd::Log { name } => {
+        ComputerCmd::Log { name } => {
             let i = api.find(&name).await?;
             print!(
                 "{}",
@@ -397,11 +397,11 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
                 .await?
             );
         }
-        VmCmd::Key { name } => {
+        ComputerCmd::Key { name } => {
             let i = api.find(&name).await?;
             println!("{}", save_key(&api, &i).await?.display());
         }
-        VmCmd::Ssh { name, args } => {
+        ComputerCmd::Ssh { name, args } => {
             let i = api.find(&name).await?;
             let key = save_key(&api, &i).await?;
             let addr = i["address"].as_str().unwrap_or("");

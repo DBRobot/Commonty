@@ -5,7 +5,7 @@ members = [
   "servers/gate",
   "servers/library",
   "servers/games",
-  "servers/vms",
+  "servers/computers",
   "servers/transcode",
   "servers/smarthome/door",
   "client/archive",

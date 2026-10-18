@@ -6,11 +6,11 @@ Status: being built, in this order, through the control plane:
    signed items, judged in `state/computers` beside identity, served at
    `4195/computers`. Below, under The records.
 2. **Placement** (the control plane's): each computer is a placed
-   service with a lease, fitted to the boxes' `vm.prom`, never moved while
+   service with a lease, fitted to the boxes' `computers.prom`, never moved while
    its box is alive.
 3. **The follower** on each box: runs the computers whose lease the box
-   holds; the guest, the page, `dd vm`, the outbound rules and the
-   allowance are built (branch vms-1017) and move onto it.
+   holds; the guest, the page, `dd computer`, the outbound rules and the
+   allowance are built and move onto it.
 4. **Snapshots**, so a computer can come back on another box.
 
 A box carries the compute role when its own report says it has KVM; no
@@ -60,7 +60,7 @@ Nobody types an SSH key. Each remote computer makes its own key pair when
 it is made: the public half is let in, the private half is kept beside
 its disks on the box (`computers/<id>/ssh/key`, out of the guest's
 shares, so it moves and goes with them) and handed only to its owner:
-`dd vm ssh <name>` fetches it into `~/.ssh/commonty-<name>` and uses it,
+`dd computer ssh <name>` fetches it into `~/.ssh/commonty-<name>` and uses it,
 and the page offers it as a download. "New key" makes another and the
 old one stops working. The box already runs the computer, so holding its
 key tells it nothing new.
@@ -68,7 +68,7 @@ key tells it nothing new.
 ## How it fits together
 
 ```
-browser: compute.<domain>        CLI: dd vm ...
+browser: compute.<domain>        CLI: dd computer ...
           │                           │
           ▼                           ▼
      gate (who they are) ──► the computers API ──► control plane: the agreed state
@@ -76,10 +76,10 @@ browser: compute.<domain>        CLI: dd vm ...
                                                     owner, consent, port
                                                           │
                                 place.Decide: which box, from each box's
-                                vm.prom facts and the owner's consent
+                                computers.prom facts and the owner's consent
                                                           │
                                                           ▼
-     the box the plan names ── lease svc/vm-<id> ── dd-computer@<id>.service
+     the box the plan names ── lease svc/computer-<id> ── dd-computer@<id>.service
                                                    qemu: system.qcow2, home.qcow2
                                                    on tank/enc/computers/<id>
                                                           │
@@ -113,7 +113,7 @@ browser: compute.<domain>        CLI: dd vm ...
 - **In: the Commonty network only.** Each computer has a port from a
   fleet-wide pool, kept in its record so it stays the same when it moves,
   forwarded to the guest's SSH, and more forwarded ports as its config
-  says. A name, `vm-<name>.<owner>.<domain>`, follows the lease like every
+  says. A name, `computer-<name>.<owner>.<domain>`, follows the lease like every
   other service's (the DNS Worker). No public name, no tunnel.
 - **Who may reach it**: a `dd-computers` chain beside `dd-games`, refilled
   every 15 seconds from the computers API: one rule per (allowed device,
@@ -129,13 +129,13 @@ browser: compute.<domain>        CLI: dd vm ...
 
 ## Placement and moves
 
-- **What a box can host**: each box writes `vm.prom` to its facts, and its
+- **What a box can host**: each box writes `computers.prom` to its facts, and its
   heartbeat carries it:
-  - `dd_vm_max_mem_bytes`: its memory, less what the services it carries
+  - `dd_computer_max_mem_bytes`: its memory, less what the services it carries
     keep aside, less 2G;
-  - `dd_vm_max_threads`: its threads, less one;
-  - `dd_vm_max_disk_bytes`: what `tank/enc/computers` has free under its quota.
-  Computed on the box every minute (`dd-vm-facts`). A box with no KVM, or
+  - `dd_computer_max_threads`: its threads, less one;
+  - `dd_computer_max_disk_bytes`: what `tank/enc/computers` has free under its quota.
+  Computed on the box every minute (`dd-computer-facts`). A box with no KVM, or
   one draining or failing, writes zeros.
 - **Where it may run**: the boxes whose facts fit it and, for "my boxes
   only", the owner's boxes in the identity state (`members.<name>.boxes`).
@@ -175,9 +175,8 @@ grow an computer; a running one isn't stopped.
   the serial console over a websocket.
 - **The page**, `compute.<domain>`: the configs, the computers, the
   console, the "anyone's box" confirmation. Same layout as the games page.
-- **The CLI**: `dd vm config save <file>`, `dd vm make <config>`,
-  `dd vm start|stop|rebuild|delete <name>`, `dd vm ssh <name>`,
-  `dd vm console <name>`. The CLI asks the same question before
+- **The CLI**: `dd computer config <name> ...`, `dd computer make <config> <name>`,
+  `dd computer start|stop|apply|reset|delete|log|key|ssh <name>`. The CLI asks the same question before
   "anyone's".
 
 ## The records

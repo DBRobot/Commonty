@@ -1,12 +1,12 @@
 [package]
-name = "vms"
+name = "computers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Members' own computers: the manager behind compute.<domain>"
 
 [[bin]]
-name = "dd-vms"
+name = "dd-computers"
 path = "src/main.rs"
 
 [dependencies]

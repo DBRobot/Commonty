@@ -5,7 +5,7 @@
 # only for players still the owner's friends. The chain is rebuilt when the
 # answer changes, and emptied when either cannot say.
 set -euo pipefail
-# the chain it fills: the games', or members' computers' (vms.nix)
+# the chain it fills: the games', or members' computers' (computers.nix)
 CHAIN=${CHAIN:-dd-games}
 
 mkdir -p "$STATE"

@@ -52,7 +52,7 @@
         "thanos"
         "members-runner"
         "games"
-        "vms"
+        "computers"
         "forge"
         "transcode"
         "network"
@@ -321,7 +321,7 @@
             "verify"
             "release"
             "games"
-            "vms"
+            "computers"
             "transcode"
             "git-remote-dd"
           ];
@@ -844,8 +844,8 @@
           verify = perCrate "verify";
           # the manager behind the Games tile (nix/modules/games/games.nix)
           games = perCrate "games";
-          # the manager behind members' computers (nix/modules/vms/vms.nix)
-          vms = perCrate "vms";
+          # the manager behind members' remote computers (nix/modules/computers/computers.nix)
+          computers = perCrate "computers";
           # one file, one viewer, in memory: the compute side of the
           # encrypted libraries (modules/library/transcode.nix)
           transcode = perCrate "transcode";
@@ -1654,9 +1654,9 @@
               builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "game" b.roles) boxes)
             )
           );
-          # and for members' computers: each compute box's pool (dd.vms.reach)
-          fleetVmPorts = lib.unique (
-            lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.vms.reach) (
+          # and for members' computers: each compute box's pool (dd.computers.reach)
+          fleetComputerPorts = lib.unique (
+            lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.computers.reach) (
               builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "compute" b.roles) boxes)
             )
           );
@@ -1703,7 +1703,7 @@
                 }
                 (lib.optionalAttrs (builtins.elem "gateway" box.roles) {
                   dd.headscale.gamePorts = fleetGamePorts;
-                  dd.headscale.vmPorts = fleetVmPorts;
+                  dd.headscale.computerPorts = fleetComputerPorts;
                   dd.headscale.owners = lib.mapAttrs' (
                     n: b: lib.nameValuePair b.net (lib.importJSON ./fleet/boxes/${n}/box.json).owner
                   ) (lib.filterAttrs (n: b: b ? net && builtins.pathExists ./fleet/boxes/${n}/box.json) boxes);

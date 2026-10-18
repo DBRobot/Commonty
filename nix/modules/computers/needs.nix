@@ -1,18 +1,18 @@
 # What members' computers need of a box (types: nix/lib/needs-type.nix).
 # Each instance is its own size, which its record says; this is the host's.
 {
-  dd-vms = {
+  dd-computers = {
     what = "members' own computers, each a VM with its own disks";
     traffic = {
       class = "high";
       upMbps = 10;
     };
     units = [
-      "dd-vm@*"
-      "dd-vms"
-      "vms-access"
-      "dd-vms-usage"
-      "dd-vm-facts"
+      "dd-computer@*"
+      "dd-computers"
+      "computers-access"
+      "dd-computers-usage"
+      "dd-computer-facts"
     ];
     base = {
       requires = {

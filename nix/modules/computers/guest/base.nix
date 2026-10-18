@@ -8,7 +8,12 @@
 # From the host it gets two shares: config (read-only: the owner's name,
 # their SSH keys, their Nix file, written from the host's record) and
 # report (what the guest says back: whether the Nix file applied).
-{ lib, pkgs, ... }:
+{
+  lib,
+  pkgs,
+  modulesPath,
+  ...
+}:
 let
   config9p = "/run/dd/config";
   report9p = "/run/dd/report";
@@ -26,6 +31,10 @@ let
   };
 in
 {
+  # virtio's disk, network and 9p drivers in the initrd: without them it
+  # waits for /dev/disk/by-label/nixos and gives up
+  imports = [ "${modulesPath}/profiles/qemu-guest.nix" ];
+
   system.stateVersion = "26.05";
 
   boot.loader.grub.device = "/dev/vda";

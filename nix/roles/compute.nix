@@ -1,11 +1,11 @@
 { config, ... }:
 {
-  # Members' own computers (nix/modules/vms/vms.nix, docs/dev/instances.md):
+  # Members' own computers (nix/modules/computers/computers.nix, docs/dev/instances.md):
   # a VM each, with its own disks, made from a config they save. That a
   # given computer exists is the box's state, not the repo's.
-  imports = [ ../modules/vms/vms.nix ];
+  imports = [ ../modules/computers/computers.nix ];
 
-  dd.vms.enable = true;
+  dd.computers.enable = true;
 
   dd.home.services = [
     {
@@ -23,7 +23,7 @@
   # computer. The disks themselves go to snapshots (docs/dev/instances.md),
   # not the nightly backup
   dd.backup.paths = [
-    "/var/lib/dd-vms/records"
-    "/var/lib/dd-vms/configs"
+    "/var/lib/dd-computers/records"
+    "/var/lib/dd-computers/configs"
   ];
 }
