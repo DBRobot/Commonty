@@ -327,7 +327,7 @@ func reportFacts(report, model string) map[string]float64 {
 
 // promFacts reads the few samples the heartbeat carries from text-format
 // metric files: release (dd_agent_counter), agent_ok (dd_agent_info's
-// result: 1 ok, 0 refused) and backup_last (dd_backup_last_success_seconds)
+// result: 1 ok, 0 refused or rolled back) and backup_last (dd_backup_last_success_seconds)
 // maxFacts bounds what one heartbeat carries, members and services and all
 const maxFacts = 512
 
@@ -455,9 +455,12 @@ func promFacts(files ...string) map[string]float64 {
 					out["can/"+svc] = v
 				}
 			case "dd_agent_info":
-				if strings.Contains(l, `result="ok"`) {
+				// 0 only for a release that failed here (ident.OurFault keeps
+				// such a box's access); held, none, absent say nothing of one
+				switch {
+				case strings.Contains(l, `result="ok"`):
 					out["agent_ok"] = 1
-				} else {
+				case strings.Contains(l, `result="refused"`), strings.Contains(l, `result="rollback"`):
 					out["agent_ok"] = 0
 				}
 			}

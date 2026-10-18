@@ -204,17 +204,44 @@ func TestABoxDownByOurFaultIsNotForgotten(t *testing.T) {
 	k := strangerKey(1)
 	name, _, _ := JoinName(k)
 	f.block(1000, joinReq(k, 1))
-	b, _ := json.Marshal(Heartbeat{Facts: map[string]float64{"agent_ok": 0}})
+	// release 6 is out: the release's own box runs it
+	f.block(1500, f.req("node1", "heartbeat", Heartbeat{Facts: map[string]float64{"release": 6}}))
+	b, _ := json.Marshal(Heartbeat{Facts: map[string]float64{"agent_ok": 0, "release": 5}})
 	f.block(2000, Request{Kind: "heartbeat", Box: name, Seq: 2, Body: b, Sig: "ok:" + k})
 	f.block(2000 + JoinedGoneAfter + 1)
 	if f.s.Joined[name] == nil || f.s.Boxes[name] == nil {
 		t.Fatal("a box whose release failed on it was forgotten")
 	}
 	got := f.s.IdentBoxes()
-	if info, ok := got(name); !ok || info.LastSeen != 2000 {
+	if info, ok := got(name); !ok || info.LastSeen != 2000 || info.Fleet != 6 {
 		t.Fatal(info, ok)
 	}
 	if _, ok := got("nobody"); ok {
 		t.Fatal("a box that is not there")
+	}
+}
+
+func TestAStrangersWordAloneIsNotOurFault(t *testing.T) {
+	f := newFleet(t)
+	f.block(500, f.req("node1", "heartbeat", Heartbeat{Facts: map[string]float64{"release": 6}}))
+	for i, facts := range []map[string]float64{
+		{"agent_ok": 0},
+		{"agent_ok": 0, "release": 6},
+		// a joined box's word of a newer release is no release of ours
+		{"agent_ok": 0, "release": 9},
+	} {
+		k := strangerKey(10 + i)
+		name, _, _ := JoinName(k)
+		at := 1000 + int64(i)*2*JoinedGoneAfter
+		f.block(at, joinReq(k, 1))
+		b, _ := json.Marshal(Heartbeat{Facts: facts})
+		f.block(at, Request{Kind: "heartbeat", Box: name, Seq: 2, Body: b, Sig: "ok:" + k})
+		if f.s.Joined[name] == nil {
+			t.Fatalf("%v: not joined", facts)
+		}
+		f.block(at + JoinedGoneAfter + 1)
+		if f.s.Joined[name] != nil {
+			t.Fatalf("%v: a stranger that said a release failed, with none newer out, kept its place", facts)
+		}
 	}
 }

@@ -192,15 +192,28 @@ func joinedRecord(body []byte) bool {
 	return false
 }
 
+// fleetRelease: the newest release a box of the release says it runs; a
+// joined box's word never counts
+func (s *State) fleetRelease() float64 {
+	var r float64
+	for name, b := range s.Boxes {
+		if _, joined := s.Joined[name]; !joined && b != nil {
+			r = max(r, b.Facts["release"])
+		}
+	}
+	return r
+}
+
 // IdentBoxes: what the identity view reads of each box (ident.Boxes), from
 // this state
 func (s *State) IdentBoxes() ident.Boxes {
+	fleet := s.fleetRelease()
 	return func(name string) (ident.BoxInfo, bool) {
 		b := s.Boxes[name]
 		if b == nil {
 			return ident.BoxInfo{}, false
 		}
-		return ident.BoxInfo{LastSeen: b.LastSeen, Facts: b.Facts}, true
+		return ident.BoxInfo{LastSeen: b.LastSeen, Facts: b.Facts, Fleet: fleet}, true
 	}
 }
 
@@ -225,13 +238,14 @@ func (s *State) checkNetAddr(cfg *Config, r Request) error {
 // last word was a release that failed on it: a box down by our fault keeps
 // its place (and its member's access, ident.OurFault)
 func (s *State) dropGone(now int64) {
+	fleet := s.fleetRelease()
 	for name, j := range s.Joined {
 		last := j.At
 		b := s.Boxes[name]
 		if b != nil && b.LastSeen > last {
 			last = b.LastSeen
 		}
-		if now-last > JoinedGoneAfter && (b == nil || !ident.OurFault(b.Facts)) {
+		if now-last > JoinedGoneAfter && (b == nil || !ident.OurFault(b.Facts, fleet)) {
 			delete(s.Joined, name)
 			delete(s.Boxes, name)
 		}

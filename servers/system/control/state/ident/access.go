@@ -15,6 +15,8 @@ import "sort"
 type BoxInfo struct {
 	LastSeen int64              // agreed ms; 0, never heard
 	Facts    map[string]float64 // its last heartbeat's
+	// the newest release the release's own boxes say they run; 0, unknown
+	Fleet float64
 }
 
 // Boxes looks a box up in the agreed state: false when it is not there
@@ -53,10 +55,14 @@ func Qualify(f map[string]float64) string {
 
 // OurFault: the box went quiet on a release that failed on it - its last
 // word was that its agent's run did not end well (agent_ok 0: refused, or
-// rolled back). A box down for that is never counted as gone.
-func OurFault(f map[string]float64) bool {
+// rolled back) on a release older than the one the release's own boxes
+// run (fleet, 0 unknown). A box down for that is never counted as gone.
+// Its word alone is not enough: with no newer release out, nothing of
+// ours failed on it.
+func OurFault(f map[string]float64, fleet float64) bool {
 	v, said := f["agent_ok"]
-	return said && v == 0
+	r, runs := f["release"]
+	return said && v == 0 && runs && r < fleet
 }
 
 // boxesOf: the boxes whose enlistment to name stands
@@ -114,7 +120,7 @@ func (s *State) Access(cfg *Config, e *Entry, at uint64, boxes Boxes) (string, [
 			v.Why = "not qualifying"
 		case int64(at)*1000-info.LastSeen <= Grace*1000:
 			v.Counts, v.Why = true, "seen"
-		case OurFault(info.Facts):
+		case OurFault(info.Facts, info.Fleet):
 			v.Counts, v.Why = true, "our fault"
 		case grace > 0:
 			v.Counts, v.Why = true, "extended"

@@ -198,7 +198,9 @@ func TestDownByOurFaultKeepsAccess(t *testing.T) {
 		failed[k] = v
 	}
 	failed["agent_ok"] = 0
-	f.boxes[a] = BoxInfo{LastSeen: int64(f.at) * 1000, Facts: failed}
+	failed["release"] = 5
+	// release 6 is out, from the release's own boxes: 5 failing here is ours
+	f.boxes[a] = BoxInfo{LastSeen: int64(f.at) * 1000, Facts: failed, Fleet: 6}
 	f.at += 3 * Grace
 	if got := f.access("ann"); got != "box" {
 		t.Fatal(got)
@@ -317,5 +319,37 @@ func TestOnlyTheStateMachineSaysABoxJoined(t *testing.T) {
 	f.join(2, ann, tid(2), f.at+day)
 	if f.s.Joins[name] != nil {
 		t.Fatal("an expired join record stayed")
+	}
+}
+
+func TestOurFaultIsNotTheBoxsWordAlone(t *testing.T) {
+	f := newFleet(t)
+	ann := f.person("ann", 1)
+	a := f.box(ann, 1, computeBox)
+	claim := func(release, fleet float64, said bool) BoxInfo {
+		facts := map[string]float64{"agent_ok": 0}
+		for k, v := range computeBox {
+			if k != "agent_ok" {
+				facts[k] = v
+			}
+		}
+		if said {
+			facts["release"] = release
+		}
+		return BoxInfo{LastSeen: int64(f.at) * 1000, Facts: facts, Fleet: fleet}
+	}
+	for what, info := range map[string]BoxInfo{
+		"no newer release than the one it runs": claim(6, 6, true),
+		"a release the fleet never ran":         claim(9, 6, true),
+		"the fleet's release not known":         claim(5, 0, true),
+		"no word of what it runs":               claim(0, 6, false),
+	} {
+		f.boxes[a] = info
+		at := f.at
+		f.at += Grace + day
+		if got := f.access("ann"); got != "none" {
+			t.Fatalf("%s: a box gone a month, by its own word our fault, still gives %s", what, got)
+		}
+		f.at = at
 	}
 }

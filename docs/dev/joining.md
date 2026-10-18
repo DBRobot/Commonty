@@ -228,11 +228,16 @@ replaying the directory serves its replay, which knows invites only).
   (unheard by the agreed state) while healthy.
 - **Our fault never counts**: a box whose last word was that its agent's
   last run did not end well (`agent_ok` 0: the release was refused or
-  rolled back on it) is never gone, however long it is quiet, and the
-  state machine does not forget it after 30 days as it does a stranger.
-  That is the signal the agreed state has; there is no fleet-wide "bad
-  release" mark in it, so a box that dies on a release without saying so
-  first counts as gone after 30 days like any other.
+  rolled back on it; held, none and absent say nothing) on a release
+  older than the newest the release's own boxes run is never gone,
+  however long it is quiet, and the state machine does not forget it
+  after 30 days as it does a stranger. Its word alone is not enough: with
+  no newer release out, nothing of ours failed on it. That is the signal
+  the agreed state has; there is no fleet-wide "bad release" mark in it,
+  so a box that dies on a release without saying so first counts as gone
+  after 30 days like any other. The box's word itself is unattested
+  until TPM attestation is wired: a box that lies about its release is
+  not caught by this.
 - **Grace**: 30 days. Only the admin (the release's `identity.admin`,
   fleet/policy.json `owner`) extends it for a member, with a root-signed
   `extend` naming them and an `until`. It keeps their access while they
