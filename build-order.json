@@ -1,8 +1,8 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "v0.1.56-1-1792301185",
-    "issued": 1792301186,
+    "id": "v0.1.57-1-1792301526",
+    "issued": 1792301527,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -12,8 +12,8 @@
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/2aa4l94i4aqmlvpd718qlj3r45sjmdd7-commonty-android-0.1.56",
-        "version": "0.1.56"
+        "path": "/nix/store/j1j4dcnhmkmgqwdbwk4535mha9qh7cvx-commonty-android-0.1.57",
+        "version": "0.1.57"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -23,30 +23,30 @@
         ],
         "name": "dd-windows",
         "part": "dd-windows",
-        "path": "/nix/store/phb4p9di92dwgp5pdcfk9hvasb5zaqi3-dd-windows-0.1.56",
-        "version": "0.1.56"
+        "path": "/nix/store/j8r7g76b9wjw9dwm64wvdvkacsfwazkg-dd-windows-0.1.57",
+        "version": "0.1.57"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "home-controller",
         "part": "home-controller",
-        "path": "/nix/store/wl2kjf1flhi8059gvwnkizf6pn6r1y5z-commonty-home-controller-0.1.56",
-        "version": "0.1.56"
+        "path": "/nix/store/i8r8qsdn8bn1dyjlzz6x53m9lfad3jiy-commonty-home-controller-0.1.57",
+        "version": "0.1.57"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "linux",
         "part": "linux",
-        "path": "/nix/store/vji8fygn4vdqrslks50hjkv3ljfsp37r-commonty-linux-0.1.56",
-        "version": "0.1.56"
+        "path": "/nix/store/b818pvag4x8hbjj23r07ypdn7chxf9w1-commonty-linux-0.1.57",
+        "version": "0.1.57"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -56,13 +56,13 @@
         ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/ph2f21ric799lra0dq2iplri1gcn571p-commonty-windows-0.1.56",
-        "version": "0.1.56"
+        "path": "/nix/store/dlr8k57c0h74gvix5dp058447dxm7p6y-commonty-windows-0.1.57",
+        "version": "0.1.57"
       }
     ],
     "kind": "build-order",
-    "rev": "aaf2712e1b4f191333bc6c511f2489ba907d1726"
+    "rev": "cd3246f519c34a9f32ce477de05a64abccd4150a"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "WATX0Bd3/W2uamz1a5Lii8NVSibd+CnfZV2it7bsyN+4AcKw0Q8BdKrUic0BS74Osvm5TVCGjEnj3fKav8DWAg=="
+  "signature": "qZBnudAqDckR7tPZI6nWEktgc1mDWOjOFR+XHLlSzy4OgYFuJ2b3KkIEtDyZjt7rip4m6xRAn62l/QR+Q6dGCw=="
 }
