@@ -17,7 +17,7 @@ main h2 { margin: 0; font-size: 17px; }
 #view { display: grid; gap: 14px; min-width: 0; }
 
 /* home.css spaces a lone button from what is above it; here they sit in rows */
-main button { margin-top: 0; }
+main button, main button.quiet { margin-top: 0; }
 main button.small { height: 32px; padding: 0 12px; font-size: 14px; }
 main button.bad { background: var(--broken); color: #fff; }
 a.btn {
@@ -81,8 +81,10 @@ a.btn.quiet-l:hover { background: var(--bg); }
 .card-foot button, .card-foot a.btn { height: 38px; }
 
 /* a command to copy */
-.copy { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.copy code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 6px 10px; background: var(--code); border-radius: var(--radius); font-size: 14px; }
+.copy { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
+/* home.css starts every button at the top; this one is as tall as its command */
+.copy button.small { height: auto; min-height: 34px; align-self: stretch; }
+.copy code { flex: 1; min-width: 0; display: flex; align-items: center; overflow-wrap: anywhere; padding: 6px 10px; background: var(--code); border-radius: var(--radius); font-size: 14px; }
 
 .empty-p { display: grid; gap: 10px; justify-items: start; padding: 20px; }
 .empty-p p { margin: 0; max-width: 60ch; color: var(--ink-2); }
