@@ -10,6 +10,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"commonty/control/state/ident"
@@ -207,6 +208,11 @@ func TestTotalsPortsAndConsent(t *testing.T) {
 	if got := f.add(seal(t, "computer-delete", body(t, del), tom.root)); got != "ok" {
 		t.Fatal(got)
 	}
+	// the deleted one, its old item sent again: it stays gone
+	a.Version = 9
+	if got := f.add(seal(t, "computer", body(t, a), tom.root)); got == "ok" {
+		t.Fatal("a deleted computer came back")
+	}
 	if got := f.add(seal(t, "computer", body(t, d), ann.root)); got != "ok" {
 		t.Fatal(got)
 	}
@@ -321,5 +327,31 @@ func TestServe(t *testing.T) {
 	}
 	if code, _ := sv.Answer(len(f.log), item, 8, f.at, "", mine.Changed); code != 304 {
 		t.Fatalf("unchanged: %d", code)
+	}
+}
+
+// many readers at once while the log grows: one answer at a time, no race
+// (go test -race)
+func TestServeAtOnce(t *testing.T) {
+	tom := who("tom", 1)
+	f := newFleet(t, tom)
+	f.claim(tom)
+	for i := 0; i < 20; i++ {
+		c := make1("tom", fmt.Sprintf("%016x", i+1), fmt.Sprintf("c%d", i), 512, 0, 1)
+		c.Threads = 1
+		f.log = append(f.log, ident.Item{Time: f.at + int64(i+1)*1000, Box: "node1", Item: seal(t, "computer", body(t, c), tom.root)})
+	}
+	sv := NewServer(f.cfg, f.lim, voters)
+	done := make(chan struct{})
+	for g := 0; g < 8; g++ {
+		go func(g int) {
+			defer func() { done <- struct{}{} }()
+			for n := len(f.log) - 20; n <= len(f.log); n++ {
+				sv.Answer(n, func(i int) ident.Item { return f.log[i] }, uint64(n), f.at, "", 0)
+			}
+		}(g)
+	}
+	for g := 0; g < 8; g++ {
+		<-done
 	}
 }

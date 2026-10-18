@@ -105,12 +105,15 @@ type Held struct {
 type State struct {
 	Configs   map[string]map[string]*Config `json:"configs"` // owner -> name -> config
 	Computers map[string]*Held              `json:"computers"`
-	Outcomes  map[string]string             `json:"outcomes"`
-	Order     []string                      `json:"outcomeOrder"`
+	// ids deleted, for good: an old item for one, sent again, never brings
+	// it back (ids are made fresh by the signer, never reused)
+	Deleted  map[string]string `json:"deleted"` // id -> owner
+	Outcomes map[string]string `json:"outcomes"`
+	Order    []string          `json:"outcomeOrder"`
 }
 
 func New() *State {
-	return &State{Configs: map[string]map[string]*Config{}, Computers: map[string]*Held{}, Outcomes: map[string]string{}}
+	return &State{Configs: map[string]map[string]*Config{}, Computers: map[string]*Held{}, Deleted: map[string]string{}, Outcomes: map[string]string{}}
 }
 
 const maxOutcomes = 1024
@@ -284,6 +287,9 @@ func (s *State) computer(id *ident.State, cfg *ident.Config, lim *Limits, env *i
 	if !idRe.MatchString(n.ID) || !nameRe.MatchString(n.Name) {
 		return errors.New("an id is 16 hex, a name lowercase letters, digits and dashes")
 	}
+	if _, gone := s.Deleted[n.ID]; gone {
+		return errors.New("that remote computer was deleted")
+	}
 	cur := s.Computers[n.ID]
 	if cur != nil {
 		if cur.Owner != n.Owner {
@@ -412,6 +418,7 @@ func (s *State) del(id *ident.State, cfg *ident.Config, env *ident.Envelope, bod
 		return errors.New("not dated now")
 	}
 	delete(s.Computers, d.ID)
+	s.Deleted[d.ID] = d.Owner
 	return nil
 }
 
