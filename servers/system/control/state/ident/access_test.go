@@ -201,7 +201,7 @@ func TestDownByOurFaultKeepsAccess(t *testing.T) {
 	failed["release"] = 5
 	// release 6 is out, from the release's own boxes: 5 failing here is ours
 	f.boxes[a] = BoxInfo{LastSeen: int64(f.at) * 1000, Facts: failed, Fleet: 6}
-	f.at += 3 * Grace
+	f.at += 2 * Grace
 	if got := f.access("ann"); got != "box" {
 		t.Fatal(got)
 	}
@@ -351,5 +351,35 @@ func TestOurFaultIsNotTheBoxsWordAlone(t *testing.T) {
 			t.Fatalf("%s: a box gone a month, by its own word our fault, still gives %s", what, got)
 		}
 		f.at = at
+	}
+}
+
+func TestOurFaultHasAnEnd(t *testing.T) {
+	// a box can say it runs any release, an old one too, and that it
+	// failed: what keeps it counting by that word alone has to stop
+	f := newFleet(t)
+	ann := f.person("ann", 1)
+	a := f.box(ann, 1, computeBox)
+	failed := map[string]float64{"agent_ok": 0, "release": 0}
+	for k, v := range computeBox {
+		if k != "agent_ok" {
+			failed[k] = v
+		}
+	}
+	f.boxes[a] = BoxInfo{LastSeen: int64(f.at) * 1000, Facts: failed, Fleet: 6}
+	start := f.at
+	f.at = start + 89*day
+	if got := f.access("ann"); got != "box" {
+		t.Fatalf("89 days down by our fault: %s", got)
+	}
+	f.at = start + 91*day
+	if got := f.access("ann"); got != "none" {
+		t.Fatalf("91 days down by our fault, by its own word: %s", got)
+	}
+	// past it, only the admin's extension keeps her
+	david := f.person("david", 20)
+	f.must("david extends", f.put(seal(t, "extend", jsonBody(t, map[string]any{"name": "ann", "until": f.at + 30*day, "at": f.at}), david.root, nil)), true)
+	if got := f.access("ann"); got != "box" {
+		t.Fatalf("extended: %s", got)
 	}
 }

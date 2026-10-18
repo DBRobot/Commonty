@@ -27,6 +27,10 @@ const (
 	// Grace: how long a box may be gone, by its member's doing, and still
 	// count
 	Grace = 30 * 24 * 3600
+	// OurFaultFor: how long a box down by our fault still counts, from its
+	// last word. That word is the box's own (its release and how it went),
+	// so it has an end; past it, only the admin's extension keeps it
+	OurFaultFor = 90 * 24 * 3600
 	// what "8 GB" of RAM shows as: MemTotal leaves out what the firmware
 	// and the graphics keep
 	minRAM = 7 << 30
@@ -120,7 +124,7 @@ func (s *State) Access(cfg *Config, e *Entry, at uint64, boxes Boxes) (string, [
 			v.Why = "not qualifying"
 		case int64(at)*1000-info.LastSeen <= Grace*1000:
 			v.Counts, v.Why = true, "seen"
-		case OurFault(info.Facts, info.Fleet):
+		case OurFault(info.Facts, info.Fleet) && int64(at)*1000-info.LastSeen <= OurFaultFor*1000:
 			v.Counts, v.Why = true, "our fault"
 		case grace > 0:
 			v.Counts, v.Why = true, "extended"
