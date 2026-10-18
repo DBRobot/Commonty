@@ -83,8 +83,10 @@ let
     exec ${pkgs.qemu_kvm}/bin/qemu-system-x86_64 \
       -name vm-"$id" -machine q35,$accel -m "$mem" -smp "$threads" \
       -nodefaults -display none -vga none \
-      -drive file="$d"/system.qcow2,if=virtio,serial=system,format=qcow2 \
-      -drive file="$d"/home.qcow2,if=virtio,serial=home,format=qcow2 \
+      -drive file="$d"/system.qcow2,if=none,id=system,format=qcow2 \
+      -device virtio-blk-pci,drive=system,serial=system,bootindex=0 \
+      -drive file="$d"/home.qcow2,if=none,id=home,format=qcow2 \
+      -device virtio-blk-pci,drive=home,serial=home \
       -virtfs local,path="$d"/config,mount_tag=config,security_model=none,readonly=on \
       -virtfs local,path="$d"/report,mount_tag=report,security_model=none \
       -netdev user,id=n0,"$fwd" -device virtio-net-pci,netdev=n0 \
