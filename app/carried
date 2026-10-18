@@ -7,6 +7,7 @@ servers/web-shared/bar.css                   static/bar.css
 servers/web-shared/shell.js                  static/shell.js
 servers/web-shared/footer.js                 static/footer.js
 servers/web-shared/kit.js                    static/kit.js
+servers/web-shared/favicon.svg                static/favicon.svg
 servers/web-shared/guide.js                  static/guide.js
 servers/web-shared/guide-face.js             static/guide-face.js
 servers/web-shared/guide-tour.js             static/guide-tour.js
