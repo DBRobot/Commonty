@@ -689,16 +689,15 @@ async fn put(
     State(c): State<Arc<Ctx>>,
     Path(name): Path<String>,
     headers: axum::http::HeaderMap,
-    body: axum::body::Bytes,
+    body: axum::body::Body,
 ) -> Response {
-    // nothing bigger than the control plane takes, read or not
-    if body.len() > crate::directory::ENVELOPE_MAX {
-        return (StatusCode::PAYLOAD_TOO_LARGE, "too big").into_response();
-    }
+    let body = match crate::directory::read_put(&c.d, &headers, body).await {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
     // a v2 envelope goes to the control plane as it came (ident.rs)
     if crate::ident::Envelope::is_one(&body) {
-        let source = crate::directory::source_of(&headers);
-        return match c.d.submit_envelope("leave", &name, &source, &body).await {
+        return match c.d.submit_envelope("leave", &name, &body).await {
             Ok(hash) => (
                 StatusCode::ACCEPTED,
                 axum::Json(serde_json::json!({ "submitted": true, "item": hash })),

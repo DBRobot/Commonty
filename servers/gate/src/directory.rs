@@ -77,66 +77,54 @@ pub struct Directory {
     /// the agreed identity state, read from dd-control: set for shadow and
     /// agreed
     pub ident: Option<Arc<crate::ident::Agreed>>,
-    /// v2 envelopes this box sent on, and when each name and each source
-    /// last did: what keeps the shared log's budget from being anyone's to
-    /// spend (submit_envelope)
-    envelopes: std::sync::Mutex<EnvelopeLimits>,
+    /// what stands in front of the directory's and leaving's PUTs
+    /// (docs/dev/gate.md, "Who is who"): one limiter by visitor, the
+    /// per-name allowance, and the v2 items already sent on
+    guard: std::sync::Mutex<PutGuard>,
 }
 
-/// Each name, and each source, has its own small allowance a minute; a flood
-/// from one spends only its own. An item already sent on is not sent again.
-#[derive(Default)]
-struct EnvelopeLimits {
-    by_name: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
-    by_source: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
-    by_key: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
-    /// sha256 of what each sent envelope signed (its kind and body), with
-    /// when (unix seconds), oldest first: an item is the same item however
-    /// its outer JSON is written. Kept a day, whatever else arrives
-    sent: std::collections::VecDeque<(String, u64)>,
-    /// where `sent` is kept across a restart; None: not kept
-    sent_file: Option<PathBuf>,
-}
-
-/// a v2 envelope's most: the control plane takes no bigger item
+/// a PUT's most: the control plane takes no bigger item
 pub const ENVELOPE_MAX: usize = 64 * 1024;
-/// envelopes a minute for one name, from one source, and by one signing key
+/// PUTs a minute from one visitor, v1 and v2 alike, counted before a byte
+/// of the body is read
+pub const PUTS_PER_SOURCE: usize = 20;
+/// v2 items a minute for one name, counted once the signature verified
 pub const ENVELOPES_PER_NAME: usize = 6;
-pub const ENVELOPES_PER_SOURCE: usize = 20;
-pub const ENVELOPES_PER_KEY: usize = 6;
-/// how many names, sources or keys each table holds at once: past it, the
-/// quiet ones go, and while every one is busy a new one waits
-pub const ENVELOPE_TABLE_MAX: usize = 4096;
-/// how long, and how many, sent envelopes are remembered, to refuse one
-/// twice: a day, so junk sent in between cannot push a real one out sooner -
-/// filling it takes far more than any source's allowance in a day
-const ENVELOPES_REMEMBERED: usize = 1 << 16;
-const ENVELOPE_REMEMBER_SECS: u64 = 24 * 3600;
+/// how many visitors or names a window holds at once
+pub const WINDOW_MAX: usize = 4096;
+/// a v2 item sent on is not sent again for a day; the list holds at most this
+const SENT_MAX: usize = 1 << 16;
+const SENT_SECS: u64 = 24 * 3600;
 
-impl EnvelopeLimits {
-    /// room for one more from `key` under `most` a minute; taken if so
-    fn take(
-        map: &mut std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
-        key: &str,
-        most: usize,
-        now: std::time::Instant,
-    ) -> bool {
+#[derive(Default)]
+pub struct PutGuard {
+    by_source: Window,
+    by_name: Window,
+    sent: Sent,
+}
+
+/// how many times each key went in the last minute, for at most WINDOW_MAX
+/// keys: when full, the quiet go first, then the one quiet longest, so a
+/// flood of new keys never shuts a newcomer out
+#[derive(Default)]
+struct Window(std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>);
+
+impl Window {
+    fn take(&mut self, key: &str, most: usize, now: std::time::Instant) -> bool {
         let minute = Duration::from_secs(60);
-        if !map.contains_key(key) && map.len() >= ENVELOPE_TABLE_MAX {
-            // the quiet ones go - their minute is over, nothing of theirs is
-            // lost - and if all are busy, the one quiet longest: a flood of
-            // new names never shuts a newcomer out
-            map.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) <= minute));
-            if map.len() >= ENVELOPE_TABLE_MAX
-                && let Some(oldest) = map
+        let m = &mut self.0;
+        if !m.contains_key(key) && m.len() >= WINDOW_MAX {
+            m.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) <= minute));
+            if m.len() >= WINDOW_MAX
+                && let Some(k) = m
                     .iter()
                     .min_by_key(|(_, q)| q.back().copied())
                     .map(|(k, _)| k.clone())
             {
-                map.remove(&oldest);
+                m.remove(&k);
             }
         }
-        let q = map.entry(key.to_string()).or_default();
+        let q = m.entry(key.to_string()).or_default();
         while q.front().is_some_and(|t| now.duration_since(*t) > minute) {
             q.pop_front();
         }
@@ -146,52 +134,94 @@ impl EnvelopeLimits {
         q.push_back(now);
         true
     }
+}
 
-    fn sent_already(&self, hash: &str, now: u64) -> bool {
-        self.sent
+/// The v2 items sent on, by sha256 of what was signed, with when. The file
+/// and memory never differ: a change is written (to a temporary file, then
+/// renamed over) before memory takes it, and a list that cannot be read or
+/// written makes it `broken` - every v2 PUT is then refused (503), never
+/// let through unchecked.
+#[derive(Default)]
+struct Sent {
+    items: std::collections::VecDeque<(String, u64)>,
+    file: Option<PathBuf>,
+    broken: Option<String>,
+}
+
+impl Sent {
+    fn load(file: PathBuf) -> Self {
+        let (items, broken) = match std::fs::read(&file) {
+            Ok(b) => match serde_json::from_slice(&b) {
+                Ok(v) => (v, None),
+                Err(e) => (Default::default(), Some(format!("{}: {e}", file.display()))),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Default::default(), None),
+            Err(e) => (Default::default(), Some(format!("{}: {e}", file.display()))),
+        };
+        Self {
+            items,
+            file: Some(file),
+            broken,
+        }
+    }
+
+    fn ok(&self) -> std::result::Result<(), String> {
+        match &self.broken {
+            Some(why) => Err(format!("the list of items sent is unreadable ({why})")),
+            None => Ok(()),
+        }
+    }
+
+    fn has(&self, hash: &str, now: u64) -> std::result::Result<bool, String> {
+        self.ok()?;
+        Ok(self
+            .items
             .iter()
-            .any(|(h, at)| h == hash && now.saturating_sub(*at) <= ENVELOPE_REMEMBER_SECS)
+            .any(|(h, at)| h == hash && now.saturating_sub(*at) <= SENT_SECS))
     }
 
-    fn remember(&mut self, hash: String, now: u64) {
-        while self
-            .sent
-            .front()
-            .is_some_and(|(_, at)| now.saturating_sub(*at) > ENVELOPE_REMEMBER_SECS)
-        {
-            self.sent.pop_front();
-        }
-        self.sent.push_back((hash, now));
-        while self.sent.len() > ENVELOPES_REMEMBERED {
-            self.sent.pop_front();
-        }
-        self.save();
-    }
-
-    fn forget(&mut self, hash: &str) {
-        self.sent.retain(|(h, _)| h != hash);
-        self.save();
-    }
-
-    fn save(&self) {
-        if let Some(f) = &self.sent_file {
+    fn write(
+        &mut self,
+        next: std::collections::VecDeque<(String, u64)>,
+    ) -> std::result::Result<(), String> {
+        self.ok()?;
+        if let Some(f) = &self.file {
             let tmp = f.with_extension("tmp");
-            if std::fs::write(&tmp, serde_json::to_vec(&self.sent).unwrap_or_default()).is_ok() {
-                let _ = std::fs::rename(&tmp, f);
+            let res = serde_json::to_vec(&next)
+                .map_err(|e| e.to_string())
+                .and_then(|b| std::fs::write(&tmp, b).map_err(|e| e.to_string()))
+                .and_then(|()| std::fs::rename(&tmp, f).map_err(|e| e.to_string()));
+            if let Err(e) = res {
+                self.broken = Some(format!("{}: {e}", f.display()));
+                return self.ok();
             }
         }
+        self.items = next;
+        Ok(())
     }
 
-    fn load(file: PathBuf) -> Self {
-        let sent = std::fs::read(&file)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
-        Self {
-            sent,
-            sent_file: Some(file),
-            ..Default::default()
+    fn add(&mut self, hash: String, now: u64) -> std::result::Result<(), String> {
+        let mut next: std::collections::VecDeque<(String, u64)> = self
+            .items
+            .iter()
+            .filter(|(_, at)| now.saturating_sub(*at) <= SENT_SECS)
+            .cloned()
+            .collect();
+        next.push_back((hash, now));
+        while next.len() > SENT_MAX {
+            next.pop_front();
         }
+        self.write(next)
+    }
+
+    fn remove(&mut self, hash: &str) -> std::result::Result<(), String> {
+        let next = self
+            .items
+            .iter()
+            .filter(|(h, _)| h != hash)
+            .cloned()
+            .collect();
+        self.write(next)
     }
 }
 
@@ -248,7 +278,7 @@ impl Directory {
             agreed: None,
             ident_from: crate::ident::From::Replay,
             ident: None,
-            envelopes: Default::default(),
+            guard: Default::default(),
         })
     }
 
@@ -307,7 +337,7 @@ impl Directory {
             .parent()
             .map(|p| p.join("envelopes-sent.json"))
             .unwrap_or_else(|| self.dir.join("envelopes-sent.json"));
-        self.envelopes = std::sync::Mutex::new(EnvelopeLimits::load(sent));
+        self.guard.lock().unwrap().sent = Sent::load(sent);
         if from != crate::ident::From::Replay
             && let Some(c) = control
         {
@@ -967,22 +997,38 @@ pub fn source_of(headers: &HeaderMap) -> String {
         .unwrap_or_else(|| "local".into())
 }
 
+/// The start of every directory or leaving PUT: the visitor's allowance,
+/// then the body, read only up to the most an item may be
+pub async fn read_put(
+    d: &Directory,
+    headers: &HeaderMap,
+    body: axum::body::Body,
+) -> std::result::Result<axum::body::Bytes, Response> {
+    if !d.put_allowed(headers) {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many from here; wait a minute",
+        )
+            .into_response());
+    }
+    axum::body::to_bytes(body, ENVELOPE_MAX)
+        .await
+        .map_err(|_| (StatusCode::PAYLOAD_TOO_LARGE, "too big").into_response())
+}
+
 async fn put_entry(
     State(d): State<Arc<Directory>>,
     Path(name): Path<String>,
     headers: HeaderMap,
-    body: axum::body::Bytes,
+    body: axum::body::Body,
 ) -> Response {
-    // nothing bigger than the control plane takes, read or not
-    if body.len() > ENVELOPE_MAX {
-        return (StatusCode::PAYLOAD_TOO_LARGE, "too big").into_response();
-    }
+    let body = match read_put(&d, &headers, body).await {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
     // a v2 envelope goes to the control plane as it came (ident.rs)
     if crate::ident::Envelope::is_one(&body) {
-        return match d
-            .submit_envelope("entry", &name, &source_of(&headers), &body)
-            .await
-        {
+        return match d.submit_envelope("entry", &name, &body).await {
             Ok(hash) => (
                 StatusCode::ACCEPTED,
                 Json(serde_json::json!({ "submitted": true, "item": hash })),
@@ -1390,29 +1436,13 @@ impl Directory {
         &self,
         kind: &str,
         name: &str,
-        source: &str,
         bytes: &[u8],
     ) -> std::result::Result<String, (StatusCode, String)> {
+        let unavailable = |e: String| (StatusCode::SERVICE_UNAVAILABLE, e);
         if !self.takes_v2() {
             return Err((
                 StatusCode::BAD_REQUEST,
                 "this box takes v1 items only for now (/_dd/config has no envelope)".into(),
-            ));
-        }
-        if bytes.len() > ENVELOPE_MAX {
-            return Err((StatusCode::PAYLOAD_TOO_LARGE, "too big".into()));
-        }
-        // the sender's allowance, before reading a byte of it: what a flood
-        // from one place costs - parsing, hashing, signature work - is its own
-        if !EnvelopeLimits::take(
-            &mut self.envelopes.lock().unwrap().by_source,
-            source,
-            ENVELOPES_PER_SOURCE,
-            std::time::Instant::now(),
-        ) {
-            return Err((
-                StatusCode::TOO_MANY_REQUESTS,
-                "too many from here; wait a minute".into(),
             ));
         }
         let env = crate::ident::Envelope::parse(bytes).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
@@ -1428,50 +1458,59 @@ impl Directory {
                 "name in path and body differ".into(),
             ));
         }
-        // the same item - the same kind and body, whatever the outer JSON
-        // says - is sent once, from here, across restarts, and never once
-        // the agreed state has it
+        // the same kind and body signed is the same item, however its outer
+        // JSON is written; a list that cannot be read lets nothing through
         let hash = env.signed_hash();
         if self
-            .envelopes
+            .guard
             .lock()
             .unwrap()
-            .sent_already(&hash, identity::now())
-            || self.agreed_has(name, &env)
+            .sent
+            .has(&hash, identity::now())
+            .map_err(unavailable)?
         {
             return Err((StatusCode::CONFLICT, "that item was sent already".into()));
         }
-        // whose it is: signed by the key that speaks for the name, as a v1
-        // item must be before this box takes it. Not judged - the control
-        // plane does that - but nothing unsigned, or signed by someone
-        // else, reaches the shared log through this box. The name's and the
-        // key's allowances count only signed items, so nobody spends a
-        // member's by sending forgeries in their name
-        let signer = self
-            .envelope_signed(kind, name, bytes)
+        // signed by the key that speaks for the name: checked, not judged
+        self.envelope_signed(kind, name, bytes)
             .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
         {
-            let now = std::time::Instant::now();
-            let mut l = self.envelopes.lock().unwrap();
-            if l.sent_already(&hash, identity::now()) {
-                return Err((StatusCode::CONFLICT, "that item was sent already".into()));
-            }
-            if !EnvelopeLimits::take(&mut l.by_name, name, ENVELOPES_PER_NAME, now)
-                || !EnvelopeLimits::take(&mut l.by_key, &signer, ENVELOPES_PER_KEY, now)
+            let mut g = self.guard.lock().unwrap();
+            // the name's allowance counts only items that verified: a
+            // forgery in a member's name spends nothing of theirs
+            if !g
+                .by_name
+                .take(name, ENVELOPES_PER_NAME, std::time::Instant::now())
             {
                 return Err((
                     StatusCode::TOO_MANY_REQUESTS,
                     "too many for this name; wait a minute".into(),
                 ));
             }
-            l.remember(hash.clone(), identity::now());
+            if g.sent.has(&hash, identity::now()).map_err(unavailable)? {
+                return Err((StatusCode::CONFLICT, "that item was sent already".into()));
+            }
+            g.sent
+                .add(hash.clone(), identity::now())
+                .map_err(unavailable)?;
         }
         if let Err(e) = self.submit_raw(bytes.to_vec()).await {
             // not sent: the same item may be tried again
-            self.envelopes.lock().unwrap().forget(&hash);
+            let _ = self.guard.lock().unwrap().sent.remove(&hash);
             return Err((StatusCode::BAD_GATEWAY, format!("the control plane: {e:#}")));
         }
         Ok(hash)
+    }
+
+    /// Room for one more PUT from this visitor: the one limiter in front of
+    /// the directory's and leaving's PUTs, v1 and v2, asked before a byte of
+    /// the body is read
+    pub fn put_allowed(&self, headers: &HeaderMap) -> bool {
+        self.guard.lock().unwrap().by_source.take(
+            &source_of(headers),
+            PUTS_PER_SOURCE,
+            std::time::Instant::now(),
+        )
     }
 
     /// An envelope's signature, by the key that speaks for `name` now: for
@@ -1546,16 +1585,6 @@ impl Directory {
             }
             _ => Err(format!("{kind} is not put here")),
         }
-    }
-
-    /// Whether the agreed state already holds this very item for `name`:
-    /// its kind and body as signed
-    fn agreed_has(&self, name: &str, env: &crate::ident::Envelope) -> bool {
-        self.agreed_member(name).is_some_and(|m| {
-            m.item.get("v").and_then(|v| v.as_u64()) == Some(2)
-                && m.item.get("kind").and_then(|k| k.as_str()) == Some(env.kind.as_str())
-                && m.item.get("body").and_then(|b| b.as_str()) == Some(env.body_b64())
-        })
     }
 
     /// bytes to this box's dd-control, over its socket, as they are
@@ -2722,9 +2751,14 @@ mod tests {
     async fn put_v2(d: &Arc<Directory>, name: &str, source: &str, bytes: Vec<u8>) -> StatusCode {
         let mut h = HeaderMap::new();
         h.insert("x-dd-peer", source.parse().unwrap());
-        put_entry(State(d.clone()), Path(name.into()), h, bytes.into())
-            .await
-            .status()
+        put_entry(
+            State(d.clone()),
+            Path(name.into()),
+            h,
+            axum::body::Body::from(bytes),
+        )
+        .await
+        .status()
     }
 
     fn sealed(e: &Entry, k: &ed25519_dalek::SigningKey) -> Vec<u8> {
@@ -2755,48 +2789,117 @@ mod tests {
         (Arc::new(d), got, k)
     }
 
+    // --- 1. one limiter, by visitor, for every PUT, before anything else
+
     #[tokio::test]
-    async fn a_signed_v2_entry_goes_to_the_control_plane_as_it_came() {
-        let (d, got, k) = with_ann("v2-ok");
-        let e = sealed(&entry("ann", &k, &[], 2), &k);
-        assert_eq!(
-            put_v2(&d, "ann", "a", e.clone()).await,
-            StatusCode::ACCEPTED
-        );
-        assert_eq!(*got.lock().unwrap(), e);
-        // a sign-up: a name nobody holds, signed by the root it names
+    async fn one_limiter_counts_every_put_from_a_visitor_v1_and_v2() {
+        let (d, _got, k) = with_ann("one-limiter");
+        let mut last = StatusCode::OK;
+        for n in 0..=PUTS_PER_SOURCE {
+            // v1 garbage and v2 envelopes alike spend the same allowance
+            let b = if n % 2 == 0 {
+                b"not json".to_vec()
+            } else {
+                sealed(&entry("ann", &k, &[], n as u64 + 2), &k)
+            };
+            last = put_v2(&d, "ann", "198.51.100.1", b).await;
+        }
+        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+        // another visitor is not touched by it
         let k2 = generate();
-        let s = sealed(&entry("bea", &k2, &[], 1), &k2);
+        let b = sealed(&entry("bea", &k2, &[], 1), &k2);
         assert_eq!(
-            put_v2(&d, "bea", "a", s.clone()).await,
+            put_v2(&d, "bea", "198.51.100.2", b).await,
             StatusCode::ACCEPTED
         );
-        assert_eq!(*got.lock().unwrap(), s);
+        // a header the client writes is not who they are
+        let mut h = HeaderMap::new();
+        h.insert("x-real-ip", "203.0.113.1".parse().unwrap());
+        h.insert("x-forwarded-for", "203.0.113.2".parse().unwrap());
+        assert_eq!(source_of(&h), "local");
     }
 
     #[tokio::test]
-    async fn an_unsigned_or_forged_envelope_never_reaches_the_log() {
-        let (d, got, k) = with_ann("v2-forged");
-        let mut env =
-            identity::envelope::seal_json("entry", &entry("ann", &k, &[], 2), &k).unwrap();
-        env.sig = "c2ln".into();
-        let b = serde_json::to_vec(&env).unwrap();
-        assert_eq!(put_v2(&d, "ann", "a", b).await, StatusCode::FORBIDDEN);
-        env.sig = String::new();
-        let b = serde_json::to_vec(&env).unwrap();
-        assert_eq!(put_v2(&d, "ann", "a", b).await, StatusCode::BAD_REQUEST);
+    async fn over_the_limit_the_body_is_never_read_and_a_big_one_never_whole() {
+        let (d, got, _k) = with_ann("before-reading");
+        for _ in 0..PUTS_PER_SOURCE {
+            put_v2(&d, "ann", "198.51.100.3", b"{}".to_vec()).await;
+        }
+        // a body that would fail to stream: refused at the limiter, unread
+        let mut h = HeaderMap::new();
+        h.insert("x-dd-peer", "198.51.100.3".parse().unwrap());
+        let poisoned = axum::body::Body::from_stream(futures_util::stream::once(async {
+            Err::<axum::body::Bytes, std::io::Error>(std::io::Error::other("read"))
+        }));
+        let res = put_entry(State(d.clone()), Path("ann".into()), h, poisoned).await;
+        assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+        // within the allowance, a body past the most is cut off, not kept
+        let big = vec![b' '; ENVELOPE_MAX + 1];
+        assert_eq!(
+            put_v2(&d, "ann", "198.51.100.4", big).await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
         assert!(got.lock().unwrap().is_empty());
     }
 
+    // --- 2. per name, only after a verified signature
+
     #[tokio::test]
-    async fn someone_elses_name_is_refused() {
-        let (d, got, _k) = with_ann("v2-theirs");
-        // eve signs an entry for ann with her own key: a new root, with no
-        // word from ann's recovery key
+    async fn forgeries_in_a_members_name_spend_nothing_of_theirs() {
+        let (d, got, k) = with_ann("name-after-verify");
         let eve = generate();
-        let e = sealed(&entry("ann", &eve, &[], 2), &eve);
-        assert_eq!(put_v2(&d, "ann", "a", e).await, StatusCode::FORBIDDEN);
-        // nor may she say ann has left
+        for n in 0..(ENVELOPES_PER_NAME * 2) {
+            let forged = sealed(&entry("ann", &eve, &[], 50 + n as u64), &eve);
+            assert_eq!(
+                put_v2(&d, "ann", &format!("198.51.100.{n}"), forged).await,
+                StatusCode::FORBIDDEN
+            );
+        }
+        assert!(got.lock().unwrap().is_empty());
+        assert_eq!(
+            put_v2(
+                &d,
+                "ann",
+                "203.0.113.9",
+                sealed(&entry("ann", &k, &[], 2), &k)
+            )
+            .await,
+            StatusCode::ACCEPTED
+        );
+        // and her own allowance is hers: past it, she waits
+        let mut last = StatusCode::ACCEPTED;
+        for v in 3..(3 + ENVELOPES_PER_NAME as u64) {
+            last = put_v2(
+                &d,
+                "ann",
+                &format!("203.0.113.{v}"),
+                sealed(&entry("ann", &k, &[], v), &k),
+            )
+            .await;
+        }
+        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn unsigned_forged_or_someone_elses_never_reach_the_log() {
+        let (d, got, k) = with_ann("signed-only");
+        let mut env =
+            identity::envelope::seal_json("entry", &entry("ann", &k, &[], 2), &k).unwrap();
+        env.sig = "c2ln".into();
+        assert_eq!(
+            put_v2(&d, "ann", "a", serde_json::to_vec(&env).unwrap()).await,
+            StatusCode::FORBIDDEN
+        );
+        env.sig = String::new();
+        assert_eq!(
+            put_v2(&d, "ann", "a", serde_json::to_vec(&env).unwrap()).await,
+            StatusCode::BAD_REQUEST
+        );
+        let eve = generate();
+        assert_eq!(
+            put_v2(&d, "ann", "a", sealed(&entry("ann", &eve, &[], 2), &eve)).await,
+            StatusCode::FORBIDDEN
+        );
         let ctx = Arc::new(crate::leaving::Ctx {
             d: d.clone(),
             m: None,
@@ -2808,68 +2911,119 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ann_may_say_she_has_left() {
-        let (d, got, k) = with_ann("v2-leave");
-        let l = leave_by("ann", &k);
-        let ctx = Arc::new(crate::leaving::Ctx {
-            d,
-            m: None,
-            demo: None,
-        });
-        let res = crate::leaving::put_for_test(ctx, "ann", l.clone()).await;
-        assert_eq!(res.status(), StatusCode::ACCEPTED);
-        assert_eq!(*got.lock().unwrap(), l);
-    }
-
-    #[tokio::test]
-    async fn the_same_item_twice_is_sent_once() {
-        let (d, _got, k) = with_ann("v2-twice");
+    async fn signed_items_go_to_the_control_plane_as_they_came() {
+        let (d, got, k) = with_ann("as-it-came");
         let e = sealed(&entry("ann", &k, &[], 2), &k);
         assert_eq!(
             put_v2(&d, "ann", "a", e.clone()).await,
             StatusCode::ACCEPTED
         );
-        assert_eq!(put_v2(&d, "ann", "b", e).await, StatusCode::CONFLICT);
-    }
-
-    #[tokio::test]
-    async fn a_flood_spends_its_own_allowance_and_nobody_elses() {
-        let (d, _got, k) = with_ann("v2-flood");
-        // one source signs up name after name: its allowance runs out
-        let mut last = StatusCode::ACCEPTED;
-        for n in 0..=ENVELOPES_PER_SOURCE {
-            let key = generate();
-            let name = format!("flood{n}");
-            last = put_v2(
-                &d,
-                &name,
-                "flooder",
-                sealed(&entry(&name, &key, &[], 1), &key),
-            )
-            .await;
-        }
-        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
-        // ann, from elsewhere, still gets through
-        let e = sealed(&entry("ann", &k, &[], 2), &k);
-        assert_eq!(put_v2(&d, "ann", "home", e).await, StatusCode::ACCEPTED);
-        // and one name, from many places, has its own limit
-        let mut last = StatusCode::ACCEPTED;
-        for v in 3..(3 + ENVELOPES_PER_NAME as u64) {
-            let e = sealed(&entry("ann", &k, &[], v), &k);
-            last = put_v2(&d, "ann", &format!("s{v}"), e).await;
-        }
-        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
-    }
-
-    #[tokio::test]
-    async fn an_envelope_too_big_is_refused() {
-        let (d, got, _k) = with_ann("v2-big");
-        let big = vec![b' '; ENVELOPE_MAX + 1];
+        assert_eq!(*got.lock().unwrap(), e);
+        let k2 = generate();
+        let s = sealed(&entry("bea", &k2, &[], 1), &k2);
         assert_eq!(
-            put_v2(&d, "ann", "a", big).await,
-            StatusCode::PAYLOAD_TOO_LARGE
+            put_v2(&d, "bea", "b", s.clone()).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(*got.lock().unwrap(), s);
+        let l = leave_by("ann", &k);
+        let ctx = Arc::new(crate::leaving::Ctx {
+            d: d.clone(),
+            m: None,
+            demo: None,
+        });
+        assert_eq!(
+            crate::leaving::put_for_test(ctx, "ann", l.clone())
+                .await
+                .status(),
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(*got.lock().unwrap(), l);
+    }
+
+    // --- 3. the sent list never fails open, and never drifts from its file
+
+    #[tokio::test]
+    async fn the_same_item_reworded_or_after_a_restart_is_sent_once() {
+        let (d, _got, k) = with_ann("sent-once");
+        let env = identity::envelope::seal_json("entry", &entry("ann", &k, &[], 2), &k).unwrap();
+        assert_eq!(
+            put_v2(&d, "ann", "a", serde_json::to_vec(&env).unwrap()).await,
+            StatusCode::ACCEPTED
+        );
+        let mut v = serde_json::to_value(&env).unwrap();
+        v["extra"] = serde_json::json!("x");
+        let reworded = format!("  {}", serde_json::to_string(&v).unwrap()).into_bytes();
+        assert_eq!(put_v2(&d, "ann", "b", reworded).await, StatusCode::CONFLICT);
+        let base = std::env::temp_dir().join(format!("dd-dir-sent-once-{}", std::process::id()));
+        let file = base.join("envelopes-sent.json");
+        let on_disk: Vec<(String, u64)> =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(on_disk.len(), 1);
+        let again = Sent::load(file);
+        assert!(again.has(&on_disk[0].0, identity::now()).unwrap());
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_sent_list_refuses_every_v2_put() {
+        let base = scratch("sent-corrupt");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("envelopes-sent.json"), b"{not a list").unwrap();
+        let sock = base.join("submit.sock");
+        let got = fake_submit(&sock);
+        let d = Directory::open(base.join("entries"), None)
+            .unwrap()
+            .agreed(
+                "http://127.0.0.1:1".into(),
+                sock,
+                vec!["box".into()],
+                "box".into(),
+            )
+            .unwrap()
+            .identity_from(crate::ident::From::Shadow, Some("http://127.0.0.1:1"));
+        let d = Arc::new(d);
+        let k = generate();
+        assert_eq!(
+            put_v2(&d, "bea", "a", sealed(&entry("bea", &k, &[], 1), &k)).await,
+            StatusCode::SERVICE_UNAVAILABLE
         );
         assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_sent_list_that_cannot_be_written_keeps_memory_as_the_file_is() {
+        let base = scratch("sent-unwritable");
+        std::fs::create_dir_all(&base).unwrap();
+        let mut s = Sent::load(base.join("missing-dir").join("sent.json"));
+        assert!(s.add("one".into(), 10).is_err());
+        assert!(s.items.is_empty());
+        // and from then on it says so, rather than letting anything through
+        assert!(s.has("one", 10).is_err());
+    }
+
+    #[test]
+    fn a_sent_item_is_kept_a_day_whatever_comes_after() {
+        let mut s = Sent::default();
+        let t = 1_000_000;
+        s.add("real".into(), t).unwrap();
+        for n in 0..10_000 {
+            s.add(format!("junk{n}"), t + 60).unwrap();
+        }
+        assert!(s.has("real", t + 3600).unwrap());
+        assert!(!s.has("real", t + SENT_SECS + 1).unwrap());
+    }
+
+    #[test]
+    fn a_window_stays_bounded_and_never_shuts_a_newcomer_out() {
+        let now = std::time::Instant::now();
+        let mut w = Window::default();
+        for n in 0..WINDOW_MAX {
+            let at = now - Duration::from_secs(30) + Duration::from_millis(n as u64);
+            w.0.insert(format!("k{n}"), std::collections::VecDeque::from([at]));
+        }
+        assert!(w.take("new", 1, now));
+        assert_eq!(w.0.len(), WINDOW_MAX);
+        assert!(!w.0.contains_key("k0"));
     }
 
     #[tokio::test]
@@ -2878,135 +3032,10 @@ mod tests {
         assert!(!d.takes_v2());
         let d = Arc::new(d);
         let k = generate();
-        let e = sealed(&entry("ann", &k, &[], 1), &k);
-        assert_eq!(put_v2(&d, "ann", "a", e).await, StatusCode::BAD_REQUEST);
-        assert!(got.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_header_the_client_writes_is_not_who_they_are() {
-        let (d, _got, _k) = with_ann("v2-spoof");
-        // the same connection, a new X-Real-IP / X-Forwarded-For each time
-        let mut last = StatusCode::ACCEPTED;
-        for n in 0..=ENVELOPES_PER_SOURCE {
-            let key = generate();
-            let name = format!("spoof{n}");
-            let mut h = HeaderMap::new();
-            h.insert("x-dd-peer", "198.51.100.9".parse().unwrap());
-            h.insert("x-real-ip", format!("10.0.0.{n}").parse().unwrap());
-            h.insert("x-forwarded-for", format!("10.1.0.{n}").parse().unwrap());
-            let b = sealed(&entry(&name, &key, &[], 1), &key);
-            last = put_entry(State(d.clone()), Path(name), h, b.into())
-                .await
-                .status();
-        }
-        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
-        let mut h = HeaderMap::new();
-        h.insert("x-real-ip", "203.0.113.1".parse().unwrap());
-        assert_eq!(source_of(&h), "local");
-    }
-
-    #[tokio::test]
-    async fn an_item_reworded_or_resent_after_a_restart_is_still_the_same_item() {
-        let (d, _got, k) = with_ann("v2-replay-item");
-        let env = identity::envelope::seal_json("entry", &entry("ann", &k, &[], 2), &k).unwrap();
-        let b = serde_json::to_vec(&env).unwrap();
-        assert_eq!(put_v2(&d, "ann", "a", b).await, StatusCode::ACCEPTED);
-        // the same item, its outer JSON written another way
-        let mut v = serde_json::to_value(&env).unwrap();
-        v["extra"] = serde_json::json!("x");
-        let reworded = format!("  {}", serde_json::to_string(&v).unwrap()).into_bytes();
-        assert_eq!(put_v2(&d, "ann", "b", reworded).await, StatusCode::CONFLICT);
-        // and after a restart of the gate, still refused (the same folder,
-        // not a fresh one: scratch() would empty it)
-        let base =
-            std::env::temp_dir().join(format!("dd-dir-v2-replay-item-{}", std::process::id()));
-        let d2 = Arc::new(
-            Directory::open(base.join("entries"), None)
-                .unwrap()
-                .agreed(
-                    "http://127.0.0.1:1".into(),
-                    base.join("submit.sock"),
-                    vec!["box".into()],
-                    "box".into(),
-                )
-                .unwrap()
-                .identity_from(crate::ident::From::Agreed, Some("http://127.0.0.1:1")),
+        assert_eq!(
+            put_v2(&d, "ann", "a", sealed(&entry("ann", &k, &[], 1), &k)).await,
+            StatusCode::BAD_REQUEST
         );
-        let b = serde_json::to_vec(&env).unwrap();
-        assert_eq!(put_v2(&d2, "ann", "c", b).await, StatusCode::CONFLICT);
-    }
-
-    #[tokio::test]
-    async fn an_item_the_agreed_state_holds_is_not_sent_again() {
-        let (d, got) = agreed_dir("v2-agreed-has", crate::ident::From::Agreed);
-        let k = generate();
-        let env = identity::envelope::seal_json("entry", &entry("ann", &k, &[], 1), &k).unwrap();
-        let s: crate::ident::State = serde_json::from_value(serde_json::json!({
-            "height": 1,
-            "members": {"ann": {"status": "member", "item": env}}
-        }))
-        .unwrap();
-        d.ident.as_ref().unwrap().set(s);
-        let d = Arc::new(d);
-        let b = serde_json::to_vec(&env).unwrap();
-        assert_eq!(put_v2(&d, "ann", "a", b).await, StatusCode::CONFLICT);
-        assert!(got.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn the_limit_tables_stay_bounded_and_never_shut_a_newcomer_out() {
-        let now = std::time::Instant::now();
-        let old = now - Duration::from_secs(120);
-        let mut m = std::collections::HashMap::new();
-        for n in 0..ENVELOPE_TABLE_MAX {
-            m.insert(format!("k{n}"), std::collections::VecDeque::from([old]));
-        }
-        // quiet ones go to make room
-        assert!(EnvelopeLimits::take(&mut m, "new", 1, now));
-        assert_eq!(m.len(), 1);
-        // all busy: the one quiet longest goes, and the newcomer is in
-        let mut m = std::collections::HashMap::new();
-        for n in 0..ENVELOPE_TABLE_MAX {
-            let at = now - Duration::from_secs(30) + Duration::from_millis(n as u64);
-            m.insert(format!("k{n}"), std::collections::VecDeque::from([at]));
-        }
-        assert!(EnvelopeLimits::take(&mut m, "new", 1, now));
-        assert_eq!(m.len(), ENVELOPE_TABLE_MAX);
-        assert!(!m.contains_key("k0"));
-        assert!(m.contains_key("new"));
-    }
-
-    #[test]
-    fn a_sent_item_is_kept_a_day_whatever_comes_after() {
-        let mut l = EnvelopeLimits::default();
-        let t = 1_000_000;
-        l.remember("real".into(), t);
-        // a flood of other items within the day pushes nothing out
-        for n in 0..10_000 {
-            l.remember(format!("junk{n}"), t + 60);
-        }
-        assert!(l.sent_already("real", t + 3600));
-        // after a day it is gone, and not before
-        assert!(!l.sent_already("real", t + ENVELOPE_REMEMBER_SECS + 1));
-    }
-
-    #[tokio::test]
-    async fn a_source_pays_before_its_bytes_are_read() {
-        let (d, got, _k) = with_ann("v2-parse");
-        // broken envelopes, which would cost parsing: the source's
-        // allowance counts them all the same
-        let mut last = StatusCode::BAD_REQUEST;
-        for _ in 0..=ENVELOPES_PER_SOURCE {
-            last = put_v2(
-                &d,
-                "ann",
-                "noisy",
-                br#"{"v": 2, "kind": "entry", "body": "!!", "sig": "x"}"#.to_vec(),
-            )
-            .await;
-        }
-        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
         assert!(got.lock().unwrap().is_empty());
     }
 }

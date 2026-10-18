@@ -547,33 +547,18 @@ signed item once and the gate reads the result. `VERIFY_IDENTITY_FROM`
   background, `?since` answering 304 when nothing changed, so a request
   never waits on it; until the first read, it knows nobody.
 
-**v2 envelopes.** Where the control plane judges (shadow or agreed, on the
-agreed log), `/_dd/config` says `"envelope": 2`, and `PUT
-/_dd/directory/<name>` and `PUT /_dd/leaving/<name>` take a v2 envelope as
-well as a v1 item. Before it goes on, the gate checks what it would of a
-v1 item - not judging it, which is the control plane's: at most 64 KiB; of
-the path's kind and for the path's name; signed by the key that speaks for
-that name now (the root on file; a changed root also by the recovery key
-on file; a name nobody holds, by the root it names, with the terms agreed,
-as a v1 sign-up; a leaving, by the root on file - `identity::envelope` and
-`identity::check_envelope_assertion` for a passkey); not sent already -
-the same kind and body signed, however its outer JSON is written, answers
-409, from a list kept a day and across restarts (`envelopes-sent.json`, at
-most 65536, which no source's allowance comes near filling in a day), and so
-does an item the agreed state already holds; and within its own allowances, each counted apart so a flood spends
-only its own and never the log's shared budget: 20 a minute from one
-source, counted before a byte of the item is read, and 6 a minute for one name and
-6 for one signing key, counted only for items that verified, so forgeries
-in a member's name spend nothing of theirs. The source is `X-Dd-Peer`,
-which nginx sets on every request to the gate from the connection it saw -
-the visitor's address the tunnel reports, on the public door - over
-anything a client sent; X-Real-IP and X-Forwarded-For are never read. Each
-table holds at most 4096 sources, names or keys: the quiet ones go first,
-then the one quiet longest, so a flood of new names never shuts a newcomer
-out.
-Then it is submitted to the control plane as the bytes it came in,
-answered `202 {"submitted": true, "item": <sha256 of those bytes>}`. A box
-that still replays answers 400 to an envelope.
+**A PUT to the directory or leaving**, in order (directory.rs `read_put`,
+`submit_envelope`):
+1. the visitor's allowance, 20 a minute by `X-Dd-Peer` (nginx sets it from the
+   connection, the tunnel's visitor on the public door) - before a byte is read;
+2. the body, read only up to 64 KiB;
+3. v1: as before. v2 (`/_dd/config` says `"envelope": 2` only where the control
+   plane judges): of the path's kind and name, else 400;
+4. not sent in the last day (sha256 of kind and body); a list that cannot be
+   read or written refuses every v2 PUT with 503, never lets one through;
+5. signed by the key that speaks for the name (identity crate), else 403;
+6. the name's allowance, 6 a minute, counted only for items that verified;
+7. remembered (file first, then memory), then sent to dd-control as it came: 202.
 
 `GET /_dd/directory/<name>` still answers v1-shaped (`{entry, signature}`),
 which the app's `devices.js` tells from an envelope by its `signature` and
