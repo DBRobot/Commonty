@@ -74,17 +74,16 @@ box installer (full screen)        fleet
   bytes, hex>)`, `purpose("join")`, and checks that it is for `join` alone
   and good for 7 days. Like any purpose-built token it opens nothing else:
   not the member's files, pages or directory entry.
-- **Whose a box is, is the gates'**, as the directory is. The box's
-  dd-control sends the ticket with its join (`-join-ticket-file`); the
-  validators carry it in `Joined.Ticket` and judge it no more than they
-  judge the directory (they refuse only one too big, or one that came with
-  another box already). Every gate checks it the same way
-  ([`member_boxes.rs`](../../servers/gate/src/member_boxes.rs)): signed by
-  a device in the member's entry, good at the agreed time the box joined,
-  the first box to come with that ticket id, and not one the member has
-  removed. So every box agrees whose it is, and none vouches for it alone.
-  A ticket no gate takes leaves the box a stranger, and a member's box can
-  do no more on the fleet than a stranger's.
+- **Whose a box is, is the agreed identity state's**: the member's root
+  enlists the box (`enlist`, judged in
+  [`state/ident`](../../servers/system/control/state/ident/judge.go)) and
+  every gate reads it from the member's `boxes`
+  ([`member_boxes.rs`](../../servers/gate/src/member_boxes.rs)). The box's
+  dd-control still sends the ticket with its join (`-join-ticket-file`)
+  and the validators carry it in `Joined.Ticket`, but a ticket alone makes
+  a box no one's. A box no member has enlisted stays a stranger, and a
+  member's box can do no more on the fleet than a stranger's. Turning the
+  ticket into an enlistment is still to build: today the root signs it.
 - **The pending backup** is a restic repository of its own, at
   `images-<member>/pending/<ticket id>/`, under a password made for it
   alone: the drive never holds what opens the member's other images. The
@@ -101,9 +100,9 @@ box installer (full screen)        fleet
   trash, as any delete there).
 - **The box** is on the member's Devices tab ("Your boxes",
   `GET /_dd/boxes/mine`), with when it last said how it is, and on their
-  Metrics page. Removing it
-  puts its ticket id in the member's signed entry (`removed_boxes`), and on
-  every box at once it is nobody's.
+  Metrics page. Removing it is the root's `unenlist` (still to build: the
+  tab today puts its ticket id in the signed entry's `removed_boxes`, which
+  no longer decides anything).
 - **Its metrics** are its member's
   ([`observe/joined-metrics.nix`](../../nix/modules/observe/joined-metrics.nix)).
   It has no key to the metrics bucket the release boxes' sidecars upload
@@ -239,7 +238,8 @@ Two VM tests, split where the box first starts:
   to build for): its agent names it by the key, takes the signed commit,
   builds and switches to that name's system; dd-control, held until then,
   joins a control plane of three validators and the witness with the
-  member's ticket; the member's gate lists the box as hers
+  member's ticket; the member's root enlists it, and the member's gate
+  lists it as theirs
   (`/_dd/boxes/mine`).
 
 Not covered by either: a real machine's firmware (the vendor table, Setup
