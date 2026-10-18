@@ -7,7 +7,6 @@ package ident
 
 import (
 	"encoding/json"
-	"sort"
 	"strings"
 	"sync"
 )
@@ -83,6 +82,19 @@ type Member struct {
 	Boxes   []string        `json:"boxes"`
 	Format  int             `json:"format"` // 1 | 2
 	Item    json.RawMessage `json:"item"`
+	// what they may use: "invite" (the release's list, or an invite it
+	// signed), "box" (a box of theirs that counts), or "none"
+	Access   string    `json:"access"`
+	Enlisted []BoxView `json:"enlisted"`
+	// the admin's extension, while it runs (ms)
+	GraceUntil uint64 `json:"grace_until,omitempty"`
+}
+
+// Owner is whose an enlisted box is, and the ticket it was enlisted with
+type Owner struct {
+	Ticket string `json:"ticket"`
+	Owner  string `json:"owner"`
+	Since  uint64 `json:"since"` // agreed, ms
 }
 
 // View is the whole of what /identity serves
@@ -95,6 +107,8 @@ type View struct {
 	Handovers map[string][]Handover `json:"handovers"`
 	Invites   map[string]*Open      `json:"invites"`
 	Outcomes  map[string]string     `json:"outcomes"`
+	// box -> whose it is: every enlistment that stands
+	Enlisted map[string]*Owner `json:"enlisted"`
 }
 
 // Open is an invite not yet expired
@@ -108,10 +122,10 @@ type Open struct {
 // everything, from its removal date
 const SuspendWindow = 90 * 24 * 3600
 
-// Status is a person's standing by the release's list, their own word and
-// their boxes: their own leaving first, then the list shutting them out,
-// then the list or an invite or a box letting them in
-func (s *State) Status(cfg *Config, e *Entry, at uint64, boxCounts func(box string) bool) (status string, left uint64, why string) {
+// standing: a person by the release's list and their own word - their own
+// leaving first, then the list shutting them out, then the list or an
+// invite letting them in ("invite"); "" for none of these
+func (s *State) standing(cfg *Config, e *Entry, at uint64) (status string, left uint64, why string) {
 	if said := s.Said[e.Name]; said != nil && !said.Leave.Back {
 		return "left", said.Agreed, ""
 	}
@@ -134,40 +148,39 @@ func (s *State) Status(cfg *Config, e *Entry, at uint64, boxCounts func(box stri
 	}
 	for _, id := range ids {
 		if contains(cfg.Members.Members, id) {
-			return "member", 0, ""
+			return "invite", 0, ""
 		}
 	}
 	if e.Grant != nil && cfg.Release != "" && VerifyGrant(e, cfg.Release) == nil {
-		return "member", 0, ""
+		return "invite", 0, ""
 	}
-	for _, b := range s.boxesOf(e.Name, at) {
-		if boxCounts == nil || boxCounts(b) {
-			return "member", 0, ""
-		}
+	return "", 0, ""
+}
+
+// Status is a person's standing as readers see it: left, suspended or
+// revoked; member while they have access (an invite or a box that
+// counts); none otherwise (signed up, not let in)
+func (s *State) Status(cfg *Config, e *Entry, at uint64, boxes Boxes) (status string, left uint64, why string) {
+	st, left, why := s.standing(cfg, e, at)
+	switch st {
+	case "left", "suspended", "revoked":
+		return st, left, why
+	}
+	if acc, _, _ := s.Access(cfg, e, at, boxes); acc != "none" {
+		return "member", 0, ""
 	}
 	return "none", 0, ""
 }
 
-func (s *State) boxesOf(name string, at uint64) []string {
-	var out []string
-	for b, en := range s.Enlisted {
-		if en.Member == name && s.owns(en, at) {
-			out = append(out, b)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// View: the state as readers get it, at agreed time `at` (seconds).
-// boxCounts says whether an enlisted box qualifies (its hardware,
-// docs/dev/joining.md); nil counts every one.
-func (s *State) View(cfg *Config, height uint64, timeMs int64, boxCounts func(string) bool) *View {
+// View: the state as readers get it, at agreed time `at` (seconds). boxes
+// is what the agreed state says of each box now (its facts, when it was
+// last heard); nil knows none, so no box counts.
+func (s *State) View(cfg *Config, height uint64, timeMs int64, boxes Boxes) *View {
 	at := uint64(0)
 	if timeMs > 0 {
 		at = uint64(timeMs / 1000)
 	}
-	v := &View{Height: height, Time: timeMs, Members: map[string]*Member{}, Handovers: s.Handovers, Invites: map[string]*Open{}, Outcomes: s.Outcomes}
+	v := &View{Height: height, Time: timeMs, Members: map[string]*Member{}, Handovers: s.Handovers, Invites: map[string]*Open{}, Outcomes: s.Outcomes, Enlisted: map[string]*Owner{}}
 	for _, n := range s.names() {
 		h := s.entry(n, at)
 		if h == nil {
@@ -178,7 +191,8 @@ func (s *State) View(cfg *Config, height uint64, timeMs int64, boxCounts func(st
 		if strings.HasPrefix(e.Root, WebauthnRoot) {
 			kind = "passkey"
 		}
-		st, left, why := s.Status(cfg, e, at, boxCounts)
+		st, left, why := s.Status(cfg, e, at, boxes)
+		access, enlisted, grace := s.Access(cfg, e, at, boxes)
 		format := 1
 		if h.Signed.V2() {
 			format = 2
@@ -188,8 +202,13 @@ func (s *State) View(cfg *Config, height uint64, timeMs int64, boxCounts func(st
 			Devices: nz(e.Devices), Passkeys: nz(e.Passkeys), Libraries: nz(e.Libraries), Grant: e.Grant,
 			Version: e.Version, Updated: e.Updated, Agreed: h.Agreed * 1000, Status: st, Left: left * 1000, Suspended: why,
 			Removed: removedOf(cfg, e) * 1000, Boxes: nz(s.boxesOf(n, at)), Format: format, Item: h.Item,
+			Access: access, Enlisted: nz(enlisted), GraceUntil: grace * 1000,
 		}
 		v.Members[n] = m
+		for _, b := range m.Boxes {
+			en := s.Enlisted[b]
+			v.Enlisted[b] = &Owner{Ticket: en.Ticket, Owner: n, Since: en.Since * 1000}
+		}
 	}
 	for k, raw := range s.Invites {
 		var probe struct {

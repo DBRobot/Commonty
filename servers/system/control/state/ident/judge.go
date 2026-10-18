@@ -8,6 +8,7 @@ package ident
 // claims_free; leaving.rs record), moved.
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,10 +16,12 @@ import (
 	"strings"
 )
 
-// Config is the release's part: the key that signs invites, and the member
-// list (fleet/members.json at the commit released)
+// Config is the release's part: the key that signs invites, the member
+// list (fleet/members.json at the commit released), and the fleet's admin
+// (fleet/policy.json owner), whose root alone extends a member's grace
 type Config struct {
 	Release string `json:"release"`
+	Admin   string `json:"admin,omitempty"`
 	Members struct {
 		Members   []string          `json:"members"`
 		Revoked   []string          `json:"revoked"`
@@ -58,16 +61,34 @@ type Said struct {
 	Agreed uint64          `json:"agreed"`
 }
 
-// Enlisted is a box a member's root named as theirs
+// Enlisted is a box a member's root named as theirs, with the ticket it
+// joined with
 type Enlisted struct {
-	Member  string          `json:"member"` // the name
-	ID      string          `json:"id"`     // the root that enlisted it
-	Box     string          `json:"box"`
-	Key     string          `json:"key"`
-	Ticket  string          `json:"ticket"`
-	Expires uint64          `json:"expires"`
-	Agreed  uint64          `json:"agreed"`
-	Item    json.RawMessage `json:"item"`
+	Member string          `json:"member"` // the name
+	ID     string          `json:"id"`     // the root that enlisted it
+	Box    string          `json:"box"`
+	Key    string          `json:"key"`
+	Ticket string          `json:"ticket"` // its id
+	Since  uint64          `json:"since"`  // agreed, seconds
+	Item   json.RawMessage `json:"item"`
+}
+
+// Join is what a box joined the control plane with, as the state machine
+// put it in the log (state/join.go): its key and its member's ticket
+type Join struct {
+	Key    string `json:"key"`
+	Ticket string `json:"ticket"`
+	Until  uint64 `json:"until"` // the ticket's own expiry, unchecked: when the record may go
+}
+
+// Extension is the fleet admin's word that a member keeps their access
+// until a time, whatever their boxes do
+type Extension struct {
+	ID     string          `json:"id"` // whose: the root the name had then
+	Until  uint64          `json:"until"`
+	At     uint64          `json:"at"`
+	Agreed uint64          `json:"agreed"`
+	Item   json.RawMessage `json:"item"`
 }
 
 type Handover struct {
@@ -84,6 +105,10 @@ type State struct {
 	Said      map[string]*Said           `json:"said,omitempty"`
 	Handovers map[string][]Handover      `json:"handovers,omitempty"`
 	Enlisted  map[string]*Enlisted       `json:"enlisted,omitempty"`
+	Joins     map[string]*Join           `json:"joins,omitempty"`
+	// ticket id -> the box it enlisted: a ticket is used once, for good
+	Tickets  map[string]string     `json:"tickets,omitempty"`
+	Extended map[string]*Extension `json:"extended,omitempty"`
 	// per box, the newest enlist or unenlist taken: an older one, signed
 	// before, never counts again
 	BoxAt    map[string]uint64 `json:"box_at,omitempty"`       // box -> its enlistment
@@ -121,6 +146,15 @@ func (s *State) UnmarshalJSON(b []byte) error {
 	if s.BoxAt == nil {
 		s.BoxAt = map[string]uint64{}
 	}
+	if s.Joins == nil {
+		s.Joins = map[string]*Join{}
+	}
+	if s.Tickets == nil {
+		s.Tickets = map[string]string{}
+	}
+	if s.Extended == nil {
+		s.Extended = map[string]*Extension{}
+	}
 	if s.Outcomes == nil {
 		s.Outcomes = map[string]string{}
 	}
@@ -157,7 +191,8 @@ func New() *State {
 	return &State{
 		Entries: map[string]*Held{}, Invites: map[string]json.RawMessage{}, Acks: map[string][]string{},
 		Said: map[string]*Said{}, Handovers: map[string][]Handover{}, Enlisted: map[string]*Enlisted{},
-		BoxAt: map[string]uint64{}, Outcomes: map[string]string{},
+		BoxAt: map[string]uint64{}, Outcomes: map[string]string{}, Joins: map[string]*Join{},
+		Tickets: map[string]string{}, Extended: map[string]*Extension{},
 	}
 }
 
@@ -327,11 +362,12 @@ func (s *State) Judge(cfg *Config, voters []string, from string, raw json.RawMes
 		return
 	}
 	var probe struct {
-		V     int
-		Entry json.RawMessage
-		Inv   json.RawMessage
-		Ack   *string
-		Leave json.RawMessage
+		V      int
+		Entry  json.RawMessage
+		Inv    json.RawMessage
+		Ack    *string
+		Leave  json.RawMessage
+		Joined json.RawMessage
 	}
 	if v, ok := top["v"]; ok {
 		_ = json.Unmarshal(v, &probe.V)
@@ -344,6 +380,8 @@ func (s *State) Judge(cfg *Config, voters []string, from string, raw json.RawMes
 				probe.Inv = v
 			case "leave":
 				probe.Leave = v
+			case "joined":
+				probe.Joined = v
 			case "ack":
 				var a string
 				if json.Unmarshal(v, &a) == nil {
@@ -364,6 +402,8 @@ func (s *State) Judge(cfg *Config, voters []string, from string, raw json.RawMes
 				s.Acks[*probe.Ack] = got
 			}
 		}
+	case probe.Joined != nil:
+		s.joined(from, probe.Joined, at)
 	case probe.Leave != nil:
 		var sl SignedLeave
 		if err := strict(probe.Leave, &sl); err != nil {
@@ -455,7 +495,9 @@ func (s *State) judgeV2(cfg *Config, voters []string, from string, raw json.RawM
 			return VerifyEd25519(cfg.Release, Message("invite", body), env.Sig)
 		}, raw, at))
 	case "enlist", "unenlist":
-		s.outcome(hash, s.enlist(env, body, raw, at))
+		s.outcome(hash, s.enlist(cfg, env, body, raw, at))
+	case "extend":
+		s.outcome(hash, s.extend(cfg, env, body, raw, at))
 	default:
 		s.outcome(hash, fmt.Errorf("no such item: %q", env.Kind))
 	}
@@ -586,19 +628,88 @@ func (s *State) record(l Leave, verify func(*Entry) error, raw json.RawMessage, 
 	return nil
 }
 
+// joined: the state machine's record of a box joining with a ticket
+// (state/join.go), under the box's own name. No gate can put one: the
+// state machine refuses a directory item that says it, and the name must
+// be the key's.
+func (s *State) joined(from string, raw json.RawMessage, at uint64) {
+	var j struct {
+		Key    string `json:"key"`
+		Ticket string `json:"ticket"`
+	}
+	if strict(raw, &j) != nil {
+		return
+	}
+	again, _ := json.Marshal(&j)
+	if sameAs(raw, again) != nil || j.Ticket == "" || BoxName(j.Key) != from {
+		return
+	}
+	// a record whose ticket is a day past its time can never enlist anything
+	for b, old := range s.Joins {
+		if old.Until+leaveBehind < at {
+			delete(s.Joins, b)
+		}
+	}
+	_, until := TicketID(j.Ticket)
+	s.Joins[from] = &Join{Key: j.Key, Ticket: j.Ticket, Until: until}
+}
+
+// BoxName is the name a joined box's key gives it (state.JoinName): "j"
+// and ten hex of the sha256 of its SPKI
+func BoxName(spki string) string {
+	der, err := b64.DecodeString(spki)
+	if err != nil || len(der) == 0 {
+		return ""
+	}
+	h := sha256.Sum256(der)
+	return "j" + hexs(h[:5])
+}
+
+// rootOf: the entry whose current root has this id
+func (s *State) rootOf(id string, at uint64) *Held {
+	for _, n := range s.names() {
+		if h := s.entry(n, at); h != nil && MemberID(h.Signed.Entry.Root) == id {
+			return h
+		}
+	}
+	return nil
+}
+
+// banned: why a person is out by the release's list or their own word, or
+// "" - nothing they sign lets them back in
+func (s *State) banned(cfg *Config, e *Entry, at uint64) string {
+	st, _, _ := s.standing(cfg, e, at)
+	if st == "left" || st == "suspended" || st == "revoked" {
+		return st
+	}
+	return ""
+}
+
+// timely: a statement's own date, within the window of the agreed time
+func timely(said, at uint64) error {
+	if said > at+leaveAhead {
+		return errors.New("dated ahead of now")
+	}
+	if said+leaveBehind < at {
+		return errors.New("too old to be taken")
+	}
+	return nil
+}
+
 // enlist / unenlist: a member's root names a box as theirs, or no longer.
-// What makes an enlisted box count (its hardware) is the control plane's
-// (docs/dev/joining.md); here, only that the member said it. Each is dated,
-// timely like a leave, and newer than the last taken for that box, so an
-// old one sent again changes nothing.
-func (s *State) enlist(env Envelope, body []byte, raw json.RawMessage, at uint64) error {
+// An enlist names the ticket the box joined with, which must be one of
+// theirs - signed by a device in their entry, for them, not expired when
+// the enlist is agreed, and never used before; once used, it is used for
+// good. A box is one member's at a time. Each is dated, timely like a
+// leave, and newer than the last taken for that box, so an old one sent
+// again changes nothing. What makes an enlisted box count (its hardware,
+// how long it has been gone) is the view's (access.go).
+func (s *State) enlist(cfg *Config, env Envelope, body []byte, raw json.RawMessage, at uint64) error {
 	var e struct {
-		Member  string `json:"member"`
-		Box     string `json:"box"`
-		Key     string `json:"key,omitempty"`
-		Ticket  string `json:"ticket,omitempty"`
-		Expires uint64 `json:"expires,omitempty"`
-		At      uint64 `json:"at"`
+		Member string `json:"member"`
+		Box    string `json:"box"`
+		Ticket string `json:"ticket,omitempty"`
+		At     uint64 `json:"at"`
 	}
 	if err := strict(body, &e); err != nil {
 		return fmt.Errorf("not an item: %w", err)
@@ -610,24 +721,15 @@ func (s *State) enlist(env Envelope, body []byte, raw json.RawMessage, at uint64
 	if e.Box == "" {
 		return errors.New("no box named")
 	}
-	var who *Held
-	for _, n := range s.names() {
-		if h := s.entry(n, at); h != nil && MemberID(h.Signed.Entry.Root) == e.Member {
-			who = h
-			break
-		}
-	}
+	who := s.rootOf(e.Member, at)
 	if who == nil {
 		return errors.New("no member with that root")
 	}
 	if err := VerifyRoot(&env, &who.Signed.Entry); err != nil {
 		return fmt.Errorf("refused: %w", err)
 	}
-	if e.At > at+leaveAhead {
-		return errors.New("dated ahead of now")
-	}
-	if e.At+leaveBehind < at {
-		return errors.New("too old to be taken")
+	if err := timely(e.At, at); err != nil {
+		return err
 	}
 	if e.At <= s.BoxAt[e.Box] {
 		return errors.New("older than the last word on that box")
@@ -638,6 +740,9 @@ func (s *State) enlist(env Envelope, body []byte, raw json.RawMessage, at uint64
 		cur = nil
 	}
 	if env.Kind == "unenlist" {
+		if e.Ticket != "" {
+			return errors.New("not an item: an unenlist names no ticket")
+		}
 		if cur == nil || cur.Member != name {
 			return errors.New("that box is not theirs")
 		}
@@ -645,24 +750,90 @@ func (s *State) enlist(env Envelope, body []byte, raw json.RawMessage, at uint64
 		s.BoxAt[e.Box] = e.At
 		return nil
 	}
-	if e.Expires <= at {
-		return errors.New("that enlistment has expired")
+	if why := s.banned(cfg, &who.Signed.Entry, at); why != "" {
+		return fmt.Errorf("refused: they are %s", why)
 	}
-	if cur != nil && cur.Member != name {
-		return errors.New("that box is someone else's")
+	if cur != nil {
+		if cur.Member != name {
+			return errors.New("that box is someone else's")
+		}
+		return errors.New("that box is theirs already")
 	}
-	s.Enlisted[e.Box] = &Enlisted{Member: name, ID: e.Member, Box: e.Box, Key: e.Key, Ticket: e.Ticket, Expires: e.Expires, Agreed: at, Item: raw}
+	j := s.Joins[e.Box]
+	if j == nil {
+		return errors.New("that box has not joined with a ticket")
+	}
+	var keys []string
+	for _, d := range who.Signed.Entry.Devices {
+		keys = append(keys, d.PublicKey)
+	}
+	t, err := ReadTicket(j.Ticket, keys)
+	if err != nil {
+		return fmt.Errorf("refused: the box's ticket: %w", err)
+	}
+	if t.User != name {
+		return errors.New("refused: the box's ticket is someone else's")
+	}
+	if t.ID != e.Ticket {
+		return errors.New("refused: that box joined with another ticket")
+	}
+	if t.Expires <= at {
+		return errors.New("refused: that ticket has expired")
+	}
+	if b, used := s.Tickets[t.ID]; used {
+		return fmt.Errorf("refused: that ticket enlisted %s already", b)
+	}
+	s.Enlisted[e.Box] = &Enlisted{Member: name, ID: e.Member, Box: e.Box, Key: j.Key, Ticket: t.ID, Since: at, Item: raw}
+	s.Tickets[t.ID] = e.Box
 	s.BoxAt[e.Box] = e.At
 	return nil
 }
 
-// owns: an enlistment still stands - not expired, its member not gone, and
-// the name still held by the person whose root enlisted it (a guest's name
-// that lapsed and went to someone else takes none of it along)
-func (s *State) owns(en *Enlisted, at uint64) bool {
-	if en.Expires <= at {
-		return false
+// extend: the fleet's admin keeps a member's access until `until`, while
+// their boxes are gone. Signed by the admin's root (the release names the
+// admin), dated like the rest, the newest standing; an until already past
+// takes an extension back.
+func (s *State) extend(cfg *Config, env Envelope, body []byte, raw json.RawMessage, at uint64) error {
+	var e struct {
+		Name  string `json:"name"`
+		Until uint64 `json:"until"`
+		At    uint64 `json:"at"`
 	}
+	if err := strict(body, &e); err != nil {
+		return fmt.Errorf("not an item: %w", err)
+	}
+	again, _ := json.Marshal(&e)
+	if err := sameAs(body, again); err != nil {
+		return err
+	}
+	if cfg.Admin == "" {
+		return errors.New("this fleet names no admin")
+	}
+	admin := s.entry(cfg.Admin, at)
+	if admin == nil {
+		return errors.New("the admin has no entry")
+	}
+	if err := VerifyRoot(&env, &admin.Signed.Entry); err != nil {
+		return fmt.Errorf("refused: %w", err)
+	}
+	if err := timely(e.At, at); err != nil {
+		return err
+	}
+	who := s.entry(e.Name, at)
+	if who == nil {
+		return errors.New("no entry by that name")
+	}
+	if old := s.Extended[e.Name]; old != nil && e.At <= old.At {
+		return errors.New("older than the extension on record")
+	}
+	s.Extended[e.Name] = &Extension{ID: MemberID(who.Signed.Entry.Root), Until: e.Until, At: e.At, Agreed: at, Item: raw}
+	return nil
+}
+
+// owns: an enlistment still stands - its member not gone, and the name
+// still held by the person whose root enlisted it (a guest's name that
+// lapsed and went to someone else takes none of it along)
+func (s *State) owns(en *Enlisted, at uint64) bool {
 	if said := s.Said[en.Member]; said != nil && !said.Leave.Back {
 		return false
 	}

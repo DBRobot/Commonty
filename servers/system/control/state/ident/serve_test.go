@@ -25,7 +25,7 @@ func TestIdentityAnswers(t *testing.T) {
 	cfg.Members.Removed = map[string]uint64{id: 1_791_000_000}
 	sv := NewServer(cfg, []string{"node2", "node1"})
 	get := func(n int, height uint64, name string, since uint64) (int, map[string]any) {
-		code, b := sv.Answer(n, func(i int) Item { return items[i] }, height, items[n-1].Time, name, since)
+		code, b := sv.Answer(n, func(i int) Item { return items[i] }, height, items[n-1].Time, nil, name, since)
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
 		return code, m
@@ -85,7 +85,7 @@ func TestIdentityAnswersAtOnce(t *testing.T) {
 		go func(g int) {
 			defer func() { done <- struct{}{} }()
 			for n := 1; n <= len(items); n++ {
-				sv.Answer(n, func(i int) Item { return items[i] }, uint64(n), items[n-1].Time, "", 0)
+				sv.Answer(n, func(i int) Item { return items[i] }, uint64(n), items[n-1].Time, nil, "", 0)
 			}
 		}(g)
 	}

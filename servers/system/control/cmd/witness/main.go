@@ -101,7 +101,7 @@ func main() {
 			code, b := ids.Answer(len(s.Directory), func(i int) ident.Item {
 				d := s.Directory[i]
 				return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
-			}, s.Height, s.Time, name, since)
+			}, s.Height, s.Time, s.IdentBoxes(), name, since)
 			return js.ValueOf([]any{code, string(b)})
 		}))
 	}
