@@ -14,12 +14,19 @@ let
   # the guest's own nixpkgs, without the box's overlays: the guest rebuilds
   # from plain nixpkgs (guest/base.nix), so the host's first system is the
   # one the guest would build
-  guestSystem = import "${pkgs.path}/nixos/lib/eval-config.nix" {
+  guestSystem = import "${pkgs.path}/nixos" {
     system = pkgs.stdenv.hostPlatform.system;
-    modules = [
-      ./guest/base.nix
-      ./guest/member.nix
-    ];
+    # the shape the guest's own configuration.nix has (below): one module
+    # importing the two, so the system is the very one the guest builds
+    # (the order of its packages follows the order of the imports)
+    configuration = {
+      imports = [
+        ./guest/base.nix
+        ./guest/member.nix
+      ];
+      dd.guest.base = ./guest/base.nix;
+      dd.guest.nixpkgs = pkgs.path;
+    };
   };
   # the first disk every computer starts from; each copies it once, and
   # from then on it is the instance's own
@@ -34,7 +41,11 @@ let
     additionalSpace = "2G";
     copyChannel = false;
     configFile = pkgs.writeText "configuration.nix" ''
-      { imports = [ /etc/dd/base.nix ./member.nix ]; }
+      {
+        imports = [ ${./guest/base.nix} ./member.nix ];
+        dd.guest.base = builtins.storePath ${./guest/base.nix};
+        dd.guest.nixpkgs = builtins.storePath ${pkgs.path};
+      }
     '';
     contents = [
       {

@@ -1,14 +1,16 @@
 # What every member's computer is before its owner's own Nix file: a NixOS
 # machine on a disk of its own, with its own store, that builds its own
 # system. The host builds the first disk from this and the release's
-# nixpkgs; after that the guest rebuilds itself, from this file (kept in
-# /etc/dd) and the owner's (/etc/nixos/member.nix), and the host never
+# nixpkgs; after that the guest rebuilds itself, from this file (by its
+# store path, which /etc/nixos/configuration.nix names and dd.guest.base
+# keeps) and the owner's (/etc/nixos/member.nix), and the host never
 # evaluates or builds what the owner wrote.
 #
 # From the host it gets a share, config (read-only: the owner's name, their
 # SSH keys, their Nix file, written from the host's record), and a small
 # disk, report, for what it says back: whether the Nix file applied.
 {
+  config,
   lib,
   pkgs,
   modulesPath,
@@ -32,7 +34,19 @@ in
 {
   # virtio's disk, network and 9p drivers in the initrd: without them it
   # waits for /dev/disk/by-label/nixos and gives up
-  imports = [ "${modulesPath}/profiles/qemu-guest.nix" ];
+  imports = [
+    "${modulesPath}/profiles/qemu-guest.nix"
+    {
+      options.dd.guest.base = lib.mkOption {
+        type = lib.types.path;
+        description = "this file's store path, as configuration.nix imports it";
+      };
+      options.dd.guest.nixpkgs = lib.mkOption {
+        type = lib.types.path;
+        description = "the nixpkgs the guest rebuilds from: the release's, by its store path";
+      };
+    }
+  ];
 
   system.stateVersion = "26.05";
 
@@ -53,12 +67,17 @@ in
   };
   fileSystems.${config9p} = share "config" true;
 
-  # this file, by content: the same store path whether the host evaluates it
-  # from the repo or the guest from /etc/dd
-  environment.etc."dd/base.nix".source = ./base.nix;
-  environment.etc."dd/nixpkgs".source = pkgs.path;
+  # this file, as configuration.nix names it: kept in the guest's store, so
+  # a rebuild there finds it. Not ./base.nix: read from the store, a path
+  # beside it is /nix/store itself
+  # by store path, not through a link in /etc: a link read as nixpkgs is
+  # copied into the store under another name, and the system differs
+  system.extraDependencies = [
+    "${config.dd.guest.base}"
+    "${config.dd.guest.nixpkgs}"
+  ];
   nix.nixPath = [
-    "nixpkgs=/etc/dd/nixpkgs"
+    "nixpkgs=${config.dd.guest.nixpkgs}"
     "nixos-config=/etc/nixos/configuration.nix"
   ];
   nix.channel.enable = false;
@@ -158,7 +177,7 @@ in
       pkgs.nix
       pkgs.git
     ];
-    environment.NIX_PATH = "nixpkgs=/etc/dd/nixpkgs:nixos-config=/etc/nixos/configuration.nix";
+    environment.NIX_PATH = "nixpkgs=${config.dd.guest.nixpkgs}:nixos-config=/etc/nixos/configuration.nix";
     serviceConfig.Type = "oneshot";
     script = ''
       f=${config9p}/member.nix
