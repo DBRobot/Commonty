@@ -50,6 +50,8 @@
       "dd-ports-check"
       "dd-netspeed"
       "dd-service-memory"
+      # what it can run, by the release's rules on the report (box/capability.nix)
+      "dd-capability"
     ];
     everyBox = true;
     base = {

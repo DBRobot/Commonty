@@ -248,7 +248,10 @@ func facts() map[string]float64 {
 	// holds in memory (nix/modules/box/service-memory.nix)
 	// and its own store (nix/modules/storage/store.nix): its size, what is
 	// free, and what it keeps of each bucket, for where the copies go
-	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom") {
+	// and what it can run, judged by the release's rules on its report as
+	// it is now (nix/modules/box/capability.nix); and whether its owner is
+	// draining it (dd-drain)
+	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom", "/var/lib/dd-facts/can.prom", "/var/lib/dd-facts/draining.prom") {
 		f[name] = v
 	}
 	// what members keep here: not .prom, so none of it reaches Prometheus
@@ -365,6 +368,18 @@ func promFacts(files ...string) map[string]float64 {
 				svc, ok2 := strings.CutSuffix(svc, `"}`)
 				if ok && ok2 && len(fs) == 2 && usageName(svc) && len(out) < maxFacts {
 					out["svc/"+svc+"/mem"] = v
+				}
+			case "dd_box_draining":
+				// any file saying so drains it
+				out["draining"] = max(out["draining"], v)
+			case "dd_can_live":
+				out["can_live"] = v
+			case "dd_can":
+				// dd_can{service="photos"} as can/photos: how well it suits it
+				svc, ok := strings.CutPrefix(fs[0], `dd_can{service="`)
+				svc, ok2 := strings.CutSuffix(svc, `"}`)
+				if ok && ok2 && len(fs) == 2 && usageName(svc) && len(out) < maxFacts {
+					out["can/"+svc] = v
 				}
 			case "dd_agent_info":
 				if strings.Contains(l, `result="ok"`) {

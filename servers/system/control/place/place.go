@@ -41,8 +41,13 @@ type Bucket struct {
 type Box struct {
 	Site   string `json:"site"`
 	Region string `json:"region"`
-	// service -> how well this box suits it; a service not here, it cannot run
+	// service -> how well this box suits it; a service not here, it cannot run.
+	// What the release judged from the box's report; a heartbeat with its
+	// own (can_live, can/<svc>) is used instead
 	Can map[string]float64 `json:"can"`
+	// what its owner's box.json or the policy keep off it whatever its
+	// hardware (trust, a metered line): a box's own word never adds these
+	Barred []string `json:"barred"`
 }
 
 type Service struct {
@@ -70,6 +75,10 @@ type Service struct {
 	// one writer at a time: a placed service that runs only while its box
 	// holds the lease svc/<name> (cmd/dd-control/placed.go)
 	Lease bool `json:"lease"`
+	// on-failure: it stays on the box that runs it while that box is
+	// alive, however much better another suits it; else it moves for a
+	// box better by the damping margin
+	Moves string `json:"moves"`
 }
 
 type Damping struct {
@@ -86,6 +95,8 @@ type Plan struct {
 	// bucket -> the boxes whose stores keep it: where its service runs
 	// first, then where it is already, then the boxes with the most room
 	Copies map[string][]string `json:"copies"`
+	// box -> what stays there (moves on-failure) though it no longer fits
+	DoesNotFit map[string][]string `json:"doesNotFit"`
 }
 
 type Decision struct {
@@ -99,7 +110,7 @@ const gib = 1 << 30
 // Decide plans the fleet. goneAfter is how long (ms of agreed time) a box
 // may go unheard and still count as alive.
 func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
-	p := Plan{Boxes: map[string][]Decision{}, Unplaced: map[string]string{}, Copies: map[string][]string{}}
+	p := Plan{Boxes: map[string][]Decision{}, Unplaced: map[string]string{}, Copies: map[string][]string{}, DoesNotFit: map[string][]string{}}
 	live := []string{}
 	for name := range in.Boxes {
 		if b := s.Boxes[name]; b != nil && s.Time-b.LastSeen <= goneAfter {
@@ -132,11 +143,39 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 			}
 		}
 	}
+	// what each box can run: what it says in its heartbeat, judged by the
+	// release's rules on its own report as it is now (box/capability.nix),
+	// or the release's table. Its word never adds what its owner's choices
+	// bar, nor a writer whose lease the release does not let it hold (the
+	// lease rules, and the keys sealed to those boxes, are the release's)
+	canOf := map[string]map[string]float64{}
+	for _, name := range live {
+		f, rel := s.Boxes[name].Facts, in.Boxes[name]
+		if f["can_live"] == 0 {
+			canOf[name] = rel.Can
+			continue
+		}
+		barred := map[string]bool{}
+		for _, svc := range rel.Barred {
+			barred[svc] = true
+		}
+		c := map[string]float64{}
+		for svc, sv := range in.Services {
+			v, ok := f["can/"+svc]
+			if _, rok := rel.Can[svc]; ok && !barred[svc] && (!sv.Lease || rok) {
+				c[svc] = v
+			}
+		}
+		canOf[name] = c
+	}
+	// a draining box (dd-drain) is given nothing new, and what may move
+	// moves off it
+	draining := func(name string) bool { return s.Boxes[name].Facts["draining"] > 0 }
 	// a placed service can run only on a box that carries it, and not
 	// where the box itself refused to start it for want of room
 	// (cmd/dd-control/placed.go)
 	can := func(name, svc string) bool {
-		if _, ok := in.Boxes[name].Can[svc]; !ok {
+		if _, ok := canOf[name][svc]; !ok {
 			return false
 		}
 		f := s.Boxes[name].Facts
@@ -192,7 +231,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 			l := s.Leases["svc/"+svc]
 			return l != nil && l.Holder == name && l.Expires > s.Time
 		}
-		_, can := in.Boxes[name].Can[svc]
+		_, can := canOf[name][svc]
 		return can && now[svc][name]
 	}
 	for b, bk := range in.Buckets {
@@ -297,7 +336,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 	// measured against what the service wants, what is already beside it,
 	// and whether it is filling up
 	fit := func(name, svc string) (float64, string) {
-		sv, f := in.Services[svc], in.Boxes[name].Can[svc]
+		sv, f := in.Services[svc], canOf[name][svc]
 		why := fmt.Sprintf("suits %.2f", f)
 		if sv.Class != "low" {
 			k := 1.0
@@ -418,6 +457,16 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 			}
 		}
 		cands := capable(svc)
+		// what may stay: the boxes that run it now, able or not
+		sticky := sv.Moves == "on-failure"
+		if sticky {
+			for _, name := range live {
+				if now[svc][name] && !can(name, svc) {
+					cands = append(cands, name)
+				}
+			}
+			sort.Strings(cands)
+		}
 		if len(cands) == 0 {
 			p.Unplaced[svc] = "no live box can run it"
 			return
@@ -425,7 +474,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		best := func(from []string) []string {
 			out := []string{}
 			for _, name := range from {
-				if !planned[name][svc] && allowed(name, svc) && room(name, svc) {
+				if !planned[name][svc] && can(name, svc) && !draining(name) && allowed(name, svc) && room(name, svc) {
 					out = append(out, name)
 				}
 			}
@@ -441,6 +490,22 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		}
 		// the best of from, unless what runs now is within the margin of it
 		choose := func(from []string, why0 string) bool {
+			// one that moves on failure stays on a live box that runs it;
+			// fit and room are for choosing a new one
+			if sticky {
+				for _, name := range from {
+					if now[svc][name] && !planned[name][svc] {
+						f, why := fit(name, svc)
+						why = why0 + "stays: it moves only when its box is gone; " + why
+						if !room(name, svc) {
+							why += "; it no longer fits here"
+							p.DoesNotFit[name] = append(p.DoesNotFit[name], svc)
+						}
+						place(name, svc, f, why)
+						return true
+					}
+				}
+			}
 			order := best(from)
 			if len(order) == 0 {
 				return false
@@ -542,10 +607,11 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 				add(name)
 			}
 		}
-		// where it is already, the most of it first
+		// where it is already, the most of it first; a draining box's
+		// copy only when no other store has room for it
 		have := []string{}
 		for _, name := range live {
-			if stored(name) && held(name, b) > 0 && !kept[name] {
+			if stored(name) && held(name, b) > 0 && !kept[name] && !draining(name) {
 				have = append(have, name)
 			}
 		}
@@ -556,7 +622,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 		// then the most room, and only where it fits
 		more := []string{}
 		for _, name := range live {
-			if stored(name) && !kept[name] {
+			if stored(name) && !kept[name] && !draining(name) {
 				more = append(more, name)
 			}
 		}
@@ -570,6 +636,11 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 			}
 			if d := needs(name, b); d <= spare(name) {
 				disk[name] += d
+				add(name)
+			}
+		}
+		for _, name := range live {
+			if draining(name) && stored(name) && held(name, b) > 0 && !lost(name, b) {
 				add(name)
 			}
 		}

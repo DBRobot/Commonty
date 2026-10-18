@@ -35,6 +35,7 @@ in
       inherit (box) encrypted;
     })
     ./home-network.nix
+    (import ./capability.nix dir)
     ../storage/store.nix
     ../storage/postgres-follow.nix
   ];

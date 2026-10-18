@@ -162,6 +162,34 @@ each service holds, the roles each box runs. It is greedy, not optimal:
 - What runs stays unless another box is better by a margin: 0.3, plus
   0.01 for each GiB the move would carry. 100G of game worlds moves for a
   much better box; a stateless page moves for a clearly better one.
+- A service whose needs say `moves = "on-failure"` stays on the live box
+  that runs it whatever the scores, and whatever that box can now run or
+  hold: fit and room are checked only when choosing a new box, once that
+  one is gone. One that stays where it no longer fits is named in the
+  plan's `doesNotFit` for that box.
+- What a box can run is its heartbeat's word when it sends one
+  (`can_live`, `can/<service>`: the release's rules run on the box's own
+  report, [servers](servers.md#needs-and-placement)), else the release's
+  table. Its word never adds a service the release's `barred` names for it
+  (its owner's trust and line choices), nor a lease service the release
+  does not let it hold: the lease rules, and the keys sealed to those
+  boxes, are the release's. A box claiming more than it has only draws
+  work it then fails, which moves it: availability, never access.
+- A box whose facts say `draining` (below) is given nothing new: no
+  service, no new copy. What may move moves off it; what moves on failure
+  stays until the box leaves. A copy it keeps already stays listed only
+  while no other store has room for it.
+
+So when the needs or a box's capability change, the next round plans
+again: needs with the release that changes them, a box's hardware at its
+next boot, with no release.
+
+### Draining a box
+
+Before a box leaves, its owner runs `dd-drain on` as root on it. That
+writes `/var/lib/dd-facts/draining.prom` (`dd_box_draining 1`), which
+`dd-control` reads with its other facts (any file saying 1 drains it) and
+carries as `draining`. `dd-drain off` removes it. It is on no page.
 
 `dd-control -placement` serves the plan at `127.0.0.1:4195/plan`, each
 choice with why.

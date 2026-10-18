@@ -287,7 +287,7 @@ needs file that says something unknown fails to evaluate:
 
 ```
 per service      what, units, instances, perHouse, everyBox, servesCode, when,
-                 trust, traffic, alwaysOn, spread, grows, base/variants
+                 trust, traffic, alwaysOn, spread, grows, moves, base/variants
 trust            owner, household or any
 traffic          class (high, medium, low), upMbps, downMbps
 grows            photos, libraries, code, passwords
@@ -329,6 +329,21 @@ false`) counts as metered. The owner's own boxes usually come out able to
 run nearly everything; that is the point. Whether they do is the control
 plane's call.
 
+The release ships this table, from the reports in `fleet/boxes`, and each
+box also judges itself: `dd-capability`
+([`box/capability.nix`](../../nix/modules/box/capability.nix)) runs the
+same `capability.nix`, with the release's needs (`.#needs`), policy and
+the box's own box.json, on the report the box made at this boot
+(`/var/lib/dd/report/hardware.json`). It writes
+`/var/lib/dd-facts/can.prom` (`dd_can_live 1`, `dd_can{service=…}`
+scores), which the heartbeat carries. It runs at boot after the report
+and again on every switch whose needs or rules changed; on no report or a
+failed judgment it removes the file and the release's table stands. So a
+box that gains a GPU or memory is placed for it the next round, with no
+release. Running the Nix rules on the box, not a Go copy of them, keeps
+one set of rules; `checks.placement` fails if a box judged this way, on
+the release's report, would come to anything but the release's table.
+
 `checks.placement` ([`nix/tests/placement.nix`](../../nix/tests/placement.nix))
 fails when a box cannot join, when its roles bring a service it cannot
 run, or when it runs a service none of its roles lists.
@@ -342,10 +357,12 @@ answers stop making sense fails there, by name.
 
 **Does.** `.#placement-inputs`
 ([`nix/lib/placement-inputs.nix`](../../nix/lib/placement-inputs.nix)) is
-the table the control plane places from: each box's scores, and per
-service whether the fleet wants it (some box's roles bring it, and the
+the table the control plane places from: each box's scores, what its
+owner's box.json or the policy bar it from whatever its hardware
+(`barred`: trust, a metered line), and per service whether the fleet wants it (some box's roles bring it, and the
 policy setting in its `when` is on), how many, spread or by house, the line
-it wants, its memory and what moving it carries. Roles stay a convenient
+it wants, its memory, what moving it carries, and `moves`: `better` (the
+default) or `on-failure`. Roles stay a convenient
 bundle of services, and still what a box's config installs. How the
 control plane chooses is in [the control plane](control-plane.md#placement).
 
