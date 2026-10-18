@@ -41,7 +41,8 @@ code.mono { background: var(--code); padding: 2px 6px; border-radius: var(--radi
 .what { min-width: 0; flex: 1 1 320px; }
 .meta { margin: 4px 0 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; color: var(--ink-2); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.actions button { min-height: 40px; }
+/* home.css spaces a lone button from what is above it; in a row they line up */
+.actions button { min-height: 40px; height: auto; margin-top: 0; padding-block: 8px; }
 
 .note {
   margin: 0 0 22px;
