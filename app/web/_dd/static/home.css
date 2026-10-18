@@ -1161,7 +1161,7 @@ body.dd-tucked.dd-peek .dd-guide-btn .hat { animation: dd-eyes 4.6s both; }
 .dd-guide > header button { margin: 0 0 0 auto; width: 32px; height: 32px; padding: 0; display: grid; place-items: center; background: none; border: 0; border-radius: var(--radius); color: var(--gd-bar-ink); cursor: pointer; }
 .dd-guide > header button:hover { background: rgba(255, 255, 255, .12); }
 .dd-guide > header button svg { width: 20px; height: 20px; }
-.dd-guide .log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--gd-sunk); }
+.dd-guide .dd-talk { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--gd-sunk); }
 .dd-guide .msg { max-width: 86%; padding: 8px 11px; border-radius: 10px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dd-guide .msg.me { align-self: flex-end; background: var(--gd-bar); color: var(--gd-bar-ink); border-bottom-right-radius: 3px; }
 .dd-guide .msg.it { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 3px; }

@@ -708,7 +708,8 @@ function build(opts) {
   const btn = el('button', { type: 'button', class: 'dd-guide-btn', 'aria-label': 'Open the assistant', 'aria-expanded': 'false', 'aria-controls': 'dd-guide', 'data-guide': 'assistant', 'aria-keyshortcuts': ariaKey(shortcut()) },
     chatMark(), eyes, el('i', { class: 'o', 'aria-hidden': 'true' }), el('i', { class: 'new', 'aria-hidden': 'true' }));
   const tuck = el('button', { type: 'button', class: 'dd-tuck', 'aria-label': 'Tuck the assistant away' }, arrow('m3 5 5 5-5 5', '0 0 12 20'));
-  const log = el('div', { class: 'log', role: 'log', 'aria-live': 'polite', tabindex: '0', 'aria-label': 'Conversation' });
+  // not .log: the Git pages style a CI job's log by that name (git.css)
+  const log = el('div', { class: 'dd-talk', role: 'log', 'aria-live': 'polite', tabindex: '0', 'aria-label': 'Conversation' });
   const input = el('input', { type: 'text', placeholder: 'Ask, or say where to go', autocomplete: 'off', 'aria-label': 'Ask Monty', maxlength: '300' });
   const auto = el('input', { type: 'checkbox', id: 'dd-guide-auto' });
   auto.checked = local.get(KEYS.auto) === '1';
