@@ -83,9 +83,17 @@ assert api("ann", "POST", f"/api/instances/{i}/stop")[0] == 422
 
 # its Nix file applied, and the system it built is the one the host made:
 # nothing to build, so nothing to fetch
-box.wait_until_succeeds(f"test -s {d}/instances/{i}/report/apply.json", timeout=600)
-applied = json.loads(box.succeed(f"cat {d}/instances/{i}/report/apply.json"))
-assert applied["ok"], api("tom", "GET", f"/api/instances/{i}/log")[1]
+
+
+def applied():
+    mine = json.loads(api("tom", "GET", "/api/state")[1])
+    return next(x for x in mine["instances"] if x["id"] == i).get("applied")
+
+
+box.wait_until_succeeds(f"test -s {d}/instances/{i}/report.img", timeout=60)
+retry(lambda last: applied() is not None, timeout_seconds=600)
+got = applied()
+assert got["ok"], api("tom", "GET", f"/api/instances/{i}/log")[1]
 
 # what its disks hold counts toward tom's allowance: into the box's facts
 box.succeed("systemctl start dd-computers-usage.service")
@@ -106,9 +114,12 @@ box.fail(f"{ssh} curl -sf -m 5 -o /dev/null http://192.168.1.1/")
 box.succeed(f"{ssh} 'echo kept > ~/kept'")
 assert api("tom", "POST", f"/api/instances/{i}/stop")[0] == 200
 box.wait_until_succeeds(
-    f"systemctl show -p ActiveState dd-computer@{i}.service | grep -q inactive", timeout=120
+    f"systemctl show -p ActiveState dd-computer@{i}.service | grep -q inactive",
+    timeout=120,
 )
-assert "Result=success" in box.succeed(f"systemctl show -p Result dd-computer@{i}.service")
+assert "Result=success" in box.succeed(
+    f"systemctl show -p Result dd-computer@{i}.service"
+)
 assert api("tom", "POST", f"/api/instances/{i}/start")[0] == 200
 box.wait_until_succeeds(f"{ssh} true", timeout=600)
 assert box.succeed(f"{ssh} cat kept").strip() == "kept"
@@ -118,14 +129,16 @@ pid = box.succeed(f"systemctl show -p MainPID --value dd-computer@{i}.service").
 box.succeed("systemctl restart dd-computers.service")
 box.wait_until_succeeds("test -S /run/dd-computers/dd-computers.sock", timeout=60)
 assert (
-    box.succeed(f"systemctl show -p MainPID --value dd-computer@{i}.service").strip() == pid
+    box.succeed(f"systemctl show -p MainPID --value dd-computer@{i}.service").strip()
+    == pid
 )
 
 # deleted only once stopped, and then it's gone with its disks
 assert api("tom", "DELETE", f"/api/instances/{i}")[0] == 422
 assert api("tom", "POST", f"/api/instances/{i}/stop")[0] == 200
 box.wait_until_succeeds(
-    f"systemctl show -p ActiveState dd-computer@{i}.service | grep -q inactive", timeout=120
+    f"systemctl show -p ActiveState dd-computer@{i}.service | grep -q inactive",
+    timeout=120,
 )
 assert api("tom", "DELETE", f"/api/instances/{i}")[0] == 200
 box.fail(f"test -e {d}/instances/{i}")

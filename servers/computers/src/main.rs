@@ -34,6 +34,10 @@ fn who(h: &HeaderMap) -> Result<(String, bool), StatusCode> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .ok_or(StatusCode::UNAUTHORIZED)?;
+    // a name becomes a file name here (configs/<name>.json): a name, or nothing
+    if !computers::valid_name(&u) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
     let member = h.get("x-dd-role").and_then(|v| v.to_str().ok()) == Some("member");
     Ok((u, member))
 }
@@ -307,6 +311,13 @@ async fn main() -> Result<()> {
         std::fs::set_permissions(&bind, std::os::unix::fs::PermissionsExt::from_mode(0o660))?;
         axum::serve(listener, router).await?;
     } else {
+        // a port anyone on the box could reach and name themselves on:
+        // only for a test that says so
+        if std::env::var("DD_COMPUTERS_TCP_FOR_TESTS").as_deref() != Ok("1") {
+            anyhow::bail!(
+                "{bind} is not a socket path: the user comes from a header, so only a socket nginx's group opens will do"
+            );
+        }
         let listener = tokio::net::TcpListener::bind(&bind).await?;
         axum::serve(listener, router).await?;
     }

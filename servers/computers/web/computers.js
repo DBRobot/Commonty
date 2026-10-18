@@ -316,7 +316,7 @@ function editor(name) {
   const software = el('section', { class: 'panel sec software' },
     el('h2', { text: 'Software' }),
     field('ed-nix', 'A NixOS module', el('textarea', { id: 'ed-nix', spellcheck: 'false', text: c.nix || '' }),
-      'Saved and applied, the computer rebuilds itself from this. /home is kept.'));
+      'Saved and applied, the computer rebuilds itself from this. /home is kept. Never put a password, token or key here: every box on the fleet keeps a copy of configs. Put secrets in /home on the computer.'));
   // settings down the left, the Nix file taking the rest
   const f = el('form', { class: 'editor', id: 'ed' },
     el('div', { class: 'ed-left' }, nameSec, size, access, where),

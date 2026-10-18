@@ -62,7 +62,10 @@ let
     threads=$(jq -r '.threads' "$rec")
     disk=$(jq -r '.disk' "$rec")
     fwd=$(jq -r '[{guest: 22, host: .port}] + (.forwards // []) | map("hostfwd=tcp::\(.host)-:\(.guest)") | join(",")' "$rec")
-    mkdir -p "$d"/config "$d"/report
+    mkdir -p "$d"/config
+    # what the guest says back: a raw disk of fixed size, not a share it
+    # could fill (servers/computers, read_report)
+    [ -e "$d"/report.img ] || ${pkgs.coreutils}/bin/truncate -s 1M "$d"/report.img
     if [ ! -e "$d"/system.qcow2 ]; then
       img convert -O qcow2 ${image}/nixos.qcow2 "$d"/system.qcow2.new
       mv "$d"/system.qcow2.new "$d"/system.qcow2
@@ -88,7 +91,8 @@ let
       -drive file="$d"/home.qcow2,if=none,id=home,format=qcow2 \
       -device virtio-blk-pci,drive=home,serial=home \
       -virtfs local,path="$d"/config,mount_tag=config,security_model=none,readonly=on \
-      -virtfs local,path="$d"/report,mount_tag=report,security_model=none \
+      -drive file="$d"/report.img,if=none,id=report,format=raw \
+      -device virtio-blk-pci,drive=report,serial=report \
       -netdev user,id=n0,"$fwd" -device virtio-net-pci,netdev=n0 \
       -device virtio-rng-pci \
       -qmp unix:"$qmp",server=on,wait=off \

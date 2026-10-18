@@ -249,12 +249,24 @@ fn random_id() -> Result<String> {
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
-/// A file a guest wrote, from its report share: the guest's root can put
-/// anything there, a link to another member's files, a pipe, a huge file.
-/// Read only a plain file, not followed, at most `max` bytes.
-fn read_guest(path: &Path, max: u64) -> Option<Vec<u8>> {
+/// What a guest says back, from its report disk: a 1 MiB raw disk the box
+/// made, which the guest writes as a device (block 0: what came of its
+/// apply, as JSON; from 4096 on: the apply's log), so it can't grow, link
+/// or block. Read here not followed all the same, at most `max` bytes from
+/// `at`, the zeros after what was written left off.
+pub const REPORT_LOG_AT: u64 = 4096;
+fn read_report(path: &Path, at: u64, max: u64) -> Option<Vec<u8>> {
+    let mut b = read_guest_from(path, at, max)?;
+    while b.last() == Some(&0) {
+        b.pop();
+    }
+    Some(b)
+}
+
+fn read_guest_from(path: &Path, at: u64, max: u64) -> Option<Vec<u8>> {
+    use std::io::{Seek as _, SeekFrom};
     use std::os::unix::fs::OpenOptionsExt as _;
-    let f = std::fs::OpenOptions::new()
+    let mut f = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)
@@ -262,6 +274,7 @@ fn read_guest(path: &Path, max: u64) -> Option<Vec<u8>> {
     if !f.metadata().ok()?.is_file() {
         return None;
     }
+    f.seek(SeekFrom::Start(at)).ok()?;
     let mut b = Vec::new();
     f.take(max).read_to_end(&mut b).ok()?;
     Some(b)
@@ -824,7 +837,8 @@ impl Manager {
             "failed" => "failed",
             _ => "stopped",
         };
-        let applied = read_guest(&self.instance_dir(&r.id).join("report/apply.json"), 4096)
+        let applied = read_report(&self.instance_dir(&r.id).join("report.img"), 0, 4096)
+            .filter(|b| !b.is_empty())
             .and_then(|b| serde_json::from_slice(&b).ok());
         View {
             address: format!("{}:{}", self.address, r.port),
@@ -845,8 +859,12 @@ impl Manager {
     /// The guest's own words about its last apply, cut short; shown to its owner.
     pub fn apply_log(&self, owner: &str, id: &str) -> Result<String> {
         self.record(owner, id)?;
-        let b =
-            read_guest(&self.instance_dir(id).join("report/apply.log"), 8192).unwrap_or_default();
+        let b = read_report(
+            &self.instance_dir(id).join("report.img"),
+            REPORT_LOG_AT,
+            8192,
+        )
+        .unwrap_or_default();
         Ok(String::from_utf8_lossy(&b).into_owned())
     }
 
@@ -1038,16 +1056,21 @@ mod tests {
         let (m, _) = scratch("report");
         m.save_config("tom", config("c", 1024, 1)).unwrap();
         let a = m.make("tom", "c", "a", true, &[]).unwrap();
-        let rep = m.instance_dir(&a.id).join("report");
-        std::fs::create_dir_all(&rep).unwrap();
-        // another member's record, linked in by the guest
-        std::os::unix::fs::symlink(m.record_path(&a.id), rep.join("apply.log")).unwrap();
+        let rep = m.instance_dir(&a.id).join("report.img");
+        std::fs::create_dir_all(rep.parent().unwrap()).unwrap();
+        // a link where the disk should be: not followed
+        std::os::unix::fs::symlink(m.record_path(&a.id), &rep).unwrap();
         assert_eq!(m.apply_log("tom", &a.id).unwrap(), "");
-        std::os::unix::fs::symlink(m.record_path(&a.id), rep.join("apply.json")).unwrap();
         assert!(m.view(a.clone()).applied.is_none());
-        std::fs::remove_file(rep.join("apply.json")).unwrap();
-        std::fs::write(rep.join("apply.json"), r#"{"ok": true}"#).unwrap();
-        assert!(m.view(a).applied.is_some());
+        std::fs::remove_file(&rep).unwrap();
+        // the disk as the guest leaves it: JSON in block 0, the log after,
+        // zeros between
+        let mut disk = vec![0u8; 1 << 20];
+        disk[..12].copy_from_slice(br#"{"ok": true}"#);
+        disk[4096..4100].copy_from_slice(b"done");
+        std::fs::write(&rep, &disk).unwrap();
+        assert!(m.view(a.clone()).applied.is_some());
+        assert_eq!(m.apply_log("tom", &a.id).unwrap(), "done");
     }
 
     #[test]

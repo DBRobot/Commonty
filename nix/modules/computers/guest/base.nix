@@ -5,9 +5,9 @@
 # /etc/dd) and the owner's (/etc/nixos/member.nix), and the host never
 # evaluates or builds what the owner wrote.
 #
-# From the host it gets two shares: config (read-only: the owner's name,
-# their SSH keys, their Nix file, written from the host's record) and
-# report (what the guest says back: whether the Nix file applied).
+# From the host it gets a share, config (read-only: the owner's name, their
+# SSH keys, their Nix file, written from the host's record), and a small
+# disk, report, for what it says back: whether the Nix file applied.
 {
   lib,
   pkgs,
@@ -16,7 +16,6 @@
 }:
 let
   config9p = "/run/dd/config";
-  report9p = "/run/dd/report";
   share = tag: ro: {
     device = tag;
     fsType = "9p";
@@ -53,7 +52,6 @@ in
     autoResize = true;
   };
   fileSystems.${config9p} = share "config" true;
-  fileSystems.${report9p} = share "report" false;
 
   # this file, by content: the same store path whether the host evaluates it
   # from the repo or the guest from /etc/dd
@@ -172,11 +170,18 @@ in
       install -m 0644 "$f" /etc/nixos/member.nix
       start=$(date +%s)
       if nixos-rebuild switch > /var/lib/dd/apply.log 2>&1; then ok=true; else ok=false; fi
-      tail -c 8192 /var/lib/dd/apply.log > ${report9p}/apply.log || true
-      jq -n --arg hash "$want" --argjson ok $ok --argjson at "$(date +%s)" \
+      # onto the report disk: block 0 what came of it, then the log's end
+      dev=/dev/disk/by-id/virtio-report
+      [ -b "$dev" ] || exit 0
+      r=$(mktemp)
+      head -c 12288 /dev/zero > "$r"
+      jq -cn --arg hash "$want" --argjson ok $ok --argjson at "$(date +%s)" \
         --argjson took $(( $(date +%s) - start )) \
-        '{hash: $hash, ok: $ok, at: $at, took: $took}' > ${report9p}/apply.json.new
-      mv ${report9p}/apply.json.new ${report9p}/apply.json
+        '{hash: $hash, ok: $ok, at: $at, took: $took}' | head -c 4095 \
+        | dd of="$r" conv=notrunc status=none
+      tail -c 8192 /var/lib/dd/apply.log | dd of="$r" bs=4096 seek=1 conv=notrunc status=none
+      dd if="$r" of="$dev" bs=4096 count=3 conv=notrunc,fsync status=none
+      rm -f "$r"
     '';
   };
   systemd.timers.dd-apply = {
