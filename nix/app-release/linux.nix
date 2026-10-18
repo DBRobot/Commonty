@@ -7,6 +7,8 @@
   pkgs,
   version,
   src,
+  # the lockfile and manifests with every target a stand-in (depsSrc)
+  depsSrc,
   cargoVendor,
   netSrc,
   netVendor,
@@ -62,69 +64,107 @@ let
     pkgs.cargo
     pkgs.cargo-tauri
     pkgs.go
+    pkgs.zstd
   ];
-in
-pkgs.vmTools.runInLinuxImage (
-  pkgs.stdenv.mkDerivation {
-    pname = "commonty-linux";
-    inherit version;
-    diskImage = image;
-    diskImageFormat = "qcow2";
-    # node2 has 14 GB in all; the build fits in six
-    memSize = 6144;
-    enableParallelBuilding = true;
-    # one fixed time for every file the packages hold, so two boxes make
-    # the same bytes
-    SOURCE_DATE_EPOCH = "315532800";
+  # what both builds below set up alike: a dependency's compiled form is
+  # only taken up if it was built with the same everything
+  setup = ''
+    set -euo pipefail
+    export PATH=${nixTools}:/usr/bin:/bin:/usr/sbin:/sbin
+    # on the image's disk: /tmp in the VM is memory, and the build and
+    # the AppImage's tree outgrow it
+    export HOME=/work/home XDG_CACHE_HOME=/work/cache TMPDIR=/work/tmp
+    mkdir -p $HOME $XDG_CACHE_HOME/tauri $TMPDIR /work/netlib
+    export CARGO_NET_OFFLINE=true
+    export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc
+    export CARGO_BUILD_JOBS=$NIX_BUILD_CORES
+  '';
+  # the cargo build tauri runs (cargo tauri build --verbose prints it)
+  appBuild = "cargo build --locked --bins --features tauri/custom-protocol --release";
+  vm =
+    attrs:
+    pkgs.vmTools.runInLinuxImage (
+      pkgs.stdenv.mkDerivation (
+        {
+          diskImage = image;
+          diskImageFormat = "qcow2";
+          # node2 has 14 GB in all; the build fits in six
+          memSize = 6144;
+          enableParallelBuilding = true;
+          # one fixed time for every file the packages hold, so two boxes make
+          # the same bytes
+          SOURCE_DATE_EPOCH = "315532800";
+        }
+        // attrs
+      )
+    );
+  # Every dependency compiled, in Ubuntu, from the lockfile alone: what took
+  # most of the build's half hour, made again only when Cargo.lock or a
+  # manifest moves. Each box makes it itself, as it does every step.
+  deps = vm {
+    # no version: it would make it again for every release
+    name = "commonty-linux-deps";
     buildCommand = ''
-      set -euo pipefail
-      export PATH=${nixTools}:/usr/bin:/bin:/usr/sbin:/sbin
-      # on the image's disk: /tmp in the VM is memory, and the build and
-      # the AppImage's tree outgrow it
-      export HOME=/work/home XDG_CACHE_HOME=/work/cache TMPDIR=/work/tmp
-      mkdir -p $HOME $XDG_CACHE_HOME/tauri $TMPDIR /work/netlib
-      ${pkgs.lib.concatStrings (
-        pkgs.lib.mapAttrsToList (n: f: ''
-          install -m755 ${f} $XDG_CACHE_HOME/tauri/${n}
-        '') tools
-      )}
-
-      # the network engine, with Ubuntu's C compiler
-      cp -r ${netSrc} /work/net && chmod -R u+w /work/net
-      cp -r ${netVendor} /work/net/vendor
-      (cd /work/net && CGO_ENABLED=1 CC=gcc GOFLAGS="-mod=vendor -trimpath" \
-        GOTOOLCHAIN=local GOPROXY=off GOCACHE=/work/gocache \
-        go build -buildmode=c-archive -o /work/netlib/libcommontynet.a .)
-
-      cp -r ${src} /work/src && chmod -R u+w /work/src
+      ${setup}
+      cp -r ${depsSrc} /work/src && chmod -R u+w /work/src
       cd /work/src
-      cp -r ${appWeb}/. app/web/ && chmod -R u+w app/web
       mkdir -p .cargo
       cp ${cargoVendor}/config.toml .cargo/config.toml
-
-      export CARGO_NET_OFFLINE=true
-      export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc
-      export COMMONTY_NET_LIB_DIR=/work/netlib COMMONTY_VERSION=${version}
-      # the release key and the repository, for the home controller's installer
-      export COMMONTY_RELEASE_KEY=$(tr -d '[:space:]' < ${../../fleet/release.pub})
-      export COMMONTY_REPO=${(pkgs.lib.importJSON ../../fleet/policy.json).repo}
-      export APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 LDAI_RUNTIME_FILE=${runtime}
-      export CARGO_BUILD_JOBS=$NIX_BUILD_CORES
-      # the card writer the installer runs elevated, carried beside the app
       cargo build --release --locked -p hubwriter
-      cd app
-      cargo tauri build --verbose --config '{"version":"${version}","bundle":{"resources":{"../target/release/dd-hub-writer":"dd-hub-writer"}}}' --bundles deb,appimage -- --locked
-
+      (cd app && ${appBuild})
       mkdir -p $out
-      # tauri's .deb keeps each file's build time, in whatever order the
-      # disk lists them; Ubuntu's dpkg-deb packs it again sorted, every
-      # time clamped to SOURCE_DATE_EPOCH
-      dpkg-deb -R /work/src/target/release/bundle/deb/*.deb /work/deb
-      # and its checksum list in the disk's order too, which differs from
-      # one machine to the next (v0.1.25: node1 and node2 disagreed on it)
-      LC_ALL=C sort -k2 -o /work/deb/DEBIAN/md5sums /work/deb/DEBIAN/md5sums
-      dpkg-deb --root-owner-group -Zxz --build /work/deb $out/commonty_${version}_amd64.deb
-      cp /work/src/target/release/bundle/appimage/*.AppImage $out/commonty_${version}_amd64.AppImage
+      tar -C /work/src -cf - target | zstd -T0 -3 -o $out/target.tar.zst
     '';
-  }
-)
+  };
+in
+vm {
+  pname = "commonty-linux";
+  inherit version;
+  buildCommand = ''
+    ${setup}
+    ${pkgs.lib.concatStrings (
+      pkgs.lib.mapAttrsToList (n: f: ''
+        install -m755 ${f} $XDG_CACHE_HOME/tauri/${n}
+      '') tools
+    )}
+
+    # the network engine, with Ubuntu's C compiler
+    cp -r ${netSrc} /work/net && chmod -R u+w /work/net
+    cp -r ${netVendor} /work/net/vendor
+    (cd /work/net && CGO_ENABLED=1 CC=gcc GOFLAGS="-mod=vendor -trimpath" \
+      GOTOOLCHAIN=local GOPROXY=off GOCACHE=/work/gocache \
+      go build -buildmode=c-archive -o /work/netlib/libcommontynet.a .)
+
+    cp -r ${src} /work/src && chmod -R u+w /work/src
+    cd /work/src
+    cp -r ${appWeb}/. app/web/ && chmod -R u+w app/web
+    mkdir -p .cargo
+    cp ${cargoVendor}/config.toml .cargo/config.toml
+    # the dependencies, compiled already; cargo builds only what is ours.
+    # Ours were stand-ins there: every source newer than what was built from
+    # them, so cargo never takes a stand-in for the real thing
+    zstd -dc ${deps}/target.tar.zst | tar -C /work/src -xf -
+    find /work/src -path /work/src/target -prune -o -type f -exec touch {} +
+
+    export COMMONTY_NET_LIB_DIR=/work/netlib COMMONTY_VERSION=${version}
+    # the release key and the repository, for the home controller's installer
+    export COMMONTY_RELEASE_KEY=$(tr -d '[:space:]' < ${../../fleet/release.pub})
+    export COMMONTY_REPO=${(pkgs.lib.importJSON ../../fleet/policy.json).repo}
+    export APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 LDAI_RUNTIME_FILE=${runtime}
+    # the card writer the installer runs elevated, carried beside the app
+    cargo build --release --locked -p hubwriter
+    cd app
+    cargo tauri build --verbose --config '{"version":"${version}","bundle":{"resources":{"../target/release/dd-hub-writer":"dd-hub-writer"}}}' --bundles deb,appimage -- --locked
+
+    mkdir -p $out
+    # tauri's .deb keeps each file's build time, in whatever order the
+    # disk lists them; Ubuntu's dpkg-deb packs it again sorted, every
+    # time clamped to SOURCE_DATE_EPOCH
+    dpkg-deb -R /work/src/target/release/bundle/deb/*.deb /work/deb
+    # and its checksum list in the disk's order too, which differs from
+    # one machine to the next (v0.1.25: node1 and node2 disagreed on it)
+    LC_ALL=C sort -k2 -o /work/deb/DEBIAN/md5sums /work/deb/DEBIAN/md5sums
+    dpkg-deb --root-owner-group -Zxz --build /work/deb $out/commonty_${version}_amd64.deb
+    cp /work/src/target/release/bundle/appimage/*.AppImage $out/commonty_${version}_amd64.AppImage
+  '';
+}

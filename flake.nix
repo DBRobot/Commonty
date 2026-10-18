@@ -986,6 +986,7 @@
                   cargoVendor
                   ;
                 src = sources.app;
+                depsSrc = depsIn sources.app;
                 netSrc = ./app/net;
                 netVendor = appNet.goModules;
               };
