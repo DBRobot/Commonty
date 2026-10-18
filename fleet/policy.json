@@ -25,5 +25,12 @@
       "to": "https://github.com/DBRobot/Home-Server.git",
       "user": "DBRobot"
     }
-  ]
+  ],
+  "computers": {
+    "memory": 16384,
+    "threads": 8,
+    "disk": 200,
+    "portBase": 27200,
+    "portCount": 200
+  }
 }

@@ -710,6 +710,9 @@
                   release = nixpkgs.lib.removeSuffix "\n" (builtins.readFile ./fleet/release.pub);
                   members = builtins.fromJSON (builtins.readFile ./fleet/members.json);
                 };
+                # what members' remote computers may take, and their ports'
+                # pool (state/computers): fleet/policy.json computers
+                computers = (builtins.fromJSON (builtins.readFile ./fleet/policy.json)).computers;
                 rules = ctl.rules // {
                   leases = (ctl.rules.leases or { }) // leases;
                 };

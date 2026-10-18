@@ -7,6 +7,7 @@
 package main
 
 import (
+	"commonty/control/state/computers"
 	"commonty/control/state/ident"
 	"context"
 	"crypto/ecdsa"
@@ -751,6 +752,23 @@ func main() {
 				d := s.Directory[i]
 				return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
 			}, s.Height, s.Time, q.Get("name"), since)
+			w.Header().Set("content-type", "application/json")
+			w.WriteHeader(code)
+			_, _ = w.Write(b)
+		})
+	}
+	// members' remote computers (docs/dev/remote-computers.md): judged here from
+	// the same log, beside identity, so every box serves the same
+	if cfg.Identity != nil && cfg.Computers != nil {
+		rc := computers.NewServer(cfg.Identity, cfg.Computers, cfg.BoxVoters())
+		http.HandleFunc("/computers", func(w http.ResponseWriter, req *http.Request) {
+			q := req.URL.Query()
+			since, _ := strconv.ParseUint(q.Get("since"), 10, 64)
+			s := n.State()
+			code, b := rc.Answer(len(s.Directory), func(i int) ident.Item {
+				d := s.Directory[i]
+				return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+			}, s.Height, s.Time, q.Get("owner"), since)
 			w.Header().Set("content-type", "application/json")
 			w.WriteHeader(code)
 			_, _ = w.Write(b)

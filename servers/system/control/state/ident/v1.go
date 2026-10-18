@@ -642,6 +642,11 @@ func noDuplicates(raw []byte) error {
 // nothing the struct does not know, no key in another case, no null where
 // the signer leaves a field out. Otherwise a signature could pass over
 // bytes that say one thing while the item read says another.
+// Strict and SameAs read a signed body the way every kind here is read:
+// for the judges beside this one (state/computers)
+func Strict(raw []byte, v any) error   { return strict(raw, v) }
+func SameAs(raw, rebuilt []byte) error { return sameAs(raw, rebuilt) }
+
 func sameAs(raw, rebuilt []byte) error {
 	if err := noDuplicates(raw); err != nil {
 		return fmt.Errorf("not an item: %w", err)
