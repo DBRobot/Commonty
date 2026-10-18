@@ -91,6 +91,13 @@ cfg["validators"].append(
         "key": b64(w.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)),
     }
 )
+# the identity judge's part, so dd-control serves /identity: a release
+# key, and nobody on its list (ada is on the gates' VERIFY_MEMBERS)
+rel = ed.Ed25519PrivateKey.generate()
+cfg["identity"] = {
+    "release": b64(rel.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)),
+    "members": {"members": [], "revoked": []},
+}
 json.dump(cfg, open("config.json", "w"))
 json.dump(cfg, open(f"{OUT}/config.json", "w"))
 open("w/config.js", "w").write("export default " + json.dumps(cfg) + ";\n")
