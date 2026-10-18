@@ -97,7 +97,9 @@ copied("photos", "p2", "the plan keeps it here")
 # b nearly full: what a sends is refused, what b keeps still read
 # the timer stopped, and a run of it already going: one ending after the
 # touch would see the room and take the mark away
-b.succeed("systemctl stop dd-store-facts.timer dd-store-facts.service; touch /run/dd-store/full")
+b.succeed(
+    "systemctl stop dd-store-facts.timer dd-store-facts.service; touch /run/dd-store/full"
+)
 put(a, "photos", "p3", "no room for it there")
 a.succeed("systemctl start dd-store-copy.service")
 b.fail(
