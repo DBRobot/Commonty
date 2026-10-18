@@ -63,6 +63,8 @@
         "takeover"
         "forge-follow"
         "net-follow"
+        "join-install"
+        "joined-box"
         "photos"
         "llm"
         "vault"
@@ -1050,6 +1052,14 @@
                     ''
                   );
               # the proof each starts where a stranger would run it
+              # the box installer's drive (docs/dev/joining.md), which the
+              # app's installer window writes
+              box-installer = need { ramGB = 4; } (
+                pkgs.runCommand "commonty-box-installer-${version}" { } ''
+                  mkdir -p $out
+                  cp ${self.installers.${system}.box}/*.raw.zst $out/commonty-box-installer-${version}.img.zst
+                ''
+              );
               tests.linux = import ./nix/app-release/test-linux.nix { inherit pkgs linux; };
               tests.windows = import ./nix/app-release/test-windows.nix {
                 inherit pkgs;
@@ -1388,6 +1398,204 @@
             }) testedCrates
           );
         };
+      # One box per entry in fleet/boxes.json: its hardware file plus its
+      # roles. What a box runs is data, not a hand-written import list, and
+      # the per-box wiring (who its peers are, the boxes Settings shows)
+      # is derived from the same list.
+      fleetBoxes =
+        let
+          lib = nixpkgs.lib;
+          # With failover (fleet/policy.json), a box carries every role whose
+          # writers it is able to run, by its own report and the owner's
+          # rules (capability), whatever fleet/boxes.json lists: a box that
+          # joins is ready to take them over, and the control plane decides
+          # where each runs. No hand-written list to keep.
+          failover = (lib.importJSON ./fleet/policy.json).failover or false;
+          fp = import ./nix/lib/fleet-placement.nix { inherit lib; };
+          roleList = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ./fleet/roles.json);
+          writersOf =
+            r: lib.filter (s: fp.needs ? ${s} && fp.needs.${s}.lease) (roleList.${r}.services or [ ]);
+          ableTo =
+            name: r: writersOf r != [ ] && lib.all (s: fp.inputs.boxes.${name}.can ? ${s}) (writersOf r);
+          boxes = lib.mapAttrs (
+            name: box:
+            box
+            // lib.optionalAttrs failover {
+              roles =
+                box.roles
+                ++ lib.filter (r: !builtins.elem r box.roles && ableTo name r) (builtins.attrNames roleList);
+            }
+          ) (builtins.fromJSON (builtins.readFile ./fleet/boxes.json));
+          directoryOf =
+            name: box:
+            if box.public then
+              "https://files.${(lib.importJSON ./fleet/policy.json).domain}/_dd/directory"
+            else
+              "http://${box.net}:4181/_dd/directory";
+          # a role that declares secrets imports roles/_sops.nix; the sops
+          # module has to be present for it. Roles are files; look inside.
+          needsSops =
+            roles: builtins.any (r: lib.hasInfix "_sops.nix" (builtins.readFile ./nix/roles/${r}.nix)) roles;
+          storage = lib.filterAttrs (_: b: builtins.elem "storage" b.roles) boxes;
+          # the garage cluster: every storage box, each told about the others
+          # whose ids are known (a box's id exists once it has started once)
+          garageOf = name: box: {
+            dd.garage = {
+              zone = box.regionId;
+              inherit (box.garage) capacity dataDir;
+              publicAddr = "${box.net}:3901";
+              peers = lib.mapAttrsToList (_: b: "${b.garage.id}@${b.net}:3901") (
+                lib.filterAttrs (n: b: n != name && b.garage ? id) storage
+              );
+            };
+          };
+          # The storage pool, for a box: its own garage, or a storage box's
+          # over the fleet's network - one in the same house when there is
+          # one, then any - each serves the whole cluster. Closures (the
+          # nix-cache bucket), backups, the vault's files and the gateway's
+          # s3. all go there (dd.box.s3).
+          poolFor =
+            box:
+            if builtins.elem "storage" box.roles then
+              "127.0.0.1"
+            else
+              let
+                order = lib.sort (a: b: a.name < b.name) (
+                  lib.mapAttrsToList (name: b: b // { inherit name; }) storage
+                );
+                near = lib.filter (b: b.siteId == box.siteId) order;
+              in
+              (builtins.head (if near != [ ] then near else order)).net;
+          cacheOf =
+            name: box:
+            let
+              host = poolFor box;
+            in
+            {
+              dd.agent.cache = "s3://nix-cache?endpoint=${host}:3900&scheme=http&region=us-east-1";
+              dd.box.s3 = "http://${host}:3900";
+            };
+          # what a member's device may reach for games, on any box: each
+          # games box's own list (dd.games.reach: its range and every port
+          # a game insists on)
+          fleetGamePorts = lib.unique (
+            lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.games.reach) (
+              builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "game" b.roles) boxes)
+            )
+          );
+          # and for members' computers: each compute box's pool (dd.computers.reach)
+          fleetComputerPorts = lib.unique (
+            lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.computers.reach) (
+              builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "compute" b.roles) boxes)
+            )
+          );
+          mkBox = name: box: mkBoxIn ./fleet/boxes/${name} name box;
+          # what every box's system gets, beside its modules
+          boxArgs = {
+            inherit self vmTests;
+            boxNames = builtins.attrNames boxes;
+            # a unit's script from a file beside its module (nix/lib/script.nix)
+            ddScript = import ./nix/lib/script.nix { lib = nixpkgs.lib; };
+          };
+          mkBoxIn =
+            dir: name: box:
+            lib.nixosSystem {
+              specialArgs = boxArgs;
+              modules = boxModules dir name box;
+            };
+          # a box's modules: its host, its roles, the box-wide ones
+          boxModules =
+            dir: name: box:
+            [
+              (import ./nix/modules/box/host.nix dir)
+              {
+                networking.hostName = name;
+                dd.box.net = box.net;
+                dd.box.site = box.siteId;
+                dd.box.region = box.regionId;
+                # the same house's boxes alone: its Wi-Fi and its page
+                dd.verify.housePeers = lib.mapAttrsToList directoryOf (
+                  lib.filterAttrs (n: b: n != name && b.siteId == box.siteId) boxes
+                );
+                # itself included: Settings' Network tab is the whole fleet
+                dd.verify.fleet = lib.mapAttrs (_: b: b.net) boxes;
+                # whose each box is, and where its own metrics answer
+                dd.verify.boxes = lib.mapAttrs (n: _: {
+                  owner = (lib.importJSON ./fleet/boxes/${n}/box.json).owner or null;
+                  metrics = self.nixosConfigurations.${n}.config.dd.boxMetrics.host;
+                }) boxes;
+                # the other boxes, as the agent checks a release did not
+                # cost this box its way off itself
+                # a port each other box listens on, or refuses from: the gate's
+                # (in the house it answers; out of it the firewall is silent)
+                # and the front door's. Either answering is reach. An agent
+                # from before refusals counted needs the first: that is what
+                # took release 211 back on node1, where node2 has no 443.
+                dd.agent.reach = lib.concatLists (
+                  lib.mapAttrsToList (_: b: [
+                    "${b.net}:4181"
+                    "${b.net}:443"
+                  ]) (lib.filterAttrs (n: _: n != name) boxes)
+                );
+              }
+              (lib.optionalAttrs (builtins.elem "gateway" box.roles) {
+                dd.headscale.gamePorts = fleetGamePorts;
+                dd.headscale.computerPorts = fleetComputerPorts;
+                dd.headscale.owners = lib.mapAttrs' (
+                  n: b: lib.nameValuePair b.net (lib.importJSON ./fleet/boxes/${n}/box.json).owner
+                ) (lib.filterAttrs (n: b: b ? net && builtins.pathExists ./fleet/boxes/${n}/box.json) boxes);
+                # every box may ask for its own key, signed and sealed by its TPM
+                dd.headscale.boxes =
+                  lib.mapAttrs
+                    (n: b: {
+                      key = b.unlockKey;
+                      recipient = (lib.importJSON ./fleet/boxes/${n}/hardware.json).secretsKey;
+                    })
+                    (
+                      lib.filterAttrs (n: b: b ? unlockKey && builtins.pathExists ./fleet/boxes/${n}/hardware.json) boxes
+                    );
+              })
+            ]
+            ++ map (r: ./nix/roles/${r}.nix) box.roles
+            ++ lib.optional (builtins.elem "storage" box.roles) (garageOf name box)
+            ++ [ (cacheOf name box) ]
+            ++ [
+              lanzaboote.nixosModules.lanzaboote
+              ./nix/modules/box/secure-boot.nix
+              ./nix/modules/box/disk-unlock.nix
+              ./nix/modules/box/control.nix
+              ./nix/modules/box/placed.nix
+              ./nix/modules/box/ports.nix
+              ./nix/modules/box/report.nix
+              {
+                dd.control.enable = true;
+                dd.control.roles = box.roles;
+              }
+            ]
+            ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops
+            ++ [ disko.nixosModules.disko ]
+            ++ lib.optional (builtins.elem "observe" box.roles) {
+              # this box's own sidecar; the others' history is read from the
+              # bucket, never from them (README: no box talks to another)
+              dd.thanos.sidecars = [ "127.0.0.1:10901" ];
+            };
+          joinedBox = {
+            net = "";
+            siteId = "joined";
+            regionId = "joined";
+            public = false;
+            roles = [ "core" ];
+          };
+        in
+        {
+          configs = lib.mapAttrs mkBox boxes;
+          # a stranger: core alone, and its store; what it carries the
+          # control plane never gives it, holding no lease
+          joined = { name, dir }: mkBoxIn dir name joinedBox;
+          # the same, as modules, for a VM test to boot (nix/tests/joined-box.nix)
+          joinedModules = { name, dir }: boxModules dir name joinedBox;
+          inherit boxArgs;
+        };
     in
     {
       # `nix develop` drops you into a shell with the rust toolchain on PATH.
@@ -1668,185 +1876,37 @@
             );
         };
 
-      # One box per entry in fleet/boxes.json: its hardware file plus its
-      # roles. What a box runs is data, not a hand-written import list, and
-      # the per-box wiring (who its peers are, the boxes Settings shows)
-      # is derived from the same list.
       nixosConfigurations =
-        let
-          lib = nixpkgs.lib;
-          # With failover (fleet/policy.json), a box carries every role whose
-          # writers it is able to run, by its own report and the owner's
-          # rules (capability), whatever fleet/boxes.json lists: a box that
-          # joins is ready to take them over, and the control plane decides
-          # where each runs. No hand-written list to keep.
-          failover = (lib.importJSON ./fleet/policy.json).failover or false;
-          fp = import ./nix/lib/fleet-placement.nix { inherit lib; };
-          roleList = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ./fleet/roles.json);
-          writersOf =
-            r: lib.filter (s: fp.needs ? ${s} && fp.needs.${s}.lease) (roleList.${r}.services or [ ]);
-          ableTo =
-            name: r: writersOf r != [ ] && lib.all (s: fp.inputs.boxes.${name}.can ? ${s}) (writersOf r);
-          boxes = lib.mapAttrs (
-            name: box:
-            box
-            // lib.optionalAttrs failover {
-              roles =
-                box.roles
-                ++ lib.filter (r: !builtins.elem r box.roles && ableTo name r) (builtins.attrNames roleList);
-            }
-          ) (builtins.fromJSON (builtins.readFile ./fleet/boxes.json));
-          directoryOf =
-            name: box:
-            if box.public then
-              "https://files.${(lib.importJSON ./fleet/policy.json).domain}/_dd/directory"
-            else
-              "http://${box.net}:4181/_dd/directory";
-          # a role that declares secrets imports roles/_sops.nix; the sops
-          # module has to be present for it. Roles are files; look inside.
-          needsSops =
-            roles: builtins.any (r: lib.hasInfix "_sops.nix" (builtins.readFile ./nix/roles/${r}.nix)) roles;
-          storage = lib.filterAttrs (_: b: builtins.elem "storage" b.roles) boxes;
-          # the garage cluster: every storage box, each told about the others
-          # whose ids are known (a box's id exists once it has started once)
-          garageOf = name: box: {
-            dd.garage = {
-              zone = box.regionId;
-              inherit (box.garage) capacity dataDir;
-              publicAddr = "${box.net}:3901";
-              peers = lib.mapAttrsToList (_: b: "${b.garage.id}@${b.net}:3901") (
-                lib.filterAttrs (n: b: n != name && b.garage ? id) storage
-              );
-            };
-          };
-          # The storage pool, for a box: its own garage, or a storage box's
-          # over the fleet's network - one in the same house when there is
-          # one, then any - each serves the whole cluster. Closures (the
-          # nix-cache bucket), backups, the vault's files and the gateway's
-          # s3. all go there (dd.box.s3).
-          poolFor =
-            box:
-            if builtins.elem "storage" box.roles then
-              "127.0.0.1"
-            else
-              let
-                order = lib.sort (a: b: a.name < b.name) (
-                  lib.mapAttrsToList (name: b: b // { inherit name; }) storage
-                );
-                near = lib.filter (b: b.siteId == box.siteId) order;
-              in
-              (builtins.head (if near != [ ] then near else order)).net;
-          cacheOf =
-            name: box:
-            let
-              host = poolFor box;
-            in
-            {
-              dd.agent.cache = "s3://nix-cache?endpoint=${host}:3900&scheme=http&region=us-east-1";
-              dd.box.s3 = "http://${host}:3900";
-            };
-          # what a member's device may reach for games, on any box: each
-          # games box's own list (dd.games.reach: its range and every port
-          # a game insists on)
-          fleetGamePorts = lib.unique (
-            lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.games.reach) (
-              builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "game" b.roles) boxes)
-            )
-          );
-          # and for members' computers: each compute box's pool (dd.computers.reach)
-          fleetComputerPorts = lib.unique (
-            lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.computers.reach) (
-              builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "compute" b.roles) boxes)
-            )
-          );
-          mkBox =
-            name: box:
-            lib.nixosSystem {
-              specialArgs = {
-                inherit self vmTests;
-                boxNames = builtins.attrNames boxes;
-                # a unit's script from a file beside its module (nix/lib/script.nix)
-                ddScript = import ./nix/lib/script.nix { lib = nixpkgs.lib; };
-              };
-              modules = [
-                (import ./nix/modules/box/host.nix ./fleet/boxes/${name})
-                {
-                  networking.hostName = name;
-                  dd.box.net = box.net;
-                  dd.box.site = box.siteId;
-                  dd.box.region = box.regionId;
-                  # the same house's boxes alone: its Wi-Fi and its page
-                  dd.verify.housePeers = lib.mapAttrsToList directoryOf (
-                    lib.filterAttrs (n: b: n != name && b.siteId == box.siteId) boxes
-                  );
-                  # itself included: Settings' Network tab is the whole fleet
-                  dd.verify.fleet = lib.mapAttrs (_: b: b.net) boxes;
-                  # whose each box is, and where its own metrics answer
-                  dd.verify.boxes = lib.mapAttrs (n: _: {
-                    owner = (lib.importJSON ./fleet/boxes/${n}/box.json).owner or null;
-                    metrics = self.nixosConfigurations.${n}.config.dd.boxMetrics.host;
-                  }) boxes;
-                  # the other boxes, as the agent checks a release did not
-                  # cost this box its way off itself
-                  # a port each other box listens on, or refuses from: the gate's
-                  # (in the house it answers; out of it the firewall is silent)
-                  # and the front door's. Either answering is reach. An agent
-                  # from before refusals counted needs the first: that is what
-                  # took release 211 back on node1, where node2 has no 443.
-                  dd.agent.reach = lib.concatLists (
-                    lib.mapAttrsToList (_: b: [
-                      "${b.net}:4181"
-                      "${b.net}:443"
-                    ]) (lib.filterAttrs (n: _: n != name) boxes)
-                  );
-                }
-                (lib.optionalAttrs (builtins.elem "gateway" box.roles) {
-                  dd.headscale.gamePorts = fleetGamePorts;
-                  dd.headscale.computerPorts = fleetComputerPorts;
-                  dd.headscale.owners = lib.mapAttrs' (
-                    n: b: lib.nameValuePair b.net (lib.importJSON ./fleet/boxes/${n}/box.json).owner
-                  ) (lib.filterAttrs (n: b: b ? net && builtins.pathExists ./fleet/boxes/${n}/box.json) boxes);
-                  # every box may ask for its own key, signed and sealed by its TPM
-                  dd.headscale.boxes =
-                    lib.mapAttrs
-                      (n: b: {
-                        key = b.unlockKey;
-                        recipient = (lib.importJSON ./fleet/boxes/${n}/hardware.json).secretsKey;
-                      })
-                      (
-                        lib.filterAttrs (n: b: b ? unlockKey && builtins.pathExists ./fleet/boxes/${n}/hardware.json) boxes
-                      );
-                })
-              ]
-              ++ map (r: ./nix/roles/${r}.nix) box.roles
-              ++ lib.optional (builtins.elem "storage" box.roles) (garageOf name box)
-              ++ [ (cacheOf name box) ]
-              ++ [
-                lanzaboote.nixosModules.lanzaboote
-                ./nix/modules/box/secure-boot.nix
-                ./nix/modules/box/disk-unlock.nix
-                ./nix/modules/box/control.nix
-                ./nix/modules/box/placed.nix
-                ./nix/modules/box/ports.nix
-                ./nix/modules/box/report.nix
-                {
-                  dd.control.enable = true;
-                  dd.control.roles = box.roles;
-                }
-              ]
-              ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops
-              ++ [ disko.nixosModules.disko ]
-              ++ lib.optional (builtins.elem "observe" box.roles) {
-                # this box's own sidecar; the others' history is read from the
-                # bucket, never from them (README: no box talks to another)
-                dd.thanos.sidecars = [ "127.0.0.1:10901" ];
-              };
-            };
-        in
-        lib.mapAttrs mkBox boxes
+        fleetBoxes.configs
         // import ./nix/controller {
           inherit self nixpkgs;
-          tang = lib.importJSON ./fleet/tang.json;
+          tang = nixpkgs.lib.importJSON ./fleet/tang.json;
         };
+      # A box the release does not list builds its own config from its own
+      # report (docs/dev/joining.md): `nix build --impure --expr` with this,
+      # from the release's commit, on the box
+      lib.joinedBox = fleetBoxes.joined;
+      lib.joinedBoxModules = fleetBoxes.joinedModules;
+      lib.boxArgs = fleetBoxes.boxArgs;
+      # the installer a blank machine boots to become a box of the fleet,
+      # with nothing set up by hand (nix/installer)
+      installers.${system} = {
+        join =
+          (nixpkgs.lib.nixosSystem {
+            inherit system;
+            specialArgs = { inherit self; };
+            modules = [
+              "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
+              ./nix/installer/iso.nix
+            ];
+          }).config.system.build.isoImage;
+        # the drive the app's installer window writes (nix/installer/image.nix)
+        box =
+          (nixpkgs.lib.nixosSystem {
+            inherit system;
+            specialArgs = { inherit self; };
+            modules = [ ./nix/installer/image.nix ];
+          }).config.system.build.image;
+      };
     };
 }

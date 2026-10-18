@@ -80,6 +80,11 @@ pub struct Entry {
     /// Absent on entries made before it was asked, which stay valid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terms: Option<String>,
+    /// The join tickets of boxes this person set up and has since removed
+    /// (docs/dev/joining.md): a box that came with one of these is not
+    /// theirs any more, on every box at once. Absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_boxes: Vec<String>,
     /// strictly increasing; a box never accepts an older or equal one
     pub version: u64,
     pub updated: u64,
@@ -1470,6 +1475,7 @@ mod tests {
                 proof: prove(&ck, &inv.invite.public_key, root, 200),
             }),
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 200,
         };
@@ -1502,6 +1508,7 @@ mod tests {
             libraries: vec![],
             grant: None,
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: TERMS_ASKED_FROM - 1,
         };
@@ -1544,6 +1551,7 @@ mod tests {
             libraries: vec![],
             grant: None,
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         };
@@ -1663,6 +1671,7 @@ mod tests {
                 grant: None,
                 libraries: vec![],
                 terms: None,
+                removed_boxes: vec![],
                 version,
                 updated: version,
             },
@@ -1800,6 +1809,7 @@ mod tests {
                 recovered_from: vec![],
                 devices: vec![dev(&generate())],
                 terms: None,
+                removed_boxes: vec![],
                 version: 1,
                 updated: 1,
             };
@@ -1842,6 +1852,7 @@ mod tests {
             recovered_from: vec![],
             devices: vec![dev(&d1)],
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         };
@@ -1941,6 +1952,7 @@ mod tests {
             }),
             libraries: vec![],
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         };
@@ -2248,6 +2260,7 @@ mod tests {
                 created: 1,
             }],
             terms: None,
+            removed_boxes: vec![],
             version: 1,
             updated: 1,
         };

@@ -75,7 +75,14 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/control":
             now = int(time.time() * 1000)
             t = now if control["fresh"] else now - 600_000
-            return self.reply(200, {"time": t, "leases": control["leases"]})
+            return self.reply(
+                200,
+                {
+                    "time": t,
+                    "leases": control["leases"],
+                    "joined": control.get("joined", {}),
+                },
+            )
         if u.path == "/tunnels":
             return self.reply(200, tunnels)
         if u.path == "/identity":

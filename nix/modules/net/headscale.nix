@@ -40,6 +40,9 @@ let
       # by the gate in the boxes user: tagged, so no one's device, and never
       # its owner's box-admin ports
       tagOwners."tag:computer" = [ "boxes@" ];
+      # a box that joined on its own key (state/join.go): a stranger, which
+      # keeps copies and nothing else
+      tagOwners."tag:joined" = [ "boxes@" ];
       # A person's devices reach a box's front door and its game servers.
       # A box's owner's devices reach that box, and only that box, for what
       # an admin needs: ssh, its dns, the cache push. Boxes reach each other
@@ -78,6 +81,22 @@ let
           action = "accept";
           src = [ "tag:box" ];
           dst = map (p: "tag:box:${p}") boxPorts;
+        }
+        # the boxes' stores, at store.<box>.<domain> on a port of their
+        # own: all a box that joined on its own key reaches, and all of it
+        # another box reaches
+        {
+          action = "accept";
+          src = [ "tag:box" ];
+          dst = [
+            "tag:box:3443"
+            "tag:joined:3443"
+          ];
+        }
+        {
+          action = "accept";
+          src = [ "tag:joined" ];
+          dst = [ "tag:box:3443" ];
         }
       ]
       ++ lib.mapAttrsToList (addr: owner: {

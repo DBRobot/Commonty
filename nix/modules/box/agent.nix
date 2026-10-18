@@ -109,7 +109,9 @@ in
         pkgs.systemd
         pkgs.coreutils
         pkgs.openssh # ssh-keygen checks the boxes' signatures
-      ];
+      ]
+      # a box that joined fetches the signed commit to build itself from
+      ++ lib.optional config.dd.box.joined pkgs.git;
       environment = {
         DD_AGENT_URL = cfg.url;
         DD_AGENT_ATTESTERS = "/etc/dd/attesters.json";
@@ -119,7 +121,13 @@ in
         DD_AGENT_SSH = lib.boolToString cfg.ssh;
         DD_AGENT_REACH = lib.concatStringsSep " " cfg.reach;
       }
-      // lib.optionalAttrs (cfg.cache != null) { DD_AGENT_CACHE = cfg.cache; };
+      // lib.optionalAttrs (cfg.cache != null) { DD_AGENT_CACHE = cfg.cache; }
+      # a box that joined on its own key builds its own system, from the
+      # fleet's public repository at the commit the release key signed
+      // lib.optionalAttrs config.dd.box.joined {
+        DD_AGENT_JOINED_SOURCE = "git+https://code.${config.dd.domain}/${config.dd.repo}";
+        DD_AGENT_JOINED_DIR = "/var/lib/dd/box";
+      };
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${agent}/bin/dd-agent";

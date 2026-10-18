@@ -60,10 +60,19 @@ in
         config.environment.etc."dd-placed/carries.json".source
       ];
       description = "The control plane: heartbeats and the agreed state";
+      # a box that joined, still under the name it was installed with: it
+      # joins once it has built itself under its key's (dd-agent), whose
+      # switch starts this
       wantedBy = [ "multi-user.target" ];
+      unitConfig.ConditionHost = lib.mkIf (config.networking.hostName == "joining") "!joining";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
-      path = [ pkgs.tpm2-tools ];
+      path = [
+        pkgs.tpm2-tools
+      ]
+      # where the network's control server runs: where each box that joined
+      # on its own key is on the network, into the agreed state
+      ++ lib.optional config.services.headscale.enable config.services.headscale.package;
       environment.TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
       serviceConfig = {
         ExecStart = lib.concatStringsSep " " [
@@ -85,6 +94,9 @@ in
           (lib.optionalString config.dd.verify.enable "-submit /run/dd-control/submit.sock -submit-group dd-verify")
           # dd-attest hands in what it built for a build order here
           "-builds /run/dd-control/built.sock"
+          # a box the release does not list joins on its own key: the one
+          # its TPM holds, and its secrets key's recipient (dd-join-prepare)
+          (lib.optionalString config.dd.box.joined "-join-key /var/lib/dd/box-key.spki -join-recipient-file /var/lib/dd/secrets-recipient -join-house joined -join-ticket-file /var/lib/dd/join-ticket")
         ];
         StateDirectory = "dd-control";
         StateDirectoryMode = "0700";

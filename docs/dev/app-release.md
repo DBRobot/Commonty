@@ -101,6 +101,9 @@ windows     windows.nix   the installer: Rust for msvc with clang and lld
 dd-windows  windows.nix   dd.exe, the same way
 android     android.nix   the apk, both abis, unsigned; gradle offline
                           against android-deps.json
+box-installer nix/installer/image.nix  the box installer's drive, which
+                          the app's installer window writes
+                          (docs/dev/joining.md)
 tests       test-linux.nix  the .deb installed on stock Ubuntu 22.04 and the
                           AppImage run on 24.04 without WebKit; each must
                           open its window

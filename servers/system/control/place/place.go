@@ -136,6 +136,19 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 			p.Boxes[name] = []Decision{}
 		}
 	}
+	// a box that joined on its own key (state/join.go) can run nothing - it
+	// is in no release's capability table - and holds copies where its
+	// store has room: more places a bucket is kept, never the only one, as
+	// a bucket is always kept where its service runs
+	for name := range s.Joined {
+		if _, listed := in.Boxes[name]; listed {
+			continue
+		}
+		if b := s.Boxes[name]; b != nil && s.Time-b.LastSeen <= goneAfter {
+			live = append(live, name)
+			p.Boxes[name] = []Decision{}
+		}
+	}
 	sort.Strings(live)
 
 	// what runs now, by the roles each heartbeat names, and the placed
@@ -639,7 +652,20 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 				have = append(have, name)
 			}
 		}
-		sort.SliceStable(have, func(i, j int) bool { return held(have[i], b) > held(have[j], b) })
+		// a holder able to take the service over first, then a box of
+		// the release, then one that joined: a box's own word that it
+		// keeps a copy never pushes out a box the release names
+		takesOver := func(name string) bool { _, ok := in.Boxes[name].Can[bk.Service]; return ok }
+		listed := func(name string) bool { _, ok := in.Boxes[name]; return ok }
+		sort.SliceStable(have, func(i, j int) bool {
+			if a, b := takesOver(have[i]), takesOver(have[j]); a != b {
+				return a
+			}
+			if a, b := listed(have[i]), listed(have[j]); a != b {
+				return a
+			}
+			return held(have[i], b) > held(have[j], b)
+		})
 		for _, name := range have {
 			add(name)
 		}
@@ -650,7 +676,14 @@ func Decide(in Inputs, s *state.State, goneAfter int64) Plan {
 				more = append(more, name)
 			}
 		}
-		sort.SliceStable(more, func(i, j int) bool { return spare(more[i]) > spare(more[j]) })
+		// a box able to take the service over first: a copy is what it
+		// would start from; then any other, a stranger's too, by room
+		sort.SliceStable(more, func(i, j int) bool {
+			if a, b := takesOver(more[i]), takesOver(more[j]); a != b {
+				return a
+			}
+			return spare(more[i]) > spare(more[j])
+		})
 		for _, name := range more {
 			if len(keep) >= n {
 				break

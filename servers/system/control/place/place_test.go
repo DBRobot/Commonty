@@ -543,3 +543,47 @@ func TestABoxsOwnWordAddsNothingItsOwnerBarsNorALease(t *testing.T) {
 		t.Fatalf("db: %+v", p)
 	}
 }
+
+func TestAJoinedBoxKeepsCopiesAndRunsNothing(t *testing.T) {
+	in, s := stores()
+	// nas has no room; a stranger with a roomy store joins
+	s.Boxes["nas"].Facts["store_free_bytes"] = 10 * gib
+	s.Joined = map[string]*state.Joined{"jabc": {Key: "k"}}
+	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
+		"store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib, "ram_bytes": 64 * gib,
+	}}
+	p := Decide(in, s, 90_000)
+	if len(p.Boxes["jabc"]) != 0 {
+		t.Fatalf("a stranger was given a service: %+v", p.Boxes["jabc"])
+	}
+	if got := strings.Join(p.Copies["ente"], ","); got != "big,jabc" {
+		t.Fatalf("copies %q", got)
+	}
+}
+
+func TestACopyGoesFirstToABoxThatCouldTakeTheServiceOver(t *testing.T) {
+	in, s := stores()
+	in.Boxes["small"].Can["photos"], in.Boxes["small"].Can["postgres"] = 0.5, 0.5
+	// a stranger with far more room
+	s.Joined = map[string]*state.Joined{"jabc": {Key: "k"}}
+	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
+		"store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib,
+	}}
+	p := Decide(in, s, 90_000)
+	if got := strings.Join(p.Copies["ente"], ","); got != "big,small" {
+		t.Fatalf("copies %q: the box that could take photos over comes first", got)
+	}
+}
+
+func TestAStrangerSayingItKeepsACopyPushesOutNoBoxOfTheRelease(t *testing.T) {
+	in, s := stores()
+	s.Boxes["nas"].Facts["store/ente/bytes"] = 40 * gib
+	s.Joined = map[string]*state.Joined{"jabc": {Key: "k"}}
+	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
+		"store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib, "store/ente/bytes": 40 * gib,
+	}}
+	p := Decide(in, s, 90_000)
+	if got := strings.Join(p.Copies["ente"], ","); got != "big,nas" {
+		t.Fatalf("copies %q: the stranger's claim took the release box's slot", got)
+	}
+}

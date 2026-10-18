@@ -4,7 +4,15 @@ let
   me = boxes.${config.networking.hostName} or { };
   policy = lib.importJSON ../../fleet/policy.json;
   # whose box this is, and their keys (fleet/policy.json people)
-  owner = policy.people.${config.dd.box.owner};
+  # (nobody's, for a box that joined on its own key: no one's keys log in)
+  owner =
+    if config.dd.box.owner == null then
+      {
+        ssh = [ ];
+        paperKey = null;
+      }
+    else
+      policy.people.${config.dd.box.owner};
   # the other boxes, by their address on the fleet's network
   peersNet = lib.mapAttrsToList (_: b: b.net) (
     lib.filterAttrs (n: b: n != config.networking.hostName && b ? net) boxes
@@ -50,6 +58,8 @@ in
     # and an ssh session coming or going cannot fail its switch
     ../modules/box/logins.nix
     ../modules/observe/thanos.nix
+    # a joined box's metrics, to the observe box and its member alone
+    ../modules/observe/joined-metrics.nix
     ../modules/box/locate.nix
     ../modules/box/netspeed.nix
     ../modules/box/timer-watch.nix
@@ -71,7 +81,11 @@ in
     lib.optional (mail ? reader) mail.reader;
   dd.agent = {
     enable = true;
-    url = "https://git.${config.dd.domain}/${config.dd.repo}/raw/branch/releases/current.json";
+    # (from the public door for a box that joined on its own key, which
+    # the fleet's network keeps out of the forge)
+    url = "https://${
+      if config.dd.box.joined then "code" else "git"
+    }.${config.dd.domain}/${config.dd.repo}/raw/branch/releases/current.json";
     publicKey = lib.fileContents ../../fleet/release.pub;
     # each box's host key, as dd-attest signs with it: two of them must
     # vouch for a closure before a box switches to it
@@ -97,7 +111,9 @@ in
   dd.repo = policy.repo;
   # the box owner's paper key (their entry's recovery key): the box's disk keys
   # have a copy encrypted to it in /boot/dd, for a dead TPM
-  dd.unlock.recovery = owner.paperKey;
+  # (none for a box nobody owns, whose disks are not encrypted: what it
+  # keeps is ciphertext already)
+  dd.unlock.recovery = if owner.paperKey == null then "" else owner.paperKey;
   # every box holds a directory replica; the gateway role turns this into
   # the full verifier with the browser login
   dd.verify.role = lib.mkDefault "directory";
@@ -126,7 +142,9 @@ in
   # only be rebooted blind. The passphrase is in secrets/fleet.yaml on the
   # laptop (`dd secret run -- decrypt --extract '["console-password"]'
   # secrets/fleet.yaml`); the box holds only its hash.
-  sops.secrets.console-password-hash.neededForUsers = true;
+  sops.secrets.console-password-hash = lib.mkIf (config.dd.hasSecret "console-password-hash") {
+    neededForUsers = true;
+  };
   # and it has to be false for that hash to reach /etc/shadow: with
   # mutable users nixos writes a declarative password only for a user it
   # is creating, so on these boxes admin kept the `!` it was made with and
@@ -134,10 +152,18 @@ in
   # made a user by hand here (checked on both boxes); users are what the
   # repo says they are.
   users.mutableUsers = false;
+  # a box that joined on its own key is nobody's: nobody logs in to it, by
+  # keyboard or ssh, which is what it should be
+  users.allowNoPasswordLogin = config.dd.box.owner == null;
 
   users.users.admin = {
     isNormalUser = true;
-    hashedPasswordFile = config.sops.secrets.console-password-hash.path;
+    # none on a box without it: no keyboard way in there
+    hashedPasswordFile =
+      if config.dd.hasSecret "console-password-hash" then
+        config.sops.secrets.console-password-hash.path
+      else
+        null;
     extraGroups = [ "wheel" ];
     # the box's owner (box.json) logs in as admin
     openssh.authorizedKeys.keys = owner.ssh;

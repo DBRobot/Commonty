@@ -224,6 +224,13 @@ let
       url() {
         case "$1" in
         ${lib.concatStrings (lib.mapAttrsToList (p: v: "  ${p}) echo ${v.url} ;;\n") cfg.peers)}
+        j[0-9a-f]*)
+          # a box that joined on its own key (state/join.go), as the agreed
+          # state has it: its store is at its name
+          curl -fsS --max-time 10 ${cfg.control}/state \
+            | jq -e --arg n "$1" '.joined[$n] // empty' >/dev/null \
+            && echo "https://store.$1.${base}:${toString cfg.publicPort}"
+          ;;
         *) return 1 ;;
         esac
       }
@@ -396,6 +403,16 @@ in
       );
       default = { };
       description = "buckets copied hourly from the old shared storage pool (dd.box.s3) into this store, until failover reads them here: copied, never deleted from either";
+    };
+    publicPort = lib.mkOption {
+      type = lib.types.port;
+      default = 3443;
+      description = "where other boxes reach this store, at store.<box>.<domain>, and the only port a box that joined on its own key reaches";
+    };
+    control = lib.mkOption {
+      type = lib.types.str;
+      default = "http://127.0.0.1:4195";
+      description = "this box's dd-control, whose agreed state lists the boxes that joined on their own keys";
     };
     dataset = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
@@ -608,6 +625,75 @@ in
       };
     };
 
+    # a key here for each box that joined on its own key, as for the
+    # release's (dd-store-setup): written into the buckets copied, sealed
+    # to the recipient it joined with; gone when it is gone from the
+    # agreed state (only its key: what it copied here stays)
+    systemd.services.dd-store-joined = {
+      description = "Keys to this store for the boxes that joined on their own keys";
+      after = [ "dd-store-setup.service" ];
+      restartIfChanged = false;
+      path = [
+        pkgs.coreutils
+        pkgs.gnugrep
+        pkgs.gawk
+        pkgs.age
+        pkgs.curl
+        pkgs.jq
+      ]
+      # a joined box's recipient is its TPM's
+      ++ cfg.agePlugins;
+      serviceConfig.Type = "oneshot";
+      script = ''
+        set -uo pipefail
+        g() { ${garage} "$@"; }
+        g status >/dev/null 2>&1 || exit 0
+        st=$(curl -fsS --max-time 10 ${cfg.control}/state) || { echo "no agreed state yet"; exit 0; }
+        umask 077
+        key() {
+          g key info "$1" >/dev/null 2>&1 || g key create "$1" >/dev/null
+          g key info "$1" --show-secret | awk '
+            /Key ID:/ { print "AWS_ACCESS_KEY_ID=" $NF }
+            /Secret key:/ { print "AWS_SECRET_ACCESS_KEY=" $NF }'
+        }
+        now=$(printf '%s' "$st" | jq -r '.joined // {} | keys[]')
+        for p in $now; do
+          case "$p" in j[0-9a-f]*) ;; *) continue ;; esac
+          [ -s ${sealed}/$p.age ] && continue
+          recipient=$(printf '%s' "$st" | jq -r --arg p "$p" '.joined[$p].recipient')
+          key peer-$p > ${state}/from/$p.env
+          id=$(awk -F= '/ACCESS_KEY_ID/ { print $2 }' ${state}/from/$p.env)
+          for b in ${lib.concatStringsSep " " copied}; do
+            g bucket allow --read --write "$b" --key "$id" >/dev/null
+          done
+          if age -r "$recipient" -o ${sealed}/$p.age.new ${state}/from/$p.env; then
+            chmod 0444 ${sealed}/$p.age.new
+            mv ${sealed}/$p.age.new ${sealed}/$p.age
+            echo "$p joined: its key here, sealed to it"
+          else
+            echo "$p: its recipient is not one age takes"
+          fi
+        done
+        # a joined box gone from the agreed state: its key goes
+        for f in ${state}/from/j*.env; do
+          [ -e "$f" ] || continue
+          p=$(basename "$f" .env)
+          printf '%s\n' $now | grep -qx "$p" && continue
+          g key delete --yes peer-$p >/dev/null 2>&1 || true
+          rm -f "$f" ${sealed}/$p.age
+          echo "$p is gone: its key here is too"
+        done
+        exit 0
+      '';
+    };
+    systemd.timers.dd-store-joined = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "2min";
+        OnUnitActiveSec = "5min";
+      };
+    };
+
     # its room, for the plan: how big, how much free, and what it keeps of
     # each bucket; and nearly full, it refuses other boxes' copies
     systemd.services.dd-store-facts = {
@@ -677,9 +763,24 @@ in
 
     # other boxes reach this store, and their keys to it, by name on the
     # fleet's network
+    # on a port of its own, which is all a box that joined on its own key
+    # may reach of another box on the fleet's network (net/headscale.nix)
+    networking.firewall.interfaces.commonty0.allowedTCPPorts = [ cfg.publicPort ];
     services.nginx.virtualHosts."store.${box}.${base}" = {
       useACMEHost = base;
-      forceSSL = true;
+      onlySSL = true;
+      listen = [
+        {
+          addr = "0.0.0.0";
+          port = cfg.publicPort;
+          ssl = true;
+        }
+        {
+          addr = "[::]";
+          port = cfg.publicPort;
+          ssl = true;
+        }
+      ];
       locations."/".proxyPass = "http://127.0.0.1:${toString cfg.port}";
       # s3 signs its requests; no cookie of anyone's goes to the store
       locations."/".ddCookie = "";

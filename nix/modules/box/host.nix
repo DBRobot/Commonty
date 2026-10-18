@@ -15,6 +15,8 @@ let
   hw = lib.importJSON (dir + "/hardware.json");
   box = lib.importJSON (dir + "/box.json");
   house = box.house;
+  # its Wi-Fi password, sealed to it by the installer (join-install.sh)
+  sealedWifi = house.sealedWifi or false;
   # the other boxes with a store of their own (box.json store), and what
   # their secrets keys are: what is sealed to them
   fleet = builtins.attrNames (lib.importJSON ../../../fleet/boxes.json);
@@ -26,6 +28,10 @@ let
   placement = import ../../lib/fleet-placement.nix { inherit lib; };
   pgAble = lib.filter (n: placement.inputs.boxes.${n}.can ? postgresql) stores;
   netAble = lib.filter (n: placement.inputs.boxes.${n}.can ? headscale) stores;
+  # the box that gathers the fleet's metrics: where a joined box sends its own
+  observeBox = lib.findFirst (
+    n: builtins.elem "observe" ((lib.importJSON ../../../fleet/boxes.json).${n}.roles or [ ])
+  ) null fleet;
 in
 {
   imports = [
@@ -75,21 +81,58 @@ in
       # the disks' key made in the initrd at every boot, from this box's TPM
       # and the unlock Worker (modules/box/disk-unlock.nix)
       dd.unlock.enable = box.encrypted;
+      # one that joined on its own: from its TPM alone (docs/dev/joining.md)
+      dd.unlock.tpmOnly = (box.unlock or "worker") == "tpm";
 
+      # Wi-Fi where this box's secrets hold the house's password, or where
+      # its installer sealed it to the box (a box that joined: below); wired
+      # alone where neither
       dd.home = {
         inherit (house) ssid address;
-        pskFile = config.sops.templates."wifi.env".path;
-        inherit (hw) wifi wired;
+        pskFile =
+          if config.dd.hasSecret "wifi-psk" then
+            config.sops.templates."wifi.env".path
+          else if sealedWifi then
+            "/run/dd-wifi-key/wifi.env"
+          else
+            "/dev/null";
+        inherit (hw) wired;
+        wifi = if config.dd.hasSecret "wifi-psk" || sealedWifi then hw.wifi else null;
       };
-      sops.secrets.wifi-psk = { };
-      sops.templates."wifi.env".content = "psk=${config.sops.placeholder.wifi-psk}\n";
+      sops.secrets.wifi-psk = lib.mkIf (config.dd.hasSecret "wifi-psk") { };
+      # the installer's: the password sealed to this box's secrets key, which
+      # only its TPM opens; opened into memory before NetworkManager reads it
+      systemd.services.dd-wifi-unseal = lib.mkIf sealedWifi {
+        description = "Open the Wi-Fi password the installer sealed to this box";
+        wantedBy = [ "multi-user.target" ];
+        before = [ "NetworkManager-ensure-profiles.service" ];
+        requiredBy = [ "NetworkManager-ensure-profiles.service" ];
+        unitConfig.ConditionPathExists = "/var/lib/dd/wifi.age";
+        path = [
+          pkgs.age
+          pkgs.age-plugin-tpm
+        ];
+        environment.TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          RuntimeDirectory = "dd-wifi-key";
+          RuntimeDirectoryMode = "0700";
+          RuntimeDirectoryPreserve = true;
+          UMask = "0077";
+          ExecStart = "${pkgs.age}/bin/age -d -i /var/lib/dd/secrets-key.txt -o /run/dd-wifi-key/wifi.env /var/lib/dd/wifi.age";
+        };
+      };
+      sops.templates."wifi.env" = lib.mkIf (config.dd.hasSecret "wifi-psk") {
+        content = "psk=${config.sops.placeholder.wifi-psk}\n";
+      };
     }
     (lib.optionalAttrs (options.dd ? adblock) {
       # who lives in this house: they switch its ad blocking
       dd.adblock.household = lib.mkIf (house ? household) house.household;
     })
     (lib.mkIf (box.extraPools != [ ]) { boot.zfs.extraPools = box.extraPools; })
-    (lib.mkIf (box ? runnerCapacity) { dd.runner.capacity = box.runnerCapacity; })
+    (lib.optionalAttrs (box ? runnerCapacity) { dd.runner.capacity = box.runnerCapacity; })
     # the memory game servers may have together, where a third of the box's
     # is not the owner's choice
     (lib.optionalAttrs (options.dd ? games && box ? gamesMemoryMiB) {
@@ -138,11 +181,15 @@ in
         dataset = "${config.dd.box.bulkPool}/enc/store";
         dataDir = (box.store or { }).dir or "/srv/store";
         peers = lib.genAttrs (lib.remove config.networking.hostName stores) (n: {
-          url = "https://store.${n}.${config.dd.domain}";
+          url = "https://store.${n}.${config.dd.domain}:${toString config.dd.store.publicPort}";
           recipient = secretsKey n;
         });
       };
     }
+    # a box that joined on its own key sends its metrics to the observe box
+    (lib.mkIf (config.dd.box.joined && observeBox != null) {
+      dd.joinedMetrics.to = "https://store.${observeBox}.${config.dd.domain}:${toString config.dd.store.publicPort}";
+    })
     # with failover on, postgres follows its lease through this store
     (lib.mkIf (config.dd.failover && config.services.postgresql.enable) {
       dd.store.buckets.postgres-wal.owner = "postgres";

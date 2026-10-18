@@ -1,0 +1,11 @@
+{
+  "owner": null,
+  "house": {
+    "ssid": "",
+    "address": ""
+  },
+  "encrypted": true,
+  "unlock": "tpm",
+  "extraPools": [],
+  "datasets": {}
+}

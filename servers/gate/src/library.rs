@@ -299,6 +299,21 @@ async fn images(app: Arc<App>, raw: String, req: Request) -> Response {
         return library_gate::dav::options();
     }
     let headers = req.headers();
+    // a member's join ticket, from the drive a box was set up with: its own
+    // pending backup (pending/<its id>/) and nothing else, never a delete
+    if let Some((user, ticket)) = crate::member_boxes::pending_ticket(&app, headers) {
+        if app.role(&user) != Some(crate::pages::Role::Member)
+            || !library_gate::dav::ticket_allows(
+                req.method(),
+                headers,
+                &raw,
+                &format!("pending/{ticket}"),
+            )
+        {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        return metered(&app, g, &user, images_prefix(&user), raw, Role::Owner, req).await;
+    }
     let Some((user, by_device)) = app.identify_how(headers, "access") else {
         return (
             StatusCode::UNAUTHORIZED,

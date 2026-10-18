@@ -15,6 +15,10 @@ path = "src/bin/dd-agent.rs"
 name = "dd-attest"
 path = "src/bin/dd-attest.rs"
 
+[[bin]]
+name = "dd-box-setup"
+path = "src/bin/dd-box-setup.rs"
+
 [dependencies]
 sha2 = "0.10"
 identity = { path = "../../../client/identity" }
@@ -27,3 +31,5 @@ anyhow = "1"
 # the agent fetches one small file; nothing async, nothing heavy
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 clap = { version = "4", features = ["derive", "env"] }
+# the box installer reads its join ticket's id (setup.rs), never verifies it
+biscuit-auth = "6"

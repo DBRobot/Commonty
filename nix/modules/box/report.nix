@@ -34,6 +34,72 @@ in
       '';
     };
 
+    # A box the release does not list (dd.box.joined): its key to join the
+    # fleet with, made in its TPM as dd-unlock-enrol makes a listed box's
+    # (usable only under its signed boot), its secrets key's recipient,
+    # and its own report where dd-agent builds its system from
+    # (docs/dev/joining.md)
+    systemd.services.dd-join-prepare = lib.mkIf config.dd.box.joined {
+      description = "This box's key to join the fleet, and its report to build from";
+      wantedBy = [ "multi-user.target" ];
+      # a box on its TPM alone makes its key at its first boot, after its
+      # disk's key is sealed (disk-unlock-seal.sh)
+      after = [
+        "dd-box-report.service"
+      ]
+      ++ lib.optional config.dd.unlock.tpmOnly "dd-unlock-seal.service";
+      requires = [ "dd-box-report.service" ];
+      before = [ "dd-control.service" ];
+      requiredBy = [ "dd-control.service" ];
+      path = [
+        pkgs.tpm2-tools
+        pkgs.coreutils
+        pkgs.jq
+      ];
+      environment.TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        set -eu
+        K=/boot/dd/unlock
+        w=$(mktemp -d)
+        trap 'rm -rf "$w"' EXIT
+        mkdir -p $K
+        tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
+        sb=$(od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null | tr -d ' ' || true)
+        if [ ! -s $K/sig.pub ] && [ "$sb" != 1 ]; then
+          # a key made under any boot but a signed one would sign for any
+          echo "no key to join with until Secure Boot is on"
+          exit 1
+        fi
+        if [ ! -s $K/sig.pub ]; then
+          tpm2_startauthsession -Q -S "$w/s.ctx"
+          tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"
+          tpm2_flushcontext "$w/s.ctx"
+          tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -L "$w/pcr.pol" \
+            -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda' \
+            -u $K/sig.pub -r $K/sig.priv
+          echo "this box's key to join the fleet, made in its TPM"
+        fi
+        tpm2_load -Q -C "$w/srk.ctx" -u $K/sig.pub -r $K/sig.priv -c "$w/sig.ctx"
+        tpm2_readpublic -Q -c "$w/sig.ctx" -f der -o "$w/spki.der"
+        tpm2_flushcontext -t >/dev/null 2>&1 || true
+        umask 022
+        base64 -w0 < "$w/spki.der" > /var/lib/dd/box-key.spki.new
+        mv /var/lib/dd/box-key.spki.new /var/lib/dd/box-key.spki
+        jq -er .secretsKey ${out}/hardware.json > /var/lib/dd/secrets-recipient.new
+        mv /var/lib/dd/secrets-recipient.new /var/lib/dd/secrets-recipient
+        mkdir -p /var/lib/dd/box
+        cp ${out}/hardware.json ${out}/hardware-configuration.nix /var/lib/dd/box/
+        # what an owner would choose, nobody has: wired, its address from
+        # the router, its disks as they are
+        [ -s /var/lib/dd/box/box.json ] || jq -n '{owner: null, house: {ssid: "", address: ""},
+          encrypted: false, extraPools: [], datasets: {}}' > /var/lib/dd/box/box.json
+      '';
+    };
+
     systemd.services.dd-box-report = {
       description = "This box's signed report on its own hardware";
       wantedBy = [ "multi-user.target" ];

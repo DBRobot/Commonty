@@ -75,6 +75,7 @@ These pages are in four parts:
 - [The home controller](dev/home-controller.md)
 - [Storage: each box its own store](dev/storage.md)
 - [Failover](dev/failover.md)
+- [A box joining the fleet](dev/joining.md)
 - [What each service needs from a box](dev/hardware.md)
 - [The mirror](dev/mirror.md)
 - [Nix: modules, roles and tests](dev/nix.md)
