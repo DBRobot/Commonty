@@ -385,3 +385,161 @@ func TestOnlyTheLeaseHolderSaysHowBigItsBucketIs(t *testing.T) {
 		t.Fatalf("a claim of the box without the lease sized the bucket: %v", p.Unplaced)
 	}
 }
+
+func why(p Plan, box, svc string) string {
+	for _, d := range p.Boxes[box] {
+		if d.Service == svc {
+			return d.Why
+		}
+	}
+	return ""
+}
+
+// web, placed, moves on-failure, runs on small; nas suits it far better
+func sticky() (Inputs, *state.State) {
+	in, s := fleet()
+	in.Boxes["small"].Can["web"] = 0.5
+	in.Boxes["nas"].Can["web"] = 9
+	in.Services["web"] = Service{Enabled: true, Instances: 1, Class: "low", Placed: true, Moves: "on-failure", MemoryGiB: 1}
+	for _, b := range []string{"small", "nas"} {
+		s.Boxes[b].Facts["carries/web"] = 1
+	}
+	s.Boxes["small"].Facts["runs/web"] = 1
+	return in, s
+}
+
+func TestAHealthyHolderIsNeverMovedByABetterBox(t *testing.T) {
+	in, s := sticky()
+	p := Decide(in, s, 90_000)
+	if !runs(p, "small", "web") || runs(p, "nas", "web") || !strings.Contains(why(p, "small", "web"), "stays") {
+		t.Fatalf("web moved off a live box: %+v", p)
+	}
+	if len(p.DoesNotFit) != 0 {
+		t.Fatalf("flagged though it fits: %v", p.DoesNotFit)
+	}
+	// moving on a better score is still the default
+	sv := in.Services["web"]
+	sv.Moves = ""
+	in.Services["web"] = sv
+	if p := Decide(in, s, 90_000); !runs(p, "nas", "web") {
+		t.Fatalf("web stayed without on-failure: %+v", p)
+	}
+}
+
+func TestADeadHolderIsMoved(t *testing.T) {
+	in, s := sticky()
+	s.Boxes["small"].LastSeen = 0
+	p := Decide(in, s, 90_000)
+	if !runs(p, "nas", "web") {
+		t.Fatalf("web not moved off a dead box: %+v", p)
+	}
+}
+
+func TestAShrunkBoxKeepsItsServiceAndIsFlagged(t *testing.T) {
+	in, s := sticky()
+	s.Boxes["small"].Facts["ram_bytes"] = 1 * gib // 0.85G: garage fits, web beside it not
+	in.Boxes["small"].Can["web"] = 0              // and it scores nothing
+	p := Decide(in, s, 90_000)
+	if !runs(p, "small", "web") || runs(p, "nas", "web") {
+		t.Fatalf("web moved off a live box that shrank: %+v", p)
+	}
+	if got := p.DoesNotFit["small"]; len(got) != 1 || got[0] != "web" || !strings.Contains(why(p, "small", "web"), "no longer fits") {
+		t.Fatalf("doesNotFit %v, why %q", p.DoesNotFit, why(p, "small", "web"))
+	}
+	// a release that no longer lets it run there: it still stays
+	delete(in.Boxes["small"].Can, "web")
+	if p := Decide(in, s, 90_000); !runs(p, "small", "web") {
+		t.Fatalf("web moved once the box could not run it: %+v", p)
+	}
+}
+
+func TestADrainingBoxIsGivenNothingNewAndWhatMovesLeaves(t *testing.T) {
+	in, s := sticky()
+	// games run on the nas, damped there (TestACostlyMoveIsDamped); web,
+	// sticky, also runs there
+	s.Boxes["nas"].Roles = []string{"games"}
+	s.Boxes["small"].Facts["runs/web"] = 0
+	s.Boxes["nas"].Facts["runs/web"] = 1
+	s.Boxes["nas"].Facts["draining"] = 1
+	p := Decide(in, s, 90_000)
+	if runs(p, "nas", "games") || !runs(p, "big", "games") {
+		t.Fatalf("games stayed on a draining box: %+v", p)
+	}
+	if runs(p, "nas", "garage") || runs(p, "nas", "pihole") {
+		t.Fatalf("a draining box was given something new: %+v", p.Boxes["nas"])
+	}
+	if !runs(p, "nas", "web") {
+		t.Fatalf("a sticky service left before its box did: %+v", p)
+	}
+	if _, ok := p.Unplaced["pihole@b"]; !ok {
+		t.Fatalf("house b's only box drains, and its DNS is not said unplaced: %v", p.Unplaced)
+	}
+}
+
+func TestADrainingStoreGetsNoNewCopyAndGivesItsOwnUp(t *testing.T) {
+	in, s := stores()
+	s.Boxes["nas"].Facts["draining"] = 1
+	p := Decide(in, s, 90_000)
+	if got := strings.Join(p.Copies["ente"], ","); got != "big,small" {
+		t.Fatalf("copies %q, unplaced %v", got, p.Unplaced)
+	}
+	// one it keeps already moves where there is room, and stays while
+	// there is none
+	s.Boxes["nas"].Facts["store/ente/bytes"] = 40 * gib
+	if got := strings.Join(Decide(in, s, 90_000).Copies["ente"], ","); got != "big,small" {
+		t.Fatalf("copies %q", got)
+	}
+	s.Boxes["small"].Facts["store_free_bytes"] = 20 * gib
+	if got := strings.Join(Decide(in, s, 90_000).Copies["ente"], ","); got != "big,nas" {
+		t.Fatalf("copies %q", got)
+	}
+}
+
+func TestABoxWhoseHeartbeatGainsHardwareIsEligibleNextRound(t *testing.T) {
+	in, s := fleet()
+	in.Services["llm"] = Service{Enabled: true, Instances: 1, MemoryGiB: 7}
+	p := Decide(in, s, 90_000)
+	if _, ok := p.Unplaced["llm"]; !ok {
+		t.Fatalf("llm placed with no box able: %+v", p)
+	}
+	// nas got a GPU: its report, judged on the box, says it can now
+	f := s.Boxes["nas"].Facts
+	f["can_live"], f["can/llm"], f["can/garage"], f["can/pihole"] = 1, 2, 3, 1
+	p = Decide(in, s, 90_000)
+	if !runs(p, "nas", "llm") {
+		t.Fatalf("llm not on the box that can now: %+v", p)
+	}
+	// and a box whose word leaves a service out cannot run it any more
+	if runs(p, "nas", "games") {
+		t.Fatalf("games on a box that no longer says it can: %+v", p.Boxes["nas"])
+	}
+	// small got more memory: 8G holds 0.85 * 8 = 6.8G, under llm; now 32G
+	in.Boxes["small"].Can["llm"] = 5
+	if p := Decide(in, s, 90_000); runs(p, "small", "llm") {
+		t.Fatalf("llm on a box without the room: %+v", p.Boxes["small"])
+	}
+	s.Boxes["small"].Facts["ram_bytes"] = 32 * gib
+	if p := Decide(in, s, 90_000); !runs(p, "small", "llm") {
+		t.Fatalf("llm not on the box that grew: %+v", p)
+	}
+}
+
+func TestABoxsOwnWordAddsNothingItsOwnerBarsNorALease(t *testing.T) {
+	in, s := fleet()
+	in.Services["llm"] = Service{Enabled: true, Instances: 1, MemoryGiB: 1}
+	in.Services["db"] = Service{Enabled: true, Instances: 1, MemoryGiB: 1, Placed: true, Lease: true}
+	b := in.Boxes["nas"]
+	b.Barred = []string{"llm"}
+	in.Boxes["nas"] = b
+	f := s.Boxes["nas"].Facts
+	f["can_live"], f["can/llm"], f["can/db"], f["carries/db"] = 1, 9, 9, 1
+	p := Decide(in, s, 90_000)
+	if runs(p, "nas", "llm") || runs(p, "nas", "db") {
+		t.Fatalf("a box's word added what the release keeps off it: %+v", p.Boxes["nas"])
+	}
+	// a lease the release lets it hold, it may be given
+	in.Boxes["nas"].Can["db"] = 0.1
+	if p := Decide(in, s, 90_000); !runs(p, "nas", "db") {
+		t.Fatalf("db: %+v", p)
+	}
+}

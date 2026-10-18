@@ -33,10 +33,18 @@ in
     site = b.siteId or n;
     region = b.regionId or n;
     can = lib.mapAttrs (_: c: c.score) capability.boxes.${n}.can;
+    # what its owner's box.json or the policy keep off it: a box's own
+    # judgment in its heartbeat (box/capability.nix) never adds these
+    inherit (capability.boxes.${n}) barred;
   }) list;
   services = lib.mapAttrs (s: n: {
     enabled = n.everyBox || (builtins.elem s brought && on n);
-    inherit (n) everyBox spread lease;
+    inherit (n)
+      everyBox
+      spread
+      lease
+      moves
+      ;
     placed = n.placed || n.lease;
     perHouse = if n.perHouse == null then 0 else n.perHouse;
     instances = if n.instances == null then 0 else n.instances;

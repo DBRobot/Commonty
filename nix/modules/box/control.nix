@@ -32,7 +32,24 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = [ pkg.dd-control ];
+    environment.systemPackages = [
+      pkg.dd-control
+      # dd-drain on: this box is given nothing new, and what may move moves
+      # off it; what stays on failure stays until it leaves (control-plane.md)
+      (pkgs.writeShellScriptBin "dd-drain" ''
+        set -eu
+        f=/var/lib/dd-facts/draining.prom
+        [ "$(id -u)" = 0 ] || { echo "dd-drain: run it as root" >&2; exit 1; }
+        case "''${1:-}" in
+          on)
+            install -d /var/lib/dd-facts
+            echo "dd_box_draining 1" > "$f.new" && mv "$f.new" "$f"
+            ;;
+          off) rm -f "$f" ;;
+          *) echo "usage: dd-drain on|off" >&2; exit 2 ;;
+        esac
+      '')
+    ];
     environment.etc."dd-control/config.json".source = pkg.control-config;
     systemd.services.dd-control = {
       # the voters are in the config; a new list read only at start would sit

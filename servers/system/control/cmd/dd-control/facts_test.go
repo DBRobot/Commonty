@@ -66,3 +66,17 @@ func TestTheStoreSaysItsRoomAndWhatItKeeps(t *testing.T) {
 		t.Fatalf("facts: %v", f)
 	}
 }
+
+func TestTheHeartbeatCarriesWhatTheBoxCanRunAndWhetherItDrains(t *testing.T) {
+	d := t.TempDir()
+	c := filepath.Join(d, "can.prom")
+	dr := filepath.Join(d, "draining.prom")
+	other := filepath.Join(d, "computer.prom")
+	_ = os.WriteFile(c, []byte("dd_can_live 1\ndd_can{service=\"photos\"} 1.25\ndd_can{service=\"bad name\"} 1\n"), 0o644)
+	_ = os.WriteFile(dr, []byte("dd_box_draining 1\n"), 0o644)
+	_ = os.WriteFile(other, []byte("dd_box_draining 0\n"), 0o644)
+	f := promFacts(c, dr, other)
+	if f["can_live"] != 1 || f["can/photos"] != 1.25 || f["draining"] != 1 || len(f) != 3 {
+		t.Fatalf("facts: %v", f)
+	}
+}

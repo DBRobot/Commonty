@@ -31,19 +31,36 @@ let
     lib.filter (s: builtins.any (u: builtins.any (matches u) (claims s)) units) (
       builtins.attrNames needs
     );
-  problems = lib.concatMap (
-    box:
-    let
-      t = capability.boxes.${box};
-    in
-    map (w: "${box}: cannot join the fleet: ${w}") t.why
-    ++ lib.concatMap (
-      s: map (w: "${box}: its roles bring ${s}, which it cannot run: ${w}") (t.cannot.${s} or [ ])
-    ) (brought box)
-    ++ map (s: "${box}: runs ${s}, which none of its roles brings (fleet/roles.json services)") (
-      lib.filter (s: !(builtins.elem s (brought box ++ every))) (running box)
+  # each box judges itself on the needs as JSON, the release's needs.json
+  # (box/capability.nix): on the report the release has, it must come to
+  # the release's own table
+  judged = import ../lib/capability.nix {
+    inherit lib;
+    needs = builtins.fromJSON (builtins.toJSON needs);
+    policy = lib.importJSON ../../fleet/policy.json;
+    boxes = lib.mapAttrs (n: _: {
+      hw = lib.importJSON ../../fleet/boxes/${n}/hardware.json;
+      own = lib.importJSON ../../fleet/boxes/${n}/box.json;
+    }) list;
+  };
+  scores = t: lib.mapAttrs (_: c: c.score) t.can;
+  problems =
+    map (b: "${b}: judged on the box, its capability is not the release's") (
+      lib.filter (b: scores judged.boxes.${b} != scores capability.boxes.${b}) (builtins.attrNames list)
     )
-  ) (builtins.attrNames list);
+    ++ lib.concatMap (
+      box:
+      let
+        t = capability.boxes.${box};
+      in
+      map (w: "${box}: cannot join the fleet: ${w}") t.why
+      ++ lib.concatMap (
+        s: map (w: "${box}: its roles bring ${s}, which it cannot run: ${w}") (t.cannot.${s} or [ ])
+      ) (brought box)
+      ++ map (s: "${box}: runs ${s}, which none of its roles brings (fleet/roles.json services)") (
+        lib.filter (s: !(builtins.elem s (brought box ++ every))) (running box)
+      )
+    ) (builtins.attrNames list);
 in
 if problems == [ ] then
   pkgs.writeText "placement.json" (builtins.toJSON capability)

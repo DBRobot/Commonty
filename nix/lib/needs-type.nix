@@ -266,6 +266,14 @@ t.attrsOf (
         default = false;
         description = "one writer at a time: placed, and it runs only while its box holds the control plane's lease svc/<name>, which the boxes able to run it may hold (cmd/dd-control/placed.go)";
       };
+      moves = lib.mkOption {
+        type = t.enum [
+          "better"
+          "on-failure"
+        ];
+        default = "better";
+        description = "better: it moves to a box that suits it better by the damping margin; on-failure: it stays on the box running it while that box is alive, even one it no longer fits (the plan's doesNotFit says so), and a new box is chosen only when that one is gone (servers/system/control/place)";
+      };
       hosts = lib.mkOption {
         type = t.listOf t.str;
         default = [ ];

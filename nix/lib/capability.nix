@@ -8,7 +8,8 @@
 #
 #   boxes.<name> = { hw = hardware.json; own = box.json; site = siteId; region = regionId; }
 #
-# Returns { boxes.<name> = { joins; why; can.<svc> = { score; for }; cannot.<svc> = [ why ]; };
+# Returns { boxes.<name> = { joins; why; can.<svc> = { score; for }; cannot.<svc> = [ why ];
+#                           barred = [ svc ] (by its owner's choices or the policy, not hardware) };
 #           services.<svc> = [ { box; score; } ] best first;
 #           sizes.<svc> = { memory; reserve; floor; } in GiB, as judged here }
 {
@@ -134,7 +135,17 @@ let
     ++
       lib.optional (d > f.pool * 0.85)
         "needs ${toString (builtins.ceil d)}G of storage, the box's largest pool holds ${toString (builtins.floor f.pool)}G"
-    ++ lib.optional (n.trust == "owner" && f.owner != policy.owner) "only on ${policy.owner}'s boxes"
+    ++ ownerLacks name s;
+
+  # what its owner chose (box.json) or the policy keeps off it, whatever its
+  # hardware: the control plane never takes a box's own word over these
+  ownerLacks =
+    name: s:
+    let
+      f = facts name;
+      n = needs.${s};
+    in
+    lib.optional (n.trust == "owner" && f.owner != policy.owner) "only on ${policy.owner}'s boxes"
     ++ lib.optional (
       n.trust == "household" && f.owner != policy.owner && f.household == [ ]
     ) "only on ${policy.owner}'s boxes or a household's"
@@ -144,15 +155,15 @@ let
 
   # and through its dependencies: what it needs on the same box must be
   # able to run there too
-  lacks =
-    name:
+  lacksBy =
+    own: name:
     let
       go =
         seen: s:
         if builtins.elem s seen then
           [ ]
         else
-          ownLacks name s
+          own name s
           ++ lib.concatMap (d: map (w: "${d} cannot run here: ${w}") (go (seen ++ [ s ]) d)) (
             lib.filter (d: needs ? ${d} && needs.${s}.base.depends.${d}.local) (
               builtins.attrNames needs.${s}.base.depends
@@ -160,6 +171,7 @@ let
           );
     in
     go [ ];
+  lacks = lacksBy ownLacks;
 
   # how well a box suits a service it can run, from what is known before
   # it runs (the live line, uptime and room are the control plane's)
@@ -240,6 +252,7 @@ let
         ) ok
       );
       cannot = lib.filterAttrs (_: w: w != [ ]) why;
+      barred = lib.filter (s: lacksBy ownerLacks name s != [ ]) others;
     }
   );
 in
