@@ -281,39 +281,42 @@ function editor(name) {
   head(fresh ? 'New config' : c.name, [['Computers', '#/'], ['Configs', '#/configs'], [fresh ? 'New' : c.name]]);
   const L = now.limits;
   const num = (id, v, min, max, step) => el('input', { id, type: 'number', value: v, min, max, step, required: true });
-  const f = el('form', { class: 'editor', id: 'ed' },
-    // an existing config is named in the heading; its name stays
-    fresh
-      ? el('section', { class: 'panel sec' },
-        field('ed-name', 'Name', el('input', { id: 'ed-name', required: true, pattern: '[a-z0-9][a-z0-9-]{0,31}', autocomplete: 'off', placeholder: 'claude-box' }),
-          'Lowercase letters, digits and dashes.'))
-      : el('input', { id: 'ed-name', type: 'hidden', value: c.name }),
-    el('section', { class: 'panel sec' },
-      el('h2', { text: 'Size' }),
-      el('div', { class: 'three' },
-        field('ed-memory', 'Memory, MiB', num('ed-memory', c.memory, 512, L.memory, 256)),
-        field('ed-threads', 'Threads', num('ed-threads', c.threads, 1, L.threads, 1)),
-        field('ed-disk', 'Disk, GiB', num('ed-disk', c.disk, 8, L.disk, 1))),
-      el('p', { class: 'hint', text: `All your computers together: up to ${gib(L.memory)} and ${L.threads} threads. A disk only grows, never shrinks.` })),
-    el('section', { class: 'panel sec' },
-      el('h2', { text: 'Software' }),
-      field('ed-nix', 'A NixOS module', el('textarea', { id: 'ed-nix', rows: 12, spellcheck: 'false', text: c.nix || '' }),
-        'Saved and applied, the computer rebuilds itself from this. /home is kept.')),
-    el('section', { class: 'panel sec' },
-      el('h2', { text: 'Access' }),
-      field('ed-keys', 'SSH keys, one per line', el('textarea', { id: 'ed-keys', rows: 3, spellcheck: 'false', placeholder: 'ssh-ed25519 AAAA… you@laptop', text: c.keys.join('\n') })),
+  const nameSec = fresh
+    ? el('section', { class: 'panel sec' },
+      field('ed-name', 'Name', el('input', { id: 'ed-name', required: true, pattern: '[a-z0-9][a-z0-9-]{0,31}', autocomplete: 'off', placeholder: 'claude-box' }),
+        'Lowercase letters, digits and dashes.'))
+    : el('input', { id: 'ed-name', type: 'hidden', value: c.name });
+  const size = el('section', { class: 'panel sec' },
+    el('h2', { text: 'Size' }),
+    el('div', { class: 'three' },
+      field('ed-memory', 'Memory, MiB', num('ed-memory', c.memory, 512, L.memory, 256)),
+      field('ed-threads', 'Threads', num('ed-threads', c.threads, 1, L.threads, 1)),
+      field('ed-disk', 'Disk, GiB', num('ed-disk', c.disk, 8, L.disk, 1))),
+    el('p', { class: 'hint', text: `All your computers together: up to ${gib(L.memory)} and ${L.threads} threads. A disk only grows, never shrinks.` }));
+  const access = el('section', { class: 'panel sec' },
+    el('h2', { text: 'Access' }),
+    field('ed-keys', 'SSH keys, one per line', el('textarea', { id: 'ed-keys', rows: 3, spellcheck: 'false', placeholder: 'ssh-ed25519 AAAA… you@laptop', text: c.keys.join('\n') })),
+    el('div', { class: 'two' },
       field('ed-ports', 'Ports to open besides SSH', el('input', { id: 'ed-ports', inputmode: 'numeric', placeholder: '8080 3000', autocomplete: 'off', value: c.ports.join(' ') }),
         'Each gets a port on the box; the computer page says which.'),
       field('ed-players', 'Friends who may reach it', el('input', { id: 'ed-players', placeholder: 'ann bob', autocomplete: 'off', value: c.players.join(' ') }),
-        'Only friends count, and only while you stay friends.')),
-    el('section', { class: 'panel sec' },
-      el('h2', { text: 'Where it runs' }),
-      el('fieldset', { class: 'where' },
-        el('legend', { class: 'sr', text: 'Where it runs' }),
-        el('label', { class: 'opt-card' }, el('input', { type: 'radio', name: 'consent', value: 'own', checked: c.consent !== 'any' }),
-          el('span', {}, el('strong', { text: 'Only on my boxes' }), el('span', { class: 'dim', text: 'Nobody else holds it. If your box goes down, it waits for it.' }))),
-        el('label', { class: 'opt-card' }, el('input', { type: 'radio', name: 'consent', value: 'any', checked: c.consent === 'any' }),
-          el('span', {}, el('strong', { text: "On anyone's box" }), el('span', { class: 'dim', text: "It can run on, and move to, another member's box. That box's owner can read it." }))))),
+        'Only friends count, and only while you stay friends.')));
+  const where = el('section', { class: 'panel sec' },
+    el('h2', { text: 'Where it runs' }),
+    el('fieldset', { class: 'where' },
+      el('legend', { class: 'sr', text: 'Where it runs' }),
+      el('label', { class: 'opt-card' }, el('input', { type: 'radio', name: 'consent', value: 'own', checked: c.consent !== 'any' }),
+        el('span', {}, el('strong', { text: 'Only on my boxes' }), el('span', { class: 'dim', text: 'Nobody else holds it. If your box goes down, it waits for it.' }))),
+      el('label', { class: 'opt-card' }, el('input', { type: 'radio', name: 'consent', value: 'any', checked: c.consent === 'any' }),
+        el('span', {}, el('strong', { text: "On anyone's box" }), el('span', { class: 'dim', text: "It can run on, and move to, another member's box. That box's owner can read it." })))));
+  const software = el('section', { class: 'panel sec software' },
+    el('h2', { text: 'Software' }),
+    field('ed-nix', 'A NixOS module', el('textarea', { id: 'ed-nix', spellcheck: 'false', text: c.nix || '' }),
+      'Saved and applied, the computer rebuilds itself from this. /home is kept.'));
+  // settings down the left, the Nix file taking the rest
+  const f = el('form', { class: 'editor', id: 'ed' },
+    el('div', { class: 'ed-left' }, nameSec, size, access, where),
+    software,
     el('div', { class: 'savebar' },
       el('a', { href: '#/configs', text: 'Cancel' }),
       el('button', { type: 'submit', text: fresh ? 'Save config' : 'Save' })));

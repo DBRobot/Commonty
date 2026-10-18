@@ -1,13 +1,12 @@
 /* The Computers pages: what they add to home.css (loaded before this). The
    colours, type, bar, buttons, fields and state words are home.css's. */
 
+/* the whole window: the page's own gutter, no centred column */
 main {
-  max-width: 1080px;
-  margin: 0 auto;
-  padding-inline: 16px;
-  padding-block: 24px 72px;
+  padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px 32px;
   display: grid;
-  gap: 20px;
+  gap: 14px;
 }
 main h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; text-wrap: balance; }
 main h2 { margin: 0; font-size: 17px; }
@@ -15,7 +14,7 @@ main h2 { margin: 0; font-size: 17px; }
 .dim { color: var(--ink-2); }
 .small-t { font-size: 14px; margin: 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-#view { display: grid; gap: 20px; min-width: 0; }
+#view { display: grid; gap: 14px; min-width: 0; }
 
 /* home.css spaces a lone button from what is above it; here they sit in rows */
 main button { margin-top: 0; }
@@ -31,7 +30,7 @@ a.btn.quiet-l { background: var(--surface); color: var(--ink); border: 1px solid
 a.btn.quiet-l:hover { background: var(--bg); }
 
 /* where you are, the page's name, its own actions */
-.head { display: grid; gap: 6px; }
+.head { display: grid; gap: 2px; }
 .head .crumbs { margin: 0; font-size: 15px; }
 .head .crumbs:has(a:only-child) { display: none; }
 .head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -46,15 +45,15 @@ a.btn.quiet-l:hover { background: var(--bg); }
 }
 
 /* what all your computers take, against the limits */
-.usage { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 28px; padding: 16px 20px; }
-.usage .small-t { grid-column: 1 / -1; }
+.usage { display: grid; grid-template-columns: 1fr 1fr auto; align-items: center; gap: 8px 28px; padding: 10px 14px; }
+
 .meter { display: grid; grid-template-columns: 80px 1fr auto; align-items: center; gap: 12px; min-width: 0; }
 .meter .k { font-weight: 600; font-size: 15px; }
 .meter .bar { height: 8px; background: var(--line-2); border-radius: 4px; overflow: hidden; }
 .meter .bar i { display: block; height: 100%; background: var(--pick); }
 .meter .bar i[data-full] { background: var(--attention); }
 .meter .v { font-size: 14px; color: var(--ink-2); white-space: nowrap; }
-@media (max-width: 640px) { .usage { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .usage { grid-template-columns: 1fr; } }
 
 /* Computers | Configs */
 .tabs-l { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
@@ -67,12 +66,12 @@ a.btn.quiet-l:hover { background: var(--bg); }
 .tabs-l .count { font-size: 12px; padding: 0 7px; border-radius: 999px; background: var(--off-bg); color: var(--ink-2); }
 
 /* computers and configs, as cards */
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 14px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 10px; }
 .card-c {
-  display: grid; gap: 10px; align-content: start; min-width: 0;
-  padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  display: grid; gap: 8px; align-content: start; min-width: 0;
+  padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
 }
-.card-c.ph { height: 168px; background: var(--line-2); border-color: var(--line-2); }
+.card-c.ph { height: 150px; background: var(--line-2); border-color: var(--line-2); }
 .card-c p { margin: 0; }
 .card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .card-top h2 a { color: var(--ink); text-decoration: none; }
@@ -84,14 +83,15 @@ a.btn.quiet-l:hover { background: var(--bg); }
 .copy { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .copy code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 6px 10px; background: var(--code); border-radius: var(--radius); font-size: 14px; }
 
-.empty-p { display: grid; gap: 10px; justify-items: start; padding: 28px; }
+.empty-p { display: grid; gap: 10px; justify-items: start; padding: 20px; }
 .empty-p p { margin: 0; max-width: 60ch; color: var(--ink-2); }
 
 /* one computer: what you do with it, beside what it is */
-.split { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
-.split .col { display: grid; gap: 20px; min-width: 0; }
+/* wide: connect and software side by side, details beside them */
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 14px; align-items: start; }
+.split .col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 14px; min-width: 0; align-items: start; }
 @media (max-width: 860px) { .split { grid-template-columns: 1fr; } .split .facts { order: -1; } }
-.sec { display: grid; gap: 12px; padding: 18px 20px; }
+.sec { display: grid; gap: 10px; padding: 12px 14px; align-content: start; }
 .sec p { margin: 0; }
 .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .facts dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0; }
@@ -111,7 +111,16 @@ ul.who { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .confirm p { max-width: 50ch; }
 
 /* a config, section by section */
-form.editor { display: grid; gap: 20px; }
+/* a config: its sections side by side where they fit; software takes a column of its own */
+form.editor { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 14px; align-items: stretch; }
+form.editor .ed-left { display: grid; gap: 14px; align-content: start; min-width: 0; }
+form.editor .software { grid-template-rows: auto 1fr; }
+form.editor .software .field { grid-template-rows: auto 1fr auto; }
+form.editor .software textarea { min-height: 420px; height: 100%; }
+form.editor .savebar { grid-column: 1 / -1; }
+@media (max-width: 960px) { form.editor { grid-template-columns: 1fr; } }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 560px) { .two { grid-template-columns: 1fr; } }
 .field { display: grid; gap: 6px; min-width: 0; }
 .field label { margin: 0; }
 .field .hint, .sec .hint { margin: 0; }
@@ -141,5 +150,5 @@ label.pick input { width: 18px; height: 18px; accent-color: var(--attention); }
 }
 .savebar {
   position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 18px;
-  padding: 12px 0; background: var(--bg); border-top: 1px solid var(--line);
+  padding: 10px 0; background: var(--bg); border-top: 1px solid var(--line);
 }
