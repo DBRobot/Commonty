@@ -2,9 +2,11 @@
 
 Status: a box joins **as a stranger** (built) and builds its own system
 from its own report (built). **As a member's box**, set up from the app's
-installer window and a USB drive, is being built (below): the fleet's side
-(the ticket, whose a box is, the pending backup, Your boxes) and the
-drive's installer are built; the app's window is on its own branch.
+installer window and a USB drive, is built: the ticket, the enlistment the
+member's root signs, whose a box is, the access a box gives, the pending
+backup, Your boxes. Proof that the box is real hardware (the TPM's
+attestation, docs/dev/attestation.md) is on its own branch and not yet
+asked for.
 
 A box the release does not list needs no one to add it. It joins the
 control plane's agreed state on its own word, and joining gives it nothing
@@ -74,25 +76,38 @@ box installer (full screen)        fleet
   bytes, hex>)`, `purpose("join")`, and checks that it is for `join` alone
   and good for 7 days. Like any purpose-built token it opens nothing else:
   not the member's files, pages or directory entry.
-- **Whose a box is, is the agreed identity state's**: the member's root
-  enlists the box (`enlist`, judged in
-  [`state/ident`](../../servers/system/control/state/ident/judge.go)) and
-  every gate reads it from the member's `boxes`
-  ([`member_boxes.rs`](../../servers/gate/src/member_boxes.rs)). The box's
-  dd-control still sends the ticket with its join (`-join-ticket-file`)
-  and the validators carry it in `Joined.Ticket`, but a ticket alone makes
-  a box no one's. A box no member has enlisted stays a stranger, and a
-  member's box can do no more on the fleet than a stranger's. Turning the
-  ticket into an enlistment is still to build: today the root signs it.
+- **Whose a box is, is the agreed identity state's**: the box's
+  dd-control sends the ticket with its join (`-join-ticket-file`), and the
+  join puts the box's key and ticket in the directory log (`joined`,
+  [`state/join.go`](../../servers/system/control/state/join.go)). Then
+  the member's root signs an `enlist` naming the box and the ticket's id,
+  and the judge
+  ([`state/ident`](../../servers/system/control/state/ident/judge.go))
+  takes it only if the box's ticket is the member's: signed by a device in
+  their entry, for them, not expired, never used. Once enlisted, the
+  ticket is used for good. A box is one member's at a time. Every gate
+  reads whose each box is from the agreed state's `enlisted`
+  ([`member_boxes.rs`](../../servers/gate/src/member_boxes.rs)), with the
+  ticket it was enlisted with; a ticket alone makes a box no one's. A box
+  no member has enlisted stays a stranger.
+- **Ticket to enlistment**: after the join, the app that wrote the drive
+  (or any of the member's devices with Backups open) sees the box waiting
+  (`GET /_dd/network/joined`, `enlisted: false`) and, where the account's
+  main key is on that device, signs the `enlist` and puts it to the door
+  (`PUT /_dd/boxes/enlist`). An account whose main key is a passkey adds it
+  on Settings > Devices ("waiting for you to add it", Add with passkey).
 - **The pending backup** is a restic repository of its own, at
   `images-<member>/pending/<ticket id>/`, under a password made for it
   alone: the drive never holds what opens the member's other images. The
   app seals that password to the member's devices, beside the ticket, so
   any of them can open the backup. The gate takes the ticket there and
   nowhere else (GET, HEAD, PROPFIND, PUT, MKCOL, and the pieces of an
-  upload; never a delete), counted against the member's allowance, and an
-  hour's check moves the folder to the images' trash 7 days after its
-  first write unless a box joined with its ticket (below).
+  upload; never a delete), counted against the member's allowance, from
+  anyone signed up and not shut out (the backup is made before the box
+  gives them access), and only until a box is enlisted with it: a used
+  ticket opens nothing. An hour's check moves the folder to the images'
+  trash 7 days after its first write unless a box was enlisted with its
+  ticket (the agreed state's `enlisted`, never the joined box's word).
 - **On join** the app, on any of the member's devices, reads which of its
   boxes joined and with which ticket (`GET /_dd/network/joined`), copies
   each one's pending backup into the member's images (`restic copy`) and
@@ -100,9 +115,19 @@ box installer (full screen)        fleet
   trash, as any delete there).
 - **The box** is on the member's Devices tab ("Your boxes",
   `GET /_dd/boxes/mine`), with when it last said how it is, and on their
-  Metrics page. Removing it is the root's `unenlist` (still to build: the
-  tab today puts its ticket id in the signed entry's `removed_boxes`, which
-  no longer decides anything).
+  Metrics page. Removing it is the root's `unenlist`
+  (`PUT /_dd/boxes/unenlist`, signed by the passkey on the tab, or by the
+  app where the main key is a device key). An entry's `removed_boxes`, from
+  before, is still read and signed as it is, and decides nothing.
+- **The door's PUTs** (`/_dd/boxes/enlist`, `unenlist`, `extend`) are the
+  directory's, step for step: the one per-visitor limiter first, a body of
+  64 KiB at most, the kind the path names, signed in, the item theirs (an
+  enlistment's `member` is the signed-in member's root; an extension is
+  the admin's), its signature checked against the root the agreed identity
+  state has for them now, the name's and key's allowances counted only
+  after that, duplicates by the shared item hash, and 503 while the
+  identity state is not read. The judge decides; the door only refuses
+  what can't be theirs.
 - **Its metrics** are its member's
   ([`observe/joined-metrics.nix`](../../nix/modules/observe/joined-metrics.nix)).
   It has no key to the metrics bucket the release boxes' sidecars upload
@@ -177,6 +202,57 @@ box installer (full screen)        fleet
   box opens it into memory at each boot, before NetworkManager starts
   (`dd-wifi-unseal`); it is never on its disk in the clear.
 
+## Access
+
+Signing up gives nothing. The fleet's services open to a member by an
+**invite** (the release's member list, or an invite the release key
+signed: both David's) or by a **box** of theirs that counts. The judge's
+view says which (`access`: `invite`, `box` or `none`,
+[`state/ident/access.go`](../../servers/system/control/state/ident/access.go)),
+and the gates open the services by it alone, from the agreed state, and
+to nobody while it is not read (a gate in `agreed` mode; one still
+replaying the directory serves its replay, which knows invites only).
+
+- **What qualifies**: a TPM 2.0 and UEFI, any architecture, and either
+  general compute (4 threads and 8 GB, read as at least 7 GiB of
+  MemTotal; a Raspberry Pi never) or a specialist box (a store of 1 TB, or
+  a GPU of its own: nvidia or amdgpu). Read from the box's own signed
+  report, as its heartbeat carries it (dd-control `reportFacts`:
+  `tpm_major`, `uefi`, `gpus` from `/var/lib/dd/report/hardware.json`,
+  `raspberry_pi` from its device tree), with `cores`, `ram_bytes` and
+  `store_size_bytes`, which it carried already. Wired or Wi-Fi alike.
+- **Many boxes**: access stands while any qualifying box of theirs is
+  enlisted and not gone 30 days. Removing one of several costs nothing
+  while another counts.
+- **Losing it**: only by removing every box, or every box gone 30 days
+  (unheard by the agreed state) while healthy.
+- **Our fault never counts**: a box whose last word was that its agent's
+  last run did not end well (`agent_ok` 0: the release was refused or
+  rolled back on it) is never gone, however long it is quiet, and the
+  state machine does not forget it after 30 days as it does a stranger.
+  That is the signal the agreed state has; there is no fleet-wide "bad
+  release" mark in it, so a box that dies on a release without saying so
+  first counts as gone after 30 days like any other.
+- **Grace**: 30 days. Only the admin (the release's `identity.admin`,
+  fleet/policy.json `owner`) extends it for a member, with a root-signed
+  `extend` naming them and an `until`. It keeps their access while they
+  still have a box enlisted, gone however long; it brings back nobody who
+  removed their boxes.
+- **A ban is a ban**: a member left, suspended or removed is `none`
+  whatever box or invite they hold, and enlists nothing; only David taking
+  them off the release's `revoked` lets them back.
+- **A home controller**: any member with access sets one up, however they
+  came in (an invite or a box); a ban shuts it as it shuts the rest.
+- **Anyone signed up and not shut out** may keep a pending backup and see
+  and remove their boxes, whatever their access: that is how a box comes
+  to give them access.
+- **Placement**: an enlisted, qualifying box of a member with access is
+  a peer of the release's boxes for copies: a copy it holds is kept as one
+  on a box of the release is, and a stranger's word never pushes it out
+  (`place.Decide`'s `members`). It runs no service: it is in no release's
+  capability table, holds no lease, and its owner's box would see others'
+  plaintext if it did.
+
 ## The drive
 
 The app's installer window writes `commonty-box-installer-<version>.img.zst`
@@ -238,9 +314,12 @@ Two VM tests, split where the box first starts:
   to build for): its agent names it by the key, takes the signed commit,
   builds and switches to that name's system; dd-control, held until then,
   joins a control plane of three validators and the witness with the
-  member's ticket; the member's root enlists it, and the member's gate
-  lists it as theirs
-  (`/_dd/boxes/mine`).
+  member's ticket. Signing up opened nothing (`/verify` 403) and the box
+  waits for her; its report is written to qualify (a TPM 2.0, UEFI, a GPU);
+  an enlist naming another ticket is refused; her root's enlist on its
+  ticket, through her gate's PUT, makes it hers (`/_dd/boxes/mine`) and
+  opens the services (`access: box`, `/verify` 200); her unenlist makes it
+  nobody's and shuts them again, and the used ticket enlists nothing.
 
 Not covered by either: a real machine's firmware (the vendor table, Setup
 Mode set from Linux, an unsigned system refused by Secure Boot, which stops

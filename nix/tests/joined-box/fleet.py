@@ -11,42 +11,40 @@ from cryptography.hazmat.primitives import serialization as S
 T = os.getcwd()
 b64 = lambda b: base64.b64encode(b).decode()
 
-if sys.argv[1] == "enlist":
-    # `fleet.py enlist <box> <key>`: ada's root enlists the box, as a v2
-    # envelope straight to the first validator's submit socket. The body is
-    # written as the judge marshals it (state/ident enlist), field for field.
+if sys.argv[1] == "item":
+    # `fleet.py item <enlist|unenlist> <box> [ticket]`: ada's root signs it,
+    # as a v2 envelope, and her device's token puts it to her gate
+    # (PUT /_dd/boxes/<kind>), which checks it and hands it to the log.
+    # The body is written as the judge reads it (state/ident enlist).
+    kind, box = sys.argv[2], sys.argv[3]
     root = ed.Ed25519PrivateKey.from_private_bytes(
         bytes.fromhex(open("root.hex").read())
     )
     rpub = b64(root.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw))
-    now = int(time.time())
-    body = json.dumps(
-        {
-            "member": hashlib.sha256(rpub.encode()).hexdigest(),
-            "box": sys.argv[2],
-            "key": sys.argv[3],
-            "expires": now + 365 * 24 * 3600,
-            "at": now,
-        },
-        separators=(",", ":"),
-    ).encode()
+    fields = {"member": hashlib.sha256(rpub.encode()).hexdigest(), "box": box}
+    if kind == "enlist":
+        fields["ticket"] = sys.argv[4]
+    fields["at"] = int(time.time())
+    body = json.dumps(fields, separators=(",", ":")).encode()
     env = {
         "v": 2,
-        "kind": "enlist",
+        "kind": kind,
         "body": b64(body),
-        "sig": b64(root.sign(b"commonty enlist v2\0" + body)),
+        "sig": b64(root.sign(f"commonty {kind} v2".encode() + b"\0" + body)),
     }
     subprocess.run(
         [
             "curl",
-            "-sf",
-            "--unix-socket",
-            "s1.sock",
+            "-sSf",
+            "-X",
+            "PUT",
+            "-H",
+            "Authorization: Bearer " + open("token").read().strip(),
             "-H",
             "content-type: application/json",
             "--data-binary",
             json.dumps(env),
-            "http://control/submit",
+            f"http://127.0.0.1:4281/_dd/boxes/{kind}",
         ],
         check=True,
     )
@@ -92,7 +90,8 @@ cfg["validators"].append(
     }
 )
 # the identity judge's part, so dd-control serves /identity: a release
-# key, and nobody on its list (ada is on the gates' VERIFY_MEMBERS)
+# key, and nobody on its list - ada comes in by her box alone (she is on
+# the replaying gates' VERIFY_MEMBERS, which her agreed gate never reads)
 rel = ed.Ed25519PrivateKey.generate()
 cfg["identity"] = {
     "release": b64(rel.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)),
@@ -200,8 +199,9 @@ for i in (1, 2, 3):
         os.environ,
         # the first gate whole, for the member's pages (/_dd/boxes/mine)
         VERIFY_ROLE="full" if i == 1 else "directory",
-        # whose a joined box is: the agreed identity state's enlistments
-        VERIFY_IDENTITY_FROM="shadow" if i == 1 else "replay",
+        # who may use the services, and whose a joined box is: the agreed
+        # identity state alone, on the member's gate
+        VERIFY_IDENTITY_FROM="agreed" if i == 1 else "replay",
         VERIFY_PAGES_DIR=PAGES,
         VERIFY_DIR=f"{T}/g{i}/keys",
         VERIFY_BIND=f"0.0.0.0:428{i}",

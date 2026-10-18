@@ -1,7 +1,9 @@
 # A joined box's own system after its first boot: named by its key, moved
-# to that name's system by its own agent, joined with its member's ticket,
-# and its member's.
+# to that name's system by its own agent, joined with its member's ticket;
+# its member's once her root enlists it on that ticket, which opens the
+# services to her; and nobody's, and the services shut, once she removes it.
 import json
+import time
 
 # boxNamed is never started: it is the system the box moves to
 fleet.start()
@@ -126,16 +128,78 @@ j = joined()
 assert j["ticket"] == box.succeed("cat /var/lib/dd/join-ticket").strip(), j
 assert j["key"] == spki, j
 
-# not hers on its ticket alone: ada's root enlists it
+# not hers on its ticket alone, and signing up opened nothing: the box waits
+# for her root, and the services are shut to her
 token = fleet.succeed("cat /root/f/token").strip()
-mine = (
-    f"curl -sf -H 'Authorization: Bearer {token}' http://127.0.0.1:4281/_dd/boxes/mine"
-)
+auth = f"-H 'Authorization: Bearer {token}'"
+mine = f"curl -sf {auth} http://127.0.0.1:4281/_dd/boxes/mine"
+verify = f"curl -s -o /dev/null -w '%{{http_code}}' {auth} http://127.0.0.1:4281/verify"
 assert json.loads(fleet.succeed(mine))["boxes"] == []
-fleet.succeed(f"cd /root/f && python3 {nix['fleet']} enlist {nix['keyName']} {spki}")
+waiting = json.loads(
+    fleet.succeed(f"curl -sf {auth} http://127.0.0.1:4281/_dd/network/joined")
+)
+assert waiting == [
+    {
+        "name": nix["keyName"],
+        "ticket": "00112233445566778899aabbccddeeff",
+        "joined": j["at"],
+        "enlisted": False,
+    }
+], waiting
+assert fleet.succeed(verify).strip() == "403"
 
-# the member's gate: the box is hers
+# the box's own report says it qualifies: a TPM 2.0, UEFI and a GPU (the
+# test's VM has neither of the last two, so its report is written so here)
+box.succeed(
+    "jq '.firmware.uefi = true | .firmware.tpm = {version: 2} | .gpus = [{driver: \"nvidia\"}]'"
+    " /var/lib/dd/report/hardware.json > /run/hw.json && cp /run/hw.json /var/lib/dd/report/hardware.json"
+)
 fleet.wait_until_succeeds(
-    f"{mine} | jq -e '.boxes[] | select(.name == \"{nix['keyName']}\")'",
+    f"curl -sf http://127.0.0.1:4191/state | jq -e '.boxes.{nix['keyName']}.facts | .gpus == 1 and .tpm_major == 2 and .uefi == 1'",
+    timeout=180,
+)
+
+# a ticket the box did not join with: the judge refuses it, and the box
+# stays nobody's (another member's ticket, and the rest, are state/ident's
+# tests)
+fleet.succeed(
+    f"cd /root/f && python3 {nix['fleet']} item enlist {nix['keyName']} ffeeddccbbaa99887766554433221100"
+)
+time.sleep(10)
+assert json.loads(fleet.succeed(mine))["boxes"] == []
+
+# ada's root enlists it on its ticket, through her gate
+fleet.succeed(
+    f"cd /root/f && python3 {nix['fleet']} item enlist {nix['keyName']} 00112233445566778899aabbccddeeff"
+)
+fleet.wait_until_succeeds(
+    f'{mine} | jq -e \'.boxes[] | select(.name == "{nix["keyName"]}" and .ticket == "00112233445566778899aabbccddeeff")\'',
     timeout=120,
 )
+ident = json.loads(fleet.succeed("curl -sf 'http://127.0.0.1:4191/identity?name=ada'"))[
+    "member"
+]
+assert ident["access"] == "box", ident
+assert ident["enlisted"][0]["qualifies"] == "gpu" and ident["enlisted"][0]["counts"], (
+    ident
+)
+# the services are open to her now
+fleet.wait_until_succeeds(f"test $({verify}) = 200", timeout=60)
+assert json.loads(
+    fleet.succeed(f"curl -sf {auth} http://127.0.0.1:4281/_dd/network/joined")
+)[0]["enlisted"]
+
+# she removes it: nobody's at once, and the services shut again
+fleet.succeed(f"cd /root/f && python3 {nix['fleet']} item unenlist {nix['keyName']}")
+fleet.wait_until_succeeds(f"{mine} | jq -e '.boxes == []'", timeout=120)
+fleet.wait_until_succeeds(f"test $({verify}) = 403", timeout=60)
+ident = json.loads(fleet.succeed("curl -sf 'http://127.0.0.1:4191/identity?name=ada'"))[
+    "member"
+]
+assert ident["access"] == "none" and ident["enlisted"] == [], ident
+# and its ticket is used: enlisting it again on it is refused
+fleet.succeed(
+    f"cd /root/f && python3 {nix['fleet']} item enlist {nix['keyName']} 00112233445566778899aabbccddeeff"
+)
+time.sleep(10)
+assert json.loads(fleet.succeed(mine))["boxes"] == []
