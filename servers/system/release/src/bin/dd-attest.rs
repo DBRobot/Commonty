@@ -267,7 +267,15 @@ fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
     // dd-build unit's, which systemd never runs twice; the checked list is
     // only appended to, a line at a time, and only read whole.
     let mut checked = read_checked();
+    // a newer order replaces this one: building on for the old one kept the
+    // new one waiting an hour, so a job not started is left and one under
+    // way is stopped, said nowhere and not marked done
+    let gone = || superseded(url, &trusted, &id);
     for job in todo {
+        if gone() {
+            eprintln!("== order {id}: replaced by a newer one; the next run takes that");
+            return Ok(());
+        }
         eprintln!("== order {id}: {}", job.name);
         // Built, or the reason it was not: either way the laptop hears it
         // in the log, rather than waiting out a box that will never answer
@@ -281,6 +289,7 @@ fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
             "job": job.name,
             "path": job.path,
         });
+        let mut replaced = false;
         let built = (|| -> Result<(String, String)> {
             let drv = eval_job(flake, rev, &job, "drvPath")?;
             let path = eval_job(flake, rev, &job, "outPath")?;
@@ -290,7 +299,10 @@ fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
                 &rev[..12],
                 job.path
             );
-            sh("nix-store", &["--realise", &drv])?;
+            if !realise_unless(&drv, &gone)? {
+                replaced = true;
+                bail!("replaced");
+            }
             let closure = attest(&drv, &path, &mut checked)?;
             let nar = release::nar_hash_from_path_info(
                 &sh("nix", &["path-info", "--json", &path])?,
@@ -299,6 +311,13 @@ fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("{e}"))?;
             Ok((closure, nar))
         })();
+        if replaced {
+            eprintln!(
+                "== order {id}: replaced by a newer one during {}; the next run takes that",
+                job.name
+            );
+            return Ok(());
+        }
         match built {
             Ok((closure, nar)) => {
                 said["closure"] = closure.into();
@@ -329,6 +348,48 @@ fn order(url: &str, key_file: &str, submit: &str) -> Result<()> {
         writeln!(f, "{id} {}", job.name)?;
     }
     Ok(())
+}
+
+/// Whether the order at `url` is now another, newer one. Not being able to
+/// read it says nothing: the build goes on.
+fn superseded(url: &str, trusted: &ed25519_dalek::VerifyingKey, id: &str) -> bool {
+    let Ok(mut r) = ureq::get(url).call() else {
+        return false;
+    };
+    let Ok(raw) = r.body_mut().read_to_string() else {
+        return false;
+    };
+    release::verify_doc(&raw, "build-order", trusted)
+        .ok()
+        .and_then(|o| o["id"].as_str().map(|now| now != id))
+        .unwrap_or(false)
+}
+
+/// `nix-store --realise`, asking `gone` every minute while it builds: true
+/// once built, false if it was stopped because `gone` said so
+fn realise_unless(drv: &str, gone: &dyn Fn() -> bool) -> Result<bool> {
+    let mut c = Command::new("nix-store")
+        .args(["--realise", drv])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context("nix-store")?;
+    loop {
+        for _ in 0..60 {
+            if let Some(st) = c.try_wait()? {
+                ensure!(st.success(), "nix-store --realise failed");
+                return Ok(true);
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        if gone() {
+            // the daemon stops a build its last client has left
+            let _ = c.kill();
+            let _ = c.wait();
+            return Ok(false);
+        }
+    }
 }
 
 /// one result to dd-control over its socket: a plain HTTP/1.0 POST
