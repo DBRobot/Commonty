@@ -88,8 +88,10 @@ pub const ENVELOPE_MAX: usize = 64 * 1024;
 /// PUTs a minute from one visitor, v1 and v2 alike, counted before a byte
 /// of the body is read
 pub const PUTS_PER_SOURCE: usize = 20;
-/// v2 items a minute for one name, counted once the signature verified
+/// v2 items a minute for one name, and by one signing key (one key may be
+/// the root of several names), counted once the signature verified
 pub const ENVELOPES_PER_NAME: usize = 6;
+pub const ENVELOPES_PER_KEY: usize = 6;
 /// how many visitors or names a window holds at once
 pub const WINDOW_MAX: usize = 4096;
 /// a v2 item sent on is not sent again for a day; the list holds at most this
@@ -100,6 +102,7 @@ const SENT_SECS: u64 = 24 * 3600;
 pub struct PutGuard {
     by_source: Window,
     by_name: Window,
+    by_key: Window,
     sent: Sent,
 }
 
@@ -1471,16 +1474,25 @@ impl Directory {
         {
             return Err((StatusCode::CONFLICT, "that item was sent already".into()));
         }
+        // nor an item the agreed state says is in the log already, however
+        // long ago: from the state as last read, never a wait for it
+        if self.in_agreed_log(bytes) {
+            return Err((
+                StatusCode::CONFLICT,
+                "that item is in the log already".into(),
+            ));
+        }
         // signed by the key that speaks for the name: checked, not judged
-        self.envelope_signed(kind, name, bytes)
+        let signer = self
+            .envelope_signed(kind, name, bytes)
             .map_err(|e| (StatusCode::FORBIDDEN, format!("refused: {e}")))?;
         {
             let mut g = self.guard.lock().unwrap();
             // the name's allowance counts only items that verified: a
             // forgery in a member's name spends nothing of theirs
-            if !g
-                .by_name
-                .take(name, ENVELOPES_PER_NAME, std::time::Instant::now())
+            let now = std::time::Instant::now();
+            if !g.by_name.take(name, ENVELOPES_PER_NAME, now)
+                || !g.by_key.take(&signer, ENVELOPES_PER_KEY, now)
             {
                 return Err((
                     StatusCode::TOO_MANY_REQUESTS,
@@ -1500,6 +1512,19 @@ impl Directory {
             return Err((StatusCode::BAD_GATEWAY, format!("the control plane: {e:#}")));
         }
         Ok(hash)
+    }
+
+    /// Whether the agreed state, as last read, records this item (by the
+    /// log's item hash) as judged already. Not read yet: no answer, and the
+    /// sent list stands alone
+    fn in_agreed_log(&self, bytes: &[u8]) -> bool {
+        let Some(state) = self.ident.as_ref().and_then(|a| a.state()) else {
+            return false;
+        };
+        let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+            return false;
+        };
+        state.outcomes.contains_key(&item_hash(&v))
     }
 
     /// Room for one more PUT from this visitor: the one limiter in front of
@@ -3037,5 +3062,53 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
         assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_item_the_agreed_log_judged_is_not_sent_again() {
+        let (d, got, k) = with_ann("in-agreed-log");
+        let b = sealed(&entry("ann", &k, &[], 2), &k);
+        let hash = item_hash(&serde_json::from_slice(&b).unwrap());
+        let s: crate::ident::State = serde_json::from_value(serde_json::json!({
+            "height": 2,
+            "members": {"ann": {"status": "member", "item": {"entry": sign(entry("ann", &k, &[], 1), &k).unwrap()}}},
+            "outcomes": {hash: "ok"}
+        }))
+        .unwrap();
+        d.ident.as_ref().unwrap().set(s);
+        assert_eq!(put_v2(&d, "ann", "a", b).await, StatusCode::CONFLICT);
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn not_yet_read_the_agreed_log_blocks_nothing() {
+        let (d, got) = agreed_dir("agreed-unread", crate::ident::From::Shadow);
+        let d = Arc::new(d);
+        let k = generate();
+        let b = sealed(&entry("bea", &k, &[], 1), &k);
+        assert_eq!(
+            put_v2(&d, "bea", "a", b.clone()).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(*got.lock().unwrap(), b);
+    }
+
+    #[tokio::test]
+    async fn one_key_signing_for_many_names_has_one_allowance() {
+        // one key may be the root of several names: its allowance spans them
+        let (d, _got, _k) = with_ann("per-key");
+        let k = generate();
+        let mut last = StatusCode::ACCEPTED;
+        for n in 0..=ENVELOPES_PER_KEY {
+            let name = format!("same{n}");
+            last = put_v2(
+                &d,
+                &name,
+                &format!("198.51.100.{n}"),
+                sealed(&entry(&name, &k, &[], 1), &k),
+            )
+            .await;
+        }
+        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
     }
 }
