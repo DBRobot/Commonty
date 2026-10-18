@@ -1,93 +1,145 @@
-/* The Computers page: what it adds to home.css (loaded before this). The
+/* The Computers pages: what they add to home.css (loaded before this). The
    colours, type, bar, buttons, fields and state words are home.css's. */
 
 main {
-  max-width: 980px;
+  max-width: 1080px;
   margin: 0 auto;
   padding-inline: 16px;
-  padding-block: 32px 72px;
+  padding-block: 24px 72px;
+  display: grid;
+  gap: 20px;
 }
-h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
-h2 { margin: 0 0 14px; font-size: 18px; }
-h3 { margin: 0 0 6px; font-size: 16px; }
-section { margin-bottom: 36px; }
-
-.top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 18px;
-}
-.used { margin: 0; color: var(--ink-2); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+main h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; text-wrap: balance; }
+main h2 { margin: 0; font-size: 17px; }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-code.mono { background: var(--code); padding: 2px 6px; border-radius: var(--radius); overflow-wrap: anywhere; }
+.dim { color: var(--ink-2); }
+.small-t { font-size: 14px; margin: 0; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+#view { display: grid; gap: 20px; min-width: 0; }
 
-.list { display: grid; gap: 10px; }
-.row {
-  display: flex;
-  gap: 16px;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  padding: 16px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+/* home.css spaces a lone button from what is above it; here they sit in rows */
+main button { margin-top: 0; }
+main button.small { height: 32px; padding: 0 12px; font-size: 14px; }
+main button.bad { background: var(--broken); color: #fff; }
+a.btn {
+  display: inline-flex; align-items: center; height: 44px; padding: 0 18px;
+  background: var(--accent); color: var(--accent-ink); font-weight: 600;
+  border-radius: var(--radius); text-decoration: none;
 }
-.row.ph { height: 76px; background: var(--line-2); border-color: var(--line-2); }
-.ph { color: transparent; }
-.what { min-width: 0; flex: 1 1 320px; }
-.meta { margin: 4px 0 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; color: var(--ink-2); }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; }
-/* home.css spaces a lone button from what is above it; in a row they line up */
-.actions button { min-height: 40px; height: auto; margin-top: 0; padding-block: 8px; }
+a.btn:hover { background: var(--accent-hover); color: var(--accent-ink); }
+a.btn.quiet-l { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+a.btn.quiet-l:hover { background: var(--bg); }
+
+/* where you are, the page's name, its own actions */
+.head { display: grid; gap: 6px; }
+.head .crumbs { margin: 0; font-size: 15px; }
+.head .crumbs:has(a:only-child) { display: none; }
+.head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.head-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 .note {
-  margin: 0 0 22px;
+  margin: 0;
   padding: 12px 16px;
   border: 1px solid var(--broken);
   background: var(--broken-bg);
   border-radius: var(--radius);
 }
 
-dialog {
-  width: min(640px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
-  padding: 24px;
-  color: var(--ink);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+/* what all your computers take, against the limits */
+.usage { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 28px; padding: 16px 20px; }
+.usage .small-t { grid-column: 1 / -1; }
+.meter { display: grid; grid-template-columns: 80px 1fr auto; align-items: center; gap: 12px; min-width: 0; }
+.meter .k { font-weight: 600; font-size: 15px; }
+.meter .bar { height: 8px; background: var(--line-2); border-radius: 4px; overflow: hidden; }
+.meter .bar i { display: block; height: 100%; background: var(--pick); }
+.meter .bar i[data-full] { background: var(--attention); }
+.meter .v { font-size: 14px; color: var(--ink-2); white-space: nowrap; }
+@media (max-width: 640px) { .usage { grid-template-columns: 1fr; } }
+
+/* Computers | Configs */
+.tabs-l { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tabs-l .tab {
+  display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: -1px;
+  color: var(--ink-2); font-weight: 600; text-decoration: none; border-bottom: 2px solid transparent;
 }
-dialog::backdrop { background: color-mix(in srgb, var(--ink) 40%, transparent); }
-dialog form { display: grid; gap: 6px; }
-dialog label { margin-top: 10px; }
-dialog input, dialog textarea { width: 100%; box-sizing: border-box; }
+.tabs-l .tab:hover { color: var(--ink); }
+.tabs-l .tab[aria-current="page"] { color: var(--ink); border-bottom-color: var(--pick); }
+.tabs-l .count { font-size: 12px; padding: 0 7px; border-radius: 999px; background: var(--off-bg); color: var(--ink-2); }
+
+/* computers and configs, as cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 14px; }
+.card-c {
+  display: grid; gap: 10px; align-content: start; min-width: 0;
+  padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.card-c.ph { height: 168px; background: var(--line-2); border-color: var(--line-2); }
+.card-c p { margin: 0; }
+.card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.card-top h2 a { color: var(--ink); text-decoration: none; }
+.card-top h2 a:hover { text-decoration: underline; }
+.card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.card-foot button, .card-foot a.btn { height: 38px; }
+
+/* a command to copy */
+.copy { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.copy code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 6px 10px; background: var(--code); border-radius: var(--radius); font-size: 14px; }
+
+.empty-p { display: grid; gap: 10px; justify-items: start; padding: 28px; }
+.empty-p p { margin: 0; max-width: 60ch; color: var(--ink-2); }
+
+/* one computer: what you do with it, beside what it is */
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+.split .col { display: grid; gap: 20px; min-width: 0; }
+@media (max-width: 860px) { .split { grid-template-columns: 1fr; } .split .facts { order: -1; } }
+.sec { display: grid; gap: 12px; padding: 18px 20px; }
+.sec p { margin: 0; }
+.row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.facts dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0; }
+.facts dt { color: var(--ink-2); font-size: 14px; }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.log {
+  margin: 0; max-height: 240px; overflow: auto; padding: 10px 12px;
+  background: var(--code); border-radius: var(--radius); font: 13px/1.5 var(--mono); white-space: pre-wrap;
+}
+table.ports { border-collapse: collapse; width: 100%; max-width: 420px; }
+table.ports th { text-align: left; font: 500 12px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line-2); }
+table.ports td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line-2); }
+ul.who { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.danger { border-color: color-mix(in srgb, var(--broken) 40%, var(--line)); }
+.danger .row { align-items: flex-start; }
+.confirm { display: grid; gap: 8px; }
+.confirm p { max-width: 50ch; }
+
+/* a config, section by section */
+form.editor { display: grid; gap: 20px; }
+.field { display: grid; gap: 6px; min-width: 0; }
+.field label { margin: 0; }
+.field .hint, .sec .hint { margin: 0; }
+.field input, .field textarea { width: 100%; box-sizing: border-box; }
+.field input { height: 44px; }
 textarea {
-  font: 14px/1.45 var(--mono);
-  color: var(--ink);
-  background: var(--surface);
-  border: 1px solid var(--field);
-  border-radius: var(--radius);
-  padding: 8px 10px;
-  resize: vertical;
+  font: 14px/1.45 var(--mono); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--field); border-radius: var(--radius); padding: 8px 10px; resize: vertical;
 }
 textarea:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
-.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-@media (max-width: 520px) { .three { grid-template-columns: 1fr; } }
-fieldset { margin: 14px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
-legend { padding: 0 4px; color: var(--ink-2); }
-label.pick { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
-label.pick input { width: auto; height: auto; }
-.warn {
-  margin-top: 14px;
-  padding: 12px 14px;
-  background: var(--attention-bg);
-  border: 1px solid var(--attention);
-  border-radius: var(--radius);
+.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+@media (max-width: 560px) { .three { grid-template-columns: 1fr; } }
+fieldset.where { margin: 0; padding: 0; border: 0; display: grid; gap: 10px; min-width: 0; }
+.pick-list { display: grid; gap: 10px; }
+label.opt-card {
+  display: flex; gap: 12px; align-items: flex-start; margin: 0; padding: 12px 14px; font-weight: 400;
+  border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer;
 }
-.warn p { margin: 0; }
-.error { margin: 10px 0 0; color: var(--broken); }
-dialog .actions { justify-content: flex-end; margin-top: 18px; }
+label.opt-card:has(input:checked) { border-color: var(--pick); background: color-mix(in srgb, var(--pick) 6%, var(--surface)); }
+label.opt-card input { width: 18px; height: 18px; margin: 3px 0 0; flex: none; accent-color: var(--pick); }
+label.opt-card > span { display: grid; gap: 2px; min-width: 0; }
+label.pick { display: flex; gap: 8px; align-items: center; margin: 10px 0 0; font-weight: 600; }
+label.pick input { width: 18px; height: 18px; accent-color: var(--attention); }
+.warn {
+  padding: 12px 14px; background: var(--attention-bg);
+  border: 1px solid var(--attention); border-radius: var(--radius);
+}
+.savebar {
+  position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 18px;
+  padding: 12px 0; background: var(--bg); border-top: 1px solid var(--line);
+}
