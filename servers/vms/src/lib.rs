@@ -40,8 +40,8 @@ pub const MIN_DISK: u64 = 8;
 pub const MAX_NIX: usize = 64 * 1024;
 pub const MAX_FORWARDS: usize = 8;
 /// the config every member has from the start
-pub const GENERIC: &str = "generic";
-const GENERIC_NIX: &str = "{ pkgs, ... }:
+pub const DEFAULT: &str = "default";
+const DEFAULT_NIX: &str = "{ pkgs, ... }:
 {
   # a general-purpose machine: build tools, editors, languages' basics
   environment.systemPackages = with pkgs; [
@@ -371,16 +371,16 @@ impl Manager {
             .unwrap_or_default()
     }
 
-    /// Their configs, and the generic one unless they saved their own by
+    /// Their configs, and the default one unless they saved their own by
     /// that name: something to make a remote computer from on day one.
     pub fn configs(&self, owner: &str) -> BTreeMap<String, Config> {
         let mut all = self.stored(owner);
-        all.entry(GENERIC.to_string()).or_insert_with(|| Config {
-            name: GENERIC.to_string(),
+        all.entry(DEFAULT.to_string()).or_insert_with(|| Config {
+            name: DEFAULT.to_string(),
             memory: 4096.min(self.limits.memory),
             threads: 2.min(self.limits.threads),
             disk: 32.min(self.limits.disk),
-            nix: GENERIC_NIX.to_string(),
+            nix: DEFAULT_NIX.to_string(),
             keys: vec![],
             ports: vec![],
             players: vec![],
@@ -479,8 +479,8 @@ impl Manager {
         let _g = self.lock.lock().unwrap();
         let mut all = self.stored(owner);
         if all.remove(name).is_none() {
-            bail!(if name == GENERIC {
-                "the generic config is always there; change it, and yours takes its place"
+            bail!(if name == DEFAULT {
+                "the default config is always there; change it, and yours takes its place"
             } else {
                 "no such config"
             });
@@ -589,7 +589,7 @@ impl Manager {
     /// A new instance from a saved config. `yes`: the owner said yes to
     /// the warning about someone else's box, just now.
     /// `keys`: SSH keys for this one computer besides its config's (the
-    /// generic config has none of its own)
+    /// default config has none of its own)
     pub fn make(
         &self,
         owner: &str,
@@ -1087,12 +1087,12 @@ mod tests {
     }
 
     #[test]
-    fn everyone_has_the_generic_config_and_each_computer_its_own_key() {
-        let (m, _) = scratch("generic");
-        assert!(m.configs("ann").contains_key(GENERIC));
-        assert_eq!(m.configs("ann")[GENERIC].consent, Consent::Any);
-        assert_eq!(m.configs("david")[GENERIC].consent, Consent::Own);
-        let r = m.make("ann", GENERIC, "a", true, &[]).unwrap();
+    fn everyone_has_the_default_config_and_each_computer_its_own_key() {
+        let (m, _) = scratch("default");
+        assert!(m.configs("ann").contains_key(DEFAULT));
+        assert_eq!(m.configs("ann")[DEFAULT].consent, Consent::Any);
+        assert_eq!(m.configs("david")[DEFAULT].consent, Consent::Own);
+        let r = m.make("ann", DEFAULT, "a", true, &[]).unwrap();
         // its own key: the public half let in, the private half its owner's
         assert!(r.key.starts_with("ssh-ed25519 ") && r.key.ends_with(" ann@a"));
         assert_eq!(r.all_keys(), vec![r.key.clone()]);
@@ -1106,7 +1106,7 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
         m.rekey("ann", &r.id).unwrap();
         assert_ne!(m.record("ann", &r.id).unwrap().key, r.key);
-        assert!(m.delete_config("ann", GENERIC).is_err());
+        assert!(m.delete_config("ann", DEFAULT).is_err());
     }
 
     /// ssh itself reads the key and gets the same public half back, where

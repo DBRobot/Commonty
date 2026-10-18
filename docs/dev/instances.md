@@ -53,8 +53,8 @@ host, a template unit, a firewall chain refilled from who may reach it.
 
 A config is a saved thing apart from the instances made from it: make
 three the same, change the config, rebuild one. Every member has one
-from the start, `generic` (4G, 2 threads, 32G, build tools and the
-usual languages). Saving a config called `generic` replaces it for
+from the start, the Default config, `default` (4G, 2 threads, 32G, build tools and the
+usual languages). Saving a config called `default` replaces it for
 that member.
 
 Nobody types an SSH key. Each remote computer makes its own key pair when

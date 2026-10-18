@@ -21,6 +21,8 @@ const state = (s) => {
   const [tone, word] = words[s] || words.stopped;
   return el('span', { class: 'state-word', 'data-state': tone, text: word });
 };
+// the config everyone has, by the name people know it by
+const label = (n) => (n === 'default' ? 'Default config' : n);
 const up = (i) => i.state === 'running' || i.state === 'starting';
 // with its own key, saved where the download and dd put it
 const sshOf = (i) => {
@@ -118,7 +120,7 @@ function overview() {
     el('p', { class: 'mono dim', text: spec(i) }),
     copyable(sshOf(i)),
     el('div', { class: 'card-foot' },
-      i.consent === 'any' ? el('span', { class: 'state-word', 'data-state': 'attention', text: "On anyone's box" }) : el('span', { class: 'dim', text: `From ${i.config}` }),
+      i.consent === 'any' ? el('span', { class: 'state-word', 'data-state': 'attention', text: "On anyone's box" }) : el('span', { class: 'dim', text: `From ${label(i.config)}` }),
       up(i)
         ? el('button', { type: 'button', class: 'quiet', text: 'Stop', onclick: () => act(() => call('POST', `/api/instances/${i.id}/stop`, {})) })
         : el('button', { type: 'button', text: 'Start', onclick: () => act(() => call('POST', `/api/instances/${i.id}/start`, {})) }))));
@@ -131,7 +133,7 @@ function overview() {
       ? el('div', { class: 'cards' }, cards)
       : el('div', { class: 'empty-p panel' },
         el('h2', { text: s.member ? 'No remote computers yet' : 'Remote computers are for members' }),
-        s.member ? el('p', {}, 'A remote computer is yours to SSH into and install what you need. Make one from the generic config, or write your own: how big it is, what it has, and who can reach it.') : null,
+        s.member ? el('p', {}, 'A remote computer is yours to SSH into and install what you need. Make one from the Default config, or write your own: how big it is, what it has, and who can reach it.') : null,
         s.member ? el('a', { class: 'btn', href: '#/new', text: 'Make a remote computer' }) : null));
 }
 
@@ -197,7 +199,7 @@ function computer(id) {
         log,
         el('div', { class: 'row' },
           apply,
-          c ? el('a', { href: `#/configs/${encodeURIComponent(c.name)}`, text: `Edit ${c.name}` }) : el('span', { class: 'dim', text: 'Its config is gone.' })),
+          c ? el('a', { href: `#/configs/${encodeURIComponent(c.name)}`, text: `Edit ${label(c.name)}` }) : el('span', { class: 'dim', text: 'Its config is gone.' })),
         yesBox,
         el('p', { class: 'dim small-t', text: 'Packages and keys change at once; size and ports at its next start.' })),
       el('section', { class: 'panel sec' },
@@ -213,7 +215,7 @@ function computer(id) {
         el('dt', { text: 'Memory' }), el('dd', { class: 'mono', text: gib(i.memory) }),
         el('dt', { text: 'Threads' }), el('dd', { class: 'mono', text: String(i.threads) }),
         el('dt', { text: 'Disk' }), el('dd', { class: 'mono', text: `${i.disk} GiB system + ${i.disk} GiB /home` }),
-        el('dt', { text: 'Made from' }), el('dd', {}, c ? el('a', { href: `#/configs/${encodeURIComponent(c.name)}`, text: i.config }) : i.config),
+        el('dt', { text: 'Made from' }), el('dd', {}, c ? el('a', { href: `#/configs/${encodeURIComponent(c.name)}`, text: label(i.config) }) : label(i.config)),
         el('dt', { text: 'Runs on' }), el('dd', { text: i.consent === 'any' ? "Anyone's box: its owner can read it" : 'Your boxes only' }),
         el('dt', { text: 'Made' }), el('dd', { class: 'mono', text: new Date(i.created).toLocaleDateString() })))));
 }
@@ -250,7 +252,7 @@ function configs() {
         const made = now.instances.filter((i) => i.config === c.name).length;
         return el('article', { class: 'card-c' },
           el('div', { class: 'card-top' },
-            el('h2', {}, el('a', { href: `#/configs/${encodeURIComponent(c.name)}`, text: c.name })),
+            el('h2', {}, el('a', { href: `#/configs/${encodeURIComponent(c.name)}`, text: label(c.name) })),
             c.consent === 'any' ? el('span', { class: 'state-word', 'data-state': 'attention', text: "Anyone's box" }) : el('span', { class: 'state-word', 'data-state': 'off', text: 'My boxes' })),
           el('p', { class: 'mono dim', text: spec(c) }),
           el('p', { class: 'dim', text: `${c.ports.length ? `Ports ${c.ports.join(', ')}` : 'SSH only'} · ${made} made` }),
@@ -281,7 +283,7 @@ function editor(name) {
     ? { name: '', memory: 4096, threads: 2, disk: 32, consent: now.user === now.boxOwner ? 'own' : 'any', keys: [], ports: [], players: [], nix: DEFAULT_NIX }
     : now.configs.find((x) => x.name === name);
   if (!c) return missing('That config');
-  head(fresh ? 'New config' : c.name, [['Remote computers', '#/'], ['Configs', '#/configs'], [fresh ? 'New' : c.name]]);
+  head(fresh ? 'New config' : label(c.name), [['Remote computers', '#/'], ['Configs', '#/configs'], [fresh ? 'New' : c.name]]);
   const L = now.limits;
   const num = (id, v, min, max, step) => el('input', { id, type: 'number', value: v, min, max, step, required: true });
   const nameSec = fresh
@@ -359,7 +361,7 @@ function maker(pick) {
     const r = el('input', { type: 'radio', name: 'cfg', value: c.name, checked: c === chosen });
     r.addEventListener('change', () => { chosen = c; showWarn(); });
     return el('label', { class: 'opt-card' }, r,
-      el('span', {}, el('strong', { text: c.name }), el('span', { class: 'mono dim', text: spec(c) }),
+      el('span', {}, el('strong', { text: label(c.name) }), el('span', { class: 'mono dim', text: spec(c) }),
         el('span', { class: 'dim', text: c.consent === 'any' ? "Anyone's box" : 'My boxes only' })));
   }));
   showWarn();

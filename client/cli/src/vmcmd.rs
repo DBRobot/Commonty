@@ -41,7 +41,7 @@ pub enum VmCmd {
     },
     /// Delete a config; remote computers made from it keep running
     Forget { name: String },
-    /// A new remote computer from a saved config (the generic one is always there)
+    /// A new remote computer from a saved config (the default one is always there)
     Make {
         config: String,
         name: String,
