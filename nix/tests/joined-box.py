@@ -134,6 +134,16 @@ token = fleet.succeed("cat /root/f/token").strip()
 auth = f"-H 'Authorization: Bearer {token}'"
 mine = f"curl -sf {auth} http://127.0.0.1:4281/_dd/boxes/mine"
 verify = f"curl -s -o /dev/null -w '%{{http_code}}' {auth} http://127.0.0.1:4281/verify"
+code = fleet.execute(
+    f"curl -s -o /dev/null -w '%{{http_code}}' {auth} http://127.0.0.1:4281/_dd/boxes/mine"
+)[1]
+if code != "200":
+    print(
+        fleet.execute(
+            "curl -s 'http://127.0.0.1:4191/identity?name=ada'; tail -60 /root/f/g1.log"
+        )[1]
+    )
+    raise Exception(f"/_dd/boxes/mine: {code}")
 assert json.loads(fleet.succeed(mine))["boxes"] == []
 waiting = json.loads(
     fleet.succeed(f"curl -sf {auth} http://127.0.0.1:4281/_dd/network/joined")
@@ -150,10 +160,11 @@ assert fleet.succeed(verify).strip() == "403"
 
 # the box's own report says it qualifies: a TPM 2.0, UEFI and a GPU (the
 # test's VM has neither of the last two, so its report is written so here)
-box.succeed(
-    "jq '.firmware.uefi = true | .firmware.tpm = {version: 2} | .gpus = [{driver: \"nvidia\"}]'"
-    " /var/lib/dd/report/hardware.json > /run/hw.json && cp /run/hw.json /var/lib/dd/report/hardware.json"
-)
+hw = json.loads(box.succeed("cat /var/lib/dd/report/hardware.json"))
+hw["firmware"]["uefi"] = True
+hw["firmware"]["tpm"] = {"version": 2}
+hw["gpus"] = [{"driver": "nvidia"}]
+box.succeed(f"cat > /var/lib/dd/report/hardware.json <<'EOF'\n{json.dumps(hw)}\nEOF")
 fleet.wait_until_succeeds(
     f"curl -sf http://127.0.0.1:4191/state | jq -e '.boxes.{nix['keyName']}.facts | .gpus == 1 and .tpm_major == 2 and .uefi == 1'",
     timeout=180,
