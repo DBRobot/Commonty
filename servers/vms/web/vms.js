@@ -1,4 +1,4 @@
-// The Computers pages: an overview of your computers and configs, a page
+// The Remote computers pages: an overview of your computers and configs, a page
 // for each computer, a page to edit a config, and a short flow to make a
 // computer. One answer draws all of them (/api/state), the kept copy first
 // (kit.js load); the address after # says which view.
@@ -75,7 +75,7 @@ function copyable(text) {
 
 function head(title, crumbs, ...acts) {
   $('title').textContent = title;
-  document.title = title === 'Computers' ? 'Computers' : `${title} · Computers`;
+  document.title = title === 'Remote computers' ? title : `${title} · Remote computers`;
   $('crumbs').replaceChildren(
     ...crumbs.flatMap(([label, href], n) => [
       n ? el('span', { class: 'sep', 'aria-hidden': 'true', text: '/' }) : null,
@@ -102,16 +102,16 @@ function tabs(which) {
     class: 'tab',
     'aria-current': which === id ? 'page' : null,
   }, label, el('span', { class: 'count mono', text: String(n) }));
-  return el('nav', { class: 'tabs-l', 'aria-label': 'Computers or configs' },
-    t('computers', 'Computers', now.instances.length),
+  return el('nav', { class: 'tabs-l', 'aria-label': 'Remote computers or configs' },
+    t('computers', 'Remote computers', now.instances.length),
     t('configs', 'Configs', now.configs.length));
 }
 
 // ---- the overview: your computers, as cards
 
 function overview() {
-  head('Computers', [],
-    now.member ? el('a', { class: 'btn', href: now.configs.length ? '#/new' : '#/configs/new', text: 'New computer' }) : null);
+  head('Remote computers', [],
+    now.member ? el('a', { class: 'btn', href: '#/new', text: 'New remote computer' }) : null);
   const s = now;
   const cards = s.instances.map((i) => el('article', { class: 'card-c' },
     el('div', { class: 'card-top' },
@@ -125,29 +125,28 @@ function overview() {
         ? el('button', { type: 'button', class: 'quiet', text: 'Stop', onclick: () => act(() => call('POST', `/api/instances/${i.id}/stop`, {})) })
         : el('button', { type: 'button', text: 'Start', onclick: () => act(() => call('POST', `/api/instances/${i.id}/start`, {})) }))));
   $('view').replaceChildren(
-    el('section', { class: 'usage panel', 'aria-label': 'What your computers take, together' },
+    el('section', { class: 'usage panel', 'aria-label': 'What your remote computers take, together' },
       meter('Memory', s.used.memory, s.limits.memory, gib),
-      meter('Threads', s.used.threads, s.limits.threads, String),
-      el('p', { class: 'dim small-t' }, 'Their disks count toward your storage, in ', el('a', { href: '/_dd/settings#storage', text: 'Settings' }), '.')),
+      meter('Threads', s.used.threads, s.limits.threads, String)),
     tabs('computers'),
     cards.length
       ? el('div', { class: 'cards' }, cards)
       : el('div', { class: 'empty-p panel' },
-        el('h2', { text: s.member ? 'No computers yet' : 'Computers are for members' }),
-        s.member ? el('p', {}, 'A computer is yours to SSH into and install what you need. Start with a config: how big it is, what it has, and who can reach it.') : null,
-        s.member ? el('a', { class: 'btn', href: s.configs.length ? '#/new' : '#/configs/new', text: s.configs.length ? 'Make a computer' : 'Write a config' }) : null));
+        el('h2', { text: s.member ? 'No remote computers yet' : 'Remote computers are for members' }),
+        s.member ? el('p', {}, 'A remote computer is yours to SSH into and install what you need. Make one from the generic config, or write your own: how big it is, what it has, and who can reach it.') : null,
+        s.member ? el('a', { class: 'btn', href: '#/new', text: 'Make a remote computer' }) : null));
 }
 
 // ---- one computer
 
 function computer(id) {
   const i = now.instances.find((x) => x.id === id);
-  if (!i) return missing('That computer');
+  if (!i) return missing('That remote computer');
   const run = (verb, label, quiet) => el('button', {
     type: 'button', class: quiet ? 'quiet' : null, text: label,
     onclick: () => act(() => call('POST', `/api/instances/${i.id}/${verb}`, {})),
   });
-  head(i.name, [['Computers', '#/'], [i.name]], state(i.state), up(i) ? run('stop', 'Stop', true) : run('start', 'Start'));
+  head(i.name, [['Remote computers', '#/'], [i.name]], state(i.state), up(i) ? run('stop', 'Stop', true) : run('start', 'Start'));
 
   const applied = i.applied
     ? i.applied.ok
@@ -232,14 +231,14 @@ function confirming(label, said, fn, disabled) {
 function warning() {
   return el('div', { class: 'warn' },
     el('p', {}, el('strong', { text: "This runs on someone else's box." }),
-      ' Whoever has that box in their house can read this computer’s disk and memory: your files, and anything you sign in to on it, such as Claude.'),
+      ' Whoever has that box in their house can read this remote computer’s disk and memory: your files, and anything you sign in to on it, such as Claude.'),
     el('label', { class: 'pick' }, el('input', { type: 'checkbox', id: 'yes-any' }), "I understand; run it on someone else's box"));
 }
 
 // ---- configs
 
 function configs() {
-  head('Computers', [], now.member ? el('a', { class: 'btn quiet-l', href: '#/configs/new', text: 'New config' }) : null);
+  head('Remote computers', [], now.member ? el('a', { class: 'btn quiet-l', href: '#/configs/new', text: 'New config' }) : null);
   $('view').replaceChildren(
     tabs('configs'),
     now.configs.length
@@ -250,14 +249,14 @@ function configs() {
             el('h2', {}, el('a', { href: `#/configs/${encodeURIComponent(c.name)}`, text: c.name })),
             c.consent === 'any' ? el('span', { class: 'state-word', 'data-state': 'attention', text: "Anyone's box" }) : el('span', { class: 'state-word', 'data-state': 'off', text: 'My boxes' })),
           el('p', { class: 'mono dim', text: spec(c) }),
-          el('p', { class: 'dim', text: `${c.keys.length} SSH ${c.keys.length === 1 ? 'key' : 'keys'} · ${c.ports.length ? `ports ${c.ports.join(', ')}` : 'SSH only'} · ${made} ${made === 1 ? 'computer' : 'computers'}` }),
+          el('p', { class: 'dim', text: `${c.keys.length ? `${c.keys.length} SSH ${c.keys.length === 1 ? 'key' : 'keys'}` : 'Key asked when made'} · ${c.ports.length ? `ports ${c.ports.join(', ')}` : 'SSH only'} · ${made} made` }),
           el('div', { class: 'card-foot' },
             el('a', { href: `#/configs/${encodeURIComponent(c.name)}`, text: 'Edit' }),
-            el('a', { class: 'btn', href: `#/new/${encodeURIComponent(c.name)}`, text: 'Make a computer' })));
+            el('a', { class: 'btn', href: `#/new/${encodeURIComponent(c.name)}`, text: 'Make one' })));
       }))
       : el('div', { class: 'empty-p panel' },
         el('h2', { text: 'No configs yet' }),
-        el('p', { text: 'A config says how big a computer is, what it has installed, and who can reach it. Computers are made from one.' }),
+        el('p', { text: 'A config says how big a remote computer is, what it has installed, and who can reach it.' }),
         now.member ? el('a', { class: 'btn', href: '#/configs/new', text: 'Write a config' }) : null));
 }
 
@@ -278,7 +277,7 @@ function editor(name) {
     ? { name: '', memory: 4096, threads: 2, disk: 32, consent: now.user === now.boxOwner ? 'own' : 'any', keys: [], ports: [], players: [], nix: DEFAULT_NIX }
     : now.configs.find((x) => x.name === name);
   if (!c) return missing('That config');
-  head(fresh ? 'New config' : c.name, [['Computers', '#/'], ['Configs', '#/configs'], [fresh ? 'New' : c.name]]);
+  head(fresh ? 'New config' : c.name, [['Remote computers', '#/'], ['Configs', '#/configs'], [fresh ? 'New' : c.name]]);
   const L = now.limits;
   const num = (id, v, min, max, step) => el('input', { id, type: 'number', value: v, min, max, step, required: true });
   const nameSec = fresh
@@ -292,7 +291,7 @@ function editor(name) {
       field('ed-memory', 'Memory, MiB', num('ed-memory', c.memory, 512, L.memory, 256)),
       field('ed-threads', 'Threads', num('ed-threads', c.threads, 1, L.threads, 1)),
       field('ed-disk', 'Disk, GiB', num('ed-disk', c.disk, 8, L.disk, 1))),
-    el('p', { class: 'hint', text: `All your computers together: up to ${gib(L.memory)} and ${L.threads} threads. A disk only grows, never shrinks.` }));
+    el('p', { class: 'hint', text: `All your remote computers together: up to ${gib(L.memory)} and ${L.threads} threads. A disk only grows, never shrinks.` }));
   const access = el('section', { class: 'panel sec' },
     el('h2', { text: 'Access' }),
     field('ed-keys', 'SSH keys, one per line', el('textarea', { id: 'ed-keys', rows: 3, spellcheck: 'false', placeholder: 'ssh-ed25519 AAAA… you@laptop', text: c.keys.join('\n') })),
@@ -338,7 +337,7 @@ function editor(name) {
   });
   const del = fresh ? null : el('section', { class: 'panel sec danger' },
     el('h2', { text: 'Delete this config' }),
-    el('p', { class: 'dim', text: 'Computers made from it keep running; they just have nothing to apply.' }),
+    el('p', { class: 'dim', text: 'Remote computers made from it keep running; they just have nothing to apply.' }),
     confirming('Delete config', `Delete the config ${c.name}?`, () => act(() => call('DELETE', `/api/configs/${encodeURIComponent(c.name)}`), '#/configs')));
   $('view').replaceChildren(f, del || '');
 }
@@ -346,11 +345,16 @@ function editor(name) {
 // ---- making one
 
 function maker(pick) {
-  head('New computer', [['Computers', '#/'], ['New']]);
-  if (!now.configs.length) { location.hash = '#/configs/new'; return; }
+  head('New remote computer', [['Remote computers', '#/'], ['New']]);
   let chosen = now.configs.find((c) => c.name === pick) || now.configs[0];
   const warnSlot = el('div');
-  const showWarn = () => warnSlot.replaceChildren(chosen.consent === 'any' ? warning() : '');
+  const keySlot = el('div');
+  const showWarn = () => {
+    warnSlot.replaceChildren(chosen.consent === 'any' ? warning() : '');
+    keySlot.replaceChildren(chosen.keys.length ? '' : field('mk-keys', 'Your SSH key',
+      el('textarea', { id: 'mk-keys', rows: 2, spellcheck: 'false', required: true, placeholder: 'ssh-ed25519 AAAA… you@laptop' }),
+      "This config has no key of its own: paste the public key of the device you'll sign in from (cat ~/.ssh/id_ed25519.pub)."));
+  };
   const list = el('div', { class: 'pick-list' }, now.configs.map((c) => {
     const r = el('input', { type: 'radio', name: 'cfg', value: c.name, checked: c === chosen });
     r.addEventListener('change', () => { chosen = c; showWarn(); });
@@ -364,6 +368,7 @@ function maker(pick) {
       el('p', { class: 'hint' }, 'Or ', el('a', { href: '#/configs/new', text: 'write a new config' }), '.')),
     el('section', { class: 'panel sec' }, el('h2', { text: 'Its name' }),
       field('mk-name', 'Name', el('input', { id: 'mk-name', required: true, pattern: '[a-z0-9][a-z0-9-]{0,31}', autocomplete: 'off', placeholder: 'dev' }), 'Lowercase letters, digits and dashes.'),
+      keySlot,
       warnSlot),
     el('div', { class: 'savebar' }, el('a', { href: '#/', text: 'Cancel' }), el('button', { type: 'submit', text: 'Make it' })));
   f.addEventListener('submit', (ev) => {
@@ -371,7 +376,8 @@ function maker(pick) {
     const yes = chosen.consent === 'any' && !!$('yes-any')?.checked;
     if (chosen.consent === 'any' && !yes) { note("Say yes to the warning first: it runs on someone else's box."); return; }
     act(async () => {
-      const made = await call('POST', '/api/instances', { config: chosen.name, name: $('mk-name').value, yes });
+      const keys = ($('mk-keys')?.value || '').split('\n').map((k) => k.trim()).filter(Boolean);
+      const made = await call('POST', '/api/instances', { config: chosen.name, name: $('mk-name').value, yes, keys });
       location.hash = `#/c/${made.id}`;
     });
   });
@@ -379,10 +385,10 @@ function maker(pick) {
 }
 
 function missing(what) {
-  head('Not here', [['Computers', '#/'], ['Not here']]);
+  head('Not here', [['Remote computers', '#/'], ['Not here']]);
   $('view').replaceChildren(el('div', { class: 'empty-p panel' },
     el('h2', { text: `${what} isn't here` }),
-    el('p', {}, 'It may have been deleted. ', el('a', { href: '#/', text: 'Back to your computers' }), '.')));
+    el('p', {}, 'It may have been deleted. ', el('a', { href: '#/', text: 'Back to your remote computers' }), '.')));
 }
 
 // ---- the address says which

@@ -41,7 +41,7 @@ fn who(h: &HeaderMap) -> Result<(String, bool), StatusCode> {
 fn member(h: &HeaderMap) -> Result<String, (StatusCode, &'static str)> {
     match who(h).map_err(|c| (c, "who are you?"))? {
         (u, true) => Ok(u),
-        _ => Err((StatusCode::FORBIDDEN, "computers are for members")),
+        _ => Err((StatusCode::FORBIDDEN, "remote computers are for members")),
     }
 }
 
@@ -110,6 +110,9 @@ struct Make {
     /// the owner's yes to running on someone else's box
     #[serde(default)]
     yes: bool,
+    /// SSH keys for this computer besides its config's
+    #[serde(default)]
+    keys: Vec<String>,
 }
 
 async fn make(State(m): State<App>, h: HeaderMap, Json(b): Json<Make>) -> Response {
@@ -117,7 +120,10 @@ async fn make(State(m): State<App>, h: HeaderMap, Json(b): Json<Make>) -> Respon
         Ok(u) => u,
         Err(r) => return r.into_response(),
     };
-    done(m.make(&user, &b.config, &b.name, b.yes).map(|r| m.view(r)))
+    done(
+        m.make(&user, &b.config, &b.name, b.yes, &b.keys)
+            .map(|r| m.view(r)),
+    )
 }
 
 #[derive(serde::Deserialize, Default)]

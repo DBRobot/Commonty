@@ -1,4 +1,4 @@
-//! `dd vm`: your own computers on the fleet (docs/dev/instances.md), through
+//! `dd vm`: your remote computers (docs/dev/instances.md), through
 //! the same API as their page, compute.<domain>, with this device's token.
 
 use std::io::Write as _;
@@ -10,9 +10,9 @@ use serde_json::{Value, json};
 
 #[derive(Subcommand)]
 pub enum VmCmd {
-    /// Your computers and configs, and what they take of your limits
+    /// Your remote computers and configs, and what they take of your limits
     List,
-    /// Save a config: what computers are made from
+    /// Save a config: what remote computers are made from
     Config {
         name: String,
         /// MiB
@@ -39,15 +39,19 @@ pub enum VmCmd {
         #[arg(long)]
         anywhere: bool,
     },
-    /// Delete a config; computers made from it keep running
+    /// Delete a config; remote computers made from it keep running
     Forget { name: String },
-    /// A new computer from a saved config
+    /// A new remote computer from a saved config (the generic one is always there)
     Make {
         config: String,
         name: String,
         /// yes to running on someone else's box, without being asked
         #[arg(long)]
         yes: bool,
+        /// an SSH public key file for this one (repeat for more); a config
+        /// with no key of its own, like generic, takes ~/.ssh/id_ed25519.pub
+        #[arg(long = "key")]
+        keys: Vec<PathBuf>,
     },
     /// Start it; it stays up across reboots until stopped
     Start { name: String },
@@ -120,7 +124,7 @@ impl Api {
         self.state().await?["instances"]
             .as_array()
             .and_then(|a| a.iter().find(|i| i["name"] == name).cloned())
-            .with_context(|| format!("you have no computer called {name}"))
+            .with_context(|| format!("you have no remote computer called {name}"))
     }
 }
 
@@ -259,12 +263,37 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
                 .await?;
             println!("config {name} deleted");
         }
-        VmCmd::Make { config, name, yes } => {
+        VmCmd::Make {
+            config,
+            name,
+            yes,
+            keys,
+        } => {
             let s = api.state().await?;
-            let anywhere = s["configs"]
+            let cfg = s["configs"]
                 .as_array()
-                .and_then(|a| a.iter().find(|c| c["name"] == config.as_str()))
-                .is_some_and(|c| c["consent"] == "any");
+                .and_then(|a| a.iter().find(|c| c["name"] == config.as_str()).cloned())
+                .with_context(|| format!("you have no config called {config}"))?;
+            let anywhere = cfg["consent"] == "any";
+            let mut files = keys;
+            if files.is_empty() && cfg["keys"].as_array().is_none_or(|k| k.is_empty()) {
+                let own = std::env::var_os("HOME")
+                    .map(|h| PathBuf::from(h).join(".ssh/id_ed25519.pub"))
+                    .filter(|p| p.exists())
+                    .context("the config has no SSH key: give one with --key <file.pub>")?;
+                files.push(own);
+            }
+            let mut ks = Vec::new();
+            for p in files {
+                let k = std::fs::read_to_string(&p)
+                    .with_context(|| format!("reading {}", p.display()))?;
+                ks.extend(
+                    k.lines()
+                        .map(str::trim)
+                        .filter(|l| !l.is_empty())
+                        .map(str::to_string),
+                );
+            }
             let yes = if anywhere && !yes { agree()? } else { yes };
             if anywhere && !yes {
                 bail!("not made");
@@ -273,7 +302,7 @@ pub async fn run(cmd: VmCmd, keys: &auth::Store, dirs: &[String]) -> Result<()> 
                 &api.send(
                     M::POST,
                     "/api/instances",
-                    Some(json!({"config": config, "name": name, "yes": yes})),
+                    Some(json!({"config": config, "name": name, "yes": yes, "keys": ks})),
                 )
                 .await?,
             )?;

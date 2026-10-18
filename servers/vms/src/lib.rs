@@ -39,6 +39,16 @@ pub const MIN_MEMORY: u64 = 512;
 pub const MIN_DISK: u64 = 8;
 pub const MAX_NIX: usize = 64 * 1024;
 pub const MAX_FORWARDS: usize = 8;
+/// the config every member has from the start
+pub const GENERIC: &str = "generic";
+const GENERIC_NIX: &str = "{ pkgs, ... }:
+{
+  # a general-purpose machine: build tools, editors, languages' basics
+  environment.systemPackages = with pkgs; [
+    gcc gnumake pkg-config python3 nodejs ripgrep fd tmux unzip wget
+  ];
+}
+";
 
 /// Where it may run. `Own`: only on a box of the owner's. `Any`: anyone's,
 /// which its owner said yes to, knowing that box's owner can read it.
@@ -284,11 +294,35 @@ impl Manager {
         self.dir.join("instances").join(id)
     }
 
-    pub fn configs(&self, owner: &str) -> BTreeMap<String, Config> {
+    /// what the member saved
+    fn stored(&self, owner: &str) -> BTreeMap<String, Config> {
         std::fs::read(self.configs_path(owner))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default()
+    }
+
+    /// Their configs, and the generic one unless they saved their own by
+    /// that name: something to make a remote computer from on day one.
+    pub fn configs(&self, owner: &str) -> BTreeMap<String, Config> {
+        let mut all = self.stored(owner);
+        all.entry(GENERIC.to_string()).or_insert_with(|| Config {
+            name: GENERIC.to_string(),
+            memory: 4096.min(self.limits.memory),
+            threads: 2.min(self.limits.threads),
+            disk: 32.min(self.limits.disk),
+            nix: GENERIC_NIX.to_string(),
+            keys: vec![],
+            ports: vec![],
+            players: vec![],
+            // the box's own owner can keep it home; anyone else has no box here
+            consent: if owner == self.box_owner {
+                Consent::Own
+            } else {
+                Consent::Any
+            },
+        });
+        all
     }
 
     fn records(&self) -> Vec<Record> {
@@ -312,14 +346,14 @@ impl Manager {
 
     fn record(&self, owner: &str, id: &str) -> Result<Record> {
         if id.len() != 16 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-            bail!("no such computer");
+            bail!("no such remote computer");
         }
         let r: Record = std::fs::read(self.record_path(id))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
-            .context("no such computer")?;
+            .context("no such remote computer")?;
         if r.owner != owner {
-            bail!("no such computer");
+            bail!("no such remote computer");
         }
         Ok(r)
     }
@@ -367,16 +401,20 @@ impl Manager {
     pub fn save_config(&self, owner: &str, c: Config) -> Result<()> {
         self.check(owner, &c)?;
         let _g = self.lock.lock().unwrap();
-        let mut all = self.configs(owner);
+        let mut all = self.stored(owner);
         all.insert(c.name.clone(), c);
         write_atomic(&self.configs_path(owner), &serde_json::to_vec_pretty(&all)?)
     }
 
     pub fn delete_config(&self, owner: &str, name: &str) -> Result<()> {
         let _g = self.lock.lock().unwrap();
-        let mut all = self.configs(owner);
+        let mut all = self.stored(owner);
         if all.remove(name).is_none() {
-            bail!("no such config");
+            bail!(if name == GENERIC {
+                "the generic config is always there; change it, and yours takes its place"
+            } else {
+                "no such config"
+            });
         }
         write_atomic(&self.configs_path(owner), &serde_json::to_vec_pretty(&all)?)
     }
@@ -397,7 +435,7 @@ impl Manager {
     fn fits(&self, owner: &str, except: Option<&str>, c: &Config) -> Result<()> {
         if c.memory > self.limits.box_memory || c.threads > self.limits.box_threads {
             bail!(
-                "this box can take a computer of up to {} MiB and {} threads",
+                "this box can take a remote computer of up to {} MiB and {} threads",
                 self.limits.box_memory,
                 self.limits.box_threads
             );
@@ -405,14 +443,14 @@ impl Manager {
         let (m, t) = self.used(owner, except);
         if m + c.memory > self.limits.memory {
             bail!(
-                "your computers would take {} MiB together; the limit is {} MiB",
+                "your remote computers would take {} MiB together; the limit is {} MiB",
                 m + c.memory,
                 self.limits.memory
             );
         }
         if t + c.threads > self.limits.threads {
             bail!(
-                "your computers would take {} threads together; the limit is {}",
+                "your remote computers would take {} threads together; the limit is {}",
                 t + c.threads,
                 self.limits.threads
             );
@@ -442,7 +480,7 @@ impl Manager {
             .fold(0, u64::saturating_add);
         if used >= budget {
             bail!(
-                "you use {} GB of your {} GB allowance: make room first",
+                "you use {} GB of your {} GB storage allowance: make room first",
                 used / 1_000_000_000,
                 budget / 1_000_000_000
             );
@@ -481,14 +519,31 @@ impl Manager {
 
     /// A new instance from a saved config. `yes`: the owner said yes to
     /// the warning about someone else's box, just now.
-    pub fn make(&self, owner: &str, config: &str, name: &str, yes: bool) -> Result<Record> {
+    /// `keys`: SSH keys for this one computer besides its config's (the
+    /// generic config has none of its own)
+    pub fn make(
+        &self,
+        owner: &str,
+        config: &str,
+        name: &str,
+        yes: bool,
+        keys: &[String],
+    ) -> Result<Record> {
         if !valid_name(name) {
             bail!("a name is lowercase letters, digits and dashes, up to 32");
         }
-        let c = self
+        let mut c = self
             .configs(owner)
             .remove(config)
             .context("no such config")?;
+        c.keys.extend(
+            keys.iter()
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty()),
+        );
+        if c.keys.is_empty() {
+            bail!("add an SSH key: it's how you sign in to a remote computer");
+        }
         self.check(owner, &c)?;
         let anywhere = (c.consent == Consent::Any && yes).then(now_ms);
         self.where_ok(owner, &c, anywhere)?;
@@ -496,7 +551,7 @@ impl Manager {
         let _g = self.lock.lock().unwrap();
         let records = self.records();
         if records.iter().any(|r| r.owner == owner && r.name == name) {
-            bail!("you have a computer called {name}");
+            bail!("you have a remote computer called {name}");
         }
         self.fits(owner, None, &c)?;
         let ports = self.ports(&records, 1 + c.ports.len())?;
@@ -775,13 +830,19 @@ mod tests {
     fn the_totals_count_every_instance_running_or_not() {
         let (m, _) = scratch("totals");
         m.save_config("tom", config("big", 12288, 6)).unwrap();
-        let a = m.make("tom", "big", "a", true).unwrap();
+        let a = m.make("tom", "big", "a", true, &[]).unwrap();
         m.set_up("tom", &a.id, false).unwrap();
-        let e = m.make("tom", "big", "b", true).unwrap_err().to_string();
+        let e = m
+            .make("tom", "big", "b", true, &[])
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("MiB together"), "{e}");
         m.save_config("tom", config("small", 4096, 2)).unwrap();
-        m.make("tom", "small", "b", true).unwrap();
-        let e = m.make("tom", "small", "c", true).unwrap_err().to_string();
+        m.make("tom", "small", "b", true, &[]).unwrap();
+        let e = m
+            .make("tom", "small", "c", true, &[])
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("together"), "{e}");
     }
 
@@ -789,15 +850,20 @@ mod tests {
     fn someone_elses_box_needs_a_yes_and_own_needs_your_box() {
         let (m, _) = scratch("consent");
         m.save_config("tom", config("any", 1024, 1)).unwrap();
-        assert!(m.make("tom", "any", "a", false).is_err());
-        assert!(m.make("tom", "any", "a", true).unwrap().anywhere.is_some());
+        assert!(m.make("tom", "any", "a", false, &[]).is_err());
+        assert!(
+            m.make("tom", "any", "a", true, &[])
+                .unwrap()
+                .anywhere
+                .is_some()
+        );
         let mut own = config("own", 1024, 1);
         own.consent = Consent::Own;
         m.save_config("tom", own.clone()).unwrap();
-        assert!(m.make("tom", "own", "b", false).is_err());
+        assert!(m.make("tom", "own", "b", false, &[]).is_err());
         m.save_config("david", own).unwrap();
         assert!(
-            m.make("david", "own", "b", false)
+            m.make("david", "own", "b", false, &[])
                 .unwrap()
                 .anywhere
                 .is_none()
@@ -810,7 +876,7 @@ mod tests {
         let mut c = config("web", 1024, 1);
         c.ports = vec![8080];
         m.save_config("tom", c.clone()).unwrap();
-        let a = m.make("tom", "web", "a", true).unwrap();
+        let a = m.make("tom", "web", "a", true, &[]).unwrap();
         assert_eq!(a.port, 27200);
         assert_eq!(
             a.forwards,
@@ -835,15 +901,15 @@ mod tests {
         let mut two = config("two", 1024, 1);
         two.ports = vec![80];
         m.save_config("ann", two).unwrap();
-        assert!(m.make("ann", "two", "b", true).is_err());
-        assert_eq!(m.make("ann", "x", "b", true).unwrap().port, 27203);
+        assert!(m.make("ann", "two", "b", true, &[]).is_err());
+        assert_eq!(m.make("ann", "x", "b", true, &[]).unwrap().port, 27203);
     }
 
     #[test]
     fn only_the_owner_and_only_stopped() {
         let (m, f) = scratch("owner");
         m.save_config("tom", config("c", 1024, 1)).unwrap();
-        let a = m.make("tom", "c", "a", true).unwrap();
+        let a = m.make("tom", "c", "a", true, &[]).unwrap();
         assert!(m.set_up("ann", &a.id, false).is_err());
         assert!(m.delete("ann", &a.id).is_err());
         assert!(m.delete("tom", &a.id).is_err()); // running
@@ -858,7 +924,7 @@ mod tests {
     fn a_guests_report_is_never_followed() {
         let (m, _) = scratch("report");
         m.save_config("tom", config("c", 1024, 1)).unwrap();
-        let a = m.make("tom", "c", "a", true).unwrap();
+        let a = m.make("tom", "c", "a", true, &[]).unwrap();
         let rep = m.instance_dir(&a.id).join("report");
         std::fs::create_dir_all(&rep).unwrap();
         // another member's record, linked in by the guest
@@ -882,14 +948,14 @@ mod tests {
         .unwrap();
         m.ledger = Some(ledger.clone());
         m.save_config("tom", config("c", 1024, 1)).unwrap();
-        let e = m.make("tom", "c", "a", true).unwrap_err().to_string();
+        let e = m.make("tom", "c", "a", true, &[]).unwrap_err().to_string();
         assert!(e.contains("allowance"), "{e}");
         std::fs::write(
             &ledger,
             r#"{"budget": 1000, "members": {"tom": {"photos": 600}}}"#,
         )
         .unwrap();
-        m.make("tom", "c", "a", true).unwrap();
+        m.make("tom", "c", "a", true, &[]).unwrap();
     }
 
     #[test]
@@ -898,10 +964,32 @@ mod tests {
         m.limits.box_memory = 6144;
         m.limits.box_threads = 3;
         m.save_config("tom", config("big", 8192, 2)).unwrap();
-        let e = m.make("tom", "big", "a", true).unwrap_err().to_string();
+        let e = m
+            .make("tom", "big", "a", true, &[])
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("this box can take"), "{e}");
         m.save_config("tom", config("small", 2048, 2)).unwrap();
-        m.make("tom", "small", "a", true).unwrap();
+        m.make("tom", "small", "a", true, &[]).unwrap();
+    }
+
+    #[test]
+    fn everyone_has_the_generic_config_and_a_key_is_asked_for() {
+        let (m, _) = scratch("generic");
+        assert!(m.configs("ann").contains_key(GENERIC));
+        assert_eq!(m.configs("ann")[GENERIC].consent, Consent::Any);
+        assert_eq!(m.configs("david")[GENERIC].consent, Consent::Own);
+        let e = m
+            .make("ann", GENERIC, "a", true, &[])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("SSH key"), "{e}");
+        let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample ann@phone".to_string();
+        let r = m
+            .make("ann", GENERIC, "a", true, std::slice::from_ref(&key))
+            .unwrap();
+        assert_eq!(r.keys, vec![key]);
+        assert!(m.delete_config("ann", GENERIC).is_err());
     }
 
     #[test]

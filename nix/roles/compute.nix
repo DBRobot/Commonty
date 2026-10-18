@@ -9,8 +9,8 @@
 
   dd.home.services = [
     {
-      name = "Computers";
-      blurb = "A computer of your own on the fleet: SSH in, install what you need.";
+      name = "Remote computers";
+      blurb = "A remote computer of your own: SSH in, install what you need.";
       url = "https://compute.${config.dd.domain}/";
       icon = "computer";
       color = "#3b6f8f";

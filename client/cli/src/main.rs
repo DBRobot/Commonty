@@ -140,7 +140,7 @@ enum Command {
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES, global = true)]
         directories: Vec<String>,
     },
-    /// Your own computers on the fleet: configs, and the VMs made from them.
+    /// Your remote computers: configs, and the VMs made from them.
     Vm {
         #[command(subcommand)]
         cmd: vmcmd::VmCmd,

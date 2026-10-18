@@ -51,7 +51,12 @@ host, a template unit, a firewall chain refilled from who may reach it.
   instance can't be made without the yes.
 
 A config is a saved thing apart from the instances made from it: make
-three the same, change the config, rebuild one.
+three the same, change the config, rebuild one. Every member has one
+from the start, `generic` (4G, 2 threads, 32G, build tools and the
+usual languages), with no SSH key of its own: making a remote computer
+from it asks for the key (the page asks; `dd vm make` takes
+`~/.ssh/id_ed25519.pub`). Saving a config called `generic` replaces it
+for that member.
 
 ## How it fits together
 
