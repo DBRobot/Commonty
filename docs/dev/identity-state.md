@@ -58,8 +58,9 @@ language checks a v2 item with a hash, a signature check and a JSON parse.
 | `entry` | the root the body names; a changed root also by the recovery key on file (`recovery_sig`) | `name, root, recovery, recovered_from[], devices[{fingerprint, public_key, added}], passkeys[{id, cred, added, rp_id?}], grant?, libraries[], terms?, version, updated` - the fields of `identity::Entry` |
 | `leave` | the root on file for `name` | `name, root, at, back?` |
 | `invite` | the release key | `public_key, issued, expires` |
-| `enlist` | the root on file for the member | `member` (sha256 hex of the root), `box` (the joining box's name), `key` (its TPM key, SPKI base64), `ticket` (32 hex), `expires`, `at` |
+| `enlist` | the root on file for the member | `member` (sha256 hex of the root), `box` (the joined box's name), `ticket` (the id of the join ticket it joined with, 32 hex), `at` |
 | `unenlist` | the root on file for the member | `member, box, at` |
+| `extend` | the root on file for the fleet's admin (the release's `identity.admin`, fleet/policy.json `owner`) | `name` (whose grace), `until`, `at` (seconds) |
 | `computer-config`, `computer`, `computer-power`, `computer-delete` | see [remote computers](remote-computers.md#the-records) | judged beside this, by state/computers: the identity judge passes these kinds through and records no outcome for them |
 
 A grant inside an entry body keeps today's form - `{invite: {invite:
@@ -74,7 +75,14 @@ root, `root` is `webauthn:<credential id>`), both with JSON string escaping.
 
 `ack` (a box's gate acknowledging a first claim) is carried by the box's
 TPM-signed request like every request; its body is `{"ack": "<the claim's log name>"}`
-as today. Once the readers have switched the judge no longer needs acks (the
+as today.
+
+`joined` is the state machine's own: when a box joins with a member's
+ticket (state/join.go), the join puts `{"joined": {"key", "ticket"}}` in
+the directory log under the box's name, at the join's agreed time. It is
+how the judge knows, in log order, which ticket a box came with. No gate
+can put one: the state machine refuses a directory item with `joined` at
+its top, and the judge takes one only under the name its key gives. Once the readers have switched the judge no longer needs acks (the
 agreement is the acknowledgement); they are accepted and ignored after that.
 
 ### The old format (v1), during the move
@@ -115,9 +123,14 @@ The judge keeps, per name:
       "status": "member | none | left | suspended | revoked",
       "left": 1792270000000, "suspended": "<reason>", "removed": 1792270000000,
       "boxes": ["<box name>"],
+      "access": "invite | box | none",
+      "enlisted": [{"box": "...", "ticket": "...", "since": 0, "qualifies": "compute | storage | gpu | ",
+                    "lastSeen": 0, "counts": true, "why": "seen | our fault | extended | gone | not qualifying"}],
+      "grace_until": 1792270000000,
       "item": "<the v1 item or v2 envelope as agreed, verbatim>"
     }
   },
+  "enlisted": {"<box name>": {"ticket": "<id>", "owner": "<name>", "since": 1792270000000}},
   "handovers": {"<name>": [{"before": "<item>", "after": "<item>"}]},
   "invites": {"<public key>": {"issued": 0, "expires": 0, "item": {}}},
   "outcomes": {"<item hash>": "ok | refused: <why>"}
@@ -134,16 +147,25 @@ The judge keeps, per name:
     `revoked`.
   - `revoked`: an id is on `revoked`. Nothing below lets them back in - not
     `members` naming another of their ids, not a grant, not a box.
-  - `member`: an id is on `members`; or a grant the release key signed; or
-    an enlisted box of theirs.
+  - `member`: they have access (below): an id is on `members`, or a grant
+    the release key signed, or a box of theirs that counts.
   - `none`: none of the above (signed up, not let in).
+- **access**: `invite` (on `members`, or a grant), `box` (an enlisted box
+  that counts, docs/dev/joining.md "Access"), else `none`; `none` whatever
+  else for `left`, `suspended` and `revoked`. What the gates open the
+  services by.
+- **enlisted**: their standing enlistments, each with what its own report
+  qualifies it as and whether it keeps their access now. The top-level
+  `enlisted` is the same by box: whose each is and the ticket it was
+  enlisted with (what the pending backups and the purge go by).
+- **grace_until**: the admin's extension, while it runs.
 - **removed**: the release's `removed` date for any of their ids (the
   newest), whatever their status: what a reader that forgets a removed
   member counts from (the mail Worker).
 - **ids**: the current root's id first, then the roots it recovered from,
   newest first.
-- **boxes**: enlistments that stand: not expired, by a root that is still
-  theirs, and they have not left.
+- **boxes**: enlistments that stand: by a root that is still theirs, and
+  they have not left.
 - **item**: what was agreed, so any reader that wants to can check the
   signature itself.
 - **outcomes**: what became of each item, by its hash, for the writer
@@ -217,11 +239,21 @@ moved, not changed. Each item is judged at its agreed time `at`.
 - **enlist / unenlist**: signed by the root on file whose id is `member`;
   `at` within 5 minutes ahead of / 24 hours behind the agreed time, and
   newer than the last enlist or unenlist taken for that box (kept after an
-  unenlist), so an old one sent again changes nothing; an enlist must not
-  have expired. A box already someone's is refused while that enlistment
-  stands (see **boxes** above); unenlist only by its owner. Which boxes
-  qualify (their hardware) is docs/dev/joining.md's; the judge counts every
-  standing enlistment today.
+  unenlist), so an old one sent again changes nothing. An enlist names the
+  ticket the box joined with (its `joined` record): signed by a device in
+  the member's entry, for them (`user`), for `join`, not expired at the
+  enlist's agreed time, and never used before; once enlisted, the ticket is
+  used for good, even after an unenlist. The ticket is read by the judge
+  itself (state/ident ticket.go: the authority block of biscuit-auth's
+  format, its signature, its facts and its one time check). A member who
+  is left, suspended or revoked enlists nothing. A box already someone's is
+  refused while that enlistment stands (see **boxes** above); unenlist only
+  by its owner. Which boxes count for access is the view's (state/ident
+  access.go, docs/dev/joining.md "Access").
+- **extend**: signed by the root on file for the release's admin; dated
+  like a leave, the newest standing; an `until` already past takes it back.
+  It keeps a member's access while their enlisted boxes are gone, until
+  `until`.
 - **an item that says more than its signature** is refused: unknown fields,
   a key twice, keys in another case, `null` for a field left out, floats,
   anything that does not read back to the same value that is checked.
@@ -231,8 +263,9 @@ moved, not changed. Each item is judged at its agreed time `at`.
   acknowledged, first in log order. No original agreed time is carried;
   nothing before the log was agreed. Leaves held before the log
   (leaving.json) are not carried over; on the real fleet there are none.
-- **the release's member list** (`fleet/members.json` in the release, and
-  the release key) is part of the control plane's config, as the box list is.
+- **the release's member list** (`fleet/members.json` in the release, the
+  release key, and the admin, fleet/policy.json `owner`) is part of the
+  control plane's config, as the box list is.
 
 ## 4. Shadow check
 
