@@ -18,6 +18,8 @@ pub struct Lib {
     pub key: library::Key,
     /// the member's main library: its calendars are named by folder alone
     pub main: bool,
+    /// the member's own (main, or another of theirs: a shared calendar)
+    pub owned: bool,
     pub writable: bool,
 }
 
@@ -29,6 +31,10 @@ pub trait Source: Send + Sync + 'static {
     async fn libraries(&self) -> Result<Vec<Lib>>;
     /// a device token for the gate, and its base url
     async fn token(&self) -> Result<(String, String)>;
+    /// the calendars from a link added on this computer: (library, folder, link)
+    fn links(&self) -> Vec<(String, String, String)> {
+        Vec::new()
+    }
 }
 
 pub struct GateStore<S> {
@@ -90,11 +96,36 @@ impl<S: Source> GateStore<S> {
             Ok(Some((b, _))) => String::from_utf8_lossy(&b).trim().to_string(),
             _ => String::new(),
         };
-        self.meta
-            .lock()
-            .await
-            .insert(key, (path.to_string(), v.clone()));
+        let mut m = self.meta.lock().await;
+        // a name or colour by version: old versions are let go of now and then
+        if m.len() > 1024 {
+            m.clear();
+        }
+        m.insert(key, (path.to_string(), v.clone()));
         v
+    }
+}
+
+impl<S: Source> GateStore<S> {
+    /// The calendars from a link this computer keeps (Source::links): its
+    /// gate, its folder, and the link. Only in the member's own libraries,
+    /// and only links added here: the list is this computer's, never a file
+    /// another member who can write a calendar could have put there.
+    pub async fn linked(&self) -> Result<Vec<(media::gate::Gate, String, String)>> {
+        let libs = self.libs().await?;
+        let mut out = Vec::new();
+        for (lib_id, folder, url) in self.source.links() {
+            let ours = folder.starts_with("Calendars/")
+                && !folder.contains("..")
+                && folder.matches('/').count() == 1;
+            let Some(lib) = libs.iter().find(|l| l.id == lib_id && l.owned) else {
+                continue;
+            };
+            if ours {
+                out.push((self.gate(lib).await?, folder, url));
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -124,6 +155,9 @@ impl<S: Source> Store for GateStore<S> {
                     Some(t) => self.meta(&g, &format!("{}/color", folder.path), &t).await,
                     None => String::new(),
                 };
+                // a calendar from a link is the link's: changes here would
+                // be written over at its next refresh
+                let linked = tag("source").is_some();
                 out.push(Coll {
                     id: if lib.main {
                         slug.clone()
@@ -136,7 +170,7 @@ impl<S: Source> Store for GateStore<S> {
                     } else {
                         String::new()
                     },
-                    writable: lib.writable,
+                    writable: lib.writable && !linked,
                 });
             }
         }

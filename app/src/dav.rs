@@ -52,6 +52,69 @@ pub fn details() -> serde_json::Value {
     }
 }
 
+/// the calendars from a link added on this computer, beside the app's
+/// other state: [{ lib, folder, url }], this account alone
+fn links_file() -> std::path::PathBuf {
+    crate::paths::data().join("calendar-links.json")
+}
+
+fn read_links() -> Vec<(String, String, String)> {
+    let v: serde_json::Value = std::fs::read(links_file())
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|l| {
+            Some((
+                l["lib"].as_str()?.to_string(),
+                l["folder"].as_str()?.to_string(),
+                l["url"].as_str()?.to_string(),
+            ))
+        })
+        .collect()
+}
+
+static REFRESH: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// A calendar from a link, added in the app's window: `{ lib, folder, url }`,
+/// kept in this computer's list and fetched at once.
+pub fn add_link(body: &[u8]) -> Result<serde_json::Value, String> {
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+    let lib = v["lib"].as_str().unwrap_or("");
+    let folder = v["folder"].as_str().unwrap_or("");
+    let url =
+        davbridge::subscribe::link(v["url"].as_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    if !identity::valid_library_id(lib)
+        || !folder.starts_with("Calendars/")
+        || folder.contains("..")
+        || folder.matches('/').count() != 1
+    {
+        return Err("not a calendar".into());
+    }
+    let mut all: Vec<serde_json::Value> = read_links()
+        .into_iter()
+        .filter(|(l, f, _)| !(l == lib && f == folder))
+        .map(|(l, f, u)| serde_json::json!({ "lib": l, "folder": f, "url": u }))
+        .collect();
+    all.push(serde_json::json!({ "lib": lib, "folder": folder, "url": url }));
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        o.mode(0o600);
+    }
+    std::io::Write::write_all(
+        &mut o.open(links_file()).map_err(|e| e.to_string())?,
+        serde_json::Value::Array(all).to_string().as_bytes(),
+    )
+    .map_err(|e| e.to_string())?;
+    REFRESH.notify_one();
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 /// the libraries and a token, from this device's keys
 struct Device<R: Runtime> {
     app: AppHandle<R>,
@@ -76,6 +139,7 @@ impl<R: Runtime> davbridge::gate::Source for Device<R> {
                     id: lib.id,
                     key,
                     main: mine && main,
+                    owned: mine,
                     writable,
                 };
                 if mine {
@@ -84,6 +148,10 @@ impl<R: Runtime> davbridge::gate::Source for Device<R> {
                 l
             })
             .collect())
+    }
+
+    fn links(&self) -> Vec<(String, String, String)> {
+        read_links()
     }
 
     async fn token(&self) -> anyhow::Result<(String, String)> {
@@ -112,6 +180,26 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
             }
         };
         let store = Arc::new(davbridge::gate::GateStore::new(Device { app }));
+        // calendars from a link: fetched now and every half hour after,
+        // while the app runs; on one computer would do, on several each
+        // writes the same files
+        let links = store.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            loop {
+                for (cal, r) in davbridge::subscribe::refresh_all(&links).await {
+                    if let Err(e) = r {
+                        eprintln!("calendar from a link, {cal}: {e:#}");
+                    }
+                }
+                // half an hour, or at once when one is added
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(30 * 60),
+                    REFRESH.notified(),
+                )
+                .await;
+            }
+        });
         if let Err(e) = axum::serve(listener, davbridge::router(store, pw, PORT)).await {
             eprintln!("calendars for other programs: 127.0.0.1:{PORT}: {e}");
         }

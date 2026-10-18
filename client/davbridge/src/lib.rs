@@ -32,6 +32,7 @@ use axum::response::{IntoResponse, Response};
 
 pub mod gate;
 pub mod store;
+pub mod subscribe;
 
 pub use store::{Coll, Item, Kind, Memory, Saved, Store, Version};
 
@@ -68,15 +69,9 @@ const NONCE_SECS: u64 = 600;
 /// program signs in with.
 pub fn router<S: Store>(store: Arc<S>, password: String, port: u16) -> axum::Router {
     let run = {
-        use std::hash::{BuildHasher as _, Hasher as _};
-        // RandomState is keyed from the system's randomness
-        let a = std::collections::hash_map::RandomState::new()
-            .build_hasher()
-            .finish();
-        let b = std::collections::hash_map::RandomState::new()
-            .build_hasher()
-            .finish();
-        format!("{a:016x}{b:016x}")
+        let mut r = [0u8; 32];
+        getrandom::fill(&mut r).expect("the system's randomness");
+        hex(&r)
     };
     let b = Arc::new(Bridge {
         store,
@@ -456,18 +451,17 @@ fn hash(algorithm: &str, s: &str) -> String {
 /// both under the password and this run's secret, so the bridge keeps
 /// nothing to check one and no two challenges are the same
 fn nonce(secret: &str, at: u64, own: u64) -> String {
-    let mac = hash(
-        "SHA-256",
-        &format!("commonty bridge nonce\0{secret}\0{at}\0{own}"),
-    );
+    use hmac::Mac as _;
+    let mut m = hmac::Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).expect("any key");
+    m.update(format!("commonty bridge nonce\0{at}\0{own}").as_bytes());
+    let mac = hex(&m.finalize().into_bytes());
     format!("{at:x}.{own:x}.{}", &mac[..32])
 }
 
 fn fresh_part() -> u64 {
-    use std::hash::{BuildHasher as _, Hasher as _};
-    std::collections::hash_map::RandomState::new()
-        .build_hasher()
-        .finish()
+    let mut r = [0u8; 8];
+    getrandom::fill(&mut r).expect("the system's randomness");
+    u64::from_le_bytes(r)
 }
 
 /// Ok((nonce, count)), or Err(stale): whether the answer was right for a

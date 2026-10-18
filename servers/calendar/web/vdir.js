@@ -85,11 +85,12 @@ export async function collections(root, draw) {
       const meta = async (n) => {
         try { return (await readText(lib, `${f.path}/${n}`))?.text.trim() || ''; } catch { return ''; }
       };
-      const [name, raw] = await Promise.all([meta('displayname'), meta('color')]);
+      const [name, raw, source] = await Promise.all([meta('displayname'), meta('color'), root === 'Calendars' ? meta('source') : '']);
       // another member writes a shared calendar's colour: a colour, or none
       const color = /^#[0-9a-fA-F]{3,8}$/.test(raw) ? raw : '';
       const mine = !lib.reader && !lib.writer;
-      out.push({ lib, root, path: f.path, slug: f.name, name: name || f.name, color, owner: lib.owner || '', mine, writable: !lib.reader, readers: lib.readers || [] });
+      // a calendar from a link is the link's: the app writes it, a change here would be written over
+      out.push({ lib, root, path: f.path, slug: f.name, name: name || f.name, color, owner: lib.owner || '', mine, writable: !lib.reader && !source, linked: !!source, readers: lib.readers || [] });
     }));
   }));
   out.sort((a, b) => (a.mine === b.mine ? a.name.localeCompare(b.name) : a.mine ? -1 : 1));
@@ -172,6 +173,24 @@ export async function make(lib, root, name, color) {
   await saveText(lib, `${path}/displayname`, name + '\n', null);
   if (color) await saveText(lib, `${path}/color`, color + '\n', null);
   return { lib, root, path, slug, name, color, owner: lib.owner || '', mine: true, writable: true };
+}
+
+/// A calendar that is a copy of one at a link (Google's or Outlook's
+/// private address): the app in whose window it is added fetches it and
+/// keeps it up to date, from its own list; the library has only the
+/// `source` marker that makes it read only.
+export const linksHere = () => inApp;
+export async function makeLinked(lib, name, color, url) {
+  const c = await make(lib, 'Calendars', name, color);
+  // the link first: a calendar marked read only with no link would never fill
+  const r = await appFetch('/_dd/app/calendar-link', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ lib: lib.id, folder: c.path, url }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  await saveText(lib, `${c.path}/source`, 'link\n', null);
+  return { ...c, writable: false, linked: true };
 }
 
 /// A calendar's or address book's name or colour changed.

@@ -252,6 +252,13 @@ async fn serve<R: Runtime>(
     if path == "/_dd/app/dav" {
         return Ok(no_store(&crate::dav::details()));
     }
+    // a calendar from a link: kept in this computer's own list (dav.rs)
+    if path == "/_dd/app/calendar-link" && req.method() == "POST" {
+        return Ok(match crate::dav::add_link(req.body()) {
+            Ok(v) => json_response(&v),
+            Err(e) => plain(StatusCode::BAD_REQUEST, &e),
+        });
+    }
     if path == "/_dd/app/libraries" {
         return Ok(match libraries_value(app).await? {
             Some(v) => no_store(&v),

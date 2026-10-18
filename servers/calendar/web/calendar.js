@@ -5,7 +5,7 @@
 
 import { $, el } from './kit.js';
 import * as I from './ical.js';
-import { collections, items, save, remove, make, first, fileName, forAccount, otherApps } from './vdir.js';
+import { collections, items, save, remove, make, makeLinked, linksHere, first, fileName, forAccount, otherApps } from './vdir.js';
 import { unlock, libraries, share } from './library.js';
 import { me } from './shell.js';
 
@@ -262,6 +262,11 @@ function drawCals() {
       draw();
     });
     const sharedOut = c.mine && c.readers?.length;
+    if (c.linked) {
+      return el('label', { class: 'cal-row', for: cb.id, style: `--swatch:${calColor(c)}` }, cb,
+        el('span', { class: 'swatch' }), el('span', { class: 'name', text: c.name }), el('span', { class: 'sub', text: 'link' }),
+        el('span', { class: 'sr-only', text: ', from a link: the app keeps it up to date' }));
+    }
     return el('label', { class: 'cal-row', for: cb.id, style: `--swatch:${calColor(c)}` }, cb,
       el('span', { class: 'swatch' }), el('span', { class: 'name', text: c.name }),
       sharedOut ? el('button', { type: 'button', class: 'sharing', title: `Shared with ${c.readers.map((r) => r.name).join(', ')}`, onclick: (e) => { e.preventDefault(); openSharing(c); } }, 'Sharing') : '',
@@ -671,6 +676,35 @@ function openSharing(c) {
   f.dlg.showModal();
 }
 
+$('new-linked').addEventListener('click', () => {
+  const own = libs.find((l) => !l.reader && !l.writer);
+  if (!own) return;
+  const dlg = $('ask');
+  $('ask-h').textContent = 'Calendar from a link';
+  $('ask-text').textContent = 'Google Calendar: Settings, your calendar, Secret address in iCal format. Outlook: Settings, Shared calendars, Publish a calendar, the ICS link. This computer fetches it every half hour while Commonty runs.';
+  const name = el('input', { id: 'nl-name', autocomplete: 'off' });
+  const url = el('input', { id: 'nl-url', autocomplete: 'off', type: 'url', placeholder: 'https://… or webcal://…' });
+  const err = el('p', { class: 'form-err', role: 'alert' });
+  $('ask-body').replaceChildren(el('label', { for: 'nl-name' }, 'Name', name), el('label', { for: 'nl-url' }, 'Link', url), err);
+  $('ask-actions').replaceChildren(
+    el('button', { type: 'button', class: 'quiet', onclick: () => dlg.close() }, 'Cancel'),
+    el('button', { type: 'button', onclick: async () => {
+      const u = url.value.trim();
+      if (!name.value.trim()) { name.focus(); return; }
+      if (!/^(https|webcals?):\/\//i.test(u)) { err.textContent = 'A calendar link starts with https:// or webcal://'; url.focus(); return; }
+      try {
+        const c = await makeLinked(own, name.value.trim(), PALETTE[(cals.length + 3) % PALETTE.length], u);
+        cals.push(c); files.set(calId(c), []);
+        dlg.close();
+        drawCals(); draw();
+        say('Added. Its events arrive once the Commonty app fetches the link.');
+      } catch (e) { err.textContent = `Not added: ${e.message}`; }
+    } }, 'Add'));
+  dlg.onclose = null;
+  dlg.showModal();
+  name.focus();
+});
+
 async function reload() {
   const got = await collections('Calendars');
   libs = got.libs;
@@ -788,6 +822,8 @@ async function start() {
   $('actions').hidden = !cals.some((c) => c.writable);
   $('new-cal').hidden = !libs.some((l) => !l.reader && !l.writer) || !!lib.ok.demo;
   $('new-shared').hidden = $('new-cal').hidden;
+  // the link is kept on the computer that fetches it: the app's window
+  $('new-linked').hidden = $('new-cal').hidden || !linksHere();
   await Promise.all(cals.map(async (c) => {
     const id = calId(c);
     try { files.set(id, await items(c, '.ics', (kept) => { if (!files.has(id)) { files.set(id, kept); draw(); } })); }

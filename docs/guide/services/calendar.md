@@ -31,6 +31,12 @@ Then:
   change events. **Sharing** beside it changes who. Sharing is done in
   the Commonty app's own window, on the device that holds your account's
   main key.
+- **Google or Outlook calendar:** **Calendar from a link** takes the
+  calendar's private iCal address (Google: Settings, your calendar,
+  Secret address in iCal format; Outlook: Settings, Shared calendars,
+  Publish a calendar, the ICS link). Add it in the Commonty app's own
+  window; that computer fetches it every half hour while Commonty runs. It is read only here; change it in Google or
+  Outlook.
 - **Birthdays:** tick **Birthdays** to see the birthdays in your
   [contacts](contacts.md).
 - **Bring a calendar in:** **Import .ics** takes a calendar file, such as

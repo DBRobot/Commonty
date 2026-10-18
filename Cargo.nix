@@ -6433,6 +6433,14 @@ rec {
             packageId = "base64 0.22.1";
           }
           {
+            name = "getrandom";
+            packageId = "getrandom 0.3.4";
+          }
+          {
+            name = "hmac";
+            packageId = "hmac 0.12.1";
+          }
+          {
             name = "library";
             packageId = "library";
           }
@@ -6449,6 +6457,12 @@ rec {
             packageId = "quick-xml";
           }
           {
+            name = "reqwest";
+            packageId = "reqwest 0.12.28";
+            usesDefaultFeatures = false;
+            features = [ "rustls-tls" ];
+          }
+          {
             name = "sha2";
             packageId = "sha2 0.10.9";
           }
@@ -6459,10 +6473,14 @@ rec {
           {
             name = "tokio";
             packageId = "tokio";
-            features = [ "sync" "time" ];
+            features = [ "sync" "time" "net" ];
           }
         ];
         devDependencies = [
+          {
+            name = "futures-util";
+            packageId = "futures-util";
+          }
           {
             name = "http-body-util";
             packageId = "http-body-util";
@@ -6470,7 +6488,7 @@ rec {
           {
             name = "tokio";
             packageId = "tokio";
-            features = [ "macros" "rt-multi-thread" "net" ];
+            features = [ "macros" "rt-multi-thread" "net" "io-util" ];
           }
           {
             name = "tower";

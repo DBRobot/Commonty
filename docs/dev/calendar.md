@@ -192,10 +192,50 @@ Its tests (`cargo test -p davbridge`) ask what the programs ask, against a
 store in memory; `cargo run -p davbridge --example memory -- 41699 <pw>`
 serves one to try a program against.
 
+## A calendar from a link
+
+Google and Outlook give each calendar a private address in iCalendar
+format. **Calendar from a link**, in the app's own window, makes a
+calendar and keeps the address in that computer's own list
+(`calendar-links.json` in the app's data folder, this account alone);
+the calendar's folder gets only a `source` marker, which makes it read
+only. The link is never in the library: a member who may write a shared
+calendar could otherwise put one there for the owner's computer to fetch.
+That computer fetches it ([subscribe.rs](../../client/davbridge/src/subscribe.rs)),
+a minute after it starts, at once when one is added, and every half hour
+while it runs, only from addresses on the internet (each hop's host
+looked up, every address checked, the connection made to the one checked,
+no proxy, five redirects at most), splits it into
+one file per event (the series and its changed occurrences together, every
+time zone the link gave in each, the file named from the UID), and writes
+only what changed since the last fetch (`source-state`, each file's
+sha256), taking away what the link dropped. The calendar is read only in
+the page and to other programs: a change there would be written over.
+
+The fetch goes from the member's computer to Google or Microsoft, who
+already hold that calendar; nothing about it passes a box in the clear.
+Changes go one way, from the link. Two-way sync with Google and Outlook
+needs Commonty registered with each for OAuth (see the plan below).
+
 ## Birthdays
 
 Calendar's **Birthdays** reads the member's contacts on the device and
 draws a day's event on each `BDAY`. Nothing is written for it.
+
+## Not yet
+
+- **Two-way Google and Outlook.** The app would sign in to Google
+  Calendar (OAuth, desktop flow, the Calendar and Contacts APIs) and
+  Microsoft Graph, and keep a Commonty calendar and theirs in step, on
+  the device. It needs an OAuth client registered with Google (a Google
+  Cloud project with the Calendar and People APIs, a consent screen; an
+  unverified app works for up to 100 named test users) and an app
+  registered in Microsoft Entra (personal and work accounts,
+  `Calendars.ReadWrite`, `Contacts.ReadWrite`, `offline_access`, a
+  loopback redirect). Both are David's accounts to make.
+- **A native Android sync adapter.** On a phone today, DAVx5 takes the
+  app's bridge (Other apps) into the phone's own calendar and contacts.
+- **iPhone**: not supported yet.
 
 ## Changing it
 
