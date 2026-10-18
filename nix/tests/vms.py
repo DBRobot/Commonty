@@ -63,7 +63,12 @@ code, text = api(
 assert code == 422 and "together" in text, text
 
 ssh = f"ssh -i /root/key -p {port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 tom@127.0.0.1"
-box.wait_until_succeeds(f"{ssh} true", timeout=1200)
+try:
+    box.wait_until_succeeds(f"{ssh} true", timeout=900)
+except Exception:
+    # what the guest said while it booted, for whoever reads the failure
+    print(box.execute(f"tail -c 20000 {d}/instances/{i}/console.log")[1])
+    raise
 
 # theirs: wheel, sudo, /home on its own disk
 assert "wheel" in box.succeed(f"{ssh} id")

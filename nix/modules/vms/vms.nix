@@ -92,7 +92,8 @@ let
       -netdev user,id=n0,"$fwd" -device virtio-net-pci,netdev=n0 \
       -device virtio-rng-pci \
       -qmp unix:"$qmp",server=on,wait=off \
-      -serial unix:"$serial",server=on,wait=off
+      -chardev socket,id=console,path="$serial",server=on,wait=off,logfile="$d"/console.log,logappend=off \
+      -serial chardev:console
   '';
   # as a game's: the guest powers down, then qemu is told to quit
   stop = pkgs.writeShellScript "dd-vm-stop" ''
