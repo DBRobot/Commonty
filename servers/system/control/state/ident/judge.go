@@ -36,10 +36,19 @@ type Held struct {
 
 // Pending is a claim to a name nobody holds, waiting for every voter's ack
 type Pending struct {
-	Hash string          `json:"hash"`
+	Hash string          `json:"hash"` // its log name: what the gates' acks name
+	Key  string          `json:"key"`  // its item hash: what its outcome is kept under
 	Item json.RawMessage `json:"item"`
 	At   uint64          `json:"at"`
 	s    *Signed
+}
+
+// key: its item hash, worked out again for a claim kept from before Key was
+func (p *Pending) key() string {
+	if p.Key != "" {
+		return p.Key
+	}
+	return ItemHash(p.Item)
 }
 
 // Said is a leaving statement agreed at `Agreed`
@@ -162,6 +171,7 @@ const (
 	maxHandovers = 32
 )
 
+// outcome records what became of an item, by its item hash
 func (s *State) outcome(hash string, err error) {
 	if _, had := s.Outcomes[hash]; !had {
 		s.Order = append(s.Order, hash)
@@ -302,7 +312,9 @@ func (s *State) commit(cfg *Config, next *Signed, at uint64) error {
 // `from`. voters: the validators that are boxes, whose gates acknowledge
 // claims while acks are still the rule.
 func (s *State) Judge(cfg *Config, voters []string, from string, raw json.RawMessage, at uint64) {
-	hash := ItemHash(raw)
+	// outcomes by what was signed; claims and acks by the item's log name,
+	// which the gates' acks still use
+	hash, name := ItemHash(raw), LogName(raw)
 	// which item it is, by its exact keys: v1 is one key (entry, invite,
 	// ack, leave), as Rust's tagged enum reads it; v2 is an envelope
 	if err := noDuplicates(raw); err != nil {
@@ -342,7 +354,7 @@ func (s *State) Judge(cfg *Config, voters []string, from string, raw json.RawMes
 	}
 	switch {
 	case probe.V == 2:
-		s.judgeV2(cfg, voters, from, raw, hash, at)
+		s.judgeV2(cfg, voters, from, raw, hash, name, at)
 	case probe.Ack != nil:
 		if contains(voters, from) {
 			got := s.Acks[*probe.Ack]
@@ -380,14 +392,14 @@ func (s *State) Judge(cfg *Config, voters []string, from string, raw json.RawMes
 			s.outcome(hash, fmt.Errorf("not an item: %w", err))
 			break
 		}
-		s.entryItem(cfg, voters, next, hash, at)
+		s.entryItem(cfg, voters, next, hash, name, at)
 	default:
 		s.outcome(hash, errors.New("not an item"))
 	}
 	s.settle(cfg, voters)
 }
 
-func (s *State) judgeV2(cfg *Config, voters []string, from string, raw json.RawMessage, hash string, at uint64) {
+func (s *State) judgeV2(cfg *Config, voters []string, from string, raw json.RawMessage, hash, name string, at uint64) {
 	envp, err := ReadEnvelope(raw)
 	if err != nil {
 		s.outcome(hash, err)
@@ -406,7 +418,7 @@ func (s *State) judgeV2(cfg *Config, voters []string, from string, raw json.RawM
 			s.outcome(hash, fmt.Errorf("not an item: %w", err))
 			return
 		}
-		s.entryItem(cfg, voters, next, hash, at)
+		s.entryItem(cfg, voters, next, hash, name, at)
 	case "leave":
 		var l Leave
 		if err := strict(body, &l); err != nil {
@@ -450,7 +462,7 @@ func (s *State) judgeV2(cfg *Config, voters []string, from string, raw json.RawM
 }
 
 // entryItem: an update lands at once; a claim waits for the voters
-func (s *State) entryItem(cfg *Config, voters []string, next *Signed, hash string, at uint64) {
+func (s *State) entryItem(cfg *Config, voters []string, next *Signed, hash, name string, at uint64) {
 	if s.entry(next.Entry.Name, at) != nil {
 		s.outcome(hash, s.commit(cfg, next, at))
 		return
@@ -466,11 +478,11 @@ func (s *State) entryItem(cfg *Config, voters []string, next *Signed, hash strin
 		return
 	}
 	for _, p := range s.Pending {
-		if p.Hash == hash {
+		if p.Hash == name {
 			return
 		}
 	}
-	s.Pending = append(s.Pending, &Pending{Hash: hash, Item: next.Raw, At: at, s: next})
+	s.Pending = append(s.Pending, &Pending{Hash: name, Key: hash, Item: next.Raw, At: at, s: next})
 }
 
 // settle is the gate's settle: claims every voter acknowledged become
@@ -518,13 +530,13 @@ func (s *State) settle(cfg *Config, voters []string) {
 			sort.SliceStable(others, func(i, j int) bool { return others[i].s.Entry.Version < others[j].s.Entry.Version })
 			for _, q := range others {
 				if err := s.commit(cfg, q.s, q.At); err != nil {
-					s.outcome(q.Hash, fmt.Errorf("%s went to an earlier claim", name))
+					s.outcome(q.key(), fmt.Errorf("%s went to an earlier claim", name))
 				} else {
-					s.outcome(q.Hash, nil)
+					s.outcome(q.key(), nil)
 				}
 			}
 		}
-		s.outcome(p.Hash, res)
+		s.outcome(p.key(), res)
 	}
 }
 

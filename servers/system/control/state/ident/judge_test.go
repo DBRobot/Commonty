@@ -82,12 +82,11 @@ func (l *log) put(raw json.RawMessage) string {
 // claim: a first entry, acknowledged by every voter
 func (l *log) claim(raw json.RawMessage) string {
 	l.put(raw)
-	h := ItemHash(raw)
 	for _, v := range voters {
 		l.at++
-		l.s.Judge(&Config{}, voters, v, jsonBody(l.t, map[string]string{"ack": h}), l.at)
+		l.s.Judge(&Config{}, voters, v, jsonBody(l.t, map[string]string{"ack": LogName(raw)}), l.at)
 	}
-	return l.s.Outcomes[h]
+	return l.s.Outcomes[ItemHash(raw)]
 }
 
 func (l *log) must(what, got string, ok bool) {

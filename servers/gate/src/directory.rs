@@ -1344,8 +1344,11 @@ struct LogPage {
     next: usize,
 }
 
-/// an item's name in the log: its canonical json's sha256, the same
-/// whichever way the control plane escaped it
+/// an item's name in the log, for the replay's own claims, acks and
+/// outcomes: its canonical json's sha256, the same whichever way the control
+/// plane escaped it. Not the item hash the judge keys outcomes on
+/// (identity::item_hash, sha256 of what was signed); acks name claims by
+/// this until the replay is gone
 fn item_hash(v: &serde_json::Value) -> String {
     use sha2::Digest as _;
     let b = serde_json::to_vec(v).unwrap_or_default();
@@ -1524,7 +1527,7 @@ impl Directory {
         let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
             return false;
         };
-        state.outcomes.contains_key(&item_hash(&v))
+        state.outcomes.contains_key(&identity::item_hash(&v))
     }
 
     /// Room for one more PUT from this visitor: the one limiter in front of
@@ -3068,7 +3071,7 @@ mod tests {
     async fn an_item_the_agreed_log_judged_is_not_sent_again() {
         let (d, got, k) = with_ann("in-agreed-log");
         let b = sealed(&entry("ann", &k, &[], 2), &k);
-        let hash = item_hash(&serde_json::from_slice(&b).unwrap());
+        let hash = identity::item_hash(&serde_json::from_slice(&b).unwrap());
         let s: crate::ident::State = serde_json::from_value(serde_json::json!({
             "height": 2,
             "members": {"ann": {"status": "member", "item": {"entry": sign(entry("ann", &k, &[], 1), &k).unwrap()}}},

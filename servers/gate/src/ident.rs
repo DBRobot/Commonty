@@ -243,7 +243,6 @@ pub struct Envelope {
     pub kind: String,
     body: serde_json::Value,
     body_b64: String,
-    body_bytes: Vec<u8>,
     raw: Vec<u8>,
 }
 
@@ -288,7 +287,6 @@ impl Envelope {
             kind,
             body,
             body_b64,
-            body_bytes: b,
             raw: bytes.to_vec(),
         })
     }
@@ -303,14 +301,13 @@ impl Envelope {
         &self.body_b64
     }
 
-    /// sha256 of what was signed (identity::envelope::message: the kind and
-    /// the body's bytes): one item however its outer JSON is written
+    /// the one item hash (identity::item_hash): what was signed and its
+    /// signatures, read from the envelope as it came - one item however its
+    /// outer JSON is written
     pub fn signed_hash(&self) -> String {
-        use sha2::Digest;
-        format!(
-            "{:x}",
-            sha2::Sha256::digest(identity::envelope::message(&self.kind, &self.body_bytes))
-        )
+        serde_json::from_slice::<serde_json::Value>(&self.raw)
+            .map(|v| identity::item_hash(&v))
+            .unwrap_or_default()
     }
 
     /// the item's name in the log, for a writer waiting on its outcome:

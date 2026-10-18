@@ -148,6 +148,27 @@ The judge keeps, per name:
 - **outcomes**: what became of each item, by its hash, for the writer
   waiting on it. Kept for the last 1024 items.
 
+### Item hash
+
+One definition, used by the judge (`outcomes`, Go `ItemHash`) and by every
+gate (refusing an item already sent or already judged, Rust
+`identity::item_hash`); the shared vectors hold the two to the same bytes:
+
+- **sha256 of what was signed and the signatures over it**, so one signed
+  item has one hash however its outer JSON is written or re-wrapped, and a
+  forgery over the same body never shares the real item's hash (its refusal
+  never stands for the real one):
+  - a v2 envelope: `commonty <kind> v2` NUL body, then NUL `sig`, and NUL
+    `recovery_sig` when there is one
+  - a v1 entry: the canonical entry, NUL `signature` (NUL
+    `recovery_signature`); an invite: the invite, NUL `signature`; a leave:
+    the leave, NUL `signature` - each as serde writes it
+  - anything else (a box's ack, or what reads as none of these): the item's
+    JSON, keys sorted
+- **The log name** is different and only for v1's claims and acks: sha256
+  of the item's JSON, keys sorted (Go `LogName`). Acks name the claim they
+  acknowledge by it; it goes when acks do.
+
 ### How readers get it
 
 - **On a box**: `GET http://127.0.0.1:4195/identity` (dd-control) returns the
