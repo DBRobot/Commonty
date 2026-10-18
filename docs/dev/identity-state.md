@@ -72,7 +72,7 @@ root, `root` is `webauthn:<credential id>`), both with JSON string escaping.
 ### Boxes' own items (not signed by a person)
 
 `ack` (a box's gate acknowledging a first claim) is carried by the box's
-TPM-signed request like every request; its body is `{"ack": "<item hash>"}`
+TPM-signed request like every request; its body is `{"ack": "<the claim's log name>"}`
 as today. Once the readers have switched the judge no longer needs acks (the
 agreement is the acknowledgement); they are accepted and ignored after that.
 
