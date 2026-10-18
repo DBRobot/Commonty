@@ -108,13 +108,13 @@ def served(path, upstream, host=bare):
         failures.append(f"{host}{path}: not our pages' content policy")
 
 
-def moved(path, to, host=bare):
+def moved(path, to, host=bare, want="302"):
     code, head, _ = ask(path, host)
     where = re.search(r"^location: (\S+)", head, re.M)
     told.append(f"  {code}  {host}{path}  -> {where and where.group(1)}")
-    if code != "301" or not where or where.group(1) != to:
+    if code != want or not where or where.group(1) != to:
         failures.append(
-            f"{host}{path}: {code} to {where and where.group(1)}, wanted 301 to {to}"
+            f"{host}{path}: {code} to {where and where.group(1)}, wanted {want} to {to}"
         )
 
 
@@ -127,7 +127,8 @@ served("/", "/_dd/home", host=home)
 # the docs, the download and everything else as before
 served("/docs", "/_dd/docs/page")
 served("/docs/guide/joining", "/_dd/docs/page/guide/joining")
-moved("/download", f"https://{home}/_dd/download")
+# the one fixed address; everything else a 302, which browsers don't keep
+moved("/download", f"https://{home}/_dd/download", want="301")
 moved("/_dd/login", f"https://{home}/_dd/login")
 moved("/anything", f"https://{home}/anything")
 code, _, out = ask("/.well-known/security.txt")
