@@ -71,7 +71,7 @@ box.fail(
 page = box.succeed("curl -sf http://127.0.0.1:4181/_dd/send")
 assert "send.js" in page, page
 box.succeed(
-    "curl -sf http://127.0.0.1:4181/_dd/static/send.js | grep -q bitwarden-send"
+    "curl -sf http://127.0.0.1:4181/_dd/static/send.js | grep -c bitwarden-send"
 )
 # the web vault is the app's now: a browser here is handed to the app,
 # which opens it at the app's own copy, and the same page starts a
@@ -80,10 +80,10 @@ page = box.succeed("curl -sf http://127.0.0.1:4181/_dd/use-app")
 assert "use-app.js" in page and 'id="open"' in page and 'id="retry"' in page, page
 assert "/_dd/download" in page, page
 box.succeed(
-    "curl -sf http://127.0.0.1:4181/_dd/static/use-app.js | grep -q prevalidate"
+    "curl -sf http://127.0.0.1:4181/_dd/static/use-app.js | grep -c prevalidate"
 )
 box.succeed(
-    "curl -sf http://127.0.0.1:4181/_dd/static/use-app.js | grep -qF 'commonty://open?'"
+    "curl -sf http://127.0.0.1:4181/_dd/static/use-app.js | grep -cF 'commonty://open?'"
 )
 
 # the breach list is fetched on a timer, from the internet this test has not

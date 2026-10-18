@@ -40,7 +40,7 @@ box.fail("journalctl -u llama-swap --no-pager | grep -q 'Once upon a time'")
 # the engines come back empty; the shape is what is checked.)
 box.wait_for_unit("searx.service")
 box.wait_until_succeeds(
-    "curl -sf 'http://127.0.0.1:4196/search?q=test&format=json' | grep -q '\"results\"'",
+    "curl -sf 'http://127.0.0.1:4196/search?q=test&format=json' | grep -c '\"results\"'",
     timeout=120,
 )
 listen = box.succeed("ss -Hltn 'sport = :4196'")

@@ -122,7 +122,7 @@ with subtest("each person is their own Home Assistant user"):
     controller.wait_for_open_port(8123)
     cookie = me["cookie"]
     page = controller.wait_until_succeeds(
-        "curl -fsS -H 'Accept: text/html' -H 'Host: %s' -H 'Cookie: %s' http://127.0.0.1/ | grep -q /_door/static && echo ok"
+        "curl -fsS -H 'Accept: text/html' -H 'Host: %s' -H 'Cookie: %s' http://127.0.0.1/ | grep -c /_door/static && echo ok"
         % (name, cookie),
         timeout=180,
     )

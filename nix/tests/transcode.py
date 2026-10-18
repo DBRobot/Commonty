@@ -58,7 +58,7 @@ assert started["from"] == 0, started
 # names a segment the moment the page has its answer, and a segment is
 # playable bytes
 box.succeed(
-    "curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep -q '\\.ts'" % sid
+    "curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep -c '\\.ts'" % sid
 )
 seg = box.succeed(
     "curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep '\\.ts' | head -1"
@@ -209,7 +209,7 @@ def film(name, gop):
     sid = json.loads(reply)["id"]
     # the whole minute packed
     box.wait_until_succeeds(
-        "curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep -q ENDLIST" % sid,
+        "curl -sf http://127.0.0.1:4190/session/%s/index.m3u8 | grep -c ENDLIST" % sid,
         timeout=180,
     )
     playlist = box.succeed("curl -sf http://127.0.0.1:4190/session/%s/index.m3u8" % sid)

@@ -35,8 +35,8 @@ demo = box.succeed(
     f"curl -sf {sock} -H 'x-dd-user: demo' -H 'x-dd-role: demo' http://games/game/probe"
 )
 assert "Start a server" not in demo and "can look" in demo
-box.succeed(f"curl -sf {sock} http://games/static/games.css | grep -q ribbon")
-box.succeed(f"curl -sf {sock} http://games/static/games.js | grep -q Escape")
+box.succeed(f"curl -sf {sock} http://games/static/games.css | grep -c ribbon")
+box.succeed(f"curl -sf {sock} http://games/static/games.js | grep -c Escape")
 
 # tom asks for one; the manager, which is not root, may start it
 assert box.succeed(f"{m}/create/probe -d SERVER_NAME=toms").strip() == "303"
@@ -144,7 +144,7 @@ box.shutdown()
 box.start()
 box.wait_for_unit("dd-games.service")
 box.wait_until_succeeds(
-    "curl -sf -m 5 http://127.0.0.1:27015/world.txt | grep -q hello", timeout=1500
+    "curl -sf -m 5 http://127.0.0.1:27015/world.txt | grep -c hello", timeout=1500
 )
 
 # a stop is a shutdown of the guest, not a kill, and it stays stopped
@@ -166,7 +166,7 @@ assert "hello" in box.succeed(
 )
 assert box.succeed(f"{m}/worlds/{name}/start").strip() == "303"
 box.wait_until_succeeds(
-    "curl -sf -m 5 http://127.0.0.1:27015/world.txt | grep -q hello", timeout=600
+    "curl -sf -m 5 http://127.0.0.1:27015/world.txt | grep -c hello", timeout=600
 )
 box.succeed("test -e /var/lib/dd-games/instances/probe1/server/world/world.txt")
 assert box.succeed(f"{m}/stop/probe1").strip() == "303"

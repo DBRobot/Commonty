@@ -50,7 +50,7 @@ put(a, "scratch", "s1", "kept on a alone")
 # b's key for a is at b's store, sealed: a opens it, b's own copy of it
 # (not the sealed one) is root's alone
 a.succeed(
-    "curl -sf http://store.b.test.invalid/_keys/a.age -o /tmp/k && age -d -i /etc/age-identity /tmp/k | grep -q AWS_ACCESS_KEY_ID"
+    "curl -sf http://store.b.test.invalid/_keys/a.age -o /tmp/k && age -d -i /etc/age-identity /tmp/k | grep -c AWS_ACCESS_KEY_ID"
 )
 b.fail(
     "curl -sf http://store.b.test.invalid/_keys/a.age -o /tmp/k && age -d -i /etc/age-identity /tmp/k"

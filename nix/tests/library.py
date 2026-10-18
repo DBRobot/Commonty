@@ -209,15 +209,15 @@ cfg = json.loads(box.succeed(f"curl -s {as_demo} http://127.0.0.1:4181/_dd/confi
 assert cfg["demoLibrary"]["id"] == demo_lib, cfg
 # its own library opens with that cookie
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{demo_lib}/ | grep -q 207"
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{demo_lib}/ | grep -c 207"
 )
 # a member's does not
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403"
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -c 403"
 )
 # and the demo writes nothing, even in its own
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X MKCOL http://127.0.0.1:4181/_dd/dav/{demo_lib}/x | grep -q 403"
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_demo} -X MKCOL http://127.0.0.1:4181/_dd/dav/{demo_lib}/x | grep -c 403"
 )
 # the config says nothing about a library to anyone who is not the demo
 assert "demoLibrary" not in json.loads(
@@ -230,10 +230,10 @@ box.succeed(
 )
 tom = box.succeed(f"DD_KEYRING_FILE=/root/tom.json {nix['dd']} token").strip()
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' -X PROPFIND -H 'Authorization: Bearer {tom}' http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403"
+    f"curl -s -o /dev/null -w '%{{http_code}}' -X PROPFIND -H 'Authorization: Bearer {tom}' http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -c 403"
 )
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 401"
+    f"curl -s -o /dev/null -w '%{{http_code}}' -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -c 401"
 )
 
 # ...and a stranger who claims her library id in his own entry opens nothing
@@ -260,13 +260,13 @@ assert "signature" in box.succeed("cat /root/claim.out")
 # gate still says no
 box.succeed(f"cp /root/claim.json {keys}/tom.json")
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403"
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X PROPFIND http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -c 403"
 )
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X PUT --data x http://127.0.0.1:4181/_dd/dav/{lib}/wreck | grep -q 403"
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X PUT --data x http://127.0.0.1:4181/_dd/dav/{lib}/wreck | grep -c 403"
 )
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X DELETE http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -q 403"
+    f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} -X DELETE http://127.0.0.1:4181/_dd/dav/{lib}/ | grep -c 403"
 )
 # nor may a member claim the demo's library, whose id and key are both in
 # this box's configuration in the open
@@ -274,7 +274,7 @@ greedy = f'.entry.libraries += [{{"id": "{demo_lib}", "keys": [], "readers": [],
 box.succeed(f"jq '{greedy}' {keys}/sarah.json > /root/greedy.json")
 box.succeed(f"cp /root/greedy.json {keys}/sarah.json")
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Authorization: Bearer {token}' -X PUT --data x http://127.0.0.1:4181/_dd/dav/{demo_lib}/wreck | grep -q 403"
+    f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Authorization: Bearer {token}' -X PUT --data x http://127.0.0.1:4181/_dd/dav/{demo_lib}/wreck | grep -c 403"
 )
 
 # A member's disk images, in the bucket under images-<name>: what `dd image`

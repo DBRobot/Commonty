@@ -72,7 +72,7 @@ assert "box" not in now["pending"], f"a stolen box was put on the waiting list: 
 post("/test/away", {"box": "box"})
 post("/test/stolen", {"box": "box", "stolen": False})
 worker.wait_until_succeeds(
-    'curl -s http://127.0.0.1:8000/state | grep -q \'"pending": {"box"\'', timeout=120
+    'curl -s http://127.0.0.1:8000/state | grep -c \'"pending": {"box"\'', timeout=120
 )
 # (the box is in its initrd, waiting: nothing on it answers yet)
 post("/test/approve", {"box": "box"})

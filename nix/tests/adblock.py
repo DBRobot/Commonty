@@ -22,7 +22,7 @@ box.wait_until_succeeds(
 )
 # without it, nothing
 box.succeed(
-    "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8053/api/stats/summary | grep -qx 401"
+    "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8053/api/stats/summary | grep -cx 401"
 )
 # and what it asks the internet goes through Unbound, over TLS
 box.wait_for_unit("unbound.service")
@@ -113,7 +113,7 @@ assert any(i.get("toggle") for g in me["menu"] for i in g), me["menu"]
 me = json.loads(box.succeed(f"curl -sf {tom} http://127.0.0.1:4181/_dd/me"))
 assert not any(i.get("toggle") for g in me["menu"] for i in g), me["menu"]
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' {tom} http://127.0.0.1:4181/_dd/adblock/state | grep -qx 403"
+    f"curl -s -o /dev/null -w '%{{http_code}}' {tom} http://127.0.0.1:4181/_dd/adblock/state | grep -cx 403"
 )
 
 state = json.loads(
@@ -187,7 +187,7 @@ house.wait_until_succeeds(
 )
 # not from another site's form
 box.succeed(
-    f"curl -s -o /dev/null -w '%{{http_code}}' {sarah} -d 'on=false' http://127.0.0.1:4181/_dd/adblock/switch | grep -qE '^(403|415)$'"
+    f"curl -s -o /dev/null -w '%{{http_code}}' {sarah} -d 'on=false' http://127.0.0.1:4181/_dd/adblock/switch | grep -cE '^(403|415)$'"
 )
 # and the page is hers
-box.succeed(f"curl -sf {sarah} http://127.0.0.1:4181/_dd/adblock | grep -q adblock.js")
+box.succeed(f"curl -sf {sarah} http://127.0.0.1:4181/_dd/adblock | grep -c adblock.js")
