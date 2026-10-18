@@ -550,7 +550,10 @@ async function attach(it, from, current = () => true) {
     hls = h;
     lastPiece = null;
     let recovered = false, bufferErrors = 0;
-    h.on(Hls.Events.FRAG_LOADED, (_, d) => { lastPiece = { bytes: d.frag?.stats?.total || 0, secs: d.frag?.duration || 0 }; });
+    h.on(Hls.Events.FRAG_LOADED, (_, d) => {
+      lastPiece = { bytes: d.frag?.stats?.total || 0, secs: d.frag?.duration || 0 };
+      if (playing) playing.lost = 0;
+    });
     h.on(Hls.Events.ERROR, (_, d) => {
       const buffer = d.details === Hls.ErrorDetails.BUFFER_FULL_ERROR || d.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR;
       // every fatal one, and the first of a run of buffer ones and every tenth after
@@ -564,9 +567,11 @@ async function attach(it, from, current = () => true) {
         h.recoverMediaError();
         return;
       }
-      $('p-note').textContent = d.type === Hls.ErrorTypes.NETWORK_ERROR
-        ? 'The player lost the box. Close it and press play again.'
-        : buffer
+      if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        rejoin(it);
+        return;
+      }
+      $('p-note').textContent = buffer
           ? 'This device ran out of room for the film. Close the player and press play again; if it stops again, try the desktop app or a computer.'
           : 'The player stopped. Close it and press play again.';
     });
@@ -574,6 +579,36 @@ async function attach(it, from, current = () => true) {
     h.attachMedia(v);
   }
   return true;
+}
+
+// A box that restarts - a release does - forgets the films it was packing,
+// and the player loses its playlist. It asks the box again from the same
+// second while the box comes back, and only then says so; a box that keeps
+// losing the film before a piece of it arrives is not asked forever.
+async function rejoin(it) {
+  if (playing?.it !== it || playing.rejoining) return;
+  playing.lost = (playing.lost || 0) + 1;
+  if (playing.lost > 3) {
+    $('p-note').textContent = 'The player lost the box. Close it and press play again.';
+    return;
+  }
+  playing.rejoining = true;
+  const v = $('video');
+  const t = playing.offset + (v.currentTime || 0);
+  try {
+    for (let i = 0; i < 8 && playing?.it === it; i++) {
+      if (i) {
+        $('p-note').textContent = `Waiting for the box to come back to ${clock(t)}…`;
+        await new Promise((r) => setTimeout(r, 4000));
+        if (playing?.it !== it) return;
+      }
+      await seekTo(t, true);
+      if (session || playing?.starting) return;
+    }
+    if (playing?.it === it) $('p-note').textContent = 'The player lost the box. Close it and press play again.';
+  } finally {
+    if (playing?.it === it) playing.rejoining = false;
+  }
 }
 
 // The last segment the player loaded, for a report: its bytes and seconds
@@ -691,7 +726,7 @@ function paintBar() {
 // just goes there; before where this session began, or past what the box
 // has packed, the box starts again at that point.
 let jumps = 0;
-async function seekTo(t) {
+async function seekTo(t, again = false) {
   if (!playing) return;
   const v = $('video');
   const len = filmLength();
@@ -699,7 +734,7 @@ async function seekTo(t) {
   // a file opened whole in the tab seeks itself; one from the box seeks
   // within what it has packed, and anywhere else - including while an
   // earlier jump is still starting - asks the box to start there
-  if (playing.inline || (session && t >= keptFrom() && t <= readyTo())) {
+  if (!again && (playing.inline || (session && t >= keptFrom() && t <= readyTo()))) {
     v.currentTime = Math.max(0, t - playing.offset);
     return;
   }
