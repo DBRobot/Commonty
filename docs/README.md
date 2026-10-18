@@ -31,6 +31,8 @@ These pages are in four parts:
 
 - [Mail](guide/services/mail.md)
 - [Files](guide/services/files.md)
+- [Calendar](guide/services/calendar.md)
+- [Contacts](guide/services/contacts.md)
 - [Movies & TV](guide/services/movies.md)
 - [Photos](guide/services/photos.md)
 - [Passwords](guide/services/passwords.md)
@@ -61,6 +63,7 @@ These pages are in four parts:
 - [Encrypted libraries](dev/libraries.md)
 - [Mail](dev/mail.md)
 - [The PDF editor](dev/pdf-editor.md)
+- [Calendar and contacts](dev/calendar.md)
 - [Leaving, and announcing a change](dev/leaving.md)
 - [Programs we package](dev/packaged.md)
 - [Pull requests, CI and releases](dev/ci.md)

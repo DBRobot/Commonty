@@ -14,6 +14,7 @@ const home = `https://home.${domain}`;
 const sitePage = location.hostname.startsWith('llm.') ? '/_dd/chat' : location.pathname;
 const what = vault ? 'Passwords' : photos ? 'Photos' : ({
   '/_dd/files': 'Files', '/_dd/media': 'Movies & TV', '/_dd/chat': 'Chat', '/_dd/mail': 'Mail',
+  '/_dd/calendar': 'Calendar', '/_dd/contacts': 'Contacts',
 })[sitePage] || 'Commonty';
 const show = (id) => {
   for (const s of document.querySelectorAll('main > section'))

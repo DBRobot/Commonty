@@ -1844,6 +1844,16 @@ async fn media_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
     library_page(&app, &headers, "media", "/_dd/media")
 }
 
+/// Calendar: the library's Calendars, the same way as Files.
+async fn calendar_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    library_page(&app, &headers, "calendar", "/_dd/calendar")
+}
+
+/// Contacts: the library's Contacts, the same way as Files.
+async fn contacts_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    library_page(&app, &headers, "contacts", "/_dd/contacts")
+}
+
 fn library_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.signed_in(cookie) {
@@ -3087,6 +3097,8 @@ pub async fn start(
         .route("/_dd/config", get(page_config))
         .route("/_dd/files", get(files_page))
         .route("/_dd/mail", get(mail_page))
+        .route("/_dd/calendar", get(calendar_page))
+        .route("/_dd/contacts", get(contacts_page))
         .route("/_dd/media", get(media_page))
         // the boxes are on Settings' Network tab now
         .route(

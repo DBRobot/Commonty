@@ -491,6 +491,10 @@ dd library put <lib> <file> [--as name]   - reads stdin, whole
 dd library get <lib> <name> <out>
 dd library mkdir <lib> <path>
 dd library trash <lib> <name>
+dd library share <lib> <member> [--write]
+                           sealed to their devices, in your entry (needs the root);
+                           --write makes them a writer
+dd library unshare <lib> <member>
 dd media [--at dir]        every openable library mounted with rclone under
                            ~/Commonty/<first 12 of the id>, until ctrl-c
 ```

@@ -542,6 +542,84 @@ pub async fn add_library(
     Ok(signed)
 }
 
+/// Who else may open one of our libraries, as `[(member, writes)]`: its
+/// key sealed to each member's own keys, out of their entry as the release
+/// holds it (a box cannot slip in a key of its own under a member's name),
+/// and signed into our entry. Replaces the library's readers whole; an
+/// empty list shares it with nobody. `writes` gives that member the gate's
+/// writer role (docs/dev/libraries.md).
+pub async fn set_readers(
+    dirs: &[String],
+    name: &str,
+    root: &ed25519_dalek::SigningKey,
+    lib: &str,
+    key: &library::Key,
+    readers: &[(String, bool)],
+    list: &identity::MemberList,
+) -> Result<SignedEntry> {
+    let cur = ours(dirs, name, root).await?;
+    let mut entry = cur.entry.clone();
+    let at = entry
+        .libraries
+        .iter()
+        .position(|l| l.id == lib)
+        .with_context(|| format!("library {lib} is not one of yours"))?;
+    let mut sealed: Vec<identity::Reader> = Vec::new();
+    for (member, writes) in readers {
+        if sealed.iter().any(|r| r.name == *member) {
+            bail!("{member} is in the list twice");
+        }
+        if member == name {
+            bail!("a library is yours already; share it with someone else");
+        }
+        let theirs = directory::resolve_released(dirs, member, list)
+            .await
+            .with_context(|| format!("{member} is not a member here"))?;
+        let keys = library::seal_for_entry(&theirs.entry, key)?;
+        if keys.is_empty() {
+            bail!("{member} has no device a key can be sealed to yet");
+        }
+        sealed.push(identity::Reader {
+            name: member.clone(),
+            keys,
+            writes: *writes,
+        });
+    }
+    entry.libraries[at].readers = sealed;
+    identity::drop_passkey_keys(&mut entry);
+    entry.version += 1;
+    entry.updated = identity::now();
+    let signed = identity::sign(entry, root)?;
+    publish(dirs, &signed).await?;
+    Ok(signed)
+}
+
+/// A new library for something kept together with others (a shared
+/// calendar): a fresh key sealed to every key of ours, in our entry, and
+/// shared with `readers` as `set_readers` does.
+pub async fn new_shared_library(
+    dirs: &[String],
+    name: &str,
+    root: &ed25519_dalek::SigningKey,
+    readers: &[(String, bool)],
+    list: &identity::MemberList,
+) -> Result<(String, library::Key)> {
+    let cur = ours(dirs, name, root).await?;
+    let key = library::random_key();
+    let lib = identity::Library {
+        id: library::random_id(),
+        keys: library::seal_for_entry(&cur.entry, &key)?,
+        readers: vec![],
+        created: identity::now(),
+    };
+    let id = lib.id.clone();
+    add_library(dirs, name, root, lib).await?;
+    if !readers.is_empty() {
+        set_readers(dirs, name, root, &id, &key, readers, list).await?;
+    }
+    Ok((id, key))
+}
+
 pub fn device_of(kp: &auth::device::KeyPair) -> Device {
     let public_key = auth::device::public_b64(kp);
     Device {

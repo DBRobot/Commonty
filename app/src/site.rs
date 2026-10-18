@@ -31,6 +31,8 @@ pub(crate) fn page_for(path: &str) -> Option<&'static str> {
         "/" | "/_dd/home" => "home",
         "/_dd/files" => "files",
         "/_dd/media" => "media",
+        "/_dd/calendar" => "calendar",
+        "/_dd/contacts" => "contacts",
         "/_dd/chat" => "chat",
         "/_dd/mail" => "mail",
         "/_dd/settings" | "/_dd/backups" | "/_dd/devices" | "/_dd/network" | "/_dd/boxes"
@@ -245,6 +247,12 @@ async fn serve<R: Runtime>(
             ),
         });
     }
+    if path == "/_dd/app/libraries" {
+        return Ok(match libraries_value(app).await? {
+            Some(v) => no_store(&v),
+            None => plain(StatusCode::NOT_FOUND, "no library opens here"),
+        });
+    }
     if path == "/_dd/app/archive" {
         return Ok(match archive_value(app).await? {
             Some(v) => no_store(&v),
@@ -263,6 +271,14 @@ async fn serve<R: Runtime>(
     }
     if path == "/_dd/app/admit" && req.method() == "POST" {
         return admit(app, req.body()).await;
+    }
+    // a calendar shared, or who it is shared with changed: signed with the
+    // main key here, like a device added
+    if path == "/_dd/app/share" && req.method() == "POST" {
+        return Ok(match share(app, req.body()).await {
+            Ok(v) => json_response(&v),
+            Err((st, why)) => plain(st, &why),
+        });
     }
     if path == "/_dd/app/remove" && req.method() == "POST" {
         return remove(app, req.body()).await;
@@ -558,6 +574,9 @@ async fn proxy<R: Runtime>(
         "x-dd-part",
         "x-dd-presign",
         "accept",
+        // a save made from a version (a calendar event, a contact)
+        "if-match",
+        "if-none-match",
     ] {
         if let Some(v) = req.headers().get(h).and_then(|v| v.to_str().ok()) {
             out = out.header(h, v);
@@ -651,6 +670,74 @@ async fn admit<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<Response<V
     Ok(json_response(&serde_json::json!({ "ok": true })))
 }
 
+/// Who may open one of the member's libraries, `{ id?, readers: [{ name,
+/// writes }] }`, signed into their entry with the main key on this device;
+/// with no id, a new library for it first (a shared calendar). Answers
+/// `{ id }`. In the app's window only, as a device added is.
+async fn share<R: Runtime>(
+    app: &AppHandle<R>,
+    body: &[u8],
+) -> Result<serde_json::Value, (StatusCode, String)> {
+    let bad = |e: String| (StatusCode::BAD_GATEWAY, e);
+    let refuse = |e: &str| (StatusCode::BAD_REQUEST, e.to_string());
+    let keys = app.state::<crate::account::Keys>();
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|e| refuse(&e.to_string()))?;
+    let mut readers = Vec::new();
+    for r in v["readers"]
+        .as_array()
+        .ok_or_else(|| refuse("no readers"))?
+    {
+        let name = r["name"].as_str().unwrap_or("").trim().to_lowercase();
+        if name.is_empty() {
+            return Err(refuse("a member's name is needed"));
+        }
+        let writes = r["writes"].as_bool().unwrap_or(false);
+        // a name given twice is one member
+        readers.retain(|(n, _): &(String, bool)| *n != name);
+        readers.push((name, writes));
+    }
+    let Some(root) = account::load_root(&keys.0).map_err(|e| bad(e.to_string()))? else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "your account's main key is not on this device: share from the one that holds it"
+                .into(),
+        ));
+    };
+    let name = keys
+        .0
+        .get(crate::account::USER)
+        .map_err(|e| bad(e.to_string()))?
+        .ok_or_else(|| bad("no name on this device".into()))?;
+    let dirs = crate::account::dirs();
+    let list = account::released(&keys.0, &dirs)
+        .await
+        .map_err(|e| bad(format!("{e:#}")))?;
+    let id = match v["id"].as_str() {
+        None => {
+            account::new_shared_library(&dirs, &name, &root, &readers, &list)
+                .await
+                .map_err(|e| bad(format!("{e:#}")))?
+                .0
+        }
+        Some(id) => {
+            let (opener, user, _) =
+                media::gate::Opener::load(&keys.0).map_err(|e| bad(e.to_string()))?;
+            let libs = media::gate::openable(&dirs, &user, &opener, None)
+                .await
+                .map_err(|e| bad(format!("{e:#}")))?;
+            let (_, _, key) = libs
+                .iter()
+                .find(|(o, l, _)| *o == user && l.id == id)
+                .ok_or_else(|| refuse("not one of your libraries"))?;
+            account::set_readers(&dirs, &name, &root, id, key, &readers, &list)
+                .await
+                .map_err(|e| bad(format!("{e:#}")))?;
+            id.to_string()
+        }
+    };
+    Ok(serde_json::json!({ "id": id }))
+}
+
 /// Leaving, or coming back, signed with the main key on this device: what
 /// Settings' Leave tab asks, in this window or a browser let in from it.
 /// An account whose root is a passkey signs with that, on the gate's page.
@@ -733,6 +820,60 @@ fn no_store(v: &serde_json::Value) -> Response<Vec<u8>> {
         .header(header::CACHE_CONTROL, "no-store")
         .body(v.to_string().into_bytes())
         .unwrap_or_default()
+}
+
+/// Every library a page may open here, the member's own first, then those
+/// other members of the release share with them: `[{ id, key, owner,
+/// reader, writer }]`. Calendar and Contacts read them all, since a
+/// calendar two people keep is one member's library the other may write.
+/// For the app's own pages only, as library_value.
+pub(crate) async fn libraries_value<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<serde_json::Value>, String> {
+    use base64::Engine as _;
+    crate::local::network_ready().await;
+    let keys = app.state::<crate::account::Keys>();
+    let (mut opener, user, _) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
+    let dirs = crate::account::dirs();
+    if opener.anchor().is_none() {
+        account::own_entry(&keys.0, &dirs, &user)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        (opener, _, _) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
+    }
+    // another member's library counts only when the release says they
+    // belong: without the list, the member's own alone
+    let list = account::released(&keys.0, &dirs).await.ok();
+    let libs = media::gate::openable(&dirs, &user, &opener, list.as_ref())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if libs.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(serde_json::Value::Array(
+        libs.iter()
+            .map(|(owner, lib, key)| {
+                let mine = *owner == user;
+                let writer = !mine && lib.readers.iter().any(|r| r.name == user && r.writes);
+                serde_json::json!({
+                    "id": lib.id,
+                    "key": base64::engine::general_purpose::STANDARD.encode(&key[..]),
+                    "owner": owner,
+                    "reader": !mine && !writer,
+                    "writer": writer,
+                    // who the member shares their own with
+                    "readers": if mine {
+                        lib.readers
+                            .iter()
+                            .map(|r| serde_json::json!({ "name": r.name, "writes": r.writes }))
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![]
+                    },
+                })
+            })
+            .collect(),
+    )))
 }
 
 /// The library a page opens, `{ id, key, reader }`: this device's own keys

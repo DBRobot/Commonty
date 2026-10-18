@@ -1033,6 +1033,12 @@ async fn site_pages<R: Runtime>(
                 "no library opens here",
             );
         }
+        "/_dd/app/libraries" => {
+            return answer(
+                crate::site::libraries_value(&site.app).await,
+                "no library opens here",
+            );
+        }
         "/_dd/app/archive" => {
             return answer(
                 crate::site::archive_value(&site.app).await,

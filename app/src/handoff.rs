@@ -25,6 +25,8 @@ pub const SITE_PAGES: &[&str] = &[
     "/_dd/home",
     "/_dd/files",
     "/_dd/media",
+    "/_dd/calendar",
+    "/_dd/contacts",
     "/_dd/settings",
     "/_dd/chat",
     "/_dd/mail",

@@ -394,6 +394,31 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "calendar.js",
+        "servers/calendar/web/calendar.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "calendar.css",
+        "servers/calendar/web/calendar.css",
+        "text/css; charset=utf-8",
+    ),
+    (
+        "ical.js",
+        "servers/calendar/web/ical.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "vdir.js",
+        "servers/calendar/web/vdir.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "contacts.js",
+        "servers/contacts/web/contacts.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "shelf.js",
         "servers/media/web/shelf.js",
         "text/javascript; charset=utf-8",
@@ -562,6 +587,8 @@ const ICONS: &[(&str, &str)] = &[
     ("videos", "servers/web-shared/icons/videos.svg"),
     ("mail", "servers/web-shared/icons/mail.svg"),
     ("files", "servers/web-shared/icons/files.svg"),
+    ("calendar", "servers/web-shared/icons/calendar.svg"),
+    ("contacts", "servers/web-shared/icons/contacts.svg"),
     ("chat", "servers/web-shared/icons/chat.svg"),
     ("code", "servers/web-shared/icons/code.svg"),
     ("metrics", "servers/web-shared/icons/metrics.svg"),
@@ -594,6 +621,9 @@ const PAGES: &[(&str, &str)] = &[
     ("home", "servers/home/web/pages/home.html"),
     ("files", "servers/files/web/pages/files.html"),
     ("media", "servers/media/web/pages/media.html"),
+    // Calendar and Contacts: the library's Calendars/ and Contacts/, through the app
+    ("calendar", "servers/calendar/web/pages/calendar.html"),
+    ("contacts", "servers/contacts/web/pages/contacts.html"),
     ("friends", "servers/home/web/pages/friends.html"),
     ("chat", "servers/chat/web/pages/chat.html"),
     ("git", "servers/forge/web/pages/git.html"),
@@ -1406,6 +1436,8 @@ mod tests {
             ("home", "shell.js"),
             ("files", "files.js"),
             ("media", "media.js"),
+            ("calendar", "calendar.js"),
+            ("contacts", "contacts.js"),
             ("settings", "settings.js"),
             ("git", "git.js"),
             ("metrics", "metrics.js"),
@@ -1434,6 +1466,12 @@ mod tests {
         for f in ["files.js", "media.js"] {
             assert!(text(f).contains("from './library.js'"));
         }
+        // calendars and address books too, and through one store
+        for f in ["calendar.js", "contacts.js"] {
+            assert!(text(f).contains("from './vdir.js'"), "{f}");
+            assert!(text(f).contains("from './library.js'"), "{f}");
+        }
+        assert!(text("vdir.js").contains("from './library.js'"));
         assert!(text("library.js").contains("/_dd/dav/"));
         // a film goes through the box, with its block keys sealed to it
         let lib = text("library.js");

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Contacts</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/calendar.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="drive cal-page" id="main">
+    <div class="drive-head">
+      <h1>Contacts</h1>
+      <div class="drive-actions" id="actions" hidden>
+        <button id="export" class="quiet" type="button">Export .vcf</button>
+        <button id="import" class="quiet" type="button">Import .vcf</button>
+        <input id="import-file" type="file" accept=".vcf,text/vcard,text/x-vcard" multiple hidden>
+        <button id="new-person" type="button">New contact</button>
+      </div>
+    </div>
+
+    <p id="msg" class="lead" role="status"></p>
+    <div id="link" hidden>
+      <p class="lead">Your contacts open through the Commonty app, which holds their key on your device. <a href="/_dd/download">Get the app</a></p>
+    </div>
+
+    <div class="drive-body" id="body" hidden>
+      <aside class="rail cal-rail" aria-label="Address books">
+        <section>
+          <h2 class="rail-h">Address books</h2>
+          <div id="books"></div>
+          <button type="button" class="rail-add" id="new-book">New address book</button>
+        </section>
+      </aside>
+      <section class="panel" aria-label="People">
+        <div class="toolbar">
+          <label class="search"><span class="sr-only">Search contacts</span><input id="search" type="search" placeholder="Search names, numbers, emails" autocomplete="off"></label>
+          <span class="pcount" id="count"></span>
+        </div>
+        <div class="people" id="people">
+          <div class="plist" id="plist"></div>
+          <div class="pcard" id="pcard"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="edit" aria-labelledby="edit-h">
+    <form id="edit-form" method="dialog">
+      <h2 id="edit-h">New contact</h2>
+      <label>Name<input id="p-name" autocomplete="off" required></label>
+      <label>Company<input id="p-org" autocomplete="off"></label>
+      <label>Job title<input id="p-title" autocomplete="off"></label>
+      <div><div class="fine">Phone</div><div class="many" id="p-tels"></div></div>
+      <div><div class="fine">Email</div><div class="many" id="p-emails"></div></div>
+      <div><div class="fine">Address</div><div class="adr">
+        <input id="p-street" aria-label="Street" placeholder="Street">
+        <input id="p-city" aria-label="City" placeholder="City">
+        <input id="p-region" aria-label="State or region" placeholder="State or region">
+        <input id="p-code" aria-label="Postal code" placeholder="Postal code">
+        <input id="p-country" aria-label="Country" placeholder="Country">
+      </div></div>
+      <label>Birthday<input id="p-bday" type="date"></label>
+      <label>Commonty name<input id="p-member" autocomplete="off" placeholder="Their name on Commonty, if they have one"></label>
+      <label>Notes<textarea id="p-note" rows="3"></textarea></label>
+      <label>Address book<select id="p-book"></select></label>
+      <p class="form-err" id="edit-err" role="alert"></p>
+      <div class="ask-actions">
+        <button class="quiet" type="button" id="edit-cancel">Cancel</button>
+        <button type="submit" id="edit-ok">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ask" aria-labelledby="ask-h">
+    <form method="dialog">
+      <h2 id="ask-h"></h2>
+      <p id="ask-text"></p>
+      <div id="ask-body"></div>
+      <div class="ask-actions" id="ask-actions"></div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/_dd/static/contacts.js"></script>
+  <script type="module" src="/_dd/static/shell.js"></script>
+</body>
+</html>

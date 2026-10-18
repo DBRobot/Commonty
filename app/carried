@@ -36,6 +36,13 @@ servers/media/web/media.js            static/media.js
 servers/media/web/shelf.js            static/shelf.js
 servers/media/web/icons/tmdb.svg      static/tmdb.svg
 servers/media/web/pages/media.html    pages/media.html
+servers/calendar/web/calendar.js      static/calendar.js
+servers/calendar/web/calendar.css     static/calendar.css
+servers/calendar/web/ical.js          static/ical.js
+servers/calendar/web/vdir.js          static/vdir.js
+servers/calendar/web/pages/calendar.html pages/calendar.html
+servers/contacts/web/contacts.js      static/contacts.js
+servers/contacts/web/pages/contacts.html pages/contacts.html
 servers/fleet/web/backups.js          static/backups.js
 servers/fleet/web/backups.css         static/backups.css
 servers/home/web/settings.js               static/settings.js

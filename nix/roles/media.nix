@@ -34,5 +34,21 @@
       color = "#2f6fd6";
       rank = 30;
     }
+    {
+      name = "Calendar";
+      blurb = "Your calendars and the ones shared with you, encrypted on your device.";
+      url = "https://files.${config.dd.domain}/_dd/calendar";
+      icon = "calendar";
+      color = "#1d5c42";
+      rank = 32;
+    }
+    {
+      name = "Contacts";
+      blurb = "Everyone you keep a number or address for, encrypted on your device.";
+      url = "https://files.${config.dd.domain}/_dd/contacts";
+      icon = "contacts";
+      color = "#7a3b69";
+      rank = 34;
+    }
   ];
 }

@@ -42,6 +42,18 @@ pub enum LibraryCmd {
     Mkdir { library: String, path: String },
     /// Move a file to the trash (nothing is gone until the box purges it)
     Trash { library: String, name: String },
+    /// Let another member open one of your libraries: its key sealed to
+    /// their devices, in your entry (needs the root). With --write they may
+    /// change what is in it too, but not delete anything for good.
+    Share {
+        library: String,
+        member: String,
+        #[arg(long)]
+        write: bool,
+    },
+    /// Stop sharing one of your libraries with a member (needs the root).
+    /// What they already copied off it stays theirs.
+    Unshare { library: String, member: String },
     /// Seal every library key again to your devices, the root and the
     /// paper key alone, and drop what was sealed to a passkey (needs the
     /// root). The app does it at launch; once is enough.
@@ -76,6 +88,52 @@ pub async fn run(cmd: LibraryCmd, keys: &auth::Store, dirs: &[String]) -> Result
                 gate.mkdir(folder).await?;
             }
             println!("  with Files, Movies and Shows in it");
+        }
+        LibraryCmd::Share {
+            library: id,
+            member,
+            write,
+        } => {
+            let root = opener
+                .root
+                .as_ref()
+                .context("the root key is not on this machine: share from the one that holds it")?;
+            let list = account::released(keys, dirs).await?;
+            let (lib, key) = pick(keys, dirs, &user, &opener, &id).await?;
+            let mut readers: Vec<(String, bool)> = lib
+                .readers
+                .iter()
+                .filter(|r| r.name != member)
+                .map(|r| (r.name.clone(), r.writes))
+                .collect();
+            readers.push((member.clone(), write));
+            account::set_readers(dirs, &user, root, &id, &key, &readers, &list).await?;
+            println!(
+                "{id}: {member} may {} it",
+                if write { "open and change" } else { "open" }
+            );
+        }
+        LibraryCmd::Unshare {
+            library: id,
+            member,
+        } => {
+            let root = opener
+                .root
+                .as_ref()
+                .context("the root key is not on this machine: run this where it is")?;
+            let list = account::released(keys, dirs).await?;
+            let (lib, key) = pick(keys, dirs, &user, &opener, &id).await?;
+            if !lib.readers.iter().any(|r| r.name == member) {
+                bail!("{id} is not shared with {member}");
+            }
+            let readers: Vec<(String, bool)> = lib
+                .readers
+                .iter()
+                .filter(|r| r.name != member)
+                .map(|r| (r.name.clone(), r.writes))
+                .collect();
+            account::set_readers(dirs, &user, root, &id, &key, &readers, &list).await?;
+            println!("{id}: no longer shared with {member}");
         }
         LibraryCmd::Reseal => {
             let root = opener

@@ -1430,6 +1430,96 @@ async fn a_writer_saves_into_a_shared_library_and_a_reader_does_not() {
     assert_eq!(r.status(), 403);
 }
 
+/// `dd library share`: the owner seals a library to another member's
+/// devices, out of their entry as the release holds it; with --write they
+/// save into it, without it they only read it, and unshared they do neither.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_shares_a_library_and_takes_it_back() {
+    let forge = Forge::new();
+    let a = Box_::start_with_libraries(&forge, fake_bucket()).await;
+    let d = dirs([&a]);
+    let (alice, bob, carol) = (Device::new(), Device::new(), Device::new());
+    for (dev, name) in [(&alice, "alice"), (&bob, "bob"), (&carol, "carol")] {
+        dev.dd_ok(&args(
+            &[
+                "identity",
+                "new",
+                "--born",
+                "1990-01",
+                "--agree-terms",
+                "--name",
+                name,
+            ],
+            &d,
+        ));
+    }
+    forge.list(
+        &[
+            (member_id_of(&alice, &d), "alice"),
+            (member_id_of(&bob, &d), "bob"),
+            (member_id_of(&carol, &d), "carol"),
+        ],
+        &[],
+    );
+    let out = alice.dd_ok(&args(&["library", "new"], &d));
+    let id = out
+        .lines()
+        .find_map(|l| l.strip_prefix("library "))
+        .and_then(|l| l.split(':').next())
+        .expect("the new library's id")
+        .to_string();
+    alice.dd_ok(&args(&["library", "share", &id, "bob", "--write"], &d));
+    alice.dd_ok(&args(&["library", "share", &id, "carol"], &d));
+    alice.dd_fails(
+        &args(&["library", "share", &id, "mallory"], &d),
+        "not a member",
+    );
+    let out = bob.dd_ok(&args(&["library", "list"], &d));
+    assert!(out.contains(&format!("{id}  alice's")), "{out}");
+    let dir = scratch("share");
+    let event = dir.join("e.ics");
+    std::fs::write(&event, "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n").unwrap();
+    let ev = event.to_str().unwrap();
+    bob.dd_ok(&args(
+        &["library", "put", &id, ev, "--as", "Calendars/f/e.ics"],
+        &d,
+    ));
+    // carol reads what bob wrote, sealed under alice's key, and writes nothing
+    let back = dir.join("back.ics");
+    carol.dd_ok(&args(
+        &[
+            "library",
+            "get",
+            &id,
+            "Calendars/f/e.ics",
+            back.to_str().unwrap(),
+        ],
+        &d,
+    ));
+    assert_eq!(
+        std::fs::read(&back).unwrap(),
+        std::fs::read(&event).unwrap()
+    );
+    carol.dd_fails(
+        &args(
+            &["library", "put", &id, ev, "--as", "Calendars/f/c.ics"],
+            &d,
+        ),
+        "403",
+    );
+    // taken back from bob: he can no longer write, or find it
+    alice.dd_ok(&args(&["library", "unshare", &id, "bob"], &d));
+    bob.dd_fails(
+        &args(
+            &["library", "put", &id, ev, "--as", "Calendars/f/again.ics"],
+            &d,
+        ),
+        "no library",
+    );
+    let out = bob.dd_ok(&args(&["library", "list"], &d));
+    assert!(!out.contains(&id), "{out}");
+}
+
 fn run_with_stdin(dev: &Device, a: &[&str], stdin: &str, want_ok: bool) -> String {
     use std::io::Write as _;
     let mut c = Command::new(env!("CARGO_BIN_EXE_dd"))

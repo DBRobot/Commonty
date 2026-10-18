@@ -62,6 +62,7 @@ export async function list(lib, dir) {
       size: isDir ? 0 : plain_size(sealed),
       sealed,
       modified: el.getElementsByTagNameNS('DAV:', 'getlastmodified')[0]?.textContent || '',
+      etag: el.getElementsByTagNameNS('DAV:', 'getetag')[0]?.textContent || '',
     });
   }
   out.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
@@ -383,4 +384,66 @@ export async function restore(lib, item, to = item.path) {
 export async function mkdir(lib, path) {
   const r = await fetch(dav(lib, path), { method: 'MKCOL' });
   if (!r.ok && r.status !== 405) throw new Error(`the gate said ${r.status}`);
+}
+
+/// Every library this viewer opens, their own first, then those other
+/// members share with them: [{ id, key, owner, reader, writer }]. Outside
+/// the app, the one unlock() gives.
+export async function libraries() {
+  if (inApp || servedByApp) {
+    const r = inApp ? await appFetch('/_dd/app/libraries') : await fetch('/_dd/app/libraries');
+    if (r.ok) return r.json();
+    if (r.status !== 404) throw new Error(`the app said ${r.status}: ${await r.text()}`);
+  }
+  const u = await unlock();
+  return u.ok ? [u.ok] : [];
+}
+
+/// A small file whole, as text, and its version: { text, etag }, or null
+/// when nothing has that name. An event, a contact.
+export async function readText(lib, path) {
+  const r = await fetch(dav(lib, path));
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`the gate said ${r.status}`);
+  const etag = r.headers.get('etag') || '';
+  const plain = file_open(lib.key, lib.id, new Uint8Array(await r.arrayBuffer()));
+  return { text: new TextDecoder().decode(plain), etag };
+}
+
+/// A small file saved from a version: `from` is the etag it was read at,
+/// 'new' when nothing may be there yet, or null for whatever is there.
+/// { etag } when it is in, { changed: true } when another save got there
+/// first and nothing changed.
+export async function saveText(lib, path, text, from) {
+  const headers = {};
+  if (from === 'new') headers['if-none-match'] = '*';
+  else if (from) headers['if-match'] = from;
+  const body = file_seal(lib.key, lib.id, new TextEncoder().encode(text));
+  const r = await fetch(dav(lib, path), { method: 'PUT', headers, body });
+  if (r.status === 412) return { changed: true };
+  if (!r.ok) throw new Error(`the gate said ${r.status}`);
+  return { etag: r.headers.get('etag') || '' };
+}
+
+/// to the trash from a version; false when another save got there first
+export async function trashFrom(lib, path, from) {
+  const r = await fetch(dav(lib, path), { method: 'DELETE', headers: from ? { 'if-match': from } : {} });
+  if (r.status === 412) return false;
+  if (!r.ok && r.status !== 404) throw new Error(`the gate said ${r.status}`);
+  return true;
+}
+
+/// Who may open one of this member's libraries, `[{ name, writes }]`,
+/// signed into their entry by the app with the account's main key; with no
+/// `id`, a new library for it (a shared calendar). Only in the app's own
+/// window: `{ app: true }` anywhere else. `{ id }` when done.
+export async function share(id, readers) {
+  if (!inApp) return { app: true };
+  const r = await appFetch('/_dd/app/share', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(id ? { id, readers } : { readers }),
+  });
+  if (!r.ok) throw new Error(await r.text() || `the app said ${r.status}`);
+  return r.json();
 }

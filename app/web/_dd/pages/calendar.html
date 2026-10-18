@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calendar</title>
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/calendar.css">
+</head>
+<body>
+  <header class="dd-bar">
+    <div class="bar">
+      <a class="brand" href="/_dd/home" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+  <main class="drive cal-page" id="main">
+    <div class="drive-head">
+      <h1>Calendar</h1>
+      <div class="drive-actions" id="actions" hidden>
+        <button id="import" class="quiet" type="button">Import .ics</button>
+        <input id="import-file" type="file" accept=".ics,text/calendar" multiple hidden>
+        <button id="new-event" type="button">New event</button>
+      </div>
+    </div>
+
+    <p id="msg" class="lead" role="status"></p>
+    <div id="link" hidden>
+      <p class="lead">Your calendar opens through the Commonty app, which holds its key on your device. <a href="/_dd/download">Get the app</a></p>
+    </div>
+
+    <div class="drive-body" id="body" hidden>
+      <aside class="rail cal-rail" aria-label="Calendars">
+        <div class="mini" id="mini"></div>
+        <section>
+          <h2 class="rail-h">Yours</h2>
+          <div id="cals-mine"></div>
+          <button type="button" class="rail-add" id="new-cal">New calendar</button>
+          <button type="button" class="rail-add" id="new-shared">New shared calendar</button>
+        </section>
+        <section id="shared-box" hidden>
+          <h2 class="rail-h">Shared with you</h2>
+          <div id="cals-shared"></div>
+        </section>
+        <section>
+          <h2 class="rail-h">More</h2>
+          <label class="cal-row" for="show-birthdays"><input type="checkbox" id="show-birthdays"><span class="swatch" style="--swatch: var(--off)"></span><span>Birthdays</span></label>
+        </section>
+      </aside>
+
+      <section class="panel" aria-label="Events">
+        <div class="toolbar">
+          <button class="quiet small" type="button" id="today">Today</button>
+          <div class="step">
+            <button class="quiet small" type="button" id="prev" aria-label="Earlier">‹</button>
+            <button class="quiet small" type="button" id="next" aria-label="Later">›</button>
+          </div>
+          <h2 class="range" id="range"></h2>
+          <div class="grow"></div>
+          <div class="seg" role="group" aria-label="Show">
+            <button type="button" data-span="week" aria-pressed="true">Week</button>
+            <button type="button" data-span="month" aria-pressed="false">Month</button>
+          </div>
+        </div>
+        <div class="cal" id="cal">
+          <div class="cal-main" id="grid"></div>
+          <aside class="detail" id="detail" hidden aria-live="polite"></aside>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="edit" aria-labelledby="edit-h">
+    <form id="edit-form" method="dialog">
+      <h2 id="edit-h">New event</h2>
+      <label>Title<input id="f-title" autocomplete="off" required></label>
+      <label class="check"><input type="checkbox" id="f-allday"> All day</label>
+      <div class="when">
+        <label>Starts<input id="f-sd" type="date" required></label>
+        <label class="timed">at<input id="f-st" type="time" step="300"></label>
+        <label>Ends<input id="f-ed" type="date" required></label>
+        <label class="timed">at<input id="f-et" type="time" step="300"></label>
+      </div>
+      <label>Repeats<select id="f-repeat">
+        <option value="">Does not repeat</option>
+        <option value="FREQ=DAILY">Every day</option>
+        <option value="FREQ=WEEKLY">Every week</option>
+        <option value="FREQ=WEEKLY;INTERVAL=2">Every other week</option>
+        <option value="FREQ=MONTHLY">Every month</option>
+        <option value="FREQ=YEARLY">Every year</option>
+        <option value="keep" id="f-repeat-keep" hidden>As it was</option>
+      </select></label>
+      <label>Calendar<select id="f-cal"></select></label>
+      <label>Where<input id="f-where" autocomplete="off"></label>
+      <label>Reminder<select id="f-alarm">
+        <option value="">None</option>
+        <option value="0">At the start</option>
+        <option value="10">10 minutes before</option>
+        <option value="30">30 minutes before</option>
+        <option value="60">1 hour before</option>
+        <option value="1440">1 day before</option>
+      </select></label>
+      <label>Notes<textarea id="f-notes" rows="3"></textarea></label>
+      <fieldset id="f-which" hidden>
+        <legend>Change</legend>
+        <label class="check"><input type="radio" name="which" value="one" checked> This event</label>
+        <label class="check"><input type="radio" name="which" value="after"> This and later ones</label>
+        <label class="check"><input type="radio" name="which" value="all"> Every one</label>
+      </fieldset>
+      <p class="form-err" id="edit-err" role="alert"></p>
+      <div class="ask-actions">
+        <button value="cancel" class="quiet" type="button" id="edit-cancel">Cancel</button>
+        <button value="ok" type="submit" id="edit-ok">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ask" aria-labelledby="ask-h">
+    <form method="dialog" id="ask-form">
+      <h2 id="ask-h"></h2>
+      <p id="ask-text"></p>
+      <div id="ask-body"></div>
+      <div class="ask-actions" id="ask-actions"></div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/_dd/static/calendar.js"></script>
+  <script type="module" src="/_dd/static/shell.js"></script>
+</body>
+</html>

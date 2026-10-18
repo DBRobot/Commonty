@@ -1576,6 +1576,7 @@
             tests
             ;
           plaintext-label = import ./nix/tests/plaintext-label.nix args;
+          calendar-js = import ./nix/tests/calendar-js.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           boxes = import ./nix/tests/boxes.nix args;
           box-reports = import ./nix/tests/box-reports.nix args;
