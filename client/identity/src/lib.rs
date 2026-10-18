@@ -142,6 +142,14 @@ pub struct SealedKey {
 pub struct Reader {
     pub name: String,
     pub keys: Vec<SealedKey>,
+    /// they may write too (a calendar two people keep): saves, moves and
+    /// deletes into the trash; deleting for good stays the owner's
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub writes: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// An entry and its root's signature, in either form it is written in:
@@ -1386,6 +1394,21 @@ pub fn check_read_proof(proof: &str, name: &str, now: u64) -> Option<String> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_reader_who_writes_says_so_and_one_who_does_not_reads_as_before() {
+        // an entry signed before writers existed keeps its bytes, so its
+        // signature still holds
+        let before = r#"{"name":"bo","keys":[{"to":"device:g","sealed":"x"}]}"#;
+        let r: super::Reader = serde_json::from_str(before).unwrap();
+        assert!(!r.writes);
+        assert_eq!(serde_json::to_string(&r).unwrap(), before);
+        let w = super::Reader { writes: true, ..r };
+        let json = serde_json::to_string(&w).unwrap();
+        assert!(json.ends_with(r#","writes":true}"#), "{json}");
+        let back: super::Reader = serde_json::from_str(&json).unwrap();
+        assert!(back.writes);
+    }
+
+    #[test]
     fn a_read_proof_is_for_one_name_and_a_short_while() {
         let k = super::generate();
         let me = super::encode_public(&k.verifying_key());
@@ -2220,6 +2243,7 @@ mod tests {
                 readers: vec![Reader {
                     name: "bo".into(),
                     keys: vec![sealed("device:g")],
+                    writes: false,
                 }],
                 created: 1,
             }],

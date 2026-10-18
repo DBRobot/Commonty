@@ -20,6 +20,17 @@ pub(crate) fn allowed(
     headers: &HeaderMap,
     lib: &str,
 ) -> std::result::Result<(String, Role), Response> {
+    allowed_for(app, headers, lib).map(|(user, role, _)| (user, role))
+}
+
+/// who is asking, as what, and whose library it is: a writer's saves count
+/// against the owner's allowance, as the owner's own do
+#[allow(clippy::result_large_err)]
+pub(crate) fn allowed_for(
+    app: &App,
+    headers: &HeaderMap,
+    lib: &str,
+) -> std::result::Result<(String, Role, String), Response> {
     let refused = |code: StatusCode, why: &str| Err((code, why.to_string()).into_response());
     if !lib.chars().all(|c| c.is_ascii_hexdigit()) || lib.len() != 32 {
         return refused(StatusCode::BAD_REQUEST, "not a library id");
@@ -36,7 +47,7 @@ pub(crate) fn allowed(
     // else: it owns no entry and no key of its own
     if user == crate::pages::DEMO_USER {
         return match &app.demo_library {
-            Some((id, _)) if id == lib => Ok((user, Role::Reader)),
+            Some((id, _)) if id == lib => Ok((user.clone(), Role::Reader, user)),
             _ => refused(StatusCode::FORBIDDEN, "not your library"),
         };
     }
@@ -56,7 +67,7 @@ pub(crate) fn allowed(
             && let Ok(Some(e)) = app.directory.entry(&user)
             && e.entry.libraries.iter().any(|l| l.id == lib)
         {
-            return Ok((user, Role::Reader));
+            return Ok((user.clone(), Role::Reader, user));
         }
         return refused(StatusCode::FORBIDDEN, "not your library");
     }
@@ -64,17 +75,22 @@ pub(crate) fn allowed(
     if let Ok(Some(e)) = app.directory.entry(&user)
         && e.entry.libraries.iter().any(|l| l.id == lib)
     {
-        return Ok((user, Role::Owner));
+        return Ok((user.clone(), Role::Owner, user));
     }
-    // a reader: some owner's entry names them for it
-    let names = |owner: &str| {
-        app.directory.entry(owner).ok().flatten().is_some_and(|e| {
+    // a reader: some owner's entry names them for it, and says whether
+    // they may write
+    let named = |owner: &str| {
+        app.directory.entry(owner).ok().flatten().and_then(|e| {
             e.entry
                 .libraries
                 .iter()
-                .any(|x| x.id == lib && x.readers.iter().any(|r| r.name == user))
+                .filter(|x| x.id == lib)
+                .flat_map(|x| x.readers.iter())
+                .find(|r| r.name == user)
+                .map(|r| r.writes)
         })
     };
+    let names = |owner: &str| named(owner).is_some();
     let known = app.library_owners.lock().unwrap().get(lib).cloned();
     let everyone = || {
         app.directory
@@ -86,8 +102,18 @@ pub(crate) fn allowed(
         app.library_owners
             .lock()
             .unwrap()
-            .insert(lib.to_string(), owner);
-        return Ok((user, Role::Reader));
+            .insert(lib.to_string(), owner.clone());
+        // a writer writes into a current member's library only: a suspended
+        // owner's own access is read only, and theirs is no more than that
+        let role = if named(&owner) == Some(true)
+            && app.member(&owner)
+            && app.suspension(&owner).is_none()
+        {
+            Role::Writer
+        } else {
+            Role::Reader
+        };
+        return Ok((user, role, owner));
     }
     refused(StatusCode::FORBIDDEN, "not your library")
 }
@@ -141,14 +167,15 @@ async fn serve(app: Arc<App>, lib: String, raw: String, req: Request) -> Respons
     if req.method() == Method::OPTIONS {
         return library_gate::dav::options();
     }
-    let (user, role) = match allowed(&app, req.headers(), &lib) {
+    let (_, role, owner) = match allowed_for(&app, req.headers(), &lib) {
         Ok(r) => r,
         Err(r) => return r,
     };
-    if !matches!(role, Role::Owner) {
+    if role == Role::Reader {
         return library_gate::dav::serve(g, lib, raw, role, req).await;
     }
-    metered(&app, g, &user, lib, raw, role, req).await
+    // the owner's allowance, whoever of the two writes
+    metered(&app, g, &owner, lib, raw, role, req).await
 }
 
 /// Past your allowance, as a person reads it.

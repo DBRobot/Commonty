@@ -152,6 +152,38 @@ fn all() -> serde_json::Value {
     ada2.updated = 1_791_700_100;
     let ada2_signed = sign_recovery(ada2.clone(), &ada_new_root, &ada_paper).unwrap();
 
+    // ada shares a calendar: one member may change it, one only reads it
+    let mut ada3 = ada2.clone();
+    ada3.version = 3;
+    ada3.updated = 1_791_700_200;
+    ada3.libraries.push(Library {
+        id: "fedcba9876543210fedcba9876543210".into(),
+        keys: vec![SealedKey {
+            to: "root".into(),
+            sealed: "c2VhbGVk".into(),
+        }],
+        readers: vec![
+            Reader {
+                name: "bo".into(),
+                keys: vec![SealedKey {
+                    to: "device:b0".into(),
+                    sealed: "Ym8=".into(),
+                }],
+                writes: true,
+            },
+            Reader {
+                name: "cy".into(),
+                keys: vec![SealedKey {
+                    to: "device:c1".into(),
+                    sealed: "Y3k=".into(),
+                }],
+                writes: false,
+            },
+        ],
+        created: 1_791_700_200,
+    });
+    let ada3_signed = sign(ada3.clone(), &ada_new_root).unwrap();
+
     // bea: a passkey root, let in by an invite
     let invite = sign_invite(
         Invite {
@@ -258,6 +290,10 @@ fn all() -> serde_json::Value {
                 {"what": "ada recovered", "canonical": B64.encode(canonical(&ada2).unwrap()),
                  "signed": ada2_signed, "logged": logged("entry", &ada2_signed),
                  "previous": 0},
+                {"what": "ada shares a calendar, one reader writes",
+                 "canonical": B64.encode(canonical(&ada3).unwrap()),
+                 "signed": ada3_signed, "logged": logged("entry", &ada3_signed),
+                 "previous": 1},
                 {"what": "bea, a passkey root let in by an invite",
                  "canonical": B64.encode(canonical(&bea).unwrap()),
                  "challenge": B64.encode(challenge(&bea).unwrap()),
@@ -709,6 +745,7 @@ fn random_entry(r: &mut Rng, i: usize) -> Entry {
                             sealed: r.string(),
                         })
                         .collect(),
+                    writes: false,
                 })
                 .collect(),
             created: r.next(),

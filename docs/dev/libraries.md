@@ -253,10 +253,13 @@ who may; [servers/library/](../../servers/library/) (crate
    document a person writes about themselves, so naming a library id in
    it proves nothing alone.
 5. The owner is the member whose entry holds the library. A reader is a
-   member some owner's entry names in that library's `readers`.
+   member some owner's entry names in that library's `readers`; one named
+   there with `writes: true` is a writer.
 
 An owner may write; a reader gets 403 for PUT, POST, MKCOL, MOVE, COPY,
-DELETE and PROPPATCH.
+DELETE and PROPPATCH. A writer (a calendar two people keep) may do all of
+those but delete for good: a DELETE in the trash, or of the trash, is the
+owner's alone. What a writer saves counts against the owner's allowance.
 
 ### WebDAV
 
@@ -266,8 +269,8 @@ DELETE and PROPPATCH.
 
 ```
 OPTIONS                 answers before anyone is asked who they are
-PROPFIND  depth 0 or 1  a file's size and date, or a folder's level; the
-                        root hides trash/
+PROPFIND  depth 0 or 1  a file's size, date and etag, or a folder's level;
+                        the root hides trash/
 GET, HEAD               streamed through, Range passed on
 GET on a folder         the root, or a path ending /: its listing as JSON,
                         one level, nginx autoindex's shape
@@ -275,8 +278,8 @@ GET on a folder         the root, or a path ending /: its listing as JSON,
                         404; the root hides trash/
 GET + x-dd-presign: 1   { url }: a presigned GET good for 6 hours, for a
                         transcoder (HANDOFF_SECS)
-PUT                     streamed through; 201. What had the name is
-                        copied into the trash first
+PUT                     streamed through; 201 with the new ETag. What had
+                        the name is copied into the trash first
 MKCOL                   a folder is a zero-byte "<path>/" marker object
 MOVE, COPY              Destination must be in the same library, not the
                         source or inside it; with Overwrite: F, 412 if the
@@ -289,6 +292,10 @@ DELETE in the trash     trash/<stamp>/...: that thing, gone for good at once;
                         trash itself: all of it (Empty trash). The owner's
                         only, like every write; 404 for what is not there
 PROPPATCH               refused (403 in a multistatus)
+
+If-Match, If-None-Match on PUT, DELETE and an upload's last piece: made only from
+                        that version (an etag, or * for anything / nothing);
+                        otherwise 412 and nothing changes
 
 in pieces, for a file too large for a tab (header x-dd-upload):
 POST   x-dd-upload: start              -> { upload: id }   S3 multipart
@@ -303,6 +310,14 @@ encrypted names under them. Nothing may be written, moved or copied into
 the trash (`trash` and `trash/...` exactly: an encrypted name may begin
 with those letters and is no part of it); the one move out of it is a
 restore, `trash/<stamp>/...` back into the library.
+
+A PUT or DELETE that carries `If-Match` or `If-None-Match` is made from
+a version: the gate looks at the object's etag and writes under that
+object's lock, so two devices saving one calendar event from the same
+version cannot both win; the second gets 412, reads the new one and
+merges. A write without either header is the last one wins, as before.
+The lock is in the gate's memory, so it holds for writes that reach the
+same box.
 
 A write over a name keeps every version: the one before goes to the
 trash for 30 days. So what is rewritten often does not live in the

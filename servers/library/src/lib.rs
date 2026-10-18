@@ -417,6 +417,9 @@ fn contents(xml: &str) -> Vec<(String, u64)> {
 pub enum Role {
     Owner,
     Reader,
+    /// a member the owner let write: saves, moves and deletes into the
+    /// trash, never deletes for good (a shared calendar)
+    Writer,
 }
 
 pub mod dav;

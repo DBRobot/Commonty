@@ -35,6 +35,103 @@ fn trash_place(lib: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
         .or_default()
         .clone()
 }
+
+/// One lock for each object a conditional write (If-Match, If-None-Match)
+/// is making: its etag is looked at and the write made under it, so two
+/// devices saving one event from the same version cannot both win. An
+/// object's lock is let go of once nobody holds or waits for it.
+static WRITE_PLACES: std::sync::Mutex<
+    std::collections::BTreeMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>,
+> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// A conditional write's hold on its object, until the write is made.
+struct Held {
+    object: String,
+    guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        let Some(guard) = self.guard.take() else {
+            return;
+        };
+        let lock = tokio::sync::OwnedMutexGuard::mutex(&guard).clone();
+        drop(guard);
+        // a clone is only ever taken under the map's lock, so two (the
+        // map's and this) means nobody else holds or waits for it
+        let mut places = WRITE_PLACES.lock().unwrap();
+        if std::sync::Arc::strong_count(&lock) == 2 {
+            places.remove(&self.object);
+        }
+    }
+}
+
+/// The version a write names, checked under its object's lock: None when
+/// the write names none, the hold while it is made, or 412.
+async fn from_version(
+    g: &Gate,
+    object: &str,
+    headers: &HeaderMap,
+) -> Result<std::result::Result<Option<Held>, Response>> {
+    if !conditional(headers) {
+        return Ok(Ok(None));
+    }
+    let lock = WRITE_PLACES
+        .lock()
+        .unwrap()
+        .entry(object.to_string())
+        .or_default()
+        .clone();
+    let held = Held {
+        object: object.to_string(),
+        guard: Some(lock.lock_owned().await),
+    };
+    let now = g.etag(object).await?;
+    if !preconditions_hold(headers, now.as_deref()) {
+        return Ok(Err(StatusCode::PRECONDITION_FAILED.into_response()));
+    }
+    Ok(Ok(Some(held)))
+}
+
+/// an etag as a client may write it: no weak mark, no quotes
+fn bare_etag(e: &str) -> &str {
+    e.trim().trim_start_matches("W/").trim_matches('"')
+}
+
+/// Whether a write's If-Match and If-None-Match hold for what is there now
+/// (`current`, its etag, or None for nothing): `*` is anything at all, a
+/// list is any of those versions.
+fn preconditions_hold(headers: &HeaderMap, current: Option<&str>) -> bool {
+    let named = |v: &str, e: &str| v.split(',').any(|x| bare_etag(x) == bare_etag(e));
+    if let Some(v) = headers.get(header::IF_MATCH).and_then(|v| v.to_str().ok()) {
+        let ok = match current {
+            None => false,
+            Some(_) if v.trim() == "*" => true,
+            Some(e) => named(v, e),
+        };
+        if !ok {
+            return false;
+        }
+    }
+    if let Some(v) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+    {
+        let ok = match current {
+            None => true,
+            Some(_) if v.trim() == "*" => false,
+            Some(e) => !named(v, e),
+        };
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+fn conditional(headers: &HeaderMap) -> bool {
+    headers.contains_key(header::IF_MATCH) || headers.contains_key(header::IF_NONE_MATCH)
+}
 /// a library's id, or `images-<name>`: the bucket's top level, and nothing
 /// that could reach past one person's folder
 fn top_prefix(id: &str) -> bool {
@@ -54,6 +151,8 @@ pub struct Entry {
     pub key: String,
     pub size: u64,
     pub modified: String,
+    /// the store's etag, quotes and all ("" when it gave none)
+    pub etag: String,
 }
 
 impl Gate {
@@ -89,6 +188,7 @@ impl Gate {
                     key: unxml(&key),
                     size,
                     modified,
+                    etag: unxml(&between(c, "<ETag>", "</ETag>").unwrap_or_default()),
                 });
             }
             for p in xml.split("<CommonPrefixes>").skip(1) {
@@ -194,6 +294,7 @@ impl Gate {
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(0),
                     modified: between(c, "<LastModified>", "</LastModified>").unwrap_or_default(),
+                    etag: unxml(&between(c, "<ETag>", "</ETag>").unwrap_or_default()),
                 });
             }
             if xml.contains("<IsTruncated>true</IsTruncated>") {
@@ -233,6 +334,53 @@ impl Gate {
             .unwrap_or_default()
             .to_string();
         Ok(Some((size, modified)))
+    }
+
+    /// one object's size, date and etag, in one HEAD, if it exists
+    pub async fn head(&self, object: &str) -> Result<Option<(u64, String, String)>> {
+        let r = reqwest::Client::new()
+            .head(self.presign("HEAD", object))
+            .send()
+            .await?;
+        if r.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !r.status().is_success() {
+            return Err(anyhow!("s3 head {}", r.status()));
+        }
+        let h = |n: header::HeaderName| {
+            r.headers()
+                .get(n)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_string()
+        };
+        Ok(Some((
+            h(header::CONTENT_LENGTH).parse().unwrap_or(0),
+            h(header::LAST_MODIFIED),
+            h(header::ETAG),
+        )))
+    }
+
+    /// one object's etag as the store gives it, if it exists
+    pub async fn etag(&self, object: &str) -> Result<Option<String>> {
+        let r = reqwest::Client::new()
+            .head(self.presign("HEAD", object))
+            .send()
+            .await?;
+        if r.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !r.status().is_success() {
+            return Err(anyhow!("s3 head {}", r.status()));
+        }
+        Ok(Some(
+            r.headers()
+                .get(header::ETAG)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_string(),
+        ))
     }
 
     /// move: a copy and then the source gone
@@ -463,15 +611,28 @@ fn dav_date(s: &str) -> String {
     )
 }
 
-fn propfind_response(href: &str, name: &str, dir: bool, size: u64, modified: &str) -> String {
+fn propfind_response(
+    href: &str,
+    name: &str,
+    dir: bool,
+    size: u64,
+    modified: &str,
+    etag: &str,
+) -> String {
     let kind = if dir { "<D:collection/>" } else { "" };
     let len = if dir {
         String::new()
     } else {
         format!("<D:getcontentlength>{size}</D:getcontentlength>")
     };
+    // what a calendar or contacts device compares to tell a changed item
+    let tag = if etag.is_empty() {
+        String::new()
+    } else {
+        format!("<D:getetag>{}</D:getetag>", xml(etag))
+    };
     format!(
-        "<D:response><D:href>{}</D:href><D:propstat><D:prop><D:displayname>{}</D:displayname><D:resourcetype>{kind}</D:resourcetype>{len}<D:getlastmodified>{}</D:getlastmodified></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>",
+        "<D:response><D:href>{}</D:href><D:propstat><D:prop><D:displayname>{}</D:displayname><D:resourcetype>{kind}</D:resourcetype>{len}{tag}<D:getlastmodified>{}</D:getlastmodified></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>",
         xml(href),
         xml(name),
         xml(&dav_date(modified))
@@ -534,8 +695,13 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
             method.as_str(),
             "PUT" | "POST" | "MKCOL" | "MOVE" | "COPY" | "DELETE" | "PROPPATCH"
         );
-    if writes && role != Role::Owner {
+    if writes && role == Role::Reader {
         return (StatusCode::FORBIDDEN, "a reader does not write").into_response();
+    }
+    // a writer saves, moves and deletes into the trash; what is gone for
+    // good is the owner's to say
+    if role == Role::Writer && method == Method::DELETE && in_trash(&path) {
+        return (StatusCode::FORBIDDEN, "only the owner deletes for good").into_response();
     }
     if let Some(upload) = piece(&headers) {
         let out = in_pieces(g, &lib, &path, upload.to_string(), req).await;
@@ -557,7 +723,7 @@ pub async fn serve(g: &Gate, lib: String, raw: String, role: Role, req: Request)
         "HEAD" | "GET" => get(g, &lib, &path, &headers, method == Method::HEAD).await,
         "PUT" => put(g, &lib, &path, req).await,
         "MKCOL" => mkcol(g, &lib, &path).await,
-        "DELETE" => delete(g, &lib, &path).await,
+        "DELETE" => delete(g, &lib, &path, &headers).await,
         "MOVE" | "COPY" => move_or_copy(g, &lib, &path, &headers, method.as_str() == "MOVE").await,
         "PROPPATCH" => Ok(multistatus(format!(
             "<D:response><D:href>{}</D:href><D:propstat><D:prop/><D:status>HTTP/1.1 403 Forbidden</D:status></D:propstat></D:response>",
@@ -686,7 +852,7 @@ async fn propfind(g: &Gate, lib: &str, path: &str, headers: &HeaderMap) -> Resul
     let name = path.rsplit('/').next().unwrap_or("").to_string();
     // a file?
     if !path.is_empty()
-        && let Some((size, modified)) = g.stat(&key(lib, path)).await?
+        && let Some((size, modified, etag)) = g.head(&key(lib, path)).await?
     {
         return Ok(multistatus(propfind_response(
             &href(lib, path, false),
@@ -694,6 +860,7 @@ async fn propfind(g: &Gate, lib: &str, path: &str, headers: &HeaderMap) -> Resul
             false,
             size,
             &modified,
+            &etag,
         )));
     }
     // a folder: the root always, another if anything is under it
@@ -706,7 +873,7 @@ async fn propfind(g: &Gate, lib: &str, path: &str, headers: &HeaderMap) -> Resul
     if !path.is_empty() && files.is_empty() && dirs.is_empty() {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
-    let mut body = propfind_response(&href(lib, path, true), &name, true, 0, "");
+    let mut body = propfind_response(&href(lib, path, true), &name, true, 0, "", "");
     if depth != "0" {
         for d in dirs {
             let rel = d.trim_start_matches(&prefix).trim_end_matches('/');
@@ -723,6 +890,7 @@ async fn propfind(g: &Gate, lib: &str, path: &str, headers: &HeaderMap) -> Resul
                 rel,
                 true,
                 0,
+                "",
                 "",
             ));
         }
@@ -743,6 +911,7 @@ async fn propfind(g: &Gate, lib: &str, path: &str, headers: &HeaderMap) -> Resul
                 false,
                 f.size,
                 &f.modified,
+                &f.etag,
             ));
         }
     }
@@ -808,6 +977,12 @@ async fn put(g: &Gate, lib: &str, path: &str, req: Request) -> Result<Response> 
     if in_trash(path) {
         return Ok(StatusCode::FORBIDDEN.into_response());
     }
+    // a write from a version: the version looked at and the write made
+    // under one lock, so a second device saving from the same one gets 412
+    let _held = match from_version(g, &key(lib, path), req.headers()).await? {
+        Ok(h) => h,
+        Err(refused) => return Ok(refused),
+    };
     // what had this name is kept: a copy into the trash, and the PUT then
     // replaces it, so a failed upload leaves the old file where it was
     let before = g.version(&key(lib, path)).await?;
@@ -827,7 +1002,23 @@ async fn put(g: &Gate, lib: &str, path: &str, req: Request) -> Result<Response> 
         r = r.header(header::CONTENT_LENGTH, l);
     }
     match r.send().await {
-        Ok(r) if r.status().is_success() => Ok(StatusCode::CREATED.into_response()),
+        Ok(r) if r.status().is_success() => {
+            // the new version, for the device that wrote it to save from next
+            let etag = match r.headers().get(header::ETAG) {
+                Some(e) => Some(e.clone()),
+                None => g
+                    .etag(&key(lib, path))
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|e| header::HeaderValue::from_str(&e).ok()),
+            };
+            let mut out = StatusCode::CREATED.into_response();
+            if let Some(e) = etag.filter(|e| !e.is_empty()) {
+                out.headers_mut().insert(header::ETAG, e);
+            }
+            Ok(out)
+        }
         Ok(r) => {
             g.untrash(&key(lib, path), &before, &kept).await;
             Err(anyhow!("s3 put {}", r.status()))
@@ -938,6 +1129,11 @@ async fn in_pieces(
             Ok(axum::Json(serde_json::json!({ "etag": etag })).into_response())
         }
         "POST" => {
+            // the last piece makes the file: from a version too, as a PUT
+            let _held = match from_version(g, &object, req.headers()).await? {
+                Ok(h) => h,
+                Err(refused) => return Ok(refused),
+            };
             let body = axum::body::to_bytes(req.into_body(), 1 << 20).await?;
             let v: serde_json::Value = serde_json::from_slice(&body).context("the parts")?;
             let parts = v["parts"].as_array().context("no parts")?;
@@ -981,13 +1177,17 @@ async fn in_pieces(
 /// Gone from where it was, kept under trash with a stamp so nothing there
 /// is ever overwritten. In the trash, gone for good: the one thing there,
 /// or with `trash` itself, everything in it.
-async fn delete(g: &Gate, lib: &str, path: &str) -> Result<Response> {
+async fn delete(g: &Gate, lib: &str, path: &str, headers: &HeaderMap) -> Result<Response> {
     if path.is_empty() {
         return Ok(StatusCode::FORBIDDEN.into_response());
     }
     if in_trash(path) {
         return Ok(for_good(g, lib, path).await?.0);
     }
+    let _held = match from_version(g, &key(lib, path), headers).await? {
+        Ok(h) => h,
+        Err(refused) => return Ok(refused),
+    };
     let objects = g.objects_at(lib, path, true).await?;
     if objects.is_empty() {
         return Ok(StatusCode::NOT_FOUND.into_response());
@@ -1289,6 +1489,11 @@ mod tests {
     // listing, HEAD, GET, PUT, copy and DELETE. Signatures are not checked.
     type Bucket = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>>;
 
+    /// the fake store's etag: quoted, from the bytes, as S3's md5 is
+    fn tag(v: &[u8]) -> String {
+        format!("\"{}\"", &crate::sha_hex(v)[..16])
+    }
+
     async fn fake_s3(bucket: Bucket, req: Request) -> Response {
         let path = percent_decode(req.uri().path());
         let object = path.trim_start_matches("/b/").to_string();
@@ -1327,8 +1532,9 @@ mod tests {
                         continue;
                     }
                     out.push_str(&format!(
-                        "<Contents><Key>{k}</Key><Size>{}</Size><LastModified>2026-01-01T00:00:00.000Z</LastModified></Contents>",
-                        v.len()
+                        "<Contents><Key>{k}</Key><Size>{}</Size><LastModified>2026-01-01T00:00:00.000Z</LastModified><ETag>{}</ETag></Contents>",
+                        v.len(),
+                        xml(&tag(v))
                     ));
                 }
                 for d in dirs {
@@ -1341,7 +1547,10 @@ mod tests {
             }
             "HEAD" | "GET" => match b.get(&object) {
                 Some(v) => (
-                    [(header::CONTENT_LENGTH, v.len().to_string())],
+                    [
+                        (header::CONTENT_LENGTH, v.len().to_string()),
+                        (header::ETAG, tag(v)),
+                    ],
                     if method == Method::HEAD {
                         Vec::new()
                     } else {
@@ -1365,11 +1574,12 @@ mod tests {
                 };
                 // kept, but the answer is lost on the way back
                 let lost = v == b"lost";
+                let t = tag(&v);
                 b.insert(object, v);
                 if lost {
                     return StatusCode::INTERNAL_SERVER_ERROR.into_response();
                 }
-                StatusCode::OK.into_response()
+                ([(header::ETAG, t)], StatusCode::OK).into_response()
             }
             "DELETE" => {
                 b.remove(&object);
@@ -1446,6 +1656,224 @@ mod tests {
         serve(g, "L".into(), path.into(), Role::Owner, req)
             .await
             .status()
+    }
+
+    async fn dav_as(
+        g: &Gate,
+        role: Role,
+        method: &str,
+        path: &str,
+        hs: &[(&str, &str)],
+        body: &str,
+    ) -> Response {
+        let mut r = Request::builder()
+            .method(method)
+            .uri(format!("/_dd/dav/L/{path}"));
+        for (k, v) in hs {
+            r = r.header(*k, *v);
+        }
+        let req = r.body(Body::from(body.to_string())).unwrap();
+        serve(g, "L".into(), path.into(), role, req).await
+    }
+
+    #[tokio::test]
+    async fn a_save_from_an_old_version_is_refused() {
+        let (g, b) = bucket().await;
+        let new = [("if-none-match", "*")];
+        let r = dav_as(&g, Role::Owner, "PUT", "c/e.ics", &new, "one").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let one = r.headers()[header::ETAG].to_str().unwrap().to_string();
+        assert_eq!(one, tag(b"one"));
+        // a second device making the same new item: it is there now
+        let r = dav_as(&g, Role::Owner, "PUT", "c/e.ics", &new, "other").await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        // saved from the version it read: taken, and the new version comes back
+        let from_one = [("if-match", one.as_str())];
+        let r = dav_as(&g, Role::Owner, "PUT", "c/e.ics", &from_one, "two").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        assert_eq!(r.headers()[header::ETAG].to_str().unwrap(), tag(b"two"));
+        // the other device, still on version one, is told and changes nothing
+        let r = dav_as(&g, Role::Owner, "PUT", "c/e.ics", &from_one, "three").await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        let r = dav_as(&g, Role::Owner, "DELETE", "c/e.ics", &from_one, "").await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(b.lock().unwrap()["L/c/e.ics"], b"two");
+        // a weak mark or no quotes is the same version
+        let bare = tag(b"two").trim_matches('"').to_string();
+        let weak = format!("W/\"{bare}\"");
+        let r = dav_as(
+            &g,
+            Role::Owner,
+            "DELETE",
+            "c/e.ics",
+            &[("if-match", &weak)],
+            "",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(trashed(&b, "e.ics").len(), 2, "both old versions are kept");
+        // gone: If-Match * holds for nothing
+        let r = dav_as(&g, Role::Owner, "PUT", "c/e.ics", &[("if-match", "*")], "x").await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+    }
+
+    #[tokio::test]
+    async fn two_saves_from_one_version_at_once_one_wins() {
+        let (g, b) = bucket().await;
+        dav(&g, "PUT", "c/e.ics", &[], "one").await;
+        let one = tag(b"one");
+        let from_one = [("if-match", one.as_str())];
+        let (x, y) = tokio::join!(
+            dav_as(&g, Role::Owner, "PUT", "c/e.ics", &from_one, "laptop"),
+            dav_as(&g, Role::Owner, "PUT", "c/e.ics", &from_one, "phone")
+        );
+        let mut got = [x.status(), y.status()];
+        got.sort();
+        assert_eq!(got, [StatusCode::CREATED, StatusCode::PRECONDITION_FAILED]);
+        let now = b.lock().unwrap()["L/c/e.ics"].clone();
+        assert!(now == b"laptop" || now == b"phone");
+    }
+
+    #[tokio::test]
+    async fn a_listing_says_each_items_version() {
+        let (g, _b) = bucket().await;
+        dav(&g, "PUT", "c/a.ics", &[], "one").await;
+        dav(&g, "PUT", "c/b.ics", &[], "two").await;
+        let r = dav_as(&g, Role::Reader, "PROPFIND", "c", &[("depth", "1")], "").await;
+        let body = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(
+            body.contains(&format!("<D:getetag>{}</D:getetag>", xml(&tag(b"one")))),
+            "{body}"
+        );
+        assert!(
+            body.contains(&format!("<D:getetag>{}</D:getetag>", xml(&tag(b"two")))),
+            "{body}"
+        );
+        let r = dav_as(
+            &g,
+            Role::Reader,
+            "PROPFIND",
+            "c/a.ics",
+            &[("depth", "0")],
+            "",
+        )
+        .await;
+        let body = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("<D:getetag>"));
+    }
+
+    #[tokio::test]
+    async fn a_writer_saves_and_trashes_but_never_deletes_for_good() {
+        let (g, b) = bucket().await;
+        let w = |m, p| dav_as(&g, Role::Writer, m, p, &[], "x");
+        assert_eq!(w("PUT", "c/e.ics").await.status(), StatusCode::CREATED);
+        assert_eq!(w("PUT", "c/e.ics").await.status(), StatusCode::CREATED);
+        assert_eq!(
+            w("DELETE", "c/e.ics").await.status(),
+            StatusCode::NO_CONTENT
+        );
+        let in_trash: Vec<String> = b
+            .lock()
+            .unwrap()
+            .keys()
+            .filter(|k| k.starts_with("L/trash/"))
+            .cloned()
+            .collect();
+        assert!(!in_trash.is_empty());
+        let one = in_trash[0].trim_start_matches("L/").to_string();
+        assert_eq!(w("DELETE", &one).await.status(), StatusCode::FORBIDDEN);
+        assert_eq!(w("DELETE", "trash").await.status(), StatusCode::FORBIDDEN);
+        assert!(b.lock().unwrap().contains_key(&in_trash[0]));
+        // and a reader still writes nothing
+        let r = dav_as(&g, Role::Reader, "PUT", "c/f.ics", &[], "x").await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn a_saves_lock_is_let_go_of_after() {
+        let (g, _b) = bucket().await;
+        let r = dav_as(
+            &g,
+            Role::Owner,
+            "PUT",
+            "c/lock.ics",
+            &[("if-none-match", "*")],
+            "one",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let r = dav_as(
+            &g,
+            Role::Owner,
+            "PUT",
+            "c/lock.ics",
+            &[("if-none-match", "*")],
+            "x",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        assert!(
+            !WRITE_PLACES.lock().unwrap().contains_key("L/c/lock.ics"),
+            "no lock is kept for an object nobody is writing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_writers_move_or_copy_never_drops_a_file() {
+        let (g, b) = bucket().await;
+        let w = |m: &'static str, p: &'static str, hs: Vec<(&'static str, String)>| {
+            let g = g.clone();
+            async move {
+                let hs: Vec<(&str, &str)> = hs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                dav_as(&g, Role::Writer, m, p, &hs, "x").await.status()
+            }
+        };
+        dav(&g, "PUT", "w/a", &[], "first").await;
+        dav(&g, "PUT", "w/b", &[], "kept").await;
+        // over a file: what was there goes to the trash first
+        let to = vec![("destination", "/_dd/dav/L/w/b".to_string())];
+        assert_eq!(w("MOVE", "w/a", to.clone()).await, StatusCode::CREATED);
+        assert_eq!(trashed(&b, "b"), vec![b"kept".to_vec()]);
+        dav(&g, "PUT", "w/c", &[], "other").await;
+        let onto_b = vec![("destination", "/_dd/dav/L/w/b".to_string())];
+        assert_eq!(w("COPY", "w/c", onto_b).await, StatusCode::CREATED);
+        assert_eq!(trashed(&b, "b").len(), 2, "the copy's target is kept too");
+        // never into the trash, by move or copy
+        let into = vec![("destination", "/_dd/dav/L/trash/1/w/c".to_string())];
+        assert_eq!(w("MOVE", "w/c", into.clone()).await, StatusCode::FORBIDDEN);
+        assert_eq!(w("COPY", "w/c", into).await, StatusCode::FORBIDDEN);
+        // and nothing in the trash is ever deleted by a writer
+        assert_eq!(w("DELETE", "trash", vec![]).await, StatusCode::FORBIDDEN);
+        assert!(b.lock().unwrap().keys().any(|k| k.starts_with("L/trash/")));
+    }
+
+    #[test]
+    fn preconditions() {
+        let h = |k: &'static str, v: &'static str| {
+            let mut m = HeaderMap::new();
+            m.insert(k, v.parse().unwrap());
+            m
+        };
+        assert!(preconditions_hold(&HeaderMap::new(), None));
+        assert!(preconditions_hold(&HeaderMap::new(), Some("\"a\"")));
+        assert!(preconditions_hold(&h("if-match", "\"a\""), Some("\"a\"")));
+        assert!(preconditions_hold(
+            &h("if-match", "\"b\", \"a\""),
+            Some("\"a\"")
+        ));
+        assert!(!preconditions_hold(&h("if-match", "\"b\""), Some("\"a\"")));
+        assert!(!preconditions_hold(&h("if-match", "*"), None));
+        assert!(preconditions_hold(&h("if-none-match", "*"), None));
+        assert!(!preconditions_hold(&h("if-none-match", "*"), Some("\"a\"")));
+        assert!(!preconditions_hold(
+            &h("if-none-match", "\"a\""),
+            Some("\"a\"")
+        ));
+        assert!(preconditions_hold(
+            &h("if-none-match", "\"b\""),
+            Some("\"a\"")
+        ));
     }
 
     fn trashed(b: &Bucket, name: &str) -> Vec<Vec<u8>> {

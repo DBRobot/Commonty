@@ -87,6 +87,28 @@ pub struct Item {
     /// plain bytes (the sealed size less headers and tags)
     pub size: u64,
     pub modified: String,
+    /// the gate's version of it: what a save from it names (If-Match)
+    pub etag: String,
+}
+
+/// what a save is made from
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Version {
+    /// whatever is there, or nothing: the last save wins
+    Any,
+    /// nothing may be there yet
+    New,
+    /// this version, as the gate gave its etag
+    From(String),
+}
+
+/// how a save went
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Saved {
+    /// stored; the new version's etag
+    Done(String),
+    /// someone saved another version first (412): read it and try again
+    Changed,
 }
 
 impl Gate {
@@ -193,6 +215,9 @@ impl Gate {
                 path,
                 dir,
                 modified: between(resp, "<D:getlastmodified>", "</D:getlastmodified>")
+                    .map(|s| unxml(&s))
+                    .unwrap_or_default(),
+                etag: between(resp, "<D:getetag>", "</D:getetag>")
                     .map(|s| unxml(&s))
                     .unwrap_or_default(),
             });
@@ -316,6 +341,83 @@ impl Gate {
             progress(done);
         }
         Ok(done)
+    }
+
+    /// A small file whole, sealed here and saved from `from`: a calendar
+    /// event, a contact. Saved::Changed when another save got there first.
+    pub async fn put_bytes(&self, plain_path: &str, plain: &[u8], from: &Version) -> Result<Saved> {
+        let enc = self.cipher.encrypter();
+        let mut sealed = enc.header();
+        for (n, block) in plain.chunks(library::crypt::BLOCK).enumerate() {
+            sealed.extend_from_slice(&enc.block(n as u64, block));
+        }
+        let mut r = self.req("PUT", &self.url(plain_path));
+        r = match from {
+            Version::Any => r,
+            Version::New => r.header("if-none-match", "*"),
+            Version::From(e) => r.header("if-match", e.as_str()),
+        };
+        let r = r.body(sealed).send().await?;
+        if r.status().as_u16() == 412 {
+            return Ok(Saved::Changed);
+        }
+        if !r.status().is_success() {
+            bail!("storing {plain_path}: {}", r.status());
+        }
+        let etag = r
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        Ok(Saved::Done(etag))
+    }
+
+    /// A small file whole, opened here, and its version; None when nothing
+    /// has that name.
+    pub async fn get_bytes(&self, plain_path: &str) -> Result<Option<(Vec<u8>, String)>> {
+        let r = self.req("GET", &self.url(plain_path)).send().await?;
+        if r.status().as_u16() == 404 {
+            return Ok(None);
+        }
+        if !r.status().is_success() {
+            bail!("fetching {plain_path}: {}", r.status());
+        }
+        let etag = r
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let sealed = r.bytes().await?;
+        if sealed.len() < library::crypt::HEADER {
+            bail!("{plain_path}: shorter than a header");
+        }
+        let dec = self.cipher.decrypter(&sealed[..library::crypt::HEADER])?;
+        let mut plain = Vec::with_capacity(sealed.len());
+        for (n, block) in sealed[library::crypt::HEADER..]
+            .chunks(library::crypt::SEALED_BLOCK)
+            .enumerate()
+        {
+            plain.extend_from_slice(&dec.block(n as u64, block)?);
+        }
+        Ok(Some((plain, etag)))
+    }
+
+    /// to the trash, only from `from`; false when another save got there
+    /// first, and nothing changed
+    pub async fn trash_if(&self, plain_path: &str, from: &Version) -> Result<bool> {
+        let mut r = self.req("DELETE", &self.url(plain_path));
+        if let Version::From(e) = from {
+            r = r.header("if-match", e.as_str());
+        }
+        let r = r.send().await?;
+        match r.status().as_u16() {
+            412 => Ok(false),
+            404 if *from == Version::Any => Ok(true),
+            s if (200..300).contains(&s) => Ok(true),
+            s => bail!("trashing {plain_path}: {s}"),
+        }
     }
 
     /// to the trash (the gate never deletes)

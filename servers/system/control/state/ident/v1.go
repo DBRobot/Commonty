@@ -64,6 +64,8 @@ type SealedKey struct {
 type Reader struct {
 	Name string      `json:"name"`
 	Keys []SealedKey `json:"keys"`
+	// may write too (a calendar two people keep); serde leaves it out when false
+	Writes bool `json:"writes,omitempty"`
 }
 
 type Invite struct {
@@ -349,6 +351,11 @@ func (e *Entry) Canonical() ([]byte, error) {
 					b.WriteByte(',')
 					b.key("keys")
 					b.sealed(r.Keys)
+					if r.Writes {
+						b.WriteByte(',')
+						b.key("writes")
+						b.WriteString("true")
+					}
 					b.WriteByte('}')
 				}
 				b.WriteByte(']')

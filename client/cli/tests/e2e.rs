@@ -119,6 +119,44 @@ impl Box_ {
         directory_readers: Vec<String>,
         member_list: Option<String>,
     ) -> Self {
+        Self::start_full_with(
+            dir,
+            full,
+            members,
+            release_pub,
+            home,
+            directory_readers,
+            member_list,
+            None,
+        )
+        .await
+    }
+    /// a box that holds the libraries bucket (`library`), with the member
+    /// list `forge` publishes
+    async fn start_with_libraries(forge: &Forge, library: verify::library::Gate) -> Self {
+        Self::start_full_with(
+            scratch("box").join("keys"),
+            true,
+            None,
+            None,
+            vec![],
+            vec![],
+            Some(forge.url.clone()),
+            Some(library),
+        )
+        .await
+    }
+    #[allow(clippy::too_many_arguments)]
+    async fn start_full_with(
+        dir: PathBuf,
+        full: bool,
+        members: Option<verify::Members>,
+        release_pub: Option<String>,
+        home: Vec<verify::pages::Service>,
+        directory_readers: Vec<String>,
+        member_list: Option<String>,
+        library: Option<verify::library::Gate>,
+    ) -> Self {
         let (addr, _task) = verify::start(verify::Config {
             mail: None,
             home,
@@ -126,7 +164,7 @@ impl Box_ {
             release_pub,
             web_dir: None,
             photos: None,
-            library: None,
+            library,
             fleet: Default::default(),
             thanos: None,
             adblock: None,
@@ -996,6 +1034,7 @@ async fn a_shared_library_comes_only_from_a_member_the_release_lets_in() {
                 to: format!("device:{}", identity::fingerprint(&to_bob)),
                 sealed: library::seal_to(&to_bob, &library::random_key()[..]).unwrap(),
             }],
+            writes: false,
         }],
         created: owner.len() as u64,
     };
@@ -1062,6 +1101,333 @@ async fn a_shared_library_comes_only_from_a_member_the_release_lets_in() {
         !out.contains(&posing.id),
         "a member's root under alice's name: {out}"
     );
+}
+
+/// Enough of S3 for the library gate, in threads: presigned GET, HEAD, PUT
+/// and DELETE of one object, a signed copy (x-amz-copy-source) and a
+/// listing. Etags are from the bytes, as S3's are.
+fn fake_bucket() -> verify::library::Gate {
+    use std::collections::BTreeMap;
+    use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+    use std::sync::{Arc, Mutex};
+    let store: Arc<Mutex<BTreeMap<String, Vec<u8>>>> = Default::default();
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}", l.local_addr().unwrap());
+    let unpct = |s: &str| {
+        let b = s.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'%' && i + 2 < b.len() {
+                out.push(u8::from_str_radix(&s[i + 1..i + 3], 16).unwrap());
+                i += 3;
+            } else {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8(out).unwrap()
+    };
+    std::thread::spawn(move || {
+        for c in l.incoming().flatten() {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                let mut r = BufReader::new(c.try_clone().unwrap());
+                let mut line = String::new();
+                r.read_line(&mut line).unwrap();
+                let mut len = 0usize;
+                let mut copy = None;
+                loop {
+                    let mut h = String::new();
+                    if r.read_line(&mut h).unwrap() == 0 || h == "\r\n" {
+                        break;
+                    }
+                    let (k, v) = h.split_once(':').unwrap_or((&h, ""));
+                    let v = v.trim().to_string();
+                    match k.to_ascii_lowercase().as_str() {
+                        "content-length" => len = v.parse().unwrap_or(0),
+                        "x-amz-copy-source" => copy = Some(unpct(&v)),
+                        _ => {}
+                    }
+                }
+                let mut body = vec![0u8; len];
+                r.read_exact(&mut body).unwrap();
+                let mut parts = line.split_whitespace();
+                let method = parts.next().unwrap_or("").to_string();
+                let target = parts.next().unwrap_or("");
+                let (path, query) = target.split_once('?').unwrap_or((target, ""));
+                let object = unpct(path.trim_start_matches("/b/"));
+                let tag = |v: &[u8]| {
+                    use sha2::Digest as _;
+                    let d = sha2::Sha256::digest(v);
+                    format!("\"{:x}\"", u128::from_be_bytes(d[..16].try_into().unwrap()))
+                };
+                let mut s = store.lock().unwrap();
+                let (status, etag, out) = match method.as_str() {
+                    "GET" if query.contains("list-type") => {
+                        let prefix = query
+                            .split('&')
+                            .find_map(|kv| kv.strip_prefix("prefix="))
+                            .map(unpct)
+                            .unwrap_or_default();
+                        let delim = query.contains("delimiter=");
+                        let mut xml = String::from("<ListBucketResult>");
+                        let mut dirs = std::collections::BTreeSet::new();
+                        for (k, v) in s.iter().filter(|(k, _)| k.starts_with(&prefix)) {
+                            let rest = &k[prefix.len()..];
+                            if delim && let Some(i) = rest.find('/') {
+                                dirs.insert(format!("{prefix}{}", &rest[..=i]));
+                                continue;
+                            }
+                            xml.push_str(&format!(
+                                "<Contents><Key>{k}</Key><Size>{}</Size><ETag>{}</ETag></Contents>",
+                                v.len(),
+                                tag(v).replace('"', "&quot;")
+                            ));
+                        }
+                        for d in dirs {
+                            xml.push_str(&format!(
+                                "<CommonPrefixes><Prefix>{d}</Prefix></CommonPrefixes>"
+                            ));
+                        }
+                        xml.push_str("<IsTruncated>false</IsTruncated></ListBucketResult>");
+                        ("200 OK", String::new(), xml.into_bytes())
+                    }
+                    "GET" | "HEAD" => match s.get(&object) {
+                        Some(v) => ("200 OK", tag(v), v.clone()),
+                        None => ("404 Not Found", String::new(), vec![]),
+                    },
+                    "PUT" => {
+                        let v = match copy.as_deref() {
+                            Some(from) => s
+                                .get(from.trim_start_matches("/b/"))
+                                .cloned()
+                                .unwrap_or_default(),
+                            None => body,
+                        };
+                        let t = tag(&v);
+                        s.insert(object, v);
+                        ("200 OK", t, vec![])
+                    }
+                    "DELETE" => {
+                        s.remove(&object);
+                        ("204 No Content", String::new(), vec![])
+                    }
+                    _ => ("405 Method Not Allowed", String::new(), vec![]),
+                };
+                drop(s);
+                let mut c = c;
+                let etag = if etag.is_empty() {
+                    String::new()
+                } else {
+                    format!("etag: {etag}\r\n")
+                };
+                let _ = write!(
+                    c,
+                    "HTTP/1.1 {status}\r\n{etag}content-length: {}\r\nconnection: close\r\n\r\n",
+                    out.len()
+                );
+                if method != "HEAD" {
+                    let _ = c.write_all(&out);
+                }
+            });
+        }
+    });
+    verify::library::Gate {
+        endpoint,
+        bucket: "b".into(),
+        key_id: "k".into(),
+        key_secret: "s".into(),
+        region: "garage".into(),
+    }
+}
+
+/// An owner who is not a member (left, or suspended) has their own
+/// library to read and nothing more, and no one they named a writer has
+/// more than that either: the writer reads it and writes nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_writer_for_an_owner_no_longer_a_member_only_reads() {
+    let forge = Forge::new();
+    let a = Box_::start_with_libraries(&forge, fake_bucket()).await;
+    let d = dirs([&a]);
+    let bob = Device::new();
+    bob.dd_ok(&args(
+        &[
+            "identity",
+            "new",
+            "--born",
+            "1990-01",
+            "--agree-terms",
+            "--name",
+            "bob",
+        ],
+        &d,
+    ));
+    let to = bob.public_key();
+    let family = identity::Library {
+        id: library::random_id(),
+        keys: vec![],
+        readers: vec![identity::Reader {
+            name: "bob".into(),
+            keys: vec![identity::SealedKey {
+                to: format!("device:{}", identity::fingerprint(&to)),
+                sealed: library::seal_to(&to, &library::random_key()[..]).unwrap(),
+            }],
+            writes: true,
+        }],
+        created: 1,
+    };
+    let alice = identity::generate();
+    let e = made_entry("alice", &alice, "", vec![], vec![family.clone()]);
+    let (st, why) = put_raw(
+        &a,
+        "alice",
+        &serde_json::to_value(identity::sign(e, &alice).unwrap()).unwrap(),
+    )
+    .await;
+    assert_eq!(st, 200, "{why}");
+    // the same box again, now holding to a list where bob is a member and
+    // alice, who named him, is not
+    let bob_id = member_id_of(&bob, &d);
+    forge.list(&[(bob_id.clone(), "bob")], &[]);
+    let a = Box_::start_full_with(
+        a.dir.clone(),
+        true,
+        Some(verify::Members::list(vec![bob_id])),
+        None,
+        vec![],
+        vec![],
+        Some(forge.url.clone()),
+        Some(fake_bucket()),
+    )
+    .await;
+    let http = reqwest::Client::new();
+    let at = |p: &str| a.url(&format!("/_dd/dav/{}/{p}", family.id));
+    let r = http
+        .put(at("cal/e.ics"))
+        .bearer_auth(bob.token())
+        .body("late")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 403, "a writer for an owner who is not a member");
+    let r = http
+        .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), at(""))
+        .bearer_auth(bob.token())
+        .header("depth", "1")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 207, "and still reads it");
+}
+
+/// A library its owner lets one member write and another only read: the
+/// writer saves and trashes and never deletes for good; the reader writes
+/// nothing; a save from an old version is refused for either.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_writer_saves_into_a_shared_library_and_a_reader_does_not() {
+    let forge = Forge::new();
+    let a = Box_::start_with_libraries(&forge, fake_bucket()).await;
+    let d = dirs([&a]);
+    let (bob, carol) = (Device::new(), Device::new());
+    for (dev, name) in [(&bob, "bob"), (&carol, "carol")] {
+        dev.dd_ok(&args(
+            &[
+                "identity",
+                "new",
+                "--born",
+                "1990-01",
+                "--agree-terms",
+                "--name",
+                name,
+            ],
+            &d,
+        ));
+    }
+    let reader = |dev: &Device, name: &str, writes| {
+        let to = dev.public_key();
+        identity::Reader {
+            name: name.into(),
+            keys: vec![identity::SealedKey {
+                to: format!("device:{}", identity::fingerprint(&to)),
+                sealed: library::seal_to(&to, &library::random_key()[..]).unwrap(),
+            }],
+            writes,
+        }
+    };
+    let family = identity::Library {
+        id: library::random_id(),
+        keys: vec![],
+        readers: vec![reader(&bob, "bob", true), reader(&carol, "carol", false)],
+        created: 1,
+    };
+    let alice = identity::generate();
+    let e = made_entry("alice", &alice, "", vec![], vec![family.clone()]);
+    let (st, why) = put_raw(
+        &a,
+        "alice",
+        &serde_json::to_value(identity::sign(e, &alice).unwrap()).unwrap(),
+    )
+    .await;
+    assert_eq!(st, 200, "{why}");
+    forge.list(
+        &[
+            (
+                identity::member_id(&identity::encode_public(&alice.verifying_key())),
+                "alice",
+            ),
+            (member_id_of(&bob, &d), "bob"),
+            (member_id_of(&carol, &d), "carol"),
+        ],
+        &[],
+    );
+    let http = reqwest::Client::new();
+    let at = |p: &str| a.url(&format!("/_dd/dav/{}/{p}", family.id));
+    let send = |dev: &Device, m: &str, p: &str, hs: &[(&str, &str)], body: &str| {
+        let mut r = http
+            .request(reqwest::Method::from_bytes(m.as_bytes()).unwrap(), at(p))
+            .bearer_auth(dev.token())
+            .body(body.to_string());
+        for (k, v) in hs {
+            r = r.header(*k, *v);
+        }
+        r.send()
+    };
+    // the reader sees, and changes nothing
+    let r = send(&carol, "PUT", "cal/e.ics", &[], "carol's")
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 403);
+    // the writer makes an event, and gets its version back
+    let r = send(&bob, "PUT", "cal/e.ics", &[("if-none-match", "*")], "one")
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 201);
+    let one = r.headers()["etag"].to_str().unwrap().to_string();
+    let r = send(&carol, "PROPFIND", "cal", &[("depth", "1")], "")
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 207);
+    assert!(r.text().await.unwrap().contains("getetag"));
+    // saves from version one: the first wins, the second is told
+    let from_one = [("if-match", one.as_str())];
+    let r = send(&bob, "PUT", "cal/e.ics", &from_one, "two")
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 201);
+    let r = send(&bob, "PUT", "cal/e.ics", &from_one, "stale")
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 412);
+    let r = send(&carol, "GET", "cal/e.ics", &[], "").await.unwrap();
+    assert_eq!(r.text().await.unwrap(), "two");
+    // into the trash, yes; out of it for good, only the owner
+    let r = send(&bob, "DELETE", "cal/e.ics", &[], "").await.unwrap();
+    assert_eq!(r.status(), 204);
+    let r = send(&bob, "DELETE", "trash", &[], "").await.unwrap();
+    assert_eq!(r.status(), 403);
+    let r = send(&carol, "DELETE", "cal/x.ics", &[], "").await.unwrap();
+    assert_eq!(r.status(), 403);
 }
 
 fn run_with_stdin(dev: &Device, a: &[&str], stdin: &str, want_ok: bool) -> String {

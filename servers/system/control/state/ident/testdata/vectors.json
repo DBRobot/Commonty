@@ -17221,6 +17221,141 @@
         "what": "ada recovered"
       },
       {
+        "canonical": "eyJuYW1lIjoiYWRhIiwicm9vdCI6ImJub2MzU213dDQvUk92VEZXWS92OU84cWx4WnVQS2J5NVB2OHpZQlFXL0U9IiwicmVjb3ZlcnkiOiI3VWtveGlqUndzYnE2UU00a0ZtVllTbFpKenBjWS9rMk5zRkdGS3lITjlFPSIsInJlY292ZXJlZF9mcm9tIjpbImdUbDNEcWg5RjE5V28xUm13MHgrek11TmlwRzA3amVpWGZZUFc0L0pzNVE9Il0sImRldmljZXMiOlt7ImZpbmdlcnByaW50IjoiY2E5M2FjMTcwNTE4IiwicHVibGljX2tleSI6InlwT3NGd1VZY0hIV2U0UEgvdzcrZ1FqbzdFVXdWMTEzSm9lVE05dmF2bnc9IiwiYWRkZWQiOjE3MDAwMDAwMDF9XSwibGlicmFyaWVzIjpbeyJpZCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmIiwia2V5cyI6W3sidG8iOiJkZXZpY2U6YWJjIiwic2VhbGVkIjoicVwiYlxccy88Jj5cdTAwMDFcdTAwMWZcblx0XHJcYlxmw6nmvKLigKh/In1dLCJjcmVhdGVkIjoxNzAwMDAwMDAyfSx7ImlkIjoiZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTAiLCJrZXlzIjpbeyJ0byI6InJvb3QiLCJzZWFsZWQiOiJjMlZoYkdWayJ9XSwicmVhZGVycyI6W3sibmFtZSI6ImJvIiwia2V5cyI6W3sidG8iOiJkZXZpY2U6YjAiLCJzZWFsZWQiOiJZbTg9In1dLCJ3cml0ZXMiOnRydWV9LHsibmFtZSI6ImN5Iiwia2V5cyI6W3sidG8iOiJkZXZpY2U6YzEiLCJzZWFsZWQiOiJZM2s9In1dfV0sImNyZWF0ZWQiOjE3OTE3MDAyMDB9XSwidGVybXMiOiIyMDI2LTEwLTExIiwidmVyc2lvbiI6MywidXBkYXRlZCI6MTc5MTcwMDIwMH0=",
+        "logged": {
+          "entry": {
+            "entry": {
+              "devices": [
+                {
+                  "added": 1700000001,
+                  "fingerprint": "ca93ac170518",
+                  "public_key": "ypOsFwUYcHHWe4PH/w7+gQjo7EUwV113JoeTM9vavnw="
+                }
+              ],
+              "libraries": [
+                {
+                  "created": 1700000002,
+                  "id": "0123456789abcdef0123456789abcdef",
+                  "keys": [
+                    {
+                      "sealed": "q\"b\\s/<&>\u0001\u001f\n\t\r\b\fé漢 ",
+                      "to": "device:abc"
+                    }
+                  ]
+                },
+                {
+                  "created": 1791700200,
+                  "id": "fedcba9876543210fedcba9876543210",
+                  "keys": [
+                    {
+                      "sealed": "c2VhbGVk",
+                      "to": "root"
+                    }
+                  ],
+                  "readers": [
+                    {
+                      "keys": [
+                        {
+                          "sealed": "Ym8=",
+                          "to": "device:b0"
+                        }
+                      ],
+                      "name": "bo",
+                      "writes": true
+                    },
+                    {
+                      "keys": [
+                        {
+                          "sealed": "Y3k=",
+                          "to": "device:c1"
+                        }
+                      ],
+                      "name": "cy"
+                    }
+                  ]
+                }
+              ],
+              "name": "ada",
+              "recovered_from": [
+                "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q="
+              ],
+              "recovery": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=",
+              "root": "bnoc3Smwt4/ROvTFWY/v9O8qlxZuPKby5Pv8zYBQW/E=",
+              "terms": "2026-10-11",
+              "updated": 1791700200,
+              "version": 3
+            },
+            "signature": "tg7ZdcA2GjKT1ivuHpZPChh4ZVKQk/KDFptmgj327PglyZ3X95b6W730H/cf4hUDAG0BdY6BdNCKGoLOTN6EDQ=="
+          }
+        },
+        "previous": 1,
+        "signed": {
+          "entry": {
+            "devices": [
+              {
+                "added": 1700000001,
+                "fingerprint": "ca93ac170518",
+                "public_key": "ypOsFwUYcHHWe4PH/w7+gQjo7EUwV113JoeTM9vavnw="
+              }
+            ],
+            "libraries": [
+              {
+                "created": 1700000002,
+                "id": "0123456789abcdef0123456789abcdef",
+                "keys": [
+                  {
+                    "sealed": "q\"b\\s/<&>\u0001\u001f\n\t\r\b\fé漢 ",
+                    "to": "device:abc"
+                  }
+                ]
+              },
+              {
+                "created": 1791700200,
+                "id": "fedcba9876543210fedcba9876543210",
+                "keys": [
+                  {
+                    "sealed": "c2VhbGVk",
+                    "to": "root"
+                  }
+                ],
+                "readers": [
+                  {
+                    "keys": [
+                      {
+                        "sealed": "Ym8=",
+                        "to": "device:b0"
+                      }
+                    ],
+                    "name": "bo",
+                    "writes": true
+                  },
+                  {
+                    "keys": [
+                      {
+                        "sealed": "Y3k=",
+                        "to": "device:c1"
+                      }
+                    ],
+                    "name": "cy"
+                  }
+                ]
+              }
+            ],
+            "name": "ada",
+            "recovered_from": [
+              "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q="
+            ],
+            "recovery": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=",
+            "root": "bnoc3Smwt4/ROvTFWY/v9O8qlxZuPKby5Pv8zYBQW/E=",
+            "terms": "2026-10-11",
+            "updated": 1791700200,
+            "version": 3
+          },
+          "signature": "tg7ZdcA2GjKT1ivuHpZPChh4ZVKQk/KDFptmgj327PglyZ3X95b6W730H/cf4hUDAG0BdY6BdNCKGoLOTN6EDQ=="
+        },
+        "what": "ada shares a calendar, one reader writes"
+      },
+      {
         "canonical": "eyJuYW1lIjoiYmVhIiwicm9vdCI6IndlYmF1dGhuOkNRa0pDUWtKQ1FrSkNRa0pDUWtKQ1E6b2RkTUxwYUVzd1drOFQ3WnducDFVNFlwbzdMaWttcmFfWHZXa3VTbUR1OCIsInJlY292ZXJ5IjoiIiwiZGV2aWNlcyI6W10sInBhc3NrZXlzIjpbeyJpZCI6IkNRa0pDUWtKQ1FrSkNRa0pDUWtKQ1EiLCJjcmVkIjp7ImNyZWQiOnsiYXR0ZXN0YXRpb24iOnsiZGF0YSI6Ik5vbmUiLCJtZXRhZGF0YSI6Ik5vbmUifSwiYXR0ZXN0YXRpb25fZm9ybWF0Ijoibm9uZSIsImJhY2t1cF9lbGlnaWJsZSI6dHJ1ZSwiYmFja3VwX3N0YXRlIjp0cnVlLCJjb3VudGVyIjowLCJjcmVkIjp7ImtleSI6eyJFQ19FQzIiOnsiY3VydmUiOiJTRUNQMjU2UjEiLCJ4IjoiY1RYNlQ5azZDZHpwaTc5b0cwdjg5UTU4RFdOVTVpcjdDXzhxTkNsaGVHVSIsInkiOiI3VXdmQXQyNUFqN2xhbFYtVVYxcW5jWnNFZklnbGczbGxETk45WWgzWnlRIn19LCJ0eXBlXyI6IkVTMjU2In0sImNyZWRfaWQiOiJDUWtKQ1FrSkNRa0pDUWtKQ1FrSkNRIiwiZXh0ZW5zaW9ucyI6eyJhcHBpZCI6Ik5vdFJlcXVlc3RlZCIsImNyZWRfcHJvcHMiOnsiVW5zaWduZWQiOnsicmsiOnRydWV9fSwiY3JlZF9wcm90ZWN0IjoiSWdub3JlZCIsImhtYWNfY3JlYXRlX3NlY3JldCI6Ik5vdFJlcXVlc3RlZCJ9LCJyZWdpc3RyYXRpb25fcG9saWN5IjoicmVxdWlyZWQiLCJ0cmFuc3BvcnRzIjpudWxsLCJ1c2VyX3ZlcmlmaWVkIjp0cnVlfX0sImFkZGVkIjoxNzAwMDAwMDAwLCJycF9pZCI6ImV4YW1wbGUub3JnIn1dLCJncmFudCI6eyJpbnZpdGUiOnsiaW52aXRlIjp7InB1YmxpY19rZXkiOiJVN2xQTjhjTExpMzRLM1FwU3RrRVhVWnZFWm9MNzlTcXNFR0FhRW1PZHEwPSIsImlzc3VlZCI6MTc5MTYwMDAwMCwiZXhwaXJlcyI6MTc5MTgwMDAwMH0sInNpZ25lciI6ImlvamozWFFKOFpYOVV0c3RQTHBkY3NwbkNiOGRsQkliODNTSUFiUVBiMXc9Iiwic2lnbmF0dXJlIjoiVmpTMUg2L3E2akp3TU82WTcwSEtwS3Vla3BLd0lsTE9DVnE0emEwSE1sb3BEVFdNMEdoYXNSYTRVeUhLejQ1SnRxYk9zWGU3ZUppVzdQRU0raEZCQWc9PSJ9LCJyZWRlZW1lZCI6MTc5MTcwMDE1MCwicHJvb2YiOiJCZ3hNYTVpS0V4TXdVSGwrZ3hkZlJTOGZ0eDU2aFFYMEZhMWdrU3BpeUt2UXgwalpTTmZrSU1xQVROd2RodXZZRGM5VmdFRUI2blNjKzdRT0xEV1VBQT09In0sInRlcm1zIjoiMjAyNi0xMC0xMSIsInZlcnNpb24iOjEsInVwZGF0ZWQiOjE3OTE3MDAyMDB9",
         "challenge": "zkdZMp+LpwdLbEvHgwZZM/ETwAPDhEe+GoH3Iv0uEJs=",
         "cose_digest_root": "webauthn:CQkJCQkJCQkJCQkJCQkJCQ:oddMLpaEswWk8T7Zwnp1U4Ypo7Likmra_XvWkuSmDu8",
