@@ -12,6 +12,8 @@ paths = [
   '''^nix/tests/''',
   '''^app/src/testdata/''',
   '''^servers/smarthome/door/src/testdata/''',
+  '''^servers/system/control/state/ident/testdata/''',
+  '''^client/identity/tests/vectors\.rs$''',
   '''^data/games/catalogue\.json$''',
   '''^nix/modules/library/libraries\.nix$''',
 ]
