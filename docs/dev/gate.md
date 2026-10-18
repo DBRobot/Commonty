@@ -554,10 +554,12 @@ signed item once and the gate reads the result. `VERIFY_IDENTITY_FROM`
 2. the body, read only up to 64 KiB;
 3. v1: as before. v2 (`/_dd/config` says `"envelope": 2` only where the control
    plane judges): of the path's kind and name, else 400;
-4. not sent in the last day (sha256 of kind and body); a list that cannot be
-   read or written refuses every v2 PUT with 503, never lets one through;
+4. not sent in the last day (sha256 of kind and body) - a list that cannot be
+   read or written refuses every v2 PUT with 503 - and not among the agreed
+   state's recent outcomes (its item hash; state not read yet: no answer);
 5. signed by the key that speaks for the name (identity crate), else 403;
-6. the name's allowance, 6 a minute, counted only for items that verified;
+6. 6 a minute for the name and 6 for the signing key - one key may be the
+   root of several names - counted only for items that verified;
 7. remembered (file first, then memory), then sent to dd-control as it came: 202.
 
 `GET /_dd/directory/<name>` still answers v1-shaped (`{entry, signature}`),

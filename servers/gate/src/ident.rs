@@ -97,6 +97,10 @@ pub struct State {
     pub height: u64,
     #[serde(default)]
     pub members: HashMap<String, Member>,
+    /// what became of each recent item, by its item hash (the judge's
+    /// ItemHash, the gate's item_hash): an item here is in the log already
+    #[serde(default)]
+    pub outcomes: HashMap<String, String>,
 }
 
 /// The agreed identity state as last read from dd-control.
