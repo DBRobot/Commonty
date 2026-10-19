@@ -422,38 +422,64 @@ func TestAnOAEPNamedEKKeyParses(t *testing.T) {
 	}
 }
 
-// a certificate naming no maker is the maker's whose roots it chains to
-func TestAnEKCertificateNamingNoMakerChainsToOne(t *testing.T) {
+// a certificate naming no maker is taken only as AMD's (whose fTPM
+// certificates name none), issued under AMD's name and chained to AMD's roots
+func TestAnEKCertificateNamingNoMakerIsAMDsOrNone(t *testing.T) {
+	pool, leaf := testEK(t, "Advanced Micro Devices", true)
+	intel := intelPolicy(t).roots["494E5443"]
+	pol := &policy{roots: map[string]*x509.CertPool{"414D4400": pool, "494E5443": intel}}
+	vendor, _, err := verifyChain(pol, []*x509.Certificate{leaf}, oct2026)
+	if err != nil || vendor != "414D4400" {
+		t.Fatalf("%s %v", vendor, err)
+	}
+	// chained to another maker's root: refused, never tried across makers
+	for _, id := range []string{"494E5443", "00001014"} {
+		pol = &policy{roots: map[string]*x509.CertPool{id: pool, "414D4400": intel}, test: Test{SoftwareTPM: true}}
+		if _, _, err := verifyChain(pol, []*x509.Certificate{leaf}, oct2026); err == nil {
+			t.Fatalf("a nameless certificate taken by %s's root", id)
+		}
+	}
+	// issued by someone not AMD, though under a root filed as AMD's
+	pool, other := testEK(t, "Someone Else", true)
+	pol = &policy{roots: map[string]*x509.CertPool{"414D4400": pool}}
+	if _, _, err := verifyChain(pol, []*x509.Certificate{other}, oct2026); !errors.Is(err, ErrNoRoot) {
+		t.Fatalf("want ErrNoRoot, got %v", err)
+	}
+}
+
+func TestALeafWithoutEKMarkersIsRefused(t *testing.T) {
+	pool, leaf := testEK(t, "Advanced Micro Devices", false)
+	pol := &policy{roots: map[string]*x509.CertPool{"414D4400": pool}}
+	_, _, err := verifyChain(pol, []*x509.Certificate{leaf}, oct2026)
+	wantErr(t, err, "not an EK certificate")
+}
+
+// testEK: a CA under org's name and an EK certificate it issued naming no
+// maker, with the EK certificate purpose or without
+func testEK(t *testing.T, org string, marked bool) (*x509.CertPool, *x509.Certificate) {
+	t.Helper()
 	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "maker root"},
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "maker root", Organization: []string{org}},
 		NotBefore: oct2026.AddDate(-1, 0, 0), NotAfter: oct2026.AddDate(10, 0, 0),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
 	}
 	caDER, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &caKey.PublicKey, caKey)
 	ca, _ := x509.ParseCertificate(caDER)
 	ekKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	leafDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+	lt := &x509.Certificate{
 		SerialNumber: big.NewInt(2), NotBefore: tmpl.NotBefore, NotAfter: tmpl.NotAfter,
 		KeyUsage: x509.KeyUsageKeyEncipherment,
-	}, ca, &ekKey.PublicKey, caKey)
+	}
+	if marked {
+		lt.UnknownExtKeyUsage = []asn1.ObjectIdentifier{oidEKCertificate}
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, lt, ca, &ekKey.PublicKey, caKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	leaf, _ := x509.ParseCertificate(leafDER)
 	pool := x509.NewCertPool()
 	pool.AddCert(ca)
-	pol := &policy{roots: map[string]*x509.CertPool{"414D4400": pool, "494E5443": intelPolicy(t).roots["494E5443"]}}
-	vendor, _, err := verifyChain(pol, []*x509.Certificate{leaf}, oct2026)
-	if err != nil || vendor != "414D4400" {
-		t.Fatalf("%s %v", vendor, err)
-	}
-	pol = &policy{roots: map[string]*x509.CertPool{"00001014": pool}}
-	if _, _, err := verifyChain(pol, []*x509.Certificate{leaf}, oct2026); !errors.Is(err, ErrSoftware) {
-		t.Fatalf("a software TPM's root taken: %v", err)
-	}
-	pol = &policy{roots: map[string]*x509.CertPool{"494E5443": intelPolicy(t).roots["494E5443"]}}
-	if _, _, err := verifyChain(pol, []*x509.Certificate{leaf}, oct2026); !errors.Is(err, ErrNoRoot) {
-		t.Fatalf("want ErrNoRoot, got %v", err)
-	}
+	return pool, leaf
 }

@@ -16,6 +16,14 @@ var (
 	oidManufacturer = asn1.ObjectIdentifier{2, 23, 133, 2, 1}
 	oidModel        = asn1.ObjectIdentifier{2, 23, 133, 2, 2}
 	oidRSAESOAEP    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 7}
+	// tcg-kp-EKCertificate, and the TCG's arc its certificate policies sit in
+	oidEKCertificate = asn1.ObjectIdentifier{2, 23, 133, 8, 1}
+	oidTCG           = asn1.ObjectIdentifier{2, 23, 133}
+)
+
+const (
+	amdVendor = "414D4400"
+	amdOrg    = "Advanced Micro Devices"
 )
 
 // the makers whose roots the release ships, for messages
@@ -116,4 +124,20 @@ func ekCertKey(c *x509.Certificate) (crypto.PublicKey, error) {
 		return nil, errors.New("the EK certificate's key is of a kind not known")
 	}
 	return x509.ParsePKCS1PublicKey(spki.Key.RightAlign())
+}
+
+// ekMarked: the certificate says it is a TPM's EK certificate - the TCG's
+// EK purpose, or a TCG certificate policy
+func ekMarked(c *x509.Certificate) bool {
+	for _, u := range c.UnknownExtKeyUsage {
+		if u.Equal(oidEKCertificate) {
+			return true
+		}
+	}
+	for _, p := range c.PolicyIdentifiers {
+		if len(p) > len(oidTCG) && p[:len(oidTCG)].Equal(oidTCG) {
+			return true
+		}
+	}
+	return false
 }

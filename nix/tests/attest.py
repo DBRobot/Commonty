@@ -2,7 +2,9 @@
 box.start()
 box.wait_for_unit("multi-user.target")
 # securityfs says size 0; the firmware's log is there to read
-box.succeed("test $(head -c 64 /sys/kernel/security/tpm0/binary_bios_measurements | wc -c) = 64")
+box.succeed(
+    "test $(head -c 64 /sys/kernel/security/tpm0/binary_bios_measurements | wc -c) = 64"
+)
 
 # the join key, as dd-unlock-enrol makes it: under PCR 7's policy
 box.succeed(
