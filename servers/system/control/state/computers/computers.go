@@ -7,10 +7,13 @@ package computers
 // rest: no clock but the agreed time, no I/O, every map walked in order.
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 
 	"commonty/control/state/ident"
@@ -24,6 +27,10 @@ type Limits struct {
 	Disk      uint64 `json:"disk"`    // GiB, likewise
 	PortBase  uint64 `json:"portBase"`
 	PortCount uint64 `json:"portCount"`
+	// whose boxes the release lets host computers (box.json owners): one of
+	// theirs is a box of their own for "own", as placement counts it,
+	// beside what they have enlisted
+	Owners []string `json:"owners,omitempty"`
 }
 
 const (
@@ -38,12 +45,32 @@ const (
 	MaxPlayers     = 32  // let in, per config or computer
 	MaxMemberPorts = 16  // SSH and forwards, every computer of theirs
 	MaxMade        = 256 // computers ever, deleted ones counted
+	MaxKeys        = 8   // SSH public keys let in, per config or computer
+	MaxKey         = 2048
 	powerAhead     = 300
 	powerAgo       = 3600
 )
 
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 var idRe = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// an OpenSSH public key line: its type, the key, and a comment of plain
+// text at most; no options, nothing past one line
+var keyRe = regexp.MustCompile(`^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) ([A-Za-z0-9+/]+={0,2})( [ -~]{1,128})?$`)
+
+// ValidKey: one OpenSSH public key, whose blob names the type the line says
+func ValidKey(k string) bool {
+	m := keyRe.FindStringSubmatch(k)
+	if len(k) > MaxKey || m == nil {
+		return false
+	}
+	blob, err := base64.StdEncoding.DecodeString(m[2])
+	if err != nil || len(blob) < 4 {
+		return false
+	}
+	n := int(binary.BigEndian.Uint32(blob))
+	return n == len(m[1]) && len(blob) > 4+n && string(blob[4:4+n]) == m[1]
+}
 
 // Config is a member's saved config, as they signed it
 type Config struct {
@@ -55,6 +82,9 @@ type Config struct {
 	Nix     string   `json:"nix"`
 	Ports   []uint64 `json:"ports"`
 	Players []string `json:"players"`
+	// OpenSSH public keys its owner's sshd lets in: made on their devices,
+	// only the public half here
+	Keys    []string `json:"keys"`
 	Consent string   `json:"consent"` // own | any
 	Version uint64   `json:"version"`
 	Gone    bool     `json:"gone,omitempty"` // deleted
@@ -72,6 +102,7 @@ type Computer struct {
 	Nix     string   `json:"nix"`
 	Ports   []uint64 `json:"ports"`
 	Players []string `json:"players"`
+	Keys    []string `json:"keys"`
 	Consent string   `json:"consent"`
 	// their yes to the warning, for anyone's box
 	Anywhere bool   `json:"anywhere"`
@@ -188,7 +219,7 @@ func read(body []byte, v any) error {
 }
 
 // the size and contents both kinds share
-func (s *State) shape(id *ident.State, cfg *ident.Config, lim *Limits, owner string, memory, threads, disk uint64, nix string, ports []uint64, players []string, consent string, at uint64) error {
+func (s *State) shape(id *ident.State, cfg *ident.Config, lim *Limits, owner string, memory, threads, disk uint64, nix string, ports []uint64, players []string, keys []string, consent string, at uint64) error {
 	if memory < MinMemory || memory > lim.Memory {
 		return fmt.Errorf("memory is %d to %d MiB", MinMemory, lim.Memory)
 	}
@@ -227,10 +258,18 @@ func (s *State) shape(id *ident.State, cfg *ident.Config, lim *Limits, owner str
 			return fmt.Errorf("not someone to let in: %w", err)
 		}
 	}
+	if len(keys) > MaxKeys {
+		return fmt.Errorf("at most %d SSH keys", MaxKeys)
+	}
+	for _, k := range keys {
+		if !ValidKey(k) {
+			return errors.New("not an SSH public key, one to a line")
+		}
+	}
 	if consent != "own" && consent != "any" {
 		return errors.New("where it runs is own or any")
 	}
-	if consent == "own" && len(id.BoxesOf(owner, at)) == 0 {
+	if consent == "own" && len(id.BoxesOf(owner, at)) == 0 && !slices.Contains(lim.Owners, owner) {
 		return errors.New("they have no box of their own: only anyone's box")
 	}
 	return nil
@@ -291,7 +330,7 @@ func (s *State) config(id *ident.State, cfg *ident.Config, lim *Limits, env *ide
 		return fmt.Errorf("at most %d configs, deleted ones counted", MaxConfigs)
 	}
 	if !c.Gone {
-		if err := s.shape(id, cfg, lim, c.Owner, c.Memory, c.Threads, c.Disk, c.Nix, c.Ports, c.Players, c.Consent, at); err != nil {
+		if err := s.shape(id, cfg, lim, c.Owner, c.Memory, c.Threads, c.Disk, c.Nix, c.Ports, c.Players, c.Keys, c.Consent, at); err != nil {
 			return err
 		}
 	}
@@ -337,7 +376,7 @@ func (s *State) computer(id *ident.State, cfg *ident.Config, lim *Limits, env *i
 			return fmt.Errorf("they have a remote computer called %s", n.Name)
 		}
 	}
-	if err := s.shape(id, cfg, lim, n.Owner, n.Memory, n.Threads, n.Disk, n.Nix, n.Ports, n.Players, n.Consent, at); err != nil {
+	if err := s.shape(id, cfg, lim, n.Owner, n.Memory, n.Threads, n.Disk, n.Nix, n.Ports, n.Players, n.Keys, n.Consent, at); err != nil {
 		return err
 	}
 	if n.Consent == "any" && !n.Anywhere {

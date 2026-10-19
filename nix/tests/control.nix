@@ -45,6 +45,15 @@ pkgs.runCommand "control-e2e"
     # the identity judge's part: a release key, and nobody on the list
     rel = ed25519.Ed25519PrivateKey.generate()
     cfg["identity"] = {"release": base64.b64encode(rel.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)).decode(), "members": {"members": [], "revoked": []}}
+    # a member's remote computers: cara, let in by the release, whose box
+    # node3 is; node2 hosts anyone's, node1 none
+    import hashlib
+    cara = ed25519.Ed25519PrivateKey.generate()
+    open("cara.key", "wb").write(cara.private_bytes(S.Encoding.Raw, S.PrivateFormat.Raw, S.NoEncryption()))
+    croot = base64.b64encode(cara.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)).decode()
+    cfg["identity"]["members"]["members"].append(hashlib.sha256(croot.encode()).hexdigest())
+    cfg["computers"] = {"memory": 16384, "threads": 8, "disk": 200, "portBase": 27200, "portCount": 8, "owners": ["cara"]}
+    cfg["rules"]["computerHosts"] = {"node2": "", "node3": "cara"}
     json.dump(cfg, open("config.json", "w"))
     open("w/config.js", "w").write("export default " + json.dumps(cfg) + ";\n")
     open("w/.dev.vars", "w").write("WITNESS_KEY=" + base64.b64encode(w.private_bytes(S.Encoding.Raw, S.PrivateFormat.Raw, S.NoEncryption())).decode() + "\n")

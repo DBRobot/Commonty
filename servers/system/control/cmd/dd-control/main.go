@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -178,6 +179,12 @@ func reportMessage(box, dir string) ([]byte, error) {
 // network; the gate checks the same bytes (servers/gate/src/network.rs)
 func joinMessage(box string, now int64) []byte {
 	return []byte(fmt.Sprintf("commonty box join v1\x00%s\x00%d", box, now))
+}
+
+// what a box signs to ask for a network key for the remote computer it
+// runs (the gate's network.rs, computer_join_message)
+func computerJoinMessage(box, id string, now int64) []byte {
+	return []byte(fmt.Sprintf("commonty computer join v1\x00%s\x00%s\x00%d", box, id, now))
 }
 
 // how old agreement may be and still switch anything here
@@ -442,11 +449,13 @@ func main() {
 	placedCopies := flag.String("placed-copies", "", "where to write the plan's copies, which boxes' stores keep each bucket (nix/modules/storage/store.nix); empty: nowhere")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
+	testFacts := flag.String("test-facts", "", "tests only: a JSON object of facts this box reports over what it measures")
 	submitSock := flag.String("submit", "", "a unix socket where this box's gate hands in directory items (POST /submit); empty: none")
 	submitGroup := flag.String("submit-group", "", "the group that may open -submit (the gate's)")
 	builtSock := flag.String("builds", "", "a unix socket, root's alone, where dd-attest hands in build results (POST /built); empty: none")
 	report := flag.String("sign-report", "", "sign the box's report in this directory (hardware.json, hardware-configuration.nix) as -box, into report.sig, and exit")
 	join := flag.Bool("sign-join", false, "print a request for a join key to the fleet's network, signed as -box now, and exit")
+	computerJoin := flag.String("sign-computer-join", "", "print a request for a network key for the remote computer with this id, which this box runs, signed as -box now, and exit")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -456,6 +465,23 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println(base64.StdEncoding.EncodeToString(k.Public().(ed25519.PublicKey)))
+		return
+	}
+
+	if *computerJoin != "" {
+		if !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(*computerJoin) {
+			log.Fatalf("not a computer's id: %q", *computerJoin)
+		}
+		now := time.Now().Unix()
+		sign := func(m []byte) (string, error) { return tpmSign(*tpmKeys, m) }
+		if *softKey != "" {
+			sign = softSigner(*softKey)
+		}
+		sig, err := sign(computerJoinMessage(*box, *computerJoin, now))
+		if err != nil {
+			log.Fatal(err)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"box": *box, "id": *computerJoin, "time": now, "sig": sig})
 		return
 	}
 
@@ -632,6 +658,12 @@ func main() {
 			for k, v := range placed.facts() {
 				f[k] = v
 			}
+			if *testFacts != "" {
+				extra := map[string]float64{}
+				if raw, err := os.ReadFile(*testFacts); err == nil && json.Unmarshal(raw, &extra) == nil {
+					maps.Copy(f, extra)
+				}
+			}
 			body, _ := json.Marshal(state.Heartbeat{Facts: f, Roles: splitRoles(*roles)})
 			if _, err := submit("heartbeat", body); err != nil {
 				log.Printf("heartbeat: %v", err)
@@ -734,10 +766,6 @@ func main() {
 			return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
 		}
 	}
-	// no plan here: no computer runs here either
-	if *placement == "" {
-		placed.lowerComputers("no placement inputs")
-	}
 	// what the fleet would run, from the agreed state now
 	if *placement != "" {
 		raw, err := os.ReadFile(*placement)
@@ -756,15 +784,14 @@ func main() {
 			}
 			return place.Decide(i, s, cfg.Rules.GoneAfter)
 		}
-		placed.agreed = func(s *state.State) (map[string]bool, error) {
+		placed.limits = cfg.Computers
+		placed.agreed = func(s *state.State) (map[string]*computers.Listed, error) {
 			if rc == nil {
 				return nil, errors.New("the release has no rules for computers")
 			}
-			up := map[string]bool{}
+			up := map[string]*computers.Listed{}
 			for _, c := range rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time) {
-				if c.Up {
-					up[place.ComputerService(c.ID)] = true
-				}
+				up[place.ComputerService(c.ID)] = c
 			}
 			return up, nil
 		}
@@ -785,8 +812,9 @@ func main() {
 					time.Sleep(placeEvery)
 					placed.fence()
 					s := n.State()
+					// not fresh: what runs keeps running, a writer (a
+					// computer too) only until its lease may lapse
 					if time.Now().UnixMilli()-s.Time > freshFor.Milliseconds() {
-						placed.lowerComputers("the agreed state is not fresh")
 						continue
 					}
 					placed.reconcile(decide(s), s)
@@ -820,6 +848,18 @@ func main() {
 		})
 	}
 	if rc != nil {
+		// one computer and its lease, from one agreed state: what the gate
+		// hands a computer's network key by (the gate's network.rs)
+		http.HandleFunc("/computer-lease", func(w http.ResponseWriter, req *http.Request) {
+			id := req.URL.Query().Get("id")
+			if !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(id) {
+				http.Error(w, "not a computer's id", http.StatusBadRequest)
+				return
+			}
+			s := n.State()
+			w.Header().Set("content-type", "application/json")
+			_ = json.NewEncoder(w).Encode(computerLease(s, cfg, id, rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time)))
+		})
 		http.HandleFunc("/computers", func(w http.ResponseWriter, req *http.Request) {
 			q := req.URL.Query()
 			since, _ := strconv.ParseUint(q.Get("since"), 10, 64)
@@ -879,4 +919,22 @@ func softSigner(path string) func([]byte) (string, error) {
 		}
 		return base64.RawURLEncoding.EncodeToString(sig), nil
 	}
+}
+
+// computerLease: a computer and its lease as one agreed state has them,
+// with the release's owner of the box that holds it
+func computerLease(s *state.State, cfg *state.Config, id string, cs []*computers.Listed) map[string]any {
+	out := map[string]any{"height": s.Height, "leaseHeight": s.Height, "time": s.Time}
+	for _, c := range cs {
+		if c.ID == id {
+			out["computer"] = map[string]any{"owner": c.Owner, "up": c.Up, "consent": c.Consent}
+		}
+	}
+	if l := s.Leases["svc/computer-"+id]; l != nil {
+		out["lease"] = map[string]any{"holder": l.Holder, "expires": l.Expires}
+		if owner, ok := cfg.Rules.ComputerHosts[l.Holder]; ok {
+			out["hostOwner"] = owner
+		}
+	}
+	return out
 }

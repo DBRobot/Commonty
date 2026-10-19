@@ -68,6 +68,7 @@ type Listed struct {
 	Disk     uint64    `json:"disk"`
 	Nix      string    `json:"nix"`
 	Players  []string  `json:"players"`
+	Keys     []string  `json:"keys"`
 	Consent  string    `json:"consent"`
 	Anywhere bool      `json:"anywhere"`
 	Port     uint64    `json:"port"`
@@ -120,7 +121,7 @@ func (s *State) View(id *ident.State, cfg *ident.Config, height uint64, timeMs i
 		c := &Listed{
 			Owner: h.Owner, ID: h.ID, Name: h.Name, Config: h.Config,
 			Memory: h.Memory, Threads: h.Threads, Disk: h.Disk, Nix: h.Nix,
-			Players: h.Players, Consent: h.Consent, Anywhere: h.Anywhere,
+			Players: h.Players, Keys: h.Keys, Consent: h.Consent, Anywhere: h.Anywhere,
 			Port: h.Port, Forwards: h.Forwards, Asked: h.Up, Up: h.Up && member,
 			Agreed: h.Agreed, Item: h.Item,
 		}
@@ -129,6 +130,9 @@ func (s *State) View(id *ident.State, cfg *ident.Config, height uint64, timeMs i
 		}
 		if c.Players == nil {
 			c.Players = []string{}
+		}
+		if c.Keys == nil {
+			c.Keys = []string{}
 		}
 		c.Boxes = []string{}
 		if h.Consent == "own" {

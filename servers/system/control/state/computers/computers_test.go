@@ -563,3 +563,51 @@ func TestOwners(t *testing.T) {
 		t.Fatalf("%d %s", code, b)
 	}
 }
+
+// "own" counts a box the release gives a member (box.json) as theirs,
+// as placement does, without an enlistment
+func TestOwnOnABoxTheReleaseGivesThem(t *testing.T) {
+	ann := who("ann", 10)
+	f := newFleet(t, ann)
+	f.claim(ann)
+	own := make1("ann", "00000000000000b1", "own", 1024, 1, 1)
+	own.Consent, own.Anywhere = "own", false
+	if got := f.add(seal(t, "computer", body(t, own), ann.root)); got == "ok" {
+		t.Fatal("own, with no box")
+	}
+	f.lim.Owners = []string{"ann"}
+	own.Version = 2
+	if got := f.add(seal(t, "computer", body(t, own), ann.root)); got != "ok" {
+		t.Fatal(got)
+	}
+}
+
+// the keys its sshd lets in: OpenSSH public keys only, a few, one line each
+func TestSSHKeys(t *testing.T) {
+	ann := who("ann", 10)
+	f := newFleet(t, ann)
+	f.claim(ann)
+	good := "ssh-ed25519 " + b64.EncodeToString(append([]byte{0, 0, 0, 11}, append([]byte("ssh-ed25519"), make([]byte, 36)...)...))
+	c := make1("ann", "00000000000000d1", "keys", 1024, 1, 1)
+	for _, bad := range [][]string{
+		{"command=\"sh\" " + good},
+		{good + " a\nssh-ed25519 AAAA"},
+		{"ssh-rsa " + good[len("ssh-ed25519 "):]}, // the blob says ed25519
+		{"ssh-ed25519 !!!!"},
+		{good, good, good, good, good, good, good, good, good},
+	} {
+		c.Keys = bad
+		c.Version++
+		if got := f.add(seal(t, "computer", body(t, c), ann.root)); got == "ok" {
+			t.Fatalf("keys %q taken", bad)
+		}
+	}
+	c.Keys = []string{good, good + " ann@laptop"}
+	c.Version++
+	if got := f.add(seal(t, "computer", body(t, c), ann.root)); got != "ok" {
+		t.Fatal(got)
+	}
+	if k := f.view().Computers[c.ID].Keys; len(k) != 2 || k[1] != good+" ann@laptop" {
+		t.Fatalf("keys %v", k)
+	}
+}

@@ -15,7 +15,12 @@ for f in "$dir"/*; do
   until=$(jq -r '.until // empty' "$f" 2>/dev/null) || continue
   [ -n "$until" ] && [ "$now" -ge "$until" ] || continue
   svc=$(basename "$f")
-  mapfile -t units < <(jq -r --arg s "$svc" '.[$s] // [] | .[]' "$carries")
+  # a remote computer's one unit is its own (placed.go, units)
+  if [[ $svc =~ ^computer-([0-9a-f]{16})$ ]]; then
+    units=("dd-computer@${BASH_REMATCH[1]}.service")
+  else
+    mapfile -t units < <(jq -r --arg s "$svc" '.[$s] // [] | .[]' "$carries")
+  fi
   echo "$svc: its lease may have lapsed; stopping ${units[*]}"
   if [ "${#units[@]}" -eq 0 ] || systemctl stop "${units[@]}"; then
     rm -f "$f"

@@ -61,6 +61,11 @@ type Rules struct {
 	GoneAfter int64 `json:"goneAfterMs"` // a box unheard this long is not alive
 	// role -> who may hold its writer lease; empty means any live box
 	Leases map[string]LeaseRule `json:"leases"`
+	// box -> its owner by the release (box.json, "" for none): the boxes
+	// whose release table gives them computers and whose owner does not
+	// bar them, the only ones a remote computer's lease goes to
+	// (computerlease.go)
+	ComputerHosts map[string]string `json:"computerHosts,omitempty"`
 }
 
 type LeaseRule struct {
@@ -236,6 +241,11 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 
 func (s *State) checkLease(cfg *Config, box string, op LeaseOp, now int64) error {
 	rule, ok := cfg.Rules.Leases[op.Role]
+	// a remote computer's: by the log, not the release (computerlease.go)
+	computer := ""
+	if m := computerLease.FindStringSubmatch(op.Role); !ok && m != nil {
+		computer, ok = m[1], true
+	}
 	if !ok {
 		return fmt.Errorf("no lease called %q", op.Role)
 	}
@@ -252,10 +262,17 @@ func (s *State) checkLease(cfg *Config, box string, op LeaseOp, now int64) error
 		if !s.Alive(cfg, box, now) {
 			return fmt.Errorf("%s is not alive", box)
 		}
+		if computer != "" {
+			return s.checkComputerLease(cfg, box, computer, now)
+		}
 		return nil
 	case "renew", "release":
 		if !held || cur.Holder != box || cur.Epoch != op.Epoch {
 			return fmt.Errorf("%s does not hold %s at epoch %d", box, op.Role, op.Epoch)
+		}
+		// given back always; kept only while it may still be held
+		if computer != "" && op.Op == "renew" {
+			return s.checkComputerLease(cfg, box, computer, now)
 		}
 		return nil
 	}

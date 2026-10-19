@@ -36,7 +36,16 @@ def state(i):
 json.dump(
     {
         "boxes": {
-            f"node{i}": {"site": f"h{i}", "region": "r", "can": {"web": 1, "db": 1}}
+            f"node{i}": {
+                "site": f"h{i}",
+                "region": "r",
+                # node1 is no host of computers; node3 is cara's
+                "can": {"web": 1, "db": 1} | ({"computers": 1} if i > 1 else {}),
+                "owner": "cara" if i == 3 else "",
+                "memoryGiB": 32,
+                "threads": 8,
+                "poolGiB": 500,
+            }
             for i in (1, 2, 3)
         },
         "services": {
@@ -58,6 +67,19 @@ for i in (2, 3):
     json.dump(
         {"web": ["web.service"], "db": ["db.service"]},
         open(f"{T}/carries{i}.json", "w"),
+    )
+# what a host of computers says of itself (computer-facts.sh), as each box
+# would: KVM on x86_64, room for them
+for i in (1, 2, 3):
+    json.dump(
+        {
+            "kvm": 1,
+            "x86_64": 1,
+            "computer_max_mem_bytes": 16 * 2**30,
+            "computer_max_threads": 7,
+            "computer_max_disk_bytes": 400 * 2**30,
+        },
+        open(f"{T}/facts{i}.json", "w"),
     )
 os.makedirs(f"{T}/bin", exist_ok=True)
 with open(f"{T}/bin/systemctl", "w") as f:
@@ -102,6 +124,8 @@ def run(i):
             f"{T}/carries{i}.json",
             "-placed-dir",
             f"{T}/placed{i}",
+            "-test-facts",
+            f"{T}/facts{i}.json",
         ],
         env=env,
         stdout=open(f"{T}/n{i}.log", "a"),
@@ -407,6 +431,129 @@ ok(
     all(entry_on(i, "bob") for i in (1, 2, 3)),
     "the gate back, the name is agreed on every box",
 )
+
+
+# ---- a member's remote computer: judged from the log, placed, run under
+# its lease on a box placement may give it, and stopped when powered off
+def submit(i, item):
+    import socket
+
+    body = json.dumps(item).encode()
+    c = socket.socket(socket.AF_UNIX)
+    c.connect(f"{T}/s{i}.sock")
+    c.sendall(
+        b"POST /submit HTTP/1.0\r\nContent-Type: application/json\r\n"
+        + f"Content-Length: {len(body)}\r\n\r\n".encode()
+        + body
+    )
+    answer = b""
+    while chunk := c.recv(4096):
+        answer += chunk
+    return int(answer.split()[1])
+
+
+cara = ed.Ed25519PrivateKey.from_private_bytes(open(f"{T}/cara.key", "rb").read())
+
+
+def seal(kind, value):
+    body = json.dumps(value, separators=(",", ":")).encode()
+    sig = cara.sign(f"commonty {kind} v2\0".encode() + body)
+    return {"v": 2, "kind": kind, "body": b64(body), "sig": b64(sig)}
+
+
+c, b = http("PUT", "http://127.0.0.1:4282/_dd/directory/cara", signed("cara", cara, 1))
+ok(c == 200, f"cara's name agreed ({c} {b[:120]!r})")
+
+
+def cara_member(i):
+    c, v = identity(i)
+    return c == 200 and v["members"].get("cara", {}).get("status") == "member"
+
+
+until("cara a member on every box", lambda: all(cara_member(i) for i in (1, 2, 3)), 30)
+
+KEY = (
+    "ssh-ed25519 "
+    + b64(b"\0\0\0\x0bssh-ed25519\0\0\0\x20" + bytes(32))
+    + " cara@laptop"
+)
+
+
+def computer(cid, name, consent, version=1):
+    return {
+        "owner": "cara",
+        "id": cid,
+        "name": name,
+        "config": "default",
+        "memory": 2048,
+        "threads": 2,
+        "disk": 32,
+        "nix": "",
+        "ports": [],
+        "players": [],
+        "keys": [KEY],
+        "consent": consent,
+        "anywhere": consent == "any",
+        "version": version,
+    }
+
+
+def computers(i):
+    c, b = http("GET", f"http://127.0.0.1:419{i}/computers", timeout=5)
+    return json.loads(b)["computers"] if c == 200 else {}
+
+
+OWN = "00000000000000c3"
+ok(
+    submit(1, seal("computer", computer(OWN, "dev", "own"))) == 202,
+    "cara's computer handed in",
+)
+until("it is agreed up", lambda: computers(2).get(OWN, {}).get("up") is True, 30)
+ok(
+    computers(3).get(OWN, {}).get("keys") == [KEY],
+    "agreed with the key her device made, on every box",
+)
+
+comp_flag = lambda i, cid: f"{T}/placed{i}/computer-{cid}"
+lease_of = lambda i, cid: state(i).get("leases", {}).get(f"svc/computer-{cid}", {})
+until(
+    "it runs on cara's box under its lease",
+    lambda: (
+        os.path.exists(comp_flag(3, OWN)) and lease_of(1, OWN).get("holder") == "node3"
+    ),
+    90,
+)
+ok(
+    os.path.exists(comp_flag(3, OWN))
+    and json.load(open(comp_flag(3, OWN)))["epoch"] == lease_of(1, OWN).get("epoch"),
+    "cara's own box holds its lease and runs it at that epoch",
+)
+ok(
+    f"start --no-block dd-computer@{OWN}.service\n"
+    in open(f"{T}/systemctl3.log").readlines(),
+    "and started its unit",
+)
+time.sleep(5)
+ok(
+    not os.path.exists(comp_flag(2, OWN))
+    and f"dd-computer@{OWN}" not in open(f"{T}/systemctl2.log").read(),
+    "a host that is not cara's never runs her my-boxes-only computer",
+)
+
+off = {"id": OWN, "up": False, "at": int(time.time())}
+ok(submit(2, seal("computer-power", off)) == 202, "powered off")
+until(
+    "it stops and its lease goes back",
+    lambda: not os.path.exists(comp_flag(3, OWN)) and not lease_of(1, OWN),
+    60,
+)
+ok(
+    f"stop dd-computer@{OWN}.service\n" in open(f"{T}/systemctl3.log").readlines()
+    and not os.path.exists(comp_flag(3, OWN))
+    and not lease_of(1, OWN),
+    "powered off: stopped, waited for, its lease given back",
+)
+
 for g in gates.values():
     g.terminate()
 

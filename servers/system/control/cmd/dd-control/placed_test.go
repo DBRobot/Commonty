@@ -1,7 +1,7 @@
 package main
 
 import (
-	"errors"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +11,7 @@ import (
 
 	"commonty/control/place"
 	"commonty/control/state"
+	"commonty/control/state/computers"
 )
 
 func newPlacer(t *testing.T) (*placer, *[]string) {
@@ -266,69 +267,146 @@ func TestThePlansCopiesAreWritten(t *testing.T) {
 	}
 }
 
-const (
-	compA = "computer-0123456789abcdef"
-	compB = "computer-fedcba9876543210"
-)
-
-// a placer with computers a and b agreed up
-func computerPlacer(t *testing.T) (*placer, *[]string) {
-	p, calls := newPlacer(t)
-	p.agreed = func(*state.State) (map[string]bool, error) { return map[string]bool{compA: true, compB: true}, nil }
-	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: compA}, {Service: compB}, {Service: "computer-../x"}}}}, state.New())
-	if !p.up(compA) || !p.up(compB) {
-		t.Fatalf("flags %v %v", p.up(compA), p.up(compB))
+// a placer with these computers agreed (by id; up unless said), within the
+// policy's limits
+func computerPlacer(t *testing.T, cs ...*computers.Listed) (*placer, *[]string, *int64, *state.State) {
+	p, calls, clock, s := leasedPlacer(t)
+	p.limits = &computers.Limits{Memory: 16384, Threads: 8, Disk: 200, PortBase: 27200, PortCount: 200}
+	agreed := map[string]*computers.Listed{}
+	for _, c := range cs {
+		agreed["computer-"+c.ID] = c
 	}
-	return p, calls
+	p.agreed = func(*state.State) (map[string]*computers.Listed, error) { return agreed, nil }
+	return p, calls, clock, s
 }
 
-func TestAComputerGetsItsFlagAndNothingElse(t *testing.T) {
-	p, calls := computerPlacer(t)
-	if len(*calls) != 0 {
-		t.Fatalf("calls %v", *calls)
+func comp(id, owner string, mem, threads, port uint64) *computers.Listed {
+	return &computers.Listed{ID: id, Owner: owner, Memory: mem, Threads: threads, Disk: 32, Port: port, Up: true}
+}
+
+func TestAComputerRunsUnderItsLeaseAndIsFenced(t *testing.T) {
+	p, calls, clock, s := computerPlacer(t, comp("0123456789abcdef", "ann", 4096, 2, 27200))
+	a, b := "computer-0123456789abcdef", "computer-fedcba9876543210"
+	unit := "dd-computer@0123456789abcdef.service"
+	plan := place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: a}, {Service: "computer-../x"}}}}
+	p.reconcile(plan, s)
+	if p.up(a) || !reflect.DeepEqual(*calls, []string{"lease acquire"}) {
+		t.Fatalf("started without its lease: %v", *calls)
 	}
-	if f := p.facts(); f["runs/"+compA] != 1 || f["runs/"+compB] != 1 || len(f) != 4 {
+	last := uint64(0)
+	for q := range p.sent[a] {
+		last = max(last, q)
+	}
+	s.Leases["svc/"+a] = &state.Lease{Holder: "node1", Epoch: 2, Expires: s.Time + 15_000, Seq: last}
+	// not at once: a holder before may still be stopping
+	p.reconcile(plan, s)
+	*clock += leaseMargin.Milliseconds()
+	p.reconcile(plan, s)
+	if h := p.holding(a); !p.up(a) || h.Epoch != 2 || (*calls)[len(*calls)-1] != "start --no-block "+unit {
+		t.Fatalf("flag %v %+v, calls %v", p.up(a), h, *calls)
+	}
+	if f := p.facts(); f["runs/"+a] != 1 || f["runs/"+b] != 0 {
 		t.Fatalf("facts %v", f)
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(p.dir), "x")); err == nil {
-		t.Fatalf("a flag outside the flags' directory")
-	}
-	// a plan without b takes its flag down
-	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: compA}}}}, state.New())
-	if !p.up(compA) || p.up(compB) || len(*calls) != 0 {
-		t.Fatalf("flags %v %v, calls %v", p.up(compA), p.up(compB), *calls)
+	// cut off: the fence stops it, waiting for the stop, before the lease may lapse
+	*clock += 15_000
+	p.fence()
+	if p.up(a) || (*calls)[len(*calls)-1] != "stop "+unit {
+		t.Fatalf("still running past its lease: %v", *calls)
 	}
 }
 
-func TestAComputerFlagFailsClosed(t *testing.T) {
-	both := place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: compA}, {Service: compB}}}}
-	for name, step := range map[string]func(p *placer){
-		"the agreed computers cannot be read": func(p *placer) {
-			p.agreed = func(*state.State) (map[string]bool, error) { return nil, errors.New("no view") }
-			p.reconcile(both, state.New())
-		},
-		"no agreed computers at all": func(p *placer) {
-			p.agreed = nil
-			p.reconcile(both, state.New())
-		},
-		"a plan this box is not in": func(p *placer) {
-			p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node2": {}}}, state.New())
-		},
-		"no plan, the state not fresh": func(p *placer) {
-			p.lowerComputers("the agreed state is not fresh")
-		},
-	} {
-		p, _ := computerPlacer(t)
-		step(p)
-		if p.up(compA) || p.up(compB) {
-			t.Fatalf("%s: flags %v %v", name, p.up(compA), p.up(compB))
-		}
+func TestAComputerTheLeaseOfIsGivenBackWhenThePlanMovesIt(t *testing.T) {
+	p, calls, _, s := computerPlacer(t, comp("0123456789abcdef", "ann", 4096, 2, 27200))
+	a := "computer-0123456789abcdef"
+	s.Leases["svc/"+a] = &state.Lease{Holder: "node1", Epoch: 1, Expires: s.Time + 15_000}
+	// no flag and not in the plan: only its lease is this box's, and goes back
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}, s)
+	if !reflect.DeepEqual(*calls, []string{"lease release"}) {
+		t.Fatalf("calls %v", *calls)
 	}
-	// planned here, but not agreed up: down, and never raised
-	p, _ := computerPlacer(t)
-	p.agreed = func(*state.State) (map[string]bool, error) { return map[string]bool{compA: true}, nil }
-	p.reconcile(both, state.New())
-	if !p.up(compA) || p.up(compB) {
-		t.Fatalf("flags %v %v", p.up(compA), p.up(compB))
+}
+
+// planned here, but not agreed up, unread, or past what its owner may have
+// here: no lease asked for
+func TestAComputerIsAskedForOnlyAgreedUpAndWithinItsLimits(t *testing.T) {
+	a, b := comp("0123456789abcdef", "ann", 12288, 4, 27200), comp("fedcba9876543210", "ann", 8192, 2, 27201)
+	plan := place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: "computer-" + a.ID}, {Service: "computer-" + b.ID}}}}
+	asked := func(p *placer) []string {
+		out := []string{}
+		for svc, sent := range p.sent {
+			if len(sent) > 0 {
+				out = append(out, svc)
+			}
+		}
+		return out
+	}
+	// ann's two together are 20 GiB, over her 16: the first by id alone
+	p, _, _, s := computerPlacer(t, a, b)
+	p.reconcile(plan, s)
+	if got := asked(p); !reflect.DeepEqual(got, []string{"computer-" + a.ID}) {
+		t.Fatalf("asked for %v", got)
+	}
+	// not up
+	down := *a
+	down.Up = false
+	p, _, _, s = computerPlacer(t, &down)
+	p.reconcile(plan, s)
+	if got := asked(p); len(got) != 0 {
+		t.Fatalf("asked for %v, not up", got)
+	}
+	// a port outside the pool
+	p, _, _, s = computerPlacer(t, comp("0123456789abcdef", "ann", 1024, 1, 22))
+	p.reconcile(plan, s)
+	if got := asked(p); len(got) != 0 {
+		t.Fatalf("asked for %v, its port not the pool's", got)
+	}
+	// the agreed computers unread, or no limits in the release
+	p, _, _, s = computerPlacer(t, a)
+	p.agreed = func(*state.State) (map[string]*computers.Listed, error) { return nil, os.ErrNotExist }
+	p.reconcile(plan, s)
+	if got := asked(p); len(got) != 0 {
+		t.Fatalf("asked for %v, nothing agreed read", got)
+	}
+	p, _, _, s = computerPlacer(t, a)
+	p.limits = nil
+	p.reconcile(plan, s)
+	if got := asked(p); len(got) != 0 {
+		t.Fatalf("asked for %v, no limits", got)
+	}
+}
+
+// a computer running here that is powered off: stopped, waited for, then
+// its lease given back
+func TestAComputerPoweredOffStopsBeforeItsLeaseGoesBack(t *testing.T) {
+	a := comp("0123456789abcdef", "ann", 4096, 2, 27200)
+	p, calls, _, s := computerPlacer(t, a)
+	svc := "computer-" + a.ID
+	s.Leases["svc/"+svc] = &state.Lease{Holder: "node1", Epoch: 3, Expires: s.Time + 15_000}
+	if err := p.raise(svc, []byte(`{"epoch":3,"until":99999999}`)); err != nil {
+		t.Fatal(err)
+	}
+	a.Up = false
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: svc}}}}, s)
+	want := []string{"stop dd-computer@" + a.ID + ".service", "lease release"}
+	if p.up(svc) || !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("flag %v, calls %v", p.up(svc), *calls)
+	}
+}
+
+// one computer and its lease from one state: whose box holds it by the release
+func TestAComputersLeaseIsAnsweredFromOneState(t *testing.T) {
+	s := state.New()
+	s.Height, s.Time = 7, 5000
+	s.Leases["svc/computer-0123456789abcdef"] = &state.Lease{Holder: "node1", Epoch: 2, Expires: 9000}
+	cfg := &state.Config{Rules: state.Rules{ComputerHosts: map[string]string{"node1": "ann"}}}
+	got := computerLease(s, cfg, "0123456789abcdef", []*computers.Listed{{ID: "0123456789abcdef", Owner: "ann", Up: true, Consent: "own"}})
+	b, _ := json.Marshal(got)
+	want := `{"computer":{"consent":"own","owner":"ann","up":true},"height":7,"hostOwner":"ann","lease":{"expires":9000,"holder":"node1"},"leaseHeight":7,"time":5000}`
+	if string(b) != want {
+		t.Fatalf("%s", b)
+	}
+	if got := computerLease(s, cfg, "fedcba9876543210", nil); got["computer"] != nil || got["lease"] != nil {
+		t.Fatalf("%v", got)
 	}
 }

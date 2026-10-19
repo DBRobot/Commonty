@@ -695,6 +695,15 @@
                     if able == [ ] then [ "" ] else able;
                 }
               ) (nixpkgs.lib.filterAttrs (_: n: n.lease) fp.needs);
+              # a remote computer's lease goes only where placement may put
+              # it (place/computers.go): the release's table gives the box
+              # computers and its owner does not bar them; with its owner,
+              # for "own"
+              computerHosts = nixpkgs.lib.mapAttrs (_: b: if b.owner == null then "" else b.owner) (
+                nixpkgs.lib.filterAttrs (
+                  _: b: b.can ? computers && !(builtins.elem "computers" b.barred)
+                ) fp.inputs.boxes
+              );
               config = {
                 boxes = builtins.listToAttrs (
                   nixpkgs.lib.imap1 (i: n: {
@@ -715,9 +724,12 @@
                 };
                 # what members' remote computers may take, and their ports'
                 # pool (state/computers): fleet/policy.json computers
-                computers = (builtins.fromJSON (builtins.readFile ./fleet/policy.json)).computers;
+                computers = (builtins.fromJSON (builtins.readFile ./fleet/policy.json)).computers // {
+                  owners = nixpkgs.lib.unique (builtins.filter (o: o != "") (builtins.attrValues computerHosts));
+                };
                 rules = ctl.rules // {
                   leases = (ctl.rules.leases or { }) // leases;
+                  inherit computerHosts;
                 };
               };
               src = pkgs.lib.fileset.toSource {
