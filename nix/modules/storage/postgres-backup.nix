@@ -113,6 +113,13 @@ in
 
         systemd.services = lib.genAttrs (map (d: "postgresqlBackup-${d}") dbs) (_: {
           unitConfig.RequiresMountsFor = cfg.dir;
+          # a dump of what runs, never a reason to run it: upstream's
+          # Requires=postgresql.target made the hourly timer start postgres,
+          # and a start queued while postgres is stopped for its lease to move
+          # cancels that stop and brings it back on the old holder
+          requires = lib.mkForce [ ];
+          after = [ "postgresql.service" ];
+          serviceConfig.ExecCondition = "${pkgs.systemd}/bin/systemctl is-active --quiet postgresql.service";
           serviceConfig.ExecStartPre = [
             # "+" runs as root despite User=postgres, so it can create the
             # directory inside the root-owned dataset mountpoint. Doing it here
@@ -153,7 +160,6 @@ in
         systemd.services.postgres-backup-verify = {
           description = "Restore the newest dump into a scratch database and check it";
           after = [ "postgresql.service" ];
-          requires = [ "postgresql.service" ];
           onFailure = lib.optional mail "postgres-backup-alert@postgres-backup-verify.service";
           # not on the hour: the hourly dump is being rewritten then, and the
           # check found no file (2026-09-14)
@@ -161,6 +167,8 @@ in
           serviceConfig = {
             Type = "oneshot";
             User = "postgres";
+            # as the dumps: only where postgres runs, never starting it
+            ExecCondition = "${pkgs.systemd}/bin/systemctl is-active --quiet postgresql.service";
             ExecStart = verify;
           };
         };

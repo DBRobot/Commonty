@@ -11,9 +11,14 @@ with subtest("a wrong passphrase is refused at the keyboard"):
     box.wait_until_tty_matches("1", "[Ll]ogin incorrect")
 
 with subtest("the passphrase logs you in and wheel still works"):
-    box.wait_until_tty_matches("1", "login:")
+    # the first try's prompts are still on the screen: wait for the ones
+    # after "Login incorrect", or the passphrase is typed before login asks
+    # for it, and the password prompt flushes what was typed early
+    box.wait_until_tty_matches("1", r"[Ll]ogin incorrect\s+\S+ login:")
     box.send_chars("admin\n")
-    box.wait_until_tty_matches("1", "Password:")
+    box.wait_until_tty_matches(
+        "1", r"[Ll]ogin incorrect\s+\S+ login: admin\s+Password:"
+    )
     box.send_chars("console-test-passphrase\n")
     box.wait_until_tty_matches("1", "admin@box")
     box.send_chars("sudo id -u > /tmp/who\n")

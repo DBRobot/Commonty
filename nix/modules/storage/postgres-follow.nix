@@ -217,13 +217,17 @@ let
         pkgs.coreutils
       ]
     }
-    seg=$(psql -tAc "select pg_walfile_name(pg_switch_wal())" 2>/dev/null) || exit 0
+    psql -tAc "select pg_switch_wal()" >/dev/null 2>&1 || exit 0
+    # done when no finished segment waits for the archiver. (Not by name: with
+    # nothing written since the last switch, as right after dd-pg-base, the
+    # name pg_switch_wal points at is the empty segment it started, which is
+    # archived only once archive_timeout fills it, so every stop took 30s.)
     for _ in $(seq 1 60); do
-      done=$(psql -tAc "select coalesce(last_archived_wal, ''') >= '$seg' from pg_stat_archiver" 2>/dev/null || echo f)
-      [ "$done" = t ] && exit 0
+      left=$(psql -tAc "select count(*) from pg_ls_archive_statusdir() where name like '%.ready'" 2>/dev/null || echo 1)
+      [ "$left" = 0 ] && exit 0
       sleep 0.5
     done
-    echo "segment $seg not archived within 30s: the next holder restores to before it" >&2
+    echo "$left segments not archived within 30s: the next holder restores to before them" >&2
   '';
 in
 {

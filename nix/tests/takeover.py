@@ -63,8 +63,23 @@ a.wait_until_succeeds(
 a.succeed("systemctl start dd-pg-base.service")
 # stopped first, the flags after, as dd-control does: postgres archives its
 # last segment on the way down only while its flag says the lease is its.
-# A stop can be cancelled by a start racing it: ask again
-a.wait_until_succeeds("systemctl stop ente.service postgresql.service", timeout=120)
+# The hourly dump coming due mid-stop (CI, 14:00) once cancelled the stop and
+# brought postgres back: it may not start postgres at all
+a.succeed("systemctl stop --no-block ente.service postgresql.service")
+a.succeed("systemctl start --no-block postgresqlBackup-ente.service")
+a.wait_until_succeeds(
+    '[ "$(systemctl list-jobs --no-legend | grep -c -e ente -e postgres)" = 0 ]',
+    timeout=120,
+)
+a.succeed('[ "$(systemctl show -P ActiveState postgresql.service)" = inactive ]')
+# the dump waited for the stop and found nothing to dump: skipped, not failed
+a.succeed(
+    '[ "$(systemctl show -P Result postgresqlBackup-ente.service)" = exec-condition ]'
+)
+# and the last segment went within the stop, not 30s of archive_timeout later
+a.succeed(
+    "[ $(journalctl -u postgresql.service -o cat | grep -c 'not archived within') = 0 ]"
+)
 a.succeed("rm /run/dd-placed/postgresql /run/dd-placed/ente-museum")
 a.wait_until_succeeds(
     # a copy that found the other store not ready says so: until none does

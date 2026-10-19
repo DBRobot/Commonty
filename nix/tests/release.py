@@ -60,17 +60,42 @@ def publish(counter, path, tamper=False):
 
 
 def agent(expect_ok=True):
-    # a switch can make systemd re-exec, which cuts systemctl's wait
-    # short while the agent is still running: wait for the unit itself
+    # this run, not the last one: a start only queued leaves the unit as the
+    # last run left it. A switch can make systemd re-exec, which cuts
+    # systemctl's wait short, and a systemctl that cannot reach systemd then
+    # prints nothing: wait for a new invocation that systemd says is done
+    before = box.succeed("systemctl show -P InvocationID dd-agent.service").strip()
     box.succeed("systemctl start --no-block dd-agent.service")
     box.wait_until_succeeds(
-        "[ $(systemctl is-active dd-agent.service) != active ] && [ $(systemctl is-active dd-agent.service) != activating ]",
+        "id=$(systemctl show -P InvocationID dd-agent.service) && "
+        f'[ -n "$id" ] && [ "$id" != "{before}" ] && ' + gone("dd-agent.service"),
         timeout=300,
     )
-    if expect_ok:
-        box.succeed("! systemctl is-failed dd-agent.service")
-    else:
-        box.succeed("systemctl is-failed dd-agent.service")
+    result = box.succeed("systemctl show -P Result dd-agent.service").strip()
+    assert (result == "success") == expect_ok, (result, run_log())
+
+
+def run_log():
+    """what the agent's last run said, and only that run"""
+    return box.succeed(
+        "journalctl -o cat _SYSTEMD_INVOCATION_ID=$(systemctl show -P InvocationID dd-agent.service)"
+    )
+
+
+def said(text):
+    # journald may take the last lines of an exited run a moment after
+    # systemd has the unit stopped
+    box.wait_until_succeeds(
+        "journalctl -o cat _SYSTEMD_INVOCATION_ID=$(systemctl show -P InvocationID dd-agent.service)"
+        f" | grep -c -F '{text}'",
+        timeout=30,
+    )
+
+
+def gone(unit):
+    """not running, as systemd says it: `! systemctl is-active` also passes
+    when systemctl cannot reach a systemd that is re-executing"""
+    return f'case "$(systemctl show -P ActiveState {unit})" in inactive|failed) ;; *) false ;; esac'
 
 
 # release 1 names what the box already runs: nothing to do, counter kept
@@ -81,7 +106,7 @@ box.succeed("[ $(cat /var/lib/dd-agent/counter) = 1 ]")
 # release 2 moves it, and leaves no guard behind
 publish(2, f"{nix['marked']}")
 agent()
-box.succeed("! systemctl is-active dd-agent-guard.timer")
+box.succeed(gone("dd-agent-guard.timer"))
 box.succeed(f"[ $(readlink /run/current-system) = {nix['marked']} ]")
 box.succeed("grep -q 'release 2' /etc/dd-marker")
 box.succeed("[ $(cat /var/lib/dd-agent/counter) = 2 ]")
@@ -97,7 +122,7 @@ box.succeed("[ $(cat /var/lib/dd-agent/counter) = 2 ]")
 publish(5, f"{nix['base']}", tamper=True)
 agent(expect_ok=False)
 box.succeed(f"[ $(readlink /run/current-system) = {nix['marked']} ]")
-box.succeed("journalctl -u dd-agent > /tmp/j && grep -q 'release refused' /tmp/j")
+said("release refused")
 
 # a release that leaves the box without ssh comes back by itself
 publish(3, f"{nix['broken']}")
@@ -107,8 +132,8 @@ box.wait_for_unit("sshd.service")
 box.succeed("grep -q 'release 2' /etc/dd-marker")
 box.succeed("[ $(cat /var/lib/dd-agent/counter) = 2 ]")
 box.succeed("grep -q 'result=\"rollback\"' /var/lib/dd-facts/dd_agent.prom")
-box.succeed("! systemctl is-active dd-agent-guard.service")
-box.succeed("! systemctl is-active dd-agent-guard.timer")
+box.succeed(gone("dd-agent-guard.service"))
+box.succeed(gone("dd-agent-guard.timer"))
 
 # a release that leaves the box healthy but cut off from the fleet is not a
 # release this box keeps: the switch may not take away what it had
@@ -117,9 +142,7 @@ agent(expect_ok=False)
 box.succeed(f"[ $(readlink /run/current-system) = {nix['marked']} ]")
 box.succeed("grep -q 'release 2' /etc/dd-marker")
 box.succeed("[ $(cat /var/lib/dd-agent/counter) = 2 ]")
-box.succeed(
-    "journalctl -u dd-agent > /tmp/j2 && grep -q 'could no longer reach the fleet' /tmp/j2"
-)
+said("could no longer reach the fleet")
 
 # a file the key did not sign leaves the counter this box applied on its
 # status, not 0
@@ -133,9 +156,7 @@ box.succeed("grep -q 'result=\"refused\"' /var/lib/dd-facts/dd_agent.prom")
 publish(2, f"{nix['base']}")
 agent(expect_ok=False)
 box.succeed(f"[ $(readlink /run/current-system) = {nix['marked']} ]")
-box.succeed(
-    "journalctl -u dd-agent > /tmp/j3 && grep -q 'applied 2 as something else' /tmp/j3"
-)
+said("applied 2 as something else")
 publish(2, f"{nix['marked']}")
 agent()
 box.succeed("[ $(cat /var/lib/dd-agent/counter) = 2 ]")
@@ -160,12 +181,12 @@ box.succeed(
 )
 box.succeed(f"[ $(readlink -f /nix/var/nix/profiles/system) = {nix['broken']} ]")
 box.succeed("systemctl kill -s KILL dd-agent.service")
-box.wait_until_succeeds("! systemctl is-active dd-agent.service")
+box.wait_until_succeeds(gone("dd-agent.service"))
 box.succeed("systemctl start --no-block dd-agent-guard.service")
 box.wait_until_succeeds(
     f"[ $(readlink /run/current-system) = {nix['marked']} ]", timeout=300
 )
-box.wait_until_succeeds("! systemctl is-active dd-agent-guard.service", timeout=300)
+box.wait_until_succeeds(gone("dd-agent-guard.service"), timeout=300)
 box.succeed(f"[ $(readlink -f /nix/var/nix/profiles/system) = {nix['marked']} ]")
 box.succeed("grep -q 'release 2' /etc/dd-marker")
 box.succeed(
