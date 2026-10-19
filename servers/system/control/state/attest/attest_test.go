@@ -483,3 +483,113 @@ func testEK(t *testing.T, org string, marked bool) (*x509.CertPool, *x509.Certif
 	pool.AddCert(ca)
 	return pool, leaf
 }
+
+// David's laptop (Lenovo Legion Pro 5 16ADR10, AMD fTPM): its RSA EK's
+// certificate from AMD's service, and the CA above it by its AIA link
+// (testdata/README.md)
+func amdChain(t *testing.T) ([]*x509.Certificate, *policy) {
+	t.Helper()
+	var certs []*x509.Certificate
+	for _, f := range []string{"laptop-ek-rsa.der", "amd-prg-rpl-ica.der"} {
+		der, err := os.ReadFile("testdata/" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := x509.ParseCertificate(der)
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		certs = append(certs, c)
+	}
+	root, err := os.ReadFile("testdata/amd-root.der")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, err := (&Config{Roots: map[string][]string{
+		"414D4400": {string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: root}))},
+	}}).policy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return certs, pol
+}
+
+func TestARealAMDEKChainsToAMDsRoot(t *testing.T) {
+	certs, pol := amdChain(t)
+	vendor, model, err := verifyChain(pol, certs, oct2026)
+	if err != nil || vendor != "414D4400" || model != "AMD" {
+		t.Fatalf("%s %s %v", vendor, model, err)
+	}
+	raw, err := os.ReadFile("testdata/laptop-ek.pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2b, err := tpm2.Unmarshal[tpm2.TPM2BPublic](raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ek, err := p2b.Contents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ekShape(ek); err != nil {
+		t.Fatal(err)
+	}
+	pub, _ := tpm2.Pub(*ek)
+	key, err := ekCertKey(certs[0])
+	if err != nil || !samePub(key, pub) {
+		t.Fatalf("the certificate is not for the laptop's EK: %v", err)
+	}
+	// without AMD's CA between them
+	_, _, err = verifyChain(pol, certs[:1], oct2026)
+	wantErr(t, err, "does not chain")
+}
+
+func dbHash(t *testing.T, b64der string) string {
+	t.Helper()
+	der, err := base64.StdEncoding.DecodeString(b64der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.Sum256(der)
+	return hex.EncodeToString(h[:])
+}
+
+// a box's db certificate is its own: Microsoft's and a distro's shim keys
+// are everyone's, and no two boxes claim one
+func TestASharedSecureBootCertificateIsRefused(t *testing.T) {
+	v := load(t)
+	for _, f := range []string{"ms-uefi-ca-2011.der", "canonical-master-ca.der"} {
+		der, err := os.ReadFile("testdata/" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b := v.Begin
+		b.DB = base64.StdEncoding.EncodeToString(der)
+		_, err = New().CheckOpen(&v.Config, v.Box, v.Key, b, v.At)
+		wantErr(t, err, "shared")
+	}
+	h := dbHash(t, v.Begin.DB)
+	s := New()
+	s.DBs[h] = "jother"
+	_, err := s.CheckOpen(&v.Config, v.Box, v.Key, v.Begin, v.At)
+	wantErr(t, err, "already jother's")
+	s = New()
+	s.Pending["jother"] = &Pending{DB: h, Opened: v.At}
+	_, err = s.CheckOpen(&v.Config, v.Box, v.Key, v.Begin, v.At)
+	wantErr(t, err, "jother")
+}
+
+func TestTheDBCertificateIsRecordedAndForgotten(t *testing.T) {
+	v := load(t)
+	s := opened(t, v)
+	s.ApplyResponse(&v.Config, v.Voters, v.Box, v.Response, v.At+1000)
+	h := dbHash(t, v.Begin.DB)
+	if s.DBs[h] != v.Box || s.Done[v.Box].DB != h {
+		t.Fatalf("not recorded: %+v", s.DBs)
+	}
+	s.Forget(v.Box)
+	if len(s.DBs) != 0 {
+		t.Fatal("kept after the box left")
+	}
+}
