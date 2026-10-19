@@ -1,903 +1,441 @@
-//! Members' own computers (docs/dev/instances.md).
+//! Members' remote computers on a box (docs/dev/remote-computers.md).
 //!
-//! A member saves configs - size, packages as a Nix file, who may reach it,
-//! where it may run - and makes instances from them. An instance is a record
-//! on this box and a unit, `dd-computer@<id>`, that boots it (nix/modules/vms).
-//! This service keeps both: it checks a member's instances together stay
-//! within the policy's totals, hands each its ports, writes what the guest
-//! reads from the record, and on its own start brings back every instance
-//! whose record says it should be up.
+//! Nothing about a computer is decided here. Its record is agreed state,
+//! judged by the control plane (state/computers) and served by this box's
+//! dd-control at 127.0.0.1:4195/computers; the plan puts it on a box, and
+//! dd-control holds its lease and starts `dd-computer@<id>` there. This
+//! crate is the box's side of that:
 //!
-//! Who is asking comes from the gate: nginx sets `x-dd-user` from the
-//! verifier's answer.
+//! - `prepare <id>`: before the guest starts, the agreed record, checked
+//!   again here (the policy's bounds, the pool, the owner's totals on this
+//!   box), written where the unit reads it, and the guest's share (the
+//!   owner's name, their SSH public keys, their Nix file);
+//! - `share <id>`: a running computer's share, rewritten when the agreed
+//!   record changes, so a saved Nix file or key reaches the guest;
+//! - the page and its API behind compute.<domain>: what the agreed state
+//!   says of the member's computers and where the plan puts each. Changing
+//!   anything is a signed item the page or `dd computer` puts at the gate.
+//!
+//! Each computer has a user of its own (DynamicUser=, `dd-computer-<id>`),
+//! which alone owns its directory: its QEMU, its prepare and its share run
+//! as that user, and nothing here reads what a guest wrote.
 
 use std::collections::BTreeMap;
-use std::io::Read as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-/// What every member's instances, together, may take; and the bounds of one.
+/// What one member's computers may take together, and the pool their ports
+/// come from (fleet/policy.json computers): held to here as the judge does
 #[derive(Debug, Clone, Serialize)]
 pub struct Limits {
-    /// MiB, every instance a member has, running or not
     pub memory: u64,
-    pub threads: u32,
-    /// GiB, one instance's disk (its system's and its home's each)
+    pub threads: u64,
     pub disk: u64,
-    pub port_base: u16,
-    pub port_count: u16,
-    /// MiB and threads this box can give one computer (computer-facts.sh says the
-    /// same to placement): a small box runs small ones
-    pub box_memory: u64,
-    pub box_threads: u32,
+    pub port_base: u64,
+    pub port_count: u64,
 }
 
 pub const MIN_MEMORY: u64 = 512;
 pub const MIN_DISK: u64 = 8;
-pub const MAX_NIX: usize = 64 * 1024;
+pub const MAX_NIX: usize = 44 * 1024;
+pub const MAX_KEYS: usize = 8;
+pub const MAX_KEY: usize = 2048;
 pub const MAX_FORWARDS: usize = 8;
-/// the config every member has from the start
-pub const DEFAULT: &str = "default";
-const DEFAULT_NIX: &str = "{ pkgs, ... }:
-{
-  # a general-purpose machine: build tools, editors, languages' basics
-  environment.systemPackages = with pkgs; [
-    gcc gnumake pkg-config python3 nodejs ripgrep fd tmux unzip wget
-  ];
-}
-";
 
-/// Where it may run. `Own`: only on a box of the owner's. `Any`: anyone's,
-/// which its owner said yes to, knowing that box's owner can read it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum Consent {
-    #[default]
-    Own,
-    Any,
-}
-
-/// A saved config: what instances are made from.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Config {
-    /// the address names it (PUT /api/configs/<name>); the body needn't
-    #[serde(default)]
-    pub name: String,
-    /// MiB
-    pub memory: u64,
-    pub threads: u32,
-    /// GiB
-    pub disk: u64,
-    /// a NixOS module for the guest: its packages, services, shells
-    #[serde(default)]
-    pub nix: String,
-    /// SSH public keys, one per entry, for the owner's account
-    #[serde(default)]
-    pub keys: Vec<String>,
-    /// guest ports opened besides SSH
-    #[serde(default)]
-    pub ports: Vec<u16>,
-    /// members who may reach it too (the owner's friends; the gate checks)
-    #[serde(default)]
-    pub players: Vec<String>,
-    #[serde(default)]
-    pub consent: Consent,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Forward {
-    pub guest: u16,
-    pub host: u16,
+    pub guest: u64,
+    pub host: u64,
 }
 
-/// One instance, as this box keeps it. The unit reads it (computers.nix, dd-computer-run):
-/// `memory`, `threads`, `disk`, `port`, `forwards`, `owner`, `keys`, `nix`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Record {
-    pub id: String,
+/// One computer as /computers lists it
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Listed {
     pub owner: String,
+    pub id: String,
     pub name: String,
-    /// the config it was made from, and last applied
     pub config: String,
     pub memory: u64,
-    pub threads: u32,
+    pub threads: u64,
     pub disk: u64,
-    /// SSH, on this box's address on the Commonty network
-    pub port: u16,
-    #[serde(default)]
-    pub forwards: Vec<Forward>,
-    #[serde(default)]
     pub nix: String,
-    #[serde(default)]
-    pub keys: Vec<String>,
-    /// its own key's public half; the private half is beside its disk
-    #[serde(default)]
-    pub key: String,
-    #[serde(default)]
     pub players: Vec<String>,
-    #[serde(default)]
-    pub consent: Consent,
-    /// when the owner said yes to anyone's box (ms); none for `Own`
-    #[serde(default)]
-    pub anywhere: Option<u64>,
+    pub keys: Vec<String>,
+    pub consent: String,
+    pub anywhere: bool,
+    pub port: u64,
+    pub forwards: Vec<Forward>,
+    pub asked: bool,
     pub up: bool,
-    pub created: u64,
 }
 
-impl Record {
-    /// every key let in: its own, and any its config adds
-    pub fn all_keys(&self) -> Vec<String> {
-        std::iter::once(self.key.clone())
-            .filter(|k| !k.is_empty())
-            .chain(self.keys.iter().cloned())
-            .collect()
-    }
-}
-
-/// What the page and the CLI are shown of an instance.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct View {
-    #[serde(flatten)]
-    pub record: Record,
-    /// running, starting, stopped, failed
-    pub state: &'static str,
-    /// `<address>:<port>`, for ssh -p
-    pub address: String,
-    /// what came of its Nix file, as the guest says (untrusted: shown, never acted on)
-    pub applied: Option<serde_json::Value>,
+    pub computers: BTreeMap<String, Listed>,
+    pub configs: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
 }
 
-/// The units the records run as. systemd on a box; a stand-in in tests.
-pub trait Units: Send + Sync {
-    fn start(&self, id: &str) -> Result<()>;
-    fn stop(&self, id: &str) -> Result<()>;
-    /// systemd's ActiveState: active, activating, inactive, failed, ...
-    fn state(&self, id: &str) -> String;
+pub fn valid_id(id: &str) -> bool {
+    id.len() == 16
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-pub struct Systemd;
+/// a member's name, as the guest makes it a user and the box a file name
+pub fn valid_name(n: &str) -> bool {
+    let b = n.as_bytes();
+    !b.is_empty()
+        && b.len() <= 32
+        && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter()
+            .all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'_')
+}
 
-impl Systemd {
-    fn ctl(&self, verb: &str, id: &str) -> Result<String> {
-        let out = std::process::Command::new("systemctl")
-            .args([verb, "--no-block", &format!("dd-computer@{id}.service")])
-            .output()
-            .context("systemctl")?;
-        if !out.status.success() {
+const KEY_TYPES: [&str; 7] = [
+    "ssh-ed25519",
+    "ssh-rsa",
+    "ecdsa-sha2-nistp256",
+    "ecdsa-sha2-nistp384",
+    "ecdsa-sha2-nistp521",
+    "sk-ssh-ed25519@openssh.com",
+    "sk-ecdsa-sha2-nistp256@openssh.com",
+];
+
+/// One OpenSSH public key line, as the judge takes it (state/computers
+/// ValidKey): a type, the key whose blob names that type, and a comment of
+/// printable text at most. No options, nothing past one line: it becomes a
+/// line of the guest's authorized keys.
+pub fn valid_key(k: &str) -> bool {
+    use base64::Engine as _;
+    if k.len() > MAX_KEY {
+        return false;
+    }
+    let mut parts = k.splitn(3, ' ');
+    let (Some(kind), Some(b64)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    if let Some(c) = parts.next()
+        && (c.is_empty() || c.len() > 128 || !c.bytes().all(|b| (b' '..=b'~').contains(&b)))
+    {
+        return false;
+    }
+    if !KEY_TYPES.contains(&kind) {
+        return false;
+    }
+    let Ok(blob) = base64::engine::general_purpose::STANDARD.decode(b64) else {
+        return false;
+    };
+    if blob.len() < 4 {
+        return false;
+    }
+    let n = u32::from_be_bytes([blob[0], blob[1], blob[2], blob[3]]) as usize;
+    n == kind.len() && blob.len() > 4 + n && &blob[4..4 + n] == kind.as_bytes()
+}
+
+impl Limits {
+    fn in_pool(&self, p: u64) -> bool {
+        p >= self.port_base && p < self.port_base.saturating_add(self.port_count)
+    }
+
+    /// One computer's record within the policy's bounds, as the judge
+    /// checked it: the box is not trusted to have been told the truth, nor
+    /// is any other box
+    pub fn check(&self, c: &Listed) -> Result<()> {
+        if !valid_id(&c.id) || !valid_name(&c.owner) {
+            bail!("not a computer's id or not an owner's name");
+        }
+        if !c.up {
+            bail!("it is not agreed up");
+        }
+        if c.memory < MIN_MEMORY || c.memory > self.memory {
+            bail!("memory is {MIN_MEMORY} to {} MiB", self.memory);
+        }
+        if c.threads < 1 || c.threads > self.threads {
+            bail!("threads are 1 to {}", self.threads);
+        }
+        if c.disk < MIN_DISK || c.disk > self.disk {
+            bail!("a disk is {MIN_DISK} to {} GiB", self.disk);
+        }
+        if c.nix.len() > MAX_NIX {
+            bail!("the Nix file is too big");
+        }
+        if c.keys.len() > MAX_KEYS || !c.keys.iter().all(|k| valid_key(k)) {
+            bail!("its SSH keys are not public keys, one to a line");
+        }
+        if !self.in_pool(c.port) || c.forwards.len() > MAX_FORWARDS {
+            bail!("its ports are not the pool's");
+        }
+        let mut seen = vec![c.port];
+        for f in &c.forwards {
+            if !self.in_pool(f.host) || f.guest == 0 || f.guest == 22 || f.guest > 65535 {
+                bail!("its ports are not the pool's");
+            }
+            if seen.contains(&f.host) {
+                bail!("a port twice");
+            }
+            seen.push(f.host);
+        }
+        Ok(())
+    }
+
+    /// The owner's computers running here together, this one with them,
+    /// within their totals; and no port of this one another here has
+    pub fn fits_beside(&self, c: &Listed, here: &[&Listed]) -> Result<()> {
+        let (mut mem, mut thr, mut disk) = (c.memory, c.threads, c.disk);
+        let mine: Vec<u64> = std::iter::once(c.port)
+            .chain(c.forwards.iter().map(|f| f.host))
+            .collect();
+        for o in here.iter().filter(|o| o.id != c.id) {
+            if o.owner == c.owner {
+                mem = mem.saturating_add(o.memory);
+                thr = thr.saturating_add(o.threads);
+                disk = disk.saturating_add(o.disk);
+            }
+            let theirs = std::iter::once(o.port).chain(o.forwards.iter().map(|f| f.host));
+            if theirs.into_iter().any(|p| mine.contains(&p)) {
+                bail!("a port another computer here has");
+            }
+        }
+        if mem > self.memory || thr > self.threads || disk > self.disk {
             bail!(
-                "systemctl {verb}: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
+                "{}'s computers here would take {mem} MiB, {thr} threads and {disk} GiB; the limit is {} MiB, {} and {} GiB",
+                c.owner,
+                self.memory,
+                self.threads,
+                self.disk
             );
         }
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        Ok(())
     }
 }
 
-impl Units for Systemd {
-    fn start(&self, id: &str) -> Result<()> {
-        self.ctl("start", id).map(|_| ())
-    }
-    fn stop(&self, id: &str) -> Result<()> {
-        self.ctl("stop", id).map(|_| ())
-    }
-    fn state(&self, id: &str) -> String {
-        std::process::Command::new("systemctl")
-            .args([
-                "show",
-                "-p",
-                "ActiveState",
-                "--value",
-                &format!("dd-computer@{id}.service"),
-            ])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default()
-    }
-}
-
-pub struct Manager {
-    pub dir: PathBuf,
-    pub limits: Limits,
-    /// whose box this is: "own" instances run only for them
-    pub box_owner: String,
-    /// this box on the Commonty network
-    pub address: String,
-    /// the storage ledger's count (storage/view.nix), for the allowance;
-    /// none on a box without it
-    pub ledger: Option<PathBuf>,
-    units: Box<dyn Units>,
-    lock: Mutex<()>,
-}
-
-/// a member's name or a config's: lowercase, digits, dashes
-pub fn valid_name(n: &str) -> bool {
-    !n.is_empty()
-        && n.len() <= 32
-        && n.bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        && !n.starts_with('-')
-}
-
-fn valid_key(k: &str) -> bool {
-    let k = k.trim();
-    !k.contains(['\n', '\r'])
-        && k.len() < 16 * 1024
-        && [
-            "ssh-ed25519 ",
-            "ssh-rsa ",
-            "ecdsa-sha2-",
-            "sk-ssh-ed25519@openssh.com ",
-            "sk-ecdsa-sha2-",
-        ]
-        .iter()
-        .any(|p| k.starts_with(p))
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-fn random_id() -> Result<String> {
-    let mut b = [0u8; 8];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
-    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
-}
-
-/// What a guest says back, from its report disk: a 1 MiB raw disk the box
-/// made, which the guest writes as a device (block 0: what came of its
-/// apply, as JSON; from 4096 on: the apply's log), so it can't grow, link
-/// or block. Read here not followed all the same, at most `max` bytes from
-/// `at`, the zeros after what was written left off.
-pub const REPORT_LOG_AT: u64 = 4096;
-fn read_report(path: &Path, at: u64, max: u64) -> Option<Vec<u8>> {
-    let mut b = read_guest_from(path, at, max)?;
-    while b.last() == Some(&0) {
-        b.pop();
-    }
-    Some(b)
-}
-
-fn read_guest_from(path: &Path, at: u64, max: u64) -> Option<Vec<u8>> {
-    use std::io::{Seek as _, SeekFrom};
-    use std::os::unix::fs::OpenOptionsExt as _;
-    let mut f = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .ok()?;
-    if !f.metadata().ok()?.is_file() {
-        return None;
-    }
-    f.seek(SeekFrom::Start(at)).ok()?;
+/// A GET to dd-control on this box's loopback: plain HTTP/1.0, bounded
+pub fn get(addr: &str, path: &str) -> Result<Vec<u8>> {
+    let mut s =
+        std::net::TcpStream::connect(addr).with_context(|| format!("dd-control at {addr}"))?;
+    s.set_read_timeout(Some(Duration::from_secs(20)))?;
+    s.set_write_timeout(Some(Duration::from_secs(5)))?;
+    write!(
+        s,
+        "GET {path} HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    )?;
     let mut b = Vec::new();
-    f.take(max).read_to_end(&mut b).ok()?;
-    Some(b)
+    s.take(64 << 20).read_to_end(&mut b)?;
+    let head_end = b
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .context("no answer from dd-control")?;
+    let status = std::str::from_utf8(&b[..head_end])
+        .ok()
+        .and_then(|h| h.split(' ').nth(1))
+        .and_then(|c| c.parse::<u16>().ok())
+        .unwrap_or(0);
+    if status != 200 {
+        bail!("dd-control said {status} to {path}");
+    }
+    Ok(b[head_end + 4..].to_vec())
 }
 
-/// An SSH key pair for one remote computer: the public line for its
-/// authorized keys, and the private key in OpenSSH's own format, which ssh
-/// reads as it is (no passphrase: it is kept on the box, beside the disk
-/// it opens, and handed only to the owner).
-pub fn ssh_key(comment: &str) -> Result<(String, String)> {
-    use base64::Engine as _;
-    let b64 = base64::engine::general_purpose::STANDARD;
-    let mut seed = [0u8; 32];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut seed)?;
-    let pk = ed25519_dalek::SigningKey::from_bytes(&seed)
-        .verifying_key()
-        .to_bytes();
-    // RFC 4251 strings: a length, then the bytes
-    fn string(out: &mut Vec<u8>, b: &[u8]) {
-        out.extend_from_slice(&(b.len() as u32).to_be_bytes());
-        out.extend_from_slice(b);
+pub fn view(control: &str) -> Result<View> {
+    Ok(serde_json::from_slice(&get(control, "/computers")?)?)
+}
+
+/// computer id -> the box the plan gives it, from the plan every box makes
+/// alike; and why the ones it places nowhere are not
+pub fn placed(control: &str) -> Result<(BTreeMap<String, String>, BTreeMap<String, String>)> {
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Plan {
+        boxes: BTreeMap<String, Vec<serde_json::Value>>,
+        unplaced: BTreeMap<String, String>,
     }
-    let mut public = Vec::new();
-    string(&mut public, b"ssh-ed25519");
-    string(&mut public, &pk);
-    let mut check = [0u8; 4];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut check)?;
-    let mut private = Vec::new();
-    private.extend_from_slice(&check);
-    private.extend_from_slice(&check);
-    string(&mut private, b"ssh-ed25519");
-    string(&mut private, &pk);
-    let mut both = seed.to_vec();
-    both.extend_from_slice(&pk);
-    string(&mut private, &both);
-    string(&mut private, comment.as_bytes());
-    let mut pad = 1u8;
-    while private.len() % 8 != 0 {
-        private.push(pad);
-        pad += 1;
+    let p: Plan = serde_json::from_slice(&get(control, "/plan")?)?;
+    let mut on = BTreeMap::new();
+    for (b, ds) in p.boxes {
+        for d in ds {
+            if let Some(id) = d["service"]
+                .as_str()
+                .and_then(|s| s.strip_prefix("computer-"))
+            {
+                on.insert(id.to_string(), b.clone());
+            }
+        }
     }
-    let mut blob = b"openssh-key-v1\0".to_vec();
-    string(&mut blob, b"none");
-    string(&mut blob, b"none");
-    string(&mut blob, b"");
-    blob.extend_from_slice(&1u32.to_be_bytes());
-    string(&mut blob, &public);
-    string(&mut blob, &private);
-    let body = b64.encode(&blob);
-    // the armour's label, said in two halves so no scanner takes the code
-    // that writes it for a key
-    let label = concat!("OPENSSH PRIVATE", " KEY");
-    let mut pem = format!("-----BEGIN {label}-----\n");
-    for line in body.as_bytes().chunks(70) {
-        pem.push_str(std::str::from_utf8(line).unwrap_or_default());
-        pem.push('\n');
-    }
-    pem.push_str(&format!("-----END {label}-----\n"));
-    Ok((
-        format!("ssh-ed25519 {} {comment}", b64.encode(&public)),
-        pem,
-    ))
+    let why = p
+        .unplaced
+        .into_iter()
+        .filter_map(|(s, w)| s.strip_prefix("computer-").map(|id| (id.to_string(), w)))
+        .collect();
+    Ok((on, why))
+}
+
+/// The computers this box runs: their flags, which dd-control raises while
+/// it holds each one's lease (/run/dd-placed/computer-<id>)
+pub fn flagged(placed: &Path) -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(placed)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()
+                .and_then(|n| n.strip_prefix("computer-"))
+                .filter(|id| valid_id(id))
+                .map(str::to_string)
+        })
+        .collect();
+    out.sort();
+    out
 }
 
 /// written beside, then moved: a reader never sees half a file
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
+pub fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let tmp = path.with_extension("new");
+    let _ = std::fs::remove_file(&tmp);
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(mode)
+        .open(&tmp)
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    f.write_all(bytes)?;
+    f.sync_all()?;
     std::fs::rename(&tmp, path).with_context(|| format!("moving {}", path.display()))?;
     Ok(())
 }
 
-impl Manager {
-    pub fn new(
-        dir: PathBuf,
-        limits: Limits,
-        box_owner: String,
-        address: String,
-        units: Box<dyn Units>,
-    ) -> Result<Self> {
-        for d in ["records", "instances", "configs"] {
-            std::fs::create_dir_all(dir.join(d))?;
-        }
-        Ok(Manager {
-            dir,
-            limits,
-            box_owner,
-            address,
-            ledger: None,
-            units,
-            lock: Mutex::new(()),
-        })
+/// The box's side of the computers
+pub struct Host {
+    /// /var/lib/dd-computer: each computer's own directory, <id>/, its
+    /// user's alone (StateDirectory=, DynamicUser=)
+    pub dir: PathBuf,
+    /// /run/dd-placed
+    pub placed: PathBuf,
+    /// dd-control, 127.0.0.1:4195
+    pub control: String,
+    pub limits: Limits,
+}
+
+impl Host {
+    fn instance(&self, id: &str) -> PathBuf {
+        self.dir.join(id)
     }
 
-    fn configs_path(&self, owner: &str) -> PathBuf {
-        self.dir.join("configs").join(format!("{owner}.json"))
-    }
-    fn record_path(&self, id: &str) -> PathBuf {
-        self.dir.join("records").join(format!("{id}.json"))
-    }
-    fn instance_dir(&self, id: &str) -> PathBuf {
-        self.dir.join("instances").join(id)
-    }
-
-    /// what the member saved
-    fn stored(&self, owner: &str) -> BTreeMap<String, Config> {
-        std::fs::read(self.configs_path(owner))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
-    }
-
-    /// Their configs, and the default one unless they saved their own by
-    /// that name: something to make a remote computer from on day one.
-    pub fn configs(&self, owner: &str) -> BTreeMap<String, Config> {
-        let mut all = self.stored(owner);
-        all.entry(DEFAULT.to_string()).or_insert_with(|| Config {
-            name: DEFAULT.to_string(),
-            memory: 4096.min(self.limits.memory),
-            threads: 2.min(self.limits.threads),
-            disk: 32.min(self.limits.disk),
-            nix: DEFAULT_NIX.to_string(),
-            keys: vec![],
-            ports: vec![],
-            players: vec![],
-            // the box's own owner can keep it home; anyone else has no box here
-            consent: if owner == self.box_owner {
-                Consent::Own
-            } else {
-                Consent::Any
-            },
-        });
-        all
-    }
-
-    fn records(&self) -> Vec<Record> {
-        let mut out = Vec::new();
-        let Ok(rd) = std::fs::read_dir(self.dir.join("records")) else {
-            return out;
-        };
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.extension().is_some_and(|x| x == "json")
-                && let Ok(r) = std::fs::read(&p)
-                    .map_err(anyhow::Error::from)
-                    .and_then(|b| Ok(serde_json::from_slice::<Record>(&b)?))
-            {
-                out.push(r);
-            }
-        }
-        out.sort_by_key(|r| r.created);
-        out
-    }
-
-    fn record(&self, owner: &str, id: &str) -> Result<Record> {
-        if id.len() != 16 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-            bail!("no such remote computer");
-        }
-        let r: Record = std::fs::read(self.record_path(id))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .context("no such remote computer")?;
-        if r.owner != owner {
-            bail!("no such remote computer");
-        }
-        Ok(r)
-    }
-
-    fn put(&self, r: &Record) -> Result<()> {
-        write_atomic(&self.record_path(&r.id), &serde_json::to_vec_pretty(r)?)
-    }
-
-    /// A config as the owner may save it: every bound checked here, so a
-    /// saved config can always make an instance on its own terms.
-    pub fn check(&self, owner: &str, c: &Config) -> Result<()> {
-        if !valid_name(&c.name) {
-            bail!("a name is lowercase letters, digits and dashes, up to 32");
-        }
-        if c.memory < MIN_MEMORY || c.memory > self.limits.memory {
-            bail!("memory is {MIN_MEMORY} to {} MiB", self.limits.memory);
-        }
-        if c.threads < 1 || c.threads > self.limits.threads {
-            bail!("threads are 1 to {}", self.limits.threads);
-        }
-        if c.disk < MIN_DISK || c.disk > self.limits.disk {
-            bail!("a disk is {MIN_DISK} to {} GiB", self.limits.disk);
-        }
-        if c.nix.len() > MAX_NIX {
-            bail!("the Nix file is over 64 KiB");
-        }
-        if let Some(k) = c.keys.iter().find(|k| !valid_key(k)) {
-            bail!(
-                "not an SSH public key: {}",
-                k.chars().take(40).collect::<String>()
-            );
-        }
-        if c.ports.len() > MAX_FORWARDS {
-            bail!("at most {MAX_FORWARDS} ports besides SSH");
-        }
-        if c.ports.iter().any(|&p| p == 0 || p == 22) {
-            bail!("a port is 1 to 65535, and SSH is always there");
-        }
-        if let Some(p) = c.players.iter().find(|p| !valid_name(p) || *p == owner) {
-            bail!("not someone to let in: {p}");
-        }
-        Ok(())
-    }
-
-    pub fn save_config(&self, owner: &str, c: Config) -> Result<()> {
-        self.check(owner, &c)?;
-        let _g = self.lock.lock().unwrap();
-        let mut all = self.stored(owner);
-        all.insert(c.name.clone(), c);
-        write_atomic(&self.configs_path(owner), &serde_json::to_vec_pretty(&all)?)
-    }
-
-    pub fn delete_config(&self, owner: &str, name: &str) -> Result<()> {
-        let _g = self.lock.lock().unwrap();
-        let mut all = self.stored(owner);
-        if all.remove(name).is_none() {
-            bail!(if name == DEFAULT {
-                "the default config is always there; change it, and yours takes its place"
-            } else {
-                "no such config"
-            });
-        }
-        write_atomic(&self.configs_path(owner), &serde_json::to_vec_pretty(&all)?)
-    }
-
-    /// What the owner's instances take together, leaving one out (the one
-    /// being changed).
-    fn used(&self, owner: &str, except: Option<&str>) -> (u64, u32) {
-        self.records()
-            .iter()
-            .filter(|r| r.owner == owner && Some(r.id.as_str()) != except)
-            .fold((0, 0), |(m, t), r| (m + r.memory, t + r.threads))
-    }
-
-    pub fn usage(&self, owner: &str) -> (u64, u32) {
-        self.used(owner, None)
-    }
-
-    fn fits(&self, owner: &str, except: Option<&str>, c: &Config) -> Result<()> {
-        if c.memory > self.limits.box_memory || c.threads > self.limits.box_threads {
-            bail!(
-                "this box can take a remote computer of up to {} MiB and {} threads",
-                self.limits.box_memory,
-                self.limits.box_threads
-            );
-        }
-        let (m, t) = self.used(owner, except);
-        if m + c.memory > self.limits.memory {
-            bail!(
-                "your remote computers would take {} MiB together; the limit is {} MiB",
-                m + c.memory,
-                self.limits.memory
-            );
-        }
-        if t + c.threads > self.limits.threads {
-            bail!(
-                "your remote computers would take {} threads together; the limit is {}",
-                t + c.threads,
-                self.limits.threads
-            );
-        }
-        Ok(())
-    }
-
-    /// Over their allowance, as the ledger last counted every service: no
-    /// new computer, no bigger disk. One running isn't stopped. No ledger
-    /// here, or no count yet: nothing to hold to.
-    fn within_allowance(&self, owner: &str) -> Result<()> {
-        let Some(path) = &self.ledger else {
-            return Ok(());
-        };
-        let Some(v) = std::fs::read(path)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-        else {
-            return Ok(());
-        };
-        let budget = v["budget"].as_u64().unwrap_or(u64::MAX);
-        let used: u64 = v["members"][owner]
-            .as_object()
-            .into_iter()
-            .flatten()
-            .filter_map(|(_, n)| n.as_u64())
-            .fold(0, u64::saturating_add);
-        if used >= budget {
-            bail!(
-                "you use {} GB of your {} GB storage allowance: make room first",
-                used / 1_000_000_000,
-                budget / 1_000_000_000
-            );
-        }
-        Ok(())
-    }
-
-    fn where_ok(&self, owner: &str, c: &Config, anywhere: Option<u64>) -> Result<()> {
-        match c.consent {
-            Consent::Own if owner != self.box_owner => {
-                bail!("this box isn't yours: choose anyone's box, and say yes to its warning")
-            }
-            Consent::Any if anywhere.is_none() => {
-                bail!("running on someone else's box needs your yes first")
-            }
-            _ => Ok(()),
-        }
-    }
-
-    /// Host ports for SSH and the forwards: the lowest free in the pool.
-    fn ports(&self, records: &[Record], n: usize) -> Result<Vec<u16>> {
-        let taken: std::collections::HashSet<u16> = records
-            .iter()
-            .flat_map(|r| std::iter::once(r.port).chain(r.forwards.iter().map(|f| f.host)))
-            .collect();
-        let free: Vec<u16> = (self.limits.port_base
-            ..self.limits.port_base.saturating_add(self.limits.port_count))
-            .filter(|p| !taken.contains(p))
-            .take(n)
-            .collect();
-        if free.len() < n {
-            bail!("no ports left on this box");
-        }
-        Ok(free)
-    }
-
-    /// A new instance from a saved config. `yes`: the owner said yes to
-    /// the warning about someone else's box, just now.
-    /// `keys`: SSH keys for this one computer besides its config's (the
-    /// default config has none of its own)
-    pub fn make(
-        &self,
-        owner: &str,
-        config: &str,
-        name: &str,
-        yes: bool,
-        keys: &[String],
-    ) -> Result<Record> {
-        if !valid_name(name) {
-            bail!("a name is lowercase letters, digits and dashes, up to 32");
-        }
-        let mut c = self
-            .configs(owner)
-            .remove(config)
-            .context("no such config")?;
-        c.keys.extend(
-            keys.iter()
-                .map(|k| k.trim().to_string())
-                .filter(|k| !k.is_empty()),
-        );
-        self.check(owner, &c)?;
-        let anywhere = (c.consent == Consent::Any && yes).then(now_ms);
-        self.where_ok(owner, &c, anywhere)?;
-        self.within_allowance(owner)?;
-        let _g = self.lock.lock().unwrap();
-        let records = self.records();
-        if records.iter().any(|r| r.owner == owner && r.name == name) {
-            bail!("you have a remote computer called {name}");
-        }
-        self.fits(owner, None, &c)?;
-        let ports = self.ports(&records, 1 + c.ports.len())?;
-        let id = random_id()?;
-        let key = self.new_key(&id, owner, name)?;
-        let r = Record {
-            id,
-            owner: owner.to_string(),
-            name: name.to_string(),
-            config: c.name.clone(),
-            memory: c.memory,
-            threads: c.threads,
-            disk: c.disk,
-            port: ports[0],
-            forwards: c
-                .ports
-                .iter()
-                .zip(&ports[1..])
-                .map(|(&guest, &host)| Forward { guest, host })
-                .collect(),
-            nix: c.nix,
-            keys: c.keys,
-            key,
-            players: c.players,
-            consent: c.consent,
-            anywhere,
-            up: true,
-            created: now_ms(),
-        };
-        self.put(&r)?;
-        self.units.start(&r.id)?;
-        Ok(r)
-    }
-
-    /// The config, again, onto an instance made from it: its Nix file and
-    /// keys at once (the guest rebuilds), its size and ports at its next start.
-    pub fn apply(&self, owner: &str, id: &str, yes: bool) -> Result<Record> {
-        let _g = self.lock.lock().unwrap();
-        let mut r = self.record(owner, id)?;
-        let c = self
-            .configs(owner)
-            .remove(&r.config)
-            .context("its config is gone: save one by that name")?;
-        self.check(owner, &c)?;
-        let anywhere = match c.consent {
-            Consent::Any if r.consent == Consent::Any => r.anywhere,
-            Consent::Any if yes => Some(now_ms()),
-            _ => None,
-        };
-        self.where_ok(owner, &c, anywhere)?;
-        self.fits(owner, Some(id), &c)?;
-        if c.disk < r.disk {
-            bail!("a disk only grows: this one is {} GiB", r.disk);
-        }
-        if c.disk > r.disk {
-            self.within_allowance(owner)?;
-        }
-        // its own ports count as taken: the ones it keeps are its own, and a
-        // new one must not be its SSH
-        let records = self.records();
-        let mut forwards = Vec::new();
-        let new = c
-            .ports
-            .iter()
-            .filter(|g| !r.forwards.iter().any(|f| f.guest == **g))
-            .count();
-        let mut fresh = self.ports(&records, new)?.into_iter();
-        for &guest in &c.ports {
-            let host = r
-                .forwards
-                .iter()
-                .find(|f| f.guest == guest)
-                .map(|f| f.host)
-                .or_else(|| fresh.next())
-                .context("no ports left on this box")?;
-            forwards.push(Forward { guest, host });
-        }
-        r.memory = c.memory;
-        r.threads = c.threads;
-        r.disk = c.disk;
-        r.forwards = forwards;
-        r.nix = c.nix;
-        r.keys = c.keys;
-        r.players = c.players;
-        r.consent = c.consent;
-        r.anywhere = anywhere;
-        self.put(&r)?;
-        self.write_share(&r)?;
-        Ok(r)
-    }
-
-    /// what the guest reads (its config share), as the unit writes it at start
-    fn write_share(&self, r: &Record) -> Result<()> {
-        let d = self.instance_dir(&r.id).join("config");
-        if !d.is_dir() {
-            return Ok(()); // never started: the unit writes it
-        }
-        write_atomic(
-            &d.join("owner.json"),
-            &serde_json::to_vec(&serde_json::json!({"name": r.owner, "keys": r.all_keys()}))?,
-        )?;
-        let nix = if r.nix.trim().is_empty() {
-            "{ ... }: { }\n"
+    /// What the guest reads, from the agreed record: its owner's name and
+    /// SSH public keys, and their Nix file (an empty one is the empty
+    /// module). Only what changed is written.
+    pub fn write_share(&self, c: &Listed) -> Result<bool> {
+        let share = self.instance(&c.id).join("config");
+        std::fs::create_dir_all(&share)?;
+        let owner = serde_json::to_vec(&serde_json::json!({"name": c.owner, "keys": c.keys}))?;
+        let nix = if c.nix.trim().is_empty() {
+            "{ ... }: { }\n".to_string()
         } else {
-            &r.nix
+            c.nix.clone()
         };
-        write_atomic(&d.join("member.nix"), nix.as_bytes())
+        let mut changed = false;
+        for (f, b) in [("owner.json", owner), ("member.nix", nix.into_bytes())] {
+            let p = share.join(f);
+            if std::fs::read(&p).ok().as_deref() != Some(&b[..]) {
+                write_atomic(&p, &b, 0o600)?;
+                changed = true;
+            }
+        }
+        Ok(changed)
     }
 
-    /// where a computer's own key is: beside its disks, out of the guest's
-    /// shares, so it moves and is deleted with them
-    fn key_path(&self, id: &str) -> PathBuf {
-        self.instance_dir(id).join("ssh").join("key")
-    }
-
-    fn new_key(&self, id: &str, owner: &str, name: &str) -> Result<String> {
-        let (public, private) = ssh_key(&format!("{owner}@{name}"))?;
-        let path = self.key_path(id);
-        std::fs::create_dir_all(path.parent().context("no parent")?)?;
-        let tmp = path.with_extension("tmp");
+    /// Before `dd-computer@<id>` starts: the record as agreed now, checked,
+    /// written for the unit (<id>/record.json) and its share. Refused
+    /// unless this box holds its flag and the record is agreed up.
+    pub fn prepare(&self, id: &str) -> Result<Listed> {
+        if !valid_id(id) {
+            bail!("not a computer's id: {id}");
+        }
+        // what tells the guest's unit this start was prepared: gone until it is
+        let ready = self.ready(id);
+        if let Err(e) = std::fs::remove_file(&ready)
+            && e.kind() != std::io::ErrorKind::NotFound
         {
-            use std::io::Write as _;
-            use std::os::unix::fs::OpenOptionsExt as _;
-            let _ = std::fs::remove_file(&tmp);
-            let mut f = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&tmp)?;
-            f.write_all(private.as_bytes())?;
+            return Err(e.into());
         }
-        std::fs::rename(&tmp, &path)?;
-        Ok(public)
-    }
-
-    /// Its private key, for its owner alone: what `dd computer ssh` and the
-    /// page's download hand to ssh.
-    pub fn private_key(&self, owner: &str, id: &str) -> Result<(String, String)> {
-        let r = self.record(owner, id)?;
-        let k = std::fs::read_to_string(self.key_path(id)).context("it has no key yet")?;
-        Ok((r.name, k))
-    }
-
-    /// A new key, the old one no longer let in: for a key that went
-    /// somewhere it shouldn't have.
-    pub fn rekey(&self, owner: &str, id: &str) -> Result<()> {
-        let _g = self.lock.lock().unwrap();
-        let mut r = self.record(owner, id)?;
-        r.key = self.new_key(id, owner, &r.name)?;
-        self.put(&r)?;
-        self.write_share(&r)
-    }
-
-    pub fn set_up(&self, owner: &str, id: &str, up: bool) -> Result<()> {
-        let _g = self.lock.lock().unwrap();
-        let mut r = self.record(owner, id)?;
-        r.up = up;
-        self.put(&r)?;
-        if up {
-            self.units.start(id)
-        } else {
-            self.units.stop(id)
+        let here = flagged(&self.placed);
+        if !here.iter().any(|h| h == id) {
+            bail!("computer-{id} is not this box's to run (no flag)");
         }
+        let v = view(&self.control)?;
+        let c = v
+            .computers
+            .get(id)
+            .with_context(|| format!("no agreed computer {id}"))?;
+        if c.id != id {
+            bail!("the agreed record of {id} names another id");
+        }
+        self.limits.check(c)?;
+        let beside: Vec<&Listed> = here
+            .iter()
+            .filter(|h| *h != id)
+            .filter_map(|h| v.computers.get(h))
+            .filter(|o| o.up)
+            .collect();
+        self.limits.fits_beside(c, &beside)?;
+        std::fs::create_dir_all(self.instance(id))?;
+        self.write_share(c)?;
+        let rec = serde_json::to_vec(&serde_json::json!({
+            "owner": c.owner, "id": c.id, "name": c.name, "memory": c.memory,
+            "threads": c.threads, "disk": c.disk, "port": c.port, "forwards": c.forwards,
+            "consent": c.consent,
+        }))?;
+        write_atomic(&self.instance(id).join("record.json"), &rec, 0o600)?;
+        write_atomic(&ready, b"", 0o600)?;
+        Ok(c.clone())
     }
 
-    fn stopped(&self, id: &str) -> bool {
-        matches!(self.units.state(id).as_str(), "inactive" | "failed" | "")
+    /// prepared for this start (<id>/.prepared): the guest's unit takes it,
+    /// and runs on nothing older
+    pub fn ready(&self, id: &str) -> PathBuf {
+        self.instance(id).join(".prepared")
     }
 
-    /// Its system again from the release's first disk; /home is kept.
-    pub fn reset(&self, owner: &str, id: &str) -> Result<()> {
-        let _g = self.lock.lock().unwrap();
-        self.record(owner, id)?;
-        if !self.stopped(id) {
-            bail!("stop it first");
+    /// One running computer's share, as agreed now: a Nix file or a key
+    /// saved reaches its guest without a restart. One that is no longer
+    /// agreed up, or not here, is left: dd-control stops it. Whether it
+    /// was written.
+    pub fn share(&self, id: &str) -> Result<bool> {
+        if !valid_id(id) || !flagged(&self.placed).iter().any(|h| h == id) {
+            return Ok(false);
         }
-        let sys = self.instance_dir(id).join("system.qcow2");
-        if sys.exists() {
-            std::fs::remove_file(&sys)?;
-        }
-        Ok(())
-    }
-
-    /// Gone, with its disks. Only stopped, and only by its owner.
-    pub fn delete(&self, owner: &str, id: &str) -> Result<()> {
-        let _g = self.lock.lock().unwrap();
-        self.record(owner, id)?;
-        if !self.stopped(id) {
-            bail!("stop it first");
-        }
-        let d = self.instance_dir(id);
-        if d.exists() {
-            std::fs::remove_dir_all(&d)?;
-        }
-        std::fs::remove_file(self.record_path(id))?;
-        Ok(())
-    }
-
-    pub fn view(&self, r: Record) -> View {
-        let state = match self.units.state(&r.id).as_str() {
-            "active" | "reloading" => "running",
-            "activating" => "starting",
-            "deactivating" => "stopping",
-            "failed" => "failed",
-            _ => "stopped",
+        let v = view(&self.control)?;
+        let Some(c) = v.computers.get(id) else {
+            return Ok(false);
         };
-        let applied = read_report(&self.instance_dir(&r.id).join("report.img"), 0, 4096)
-            .filter(|b| !b.is_empty())
-            .and_then(|b| serde_json::from_slice(&b).ok());
-        View {
-            address: format!("{}:{}", self.address, r.port),
-            state,
-            applied,
-            record: r,
+        if c.id != id || self.limits.check(c).is_err() || !self.instance(id).is_dir() {
+            return Ok(false);
         }
+        self.write_share(c)
     }
 
-    pub fn instances(&self, owner: &str) -> Vec<View> {
-        self.records()
-            .into_iter()
-            .filter(|r| r.owner == owner)
-            .map(|r| self.view(r))
-            .collect()
-    }
-
-    /// The guest's own words about its last apply, cut short; shown to its owner.
-    pub fn apply_log(&self, owner: &str, id: &str) -> Result<String> {
-        self.record(owner, id)?;
-        let b = read_report(
-            &self.instance_dir(id).join("report.img"),
-            REPORT_LOG_AT,
-            8192,
-        )
-        .unwrap_or_default();
-        Ok(String::from_utf8_lossy(&b).into_owned())
-    }
-
-    /// Every instance whose record says up, after a reboot or a restart of
-    /// this service. Starting one already running is nothing.
-    pub fn restore(&self) -> usize {
-        let mut n = 0;
-        for r in self.records().into_iter().filter(|r| r.up) {
-            match self.units.start(&r.id) {
-                Ok(()) => n += 1,
-                Err(e) => eprintln!("vms: {}: {e:#}", r.id),
+    /// What the firewall's filler reads (games-access.sh), in the games'
+    /// form: a list of each computer running here, its owner, whom it lets
+    /// in and its ports
+    pub fn access(&self, v: &View) -> serde_json::Value {
+        let mut servers = Vec::new();
+        for id in flagged(&self.placed) {
+            if let Some(c) = v.computers.get(&id).filter(|c| c.up && c.id == id) {
+                let ports: Vec<u64> = std::iter::once(c.port)
+                    .chain(c.forwards.iter().map(|f| f.host))
+                    .filter(|p| self.limits.in_pool(*p))
+                    .collect();
+                servers.push(serde_json::json!({"id": id, "owner": c.owner, "players": c.players, "ports": ports}));
             }
         }
-        n
-    }
-
-    /// What the firewall's filler reads (computers-access, games-access.sh): each
-    /// running instance's owner, who else may reach it, and its host ports.
-    pub fn access(&self) -> serde_json::Value {
-        let servers: Vec<_> = self
-            .records()
-            .into_iter()
-            .filter(|r| r.up)
-            .map(|r| {
-                let ports: Vec<u16> = std::iter::once(r.port)
-                    .chain(r.forwards.iter().map(|f| f.host))
-                    .collect();
-                serde_json::json!({"owner": r.owner, "players": r.players, "ports": ports})
-            })
-            .collect();
         serde_json::json!({ "servers": servers })
     }
 }
@@ -905,274 +443,156 @@ impl Manager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex as M};
 
-    #[derive(Default, Clone)]
-    struct Fake(Arc<M<BTreeMap<String, String>>>);
-    impl Units for Fake {
-        fn start(&self, id: &str) -> Result<()> {
-            self.0.lock().unwrap().insert(id.into(), "active".into());
-            Ok(())
-        }
-        fn stop(&self, id: &str) -> Result<()> {
-            self.0.lock().unwrap().insert(id.into(), "inactive".into());
-            Ok(())
-        }
-        fn state(&self, id: &str) -> String {
-            self.0.lock().unwrap().get(id).cloned().unwrap_or_default()
+    fn lim() -> Limits {
+        Limits {
+            memory: 16384,
+            threads: 8,
+            disk: 200,
+            port_base: 27200,
+            port_count: 200,
         }
     }
 
-    fn scratch(what: &str) -> (Manager, Fake) {
-        let d = std::env::temp_dir().join(format!("dd-computers-{what}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        let f = Fake::default();
-        let m = Manager::new(
-            d,
-            Limits {
-                memory: 16384,
-                threads: 8,
-                disk: 200,
-                port_base: 27200,
-                port_count: 4,
-                box_memory: 30000,
-                box_threads: 7,
+    fn key() -> String {
+        use base64::Engine as _;
+        let mut blob = vec![0, 0, 0, 11];
+        blob.extend_from_slice(b"ssh-ed25519");
+        blob.extend_from_slice(&[0, 0, 0, 32]);
+        blob.extend_from_slice(&[7; 32]);
+        format!(
+            "ssh-ed25519 {}",
+            base64::engine::general_purpose::STANDARD.encode(blob)
+        )
+    }
+
+    fn comp(id: &str, owner: &str, mem: u64, port: u64) -> Listed {
+        Listed {
+            owner: owner.into(),
+            id: id.into(),
+            memory: mem,
+            threads: 2,
+            disk: 32,
+            port,
+            up: true,
+            keys: vec![key()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn keys_are_public_keys_on_one_line() {
+        let k = key();
+        assert!(valid_key(&k));
+        assert!(valid_key(&format!("{k} ann@laptop")));
+        assert!(!valid_key(&format!("command=\"sh\" {k}")));
+        assert!(!valid_key(&format!("{k} a\nssh-ed25519 AAAA")));
+        assert!(!valid_key(&k.replacen("ssh-ed25519", "ssh-rsa", 1)));
+        assert!(!valid_key("ssh-ed25519 !!!"));
+        assert!(!valid_key(&format!("{k} ")));
+    }
+
+    #[test]
+    fn a_record_is_held_to_the_policy_here_too() {
+        let l = lim();
+        let ok = comp("0123456789abcdef", "ann", 4096, 27200);
+        assert!(l.check(&ok).is_ok());
+        for bad in [
+            Listed {
+                up: false,
+                ..ok.clone()
             },
-            "david".into(),
-            "100.64.0.2".into(),
-            Box::new(f.clone()),
-        )
-        .unwrap();
-        (m, f)
-    }
-
-    fn config(name: &str, memory: u64, threads: u32) -> Config {
-        Config {
-            name: name.into(),
-            memory,
-            threads,
-            disk: 20,
-            nix: String::new(),
-            keys: vec!["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample tom@laptop".into()],
-            ports: vec![],
-            players: vec![],
-            consent: Consent::Any,
+            Listed {
+                memory: 32768,
+                ..ok.clone()
+            },
+            Listed {
+                threads: 9,
+                ..ok.clone()
+            },
+            Listed {
+                port: 22,
+                ..ok.clone()
+            },
+            Listed {
+                owner: "../root".into(),
+                ..ok.clone()
+            },
+            Listed {
+                id: "../../etc".into(),
+                ..ok.clone()
+            },
+            Listed {
+                keys: vec!["no".into()],
+                ..ok.clone()
+            },
+            Listed {
+                forwards: vec![Forward {
+                    guest: 80,
+                    host: 80,
+                }],
+                ..ok.clone()
+            },
+        ] {
+            assert!(l.check(&bad).is_err(), "{bad:?}");
         }
     }
 
     #[test]
-    fn the_totals_count_every_instance_running_or_not() {
-        let (m, _) = scratch("totals");
-        m.save_config("tom", config("big", 12288, 6)).unwrap();
-        let a = m.make("tom", "big", "a", true, &[]).unwrap();
-        m.set_up("tom", &a.id, false).unwrap();
-        let e = m
-            .make("tom", "big", "b", true, &[])
-            .unwrap_err()
-            .to_string();
-        assert!(e.contains("MiB together"), "{e}");
-        m.save_config("tom", config("small", 4096, 2)).unwrap();
-        m.make("tom", "small", "b", true, &[]).unwrap();
-        let e = m
-            .make("tom", "small", "c", true, &[])
-            .unwrap_err()
-            .to_string();
-        assert!(e.contains("together"), "{e}");
+    fn an_owners_computers_here_stay_within_their_totals() {
+        let l = lim();
+        let a = comp("0123456789abcdef", "ann", 12288, 27200);
+        let b = comp("fedcba9876543210", "ann", 8192, 27201);
+        let c = comp("00000000000000c1", "bob", 8192, 27202);
+        assert!(l.fits_beside(&b, &[&a]).is_err());
+        assert!(l.fits_beside(&c, &[&a]).is_ok());
+        let clash = comp("00000000000000c2", "bob", 1024, 27200);
+        assert!(l.fits_beside(&clash, &[&a]).is_err());
     }
 
+    /// the firewall's filler reads a list, as the games' manager writes it
     #[test]
-    fn someone_elses_box_needs_a_yes_and_own_needs_your_box() {
-        let (m, _) = scratch("consent");
-        m.save_config("tom", config("any", 1024, 1)).unwrap();
-        assert!(m.make("tom", "any", "a", false, &[]).is_err());
-        assert!(
-            m.make("tom", "any", "a", true, &[])
-                .unwrap()
-                .anywhere
-                .is_some()
-        );
-        let mut own = config("own", 1024, 1);
-        own.consent = Consent::Own;
-        m.save_config("tom", own.clone()).unwrap();
-        assert!(m.make("tom", "own", "b", false, &[]).is_err());
-        m.save_config("david", own).unwrap();
-        assert!(
-            m.make("david", "own", "b", false, &[])
-                .unwrap()
-                .anywhere
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn ports_are_handed_once_and_kept_across_an_apply() {
-        let (m, _) = scratch("ports");
-        let mut c = config("web", 1024, 1);
-        c.ports = vec![8080];
-        m.save_config("tom", c.clone()).unwrap();
-        let a = m.make("tom", "web", "a", true, &[]).unwrap();
-        assert_eq!(a.port, 27200);
-        assert_eq!(
-            a.forwards,
-            vec![Forward {
-                guest: 8080,
-                host: 27201
-            }]
-        );
-        c.ports = vec![8080, 3000];
-        m.save_config("tom", c).unwrap();
-        let a = m.apply("tom", &a.id, false).unwrap();
-        assert_eq!(
-            a.forwards[0],
-            Forward {
-                guest: 8080,
-                host: 27201
-            }
-        );
-        assert_eq!(a.forwards[1].host, 27202);
-        // the pool has four: a second needs two more and only one is left
-        m.save_config("ann", config("x", 1024, 1)).unwrap();
-        let mut two = config("two", 1024, 1);
-        two.ports = vec![80];
-        m.save_config("ann", two).unwrap();
-        assert!(m.make("ann", "two", "b", true, &[]).is_err());
-        assert_eq!(m.make("ann", "x", "b", true, &[]).unwrap().port, 27203);
-    }
-
-    #[test]
-    fn only_the_owner_and_only_stopped() {
-        let (m, f) = scratch("owner");
-        m.save_config("tom", config("c", 1024, 1)).unwrap();
-        let a = m.make("tom", "c", "a", true, &[]).unwrap();
-        assert!(m.set_up("ann", &a.id, false).is_err());
-        assert!(m.delete("ann", &a.id).is_err());
-        assert!(m.delete("tom", &a.id).is_err()); // running
-        m.set_up("tom", &a.id, false).unwrap();
-        assert_eq!(f.state(&a.id), "inactive");
-        m.delete("tom", &a.id).unwrap();
-        assert!(m.instances("tom").is_empty());
-        assert!(m.record("tom", "../../etc/x").is_err());
-    }
-
-    #[test]
-    fn a_guests_report_is_never_followed() {
-        let (m, _) = scratch("report");
-        m.save_config("tom", config("c", 1024, 1)).unwrap();
-        let a = m.make("tom", "c", "a", true, &[]).unwrap();
-        let rep = m.instance_dir(&a.id).join("report.img");
-        std::fs::create_dir_all(rep.parent().unwrap()).unwrap();
-        // a link where the disk should be: not followed
-        std::os::unix::fs::symlink(m.record_path(&a.id), &rep).unwrap();
-        assert_eq!(m.apply_log("tom", &a.id).unwrap(), "");
-        assert!(m.view(a.clone()).applied.is_none());
-        std::fs::remove_file(&rep).unwrap();
-        // the disk as the guest leaves it: JSON in block 0, the log after,
-        // zeros between
-        let mut disk = vec![0u8; 1 << 20];
-        disk[..12].copy_from_slice(br#"{"ok": true}"#);
-        disk[4096..4100].copy_from_slice(b"done");
-        std::fs::write(&rep, &disk).unwrap();
-        assert!(m.view(a.clone()).applied.is_some());
-        assert_eq!(m.apply_log("tom", &a.id).unwrap(), "done");
-    }
-
-    #[test]
-    fn over_the_allowance_no_new_computer() {
-        let (mut m, _) = scratch("allowance");
-        let ledger = m.dir.join("ledger.json");
-        std::fs::write(
-            &ledger,
-            r#"{"budget": 1000, "members": {"tom": {"photos": 600, "computers": 400}}}"#,
-        )
-        .unwrap();
-        m.ledger = Some(ledger.clone());
-        m.save_config("tom", config("c", 1024, 1)).unwrap();
-        let e = m.make("tom", "c", "a", true, &[]).unwrap_err().to_string();
-        assert!(e.contains("allowance"), "{e}");
-        std::fs::write(
-            &ledger,
-            r#"{"budget": 1000, "members": {"tom": {"photos": 600}}}"#,
-        )
-        .unwrap();
-        m.make("tom", "c", "a", true, &[]).unwrap();
-    }
-
-    #[test]
-    fn a_small_box_takes_small_computers() {
-        let (mut m, _) = scratch("small");
-        m.limits.box_memory = 6144;
-        m.limits.box_threads = 3;
-        m.save_config("tom", config("big", 8192, 2)).unwrap();
-        let e = m
-            .make("tom", "big", "a", true, &[])
-            .unwrap_err()
-            .to_string();
-        assert!(e.contains("this box can take"), "{e}");
-        m.save_config("tom", config("small", 2048, 2)).unwrap();
-        m.make("tom", "small", "a", true, &[]).unwrap();
-    }
-
-    #[test]
-    fn everyone_has_the_default_config_and_each_computer_its_own_key() {
-        let (m, _) = scratch("default");
-        assert!(m.configs("ann").contains_key(DEFAULT));
-        assert_eq!(m.configs("ann")[DEFAULT].consent, Consent::Any);
-        assert_eq!(m.configs("david")[DEFAULT].consent, Consent::Own);
-        let r = m.make("ann", DEFAULT, "a", true, &[]).unwrap();
-        // its own key: the public half let in, the private half its owner's
-        assert!(r.key.starts_with("ssh-ed25519 ") && r.key.ends_with(" ann@a"));
-        assert_eq!(r.all_keys(), vec![r.key.clone()]);
-        let (name, private) = m.private_key("ann", &r.id).unwrap();
-        assert_eq!(name, "a");
-        assert!(private.starts_with(concat!("-----BEGIN OPENSSH PRIVATE", " KEY-----")));
-        assert!(m.private_key("tom", &r.id).is_err());
-        let mode = std::os::unix::fs::PermissionsExt::mode(
-            &std::fs::metadata(m.key_path(&r.id)).unwrap().permissions(),
-        );
-        assert_eq!(mode & 0o777, 0o600);
-        m.rekey("ann", &r.id).unwrap();
-        assert_ne!(m.record("ann", &r.id).unwrap().key, r.key);
-        assert!(m.delete_config("ann", DEFAULT).is_err());
-    }
-
-    /// ssh itself reads the key and gets the same public half back, where
-    /// there is an ssh-keygen to ask (not in a build's sandbox)
-    #[test]
-    fn ssh_reads_the_key() {
-        let (public, private) = ssh_key("tom@dev").unwrap();
-        let d = std::env::temp_dir().join(format!("dd-computers-key-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        let f = d.join("key");
-        std::fs::write(&f, &private).unwrap();
-        std::fs::set_permissions(&f, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
-        let Ok(out) = std::process::Command::new("ssh-keygen")
-            .arg("-y")
-            .arg("-f")
-            .arg(&f)
-            .output()
-        else {
-            return;
+    fn access_is_a_list_of_what_runs_here() {
+        let d = std::env::temp_dir().join(format!("computers-access-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("placed")).unwrap();
+        std::fs::write(d.join("placed/computer-0123456789abcdef"), b"{}").unwrap();
+        let h = Host {
+            dir: d.clone(),
+            placed: d.join("placed"),
+            control: String::new(),
+            limits: lim(),
         };
-        std::fs::remove_dir_all(&d).ok();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
+        let mut v = View::default();
+        for c in [
+            comp("0123456789abcdef", "ann", 1024, 27200),
+            comp("fedcba9876543210", "bob", 1024, 27201),
+        ] {
+            v.computers.insert(c.id.clone(), c);
+        }
+        let a = h.access(&v);
+        assert_eq!(
+            a,
+            serde_json::json!({"servers": [{"id": "0123456789abcdef", "owner": "ann", "players": [], "ports": [27200]}]})
         );
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), public);
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
-    fn a_config_out_of_bounds_is_not_saved() {
-        let (m, _) = scratch("bounds");
-        assert!(m.save_config("tom", config("c", 256, 1)).is_err());
-        assert!(m.save_config("tom", config("c", 1024, 9)).is_err());
-        assert!(m.save_config("tom", config("Bad Name", 1024, 1)).is_err());
-        let mut k = config("c", 1024, 1);
-        k.keys = vec!["ssh-ed25519 AAAA\nssh-ed25519 BBBB".into()];
-        assert!(m.save_config("tom", k).is_err());
-        let mut p = config("c", 1024, 1);
-        p.ports = vec![22];
-        assert!(m.save_config("tom", p).is_err());
+    fn the_share_is_written_once_per_change() {
+        let d = std::env::temp_dir().join(format!("computers-share-{}", std::process::id()));
+        let h = Host {
+            dir: d.clone(),
+            placed: d.join("placed"),
+            control: String::new(),
+            limits: lim(),
+        };
+        let mut c = comp("0123456789abcdef", "ann", 1024, 27200);
+        assert!(h.write_share(&c).unwrap());
+        assert!(!h.write_share(&c).unwrap());
+        let nix = std::fs::read_to_string(d.join("0123456789abcdef/config/member.nix"));
+        assert_eq!(nix.unwrap(), "{ ... }: { }\n");
+        c.nix = "{ pkgs, ... }: { }".into();
+        assert!(h.write_share(&c).unwrap());
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }

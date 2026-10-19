@@ -12,17 +12,24 @@ mkdir -p "$STATE"
 rules=$(mktemp "$STATE/rules.XXXXXX")
 trap 'rm -f "$rules"' EXIT
 
-if servers=$(jq -ce '.servers' "$ACCESS" 2>/dev/null) &&
+# one line per device and port: "<address> <port>". Anything that does not
+# read as it should - no answer, the wrong shape, a jq error anywhere - is
+# no rules at all: every port closed, never the rules before left standing
+rules_now() {
+  local servers answer
+  servers=$(jq -ce '.servers | if type == "array" then . else error("not a list") end' "$ACCESS") || return 1
   answer=$(jq -c '[.[] | {owner, players}]' <<<"$servers" |
-    curl -sf --max-time 10 -H 'content-type: application/json' --data-binary @- "$GATE/internal/games/access") &&
-  [ "$(jq length <<<"$answer")" = "$(jq length <<<"$servers")" ]; then
-  # one line per device and port: "<address> <port>"
+    curl -sf --max-time 10 -H 'content-type: application/json' --data-binary @- "$GATE/internal/games/access") || return 1
+  jq -e --argjson s "$servers" 'type == "array" and length == ($s | length)' <<<"$answer" >/dev/null || return 1
   jq -r --argjson a "$answer" '
     to_entries[] | .key as $k | .value.ports[] as $p
-    | $a[$k].addresses[] | "\(.) \($p)"' <<<"$servers" | sort -u >"$rules"
-else
-  echo "$CHAIN access: no answer from the manager or the gate; every game port is closed"
+    | $a[$k].addresses[] | "\(.) \($p)"' <<<"$servers" | sort -u
+}
+if ! rules_now >"$rules"; then
+  echo "$CHAIN access: no answer from the manager or the gate, or not one that reads; every port is closed"
   : >"$rules"
+  # and the chain emptied whatever was applied before
+  rm -f "$STATE/applied"
 fi
 
 if cmp -s "$rules" "$STATE/applied"; then

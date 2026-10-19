@@ -2919,7 +2919,10 @@ pub async fn start(
                 if let Some(door) = &a.network
                     && a.members.as_ref().is_some_and(|m| !m.members.is_empty())
                     && let Err(e) = door
-                        .reap(|u| (a.member(u) || a.guest(u)) && u != pages::DEMO_USER)
+                        .reap(
+                            |u| (a.member(u) || a.guest(u)) && u != pages::DEMO_USER,
+                            a.control.as_deref(),
+                        )
                         .await
                 {
                     eprintln!("network: reaping: {e:#}");
@@ -3170,6 +3173,7 @@ pub async fn start(
         // a box's own: signed by its TPM, answered sealed to it
         .route("/_dd/network/box", post(network::box_join))
         .route("/_dd/network/controller", post(network::controller_join))
+        .route("/_dd/network/computer", post(network::computer_join))
         // a home controller's own requests, signed by its key (controller.rs)
         .route(
             "/_dd/controller/directory/{name}",

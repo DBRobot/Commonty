@@ -383,6 +383,7 @@ in
       path = [
         pkgs.jq
         pkgs.coreutils
+        pkgs.findutils
       ];
       restartIfChanged = false;
       serviceConfig.Type = "oneshot";

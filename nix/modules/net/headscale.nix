@@ -36,6 +36,10 @@ let
       # a household's home controller (docs/dev/home-controller.md): a
       # device, joined by the gate in the boxes user so the reaper leaves it
       tagOwners."tag:controller" = [ "boxes@" ];
+      # a member's own remote computer (docs/dev/remote-computers.md), joined
+      # by the gate in the boxes user: tagged, so no one's device, and never
+      # its owner's box-admin ports
+      tagOwners."tag:computer" = [ "boxes@" ];
       # A person's devices reach a box's front door and its game servers.
       # A box's owner's devices reach that box, and only that box, for what
       # an admin needs: ssh, its dns, the cache push. Boxes reach each other
@@ -61,6 +65,13 @@ let
         {
           action = "accept";
           src = [ "autogroup:member" ];
+          dst = [ "tag:box:443" ] ++ map (p: "tag:box:${p}") (cfg.gamePorts ++ cfg.computerPorts);
+        }
+        # and a member's computer what a member's device reaches of the
+        # boxes, which open game and computer ports by address
+        {
+          action = "accept";
+          src = [ "tag:computer" ];
           dst = [ "tag:box:443" ] ++ map (p: "tag:box:${p}") (cfg.gamePorts ++ cfg.computerPorts);
         }
         {
@@ -111,7 +122,9 @@ in
     computerPorts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       # alone, this box's own (dd.computers.reach)
-      default = lib.optionals (config.dd ? vms) config.dd.computers.reach;
+      default = lib.optionals (
+        config.dd ? computers && config.dd.computers.enable
+      ) config.dd.computers.reach;
       description = "the ports a member's device may reach on a box for members' computers: every compute box's pool (the flake gives the fleet's; alone, this box's own)";
     };
     owners = lib.mkOption {

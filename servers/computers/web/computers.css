@@ -46,7 +46,7 @@ a.btn.quiet-l:hover { background: var(--bg); }
 }
 
 /* what all your computers take, against the limits */
-.usage { display: grid; grid-template-columns: 1fr 1fr auto; align-items: center; gap: 8px 28px; padding: 10px 14px; }
+.usage { display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; gap: 8px 28px; padding: 10px 14px; }
 
 .meter { display: grid; grid-template-columns: 80px 1fr auto; align-items: center; gap: 12px; min-width: 0; }
 .meter .k { font-weight: 600; font-size: 15px; }
@@ -159,3 +159,4 @@ label.pick input { width: 18px; height: 18px; accent-color: var(--attention); }
   position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 18px;
   padding: 10px 0; background: var(--bg); border-top: 1px solid var(--line);
 }
+textarea.keys { min-height: 88px; word-break: break-all; }

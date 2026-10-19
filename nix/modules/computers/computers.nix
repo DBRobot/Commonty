@@ -9,8 +9,35 @@
 let
   cfg = config.dd.computers;
   base = config.dd.domain;
-  dir = "/var/lib/dd-computers";
+  # each computer's directory, its own user's alone (DynamicUser=,
+  # StateDirectory=dd-computer/<id>, so in /var/lib/private, which no other
+  # user can enter)
+  dir = "/var/lib/dd-computer";
+  private = "/var/lib/private/dd-computer";
+  # whose each computer here is, as the agreed state said when it was last
+  # prepared: root's, outside every computer's directory, what the usage
+  # count goes by
+  owners = "/var/lib/dd-computer-owners";
+  placed = "/run/dd-placed";
   sock = "/run/dd-computers/dd-computers.sock";
+  policy = (lib.importJSON ../../../fleet/policy.json).computers;
+  bin = "${self.packages.${pkgs.stdenv.hostPlatform.system}.computers}/bin/dd-computers";
+  # the guest's way to the fleet's control server, through the front door
+  # (as a box's: modules/net/box.nix)
+  netbridge = self.packages.${pkgs.stdenv.hostPlatform.system}.netbridge;
+  control = self.packages.${pkgs.stdenv.hostPlatform.system}.dd-control;
+  # what the services this box's roles bring keep aside (the needs' sizes,
+  # GiB), never given to a computer
+  fp = import ../../lib/fleet-placement.nix { inherit lib; };
+  roleList = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ../../../fleet/roles.json);
+  brought = lib.unique (
+    lib.concatMap (r: roleList.${r}.services or [ ]) (
+      lib.attrByPath [ "dd" "control" "roles" ] [ ] config
+    )
+  );
+  keptGiB = lib.foldl' (a: s: a + (fp.capability.sizes.${s}.memory or 0)) 0 (
+    lib.filter (s: s != "computers") brought
+  );
   # the guest's own nixpkgs, without the box's overlays: the guest rebuilds
   # from plain nixpkgs (guest/base.nix), so the host's first system is the
   # one the guest would build
@@ -26,6 +53,7 @@ let
       ];
       dd.guest.base = ./guest/base.nix;
       dd.guest.nixpkgs = pkgs.path;
+      dd.guest.netbridge = netbridge;
     };
   };
   # the first disk every computer starts from; each copies it once, and
@@ -45,6 +73,7 @@ let
         imports = [ ${./guest/base.nix} ./member.nix ];
         dd.guest.base = builtins.storePath ${./guest/base.nix};
         dd.guest.nixpkgs = builtins.storePath ${pkgs.path};
+        dd.guest.netbridge = builtins.storePath ${netbridge};
       }
     '';
     contents = [
@@ -55,27 +84,60 @@ let
     ];
   };
   range = "${toString cfg.portBase}:${toString (cfg.portBase + cfg.portCount - 1)}";
+  env = {
+    DD_COMPUTERS_DIR = dir;
+    DD_COMPUTERS_PLACED = placed;
+    DD_COMPUTERS_CONTROL = "127.0.0.1:4195";
+    DD_COMPUTERS_MEMORY_MIB = toString cfg.memoryMiB;
+    DD_COMPUTERS_THREADS = toString cfg.threads;
+    DD_COMPUTERS_DISK_GIB = toString cfg.diskGiB;
+    DD_COMPUTERS_PORT_BASE = toString cfg.portBase;
+    DD_COMPUTERS_PORT_COUNT = toString cfg.portCount;
+  };
+  # what every unit of the box's side keeps to
+  hardened = {
+    NoNewPrivileges = true;
+    ProtectSystem = "strict";
+    ProtectHome = true;
+    PrivateTmp = true;
+  };
+  # A computer's own units (prepare, the guest, its share) run as a user of
+  # its own, dd-computer-<id>, made for it by systemd, the only one that
+  # owns its directory (0700): a guest that broke out into its QEMU holds
+  # its own disks and nothing of another's
+  perComputer = hardened // {
+    DynamicUser = true;
+    User = "dd-computer-%i";
+    StateDirectory = "dd-computer/%i";
+    StateDirectoryMode = "0700";
+  };
 
-  # One instance, by id, from the host's record: its size, its ports, the
-  # owner's name, keys and Nix file. The disks are made the first time and
-  # grown when the record grows; never shrunk.
+  # One computer, by id, from the record dd-computer-prepare@ wrote from
+  # the agreed state: its size and its ports. The disks are made the first
+  # time and grown when the record grows; never shrunk.
   run = pkgs.writeShellScript "dd-computer-run" ''
     set -eu
     id="$1"
-    d=${dir}/instances/"$id"
-    rec=${dir}/records/"$id".json
-    qmp=${dir}/control/"$id".qmp
-    serial=${dir}/control/"$id".serial
-    [ -s "$rec" ] || { echo "no such instance: $id" >&2; exit 1; }
+    case "$id" in *[!0-9a-f]* | "") echo "not an id: $id" >&2; exit 1 ;; esac
+    d="$STATE_DIRECTORY"
+    rec="$d"/record.json
+    qmp="$RUNTIME_DIRECTORY"/qmp
+    serial="$RUNTIME_DIRECTORY"/serial
+    # prepared for this start (dd-computer-prepare@), or not at all: it
+    # runs again on its own after a while, and prepare with it
+    rm "$d"/.prepared 2>/dev/null || { echo "computer-$id was not prepared for this start" >&2; exit 1; }
+    [ -s "$rec" ] || { echo "no record for $id" >&2; exit 1; }
     jq() { ${pkgs.jq}/bin/jq "$@"; }
     img() { ${pkgs.qemu-utils}/bin/qemu-img "$@"; }
-    mem=$(jq -r '.memory' "$rec")
-    threads=$(jq -r '.threads' "$rec")
-    disk=$(jq -r '.disk' "$rec")
-    fwd=$(jq -r '[{guest: 22, host: .port}] + (.forwards // []) | map("hostfwd=tcp::\(.host)-:\(.guest)") | join(",")' "$rec")
-    mkdir -p "$d"/config
-    # what the guest says back: a raw disk of fixed size, not a share it
-    # could fill (servers/computers, read_report)
+    int() { jq -er "$1 | select(type == \"number\" and . == floor and . > 0)" "$rec"; }
+    mem=$(int .memory)
+    threads=$(int .threads)
+    disk=$(int .disk)
+    fwd=$(jq -er '[{guest: 22, host: .port}] + .forwards
+      | map(select((.host | type) == "number" and (.guest | type) == "number"))
+      | map("hostfwd=tcp::\(.host)-:\(.guest)") | join(",")' "$rec")
+    # what the guest says of its last apply: a raw disk of fixed size, not
+    # a share it could fill; nothing on the box reads it
     [ -e "$d"/report.img ] || ${pkgs.coreutils}/bin/truncate -s 1M "$d"/report.img
     if [ ! -e "$d"/system.qcow2 ]; then
       img convert -O qcow2 ${image}/nixos.qcow2 "$d"/system.qcow2.new
@@ -88,15 +150,10 @@ let
         img resize -q "$d/$f.qcow2" "$disk"G
       fi
     done
-    # what the guest reads, written from the host's record each start: the
-    # share is read-only to the guest
-    jq '{name: .owner, keys: ([.key // empty] + (.keys // []) | map(select(. != "")))}' "$rec" > "$d"/config/owner.json
-    # an empty Nix file is no module: the empty one instead (as write_share)
-    jq -r 'if ((.nix // "") | test("^\\s*$")) then "{ ... }: { }" else .nix end' "$rec" > "$d"/config/member.nix
     rm -f "$qmp" "$serial"
     if [ -w /dev/kvm ]; then accel="accel=kvm -cpu host"; else accel="accel=tcg -cpu max"; fi
     exec ${pkgs.qemu_kvm}/bin/qemu-system-x86_64 \
-      -name vm-"$id" -machine q35,$accel -m "$mem" -smp "$threads" \
+      -name computer-"$id" -machine q35,$accel -m "$mem" -smp "$threads" \
       -nodefaults -display none -vga none \
       -drive file="$d"/system.qcow2,if=none,id=system,format=qcow2 \
       -device virtio-blk-pci,drive=system,serial=system,bootindex=0 \
@@ -111,9 +168,62 @@ let
       -chardev socket,id=console,path="$serial",server=on,wait=off,logfile="$d"/console.log,logappend=off \
       -serial chardev:console
   '';
+  # A network key for a computer kept to its owner's own boxes, asked of
+  # the gate by this box, which holds its lease, signed by its TPM; the
+  # answer opens only with the box's secrets key, and goes into the guest's
+  # share alone. Single use, ten minutes; none, and the guest is simply not
+  # on the Commonty network this time.
+  netJoin = pkgs.writeShellScript "dd-computer-net" ''
+    set -u
+    id="$1"
+    case "$id" in *[!0-9a-f]* | "") exit 1 ;; esac
+    # all of it as the computer's own user: root reads and writes nothing
+    # in a directory that user could have planted a link in
+    as() { ${pkgs.util-linux}/bin/runuser -u dd-computer-"$id" -- "$@"; }
+    share=${private}/"$id"/config
+    as rm -f "$share"/net.json
+    # where it may run, as agreed: never what its own directory says
+    [ "$(${pkgs.curl}/bin/curl -fsS --max-time 10 http://127.0.0.1:4195/computers \
+      | ${pkgs.jq}/bin/jq -r --arg id "$id" '.computers[$id].consent // empty')" = own ] || exit 0
+    export PATH=${
+      lib.makeBinPath [
+        pkgs.age
+        pkgs.age-plugin-tpm
+        pkgs.tpm2-tools
+        pkgs.curl
+        pkgs.jq
+        pkgs.coreutils
+      ]
+    }
+    tmp=$(mktemp)
+    trap 'rm -f "$tmp"' EXIT
+    if ${control}/bin/dd-control -box ${config.networking.hostName} -sign-computer-join "$id" \
+      | curl -fsS --max-time 30 -H 'content-type: application/json' --data-binary @- ${cfg.networkDoor} \
+      | age -d -i /var/lib/dd/secrets-key.txt > "$tmp" \
+      && jq -e '(.key | type) == "string" and (.control_url | startswith("https://")) and (.hostname | test("^computer-[0-9a-f]{16}$"))' "$tmp" >/dev/null; then
+      as sh -c 'umask 077 && cat > "$1.new" && mv "$1.new" "$1"' - "$share"/net.json < "$tmp"
+      echo "computer-$id: a key to the Commonty network handed in"
+    else
+      echo "computer-$id: no key to the Commonty network this time"
+    fi
+  '';
+  # Whose it is, from the agreed state, into a file of root's outside its
+  # directory: the usage count is by this, never by what the computer's
+  # own user could have written
+  noteOwner = pkgs.writeShellScript "dd-computer-owner" ''
+    set -eu
+    id="$1"
+    case "$id" in *[!0-9a-f]* | "") exit 1 ;; esac
+    owner=$(${pkgs.curl}/bin/curl -fsS --max-time 10 http://127.0.0.1:4195/computers \
+      | ${pkgs.jq}/bin/jq -r --arg id "$id" '.computers[$id].owner // empty')
+    [[ $owner =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || { echo "computer-$id: no owner agreed" >&2; exit 1; }
+    install -d -m 0755 ${owners}
+    printf '%s\n' "$owner" > ${owners}/"$id".new
+    mv ${owners}/"$id".new ${owners}/"$id"
+  '';
   # as a game's: the guest powers down, then qemu is told to quit
   stop = pkgs.writeShellScript "dd-computer-stop" ''
-    qmp=${dir}/control/"$1".qmp
+    qmp="$RUNTIME_DIRECTORY"/qmp
     [ -S "$qmp" ] || exit 0
     printf '%s\n' '{"execute":"qmp_capabilities"}' '{"execute":"system_powerdown"}' \
       | ${pkgs.socat}/bin/socat - UNIX-CONNECT:"$qmp" >/dev/null 2>&1 || true
@@ -126,39 +236,56 @@ in
 {
   imports = [ ../guests/egress.nix ];
 
-  # Members' own computers (docs/dev/instances.md): one VM each, from a
-  # record on this box, with a disk for its system and one for /home. As
-  # with games, that an instance exists is the box's state, not the repo's,
-  # and a deploy never restarts one.
+  # Members' remote computers (docs/dev/remote-computers.md), the box's
+  # side. Each is agreed state; the plan puts it on a box and dd-control,
+  # holding its lease (svc/computer-<id>), raises /run/dd-placed/computer-<id>
+  # and starts dd-computer@<id> here, and stops it before the lease may
+  # lapse. A deploy never restarts one.
   options.dd.computers = {
-    enable = lib.mkEnableOption "members' own computers";
+    enable = lib.mkEnableOption "members' remote computers on this box";
     portBase = lib.mkOption {
       type = lib.types.port;
-      default = 27200;
-      description = "the first port instances' SSH and forwards are handed (games have 27000 up)";
+      default = policy.portBase;
+      readOnly = true;
+      description = "the first port of the pool computers' SSH and forwards come from (fleet/policy.json computers; games have 27000 up)";
     };
     portCount = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 200;
+      default = policy.portCount;
+      readOnly = true;
+    };
+    memoryMiB = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = policy.memory;
+      description = "what one member's computers here may take together (fleet/policy.json computers, as the judge holds them to)";
+    };
+    threads = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = policy.threads;
+    };
+    diskGiB = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = policy.disk;
+    };
+    reserveMiB = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = 2048 + builtins.ceil (keptGiB * 1024);
+      description = "memory the box keeps for itself and the services its roles bring, never given to a computer";
+    };
+    network = lib.mkOption {
+      type = lib.types.bool;
+      default = lib.attrByPath [ "dd" "net" "enable" ] false config;
+      description = "hand a computer kept to its owner's own boxes a key to the Commonty network as it starts (tagged a computer)";
+    };
+    networkDoor = lib.mkOption {
+      type = lib.types.str;
+      default = "https://home.${base}/_dd/network/computer";
+      description = "where this box asks for a computer's network key (the gate's network.rs)";
     };
     manager = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "the manager and its page (compute.<domain>); a test of the guest alone turns it off";
-    };
-    memoryMiB = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 16384;
-      description = "what one member's computers, together, may take (fleet/policy.json vms, for now)";
-    };
-    threads = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 8;
-    };
-    reserveMiB = lib.mkOption {
-      type = lib.types.ints.unsigned;
-      default = 2048;
-      description = "memory the box keeps for itself and its services, never given to a computer";
+      description = "the page and its API (compute.<domain>), and the firewall's filler";
     };
     reach = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -170,7 +297,7 @@ in
       type = lib.types.package;
       readOnly = true;
       default = image;
-      description = "the disk a new instance's system starts as";
+      description = "the disk a new computer's system starts as";
     };
   };
 
@@ -184,110 +311,143 @@ in
     dd.guests.enable = true;
     dd.box.plaintext = [ "members' computers (their disks and memory)" ];
 
+    # the page's server: no computer's files are its
     users.users.dd-computers = {
       uid = 952;
       isSystemUser = true;
       group = "dd-computers";
-      extraGroups = [ "kvm" ];
-      home = dir;
     };
     users.groups.dd-computers.gid = 952;
-    systemd.tmpfiles.rules = [
-      "d ${dir} 0750 dd-computers dd-computers -"
-      "d ${dir}/instances 0750 dd-computers dd-computers -"
-      # what the host goes by, out of every guest's reach
-      "d ${dir}/records 0750 dd-computers dd-computers -"
-      "d ${dir}/control 0750 dd-computers dd-computers -"
-    ];
+
+    # The agreed record, read on loopback, which the guest's own unit can't
+    # (its sockets carry dd-guests): checked here again and written where
+    # dd-computer@ reads it. Fails unless this box holds the computer's flag
+    # and the record is agreed up.
+    systemd.services."dd-computer-prepare@" = {
+      description = "The agreed record of member's computer %i";
+      unitConfig.ConditionPathExists = "${placed}/computer-%i";
+      environment = env;
+      serviceConfig = perComputer // {
+        Type = "oneshot";
+        ExecStart = "${bin} prepare %i";
+        # as root, which the TPM's key needs; whatever comes of it, the
+        # computer starts
+        ExecStartPost = [ "+${noteOwner} %i" ] ++ lib.optional cfg.network "-+${netJoin} %i";
+        PrivateDevices = true;
+        RestrictAddressFamilies = [
+          "AF_INET"
+          "AF_INET6"
+          "AF_UNIX"
+        ];
+      };
+    };
 
     systemd.services."dd-computer@" = {
       description = "Member's computer %i";
-      after = [ "firewall.service" ];
-      wants = [ "firewall.service" ];
+      after = [
+        "firewall.service"
+        "dd-computer-prepare@%i.service"
+      ];
+      # wanted, not required: a prepare that failed (dd-control not up yet)
+      # fails this start, and the restart asks again
+      wants = [
+        "firewall.service"
+        "dd-computer-prepare@%i.service"
+      ];
+      # only where dd-control holds its lease (box/placed.nix's condition,
+      # by instance)
+      unitConfig.ConditionPathExists = "${placed}/computer-%i";
       restartIfChanged = false;
       stopIfChanged = false;
       unitConfig.X-StopOnRemoval = false;
-      serviceConfig = {
-        User = "dd-computers";
-        Group = "dd-computers";
-        # what it may reach out to (nix/modules/guests/egress.nix)
-        SupplementaryGroups = [ config.dd.guests.group ];
+      serviceConfig = perComputer // {
+        # what it may reach out to (nix/modules/guests/egress.nix), and KVM
+        SupplementaryGroups = [
+          config.dd.guests.group
+          "kvm"
+        ];
+        # QMP and the console, its own too
+        RuntimeDirectory = "dd-computer/%i";
+        RuntimeDirectoryMode = "0700";
         ExecStart = "${run} %i";
         ExecStop = "${stop} %i";
         TimeoutStopSec = 90;
         Restart = "on-failure";
         RestartSec = 20;
-        NoNewPrivileges = true;
-        ProtectSystem = "strict";
-        ReadWritePaths = [
-          "${dir}/instances"
-          "${dir}/control"
-        ];
-        ProtectHome = true;
-        PrivateTmp = true;
         DeviceAllow = [ "/dev/kvm rw" ];
       };
     };
 
-    # The manager: configs, records, and the units they run as. Like the
-    # games manager it believes x-dd-user, so it listens on a socket only
-    # nginx's group opens
-    systemd.services.dd-computers = lib.mkIf cfg.manager {
-      description = "Members' computers: the manager behind compute.${base}";
-      wantedBy = [ "multi-user.target" ];
-      after = [
-        "network-online.target"
-        "firewall.service"
-      ];
-      wants = [ "network-online.target" ];
-      path = [ pkgs.systemd ];
-      environment = {
-        DD_COMPUTERS_DIR = dir;
-        DD_COMPUTERS_BIND = sock;
-        DD_COMPUTERS_PORT_BASE = toString cfg.portBase;
-        DD_COMPUTERS_PORT_COUNT = toString cfg.portCount;
-        DD_COMPUTERS_MEMORY_MIB = toString cfg.memoryMiB;
-        DD_COMPUTERS_THREADS = toString cfg.threads;
-        DD_COMPUTERS_RESERVE_MIB = toString cfg.reserveMiB;
-        DD_COMPUTERS_ADDRESS = config.dd.box.net;
-        # whose box: "my boxes only" runs here for them alone. A fleet box
-        # (no owner of its own) is the fleet owner's
-        DD_COMPUTERS_BOX_OWNER =
-          if config.dd.box.owner != null then
-            config.dd.box.owner
-          else
-            (lib.importJSON ../../../fleet/policy.json).owner;
-        DD_COMPUTERS_ACCESS = "/run/dd-computers/access.json";
-        # the storage ledger's count, where this box keeps one (storage/view.nix)
-        DD_COMPUTERS_LEDGER = "/var/lib/dd-storage/ledger.json";
-      };
-      serviceConfig = {
-        User = "dd-computers";
-        Group = "dd-computers";
-        RuntimeDirectory = "dd-computers";
-        RuntimeDirectoryMode = "0750";
-        # to read the ledger, where there is one
-        SupplementaryGroups = lib.optional (config.users.groups ? dd-storage) "dd-storage";
-        ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.computers}/bin/dd-computers";
-        Restart = "on-failure";
-        NoNewPrivileges = true;
-        ProtectSystem = "strict";
-        ReadWritePaths = [ dir ];
-        ProtectHome = true;
-        PrivateTmp = true;
+    # a Nix file or a key saved reaches a running guest's share: each
+    # computer's as its own user, asked for each that runs here
+    systemd.services."dd-computer-share@" = {
+      description = "Member's computer %i's share, as agreed now";
+      unitConfig.ConditionPathExists = "${placed}/computer-%i";
+      environment = env;
+      restartIfChanged = false;
+      serviceConfig = perComputer // {
+        Type = "oneshot";
+        ExecStart = "${bin} share %i";
+        PrivateDevices = true;
+        RestrictAddressFamilies = [
+          "AF_INET"
+          "AF_INET6"
+        ];
       };
     };
-    security.polkit.enable = lib.mkIf cfg.manager true;
-    security.polkit.extraConfig = lib.mkIf cfg.manager ''
-      polkit.addRule(function(action, subject) {
-        if (action.id == "org.freedesktop.systemd1.manage-units" &&
-            subject.user == "dd-computers" &&
-            /^dd-computer@[0-9a-f]{16}\.service$/.test(action.lookup("unit")) &&
-            ["start", "stop"].indexOf(action.lookup("verb")) >= 0) {
-          return polkit.Result.YES;
-        }
-      });
-    '';
+    systemd.services.dd-computers-share = {
+      description = "Members' running computers' shares, as agreed now";
+      restartIfChanged = false;
+      path = [ pkgs.systemd ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        for f in ${placed}/computer-*; do
+          id=''${f##*/computer-}
+          case "$id" in "" | *[!0-9a-f]*) continue ;; esac
+          [ ''${#id} -eq 16 ] || continue
+          if systemctl is-active -q dd-computer@"$id".service; then
+            systemctl start --no-block dd-computer-share@"$id".service
+          fi
+        done
+      '';
+    };
+    systemd.timers.dd-computers-share = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "30s";
+        OnUnitActiveSec = "30s";
+      };
+    };
+
+    # The page and its API: what the agreed state says of a member's
+    # computers. It believes x-dd-user, so it listens on a socket only
+    # nginx's group opens; it starts nothing
+    systemd.services.dd-computers = lib.mkIf cfg.manager {
+      description = "Members' computers: the page behind compute.${base}";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      environment = env // {
+        DD_COMPUTERS_BIND = sock;
+        DD_COMPUTERS_ACCESS = "/run/dd-computers/access.json";
+        DD_COMPUTERS_BOXES = pkgs.writeText "boxes.json" (
+          builtins.toJSON (
+            lib.mapAttrs (_: b: b.net) (
+              lib.filterAttrs (_: b: b ? net) (lib.importJSON ../../../fleet/boxes.json)
+            )
+          )
+        );
+      };
+      serviceConfig = hardened // {
+        RuntimeDirectory = "dd-computers";
+        RuntimeDirectoryMode = "0750";
+        ExecStart = "${bin} serve";
+        Restart = "on-failure";
+        User = "dd-computers";
+        Group = "dd-computers";
+        PrivateDevices = true;
+      };
+    };
     users.users.nginx = lib.mkIf (cfg.manager && config.services.nginx.enable) {
       extraGroups = [ "dd-computers" ];
     };
@@ -303,18 +463,19 @@ in
           auth_request_set $auth_role $upstream_http_x_dd_role;
           proxy_set_header X-DD-Role $auth_role;
           proxy_set_header Authorization "";
-          client_max_body_size 128k;
+          client_max_body_size 16k;
           error_page 401 = @login;
           error_page 403 = @waiting;
         '';
       };
     };
 
-    # Who may reach each computer: its owner's devices and the friends its
-    # config names, asked of the gate every fifteen seconds, as for games
-    # (games-access.sh, the same script on its own chain)
+    # Who may reach each computer running here: its owner's devices and the
+    # friends its record names, asked of the gate every fifteen seconds, as
+    # for games (games-access.sh, the same script on its own chain)
     systemd.services.computers-access = lib.mkIf cfg.manager {
       description = "Open each member's computer to its owner's and invited devices";
+      restartIfChanged = false;
       after = [ "firewall.service" ];
       path = [
         pkgs.jq
@@ -349,12 +510,14 @@ in
       path = [
         pkgs.jq
         pkgs.coreutils
+        pkgs.findutils
       ];
       restartIfChanged = false;
       serviceConfig.Type = "oneshot";
       script = ddScript ../guests/usage.sh {
-        DIR = dir;
+        DIR = private;
         KIND = "computers";
+        OWNERS = owners;
       };
     };
     systemd.timers.dd-computers-usage = {
@@ -372,11 +535,13 @@ in
       path = [
         pkgs.coreutils
         pkgs.gawk
+        pkgs.gnugrep
+        pkgs.findutils
       ];
       restartIfChanged = false;
       serviceConfig.Type = "oneshot";
       script = ddScript ./computer-facts.sh {
-        DIR = dir;
+        DIR = private;
         RESERVE_BYTES = cfg.reserveMiB * 1024 * 1024;
       };
     };
@@ -389,7 +554,7 @@ in
     };
 
     # SSH and forwards are open on the Commonty network only, to whom the
-    # owner lets in; the chain is filled once there is a manager (step 2)
+    # owner lets in (computers-access fills the chain)
     networking.firewall.extraCommands = ''
       for ipt in iptables ip6tables; do
         $ipt -N dd-computers 2>/dev/null || true

@@ -197,9 +197,13 @@ each service holds, the roles each box runs. It is greedy, not optimal:
   Those running on a live box stay first, as `moves = "on-failure"`;
   then, by id, the rest go where moving them carries least
   (`dd_computer_used_bytes`), then where most memory is left. A box
-  gives a computer only its flag, `/run/dd-placed/computer-<id>`,
-  and unlike a service's it fails closed: with no fresh plan this box
-  is in, or the computer not agreed up, it comes down. Its room
+  runs a computer as a writer under its lease, `svc/computer-<id>`,
+  which the validators grant only while the computer is agreed up and
+  only to a box placement may give it (state/computerlease.go,
+  `rules.computerHosts`); its flag `/run/dd-placed/computer-<id>` holds
+  the lease's epoch, and the fence stops `dd-computer@<id>` before the
+  lease may lapse. Powered off, it loses the lease at the next renewal.
+  Its room
   (`computers.prom`) is the box's word, never taken past the hardware of
   its signed report.
 

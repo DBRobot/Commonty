@@ -18,7 +18,8 @@
       "runner",
       "library",
       "vault",
-      "adblock"
+      "adblock",
+      "compute"
     ],
     "garage": {
       "id": "eca3acbf439670efa8070ef9e1c8baaa9aac7092163aaab9447102f710e81cfe",

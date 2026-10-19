@@ -1,20 +1,23 @@
 # Remote computers
 
-Status: being built, in this order, through the control plane:
+Status: the records, placement, the lease and the box's side are built; a
+computer runs on a box and stops. Snapshots and moves with their disks
+are not built yet (below, Open).
 
-1. **The records**: configs and computers as
-   signed items, judged in `state/computers` beside identity, served at
-   `4195/computers`. Below, under The records.
-2. **Placement** (the control plane's): each computer is a placed
-   service with a lease, fitted to the boxes' `computers.prom`, never moved while
+1. **The records**: configs and computers as signed items, judged in
+   `state/computers` beside identity, served at `4195/computers`. Below,
+   under The records.
+2. **Placement** (the control plane's): each computer is a placed service
+   with a lease, fitted to the boxes' `computers.prom`, never moved while
    its box is alive.
-3. **The follower** on each box: runs the computers whose lease the box
-   holds; the guest, the page, `dd computer`, the outbound rules and the
-   allowance are built and move onto it.
-4. **Snapshots**, so a computer can come back on another box.
+3. **The box's side**: dd-control holds each computer's lease where the
+   plan puts it and starts `dd-computer@<id>`; the guest, the page,
+   `dd computer`, the outbound rules and the allowance.
+4. **Snapshots**, so a computer can come back on another box. Not built.
 
-A box carries the compute role when its own report says it has KVM; no
-list of boxes names it.
+A box hosts computers when a role of its brings `computers` (fleet/roles.json
+`compute`) and its own report says it has KVM on x86_64: the release's
+table then gives it `computers` (nix/lib/placement-inputs.nix).
 
 A member keeps a computer of their own on the fleet: a VM with its own
 disk, reached over the Commonty network, that reaches the web. They make
@@ -38,8 +41,8 @@ host, a template unit, a firewall chain refilled from who may reach it.
   rebuilds the guest's system. `/home` is a disk of its own and survives
   every rebuild.
 - **Who may reach it**: the member's own devices, always, on SSH, with
-  the computer's own key (below); and more ports for themselves or named
-  friends.
+  the keys its record names (below); and more ports for themselves or
+  named friends.
 - **Where it may run**: on their own boxes only, or on anyone's. Anyone's
   says first, and has to be confirmed before the computer is made:
 
@@ -56,14 +59,17 @@ from the start, the Default config, `default` (4G, 2 threads, 32G, build tools a
 usual languages). Saving a config called `default` replaces it for
 that member.
 
-Nobody types an SSH key. Each remote computer makes its own key pair when
-it is made: the public half is let in, the private half is kept beside
-its disks on the box (`computers/<id>/ssh/key`, out of the guest's
-shares, so it moves and goes with them) and handed only to its owner:
-`dd computer ssh <name>` fetches it into `~/.ssh/commonty-<name>` and uses it,
-and the page offers it as a download. "New key" makes another and the
-old one stops working. The box already runs the computer, so holding its
-key tells it nothing new.
+**SSH keys are made on the member's devices.** Only the public half goes
+into the signed config or computer (`keys`, OpenSSH public key lines, at
+most 8); the guest's sshd lets in exactly those. `dd computer make`
+makes a key pair for the computer on the device it runs on
+(`~/.config/commonty/computers/<name>.device-key`, 0600 in a 0700
+directory, with a comment only this flow writes; a file there it did not
+make, or not the user's own 0600, is refused, and nothing in `~/.ssh` is
+ever taken) and puts its public line in the item;
+the page takes public keys pasted from a device's `.pub` file. A key
+saved later reaches a running computer within a minute, and one left
+out stops working. No private key is ever on a box.
 
 ## How it fits together
 
@@ -80,8 +86,9 @@ browser: compute.<domain>        CLI: dd computer ...
                                                           │
                                                           ▼
      the box the plan names ── lease svc/computer-<id> ── dd-computer@<id>.service
+       (dd-control: flag /run/dd-placed/computer-<id>)    after dd-computer-prepare@<id>
                                                    qemu: system.qcow2, home.qcow2
-                                                   on tank/enc/computers/<id>
+                                                   in /var/lib/private/dd-computer/<id>
                                                           │
                                    every 15 min: ZFS snapshot → restic → the
                                    computer's bucket → copies on other boxes
@@ -89,17 +96,31 @@ browser: compute.<domain>        CLI: dd computer ...
 
 ## The computer
 
-- **One service per computer**, `computer-<id>`, `placed` and `lease = true`,
-  so each has its own lease, its own fence and its own move. The unit is
-  `dd-computer@<id>` (`placed.nix` learns to map a service to a template
-  computer; it refuses `@` today).
+- **One service per computer**, `computer-<id>`, with a lease of its own,
+  `svc/computer-<id>`, its own fence and its own move. The unit is
+  `dd-computer@<id>`; dd-control maps the one to the other (placed.go
+  `units`, and box/placed-fence.sh).
 - **Its record is agreed state**, not a file on one box: a box that dies
   can't take the only copy of what the computer is with it. It holds the
   owner, the config, the consent, its port, and whether it should be up.
   Nothing secret.
-- **Two disks** on a ZFS dataset of its own, `tank/enc/computers/<id>`, its
-  quota the disk size: `system.qcow2`, which a reset rebuilds, and
-  `home.qcow2`, which nothing but deleting the computer removes.
+- **A user of its own**: its prepare, its QEMU and its share run as
+  `dd-computer-<id>` (systemd's `DynamicUser=`), which alone owns its
+  directory (`StateDirectory=dd-computer/<id>`, 0700, under
+  `/var/lib/private`, which no other user enters) and its QMP and console
+  sockets (`/run/dd-computer/<id>`). A guest that broke out into its QEMU
+  holds its own disks and key and nothing of another computer's. On disk
+  the directories are 0700 and owned by `nobody` (65534): systemd maps
+  each into its own computer's units only. Nothing on a box may run as
+  `nobody`. Root's
+  scripts never follow a link in those directories (`find -P`, `du -P`,
+  `dd iflag=nofollow`), and the network key goes in as that user.
+- **Two disks**, in its directory on the box that runs it and nowhere
+  else: `system.qcow2`, from the release's image, and
+  `home.qcow2`, which nothing but deleting the computer removes. Both are
+  grown to the record's disk size, never shrunk. (A ZFS dataset of its
+  own, `tank/enc/computers/<id>`, with the disk size as its quota, comes
+  with the snapshots.)
 - **The guest** is the same NixOS base for every computer, built by the
   release. The member's Nix file reaches it on a read-only config disk and
   the guest builds its own system from it (`nixos-rebuild`, nixpkgs pinned
@@ -116,16 +137,64 @@ browser: compute.<domain>        CLI: dd computer ...
   says. A name, `computer-<name>.<owner>.<domain>`, follows the lease like every
   other service's (the DNS Worker). No public name, no tunnel.
 - **Who may reach it**: a `dd-computers` chain beside `dd-games`, refilled
-  every 15 seconds from the computers API: one rule per (allowed device,
-  port), from the identity state's devices.
+  every 15 seconds (games-access.sh, which empties the chain on any answer
+  that does not read) from what the box's page server writes
+  of the computers running here (`/run/dd-computers/access.json`: owner,
+  players, ports) and the gate's answer of their devices' addresses.
 - **Out: the web.** The guest's traffic leaves through QEMU's user network,
   so on the host it is the `dd-computers` user's own sockets, and the host's
   firewall filters it by owner (`-m owner --gid-owner dd-guests`):
   - refused: port 25; the house's networks (RFC 1918, link-local, CGNAT
-    and so the Commonty network); the host's loopback, which QEMU's user
-    network otherwise hands the guest at `10.0.2.2`;
-  - everything else allowed, and limited per computer (tc on the
-    computer's cgroup) so one computer can't take a house's line.
+    and so the Commonty network, and the house's public IPv6 networks as
+    the box's own addresses on them say when its firewall starts); the host's loopback, which QEMU's user
+    network otherwise hands the guest at `10.0.2.2`, and every other
+    address of the host's own (a public IPv6 one reaches its services
+    through lo, which its firewall lets in): `-m addrtype --dst-type LOCAL`;
+    DNS alone goes to the host's resolvers;
+  - everything else allowed: the web, `api.anthropic.com`, package
+    mirrors, the fleet's public names. (A limit per computer, tc on its
+    cgroup, so one can't take a house's line, is not built.)
+- **On the Commonty network itself**, for a computer kept to its owner's
+  own boxes: as `dd-computer-prepare@<id>` finishes, the box that holds
+  its lease asks the gate for its key (`POST /_dd/network/computer`,
+  `{box, id, time, sig}`, signed by the box's TPM, as a box asks for its
+  own), and the answer, sealed to that box's secrets key, goes into the
+  guest's share alone (`net.json`), never to a device. The gate gives one
+  only from one fresh agreed state (dd-control's `/computer-lease`: the
+  computer and its lease at one height): the computer agreed up and kept
+  to its owner's boxes, the asking box holding `svc/computer-<id>`
+  unexpired, and that box its owner's by the release (box.json), as
+  placement has it; once a minute per box and computer. The key is single use and lives ten minutes; it is tagged
+  `tag:computer`, made in the boxes' user, and bound in the gate to the
+  computer and its owner by the key's id (`computer-nodes.json`), never by
+  a name the guest gives itself. A computer has one node: the one it had
+  comes off before a new key. The guest joins through the front door with
+  the release's netbridge, as a box does. Its node key is kept in memory
+  only (tailscaled `--state=mem:`), never on its disk, so it never travels
+  with the disk; a new key at each start, and the key before that, if
+  unused, is expired, so a computer has one way onto the network at a
+  time.
+  - **What it reaches**: a tagged node is no one's device, so none of the
+    owner's box-admin ports (22, 53, 80, 3900); the policy gives
+    `tag:computer` what a member's device reaches of the boxes (443, the
+    game and computer ports), and the gate counts its address as its
+    owner's, so the owner's game servers and other computers let it in as
+    they do their devices. Git goes over https (443); git over ssh is the
+    box's sshd on 22, an admin port, and stays shut to it.
+  - **When it goes**: the gate's reaper (every 5 minutes, and when someone
+    leaves) takes off every `tag:computer` node that the same rule would
+    not give a key now to the box it gave the key to (not agreed up, not
+    kept to its owner's boxes, its lease lapsed, or moved to another box,
+    even another of the owner's), whose owner is no longer a
+    member, or whose key the gate did not make. It fails closed: an
+    unknown computer (a 4xx) is a no; while dd-control cannot be read, a
+    node is kept on the computer's last fresh answer for ten minutes at
+    most, then taken off; with no agreed state on the gate at all, no
+    computer has a node. A computer whose node was taken off rejoins at
+    its next start, when its box asks for a new key.
+  - **A computer on anyone's box gets the internet only, never the
+    Commonty network**: that box's owner could read the key out of it and
+    be the owner's device there.
 
 ## Placement and moves
 
@@ -164,15 +233,44 @@ browser: compute.<domain>        CLI: dd computer ...
   said it kept (`dd_computer_used_bytes`), less what the new box says it
   keeps; no third box's word counts. With "my boxes only" and one box, it
   waits for that box.
-- **On the box**: dd-control raises `/run/dd-placed/computer-<id>` for
-  each computer the plan gives the box and the agreed state has up, and
-  reports `runs/computer-<id>` while it is up. It fails closed: with no
-  plan, a plan this box is not in, agreed state older than 30 seconds,
-  the agreed computers unread, or a computer not agreed up, the flag
-  comes down. The follower starts
-  `dd-computer@<id>` on the flag and stops it when the flag goes. The
-  flag is a plain one for now: the lease `svc/computer-<id>` needs a
-  lease rule the validators know, and comes with the follower.
+- **On the box**: a computer is a writer under a lease, as postgres is.
+  dd-control asks for `svc/computer-<id>` where the plan puts it, the
+  computer is agreed up and it fits this box's own check of the policy
+  (the owner's computers here within their totals, every port in the pool
+  and none twice); once the lease is its own it raises
+  `/run/dd-placed/computer-<id>` with the lease's epoch and until when it
+  may run, and starts `dd-computer@<id>`. It renews the lease every round.
+  When the plan moves it or it is powered off, it stops the unit, waits
+  for the stop, takes the flag down and gives the lease back.
+- **The lease rule** (state/computerlease.go), on every validator, the
+  witness too: `svc/computer-<16 hex>` is granted, and renewed, only while
+  the computer is in the agreed log, up, and its owner a member, and only
+  to a live box that placement may give it: listed in the release's
+  `rules.computerHosts` (the boxes whose table gives them `computers` and
+  whose owner does not bar them, flake.nix), saying it has KVM on x86_64,
+  and for "own" the computer's owner by the release (box.json). An
+  enlistment is the member's word and counts for nothing here, as in
+  placement. Given back always. A computer powered off loses its lease at
+  the next renewal.
+- **Fenced**: a box that is cut off, or whose state is stale, sends no
+  renewal and its lease lapses; the fence (placed.go `fence`, and
+  `dd-placed-fence` every 2 s, which does not need dd-control) stops
+  `dd-computer@<id>` before the lease could have lapsed, so no other box
+  can hold it while it still runs here.
+- **The guest's unit**: `dd-computer-prepare@<id>` (no `dd-guests` group,
+  so it may reach loopback) reads the agreed record from dd-control,
+  checks it again (the policy's bounds, the pool, the owner's totals among
+  the computers held here), and writes `record.json`, the guest's share
+  (`owner.json`: name and keys; `member.nix`) and a `.prepared` marker.
+  `dd-computer@<id>` wants it (not requires): it runs only on a marker
+  made for its own start, which it takes, so a prepare that failed fails
+  the start and the unit's restart asks again. Both start only where the
+  flag is. Every 30 s `dd-computers-share` starts `dd-computer-share@<id>`
+  for each one running, which rewrites its share as its own user, so a key
+  or Nix file saved reaches it; with dd-control down it does nothing.
+- **What the guest says back** (whether its Nix file applied) goes on a
+  small raw disk of its own; nothing on the box reads it, and the page
+  does not show it.
 - **What it loses**: a move restores the newest snapshot, so up to 15
   minutes of changes and a copy round (5 minutes). The old box's dataset
   is kept, named for when, and never deleted without the owner's yes.
@@ -199,14 +297,26 @@ grow an computer; a running one isn't stopped.
 
 ## The API, the page, the CLI
 
-- **One API**, `compute.<domain>/api`, behind the gate: configs (list,
-  save, delete), computers (make, start, stop, rebuild, reset, delete),
-  the serial console over a websocket.
-- **The page**, `compute.<domain>`: the configs, the computers, the
-  console, the "anyone's box" confirmation. Same layout as the games page.
-- **The CLI**: `dd computer config <name> ...`, `dd computer make <config> <name>`,
-  `dd computer start|stop|apply|reset|delete|log|key|ssh <name>`. The CLI asks the same question before
-  "anyone's".
+- **Reading**: `compute.<domain>/api/state`, behind the gate, served by
+  each host box's `dd-computers` from dd-control: the member's configs
+  and computers as agreed, where the plan puts each and its address on
+  the Commonty network, and their totals against the limits.
+- **Changing**: every change is a signed item put at the gate,
+  `PUT /_dd/computers/{kind}`. The page signs with the member's passkey
+  (sha256 of `commonty <kind> v2\0` and the body, as the judge checks);
+  `dd computer` signs with the device's root key. An account whose root
+  is a device's signs from that device only.
+- **The page**, `compute.<domain>`: web/ files in the computers server,
+  as the Games page is; the app opens it from the box rather than
+  carrying a copy. Its passkey signing is the gap
+  [app.md](app.md#keys-come-only-from-devices) names for passkey accounts (an assertion over
+  bytes a box's page put in front of it), and the box-served page adds
+  nothing beyond it. A page that signs with a device's key (power changes
+  from the browser's device key, or a device root) must be the app's
+  carried copy, never a box's.
+- **The CLI**: `dd computer list`, `config <name> ...`, `forget <name>`,
+  `make <config> <name>`, `start|stop|apply|delete|ssh <name>`.
+  It asks the same question before "anyone's".
 
 ## The records
 
@@ -223,8 +333,8 @@ everywhere. No box decides anything about a computer.
 
 | kind | signed by | body (JSON) |
 |---|---|---|
-| `computer-config` | the owner's root | `owner, name, memory, threads, disk, nix, ports[], players[], consent, version, gone?` |
-| `computer` | the owner's root | `owner, id, name, config, memory, threads, disk, nix, ports[], players[], consent, anywhere, version` |
+| `computer-config` | the owner's root | `owner, name, memory, threads, disk, nix, ports[], players[], keys[], consent, version, gone?` |
+| `computer` | the owner's root | `owner, id, name, config, memory, threads, disk, nix, ports[], players[], keys[], consent, anywhere, version` |
 | `computer-power` | the owner's root or any of their current devices | `id, up, at` |
 | `computer-delete` | the owner's root | `owner, id, at` |
 
@@ -240,7 +350,11 @@ everywhere. No box decides anything about a computer.
 - Sizes: `memory` MiB, `disk` GiB, `threads` a count. `ports` are guest
   ports besides SSH (22 is always there). `consent` is `own` or `any`;
   `anywhere` (true or false) is the owner's yes to the warning: required
-  for `any`, refused for `own`. `own` needs at least one box of theirs. `id` is 16 hex, made by the signer; `name` is
+  for `any`, refused for `own`. `own` needs at least one box of theirs:
+  one they have enlisted, or one the release gives them (`computers.owners`,
+  the owners of `rules.computerHosts`). `keys` are OpenSSH public key lines,
+  at most 8, each a known type whose key names that type, a comment of
+  printable text at most, nothing past one line. `id` is 16 hex, made by the signer; `name` is
   `[a-z0-9][a-z0-9-]{0,31}`, one per owner. `nix` is at most 44 KiB, so a
   whole item fits the gate's 64 KiB with its body in base64. No item of
   these kinds carries a `recovery_sig`: the gate and the judge refuse one. Every field is written,
@@ -273,5 +387,16 @@ everywhere. No box decides anything about a computer.
 
 ## Open
 
-- Signing from the page: power changes with the browser's device key,
-  everything else with the passkey (root). Not built yet.
+- **The port pool's size** (`fleet/policy.json` `computers.portCount`,
+  200 from 27200 for the whole fleet, 16 per member): David's decision,
+  not made yet.
+- **node1's room**: its services keep about 49 GiB by the release's
+  estimates (`dd.computers.reserveMiB`, from the needs' sizes), so it
+  offers about 12 GiB and 7 threads to computers; a 16 GiB or 8-thread
+  computer does not fit there until those estimates or the policy change.
+- **Snapshots and moves** with their disks: not built. A computer whose
+  box fails waits (own) or starts afresh elsewhere (any) without its disks.
+- **Disks of a deleted computer** stay on the box that ran it; nothing
+  deletes them yet.
+- **Signing from the page with a device's key** (power changes): not
+  built; the passkey signs everything there.

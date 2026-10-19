@@ -187,7 +187,7 @@
     },
     "why": "members' computers are KVM guests, each its own size: a box takes those that fit (its computers.prom says how big), so a small box still runs small ones",
     "services": [
-      "dd-computers"
+      "computers"
     ]
   }
 }

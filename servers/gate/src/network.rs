@@ -37,7 +37,32 @@ pub struct Door {
     age: String,
     /// when each box last had a key, and the time it signed for it
     asked: Mutex<HashMap<String, (u64, u64)>>,
+    /// each remote computer's node, by the key it joined with (its
+    /// preauth key's id): whose computer, and which. What a computer's
+    /// node is to the policy and the reaper comes from here, never from a
+    /// name the guest gives itself
+    bound: Mutex<HashMap<String, Bound>>,
+    /// where `bound` is kept across restarts; None: in memory
+    bound_file: Option<std::path::PathBuf>,
+    /// each computer's last fresh agreed state, and when it was read (ms):
+    /// what its node is kept or taken off by while dd-control is unread
+    last_good: Mutex<HashMap<String, (Snapshot, i64)>>,
 }
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Bound {
+    pub owner: String,
+    pub id: String,
+    /// the box it was given to, holding the computer's lease: the node is
+    /// that box's guest's, and goes when the lease moves on
+    #[serde(rename = "box", default)]
+    pub on: String,
+    /// when its key was made (s): a key never used is forgotten after a day
+    pub made: u64,
+}
+
+/// a remote computer's node's tag (nix/modules/net/headscale.nix)
+const COMPUTER_TAG: &str = "tag:computer";
 
 pub struct BoxKeys {
     signs: VerifyingKey,
@@ -57,6 +82,9 @@ pub fn from_env() -> Result<Option<Door>> {
         std::env::var("VERIFY_HEADSCALE_KEY_FILE").context("VERIFY_HEADSCALE_KEY_FILE")?,
     )
     .context("reading the headscale api key")?;
+    let bound_file = std::env::var("VERIFY_DIR")
+        .ok()
+        .map(|d| std::path::Path::new(&d).join("computer-nodes.json"));
     Ok(Some(Door {
         api: api.trim_end_matches('/').to_string(),
         control_url: std::env::var("VERIFY_HEADSCALE_URL").context("VERIFY_HEADSCALE_URL")?,
@@ -70,6 +98,15 @@ pub fn from_env() -> Result<Option<Door>> {
         },
         age: std::env::var("VERIFY_AGE").unwrap_or_else(|_| "age".into()),
         asked: Mutex::default(),
+        bound: Mutex::new(
+            bound_file
+                .as_ref()
+                .and_then(|f| std::fs::read(f).ok())
+                .and_then(|b| serde_json::from_slice(&b).ok())
+                .unwrap_or_default(),
+        ),
+        bound_file,
+        last_good: Mutex::default(),
     }))
 }
 
@@ -93,6 +130,12 @@ fn boxes_from(json: &str) -> Result<HashMap<String, BoxKeys>> {
 /// what a box signs (servers/system/control/cmd/dd-control, joinMessage)
 fn join_message(name: &str, time: u64) -> Vec<u8> {
     format!("commonty box join v1\0{name}\0{time}").into_bytes()
+}
+
+/// what a box signs to ask for a network key for the remote computer it
+/// runs (dd-control, computerJoinMessage)
+fn computer_join_message(name: &str, id: &str, time: u64) -> Vec<u8> {
+    format!("commonty computer join v1\0{name}\0{id}\0{time}").into_bytes()
 }
 
 /// a TPM signs plain r||s, a test's soft key DER: either will do
@@ -157,8 +200,47 @@ impl Door {
         id_of(&v["user"])
     }
 
+    /// a node's tags, as headscale 0.28 gives them (tags), or an older one
+    fn tags(n: &serde_json::Value) -> Vec<&str> {
+        ["tags", "forcedTags", "validTags"]
+            .iter()
+            .flat_map(|k| n[*k].as_array().into_iter().flatten())
+            .filter_map(|t| t.as_str())
+            .collect()
+    }
+
+    /// whose remote computer a node is, by the key it joined with
+    fn bound_to(&self, n: &serde_json::Value) -> Option<Bound> {
+        if !Self::tags(n).contains(&COMPUTER_TAG) {
+            return None;
+        }
+        let kid = id_of(&n["preAuthKey"]).ok()?.to_string();
+        self.bound.lock().unwrap().get(&kid).cloned()
+    }
+
+    fn keep_bound(&self) {
+        let Some(f) = &self.bound_file else { return };
+        let b = serde_json::to_vec(&*self.bound.lock().unwrap()).unwrap_or_default();
+        let tmp = f.with_extension("tmp");
+        if std::fs::write(&tmp, b)
+            .and_then(|_| std::fs::rename(&tmp, f))
+            .is_err()
+        {
+            eprintln!("network: could not keep {}", f.display());
+        }
+    }
+
+    fn node_id(n: &serde_json::Value) -> Option<String> {
+        match &n["id"] {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Number(i) => Some(i.to_string()),
+            _ => None,
+        }
+    }
+
     /// Every person's machines' addresses on the network, in one ask of the
-    /// control server rather than one a person.
+    /// control server rather than one a person. A remote computer's node
+    /// counts as its owner's, by the key it joined with.
     pub async fn addresses_by_owner(
         &self,
     ) -> Result<std::collections::HashMap<String, Vec<String>>> {
@@ -167,10 +249,17 @@ impl Door {
             .await?;
         let mut out: std::collections::HashMap<String, Vec<String>> = Default::default();
         for n in v["nodes"].as_array().into_iter().flatten() {
-            let Some(user) = n["user"]["name"].as_str() else {
-                continue;
+            let tags = Self::tags(n);
+            let user = match self.bound_to(n) {
+                Some(b) => b.owner,
+                // no other tagged node is anyone's
+                None if !tags.is_empty() => continue,
+                None => match n["user"]["name"].as_str() {
+                    Some(u) => u.to_string(),
+                    None => continue,
+                },
             };
-            out.entry(user.to_string()).or_default().extend(
+            out.entry(user).or_default().extend(
                 n["ipAddresses"]
                     .as_array()
                     .into_iter()
@@ -187,24 +276,82 @@ impl Door {
     /// their laptop stays on the network with whatever the policy lets it
     /// reach, for good. Boxes are left alone - they are tagged, and they
     /// joined on the boxes' key, not a person's.
-    pub async fn reap(&self, member: impl Fn(&str) -> bool) -> Result<usize> {
+    ///
+    /// A remote computer's node goes too once its computer is no longer
+    /// agreed up, or its owner no longer a member: `computer` says what the
+    /// agreed state has of an id (owner, up), Err while it is unread, when
+    /// none goes. One whose key the gate never made is no one's.
+    pub async fn reap(
+        &self,
+        member: impl Fn(&str) -> bool,
+        control: Option<&str>,
+    ) -> Result<usize> {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
         let v = self
             .call(reqwest::Method::GET, "/api/v1/node", None)
             .await?;
         let mut gone = 0;
+        let mut used = std::collections::HashSet::new();
+        let mut seen = std::collections::HashSet::new();
         for n in v["nodes"].as_array().into_iter().flatten() {
-            let tagged = ["tags", "forcedTags", "validTags"]
-                .iter()
-                .any(|k| n[*k].as_array().is_some_and(|a| !a.is_empty()));
-            if tagged {
+            let tags = Self::tags(n);
+            let user = if tags.contains(&COMPUTER_TAG) {
+                let b = self.bound_to(n);
+                if let Ok(k) = id_of(&n["preAuthKey"]) {
+                    used.insert(k.to_string());
+                }
+                let keep = match (&b, control) {
+                    // no agreed state here at all: no computer has a node
+                    (None, _) | (_, None) => false,
+                    (Some(b), Some(c)) => {
+                        // the same box still holding its lease: a node given
+                        // to the guest on one box is not another's
+                        let judge = |snap: &Snapshot| {
+                            qualifies(snap, &b.on).is_ok_and(|o| o == b.owner) && member(&b.owner)
+                        };
+                        match read_snapshot(&self.http, c, &b.id).await {
+                            Read::Refused => false,
+                            Read::Got(snap) if fresh(&snap, now_ms).is_ok() => {
+                                let ok = judge(&snap);
+                                self.last_good
+                                    .lock()
+                                    .unwrap()
+                                    .insert(b.id.clone(), (snap, now_ms));
+                                ok
+                            }
+                            // nothing fresh to go by: its last good word, for
+                            // a while, then off
+                            Read::Got(_) | Read::Unread => {
+                                match self.last_good.lock().unwrap().get(&b.id) {
+                                    Some((snap, at)) if now_ms - at <= LAST_GOOD_MS => judge(snap),
+                                    _ => false,
+                                }
+                            }
+                        }
+                    }
+                };
+                if let Some(b) = &b {
+                    seen.insert(b.id.clone());
+                }
+                if keep {
+                    continue;
+                }
+                b.map(|b| format!("{}'s computer {}", b.owner, b.id))
+                    .unwrap_or_else(|| "no one's computer".into())
+            } else if !tags.is_empty() {
                 continue;
-            }
-            let Some(user) = n["user"]["name"].as_str() else {
-                continue;
+            } else {
+                let Some(user) = n["user"]["name"].as_str() else {
+                    continue;
+                };
+                if member(user) {
+                    continue;
+                }
+                format!("{user} is not a member")
             };
-            if member(user) {
-                continue;
-            }
             let id = match &n["id"] {
                 serde_json::Value::String(s) => s.clone(),
                 serde_json::Value::Number(i) => i.to_string(),
@@ -213,13 +360,30 @@ impl Door {
             self.call(reqwest::Method::DELETE, &format!("/api/v1/node/{id}"), None)
                 .await?;
             eprintln!(
-                "network: removed {} - {user} is not a member",
+                "network: removed {} - {user}",
                 n["givenName"]
                     .as_str()
                     .or(n["name"].as_str())
                     .unwrap_or(&id)
             );
             gone += 1;
+        }
+        self.last_good
+            .lock()
+            .unwrap()
+            .retain(|id, _| seen.contains(id));
+        // a key made and never used is forgotten after a day
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let before = self.bound.lock().unwrap().len();
+        self.bound
+            .lock()
+            .unwrap()
+            .retain(|k, b| used.contains(k) || now < b.made + 86400);
+        if self.bound.lock().unwrap().len() != before {
+            self.keep_bound();
         }
         Ok(gone)
     }
@@ -230,6 +394,17 @@ impl Door {
     }
 
     async fn mint(&self, name: &str, tags: &[&str]) -> Result<(String, u64)> {
+        self.mint_any(name, tags).await.map(|(k, e, _)| (k, e))
+    }
+
+    /// a key, when it expires, and its id (what a node that joins with it
+    /// names as its preAuthKey): a key with no id could bind no node
+    async fn mint_id(&self, name: &str, tags: &[&str]) -> Result<(String, u64, u64)> {
+        let (k, e, id) = self.mint_any(name, tags).await?;
+        Ok((k, e, id.context("headscale gave no key id")?))
+    }
+
+    async fn mint_any(&self, name: &str, tags: &[&str]) -> Result<(String, u64, Option<u64>)> {
         let user = self.user_id(name).await?;
         let expires = SystemTime::now() + TTL;
         let stamp = humantime(expires);
@@ -250,12 +425,14 @@ impl Door {
             .as_str()
             .context("headscale gave no key")?
             .to_string();
+        let kid = id_of(&v["preAuthKey"]).ok();
         Ok((
             key,
             expires
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
+            kid,
         ))
     }
 }
@@ -451,6 +628,279 @@ pub(crate) async fn controller_join(State(app): State<Arc<App>>, headers: Header
 }
 
 #[derive(serde::Deserialize)]
+pub(crate) struct ComputerAsk {
+    #[serde(rename = "box")]
+    name: String,
+    id: String,
+    time: u64,
+    sig: String,
+}
+
+/// A remote computer's key to the network (docs/dev/remote-computers.md),
+/// asked for by the box that runs it as it starts it, and handed into the
+/// guest by that box alone: never to a device. Signed by the box's TPM,
+/// for one computer; given only while the computer is agreed up and kept to
+/// its owner's own boxes, and only to the box that holds its lease. The
+/// key is single use and lives ten minutes; its node is tagged a computer,
+/// bound here to the computer and its owner, and the one node that
+/// computer has: one before it comes off. The answer opens only with the
+/// box's secrets key.
+///
+/// `snap`: the computer and its lease from one agreed state (dd-control's
+/// /computer-lease), Err when it could not be read.
+pub(crate) async fn computer_key(
+    door: &Door,
+    ask: &ComputerAsk,
+    now: u64,
+    snap: Result<Snapshot, ()>,
+) -> Result<String, (StatusCode, String)> {
+    let keys = door
+        .boxes
+        .get(&ask.name)
+        .ok_or((StatusCode::FORBIDDEN, "not a box of this fleet".into()))?;
+    if ask.id.len() != 16
+        || !ask
+            .id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err((StatusCode::BAD_REQUEST, "not a computer's id".into()));
+    }
+    if ask.time.abs_diff(now) > SKEW {
+        return Err((StatusCode::FORBIDDEN, "the time is off".into()));
+    }
+    let sig = signature(&ask.sig).ok_or((StatusCode::BAD_REQUEST, "no signature".into()))?;
+    keys.signs
+        .verify(&computer_join_message(&ask.name, &ask.id, ask.time), &sig)
+        .map_err(|_| (StatusCode::FORBIDDEN, "not signed by that box".into()))?;
+    let snap = snap.map_err(|()| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the agreed state could not be read; try again".to_string(),
+        )
+    })?;
+    let owner = grant(&snap, &ask.name, now.saturating_mul(1000) as i64)?;
+    {
+        let mut asked = door.asked.lock().unwrap();
+        let at = format!("computer:{}:{}", ask.name, ask.id);
+        if let Some(&(t, signed)) = asked.get(&at) {
+            if now < t + EVERY {
+                return Err((StatusCode::TOO_MANY_REQUESTS, "one a minute".into()));
+            }
+            if ask.time <= signed {
+                return Err((StatusCode::FORBIDDEN, "that request was used".into()));
+            }
+        }
+        asked.insert(at, (now, ask.time));
+    }
+    let bad = |e: anyhow::Error| (StatusCode::BAD_GATEWAY, format!("{e:#}"));
+    // one node a computer: the one it had comes off before its new key
+    let v = door
+        .call(reqwest::Method::GET, "/api/v1/node", None)
+        .await
+        .map_err(bad)?;
+    for n in v["nodes"].as_array().into_iter().flatten() {
+        if door.bound_to(n).is_some_and(|b| b.id == ask.id)
+            && let Some(nid) = Door::node_id(n)
+        {
+            door.call(
+                reqwest::Method::DELETE,
+                &format!("/api/v1/node/{nid}"),
+                None,
+            )
+            .await
+            .map_err(bad)?;
+        }
+    }
+    // and a key made for it before and never used goes too: one way onto
+    // the network per computer, at any time
+    let earlier: Vec<String> = door
+        .bound
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, b)| b.id == ask.id)
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in earlier {
+        door.call(
+            reqwest::Method::POST,
+            "/api/v1/preauthkey/expire",
+            Some(serde_json::json!({ "id": k })),
+        )
+        .await
+        .map_err(bad)?;
+        door.bound.lock().unwrap().remove(&k);
+    }
+    let (key, expires, kid) = door.mint_id("boxes", &[COMPUTER_TAG]).await.map_err(bad)?;
+    door.bound.lock().unwrap().insert(
+        kid.to_string(),
+        Bound {
+            owner,
+            id: ask.id.clone(),
+            on: ask.name.clone(),
+            made: now,
+        },
+    );
+    door.keep_bound();
+    let answer = serde_json::json!({
+        "control_url": door.control_url,
+        "key": key,
+        "expires": expires,
+        "hostname": format!("computer-{}", ask.id),
+    });
+    seal(&door.age, &keys.recipient, &answer.to_string()).map_err(bad)
+}
+
+/// A computer and its lease as one agreed state has them (dd-control's
+/// /computer-lease)
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub(crate) struct Snapshot {
+    height: u64,
+    #[serde(rename = "leaseHeight")]
+    lease_height: u64,
+    /// the agreed time, ms
+    time: i64,
+    computer: Option<SnapComputer>,
+    lease: Option<SnapLease>,
+    /// the release's owner of the box holding the lease (box.json), when
+    /// it is a host of computers at all
+    #[serde(rename = "hostOwner")]
+    host_owner: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub(crate) struct SnapComputer {
+    owner: String,
+    up: bool,
+    consent: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub(crate) struct SnapLease {
+    holder: String,
+    expires: i64,
+}
+
+/// how old the agreed state may be and still grant anything
+const FRESH_MS: i64 = 30_000;
+
+/// Whether `box_name` may hand a network key into this computer now: the
+/// one rule for a key and for keeping its node. A computer kept to its
+/// owner's own boxes, agreed up, whose lease that box holds, unexpired at
+/// the agreed time, and that box its owner's by the release (box.json), as
+/// placement has it - all from one agreed state, fresh. A computer on
+/// anyone's box gets the internet only: that box's owner could read a key
+/// out of it. The owner, or why not.
+fn grant(snap: &Snapshot, box_name: &str, now_ms: i64) -> Result<String, (StatusCode, String)> {
+    fresh(snap, now_ms)?;
+    qualifies(snap, box_name)
+}
+
+/// one agreed state, and a fresh one
+fn fresh(snap: &Snapshot, now_ms: i64) -> Result<(), (StatusCode, String)> {
+    if snap.height == 0 || snap.height != snap.lease_height {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the computer and its lease are not from one agreed state".into(),
+        ));
+    }
+    if now_ms.saturating_sub(snap.time) > FRESH_MS {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the agreed state is not fresh".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// what that state says, as of its own time
+fn qualifies(snap: &Snapshot, box_name: &str) -> Result<String, (StatusCode, String)> {
+    let no = |why: &str| Err((StatusCode::FORBIDDEN, why.to_string()));
+    let Some(c) = &snap.computer else {
+        return Err((StatusCode::NOT_FOUND, "no such remote computer".into()));
+    };
+    if !c.up {
+        return no("that computer is not agreed up");
+    }
+    if c.consent != "own" {
+        return no("only a computer kept to its owner's own boxes joins the network");
+    }
+    match &snap.lease {
+        Some(l) if l.holder == box_name && l.expires > snap.time => {}
+        Some(l) if l.holder == box_name => return no("its lease has lapsed"),
+        _ => return no("that box does not hold the computer's lease"),
+    }
+    if snap.host_owner.as_deref() != Some(c.owner.as_str()) {
+        return no("that box is not the computer's owner's");
+    }
+    Ok(c.owner.clone())
+}
+
+/// What dd-control answered for one computer: its state; a refusal (a
+/// 4xx: a bad or unknown id), which is a decision; or nothing to go by
+/// (it did not answer, a 5xx, not what it should be)
+pub(crate) enum Read {
+    Got(Snapshot),
+    Refused,
+    Unread,
+}
+
+async fn read_snapshot(http: &reqwest::Client, control: &str, id: &str) -> Read {
+    let r = match http
+        .get(format!("{}/computer-lease", control.trim_end_matches('/')))
+        .query(&[("id", id)])
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return Read::Unread,
+    };
+    if r.status().is_client_error() {
+        return Read::Refused;
+    }
+    if !r.status().is_success() {
+        return Read::Unread;
+    }
+    match r.json().await {
+        Ok(s) => Read::Got(s),
+        Err(_) => Read::Unread,
+    }
+}
+
+/// how long a computer's node is kept on its last good word while the
+/// agreed state cannot be read: past that, it comes off
+const LAST_GOOD_MS: i64 = 10 * 60 * 1000;
+
+/// POST /_dd/network/computer, {box, id, time, sig} -> the key, sealed to that box
+pub(crate) async fn computer_join(
+    State(app): State<Arc<App>>,
+    Json(ask): Json<ComputerAsk>,
+) -> Response {
+    let Some(door) = app.network.as_ref() else {
+        return (StatusCode::NOT_FOUND, "this box has no network door").into_response();
+    };
+    let snap = match app.control.as_deref() {
+        Some(control) => match read_snapshot(&door.http, control, &ask.id).await {
+            Read::Got(s) => Ok(s),
+            Read::Refused | Read::Unread => Err(()),
+        },
+        None => Err(()),
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match computer_key(door, &ask, now, snap).await {
+        Ok(sealed) => sealed.into_response(),
+        Err((status, why)) => (status, why).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
 pub(crate) struct BoxAsk {
     #[serde(rename = "box")]
     name: String,
@@ -476,6 +926,7 @@ pub(crate) async fn box_join(State(app): State<Arc<App>>, Json(ask): Json<BoxAsk
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     /// A fake headscale with three nodes: a box, a member's laptop and a
     /// stranger's phone. Only the phone may go.
@@ -521,8 +972,11 @@ mod tests {
             boxes: HashMap::new(),
             age: "age".into(),
             asked: Mutex::default(),
+            bound: Mutex::default(),
+            bound_file: None,
+            last_good: Mutex::default(),
         };
-        let gone = door.reap(|u| u == "david").await.unwrap();
+        let gone = door.reap(|u| u == "david", None).await.unwrap();
         assert_eq!(gone, 1);
         assert_eq!(*deleted.lock().unwrap(), vec!["3".to_string()]);
     }
@@ -583,6 +1037,9 @@ mod tests {
             boxes,
             age: age.display().to_string(),
             asked: Mutex::default(),
+            bound: Mutex::default(),
+            bound_file: None,
+            last_good: Mutex::default(),
         };
         let sign = |k: &SigningKey, name: &str, t: u64| {
             let s: Signature = k.sign(&join_message(name, t));
@@ -649,6 +1106,436 @@ mod tests {
                 .is_ok()
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A fake headscale: the nodes it has, the keys it made (their tags),
+    /// and the nodes taken off
+    #[derive(Default)]
+    struct Fake {
+        /// dd-control's /computer-lease, by id; an id it does not know, 404
+        snaps: Mutex<HashMap<String, serde_json::Value>>,
+        /// whether dd-control answers at all (a 503 when not)
+        down: Mutex<bool>,
+        /// the keys expired, by id
+        expired: Mutex<Vec<String>>,
+        nodes: Mutex<Vec<serde_json::Value>>,
+        made: Mutex<Vec<serde_json::Value>>,
+        deleted: Mutex<Vec<String>>,
+    }
+
+    async fn fake_headscale(f: Arc<Fake>) -> String {
+        use axum::{
+            Json, Router,
+            extract::{Path, State},
+            routing::{delete, get, post},
+        };
+        let app = Router::new()
+            .route(
+                "/api/v1/user",
+                get(|| async {
+                    Json(serde_json::json!({ "users": [{ "id": "7", "name": "boxes" }] }))
+                }),
+            )
+            .route(
+                "/api/v1/preauthkey",
+                post(
+                    |State(f): State<Arc<Fake>>, Json(b): Json<serde_json::Value>| async move {
+                        let mut made = f.made.lock().unwrap();
+                        made.push(b);
+                        let id = made.len() + 40;
+                        Json(serde_json::json!({ "preAuthKey": { "key": format!("key-{id}"), "id": id.to_string() } }))
+                    },
+                ),
+            )
+            .route(
+                "/api/v1/preauthkey/expire",
+                post(
+                    |State(f): State<Arc<Fake>>, Json(b): Json<serde_json::Value>| async move {
+                        f.expired.lock().unwrap().push(b["id"].as_str().unwrap_or("").to_string());
+                        Json(serde_json::json!({}))
+                    },
+                ),
+            )
+            .route(
+                "/computer-lease",
+                get(
+                    |State(f): State<Arc<Fake>>,
+                     axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>| async move {
+                        if *f.down.lock().unwrap() {
+                            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+                        }
+                        match f.snaps.lock().unwrap().get(&q["id"]) {
+                            Some(v) => Json(v.clone()).into_response(),
+                            None => StatusCode::NOT_FOUND.into_response(),
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/api/v1/node",
+                get(|State(f): State<Arc<Fake>>| async move {
+                    Json(serde_json::json!({ "nodes": f.nodes.lock().unwrap().clone() }))
+                }),
+            )
+            .route(
+                "/api/v1/node/{id}",
+                delete(
+                    |State(f): State<Arc<Fake>>, Path(id): Path<String>| async move {
+                        f.deleted.lock().unwrap().push(id);
+                        Json(serde_json::json!({}))
+                    },
+                ),
+            )
+            .with_state(f);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}")
+    }
+
+    fn door_at(api: String, boxes: HashMap<String, BoxKeys>, age: String) -> Door {
+        Door {
+            api,
+            control_url: "https://headscale.test.invalid".into(),
+            key: "k".into(),
+            http: reqwest::Client::new(),
+            boxes,
+            age,
+            asked: Mutex::default(),
+            bound: Mutex::default(),
+            bound_file: None,
+            last_good: Mutex::default(),
+        }
+    }
+
+    fn computer_node(id: &str, kid: &str, ip: &str) -> serde_json::Value {
+        serde_json::json!({ "id": id, "givenName": format!("n{id}"), "user": { "name": "boxes" },
+            "tags": ["tag:computer"], "preAuthKey": { "id": kid }, "ipAddresses": [ip] })
+    }
+
+    /// A remote computer's network key: only to the box that signed for it,
+    /// holds its lease, while it is agreed up and kept to its owner's own
+    /// boxes; sealed to that box, bound to the computer and its owner, and
+    /// the computer's one node: the one before comes off
+    #[tokio::test]
+    async fn a_computer_gets_a_key_only_through_the_box_that_runs_it() {
+        use base64::Engine;
+        use p256::ecdsa::{SigningKey, signature::Signer};
+        use std::os::unix::fs::PermissionsExt;
+
+        let f = Arc::new(Fake::default());
+        let api = fake_headscale(f.clone()).await;
+        let dir = std::env::temp_dir().join(format!("computer-join-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let age = dir.join("age");
+        std::fs::write(&age, "#!/bin/sh\nprintf 'sealed to %s: ' \"$3\"; cat\n").unwrap();
+        std::fs::set_permissions(&age, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let node1 = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let node2 = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let mut boxes = HashMap::new();
+        for (n, k) in [("node1", &node1), ("node2", &node2)] {
+            boxes.insert(
+                n.to_string(),
+                BoxKeys {
+                    signs: *k.verifying_key(),
+                    recipient: format!("age1{n}"),
+                },
+            );
+        }
+        let door = door_at(api, boxes, age.display().to_string());
+        let id = "0123456789abcdef";
+        let ask = |k: &SigningKey, name: &str, t: u64| {
+            let s: Signature = k.sign(&computer_join_message(name, id, t));
+            ComputerAsk {
+                name: name.into(),
+                id: id.into(),
+                time: t,
+                sig: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s.to_bytes()),
+            }
+        };
+        let now = 1_790_000_000;
+        let now_ms = now as i64 * 1000;
+        // the computer and its lease, as one fresh agreed state has them
+        let snap = |f: &dyn Fn(&mut serde_json::Value)| {
+            let mut v = serde_json::json!({
+                "height": 9, "leaseHeight": 9, "time": now_ms - 1000,
+                "computer": { "owner": "ann", "up": true, "consent": "own" },
+                "lease": { "holder": "node1", "expires": now_ms + 10_000 },
+                "hostOwner": "ann",
+            });
+            f(&mut v);
+            Ok(serde_json::from_value::<Snapshot>(v).unwrap())
+        };
+        let same = |_: &mut serde_json::Value| {};
+        let refused = |r: Result<String, (StatusCode, String)>| r.unwrap_err().0;
+        let a = ask(&node1, "node1", now);
+
+        // signed by another box, or asked by a box that is not the holder
+        let forged = ask(&node2, "node1", now);
+        assert_eq!(
+            refused(computer_key(&door, &forged, now, snap(&same)).await),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            refused(computer_key(&door, &ask(&node2, "node2", now), now, snap(&same)).await),
+            StatusCode::FORBIDDEN
+        );
+        for (why, change, code) in [
+            ("unread", None, StatusCode::SERVICE_UNAVAILABLE),
+            (
+                "two states",
+                Some(
+                    &(|v: &mut serde_json::Value| v["leaseHeight"] = 8.into())
+                        as &dyn Fn(&mut serde_json::Value),
+                ),
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                "stale",
+                Some(&|v: &mut serde_json::Value| v["time"] = (now_ms - 60_000).into()),
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                "none",
+                Some(&|v: &mut serde_json::Value| v["computer"] = serde_json::Value::Null),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                "down",
+                Some(&|v: &mut serde_json::Value| v["computer"]["up"] = false.into()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "anyone's",
+                Some(&|v: &mut serde_json::Value| v["computer"]["consent"] = "any".into()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "no lease",
+                Some(&|v: &mut serde_json::Value| v["lease"] = serde_json::Value::Null),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "lapsed",
+                Some(&|v: &mut serde_json::Value| v["lease"]["expires"] = (now_ms - 2000).into()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "not her box",
+                Some(&|v: &mut serde_json::Value| v["hostOwner"] = "bob".into()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "no host",
+                Some(&|v: &mut serde_json::Value| v["hostOwner"] = serde_json::Value::Null),
+                StatusCode::FORBIDDEN,
+            ),
+        ] {
+            let s = match change {
+                None => Err(()),
+                Some(c) => snap(c),
+            };
+            assert_eq!(
+                refused(computer_key(&door, &a, now, s).await),
+                code,
+                "{why}"
+            );
+        }
+        assert!(f.made.lock().unwrap().is_empty());
+
+        let sealed = computer_key(&door, &a, now, snap(&same)).await.unwrap();
+        let answer: serde_json::Value =
+            serde_json::from_str(sealed.strip_prefix("sealed to age1node1: ").unwrap()).unwrap();
+        assert_eq!(answer["key"], "key-41");
+        assert_eq!(answer["hostname"], format!("computer-{id}"));
+        assert_eq!(
+            f.made.lock().unwrap()[0]["aclTags"],
+            serde_json::json!(["tag:computer"])
+        );
+        assert_eq!(
+            door.bound.lock().unwrap().get("41"),
+            Some(&Bound {
+                owner: "ann".into(),
+                id: id.into(),
+                on: "node1".into(),
+                made: now
+            })
+        );
+        // once a minute
+        assert_eq!(
+            refused(
+                computer_key(&door, &ask(&node1, "node1", now + 5), now + 5, snap(&same)).await
+            ),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        // its node joined; asked again later, that node comes off first
+        f.nodes
+            .lock()
+            .unwrap()
+            .push(computer_node("9", "41", "100.64.0.9"));
+        let later = now + 61;
+        let fresh = |v: &mut serde_json::Value| {
+            v["time"] = (later as i64 * 1000).into();
+            v["lease"]["expires"] = (later as i64 * 1000 + 10_000).into();
+        };
+        computer_key(&door, &ask(&node1, "node1", later), later, snap(&fresh))
+            .await
+            .unwrap();
+        assert_eq!(*f.deleted.lock().unwrap(), vec!["9".to_string()]);
+        // the key before it expired, and no longer bound
+        assert_eq!(*f.expired.lock().unwrap(), vec!["41".to_string()]);
+        assert!(!door.bound.lock().unwrap().contains_key("41"));
+        assert!(door.bound.lock().unwrap().contains_key("42"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// a key headscale gave no id for is no key: its node could be no one's
+    #[tokio::test]
+    async fn a_key_without_an_id_is_refused() {
+        use axum::{
+            Json, Router,
+            routing::{get, post},
+        };
+        let app = Router::new()
+            .route(
+                "/api/v1/user",
+                get(|| async {
+                    Json(serde_json::json!({ "users": [{ "id": "7", "name": "boxes" }] }))
+                }),
+            )
+            .route(
+                "/api/v1/preauthkey",
+                post(|| async { Json(serde_json::json!({ "preAuthKey": { "key": "k" } })) }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let door = door_at(format!("http://{addr}"), HashMap::new(), "age".into());
+        assert!(door.mint_id("boxes", &[COMPUTER_TAG]).await.is_err());
+    }
+
+    /// A computer's node goes once its computer is not agreed up, or its
+    /// owner is no member, or the gate never made its key; it stays while
+    /// the computers are unread. Its address is its owner's.
+    #[tokio::test]
+    async fn a_computers_node_lives_only_as_long_as_its_grant() {
+        let f = Arc::new(Fake::default());
+        let api = fake_headscale(f.clone()).await;
+        let door = door_at(api.clone(), HashMap::new(), "age".into());
+        for (kid, owner, id) in [("1", "ann", "a"), ("2", "ann", "b"), ("3", "bob", "d")] {
+            door.bound.lock().unwrap().insert(
+                kid.into(),
+                Bound {
+                    owner: owner.into(),
+                    id: id.into(),
+                    on: "node1".into(),
+                    made: 0,
+                },
+            );
+        }
+        *f.nodes.lock().unwrap() = vec![
+            computer_node("10", "1", "100.64.0.10"),
+            computer_node("11", "2", "100.64.0.11"),
+            computer_node("12", "3", "100.64.0.12"),
+            computer_node("13", "99", "100.64.0.13"),
+            serde_json::json!({ "id": "14", "user": { "name": "ann" }, "tags": [], "ipAddresses": ["100.64.0.14"] }),
+        ];
+        let by = door.addresses_by_owner().await.unwrap();
+        assert_eq!(by["ann"], vec!["100.64.0.10", "100.64.0.11", "100.64.0.14"]);
+        assert_eq!(by["bob"], vec!["100.64.0.12"]);
+        assert!(!by.contains_key("boxes"));
+
+        // no agreed state here at all: no computer has a node
+        door.reap(|u| u == "ann", None).await.unwrap();
+        assert_eq!(
+            *f.deleted.lock().unwrap(),
+            ["10", "11", "12", "13"].map(String::from).to_vec()
+        );
+        f.deleted.lock().unwrap().clear();
+
+        let ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let snap = |owner: &str, up: bool, consent: &str| {
+            serde_json::json!({ "height": 3, "leaseHeight": 3, "time": ms,
+                "computer": { "owner": owner, "up": up, "consent": consent },
+                "lease": { "holder": "node1", "expires": ms + 15_000 }, "hostOwner": owner })
+        };
+        // a: ann's, up, on her box; b: down; d: bob, no member; e: ann's,
+        // on anyone's box; f: ann's, its lease lapsed; g: unknown (404)
+        for (kid, id) in [("4", "e"), ("5", "f"), ("6", "g")] {
+            door.bound.lock().unwrap().insert(
+                kid.into(),
+                Bound {
+                    owner: "ann".into(),
+                    id: id.into(),
+                    on: "node1".into(),
+                    made: 0,
+                },
+            );
+        }
+        for (n, kid) in [("15", "4"), ("16", "5"), ("17", "6")] {
+            f.nodes
+                .lock()
+                .unwrap()
+                .push(computer_node(n, kid, "100.64.0.99"));
+        }
+        let mut lapsed = snap("ann", true, "own");
+        lapsed["lease"]["expires"] = (ms - 1).into();
+        *f.snaps.lock().unwrap() = HashMap::from([
+            ("a".to_string(), snap("ann", true, "own")),
+            ("b".to_string(), snap("ann", false, "own")),
+            ("d".to_string(), snap("bob", true, "own")),
+            ("e".to_string(), snap("ann", true, "any")),
+            ("f".to_string(), lapsed),
+        ]);
+        let gone = door.reap(|u| u == "ann", Some(&api)).await.unwrap();
+        assert_eq!(gone, 6);
+        assert_eq!(
+            *f.deleted.lock().unwrap(),
+            ["11", "12", "13", "15", "16", "17"]
+                .map(String::from)
+                .to_vec()
+        );
+
+        // its lease moved to another box of ann's: the node given on node1 goes
+        f.deleted.lock().unwrap().clear();
+        *f.nodes.lock().unwrap() = vec![computer_node("10", "1", "100.64.0.10")];
+        let mut moved = snap("ann", true, "own");
+        moved["lease"]["holder"] = "node2".into();
+        f.snaps.lock().unwrap().insert("a".into(), moved);
+        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 1);
+        f.snaps
+            .lock()
+            .unwrap()
+            .insert("a".into(), snap("ann", true, "own"));
+        // and back on node1, it stays
+        f.deleted.lock().unwrap().clear();
+        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 0);
+
+        // dd-control down: a's node stays on its last good word, for a while
+        f.deleted.lock().unwrap().clear();
+        *f.nodes.lock().unwrap() = vec![computer_node("10", "1", "100.64.0.10")];
+        *f.down.lock().unwrap() = true;
+        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 0);
+        // past the while, it comes off
+        door.last_good.lock().unwrap().get_mut("a").unwrap().1 -= LAST_GOOD_MS + 1;
+        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 1);
+        // and with no last good word at all, at once
+        door.last_good.lock().unwrap().clear();
+        f.deleted.lock().unwrap().clear();
+        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 1);
+        // a last good word that says it is down takes it off as well
+        *f.down.lock().unwrap() = false;
+        f.snaps
+            .lock()
+            .unwrap()
+            .insert("a".into(), snap("ann", false, "own"));
+        door.reap(|u| u == "ann", Some(&api)).await.unwrap();
+        *f.down.lock().unwrap() = true;
+        f.deleted.lock().unwrap().clear();
+        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 1);
     }
 
     #[test]

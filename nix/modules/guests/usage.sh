@@ -9,25 +9,42 @@ set -euo pipefail
 out=/var/lib/dd-facts/usage-$KIND.facts
 declare -A used=()
 
-for rec in "$DIR"/records/*.json; do
-  [ -e "$rec" ] || continue
-  owner=$(jq -r '.owner // empty' "$rec")
+# a file as it is, never through a link: root reads what a guest's own
+# user may have written
+read_nofollow() { dd if="$1" iflag=nofollow bs=64k count=16 status=none 2>/dev/null; }
+# each instance: whose it is, then its directory. Games keep records
+# beside (records/<id>.json, instances/<id>), written by their manager; a
+# computer's owner is root's note of the agreed one (OWNERS/<id>)
+instances() {
+  if [ -d "$DIR/records" ]; then
+    find -P "$DIR/records" -mindepth 1 -maxdepth 1 -type f -name '*.json' -printf '%f\n' |
+      while read -r f; do echo "$DIR/records/$f $DIR/instances/${f%.json}"; done
+  elif [ -d "$DIR" ]; then
+    # whose a computer is: root's own note of the agreed owner (OWNERS),
+    # never anything in its directory, which its own user may write
+    find -P "$DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' |
+      while read -r id; do echo "$OWNERS/$id $DIR/$id"; done
+  fi
+}
+while read -r rec d; do
+  if [ -n "${OWNERS:-}" ]; then
+    owner=$(read_nofollow "$rec" | head -1)
+  else
+    owner=$(read_nofollow "$rec" | jq -r '.owner // empty' 2>/dev/null) || continue
+  fi
   [[ $owner =~ ^[A-Za-z0-9._-]+$ ]] || continue
-  d="$DIR/instances/$(basename "$rec" .json)"
-  [ -d "$d" ] || continue
-  # what the disk holds: a sparse disk counts what is written, -x: the
-  # guest's share never leads off this filesystem
-  n=$(du -sxB1 "$d" | cut -f1)
+  [ -d "$d" ] && [ ! -L "$d" ] || continue
+  # what the disk holds: a sparse disk counts what is written; -x: nothing
+  # leads off this filesystem, -P: no link is followed
+  n=$(du -sxPB1 "$d" | cut -f1)
   used[$owner]=$((${used[$owner]:-0} + n))
-done
+done < <(instances)
 if [ -d "$DIR/worlds" ]; then
-  for w in "$DIR"/worlds/*/; do
-    [ -d "$w" ] || continue
-    owner=$(basename "$w")
+  while read -r owner; do
     [[ $owner =~ ^[A-Za-z0-9._-]+$ ]] || continue
-    n=$(du -sxB1 "$w" | cut -f1)
+    n=$(du -sxPB1 "$DIR/worlds/$owner" | cut -f1)
     used[$owner]=$((${used[$owner]:-0} + n))
-  done
+  done < <(find -P "$DIR/worlds" -mindepth 1 -maxdepth 1 -type d -printf '%f\n')
 fi
 
 : >"$out.tmp"

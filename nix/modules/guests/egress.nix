@@ -1,4 +1,9 @@
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   cfg = config.dd.guests;
 in
@@ -8,8 +13,9 @@ in
   # network, so on the host it is qemu's own sockets, and QEMU hands the
   # guest the host's loopback at 10.0.2.2. A guest's unit runs qemu with
   # the dd-guests group beside its own, and every socket carrying that
-  # group is filtered on its way out: the box's loopback, the house's
-  # networks, the Commonty network, and mail are refused; DNS is not. A
+  # group is filtered on its way out: the box's loopback and every address
+  # of its own, the house's networks (its public IPv6 ones too), the
+  # Commonty network, and mail are refused; DNS is not. A
   # group, not a user: the manager shares the games user and talks to the
   # gate on loopback.
   options.dd.guests = {
@@ -53,6 +59,18 @@ in
       done
       for dst in ::1 fc00::/7 fe80::/10; do
         ip6tables -A dd-guests-out -d $dst -j REJECT
+      done
+      # the house's own public IPv6 networks, as this box's addresses on them
+      # say now (one that appears later is caught when the firewall next
+      # starts; the box's own addresses, always, just below)
+      for net in $(${pkgs.iproute2}/bin/ip -6 -o addr show scope global | ${pkgs.gawk}/bin/awk '{print $4}'); do
+        ip6tables -A dd-guests-out -d "$net" -j REJECT
+      done
+      # and every other address of this box's own, whichever network it is
+      # on: a public IPv6 one reaches the box's services through lo, where
+      # its firewall lets everything in
+      for ipt in iptables ip6tables; do
+        $ipt -A dd-guests-out -m addrtype --dst-type LOCAL -j REJECT
       done
     '';
   };

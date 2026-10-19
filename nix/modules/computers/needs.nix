@@ -1,15 +1,20 @@
-# What members' computers need of a box (types: nix/lib/needs-type.nix).
-# Each instance is its own size, which its record says; this is the host's.
+# What hosting members' computers needs of a box (types: nix/lib/needs-type.nix).
+# The name is placement's (place.ComputersService): a box hosts computers
+# only where the release's table gives it this. Each computer is its own
+# size, which its record says; this is the host's.
 {
-  dd-computers = {
-    what = "members' own computers, each a VM with its own disks";
+  computers = {
+    what = "members' remote computers, each a VM with its own disks";
     traffic = {
       class = "high";
       upMbps = 10;
     };
     units = [
       "dd-computer@*"
+      "dd-computer-prepare@*"
+      "dd-computer-share@*"
       "dd-computers"
+      "dd-computers-share"
       "computers-access"
       "dd-computers-usage"
       "dd-computer-facts"
@@ -31,6 +36,7 @@
       depends = {
         nginx.local = true;
         dd-verify.local = true;
+        dd-control.local = true; # the agreed records, and the lease each runs under
         commonty-net.local = true; # the firewall opens computers on commonty0
       };
       privacy = "plaintext"; # members' disks and memory, on the box that runs them

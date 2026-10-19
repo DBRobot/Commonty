@@ -6,8 +6,9 @@
 # keeps) and the owner's (/etc/nixos/member.nix), and the host never
 # evaluates or builds what the owner wrote.
 #
-# From the host it gets a share, config (read-only: the owner's name, their
-# SSH keys, their Nix file, written from the host's record), and a small
+# From the host it gets a share, config (read-only: the owner's name, the
+# SSH public keys their signed record lets in, their Nix file, written from
+# the agreed record), and a small
 # disk, report, for what it says back: whether the Nix file applied.
 {
   config,
@@ -45,6 +46,10 @@ in
         type = lib.types.path;
         description = "the nixpkgs the guest rebuilds from: the release's, by its store path";
       };
+      options.dd.guest.netbridge = lib.mkOption {
+        type = lib.types.path;
+        description = "the bridge to the fleet's control server through the front door, from the release, by its store path";
+      };
     }
   ];
 
@@ -75,6 +80,7 @@ in
   system.extraDependencies = [
     "${config.dd.guest.base}"
     "${config.dd.guest.nixpkgs}"
+    "${config.dd.guest.netbridge}"
   ];
   nix.nixPath = [
     "nixpkgs=${config.dd.guest.nixpkgs}"
@@ -101,6 +107,9 @@ in
       PasswordAuthentication = false;
       KbdInteractiveAuthentication = false;
       PermitRootLogin = "no";
+      # every connection comes from QEMU's user network (10.0.2.2): a few
+      # wrong keys from anyone would shut its owner out too
+      PerSourcePenalties = "no";
     };
     # copied out of the share by dd-owner: sshd wants keys root owns
     authorizedKeysFiles = [ "/run/dd/keys/%u" ];
@@ -113,6 +122,65 @@ in
   # the serial console is the owner's way in when SSH isn't; the host lets
   # only the owner reach it
   services.getty.autologinUser = "root";
+
+  # The Commonty network, for a computer kept to its owner's own boxes: the
+  # box that runs it hands a single-use key into the share (net.json) as it
+  # starts it. Tagged a computer, it reaches the boxes as the owner's
+  # devices do and none of their admin ports. Through the front door, as a
+  # box's tailscaled is (netbridge).
+  services.tailscale.enable = true;
+  # its node key in memory only: it never travels with the disk, and a
+  # computer started again joins with the key its box hands in then
+  services.tailscale.extraDaemonFlags = [ "--state=mem:" ];
+  systemd.services.dd-netbridge = {
+    description = "The fleet's control server, through the front door";
+    after = [ "run-dd-config.mount" ];
+    wantedBy = [ "multi-user.target" ];
+    unitConfig.ConditionPathExists = "${config9p}/net.json";
+    path = [ pkgs.jq ];
+    script = ''
+      url=$(jq -r .control_url ${config9p}/net.json)
+      case "$url" in https://*) ;; *) echo "not a control server: $url"; exit 1 ;; esac
+      exec ${config.dd.guest.netbridge}/bin/netbridge -listen 127.0.0.1:41643 -control "$url"
+    '';
+    serviceConfig = {
+      DynamicUser = true;
+      Restart = "always";
+      RestartSec = 5;
+    };
+  };
+  systemd.services.dd-net = {
+    description = "Join the Commonty network with the key the box handed in";
+    after = [
+      "tailscaled.service"
+      "dd-netbridge.service"
+    ];
+    wants = [ "dd-netbridge.service" ];
+    wantedBy = [ "multi-user.target" ];
+    unitConfig.ConditionPathExists = "${config9p}/net.json";
+    path = [
+      pkgs.jq
+      pkgs.tailscale
+      pkgs.coreutils
+    ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      if tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null; then
+        exit 0
+      fi
+      key=$(mktemp)
+      trap 'rm -f "$key"' EXIT
+      jq -r .key ${config9p}/net.json > "$key"
+      name=$(jq -r .hostname ${config9p}/net.json)
+      case "$name" in computer-*) ;; *) exit 1 ;; esac
+      tailscale up --login-server=http://127.0.0.1:41643 --auth-key=file:"$key" \
+        --hostname="$name" --accept-dns=false --accept-routes=false --timeout=60s
+    '';
+  };
+  systemd.timers.dd-net = {
+    wantedBy = [ "timers.target" ];
+    timerConfig.OnUnitActiveSec = "2min";
+  };
 
   environment.systemPackages = with pkgs; [
     git

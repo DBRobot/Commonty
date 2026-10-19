@@ -541,7 +541,10 @@ pub(crate) async fn tick(app: &App) {
         && let Some(door) = &app.network
         && !m.members.is_empty()
         && let Err(e) = door
-            .reap(|u| (app.member(u) || app.guest(u)) && u != crate::pages::DEMO_USER)
+            .reap(
+                |u| (app.member(u) || app.guest(u)) && u != crate::pages::DEMO_USER,
+                app.control.as_deref(),
+            )
             .await
     {
         eprintln!("network: reaping: {e:#}");

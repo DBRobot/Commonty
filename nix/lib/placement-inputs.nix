@@ -32,7 +32,14 @@ in
   boxes = lib.mapAttrs (n: b: {
     site = b.siteId or n;
     region = b.regionId or n;
-    can = lib.mapAttrs (_: c: c.score) capability.boxes.${n}.can;
+    # members' computers only where a role of the box brings their host
+    # (fleet/roles.json compute): a box that could run them but does not
+    # carry the units has none placed on it nor its lease
+    can = lib.mapAttrs (_: c: c.score) (
+      lib.filterAttrs (
+        s: _: s != "computers" || builtins.elem s (lib.concatMap (r: roles.${r}.services or [ ]) b.roles)
+      ) capability.boxes.${n}.can
+    );
     # what its owner's box.json or the policy keep off it: a box's own
     # judgment in its heartbeat (box/capability.nix) never adds these
     # and whose box it is, for a member's computer kept to their own boxes

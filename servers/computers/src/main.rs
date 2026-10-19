@@ -1,32 +1,34 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use axum::{
     Json, Router,
     extract::{Path, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::get,
 };
-use computers::{Config, Limits, Manager, Systemd};
+use computers::{Host, Limits, valid_name};
 
-fn env(k: &str) -> Result<String> {
-    std::env::var(k).with_context(|| format!("{k} is not set"))
-}
 fn env_or(k: &str, d: &str) -> String {
     std::env::var(k).unwrap_or_else(|_| d.to_string())
 }
-fn num<T: std::str::FromStr>(k: &str, d: T) -> T {
+fn num(k: &str, d: u64) -> u64 {
     std::env::var(k)
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(d)
 }
 
-type App = Arc<Manager>;
+struct App {
+    host: Host,
+    /// box name -> its address on the Commonty network, from the release
+    boxes: BTreeMap<String, String>,
+}
 
-/// Who the gate says is asking, and whether a member: guests and the demo
-/// have no computers here. The demo may look.
+/// Who the gate says is asking (nginx sets x-dd-user from its answer), and
+/// whether a member: guests and the demo have no computers
 fn who(h: &HeaderMap) -> Result<(String, bool), StatusCode> {
     let u = h
         .get("x-dd-user")
@@ -34,176 +36,76 @@ fn who(h: &HeaderMap) -> Result<(String, bool), StatusCode> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    // a name becomes a file name here (configs/<name>.json): a name, or nothing
-    if !computers::valid_name(&u) {
+    if !valid_name(&u) {
         return Err(StatusCode::UNAUTHORIZED);
     }
     let member = h.get("x-dd-role").and_then(|v| v.to_str().ok()) == Some("member");
     Ok((u, member))
 }
 
-fn member(h: &HeaderMap) -> Result<String, (StatusCode, &'static str)> {
-    match who(h).map_err(|c| (c, "who are you?"))? {
-        (u, true) => Ok(u),
-        _ => Err((StatusCode::FORBIDDEN, "remote computers are for members")),
-    }
-}
-
-/// an error a member can act on, said plainly
-fn refused(e: anyhow::Error) -> Response {
+fn unavailable(e: anyhow::Error) -> Response {
     (
-        StatusCode::UNPROCESSABLE_ENTITY,
+        StatusCode::SERVICE_UNAVAILABLE,
         Json(serde_json::json!({"error": format!("{e:#}")})),
     )
         .into_response()
 }
 
-fn done(r: Result<impl serde::Serialize>) -> Response {
-    match r {
-        Ok(v) => Json(v).into_response(),
-        Err(e) => refused(e),
-    }
-}
-
-/// Everything the page draws, in one answer: the configs, the instances,
-/// the limits and what is used of them.
-async fn state(State(m): State<App>, h: HeaderMap) -> Response {
-    let (user, is_member) = match who(&h) {
+/// Everything the page draws: the member's configs and computers as agreed,
+/// where the plan puts each and how to reach it, what is used of their
+/// limits, and for those running here what their guest said back
+async fn state(State(app): State<Arc<App>>, h: HeaderMap) -> Response {
+    let (user, member) = match who(&h) {
         Ok(w) => w,
-        Err(r) => return r.into_response(),
+        Err(c) => return c.into_response(),
     };
-    let (memory, threads) = m.usage(&user);
+    let a = app.clone();
+    let got = tokio::task::spawn_blocking(move || -> Result<_> {
+        let v = computers::view(&a.host.control)?;
+        let (on, why) = computers::placed(&a.host.control)?;
+        Ok((v, on, why, computers::flagged(&a.host.placed)))
+    })
+    .await;
+    let (v, on, why, here) = match got {
+        Ok(Ok(x)) => x,
+        Ok(Err(e)) => return unavailable(e),
+        Err(e) => return unavailable(e.into()),
+    };
+    let (mut mem, mut thr, mut disk) = (0u64, 0u64, 0u64);
+    let mut list = Vec::new();
+    for c in v.computers.values().filter(|c| c.owner == user) {
+        mem += c.memory;
+        thr += c.threads;
+        disk += c.disk;
+        let host = on.get(&c.id).cloned();
+        let running_here = here.contains(&c.id);
+        let mut j = serde_json::to_value(c).unwrap_or_default();
+        j["box"] = serde_json::json!(host);
+        j["address"] = serde_json::json!(host.as_ref().and_then(|b| app.boxes.get(b)));
+        j["waiting"] = serde_json::json!(why.get(&c.id));
+        j["here"] = serde_json::json!(running_here);
+        list.push(j);
+    }
+    let configs: Vec<_> = v
+        .configs
+        .get(&user)
+        .map(|m| m.values().cloned().collect())
+        .unwrap_or_default();
     Json(serde_json::json!({
         "user": user,
-        "member": is_member,
-        "boxOwner": m.box_owner,
-        "limits": m.limits,
-        "used": {"memory": memory, "threads": threads},
-        "configs": m.configs(&user).into_values().collect::<Vec<_>>(),
-        "instances": m.instances(&user),
+        "member": member,
+        "limits": app.host.limits,
+        "used": {"memory": mem, "threads": thr, "disk": disk},
+        "configs": configs,
+        "computers": list,
     }))
     .into_response()
 }
 
-async fn save_config(
-    State(m): State<App>,
-    h: HeaderMap,
-    Path(name): Path<String>,
-    Json(mut c): Json<Config>,
-) -> Response {
-    let user = match member(&h) {
-        Ok(u) => u,
-        Err(r) => return r.into_response(),
-    };
-    c.name = name;
-    done(m.save_config(&user, c))
-}
-
-async fn delete_config(State(m): State<App>, h: HeaderMap, Path(name): Path<String>) -> Response {
-    let user = match member(&h) {
-        Ok(u) => u,
-        Err(r) => return r.into_response(),
-    };
-    done(m.delete_config(&user, &name))
-}
-
-#[derive(serde::Deserialize)]
-struct Make {
-    config: String,
-    name: String,
-    /// the owner's yes to running on someone else's box
-    #[serde(default)]
-    yes: bool,
-    /// SSH keys for this computer besides its config's
-    #[serde(default)]
-    keys: Vec<String>,
-}
-
-async fn make(State(m): State<App>, h: HeaderMap, Json(b): Json<Make>) -> Response {
-    let user = match member(&h) {
-        Ok(u) => u,
-        Err(r) => return r.into_response(),
-    };
-    done(
-        m.make(&user, &b.config, &b.name, b.yes, &b.keys)
-            .map(|r| m.view(r)),
-    )
-}
-
-#[derive(serde::Deserialize, Default)]
-struct Yes {
-    #[serde(default)]
-    yes: bool,
-}
-
-async fn act(
-    State(m): State<App>,
-    h: HeaderMap,
-    Path((id, verb)): Path<(String, String)>,
-    body: Option<Json<Yes>>,
-) -> Response {
-    let user = match member(&h) {
-        Ok(u) => u,
-        Err(r) => return r.into_response(),
-    };
-    let yes = body.map(|Json(b)| b.yes).unwrap_or_default();
-    let r = match verb.as_str() {
-        "start" => m.set_up(&user, &id, true),
-        "stop" => m.set_up(&user, &id, false),
-        "apply" => m.apply(&user, &id, yes).map(|_| ()),
-        "reset" => m.reset(&user, &id),
-        "rekey" => m.rekey(&user, &id),
-        _ => return StatusCode::NOT_FOUND.into_response(),
-    };
-    done(r)
-}
-
-async fn delete(State(m): State<App>, h: HeaderMap, Path(id): Path<String>) -> Response {
-    let user = match member(&h) {
-        Ok(u) => u,
-        Err(r) => return r.into_response(),
-    };
-    done(m.delete(&user, &id))
-}
-
-/// its private key, to its owner: a file to save as ~/.ssh/commonty-<name>
-async fn key(State(m): State<App>, h: HeaderMap, Path(id): Path<String>) -> Response {
-    let user = match member(&h) {
-        Ok(u) => u,
-        Err(r) => return r.into_response(),
-    };
-    match m.private_key(&user, &id) {
-        Ok((name, k)) => (
-            [
-                (header::CONTENT_TYPE, "application/x-pem-file".to_string()),
-                (
-                    header::CONTENT_DISPOSITION,
-                    format!("attachment; filename=\"commonty-{name}\""),
-                ),
-                (header::CACHE_CONTROL, "no-store".to_string()),
-            ],
-            k,
-        )
-            .into_response(),
-        Err(e) => refused(e),
-    }
-}
-
-async fn log(State(m): State<App>, h: HeaderMap, Path(id): Path<String>) -> Response {
-    let user = match member(&h) {
-        Ok(u) => u,
-        Err(r) => return r.into_response(),
-    };
-    match m.apply_log(&user, &id) {
-        Ok(s) => ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], s).into_response(),
-        Err(e) => refused(e),
-    }
-}
-
 /// the page: files in web/, built in
 async fn page(h: HeaderMap) -> Response {
-    if let Err(r) = who(&h) {
-        return r.into_response();
+    if let Err(c) = who(&h) {
+        return c.into_response();
     }
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -234,53 +136,46 @@ async fn static_file(Path(name): Path<String>) -> Response {
         .into_response()
 }
 
-/// this box's memory less what it keeps, in MiB, as computer-facts.sh counts it
-fn box_memory(reserve: u64) -> u64 {
-    std::fs::read_to_string("/proc/meminfo")
-        .ok()
-        .and_then(|m| {
-            m.lines()
-                .find_map(|l| l.strip_prefix("MemTotal:"))
-                .and_then(|v| v.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
-        })
-        .map(|kib| (kib / 1024).saturating_sub(reserve))
-        .unwrap_or(0)
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let mut m = Manager::new(
-        env_or("DD_COMPUTERS_DIR", "/var/lib/dd-computers").into(),
-        Limits {
+fn host() -> Host {
+    Host {
+        // a computer's own unit is handed its directory; its parent holds them all
+        dir: std::env::var("STATE_DIRECTORY")
+            .ok()
+            .and_then(|d| std::path::Path::new(&d).parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| env_or("DD_COMPUTERS_DIR", "/var/lib/dd-computer").into()),
+        placed: env_or("DD_COMPUTERS_PLACED", "/run/dd-placed").into(),
+        control: env_or("DD_COMPUTERS_CONTROL", "127.0.0.1:4195"),
+        limits: Limits {
             memory: num("DD_COMPUTERS_MEMORY_MIB", 16384),
             threads: num("DD_COMPUTERS_THREADS", 8),
             disk: num("DD_COMPUTERS_DISK_GIB", 200),
             port_base: num("DD_COMPUTERS_PORT_BASE", 27200),
             port_count: num("DD_COMPUTERS_PORT_COUNT", 200),
-            box_memory: box_memory(num("DD_COMPUTERS_RESERVE_MIB", 2048)),
-            box_threads: std::thread::available_parallelism()
-                .map(|n| (n.get() as u32).saturating_sub(1).max(1))
-                .unwrap_or(1),
         },
-        env("DD_COMPUTERS_BOX_OWNER")?,
-        env("DD_COMPUTERS_ADDRESS")?,
-        Box::new(Systemd),
-    )?;
-    m.ledger = std::env::var("DD_COMPUTERS_LEDGER").ok().map(Into::into);
-    let m = Arc::new(m);
-    eprintln!("vms: {} computer(s) brought back up", m.restore());
-    // what the firewall's filler reads, rewritten every few seconds
+    }
+}
+
+async fn serve(host: Host) -> Result<()> {
+    let boxes = match std::env::var("DD_COMPUTERS_BOXES") {
+        Ok(f) => serde_json::from_slice(&std::fs::read(&f).with_context(|| f.clone())?)?,
+        Err(_) => BTreeMap::new(),
+    };
+    let app = Arc::new(App { host, boxes });
+    // what the firewall's filler reads, rewritten every few seconds: only
+    // what is agreed now opens a port, and nothing while that is unknown
     if let Ok(access) = std::env::var("DD_COMPUTERS_ACCESS") {
-        let w = m.clone();
+        let a = app.clone();
         tokio::spawn(async move {
             loop {
-                let body = serde_json::to_vec(&w.access()).unwrap_or_default();
-                let tmp = format!("{access}.tmp");
-                if std::fs::write(&tmp, body)
-                    .and_then(|_| std::fs::rename(&tmp, &access))
-                    .is_err()
-                {
-                    eprintln!("vms: could not write {access}");
+                let b = a.clone();
+                let body = tokio::task::spawn_blocking(move || {
+                    let v = computers::view(&b.host.control).unwrap_or_default();
+                    serde_json::to_vec(&b.host.access(&v)).unwrap_or_default()
+                })
+                .await
+                .unwrap_or_default();
+                if computers::write_atomic(std::path::Path::new(&access), &body, 0o640).is_err() {
+                    eprintln!("computers: could not write {access}");
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
@@ -291,35 +186,49 @@ async fn main() -> Result<()> {
         .route("/health", get(|| async { "ok" }))
         .route("/static/{name}", get(static_file))
         .route("/api/state", get(state))
-        .route(
-            "/api/configs/{name}",
-            put(save_config).delete(delete_config),
-        )
-        .route("/api/instances", post(make))
-        .route("/api/instances/{id}", axum::routing::delete(delete))
-        .route("/api/instances/{id}/log", get(log))
-        .route("/api/instances/{id}/key", get(key))
-        .route("/api/instances/{id}/{verb}", post(act))
-        .with_state(m);
-    // as the games manager: a unix socket only nginx's group opens, since
-    // the user comes from a header
-    let bind = env_or("DD_COMPUTERS_BIND", "127.0.0.1:4183");
-    eprintln!("vms listening on {bind}");
-    if bind.starts_with('/') {
-        let _ = std::fs::remove_file(&bind);
-        let listener = tokio::net::UnixListener::bind(&bind)?;
-        std::fs::set_permissions(&bind, std::os::unix::fs::PermissionsExt::from_mode(0o660))?;
-        axum::serve(listener, router).await?;
-    } else {
-        // a port anyone on the box could reach and name themselves on:
-        // only for a test that says so
-        if std::env::var("DD_COMPUTERS_TCP_FOR_TESTS").as_deref() != Ok("1") {
-            anyhow::bail!(
-                "{bind} is not a socket path: the user comes from a header, so only a socket nginx's group opens will do"
-            );
-        }
-        let listener = tokio::net::TcpListener::bind(&bind).await?;
-        axum::serve(listener, router).await?;
+        .with_state(app);
+    // the user comes from a header: a unix socket only nginx's group opens
+    let bind = env_or("DD_COMPUTERS_BIND", "/run/dd-computers/dd-computers.sock");
+    if !bind.starts_with('/') {
+        bail!("{bind} is not a socket path: only a socket nginx's group opens will do");
     }
+    let _ = std::fs::remove_file(&bind);
+    let listener = tokio::net::UnixListener::bind(&bind)?;
+    std::fs::set_permissions(&bind, std::os::unix::fs::PermissionsExt::from_mode(0o660))?;
+    eprintln!("computers: listening on {bind}");
+    axum::serve(listener, router).await?;
     Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let h = host();
+    match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        ["prepare", id] => {
+            let c = h.prepare(id)?;
+            eprintln!(
+                "computer-{id}: {}'s {}, {} MiB, {} threads, {} GiB, port {}",
+                c.owner, c.name, c.memory, c.threads, c.disk, c.port
+            );
+            Ok(())
+        }
+        ["share", id] => {
+            // dd-control or its answer not there: nothing to do now, and the
+            // timer asks again
+            match h.share(id) {
+                Ok(true) => eprintln!("computer-{id}: its share rewritten"),
+                Ok(false) => {}
+                Err(e) => eprintln!("computer-{id}: the agreed record not read: {e:#}"),
+            }
+            Ok(())
+        }
+        [] | ["serve"] => serve(h).await,
+        _ => bail!("usage: dd-computers [serve | prepare <id> | share <id>]"),
+    }
 }
