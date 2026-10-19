@@ -1,11 +1,21 @@
 # The disks' key at boot, end to end (nix/modules/box/disk-unlock.nix)
 import json
 
+from waits import journal_has
+
 worker.start()
 worker.wait_for_unit("fake-worker.service")
 worker.wait_for_open_port(8000)
 box.start()
 box.wait_for_unit("multi-user.target")
+
+
+def in_boot_journal(text):
+    # read whole, then searched: grep -q leaving early would kill journalctl
+    # with SIGPIPE, and under pipefail fail a line that is there
+    box.succeed(
+        f"journalctl -b -o cat > /tmp/boot.log && grep -q '{text}' /tmp/boot.log"
+    )
 
 
 def state():
@@ -19,7 +29,7 @@ def post(path, body):
 
 
 # not enrolled yet: the initrd found nothing on the boot partition and went on
-box.succeed("journalctl -b -o cat | grep -q 'no enrolment on the boot partition'")
+in_boot_journal("no enrolment on the boot partition")
 
 # enrol: the TPM's key and half on the boot partition, the key to the service
 out = box.succeed("dd-unlock-enrol keys")
@@ -43,17 +53,19 @@ box.wait_for_unit("multi-user.target")
 box.succeed("grep -q kept /data/proof")
 box.succeed("zfs get -H -o value keystatus data/enc | grep -q available")
 box.wait_until_succeeds("test ! -e /run/dd/disk.key")
-box.succeed("journalctl -b -o cat | grep -q 'dd-unlock: unlocked'")
+in_boot_journal("dd-unlock: unlocked")
 
 # a cap by mountpoint lands on whichever dataset is mounted there, and is
 # never set below what a dataset already holds
 box.succeed(
     "zfs create -o mountpoint=/big data/big && head -c 3M /dev/urandom > /big/blob && sync"
 )
+# it stays active after a run (RemainAfterExit), so restart makes the new run
 box.succeed("systemctl restart zfs-datasets.service")
+run = box.succeed("systemctl show -p InvocationID --value zfs-datasets.service").strip()
 assert box.succeed("zfs get -H -o value quota data/enc").strip() == "100M"
 assert box.succeed("zfs get -H -o value quota data/big").strip() == "none"
-box.succeed("journalctl -u zfs-datasets -o cat | grep -q 'not capping data/big'")
+assert journal_has(box, "zfs-datasets.service", run, "not capping data/big")
 box.succeed("zfs destroy data/big")
 
 # 2. marked stolen, at its own home: refused, again and again. Then, while
@@ -129,10 +141,8 @@ box.succeed(
 box.shutdown()
 box.start()
 box.wait_for_unit("multi-user.target")
-box.succeed("journalctl -b -o cat | grep -q 'dd-unlock: unlocked'")
-box.succeed(
-    "journalctl -b -o cat | grep -q 'data/enc is not under data/enc\\|not this box'"
-)
+in_boot_journal("dd-unlock: unlocked")
+in_boot_journal("data/enc is not under data/enc\\|not this box")
 box.fail("grep -q planted /data/proof")
 box.succeed("test ! -e /run/dd/disk.key && test ! -e /run/dd/vault.key")
 box.fail(

@@ -1,3 +1,5 @@
+from waits import start_fresh
+
 box1.start()
 for unit in [
     "challtestsrv",
@@ -7,7 +9,18 @@ for unit in [
     "dd-acme.socket",
 ]:
     box1.wait_for_unit(unit)
-box1.wait_until_succeeds("curl -s -o /dev/null http://127.0.0.1:8787/", timeout=120)
+
+
+def worker_up(_):
+    # wrangler that has exited (a Worker that will not load) never answers
+    if box1.execute("systemctl is-failed -q dns-worker.service")[0] == 0:
+        journal = box1.execute("journalctl -b -u dns-worker -o cat | tail -n 30")[1]
+        raise Exception(f"the Worker did not start:\n{journal}")
+    return box1.execute("curl -s -o /dev/null http://127.0.0.1:8787/")[0] == 0
+
+
+with box1.nested("waiting for the Worker on 127.0.0.1:8787"):
+    retry(worker_up, 120)
 box1.wait_until_succeeds(
     "curl -s -o /dev/null --cacert /etc/ssl/certs/ca-certificates.crt https://localhost:14000/dir",
     timeout=60,
@@ -20,11 +33,11 @@ with subtest("only lego's user can ask for a challenge"):
     assert "Permission denied" in out, out
 
 with subtest("the box's certificate, issued through the Worker"):
-    box1.succeed("systemctl start acme-order-renew-test.invalid.service")
-    box1.wait_until_succeeds(
-        "systemctl show -p Result acme-order-renew-test.invalid.service | grep -q success",
-        timeout=180,
+    # boot never ordered one (acme.nix): a boot-time order raced wrangler
+    box1.succeed(
+        'test -z "$(systemctl show -P InvocationID acme-order-renew-test.invalid.service)"'
     )
+    start_fresh(box1, "acme-order-renew-test.invalid.service")
     cert = "/var/lib/acme/test.invalid/cert.pem"
     issuer = box1.succeed(f"openssl x509 -in {cert} -noout -issuer")
     assert "Pebble" in issuer, issuer

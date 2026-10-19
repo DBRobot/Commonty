@@ -31,6 +31,7 @@ let
 in
 {
   name = "photos";
+  helpers = true;
   node.specialArgs = { inherit self; };
   # ente.nix pins museum by an overlay, which a test's shared, read-only
   # nixpkgs would refuse

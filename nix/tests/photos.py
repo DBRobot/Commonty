@@ -5,11 +5,26 @@
 import hashlib
 import json
 
+from waits import journal_has, start_fresh
+
 start_all()
+
+
+def serving(unit, check, timeout):
+    # a unit that has failed will never answer: stop now, with its journal
+    def up(_):
+        if box.execute(f"systemctl is-failed -q {unit}")[0] == 0:
+            journal = box.execute(f"journalctl -b -u {unit} -o cat | tail -n 30")[1]
+            raise Exception(f"{unit} failed:\n{journal}")
+        return box.execute(check)[0] == 0
+
+    with box.nested(f"waiting for {unit} to answer: {check}"):
+        retry(up, timeout)
+
 
 box.wait_for_unit("postgresql.service")
 box.wait_for_unit("ente.service")
-box.wait_until_succeeds("curl -sf http://127.0.0.1:8080/ping", timeout=120)
+serving("ente.service", "curl -sf http://127.0.0.1:8080/ping", 120)
 # museum's api and metrics on loopback, as the module's edit has them
 listening = box.succeed("ss -Htln")
 assert "127.0.0.1:8080" in listening and "127.0.0.1:2112" in listening, listening
@@ -23,8 +38,9 @@ for anywhere in (
 ):
     assert anywhere not in listening, listening
 # the health check finds it well and leaves it be
-box.succeed("systemctl start ente-health.service")
-assert "restarting" not in box.succeed("journalctl -u ente-health.service"), (
+# a run of its own: the timer's runs are not this check
+run = start_fresh(box, "ente-health.service")
+assert not journal_has(box, "ente-health.service", run, "restarting"), (
     "museum restarted"
 )
 

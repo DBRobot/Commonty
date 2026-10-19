@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # In the initrd: the disk key from its two halves, before any pool is
 # imported. The TPM half is unsealed by the TPM only under this box's own
 # signed boot (PCR 7). The other half is the unlock Worker's, asked for with
@@ -19,22 +20,35 @@ w=$(mktemp -d)
 KEYS="$w/enrolment"
 
 # the boot partition, as the boot loader says it booted from
+part=
+v=/sys/firmware/efi/efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+if [ -r "$v" ]; then
+  part="/dev/disk/by-partuuid/$(tail -c +5 "$v" | tr -d '\0' | tr '[:upper:]' '[:lower:]')"
+fi
 esp() {
-  local v uuid
   # on the running box it is mounted already
   if [ -e /boot/dd/unlock/sig.priv ]; then
     mkdir -p "$KEYS" && cp /boot/dd/unlock/* "$KEYS"/
     return
   fi
-  v=/sys/firmware/efi/efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
-  [ -r "$v" ] || return 1
-  uuid=$(tail -c +5 "$v" | tr -d '\0' | tr '[:upper:]' '[:lower:]')
+  [ -n "$part" ] || return 1
   mkdir -p "$w/esp" "$KEYS"
-  mount -o ro "/dev/disk/by-partuuid/$uuid" "$w/esp" || return 1
+  mount -o ro "$part" "$w/esp" || return 1
   cp "$w/esp/dd/unlock/"* "$KEYS"/ 2>/dev/null
   umount "$w/esp"
   [ -e "$KEYS/sig.priv" ] && [ -e "$KEYS/half.priv" ]
 }
+# The firmware booted from that partition, so its disk is there: udev naming
+# it is only slow (on a busy host, past ENROL_WAIT), and is not "no enrolment".
+# 90s, as systemd waits for a device.
+if [ -n "$part" ] && [ ! -e /boot/dd/unlock/sig.priv ]; then
+  t=0
+  while [ ! -e "$part" ] && [ "$t" -lt 90 ]; do
+    sleep 1
+    t=$((t + 1))
+  done
+  [ -e "$part" ] || echo "dd-unlock: the boot partition $part did not appear"
+fi
 tries=0
 until esp; do
   tries=$((tries + 1))

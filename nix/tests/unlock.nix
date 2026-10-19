@@ -9,6 +9,7 @@ let
 in
 {
   name = "unlock";
+  helpers = true;
   nodes = {
     box =
       { lib, ... }:

@@ -35,6 +35,7 @@ let
 in
 {
   name = "acme";
+  helpers = true;
   node.specialArgs = { inherit self; };
   nodes.box1 =
     { config, ... }:
@@ -88,8 +89,11 @@ in
         dnsPropagationCheck = false;
       };
       security.pki.certificateFiles = [ "${pebbleCerts}/pebble.minica.pem" ];
-      # boot does not ask: the script does, once all of this is up
+      # boot does not ask: the script does, once all of this is up. The
+      # certificate's base unit wants an order too; at boot that one raced
+      # wrangler's start, and the script's start joined it and its failure
       systemd.services."acme-order-renew-${base}".wantedBy = lib.mkForce [ ];
+      systemd.services."acme-${base}".wants = lib.mkForce [ "acme-setup.service" ];
       systemd.timers."acme-renew-${base}".enable = false;
 
       services.nginx.virtualHosts = {

@@ -23,8 +23,14 @@ s3 = (
     "AWS_SECRET_ACCESS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef "
     "AWS_DEFAULT_REGION=us-east-1 aws --endpoint-url http://127.0.0.1:3900"
 )
-box.wait_until_succeeds("ls /var/lib/vaultwarden/rsa_key.pem", timeout=60)
-box.fail(f"{s3} s3 ls s3://vaultwarden/data/ | grep -q rsa_key")
+# made before it answers /alive
+box.succeed("ls /var/lib/vaultwarden/rsa_key.pem")
+# the listing must succeed, so a failed or slow aws (30s a call under load)
+# never reads as "not there"
+keys = box.succeed(
+    f"{s3} s3api list-objects-v2 --bucket vaultwarden --prefix data/ --query 'Contents[].Key' --output text"
+)
+assert "rsa_key" not in keys, keys
 
 # and its records in postgres, where the hourly dumps take them from
 box.succeed("sudo -u postgres psql -d vaultwarden -tAc 'select count(*) from users'")
