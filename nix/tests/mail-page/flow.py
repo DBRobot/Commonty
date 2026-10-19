@@ -252,8 +252,11 @@ with sync_playwright() as p:
         "the tracking picture is not loaded",
     )
     # nothing in a message runs: the page beside it holds the keys to the
-    # member's mail, files and photos (app/src/keys.rs)
-    time.sleep(1)
+    # member's mail, files and photos (app/src/keys.rs); its handlers would
+    # have run by the time the frame has loaded
+    pg.locator("#body iframe").element_handle().content_frame().wait_for_load_state(
+        "load"
+    )
     ok(
         pg.evaluate("window.__ran") is None,
         f"no script in the message ran: {pg.evaluate('window.__ran')}",

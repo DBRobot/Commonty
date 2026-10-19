@@ -144,9 +144,7 @@ node = box.succeed("garage node id -q").split("@")[0].strip()
 box.succeed(
     f"garage layout assign -z here -c 1G {node} && garage layout apply --version 1"
 )
-box.wait_until_succeeds(
-    "garage status | grep -q HEALTHY || garage bucket list", timeout=60
-)
+box.wait_until_succeeds("garage bucket list", timeout=60)
 box.succeed(
     "garage key import --yes GK0123456789abcdef01234567 "
     "1111111111111111111111111111111111111111111111111111111111111111"
