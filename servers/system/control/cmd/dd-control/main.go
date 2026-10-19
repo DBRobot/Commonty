@@ -130,8 +130,9 @@ func (r *relay) run(receive func(from uint64, kind byte, p []byte), connected fu
 	}
 }
 
-// tpmSign signs with the box's TPM-held key, under its signed boot (PCR 7),
-// the key dd-unlock-enrol made on the boot partition.
+// tpmSign signs with the box's TPM-held key, under its signed boot
+// (dd-tpm-policy: PCRs 4 and 7 as its approver approved, or PCR 7 for a
+// key made before), the key on the boot partition.
 func tpmSign(keys string, msg []byte) (string, error) {
 	dir, err := os.MkdirTemp("", "dd-control-sign")
 	if err != nil {
@@ -146,7 +147,7 @@ func tpmSign(keys string, msg []byte) (string, error) {
 		{"tpm2_createprimary", "-Q", "-C", "o", "-G", "ecc256", "-c", p("srk.ctx")},
 		{"tpm2_load", "-Q", "-C", p("srk.ctx"), "-u", filepath.Join(keys, "sig.pub"), "-r", filepath.Join(keys, "sig.priv"), "-c", p("sig.ctx")},
 		{"tpm2_startauthsession", "-Q", "--policy-session", "-S", p("s.ctx")},
-		{"tpm2_policypcr", "-Q", "-S", p("s.ctx"), "-l", "sha256:7"},
+		{"dd-tpm-policy", p("s.ctx"), keys},
 		{"tpm2_sign", "-Q", "-c", p("sig.ctx"), "-g", "sha256", "-s", "ecdsa", "-f", "plain", "-p", "session:" + p("s.ctx"), "-o", p("sig.bin"), p("msg")},
 	}
 	var failed error

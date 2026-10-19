@@ -90,11 +90,17 @@ func Default() *Box {
 	}
 }
 
-func (t *Box) run(args ...string) ([]byte, error) {
+func (t *Box) run(args ...string) ([]byte, error) { return t.runIn(nil, args...) }
+
+// runIn: run with stdin
+func (t *Box) runIn(stdin []byte, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Env = append(os.Environ(), "TPM2TOOLS_TCTI="+t.TCTI)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -162,6 +168,11 @@ func (t *Box) Begin() (attest.Begin, error) {
 			return b, err
 		}
 		*dst = base64.StdEncoding.EncodeToString(raw)
+	}
+	if t.BootKeyed() {
+		if err := t.beginBootKey(&b); err != nil {
+			return b, err
+		}
 	}
 	if stub := t.stub(); stub != "" {
 		raw, err := os.ReadFile(stub)
@@ -444,6 +455,11 @@ func (t *Box) Respond(box string, chals []attest.Challenge) (attest.Response, er
 	if _, err := t.run("tpm2_certify", "-Q", "-c", t.p("sig.ctx"), "-C", t.p("ak.ctx"), "-g", "sha256",
 		"-o", t.p("certify.msg"), "-s", t.p("certify.sig")); err != nil {
 		return r, err
+	}
+	if t.BootKeyed() {
+		if err := t.respondBootKey(&r, nonce); err != nil {
+			return r, err
+		}
 	}
 	files := map[string]*string{"quote.msg": &r.Quote, "quote.sig": &r.QuoteSig, "certify.msg": &r.Certify, "certify.sig": &r.CertifySig}
 	for f, dst := range files {

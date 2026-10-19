@@ -306,6 +306,10 @@ func run(args []string) {
 		box.TCTI = t
 		box.NoRM = strings.HasPrefix(t, "swtpm:")
 	}
+	// the join key under its approver, as dd-boot-key enrol makes it
+	if _, err := os.Stat(filepath.Join(*keys, "sig.pub")); err != nil {
+		must(box.Enrol())
+	}
 	begin, err := box.Begin()
 	must(err)
 	key := joinSPKI(begin.Join)

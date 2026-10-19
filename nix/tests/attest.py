@@ -6,16 +6,9 @@ box.succeed(
     "test $(head -c 64 /sys/kernel/security/tpm0/binary_bios_measurements | wc -c) = 64"
 )
 
-# the join key, as dd-unlock-enrol makes it: under PCR 7's policy
-box.succeed(
-    "mkdir -p /tmp/keys && cd /tmp && "
-    "tpm2_createprimary -Q -C o -G ecc256 -c srk.ctx && "
-    "tpm2_startauthsession -Q -S s.ctx && "
-    "tpm2_policypcr -Q -S s.ctx -l sha256:7 -L pcr.pol && "
-    "tpm2_flushcontext s.ctx && "
-    "tpm2_create -Q -C srk.ctx -G ecc256:ecdsa-sha256 -L pcr.pol "
-    "-a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda' -u keys/sig.pub -r keys/sig.priv"
-)
+# the join key: attest-check makes it under its approver at its first run
+# (dd-boot-key enrol), in /tmp/keys
+box.succeed("mkdir -p /tmp/keys")
 
 run = "attest-check run -roots /etc/attest-roots -keys /tmp/keys -dir /tmp/ak"
 

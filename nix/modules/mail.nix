@@ -72,6 +72,7 @@ in
       description = "Sign one mail with the TPM and hand it to the mail Worker";
       path = [
         pkgs.tpm2-tools
+        (import ../lib/tpm-policy.nix pkgs)
         pkgs.curl
         pkgs.jq
         pkgs.coreutils

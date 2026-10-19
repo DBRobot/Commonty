@@ -86,3 +86,22 @@ func TestLoaderEntrySelectedReads(t *testing.T) {
 		t.Fatalf("%q", s)
 	}
 }
+
+func TestTheESPsNewestGenerationsAreItsBoots(t *testing.T) {
+	esp := t.TempDir()
+	if err := os.MkdirAll(esp+"/EFI/Linux", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range []string{"2-a", "10-b", "9-c", "1-d"} {
+		_ = os.WriteFile(esp+"/EFI/Linux/nixos-generation-"+g+".efi", nil, 0o644)
+	}
+	boots, err := ESPBoots(esp)
+	if err != nil || len(boots) != KeepGood {
+		t.Fatalf("%v %v", boots, err)
+	}
+	for i, want := range []string{"10-b", "9-c", "2-a"} {
+		if boots[i][0] != esp+"/EFI/systemd/systemd-bootx64.efi" || boots[i][1] != esp+"/EFI/Linux/nixos-generation-"+want+".efi" {
+			t.Fatalf("%d: %v", i, boots[i])
+		}
+	}
+}
