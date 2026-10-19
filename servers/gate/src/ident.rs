@@ -125,6 +125,10 @@ pub struct State {
     /// box -> whose it is and the ticket it was enlisted with
     #[serde(default)]
     pub enlisted: HashMap<String, Owner>,
+    /// box -> whose ticket it joined with, not enlisted yet (since: when
+    /// it joined)
+    #[serde(default)]
+    pub waiting: HashMap<String, Owner>,
 }
 
 /// An enlisted box's member and the ticket it was enlisted with
@@ -330,11 +334,6 @@ impl Envelope {
     /// the name the item is about: an entry's or a leaving's `name`
     pub fn name(&self) -> Option<&str> {
         self.field("name")
-    }
-
-    /// a string field of the body
-    pub fn field(&self, k: &str) -> Option<&str> {
-        self.body.get(k).and_then(|n| n.as_str())
     }
 
     /// one string field of the body, as it came: where an item goes,

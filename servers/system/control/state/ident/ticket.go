@@ -223,27 +223,64 @@ func decodeToken(s string) ([]byte, error) {
 // authority: the authority block's bytes and that it was signed by one of
 // keys (ed25519, base64): the key that signed it
 func authority(token []byte, keys []string) ([]byte, string, error) {
-	top, err := pbRead(token)
+	sb, err := authorityBlock(token)
 	if err != nil {
 		return nil, "", err
+	}
+	return signedBy(sb, keys)
+}
+
+// authorityBlock: a biscuit's signed authority block, as it is written
+// (its block, the next key, the signature), without the proof that makes
+// the biscuit usable
+func authorityBlock(token []byte) ([]byte, error) {
+	top, err := pbRead(token)
+	if err != nil {
+		return nil, err
 	}
 	a := pbOne(top, 2)
 	if a == nil || a.wire != 2 {
-		return nil, "", errNoTicket
+		return nil, errNoTicket
 	}
-	sb, err := pbRead(a.b)
+	return a.b, nil
+}
+
+// nextKey: the ed25519 key a signed block hands on to the next
+func nextKey(sb []byte) (ed25519.PublicKey, error) {
+	fs, err := pbRead(sb)
+	if err != nil {
+		return nil, err
+	}
+	next := pbOne(fs, 2)
+	if next == nil || next.wire != 2 {
+		return nil, errNoTicket
+	}
+	nk, err := pbRead(next.b)
+	if err != nil {
+		return nil, err
+	}
+	alg, key := pbOne(nk, 1), pbOne(nk, 2)
+	if alg == nil || key == nil || alg.wire != 0 || alg.v != 0 || key.wire != 2 || len(key.b) != ed25519.PublicKeySize {
+		return nil, errNoTicket
+	}
+	return ed25519.PublicKey(key.b), nil
+}
+
+// signedBy: a signed block's block, and the one of keys that signed it
+func signedBy(sb []byte, keys []string) ([]byte, string, error) {
+	fs, err := pbRead(sb)
 	if err != nil {
 		return nil, "", err
 	}
-	block, next, sig := pbOne(sb, 1), pbOne(sb, 2), pbOne(sb, 3)
+	block, next, sig := pbOne(fs, 1), pbOne(fs, 2), pbOne(fs, 3)
 	if block == nil || next == nil || sig == nil || block.wire != 2 || next.wire != 2 || sig.wire != 2 {
 		return nil, "", errNoTicket
 	}
-	if len(pbAll(sb, 4)) > 0 {
+	if len(pbAll(fs, 4)) > 0 {
 		return nil, "", errors.New("a ticket signed by a third party")
 	}
 	version := uint64(0)
-	if v := pbAll(sb, 5); len(v) == 1 && v[0].wire == 0 {
+	if v := pbAll(fs, 5); len(v) == 1 && v[0].wire == 0 {
 		version = v[0].v
 	} else if len(v) > 0 {
 		return nil, "", errNoTicket
@@ -297,32 +334,6 @@ func ReadTicket(token string, keys []string) (*Ticket, error) {
 		return nil, err
 	}
 	return readBlock(block, key)
-}
-
-// TicketID: the id a ticket names, its signature unchecked - for keeping
-// track of a ticket the judge has not been asked to trust yet
-func TicketID(token string) (string, uint64) {
-	raw, err := decodeToken(token)
-	if err != nil {
-		return "", 0
-	}
-	top, err := pbRead(raw)
-	if err != nil {
-		return "", 0
-	}
-	a := pbOne(top, 2)
-	if a == nil {
-		return "", 0
-	}
-	sb, err := pbRead(a.b)
-	if err != nil || pbOne(sb, 1) == nil {
-		return "", 0
-	}
-	t, err := readBlock(pbOne(sb, 1).b, "")
-	if err != nil {
-		return "", 0
-	}
-	return t.ID, t.Expires
 }
 
 func readBlock(block []byte, key string) (*Ticket, error) {
@@ -421,4 +432,125 @@ func ticketID(s string) bool {
 		}
 	}
 	return true
+}
+
+// A box joins with its ticket's claim, never the ticket: the ticket is a
+// bearer token (it writes the member's pending backup), and what a join
+// carries is in the agreed state for every box to read. The claim is the
+// ticket's signed authority block, which the judge checks against the
+// member's devices, and the box's own key signed with the ticket's proof
+// key, which only a holder of the whole ticket has. Neither opens anything.
+
+// Claim is what a join brings of its ticket
+type Claim struct {
+	ID    string `json:"ticket"`
+	Block string `json:"block"` // the signed authority block, base64
+	Sig   string `json:"sig"`   // the box's key, signed with the proof key, base64
+}
+
+func claimMessage(boxKey, id string) []byte {
+	return []byte("commonty join ticket\x00" + boxKey + "\x00" + id)
+}
+
+// MakeClaim: from a box's whole ticket, its claim for joining as boxKey.
+// A ticket with blocks added after its device's, or sealed, is refused:
+// the box was handed it as the member's device made it.
+func MakeClaim(token, boxKey string) (*Claim, error) {
+	raw, err := decodeToken(token)
+	if err != nil {
+		return nil, err
+	}
+	top, err := pbRead(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(pbAll(top, 3)) > 0 {
+		return nil, errors.New("a ticket with blocks added")
+	}
+	sb, err := authorityBlock(raw)
+	if err != nil {
+		return nil, err
+	}
+	pf := pbOne(top, 4)
+	if pf == nil || pf.wire != 2 {
+		return nil, errors.New("a ticket with no proof")
+	}
+	proof, err := pbRead(pf.b)
+	if err != nil {
+		return nil, err
+	}
+	secret := pbOne(proof, 1)
+	if secret == nil || secret.wire != 2 || len(secret.b) != ed25519.SeedSize {
+		return nil, errors.New("a sealed ticket")
+	}
+	next, err := nextKey(sb)
+	if err != nil {
+		return nil, err
+	}
+	priv := ed25519.NewKeyFromSeed(secret.b)
+	if !priv.Public().(ed25519.PublicKey).Equal(next) {
+		return nil, errors.New("a ticket whose proof is not its own")
+	}
+	t, err := blockTicket(sb)
+	if err != nil {
+		return nil, err
+	}
+	return &Claim{
+		ID:    t.ID,
+		Block: b64.EncodeToString(sb),
+		Sig:   b64.EncodeToString(ed25519.Sign(priv, claimMessage(boxKey, t.ID))),
+	}, nil
+}
+
+// blockTicket: what a signed block says, its signature unchecked
+func blockTicket(sb []byte) (*Ticket, error) {
+	fs, err := pbRead(sb)
+	if err != nil {
+		return nil, err
+	}
+	block := pbOne(fs, 1)
+	if block == nil || block.wire != 2 {
+		return nil, errNoTicket
+	}
+	return readBlock(block.b, "")
+}
+
+// CheckClaim: a join's claim, for boxKey: its id is the block's, and the
+// box holds the ticket. What the ticket says (whose, until when), its
+// device's signature unchecked: the judge holds that to the member's
+// devices when their root enlists the box (ReadClaim).
+func CheckClaim(c *Claim, boxKey string) (*Ticket, error) {
+	sb, err := b64.DecodeString(c.Block)
+	if err != nil {
+		return nil, errNoTicket
+	}
+	t, err := blockTicket(sb)
+	if err != nil {
+		return nil, err
+	}
+	if t.ID != c.ID {
+		return nil, errors.New("a claim to another ticket's id")
+	}
+	next, err := nextKey(sb)
+	if err != nil {
+		return nil, err
+	}
+	sig, err := b64.DecodeString(c.Sig)
+	if err != nil || !ed25519.Verify(next, claimMessage(boxKey, c.ID), sig) {
+		return nil, errors.New("the box does not hold that ticket")
+	}
+	return t, nil
+}
+
+// ReadClaim: a claim's ticket, signed by one of keys (a member's devices)
+func ReadClaim(block string, keys []string) (*Ticket, error) {
+	sb, err := b64.DecodeString(block)
+	if err != nil {
+		return nil, errNoTicket
+	}
+	b, key, err := signedBy(sb, keys)
+	if err != nil {
+		return nil, err
+	}
+	return readBlock(b, key)
 }

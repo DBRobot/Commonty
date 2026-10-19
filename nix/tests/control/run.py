@@ -629,9 +629,28 @@ open(f"{T}/stranger.spki", "w").write(spki + "\n")
 digest = hashlib.sha256(der).digest()
 sname = "j" + digest[:5].hex()
 sid = (1 << 40) | int.from_bytes(digest[:5], "big")
-# it came with a join ticket, which the validators carry and the gates judge
-# (member_boxes.rs): one no gate takes leaves it a stranger
-open(f"{T}/ticket", "w").write("EnoKZm9yLXRoZS1nYXRlcw==\n")
+# it came with a join ticket (biscuit-cli's, state/ident ticket_test.go),
+# which stays on the box: the join carries its claim, and the agreed state
+# its id. Its own report says it meets the hardware minimum
+TICKET = (
+    "EqMCCrgBCgNhbm4KBmRldmljZQoBZgoGdGlja2V0CiAwMDExMjIzMzQ0NTU2Njc3ODg5OWFhYmJjY2RkZWVmZgoHcHVycG9zZQoE"
+    "am9pbgoBdBgDIgkKBwgKEgMYgAgiCgoICIEIEgMYgggiCgoICIMIEgMYhAgiCgoICIUIEgMYhggyKAomCgIIGxIHCAUSAwiHCBoX"
+    "CgUKAwiHCAoICgYQwOWy1gYKBBoCCAAyDwoNCgIIGxIHCAMSAxiGCBIkCAASIKbGi1Im0RWOiZK_7j48dq3cqzLyqaZjCtsO0C0z"
+    "lBicGkCt620JFzrYN2cTNjm0sU3-FPj5sBM1s7q5nyEqZTVhqC2MxgP2nvit0QI7J5XDkTjFK5SWGgVvTQIedukXI3kHIiIKIPiU"
+    "raeqCqTMMTgjg1f-AJ13kTHwuDXDeVacBd7SkdXX"
+)
+open(f"{T}/ticket", "w").write(TICKET + "\n")
+json.dump(
+    {
+        "firmware": {"uefi": True, "secureBootCapable": True, "tpm": {"version": 2}},
+        "cpu": {"threads": 4},
+        "memoryBytes": 8 << 30,
+        "bootDisk": "/dev/disk/by-id/sys",
+        "disks": [{"id": "/dev/disk/by-id/sys", "bytes": 256e9}],
+        "nics": [{"name": "eth0"}],
+    },
+    open(f"{T}/report.json", "w"),
+)
 stranger = subprocess.Popen(
     [
         f"{T}/dd-control",
@@ -647,6 +666,8 @@ stranger = subprocess.Popen(
         "hx",
         "-join-ticket-file",
         f"{T}/ticket",
+        "-report",
+        f"{T}/report.json",
         "-relay",
         "ws://127.0.0.1:8789/relay",
         "-state",
@@ -675,8 +696,12 @@ ok(
     f"a stranger joined as {sname}, on its key",
 )
 ok(
-    j.get("ticket") == "EnoKZm9yLXRoZS1nYXRlcw==",
-    "the ticket it came with is carried for the gates",
+    j.get("ticket") == "00112233445566778899aabbccddeeff",
+    "the id of the ticket it came with is kept",
+)
+ok(
+    TICKET[-40:] not in json.dumps(state(live[0])),
+    "and the ticket itself is nowhere in the agreed state",
 )
 seen = lambda: state(live[0]).get("boxes", {}).get(sname, {}).get("lastSeen", 0)
 first = seen()

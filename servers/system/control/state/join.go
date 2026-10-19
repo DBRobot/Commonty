@@ -8,12 +8,16 @@ package state
 // how fast, is bounded, and one unheard for thirty days is gone again
 // (docs/dev/joining.md).
 //
+// Below the hardware minimum (ident.Minimum) a box can't join at all.
+//
 // A box a member set up carries the member's join ticket, a biscuit one of
-// their devices signed. The validators judge none of it here: the join
-// puts the box's key and ticket in the directory log ({"joined": ...},
-// under the box's name), where the identity judge (state/ident) reads it
-// when the member's root enlists the box. Until then, and without a
-// ticket, the box is a stranger.
+// their devices signed. It joins with the ticket's claim, never the ticket
+// (ident.Claim): the ticket is a bearer token, and all of this is for every
+// box to read. Here the claim is held to its id and to the box holding the
+// ticket; the join puts the box's key and the claim in the directory log
+// ({"joined": ...}, under the box's name), where the identity judge
+// (state/ident) holds it to the member's devices when their root enlists
+// the box. Until then, and without a ticket, the box is a stranger.
 
 import (
 	"bytes"
@@ -37,7 +41,7 @@ type Joined struct {
 	// network's control server gave it (a netaddr request), never its own
 	// word: what its store's name points at
 	IPv4 uint32 `json:"ipv4,omitempty"`
-	// the member's join ticket it came with, as it came: the gates judge it
+	// the id of the member's join ticket it came with
 	Ticket string `json:"ticket,omitempty"`
 }
 
@@ -56,8 +60,10 @@ type JoinReq struct {
 	Key       string `json:"key"`
 	Recipient string `json:"recipient"`
 	House     string `json:"house"`
-	// a member's join ticket (a base64 biscuit), or nothing for a stranger
-	Ticket string `json:"ticket,omitempty"`
+	// what it has, as its heartbeat will say (ident.Minimum reads it)
+	Facts map[string]float64 `json:"facts"`
+	// its member's join ticket's claim, or nothing for a stranger
+	Claim *ident.Claim `json:"claim,omitempty"`
 }
 
 const (
@@ -70,8 +76,10 @@ const (
 	// JoinedIDBase: joined boxes' relay addresses, above the release's and
 	// below the validators' and the relay's own
 	JoinedIDBase = 1 << 40
-	// MaxTicket bounds a join ticket: a biscuit of a few facts and checks
+	// MaxTicket bounds a join ticket's signed block: a few facts and checks
 	MaxTicket = 2048
+	// maxJoinFacts bounds what a join says of itself
+	maxJoinFacts = 512
 )
 
 var houseName = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
@@ -129,15 +137,23 @@ func (s *State) checkJoin(cfg *Config, verify Verify, r Request, now int64) erro
 	if j.Recipient == "" || len(j.Recipient) > 512 || !houseName.MatchString(j.House) {
 		return errors.New("a join names its recipient and its house")
 	}
-	if len(j.Ticket) > MaxTicket {
-		return fmt.Errorf("a ticket of %d bytes; at most %d", len(j.Ticket), MaxTicket)
+	if len(j.Facts) > maxJoinFacts {
+		return fmt.Errorf("%d facts; at most %d", len(j.Facts), maxJoinFacts)
 	}
-	// a ticket goes with one box: the same one again is someone's copy of
-	// it (the gates hold a ticket to one box by its id too, which a copy
-	// with a block added would get past this)
-	if j.Ticket != "" {
+	if why := ident.Minimum(j.Facts); why != "" {
+		return fmt.Errorf("refused: this box %s", why)
+	}
+	if c := j.Claim; c != nil {
+		if len(c.Block) > MaxTicket || len(c.Sig) > 128 || len(c.ID) > 64 {
+			return fmt.Errorf("a ticket's claim of more than %d bytes", MaxTicket)
+		}
+		if _, err := ident.CheckClaim(c, j.Key); err != nil {
+			return fmt.Errorf("refused: its ticket: %w", err)
+		}
+		// a ticket goes with one box, by its id: another with the same id
+		// is a copy, or one made to look like it
 		for _, o := range s.Joined {
-			if o.Ticket == j.Ticket {
+			if o.Ticket == c.ID {
 				return errors.New("that ticket came with another box")
 			}
 		}
@@ -162,9 +178,10 @@ func (s *State) applyJoin(r Request, now int64) {
 	if s.Joined == nil {
 		s.Joined = map[string]*Joined{}
 	}
-	s.Joined[r.Box] = &Joined{ID: id, Key: j.Key, Recipient: j.Recipient, House: j.House, At: now, Ticket: j.Ticket}
-	if j.Ticket != "" {
-		rec, _ := json.Marshal(map[string]map[string]string{"joined": {"key": j.Key, "ticket": j.Ticket}})
+	s.Joined[r.Box] = &Joined{ID: id, Key: j.Key, Recipient: j.Recipient, House: j.House, At: now}
+	if c := j.Claim; c != nil {
+		s.Joined[r.Box].Ticket = c.ID
+		rec, _ := json.Marshal(map[string]map[string]string{"joined": {"key": j.Key, "ticket": c.ID, "block": c.Block}})
 		s.Directory = append(s.Directory, DirItem{Height: s.Height, Time: now, Box: r.Box, Item: rec})
 	}
 }

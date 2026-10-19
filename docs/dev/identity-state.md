@@ -78,9 +78,12 @@ TPM-signed request like every request; its body is `{"ack": "<the claim's log na
 as today.
 
 `joined` is the state machine's own: when a box joins with a member's
-ticket (state/join.go), the join puts `{"joined": {"key", "ticket"}}` in
-the directory log under the box's name, at the join's agreed time. It is
-how the judge knows, in log order, which ticket a box came with. No gate
+ticket (state/join.go), the join puts `{"joined": {"key", "ticket",
+"block"}}` in the directory log under the box's name, at the join's agreed
+time: the ticket's id and its signed authority block (base64), never the
+ticket, which is a bearer token and stays on the box. It is how the judge
+knows, in log order, which ticket a box came with; a second box with an
+id already joined is not kept. No gate
 can put one: the state machine refuses a directory item with `joined` at
 its top, and the judge takes one only under the name its key gives. Once the readers have switched the judge no longer needs acks (the
 agreement is the acknowledgement); they are accepted and ignored after that.
@@ -131,6 +134,7 @@ The judge keeps, per name:
     }
   },
   "enlisted": {"<box name>": {"ticket": "<id>", "owner": "<name>", "since": 1792270000000}},
+  "waiting": {"<box name>": {"ticket": "<id>", "owner": "<name>", "since": 1792270000000}},
   "handovers": {"<name>": [{"before": "<item>", "after": "<item>"}]},
   "invites": {"<public key>": {"issued": 0, "expires": 0, "item": {}}},
   "outcomes": {"<item hash>": "ok | refused: <why>"}
@@ -158,6 +162,9 @@ The judge keeps, per name:
   qualifies it as and whether it keeps their access now. The top-level
   `enlisted` is the same by box: whose each is and the ticket it was
   enlisted with (what the pending backups and the purge go by).
+- **waiting**: the joined boxes no one has enlisted whose ticket a device
+  of `owner`'s signed, for them, good now and unused: theirs to enlist
+  (`since`, when it joined). What Your boxes shows as waiting.
 - **grace_until**: the admin's extension, while it runs.
 - **removed**: the release's `removed` date for any of their ids (the
   newest), whatever their status: what a reader that forgets a removed
@@ -240,12 +247,12 @@ moved, not changed. Each item is judged at its agreed time `at`.
   `at` within 5 minutes ahead of / 24 hours behind the agreed time, and
   newer than the last enlist or unenlist taken for that box (kept after an
   unenlist), so an old one sent again changes nothing. An enlist names the
-  ticket the box joined with (its `joined` record): signed by a device in
+  ticket the box joined with (its `joined` record's block): signed by a device in
   the member's entry, for them (`user`), for `join`, not expired at the
   enlist's agreed time, and never used before; once enlisted, the ticket is
   used for good, even after an unenlist. The ticket is read by the judge
-  itself (state/ident ticket.go: the authority block of biscuit-auth's
-  format, its signature, its facts and its one time check). A member who
+  itself (state/ident ticket.go: the signed authority block of
+  biscuit-auth's format, its signature, its facts and its one time check). A member who
   is left, suspended or revoked enlists nothing. A box already someone's is
   refused while that enlistment stands (see **boxes** above); unenlist only
   by its owner. Which boxes count for access is the view's (state/ident

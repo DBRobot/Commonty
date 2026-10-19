@@ -111,8 +111,27 @@ box.succeed("systemctl start dd-agent", timeout=900)
 assert box.succeed("cat /etc/hostname").strip() == nix["keyName"]
 assert box.succeed("readlink -f /run/current-system").strip() == named
 
-# and joins: on its own key, under its name, with its member's ticket
+# below the hardware minimum it can't join, and says why (the VM is
+# smaller than any box): then its report says it meets it, and has a GPU
+# (a TPM 2.0, UEFI with Secure Boot, 4 threads, 8 GiB, a 256 GB system
+# disk, a network link, 8 GiB of VRAM; the test's VM has some of it)
 box.wait_for_unit("dd-control.service")
+box.wait_until_succeeds("grep -q needs /var/lib/dd-control/join-refused", timeout=120)
+print(box.succeed("cat /var/lib/dd-control/join-refused"))
+hw = json.loads(box.succeed("cat /var/lib/dd/report/hardware.json"))
+hw.setdefault("firmware", {}).update(
+    {"uefi": True, "secureBootCapable": True, "tpm": {"version": 2}}
+)
+hw.setdefault("cpu", {})["threads"] = 4
+hw["memoryBytes"] = 8 << 30
+hw["bootDisk"] = "/dev/disk/by-id/test-system"
+hw["disks"] = [{"id": "/dev/disk/by-id/test-system", "bytes": 256 * 10**9}]
+hw["nics"] = hw.get("nics") or [{"name": "eth1"}]
+hw["gpus"] = [{"driver": "nvidia", "vram": 8 << 30, "encode": []}]
+box.succeed(f"cat > /var/lib/dd/report/hardware.json <<'EOF'\n{json.dumps(hw)}\nEOF")
+
+# and joins: on its own key, under its name, with its member's ticket's
+# claim, never the ticket
 
 
 def joined():
@@ -125,7 +144,11 @@ fleet.wait_until_succeeds(
     timeout=300,
 )
 j = joined()
-assert j["ticket"] == box.succeed("cat /var/lib/dd/join-ticket").strip(), j
+assert j["ticket"] == "00112233445566778899aabbccddeeff", j
+ticket = box.succeed("cat /var/lib/dd/join-ticket").strip()
+st = fleet.succeed("curl -sf http://127.0.0.1:4191/state")
+assert ticket[-40:] not in st, "the ticket is in the agreed state"
+box.wait_until_succeeds("test ! -e /var/lib/dd-control/join-refused", timeout=120)
 assert j["key"] == spki, j
 
 # not hers on its ticket alone, and signing up opened nothing: the box waits
@@ -152,21 +175,15 @@ assert waiting == [
     {
         "name": nix["keyName"],
         "ticket": "00112233445566778899aabbccddeeff",
-        "joined": j["at"],
+        "joined": j["at"] // 1000 * 1000,
         "enlisted": False,
     }
 ], waiting
 assert fleet.succeed(verify).strip() == "403"
 
-# the box's own report says it qualifies: a TPM 2.0, UEFI and a GPU (the
-# test's VM has neither of the last two, so its report is written so here)
-hw = json.loads(box.succeed("cat /var/lib/dd/report/hardware.json"))
-hw["firmware"]["uefi"] = True
-hw["firmware"]["tpm"] = {"version": 2}
-hw["gpus"] = [{"driver": "nvidia"}]
-box.succeed(f"cat > /var/lib/dd/report/hardware.json <<'EOF'\n{json.dumps(hw)}\nEOF")
+# its heartbeats carry what its report says: it qualifies by its GPU
 fleet.wait_until_succeeds(
-    f"curl -sf http://127.0.0.1:4191/state | jq -e '.boxes.{nix['keyName']}.facts | .gpus == 1 and .tpm_major == 2 and .uefi == 1'",
+    f"curl -sf http://127.0.0.1:4191/state | jq -e '.boxes.{nix['keyName']}.facts | .gpus == 1 and .gpu_vram_bytes >= 8589934592 and .tpm_major == 2 and .uefi == 1'",
     timeout=180,
 )
 

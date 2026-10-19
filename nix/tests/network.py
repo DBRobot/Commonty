@@ -21,6 +21,17 @@ assert ip.startswith("100."), ip
 box.succeed(
     'headscale nodes list -o json | jq -e \'.[] | select(.name == "box") | .tags | index("tag:box")\''
 )
+# the shape dd-control reads joined boxes' addresses from (joinedAddrs):
+# a tagged node is listed under tagged-devices, and who its key was minted
+# for is its pre-auth key's user
+node = [
+    n
+    for n in json.loads(box.succeed("headscale nodes list -o json"))
+    if n["name"] == "box"
+][0]
+assert node["user"]["name"] == "tagged-devices", node["user"]
+assert node["pre_auth_key"]["user"]["name"] == "boxes", node.get("pre_auth_key")
+assert any(a.startswith("100.") for a in node["ip_addresses"]), node
 # it joined with a key made for that one try: single use, and gone after
 box.succeed(
     "headscale preauthkeys list -o json | jq -e 'all(.[]; (.reusable // false) == false)'"

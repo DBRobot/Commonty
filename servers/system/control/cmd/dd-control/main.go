@@ -218,9 +218,18 @@ func memFree() float64 {
 	return 0
 }
 
+// the box's own signed report on its hardware (nix/modules/box/report.nix)
+var reportPath = flag.String("report", "/var/lib/dd/report/hardware.json", "this box's hardware report")
+
 // facts: what this box has, as the placement rules will read them
 func facts() map[string]float64 {
 	f := map[string]float64{"cores": float64(runtime.NumCPU())}
+	switch runtime.GOARCH {
+	case "amd64":
+		f["arch_x86_64"] = 1
+	case "arm64":
+		f["arch_aarch64"] = 1
+	}
 	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
 		for _, l := range strings.Split(string(b), "\n") {
 			fs := strings.Fields(l)
@@ -274,7 +283,7 @@ func facts() map[string]float64 {
 	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom", "/var/lib/dd-facts/can.prom", "/var/lib/dd-facts/draining.prom", "/var/lib/dd-facts/computers.prom") {
 		f[name] = v
 	}
-	for name, v := range reportFacts("/var/lib/dd/report/hardware.json", "/sys/firmware/devicetree/base/model") {
+	for name, v := range reportFacts(*reportPath, "/sys/firmware/devicetree/base/model") {
 		f[name] = v
 	}
 	// what members keep here: not .prom, so none of it reaches Prometheus
@@ -285,38 +294,77 @@ func facts() map[string]float64 {
 	return f
 }
 
-// reportFacts: what a member's box qualifies by (ident.Qualify), from the
-// box's own signed report (nix/modules/box/report.nix, detect.sh): its TPM's
-// version, UEFI, its GPUs that are cards of their own (nvidia, amdgpu), and
+// reportFacts: what a box joins and qualifies by (ident.Minimum,
+// ident.Qualify), from its own signed report (nix/modules/box/report.nix,
+// detect.sh): its processor threads and MemTotal, its TPM's version, UEFI
+// and whether it can do Secure Boot,
+// the size of the disk its system is on, its network links, its GPUs'
+// VRAM (nvidia, amdgpu) and the encoders the transcoder can use, and
 // whether the board is a Raspberry Pi (its device tree's model)
 func reportFacts(report, model string) map[string]float64 {
 	out := map[string]float64{}
 	if b, err := os.ReadFile(report); err == nil {
 		var r struct {
 			Firmware struct {
-				UEFI bool `json:"uefi"`
-				TPM  *struct {
+				UEFI              bool `json:"uefi"`
+				SecureBoot        bool `json:"secureBoot"`
+				SetupMode         bool `json:"setupMode"`
+				SecureBootCapable bool `json:"secureBootCapable"`
+				TPM               *struct {
 					Version float64 `json:"version"`
 				} `json:"tpm"`
 			} `json:"firmware"`
+			CPU struct {
+				Threads float64 `json:"threads"`
+			} `json:"cpu"`
+			MemoryBytes float64 `json:"memoryBytes"`
+			BootDisk    string  `json:"bootDisk"`
+			Disks       []struct {
+				ID    string  `json:"id"`
+				Bytes float64 `json:"bytes"`
+			} `json:"disks"`
+			NICs []json.RawMessage `json:"nics"`
 			GPUs []struct {
-				Driver string `json:"driver"`
+				Driver string   `json:"driver"`
+				VRAM   float64  `json:"vram"`
+				Encode []string `json:"encode"`
 			} `json:"gpus"`
 		}
 		if json.Unmarshal(b, &r) == nil {
 			if r.Firmware.UEFI {
 				out["uefi"] = 1
 			}
+			if r.Firmware.SecureBootCapable || r.Firmware.SecureBoot || r.Firmware.SetupMode {
+				out["secure_boot_capable"] = 1
+			}
 			if r.Firmware.TPM != nil {
 				out["tpm_major"] = r.Firmware.TPM.Version
 			}
-			n := 0
+			out["threads"] = r.CPU.Threads
+			out["mem_total_bytes"] = r.MemoryBytes
+			for _, d := range r.Disks {
+				if d.ID != "" && d.ID == r.BootDisk {
+					out["system_disk_bytes"] = d.Bytes
+				}
+			}
+			out["nics"] = float64(len(r.NICs))
+			n, vram, enc := 0, 0.0, 0
 			for _, g := range r.GPUs {
 				if g.Driver == "nvidia" || g.Driver == "amdgpu" {
 					n++
+					vram = max(vram, g.VRAM)
+				}
+				// what the transcoder encodes on: H.264 through VAAPI
+				for _, p := range g.Encode {
+					if strings.HasPrefix(p, "H264") {
+						enc++
+						break
+					}
 				}
 			}
 			out["gpus"] = float64(n)
+			out["gpu_vram_bytes"] = vram
+			out["video_encoders"] = float64(enc)
 		}
 	}
 	if b, err := os.ReadFile(model); err == nil && strings.Contains(string(b), "Raspberry Pi") {
@@ -614,9 +662,14 @@ func main() {
 		}
 		me = state.Box{ID: id, House: *joinHouse, Key: spki}
 		joining = &state.JoinReq{Key: spki, Recipient: *joinRecipient, House: *joinHouse}
+		// the ticket stays on this box: what the join carries is its claim
 		if *joinTicket != "" {
 			if t, err := os.ReadFile(*joinTicket); err == nil {
-				joining.Ticket = strings.TrimSpace(string(t))
+				c, err := ident.MakeClaim(strings.TrimSpace(string(t)), spki)
+				if err != nil {
+					log.Fatalf("%s: %v", *joinTicket, err)
+				}
+				joining.Claim = c
 			}
 		}
 	}
@@ -756,15 +809,23 @@ func main() {
 	}
 
 	// a box the release does not list asks to join until the agreed state
-	// has it; its heartbeats count from then
+	// has it; its heartbeats count from then. Below the hardware minimum the
+	// validators refuse it, and it says why here (and in join-refused)
 	if joining != nil {
-		body, _ := json.Marshal(joining)
+		refused := filepath.Join(*dir, "join-refused")
 		go func() {
 			for {
 				if s := n.State(); s != nil && s.Joined[*box] != nil {
 					log.Printf("joined the fleet as %s", *box)
+					_ = os.Remove(refused)
 					return
 				}
+				joining.Facts = facts()
+				if why := ident.Minimum(joining.Facts); why != "" {
+					log.Printf("join: refused: this box %s", why)
+					_ = os.WriteFile(refused, []byte("this box "+why+"\n"), 0o644)
+				}
+				body, _ := json.Marshal(joining)
 				if _, err := submit("join", body); err != nil {
 					log.Printf("join: %v", err)
 				}
@@ -1112,26 +1173,39 @@ func computerLease(s *state.State, cfg *state.Config, id string, cs []*computers
 
 var joinedName = regexp.MustCompile(`^j[0-9a-f]{10}$`)
 
-// joinedAddrs: from headscale's node list, each node tagged a joined box,
-// by the user the gate made it under (joined-<name>, when it handed the box
-// its key) - never by the hostname a node gives itself - and its IPv4
-// address
+// joinedAddrs: from headscale's node list (`nodes list -o json`), each
+// node tagged a joined box, by the user the gate minted its key under
+// (joined-<name>, when it handed the box its key) - never by the hostname
+// a node gives itself - and its IPv4 address. Headscale 0.28 lists every
+// tagged node under the user tagged-devices, so the minting user is read
+// from the node's pre-auth key; the node's own user is read as well, as
+// headscale before 0.28 gave it. A box joined twice is its newest node.
 func joinedAddrs(list []byte) map[string]uint32 {
+	type user struct {
+		Name string `json:"name"`
+	}
 	var nodes []struct {
-		User struct {
-			Name string `json:"name"`
-		} `json:"user"`
-		IPAddresses []string `json:"ipAddresses"`
+		ID         json.Number `json:"id"`
+		User       user        `json:"user"`
+		PreAuthKey struct {
+			User user `json:"user"`
+		} `json:"pre_auth_key"`
+		IPAddresses []string `json:"ip_addresses"`
+		IPCamel     []string `json:"ipAddresses"`
 		Tags        []string `json:"tags"`
 		ValidTags   []string `json:"validTags"`
 		ForcedTags  []string `json:"forcedTags"`
 	}
 	out := map[string]uint32{}
+	newest := map[string]float64{}
 	if json.Unmarshal(list, &nodes) != nil {
 		return out
 	}
 	for _, nd := range nodes {
-		name, ok := strings.CutPrefix(nd.User.Name, "joined-")
+		name, ok := strings.CutPrefix(nd.PreAuthKey.User.Name, "joined-")
+		if !ok {
+			name, ok = strings.CutPrefix(nd.User.Name, "joined-")
+		}
 		if !ok || !joinedName.MatchString(name) {
 			continue
 		}
@@ -1142,9 +1216,14 @@ func joinedAddrs(list []byte) map[string]uint32 {
 		if !tagged {
 			continue
 		}
-		for _, a := range nd.IPAddresses {
+		id, _ := nd.ID.Float64()
+		if seen, ok := newest[name]; ok && seen > id {
+			continue
+		}
+		for _, a := range append(nd.IPAddresses, nd.IPCamel...) {
 			if ip := net.ParseIP(a).To4(); ip != nil {
 				out[name] = binary.BigEndian.Uint32(ip)
+				newest[name] = id
 				break
 			}
 		}

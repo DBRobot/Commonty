@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -13,10 +14,44 @@ func strangerKey(i int) string {
 	return base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("stranger-%d", i)))
 }
 
+// enough to join: the hardware minimum (ident.Minimum)
+var enough = map[string]float64{
+	"tpm_major": 2, "uefi": 1, "secure_boot_capable": 1, "arch_x86_64": 1,
+	"threads": ident.MinThreads, "mem_total_bytes": ident.MinMemTotal, "system_disk_bytes": ident.MinSystemDisk, "nics": 1,
+}
+
 func joinReq(key string, seq uint64) Request {
 	name, _, _ := JoinName(key)
-	b, _ := json.Marshal(JoinReq{Key: key, Recipient: "age1x", House: "h"})
+	b, _ := json.Marshal(JoinReq{Key: key, Recipient: "age1x", House: "h", Facts: enough})
 	return Request{Kind: "join", Box: name, Seq: seq, Body: b, Sig: "ok:" + key}
+}
+
+func TestABoxBelowTheMinimumCannotJoin(t *testing.T) {
+	f := newFleet(t)
+	for i, short := range []string{"threads", "mem_total_bytes", "system_disk_bytes", "tpm_major", "secure_boot_capable", "nics"} {
+		k := strangerKey(i)
+		name, _, _ := JoinName(k)
+		facts := map[string]float64{}
+		for n, v := range enough {
+			facts[n] = v
+		}
+		facts[short]--
+		b, _ := json.Marshal(JoinReq{Key: k, Recipient: "age1x", House: "h", Facts: facts})
+		r := Request{Kind: "join", Box: name, Seq: 1, Body: b, Sig: "ok:" + k}
+		if err := f.s.checkJoin(f.c, fakeVerify, r, 1000); err == nil || !strings.Contains(err.Error(), "needs") {
+			t.Fatalf("%s short: %v", short, err)
+		}
+	}
+	// saying nothing of itself is no better
+	k := strangerKey(9)
+	name, _, _ := JoinName(k)
+	b, _ := json.Marshal(JoinReq{Key: k, Recipient: "age1x", House: "h"})
+	if f.block(1000, Request{Kind: "join", Box: name, Seq: 1, Body: b, Sig: "ok:" + k}) != 0 {
+		t.Fatal("a box that said nothing of itself joined")
+	}
+	if f.block(1000, joinReq(k, 2)) != 1 {
+		t.Fatal("a box at the minimum refused")
+	}
 }
 
 func TestAStrangerJoinsOnItsOwnKeyAndNameAndHoldsNoLease(t *testing.T) {
@@ -27,7 +62,7 @@ func TestAStrangerJoinsOnItsOwnKeyAndNameAndHoldsNoLease(t *testing.T) {
 		t.Fatalf("not joined: %+v", f.s.Joined)
 	}
 	// its heartbeats now count, signed by its own key
-	b, _ := json.Marshal(Heartbeat{Facts: map[string]float64{"cores": 2}})
+	b, _ := json.Marshal(Heartbeat{Facts: map[string]float64{"threads": 2}})
 	if f.block(2000, Request{Kind: "heartbeat", Box: name, Seq: 2, Body: b, Sig: "ok:" + k}) != 1 {
 		t.Fatal("a joined box's heartbeat refused")
 	}
@@ -135,33 +170,54 @@ func TestAJoinedBoxOnlySendsHeartbeats(t *testing.T) {
 	}
 }
 
-func ticketJoin(key, ticket string, seq uint64) Request {
+// biscuit-cli's join ticket for ann (state/ident's ticket_test.go)
+const cliTicket = "EqMCCrgBCgNhbm4KBmRldmljZQoBZgoGdGlja2V0CiAwMDExMjIzMzQ0NTU2Njc3ODg5OWFhYmJjY2RkZWVmZgoHcHVycG9zZQoEam9pbgoBdBgDIgkKBwgKEgMYgAgiCgoICIEIEgMYgggiCgoICIMIEgMYhAgiCgoICIUIEgMYhggyKAomCgIIGxIHCAUSAwiHCBoXCgUKAwiHCAoICgYQwOWy1gYKBBoCCAAyDwoNCgIIGxIHCAMSAxiGCBIkCAASIKbGi1Im0RWOiZK_7j48dq3cqzLyqaZjCtsO0C0zlBicGkCt620JFzrYN2cTNjm0sU3-FPj5sBM1s7q5nyEqZTVhqC2MxgP2nvit0QI7J5XDkTjFK5SWGgVvTQIedukXI3kHIiIKIPiUraeqCqTMMTgjg1f-AJ13kTHwuDXDeVacBd7SkdXX"
+
+func claimFor(t *testing.T, key string) *ident.Claim {
+	t.Helper()
+	c, err := ident.MakeClaim(cliTicket, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func ticketJoin(key string, c *ident.Claim, seq uint64) Request {
 	name, _, _ := JoinName(key)
-	b, _ := json.Marshal(JoinReq{Key: key, Recipient: "age1x", House: "h", Ticket: ticket})
+	b, _ := json.Marshal(JoinReq{Key: key, Recipient: "age1x", House: "h", Facts: enough, Claim: c})
 	return Request{Kind: "join", Box: name, Seq: seq, Body: b, Sig: "ok:" + key}
 }
 
-func TestATicketGoesWithOneBoxAndIsCarriedForTheGates(t *testing.T) {
+func TestATicketGoesWithOneBoxByItsID(t *testing.T) {
 	f := newFleet(t)
 	a, b := strangerKey(1), strangerKey(2)
 	an, _, _ := JoinName(a)
-	if f.block(1000, ticketJoin(a, "En0KEwoEdXNlcg", 1)) != 1 || f.s.Joined[an].Ticket != "En0KEwoEdXNlcg" {
-		t.Fatalf("the ticket is not carried: %+v", f.s.Joined[an])
+	ca := claimFor(t, a)
+	if f.block(1000, ticketJoin(a, ca, 1)) != 1 || f.s.Joined[an].Ticket != ca.ID {
+		t.Fatalf("the ticket's id is not kept: %+v", f.s.Joined[an])
 	}
-	// the same ticket with another box is someone's copy of it
-	if f.block(2000, ticketJoin(b, "En0KEwoEdXNlcg", 1)) != 0 {
-		t.Fatal("one ticket came with two boxes")
+	// the agreed state holds the id, never the ticket
+	st, _ := json.Marshal(f.s)
+	if strings.Contains(string(st), cliTicket[:64]) || strings.Contains(string(st), "IiIKIPiUraeq") {
+		t.Fatal("the ticket is in the agreed state")
+	}
+	// a box with the same ticket (the same id) is refused: the second one
+	if f.block(2000, ticketJoin(b, claimFor(t, b), 1)) != 0 {
+		t.Fatal("one ticket id came with two boxes")
+	}
+	// a claim copied from the agreed state is not the ticket: another box
+	// with it holds nothing
+	if f.block(2000, ticketJoin(b, ca, 2)) != 0 {
+		t.Fatal("a copied claim joined")
 	}
 	// one too long is refused, and a box without one is a stranger as before
-	big := make([]byte, MaxTicket+1)
-	for i := range big {
-		big[i] = 'A'
-	}
-	if f.block(3000, ticketJoin(b, string(big), 1)) != 0 {
-		t.Fatal("an oversized ticket was taken")
+	big := *ca
+	big.Block = strings.Repeat("A", MaxTicket+1)
+	if f.block(3000, ticketJoin(b, &big, 3)) != 0 {
+		t.Fatal("an oversized claim was taken")
 	}
 	bn, _, _ := JoinName(b)
-	if f.block(4000, joinReq(b, 1)) != 1 || f.s.Joined[bn].Ticket != "" {
+	if f.block(4000, joinReq(b, 4)) != 1 || f.s.Joined[bn].Ticket != "" {
 		t.Fatal("a stranger's join changed")
 	}
 }
@@ -170,13 +226,12 @@ func TestAJoinWithATicketIsInTheDirectoryLogUnderItsName(t *testing.T) {
 	f := newFleet(t)
 	k := strangerKey(1)
 	name, _, _ := JoinName(k)
-	r := joinReq(k, 1)
-	r.Body, _ = json.Marshal(JoinReq{Key: k, Recipient: "age1x", House: "h", Ticket: "T"})
-	if f.block(1000, r) != 1 || len(f.s.Directory) != 1 {
+	c := claimFor(t, k)
+	if f.block(1000, ticketJoin(k, c, 1)) != 1 || len(f.s.Directory) != 1 {
 		t.Fatalf("%+v", f.s.Directory)
 	}
 	d := f.s.Directory[0]
-	if d.Box != name || string(d.Item) != `{"joined":{"key":"`+k+`","ticket":"T"}}` {
+	if d.Box != name || string(d.Item) != `{"joined":{"block":"`+c.Block+`","key":"`+k+`","ticket":"`+c.ID+`"}}` {
 		t.Fatalf("%s %s", d.Box, d.Item)
 	}
 	// a stranger's join, with none, puts nothing there

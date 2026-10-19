@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/binary"
+	"strings"
 	"testing"
 )
 
@@ -28,9 +29,6 @@ func TestATicketBiscuitMade(t *testing.T) {
 	}
 	if _, err := ReadTicket(cliTicket, []string{pub(key(4))}); err == nil {
 		t.Fatal("read with another device's key")
-	}
-	if id, exp := TicketID(cliTicket); id != ticketA || exp != 1791800000 {
-		t.Fatal(id, exp)
 	}
 }
 
@@ -137,5 +135,49 @@ func TestOnlyAJoinTicketIsOne(t *testing.T) {
 		if _, err := ReadTicket(junk, []string{pub(dev)}); err == nil {
 			t.Errorf("%q: read as a ticket", junk)
 		}
+	}
+}
+
+func TestAJoinCarriesAClaimNeverTheTicket(t *testing.T) {
+	dev := key(3)
+	for what, tok := range map[string]string{"ours": joinTicket("ann", ticketA, 1791800000).token(dev), "biscuit-cli's": cliTicket} {
+		c, err := MakeClaim(tok, "box-key")
+		if err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		if c.ID != ticketA {
+			t.Fatalf("%s: %+v", what, c)
+		}
+		// what the agreed state keeps holds no proof key (the gate's test
+		// shows a block without it opens nothing)
+		blk, _ := base64.StdEncoding.DecodeString(c.Block)
+		if what == "ours" && (len(blk) == 0 || strings.Contains(string(blk), string(key(200).Seed()))) {
+			t.Fatalf("%s: the proof key is in the claim", what)
+		}
+		got, err := CheckClaim(c, "box-key")
+		if err != nil || got.User != "ann" || got.Expires != 1791800000 {
+			t.Fatalf("%s: %+v %v", what, got, err)
+		}
+		// another box with a copy of the claim does not hold the ticket
+		if _, err := CheckClaim(c, "another-box"); err == nil {
+			t.Fatalf("%s: a copied claim joined another box", what)
+		}
+		// the claim names the block's id and no other
+		other := *c
+		other.ID = "ffeeddccbbaa99887766554433221100"
+		if _, err := CheckClaim(&other, "box-key"); err == nil {
+			t.Fatalf("%s: a claim to another id", what)
+		}
+	}
+	c, _ := MakeClaim(joinTicket("ann", ticketA, 1791800000).token(dev), "box-key")
+	if tk, err := ReadClaim(c.Block, []string{pub(key(9)), pub(dev)}); err != nil || tk.ID != ticketA || tk.Device != pub(dev) {
+		t.Fatal(tk, err)
+	}
+	if _, err := ReadClaim(c.Block, []string{pub(key(4))}); err == nil {
+		t.Fatal("a claim read with another device's key")
+	}
+	// a ticket with a block a holder added is not what the device made
+	if _, err := MakeClaim(cliAppended, "box-key"); err == nil {
+		t.Fatal("a claim from a ticket with blocks added")
 	}
 }

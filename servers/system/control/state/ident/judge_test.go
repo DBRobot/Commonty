@@ -113,9 +113,19 @@ func joinedBox(n byte) (name, spki string) {
 func (l *log) join(n byte, p *person, id string, exp uint64) string {
 	name, spki := joinedBox(n)
 	l.at++
-	rec := jsonBody(l.t, map[string]map[string]string{"joined": {"key": spki, "ticket": joinTicket(p.name, id, exp).token(p.device)}})
-	l.s.Judge(&Config{Release: pub(key(99))}, voters, name, rec, l.at)
+	l.s.Judge(&Config{Release: pub(key(99))}, voters, name, joinedRec(l.t, spki, joinTicket(p.name, id, exp).token(p.device)), l.at)
 	return name
+}
+
+// joinedRec: the state machine's record of a box joining with a ticket:
+// its claim, never the ticket
+func joinedRec(t *testing.T, spki, ticket string) []byte {
+	t.Helper()
+	c, err := MakeClaim(ticket, spki)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return jsonBody(t, map[string]map[string]string{"joined": {"key": spki, "ticket": c.ID, "block": c.Block}})
 }
 
 // tid: a ticket id of its own for each n

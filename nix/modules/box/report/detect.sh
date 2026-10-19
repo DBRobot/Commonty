@@ -86,15 +86,28 @@ for n in /sys/module/kvm_intel/parameters/nested /sys/module/kvm_amd/parameters/
 done
 mem=$(awk '/^MemTotal:/ {print $2 * 1024}' /proc/meminfo)
 
-# every GPU and what video it can encode (transcode wants H.264 encode);
-# vainfo finds the driver only where the box has graphics enabled
+# every GPU, what video it can encode (transcode wants H.264 encode) and
+# its VRAM; vainfo finds the driver only where the box has graphics enabled
+smi=${NVIDIA_SMI:-/run/current-system/sw/bin/nvidia-smi}
 gpus=$(for r in $cls/drm/renderD*; do
   [ -e "$r/device/driver" ] || continue
   node=/dev/dri/$(basename "$r")
   enc=$(vainfo --display drm --device "$node" 2>/dev/null | sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointEncSlice.*/\1/p' | sort -u | jq -R . | jq -s .)
-  jq -nc --arg render "$node" --arg driver "$(basename "$(readlink -f "$r/device/driver")")" \
-    --arg vendor "$(cat "$r/device/vendor")" --argjson encode "$enc" \
-    '{render: $render, driver: $driver, vendor: $vendor, encode: $encode}'
+  # its own memory, bytes: amdgpu says so in sysfs, nvidia through its
+  # driver's tool; integrated graphics share the system's and say 0
+  drv=$(basename "$(readlink -f "$r/device/driver")")
+  vram=0
+  if [ -r "$r/device/mem_info_vram_total" ] && [ "$drv" = amdgpu ]; then
+    vram=$(cat "$r/device/mem_info_vram_total")
+  elif [ "$drv" = nvidia ] && [ -x "$smi" ]; then
+    bus=$(basename "$(readlink -f "$r/device")")
+    mib=$("$smi" --query-gpu=pci.bus_id,memory.total --format=csv,noheader,nounits 2>/dev/null |
+      awk -F', *' -v b="$bus" 'tolower(substr($1, length($1) - length(b) + 1)) == tolower(b) { print $2 }')
+    case "$mib" in '' | *[!0-9]*) ;; *) vram=$((mib * 1048576)) ;; esac
+  fi
+  jq -nc --arg render "$node" --arg driver "$drv" \
+    --arg vendor "$(cat "$r/device/vendor")" --argjson encode "$enc" --argjson vram "$vram" \
+    '{render: $render, driver: $driver, vendor: $vendor, encode: $encode, vram: $vram}'
 done | jq -s .)
 
 # --- disks and pools -----------------------------------------------------
@@ -160,7 +173,7 @@ jq -n \
   usbNic: $usbNic, secretsKey: $secretsKey,
   firmware: {
     uefi: $uefi,
-    secureBoot: ($sb == "1"), setupMode: ($setup == "1"),
+    secureBoot: ($sb == "1"), setupMode: ($setup == "1"), secureBootCapable: ($sb != ""),
     tpm: (if $tpm == null then null else { version: $tpm, p256: $ecc, ppi: $ppi } end),
     settingsFromLinux: (if $settingsBy == [] then null else { by: $settingsBy, offers: $settings } end),
     windowsKey: $winkey

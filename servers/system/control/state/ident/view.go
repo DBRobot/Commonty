@@ -109,6 +109,9 @@ type View struct {
 	Outcomes  map[string]string     `json:"outcomes"`
 	// box -> whose it is: every enlistment that stands
 	Enlisted map[string]*Owner `json:"enlisted"`
+	// box -> whose ticket it joined with, while no one has enlisted it and
+	// its ticket is good: theirs to enlist
+	Waiting map[string]*Owner `json:"waiting"`
 }
 
 // Open is an invite not yet expired
@@ -184,7 +187,7 @@ func (s *State) View(cfg *Config, height uint64, timeMs int64, boxes Boxes) *Vie
 	if timeMs > 0 {
 		at = uint64(timeMs / 1000)
 	}
-	v := &View{Height: height, Time: timeMs, Members: map[string]*Member{}, Handovers: s.Handovers, Invites: map[string]*Open{}, Outcomes: s.Outcomes, Enlisted: map[string]*Owner{}}
+	v := &View{Height: height, Time: timeMs, Members: map[string]*Member{}, Handovers: s.Handovers, Invites: map[string]*Open{}, Outcomes: s.Outcomes, Enlisted: map[string]*Owner{}, Waiting: s.waiting(cfg, at)}
 	for _, n := range s.names() {
 		h := s.entry(n, at)
 		if h == nil {
@@ -235,6 +238,34 @@ func (s *State) View(cfg *Config, height uint64, timeMs int64, boxes Boxes) *Vie
 		}
 	}
 	return v
+}
+
+// waiting: the joined boxes whose ticket a device of its member's signed,
+// for them, good now, and used by no enlistment yet; Since is when the box
+// joined
+func (s *State) waiting(cfg *Config, at uint64) map[string]*Owner {
+	out := map[string]*Owner{}
+	for b, j := range s.Joins {
+		if _, used := s.Tickets[j.Ticket]; used || j.Until <= at {
+			continue
+		}
+		if en := s.Enlisted[b]; en != nil && s.owns(en, at) {
+			continue
+		}
+		h := s.entry(j.User, at)
+		if h == nil || s.banned(cfg, &h.Signed.Entry, at) != "" {
+			continue
+		}
+		var keys []string
+		for _, d := range h.Signed.Entry.Devices {
+			keys = append(keys, d.PublicKey)
+		}
+		if t, err := ReadClaim(j.Block, keys); err != nil || t.User != j.User {
+			continue
+		}
+		out[b] = &Owner{Ticket: j.Ticket, Owner: j.User, Since: j.At * 1000}
+	}
+	return out
 }
 
 // removedOf: the release's removal date for any id of theirs, newest

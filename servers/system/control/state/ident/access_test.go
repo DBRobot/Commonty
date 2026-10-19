@@ -9,7 +9,30 @@ import (
 
 const day = 24 * 3600
 
-var computeBox = map[string]float64{"tpm_major": 2, "uefi": 1, "cores": 4, "ram_bytes": 8e9, "agent_ok": 1}
+// minimumBox: just enough to join; computeBox: that and compute
+var minimumBox = map[string]float64{
+	"tpm_major": 2, "uefi": 1, "secure_boot_capable": 1, "arch_x86_64": 1,
+	"threads": MinThreads, "mem_total_bytes": MinMemTotal, "system_disk_bytes": MinSystemDisk, "nics": 1,
+}
+
+var computeBox = with(minimumBox, "threads", ComputeThreads, "mem_total_bytes", ComputeMemTotal, "agent_ok", 1)
+
+// with: a copy of f, these facts set
+func with(f map[string]float64, kv ...any) map[string]float64 {
+	out := map[string]float64{}
+	for k, v := range f {
+		out[k] = v
+	}
+	for i := 0; i < len(kv); i += 2 {
+		switch v := kv[i+1].(type) {
+		case int:
+			out[kv[i].(string)] = float64(v)
+		case float64:
+			out[kv[i].(string)] = v
+		}
+	}
+	return out
+}
 
 // fleet: a log, and what the agreed state says of each box
 type fleet struct {
@@ -87,43 +110,10 @@ func TestAQualifyingBoxGivesAccess(t *testing.T) {
 	}
 }
 
-func TestWhatQualifies(t *testing.T) {
-	with := func(kv ...any) map[string]float64 {
-		f := map[string]float64{"tpm_major": 2, "uefi": 1}
-		for i := 0; i < len(kv); i += 2 {
-			f[kv[i].(string)] = kv[i+1].(float64)
-		}
-		return f
-	}
-	cases := []struct {
-		what string
-		f    map[string]float64
-		want string
-	}{
-		{"a mini PC", with("cores", 4.0, "ram_bytes", 7.6*(1<<30)), "compute"},
-		{"a Raspberry Pi 5, 8 GB", with("cores", 4.0, "ram_bytes", 7.9*(1<<30), "raspberry_pi", 1.0), ""},
-		{"a Pi with a big disk", with("cores", 4.0, "raspberry_pi", 1.0, "store_size_bytes", 2e12), "storage"},
-		{"two cores", with("cores", 2.0, "ram_bytes", 16e9), ""},
-		{"4 GB", with("cores", 8.0, "ram_bytes", 4e9), ""},
-		{"a NAS", with("cores", 2.0, "ram_bytes", 2e9, "store_size_bytes", 4e12), "storage"},
-		{"a 1 TB disk short of 1 TB usable", with("store_size_bytes", 0.93e12), ""},
-		{"a GPU box", with("cores", 2.0, "gpus", 1.0), "gpu"},
-		{"no TPM", map[string]float64{"uefi": 1, "cores": 16, "ram_bytes": 64e9}, ""},
-		{"TPM 1.2", map[string]float64{"tpm_major": 1, "uefi": 1, "cores": 16, "ram_bytes": 64e9}, ""},
-		{"BIOS, not UEFI", map[string]float64{"tpm_major": 2, "cores": 16, "ram_bytes": 64e9}, ""},
-		{"nothing said", nil, ""},
-	}
-	for _, c := range cases {
-		if got := Qualify(c.f); got != c.want {
-			t.Errorf("%s: %q, want %q", c.what, got, c.want)
-		}
-	}
-}
-
 func TestANonQualifyingPiGivesNothing(t *testing.T) {
 	f := newFleet(t)
 	ann := f.person("ann", 1)
-	f.box(ann, 1, map[string]float64{"tpm_major": 2, "uefi": 1, "cores": 4, "ram_bytes": 8e9, "raspberry_pi": 1})
+	f.box(ann, 1, with(computeBox, "raspberry_pi", 1))
 	if got := f.access("ann"); got != "none" {
 		t.Fatal(got)
 	}
@@ -294,7 +284,7 @@ func TestATicketIsTheMembersOnce(t *testing.T) {
 	// the same ticket, on another box that came with a copy of it
 	name, spki := joinedBox(3)
 	f.at++
-	f.s.Judge(f.cfg, voters, name, jsonBody(t, map[string]map[string]string{"joined": {"key": spki, "ticket": f.s.Joins[a].Ticket}}), f.at)
+	f.s.Judge(f.cfg, voters, name, jsonBody(t, map[string]map[string]string{"joined": {"key": spki, "ticket": tid(1), "block": f.s.Joins[a].Block}}), f.at)
 	f.must("a used ticket", f.put(seal(t, "enlist", enlistBody(annID, name, tid(1), f.at), ann.root, nil)), false)
 }
 
@@ -302,7 +292,7 @@ func TestOnlyTheStateMachineSaysABoxJoined(t *testing.T) {
 	f := newFleet(t)
 	ann := f.person("ann", 1)
 	name, spki := joinedBox(1)
-	rec := jsonBody(t, map[string]map[string]string{"joined": {"key": spki, "ticket": joinTicket("ann", tid(1), f.at+day).token(ann.device)}})
+	rec := joinedRec(t, spki, joinTicket("ann", tid(1), f.at+day).token(ann.device))
 	// from a box whose name is not the key's: nothing
 	f.at++
 	f.s.Judge(f.cfg, voters, "node1", rec, f.at)
@@ -381,5 +371,44 @@ func TestOurFaultHasAnEnd(t *testing.T) {
 	f.must("david extends", f.put(seal(t, "extend", jsonBody(t, map[string]any{"name": "ann", "until": f.at + 30*day, "at": f.at}), david.root, nil)), true)
 	if got := f.access("ann"); got != "box" {
 		t.Fatalf("extended: %s", got)
+	}
+}
+
+func TestTwoBoxesWithOneTicketIDTheSecondIsRefused(t *testing.T) {
+	f := newFleet(t)
+	ann := f.person("ann", 1)
+	annID := MemberID(pub(ann.root))
+	a := f.join(1, ann, tid(1), f.at+7*day)
+	// a second box, with a ticket of the same id (a copy, or one made to
+	// match): its record is not kept, so it waits for no one
+	b := f.join(2, ann, tid(1), f.at+7*day)
+	if f.s.Joins[b] != nil {
+		t.Fatal("a second box kept with the same ticket id")
+	}
+	v := f.s.View(f.cfg, 1, int64(f.at)*1000, nil)
+	if w := v.Waiting; len(w) != 1 || w[a] == nil || w[a].Owner != "ann" || w[a].Ticket != tid(1) {
+		t.Fatalf("waiting: %+v", w)
+	}
+	f.must("the second box", f.put(seal(t, "enlist", enlistBody(annID, b, tid(1), f.at), ann.root, nil)), false)
+	f.must("the first", f.put(seal(t, "enlist", enlistBody(annID, a, tid(1), f.at), ann.root, nil)), true)
+	if v := f.s.View(f.cfg, 1, int64(f.at)*1000, nil); len(v.Waiting) != 0 {
+		t.Fatalf("an enlisted box still waits: %+v", v.Waiting)
+	}
+}
+
+func TestOnlyAMembersOwnTicketWaitsForThem(t *testing.T) {
+	f := newFleet(t)
+	ann := f.person("ann", 1)
+	bob := f.person("bob", 10)
+	f.join(1, &person{name: "ann", device: bob.device}, tid(1), f.at+7*day)
+	ok := f.join(2, ann, tid(2), f.at+day)
+	v := f.s.View(f.cfg, 1, int64(f.at)*1000, nil)
+	if len(v.Waiting) != 1 || v.Waiting[ok] == nil {
+		t.Fatalf("waiting: %+v", v.Waiting)
+	}
+	// and not once its ticket is past
+	f.at += 2 * day
+	if v := f.s.View(f.cfg, 1, int64(f.at)*1000, nil); len(v.Waiting) != 0 {
+		t.Fatalf("an expired ticket waits: %+v", v.Waiting)
 	}
 }

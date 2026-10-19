@@ -31,31 +31,7 @@ const (
 	// last word. That word is the box's own (its release and how it went),
 	// so it has an end; past it, only the admin's extension keeps it
 	OurFaultFor = 90 * 24 * 3600
-	// what "8 GB" of RAM shows as: MemTotal leaves out what the firmware
-	// and the graphics keep
-	minRAM = 7 << 30
-	// 1 TB usable: the box's store's own size (dd_store_size_bytes)
-	minStore = 1e12
 )
-
-// Qualify: what a box is worth to its member, from its own report as its
-// heartbeat carries it (cmd/dd-control facts): a TPM 2.0 and UEFI on any
-// architecture, and either general compute (4 cores, 8 GB, not a
-// Raspberry Pi) or a specialist (1 TB of store, or a GPU). "" for none.
-func Qualify(f map[string]float64) string {
-	if f["tpm_major"] != 2 || f["uefi"] != 1 {
-		return ""
-	}
-	switch {
-	case f["cores"] >= 4 && f["ram_bytes"] >= minRAM && f["raspberry_pi"] == 0:
-		return "compute"
-	case f["store_size_bytes"] >= minStore:
-		return "storage"
-	case f["gpus"] >= 1:
-		return "gpu"
-	}
-	return ""
-}
 
 // OurFault: the box went quiet on a release that failed on it - its last
 // word was that its agent's run did not end well (agent_ok 0: refused, or

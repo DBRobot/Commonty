@@ -177,49 +177,39 @@ pub(crate) async fn current(app: &Arc<App>) -> (serde_json::Value, Vec<Owned>) {
 }
 
 /// The joined boxes that came with a ticket of `user`'s and no one has
-/// enlisted: theirs to enlist, as far as the box's ticket says - which the
-/// judge checks again. The ticket is signed by a device of theirs, its id
-/// enlisted no box yet, and the box is the first to join with that id: a
-/// box's ticket is in the agreed state for every box to read, so a later
-/// one came with a copy of it (a block appended, the same authority block)
+/// enlisted: theirs to enlist. The judge's word (the agreed identity
+/// state's `waiting`): the box's ticket claim signed by a device of theirs,
+/// for them, good now, unused, and the first box to join with its id. The
+/// ticket itself is never in the agreed state, only its claim.
 fn waiting(
-    st: &serde_json::Value,
+    waiting: &HashMap<String, crate::ident::Owner>,
     user: &str,
     enlisted: &HashMap<String, crate::ident::Owner>,
-    entry_of: impl Fn(&str) -> anyhow::Result<Option<identity::SignedEntry>>,
-    now: u64,
 ) -> Vec<serde_json::Value> {
-    let used: BTreeSet<&str> = enlisted.values().map(|o| o.ticket.as_str()).collect();
-    let mut first: BTreeMap<String, (i64, &str, &serde_json::Value)> = BTreeMap::new();
-    for (name, j) in st["joined"].as_object().into_iter().flatten() {
-        let Some(t) = j["ticket"].as_str() else {
-            continue;
-        };
-        let Ok((u, id)) = verify_ticket(&entry_of, t, now) else {
-            continue;
-        };
-        if u != user || used.contains(id.as_str()) || enlisted.contains_key(name) {
-            continue;
-        }
-        let at = j["at"].as_i64().unwrap_or(i64::MAX);
-        let e = first.entry(id).or_insert((at, name, j));
-        if (at, name.as_str()) < (e.0, e.1) {
-            *e = (at, name, j);
-        }
-    }
-    let mut out: Vec<serde_json::Value> = first
-        .into_iter()
-        .map(|(id, (_, name, j))| {
+    let mut out: Vec<serde_json::Value> = waiting
+        .iter()
+        .filter(|(name, w)| w.owner == user && !enlisted.contains_key(*name))
+        .map(|(name, w)| {
             serde_json::json!({
                 "name": name,
-                "ticket": id,
-                "joined": j["at"],
+                "ticket": w.ticket,
+                "joined": w.since,
                 "enlisted": false,
             })
         })
         .collect();
     out.sort_by_key(|r| r["name"].as_str().unwrap_or_default().to_string());
     out
+}
+
+/// The agreed identity state's waiting boxes; none when it is not read
+fn waiting_of(app: &App) -> HashMap<String, crate::ident::Owner> {
+    app.directory
+        .ident
+        .as_ref()
+        .and_then(|a| a.state())
+        .map(|s| s.waiting.clone())
+        .unwrap_or_default()
 }
 
 /// The tickets boxes were enlisted with (the agreed identity state's,
@@ -269,11 +259,9 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
         })
         .collect();
     let waiting = waiting(
-        &st,
+        &waiting_of(&app),
         &user,
         &enlisted(&app).unwrap_or_default(),
-        |u| app.entry(u),
-        identity::now(),
     );
     axum::Json(serde_json::json!({ "boxes": rows, "waiting": waiting })).into_response()
 }
@@ -286,18 +274,16 @@ pub(crate) async fn joined_mine(State(app): State<Arc<App>>, headers: HeaderMap)
     let Some(user) = app.identify(&headers, "access") else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let (st, owned) = current(&app).await;
+    let (_, owned) = current(&app).await;
     let mut rows: Vec<serde_json::Value> = owned
         .into_iter()
         .filter(|o| o.user == user)
         .map(|o| serde_json::json!({ "name": o.name, "ticket": o.ticket, "enlisted": true }))
         .collect();
     rows.extend(waiting(
-        &st,
+        &waiting_of(&app),
         &user,
         &enlisted(&app).unwrap_or_default(),
-        |u| app.entry(u),
-        identity::now(),
     ));
     axum::Json(rows).into_response()
 }
@@ -585,79 +571,115 @@ mod tests {
     }
 
     #[test]
-    fn a_box_waits_for_its_member_by_its_tickets_word() {
-        let kp = device();
-        let st = serde_json::json!({ "joined": {
-            "jaaaaaaaaaa": { "at": 2, "ticket": ticket(&kp, "ann", ID, identity::now() + 60) },
-            "jbbbbbbbbbb": { "at": 1, "ticket": ticket(&kp, "bob", ID, identity::now() + 60) },
-            "jcccccccccc": { "at": 3, "ticket": ticket(&kp, "ann", ID, identity::now() + 60) },
-            "jdddddddddd": { "at": 4 },
-        }});
+    fn a_box_waits_for_its_member_by_the_judges_word() {
+        let w = HashMap::from([
+            ("jaaaaaaaaaa".to_string(), owner("ann", ID)),
+            ("jbbbbbbbbbb".to_string(), owner("bob", OTHER)),
+            // enlisted since this view of waiting was read
+            ("jcccccccccc".to_string(), owner("ann", OTHER)),
+        ]);
         let enlisted = HashMap::from([("jcccccccccc".to_string(), owner("ann", OTHER))]);
-        let (ann, bob) = (entry_with("ann", &kp), entry_with("bob", &kp));
-        let of = |u: &str| {
-            Ok(match u {
-                "ann" => Some(ann.clone()),
-                "bob" => Some(bob.clone()),
-                _ => None,
-            })
-        };
-        let w = waiting(&st, "ann", &enlisted, of, identity::now());
-        assert_eq!(w.len(), 1, "{w:?}");
-        assert_eq!(w[0]["name"], "jaaaaaaaaaa");
-        assert_eq!(w[0]["ticket"], ID);
-        assert_eq!(w[0]["enlisted"], false);
-        assert!(waiting(&st, "eve", &enlisted, of, identity::now()).is_empty());
+        let got = waiting(&w, "ann", &enlisted);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0]["name"], "jaaaaaaaaaa");
+        assert_eq!(got[0]["ticket"], ID);
+        assert_eq!(got[0]["joined"], 1);
+        assert_eq!(got[0]["enlisted"], false);
+        assert!(waiting(&w, "eve", &enlisted).is_empty());
     }
 
     const OTHER: &str = "ffeeddccbbaa99887766554433221100";
 
+    // a protobuf message's length-delimited fields, by number
+    fn pb_fields(mut b: &[u8]) -> Vec<(u64, Vec<u8>)> {
+        fn varint(b: &mut &[u8]) -> u64 {
+            let mut v = 0u64;
+            for i in 0.. {
+                let c = b[0];
+                *b = &b[1..];
+                v |= u64::from(c & 0x7f) << (7 * i);
+                if c & 0x80 == 0 {
+                    break;
+                }
+            }
+            v
+        }
+        let mut out = vec![];
+        while !b.is_empty() {
+            let tag = varint(&mut b);
+            match tag & 7 {
+                0 => {
+                    varint(&mut b);
+                }
+                2 => {
+                    let n = varint(&mut b) as usize;
+                    out.push((tag >> 3, b[..n].to_vec()));
+                    b = &b[n..];
+                }
+                w => panic!("wire type {w}"),
+            }
+        }
+        out
+    }
+
+    fn pb_bytes(out: &mut Vec<u8>, num: u64, v: &[u8]) {
+        let mut put = |mut x: u64| loop {
+            let c = (x & 0x7f) as u8;
+            x >>= 7;
+            if x == 0 {
+                out.push(c);
+                break;
+            }
+            out.push(c | 0x80);
+        };
+        put(num << 3 | 2);
+        put(v.len() as u64);
+        out.extend_from_slice(v);
+    }
+
     #[test]
-    fn a_box_with_a_copy_of_a_members_ticket_is_not_theirs_to_enlist() {
-        // the ticket a box joined with is in the agreed state for every box
-        // to read: a stranger appends a block, which makes another token of
-        // the same authority block, and joins with it after the real box
+    fn a_copy_of_the_agreed_state_cannot_write_a_pending_backup() {
+        // what the agreed state keeps of a ticket a box joined with is its
+        // id and its signed authority block (ident.Claim), never the proof
+        // key that makes the biscuit usable: none of it, nor a biscuit
+        // rebuilt around the block, writes the member's pending backup
+        let b64 = base64::engine::general_purpose::URL_SAFE;
         let kp = device();
         let t = ticket(&kp, "ann", ID, identity::now() + 600);
-        let copy = Biscuit::from_base64(&t, kp.public())
-            .unwrap()
-            .append(
-                biscuit_auth::builder::BlockBuilder::new()
-                    .check("check if time($t), $t > 0")
-                    .unwrap(),
-            )
-            .unwrap()
-            .to_base64()
-            .unwrap();
-        // one ann's id never signed: another key's, naming her
-        let forged = ticket(&device(), "ann", OTHER, identity::now() + 600);
-        // and one whose ticket enlisted a box already
-        let used = ticket(
-            &kp,
-            "ann",
-            "00112233445566778899aabbccddeeff",
-            identity::now() + 600,
-        );
-        let st = serde_json::json!({ "joined": {
-            "jbbbbbbbbbb": { "at": 5, "ticket": t },
-            "j0000000000": { "at": 9, "ticket": copy },
-            "j1111111111": { "at": 1, "ticket": forged },
-            "j2222222222": { "at": 2, "ticket": used },
-        }});
-        let enlisted = HashMap::from([(
-            "jffffffffff".to_string(),
-            owner("ann", "00112233445566778899aabbccddeeff"),
-        )]);
         let ann = entry_with("ann", &kp);
         let of = |u: &str| Ok((u == "ann").then(|| ann.clone()));
-        let w = waiting(&st, "ann", &enlisted, of, identity::now());
-        assert_eq!(
-            w.iter()
-                .map(|r| r["name"].as_str().unwrap())
-                .collect::<Vec<_>>(),
-            ["jbbbbbbbbbb"],
-            "{w:?}"
-        );
+        assert!(verify_ticket(of, &t, identity::now()).is_ok());
+        let raw = b64.decode(&t).unwrap();
+        let block = pb_fields(&raw)
+            .into_iter()
+            .find(|(n, _)| *n == 2)
+            .unwrap()
+            .1;
+        let mut rebuilt = vec![];
+        pb_bytes(&mut rebuilt, 2, &block);
+        let mut proof = vec![];
+        pb_bytes(&mut proof, 1, &device().private().to_bytes());
+        pb_bytes(&mut rebuilt, 4, &proof);
+        let mut bare = vec![];
+        pb_bytes(&mut bare, 2, &block);
+        for (what, tok) in [
+            ("the ticket's id", ID.to_string()),
+            ("the signed block", b64.encode(&block)),
+            (
+                "the signed block, as the state keeps it",
+                base64::engine::general_purpose::STANDARD.encode(&block),
+            ),
+            ("a biscuit of the block with no proof", b64.encode(&bare)),
+            (
+                "a biscuit of the block with another proof",
+                b64.encode(&rebuilt),
+            ),
+        ] {
+            assert!(
+                verify_ticket(of, &tok, identity::now()).is_err(),
+                "{what} wrote the pending backup"
+            );
+        }
     }
 
     #[test]
@@ -945,6 +967,7 @@ mod tests {
             owner: None,
             admin: Some("tom".into()),
             boxes: Default::default(),
+            mail: None,
         })
         .await
         .unwrap();

@@ -92,14 +92,25 @@ func TestTheHeartbeatCarriesTheRoomForComputers(t *testing.T) {
 }
 
 func TestOnlyJoinedTaggedNodesGiveAddresses(t *testing.T) {
+	// headscale 0.28's `nodes list -o json`, trimmed: a tagged node's user
+	// is tagged-devices; who it was minted for is its pre-auth key's user
 	list := []byte(`[
-	  {"givenName": "x", "user": {"name": "joined-j0123456789"}, "ipAddresses": ["100.64.0.9", "fd7a::9"], "validTags": ["tag:joined"]},
-	  {"givenName": "j9999999999", "user": {"name": "joined-j9999999999"}, "ipAddresses": ["100.64.0.10"], "tags": ["tag:box"]},
-	  {"givenName": "j0123456789", "user": {"name": "boxes"}, "ipAddresses": ["100.64.0.11"], "tags": ["tag:joined"]},
-	  {"givenName": "y", "user": {"name": "joined-J01234567"}, "ipAddresses": ["100.64.0.12"], "tags": ["tag:joined"]}
+	  {"id": 3, "name": "x", "user": {"id": 2147455555, "name": "tagged-devices"}, "pre_auth_key": {"user": {"name": "joined-j0123456789"}, "acl_tags": ["tag:joined"]},
+	   "ip_addresses": ["100.64.0.9", "fd7a::9"], "tags": ["tag:joined"]},
+	  {"id": 4, "name": "j9999999999", "user": {"name": "tagged-devices"}, "pre_auth_key": {"user": {"name": "joined-j9999999999"}}, "ip_addresses": ["100.64.0.10"], "tags": ["tag:box"]},
+	  {"id": 5, "name": "j0123456789", "user": {"name": "tagged-devices"}, "pre_auth_key": {"user": {"name": "boxes"}}, "ip_addresses": ["100.64.0.11"], "tags": ["tag:joined"]},
+	  {"id": 6, "name": "j1111111111", "user": {"name": "tagged-devices"}, "ip_addresses": ["100.64.0.13"], "tags": ["tag:joined"]},
+	  {"id": 7, "name": "y", "user": {"name": "tagged-devices"}, "pre_auth_key": {"user": {"name": "joined-J01234567"}}, "ip_addresses": ["100.64.0.12"], "tags": ["tag:joined"]},
+	  {"id": 8, "name": "z", "user": {"name": "tagged-devices"}, "pre_auth_key": {"user": {"name": "joined-jaaaaaaaaaa"}}, "ip_addresses": ["100.64.0.20"], "tags": ["tag:joined"]},
+	  {"id": 2, "name": "z", "user": {"name": "tagged-devices"}, "pre_auth_key": {"user": {"name": "joined-jaaaaaaaaaa"}}, "ip_addresses": ["100.64.0.2"], "tags": ["tag:joined"]}
 	]`)
 	got := joinedAddrs(list)
-	if len(got) != 1 || got["j0123456789"] != 100<<24|64<<16|9 {
+	if len(got) != 2 || got["j0123456789"] != 100<<24|64<<16|9 || got["jaaaaaaaaaa"] != 100<<24|64<<16|20 {
+		t.Fatalf("%v", got)
+	}
+	// headscale before 0.28: the node's own user, camelCase
+	old := []byte(`[{"user": {"name": "joined-j0123456789"}, "ipAddresses": ["100.64.0.9"], "validTags": ["tag:joined"]}]`)
+	if got := joinedAddrs(old); got["j0123456789"] != 100<<24|64<<16|9 {
 		t.Fatalf("%v", got)
 	}
 }
@@ -107,15 +118,24 @@ func TestOnlyJoinedTaggedNodesGiveAddresses(t *testing.T) {
 func TestWhatABoxQualifiesByComesFromItsOwnReport(t *testing.T) {
 	d := t.TempDir()
 	r, m := filepath.Join(d, "hardware.json"), filepath.Join(d, "model")
-	_ = os.WriteFile(r, []byte(`{"firmware":{"uefi":true,"tpm":{"version":2}},"gpus":[{"driver":"i915"},{"driver":"nvidia"}]}`), 0o644)
+	_ = os.WriteFile(r, []byte(`{"firmware":{"uefi":true,"secureBootCapable":true,"tpm":{"version":2}},"cpu":{"threads":12},"memoryBytes":16000000000,
+	  "bootDisk":"/dev/disk/by-id/nvme-a","disks":[{"id":"/dev/disk/by-id/ata-b","bytes":4e12},{"id":"/dev/disk/by-id/nvme-a","bytes":256e9}],
+	  "nics":[{"name":"eno1"},{"name":"wlan0"}],
+	  "gpus":[{"driver":"i915","encode":["H264Main","HEVCMain"]},{"driver":"nvidia","vram":12884901888,"encode":[]},{"driver":"amdgpu","vram":4294967296}]}`), 0o644)
 	f := reportFacts(r, m)
-	if f["uefi"] != 1 || f["tpm_major"] != 2 || f["gpus"] != 1 || f["raspberry_pi"] != 0 {
+	if f["uefi"] != 1 || f["secure_boot_capable"] != 1 || f["tpm_major"] != 2 || f["gpus"] != 2 || f["raspberry_pi"] != 0 ||
+		f["system_disk_bytes"] != 256e9 || f["threads"] != 12 || f["mem_total_bytes"] != 16e9 || f["nics"] != 2 || f["gpu_vram_bytes"] != 12884901888 || f["video_encoders"] != 1 {
+		t.Fatalf("facts: %v", f)
+	}
+	// a report from before secureBootCapable: Secure Boot on, or in setup mode, can do it
+	_ = os.WriteFile(r, []byte(`{"firmware":{"uefi":true,"secureBoot":false,"setupMode":true}}`), 0o644)
+	if f := reportFacts(r, m); f["secure_boot_capable"] != 1 || f["system_disk_bytes"] != 0 {
 		t.Fatalf("facts: %v", f)
 	}
 	_ = os.WriteFile(r, []byte(`{"firmware":{"uefi":false,"tpm":null},"gpus":[{"driver":"v3d"}]}`), 0o644)
 	_ = os.WriteFile(m, []byte("Raspberry Pi 5 Model B Rev 1.0\x00"), 0o644)
 	f = reportFacts(r, m)
-	if f["uefi"] != 0 || f["tpm_major"] != 0 || f["gpus"] != 0 || f["raspberry_pi"] != 1 {
+	if f["uefi"] != 0 || f["secure_boot_capable"] != 0 || f["tpm_major"] != 0 || f["gpus"] != 0 || f["video_encoders"] != 0 || f["raspberry_pi"] != 1 {
 		t.Fatalf("facts: %v", f)
 	}
 	if f := reportFacts(filepath.Join(d, "none"), filepath.Join(d, "none")); len(f) != 0 {

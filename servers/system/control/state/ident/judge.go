@@ -74,11 +74,15 @@ type Enlisted struct {
 }
 
 // Join is what a box joined the control plane with, as the state machine
-// put it in the log (state/join.go): its key and its member's ticket
+// put it in the log (state/join.go): its key and its ticket's claim - the
+// id, and the device's signed block, never the ticket itself
 type Join struct {
 	Key    string `json:"key"`
 	Ticket string `json:"ticket"`
-	Until  uint64 `json:"until"` // the ticket's own expiry, unchecked: when the record may go
+	Block  string `json:"block"`
+	User   string `json:"user"`  // as the block says, unchecked: the enlist checks it
+	At     uint64 `json:"at"`    // agreed, seconds
+	Until  uint64 `json:"until"` // the ticket's own expiry: when the record may go
 }
 
 // Extension is the fleet admin's word that a member keeps their access
@@ -642,12 +646,21 @@ func (s *State) joined(from string, raw json.RawMessage, at uint64) {
 	var j struct {
 		Key    string `json:"key"`
 		Ticket string `json:"ticket"`
+		Block  string `json:"block"`
 	}
 	if strict(raw, &j) != nil {
 		return
 	}
 	again, _ := json.Marshal(&j)
-	if sameAs(raw, again) != nil || j.Ticket == "" || BoxName(j.Key) != from {
+	if sameAs(raw, again) != nil || BoxName(j.Key) != from {
+		return
+	}
+	sb, err := b64.DecodeString(j.Block)
+	if err != nil {
+		return
+	}
+	t, err := blockTicket(sb)
+	if err != nil || t.ID != j.Ticket {
 		return
 	}
 	// a record whose ticket is a day past its time can never enlist anything
@@ -656,8 +669,13 @@ func (s *State) joined(from string, raw json.RawMessage, at uint64) {
 			delete(s.Joins, b)
 		}
 	}
-	_, until := TicketID(j.Ticket)
-	s.Joins[from] = &Join{Key: j.Key, Ticket: j.Ticket, Until: until}
+	// a ticket goes with the first box that joined with it
+	for b, old := range s.Joins {
+		if old.Ticket == t.ID && b != from {
+			return
+		}
+	}
+	s.Joins[from] = &Join{Key: j.Key, Ticket: t.ID, Block: j.Block, User: t.User, At: at, Until: t.Expires}
 }
 
 // BoxName is the name a joined box's key gives it (state.JoinName): "j"
@@ -773,7 +791,7 @@ func (s *State) enlist(cfg *Config, env Envelope, body []byte, raw json.RawMessa
 	for _, d := range who.Signed.Entry.Devices {
 		keys = append(keys, d.PublicKey)
 	}
-	t, err := ReadTicket(j.Ticket, keys)
+	t, err := ReadClaim(j.Block, keys)
 	if err != nil {
 		return fmt.Errorf("refused: the box's ticket: %w", err)
 	}

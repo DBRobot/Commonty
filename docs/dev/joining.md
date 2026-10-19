@@ -14,6 +14,9 @@ anyone needs to trust it with.
 
 ## As a stranger
 
+- **It meets the hardware minimum** ([Hardware](#hardware)), or it can't
+  join at all: the validators refuse the join with what is missing, and
+  the box says it in its log and in `/var/lib/dd-control/join-refused`.
 - **Its name comes from its key.** `dd-control -join-key` takes the box's
   TPM-held key and joins under `j` and ten hex of the key's hash
   ([`state/join.go`](../../servers/system/control/state/join.go)). No
@@ -64,10 +67,11 @@ app ("Set up a box" window)        USB drive (FAT partition, commonty/)
 box installer (full screen)        fleet
   BIOS: check, set what it can     gate: PUT /_dd/images/pending/<ticket id>/...
   network: wired, else wifi.json         with the ticket alone, 7 days
-  backup: the old disk, encrypted  control plane: JoinReq{..., Ticket},
-  install: TPM-sealed disk               carried as Joined.Ticket
-  join: with the ticket            gates: whose each joined box is
-    (/var/lib/dd/join-ticket)      app: on join, the pending backup moves
+  backup: the old disk, encrypted  control plane: JoinReq{..., Facts, Claim},
+  install: TPM-sealed disk               its id kept as Joined.Ticket
+  join: with the ticket's claim    gates: whose each joined box is
+    (the ticket stays in           app: on join, the pending backup moves
+     /var/lib/dd/join-ticket)
                                         into the member's images
 ```
 
@@ -76,9 +80,20 @@ box installer (full screen)        fleet
   bytes, hex>)`, `purpose("join")`, and checks that it is for `join` alone
   and good for 7 days. Like any purpose-built token it opens nothing else:
   not the member's files, pages or directory entry.
-- **Whose a box is, is the agreed identity state's**: the box's
-  dd-control sends the ticket with its join (`-join-ticket-file`), and the
-  join puts the box's key and ticket in the directory log (`joined`,
+- **The ticket never leaves the box and the app.** It is a bearer token
+  (it writes the member's pending backup), and everything a join carries
+  is in the agreed state for every box to read. So the box's dd-control
+  (`-join-ticket-file`) joins with the ticket's **claim**
+  ([`ticket.go`](../../servers/system/control/state/ident/ticket.go)
+  `MakeClaim`): its id, its signed authority block (what the member's
+  device signed, without the proof key that makes the biscuit usable), and
+  the box's own key signed with that proof key. The validators hold the
+  claim to its block's id and to that signature (only a holder of the whole
+  ticket can make it), refuse a second box with an id already joined, and
+  keep the id (`Joined.Ticket`).
+- **Whose a box is, is the agreed identity state's**: the join puts the
+  box's key, the ticket's id and its signed block in the directory log
+  (`joined`,
   [`state/join.go`](../../servers/system/control/state/join.go)). Then
   the member's root signs an `enlist` naming the box and the ticket's id,
   and the judge
@@ -92,7 +107,8 @@ box installer (full screen)        fleet
   no member has enlisted stays a stranger.
 - **Ticket to enlistment**: after the join, the app that wrote the drive
   (or any of the member's devices with Backups open) sees the box waiting
-  (`GET /_dd/network/joined`, `enlisted: false`) and, where the account's
+  (`GET /_dd/network/joined`, `enlisted: false`, from the identity view's
+  `waiting`: the judge's word that the block is the member's) and, where the account's
   main key is on that device, signs the `enlist` and puts it to the door
   (`PUT /_dd/boxes/enlist`). An account whose main key is a passkey adds it
   on Settings > Devices ("waiting for you to add it", Add with passkey).
@@ -105,7 +121,9 @@ box installer (full screen)        fleet
   upload; never a delete), counted against the member's allowance, from
   anyone signed up and not shut out (the backup is made before the box
   gives them access), and only until a box is enlisted with it: a used
-  ticket opens nothing. An hour's check moves the folder to the images'
+  ticket opens nothing. The gate checks the whole biscuit, proof and all
+  (`verify_ticket`); what the agreed state holds of it (the id, the signed
+  block) opens nothing, nor does a biscuit rebuilt around the block. An hour's check moves the folder to the images'
   trash 7 days after its first write unless a box was enlisted with its
   ticket (the agreed state's `enlisted`, never the joined box's word).
 - **On join** the app, on any of the member's devices, reads which of its
@@ -213,14 +231,8 @@ and the gates open the services by it alone, from the agreed state, and
 to nobody while it is not read (a gate in `agreed` mode; one still
 replaying the directory serves its replay, which knows invites only).
 
-- **What qualifies**: a TPM 2.0 and UEFI, any architecture, and either
-  general compute (4 threads and 8 GB, read as at least 7 GiB of
-  MemTotal; a Raspberry Pi never) or a specialist box (a store of 1 TB, or
-  a GPU of its own: nvidia or amdgpu). Read from the box's own signed
-  report, as its heartbeat carries it (dd-control `reportFacts`:
-  `tpm_major`, `uefi`, `gpus` from `/var/lib/dd/report/hardware.json`,
-  `raspberry_pi` from its device tree), with `cores`, `ram_bytes` and
-  `store_size_bytes`, which it carried already. Wired or Wi-Fi alike.
+- **What qualifies**: the [Hardware](#hardware) section's qualifying
+  level. Wired or Wi-Fi alike.
 - **Many boxes**: access stands while any qualifying box of theirs is
   enlisted and not gone 30 days. Removing one of several costs nothing
   while another counts.
@@ -261,6 +273,53 @@ replaying the directory serves its replay, which knows invites only).
   (`place.Decide`'s `members`). It runs no service: it is in no release's
   capability table, holds no lease, and its owner's box would see others'
   plaintext if it did.
+
+## Hardware
+
+Two levels, all of the numbers in one place
+([`state/ident/hardware.go`](../../servers/system/control/state/ident/hardware.go)),
+for David to tune:
+
+```
+MINIMUM (ident.Minimum)       below it the join is refused, with what is missing
+  TPM 2.0, UEFI, firmware that can do Secure Boot, x86_64 or aarch64
+  MinThreads     4            logical threads
+  MinMemTotal    7 GiB        MemTotal ("8 GiB")
+  MinSystemDisk  128 GB       the disk the system is on (1e9 bytes a GB)
+  a network link              one NIC, wired or Wi-Fi
+
+QUALIFYING (ident.Qualify)    the minimum and any one of
+  compute  ComputeThreads   8        threads, and
+           ComputeMemTotal  14.5 GiB MemTotal ("16 GiB"); never a Raspberry Pi
+  storage  StorageBytes     4 TB     usable store (4e12 bytes)
+  gpu      GPUVRAM          8 GiB    VRAM on an nvidia or amdgpu card,
+           or an encoder the transcoder can use (H.264 through VAAPI);
+           integrated graphics count only by their encoder
+```
+
+- **Why these.** The minimum is what a box needs to build and run its own
+  system: boxes don't share builds, rustc peaks near 1 GB a job, and the
+  closure is 5 to 11 GB, with generations and its share of the store
+  beside it. Compute is what hosting a service or a member's computer
+  needs: both are capped at 8 threads and 16 GiB. Storage is 4 TB because
+  copies are kept twice.
+- **A box at the minimum and nothing more** ("just enough to run") joins as
+  a stranger and holds copies, but gives its member no access. A weak CPU
+  with 4 TB of store qualifies, and so does one with a GPU.
+- **Read from the box's own signed report** as its heartbeat carries it
+  (dd-control `reportFacts`, from `/var/lib/dd/report/hardware.json`,
+  [`detect.sh`](../../nix/modules/box/report/detect.sh)): `tpm_major`,
+  `uefi`, `secure_boot_capable` (its firmware has the SecureBoot
+  variable), `threads` (`cpu.threads`), `mem_total_bytes` (`memoryBytes`,
+  MemTotal), `system_disk_bytes` (the boot disk's size), `nics`,
+  `gpu_vram_bytes` (the largest nvidia or amdgpu card's `vram`: amdgpu's
+  sysfs, nvidia-smi), `video_encoders` (render nodes that encode H.264),
+  `raspberry_pi` (its device tree); `arch_x86_64` or `arch_aarch64` from
+  the agent itself; `store_size_bytes` from its store. A join carries the
+  same facts, and the validators hold them to the minimum.
+- **The box's word**: until TPM attestation is asked for, all of it is
+  what the box says of itself; a box that lies about its hardware is not
+  caught by this.
 
 ## The drive
 
@@ -322,9 +381,13 @@ Two VM tests, split where the box first starts:
   under its install name with a test key in its TPM (so its name is known
   to build for): its agent names it by the key, takes the signed commit,
   builds and switches to that name's system; dd-control, held until then,
-  joins a control plane of three validators and the witness with the
-  member's ticket. Signing up opened nothing (`/verify` 403) and the box
-  waits for her; its report is written to qualify (a TPM 2.0, UEFI, a GPU);
+  is refused below the hardware minimum (the VM is small, and says what
+  it lacks), then, its report written to meet it and to qualify (a TPM
+  2.0, UEFI with Secure Boot, 4 threads, 8 GiB, a 256 GB system disk, a
+  GPU with 8 GiB of VRAM), joins a control plane of three validators and
+  the witness with the member's ticket's claim; the agreed state holds the
+  ticket's id and never the ticket. Signing up opened nothing (`/verify`
+  403) and the box waits for her;
   an enlist naming another ticket is refused; her root's enlist on its
   ticket, through her gate's PUT, makes it hers (`/_dd/boxes/mine`) and
   opens the services (`access: box`, `/verify` 200); her unenlist makes it
