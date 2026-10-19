@@ -115,6 +115,10 @@ in
           lib.range config.dd.games.portBase (config.dd.games.portBase + config.dd.games.portCount - 1)
           ++ config.dd.games.fixedPorts;
       })
+      # members' computers' SSH and forwards, as the games' pool
+      (lib.mkIf (has "dd-computers-up") {
+        vms = lib.range config.dd.computers.portBase (config.dd.computers.portBase + config.dd.computers.portCount - 1);
+      })
       (lib.mkIf (has "dd-control") { control = [ 4195 ]; })
       (lib.mkIf (has "dd-ci-cancel") { ci-cancel = [ 3003 ]; })
       (lib.mkIf (has "ente") {

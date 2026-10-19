@@ -1,0 +1,161 @@
+/* The Computers pages: what they add to home.css (loaded before this). The
+   colours, type, bar, buttons, fields and state words are home.css's. */
+
+/* the whole window: the page's own gutter, no centred column */
+main {
+  padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px 32px;
+  display: grid;
+  gap: 14px;
+}
+main h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; text-wrap: balance; }
+main h2 { margin: 0; font-size: 17px; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.dim { color: var(--ink-2); }
+.small-t { font-size: 14px; margin: 0; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+#view { display: grid; gap: 14px; min-width: 0; }
+
+/* home.css spaces a lone button from what is above it; here they sit in rows */
+main button, main button.quiet { margin-top: 0; }
+main button.small { height: 32px; padding: 0 12px; font-size: 14px; }
+main button.bad { background: var(--broken); color: #fff; }
+a.btn {
+  display: inline-flex; align-items: center; height: 44px; padding: 0 18px;
+  background: var(--accent); color: var(--accent-ink); font-weight: 600;
+  border-radius: var(--radius); text-decoration: none;
+}
+a.btn:hover { background: var(--accent-hover); color: var(--accent-ink); }
+a.btn.quiet-l { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+a.btn.quiet-l:hover { background: var(--bg); }
+
+/* where you are, the page's name, its own actions */
+.head { display: grid; gap: 2px; }
+.head h1 { display: flex; align-items: center; gap: 10px; }
+.head a.back { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--radius); color: var(--ink-2); text-decoration: none; font-weight: 400; }
+.head a.back:hover { background: var(--surface); color: var(--ink); }
+.head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.head-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.note {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--broken);
+  background: var(--broken-bg);
+  border-radius: var(--radius);
+}
+
+/* what all your computers take, against the limits */
+.usage { display: grid; grid-template-columns: 1fr 1fr auto; align-items: center; gap: 8px 28px; padding: 10px 14px; }
+
+.meter { display: grid; grid-template-columns: 80px 1fr auto; align-items: center; gap: 12px; min-width: 0; }
+.meter .k { font-weight: 600; font-size: 15px; }
+.meter .bar { height: 8px; background: var(--line-2); border-radius: 4px; overflow: hidden; }
+.meter .bar i { display: block; height: 100%; background: var(--pick); }
+.meter .bar i[data-full] { background: var(--attention); }
+.meter .v { font-size: 14px; color: var(--ink-2); white-space: nowrap; }
+@media (max-width: 760px) { .usage { grid-template-columns: 1fr; } }
+
+/* Computers | Configs */
+.tabs-l { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tabs-l .tab {
+  display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: -1px;
+  color: var(--ink-2); font-weight: 600; text-decoration: none; border-bottom: 2px solid transparent;
+}
+.tabs-l .tab:hover { color: var(--ink); }
+.tabs-l .tab[aria-current="page"] { color: var(--ink); border-bottom-color: var(--pick); }
+.tabs-l .count { font-size: 12px; padding: 0 7px; border-radius: 999px; background: var(--off-bg); color: var(--ink-2); }
+
+/* computers and configs, as cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 10px; }
+.card-c {
+  display: grid; gap: 8px; align-content: start; min-width: 0;
+  padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.card-c.ph { height: 150px; background: var(--line-2); border-color: var(--line-2); }
+.card-c p { margin: 0; }
+.card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.card-top h2 a { color: var(--ink); text-decoration: none; }
+.card-top h2 a:hover { text-decoration: underline; }
+.card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.card-foot button, .card-foot a.btn { height: 38px; }
+
+/* a command to copy */
+.copy { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
+/* home.css starts every button at the top; this one is as tall as its command */
+.copy button.small { height: auto; min-height: 34px; align-self: stretch; }
+.copy code { flex: 1; min-width: 0; display: flex; align-items: center; overflow-wrap: anywhere; padding: 6px 10px; background: var(--code); border-radius: var(--radius); font-size: 14px; }
+
+.empty-p { display: grid; gap: 10px; justify-items: start; padding: 20px; }
+.empty-p p { margin: 0; max-width: 60ch; color: var(--ink-2); }
+
+/* one computer: what you do with it, beside what it is */
+/* wide: connect and software side by side, details beside them */
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 14px; align-items: start; }
+.split .col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 14px; min-width: 0; align-items: start; }
+@media (max-width: 860px) { .split { grid-template-columns: 1fr; } .split .facts { order: -1; } }
+.sec { display: grid; gap: 10px; padding: 12px 14px; align-content: start; }
+.sec p { margin: 0; }
+.row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.facts dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0; }
+.facts dt { color: var(--ink-2); font-size: 14px; }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.log {
+  margin: 0; max-height: 240px; overflow: auto; padding: 10px 12px;
+  background: var(--code); border-radius: var(--radius); font: 13px/1.5 var(--mono); white-space: pre-wrap;
+}
+table.ports { border-collapse: collapse; width: 100%; max-width: 420px; }
+table.ports th { text-align: left; font: 500 12px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line-2); }
+table.ports td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line-2); }
+ul.who { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.danger { border-color: color-mix(in srgb, var(--broken) 40%, var(--line)); }
+.danger .row { align-items: flex-start; }
+.confirm { display: grid; gap: 8px; }
+.confirm p { max-width: 50ch; }
+
+/* a config, section by section */
+/* a config: its sections side by side where they fit; software takes a column of its own */
+form.editor { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 14px; align-items: stretch; }
+form.editor .ed-left { display: grid; gap: 14px; align-content: start; min-width: 0; }
+form.editor .software { grid-template-rows: auto 1fr; }
+form.editor .software .field { grid-template-rows: auto 1fr auto; }
+form.editor .software textarea { min-height: 420px; height: 100%; }
+form.editor .savebar { grid-column: 1 / -1; }
+@media (max-width: 960px) { form.editor { grid-template-columns: 1fr; } }
+/* side-by-side fields share rows: label, box, hint each line up across them */
+.two { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto; column-gap: 14px; row-gap: 6px; }
+.two > .field { grid-row: span 3; grid-template-rows: subgrid; gap: 0; }
+.three { grid-template-rows: auto auto auto; row-gap: 6px; }
+.three > .field { grid-row: span 3; grid-template-rows: subgrid; gap: 0; }
+@media (max-width: 560px) { .two { grid-template-columns: 1fr; grid-template-rows: none; } .two > .field { grid-row: auto; grid-template-rows: none; gap: 6px; } }
+.field { display: grid; gap: 6px; min-width: 0; }
+.field label { margin: 0; }
+.field .hint, .sec .hint { margin: 0; }
+.field input, .field textarea { width: 100%; box-sizing: border-box; }
+.field input { height: 44px; }
+textarea {
+  font: 14px/1.45 var(--mono); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--field); border-radius: var(--radius); padding: 8px 10px; resize: vertical;
+}
+textarea:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
+.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+@media (max-width: 560px) { .three { grid-template-columns: 1fr; } }
+fieldset.where { margin: 0; padding: 0; border: 0; display: grid; gap: 10px; min-width: 0; }
+.pick-list { display: grid; gap: 10px; }
+label.opt-card {
+  display: flex; gap: 12px; align-items: flex-start; margin: 0; padding: 12px 14px; font-weight: 400;
+  border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer;
+}
+label.opt-card:has(input:checked) { border-color: var(--pick); background: color-mix(in srgb, var(--pick) 6%, var(--surface)); }
+label.opt-card input { width: 18px; height: 18px; margin: 3px 0 0; flex: none; accent-color: var(--pick); }
+label.opt-card > span { display: grid; gap: 2px; min-width: 0; }
+label.pick { display: flex; gap: 8px; align-items: center; margin: 10px 0 0; font-weight: 600; }
+label.pick input { width: 18px; height: 18px; accent-color: var(--attention); }
+.warn {
+  padding: 12px 14px; background: var(--attention-bg);
+  border: 1px solid var(--attention); border-radius: var(--radius);
+}
+.savebar {
+  position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 18px;
+  padding: 10px 0; background: var(--bg); border-top: 1px solid var(--line);
+}

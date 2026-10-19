@@ -83,6 +83,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "computers" = rec {
+      packageId = "computers";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "computers";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "dd" = rec {
       packageId = "dd";
       build = internal.buildRustCrateWithFeatures {
@@ -4698,6 +4708,57 @@ rec {
             packageId = "tokio-rustls";
             usesDefaultFeatures = false;
             features = [ "ring" ];
+          }
+        ];
+
+      };
+      "computers" = rec {
+        crateName = "computers";
+        version = "0.1.0";
+        edition = "2024";
+        crateBin = [
+          {
+            name = "dd-computers";
+            path = "src/main.rs";
+            requiredFeatures = [ ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./servers/computers; };
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "axum";
+            packageId = "axum";
+            features = [ "json" ];
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "macros" "rt-multi-thread" "sync" "net" "time" ];
           }
         ];
 

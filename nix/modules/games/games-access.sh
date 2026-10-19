@@ -5,6 +5,8 @@
 # only for players still the owner's friends. The chain is rebuilt when the
 # answer changes, and emptied when either cannot say.
 set -euo pipefail
+# the chain it fills: the games', or members' computers' (computers.nix)
+CHAIN=${CHAIN:-dd-games}
 
 mkdir -p "$STATE"
 rules=$(mktemp "$STATE/rules.XXXXXX")
@@ -19,7 +21,7 @@ if servers=$(jq -ce '.servers' "$ACCESS" 2>/dev/null) &&
     to_entries[] | .key as $k | .value.ports[] as $p
     | $a[$k].addresses[] | "\(.) \($p)"' <<<"$servers" | sort -u >"$rules"
 else
-  echo "games-access: no answer from the manager or the gate; every game port is closed"
+  echo "$CHAIN access: no answer from the manager or the gate; every game port is closed"
   : >"$rules"
 fi
 
@@ -30,14 +32,14 @@ fi
 # the chain is the firewall's; while it reloads, or on a box without it,
 # there is nothing to fill, and the firewall starts this again once it is up
 for ipt in iptables ip6tables; do
-  if ! $ipt -w -n -L dd-games >/dev/null 2>&1; then
-    echo "games-access: no dd-games chain in $ipt yet; nothing to do"
+  if ! $ipt -w -n -L "$CHAIN" >/dev/null 2>&1; then
+    echo "$CHAIN access: no $CHAIN chain in $ipt yet; nothing to do"
     exit 0
   fi
 done
 
 for ipt in iptables ip6tables; do
-  $ipt -w -F dd-games
+  $ipt -w -F "$CHAIN"
 done
 n=0
 while read -r addr port; do
@@ -51,9 +53,9 @@ while read -r addr port; do
     continue
   fi
   for proto in tcp udp; do
-    $ipt -w -A dd-games -s "$addr" -p "$proto" --dport "$port" -j nixos-fw-accept
+    $ipt -w -A "$CHAIN" -s "$addr" -p "$proto" --dport "$port" -j nixos-fw-accept
   done
   n=$((n + 1))
 done <"$rules"
 mv "$rules" "$STATE/applied"
-echo "games-access: $n device and port pair(s) open"
+echo "$CHAIN access: $n device and port pair(s) open"

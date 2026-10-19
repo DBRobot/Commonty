@@ -1,4 +1,5 @@
 mod build_order;
+mod computercmd;
 mod consent;
 mod control_worker;
 mod derive;
@@ -136,6 +137,13 @@ enum Command {
     Library {
         #[command(subcommand)]
         cmd: librarycmd::LibraryCmd,
+        #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES, global = true)]
+        directories: Vec<String>,
+    },
+    /// Your remote computers: configs, and the VMs made from them.
+    Computer {
+        #[command(subcommand)]
+        cmd: computercmd::ComputerCmd,
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES, global = true)]
         directories: Vec<String>,
     },
@@ -1127,6 +1135,9 @@ async fn main() -> Result<()> {
         }
 
         Command::Library { cmd, directories } => librarycmd::run(cmd, &keys, &directories).await?,
+        Command::Computer { cmd, directories } => {
+            computercmd::run(cmd, &keys, &directories).await?
+        }
         Command::Media {
             at,
             directories,

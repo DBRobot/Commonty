@@ -37,6 +37,7 @@ in
       "dd-game@*"
       "dd-games-measure"
       "games-access"
+      "dd-games-usage"
     ];
     base = {
       requires = {

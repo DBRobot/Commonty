@@ -1,0 +1,22 @@
+[package]
+name = "computers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Members' own computers: the manager behind compute.<domain>"
+
+[[bin]]
+name = "dd-computers"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+# O_NOFOLLOW for what a guest writes into its report share
+libc = "0.2"
+# each remote computer's own SSH key, made here
+ed25519-dalek = "2"
+base64 = "0.22"
