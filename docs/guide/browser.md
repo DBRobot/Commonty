@@ -32,10 +32,10 @@ The first time, you link your browser to the app once, for all of them:
    If they do not match, or you did not ask, press **Not me**.
 4. The page opens in your browser.
 
-After that, every one of these pages opens straight in the app from your
-browser, with no page or button between: Photos, Passwords, Files,
-Movies & TV, Chat and Mail, from a link, a bookmark or the address bar, even
-after the app or the computer restarts.
+After that, every one of these pages opens in the app by itself, with no
+code and no button: Photos, Passwords, Files, Movies & TV, Chat and Mail,
+from a link, a bookmark or the address bar, even after the app or the
+computer restarts.
 
 To stop a browser opening them, open the app's **This device** screen
 and press **Forget** beside it under **Browsers you let in**. Signing
@@ -46,8 +46,8 @@ If the app does not answer, the page says so and offers **Get the app**.
 
 Good to know:
 
-- The app only links a new browser if one of the site's pages sent it there
-  in the last two minutes, and only after your click. If two browsers ask at once,
+- The app only links a new browser if one of these pages asked in the last
+  two minutes, and only after your click. If two browsers ask at once,
   both are refused and you start again.
 - The address your browser opens holds no secret. What it keeps is under
   a name only the browsers you let in know.

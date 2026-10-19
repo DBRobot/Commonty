@@ -30,12 +30,6 @@ pub const SITE_PAGES: &[&str] = &[
     "/_dd/mail",
 ];
 
-/// Where a page on the site sends a tab to be opened in the app
-/// (use-app.js), at a name it can know without this install's: localhost,
-/// on the site's port. Only this path answers there, and only by handing
-/// the tab on (`Admit::Entry`).
-pub const ENTRY_PATH: &str = "/_dd/app/open";
-
 /// how long after a link a browser may ask to be let in
 pub const PAIR_LIFE: Duration = Duration::from_secs(120);
 /// how long a let-in browser has to go through its session's door
@@ -100,15 +94,14 @@ pub fn site_page(path: &str) -> bool {
 }
 
 /// which way a request came in, by its Host: the app's window on
-/// 127.0.0.1, a browser asking to be let in on the install's name, a
+/// 127.0.0.1, a browser asking to be let in on the install's name, or a
 /// browser on this device's own name for let-in browsers (which one, its
-/// cookie says), or a tab a page on the site sent to localhost
+/// cookie says)
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Via {
     Window,
     Pair,
     Browser,
-    Entry,
 }
 
 fn random_hex(n: usize) -> String {
@@ -189,17 +182,13 @@ pub fn own_label(device_seed: &[u8]) -> String {
 }
 
 /// The Host a request names, exactly: 127.0.0.1:<port> for the window, the
-/// install's name for pairing, this device's own name for a browser let in,
-/// localhost on the site's port for a tab sent from the site. Anything else
-/// (a rebound DNS name, another port, an old name) is no one this server
-/// answers.
+/// install's name for pairing, this device's own name for a browser let in.
+/// Anything else (a rebound DNS name, localhost, another port, an old name)
+/// is no one this server answers.
 pub fn via(host: Option<&str>, w: Which, names: &Names, own: Option<&str>) -> Option<Via> {
     let h = host?.strip_suffix(&format!(":{}", w.port()))?;
     if h == "127.0.0.1" {
         return Some(Via::Window);
-    }
-    if w == Which::Site && h == "localhost" {
-        return Some(Via::Entry);
     }
     if h == names.host(w) {
         return Some(Via::Pair);
@@ -257,8 +246,6 @@ pub enum Admit {
     /// pairing page): nothing yet, only a page that opens itself again, so
     /// it comes from this origin and with the Strict cookie
     GoOn,
-    /// a tab a page on the site sent here: handed on to the pairing page
-    Entry,
 }
 
 /// The one rule every request to the app's servers passes, for each way in
@@ -280,13 +267,6 @@ pub fn admit(
     nav: bool,
     own: &str,
 ) -> Admit {
-    if *via == Via::Entry {
-        return if nav && method == "GET" && path == ENTRY_PATH {
-            Admit::Entry
-        } else {
-            Admit::Refuse(404, "not here")
-        };
-    }
     let way = way_in(w, via, method, path);
     if !way && !same_origin(method, origin, fetch_site, own, *via == Via::Window) {
         // A tab opened at one of these pages from anywhere else used to be
@@ -310,31 +290,7 @@ pub fn admit(
             403,
             "open this from its page on the site, through the Commonty app",
         ),
-        Via::Entry => Admit::Refuse(404, "not here"),
     }
-}
-
-/// A tab sent to the entry by one of the site's own pages: the address it
-/// came from (Referer, which a page cannot make up for another site) is on
-/// the site's domain, over https. Anything else could only bring the app's
-/// window up, so it is refused.
-pub fn from_site(referer: Option<&str>, domain: &str) -> bool {
-    let Some(rest) = referer.and_then(|r| r.strip_prefix("https://")) else {
-        return false;
-    };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    !domain.is_empty()
-        && (host == domain
-            || host
-                .strip_suffix(domain)
-                .is_some_and(|h| h.len() > 1 && h.ends_with('.')))
-}
-
-/// The way to the pairing page at `to`, through the site's home: it notes in
-/// this browser, for every page on the domain, that the app answers here
-/// (the gate's /_dd/app-here), so the next one goes straight on
-pub fn by_home(domain: &str, to: &str) -> String {
-    format!("https://home.{domain}/_dd/app-here?to={}", enc(to))
 }
 
 /// A page to go on to after a door: a path on this origin and nothing else.
@@ -1318,101 +1274,6 @@ mod tests {
     }
 
     #[test]
-    fn localhost_is_the_sites_entry_and_only_hands_a_tab_on() {
-        let n = names();
-        let s = Which::Site;
-        assert_eq!(via(Some("localhost:41660"), s, &n, None), Some(Via::Entry));
-        for (h, w) in [
-            ("localhost:41661", Which::Photos),
-            ("localhost:41662", Which::Vault),
-            ("localhost", s),
-            ("localhost:41661", s),
-            ("x.localhost:41660", s),
-        ] {
-            assert_eq!(via(Some(h), w, &n, None), None, "{h}");
-        }
-        let e = |method, path, nav| {
-            admit(
-                s,
-                &Via::Entry,
-                false,
-                method,
-                path,
-                None,
-                Some("cross-site"),
-                nav,
-                "http://localhost:41660",
-            )
-        };
-        assert_eq!(e("GET", ENTRY_PATH, true), Admit::Entry);
-        // never a fetch, a frame or a script, never anything else there
-        assert_eq!(e("GET", ENTRY_PATH, false), Admit::Refuse(404, "not here"));
-        assert_eq!(e("POST", ENTRY_PATH, true), Admit::Refuse(404, "not here"));
-        for p in [
-            "/",
-            "/_dd/home",
-            "/_dd/app/pair",
-            "/_dd/app/resume",
-            "/_dd/app/library",
-            "/_dd/app/enter",
-        ] {
-            assert_eq!(e("GET", p, true), Admit::Refuse(404, "not here"), "{p}");
-        }
-        // even with the window's or a browser's cookie: localhost holds none
-        assert_eq!(
-            admit(
-                s,
-                &Via::Entry,
-                true,
-                "GET",
-                "/_dd/app/library",
-                None,
-                None,
-                true,
-                "http://localhost:41660"
-            ),
-            Admit::Refuse(404, "not here")
-        );
-    }
-
-    #[test]
-    fn the_entry_takes_tabs_only_from_the_sites_pages() {
-        let d = "commonty.org";
-        for r in [
-            "https://photos.commonty.org/",
-            "https://commonty.org/",
-            "https://home.commonty.org/_dd/files?x",
-            "https://a.b.commonty.org",
-        ] {
-            assert!(from_site(Some(r), d), "{r}");
-        }
-        for r in [
-            None,
-            Some("http://photos.commonty.org/"),
-            Some("https://evilcommonty.org/"),
-            Some("https://commonty.org.evil.example/"),
-            Some("https://.commonty.org/"),
-            Some("https://photos.commonty.org:8443/"),
-            Some("https://evil.example/?https://photos.commonty.org/"),
-            Some(""),
-        ] {
-            assert!(!from_site(r, d), "{r:?}");
-        }
-        assert!(!from_site(Some("https://commonty.org/"), ""));
-    }
-
-    #[test]
-    fn the_way_by_home_carries_the_pairing_page_whole() {
-        let to = browser_url(&names(), Which::Photos);
-        let u = by_home("commonty.org", &to);
-        let q = u
-            .strip_prefix("https://home.commonty.org/_dd/app-here?to=")
-            .unwrap();
-        assert_eq!(dec(q), to);
-        assert!(!q.contains(['?', '&', '/', ':']), "{q}");
-    }
-
-    #[test]
     fn the_devices_own_name_is_not_the_install_name() {
         let own = own_label(b"seed");
         assert!(valid_label(&own) && own != LABEL);
@@ -1608,6 +1469,11 @@ mod tests {
         assert_eq!(
             l("commonty://open?service=site&path=%2F_dd%2Fsettings%23backups").as_deref(),
             Some("/_dd/settings#backups")
+        );
+        // Mail too: its link was refused, so it never opened in a browser
+        assert_eq!(
+            l("commonty://open?service=site&path=%2F_dd%2Fmail").as_deref(),
+            Some("/_dd/mail")
         );
         assert_eq!(
             l("commonty://open?service=site").as_deref(),

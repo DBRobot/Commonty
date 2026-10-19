@@ -276,44 +276,10 @@ async fn to_browser<R: Runtime>(app: &AppHandle<R>, link: &handoff::Link) -> Res
     PAIRS.lock().map_err(|e| e.to_string())?[slot(link.which)]
         .arm(&handoff::then_for(link), Instant::now());
     // the window comes up when a browser asks to be let in (pair), not
-    // here: a browser let in before goes straight to its page. By way of
-    // the site's home, so the site's pages send this browser straight to
-    // the app from now on (entry)
-    let to = handoff::browser_url(names, link.which);
+    // here: a browser let in before goes straight to its page
     app.opener()
-        .open_url(
-            handoff::by_home(&crate::account::domain(), &to),
-            None::<&str>,
-        )
+        .open_url(handoff::browser_url(names, link.which), None::<&str>)
         .map_err(|e| e.to_string())
-}
-
-/// A tab one of the site's pages sent to localhost (use-app.js), for a
-/// service and a page on it: armed as a commonty:// link arms it, and on
-/// in the same tab to the pairing page, which takes a browser let in before
-/// straight to the page and asks the member, once, about any other.
-fn entry(names: &Names, req: &Request) -> Response {
-    let domain = crate::account::domain();
-    if !handoff::from_site(header_str(req.headers(), "referer"), &domain) {
-        return plain(StatusCode::FORBIDDEN, "open it from its page on the site");
-    }
-    let q = req.uri().query().unwrap_or("");
-    let Some(link) = handoff::parse_link(&format!("commonty://open?{q}")) else {
-        return plain(StatusCode::NOT_FOUND, "not a page the app opens");
-    };
-    for w in [link.which, Which::Site] {
-        if let Err(e) = handoff::door_if_up(holds(w), w.port()) {
-            return plain(StatusCode::SERVICE_UNAVAILABLE, &e);
-        }
-    }
-    let Ok(mut pairs) = PAIRS.lock() else {
-        return plain(StatusCode::INTERNAL_SERVER_ERROR, "no pairing");
-    };
-    pairs[slot(link.which)].arm(&handoff::then_for(&link), Instant::now());
-    see_other(&handoff::by_home(
-        &domain,
-        &handoff::browser_url(names, link.which),
-    ))
 }
 
 fn show_window<R: Runtime>(app: &AppHandle<R>, path: &str) {
@@ -470,7 +436,7 @@ async fn handle<R: Runtime>(State(site): State<Arc<Site<R>>>, req: Request) -> R
     let cookie_ok = match &via {
         Via::Window => cookie(h, handoff::WINDOW_COOKIE) == Some(crate::site::launch_secret()),
         Via::Browser => who.is_some(),
-        Via::Pair | Via::Entry => false,
+        Via::Pair => false,
     };
     let nav = header_str(h, "sec-fetch-mode") == Some("navigate")
         && header_str(h, "sec-fetch-dest") == Some("document");
@@ -492,7 +458,6 @@ async fn handle<R: Runtime>(State(site): State<Arc<Site<R>>>, req: Request) -> R
             );
         }
         Admit::Pairing => return pair(&site, req, &path).await,
-        Admit::Entry => return entry(names, &req),
         Admit::GoOn => {
             let at = match req.uri().query() {
                 Some(q) => format!("{path}?{q}"),
@@ -705,7 +670,7 @@ async fn go_for<R: Runtime>(
             let id = who.ok_or((StatusCode::FORBIDDEN, "not let in".to_string()))?;
             browser_door(site, id, w, &then, hand)?
         }
-        Via::Pair | Via::Entry => return Err((StatusCode::FORBIDDEN, "not let in".to_string())),
+        Via::Pair => return Err((StatusCode::FORBIDDEN, "not let in".to_string())),
     })
 }
 
@@ -889,7 +854,7 @@ fn photos_key<R: Runtime>(
         Via::Browser => who.and_then(|id| {
             with_browsers(app, |b| (b.take_key(Which::Photos, id, now), false)).flatten()
         }),
-        Via::Pair | Via::Entry => None,
+        Via::Pair => None,
     };
     match hand.and_then(|h| serde_json::from_str::<serde_json::Value>(&h).ok()) {
         Some(v) => json(StatusCode::OK, v),

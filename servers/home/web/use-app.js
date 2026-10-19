@@ -1,14 +1,11 @@
 // A page whose code would hold a member's keys, in a browser (use-app.html):
 // Photos, Passwords, and the site's Files, Movies & TV, Chat and Mail. Their
-// code comes with the member's app (app/src/local.rs) and never from here,
-// and their keys are only ever on the member's devices. This tab goes to the
-// app on this computer, at localhost: straight away once the app has
-// answered in this browser before (the gate's dd_app note), at a press the
-// first time. A browser the app has linked goes straight into the page; any
-// other is linked once, in the app, for every service. What still has to
-// work here without the app: a Send opened from inside, and a Bitwarden
-// desktop app's or browser extension's sign-in, which starts and ends on the
-// web vault's address.
+// code comes with the member's app (app/src/local.rs), never from here. This
+// page hands the browser to the app by its own link, which the system gives
+// only to the app installed here: at a press the first time, by itself once
+// the app has taken one (the dd_app note). Still answered here without the
+// app: a Send opened from inside, and a Bitwarden app's or extension's
+// sign-in, which starts and ends on the web vault's address.
 const vault = location.hostname.startsWith('vault.');
 const photos = location.hostname.startsWith('photos.') || location.pathname.startsWith('/_dd/photos');
 const domain = location.hostname.split('.').slice(1).join('.');
@@ -35,56 +32,39 @@ function asked() {
   return sitePage + location.hash;
 }
 
-// The app's door on this computer (app/src/handoff.rs, ENTRY_PATH)
-function entry() {
+// the note that the app takes this browser's links: nothing secret, it
+// only spares the press next time
+const NOTE = 'dd_app=1';
+const noted = () => document.cookie.split(';').some((c) => c.trim() === NOTE);
+const note = () => {
+  document.cookie = `${NOTE}; Domain=${domain}; Path=/; Max-Age=34560000; Secure; SameSite=Lax`;
+};
+
+// A browser says nothing when no app takes the link: the app opening the
+// page takes this tab out of the front, and until it does the page says so
+// after a few seconds (the browser may be asking first).
+function handOff() {
+  const left = () => {
+    window.removeEventListener('blur', left);
+    document.removeEventListener('visibilitychange', left);
+    note();
+    show('opened');
+    // back where the member came from, when there was somewhere
+    if (history.length > 1) history.back();
+  };
+  window.addEventListener('blur', left);
+  document.addEventListener('visibilitychange', left);
   const q = new URLSearchParams({ service: vault ? 'vault' : photos ? 'photos' : 'site' });
   const path = asked();
   if (path !== '/') q.set('path', path);
-  return `http://localhost:41660/_dd/app/open?${q}`;
-}
-
-// A tab sent to the app that comes back here (the app was not running, or
-// is not on this computer) is not sent again: it shows the way to get it.
-const TRIED = 'dd-app-tried';
-function tried() {
-  try {
-    const t = JSON.parse(sessionStorage.getItem(TRIED) || 'null');
-    return t?.at === location.href && Date.now() - t.when < 60000;
-  } catch {
-    return false;
-  }
-}
-function toApp() {
-  try {
-    sessionStorage.setItem(TRIED, JSON.stringify({ at: location.href, when: Date.now() }));
-  } catch { /* sent again next time, as it would be */ }
-  location.assign(entry());
-}
-
-const answers = document.cookie.split(';').some((c) => c.trim() === 'dd_app=1');
-
-// The first time, by the app's own link: any app version takes it, and the
-// app sends the browser on by way of the gate, which notes it for next
-// time. A browser says nothing when no app takes the link: if this page is
-// still in front a few seconds on, the app did not open.
-function byLink() {
-  let left = false;
-  const away = () => {
-    left = true;
-  };
-  window.addEventListener('blur', away, { once: true });
-  document.addEventListener('visibilitychange', away, { once: true });
-  const q = new URL(entry()).search;
-  location.href = `commonty://open${q}`;
+  location.href = `commonty://open?${q}`;
   setTimeout(() => {
-    window.removeEventListener('blur', away);
-    document.removeEventListener('visibilitychange', away);
-    if (!left && document.visibilityState === 'visible') show('not-open');
+    if (document.visibilityState === 'visible' && document.hasFocus()) show('not-open');
   }, 3000);
 }
 
-document.getElementById('open').addEventListener('click', byLink);
-document.getElementById('retry').addEventListener('click', () => (answers ? toApp() : byLink()));
+document.getElementById('open').addEventListener('click', handOff);
+document.getElementById('retry').addEventListener('click', handOff);
 
 // A Bitwarden app's sign-in, as the web vault's SSO page does it: the app
 // sends its own client, return address, state and code challenge; this asks
@@ -140,15 +120,9 @@ if (vault && location.pathname === '/sso-connector.html') {
   location.replace(`/send${location.hash}`);
 } else if (vault && location.hash.startsWith('#/sso')) {
   sso(new URLSearchParams(location.hash.split('?')[1] || ''));
-} else if (tried()) {
-  show('not-open');
-} else if (answers) {
-  toApp();
+} else if (noted()) {
+  show('opening');
+  handOff();
 } else {
   show('use-app');
 }
-
-// back here from the app's address by the Back button, as the page was left
-window.addEventListener('pageshow', (e) => {
-  if (e.persisted && tried()) show('not-open');
-});

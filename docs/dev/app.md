@@ -148,8 +148,8 @@ a member. The app serves them from this computer
 the member's own browser: Photos on port 41661, Passwords on 41662, and
 the site's pages (Files, Movies & TV, Chat, Mail, Settings) on 41660. A
 browser is linked only when the member allows it from the app's window,
-once, for every service: the app remembers it until the member forgets it.
-The address the app opens the browser at holds no secret.
+once, for every service: the app remembers it until the member forgets it. The address the app opens
+the browser at holds no secret.
 
 The site's pages there are the very files the window carries
 (`app/carried`), served at `s-<own>.localhost:41660`; `/_dd/app/library`
@@ -173,18 +173,11 @@ own for the same browser, without another click.
 
 ```
 photos.<domain> in a browser ─ the gate's handoff page (/_dd/use-app)
-  the dd_app note set (the app answered in this browser before):
-    at once, in this tab ─ http://localhost:41660/_dd/app/open?service=photos&path=/gallery
-    the app (handoff::from_site: Referer https://*.<domain> or refused) ─
-          arms Photos' pairing for 120 s, and on in the same tab
-  not set, the first time: [Open with the Commonty app]
-    ─ commonty://open?service=photos&path=/gallery
+  [Open with the Commonty app], or by itself once the dd_app note is set
+                ─ commonty://open?service=photos&path=/gallery
                      │ the OS starts the app, or hands the link to the copy
                      ▼ already running (single-instance)
-    the app ─ arms Photos' pairing for 120 s, opens the default browser
-  either way ─ https://home.<domain>/_dd/app-here?to=<the pairing page>
-          the gate sets dd_app=1 on the whole domain (nothing secret, lets
-          nothing in) and goes on to the pairing page only (app_pairing_page):
+the app ─ arms Photos' pairing for 120 s, opens the default browser at
           http://s-<install>.localhost:41660/_dd/app/pair?service=photos
           (nothing secret; every service pairs on the site's page)
 the browser ─ pair.js: let in before? (localStorage "dd-own" on this origin)
@@ -209,16 +202,13 @@ the browser ─ POST /_dd/app/pair/finish {verifier} ─▶ the hash matches and
 ```
 
 - **The member's click, once.** The app's window shows "Link this
-  browser?" and the code. The browser's page shows the same code, and
-  tells the member to choose it in the app. "Link this browser" lets in
-  that one request, for every service, and "Not me" refuses it. If a second request comes
+  browser?" and the code. The browser's page shows the same code. "Link
+  this browser" lets in that one request, for every service, and "Not me"
+  refuses it. If a second request comes
   while one is waiting, or after the click but before the browser
   finishes, both are refused. Both screens then say that two browsers
   asked at once, and the member opens it again from the page. Nothing can
-  ask unless a link, or a tab one of the site's own pages sent to the
-  entry at `localhost:41660`, armed the pairing in the last 120 seconds.
-  The entry answers that one path, to a tab only, and hands it on; it
-  holds no page, no cookie and no key. After that
+  ask unless a link armed the pairing in the last 120 seconds. After that
   the browser is remembered: later links open the page in it straight
   away, across the app's restarts, with no code, no click and no window.
 - **Two kinds of name.** `<install>` is 32 random hex characters, made at
@@ -376,6 +366,14 @@ cookie, and on the pairing page's origin the device's own name (pair.js,
 - **A website** can still only fire a link: the member's own browser opens
   one of their pages, as a bookmark would. Nothing comes back to the site,
   and every own-request check above still holds.
+- **The `dd_app` note** (a cookie on the whole domain, 400 days) is set by
+  the handoff page once the app has taken its link, and makes later
+  handoff pages fire the link by themselves, and a signed-out member's
+  Files, Movies & TV, Chat and Mail show the handoff page rather than the
+  box's sign-in. It holds nothing and lets nothing in: anything that can
+  set it (any page on the domain) only makes a page fire the app's own
+  link, which the system hands to the installed app alone. The page never
+  sends a tab to a port itself.
 
 ## Where things are
 
