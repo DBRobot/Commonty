@@ -860,7 +860,9 @@
               };
               # what a box's attestation must find in PCR 4 (state/attest
               # Boot): each lanzaboote box's systemd-boot, the release's
-              # stub and kernel, from the very closures the boxes boot
+              # stub, kernel and kernel parameters, from the very closures
+              # the boxes boot. Not their initrds: a box's own build, which
+              # a release cannot list for a box it has not seen
               attestBoot =
                 let
                   boxes = builtins.filter (c: c.config.boot.lanzaboote.enable or false) (
@@ -869,13 +871,14 @@
                   stub = "${lanzaboote.packages.${system}.stub}/bin/lanzaboote_stub.efi";
                   one =
                     c:
-                    "${attest-check}/bin/attest-check boot -loader ${c.config.systemd.package}/lib/systemd/boot/efi/systemd-bootx64.efi -stub ${stub} -kernel ${c.config.boot.kernelPackages.kernel}/${c.config.system.boot.loader.kernelFile}";
+                    "${attest-check}/bin/attest-check boot -loader ${c.config.systemd.package}/lib/systemd/boot/efi/systemd-bootx64.efi -stub ${stub} -kernel ${c.config.boot.kernelPackages.kernel}/${c.config.system.boot.loader.kernelFile} -params ${nixpkgs.lib.escapeShellArg (builtins.concatStringsSep " " c.config.boot.kernelParams)}";
                 in
                 pkgs.runCommand "attest-boot.json" { nativeBuildInputs = [ pkgs.jq ]; } ''
                   { ${nixpkgs.lib.concatMapStringsSep "\n" one boxes}; } | jq -s '{
                     loaders: (map(.loaders[]) | unique),
                     stubs: (map(.stubs[]) | unique),
-                    kernels: (map(.kernels[]) | unique)
+                    kernels: (map(.kernels[]) | unique),
+                    params: (map(.params[]) | unique)
                   }' >$out
                 '';
             in

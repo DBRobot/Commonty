@@ -33,7 +33,8 @@ openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=test-box-db \
   -days 3650 -keyout "$w/db.key" -out "$w/db.pem" 2>/dev/null
 openssl x509 -in "$w/db.pem" -outform der -out "$w/db.der"
 printf 'ID=nixos\nVERSION_ID=Generation 1, 2026-10-19\n' >"$w/osrel"
-printf 'init=/nix/store/test-system/init' >"$w/cmdline"
+params='usbcore.autosuspend=-1 nohibernate root=fstab loglevel=4 lsm=landlock,yama,bpf'
+printf 'init=/nix/store/0123456789abcdfghijklmnpqrsvwxyz-nixos-system-jbox-26.05/init %s' "$params" >"$w/cmdline"
 printf '\\EFI\\nixos\\initrd.efi' >"$w/initrd"
 printf '\\EFI\\nixos\\kernel.efi' >"$w/linux"
 head -c 32 /dev/zero >"$w/initrdh"
@@ -47,7 +48,7 @@ done
 objcopy "${args[@]}" "$STUB" "$w/image.efi"
 sbsign --key "$w/db.key" --cert "$w/db.pem" --output "$w/image.signed.efi" "$w/image.efi"
 sbsign --key "$w/db.key" --cert "$w/db.pem" --output "$w/loader.signed.efi" "$LOADER"
-$ac boot -loader "$LOADER" -stub "$STUB" -kernel "$KERNEL" >"$w/boot.json"
+$ac boot -loader "$LOADER" -stub "$STUB" -kernel "$KERNEL" -params "$params" >"$w/boot.json"
 $ac make-log -db "$w/db.der" -loader "$w/loader.signed.efi" -stub "$w/image.signed.efi" -o "$w/log.bin" | while IFS=: read -r pcr d; do
   tpm2_pcrextend "$pcr:sha256=$d"
 done

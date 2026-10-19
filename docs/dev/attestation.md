@@ -39,12 +39,23 @@ proof is worth, and what it is not.
     digest, are exactly two: one of the release's systemd-boot builds,
     then the box's lanzaboote image. The box sends that image (the
     ESP's `EFI/Linux` entry systemd-boot chose, `LoaderEntrySelected`);
-    its digest must be the second, it must be the release's stub with
-    only lzbt's six sections added (every section of the stub at its
-    address, its entry point), and its `.linuxh` must be one of the
-    release's kernels. A shim, a grub, Windows' boot manager or anything
+    its digest must be the second. It must be the release's stub - the
+    same headers, data directories and entry point (in the stub's own
+    code), and every section in order at its address with its contents -
+    followed by exactly lzbt's six sections in lzbt's order, each data
+    (never code or writable), past the stub's own addresses and inside the
+    image the firmware loads. Its `.linuxh` must be one of the release's
+    kernels, and its `.cmdline` `init=` a NixOS system's followed by one
+    of the release's kernel parameter lines. Its `.initrdh` is judged
+    only against a list the release gives; it gives none, as a box's
+    initrd is its own build (its hardware), which a release cannot list
+    for a box it has not seen. One parse of the image serves both the
+    digest and these checks. A shim, a grub, Windows' boot manager or anything
     else in PCR 4, or any other kind of PCR 4 event (an edited command
-    line), and the boot is not ours. The Authenticode digest leaves out the
+    line), and the boot is not ours. Separators and the profile's
+    EV_EFI_ACTION strings pass only with a digest of their own data;
+    PCR 7 events other than variables, separators and no-action ones are
+    refused. The Authenticode digest leaves out the
     signature, so it is the same whichever box's key signed the image.
   - The join key's policy must be PCR 7 as quoted. The record keeps all
     four PCRs.
@@ -56,9 +67,9 @@ proof is worth, and what it is not.
 ## What it does not prove
 
 - That the machine is the one the member says, or theirs, or at their house.
-- That the box's own system is unchanged past its stub: the stub's
-  command line and initrd are the box's own (its name, its generation),
-  not checked against a build; the kernel is.
+- That the box's own system is unchanged past its stub: which system's
+  init the command line names, and the initrd, are the box's own build,
+  not checked against the release's; the kernel and kernel parameters are.
 - Anything after the boot it was made in. The quote is one moment; the
   join key's PCR 7 policy is what keeps it to that boot afterwards - and
   on firmware that logs no authority events, PCR 7 is the same for any
