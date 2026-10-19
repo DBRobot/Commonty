@@ -44,8 +44,9 @@ type Pending struct {
 const (
 	// TTL: a box that has not answered in an hour starts again
 	TTL = int64(time.Hour / time.Millisecond)
-	// MaxBegin bounds Begin: certificates, three public areas, a log
-	MaxBegin = 256 << 10
+	// MaxBegin bounds Begin: certificates, three public areas, a log and
+	// the stub (lanzaboote's is about 200 KB)
+	MaxBegin = 1 << 20
 	// MaxChallenge bounds one challenge (an RSA-2048 EK's is under 1 KB)
 	MaxChallenge = 4 << 10
 	// MaxResponse bounds a response: secrets, two attestations, signatures

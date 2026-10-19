@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"commonty/control/state/attest"
 
@@ -66,6 +67,10 @@ type Box struct {
 	Log string
 	// the box's own Secure Boot certificate (PEM or DER); none: Secure Boot off
 	DB string
+	// the lanzaboote image this boot ran; empty: the ESP's entry that
+	// systemd-boot says it chose (LoaderEntrySelected)
+	Stub string
+	ESP  string
 	// fetches an issuer's certificate (an AIA link); nil: none fetched
 	Fetch func(url string) ([]byte, error)
 	// no resource manager in front of the TPM (a bare swtpm): objects stay
@@ -80,6 +85,7 @@ func Default() *Box {
 		TCTI:  "device:/dev/tpmrm0",
 		Log:   "/sys/kernel/security/tpm0/binary_bios_measurements",
 		DB:    "/var/lib/sbctl/keys/db/db.pem",
+		ESP:   "/boot",
 		Fetch: Fetch,
 	}
 }
@@ -157,6 +163,13 @@ func (t *Box) Begin() (attest.Begin, error) {
 		}
 		*dst = base64.StdEncoding.EncodeToString(raw)
 	}
+	if stub := t.stub(); stub != "" {
+		raw, err := os.ReadFile(stub)
+		if err != nil {
+			return b, fmt.Errorf("the booted stub: %v", err)
+		}
+		b.Stub = base64.StdEncoding.EncodeToString(raw)
+	}
 	if t.DB != "" {
 		if raw, err := os.ReadFile(t.DB); err == nil {
 			if blk, _ := pem.Decode(raw); blk != nil {
@@ -166,6 +179,39 @@ func (t *Box) Begin() (attest.Begin, error) {
 		}
 	}
 	return b, nil
+}
+
+// systemd-boot's vendor GUID, its variables' suffix
+const loaderVars = "4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
+
+// stub: the lanzaboote image this boot ran - Stub, or the ESP's EFI/Linux
+// entry systemd-boot chose; empty when neither is there
+func (t *Box) stub() string {
+	if t.Stub != "" || t.ESP == "" {
+		return t.Stub
+	}
+	raw, err := os.ReadFile("/sys/firmware/efi/efivars/LoaderEntrySelected-" + loaderVars)
+	if err != nil || len(raw) < 6 {
+		return ""
+	}
+	name := utf16le(raw[4:])
+	if name == "" || strings.ContainsAny(name, "/\\") || strings.HasPrefix(name, ".") {
+		return ""
+	}
+	return filepath.Join(t.ESP, "EFI", "Linux", name)
+}
+
+// utf16le: an EFI variable's UTF-16 string, up to its NUL
+func utf16le(b []byte) string {
+	var u []uint16
+	for i := 0; i+1 < len(b); i += 2 {
+		c := binary.LittleEndian.Uint16(b[i:])
+		if c == 0 {
+			break
+		}
+		u = append(u, c)
+	}
+	return string(utf16.Decode(u))
 }
 
 // ekCert: the RSA EK's certificate, from NV, or for an AMD fTPM (none in

@@ -850,10 +850,6 @@
                   runHook postCheck
                 '';
               };
-            in
-            {
-              configFile = pkgs.writeText "control-config.json" (builtins.toJSON config);
-              inherit dd-control;
               # attestation end to end against a test's swtpm (nix/tests/attest.nix)
               attest-check = pkgs.buildGoModule {
                 pname = "attest-check";
@@ -862,6 +858,39 @@
                 subPackages = [ "cmd/attest-check" ];
                 doCheck = false;
               };
+              # what a box's attestation must find in PCR 4 (state/attest
+              # Boot): each lanzaboote box's systemd-boot, the release's
+              # stub and kernel, from the very closures the boxes boot
+              attestBoot =
+                let
+                  boxes = builtins.filter (c: c.config.boot.lanzaboote.enable or false) (
+                    builtins.attrValues self.nixosConfigurations
+                  );
+                  stub = "${lanzaboote.packages.${system}.stub}/bin/lanzaboote_stub.efi";
+                  one =
+                    c:
+                    "${attest-check}/bin/attest-check boot -loader ${c.config.systemd.package}/lib/systemd/boot/efi/systemd-bootx64.efi -stub ${stub} -kernel ${c.config.boot.kernelPackages.kernel}/${c.config.system.boot.loader.kernelFile}";
+                in
+                pkgs.runCommand "attest-boot.json" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                  { ${nixpkgs.lib.concatMapStringsSep "\n" one boxes}; } | jq -s '{
+                    loaders: (map(.loaders[]) | unique),
+                    stubs: (map(.stubs[]) | unique),
+                    kernels: (map(.kernels[]) | unique)
+                  }' >$out
+                '';
+            in
+            {
+              configFile =
+                pkgs.runCommand "control-config.json"
+                  {
+                    nativeBuildInputs = [ pkgs.jq ];
+                    base = builtins.toJSON config;
+                    passAsFile = [ "base" ];
+                  }
+                  ''
+                    jq -c --slurpfile boot ${attestBoot} '.attest.boot = $boot[0]' "$basePath" >$out
+                  '';
+              inherit dd-control attest-check;
               # wasm for the relay's Durable Object, from the same vendored
               # modules (buildGoModule lists packages for the build machine,
               # which leaves out a js-only one)

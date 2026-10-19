@@ -75,3 +75,14 @@ func TestTheAMDLinkIsMadeFromTheEK(t *testing.T) {
 		t.Fatalf("%s %v", url, err)
 	}
 }
+
+func TestLoaderEntrySelectedReads(t *testing.T) {
+	raw := []byte{6, 0, 0, 0}
+	for _, c := range "nixos-generation-3.efi" {
+		raw = append(raw, byte(c), 0)
+	}
+	raw = append(raw, 0, 0)
+	if s := utf16le(raw[4:]); s != "nixos-generation-3.efi" {
+		t.Fatalf("%q", s)
+	}
+}

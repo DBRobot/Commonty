@@ -42,6 +42,9 @@ type Begin struct {
 	// enrolled it (db, or MOK under shim), DER base64; empty where Secure
 	// Boot is not on, refused outside tests
 	DB string `json:"db,omitempty"`
+	// the lanzaboote image this boot ran (the ESP's EFI/Linux entry
+	// systemd-boot chose), base64: its Authenticode digest is in PCR 4
+	Stub string `json:"stub,omitempty"`
 }
 
 // Challenge is one validator's: a secret only the EK's TPM can open, and
@@ -70,6 +73,7 @@ type Response struct {
 // release never sets.
 type Config struct {
 	Roots map[string][]string `json:"roots"` // vendor id -> PEM certificates
+	Boot  *Boot               `json:"boot,omitempty"`
 	Test  *Test               `json:"test,omitempty"`
 }
 
@@ -95,6 +99,7 @@ var software = map[string]bool{"00001014": true, "49424D00": true}
 
 type policy struct {
 	roots map[string]*x509.CertPool
+	boot  *Boot
 	test  Test
 }
 
@@ -106,6 +111,7 @@ func (c *Config) policy() (*policy, error) {
 	if c.Test != nil {
 		p.test = *c.Test
 	}
+	p.boot = c.Boot
 	for vendor, pems := range c.Roots {
 		pool := x509.NewCertPool()
 		for _, s := range pems {
@@ -141,6 +147,7 @@ type Checked struct {
 	join   *tpm2.TPMTPublic
 	log    []event
 	db     []byte
+	stub   []byte
 }
 
 func b64(s string) ([]byte, error) { return base64.StdEncoding.DecodeString(s) }
@@ -240,9 +247,15 @@ func verifyBegin(pol *policy, b Begin, joinSPKI string, at time.Time) (*Checked,
 			return nil, fmt.Errorf("%w: the db certificate is a shared one, not the box's own", ErrSecureBoot)
 		}
 	}
+	var stub []byte
+	if b.Stub != "" {
+		if stub, err = b64(b.Stub); err != nil {
+			return nil, fmt.Errorf("the stub: %v", err)
+		}
+	}
 	c := &Checked{
 		EKHash: hex.EncodeToString(h[:]), Vendor: vendor, Model: model, EKPub: ekPub,
-		AKName: akName.Buffer, ak: ak, join: join, log: log, db: db,
+		AKName: akName.Buffer, ak: ak, join: join, log: log, db: db, stub: stub,
 	}
 	if db != nil {
 		d := sha256.Sum256(db)
@@ -521,6 +534,10 @@ func verifyResponse(pol *policy, c *Checked, chals []Challenge, r Response) (*Re
 	}
 
 	sb, err := secureBoot(c.log, c.db)
+	if err == nil {
+		err = checkBoot(pol.boot, c.log, c.stub)
+		sb = err == nil
+	}
 	if err != nil && !pol.test.NoSecureBoot {
 		return nil, err
 	}

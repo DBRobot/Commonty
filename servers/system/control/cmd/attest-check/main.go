@@ -5,8 +5,9 @@
 // state/attest/testdata/make-vector.sh).
 //
 //	attest-check make-ek-cert -ek ek.pub -ca-key k.pem -ca-cert c.pem -o ek.der
-//	attest-check make-log -db db.der -o log.bin    (prints PCR:digest to extend)
-//	attest-check run -roots dir -keys dir -dir dir -log f [-db f] [-software] [-no-secure-boot] [-vector out.json]
+//	attest-check make-log -db db.der -loader l.efi -stub s.efi -o log.bin
+//	attest-check boot -loader systemd-bootx64.efi -stub lanzaboote_stub.efi -kernel bzImage   (a release's Boot, JSON)
+//	attest-check run -roots dir -keys dir -dir dir -log f [-db f] [-stub f -boot f] [-software] [-no-secure-boot] [-vector out.json]
 package main
 
 import (
@@ -48,6 +49,8 @@ func main() {
 		makeLog(os.Args[2:])
 	case "run":
 		run(os.Args[2:])
+	case "boot":
+		bootPolicy(os.Args[2:])
 	default:
 		log.Fatalf("no such command: %s", os.Args[1])
 	}
@@ -124,6 +127,8 @@ func tpmSAN(manufacturer, model, version string) []byte {
 func makeLog(args []string) {
 	fs := flag.NewFlagSet("make-log", flag.ExitOnError)
 	dbPath := fs.String("db", "", "the db certificate, DER")
+	loader := fs.String("loader", "", "the first boot application (systemd-boot), PE")
+	stub := fs.String("stub", "", "the second (the box's lanzaboote image), PE")
 	off := fs.Bool("off", false, "Secure Boot off")
 	out := fs.String("o", "", "the log")
 	_ = fs.Parse(args)
@@ -134,22 +139,36 @@ func makeLog(args []string) {
 	if *off {
 		sb = 0
 	}
+	security := []byte{0xcb, 0xb2, 0x19, 0xd7, 0x3a, 0x3d, 0x96, 0x45, 0xa3, 0xbc, 0xda, 0xd0, 0x0e, 0x67, 0x65, 0x6f}
 	type ev struct {
 		pcr, typ uint32
 		data     []byte
+		digest   []byte // what was extended, where not the data's hash
 	}
+	// db as firmware keeps it: one EFI_SIGNATURE_LIST of one X.509 entry,
+	// and no authority event, as many firmwares log none
 	evs := []ev{
-		{0, 0x80000008, []byte("test firmware")}, // EV_S_CRTM_VERSION
-		{7, 0x80000001, variable(global, "SecureBoot", []byte{sb})},
-		{7, 0x80000001, variable(global, "PK", []byte("pk"))},
-		{7, 0x80000001, variable(global, "KEK", []byte("kek"))},
-		{7, 0x80000001, variable(global, "db", append(make([]byte, 16), db...))},
-		{0, 4, []byte{0, 0, 0, 0}}, // EV_SEPARATOR
-		{2, 4, []byte{0, 0, 0, 0}},
-		{4, 4, []byte{0, 0, 0, 0}},
-		{7, 4, []byte{0, 0, 0, 0}},
-		{7, 0x800000E0, variable(global, "db", append(make([]byte, 16), db...))},
-		{4, 0x80000003, []byte("the boot loader")}, // EV_EFI_BOOT_SERVICES_APPLICATION
+		{0, 0x80000008, []byte("test firmware"), nil}, // EV_S_CRTM_VERSION
+		{7, 0x80000001, variable(global, "SecureBoot", []byte{sb}), nil},
+		{7, 0x80000001, variable(global, "PK", sigList([]byte("pk"))), nil},
+		{7, 0x80000001, variable(global, "KEK", sigList([]byte("kek"))), nil},
+		{7, 0x80000001, variable(security, "db", sigList(db)), nil},
+		{0, 4, []byte{0, 0, 0, 0}, nil}, // EV_SEPARATOR
+		{2, 4, []byte{0, 0, 0, 0}, nil},
+		{4, 0x80000007, []byte("Calling EFI Application from Boot Option"), nil},
+		{4, 4, []byte{0, 0, 0, 0}, nil},
+		{7, 4, []byte{0, 0, 0, 0}, nil},
+	}
+	// EV_EFI_BOOT_SERVICES_APPLICATION: each image's Authenticode digest
+	for _, f := range []string{*loader, *stub} {
+		if f == "" {
+			continue
+		}
+		img, err := os.ReadFile(f)
+		must(err)
+		d, err := attest.Authenticode(img)
+		must(err)
+		evs = append(evs, ev{4, 0x80000003, []byte("a boot application"), d})
 	}
 	var b []byte
 	le32 := func(v uint32) { b = binary.LittleEndian.AppendUint32(b, v) }
@@ -164,17 +183,59 @@ func makeLog(args []string) {
 	le32(uint32(len(spec)))
 	b = append(b, spec...)
 	for _, e := range evs {
-		d := sha256.Sum256(e.data)
+		d := e.digest
+		if d == nil {
+			h := sha256.Sum256(e.data)
+			d = h[:]
+		}
 		le32(e.pcr)
 		le32(e.typ)
 		le32(1)
 		le16(0x0B)
-		b = append(b, d[:]...)
+		b = append(b, d...)
 		le32(uint32(len(e.data)))
 		b = append(b, e.data...)
-		fmt.Printf("%d:%s\n", e.pcr, hex.EncodeToString(d[:]))
+		fmt.Printf("%d:%s\n", e.pcr, hex.EncodeToString(d))
 	}
 	must(os.WriteFile(*out, b, 0o644))
+}
+
+// sigList: one EFI_SIGNATURE_LIST of one X.509 entry, its owner zero
+func sigList(cert []byte) []byte {
+	x509GUID := []byte{0xa1, 0x59, 0xc0, 0xa5, 0xe4, 0x94, 0xa7, 0x4a, 0x87, 0xb5, 0xab, 0x15, 0x5c, 0x2b, 0xf0, 0x72}
+	b := append([]byte(nil), x509GUID...)
+	b = binary.LittleEndian.AppendUint32(b, uint32(28+16+len(cert)))
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint32(b, uint32(16+len(cert)))
+	b = append(b, make([]byte, 16)...)
+	return append(b, cert...)
+}
+
+// bootPolicy: a release's Boot from its systemd-boot, lanzaboote stub and
+// kernel, as the judge reads them
+func bootPolicy(args []string) {
+	fs := flag.NewFlagSet("boot", flag.ExitOnError)
+	loader := fs.String("loader", "", "systemd-bootx64.efi")
+	stub := fs.String("stub", "", "lanzaboote_stub.efi, as built")
+	kernel := fs.String("kernel", "", "the kernel file the stub names")
+	_ = fs.Parse(args)
+	img, err := os.ReadFile(*loader)
+	must(err)
+	d, err := attest.Authenticode(img)
+	must(err)
+	img, err = os.ReadFile(*stub)
+	must(err)
+	st, err := attest.StubOf(img)
+	must(err)
+	k, err := os.ReadFile(*kernel)
+	must(err)
+	kh := sha256.Sum256(k)
+	out, _ := json.MarshalIndent(attest.Boot{
+		Loaders: []string{hex.EncodeToString(d)},
+		Stubs:   []attest.Stub{st},
+		Kernels: []string{hex.EncodeToString(kh[:])},
+	}, "", " ")
+	fmt.Println(string(out))
 }
 
 func variable(guid []byte, name string, value []byte) []byte {
@@ -209,6 +270,8 @@ func run(args []string) {
 	db := fs.String("db", "", "the box's own Secure Boot certificate")
 	software := fs.Bool("software", false, "let a software TPM in")
 	noSB := fs.Bool("no-secure-boot", false, "let a boot without Secure Boot in")
+	stub := fs.String("stub", "", "the lanzaboote image this boot ran")
+	boot := fs.String("boot", "", "the release's Boot (attest-check boot), JSON")
 	voters := fs.String("voters", "node1,node2", "the box voters who challenge")
 	vector := fs.String("vector", "", "write the whole exchange here")
 	_ = fs.Parse(args)
@@ -216,6 +279,12 @@ func run(args []string) {
 	cfg := attest.Config{Roots: map[string][]string{}}
 	if *software || *noSB {
 		cfg.Test = &attest.Test{SoftwareTPM: *software, NoSecureBoot: *noSB}
+	}
+	if *boot != "" {
+		raw, err := os.ReadFile(*boot)
+		must(err)
+		cfg.Boot = &attest.Boot{}
+		must(json.Unmarshal(raw, cfg.Boot))
 	}
 	vendors, err := os.ReadDir(*roots)
 	must(err)
@@ -230,6 +299,7 @@ func run(args []string) {
 
 	box := tpm.Default()
 	box.Keys, box.Dir, box.Log, box.DB, box.Fetch = *keys, *dir, *logPath, *db, nil
+	box.Stub, box.ESP = *stub, ""
 	if t := os.Getenv("TPM2TOOLS_TCTI"); t != "" {
 		box.TCTI = t
 		box.NoRM = strings.HasPrefix(t, "swtpm:")
