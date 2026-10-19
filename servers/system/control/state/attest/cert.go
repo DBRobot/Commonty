@@ -1,10 +1,12 @@
 package attest
 
 import (
+	"crypto"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/hex"
+	"errors"
 	"strings"
 )
 
@@ -13,6 +15,7 @@ var (
 	oidSubjectAttrs = asn1.ObjectIdentifier{2, 5, 29, 9}
 	oidManufacturer = asn1.ObjectIdentifier{2, 23, 133, 2, 1}
 	oidModel        = asn1.ObjectIdentifier{2, 23, 133, 2, 2}
+	oidRSAESOAEP    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 7}
 )
 
 // the makers whose roots the release ships, for messages
@@ -94,4 +97,23 @@ func tpmExtensionsHandled(c *x509.Certificate) {
 		}
 	}
 	c.UnhandledCriticalExtensions = keep
+}
+
+// ekCertKey: the EK certificate's key. Some makers' (AMD's among them) name
+// it RSAES-OAEP, which Go leaves unparsed; the key itself is PKCS#1.
+func ekCertKey(c *x509.Certificate) (crypto.PublicKey, error) {
+	if c.PublicKey != nil {
+		return c.PublicKey, nil
+	}
+	var spki struct {
+		Algorithm pkix.AlgorithmIdentifier
+		Key       asn1.BitString
+	}
+	if rest, err := asn1.Unmarshal(c.RawSubjectPublicKeyInfo, &spki); err != nil || len(rest) > 0 {
+		return nil, errors.New("the EK certificate's key does not parse")
+	}
+	if !spki.Algorithm.Algorithm.Equal(oidRSAESOAEP) {
+		return nil, errors.New("the EK certificate's key is of a kind not known")
+	}
+	return x509.ParsePKCS1PublicKey(spki.Key.RightAlign())
 }

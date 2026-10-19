@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 
 	legacy "github.com/google/go-tpm/legacy/tpm2"
 	"github.com/google/go-tpm/legacy/tpm2/credactivation"
+	"github.com/google/go-tpm/tpm2"
 )
 
 // MakeChallenge: validator's challenge of box, from its Begin. The secret
@@ -126,12 +128,11 @@ func (t *Box) Begin() (attest.Begin, error) {
 		return b, err
 	}
 	// the RSA EK alone (attest's ekShape): one key per TPM
-	cert, err := t.nv(nvRSA)
-	if err != nil {
-		return b, errors.New("no RSA EK certificate in the TPM (an AMD fTPM's is AMD's to give; not done yet)")
-	}
-	cert = oneDER(cert)
 	if _, err := t.run("tpm2_createek", "-Q", "-c", t.p("ek.ctx"), "-G", "rsa", "-u", t.p("ek.pub")); err != nil {
+		return b, err
+	}
+	cert, err := t.ekCert()
+	if err != nil {
 		return b, err
 	}
 	if _, err := os.Stat(t.p("ak.priv")); err != nil {
@@ -165,6 +166,86 @@ func (t *Box) Begin() (attest.Begin, error) {
 		}
 	}
 	return b, nil
+}
+
+// ekCert: the RSA EK's certificate, from NV, or for an AMD fTPM (none in
+// NV) from AMD's service
+func (t *Box) ekCert() ([]byte, error) {
+	if cert, err := t.nv(nvRSA); err == nil {
+		return oneDER(cert), nil
+	}
+	props, err := t.run("tpm2_getcap", "properties-fixed")
+	if err != nil {
+		return nil, err
+	}
+	if manufacturer(props) != amdVendor || t.Fetch == nil {
+		return nil, errors.New("no RSA EK certificate in the TPM")
+	}
+	raw, err := os.ReadFile(t.p("ek.pub"))
+	if err != nil {
+		return nil, err
+	}
+	url, err := AMDEKCertURL(raw)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := t.Fetch(url)
+	if err != nil {
+		return nil, fmt.Errorf("the EK certificate from AMD: %v", err)
+	}
+	return cert, nil
+}
+
+const amdVendor = "414D4400"
+
+// manufacturer: TPM2_PT_MANUFACTURER's raw value, hex, from tpm2_getcap
+// properties-fixed
+func manufacturer(props []byte) string {
+	_, rest, ok := bytes.Cut(props, []byte("TPM2_PT_MANUFACTURER:"))
+	if !ok {
+		return ""
+	}
+	_, rest, ok = bytes.Cut(rest, []byte("raw:"))
+	if !ok {
+		return ""
+	}
+	v, _, _ := bytes.Cut(rest, []byte("\n"))
+	n, err := strconv.ParseUint(string(bytes.TrimSpace(v)), 0, 32)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%08X", n)
+}
+
+// AMDEKCertURL: where AMD serves an fTPM's EK certificate, from the EK's
+// TPM2B_PUBLIC - the first 16 bytes of sha256(00 00 22 22 || exponent ||
+// modulus), hex, as tpm2-tools' tpm2_getekcertificate makes it
+func AMDEKCertURL(ekPub []byte) (string, error) {
+	p2b, err := tpm2.Unmarshal[tpm2.TPM2BPublic](ekPub)
+	if err != nil {
+		return "", err
+	}
+	pub, err := p2b.Contents()
+	if err != nil {
+		return "", err
+	}
+	d, err := pub.Parameters.RSADetail()
+	if pub.Type != tpm2.TPMAlgRSA || err != nil {
+		return "", errors.New("not an RSA EK")
+	}
+	n, err := pub.Unique.RSA()
+	if err != nil {
+		return "", err
+	}
+	exp := d.Exponent
+	if exp == 0 {
+		exp = 65537
+	}
+	h := sha256.New()
+	h.Write([]byte{0, 0, 0x22, 0x22})
+	_ = binary.Write(h, binary.BigEndian, exp)
+	h.Write(n.Buffer)
+	return "https://ftpm.amd.com/pki/aia/" + hex.EncodeToString(h.Sum(nil)[:16]), nil
 }
 
 // issuers: up the AIA links from the top of chain until a self-signed
