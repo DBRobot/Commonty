@@ -11,22 +11,22 @@
       "dd-windows": {
         "apart": 0,
         "by": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ]
       },
       "home-controller": {
         "apart": 0,
         "by": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ]
       },
       "linux": {
         "apart": 0,
         "by": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ]
       },
       "windows": {
@@ -37,44 +37,44 @@
         ]
       }
     },
-    "commit": "cd3246f519c34a9f32ce477de05a64abccd4150a",
+    "commit": "8a081c854a621f67d22b19db9a3334d64e2490f2",
     "files": {
-      "commonty-home-controller-0.1.57.img.zst": {
-        "sha256": "7150e6a8dead4d8686c2571679aa43f0734f20871717734bf1673f5130d0fa87",
-        "size": 1946463459,
-        "url": "https://commonty.org/download/v0.1.57/commonty-home-controller-0.1.57.img.zst"
+      "commonty-home-controller-0.1.58.img.zst": {
+        "sha256": "3f501aa8983d06b55abeec5ce9ea86c79b3a56cd1ebf856c1656395dce847c41",
+        "size": 1946640410,
+        "url": "https://commonty.org/download/v0.1.58/commonty-home-controller-0.1.58.img.zst"
       },
       "commonty-setup.exe": {
-        "sha256": "5c8de716d9710a44e845311d8cb13c1946895c31780f390df6626305bb18a433",
-        "size": 39255776,
-        "url": "https://commonty.org/download/v0.1.57/commonty-setup.exe"
+        "sha256": "5fe48e65b931f334031592a308f0f95dfe8c971b6102a0da3eb957bb997e3af2",
+        "size": 39268708,
+        "url": "https://commonty.org/download/v0.1.58/commonty-setup.exe"
       },
       "commonty.apk": {
-        "sha256": "f0463b2ffdd01f8abd9ede976e47ffafab36e6ae021f397e410ce5f698934981",
+        "sha256": "f29484af43dc32245c945c4930d94901cbb53815c336f423a2dc368f7f0bc9dd",
         "size": 160241696,
-        "url": "https://commonty.org/download/v0.1.57/commonty.apk"
+        "url": "https://commonty.org/download/v0.1.58/commonty.apk"
       },
-      "commonty_0.1.57_amd64.AppImage": {
-        "sha256": "1696a19d81451266e855ea0767d99d1d0c26aa67bd9bafba74f5709c22d34226",
-        "size": 191621624,
-        "url": "https://commonty.org/download/v0.1.57/commonty_0.1.57_amd64.AppImage"
+      "commonty_0.1.58_amd64.AppImage": {
+        "sha256": "1e1b9fdd6474f2074bcbc1630e8e0d8cbc1498f5310843296be560c297fd453a",
+        "size": 191642104,
+        "url": "https://commonty.org/download/v0.1.58/commonty_0.1.58_amd64.AppImage"
       },
-      "commonty_0.1.57_amd64.deb": {
-        "sha256": "a32637a303b9d45a667d5ccc070c785fa1d94974c2c64c110d25f3ebf7fd8c47",
-        "size": 41057104,
-        "url": "https://commonty.org/download/v0.1.57/commonty_0.1.57_amd64.deb"
+      "commonty_0.1.58_amd64.deb": {
+        "sha256": "e99870c3fdfa92b3ad24ed7aa0b9c149b38a26345bb871888f1830ea9fad6917",
+        "size": 41064836,
+        "url": "https://commonty.org/download/v0.1.58/commonty_0.1.58_amd64.deb"
       },
       "dd.exe": {
-        "sha256": "13ddd1d44be15918ad9e6b4553d9bdf56902e5ee5450173ac731e68661cb2519",
-        "size": 19597312,
-        "url": "https://commonty.org/download/v0.1.57/dd.exe"
+        "sha256": "ff152a0bdf1ad159e87658a02e5d0b5f7424512e2e230119f55625f19b2b0b54",
+        "size": 19583488,
+        "url": "https://commonty.org/download/v0.1.58/dd.exe"
       }
     },
     "from": "https://git.commonty.org/david/commonty",
-    "issued": 1792310949,
+    "issued": 1792370653,
     "kind": "app",
-    "tag": "v0.1.57"
+    "tag": "v0.1.58"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "Xd37Z/pPAwlVaJv/WiVLADsPkRwnZgyliAu01VCDm02Baz2lPwf/ip5b13x2ldAHT16lKDm+msNjwu2iWnzGCA=="
+  "signature": "v7xTLTG76L3val7iXCxXMCIzc3/Sn81qfFhTCHdgB5h4vPQxjJF3tPXCC8Y8HktjSav/EiNg8dFtjsHJ0hZvDQ=="
 }
