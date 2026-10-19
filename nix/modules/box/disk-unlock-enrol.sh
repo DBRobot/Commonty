@@ -49,7 +49,7 @@ case "${1:-}" in
     tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
     tpm2_load -Q -C "$w/srk.ctx" -u "$DIR/sig.pub" -r "$DIR/sig.priv" -c "$w/sig.ctx"
     tpm2_startauthsession -Q --policy-session -S "$w/s.ctx"
-    tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7
+    dd-tpm-policy "$w/s.ctx" "$DIR"
     tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p "session:$w/s.ctx" -o "$w/sig.bin" "$w/msg"
     tpm2_flushcontext "$w/s.ctx" >/dev/null 2>&1 || true
     sig=$(b64url <"$w/sig.bin")
@@ -61,7 +61,7 @@ case "${1:-}" in
     tpm2_flushcontext -t >/dev/null 2>&1 || true
     tpm2_load -Q -C "$w/srk.ctx" -u "$DIR/half.pub" -r "$DIR/half.priv" -c "$w/half.ctx"
     tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
-    tpm2_policypcr -Q -S "$w/h.ctx" -l sha256:7
+    dd-tpm-policy "$w/h.ctx" "$DIR"
     tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half"
     tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
     ikm=$( { cat "$w/half"; printf '%s=' "$share" | tr -- '-_' '+/' | base64 -d; } | od -An -v -tx1 | tr -d ' \n')

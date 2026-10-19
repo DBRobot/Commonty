@@ -72,6 +72,7 @@
         "adblock"
         "unlock"
         "attest"
+        "boot-key"
         "leaving"
         "home-controller"
         "waits"
@@ -860,6 +861,15 @@
                 subPackages = [ "cmd/attest-check" ];
                 doCheck = false;
               };
+              # the join key across updates (cmd/boot-key, docs/dev/attestation.md)
+              dd-boot-key = pkgs.buildGoModule {
+                pname = "dd-boot-key";
+                version = "0.1.0";
+                inherit src vendorHash;
+                subPackages = [ "cmd/boot-key" ];
+                doCheck = false;
+                postInstall = "mv $out/bin/boot-key $out/bin/dd-boot-key";
+              };
               # what a box's attestation must find in PCR 4 (state/attest
               # Boot): each lanzaboote box's systemd-boot, the release's
               # stub, kernel and kernel parameters, from the very closures
@@ -895,7 +905,7 @@
                   ''
                     jq -c --slurpfile boot ${attestBoot} '.attest.boot = $boot[0]' "$basePath" >$out
                   '';
-              inherit dd-control attest-check;
+              inherit dd-control attest-check dd-boot-key;
               # wasm for the relay's Durable Object, from the same vendored
               # modules (buildGoModule lists packages for the build machine,
               # which leaves out a js-only one)
@@ -1201,6 +1211,7 @@
           '';
           dd-control = control.dd-control;
           attest-check = control.attest-check;
+          dd-boot-key = control.dd-boot-key;
           control-config = control.configFile;
           # what the control plane places from: each box's capability and
           # what the fleet wants of each service (nix/lib/placement-inputs.nix)
@@ -1672,6 +1683,7 @@
             ++ [
               lanzaboote.nixosModules.lanzaboote
               ./nix/modules/box/secure-boot.nix
+              ./nix/modules/box/boot-key.nix
               ./nix/modules/box/disk-unlock.nix
               ./nix/modules/box/control.nix
               ./nix/modules/box/placed.nix

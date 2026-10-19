@@ -121,6 +121,7 @@ in
       description = "Sign one hold request with the TPM";
       path = [
         pkgs.tpm2-tools
+        (import ../../lib/tpm-policy.nix pkgs)
         pkgs.openssl
         pkgs.coreutils
         pkgs.gnused

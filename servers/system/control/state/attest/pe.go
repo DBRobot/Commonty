@@ -24,6 +24,7 @@ type peImage struct {
 	certDir  int // the certificate table's data directory entry
 	headers  int // SizeOfHeaders
 	sections []peSection
+	symbols  bool // a COFF symbol table named (a kernel's PE header may)
 }
 
 type peSection struct {
@@ -49,19 +50,18 @@ func parsePE(img []byte) (*peImage, error) {
 	}
 	coff := img[p.peOff+4:]
 	nsec := int(binary.LittleEndian.Uint16(coff[2:]))
-	if binary.LittleEndian.Uint32(coff[8:]) != 0 || binary.LittleEndian.Uint32(coff[12:]) != 0 {
-		return nil, errors.New("a PE symbol table, which an EFI image has none of")
-	}
+	p.symbols = binary.LittleEndian.Uint32(coff[8:]) != 0 || binary.LittleEndian.Uint32(coff[12:]) != 0
 	p.optSize = int(binary.LittleEndian.Uint16(coff[16:]))
 	p.opt = p.peOff + 24
-	if p.opt+p.optSize > len(img) || p.optSize < 112+16*8 {
+	if p.opt+p.optSize > len(img) || p.optSize < 112 {
 		return nil, errors.New("a PE optional header cut short")
 	}
 	if binary.LittleEndian.Uint16(img[p.opt:]) != 0x20b {
 		return nil, errors.New("not PE32+")
 	}
-	if binary.LittleEndian.Uint32(img[p.opt+108:]) != 16 {
-		return nil, errors.New("not 16 PE data directories")
+	// the certificate table is directory 4: a kernel's header lists six
+	if dirs := binary.LittleEndian.Uint32(img[p.opt+108:]); dirs < 5 || dirs > 16 || 112+8*int(dirs) > p.optSize {
+		return nil, errors.New("PE data directories out of place")
 	}
 	p.csum = p.opt + 64
 	p.certDir = p.opt + 112 + 4*8
@@ -77,9 +77,6 @@ func parsePE(img []byte) (*peImage, error) {
 			vsize: binary.LittleEndian.Uint32(h[8:]), va: binary.LittleEndian.Uint32(h[12:]),
 			rawSize: binary.LittleEndian.Uint32(h[16:]), rawPtr: binary.LittleEndian.Uint32(h[20:]),
 			chars: binary.LittleEndian.Uint32(h[36:]),
-		}
-		if strings.HasPrefix(s.name, "/") {
-			return nil, errors.New("a PE section with a long name")
 		}
 		if s.rawSize > 0 && (int(s.rawPtr) < p.headers || uint64(s.rawPtr)+uint64(s.rawSize) > uint64(len(img))) {
 			return nil, fmt.Errorf("PE section %s outside the file", s.name)
@@ -215,6 +212,15 @@ func readStub(st Stub, img []byte) (*stubImage, error) {
 	p, err := parsePE(img)
 	if err != nil {
 		return nil, err
+	}
+	// what a string or symbol table could name differently to two readers
+	if p.symbols {
+		return nil, errors.New("the stub names a symbol table")
+	}
+	for _, s := range p.sections {
+		if strings.HasPrefix(s.name, "/") {
+			return nil, errors.New("a PE section with a long name")
+		}
 	}
 	if p.headerHash() != st.Header {
 		return nil, errors.New("the stub's headers are not the release's")

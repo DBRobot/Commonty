@@ -29,13 +29,13 @@ fi
 esp() {
   # on the running box it is mounted already
   if [ -e /boot/dd/unlock/sig.priv ]; then
-    mkdir -p "$KEYS" && cp /boot/dd/unlock/* "$KEYS"/
+    mkdir -p "$KEYS" && cp -r /boot/dd/unlock/* "$KEYS"/
     return
   fi
   [ -n "$part" ] || return 1
   mkdir -p "$w/esp" "$KEYS"
   mount -o ro "$part" "$w/esp" || return 1
-  cp "$w/esp/dd/unlock/"* "$KEYS"/ 2>/dev/null
+  cp -r "$w/esp/dd/unlock/"* "$KEYS"/ 2>/dev/null
   umount "$w/esp"
   # on its TPM alone, no signing key is asked for (a joined box makes its
   # own at its first boot); otherwise it signs its ask to the Worker
@@ -83,7 +83,7 @@ sign() {
   tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx" &&
     tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/sig.pub" -r "$KEYS/sig.priv" -c "$w/sig.ctx" &&
     tpm2_startauthsession -Q --policy-session -S "$w/s.ctx" &&
-    tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 &&
+    dd-tpm-policy "$w/s.ctx" "$KEYS" &&
     tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p "session:$w/s.ctx" -o "$w/sig.bin" "$1"
   local r=$?
   tpm2_flushcontext "$w/s.ctx" >/dev/null 2>&1 || true
@@ -133,7 +133,7 @@ fi
 if [ -e "$KEYS/half.priv" ]; then
   tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/half.pub" -r "$KEYS/half.priv" -c "$w/half.ctx"
   tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
-  tpm2_policypcr -Q -S "$w/h.ctx" -l sha256:7
+  dd-tpm-policy "$w/h.ctx" "$KEYS"
   tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half" || true
   tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
 else
