@@ -156,7 +156,7 @@ pub fn pick(
 }
 
 /// One output the order asks for
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Job {
     pub name: String,
     pub attr: String,
@@ -183,19 +183,43 @@ pub fn order_payload(id: &str, flake: &str, rev: &str, jobs: &[Job]) -> serde_js
     })
 }
 
+/// what the app's builds are, in an order
+pub const APP_ATTR: &str = "legacyPackages.x86_64-linux.appRelease";
+
+/// how old an order may be and still be waited on again
+pub const ORDER_MAX_AGE_SECS: u64 = 2 * 24 * 3600;
+
 /// The order already out (its signed payload) when it asks for exactly
 /// these downloads of this tag at this commit: its id and jobs, to be
 /// waited on again. An app release that stopped part way - the laptop
 /// restarted, a box did not answer in time - finds the answers the boxes
 /// gave it instead of making a new order they must build for again.
+///
+/// Every field is held to what this run worked out for itself (`payload`
+/// is already checked as signed by the release key): the order only saves
+/// the builds, it never decides what is signed.
 pub fn resumable(
     payload: &serde_json::Value,
     tag: &str,
+    flake: &str,
     rev: &str,
+    version: &str,
     want: &BTreeMap<String, String>,
+    now: u64,
 ) -> Option<(String, Vec<Job>)> {
     let id = payload["id"].as_str()?;
-    if !id.starts_with(&format!("{tag}-")) || payload["rev"].as_str()? != rev {
+    // <tag>-<round>-<time>
+    let (round, time) = id.strip_prefix(&format!("{tag}-"))?.split_once('-')?;
+    if !round.parse::<u8>().is_ok_and(|r| r >= 1)
+        || time.parse::<u64>().is_err()
+        || payload["rev"].as_str()? != rev
+        || payload["flake"].as_str()? != flake
+    {
+        return None;
+    }
+    let issued = payload["issued"].as_u64()?;
+    // an order from the future is as stale as an old one: 10 minutes of clock skew
+    if issued > now + 600 || now.saturating_sub(issued) > ORDER_MAX_AGE_SECS {
         return None;
     }
     let mut jobs = Vec::new();
@@ -208,11 +232,15 @@ pub fn resumable(
         if builders.is_empty() {
             return None;
         }
+        let name = j["name"].as_str()?;
+        if j["attr"] != APP_ATTR || j["version"] != version || j["part"] != name {
+            return None;
+        }
         jobs.push(Job {
-            name: j["name"].as_str()?.to_string(),
-            attr: j["attr"].as_str()?.to_string(),
-            version: j["version"].as_str().map(str::to_string),
-            part: j["part"].as_str().map(str::to_string),
+            name: name.to_string(),
+            attr: APP_ATTR.into(),
+            version: Some(version.into()),
+            part: Some(name.into()),
             path: j["path"].as_str()?.to_string(),
             builders,
         });
@@ -335,13 +363,16 @@ mod tests {
 
     fn order(id: &str, rev: &str, jobs: &[(&str, &str)]) -> serde_json::Value {
         serde_json::json!({
-            "id": id, "rev": rev, "flake": "git+https://x",
+            "id": id, "rev": rev, "flake": "git+https://x", "issued": 1_000_000,
             "jobs": jobs.iter().map(|(n, p)| serde_json::json!({
                 "name": n, "attr": "legacyPackages.x86_64-linux.appRelease",
                 "version": "0.1.49", "part": n, "path": p, "builders": ["node1", "node2"],
             })).collect::<Vec<_>>(),
         })
     }
+
+    const F: &str = "git+https://x";
+    const NOW: u64 = 1_000_060;
 
     #[test]
     fn the_order_already_out_is_waited_on_again_when_it_is_for_these_downloads() {
@@ -355,22 +386,22 @@ mod tests {
             "r1",
             &[("linux", "/nix/store/a"), ("windows", "/nix/store/b")],
         );
-        let (id, jobs) = resumable(&same, "v0.1.49", "r1", &want).unwrap();
+        let (id, jobs) = resumable(&same, "v0.1.49", F, "r1", "0.1.49", &want, NOW).unwrap();
         assert_eq!(id, "v0.1.49-1-100");
         assert_eq!(jobs.len(), 2);
         assert_eq!(jobs[0].builders, vec!["node1", "node2"]);
         // another tag, another commit, other paths, a download missing or
         // one more: a new order
-        assert!(resumable(&same, "v0.1.48", "r1", &want).is_none());
-        assert!(resumable(&same, "v0.1.49", "r2", &want).is_none());
+        assert!(resumable(&same, "v0.1.48", F, "r1", "0.1.49", &want, NOW).is_none());
+        assert!(resumable(&same, "v0.1.49", F, "r2", "0.1.49", &want, NOW).is_none());
         let other = order(
             "v0.1.49-1-100",
             "r1",
             &[("linux", "/nix/store/c"), ("windows", "/nix/store/b")],
         );
-        assert!(resumable(&other, "v0.1.49", "r1", &want).is_none());
+        assert!(resumable(&other, "v0.1.49", F, "r1", "0.1.49", &want, NOW).is_none());
         let short = order("v0.1.49-1-100", "r1", &[("linux", "/nix/store/a")]);
-        assert!(resumable(&short, "v0.1.49", "r1", &want).is_none());
+        assert!(resumable(&short, "v0.1.49", F, "r1", "0.1.49", &want, NOW).is_none());
         let more = order(
             "v0.1.49-1-100",
             "r1",
@@ -380,9 +411,60 @@ mod tests {
                 ("android", "/nix/store/d"),
             ],
         );
-        assert!(resumable(&more, "v0.1.49", "r1", &want).is_none());
+        assert!(resumable(&more, "v0.1.49", F, "r1", "0.1.49", &want, NOW).is_none());
         // a v0.1.4 order is not a v0.1.49 one: the id's dash sets them apart
-        assert!(resumable(&order("v0.1.4-1-100", "r1", &[]), "v0.1.49", "r1", &want).is_none());
+        assert!(
+            resumable(
+                &order("v0.1.4-1-100", "r1", &[]),
+                "v0.1.49",
+                F,
+                "r1",
+                "0.1.49",
+                &want,
+                NOW
+            )
+            .is_none()
+        );
+        // another flake, version, build or part than this run asks for
+        assert!(
+            resumable(
+                &same,
+                "v0.1.49",
+                "git+https://y",
+                "r1",
+                "0.1.49",
+                &want,
+                NOW
+            )
+            .is_none()
+        );
+        assert!(resumable(&same, "v0.1.49", F, "r1", "0.1.48", &want, NOW).is_none());
+        let mut attr = same.clone();
+        attr["jobs"][0]["attr"] = "packages.x86_64-linux.other".into();
+        assert!(resumable(&attr, "v0.1.49", F, "r1", "0.1.49", &want, NOW).is_none());
+        let mut part = same.clone();
+        part["jobs"][0]["part"] = "windows".into();
+        assert!(resumable(&part, "v0.1.49", F, "r1", "0.1.49", &want, NOW).is_none());
+        // no age, or too old
+        let mut ageless = same.clone();
+        ageless.as_object_mut().unwrap().remove("issued");
+        assert!(resumable(&ageless, "v0.1.49", F, "r1", "0.1.49", &want, NOW).is_none());
+        assert!(
+            resumable(
+                &same,
+                "v0.1.49",
+                F,
+                "r1",
+                "0.1.49",
+                &want,
+                1_000_000 + ORDER_MAX_AGE_SECS + 1
+            )
+            .is_none()
+        );
+        // an id that is not <tag>-<round>-<time>
+        let mut id = same.clone();
+        id["id"] = "v0.1.49-x".into();
+        assert!(resumable(&id, "v0.1.49", F, "r1", "0.1.49", &want, NOW).is_none());
     }
 
     fn cand(name: &str, owner: &str, site: &str, region: &str) -> Candidate {

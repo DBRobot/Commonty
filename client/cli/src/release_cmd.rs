@@ -1000,15 +1000,108 @@ enum NextStep {
     Resume,
     /// the app changed: a new tag
     New,
+    /// nothing is done, for this reason
+    Refuse(String),
 }
 
-fn next_step(changed: bool, offered: Option<&str>, prev: &str) -> NextStep {
-    if changed {
-        NextStep::New
-    } else if offered == Some(prev) {
-        NextStep::Nothing
-    } else {
-        NextStep::Resume
+fn version_key(tag: &str) -> Option<[u64; 3]> {
+    let mut n = version_of(tag)?.split('.').map(|n| n.parse().ok());
+    Some([n.next()??, n.next()??, n.next()??])
+}
+
+/// The tag app.json offers, once the release key's signature on it checks
+/// out; None only when there is no app.json. Anything that does not read
+/// or verify is an error, and no step is taken on it.
+fn signed_app_tag(raw: Option<&str>, key: &ed25519_dalek::VerifyingKey) -> Result<Option<String>> {
+    let Some(raw) = raw else { return Ok(None) };
+    let p = release::verify_doc(raw, "app", key)
+        .map_err(|e| anyhow::anyhow!("app.json on the releases branch does not verify: {e}"))?;
+    let tag = p["tag"]
+        .as_str()
+        .filter(|t| version_key(t).is_some())
+        .context("app.json on the releases branch names no vX.Y.Z tag")?;
+    Ok(Some(tag.into()))
+}
+
+/// the same, read from the forge's releases branch
+fn read_signed_app_tag(root: &Path, key: &ed25519_dalek::VerifyingKey) -> Result<Option<String>> {
+    // an empty answer is no branch; a failed one is not taken as that
+    if git(root, &["ls-remote", "--heads", "forge", "releases"])?.is_empty() {
+        return Ok(None);
+    }
+    git(root, &["fetch", "-q", "forge", "releases"])?;
+    let releases = "refs/remotes/forge/releases";
+    if git(root, &["ls-tree", "--name-only", releases, "app.json"])?.is_empty() {
+        return Ok(None);
+    }
+    let raw = git(root, &["show", &format!("{releases}:app.json")])?;
+    signed_app_tag(Some(&raw), key)
+}
+
+/// never an app older than the one signed: that would roll the downloads back
+fn may_sign(tag: &str, signed: Option<&str>) -> Result<()> {
+    let mine = version_key(tag).with_context(|| format!("{tag} is not vX.Y.Z"))?;
+    if let Some(s) = signed {
+        let theirs = version_key(s).with_context(|| format!("the signed app {s} is not vX.Y.Z"))?;
+        ensure!(
+            mine >= theirs,
+            "{s} is signed already; {tag} is older and is not signed over it"
+        );
+    }
+    Ok(())
+}
+
+/// the order on the releases branch, when the release key signed it for
+/// exactly this run (build_order::resumable)
+#[allow(clippy::too_many_arguments)]
+fn resume_order(
+    raw: &str,
+    key: &ed25519_dalek::VerifyingKey,
+    tag: &str,
+    flake: &str,
+    rev: &str,
+    version: &str,
+    want: &BTreeMap<String, String>,
+    now: u64,
+) -> Option<(String, Vec<build_order::Job>)> {
+    let payload = match release::verify_doc(raw, "build-order", key) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("   the order on the releases branch does not verify ({e}); ordering anew");
+            return None;
+        }
+    };
+    build_order::resumable(&payload, tag, flake, rev, version, want, now)
+}
+
+/// `signed`: the tag app.json offers, verified; `prev`: the newest tag on
+/// the ref; `on_ref`: prev's commit is in the ref's history and no tag is
+/// newer
+fn next_step(changed: bool, signed: Option<&str>, prev: &str, on_ref: bool) -> NextStep {
+    let Some(p) = version_key(prev) else {
+        return NextStep::Refuse(format!("{prev} is not vX.Y.Z"));
+    };
+    if !on_ref {
+        return NextStep::Refuse(format!(
+            "{prev} is not the newest tag, in the history being released"
+        ));
+    }
+    let s = match signed.map(|s| (s, version_key(s))) {
+        None => None,
+        Some((s, Some(v))) => Some((s, v)),
+        Some((s, None)) => return NextStep::Refuse(format!("the signed app {s} is not vX.Y.Z")),
+    };
+    let next = [p[0], p[1], p[2] + 1];
+    match s {
+        Some((s, v)) if changed && v >= next => {
+            NextStep::Refuse(format!("{s} is signed already, newer than {prev}"))
+        }
+        _ if changed => NextStep::New,
+        Some((s, _)) if s == prev => NextStep::Nothing,
+        Some((s, v)) if v > p => NextStep::Refuse(format!(
+            "{s} is signed already, newer than {prev}; an older app is never signed over it"
+        )),
+        _ => NextStep::Resume,
     }
 }
 
@@ -1033,13 +1126,20 @@ fn app_next(repo: &str, keys: &auth::Store, r#ref: &str) -> Result<()> {
     let now = app_paths(&root, &rev, "0.0.0")?;
     let changed = app_paths(&root, &prev_rev, "0.0.0").ok().as_ref() != Some(&now);
     // what the downloads page offers: the tag in app.json on the releases
-    // branch. A tag pushed and never signed - the laptop that was waiting
-    // on its builders went away - is still to finish, not nothing to do
-    let offered = git(&root, &["show", "refs/remotes/forge/releases:app.json"])
-        .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|d| d["payload"]["tag"].as_str().map(str::to_string));
-    match next_step(changed, offered.as_deref(), &prev) {
+    // branch, as the release key signed it. A tag pushed and never signed -
+    // the laptop that was waiting on its builders went away - is still to
+    // finish, not nothing to do. Unreadable or unverified: nothing is done
+    let vk = load(keys)?.verifying_key();
+    let offered = read_signed_app_tag(&root, &vk)
+        .context("the app: nothing done, the signed app.json could not be read")?;
+    // and the newest tag there is anywhere, not one passed by a later tag
+    let newest = git(&root, &["tag", "-l", "v*"])?
+        .lines()
+        .filter_map(version_key)
+        .max();
+    let on_ref = git(&root, &["merge-base", "--is-ancestor", &prev_rev, &rev]).is_ok()
+        && newest <= version_key(&prev);
+    match next_step(changed, offered.as_deref(), &prev, on_ref) {
         NextStep::Nothing => {
             println!(
                 "[{}] the app: nothing it is made of changed since {prev}",
@@ -1060,6 +1160,7 @@ fn app_next(repo: &str, keys: &auth::Store, r#ref: &str) -> Result<()> {
             return Ok(());
         }
         NextStep::New => {}
+        NextStep::Refuse(why) => bail!("the app: nothing done: {why}"),
     }
     let tag = next_tag(&prev).with_context(|| format!("{prev} is not vX.Y.Z"))?;
     println!(
@@ -2093,22 +2194,33 @@ fn wait_built(
 
 /// The order on the releases branch, signed by this release key, when it
 /// is the one for exactly these downloads of this tag at this commit
+#[allow(clippy::too_many_arguments)]
 fn standing_order(
     root: &Path,
     file: &str,
     key: &ed25519_dalek::SigningKey,
     tag: &str,
+    flake: &str,
     rev: &str,
+    version: &str,
     want: &BTreeMap<String, String>,
 ) -> Option<(String, Vec<build_order::Job>)> {
-    let _ = git(root, &["fetch", "-q", "forge", "releases"]);
+    git(root, &["fetch", "-q", "forge", "releases"]).ok()?;
     let raw = git(
         root,
         &["show", &format!("refs/remotes/forge/releases:{file}")],
     )
     .ok()?;
-    let payload = release::verify_doc(&raw, "build-order", &key.verifying_key()).ok()?;
-    build_order::resumable(&payload, tag, rev, want)
+    resume_order(
+        &raw,
+        &key.verifying_key(),
+        tag,
+        flake,
+        rev,
+        version,
+        want,
+        release::now(),
+    )
 }
 
 /// how long builders have to answer before the order goes to others
@@ -2153,7 +2265,7 @@ fn order_builds(
         let fleet = build_order::candidates(boxes, owners, &state);
         // the order already out for these very downloads, waited on again
         let resumed = if round == 1 {
-            standing_order(root, file, key, tag, rev, want)
+            standing_order(root, file, key, tag, flake, rev, version, want)
         } else {
             None
         };
@@ -2188,7 +2300,7 @@ fn order_builds(
             by.insert(name.clone(), (builders.clone(), apart));
             jobs.push(build_order::Job {
                 name: name.clone(),
-                attr: "legacyPackages.x86_64-linux.appRelease".into(),
+                attr: build_order::APP_ATTR.into(),
                 version: Some(version.into()),
                 part: Some(name.clone()),
                 path: path.clone(),
@@ -2424,6 +2536,12 @@ fn app(repo: &str, keys: &auth::Store, tag: &str, dry_run: bool) -> Result<()> {
         .context("no member name here (`dd login`)")?;
     let owners = box_owners(&root, &boxes);
     let home = own_box(&boxes, &owners, &owner)?;
+    // never an app older than the one signed, by hand or not; nor on an
+    // app.json that does not verify
+    may_sign(
+        tag,
+        read_signed_app_tag(&root, &key.verifying_key())?.as_deref(),
+    )?;
     let built = order_builds(
         &root,
         &key,
@@ -2532,6 +2650,11 @@ fn app(repo: &str, keys: &auth::Store, tag: &str, dry_run: bool) -> Result<()> {
         println!("{body}");
         return Ok(());
     }
+    // asked again: a newer one could have been signed while this one built
+    may_sign(
+        tag,
+        read_signed_app_tag(&root, &key.verifying_key())?.as_deref(),
+    )?;
     to_releases(
         &root,
         &[
@@ -2615,18 +2738,142 @@ mod tests {
     fn a_tag_never_signed_is_finished_not_skipped() {
         // the app unchanged and the tag offered: nothing to do
         assert_eq!(
-            next_step(false, Some("v0.1.49"), "v0.1.49"),
+            next_step(false, Some("v0.1.49"), "v0.1.49", true),
             NextStep::Nothing
         );
-        // the app unchanged, the tag pushed but never signed: finish it
+        // the newest tag, on the ref, pushed but never signed: finish it
         assert_eq!(
-            next_step(false, Some("v0.1.43"), "v0.1.49"),
+            next_step(false, Some("v0.1.43"), "v0.1.49", true),
             NextStep::Resume
         );
-        assert_eq!(next_step(false, None, "v0.1.49"), NextStep::Resume);
-        // the app changed: a new tag, whatever is offered
-        assert_eq!(next_step(true, Some("v0.1.49"), "v0.1.49"), NextStep::New);
-        assert_eq!(next_step(true, Some("v0.1.43"), "v0.1.49"), NextStep::New);
+        assert_eq!(
+            next_step(false, Some("v0.1.9"), "v0.1.10", true),
+            NextStep::Resume
+        );
+        assert_eq!(next_step(false, None, "v0.1.49", true), NextStep::Resume);
+        // the app changed: a new tag, newer than what is signed
+        assert_eq!(
+            next_step(true, Some("v0.1.49"), "v0.1.49", true),
+            NextStep::New
+        );
+        assert_eq!(
+            next_step(true, Some("v0.1.43"), "v0.1.49", true),
+            NextStep::New
+        );
+    }
+
+    #[test]
+    fn an_older_app_is_never_signed_over_a_newer_one() {
+        let refused = |s: NextStep| matches!(s, NextStep::Refuse(_));
+        // a newer app is signed than the newest tag here: no rollback
+        assert!(refused(next_step(false, Some("v0.1.50"), "v0.1.49", true)));
+        assert!(refused(next_step(false, Some("v0.1.10"), "v0.1.9", true)));
+        // a new tag would be v0.1.50, and v0.1.50 or later is signed
+        assert!(refused(next_step(true, Some("v0.1.50"), "v0.1.49", true)));
+        assert!(refused(next_step(true, Some("v0.2.0"), "v0.1.49", true)));
+        // a tag that is not on the ref, or not vX.Y.Z
+        assert!(refused(next_step(false, Some("v0.1.43"), "v0.1.49", false)));
+        assert!(refused(next_step(false, Some("v0.1.43"), "latest", true)));
+        // the last word before anything is signed, by hand too
+        assert!(may_sign("v0.1.48", Some("v0.1.49")).is_err());
+        assert!(may_sign("v0.1.9", Some("v0.1.10")).is_err());
+        assert!(may_sign("v0.1.49", Some("v0.1.49")).is_ok());
+        assert!(may_sign("v0.1.50", Some("v0.1.49")).is_ok());
+        assert!(may_sign("v0.1.50", None).is_ok());
+        assert!(may_sign("v0.1.50", Some("junk")).is_err());
+    }
+
+    fn test_key(seed: u8) -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
+    }
+
+    #[test]
+    fn an_app_json_that_does_not_verify_takes_no_step() {
+        let key = test_key(7);
+        let vk = key.verifying_key();
+        let good = |tag: &str, k: &ed25519_dalek::SigningKey| {
+            let d = release::sign_doc("app", serde_json::json!({ "tag": tag }), k).unwrap();
+            serde_json::to_string(&d).unwrap()
+        };
+        assert_eq!(
+            signed_app_tag(Some(&good("v0.1.49", &key)), &vk).unwrap(),
+            Some("v0.1.49".into())
+        );
+        // nothing ever signed: no app.json
+        assert_eq!(signed_app_tag(None, &vk).unwrap(), None);
+        // unreadable, signed by another key, changed after signing, unsigned,
+        // another kind, or no vX.Y.Z tag: an error, and no step is taken
+        assert!(signed_app_tag(Some("{not json"), &vk).is_err());
+        assert!(signed_app_tag(Some(&good("v0.1.49", &test_key(8))), &vk).is_err());
+        let tampered = good("v0.1.49", &key).replace("v0.1.49", "v0.1.40");
+        assert!(signed_app_tag(Some(&tampered), &vk).is_err());
+        assert!(signed_app_tag(Some(r#"{"payload":{"tag":"v0.1.49"}}"#), &vk).is_err());
+        let order = release::sign_doc("build-order", serde_json::json!({ "tag": "v0.1.49" }), &key);
+        assert!(
+            signed_app_tag(Some(&serde_json::to_string(&order.unwrap()).unwrap()), &vk).is_err()
+        );
+        assert!(signed_app_tag(Some(&good("latest", &key)), &vk).is_err());
+    }
+
+    #[test]
+    fn an_order_is_waited_on_again_only_when_signed_for_this_very_run() {
+        let key = test_key(7);
+        let vk = key.verifying_key();
+        let want: BTreeMap<String, String> = [("linux".to_string(), "/nix/store/a".to_string())]
+            .into_iter()
+            .collect();
+        let now = 1_000_000;
+        let job = |path: &str| build_order::Job {
+            name: "linux".into(),
+            attr: build_order::APP_ATTR.into(),
+            version: Some("0.1.49".into()),
+            part: Some("linux".into()),
+            path: path.into(),
+            builders: vec!["node1".into(), "node2".into()],
+        };
+        let signed = |k: &ed25519_dalek::SigningKey, rev: &str, path: &str, issued: u64| {
+            let mut p =
+                build_order::order_payload("v0.1.49-1-5", "git+https://x", rev, &[job(path)]);
+            p["issued"] = issued.into();
+            serde_json::to_string(&release::sign_doc("build-order", p, k).unwrap()).unwrap()
+        };
+        let resume = |raw: &str| {
+            resume_order(
+                raw,
+                &vk,
+                "v0.1.49",
+                "git+https://x",
+                "r1",
+                "0.1.49",
+                &want,
+                now,
+            )
+        };
+        let (id, jobs) = resume(&signed(&key, "r1", "/nix/store/a", now - 60)).unwrap();
+        assert_eq!(id, "v0.1.49-1-5");
+        assert_eq!(jobs, vec![job("/nix/store/a")]);
+        // forged or unsigned: ordered anew
+        assert!(resume(&signed(&test_key(8), "r1", "/nix/store/a", now - 60)).is_none());
+        let tampered =
+            signed(&key, "r1", "/nix/store/a", now - 60).replace("/nix/store/a", "/nix/store/z");
+        assert!(resume(&tampered).is_none());
+        let bare = serde_json::json!({ "payload": build_order::order_payload("v0.1.49-1-5", "git+https://x", "r1", &[job("/nix/store/a")]) });
+        assert!(resume(&bare.to_string()).is_none());
+        assert!(resume("{not json").is_none());
+        // another commit, other downloads: ordered anew
+        assert!(resume(&signed(&key, "r2", "/nix/store/a", now - 60)).is_none());
+        assert!(resume(&signed(&key, "r1", "/nix/store/b", now - 60)).is_none());
+        // too old, or from the future
+        assert!(
+            resume(&signed(
+                &key,
+                "r1",
+                "/nix/store/a",
+                now - build_order::ORDER_MAX_AGE_SECS - 1
+            ))
+            .is_none()
+        );
+        assert!(resume(&signed(&key, "r1", "/nix/store/a", now + 3600)).is_none());
     }
 
     #[test]
