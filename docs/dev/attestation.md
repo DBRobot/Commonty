@@ -28,11 +28,26 @@ proof is worth, and what it is not.
   (TPM2_Certify): the join key, fixed to its TPM, is in the AK's TPM.
 - **What booted, now.** The AK quotes PCRs 0, 2, 4 and 7 over a nonce
   made of every voter's secret. The firmware's event log, replayed, must
-  give the quoted PCRs; then its PCR 7 events must say Secure Boot was on
-  and that the box's own certificate (its installer's record) let what
-  booted run, in db with keys of its own or in MOK under a Microsoft-signed
-  shim. The join key's policy must be PCR 7 as quoted: the key signs
-  nothing under any other boot. The record keeps all four PCRs.
+  give the quoted PCRs. Then:
+  - **PCR 7**: Secure Boot on, a platform key (not setup mode), and the
+    box's own certificate (its installer's record, sent in Begin) in the
+    db measured. Where the firmware logs which db entry let a boot
+    application run (EV_EFI_VARIABLE_AUTHORITY), one of them must be the
+    box's; many firmwares log none (David's laptop did not), and its
+    absence is no refusal.
+  - **PCR 4**: the boot applications the firmware started, by Authenticode
+    digest, are exactly two: one of the release's systemd-boot builds,
+    then the box's lanzaboote image. The box sends that image (the
+    ESP's `EFI/Linux` entry systemd-boot chose, `LoaderEntrySelected`);
+    its digest must be the second, it must be the release's stub with
+    only lzbt's six sections added (every section of the stub at its
+    address, its entry point), and its `.linuxh` must be one of the
+    release's kernels. A shim, a grub, Windows' boot manager or anything
+    else in PCR 4, or any other kind of PCR 4 event (an edited command
+    line), and the boot is not ours. The Authenticode digest leaves out the
+    signature, so it is the same whichever box's key signed the image.
+  - The join key's policy must be PCR 7 as quoted. The record keeps all
+    four PCRs.
 - **One box per Secure Boot key.** The box's db certificate must be its
   own: Microsoft's (any it made or signed) and Canonical's shim key are
   refused, and the agreed state keeps the hash of each box's, so no two
@@ -41,10 +56,18 @@ proof is worth, and what it is not.
 ## What it does not prove
 
 - That the machine is the one the member says, or theirs, or at their house.
-- That what booted is our release: PCR 4 is recorded, not judged (a
-  release changes it). PCR 7 says only that the box's own key let it run.
+- That the box's own system is unchanged past its stub: the stub's
+  command line and initrd are the box's own (its name, its generation),
+  not checked against a build; the kernel is.
 - Anything after the boot it was made in. The quote is one moment; the
-  join key's PCR 7 policy is what keeps it to that boot afterwards.
+  join key's PCR 7 policy is what keeps it to that boot afterwards - and
+  on firmware that logs no authority events, PCR 7 is the same for any
+  boot application db lets run, Microsoft-signed ones included. A box
+  enrolled with Microsoft's keys beside its own can, after attesting,
+  start a Microsoft-signed loader that reaches the join key. dbx is what
+  stands against the known-bad ones; it is not judged (a box whose keys
+  were cleared may have none, and the PCR 4 rule already refuses them at
+  the attested boot).
 - Against an attacker with the chip on a bench (a probe on the TPM's bus,
   a fault on the CPU running a firmware TPM). A maker's key leaking, or a
   TPM whose EK certificate was issued wrong, passes.
@@ -55,7 +78,8 @@ proof is worth, and what it is not.
 ```
 enlisting box       Begin rides in its request to enlist:
                       EK public, EK certificate + chain, AK public,
-                      join key public, event log, its own Secure Boot cert
+                      join key public, event log, its own Secure Boot cert,
+                      the lanzaboote image it booted
 enlistment judge    CheckAttestOpen / AttestOpen: chain to a maker's root,
                       shapes of EK/AK/join key, join key = the box's key,
                       EK not another box's -> Attest.Pending[box]
@@ -130,12 +154,21 @@ the roots).
   the TCG's EK purpose (2.23.133.8.1) or a TCG certificate policy.
 
 A real event log (the laptop's, AMD, Lenovo firmware, 127 events)
-replays to all eight live PCRs. Its PCR 7 holds SecureBoot, PK, KEK, db,
-dbx and shim's SbatLevel and MokListRT, but **no db authority event for
-the shim the firmware verified**, which the PC Client firmware profile
-asks for. A box on such firmware booting under its own db key would be
-refused ("nothing booted under the box's own certificate"); see the open
-question in the Secure Boot section.
+replays to all eight live PCRs, and the Authenticode digests computed here
+of its shim and grub match what its firmware put in PCR 4. Its PCR 7 has
+no db authority event: hence the PCR 4 rule.
+
+## Where the release's boot comes from
+
+`control.configFile` (flake.nix) adds `attest.boot` from `attestBoot`:
+for each box configuration that boots with lanzaboote, `attest-check boot`
+reads its systemd-boot (`systemd/lib/systemd/boot/efi/systemd-bootx64.efi`,
+which lzbt signs onto the ESP), lanzaboote's stub
+(`lanzaboote.packages.<system>.stub`, the one lzbt adds sections to) and
+its kernel file, and the lists are merged. lzbt keeps the ESP's systemd-boot
+until a newer one comes, so a box still on an older systemd-boot than the
+release's does not match until it has one; a release may carry earlier
+releases' digests too (not done yet).
 
 ## Secure Boot on a member's box
 
@@ -165,25 +198,16 @@ with keys of the box's own, as node1 and node2 have:
    the platform key ends setup mode: from the next start Secure Boot runs
    only what the box's key signed.
 3. The first boot is under the box's own db key, and the join key is made
-   then, under its PCR 7 (`dd-unlock-seal`). That PCR 7 is what attestation
-   checks: SecureBoot = 1, and the box's `db.pem` among the authorities.
-   Nothing to confirm at that boot.
+   then, under its PCR 7 (`dd-unlock-seal`). Attestation checks that PCR 7
+   (Secure Boot on, a PK, the box's `db.pem` in db) and PCR 4 (the
+   release's systemd-boot and stub). Nothing to confirm at that boot.
 
 Not shim + MOK: NixOS has no Microsoft-signed shim, a borrowed distro shim
 is at the mercy of SBAT revocations, Microsoft's 2011 UEFI CA (which signed
 the shims older firmware trusts) expired in June 2026 while firmware not
 updated by Windows lacks the 2023 one, many new Lenovo and Dell machines
 ship with the third-party CA turned off, and MOK needs a password typed at a
-blue screen. The judge still takes a boot by a MOK key under shim (the
-certificate shim logs in PCR 7), so a box that has one is not refused.
-
-Open (David's call): firmware that logs no db authority event, as the
-laptop's did. PCR 7 then says which keys were enrolled but not which one
-let the boot run, so it cannot tell our db key's boot from any other
-Microsoft-signed one there. Options: refuse such firmware (as now); accept
-it when the box's certificate is in the measured db and no shim ran; or
-enroll without Microsoft's keys where the machine needs none for its
-option ROMs.
+blue screen. A box booted through shim is refused by the PCR 4 rule.
 
 What the installer must keep for attestation (it does, on `joining-1017`):
 the db certificate at `/var/lib/sbctl/keys/db/db.pem` (what `tpm.Default`
