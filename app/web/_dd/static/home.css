@@ -912,6 +912,15 @@ main.drive .act .acts { display: inline-flex; gap: 6px; white-space: nowrap; }
 .preview dd { margin: 0; font: 13px var(--mono); overflow-wrap: anywhere; }
 .pv-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .pv-actions button { height: 40px; margin: 0; padding: 0 16px; font-size: 15px; }
+/* Files: names found anywhere in the library, below this folder's */
+main.drive .found { display: grid; gap: 2px; padding: 10px 6px 12px; border-top: 1px solid var(--line-2); }
+main.drive .found h2 { margin: 4px 10px 6px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+main.drive .found .hit, main.drive .found .hit:hover { display: flex; gap: 10px; align-items: center; height: auto; margin: 0; padding: 8px 10px; background: none; color: var(--ink); font-size: 15px; font-weight: 500; text-align: left; border-radius: var(--radius); }
+main.drive .found .hit:hover { background: var(--bg); }
+main.drive .found .hit .nm { overflow-wrap: anywhere; }
+main.drive .found .note { margin: 0 10px; }
+main.drive .found .hit .in { margin-left: auto; color: var(--ink-2); font-size: 13px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+main.drive .fsize { font-variant-numeric: tabular-nums; }
 /* a PDF's Edit and Sign come first, the width of the panel */
 .pv-actions .pv-edit { flex-basis: 100%; display: flex; gap: 8px; }
 .pv-actions .pv-edit button { flex: 1; }

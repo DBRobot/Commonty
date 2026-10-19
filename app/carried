@@ -29,6 +29,9 @@ servers/files/web/pdf-ocr.js    static/pdf-ocr.js
 servers/files/web/pdf.css       static/pdf.css
 servers/files/web/pick.js       static/pick.js
 servers/files/web/pick.css      static/pick.css
+servers/files/web/files-more.js static/files-more.js
+servers/files/web/scan.js       static/scan.js
+servers/files/web/scan.css      static/scan.css
 servers/media/web/media.js            static/media.js
 servers/media/web/shelf.js            static/shelf.js
 servers/media/web/icons/tmdb.svg      static/tmdb.svg

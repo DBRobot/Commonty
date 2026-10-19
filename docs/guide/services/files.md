@@ -16,11 +16,21 @@ locked on your device before they leave it, so no box can read them.
 Then:
 
 - **Upload:** drop files anywhere on the page, or press **Upload**.
-  Large files go up in pieces.
-- **Folders:** **New folder**; open one to go into it.
+  Large files go up in pieces. Drop a whole folder, or press **Upload
+  folder**, and it goes in with every folder inside it.
+- **Folders:** **New folder**; open one to go into it. The list shows how
+  much each folder holds.
+- **Search:** type in **Search your files**. This folder's matches show at
+  once, and every match in all your files below them, with where each one
+  is. The search in the top bar finds your files too while Files is open.
 - **Preview:** click a file to see it. Files up to 64 MiB preview.
 - **Download:** open a file's menu, or select several and press
-  **Download**.
+  **Download**. Several files, or a folder (**Download as zip** in its
+  menu), come down as one zip.
+- **Scan:** press **Scan**, take a picture of each page with your phone (or
+  choose pictures), crop and turn them, and save one PDF into the folder
+  you are in. With **Make the words searchable** on, the words are read on
+  your device so the PDF can be searched and copied.
 - **Rename and move:** from a file's menu, or **Move** for a selection.
 - **Edit and sign a PDF:** open a PDF and press **Edit** or **Sign**.
   You can write on it, highlight, draw, comment, change its own words,

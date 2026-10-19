@@ -4,7 +4,8 @@
 // and byte is turned over here: the gate moves ciphertext.
 
 import { unlock, list, download as fetchTo, fetchPlain, put, trash, mkdir, move, trashed, restore, forever, emptyTrash, human } from './library.js';
-import { me } from './shell.js';
+import { me, searchFrom } from './shell.js';
+import { zipOf, dropped, picked as fromFolderPicker, putAll, Names, folderSize, sizesChanged } from './files-more.js';
 
 const $ = (id) => document.getElementById(id);
 const { user } = await me();
@@ -13,6 +14,7 @@ const ROOT = 'Files';
 const PREVIEW_MAX = 64 * 1024 * 1024;
 
 let lib = null;
+let names = null;                // every name in Files, for search (files-more.js)
 let place = 'files';             // or 'trash'
 let here = '';                   // the folder under ROOT, plain
 let items = [];
@@ -148,7 +150,7 @@ function render() {
       el('td', { class: 'chk' }, tick),
       el('td', {}, name),
       el('td', { class: 'mono wide-only', text: trashy ? when(it.when) : when(it.modified) }),
-      el('td', { class: 'mono wide-only', text: it.dir ? '—' : human(it.size) }),
+      el('td', { class: 'mono wide-only' }, it.dir ? sizeOf(it) : human(it.size)),
       el('td', { class: 'act' }, trashy
         ? (lib.reader ? '' : el('span', { class: 'acts' },
           el('button', { class: 'quiet small', type: 'button', text: 'Restore', 'aria-label': `Restore ${it.name}`, onclick: (e) => { e.stopPropagation(); back(it); } }),
@@ -161,7 +163,7 @@ function render() {
     const t = el('button', { type: 'button', class: 'tile' },
       el('div', { class: 'thumb' }, icon(it, 'big')),
       el('b', { text: it.name }),
-      el('span', { text: it.dir ? 'Folder' : `${human(it.size)} · ${when(trashy ? it.when : it.modified)}` }));
+      it.dir ? el('span', {}, 'Folder · ', sizeOf(it)) : el('span', { text: `${human(it.size)} · ${when(trashy ? it.when : it.modified)}` }));
     t.style.setProperty('--c', KINDS[kind(it)][0]);
     t.onclick = () => open(it);
     return t;
@@ -171,10 +173,55 @@ function render() {
   for (const b of document.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === view));
   for (const b of document.querySelectorAll('[data-place]')) b.setAttribute('aria-current', String(b.dataset.place === place));
   $('empty').hidden = list.length > 0;
-  $('empty').textContent = trashy ? 'The trash is empty. Things put here go for good after 30 days.' : ($('search').value ? 'Nothing here by that name.' : 'Nothing here yet. Drop files anywhere on the page, or use Upload.');
+  $('empty').textContent = trashy ? 'The trash is empty. Things put here go for good after 30 days.' : ($('search').value ? 'Nothing in this folder by that name.' : 'Nothing here yet. Drop files anywhere on the page, or use Upload.');
   $('foot').textContent = trashy ? 'Trashed files stay for 30 days, then the box lets them go for good. Delete forever and Empty trash delete them at once.' : 'Names and contents are encrypted in this tab. Drop files anywhere on the page to upload them here.';
   $('all').hidden = trashy || lib.reader;
   selection();
+}
+
+// Something in Files changed under `path`: the names search keeps and the
+// sizes of the folders above it are worked out again when next asked
+function changed(...paths) {
+  names?.forget();
+  for (const p of paths) sizesChanged(folderPath(p));
+}
+
+// a folder's size: a dash until everything under it has been counted
+function sizeOf(it) {
+  const at = el('span', { class: 'fsize', text: '—' });
+  if (place !== 'files') return at;
+  folderSize(lib, it.path).then((n) => { if (n !== null) at.textContent = human(n); });
+  return at;
+}
+
+// Search: this folder's names at once, then every name in Files below them
+let findN = 0;
+async function findEverywhere() {
+  const q = $('search').value.trim();
+  const box = $('found');
+  const n = ++findN;
+  if (!q || place !== 'files') { box.hidden = true; return; }
+  box.hidden = false;
+  box.replaceChildren(el('h2', { text: 'In all your files' }), el('p', { class: 'note', text: 'Looking…' }));
+  let hits;
+  try { hits = await names.find(q); } catch (e) { if (n === findN) box.replaceChildren(el('h2', { text: 'In all your files' }), el('p', { class: 'note', text: e.message })); return; }
+  if (n !== findN) return;
+  const here2 = under(here);
+  const others = hits.filter((e) => folderPath(e.path) !== here2);
+  box.replaceChildren(el('h2', { text: 'In all your files' }),
+    ...(others.length ? others.map((e) => el('button', { type: 'button', class: 'hit', onclick: () => go(e.path) },
+      icon(e), el('span', { class: 'nm', text: e.name }), el('span', { class: 'in', text: `in ${['My files', ...folderPath(e.path).split('/').slice(1)].join(' / ')}` })))
+      : [el('p', { class: 'note', text: 'Nothing else by that name.' })]));
+}
+
+// a place in Files by its path: its folder shown, and the file opened
+async function go(path) {
+  if (!path.startsWith(`${ROOT}/`) && path !== ROOT) return;
+  const target = (await list(lib, folderPath(path))).find((x) => x.path === path);
+  if (target?.dir) { await show(inside(path)); return; }
+  await show(folderPath(path) === ROOT ? '' : inside(folderPath(path)));
+  const it = items.find((x) => x.path === path);
+  if (it) open(it);
 }
 
 const folderOf = (path) => {
@@ -194,7 +241,9 @@ async function show(dir) {
   here = dir;
   chosen.clear();
   $('search').value = '';
-  // a save in flight writes beside the file first (pdf.js); not shown
+  $('found').hidden = true;
+  // a save in flight writes beside the file first (pdf.js); not shown, nor
+  // is a file of the member's own that happens to be named like one
   items = (await list(lib, under(dir))).filter((it) => !/^\..+\.saving-\d+$/.test(it.name));
   render();
 }
@@ -246,8 +295,10 @@ function menu(it, anchor) {
   document.querySelector('.popmenu')?.remove();
   const m = el('div', { class: 'popmenu', role: 'menu' });
   const add = (label, fn, danger) => m.append(el('button', { type: 'button', role: 'menuitem', class: danger ? 'danger' : '', text: label, onclick: () => { m.remove(); anchor.focus(); fn(); } }));
-  if (it.dir) add('Open', () => open(it));
-  else add('Download', () => download(it));
+  if (it.dir) {
+    add('Open', () => open(it));
+    add('Download as zip', () => zipDown([it], `${it.name}.zip`));
+  } else add('Download', () => download(it));
   if (!it.dir && shows(it) === 'pdf') {
     add('Edit', () => editPdf(it, 'edit'));
     add('Sign', () => editPdf(it, 'sign'));
@@ -281,6 +332,7 @@ async function rename(it) {
   if (name.includes('/')) return note('A name cannot have a / in it.');
   try {
     await move(lib, it.path, `${folderPath(it.path)}/${name}`);
+    changed(it.path);
   } catch (e) {
     return note(/412/.test(e.message) ? `Something called ${name} is already there.` : e.message);
   }
@@ -297,7 +349,7 @@ async function relocate(list) {
   for (const it of list) {
     const dest = `${under(to)}/${it.name}`;
     if (dest === it.path || dest.startsWith(it.path + '/')) continue;
-    try { await move(lib, it.path, dest); } catch { failed.push(it.name); }
+    try { await move(lib, it.path, dest); changed(it.path, dest); } catch { failed.push(it.name); }
   }
   if (failed.length) note(`Not moved, something by that name is already there: ${failed.join(', ')}`);
   chosen.clear();
@@ -306,7 +358,7 @@ async function relocate(list) {
 }
 
 async function toTrash(list) {
-  for (const it of list) await trash(lib, it.path);
+  for (const it of list) { await trash(lib, it.path); changed(it.path); }
   chosen.clear();
   closePreview();
   reload();
@@ -319,7 +371,7 @@ async function gone(list) {
   if (yes === null) return;
   const failed = [];
   for (const it of list) {
-    try { await forever(lib, it); } catch { failed.push(it.name); }
+    try { await forever(lib, it); changed(it.path); } catch { failed.push(it.name); }
   }
   if (failed.length) note(`Not deleted: ${failed.join(', ')}`);
   closePreview();
@@ -338,6 +390,7 @@ async function back(it) {
   for (let n = 1; ; n++) {
     try {
       await restore(lib, it, to);
+      changed(to);
       break;
     } catch (e) {
       if (!/412/.test(e.message) || n > 20) return note(e.message);
@@ -477,6 +530,26 @@ async function download(it) {
   }
 }
 
+// several things, or a folder, as one zip
+async function zipDown(list2, name) {
+  const job = trayRow(name, 'Counting');
+  try {
+    const made = await zipOf(lib, list2, name, (d, t) => job.step(d, t, 'Unlocking into a zip'));
+    job.done(made === false ? 'Not saved' : 'Saved');
+  } catch (e) {
+    job.fail(e.message);
+  }
+}
+
+// folders dropped or picked: everything under them, folders made on the way
+async function uploadTree(things) {
+  if (lib.reader || place === 'trash') return;
+  const into = under(here);
+  await putAll(lib, into, things, (name) => trayRow(name, 'Waiting'));
+  changed(`${into}/x`);
+  if (place === 'files' && into === under(here)) show(here);
+}
+
 async function upload(files) {
   if (lib.reader || place === 'trash') return;
   const into = under(here);
@@ -489,6 +562,7 @@ async function upload(files) {
       job.fail(e.message);
     }
   }
+  changed(`${into}/x`);
   if (place === 'files' && into === under(here)) show(here);
 }
 
@@ -514,21 +588,36 @@ async function start() {
   $('trashplace').hidden = !!lib.reader;
   $('up').onclick = () => $('picker').click();
   $('picker').onchange = () => { upload([...$('picker').files]); $('picker').value = ''; };
+  $('up-folder').onclick = () => $('picker-folder').click();
+  $('scan').onclick = async () => {
+    const { openScan } = await import('./scan.js');
+    openScan({ lib, into: under(here), done: (path) => { changed(path); show(here).then(() => note(`Saved ${path.split('/').pop()}.`)); } });
+  };
+  $('picker-folder').onchange = () => { uploadTree(fromFolderPicker($('picker-folder').files)); $('picker-folder').value = ''; };
+  names = new Names(lib);
   $('newfolder').onclick = async () => {
     const name = await ask({ title: 'New folder', value: '', ok: 'Make it' });
     if (!name) return;
     if (name.includes('/')) return note('A name cannot have a / in it.');
     await mkdir(lib, ROOT);
     await mkdir(lib, `${under(here)}/${name}`);
+    changed(`${under(here)}/${name}/x`);
     show(here);
   };
   for (const b of document.querySelectorAll('[data-place]')) b.onclick = () => (b.dataset.place === 'trash' ? showTrash() : show(''));
   for (const b of document.querySelectorAll('[data-view]')) b.onclick = () => { view = b.dataset.view; try { localStorage.setItem('dd-files-view', view); } catch { /* */ } render(); };
   for (const b of document.querySelectorAll('[data-sort]')) b.onclick = () => { sort = { key: b.dataset.sort, up: sort.key === b.dataset.sort ? !sort.up : true }; render(); };
-  $('search').oninput = () => render();
+  let typing;
+  $('search').oninput = () => { render(); clearTimeout(typing); typing = setTimeout(findEverywhere, 150); };
+  $('search').onfocus = () => { names.load().catch(() => {}); };
   $('all').onchange = () => { chosen.clear(); if ($('all').checked) for (const it of items) chosen.add(it.path); render(); };
   const picked = () => items.filter((it) => chosen.has(it.path));
-  $('sel-down').onclick = async () => { for (const it of picked()) if (!it.dir) await download(it); };
+  // one file downloads as itself; more, or a folder, as one zip
+  $('sel-down').onclick = async () => {
+    const p = picked();
+    if (p.length === 1 && !p[0].dir) return download(p[0]);
+    zipDown(p, `${here ? here.split('/').pop() : 'My files'}.zip`);
+  };
   $('sel-move').onclick = () => relocate(picked());
   $('sel-trash').onclick = () => toTrash(picked());
   $('empty-trash').onclick = emptyAll;
@@ -550,9 +639,26 @@ async function start() {
     e.preventDefault();
     depth = 0;
     $('drop').hidden = true;
-    upload([...e.dataTransfer.files]);
+    // the folders in a drop are read while the drop still holds them
+    dropped(e.dataTransfer).then((things) => {
+      if (things.some((t) => t.dir || t.rel.includes('/'))) uploadTree(things);
+      else upload(things.map((t) => t.file));
+    });
   });
+  // the bar's search finds names in Files too, while this page is open
+  searchFrom({
+    name: 'Files',
+    find: async (text) => (await names.find(text, 6)).map((e) => ({
+      title: e.name,
+      sub: ['My files', ...folderPath(e.path).split('/').slice(1)].join(' / '),
+      href: `/_dd/files#${encodeURIComponent(e.path)}`,
+    })),
+  });
+  // an address with a place in it (#Files/...) opens there
+  const fromHash = () => { const h = decodeURIComponent(location.hash.slice(1)); if (h) go(h); };
+  addEventListener('hashchange', fromHash);
   await show('');
+  fromHash();
 }
 
 start().catch((e) => { $('msg').hidden = false; $('msg').textContent = String(e.message || e); });

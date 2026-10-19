@@ -133,6 +133,8 @@ state = {
     "dav": {},
     "dirs": set(),
     "uploads": {},
+    # every request, as (method, path): what the page asked of the box
+    "log": [],
 }
 DEV_FP = "a1b2c3d4e5f6"
 
@@ -157,6 +159,12 @@ MIME = {
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def parse_request(self):
+        good = super().parse_request()
+        if good and not self.path.startswith("/test/"):
+            state["log"].append([self.command, unquote(self.path)])
+        return good
 
     def send(self, body, code=200, ctype="application/json", headers=None):
         b = (
@@ -199,6 +207,8 @@ class H(BaseHTTPRequestHandler):
         p, q = u.path, parse_qs(u.query)
         if p == "/_dd/mail":
             return self.file("pages/mail.html")
+        if p == "/_dd/files":
+            return self.file("pages/files.html")
         if p.startswith("/_dd/static/"):
             return self.file("static/" + p[len("/_dd/static/") :])
         if p.startswith("/_dd/web/") and BUNDLE:
@@ -209,7 +219,20 @@ class H(BaseHTTPRequestHandler):
             b = state["dav"].get(self.dav_path())
             if b is None:
                 return self.send({"error": "no"}, 404)
+            rng = self.headers.get("range")
+            if rng:
+                # a range of the sealed file, as the gate serves it (library.js pieces)
+                a, z = rng.split("=")[1].split("-")
+                part = b[int(a) : int(z) + 1]
+                return self.send(
+                    part,
+                    206,
+                    "application/octet-stream",
+                    {"content-range": f"bytes {a}-{int(a) + len(part) - 1}/{len(b)}"},
+                )
             return self.send(b, 200, "application/octet-stream")
+        if p == "/test/log":
+            return self.send(state["log"])
         if p == "/test/dav":
             return self.send(
                 [

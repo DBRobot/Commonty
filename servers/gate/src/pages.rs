@@ -372,6 +372,22 @@ const STATIC: &[(&str, &str, &str)] = &[
         "servers/files/web/pick.css",
         "text/css; charset=utf-8",
     ),
+    // Files: zips, folder uploads, search, folder sizes; and Scan to PDF
+    (
+        "files-more.js",
+        "servers/files/web/files-more.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "scan.js",
+        "servers/files/web/scan.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "scan.css",
+        "servers/files/web/scan.css",
+        "text/css; charset=utf-8",
+    ),
     (
         "media.js",
         "servers/media/web/media.js",

@@ -343,6 +343,43 @@ which opens the library and speaks to the gate, and the wasm in
 [client/web/src/library.rs](../../client/web/src/library.rs), which does
 the crypto with the same `library` crate as everything else.
 
+Files' work on many files at once is
+[servers/files/web/files-more.js](../../servers/files/web/files-more.js):
+
+- **A folder or a selection as one zip:** each file read by ranges and
+  opened (`pieces`), streamed through `zip.js` (the Leave tab's writer,
+  stored and Zip64) to a file the person picks, or a Blob where the
+  browser has no picker.
+- **Folders in:** a drop's folder entries (`webkitGetAsEntry`) or an
+  `<input webkitdirectory>`, put with their folders made on the way;
+  `..` and `.` parts of a name are dropped, so nothing lands outside the
+  folder it was dropped in.
+- **Search:** every name under `Files/`, walked once and kept in the tab's
+  memory alone (names are private, so never in its storage), found by
+  every word typed; this folder's matches first, the library's below, and
+  in the bar's search (`searchFrom`). `/_dd/files#<path>` opens a place.
+- **Folder sizes:** everything under a folder counted, three folders at a
+  time, remembered for the visit. Any change Files makes (an upload, a
+  rename, a move, the trash, a new folder) forgets the sizes above it and
+  the search's names, so both are worked out again when next shown.
+- **A zip without a save picker** (Firefox, Safari, the app's webviews) is
+  gathered in the tab before it is saved, so it is refused past 2 GB, and
+  the person is told to download in parts or use a browser that writes
+  straight to disk.
+- A save in flight (the PDF editor's) writes beside the file as
+  `.<name>.saving-<time>` first; Files does not list names of that shape,
+  so a file of the member's own named so would not show either.
+- **Scan to PDF** is [scan.js](../../servers/files/web/scan.js): pictures
+  turned and cropped in a canvas, made a PDF by MuPDF (`Pdf.fromImages`),
+  read by Tesseract into hidden text when asked (as the PDF editor's
+  Recognise text), and sealed into the folder open. Up to 40 pages a scan,
+  each kept as a picture until the PDF is made.
+
+`checks.files-page` drives all of it in a browser against the Mail test's
+made-up gate, and looks at what the gate holds (sealed bytes under
+encrypted names) and at what it was asked: typing a search asks nothing,
+and no request carries a word searched for.
+
 The gate serves both pages at `/_dd/files` and `/_dd/media` to the demo
 when it has a library; a member's are the app's (below). They belong on `files.<domain>`: that
 host is the only one that serves `/_dd/transcode`.

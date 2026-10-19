@@ -1,0 +1,41 @@
+/* Scan to PDF (scan.js): the page being cropped above, the pages in a row
+   below, the name and Save at the foot. Tokens from home.css. */
+
+dialog.dd-scan {
+  width: min(900px, calc(100vw - 24px)); max-height: calc(100vh - 24px); padding: 0;
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink);
+}
+dialog.dd-scan:not([open]) { display: none; }
+dialog.dd-scan::backdrop { background: rgba(10, 14, 20, .45); }
+.dd-scan button { margin: 0; height: 38px; padding: 0 14px; font-size: 14px; }
+.dd-scan .head { display: flex; gap: 8px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.dd-scan .head h2 { margin: 0 auto 0 0; font-size: 17px; }
+.dd-scan .body { flex: 1; min-height: 0; overflow: auto; display: grid; gap: 12px; padding: 14px 16px; }
+.dd-scan .stage { display: grid; gap: 10px; justify-items: center; }
+.dd-scan .empty { display: grid; gap: 12px; justify-items: center; padding: 40px 0; text-align: center; color: var(--ink-2); }
+.dd-scan .view { max-width: 100%; padding: 14px; overflow: hidden; line-height: 0; background: var(--bg); border-radius: var(--radius); }
+.dd-scan .frame { position: relative; touch-action: none; }
+.dd-scan .view .img { max-width: 100%; max-height: 52vh; height: auto; width: auto; display: block; }
+.dd-scan .crop { position: absolute; outline: 2px solid var(--focus); box-shadow: 0 0 0 9999px rgba(10, 14, 20, .45); cursor: move; }
+.dd-scan .crop .h { position: absolute; width: 22px; height: 22px; border-radius: 50%; background: var(--surface); border: 2px solid var(--focus); }
+.dd-scan .crop .h.nw { left: -11px; top: -11px; cursor: nwse-resize; }
+.dd-scan .crop .h.ne { right: -11px; top: -11px; cursor: nesw-resize; }
+.dd-scan .crop .h.sw { left: -11px; bottom: -11px; cursor: nesw-resize; }
+.dd-scan .crop .h.se { right: -11px; bottom: -11px; cursor: nwse-resize; }
+.dd-scan .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.dd-scan .tools button { height: 34px; padding: 0 10px; font-size: 13px; }
+.dd-scan .strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.dd-scan .pg, .dd-scan .pg:hover { flex: none; display: grid; gap: 2px; justify-items: center; width: 74px; height: auto; padding: 4px; background: none; color: var(--ink-2); font: 11px var(--mono); border: 2px solid transparent; }
+.dd-scan .pg[aria-current="true"] { border-color: var(--pick); }
+.dd-scan .pg canvas { width: 64px; height: auto; background: #fff; box-shadow: 0 0 0 1px var(--line); }
+.dd-scan .foot { display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); }
+.dd-scan .foot .nm { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-2); }
+.dd-scan .foot .nm input { flex: 1; height: 36px; font-size: 15px; }
+.dd-scan .foot .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.dd-scan .foot .chk input { width: 16px; height: 16px; }
+.dd-scan .foot .state { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--ink-2); }
+.dd-scan .foot .row { grid-column: 1 / -1; justify-content: flex-end; }
+@media (max-width: 600px) {
+  .dd-scan .foot { grid-template-columns: 1fr; }
+}

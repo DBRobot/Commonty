@@ -29,8 +29,11 @@
       </div>
       <div class="drive-actions" id="actions" hidden>
         <button id="newfolder" class="quiet" type="button" data-guide="new-folder">New folder</button>
+        <button id="scan" class="quiet" type="button">Scan</button>
+        <button id="up-folder" class="quiet" type="button">Upload folder</button>
         <button id="up" type="button" data-guide="upload">Upload</button>
         <input id="picker" type="file" multiple hidden>
+        <input id="picker-folder" type="file" webkitdirectory multiple hidden>
       </div>
       <div class="drive-actions" id="trash-actions" hidden>
         <button id="empty-trash" class="danger" type="button">Empty trash</button>
@@ -52,7 +55,7 @@
         <div class="toolbar">
           <nav class="crumbs" id="crumbs" aria-label="Folder"></nav>
           <div class="grow"></div>
-          <label class="search"><input id="search" type="search" placeholder="Search this folder" aria-label="Search this folder"></label>
+          <label class="search"><input id="search" type="search" placeholder="Search your files" aria-label="Search your files"></label>
           <div class="seg" role="group" aria-label="View">
             <button type="button" data-view="list" aria-pressed="true" aria-label="List">☰</button>
             <button type="button" data-view="grid" aria-pressed="false" aria-label="Grid">▦</button>
@@ -77,6 +80,7 @@
         </table>
         <div class="tiles" id="tiles" hidden></div>
         <p class="note" id="empty" hidden>Nothing here yet. Drop files anywhere on the page, or use Upload.</p>
+        <div class="found" id="found" hidden></div>
         <p class="note" id="foot">Names and contents are encrypted in this tab. Drop files anywhere on the page to upload them here.</p>
       </section>
     </div>

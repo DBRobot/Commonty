@@ -80,6 +80,23 @@ export class Pdf {
     this.fieldSerial = 0;
   }
 
+  /// A new PDF of pictures, a page each, as a scan is: pages are A4 wide
+  /// and as tall as each picture's shape. images: [{ bytes, width, height }]
+  /// (JPEG or PNG). The document opens for editing like any other.
+  static async fromImages(images) {
+    await engine();
+    const doc = new mu.PDFDocument();
+    for (const im of images) {
+      const w = 595.28;
+      const h = (w * im.height) / im.width;
+      const ref = doc.addImage(new mu.Image(im.bytes));
+      const page = doc.addPage([0, 0, w, h], 0, { XObject: { Im0: ref } }, `q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} 0 0 cm /Im0 Do Q`);
+      doc.insertPage(-1, page);
+    }
+    const bytes = doc.saveToBuffer('garbage,compress').asUint8Array().slice();
+    return Pdf.open(bytes);
+  }
+
   /// Open `bytes`. A file with a password: { password: true } is thrown,
   /// and open again with `password`.
   static async open(bytes, password) {
