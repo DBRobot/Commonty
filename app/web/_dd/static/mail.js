@@ -299,16 +299,143 @@ function drawBody(r) {
   } else {
     body.innerHTML = `<pre class="plain">${esc(r.plain || '')}</pre>`;
   }
-  $('att').innerHTML = '';
-  for (const a of r.attachments) {
-    const name = a.filename || (a.type === 'message/rfc822' ? 'message.eml' : 'attachment');
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([a.body], { type: 'application/octet-stream' }));
-    link.download = name;
-    link.innerHTML = `${svg('clip', 14)}${esc(name)} · ${esc(size(a.body.length))}`;
-    $('att').append(link);
+  drawFilesOf(r);
+}
+
+// The attachments of the message open, and what can be done with each:
+// into Files (sealed there with the library's key, in this tab), to this
+// device, or a PDF opened in Files' editor. Built as nodes, never as HTML.
+let opened = null;
+let urls = [];
+function drawFilesOf(r) {
+  for (const u of urls) URL.revokeObjectURL(u);
+  urls = [];
+  const m = mb.msgs.get(pick);
+  opened = { id: pick, list: r.attachments, r };
+  const box = $('att');
+  box.replaceChildren();
+  const node = (tag, props = {}, ...kids) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) if (k === 'text') e.textContent = v; else e.setAttribute(k, v);
+    e.append(...kids);
+    return e;
+  };
+  r.attachments.forEach((a, i) => {
+    const name = attName(a);
+    const saved = m?.saved?.[`${i}:${name}`];
+    const savedPath = typeof saved?.path === 'string' ? saved.path : null;
+    const dl = node('a', { class: 'dev', download: name, text: 'To this device' });
+    dl.href = URL.createObjectURL(new Blob([a.body], { type: 'application/octet-stream' }));
+    urls.push(dl.href);
+    const icon = node('span', { class: 'ic' });
+    icon.innerHTML = svg('clip', 14);
+    const row = node('div', { class: 'mail-file' },
+      node('span', { class: 'nm' }, icon, node('b', { text: name }), node('span', { class: 'sz', text: size(a.body.length) })),
+      node('span', { class: 'acts' },
+        node('button', { type: 'button', class: 'go', 'data-save': String(i), text: 'Save to Files' }),
+        dl,
+        ...(isPdf(a, name) ? [node('button', { type: 'button', class: 'quiet', 'data-pdf': String(i), 'data-mode': 'edit', text: 'Edit' }), node('button', { type: 'button', class: 'quiet', 'data-pdf': String(i), 'data-mode': 'sign', text: 'Sign' })] : [])));
+    if (savedPath) row.append(node('span', { class: 'saved', text: `Saved to ${where(savedPath)}` }));
+    box.append(row);
+  });
+  if (r.attachments.length > 1) box.append(node('button', { type: 'button', class: 'quiet all', 'data-saveall': '1', text: 'Save all to Files' }));
+}
+const attName = (a) => a.filename || (a.type === 'message/rfc822' ? 'message.eml' : 'attachment');
+const isPdf = (a, name) => a.type === 'application/pdf' || /\.pdf$/i.test(name);
+const where = (path) => ['Files', ...path.split('/').slice(1, -1)].join(' / ');
+
+// The member's library, opened the first time an attachment goes to or
+// comes from Files: the app hands its key over as it does for Files
+let files = null;
+async function library() {
+  if (!files) {
+    const { unlock } = await import('./library.js');
+    const r = await unlock();
+    if (r.none) throw new Error('You have no files library yet.');
+    if (!r.ok) throw new Error('Your files open through the Commonty app.');
+    if (r.ok.reader) throw new Error('This library is shared with you to look at; nothing can be saved into it.');
+    files = r.ok;
+  }
+  return files;
+}
+const thisMonth = () => `Files/Mail/${new Date().toISOString().slice(0, 7)}`;
+
+async function saveToFiles(which) {
+  const s = opened;
+  try {
+    const lib = await library();
+    const { pickFolder, saveInto } = await import('./pick.js');
+    const one = which.length === 1 ? attName(s.list[which[0]]) : null;
+    const dir = await pickFolder(lib, { title: one ? `Save ${one} to Files` : `Save ${which.length} attachments to Files`, start: thisMonth() });
+    if (!dir) return;
+    const saved = {};
+    for (const i of which) {
+      const name = attName(s.list[i]);
+      const path = await saveInto(lib, dir, name, s.list[i].body);
+      saved[`${i}:${name}`] = { lib: lib.id, path, at: Date.now() };
+    }
+    await mb.change([s.id], { saved });
+    toast(`Saved to ${where(`${dir}/x`)}`);
+    if (pick === s.id && !editing) drawFilesOf(s.r);
+  } catch (err) {
+    toast(`Not saved: ${err.message || err}`);
   }
 }
+
+async function editPdf(i, mode) {
+  const s = opened;
+  const m = mb.msgs.get(s.id);
+  const a = s.list[i];
+  const name = attName(a);
+  try {
+    const lib = await library();
+    const { openEditor } = await import('./pdf.js');
+    let ed = null;
+    const actions = m && m.kind === 'in' ? [{
+      label: 'Reply with it attached',
+      small: 'A reply to this email, with the PDF as it is now',
+      run: async (bytes) => {
+        // signing or reading a scan can make it bigger than it came
+        if (bytes.length > ATTACH_MAX) throw new Error('it is now too big to send: about 18 MB of files fit');
+        ed?.close(true);
+        await compose(m, 'reply');
+        editing.attachments.push({ name, type: 'application/pdf', bytes });
+        drawFiles();
+      },
+    }] : [];
+    ed = await openEditor({
+      lib, bytes: a.body.slice(), name, folder: thisMonth(), who: user, mode, actions,
+      saved: (path) => {
+        if (!path) return;
+        mb.change([s.id], { saved: { [`${i}:${name}`]: { lib: lib.id, path, at: Date.now() } } })
+          .then(() => { if (pick === s.id && !editing) drawFilesOf(s.r); });
+      },
+    });
+  } catch (err) {
+    toast(`The editor did not open: ${err.message || err}`);
+  }
+}
+
+// a file from Files on the email being written; mail's own limit is about
+// 25 MB of message, so about 18 MB of files once they are encoded
+const ATTACH_MAX = 18 * 1024 * 1024;
+async function attachFromFiles() {
+  try {
+    const lib = await library();
+    const { pickFile } = await import('./pick.js');
+    const { fetchPlain } = await import('./library.js');
+    const it = await pickFile(lib, { title: 'Attach from Files', start: 'Files' });
+    if (!it || !editing) return;
+    const now = editing.attachments.reduce((n, x) => n + x.bytes.length, 0);
+    if (now + it.size > ATTACH_MAX) { toast(`${it.name} would make the email too big to send: about 18 MB of files fit.`); return; }
+    const bytes = await fetchPlain(lib, it.path);
+    editing.attachments.push({ name: it.name, type: TYPES[it.name.split('.').pop().toLowerCase()] || 'application/octet-stream', bytes });
+    drawFiles();
+  } catch (err) {
+    toast(`Not attached: ${err.message || err}`);
+  }
+}
+const TYPES = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', txt: 'text/plain', csv: 'text/csv', zip: 'application/zip', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ics: 'text/calendar', vcf: 'text/vcard' };
 const size = (n) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(0)} KB` : `${(n / (1 << 20)).toFixed(1)} MB`);
 
 const FMT = [
@@ -412,7 +539,7 @@ function drawEditor() {
         <button class="ib back" type="button" data-act="close" aria-label="Back">${svg('back', 18)}</button>
         <div class="mail-fmt" role="toolbar" aria-label="Formatting" data-guide="mail-format">${fmtBar()}</div>
         <div class="mail-edright">
-          <button class="ib" type="button" data-act="attach">${svg('clip', 18)}<span class="lbl">Attach</span></button>
+          <span class="mail-attach"><button class="ib" type="button" data-act="attach" aria-haspopup="menu" aria-expanded="false">${svg('clip', 18)}<span class="lbl">Attach</span></button><span class="mail-attmenu" role="menu" hidden><button type="button" role="menuitem" data-act="attach-device">From this device</button><button type="button" role="menuitem" data-act="attach-files">From Files</button></span></span>
           <button class="ib" type="button" data-act="discard" aria-label="Discard" title="Discard">${svg('trash', 18)}</button>
           <button class="ib primary" type="submit" id="send">${svg('sent', 16)}Send</button>
         </div>
@@ -558,7 +685,18 @@ async function act(name, el) {
   const m = mb.msgs.get(pick);
   if (name === 'back' || name === 'close') { if (name === 'close') await saveDraft(); editing = null; $('app').classList.remove('reading'); drawRead(); return; }
   if (name === 'discard') { const id = editing?.draftId; editing = null; if (id) await mb.discard(id); toast('Discarded'); $('app').classList.remove('reading'); drawAll(); return; }
-  if (name === 'attach') { $('c-attach').click(); return; }
+  if (name === 'attach') {
+    const menu = el.parentElement.querySelector('.mail-attmenu');
+    menu.hidden = !menu.hidden;
+    el.setAttribute('aria-expanded', String(!menu.hidden));
+    if (!menu.hidden) menu.querySelector('button').focus();
+    return;
+  }
+  if (name === 'attach-device' || name === 'attach-files') {
+    el.closest('.mail-attmenu').hidden = true;
+    if (name === 'attach-device') $('c-attach').click(); else attachFromFiles();
+    return;
+  }
   if (name === 'showcc' || name === 'showbcc') { const k = name === 'showcc' ? 'cc' : 'bcc'; $(`row-${k}`).hidden = false; el.hidden = true; $(`c-${k}`).focus(); return; }
   if (name === 'pics') { pics = true; drawRead(); return; }
   if (!m) return;
@@ -584,6 +722,18 @@ document.addEventListener('click', (e) => {
   if (r) { if (editing) saveDraft(); editing = null; pick = r.dataset.id; pics = false; $('app').classList.add('reading'); drawRows(); drawRead(); return; }
   const rm = e.target.closest('[data-rm]');
   if (rm && editing) { editing.attachments.splice(Number(rm.dataset.rm), 1); drawFiles(); return; }
+  const sv = e.target.closest('[data-save]');
+  if (sv && opened) { saveToFiles([Number(sv.dataset.save)]); return; }
+  if (e.target.closest('[data-saveall]') && opened) {
+    // the ones not saved yet; each already saved says where it went
+    const m = mb.msgs.get(opened.id);
+    const left = opened.list.map((a, i) => i).filter((i) => !m?.saved?.[`${i}:${attName(opened.list[i])}`]);
+    if (left.length) saveToFiles(left); else toast('Every attachment is in Files already.');
+    return;
+  }
+  const pdf = e.target.closest('[data-pdf]');
+  if (pdf && opened) { editPdf(Number(pdf.dataset.pdf), pdf.dataset.mode); return; }
+  if (!e.target.closest('.mail-attach')) for (const mm of document.querySelectorAll('.mail-attmenu')) mm.hidden = true;
   const x = e.target.closest('[data-act]');
   if (x) act(x.dataset.act, x);
 });

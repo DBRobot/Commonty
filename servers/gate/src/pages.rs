@@ -361,6 +361,17 @@ const STATIC: &[(&str, &str, &str)] = &[
         "servers/files/web/pdf.css",
         "text/css; charset=utf-8",
     ),
+    // choosing a file or folder in Files, from Files, the editor and Mail
+    (
+        "pick.js",
+        "servers/files/web/pick.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "pick.css",
+        "servers/files/web/pick.css",
+        "text/css; charset=utf-8",
+    ),
     (
         "media.js",
         "servers/media/web/media.js",

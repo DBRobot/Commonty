@@ -16,7 +16,17 @@ servers/files/web/pdf-doc.js    the document, on MuPDF: everything that changes 
 servers/files/web/pdf-sign.js   signatures: key, certificate, CMS, checking
 servers/files/web/pdf-ocr.js    reading a scan's words, on Tesseract
 servers/files/web/pdf.css       the workbench's look, from home.css's tokens
+servers/files/web/pick.js       a file or folder in Files, from any page with the library; saveInto
+servers/files/web/pick.css      the picker's look
 ```
+
+The editor also opens on a PDF that is not in Files yet (a mail's
+attachment): `openEditor({ bytes, name, folder })`. Its Save asks for a
+folder (starting at `folder`), and from then on it is a file in Files like
+any other. `actions` adds ways out under Save, each given the finished
+bytes (Mail's "Sign and reply"). `saveInto(lib, dir, name, bytes)` never
+writes over a file: it makes the folders on the way and takes "name (2)"
+when the name is taken.
 
 What they load is pinned in `flake.nix` beside our own wasm (`webDist`,
 served at `/_dd/web/` and carried by the app):

@@ -156,6 +156,22 @@ message itself. A draft's HTML is cleaned the same way before it is
 edited. The app gives a browser it let in the page policy of its own
 window, so no inline script runs where the key is.
 
+**Attachments and Files.** The page opens the member's library the first
+time an attachment goes to or comes from Files (`library.js` `unlock()`,
+which the app answers for Mail as it does for Files), and saves with
+`pick.js` (`pickFolder`, `saveInto`, which never writes over a file) into
+a folder that starts at `Files/Mail/<year-month>`. Where each attachment
+went is a locked change like read and starred: `{ saved: { "<n>:<name>":
+{ lib, path, at } } }`, keyed by its place in the message as well as its
+name, since a message can carry two `image.png`; every device shows
+"Saved to Files / ...". Attach from Files reads the file with
+`fetchPlain` and adds it like one from the device, refused past about
+18 MB of files. A PDF attachment opens in the PDF editor on its bytes
+(`openEditor({ bytes })`, [pdf-editor.md](pdf-editor.md)), and **Reply with
+it attached** hands the finished PDF to a reply. The box sees none of it:
+the attachment is opened with the mail key and sealed with the library key
+in the same tab.
+
 ## Sending
 
 From the member's own device (`app/src/mail.rs`, `client/mailsend`):

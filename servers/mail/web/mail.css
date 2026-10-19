@@ -91,7 +91,22 @@ body.mail-page:has(#app:not([hidden])) footer.dd-foot { display: none; }
 .mail-pics { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); margin-bottom: 12px; }
 .mail-pics button { margin: 0; height: 30px; padding: 0 12px; font-size: 13px; white-space: nowrap; flex: none; }
 .mail-att { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0 0; }
-.mail-att a { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; background: var(--bg); color: var(--ink); text-decoration: none; }
+.mail-att { flex-direction: column; flex-wrap: nowrap; }
+.mail-file { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; background: var(--bg); font-size: 13px; }
+.mail-file .nm { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.mail-file .nm b { font-weight: 600; overflow-wrap: anywhere; }
+.mail-file .nm .sz { color: var(--ink-2); font-family: var(--mono); white-space: nowrap; }
+.mail-file .ic svg { width: 14px; height: 14px; display: block; stroke: currentColor; }
+.mail-file .acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mail-file .acts button { margin: 0; height: 30px; padding: 0 10px; font-size: 13px; }
+.mail-file .acts a.dev { color: var(--link); font-size: 13px; padding: 0 6px; }
+.mail-file .saved { flex-basis: 100%; color: var(--ok); font-size: 12.5px; }
+.mail-att button.all { align-self: flex-start; margin: 0; height: 32px; padding: 0 12px; font-size: 13px; }
+.mail-attach { position: relative; display: inline-flex; }
+.mail-attmenu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: grid; min-width: 170px; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.mail-attmenu[hidden] { display: none; }
+.mail-attmenu button, .mail-attmenu button:hover { margin: 0; height: auto; padding: 8px 10px; justify-content: flex-start; background: none; color: var(--ink); font-size: 14px; font-weight: 500; border-radius: var(--radius); }
+.mail-attmenu button:hover, .mail-attmenu button:focus-visible { background: var(--line-2); }
 .mail-notes { margin: 16px 16px 0; display: grid; gap: 10px; }
 .mail-note { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; display: flex; gap: 12px; align-items: flex-start; font-size: 13.5px; }
 .mail-note svg { width: 18px; height: 18px; flex: none; margin-top: 2px; }

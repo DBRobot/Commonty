@@ -1629,7 +1629,7 @@
           # the mail Worker in a browser, against a fake Cloudflare
           mail-worker = import ./nix/tests/mail-worker.nix args;
           # the Mail page in a browser, as the app serves it, against a fake app and box
-          mail-page = import ./nix/tests/mail-page.nix args;
+          mail-page = import ./nix/tests/mail-page.nix (args // { web = self.packages.${system}.web; });
           safe-rd = import ./nix/tests/safe-rd.nix args;
           # the PDF editor's document and signatures, on the pinned MuPDF
           pdf-editor = import ./nix/tests/pdf-editor.nix (args // { web = self.packages.${system}.web; });

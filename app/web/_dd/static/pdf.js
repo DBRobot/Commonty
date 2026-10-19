@@ -5,7 +5,8 @@
 // the pages, the tools, and saving back into the library.
 
 import { el } from './kit.js';
-import { put, move, trash, list, fetchPlain, save as toDevice, human } from './library.js';
+import { put, move, trash, fetchPlain, save as toDevice, human } from './library.js';
+import { pickFile, pickFolder, saveInto } from './pick.js';
 import { Pdf } from './pdf-doc.js';
 import * as sig from './pdf-sign.js';
 
@@ -70,12 +71,18 @@ const b64 = (u8) => {
 };
 const pngBytes = (canvas) => new Promise((ok) => canvas.toBlob(async (b) => ok(new Uint8Array(await b.arrayBuffer())), 'image/png'));
 
-/// Open the editor over Files. `item` is the PDF (path, name), `lib` the
-/// library, `who` the member's name. mode: 'edit' or 'sign'. `saved(path)`
-/// once a save has landed, so Files can show it.
-export async function openEditor({ lib, item, who, mode = 'edit', saved }) {
+/// Open the editor over the page. `item` is a PDF in the library (path,
+/// name); or, for one that is not there yet (a mail's attachment), `bytes`
+/// and `name`, and Save asks where in Files it goes, starting at `folder`.
+/// `lib` is the library, `who` the member's name, mode 'edit' or 'sign'.
+/// `saved(path)` once a save has landed. `actions`: more ways out, each
+/// { label, small, run(bytes, name) }, listed under Save (Sign and reply).
+export async function openEditor({ lib, item, bytes, name, folder, who, mode = 'edit', saved, actions = [] }) {
   css();
-  const ed = new Editor(lib, item, who, saved);
+  const ed = new Editor(lib, item || { path: null, name: name || 'document.pdf' }, who, saved);
+  ed.given = bytes || null;
+  ed.folder = folder || 'Files';
+  ed.actions = actions;
   await ed.start(mode);
   return ed;
 }
@@ -124,7 +131,7 @@ class Editor {
     addEventListener('beforeunload', this.leaveHandler);
     this.back.focus();
     try {
-      const bytes = await fetchPlain(this.lib, this.item.path);
+      const bytes = this.given || await fetchPlain(this.lib, this.item.path);
       this.pdf = await this.openBytes(bytes);
       if (!this.pdf) return this.close(true);
     } catch (e) {
@@ -150,27 +157,30 @@ class Editor {
   }
 
   build() {
-    const where = this.item.path.split('/').slice(1, -1);
-    this.back = el('button', { class: 'pe-btn quiet', type: 'button', text: '← Files', 'aria-label': 'Back to Files', onclick: () => this.close() });
+    const where = this.item.path ? this.item.path.split('/').slice(1, -1) : null;
+    this.back = el('button', { class: 'pe-btn quiet', type: 'button', text: this.item.path ? '← Files' : '← Back', 'aria-label': this.item.path ? 'Back to Files' : 'Close the editor', onclick: () => this.close() });
     this.stateEl = el('span', { class: 'state-word', 'data-state': 'ok', role: 'status', text: 'Opening…' });
     this.undoBtn = el('button', { class: 'pe-btn quiet', type: 'button', text: '↶ Undo', disabled: true, onclick: () => this.undo() });
     this.redoBtn = el('button', { class: 'pe-btn quiet wide', type: 'button', text: '↷ Redo', disabled: true, onclick: () => this.redo() });
-    this.saveBtn = el('button', { class: 'pe-btn go', type: 'button', text: this.readOnly ? 'Download' : 'Save', disabled: !this.readOnly, onclick: () => (this.readOnly ? this.saveAs('download') : this.saveAs('replace')) });
+    this.saveBtn = el('button', { class: 'pe-btn go', type: 'button', text: this.readOnly ? 'Download' : this.item.path ? 'Save' : 'Save to Files', disabled: !this.readOnly, onclick: () => (this.readOnly ? this.saveAs('download') : this.saveAs('replace')) });
     this.menu = el('div', { class: 'pe-menu', role: 'menu', hidden: true });
     const opt = (label, small, fn, hide) => (hide ? null : el('button', { type: 'button', role: 'menuitem', onclick: () => { this.menu.hidden = true; fn(); } }, label, el('small', { text: small })));
+    const loose = !this.item.path;
     this.menu.append(
-      opt('Save', 'Replaces it; the old one stays in the Trash for 30 days', () => this.saveAs('replace'), this.readOnly),
+      opt(loose ? 'Save to Files' : 'Save', loose ? 'Into a folder you pick; it is locked like your other files' : 'Replaces it; the old one stays in the Trash for 30 days', () => this.saveAs('replace'), this.readOnly),
       opt('Save as a copy', 'A new file beside it; this one stays as it was', () => this.saveAs('copy'), this.readOnly),
       opt('Save flattened', 'Marks and fields burnt into the pages, for good', () => this.saveAs('flatten'), this.readOnly),
       opt('Save smaller', 'Unused parts dropped and the rest packed tighter', () => this.saveAs('smaller'), this.readOnly),
+      ...this.actions.map((a) => opt(a.label, a.small || '', () => this.saveAs('action', a))),
       el('hr'),
       opt('Download', 'To this device, unlocked', () => this.saveAs('download')),
     );
     this.more = el('button', { class: 'pe-btn go more', type: 'button', text: '▾', 'aria-label': 'More ways to save', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: (e) => { e.stopPropagation(); this.toggleMenu(); } });
+    this.whereEl = el('div', { class: 'where', text: where ? ['My files', ...where].join(' / ') : 'Not in Files yet' });
     const head = el('div', { class: 'pe-head' },
       this.back,
       el('div', { class: 'pe-title' },
-        el('div', {}, el('h1', { text: this.item.name }), el('div', { class: 'where', text: ['My files', ...where].join(' / ') }))),
+        el('div', {}, el('h1', { text: this.item.name }), this.whereEl)),
       this.stateEl,
       el('div', { class: 'pe-acts' },
         this.undoBtn, this.redoBtn,
@@ -1139,11 +1149,11 @@ class Editor {
   async chooseImage(fromLibrary) {
     let blob;
     if (fromLibrary) {
-      const it = await this.browse({ title: 'Choose a picture', want: /\.(png|jpe?g|webp|gif|bmp|avif)$/i });
+      const it = await pickFile(this.lib, { title: 'Choose a picture', want: /\.(png|jpe?g|webp|gif|bmp|avif)$/i, start: this.here(), host: this.root });
       if (!it) return;
       blob = new Blob([await fetchPlain(this.lib, it.path)]);
     } else {
-      const f = await pickFile('image/*');
+      const f = await pickLocal('image/*');
       if (!f) return;
       blob = f;
     }
@@ -1213,7 +1223,7 @@ class Editor {
   }
 
   async insertFromLibrary(at) {
-    const it = await this.browse({ title: 'Add pages from a PDF', want: /\.pdf$/i });
+    const it = await pickFile(this.lib, { title: 'Add pages from a PDF', want: /\.pdf$/i, start: this.here(), host: this.root });
     if (!it) return;
     try {
       const n = await this.pdf.insertFrom(at, await fetchPlain(this.lib, it.path));
@@ -1226,27 +1236,16 @@ class Editor {
 
   // pages out into new files beside this one
   async extract(groups, label) {
-    const dir = this.item.path.split('/').slice(0, -1).join('/');
+    const dir = this.item.path ? this.item.path.split('/').slice(0, -1).join('/') : await pickFolder(this.lib, { title: 'Where the new files go', start: this.folder, host: this.root });
+    if (!dir) return;
     const stem = this.item.name.replace(/\.pdf$/i, '');
     let made = 0;
     for (const g of groups) {
-      const bytes = this.pdf.extract(g);
-      const name = await this.freeName(dir, `${stem} (${label(g)}).pdf`);
-      await put(this.lib, `${dir}/${name}`, new Blob([bytes]));
+      await saveInto(this.lib, dir, `${stem} (${label(g)}).pdf`, this.pdf.extract(g));
       made++;
     }
     this.saved?.(null);
     this.say(`Made ${made} new file${made === 1 ? '' : 's'} beside this one.`);
-  }
-
-  async freeName(dir, name) {
-    const taken = new Set((await list(this.lib, dir)).map((x) => x.name));
-    if (!taken.has(name)) return name;
-    const dot = name.lastIndexOf('.');
-    for (let n = 2; ; n++) {
-      const t = `${name.slice(0, dot)} ${n}${name.slice(dot)}`;
-      if (!taken.has(t)) return t;
-    }
   }
 
   find(q) {
@@ -1587,7 +1586,7 @@ class Editor {
       el('div', { class: 'pe-row' },
         b('Blank page after', () => { this.pdf.insertBlank(sel.at(-1) + 1); this.refresh(); }),
         b('From your files', () => this.insertFromLibrary(sel.at(-1) + 1)),
-        b('From this device', async () => { const f = await pickFile('application/pdf', true); if (f) this.insertFiles(f, sel.at(-1) + 1); })),
+        b('From this device', async () => { const f = await pickLocal('application/pdf', true); if (f) this.insertFiles(f, sel.at(-1) + 1); })),
       el('h2', { text: 'Into new files' }),
       el('div', { class: 'pe-row' },
         b(`Copy ${label} out`, () => this.extract([sel], (g) => (g.length === 1 ? `page ${g[0] + 1}` : `pages ${g[0] + 1}-${g.at(-1) + 1}`)))),
@@ -1636,7 +1635,8 @@ class Editor {
     else { s.dataset.state = 'ok'; s.textContent = 'No changes'; }
     this.undoBtn.disabled = !this.pdf.canUndo();
     this.redoBtn.disabled = !this.pdf.canRedo();
-    if (!this.readOnly) this.saveBtn.disabled = !n && !this.pendingSeal;
+    // a document not in Files yet can always be saved there, changed or not
+    if (!this.readOnly) this.saveBtn.disabled = !n && !this.pendingSeal && !!this.item.path;
   }
 
   key(e) {
@@ -1673,7 +1673,20 @@ class Editor {
     if (t) this.setTool(t);
   }
 
-  async saveAs(how) {
+  // What is open now is what was saved: a sealed file is opened afresh, so
+  // the next change goes after its signature, not into it
+  async adopt(bytes) {
+    const reopen = await Pdf.open(bytes);
+    this.pdf.destroy();
+    this.pdf = reopen;
+    this.pendingSeal = false;
+    this.stamp = 0;
+    try { this.stamp = this.pdf.doc.getJournal().position; } catch { /* */ }
+    this.layout();
+    await this.checkSignatures();
+  }
+
+  async saveAs(how, action) {
     if (this.saving) return;
     this.saving = true;
     this.menu.hidden = true;
@@ -1694,16 +1707,33 @@ class Editor {
         this.state(['ok', 'Downloaded']);
         return;
       }
+      if (how === 'action') {
+        await action.run(bytes, this.item.name);
+        if (seal) await this.adopt(bytes);
+        this.state(['ok', 'Done']);
+        return;
+      }
+      const loose = !this.item.path;
+      const dir = loose ? await pickFolder(this.lib, { title: `Save ${this.item.name} to Files`, start: this.folder, host: this.root }) : this.here();
+      if (!dir) { this.state(); return; }
       this.state(['working', `Locking and sending ${human(bytes.length)}…`]);
-      const dir = this.item.path.split('/').slice(0, -1).join('/');
-      if (how === 'copy' || how === 'flatten' || how === 'smaller') {
+      if (loose || how === 'copy' || how === 'flatten' || how === 'smaller') {
         const stem = this.item.name.replace(/\.pdf$/i, '');
         const word = how === 'copy' ? (seal ? 'signed' : 'edited') : how === 'flatten' ? 'flattened' : 'smaller';
-        const name = await this.freeName(dir, `${stem} (${word}).pdf`);
-        await put(this.lib, `${dir}/${name}`, new Blob([bytes]));
-        this.saved?.(`${dir}/${name}`);
+        const path = await saveInto(this.lib, dir, loose && how === 'replace' ? this.item.name : `${stem} (${word}).pdf`, bytes);
+        const name = path.split('/').pop();
+        this.saved?.(path);
+        if (loose && how === 'replace') {
+          // it is a file in Files now: the next Save replaces it there
+          this.item = { path, name };
+          this.root.querySelector('.pe-title h1').textContent = name;
+          this.whereEl.textContent = ['My files', ...path.split('/').slice(1, -1)].join(' / ');
+          await this.adopt(bytes);
+          this.state(['ok', `Saved to ${this.whereEl.textContent}`]);
+          return;
+        }
         this.state(['ok', `Saved as ${name}`]);
-        this.say(`Saved as ${name}, beside it. This one is still open as it was.`);
+        this.say(`Saved as ${name}${loose ? '' : ', beside it'}. This one is still open as it was.`);
         return;
       }
       // in place: the new file first under a name of its own, then the old
@@ -1714,16 +1744,7 @@ class Editor {
       await trash(this.lib, this.item.path);
       await move(this.lib, temp, this.item.path);
       this.saved?.(this.item.path);
-      // what is open now is what was saved: a sealed file is opened afresh,
-      // so the next change goes after its signature, not into it
-      const reopen = await Pdf.open(bytes);
-      this.pdf.destroy();
-      this.pdf = reopen;
-      this.pendingSeal = false;
-      this.stamp = 0;
-      try { this.stamp = this.pdf.doc.getJournal().position; } catch { /* */ }
-      this.layout();
-      await this.checkSignatures();
+      await this.adopt(bytes);
       this.state(['ok', `Saved · ${new Date().toTimeString().slice(0, 5)}`]);
       this.say('Saved. The old one is in the Trash for 30 days.');
     } catch (e) {
@@ -1768,34 +1789,8 @@ class Editor {
     });
   }
 
-  // a file from the library: folders to walk, files matching `want`
-  browse({ title, want }) {
-    return new Promise((resolve) => {
-      const d = el('dialog', { 'aria-labelledby': 'pe-br-t' });
-      const box = el('div', { class: 'pe-browse' });
-      let at = this.item.path.split('/').slice(0, -1).join('/');
-      let pick = null;
-      const draw = async () => {
-        box.replaceChildren(el('div', { class: 'where', text: at.split('/').slice(1).length ? `My files / ${at.split('/').slice(1).join(' / ')}` : 'My files' }));
-        if (at.includes('/')) box.append(el('button', { type: 'button', text: '↑ Up a folder', onclick: () => { at = at.split('/').slice(0, -1).join('/'); draw(); } }));
-        let items = [];
-        try { items = await list(this.lib, at); } catch (e) { box.append(el('p', { text: e.message })); }
-        for (const it of items) {
-          if (it.dir) box.append(el('button', { type: 'button', text: `▸ ${it.name}`, onclick: () => { at = it.path; draw(); } }));
-          else if (want.test(it.name)) box.append(el('button', { type: 'button', onclick: () => { pick = it; d.close(); } }, el('span', { text: it.name }), el('span', { class: 'mono', text: human(it.size), style: 'margin-left:auto;color:var(--ink-2);font-size:12px' })));
-        }
-        if (box.children.length <= (at.includes('/') ? 2 : 1)) box.append(el('div', { class: 'where', text: 'Nothing here that fits.' }));
-      };
-      d.append(
-        el('div', { class: 'pe-dl-head' }, el('h2', { id: 'pe-br-t', text: title })),
-        el('div', { class: 'pe-dl-body' }, box),
-        el('div', { class: 'pe-dl-foot' }, el('button', { class: 'pe-btn quiet', type: 'button', text: 'Cancel', onclick: () => d.close() })));
-      d.onclose = () => { d.remove(); resolve(pick); };
-      this.root.append(d);
-      d.showModal();
-      draw();
-    });
-  }
+  // the folder this file is in, or where a new one would go
+  here() { return this.item.path ? this.item.path.split('/').slice(0, -1).join('/') : this.folder; }
 }
 
 function quadRect(q) {
@@ -1874,7 +1869,7 @@ function trim(cv) {
   return o;
 }
 
-function pickFile(accept, multiple = false) {
+function pickLocal(accept, multiple = false) {
   return new Promise((resolve) => {
     const i = document.createElement('input');
     i.type = 'file';

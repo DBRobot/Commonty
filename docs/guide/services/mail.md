@@ -38,6 +38,13 @@ Then:
   aliases. What you write is kept as a draft as you go.
 - **Reply, Reply all, Forward:** from the bar at the top of a message. A
   reply goes from the address the mail came to.
+- **Attachments and Files:** each attachment has **Save to Files**, which
+  puts it in a folder you pick (it starts at `Mail` and the month), locked
+  like your other files, and then says where it went. **To this device**
+  downloads it. A PDF also has **Edit** and **Sign**, which open it in
+  Files' PDF editor; from there **Reply with it attached** starts a reply
+  with the PDF as you left it. When writing, **Attach** offers **From this
+  device** or **From Files**.
 - **Search:** type in **Search mail**. It finds as you type. Narrow it
   with `from:`, `to:`, `subject:` or `file:`.
 - **Star, Archive, Mark unread:** from the bar at the top of a message.

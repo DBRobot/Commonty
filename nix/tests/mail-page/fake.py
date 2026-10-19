@@ -5,7 +5,7 @@
 # X25519 and AES-GCM), so the page opening it means the two agree.
 import base64, hashlib, hmac, json, os, sys, time, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import urlparse, parse_qs, unquote, quote
 
 from cryptography.hazmat.primitives.asymmetric.x25519 import (
     X25519PrivateKey,
@@ -17,6 +17,9 @@ from cryptography.hazmat.primitives import serialization as S
 
 WEB = sys.argv[1]
 PORT = int(sys.argv[2])
+# the web bundle the app carries beside the pages (flake.nix webDist): the
+# library's wasm and the PDF editor's MuPDF
+BUNDLE = sys.argv[3] if len(sys.argv) > 3 else None
 NAME = "tester"
 DOMAIN = "commonty.test"
 
@@ -121,6 +124,15 @@ state = {
     "sent": [],
     "dev": Ed25519PrivateKey.generate(),
     "lock": threading.Lock(),
+    # the member's Files library: what the gate keeps of it, by encrypted
+    # path, exactly as the page sent it
+    "lib": {
+        "id": os.urandom(16).hex(),
+        "key": base64.b64encode(os.urandom(32)).decode(),
+    },
+    "dav": {},
+    "dirs": set(),
+    "uploads": {},
 }
 DEV_FP = "a1b2c3d4e5f6"
 
@@ -137,6 +149,8 @@ MIME = {
     ".woff2": "font/woff2",
     ".svg": "image/svg+xml",
     ".wasm": "application/wasm",
+    ".ttf": "font/ttf",
+    ".gz": "application/gzip",
 }
 
 
@@ -171,8 +185,8 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("content-length") or 0)
         return self.rfile.read(n) if n else b""
 
-    def file(self, rel):
-        p = os.path.join(WEB, rel)
+    def file(self, rel, root=None):
+        p = os.path.join(root or WEB, rel)
         if not os.path.isfile(p):
             return self.send({"error": "no"}, 404)
         data = open(p, "rb").read()
@@ -187,6 +201,26 @@ class H(BaseHTTPRequestHandler):
             return self.file("pages/mail.html")
         if p.startswith("/_dd/static/"):
             return self.file("static/" + p[len("/_dd/static/") :])
+        if p.startswith("/_dd/web/") and BUNDLE:
+            return self.file(p[len("/_dd/web/") :], BUNDLE)
+        if p == "/_dd/app/library":
+            return self.send(state["lib"])
+        if p.startswith("/_dd/dav/"):
+            b = state["dav"].get(self.dav_path())
+            if b is None:
+                return self.send({"error": "no"}, 404)
+            return self.send(b, 200, "application/octet-stream")
+        if p == "/test/dav":
+            return self.send(
+                [
+                    {
+                        "path": k,
+                        "size": len(v),
+                        "sealed": b"%PDF" not in v and b"hello" not in v,
+                    }
+                    for k, v in sorted(state["dav"].items())
+                ]
+            )
         if p == "/_dd/me":
             return self.send(
                 {
@@ -233,6 +267,69 @@ class H(BaseHTTPRequestHandler):
             return self.send(sorted(state["objs"]))
         self.send({"error": "not here"}, 404)
 
+    def dav_path(self):
+        # /_dd/dav/<lib>/<encrypted path, a segment at a time>
+        rest = urlparse(self.path).path[len("/_dd/dav/") :].split("/", 1)
+        assert rest[0] == state["lib"]["id"], "another library"
+        return "/".join(
+            unquote(x) for x in (rest[1] if len(rest) > 1 else "").split("/") if x
+        )
+
+    def do_PROPFIND(self):
+        d = self.dav_path()
+        pre = d + "/" if d else ""
+        kids = {}
+        for k, v in state["dav"].items():
+            if k.startswith(pre) and k != d:
+                head = k[len(pre) :].split("/")[0]
+                kids[head] = None if "/" in k[len(pre) :] else len(v)
+        for k in state["dirs"]:
+            if k.startswith(pre) and k != d and "/" not in k[len(pre) :]:
+                kids.setdefault(k[len(pre) :], None)
+        if d and d not in state["dirs"] and not kids:
+            return self.send({"error": "no"}, 404)
+        base = f"/_dd/dav/{state['lib']['id']}/"
+        enc = lambda x: "/".join(quote(seg, safe="") for seg in x.split("/"))
+        rows = [
+            f"<D:response><D:href>{base}{enc(d)}/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat></D:response>"
+        ]
+        for name, size in sorted(kids.items()):
+            href = base + enc(pre + name)
+            if size is None:
+                rows.append(
+                    f"<D:response><D:href>{href}/</D:href><D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat></D:response>"
+                )
+            else:
+                rows.append(
+                    f"<D:response><D:href>{href}</D:href><D:propstat><D:prop><D:resourcetype/><D:getcontentlength>{size}</D:getcontentlength><D:getlastmodified>Sun, 18 Oct 2026 09:41:00 GMT</D:getlastmodified></D:prop></D:propstat></D:response>"
+                )
+        xml = (
+            '<?xml version="1.0"?><D:multistatus xmlns:D="DAV:">'
+            + "".join(rows)
+            + "</D:multistatus>"
+        )
+        self.send(xml, 207, "application/xml")
+
+    def do_MKCOL(self):
+        d = self.dav_path()
+        if d in state["dirs"]:
+            return self.send(b"", 405, "text/plain")
+        state["dirs"].add(d)
+        self.send(b"", 201, "text/plain")
+
+    def do_MOVE(self):
+        a = self.dav_path()
+        dest = urlparse(self.headers["destination"]).path
+        b = "/".join(
+            unquote(x)
+            for x in dest[len(f"/_dd/dav/{state['lib']['id']}/") :].split("/")
+            if x
+        )
+        if b in state["dav"]:
+            return self.send(b"", 412, "text/plain")
+        state["dav"][b] = state["dav"].pop(a)
+        self.send(b"", 201, "text/plain")
+
     def keydoc(self):
         pk = b64u(pk_of(NAME))
         sig = base64.b64encode(
@@ -251,6 +348,14 @@ class H(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         p = urlparse(self.path).path
+        if p.startswith("/_dd/dav/"):
+            up = self.headers.get("x-dd-upload")
+            if up:
+                part = int(self.headers["x-dd-part"])
+                state["uploads"][up][part] = self.body()
+                return self.send({"etag": f"e{part}"})
+            state["dav"][self.dav_path()] = self.body()
+            return self.send(b"", 201, "text/plain")
         if p.startswith("/_dd/mail/o/"):
             _, _, _, _, kind, id_ = p.split("/")
             with state["lock"]:
@@ -260,6 +365,9 @@ class H(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         p = urlparse(self.path).path
+        if p.startswith("/_dd/dav/"):
+            state["dav"].pop(self.dav_path(), None)
+            return self.send(b"", 204, "text/plain")
         if p.startswith("/_dd/mail/o/"):
             _, _, _, _, kind, id_ = p.split("/")
             with state["lock"]:
@@ -270,6 +378,16 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         p = urlparse(self.path).path
         b = self.body()
+        if p.startswith("/_dd/dav/"):
+            # a big file in pieces (library.js put): start, parts, then the end
+            if self.headers.get("x-dd-upload") == "start":
+                up = os.urandom(8).hex()
+                state["uploads"][up] = {}
+                return self.send({"upload": up})
+            up = self.headers.get("x-dd-upload")
+            parts = state["uploads"].pop(up)
+            state["dav"][self.dav_path()] = b"".join(parts[k] for k in sorted(parts))
+            return self.send(b"", 200, "text/plain")
         if p == "/_dd/app/mail/key":
             if not state["ikm"]:
                 state["ikm"] = os.urandom(32)

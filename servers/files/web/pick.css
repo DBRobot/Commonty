@@ -1,0 +1,26 @@
+/* The Files picker (pick.js), on any page that loads home.css: a folder
+   list in a dialog, from home.css's tokens. */
+
+dialog.dd-pick {
+  width: min(520px, calc(100vw - 32px)); padding: 18px 18px 14px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink); font-family: var(--font);
+}
+dialog.dd-pick::backdrop { background: rgba(10, 14, 20, .45); }
+.dd-pick h2 { margin: 0 0 8px; font-size: 17px; }
+.dd-pick .where { margin: 0 0 8px; font: 13px var(--mono); color: var(--ink-2); }
+.dd-pick .rows { display: grid; max-height: min(360px, 55vh); overflow: auto; border: 1px solid var(--line-2); border-radius: var(--radius); }
+.dd-pick .row, .dd-pick .row:hover {
+  display: flex; gap: 8px; align-items: center; height: auto; margin: 0; padding: 9px 12px;
+  border: 0; border-bottom: 1px solid var(--line-2); border-radius: 0;
+  background: none; color: var(--ink); font: 15px var(--font); text-align: left; cursor: pointer;
+}
+.dd-pick .row:hover, .dd-pick .row:focus-visible { background: var(--line-2); }
+.dd-pick .row.dir span::before { content: "▸ "; color: var(--ink-2); }
+.dd-pick .row .size { margin-left: auto; font: 12px var(--mono); color: var(--ink-2); }
+.dd-pick .row.note { cursor: default; color: var(--ink-2); font-size: 14px; }
+.dd-pick .foot { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.dd-pick .foot button { height: 38px; margin: 0; padding: 0 14px; font-size: 14px; }
+.dd-pick .ask { display: grid; gap: 6px; margin-top: 10px; }
+.dd-pick .ask input { height: 38px; font-size: 15px; }
+.dd-pick .ask .note { margin: 0; color: var(--broken); font-size: 13px; }

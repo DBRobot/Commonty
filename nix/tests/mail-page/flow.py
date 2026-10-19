@@ -84,6 +84,62 @@ def arrive(subject, frm, body, html=None, name="", extra_head="", att=None, auth
     ]
 
 
+def tiny_pdf():
+    """a one-page PDF, written out by hand with its cross-reference table"""
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        None,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    text = b"BT /F1 18 Tf 72 700 Td (Residential lease: sign below) Tj ET"
+    objs[3] = b"<< /Length %d >>\nstream\n" % len(text) + text + b"\nendstream"
+    out = b"%PDF-1.4\n"
+    offs = []
+    for i, o in enumerate(objs, 1):
+        offs.append(len(out))
+        out += b"%d 0 obj\n" % i + o + b"\nendobj\n"
+    x = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offs)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objs) + 1,
+        x,
+    )
+    return out
+
+
+def arrive_with(subject, frm, body, name, files):
+    """a message carrying attachments: files is [(name, type, bytes)]"""
+    import base64 as b64
+
+    bd = "mix3d"
+    parts = [f"--{bd}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n"]
+    for fname, ftype, data in files:
+        parts.append(
+            f'--{bd}\r\nContent-Type: {ftype}\r\nContent-Disposition: attachment; filename="{fname}"\r\nContent-Transfer-Encoding: base64\r\n\r\n{b64.b64encode(data).decode()}\r\n'
+        )
+    mid = f"<{time.time_ns()}@x>"
+    raw = (
+        f"From: {name} <{frm}>\r\nTo: tester@commonty.test\r\nSubject: {subject}\r\nDate: Sun, 18 Oct 2026 09:41:00 +0000\r\nMessage-ID: {mid}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary={bd}\r\n\r\n"
+        + "".join(parts)
+        + f"--{bd}--\r\n"
+    )
+    summary = {
+        "from": {"name": name, "address": frm},
+        "to": [{"name": "", "address": "tester@commonty.test"}],
+        "cc": [],
+        "subject": subject,
+        "snippet": body[:200],
+        "attachments": [f[0] for f in files],
+        "date": int(time.time() * 1000),
+        "rcpt": "tester@commonty.test",
+        "mid": mid,
+    }
+    return post("/test/arrive", {"raw": raw, "summary": summary, "auth": {}})["id"]
+
+
 with sync_playwright() as p:
     b = p.chromium.launch(
         headless=True,
@@ -105,6 +161,8 @@ with sync_playwright() as p:
             if m.type == "error"
             and "Content Security Policy" not in m.text
             and "404" not in m.text
+            # a folder made again: the gate's 405, which library.js takes as "there already"
+            and "405" not in m.text
             else None
         ),
     )
@@ -337,6 +395,134 @@ with sync_playwright() as p:
         lambda: not any(a3 in k for k in get("/test/objs")),
         "deleted for good, on the box too",
     )
+
+    # Files: an attachment saved into the member's library, sealed in the
+    # tab; Save all; the mark replayed on another device; attached back from
+    # Files at its size; the 18 MB refusal; and a PDF signed and replied with
+    pdf = tiny_pdf()
+    a5 = arrive_with(
+        "Lease to sign",
+        "lease@harbor.example",
+        "Please sign and send it back.",
+        "Harbor Street",
+        [("lease.pdf", "application/pdf", pdf), ("notes.txt", "text/plain", b"hello")],
+    )
+    pg.click('[data-f="inbox"]')
+    pg.reload()
+    pg.wait_for_selector(f'.mail-row[data-id="{a5}"]', timeout=15000)
+    pg.click(f'.mail-row[data-id="{a5}"]')
+    until(
+        lambda: pg.locator("#att .mail-file").count() == 2,
+        "two attachments, each with its actions",
+    )
+    ok(
+        pg.locator('#att [data-pdf="0"][data-mode="sign"]').count() == 1
+        and pg.locator('#att [data-pdf="1"]').count() == 0,
+        "Edit and Sign on the PDF alone",
+    )
+    pg.click('#att [data-save="0"]')
+    pg.wait_for_selector("dialog.dd-pick[open]", timeout=10000)
+    month = time.strftime("%Y-%m")
+    ok(
+        pg.inner_text("dialog.dd-pick .where").replace(" ", "")
+        == f"Myfiles/Mail/{month}",
+        f"the folder picker opens on Mail / {month}",
+    )
+    pg.screenshot(path=f"{OUT}/9-save-to-files.png")
+    pg.locator("dialog.dd-pick button", has_text="Save here").click()
+    until(
+        lambda: "Saved to Files / Mail / " + month in pg.inner_text("#att"),
+        "it says where it went",
+    )
+    dav = get("/test/dav")
+    ok(
+        len(dav) == 1 and dav[0]["sealed"],
+        f"one file at the gate, its bytes sealed {dav}",
+    )
+    ok(
+        not any(w in dav[0]["path"] for w in ("lease", "Mail", "Files", month)),
+        f"and its name encrypted {dav[0]['path'][:40]}",
+    )
+    pg.locator("#att [data-saveall]").click()
+    pg.wait_for_selector("dialog.dd-pick[open]", timeout=10000)
+    pg.locator("dialog.dd-pick button", has_text="Save here").click()
+    until(lambda: len(get("/test/dav")) == 2, "Save all saved the other one")
+    ok(
+        all(d["sealed"] for d in get("/test/dav")),
+        "both sealed, and lease.pdf not saved twice",
+    )
+
+    # another device: a page with nothing kept replays the change
+    other = b.new_context(viewport={"width": 1280, "height": 820})
+    op = other.new_page()
+    op.goto(f"{HOST}/_dd/mail")
+    op.wait_for_selector(f'.mail-row[data-id="{a5}"]', timeout=15000)
+    op.click(f'.mail-row[data-id="{a5}"]')
+    until(
+        lambda: op.locator("#att .saved").count() == 2,
+        "the other device shows both as saved",
+    )
+    other.close()
+
+    # attached back from Files, at its size
+    pg.click('[data-act="reply"]')
+    pg.wait_for_selector("#ed-f")
+    pg.click('[data-act="attach"]')
+    ok(
+        pg.locator(".mail-attmenu:not([hidden]) button").count() == 2,
+        "Attach offers this device or Files",
+    )
+    pg.click('[data-act="attach-files"]')
+    pg.wait_for_selector("dialog.dd-pick[open]", timeout=10000)
+    pg.locator("dialog.dd-pick button", has_text="Mail").click()
+    pg.locator("dialog.dd-pick button", has_text=month).click()
+    pg.locator("dialog.dd-pick button", has_text="lease.pdf").click()
+    until(lambda: "lease.pdf" in pg.inner_text("#files"), "lease.pdf on the reply")
+    ok(
+        f"lease.pdf · {len(pdf)} B" in pg.inner_text("#files"),
+        f"at its own size, {len(pdf)} bytes",
+    )
+
+    # past about 18 MB of files, refused before anything is read
+    pg.evaluate(
+        """async () => {
+          const l = await import('/_dd/static/library.js');
+          const r = await l.unlock();
+          await l.put(r.ok, 'Files/big.bin', new Blob([new Uint8Array(19 * 1024 * 1024)]));
+        }"""
+    )
+    pg.click('[data-act="attach"]')
+    pg.click('[data-act="attach-files"]')
+    pg.wait_for_selector("dialog.dd-pick[open]", timeout=10000)
+    pg.locator("dialog.dd-pick button", has_text="big.bin").click()
+    until(
+        lambda: "too big to send" in pg.inner_text("#toast"),
+        "a file too big to send is refused",
+    )
+    ok("big.bin" not in pg.inner_text("#files"), "and not attached")
+    pg.click('[data-act="discard"]')
+
+    # signed in the editor, then a reply carrying it
+    pg.click(f'.mail-row[data-id="{a5}"]')
+    pg.wait_for_selector('#att [data-pdf="0"][data-mode="sign"]')
+    pg.click('#att [data-pdf="0"][data-mode="sign"]')
+    pg.wait_for_selector(".pdfed .pe-page canvas", timeout=20000)
+    ok(
+        "Not in Files yet" in pg.inner_text(".pe-title"),
+        "the editor opens on the attachment itself",
+    )
+    pg.screenshot(path=f"{OUT}/10-sign-attachment.png")
+    pg.click(".pe-save .more")
+    pg.locator(".pe-menu button", has_text="Reply with it attached").click()
+    pg.wait_for_selector("#ed-f", timeout=10000)
+    ok(pg.locator(".pdfed").count() == 0, "the editor closed")
+    ok(
+        "lease.pdf" in pg.inner_text("#files")
+        and pg.input_value("#c-subj") == "Re: Lease to sign",
+        "a reply to it, carrying the PDF",
+    )
+    pg.screenshot(path=f"{OUT}/11-reply-with-it.png")
+    pg.click('[data-act="discard"]')
 
     ok(not errs, f"no errors on the page {errs[:5]}")
 

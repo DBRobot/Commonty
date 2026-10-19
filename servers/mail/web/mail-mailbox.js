@@ -242,6 +242,15 @@ export class Mailbox {
     if (!m) return;
     if ('read' in o) m.read = !!o.read;
     if ('star' in o) m.star = !!o.star;
+    // where its attachments were saved in Files, by place and name: "2:invoice.pdf"
+    // only well-formed entries: one bad op from any device must not stop the message opening
+    if (o.saved && typeof o.saved === 'object') {
+      for (const [k, v] of Object.entries(o.saved)) {
+        if (!/^\d+:/.test(k) || typeof v?.path !== 'string' || !v.path.startsWith('Files/') || typeof v.lib !== 'string') continue;
+        if (!m.saved) m.saved = {};
+        m.saved[k] = v;
+      }
+    }
     if (o.folder && FOLDERS.includes(o.folder)) {
       // marked so by them: the filter learns, on the device that was told
       if (mine && m.kind === 'in' && (o.folder === 'spam') !== (m.folder === 'spam')) this.filter.moved(this.docOf(m), o.folder === 'spam');
