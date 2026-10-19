@@ -13,6 +13,7 @@ paths = [
   '''^app/src/testdata/''',
   '''^servers/smarthome/door/src/testdata/''',
   '''^servers/system/control/state/ident/testdata/''',
+  '''^servers/system/control/state/attest/testdata/''',
   '''^client/identity/tests/vectors\.rs$''',
   '''^client/mailsend/tests/testdata/''',
   '''^data/games/catalogue\.json$''',

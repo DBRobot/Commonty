@@ -263,7 +263,7 @@ func run(args []string) {
 	if *vector != "" {
 		v := Vector{Config: cfg, Box: name, Key: key, At: now, Voters: vs, Begin: begin, Challenges: chals, Response: resp}
 		out, _ := json.MarshalIndent(v, "", " ")
-		must(os.WriteFile(*vector, out, 0o644))
+		must(os.WriteFile(*vector, append(out, '\n'), 0o644))
 	}
 	rec, err := st.CheckResponse(&cfg, vs, name, resp, now)
 	if err != nil {
