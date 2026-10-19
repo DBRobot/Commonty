@@ -864,9 +864,6 @@
   "dl/android/maven2/com/google/testing/platform#core-proto/0.0.9-alpha03": {
    "jar": "sha256-0AHrDMu/yMueqhk6NY5jcSl0Y5d1ZHvpSasjLCsptAc=",
    "pom": "sha256-O7RSgN8d0clrmgFySmFFZrfWDTNFP81SwsdB+ZmcOk4="
-  },
-  "play-sdk/index/snapshot": {
-   "gz": "sha256-XHNHAeZ7PXR2T2IdHmKoSrQoFR5wpDfySHgGLHPQWLU="
   }
  },
  "https://plugins.gradle.org/m2": {
