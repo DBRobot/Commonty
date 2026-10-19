@@ -1,9 +1,13 @@
 # Attestation test data
 
 - `swtpm-vector.json`: one whole attestation by swtpm, made by
-  `make-vector.sh` (swtpm 0.10.1, tpm2-tools 5.7). Its EK certificate is
+  `make-vector.sh` (swtpm 0.10.1, tpm2-tools 5.8). Its EK certificate is
   from a CA made for the run, under swtpm's vendor id; its event log is
-  made up, and the PCRs were extended to match it. Its secrets are the
+  made up, and the PCRs were extended to match it. It boots node1's
+  systemd-boot (systemd 260.2) and an image of the release's lanzaboote
+  stub (1.2.0) with lzbt's sections added by objcopy for node1's kernel
+  (6.18.45), both signed with sbsign by the run's own RSA db key; its db
+  holds that key and it logs no authority event. Its secrets are the
   run's own, random, and open nothing.
 - `node1-ek-rsa.der`, `node1-ek-ecc.der`, `node1-ek-chain.bin`: node1's TPM
   (Intel PTT, Tiger Lake), read with `tpm2_nvread` from NV 0x01C00002,

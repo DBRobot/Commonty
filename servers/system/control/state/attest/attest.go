@@ -39,8 +39,8 @@ type Begin struct {
 	Join  string   `json:"join"` // TPM2B_PUBLIC of the box's join key (sig.pub)
 	Log   string   `json:"log"`  // the firmware's event log, base64
 	// the box's own Secure Boot certificate, as its installer made and
-	// enrolled it (db, or MOK under shim), DER base64; empty where Secure
-	// Boot is not on, refused outside tests
+	// enrolled it in db, DER base64; empty where Secure Boot is not on,
+	// refused outside tests
 	DB string `json:"db,omitempty"`
 	// the lanzaboote image this boot ran (the ESP's EFI/Linux entry
 	// systemd-boot chose), base64: its Authenticode digest is in PCR 4
