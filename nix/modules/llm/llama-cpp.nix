@@ -237,9 +237,18 @@ in
                 -C - -o ${file m}.part ${url m} && break
               sleep 20
             done
-            echo "${m.sha256}  ${file m}.part" | sha256sum -c -
+            # no set -e here: a bad hash must not go on to be named the model
+            echo "${m.sha256}  ${file m}.part" | sha256sum -c - || { rm -f ${file m}.part; exit 1; }
             chmod 644 ${file m}.part
             mv ${file m}.part ${file m}
+          ''
+          # llama-swap preloads it only when it starts, and a release that
+          # adds the model starts llama-swap minutes before the file is here
+          + lib.optionalString m.resident ''
+            [ -r ${run}/env ] && . ${run}/env
+            curl -fsS -m 600 --unix-socket ${run}/llm.sock \
+              -H "Authorization: Bearer ''${LLAMA_API_KEY:-}" \
+              http://llm/upstream/${id}/health || echo "not loaded now: the first request will load it"
           '';
         }
       ) cfg.models
