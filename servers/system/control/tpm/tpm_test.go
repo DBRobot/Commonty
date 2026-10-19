@@ -50,3 +50,16 @@ func TestAChallengeIsSealedForTheAKAndCommitted(t *testing.T) {
 		t.Fatal("not tpm2-tools' credential file")
 	}
 }
+
+func TestTheMakerIsReadFromGetcap(t *testing.T) {
+	props := []byte("TPM2_PT_FAMILY_INDICATOR:\n  raw: 0x322E3000\n  value: \"2.0\"\nTPM2_PT_MANUFACTURER:\n  raw: 0x414D4400\n  value: \"AMD\"\n")
+	if m := manufacturer(props); m != amdVendor {
+		t.Fatalf("%q", m)
+	}
+	if m := manufacturer([]byte("TPM2_PT_MANUFACTURER:\n  raw: 0x1014\n")); m != "00001014" {
+		t.Fatalf("%q", m)
+	}
+	if manufacturer([]byte("nothing")) != "" {
+		t.Fatal("a maker from nothing")
+	}
+}

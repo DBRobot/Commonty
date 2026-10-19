@@ -107,11 +107,63 @@ the roots).
   root. Verified with node1's real certificates.
 - **Infineon, STMicroelectronics, Nuvoton** (discrete TPMs): EK in NV ->
   the maker's manufacturing CA by AIA -> root. Not yet seen on a real box.
-- **AMD fTPM** (node2): **no EK certificate in NV**, and AMD's service
-  (ftpm.amd.com/pki/aia/...) did not answer for node2's EK under the
-  naming we tried. Such a box cannot attest yet (`Begin` says so). Options:
-  find AMD's naming (tpm2-tools' `tpm2_getekcertificate` knows it) and
-  fetch on the box; or pin AMD EKs one by one; or refuse AMD fTPMs.
+- **AMD fTPM** (node2, David's laptop): no EK certificate in NV. AMD
+  serves each one at `https://ftpm.amd.com/pki/aia/<id>`, where `<id>` is
+  the first 16 bytes, hex, of sha256(`00 00 22 22` || the EK's exponent, 4
+  bytes big-endian || its modulus) - tpm2-tools' `tpm2_getekcertificate`
+  scheme (`tpm.AMDEKCertURL`). The box reads the maker from `tpm2_getcap
+  properties-fixed` and, for AMD, fetches its certificate at Begin; the
+  AIA links take it up to AMD's root (`AMDTPM`). The judge does not fetch:
+  the certificate rides in Begin like any other. An EK certificate whose
+  key is named RSAES-OAEP is read as the RSA key it is, and one that names
+  no maker is the maker's whose roots it chains to.
+
+## Secure Boot on a member's box
+
+Decided 2026-10-19: a member's box boots with Secure Boot on. Its
+installer (branch `joining-1017`, `nix/installer/join-install.sh`) does it
+with keys of the box's own, as node1 and node2 have:
+
+1. The person puts Secure Boot in **setup mode** (its keys cleared;
+   Secure Boot itself stays enabled). Where Linux can, the installer's
+   firmware step does it (`bios-settings.json`: ThinkPad/ThinkCentre
+   `thinklmi`, HP `hp-bioscfg`) and restarts; elsewhere the screen says
+   where:
+   - Lenovo consumer (Legion, IdeaPad, Yoga): F2 at power-on, Security ->
+     Secure Boot -> Reset to Setup Mode (or Clear All Secure Boot Keys),
+     F10.
+   - Dell: F2, Secure Boot -> Expert Key Management -> Custom Mode on ->
+     Delete All Keys, Apply.
+   - HP: F10, Advanced -> Secure Boot Configuration -> Clear Secure Boot
+     Keys; HP asks for a code shown on screen at the next start.
+
+   None needs a BIOS password: Windows-certified PCs let the person at the
+   firmware screen clear the keys. Not yet tried on every model.
+2. The installer stick starts (setup mode checks no signatures), installs,
+   makes the box's keys on its encrypted disk (`/var/lib/sbctl`), signs the
+   boot with lanzaboote, and enrolls them with Microsoft's beside them
+   (graphics and network cards' option ROMs are Microsoft-signed). Enrolling
+   the platform key ends setup mode: from the next start Secure Boot runs
+   only what the box's key signed.
+3. The first boot is under the box's own db key, and the join key is made
+   then, under its PCR 7 (`dd-unlock-seal`). That PCR 7 is what attestation
+   checks: SecureBoot = 1, and the box's `db.pem` among the authorities.
+   Nothing to confirm at that boot.
+
+Not shim + MOK: NixOS has no Microsoft-signed shim, a borrowed distro shim
+is at the mercy of SBAT revocations, Microsoft's 2011 UEFI CA (which signed
+the shims older firmware trusts) expired in June 2026 while firmware not
+updated by Windows lacks the 2023 one, many new Lenovo and Dell machines
+ship with the third-party CA turned off, and MOK needs a password typed at a
+blue screen. The judge still takes a boot by a MOK key under shim (the
+certificate shim logs in PCR 7), so a box that has one is not refused.
+
+What the installer must keep for attestation (it does, on `joining-1017`):
+the db certificate at `/var/lib/sbctl/keys/db/db.pem` (what `tpm.Default`
+sends in Begin), the join key made only at a boot with Secure Boot on, and
+no seal and no join key while Secure Boot is off or still in setup mode
+(a firmware whose own Secure Boot switch was off): `dd-unlock-seal` waits,
+says why, and seals at the first start with it on.
 
 ## Updating the roots
 

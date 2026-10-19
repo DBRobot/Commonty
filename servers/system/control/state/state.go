@@ -7,8 +7,8 @@
 package state
 
 import (
-	"commonty/control/state/computers"
 	"commonty/control/state/attest"
+	"commonty/control/state/computers"
 	"commonty/control/state/ident"
 	"encoding/json"
 	"errors"

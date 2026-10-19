@@ -25,6 +25,12 @@ publish` refuses a file here that is not a CA certificate in date.
 | 4E544300 | Nuvoton | nuvoton-tpm-root-ca-2111.pem | (same folder) ...%202111.cer | CD8185FF8995ED09 |
 | 4E544300 | Nuvoton | nuvoton-tpm-root-ca-2112.pem | (same folder) ...%202112.cer | 66E3A1013D4F6977 |
 
+AMD's root (`CN=AMDTPM`, self-signed, 2014-2039) is where AMD's own EK
+service keeps it, the address tpm2-tools' `tpm2_getekcertificate` uses for
+AMD fTPMs; fetched again on 2026-10-19 with the same fingerprint. Its second
+source is an AMD fTPM's real chain verifying to it
+(`state/attest/testdata`).
+
 The two STM "root" files are STM's own CAs under GlobalSign's TPM root,
 kept as anchors so a chain that stops at them still counts. GlobalSign's
 TPM ECC root was not found at a stable link; STM's ECC CA stands in for it.
