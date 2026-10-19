@@ -271,6 +271,15 @@ already there are moved over when their test is next touched:
   written yet, or may be an earlier run's. `start_fresh` and `journal_has`,
   or `wait_until_succeeds` if it truly comes later.
 
+`start_fresh` can't wait on an instance of a template unit, such as
+`dd-store-copy-final@forgejo`. Nothing holds an instance once its run ends,
+so systemd unloads it, and `systemctl show` then gives a start timestamp of
+0 and no invocation: `start_fresh` waits for a run of its own until it times
+out. No timer starts such an instance, so no run of it can be under way to
+be joined. Start it with `systemctl start` and judge it by its exit status,
+and make the unit fail when it didn't do its job (forge-follow's and
+takeover's `hand_over`).
+
 `checks.waits` holds the helpers to it: a oneshot that a timer starts every
 three seconds, each `start_fresh` checked to be a run of its own with only
 its own lines; `fetch_has` on a 2 MB page with the word at its start, twenty

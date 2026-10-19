@@ -650,6 +650,11 @@ func main() {
 			return submit("lease", body)
 		},
 	}
+	// a box with a store (where the plan's copies go) copies a writer's
+	// last writes out when it hands it over
+	if *placedCopies != "" {
+		placed.final = finalCopy
+	}
 
 	// heartbeats; a reader also asks for the latest each time
 	go func() {

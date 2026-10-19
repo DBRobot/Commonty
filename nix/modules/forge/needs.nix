@@ -21,6 +21,7 @@
       "forgejo"
       "forgejo-admin"
       "dd-forge-copy" # its repositories into the store, with failover on (follow.nix)
+      "dd-forge-handover" # the same, handed over: fails when it did not copy (follow.nix)
       "forgejo-protection"
       "forgejo-secrets"
       "dd-forge-dirs" # its directories on its dataset, once mounted

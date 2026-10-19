@@ -1,6 +1,9 @@
 # The takeover test: photos moves from a to b with nothing shared between
 # them but ciphertext in each other's stores, and its accounts come along.
 import json
+import time
+
+from waits import journal_has, journal_of, start_fresh
 
 start_all()
 for m in (a, b):
@@ -43,6 +46,36 @@ def sign_in(m):
     )
 
 
+def hand_over(m, svc, units, writer):
+    """as dd-control hands a writer over (placed.go): stopped; its flag
+    marked handed over, so its units refuse to start; its last writes copied
+    out while the flag still says the lease is this box's; and only then the
+    flag gone"""
+    m.succeed(f"systemctl stop {units}")
+    flag = f"/run/dd-placed/{svc}"
+    m.succeed(f"jq -c '.handing = true' {flag} > {flag}.new && mv {flag}.new {flag}")
+    # a start now (a timer's, a dependency's) is refused
+    m.succeed(f"systemctl start {writer}")
+    m.fail(f"systemctl is-active {writer}")
+    # no timer starts it, so no run of it is under way; it fails unless all
+    # of it was copied (an instance is unloaded once it ends: nothing to show)
+    m.succeed(f"systemctl start dd-store-copy-final@{svc}.service")
+    m.fail(f"systemctl is-active {units}")
+    m.succeed(f"rm {flag}")
+
+
+def copy_out(m):
+    """a copy run of its own, until one sends everything: one that found the
+    other store not ready yet says so"""
+    end = time.monotonic() + 180
+    while True:
+        inv = start_fresh(m, "dd-store-copy.service")
+        if not journal_has(m, "dd-store-copy.service", inv, "not copied this time"):
+            return
+        assert time.monotonic() < end, journal_of(m, "dd-store-copy.service", inv)
+        m.sleep(2)
+
+
 def psql(m, q):
     return m.succeed(f'runuser -u postgres -- psql -d ente -tAc "{q}"').strip()
 
@@ -58,13 +91,20 @@ a.wait_until_succeeds(
     timeout=90,
 )
 
-# a hands over: a base backup and the key sealed for b, its last segment
-# archived, everything copied to b's store
+# a base backup and the key sealed for b, copied to b's store while a
+# holds the flags: the store copies only for the box that writes
 a.succeed("systemctl start dd-pg-base.service")
-# stopped first, the flags after, as dd-control does: postgres archives its
-# last segment on the way down only while its flag says the lease is its.
-# The hourly dump coming due mid-stop (CI, 14:00) once cancelled the stop and
-# brought postgres back: it may not start postgres at all
+copy_out(a)
+# from here only the handover copies anything: no timer does it behind it
+a.succeed("systemctl stop dd-store-copy.timer dd-store-copy-recent.timer")
+# committed the moment before the handover: in no copy yet
+a.succeed("runuser -u postgres -- createdb late")
+a.succeed(
+    "runuser -u postgres -- psql -d late -c 'create table t (n int); insert into t values (42)'"
+)
+# stopped as dd-control's handover begins. The hourly dump coming due
+# mid-stop (CI, 14:00) once cancelled the stop and brought postgres back: it
+# may not start postgres at all
 a.succeed("systemctl stop --no-block ente.service postgresql.service")
 a.succeed("systemctl start --no-block postgresqlBackup-ente.service")
 a.wait_until_succeeds(
@@ -80,14 +120,11 @@ a.succeed(
 a.succeed(
     "[ $(journalctl -u postgresql.service -o cat | grep -c 'not archived within') = 0 ]"
 )
-a.succeed("rm /run/dd-placed/postgresql /run/dd-placed/ente-museum")
-a.wait_until_succeeds(
-    # a copy that found the other store not ready says so: until none does
-    "systemctl start dd-store-copy.service && "
-    "! journalctl _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value dd-store-copy.service) "
-    "| grep -q 'not copied this time'",
-    timeout=180,
-)
+
+# a hands over: postgres archives its last segment on the way down, and
+# that goes out to b with the rest
+hand_over(a, "ente-museum", "ente.service ente-health.service", "ente.service")
+hand_over(a, "postgresql", "postgresql.service", "postgresql.service")
 
 # b takes epoch 2 from its own store: postgres restored, museum on keys of
 # b's own that a never had
@@ -105,3 +142,8 @@ again = sign_in(b)
 assert again["id"] == tom, (again, tom)
 # and nothing else came along to b but the account and its rows
 assert psql(b, "select count(*) from users") == "1"
+# the commit made the moment before the handover is here
+assert (
+    b.succeed("runuser -u postgres -- psql -d late -tAc 'select n from t'").strip()
+    == "42"
+)

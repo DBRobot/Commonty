@@ -104,6 +104,35 @@ let
     chown -R forgejo:forgejo ${dir}
     touch ${state}/restored
   '';
+  # the repositories and files, from a snapshot, into this box's store
+  copy = pkgs.writeShellScript "dd-forge-copy" ''
+    set -uo pipefail
+    PATH=${lib.makeBinPath tools}
+    ${env}
+    # strict: a handover's, which fails when it did not copy
+    strict=''${1:-}
+    # one at a time: the timer's and a handover's share the snapshot
+    exec 9>/run/dd-forge-copy.lock
+    flock 9
+    E=$(cat ${state}/epoch 2>/dev/null || echo 0)
+    [ "$E" -gt 0 ] || { echo "the forge has not started here yet"; exit 0; }
+    zfs destroy ${dataset}@dd-copy 2>/dev/null || true
+    zfs snapshot ${dataset}@dd-copy || { echo "no snapshot: not copied this time"; [ -z "$strict" ] || exit 1; exit 0; }
+    src=${dir}/.zfs/snapshot/dd-copy
+    # what the snapshot holds: what a restore takes, and nothing else
+    rclone lsf -R --files-only --filter-from ${filters} "$src" | sort > ${state}/manifest.new
+    if rclone sync --checksum --filter-from ${filters} "$src" here:forge/files \
+      && rclone copyto ${state}/manifest.new here:forge/manifest \
+      && echo "$E" | rclone rcat here:forge/epoch; then
+      mv ${state}/manifest.new ${state}/manifest
+    else
+      echo "not copied this time"
+      failed=1
+    fi
+    zfs destroy ${dataset}@dd-copy || true
+    [ -z "$strict" ] || exit "''${failed:-0}"
+    exit 0
+  '';
   started = pkgs.writeShellScript "dd-forge-started" ''
     set -euo pipefail
     PATH=${lib.makeBinPath tools}
@@ -116,6 +145,11 @@ in
     # its bucket, where a store is there to hold it (a test may have none)
     (lib.optionalAttrs (options.dd ? store) {
       dd.store.buckets.forge = lib.mkIf ((config.dd.failover or false) && (store.enable or false)) { };
+      # handed over, the forge's last state into the store before its final
+      # copy goes out (dd-control, placed.go)
+      dd.store.handover.forgejo = lib.mkIf ((config.dd.failover or false) && (store.enable or false)) [
+        "dd-forge-handover.service"
+      ];
     })
     (lib.mkIf ((config.dd.failover or false) && (store.enable or false)) {
       systemd.tmpfiles.rules = [ "d ${state} 0700 root root -" ];
@@ -140,28 +174,18 @@ in
         after = [ "forgejo.service" ];
         unitConfig.ConditionPathExists = flag;
         restartIfChanged = false;
-        path = tools;
         serviceConfig.Type = "oneshot";
-        script = ''
-          set -uo pipefail
-          ${env}
-          E=$(cat ${state}/epoch 2>/dev/null || echo 0)
-          [ "$E" -gt 0 ] || { echo "the forge has not started here yet"; exit 0; }
-          zfs destroy ${dataset}@dd-copy 2>/dev/null || true
-          zfs snapshot ${dataset}@dd-copy || exit 0
-          src=${dir}/.zfs/snapshot/dd-copy
-          # what the snapshot holds: what a restore takes, and nothing else
-          rclone lsf -R --files-only --filter-from ${filters} "$src" | sort > ${state}/manifest.new
-          if rclone sync --checksum --filter-from ${filters} "$src" here:forge/files \
-            && rclone copyto ${state}/manifest.new here:forge/manifest \
-            && echo "$E" | rclone rcat here:forge/epoch; then
-            mv ${state}/manifest.new ${state}/manifest
-          else
-            echo "not copied this time"
-          fi
-          zfs destroy ${dataset}@dd-copy || true
-          exit 0
-        '';
+        script = "exec ${copy}";
+      };
+      # handed over: the same, and it fails when the copy did not happen
+      # (dd-store-copy-final@forgejo runs it before its copy out)
+      systemd.services.dd-forge-handover = {
+        description = "Copy the forge's last state into this box's store, handed over";
+        after = [ "forgejo.service" ];
+        unitConfig.ConditionPathExists = flag;
+        restartIfChanged = false;
+        serviceConfig.Type = "oneshot";
+        script = "exec ${copy} strict";
       };
       systemd.timers.dd-forge-copy = {
         wantedBy = [ "timers.target" ];

@@ -26,7 +26,9 @@ package main
 // one unit dd-computer@<id>, which fetches the agreed record as it starts.
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"maps"
@@ -85,7 +87,19 @@ type placer struct {
 	// what one member's computers may take together, and the ports' pool
 	// (fleet/policy.json computers): held to on this box too
 	limits *computers.Limits
+	// a writer handed over: its last writes out to the other stores, done
+	// within the time given (finalCopy); nil: none
+	final func(svc string, within time.Duration) error
+	// a writer being handed over whose final copy has not succeeded yet:
+	// since when (uptime). Its flag stays, and its lease is renewed
+	handing map[string]int64
 }
+
+// how long a handover asks again for its final copy before it gives the
+// lease back without it, its last writes kept here alone
+const handoverFor = 2 * time.Minute
+
+var errNotCopied = errors.New("not handed over yet: its last writes not copied out, or it still runs")
 
 // how long a box says it refused a service: the plan gives it elsewhere,
 // and it may come back once that has passed
@@ -98,6 +112,9 @@ const keepFree = 512 << 20
 type held struct {
 	Epoch uint64 `json:"epoch"`
 	Until int64  `json:"until"` // ms since boot (/proc/uptime): when it stops without a renewal
+	// being handed over: its units refuse to start (box/placed.nix), so
+	// nothing writes while or after its last writes are copied out
+	Handing bool `json:"handing,omitempty"`
 }
 
 func leaseOf(svc string) string { return "svc/" + svc }
@@ -248,8 +265,10 @@ func (p *placer) start(svc string) {
 }
 
 // stop takes the flag down. A writer is stopped before its flag goes, and
-// waited for: its lease is given back only once it no longer writes
-func (p *placer) stop(svc, why string) error {
+// waited for: its lease is given back only once it no longer writes. One
+// handed over sends its last writes on first, while the flag still says the
+// lease is this box's: the store copies only for the box that writes
+func (p *placer) stop(svc, why string, handover bool) error {
 	args := []string{"stop", "--no-block"}
 	if p.writer(svc) {
 		args = []string{"stop"}
@@ -258,9 +277,76 @@ func (p *placer) stop(svc, why string) error {
 		log.Printf("placed: stopping %s: %v", svc, err)
 		return err
 	}
+	if handover && p.writer(svc) {
+		// a service with buckets: its last writes out first, with its units
+		// refusing to start meanwhile, then stopped again. A computer has
+		// none to copy (its disk is its box's)
+		if p.leased[svc] && p.final != nil {
+			if err := p.mark(svc, true); err != nil {
+				log.Printf("placed: %s: %v", svc, err)
+				return errNotCopied
+			}
+			if err := p.copyOut(svc); err != nil {
+				return err
+			}
+			if err := p.run(append([]string{"stop"}, p.units(svc)...)...); err != nil {
+				log.Printf("placed: stopping %s: %v", svc, err)
+				return errNotCopied
+			}
+		}
+		// none of it runs when the flag goes and the lease is given back
+		if p.run(append([]string{"is-active", "--quiet"}, p.units(svc)...)...) == nil {
+			log.Printf("placed: %s: still running after its stop", svc)
+			return errNotCopied
+		}
+	}
 	_ = os.Remove(p.flag(svc))
 	delete(p.since, svc)
+	delete(p.handing, svc)
 	log.Printf("placed: %s no longer runs here (%s)", svc, why)
+	return nil
+}
+
+// mark sets whether a leased service's flag says it is being handed over,
+// keeping its epoch and until
+func (p *placer) mark(svc string, handing bool) error {
+	h := p.holding(svc)
+	h.Handing = handing
+	content, _ := json.Marshal(h)
+	return p.raise(svc, content)
+}
+
+// copyOut runs the final copy, bounded by the flag's until: nothing is sent
+// once another box may hold the lease
+func (p *placer) copyOut(svc string) error {
+	left := time.Duration(p.holding(svc).Until-p.uptime()) * time.Millisecond
+	if left <= 0 {
+		log.Printf("placed: %s: no time left for its final copy", svc)
+		return errNotCopied
+	}
+	if err := p.final(svc, left); err != nil {
+		log.Printf("placed: %s: final copy: %v", svc, err)
+		// whatever of it the copy started (the forge's own copy) is stopped
+		_ = p.run(append([]string{"stop"}, p.units(svc)...)...)
+		return errNotCopied
+	}
+	return nil
+}
+
+// finalCopy is the store's final copy of a service's buckets
+// (nix/modules/storage/store.nix), stopped if not done in time
+func finalCopy(svc string, within time.Duration) error {
+	unit := "dd-store-copy-final@" + svc + ".service"
+	ctx, cancel := context.WithTimeout(context.Background(), within)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "systemctl", "start", unit).CombinedOutput()
+	if ctx.Err() != nil {
+		_ = systemctl("stop", unit)
+		return fmt.Errorf("%s: not done within %v", unit, within)
+	}
+	if err != nil {
+		return fmt.Errorf("systemctl start %s: %v: %s", unit, err, out)
+	}
 	return nil
 }
 
@@ -279,7 +365,7 @@ func (p *placer) fence() {
 	now := p.uptime()
 	for _, svc := range append(p.names(), p.computers()...) {
 		if p.writer(svc) && p.up(svc) && now >= p.holding(svc).Until {
-			_ = p.stop(svc, "its lease was not seen renewed")
+			_ = p.stop(svc, "its lease was not seen renewed", false)
 		}
 	}
 }
@@ -386,7 +472,7 @@ func (p *placer) reconcile(plan place.Plan, s *state.State) {
 			}
 			p.start(svc)
 		case !want[svc] && p.up(svc):
-			_ = p.stop(svc, "the plan moved it")
+			_ = p.stop(svc, "the plan moved it", false)
 		}
 	}
 }
@@ -399,7 +485,7 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 		delete(p.since, svc)
 		if p.up(svc) {
 			// agreed and fresh: someone else's, or nobody's
-			_ = p.stop(svc, "its lease is not this box's")
+			_ = p.stop(svc, "its lease is not this box's", false)
 		}
 		if want && p.fits(svc, s) {
 			p.send(svc, state.LeaseOp{Role: leaseOf(svc), Op: "acquire"})
@@ -407,34 +493,55 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 		return
 	}
 	if !want {
-		if p.up(svc) && p.stop(svc, "the plan moved it") != nil {
-			return // still running: the lease stays, and lapses if it must
+		if p.up(svc) {
+			if p.handing == nil {
+				p.handing = map[string]int64{}
+			}
+			if _, ok := p.handing[svc]; !ok {
+				p.handing[svc] = now
+			}
+			// past handoverFor it goes without its final copy
+			copyOut := now-p.handing[svc] < handoverFor.Milliseconds()
+			err := p.stop(svc, "the plan moved it", copyOut)
+			if errors.Is(err, errNotCopied) {
+				// stopped, the flag kept: renewed, and asked again next round
+				p.send(svc, state.LeaseOp{Role: leaseOf(svc), Op: "renew", Epoch: l.Epoch})
+				// its flag still says it is handed over: nothing starts
+				if h := p.holding(svc); h.Epoch == l.Epoch {
+					if u := p.leaseUntil(svc, l); u > h.Until {
+						h.Until = u
+					}
+					content, _ := json.Marshal(h)
+					_ = p.raise(svc, content)
+				}
+				return
+			}
+			if err != nil {
+				return // still running: the lease stays, and lapses if it must
+			}
 		}
 		p.send(svc, state.LeaseOp{Role: leaseOf(svc), Op: "release", Epoch: l.Epoch})
 		return
 	}
-	// The lease was last set by this box's request l.Seq, and cannot end
-	// sooner than when that was sent plus the TTL: kept by this box's own
-	// clock since boot, whatever its wall clock says. A request this box
-	// has no record of (it restarted since) gives nothing: the flag's own
-	// until stands until a renewal it sent is agreed.
-	var until int64
-	if at, ok := p.sent[svc][l.Seq]; ok {
-		until = at + p.ttl.Milliseconds() - leaseMargin.Milliseconds()
-		for q := range p.sent[svc] {
-			if q < l.Seq {
-				delete(p.sent[svc], q)
-			}
-		}
-	}
+	until := p.leaseUntil(svc, l)
 	p.send(svc, state.LeaseOp{Role: leaseOf(svc), Op: "renew", Epoch: l.Epoch})
 	if _, ok := p.since[svc]; !ok {
 		p.since[svc] = now
 	}
 	if p.up(svc) && p.holding(svc).Epoch != l.Epoch {
 		// started under another lease: it starts again under this one
-		_ = p.stop(svc, "it runs under an older lease")
+		_ = p.stop(svc, "it runs under an older lease", false)
 		return
+	}
+	if p.up(svc) && p.holding(svc).Handing {
+		// stopped mid-handover (by this dd-control or one before it), and
+		// the plan gives it back here
+		delete(p.handing, svc)
+		if err := p.mark(svc, false); err != nil {
+			log.Printf("placed: %s: %v", svc, err)
+			return
+		}
+		p.start(svc)
 	}
 	if p.up(svc) {
 		// the newer of what the flag has and what is now known
@@ -457,6 +564,25 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 	if first {
 		p.start(svc)
 	}
+}
+
+// leaseUntil is when this box's writer stops unless a renewal is seen: the
+// lease was last set by this box's request l.Seq, and cannot end sooner than
+// when that was sent plus the TTL, kept by this box's own clock since boot,
+// whatever its wall clock says. A request this box has no record of (it
+// restarted since) gives nothing: the flag's own until stands until a
+// renewal it sent is agreed.
+func (p *placer) leaseUntil(svc string, l *state.Lease) int64 {
+	at, ok := p.sent[svc][l.Seq]
+	if !ok {
+		return 0
+	}
+	for q := range p.sent[svc] {
+		if q < l.Seq {
+			delete(p.sent[svc], q)
+		}
+	}
+	return at + p.ttl.Milliseconds() - leaseMargin.Milliseconds()
 }
 
 // send asks, and keeps when (since boot) each request went

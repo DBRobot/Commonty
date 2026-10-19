@@ -21,6 +21,7 @@
 #   another's secrets: the store sees only ciphertext.
 {
   config,
+  options,
   lib,
   pkgs,
   ...
@@ -115,7 +116,10 @@ let
     else
       base=""
       for e in $(echo "$list" | sort -rn); do
-        if at "$e" wal-g backup-list 2>/dev/null | grep -q base_; then base=$e; break; fi
+        # read whole, then matched: grep -q leaving early fails the pipe
+        # (pipefail) when there is more than one backup to list
+        backups=$(at "$e" wal-g backup-list 2>/dev/null || true)
+        if [[ $backups == *base_* ]]; then base=$e; break; fi
       done
       if [ -z "$base" ]; then
         echo "the archive has epochs ($list) and no base backup: refusing to start from nothing"
@@ -138,12 +142,32 @@ let
     fi
   '';
 
-  # recovery: a segment, from the newest epoch that has it
+  # recovery: a segment, from the newest epoch that has it. A segment no
+  # epoch has is the end of the archive (exit 1); one the archive has and
+  # that cannot be fetched stops recovery (exit 200, which postgres takes
+  # as fatal) rather than end it early, without everything after it
   fetch = pkgs.writeShellScript "dd-pg-fetch" ''
     PATH=${lib.makeBinPath tools}
     ${common}
-    for e in $(cat ${state}/fetch-from 2>/dev/null); do
+    # restoring with no epochs to restore from is no end of the archive
+    [ -s ${state}/fetch-from ] || {
+      echo "no epochs to fetch $1 from: recovery stops here" >&2
+      exit 200
+    }
+    for e in $(cat ${state}/fetch-from); do
       if at "$e" wal-g wal-fetch "$1" "$2" 2>/dev/null; then exit 0; fi
+      # the archive not listed is not its end either
+      has=$(at "$e" wal-g st ls wal_005/ 2>/dev/null) || {
+        echo "epoch $e's archive does not answer: recovery stops here" >&2
+        exit 200
+      }
+      if [[ $has == *"$1."* ]]; then
+        for _ in 1 2 3; do
+          at "$e" wal-g wal-fetch "$1" "$2" && exit 0
+        done
+        echo "segment $1 is in epoch $e's archive and could not be fetched: recovery stops here" >&2
+        exit 200
+      fi
     done
     exit 1
   '';
@@ -161,16 +185,23 @@ let
     at "$E" wal-g wal-push "$1"
   '';
 
-  # once it runs at an epoch: it is this epoch's. Quick, and nothing that
-  # needs the store, which may not take writes when a box is away
+  # once it runs at an epoch: it is this epoch's. Nothing that needs the
+  # store, which may not take writes when a box is away. Not before it has
+  # replayed all it restores: postgres says it is up (read-only) as soon as
+  # the base backup is consistent, and what starts after it (a base backup
+  # under the new epoch, the services on its databases) must not see it
+  # halfway. The epochs to fetch from stay for that replay (take writes
+  # them anew for each restore)
   started = pkgs.writeShellScript "dd-pg-started" ''
-    PATH=${lib.makeBinPath tools}
+    PATH=${lib.makeBinPath (tools ++ [ pg.finalPackage ])}
     set -euo pipefail
+    until [ "$(runuser -u postgres -- psql -tAc 'select pg_is_in_recovery()')" = f ]; do
+      sleep 1
+    done
     E=$(jq -r .epoch ${flag})
     echo "$E" > ${state}/epoch.new
     chown postgres:postgres ${state}/epoch.new
     mv ${state}/epoch.new ${state}/epoch
-    rm -f ${state}/fetch-from
   '';
 
   # then, beside it: the key sealed to every box able to hold the lease,
@@ -229,6 +260,34 @@ let
     done
     echo "$left segments not archived within 30s: the next holder restores to before them" >&2
   '';
+
+  # handed over, stopped and its flag still up (dd-store-copy-final@postgresql
+  # runs it before its copy out): every segment the drain left unarchived,
+  # and the one it stopped in, which holds all it wrote since the last
+  # switch. Fails when any is not archived, so the handover is asked again
+  handover = pkgs.writeShellScript "dd-pg-handover" ''
+    PATH=${lib.makeBinPath (tools ++ [ pg.finalPackage ])}
+    set -uo pipefail
+    [ ! -e ${data}/postmaster.pid ] || { echo "postgres runs: its own archiver sees to it"; exit 0; }
+    ctl=$(pg_controldata ${data}) || { echo "no cluster here: nothing to archive"; exit 0; }
+    cur=$(echo "$ctl" | awk -F': +' '/REDO WAL file/ { print $2 }')
+    failed=0
+    for r in ${data}/pg_wal/archive_status/*.ready; do
+      [ -e "$r" ] || continue
+      seg=$(basename "$r" .ready)
+      if ${archive} ${data}/pg_wal/$seg; then
+        mv "$r" "''${r%.ready}.done"
+      else
+        echo "$seg: not archived"
+        failed=1
+      fi
+    done
+    if [ -n "$cur" ] && [ ! -e ${data}/pg_wal/archive_status/$cur.done ]; then
+      ${archive} ${data}/pg_wal/$cur || { echo "$cur: not archived"; failed=1; }
+    fi
+    [ "$failed" = 0 ] && echo "archived to the end, $cur"
+    exit "$failed"
+  '';
 in
 {
   options.dd.postgres.follow = {
@@ -266,51 +325,72 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    services.postgresql.settings = {
-      wal_level = "replica";
-      archive_mode = "on";
-      archive_command = "${archive} %p";
-      # a segment at least this often, so an unplanned move loses at most this
-      archive_timeout = 30;
-      restore_command = "${fetch} %f %p";
-      recovery_target_timeline = "latest";
-    };
-    systemd.services.postgresql = {
-      # its key to the store is made by the store's setup, when the store
-      # is this box's own (storage/store.nix)
-      after = [ "dd-store-setup.service" ];
-      wants = [ "dd-store-setup.service" ];
-      serviceConfig = {
-        EnvironmentFile = cfg.envFile;
-        ExecStartPre = lib.mkBefore [ "+${take}" ];
-        ExecStartPost = [ "+${started}" ];
-        ExecStop = [ "${drain}" ];
-        ReadWritePaths = [ state ];
+  config = lib.mkMerge [
+    # run before the store's final copy, where there is a store
+    (lib.optionalAttrs (options.dd ? store) {
+      dd.store.handover.postgresql = lib.mkIf cfg.enable [ "dd-pg-handover.service" ];
+    })
+    (lib.mkIf cfg.enable {
+      systemd.services.dd-pg-handover = {
+        description = "Archive what postgres wrote last, handed over";
+        unitConfig.ConditionPathExists = flag;
+        restartIfChanged = false;
+        serviceConfig = {
+          Type = "oneshot";
+          User = "postgres";
+          EnvironmentFile = cfg.envFile;
+          ExecStart = handover;
+        };
       };
-      environment.PGPORT = toString pg.settings.port;
-    };
-    systemd.services.dd-pg-base = {
-      description = "A base backup of postgres for the next holder of its lease";
-      after = [ "postgresql.service" ];
-      wantedBy = [ "postgresql.service" ];
-      # only where postgres runs: the timer finds nothing to do elsewhere
-      unitConfig.ConditionPathExists = flag;
-      restartIfChanged = false;
-      serviceConfig = {
-        Type = "oneshot";
-        User = "postgres";
-        EnvironmentFile = cfg.envFile;
+      services.postgresql.settings = {
+        wal_level = "replica";
+        archive_mode = "on";
+        archive_command = "${archive} %p";
+        # a segment at least this often, so an unplanned move loses at most this
+        archive_timeout = 30;
+        restore_command = "${fetch} %f %p";
+        recovery_target_timeline = "latest";
       };
-      script = "exec ${base}";
-    };
-    systemd.timers.dd-pg-base = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnActiveSec = "1d";
-        OnUnitActiveSec = "1d";
+      systemd.services.postgresql = {
+        # its key to the store is made by the store's setup, when the store
+        # is this box's own (storage/store.nix)
+        after = [ "dd-store-setup.service" ];
+        wants = [ "dd-store-setup.service" ];
+        serviceConfig = {
+          EnvironmentFile = cfg.envFile;
+          ExecStartPre = lib.mkBefore [ "+${take}" ];
+          ExecStartPost = [ "+${started}" ];
+          # a restore is started once it has replayed the archive (started),
+          # however long that takes; a writer that loses its lease meanwhile
+          # is stopped by its fence (box/placed-fence.sh)
+          TimeoutStartSec = "infinity";
+          ExecStop = [ "${drain}" ];
+          ReadWritePaths = [ state ];
+        };
+        environment.PGPORT = toString pg.settings.port;
       };
-    };
-    systemd.tmpfiles.rules = [ "d ${state} 0700 postgres postgres -" ];
-  };
+      systemd.services.dd-pg-base = {
+        description = "A base backup of postgres for the next holder of its lease";
+        after = [ "postgresql.service" ];
+        wantedBy = [ "postgresql.service" ];
+        # only where postgres runs: the timer finds nothing to do elsewhere
+        unitConfig.ConditionPathExists = flag;
+        restartIfChanged = false;
+        serviceConfig = {
+          Type = "oneshot";
+          User = "postgres";
+          EnvironmentFile = cfg.envFile;
+        };
+        script = "exec ${base}";
+      };
+      systemd.timers.dd-pg-base = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnActiveSec = "1d";
+          OnUnitActiveSec = "1d";
+        };
+      };
+      systemd.tmpfiles.rules = [ "d ${state} 0700 postgres postgres -" ];
+    })
+  ];
 }

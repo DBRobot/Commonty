@@ -72,11 +72,15 @@ let
       text = ages.${name}.identity;
       mode = "0400";
     };
-    environment.systemPackages = [ pkgs.wal-g ];
+    environment.systemPackages = [
+      pkgs.wal-g
+      pkgs.iproute2
+    ];
   };
 in
 {
   name = "pg-follow";
+  helpers = true;
   node.specialArgs = { inherit self; };
   defaults.virtualisation.memorySize = 1536;
   defaults.virtualisation.cores = 2;

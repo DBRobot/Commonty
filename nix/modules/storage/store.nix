@@ -15,7 +15,8 @@
 #   picks them by room and keeps a copy where it is (place.Decide's Copies,
 #   which dd-control writes to /run/dd-placed/copies.json). Before any plan
 #   has been seen, the first boxes by name. Nothing is deleted on the other
-#   end: a copy is added to, never pruned.
+#   end: a copy is added to, never pruned. A writer handed over is copied
+#   once more, stopped and before its flag goes (dd-store-copy-final@).
 # - A store says how big it is, what it has free and what it keeps of each
 #   bucket (/var/lib/dd-facts/store.prom, in the box's heartbeat), and
 #   refuses what other boxes send once it is nearly full. Its dataset's
@@ -52,7 +53,10 @@ let
     admin.api_bind_addr = "127.0.0.1:${toString cfg.adminPort}";
   };
   garage = "${pkgs.garage}/bin/garage -c ${conf}";
-  needs = import ../../lib/needs.nix { inherit lib; };
+  needs = import ../../lib/needs.nix {
+    inherit lib;
+    on = config.dd.failover or false;
+  };
   # every bucket a service writes, fleet-wide: any store may be picked to
   # keep any of them
   declared = lib.foldl' (a: b: a // b) { } (
@@ -97,14 +101,19 @@ let
   # the copies: this box's buckets, out to the stores they are kept in.
   # Every 30 seconds what changed in the last quarter hour, so a takeover
   # finds all but the last moments there; every half hour all of it, with
-  # a copy read back
-  copyUnit = unit: {
+  # a copy read back. And once more when a writer is handed over (final@<its
+  # service>, from dd-control), stopped and its flag still up: what changed
+  # in its own buckets since, done before the lease may lapse
+  copyUnit = mode: {
     description =
-      if unit == "dd-store-copy" then
-        "Copy this box's store out to the stores its buckets are kept in"
-      else
-        "Copy what changed in this box's store out to the stores its buckets are kept in";
-    environment.MODE = if unit == "dd-store-copy" then "all" else "recent";
+      {
+        all = "Copy this box's store out to the stores its buckets are kept in";
+        recent = "Copy what changed in this box's store out to the stores its buckets are kept in";
+        final = "Copy a handed-over service's last writes out to the stores its buckets are kept in";
+      }
+      .${mode};
+    environment.MODE = mode;
+    scriptArgs = lib.mkIf (mode == "final") "%i";
     after = [ "dd-store-setup.service" ];
     restartIfChanged = false;
     path = [
@@ -121,6 +130,8 @@ let
     serviceConfig = {
       Type = "oneshot";
       StateDirectory = "dd-store-copy";
+      # dd-control stops it sooner, at the lease's until
+      TimeoutStartSec = lib.mkIf (mode == "final") "1min";
     };
     script = ''
       set -uo pipefail
@@ -129,11 +140,39 @@ let
       export RCLONE_CONFIG=/dev/null
       mine=/var/lib/dd-store-copy
       mkdir -p $mine/lost /run/dd-store
-      # one run of each kind at a time; the two side by side is fine
-      exec 9>/run/dd-store/copy-$MODE.lock
-      flock -n 9 || { echo "a $MODE copy still runs"; exit 0; }
-      if [ "$MODE" = recent ]; then recent="--max-age 15m"; else recent=""; fi
       failed=0
+      # one run of each kind at a time; the two side by side is fine
+      if [ "$MODE" != final ]; then
+        exec 9>/run/dd-store/copy-$MODE.lock
+        flock -n 9 || { echo "a $MODE copy still runs"; exit 0; }
+        bounded() { "$@"; }
+      else
+        SVC=$1
+        lapses=$(jq -r '.until // empty' "/run/dd-placed/$SVC" 2>/dev/null) || lapses=""
+        [ -n "$lapses" ] || { echo "$SVC: its lease is not held here: nothing to copy"; exit 0; }
+        read -r up _ </proc/uptime
+        now=$((''${up%.*} * 1000 + 10#''${up#*.} * 10))
+        # done a margin before the flag's until, by the same clock
+        deadline=$(($(date +%s) + (lapses - now) / 1000 - 3))
+        left() { echo $((deadline - $(date +%s))); }
+        bounded() { [ "$(left)" -gt 0 ] && timeout "$(left)" "$@"; }
+        # a final copy that fails says so: dd-control keeps the flag and asks again
+        [ "$(left)" -gt 0 ] || { echo "$SVC: no time left before its lease may lapse"; exit 1; }
+        # its own copies into this store first (the forge's)
+        case "$SVC" in
+        ${lib.concatStrings (
+          lib.mapAttrsToList (s: us: "  ${s}) first=\"${lib.concatStringsSep " " us}\" ;;\n") cfg.handover
+        )}
+        *) first="" ;;
+        esac
+        for u in $first; do
+          bounded systemctl start "$u" || { systemctl stop "$u"; echo "$SVC: $u failed or not done in time"; failed=1; }
+        done
+        # after a recent copy still running, never beside it
+        exec 9>/run/dd-store/copy-recent.lock
+        [ "$(left)" -gt 0 ] && flock -w "$(left)" 9 || { echo "$SVC: no final copy, a recent one ran past its time"; exit 1; }
+      fi
+      if [ "$MODE" = all ]; then recent=""; else recent="--max-age 15m"; fi
       # the plan's copies: kept, so a restart copies on as last agreed
       if [ -s ${plan} ] && jq -e 'type == "object"' ${plan} >/dev/null 2>&1; then
         # a name of this mode's own: the other mode's run, side by side, moved a
@@ -154,6 +193,18 @@ let
           )}
           esac
         fi
+      }
+      # a final copy's: the buckets its service writes
+      owns() {
+        [ "$MODE" = final ] || return 0
+        case "$1" in
+        ${lib.concatStrings (
+          lib.mapAttrsToList (
+            b: v: "  ${b}) [ \"$SVC\" = ${lib.escapeShellArg (toString v.service)} ] ;;\n"
+          ) (lib.filterAttrs (_: v: v.service != null) cfg.buckets)
+        )}
+        *) false ;;
+        esac
       }
       # whether this box writes it now
       writes() {
@@ -188,7 +239,7 @@ let
         fi
       }
       for b in ${lib.concatStringsSep " " copied}; do
-        writes $b || continue
+        owns $b && writes $b || continue
         for p in $(targets $b); do
           there=$(url $p) || { echo "$p: keeps $b by the plan, and is no store this box knows"; failed=1; continue; }
           key $p "$there" || { failed=1; continue; }
@@ -220,10 +271,14 @@ let
               fi
             fi
             # copy, never sync: nothing is deleted there
-            rclone copy --checksum --s3-no-check-bucket --fast-list $recent "here:$b" "there:$b"
-          ) && { [ "$MODE" = recent ] || date +%s > $mine/$p.$b.ok; } || { echo "$p: $b not copied this time"; failed=1; }
+            bounded rclone copy --checksum --s3-no-check-bucket --fast-list $recent "here:$b" "there:$b"
+          ) && { [ "$MODE" != all ] || date +%s > $mine/$p.$b.ok; } || { echo "$p: $b not copied this time"; failed=1; }
         done
       done
+      if [ "$MODE" = final ]; then
+        [ "$failed" = 0 ] || { echo "$SVC: its final copy is not all there"; exit 1; }
+        echo "$SVC: its last writes copied out"
+      fi
       # what the plan reads of the copies read back (place.Decide)
       [ "$MODE" = all ] || exit 0
       out=$(mktemp)
@@ -320,6 +375,11 @@ in
         }
       );
       default = { };
+    };
+    handover = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+      description = "a service's units run to their end, in order, on its planned handover, before its final copy (the forge's own copy into this store)";
     };
     migrate = lib.mkOption {
       type = lib.types.attrsOf (
@@ -431,7 +491,9 @@ in
           q=$(numfmt --from=iec ${cfg.capacity})
           [ "$(zfs get -Hp -o value quota ${cfg.dataset})" = "$q" ] || zfs set quota=$q ${cfg.dataset}
         ''}
-        if ! g layout show 2>/dev/null | grep -q "Current cluster layout version: [1-9]"; then
+        # read whole, then matched: grep -q leaving early fails the pipe
+        layout=$(g layout show 2>/dev/null || true)
+        if ! grep -q "Current cluster layout version: [1-9]" <<<"$layout"; then
           # a store of one: what it is told it offers only weighs it
           # against itself, so with auto, what the pool has now
           ${
@@ -485,8 +547,9 @@ in
       '';
     };
 
-    systemd.services.dd-store-copy = copyUnit "dd-store-copy";
-    systemd.services.dd-store-copy-recent = copyUnit "dd-store-copy-recent";
+    systemd.services.dd-store-copy = copyUnit "all";
+    systemd.services.dd-store-copy-recent = copyUnit "recent";
+    systemd.services."dd-store-copy-final@" = copyUnit "final";
     systemd.timers.dd-store-copy = {
       wantedBy = [ "timers.target" ];
       timerConfig = {

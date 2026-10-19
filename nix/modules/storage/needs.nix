@@ -179,6 +179,7 @@
       "dd-store-setup"
       "dd-store-copy"
       "dd-store-copy-recent"
+      "dd-store-copy-final@" # a writer's last writes, when dd-control hands it over
       "dd-store-facts"
       "dd-store-migrate" # the move off the old shared pool
     ];

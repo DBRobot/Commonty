@@ -23,6 +23,7 @@ let
     };
   };
   other = name: if name == "a" then "b" else "a";
+  handing = import ../lib/not-handing.nix { inherit pkgs; };
   cert = pkgs.runCommand "test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
@@ -70,9 +71,13 @@ let
         # what box/placed.nix gives the placed services' units
         systemd.services = {
           postgresql.unitConfig.ConditionPathExists = "/run/dd-placed/postgresql";
+          postgresql.serviceConfig.ExecCondition = "${handing "postgresql"}";
           postgresql-setup.unitConfig.ConditionPathExists = "/run/dd-placed/postgresql";
+          postgresql-setup.serviceConfig.ExecCondition = "${handing "postgresql"}";
           ente.unitConfig.ConditionPathExists = "/run/dd-placed/ente-museum";
+          ente.serviceConfig.ExecCondition = "${handing "ente-museum"}";
           ente-health.unitConfig.ConditionPathExists = "/run/dd-placed/ente-museum";
+          ente-health.serviceConfig.ExecCondition = "${handing "ente-museum"}";
         };
         systemd.tmpfiles.rules = [ "d /run/dd-placed 0755 root root -" ];
         dd.photos.admin = 1;
@@ -133,6 +138,7 @@ let
 in
 {
   name = "takeover";
+  helpers = true;
   node.specialArgs = { inherit self; };
   # ente.nix pins museum by an overlay
   node.pkgsReadOnly = false;

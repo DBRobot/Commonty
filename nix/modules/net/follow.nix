@@ -71,6 +71,30 @@ let
     chmod 0600 ${state}/db.sqlite
     echo "epoch $E: the network as epoch $copied left it"
   '';
+  # its database, sealed, into this box's store; strict (a handover's)
+  # fails when it did not copy
+  copy = pkgs.writeShellScript "dd-headscale-copy" ''
+    set -uo pipefail
+    PATH=${lib.makeBinPath tools}
+    ${env}
+    strict=''${1:-}
+    E=$(cat ${mine}/epoch 2>/dev/null || echo 0)
+    [ "$E" -gt 0 ] || { echo "the server has not started here yet"; exit 0; }
+    umask 077
+    failed=0
+    if sqlite3 ${state}/db.sqlite ".backup ${mine}/db.sqlite" \
+      && age ${recipients} -o ${mine}/db.sqlite.age ${mine}/db.sqlite \
+      && rclone copyto ${mine}/db.sqlite.age here:headscale/db.sqlite.age \
+      && echo "$E" | rclone rcat here:headscale/epoch; then
+      :
+    else
+      echo "not copied this time"
+      failed=1
+    fi
+    rm -f ${mine}/db.sqlite
+    [ -z "$strict" ] || exit "$failed"
+    exit 0
+  '';
   started = pkgs.writeShellScript "dd-headscale-started" ''
     ${pkgs.jq}/bin/jq -r .epoch ${flag} > ${mine}/epoch.new
     ${pkgs.coreutils}/bin/mv ${mine}/epoch.new ${mine}/epoch
@@ -99,6 +123,11 @@ in
       dd.store.buckets.headscale = lib.mkIf (
         hcfg.enable && (config.dd.failover or false) && (store.enable or false)
       ) { };
+      # handed over, its last state into the store before its final copy
+      # goes out (dd-control, placed.go)
+      dd.store.handover.headscale = lib.mkIf (
+        hcfg.enable && (config.dd.failover or false) && (store.enable or false)
+      ) [ "dd-headscale-handover.service" ];
     })
     (lib.mkIf (hcfg.enable && (config.dd.failover or false) && (store.enable or false)) {
       assertions = [
@@ -121,25 +150,18 @@ in
         after = [ "headscale.service" ];
         unitConfig.ConditionPathExists = flag;
         restartIfChanged = false;
-        path = tools;
         serviceConfig.Type = "oneshot";
-        script = ''
-          set -uo pipefail
-          ${env}
-          E=$(cat ${mine}/epoch 2>/dev/null || echo 0)
-          [ "$E" -gt 0 ] || { echo "the server has not started here yet"; exit 0; }
-          umask 077
-          sqlite3 ${state}/db.sqlite ".backup ${mine}/db.sqlite" || exit 0
-          if age ${recipients} -o ${mine}/db.sqlite.age ${mine}/db.sqlite \
-            && rclone copyto ${mine}/db.sqlite.age here:headscale/db.sqlite.age \
-            && echo "$E" | rclone rcat here:headscale/epoch; then
-            :
-          else
-            echo "not copied this time"
-          fi
-          rm -f ${mine}/db.sqlite
-          exit 0
-        '';
+        script = "exec ${copy}";
+      };
+      # handed over: the same, and it fails when the copy did not happen
+      # (dd-store-copy-final@headscale runs it before its copy out)
+      systemd.services.dd-headscale-handover = {
+        description = "Copy the network's last database into this box's store, handed over";
+        after = [ "headscale.service" ];
+        unitConfig.ConditionPathExists = flag;
+        restartIfChanged = false;
+        serviceConfig.Type = "oneshot";
+        script = "exec ${copy} strict";
       };
       systemd.timers.dd-headscale-copy = {
         wantedBy = [ "timers.target" ];

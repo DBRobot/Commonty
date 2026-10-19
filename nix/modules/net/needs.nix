@@ -10,6 +10,7 @@
       "headscale-seed"
       "headscale-snapshot"
       "dd-headscale-copy" # its database, sealed, into the store (follow.nix)
+      "dd-headscale-handover" # the same, handed over: fails when it did not copy (follow.nix)
     ];
     # one control server for the fleet; its database is the network. It
     # follows its lease, and the gateway's names follow it

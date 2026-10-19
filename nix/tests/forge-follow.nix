@@ -24,6 +24,7 @@ let
     };
   };
   other = name: if name == "a" then "b" else "a";
+  handing = import ../lib/not-handing.nix { inherit pkgs; };
   # what box/placed.nix gives the placed services' units
   forgeUnits = [
     "dd-forge-dirs"
@@ -36,6 +37,7 @@ let
     "dd-ci-resume"
     "dd-forget-forge"
     "dd-forge-copy"
+    "dd-forge-handover"
   ];
   followBox =
     name:
@@ -72,11 +74,15 @@ let
             '';
           };
         }
-        // lib.genAttrs forgeUnits (_: {
+        // lib.genAttrs forgeUnits (u: {
           unitConfig.ConditionPathExists = "/run/dd-placed/forgejo";
+          serviceConfig = lib.optionalAttrs (u != "dd-forge-handover") {
+            ExecCondition = "${handing "forgejo"}";
+          };
         })
         // lib.genAttrs [ "postgresql" "postgresql-setup" ] (_: {
           unitConfig.ConditionPathExists = "/run/dd-placed/postgresql";
+          serviceConfig.ExecCondition = "${handing "postgresql"}";
         });
         dd.store = {
           enable = true;
@@ -132,6 +138,7 @@ let
 in
 {
   name = "forge-follow";
+  helpers = true;
   node.specialArgs = { inherit self; };
   defaults.virtualisation.memorySize = 2048;
   defaults.virtualisation.cores = 2;
@@ -143,5 +150,6 @@ in
   scriptEnv = {
     sock = "/run/forgejo/forgejo.sock";
     dir = "/vault/forgejo";
+    forgeUnits = lib.concatMapStringsSep " " (u: "${u}.service") forgeUnits;
   };
 }

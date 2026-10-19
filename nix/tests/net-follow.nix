@@ -11,6 +11,7 @@
 }:
 let
   # test keys only: what each box's TPM-held secrets key is on a real one
+  handing = import ../lib/not-handing.nix { inherit pkgs; };
   ages = {
     a = {
       identity = "AGE-SECRET-KEY-1RYQV6YMT4DPUURXLGDHLEP6P4QLM4NYQ4Z4E594SKSVYTXHZTF6QAJ94TJ";
@@ -87,9 +88,20 @@ let
           mode = "0400";
         };
         # what box/placed.nix gives the placed service's units
-        systemd.services = lib.genAttrs [ "headscale" "headscale-seed" "dd-headscale-copy" ] (_: {
-          unitConfig.ConditionPathExists = "/run/dd-placed/headscale";
-        });
+        systemd.services =
+          lib.genAttrs
+            [
+              "headscale"
+              "headscale-seed"
+              "dd-headscale-copy"
+              "dd-headscale-handover"
+            ]
+            (u: {
+              unitConfig.ConditionPathExists = "/run/dd-placed/headscale";
+              serviceConfig = lib.optionalAttrs (u != "dd-headscale-handover") {
+                ExecCondition = "${handing "headscale"}";
+              };
+            });
         systemd.tmpfiles.rules = [ "d /run/dd-placed 0755 root root -" ];
         services.nginx.enable = true;
         # what the gate's module has, which this test leaves out
@@ -117,6 +129,7 @@ let
 in
 {
   name = "net-follow";
+  helpers = true;
   node.specialArgs = { inherit self; };
   defaults.virtualisation.memorySize = 1536;
   nodes = {

@@ -1,6 +1,9 @@
 # The net-follow test: the network's database moves from a to b, sealed so
 # only the boxes able to run the server can open it.
 import json
+import time
+
+from waits import journal_has, journal_of, start_fresh
 
 start_all()
 for m in (a, b, c):
@@ -8,6 +11,18 @@ for m in (a, b, c):
     m.wait_for_unit("nginx.service")
     # the plan's copies, as dd-control writes them: c keeps one too
     m.succeed("""echo '{"headscale":["a","b","c"]}' > /run/dd-placed/copies.json""")
+
+
+def copy_out(m):
+    """a copy run of its own, until one sends everything: one that found the
+    other store not ready yet says so"""
+    end = time.monotonic() + 180
+    while True:
+        inv = start_fresh(m, "dd-store-copy.service")
+        if not journal_has(m, "dd-store-copy.service", inv, "not copied this time"):
+            return
+        assert time.monotonic() < end, journal_of(m, "dd-store-copy.service", inv)
+        m.sleep(2)
 
 
 def hold(m, epoch):
@@ -34,19 +49,32 @@ a.succeed("headscale users create tom")
 a.succeed(
     "headscale preauthkeys create --user $(headscale users list -o json | jq -r '.[] | select(.name == \"tom\") | .id') --expiration 1h"
 )
-a.succeed("systemctl start dd-headscale-copy.service")
-a.fail("journalctl -u dd-headscale-copy.service | grep -q 'not copied this time'")
-
-# a hands over, its copy out to b's and c's stores
-a.wait_until_succeeds("systemctl stop headscale.service", timeout=120)
-a.succeed("rm /run/dd-placed/headscale")
-a.wait_until_succeeds(
-    # a copy that found the other store not ready says so: until none does
-    "systemctl start dd-store-copy.service && "
-    "! journalctl _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value dd-store-copy.service) "
-    "| grep -q 'not copied this time'",
-    timeout=180,
+inv = start_fresh(a, "dd-headscale-copy.service")
+assert not journal_has(a, "dd-headscale-copy.service", inv, "not copied this time")
+# copied to b's and c's stores while a holds the flag: the store copies
+# only for the box that writes
+copy_out(a)
+# from here only the handover copies anything: no timer does it behind it
+a.succeed(
+    "systemctl stop dd-store-copy.timer dd-store-copy-recent.timer dd-headscale-copy.timer"
 )
+# made the moment before the handover: in no copy yet
+a.succeed("headscale users create late")
+
+# a hands over as dd-control does (placed.go): stopped, its database into
+# the store and out to b's and c's while its flag is up, then the flag gone
+a.succeed("systemctl stop headscale.service")
+a.succeed(
+    "jq -c '.handing = true' /run/dd-placed/headscale > /run/dd-placed/headscale.new "
+    "&& mv /run/dd-placed/headscale.new /run/dd-placed/headscale"
+)
+# marked handed over: a start now is refused
+a.succeed("systemctl start headscale.service")
+a.fail("systemctl is-active headscale.service")
+# no timer starts it, so no run of it is under way; it fails unless all of
+# it was copied
+a.succeed("systemctl start dd-store-copy-final@headscale.service")
+a.succeed("rm /run/dd-placed/headscale")
 
 s3 = "aws --endpoint-url http://127.0.0.1:3910"
 fetch = (
@@ -61,7 +89,7 @@ c.fail("age -d -i /etc/age-identity -o /tmp/db.sqlite /tmp/db.age")
 hold(b, 2)
 up(b)
 b.succeed("journalctl -u headscale.service | grep -q 'the network as epoch 1 left it'")
-assert "tom" in users(b), users(b)
+assert {"tom", "late"} <= users(b), users(b)
 ka = a.succeed("cat /var/lib/headscale/noise_private.key")
 kb = b.succeed("cat /var/lib/headscale/noise_private.key")
 assert ka != kb, "b runs on a's server key"

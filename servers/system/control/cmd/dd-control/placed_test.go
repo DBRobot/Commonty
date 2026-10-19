@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,6 +34,9 @@ func newPlacer(t *testing.T) (*placer, *[]string) {
 		dir:     filepath.Join(t.TempDir(), "dd-placed"),
 		carries: map[string][]string{"web": {"web.service"}, "photos": {"ente.service", "ente-web.service"}},
 		run: func(args ...string) error {
+			if args[0] == "is-active" {
+				return errors.New("inactive") // nothing runs, unless a test says so
+			}
 			calls = append(calls, strings.Join(args, " "))
 			return nil
 		},
@@ -408,5 +413,228 @@ func TestAComputersLeaseIsAnsweredFromOneState(t *testing.T) {
 	}
 	if got := computerLease(s, cfg, "fedcba9876543210", nil); got["computer"] != nil || got["lease"] != nil {
 		t.Fatalf("%v", got)
+	}
+}
+
+// a writer stands in for one whose final copy is watched: what it was given,
+// and whether its flag was still up then
+func withFinal(p *placer, calls *[]string) {
+	p.final = func(svc string, within time.Duration) error {
+		*calls = append(*calls, fmt.Sprintf("final %s up=%v within=%v", svc, p.up(svc), within))
+		return nil
+	}
+}
+
+func TestAHandoverCopiesOutBeforeTheFlagGoes(t *testing.T) {
+	p, calls, clock, s := running(t)
+	withFinal(p, calls)
+	*clock += 2000
+	n := len(*calls)
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}, s)
+	want := []string{"stop postgresql.service", "final db up=true within=10s", "stop postgresql.service", "lease release"}
+	if got := (*calls)[n:]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls %v", got)
+	}
+	if p.up("db") {
+		t.Fatal("flag still up")
+	}
+}
+
+func TestAFencedWriterCopiesNothingOut(t *testing.T) {
+	p, calls, clock, _ := running(t)
+	withFinal(p, calls)
+	*clock += 12_000
+	p.fence()
+	// nor when the lease is another's
+	q, qcalls, _, qs := running(t)
+	withFinal(q, qcalls)
+	qs.Leases["svc/db"] = &state.Lease{Holder: "node2", Epoch: 2, Expires: qs.Time + 15_000}
+	q.reconcile(wantDB, qs)
+	for _, c := range append(*calls, *qcalls...) {
+		if strings.HasPrefix(c, "final") {
+			t.Fatalf("a final copy off the handover: %v %v", *calls, *qcalls)
+		}
+	}
+	if p.up("db") || q.up("db") {
+		t.Fatal("not stopped")
+	}
+}
+
+func TestAFinalCopyThatFailsKeepsTheFlagAndAsksAgain(t *testing.T) {
+	p, calls, clock, s := running(t)
+	fail := true
+	p.final = func(string, time.Duration) error {
+		*calls = append(*calls, "final")
+		if fail {
+			return fmt.Errorf("not done")
+		}
+		return nil
+	}
+	moved := place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}
+	n := len(*calls)
+	p.reconcile(moved, s)
+	// what it started is stopped, the flag stays and the lease is renewed
+	want := []string{"stop postgresql.service", "final", "stop postgresql.service", "lease renew"}
+	if got := (*calls)[n:]; !reflect.DeepEqual(got, want) || !p.up("db") {
+		t.Fatalf("calls %v up %v", got, p.up("db"))
+	}
+	// the renewal agreed, and the next try copies
+	grant(p, s, 1)
+	*clock += 2000
+	fail = false
+	n = len(*calls)
+	p.reconcile(moved, s)
+	if h := p.holding("db"); p.up("db") || h.Epoch != 0 {
+		t.Fatalf("flag kept after its copy: %+v", h)
+	}
+	want = []string{"stop postgresql.service", "final", "stop postgresql.service", "lease release"}
+	if got := (*calls)[n:]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls %v", got)
+	}
+}
+
+func TestAHandoverThatNeverCopiesGivesUpInTime(t *testing.T) {
+	p, calls, clock, s := running(t)
+	p.final = func(string, time.Duration) error { return fmt.Errorf("not done") }
+	moved := place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}
+	p.reconcile(moved, s)
+	for i := 0; i < 30 && p.up("db"); i++ {
+		*clock += 5000
+		grant(p, s, 1)
+		p.reconcile(moved, s)
+	}
+	if p.up("db") || (*calls)[len(*calls)-1] != "lease release" {
+		t.Fatalf("still handing over: %v", (*calls)[len(*calls)-3:])
+	}
+	if *clock-1_000_000 < handoverFor.Milliseconds() {
+		t.Fatal("gave up early")
+	}
+}
+
+func TestAWriterGivenBackMidHandoverStartsAgain(t *testing.T) {
+	p, calls, _, s := running(t)
+	p.final = func(string, time.Duration) error { return fmt.Errorf("not done") }
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}, s)
+	grant(p, s, 1)
+	p.reconcile(wantDB, s)
+	if !p.up("db") || (*calls)[len(*calls)-1] != "start --no-block postgresql.service" || len(p.handing) != 0 {
+		t.Fatalf("calls %v", *calls)
+	}
+}
+
+// a writer stood in for: whether its flag says it is handed over when the
+// final copy runs, and what the units' condition (box/placed.nix) makes of it
+func TestAFinalCopyRunsWithTheFlagMarkedHandingOver(t *testing.T) {
+	p, calls, _, s := running(t)
+	var during held
+	p.final = func(svc string, _ time.Duration) error {
+		during = p.holding(svc)
+		*calls = append(*calls, "final")
+		return nil
+	}
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}, s)
+	if !during.Handing || during.Epoch != 1 {
+		t.Fatalf("flag during the copy %+v", during)
+	}
+	raw, _ := json.Marshal(during)
+	if !strings.Contains(string(raw), `"handing":true`) {
+		t.Fatalf("the units' condition looks for \"handing\":true, the flag has %s", raw)
+	}
+}
+
+func TestReleaseOnlyOnceNothingRuns(t *testing.T) {
+	p, calls, _, s := running(t)
+	active := true
+	p.run = func(args ...string) error {
+		if args[0] == "is-active" {
+			if active {
+				return nil // something started during the copy
+			}
+			return errors.New("inactive")
+		}
+		*calls = append(*calls, strings.Join(args, " "))
+		return nil
+	}
+	p.final = func(string, time.Duration) error { return nil }
+	moved := place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}
+	p.reconcile(moved, s)
+	for _, c := range *calls {
+		if c == "lease release" {
+			t.Fatalf("released while a unit runs: %v", *calls)
+		}
+	}
+	if !p.up("db") || !p.holding("db").Handing {
+		t.Fatalf("flag %v %+v", p.up("db"), p.holding("db"))
+	}
+	active = false
+	grant(p, s, 1)
+	p.reconcile(moved, s)
+	if p.up("db") || (*calls)[len(*calls)-1] != "lease release" {
+		t.Fatalf("calls %v", *calls)
+	}
+}
+
+func TestARetriedHandoverKeepsTheFlagHandingOver(t *testing.T) {
+	p, calls, clock, s := running(t)
+	p.final = func(string, time.Duration) error { return fmt.Errorf("not done") }
+	moved := place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}
+	n := len(*calls)
+	p.reconcile(moved, s)
+	for i := 0; i < 3; i++ {
+		*clock += 5000
+		grant(p, s, 1)
+		p.reconcile(moved, s)
+		if h := p.holding("db"); !h.Handing {
+			t.Fatalf("round %d: the flag lets it start: %+v", i, h)
+		}
+	}
+	for _, c := range (*calls)[n:] {
+		if strings.HasPrefix(c, "start") {
+			t.Fatalf("started mid-handover: %v", *calls)
+		}
+	}
+}
+
+// a computer has no buckets to copy out, but is handed over in the same
+// order: stopped, and its lease given back only once it no longer runs
+func TestAComputerHandedOverIsNotCopiedAndStopsFirst(t *testing.T) {
+	a := comp("0123456789abcdef", "ann", 4096, 2, 27200)
+	p, calls, _, s := computerPlacer(t, a)
+	unit := "dd-computer@" + a.ID + ".service"
+	running := true
+	p.run = func(args ...string) error {
+		if args[0] == "is-active" {
+			if running {
+				return nil
+			}
+			return errors.New("inactive")
+		}
+		*calls = append(*calls, strings.Join(args, " "))
+		return nil
+	}
+	p.final = func(svc string, _ time.Duration) error {
+		*calls = append(*calls, "final "+svc)
+		return nil
+	}
+	svc := "computer-" + a.ID
+	s.Leases["svc/"+svc] = &state.Lease{Holder: "node1", Epoch: 3, Expires: s.Time + 15_000}
+	if err := p.raise(svc, []byte(`{"epoch":3,"until":99999999}`)); err != nil {
+		t.Fatal(err)
+	}
+	a.Up = false
+	plan := place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: svc}}}}
+	p.reconcile(plan, s)
+	if !p.up(svc) || p.holding(svc).Handing {
+		t.Fatalf("flag %v %+v", p.up(svc), p.holding(svc))
+	}
+	for _, c := range *calls {
+		if c == "lease release" || strings.HasPrefix(c, "final") {
+			t.Fatalf("calls %v", *calls)
+		}
+	}
+	running = false
+	p.reconcile(plan, s)
+	if p.up(svc) || (*calls)[len(*calls)-1] != "lease release" || (*calls)[len(*calls)-2] != "stop "+unit {
+		t.Fatalf("calls %v", *calls)
 	}
 }

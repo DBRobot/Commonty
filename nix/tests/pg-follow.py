@@ -1,4 +1,8 @@
 # The pg-follow test: postgres moves with its lease, by the archive alone.
+import time
+
+from waits import journal_has, journal_of
+
 start_all()
 for m in (a, b):
     m.wait_for_unit("garage.service")
@@ -75,9 +79,51 @@ a.fail("grep -rq 'create table t' /srv/garage")
 sql(a, "insert into t select generate_series(101, 120)")
 give_back(a)
 
+# a segment the archive has and b cannot fetch stops b's recovery, rather
+# than end it early without the rows in it and after it
+st = (
+    "set -a; . $(systemctl show -p EnvironmentFiles --value postgresql | cut -d' ' -f1); "
+    "AWS_ENDPOINT=http://127.0.0.1:3900 AWS_S3_FORCE_PATH_STYLE=true AWS_REGION=us-east-1 "
+    "WALG_S3_PREFIX=s3://postgres-wal/main/e1 wal-g st"
+)
+last = a.succeed(
+    f"{st} ls wal_005/ | grep -o '[0-9A-F]\\{{24\\}}\\.zst' | sort | tail -n1"
+).strip()
+assert last, "no segment archived"
+a.succeed(f"{st} get --no-decrypt --no-decompress wal_005/{last} /tmp/kept")
+a.succeed(
+    f"echo unreadable > /tmp/bad && {st} put --no-encrypt --no-compress -f /tmp/bad wal_005/{last}"
+)
+b.succeed(
+    'mkdir -p /run/dd-placed && echo \'{"epoch": 2, "until": 9999999999999}\' > /run/dd-placed/postgresql'
+)
+b.fail("systemctl start postgresql.service")
+# it is restarted after it fails (Restart=), and each try stops at the same
+# segment: a try that has ended (between tries, or given up) is read
+end = time.monotonic() + 180
+while True:
+    sub = b.succeed("systemctl show -p SubState --value postgresql.service").strip()
+    inv = b.succeed("systemctl show -p InvocationID --value postgresql.service").strip()
+    if sub in ("auto-restart", "failed", "dead") and journal_has(
+        b, "postgresql.service", inv, "could not be fetched: recovery stops here"
+    ):
+        break
+    assert time.monotonic() < end, (sub, journal_of(b, "postgresql.service", inv))
+    b.sleep(1)
+# its tries ran into systemd's start limit: cleared for the start below
+b.succeed(
+    "systemctl stop postgresql.service && systemctl reset-failed postgresql.service"
+)
+a.succeed(f"{st} put --no-encrypt --no-compress -f /tmp/kept wal_005/{last}")
+
 # epoch 2 on b, from the archive: every row, a's included, with the key
 # a sealed to it - the same key, not a new one
+# each fetch from the store slowed: postgres says it is up (read-only) once
+# the base backup is consistent, while it still replays what came after;
+# what it starts on then may not cut the replay short
+b.succeed("tc qdisc add dev lo root netem delay 200ms")
 lease(b, 2)
+b.succeed("tc qdisc del dev lo root")
 assert (
     b.succeed("sha256sum < /var/lib/dd-pg/key | cut -d' ' -f1").strip() == fingerprint
 )

@@ -17,7 +17,10 @@
   ...
 }:
 let
-  needs = import ../../lib/needs.nix { inherit lib; };
+  needs = import ../../lib/needs.nix {
+    inherit lib;
+    on = config.dd.failover or false;
+  };
   dir = "/run/dd-placed";
   # a box carries a placed service when one of its roles brings it
   # (fleet/roles.json); its units are the service and the ones its needs
@@ -27,7 +30,17 @@ let
   carries = lib.genAttrs (lib.filter (
     s: (needs.${s}.placed || needs.${s}.lease) && builtins.elem s brought
   ) (builtins.attrNames needs)) (s: needs.${s}.units);
-  when = svc: { unitConfig.ConditionPathExists = "${dir}/${svc}"; };
+  # the units that copy a service's last state out on its handover
+  # (dd.store.handover) run while it is handed over; the rest refuse to start
+  # then, so nothing writes while or after that copy (placed.go marks it)
+  handover = map (lib.removeSuffix ".service") (
+    lib.concatLists (lib.attrValues (config.dd.store.handover or { }))
+  );
+  handing = import ../../lib/not-handing.nix { inherit pkgs; };
+  when = svc: u: {
+    unitConfig.ConditionPathExists = "${dir}/${svc}";
+    serviceConfig = lib.optionalAttrs (!builtins.elem u handover) { ExecCondition = "${handing svc}"; };
+  };
 in
 {
   config = lib.mkIf config.dd.control.enable {
@@ -63,7 +76,7 @@ in
           };
         }
       ]
-      ++ lib.mapAttrsToList (s: units: lib.genAttrs units (_: when s)) carries
+      ++ lib.mapAttrsToList (s: units: lib.genAttrs units (when s)) carries
     );
     # a timer of a placed service fires everywhere; the service it starts
     # does not, without the flag

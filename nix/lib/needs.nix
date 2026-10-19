@@ -1,7 +1,14 @@
 # Every service's needs, typed (needs-type.nix) and in one set: placement,
 # the fit check and the release read this. A service lists its needs beside
 # its module, in needs.nix.
-{ lib }:
+{
+  lib,
+  # services switched by the control plane are, until the fleet's owner
+  # turns failover on (fleet/policy.json failover), where their roles put
+  # them, as before: one switch for every box at once. A box's own modules
+  # pass its dd.failover
+  on ? (lib.importJSON ../../fleet/policy.json).failover or false,
+}:
 let
   files = [
     ../modules/adblock/needs.nix
@@ -24,10 +31,6 @@ let
       { needs = lib.foldl' (a: f: a // import f) { } files; }
     ];
   };
-  # services switched by the control plane are, until the fleet's owner
-  # turns failover on (fleet/policy.json failover), where their roles put
-  # them, as before: one switch for every box at once
-  on = (lib.importJSON ../../fleet/policy.json).failover or false;
 in
 lib.mapAttrs (
   _: n:
