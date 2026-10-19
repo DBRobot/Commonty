@@ -22,32 +22,32 @@ Their code comes with the app you installed, never from a box, so a box
 cannot change it to steal a key. The app serves them to its own window,
 and to your browser on the same computer once you allow it.
 
-The first time, you allow your browser once:
+The first time, you link your browser to the app once, for all of them:
 
-1. Open the page in your browser, for example Files. It says **This
-   opens through the Commonty app**. Press **Open**.
-2. Your browser shows a 6-digit code, and the app comes up with **Allow
-   this browser** and a code.
-3. Check the two codes match, then press **Allow this browser** in the
-   app. If they do not match, or you did not ask, press **Not me**.
+1. Open the page in your browser, for example Photos, and press **Open with
+   the Commonty app**.
+2. Your browser shows a 6-digit code, and the app comes up with
+   **Link this browser?** and a code.
+3. Check the two codes match, then press **Link this browser** in the app.
+   If they do not match, or you did not ask, press **Not me**.
 4. The page opens in your browser.
 
-After that the app remembers your browser. Pressing **Open** on any of
-these pages (Photos and Passwords too) opens it straight away, with no
-code, even after the app or the computer restarts.
+After that, every one of these pages opens straight in the app from your
+browser, with no page or button between: Photos, Passwords, Files,
+Movies & TV, Chat and Mail, from a link, a bookmark or the address bar, even
+after the app or the computer restarts.
 
 To stop a browser opening them, open the app's **This device** screen
 and press **Forget** beside it under **Browsers you let in**. Signing
 out in that browser forgets it too. A forgotten browser asks for a code
 again next time.
 
-If nothing opens, the app is not installed or not signed in on this
-computer. The page offers **Get the Commonty app**.
+If the app does not answer, the page says so and offers **Get the app**.
 
 Good to know:
 
-- The app only lets a new browser in if you pressed **Open** in the last
-  two minutes, and only after your click. If two browsers ask at once,
+- The app only links a new browser if one of the site's pages sent it there
+  in the last two minutes, and only after your click. If two browsers ask at once,
   both are refused and you start again.
 - The address your browser opens holds no secret. What it keeps is under
   a name only the browsers you let in know.
