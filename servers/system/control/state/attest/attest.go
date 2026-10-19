@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
 	"time"
 
@@ -263,6 +264,9 @@ func parseChain(chain []string) ([]*x509.Certificate, error) {
 // root of the maker its alternative name says, at the agreed time
 func verifyChain(pol *policy, certs []*x509.Certificate, at time.Time) (vendor, model string, err error) {
 	leaf := certs[0]
+	if !ekMarked(leaf) {
+		return "", "", errors.New("not an EK certificate: no TCG EK purpose or policy")
+	}
 	vendor, model = tpmInfo(leaf)
 	if (software[vendor] || model == "swtpm") && !pol.test.SoftwareTPM {
 		return "", "", ErrSoftware
@@ -283,22 +287,12 @@ func verifyChain(pol *policy, certs []*x509.Certificate, at time.Time) (vendor, 
 		return err
 	}
 	if vendor == "" {
-		// no maker named in the certificate: the maker is whose roots it
-		// chains to, tried in vendor id order
-		var ids []string
-		for id := range pol.roots {
-			ids = append(ids, id)
+		// AMD's fTPM certificates name no maker: such a certificate is
+		// AMD's, issued in AMD's name and chained to AMD's roots, or none
+		if !slices.Contains(leaf.Issuer.Organization, amdOrg) {
+			return "", "", fmt.Errorf("%w: the EK certificate names no maker", ErrNoRoot)
 		}
-		sort.Strings(ids)
-		for _, id := range ids {
-			if verify(pol.roots[id]) == nil {
-				if software[id] && !pol.test.SoftwareTPM {
-					return "", "", ErrSoftware
-				}
-				return id, model, nil
-			}
-		}
-		return "", "", fmt.Errorf("%w: the EK certificate names no maker and chains to none", ErrNoRoot)
+		vendor = amdVendor
 	}
 	roots := pol.roots[vendor]
 	if roots == nil {

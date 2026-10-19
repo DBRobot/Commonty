@@ -813,7 +813,9 @@
                   nixpkgs.lib.mapAttrs (
                     v: _:
                     map (f: builtins.readFile (dir + "/${v}/${f}")) (
-                      builtins.filter (nixpkgs.lib.hasSuffix ".pem") (builtins.attrNames (builtins.readDir (dir + "/${v}")))
+                      builtins.filter (nixpkgs.lib.hasSuffix ".pem") (
+                        builtins.attrNames (builtins.readDir (dir + "/${v}"))
+                      )
                     )
                   ) vendors;
               };

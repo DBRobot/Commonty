@@ -115,8 +115,10 @@ the roots).
   properties-fixed` and, for AMD, fetches its certificate at Begin; the
   AIA links take it up to AMD's root (`AMDTPM`). The judge does not fetch:
   the certificate rides in Begin like any other. An EK certificate whose
-  key is named RSAES-OAEP is read as the RSA key it is, and one that names
-  no maker is the maker's whose roots it chains to.
+  key is named RSAES-OAEP is read as the RSA key it is. One that names no
+  maker counts only as AMD's: issued in AMD's name and chained to AMD's
+  roots, never tried against other makers'. Every EK certificate must carry
+  the TCG's EK purpose (2.23.133.8.1) or a TCG certificate policy.
 
 ## Secure Boot on a member's box
 
