@@ -1,5 +1,7 @@
 import time
 
+from waits import start_fresh
+
 # The store test: a box's store is its own, and its copies are elsewhere.
 start_all()
 for m in (a, b):
@@ -37,20 +39,12 @@ def copied(bucket, name, body):
         f"AWS_DEFAULT_REGION=us-east-1 {s3} s3 cp s3://{bucket}/{name} -"
     )
     for _ in range(40):
-        a.succeed("systemctl start dd-store-copy.service")
+        start_fresh(a, "dd-store-copy.service")
         status, out = b.execute(cmd)
         if status == 0 and out.strip() == body:
             return
         time.sleep(3)
     raise AssertionError(f"{bucket}/{name} never reached b")
-
-
-def copy_run():
-    # a fresh run, as no timer's run is going; its invocation id
-    a.succeed("systemctl start dd-store-copy.service")
-    return a.succeed(
-        "systemctl show -p InvocationID --value dd-store-copy.service"
-    ).strip()
 
 
 def logged(run, text):
@@ -127,7 +121,7 @@ b.succeed(
     "systemctl stop dd-store-facts.timer dd-store-facts.service; touch /run/dd-store/full"
 )
 put(a, "photos", "p3", "no room for it there")
-run = copy_run()
+run = start_fresh(a, "dd-store-copy.service")
 b.fail(
     "set -a; . /var/lib/dd-store/keys/photos.env; AWS_DEFAULT_REGION=us-east-1 "
     f"{s3} s3 ls s3://photos/p3"
@@ -143,7 +137,7 @@ b.succeed(
     "set -a; . /var/lib/dd-store/keys/photos.env; export AWS_DEFAULT_REGION=us-east-1; "
     f"for o in p1 p2 p3; do {s3} s3 rm s3://photos/$o; done"
 )
-logged(copy_run(), "read back is not what was sent")
+logged(start_fresh(a, "dd-store-copy.service"), "read back is not what was sent")
 a.succeed(
     """grep -q 'dd_store_lost{bucket="photos",box="b"} 1' /var/lib/dd-facts/store-copy.prom"""
 )

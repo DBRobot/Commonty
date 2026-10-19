@@ -65,6 +65,7 @@ let
 in
 {
   name = "store";
+  helpers = true;
   node.specialArgs = { inherit self; };
   defaults.virtualisation.memorySize = 1024;
   defaults.virtualisation.diskSize = 2048;
