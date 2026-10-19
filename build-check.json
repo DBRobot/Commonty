@@ -1,8 +1,8 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "check-1-1792308131",
-    "issued": 1792308131,
+    "id": "check-1-1792434357",
+    "issued": 1792434359,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -12,7 +12,7 @@
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/4agig64wxh6nvphr01g6nwsw5sh9k9zj-commonty-android-0.0.1",
+        "path": "/nix/store/665pi1zxffwi26531pdxhz2bjm4zzi9m-commonty-android-0.0.1",
         "version": "0.0.1"
       },
       {
@@ -23,18 +23,18 @@
         ],
         "name": "dd-windows",
         "part": "dd-windows",
-        "path": "/nix/store/ff6smd9408yzs32jfxhhk5g5bykxz7s3-dd-windows-0.0.1",
+        "path": "/nix/store/nsyknzgnw9qz07zrqcc168l995fm85vj-dd-windows-0.0.1",
         "version": "0.0.1"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "linux",
         "part": "linux",
-        "path": "/nix/store/3zkj88xnpnfx1qzacid0865pyhhs0jhm-commonty-linux-0.0.1",
+        "path": "/nix/store/qi24wwaz3s96kwc316j4w31k2wv19fxk-commonty-linux-0.0.1",
         "version": "0.0.1"
       },
       {
@@ -45,13 +45,13 @@
         ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/hn8ddlg5vdaxk2xfvvpwszv11y8qdbn6-commonty-windows-0.0.1",
+        "path": "/nix/store/6b2iygq26aw60rfh84lnblxiwy6gf1d1-commonty-windows-0.0.1",
         "version": "0.0.1"
       }
     ],
     "kind": "build-order",
-    "rev": "27368fa4845d81fa488d507ab7d579e3236b24e1"
+    "rev": "d3256ef8c3e45c51d27b36e39054b5c90ac392a7"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "apSdvcoI5ZMdK9mVfpPxTOVdCo/KIW1J74mwh9NYv3BjV9FIMAfVBr2OXozG/GIfSbvuR1nNyzxYD84PAsrUCA=="
+  "signature": "WOs6WlXBghempfVX8BLYRDlZe/j9oq9Q/i9uEEgVaSHt6DrUgV6xyVq/zRtXaNX20F+kTAwCSIVPY71c0mcWCA=="
 }
