@@ -1,6 +1,6 @@
 # Attestation: proof of real hardware
 
-Status: built on branch `tpmattest-1017`; nothing calls it yet. The
+Status: built on branch `attest-1019`; nothing calls it yet. The
 enlistment (branch `joining-1017`) opens an attestation when a member's box
 asks to enlist, and counts the box only once it has attested.
 
@@ -33,6 +33,10 @@ proof is worth, and what it is not.
   booted run, in db with keys of its own or in MOK under a Microsoft-signed
   shim. The join key's policy must be PCR 7 as quoted: the key signs
   nothing under any other boot. The record keeps all four PCRs.
+- **One box per Secure Boot key.** The box's db certificate must be its
+  own: Microsoft's (any it made or signed) and Canonical's shim key are
+  refused, and the agreed state keeps the hash of each box's, so no two
+  boxes claim one.
 
 ## What it does not prove
 
@@ -114,11 +118,24 @@ the roots).
   scheme (`tpm.AMDEKCertURL`). The box reads the maker from `tpm2_getcap
   properties-fixed` and, for AMD, fetches its certificate at Begin; the
   AIA links take it up to AMD's root (`AMDTPM`). The judge does not fetch:
-  the certificate rides in Begin like any other. An EK certificate whose
+  the certificate rides in Begin like any other. Verified with David's
+  laptop (Legion Pro 5, 2026-10-19): EK -> `PRG-RPL` (AMD, Santa Clara;
+  by AIA from ftpm.amd.com) -> `AMDTPM`. Its certificate is a plain
+  rsaEncryption key with a positive serial, the EK purpose 2.23.133.8.1,
+  AMD's own policy 1.3.6.1.4.1.3704.101.21.10, an empty subject, and the
+  TCG alternative name (id:414D4400, model AMD). An EK certificate whose
   key is named RSAES-OAEP is read as the RSA key it is. One that names no
   maker counts only as AMD's: issued in AMD's name and chained to AMD's
   roots, never tried against other makers'. Every EK certificate must carry
   the TCG's EK purpose (2.23.133.8.1) or a TCG certificate policy.
+
+A real event log (the laptop's, AMD, Lenovo firmware, 127 events)
+replays to all eight live PCRs. Its PCR 7 holds SecureBoot, PK, KEK, db,
+dbx and shim's SbatLevel and MokListRT, but **no db authority event for
+the shim the firmware verified**, which the PC Client firmware profile
+asks for. A box on such firmware booting under its own db key would be
+refused ("nothing booted under the box's own certificate"); see the open
+question in the Secure Boot section.
 
 ## Secure Boot on a member's box
 
@@ -159,6 +176,14 @@ updated by Windows lacks the 2023 one, many new Lenovo and Dell machines
 ship with the third-party CA turned off, and MOK needs a password typed at a
 blue screen. The judge still takes a boot by a MOK key under shim (the
 certificate shim logs in PCR 7), so a box that has one is not refused.
+
+Open (David's call): firmware that logs no db authority event, as the
+laptop's did. PCR 7 then says which keys were enrolled but not which one
+let the boot run, so it cannot tell our db key's boot from any other
+Microsoft-signed one there. Options: refuse such firmware (as now); accept
+it when the box's certificate is in the measured db and no shim ran; or
+enroll without Microsoft's keys where the machine needs none for its
+option ROMs.
 
 What the installer must keep for attestation (it does, on `joining-1017`):
 the db certificate at `/var/lib/sbctl/keys/db/db.pem` (what `tpm.Default`
