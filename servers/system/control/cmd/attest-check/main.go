@@ -6,7 +6,7 @@
 //
 //	attest-check make-ek-cert -ek ek.pub -ca-key k.pem -ca-cert c.pem -o ek.der
 //	attest-check make-log -db db.der -loader l.efi -stub s.efi -o log.bin
-//	attest-check boot -loader systemd-bootx64.efi -stub lanzaboote_stub.efi -kernel bzImage   (a release's Boot, JSON)
+//	attest-check boot -loader systemd-bootx64.efi -stub lanzaboote_stub.efi -kernel bzImage -params '...'   (a release's Boot, JSON)
 //	attest-check run -roots dir -keys dir -dir dir -log f [-db f] [-stub f -boot f] [-software] [-no-secure-boot] [-vector out.json]
 package main
 
@@ -218,6 +218,7 @@ func bootPolicy(args []string) {
 	loader := fs.String("loader", "", "systemd-bootx64.efi")
 	stub := fs.String("stub", "", "lanzaboote_stub.efi, as built")
 	kernel := fs.String("kernel", "", "the kernel file the stub names")
+	params := fs.String("params", "", "the kernel parameters after init=, space-joined")
 	_ = fs.Parse(args)
 	img, err := os.ReadFile(*loader)
 	must(err)
@@ -234,6 +235,7 @@ func bootPolicy(args []string) {
 		Loaders: []string{hex.EncodeToString(d)},
 		Stubs:   []attest.Stub{st},
 		Kernels: []string{hex.EncodeToString(kh[:])},
+		Params:  []string{*params},
 	}, "", " ")
 	fmt.Println(string(out))
 }

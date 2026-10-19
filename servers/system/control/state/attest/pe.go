@@ -3,77 +3,140 @@ package attest
 import (
 	"bytes"
 	"crypto/sha256"
-	"debug/pe"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
 	"sort"
+	"strings"
 )
+
+// peImage is a PE image as both the Authenticode digest and the stub check
+// read it - one parse, so the two cannot see different images.
+type peImage struct {
+	img      []byte
+	peOff    int
+	opt      int // the optional header's offset
+	optSize  int
+	csum     int // the checksum's offset
+	certDir  int // the certificate table's data directory entry
+	headers  int // SizeOfHeaders
+	sections []peSection
+}
+
+type peSection struct {
+	name            string
+	vsize, va       uint32
+	rawSize, rawPtr uint32
+	chars           uint32
+}
+
+const (
+	scnCode    = 0x00000020
+	scnExecute = 0x20000000
+	scnWrite   = 0x80000000
+)
+
+func parsePE(img []byte) (*peImage, error) {
+	if len(img) < 0x40 || !bytes.HasPrefix(img, []byte("MZ")) {
+		return nil, errors.New("not a PE image")
+	}
+	p := &peImage{img: img, peOff: int(binary.LittleEndian.Uint32(img[0x3c:]))}
+	if p.peOff < 0x40 || p.peOff+24 > len(img) || !bytes.Equal(img[p.peOff:p.peOff+4], []byte("PE\x00\x00")) {
+		return nil, errors.New("not a PE image")
+	}
+	coff := img[p.peOff+4:]
+	nsec := int(binary.LittleEndian.Uint16(coff[2:]))
+	if binary.LittleEndian.Uint32(coff[8:]) != 0 || binary.LittleEndian.Uint32(coff[12:]) != 0 {
+		return nil, errors.New("a PE symbol table, which an EFI image has none of")
+	}
+	p.optSize = int(binary.LittleEndian.Uint16(coff[16:]))
+	p.opt = p.peOff + 24
+	if p.opt+p.optSize > len(img) || p.optSize < 112+16*8 {
+		return nil, errors.New("a PE optional header cut short")
+	}
+	if binary.LittleEndian.Uint16(img[p.opt:]) != 0x20b {
+		return nil, errors.New("not PE32+")
+	}
+	if binary.LittleEndian.Uint32(img[p.opt+108:]) != 16 {
+		return nil, errors.New("not 16 PE data directories")
+	}
+	p.csum = p.opt + 64
+	p.certDir = p.opt + 112 + 4*8
+	p.headers = int(binary.LittleEndian.Uint32(img[p.opt+60:]))
+	tbl := p.opt + p.optSize
+	if nsec == 0 || nsec > 96 || tbl+40*nsec > p.headers || p.headers > len(img) {
+		return nil, errors.New("PE headers out of place")
+	}
+	for i := range nsec {
+		h := img[tbl+40*i:]
+		s := peSection{
+			name:  strings.TrimRight(string(h[:8]), "\x00"),
+			vsize: binary.LittleEndian.Uint32(h[8:]), va: binary.LittleEndian.Uint32(h[12:]),
+			rawSize: binary.LittleEndian.Uint32(h[16:]), rawPtr: binary.LittleEndian.Uint32(h[20:]),
+			chars: binary.LittleEndian.Uint32(h[36:]),
+		}
+		if strings.HasPrefix(s.name, "/") {
+			return nil, errors.New("a PE section with a long name")
+		}
+		if s.rawSize > 0 && (int(s.rawPtr) < p.headers || uint64(s.rawPtr)+uint64(s.rawSize) > uint64(len(img))) {
+			return nil, fmt.Errorf("PE section %s outside the file", s.name)
+		}
+		p.sections = append(p.sections, s)
+	}
+	// no two sections share bytes of the file
+	byRaw := slices.Clone(p.sections)
+	sort.Slice(byRaw, func(i, j int) bool { return byRaw[i].rawPtr < byRaw[j].rawPtr })
+	end := uint32(p.headers)
+	for _, s := range byRaw {
+		if s.rawSize == 0 {
+			continue
+		}
+		if s.rawPtr < end {
+			return nil, errors.New("PE sections overlap in the file")
+		}
+		end = s.rawPtr + s.rawSize
+	}
+	return p, nil
+}
+
+func (p *peImage) u32(off int) uint32 { return binary.LittleEndian.Uint32(p.img[off:]) }
+
+func (p *peImage) data(s peSection) []byte {
+	n := min(s.vsize, s.rawSize)
+	return p.img[s.rawPtr : s.rawPtr+n]
+}
 
 // Authenticode is a PE image's SHA-256 Authenticode digest: what UEFI
 // firmware extends into PCR 4 for each boot application it starts. It
 // leaves out the checksum, the certificate table and its directory entry,
 // so it is the same whichever key signed the image.
 func Authenticode(img []byte) ([]byte, error) {
-	if len(img) < 0x40 {
-		return nil, errors.New("not a PE image")
+	p, err := parsePE(img)
+	if err != nil {
+		return nil, err
 	}
-	peOff := int(binary.LittleEndian.Uint32(img[0x3c:]))
-	if peOff < 0 || peOff+24 > len(img) || !bytes.Equal(img[peOff:peOff+4], []byte("PE\x00\x00")) {
-		return nil, errors.New("not a PE image")
-	}
-	nsec := int(binary.LittleEndian.Uint16(img[peOff+6:]))
-	optSize := int(binary.LittleEndian.Uint16(img[peOff+20:]))
-	opt := peOff + 24
-	if opt+optSize > len(img) || optSize < 96 {
-		return nil, errors.New("a PE optional header cut short")
-	}
-	var dirs int
-	switch binary.LittleEndian.Uint16(img[opt:]) {
-	case 0x10b:
-		dirs = opt + 96
-	case 0x20b:
-		dirs = opt + 112
-	default:
-		return nil, errors.New("neither PE32 nor PE32+")
-	}
-	csum := opt + 64
-	certEntry := dirs + 4*8
-	headers := int(binary.LittleEndian.Uint32(img[opt+60:]))
-	if certEntry+8 > opt+optSize || headers > len(img) || headers < certEntry+8 {
-		return nil, errors.New("PE headers out of place")
-	}
-	certOff := int(binary.LittleEndian.Uint32(img[certEntry:]))
-	certSize := int(binary.LittleEndian.Uint32(img[certEntry+4:]))
+	return p.authenticode()
+}
 
+func (p *peImage) authenticode() ([]byte, error) {
+	img := p.img
+	certOff, certSize := int(p.u32(p.certDir)), int(p.u32(p.certDir+4))
 	h := sha256.New()
-	h.Write(img[:csum])
-	h.Write(img[csum+4 : certEntry])
-	h.Write(img[certEntry+8 : headers])
-	type raw struct{ off, size int }
-	var secs []raw
-	tbl := opt + optSize
-	if tbl+40*nsec > len(img) {
-		return nil, errors.New("PE section table cut short")
-	}
-	for i := range nsec {
-		s := img[tbl+40*i:]
-		size := int(binary.LittleEndian.Uint32(s[16:]))
-		off := int(binary.LittleEndian.Uint32(s[20:]))
-		if size == 0 {
+	h.Write(img[:p.csum])
+	h.Write(img[p.csum+4 : p.certDir])
+	h.Write(img[p.certDir+8 : p.headers])
+	byRaw := slices.Clone(p.sections)
+	sort.Slice(byRaw, func(i, j int) bool { return byRaw[i].rawPtr < byRaw[j].rawPtr })
+	sum := p.headers
+	for _, s := range byRaw {
+		if s.rawSize == 0 {
 			continue
 		}
-		if off < 0 || size < 0 || off+size > len(img) {
-			return nil, errors.New("a PE section outside the file")
-		}
-		secs = append(secs, raw{off, size})
-	}
-	sort.Slice(secs, func(i, j int) bool { return secs[i].off < secs[j].off })
-	sum := headers
-	for _, s := range secs {
-		h.Write(img[s.off : s.off+s.size])
-		sum += s.size
+		h.Write(img[s.rawPtr : s.rawPtr+s.rawSize])
+		sum += int(s.rawSize)
 	}
 	end := len(img)
 	if certSize > 0 {
@@ -88,105 +151,125 @@ func Authenticode(img []byte) ([]byte, error) {
 	return h.Sum(nil), nil
 }
 
+// headerHash: the DOS header and stub, the COFF header and the whole
+// optional header, data directories included, but for what lzbt's
+// objcopy changes: the section count, the time stamp (objcopy's own hash),
+// SizeOfInitializedData and the checksum; and the certificate table's
+// entry, which signing sets
+func (p *peImage) headerHash() string {
+	b := slices.Clone(p.img[:p.opt+p.optSize])
+	clear(b[p.peOff+6 : p.peOff+8])   // NumberOfSections
+	clear(b[p.peOff+8 : p.peOff+12])  // TimeDateStamp
+	clear(b[p.opt+8 : p.opt+12])      // SizeOfInitializedData
+	clear(b[p.csum : p.csum+4])       // CheckSum
+	clear(b[p.certDir : p.certDir+8]) // the certificate table
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])
+}
+
 // Stub is a lanzaboote stub as the release built it, before the box's
-// install added its own sections: where it starts, and each section's
-// address and contents.
+// install added its own sections: its headers, and each section in order.
 type Stub struct {
-	Entry    uint32            `json:"entry"`
-	Sections map[string]string `json:"sections"` // name -> sha256(address LE32 || raw data), hex
+	Header   string        `json:"header"` // headerHash, hex
+	Sections []StubSection `json:"sections"`
 }
 
-// the sections lzbt adds to the stub for each generation
-var stubAdded = map[string]bool{".osrel": true, ".cmdline": true, ".initrd": true, ".linux": true, ".initrdh": true, ".linuxh": true}
-
-func peSections(img []byte) (entry uint32, secs map[string]*pe.Section, err error) {
-	f, err := pe.NewFile(bytes.NewReader(img))
-	if err != nil {
-		return 0, nil, err
-	}
-	switch o := f.OptionalHeader.(type) {
-	case *pe.OptionalHeader64:
-		entry = o.AddressOfEntryPoint
-	case *pe.OptionalHeader32:
-		entry = o.AddressOfEntryPoint
-	default:
-		return 0, nil, errors.New("no PE optional header")
-	}
-	secs = map[string]*pe.Section{}
-	for _, s := range f.Sections {
-		if secs[s.Name] != nil {
-			return 0, nil, fmt.Errorf("two PE sections named %s", s.Name)
-		}
-		secs[s.Name] = s
-	}
-	return entry, secs, nil
+type StubSection struct {
+	Name  string `json:"name"`
+	VA    uint32 `json:"va"`
+	Size  uint32 `json:"size"` // VirtualSize
+	Chars uint32 `json:"chars"`
+	Hash  string `json:"hash"` // sha256 of its contents, hex
 }
 
-func sectionHash(s *pe.Section) (string, error) {
-	data, err := s.Data()
-	if err != nil {
-		return "", err
-	}
-	h := sha256.New()
-	_ = binary.Write(h, binary.LittleEndian, s.VirtualAddress)
-	h.Write(data)
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
+// the sections lzbt adds to the stub for each generation, in its order
+var stubAdded = []string{".osrel", ".cmdline", ".initrd", ".linux", ".initrdh", ".linuxh"}
 
 // StubOf describes the release's own stub (lanzaboote_stub.efi).
 func StubOf(img []byte) (Stub, error) {
-	entry, secs, err := peSections(img)
+	p, err := parsePE(img)
 	if err != nil {
 		return Stub{}, err
 	}
-	st := Stub{Entry: entry, Sections: map[string]string{}}
-	for name, s := range secs {
-		if st.Sections[name], err = sectionHash(s); err != nil {
-			return Stub{}, err
-		}
+	st := Stub{Header: p.headerHash()}
+	for _, s := range p.sections {
+		h := sha256.Sum256(p.data(s))
+		st.Sections = append(st.Sections, StubSection{Name: s.name, VA: s.va, Size: s.vsize, Chars: s.chars, Hash: hex.EncodeToString(h[:])})
 	}
 	return st, nil
 }
 
-// stubKernel: img is st with only lzbt's sections added; the kernel hash
-// it holds (.linuxh)
-func stubKernel(st Stub, img []byte) ([]byte, error) {
-	entry, secs, err := peSections(img)
+// stubImage: what checkBoot learns from a box's lanzaboote image
+type stubImage struct {
+	digest  []byte
+	kernel  []byte // .linuxh
+	initrd  []byte // .initrdh
+	cmdline string
+}
+
+// readStub: img is the release's stub st, its headers and every section
+// as built, with only lzbt's six sections after them: data, never code,
+// each at its own addresses past the stub's and inside the image the
+// firmware loads, and the entry point in the stub's own code
+func readStub(st Stub, img []byte) (*stubImage, error) {
+	p, err := parsePE(img)
 	if err != nil {
 		return nil, err
 	}
-	if entry != st.Entry {
-		return nil, errors.New("the stub starts elsewhere than the release's")
+	if p.headerHash() != st.Header {
+		return nil, errors.New("the stub's headers are not the release's")
 	}
-	for name, want := range st.Sections {
-		s := secs[name]
-		if s == nil {
-			return nil, fmt.Errorf("the stub has no %s", name)
-		}
-		got, err := sectionHash(s)
-		if err != nil {
-			return nil, err
-		}
-		if got != want {
-			return nil, fmt.Errorf("the stub's %s is not the release's", name)
-		}
+	n := len(st.Sections)
+	if len(p.sections) != n+len(stubAdded) {
+		return nil, fmt.Errorf("the stub has %d sections; the release's %d and lzbt's %d", len(p.sections), n, len(stubAdded))
 	}
-	for name := range secs {
-		if st.Sections[name] == "" && !stubAdded[name] {
-			return nil, fmt.Errorf("the stub has a section of its own, %s", name)
+	entry := p.u32(p.opt + 16)
+	sizeOfImage := p.u32(p.opt + 56)
+	inCode, top := false, uint64(0)
+	for i, want := range st.Sections {
+		s := p.sections[i]
+		h := sha256.Sum256(p.data(s))
+		if s.name != want.Name || s.va != want.VA || s.vsize != want.Size || s.chars != want.Chars || hex.EncodeToString(h[:]) != want.Hash {
+			return nil, fmt.Errorf("the stub's section %d (%s) is not the release's", i, s.name)
 		}
-	}
-	for name := range stubAdded {
-		if secs[name] == nil {
-			return nil, fmt.Errorf("the stub has no %s", name)
+		if s.chars&scnExecute != 0 && entry >= s.va && entry < s.va+s.vsize {
+			inCode = true
 		}
+		top = max(top, uint64(s.va)+uint64(s.vsize))
 	}
-	k, err := secs[".linuxh"].Data()
-	if err != nil {
+	if !inCode {
+		return nil, errors.New("the stub's entry point is not in its own code")
+	}
+	out := &stubImage{}
+	if out.digest, err = p.authenticode(); err != nil {
 		return nil, err
 	}
-	if len(k) < sha256.Size {
-		return nil, errors.New("the stub's kernel hash is short")
+	for i, name := range stubAdded {
+		s := p.sections[n+i]
+		switch {
+		case s.name != name:
+			return nil, fmt.Errorf("the stub's section %d is %s, not lzbt's %s", n+i, s.name, name)
+		case s.chars&(scnCode|scnExecute|scnWrite) != 0:
+			return nil, fmt.Errorf("the stub's %s is code or writable", name)
+		case uint64(s.va) < top || uint64(s.va)+uint64(s.vsize) > uint64(sizeOfImage) || s.vsize > s.rawSize:
+			return nil, fmt.Errorf("the stub's %s is not past the stub's own, inside the image", name)
+		}
+		top = uint64(s.va) + uint64(s.vsize)
 	}
-	return k[:sha256.Size], nil
+	sec := func(i int) []byte { return p.data(p.sections[n+i]) }
+	out.cmdline, out.initrd, out.kernel = string(sec(1)), sec(4), sec(5)
+	if len(out.initrd) != sha256.Size || len(out.kernel) != sha256.Size {
+		return nil, errors.New("the stub's kernel or initrd hash is not a sha256")
+	}
+	return out, nil
+}
+
+// a system's init, as lzbt writes it first on the command line
+var initPath = regexp.MustCompile(`^init=/nix/store/[0-9a-df-np-sv-z]{32}-nixos-system-[A-Za-z0-9._+-]+/init$`)
+
+// cmdlineOK: "init=<a NixOS system's init> <one of the release's kernel
+// parameter lines>"
+func cmdlineOK(b *Boot, cmdline string) bool {
+	first, rest, _ := strings.Cut(cmdline, " ")
+	return initPath.MatchString(first) && slices.Contains(b.Params, rest)
 }

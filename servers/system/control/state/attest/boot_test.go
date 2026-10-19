@@ -10,34 +10,32 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"math/big"
+	"slices"
 	"testing"
 	"time"
 )
 
 type sec struct {
-	name string
-	data []byte
+	name  string
+	data  []byte
+	chars uint32 // 0: read-only data
 }
 
-// mkPE: a PE32+ EFI application with these sections, in this order,
-// starting at entry
+const textChars = 0x60000020 // code, execute, read
+
+// mkPE: a PE32+ EFI application with these sections, in this order, its
+// entry at entry, its headers with room for more sections and its image
+// with room past them
 func mkPE(entry uint32, list ...sec) []byte {
-	var names []string
-	secs := map[string][]byte{}
-	for _, s := range list {
-		names = append(names, s.name)
-		secs[s.name] = s.data
-	}
 	const fileAlign, secAlign, optSize = 0x200, 0x1000, 240
-	hdr := 0x40 + 4 + 20 + optSize + 40*len(names)
-	headers := (hdr + fileAlign - 1) / fileAlign * fileAlign
+	headers := 0x400
 	b := make([]byte, headers)
 	copy(b, "MZ")
 	binary.LittleEndian.PutUint32(b[0x3c:], 0x40)
 	copy(b[0x40:], "PE\x00\x00")
 	coff := b[0x44:]
 	binary.LittleEndian.PutUint16(coff[0:], 0x8664)
-	binary.LittleEndian.PutUint16(coff[2:], uint16(len(names)))
+	binary.LittleEndian.PutUint16(coff[2:], uint16(len(list)))
 	binary.LittleEndian.PutUint16(coff[16:], optSize)
 	binary.LittleEndian.PutUint16(coff[18:], 0x22)
 	opt := b[0x58:]
@@ -49,23 +47,47 @@ func mkPE(entry uint32, list ...sec) []byte {
 	binary.LittleEndian.PutUint32(opt[60:], uint32(headers))
 	binary.LittleEndian.PutUint16(opt[68:], 10)
 	binary.LittleEndian.PutUint32(opt[108:], 16)
-	tbl := 0x58 + optSize
 	va := uint32(secAlign)
-	for i, n := range names {
-		data := secs[n]
-		raw := (len(data) + fileAlign - 1) / fileAlign * fileAlign
-		h := b[tbl+40*i:]
-		copy(h[0:8], n)
-		binary.LittleEndian.PutUint32(h[8:], uint32(len(data)))
-		binary.LittleEndian.PutUint32(h[12:], va)
-		binary.LittleEndian.PutUint32(h[16:], uint32(raw))
-		binary.LittleEndian.PutUint32(h[20:], uint32(len(b)))
-		binary.LittleEndian.PutUint32(h[36:], 0x40000040)
-		b = append(b, data...)
-		b = append(b, make([]byte, raw-len(data))...)
-		va += (uint32(len(data)) + secAlign - 1) / secAlign * secAlign
+	for i, s := range list {
+		b = putSection(b, i, s, va)
+		va += (uint32(len(s.data)) + secAlign - 1) / secAlign * secAlign
 	}
-	binary.LittleEndian.PutUint32(opt[56:], va)
+	binary.LittleEndian.PutUint32(b[0x58+56:], va+secAlign) // room for lzbt's
+	return b
+}
+
+// putSection: s as section i at va, its data at the end of the file
+func putSection(b []byte, i int, s sec, va uint32) []byte {
+	const fileAlign = 0x200
+	if s.chars == 0 {
+		s.chars = 0x40000040
+	}
+	raw := (len(s.data) + fileAlign - 1) / fileAlign * fileAlign
+	h := b[0x58+240+40*i:]
+	copy(h[0:8], s.name)
+	binary.LittleEndian.PutUint32(h[8:], uint32(len(s.data)))
+	binary.LittleEndian.PutUint32(h[12:], va)
+	binary.LittleEndian.PutUint32(h[16:], uint32(raw))
+	binary.LittleEndian.PutUint32(h[20:], uint32(len(b)))
+	binary.LittleEndian.PutUint32(h[36:], s.chars)
+	b = append(b, s.data...)
+	return append(b, make([]byte, raw-len(s.data))...)
+}
+
+// addSections: base with sections added after its own as lzbt's objcopy
+// adds them - packed from the end of the last, the section count raised;
+// va, where not 0, places each at an address of the test's choosing
+func addSections(base []byte, list ...sec) []byte {
+	b := slices.Clone(base)
+	n := int(binary.LittleEndian.Uint16(b[0x46:]))
+	last := b[0x58+240+40*(n-1):]
+	va := binary.LittleEndian.Uint32(last[12:]) + binary.LittleEndian.Uint32(last[8:])
+	for i, s := range list {
+		b = putSection(b, n+i, s, va)
+		va += uint32(len(s.data))
+	}
+	binary.LittleEndian.PutUint16(b[0x46:], uint16(n+len(list)))
+	binary.LittleEndian.PutUint32(b[0x48:], 0x6ad671db) // objcopy's time stamp
 	return b
 }
 
@@ -82,67 +104,64 @@ func signed(img []byte) []byte {
 	return append(out, cert...)
 }
 
+const (
+	testParams  = "usbcore.autosuspend=-1 root=fstab"
+	testCmdline = "init=/nix/store/0123456789abcdfghijklmnpqrsvwxyz-nixos-system-jbox-26.05/init " + testParams
+)
+
 type bootFixture struct {
-	loader, base, stub, kernel []byte
-	pol                        *Boot
+	loader, base, stub, kernel, initrd []byte
+	pol                                *Boot
 }
+
+var stubBase = []sec{{".text", []byte("lanzaboote stub"), textChars}, {".rdata", []byte("strings"), 0}}
 
 // one release's boot: its systemd-boot, its lanzaboote stub, its kernel,
 // and a box's image of that stub as lzbt makes it
 func release(t *testing.T) bootFixture {
 	t.Helper()
 	f := bootFixture{
-		loader: mkPE(0x1000, sec{".text", []byte("systemd-boot")}, sec{".data", []byte("loader")}),
+		loader: mkPE(0x1000, sec{".text", []byte("systemd-boot"), textChars}, sec{".data", []byte("loader"), 0}),
 		base:   mkPE(0x1000, stubBase...),
 		kernel: []byte("the release's kernel"),
+		initrd: []byte("the box's initrd"),
 	}
-	f.stub = withSections(f.kernel)
+	f.stub = f.image(lzbt(f.kernel, f.initrd, testCmdline))
 	ld, _ := Authenticode(f.loader)
 	st, err := StubOf(f.base)
 	if err != nil {
 		t.Fatal(err)
 	}
 	kh := sha256.Sum256(f.kernel)
-	f.pol = &Boot{Loaders: []string{hex.EncodeToString(ld)}, Stubs: []Stub{st}, Kernels: []string{hex.EncodeToString(kh[:])}}
+	f.pol = &Boot{Loaders: []string{hex.EncodeToString(ld)}, Stubs: []Stub{st}, Kernels: []string{hex.EncodeToString(kh[:])}, Params: []string{testParams}}
 	return f
 }
 
-var stubBase = []sec{{".text", []byte("lanzaboote stub")}, {".rdata", []byte("strings")}}
+func (f bootFixture) image(list []sec) []byte { return addSections(f.base, list...) }
 
-// withSections: the release's stub with lzbt's sections for kernel added
-// after its own, as objcopy adds them, then extra; an extra section of the
-// stub's own name replaces it
-func withSections(kernel []byte, extra ...sec) []byte {
-	kh := sha256.Sum256(kernel)
-	var list []sec
-	for _, b := range stubBase {
-		for _, e := range extra {
-			if e.name == b.name {
-				b = e
-			}
-		}
-		list = append(list, b)
+// lzbt: the sections lzbt adds, in its order
+func lzbt(kernel, initrd []byte, cmdline string) []sec {
+	kh, ih := sha256.Sum256(kernel), sha256.Sum256(initrd)
+	return []sec{
+		{".osrel", []byte("ID=nixos"), 0}, {".cmdline", []byte(cmdline), 0},
+		{".initrd", []byte(`\EFI\nixos\initrd.efi`), 0}, {".linux", []byte(`\EFI\nixos\kernel.efi`), 0},
+		{".initrdh", ih[:], 0}, {".linuxh", kh[:], 0},
 	}
-	list = append(list,
-		sec{".osrel", []byte("ID=nixos")}, sec{".cmdline", []byte("init=/nix/store/x/init")},
-		sec{".initrd", []byte(`\EFI\nixos\initrd.efi`)}, sec{".linux", []byte(`\EFI\nixos\kernel.efi`)},
-		sec{".initrdh", make([]byte, 32)}, sec{".linuxh", kh[:]})
-	for _, e := range extra {
-		if e.name != ".text" && e.name != ".rdata" {
-			list = append(list, e)
-		}
-	}
-	return mkPE(0x1000, list...)
+}
+
+func ev(pcr, typ uint32, data []byte) event {
+	d := sha256.Sum256(data)
+	return event{pcr: pcr, typ: typ, sha256: d[:], data: data}
 }
 
 func pcr4(apps ...[]byte) []event {
 	log := []event{
-		{pcr: 4, typ: evEFIAction, sha256: make([]byte, 32)},
-		{pcr: 4, typ: evSeparator, sha256: make([]byte, 32)},
+		ev(4, evEFIAction, []byte("Calling EFI Application from Boot Option")),
+		ev(4, evSeparator, []byte{0, 0, 0, 0}),
 	}
 	for _, a := range apps {
 		d, _ := Authenticode(a)
-		log = append(log, event{pcr: 4, typ: evEFIBootApplication, sha256: d})
+		log = append(log, event{pcr: 4, typ: evEFIBootApplication, sha256: d, data: []byte("image load event")})
 	}
 	return log
 }
@@ -174,8 +193,8 @@ func TestTheReleasesBootIsAccepted(t *testing.T) {
 
 func TestShimInPCR4IsRefused(t *testing.T) {
 	f := release(t)
-	shim := mkPE(0x1000, sec{".text", []byte("shim")}, sec{".vendor_cert", []byte("a distro's key")})
-	grub := mkPE(0x1000, sec{".text", []byte("grub")})
+	shim := mkPE(0x1000, sec{".text", []byte("shim"), textChars}, sec{".vendor_cert", []byte("a distro's key"), 0})
+	grub := mkPE(0x1000, sec{".text", []byte("grub"), textChars})
 	// shim first, then what it chains to
 	wantErr(t, checkBoot(f.pol, pcr4(shim, grub), grub), "not the release's systemd-boot")
 	// shim between systemd-boot and ours
@@ -186,21 +205,15 @@ func TestShimInPCR4IsRefused(t *testing.T) {
 
 func TestAnUnknownBootApplicationIsRefused(t *testing.T) {
 	f := release(t)
-	app := mkPE(0x1000, sec{".text", []byte("something else")})
+	app := mkPE(0x1000, sec{".text", []byte("something else"), textChars})
 	// one the box did not send
 	wantErr(t, checkBoot(f.pol, pcr4(f.loader, app), f.stub), "not the stub the box sent")
-	// the stub with code of its own added
-	extra := withSections(f.kernel, sec{".evil", []byte("more")})
-	wantErr(t, checkBoot(f.pol, pcr4(f.loader, extra), extra), "section of its own")
-	// the stub with its code changed
-	changed := withSections(f.kernel, sec{".text", []byte("lanzaboote stuB")})
-	wantErr(t, checkBoot(f.pol, pcr4(f.loader, changed), changed), "not the release's")
 	// the stub naming another kernel
-	other := withSections([]byte("another kernel"))
+	other := f.image(lzbt([]byte("another kernel"), f.initrd, testCmdline))
 	wantErr(t, checkBoot(f.pol, pcr4(f.loader, other), other), "kernel not the release's")
 	// a boot loader's own PCR 4 measurement (an edited command line)
 	log := append(pcr4(f.loader, f.stub), event{pcr: 4, typ: 0x0D, sha256: make([]byte, 32)})
-	wantErr(t, checkBoot(f.pol, log, f.stub), "of kind")
+	wantErr(t, checkBoot(f.pol, log, f.stub), "kind 0xd")
 	// a release that names no boot
 	wantErr(t, checkBoot(nil, pcr4(f.loader, f.stub), f.stub), "names no boot images")
 }
@@ -218,10 +231,8 @@ func TestPCR7WithoutAuthorityEvents(t *testing.T) {
 		return der
 	}
 	ours, theirs := mk("box db"), mk("someone else")
-	ev := func(typ uint32, guid []byte, name string, value []byte) event {
-		data := efiVariable(guid, name, value)
-		d := sha256.Sum256(data)
-		return event{pcr: 7, typ: typ, sha256: d[:], data: data}
+	v7 := func(typ uint32, guid []byte, name string, value []byte) event {
+		return ev(7, typ, efiVariable(guid, name, value))
 	}
 	base := func(pk []byte, db ...[]byte) []event {
 		var lists []byte
@@ -229,9 +240,9 @@ func TestPCR7WithoutAuthorityEvents(t *testing.T) {
 			lists = append(lists, efiSigList(c)...)
 		}
 		return []event{
-			ev(evEFIVariableConfig, efiGlobal, "SecureBoot", []byte{1}),
-			ev(evEFIVariableConfig, efiGlobal, "PK", pk),
-			ev(evEFIVariableConfig, efiImageSecurity, "db", lists),
+			v7(evEFIVariableConfig, efiGlobal, "SecureBoot", []byte{1}),
+			v7(evEFIVariableConfig, efiGlobal, "PK", pk),
+			v7(evEFIVariableConfig, efiImageSecurity, "db", lists),
 		}
 	}
 	pk := efiSigList(theirs)
@@ -244,7 +255,7 @@ func TestPCR7WithoutAuthorityEvents(t *testing.T) {
 	wantErr(t, err, "setup mode")
 	// where the firmware does log authorities, one must be the box's
 	auth := func(c []byte) event {
-		return ev(evEFIVariableAuthory, efiImageSecurity, "db", append(make([]byte, 16), c...))
+		return v7(evEFIVariableAuthory, efiImageSecurity, "db", append(make([]byte, 16), c...))
 	}
 	_, err = secureBoot(append(base(pk, theirs, ours), auth(theirs)), ours)
 	wantErr(t, err, "nothing booted under the box's own")
@@ -270,4 +281,113 @@ func efiSigList(cert []byte) []byte {
 	b = binary.LittleEndian.AppendUint32(b, uint32(16+len(cert)))
 	b = append(b, make([]byte, 16)...)
 	return append(b, cert...)
+}
+
+// a crafted image whose release sections all match must still be refused:
+// a digest that passes is of the image, headers and all
+func TestACraftedStubIsRefused(t *testing.T) {
+	f := release(t)
+	ok := lzbt(f.kernel, f.initrd, testCmdline)
+	try := func(img []byte, part string) {
+		t.Helper()
+		wantErr(t, checkBoot(f.pol, pcr4(f.loader, img), img), part)
+	}
+	// code added among lzbt's sections
+	code := slices.Clone(ok)
+	code[0].chars = textChars
+	try(f.image(code), "code or writable")
+	// the stub's own code changed
+	changed := mkPE(0x1000, sec{".text", []byte("lanzaboote stuB"), textChars}, stubBase[1])
+	try(addSections(changed, ok...), "(.text) is not the release's")
+	// a seventh section
+	try(f.image(append(slices.Clone(ok), sec{".extra", []byte("more"), 0})), "sections")
+	// lzbt's sections in another order
+	swapped := slices.Clone(ok)
+	swapped[4], swapped[5] = swapped[5], swapped[4]
+	try(f.image(swapped), "not lzbt's")
+	// a header changed: a data directory, the entry point, DllCharacteristics
+	for _, off := range []int{0x58 + 112 + 8*5, 0x58 + 16, 0x58 + 70} {
+		img := f.image(ok)
+		img[off] ^= 1
+		try(img, "headers are not the release's")
+	}
+	// lzbt's sections over the stub's own addresses
+	img := f.image(ok)
+	binary.LittleEndian.PutUint32(img[0x58+240+40*2+12:], 0x1000)
+	try(img, "not past the stub's own")
+	// past the image the firmware loads
+	big := slices.Clone(ok)
+	big[1].data = make([]byte, 0x3000)
+	try(f.image(big), "not past the stub's own, inside the image")
+	// a section with a long name, read from a string table
+	img = f.image(ok)
+	copy(img[0x58+240+40*2:], "/4\x00\x00\x00\x00\x00\x00")
+	try(img, "long name")
+	// the release's stub with its entry point outside its code
+	base := mkPE(0x2000, stubBase...)
+	st, err := StubOf(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol := *f.pol
+	pol.Stubs = []Stub{st}
+	img = addSections(base, ok...)
+	wantErr(t, checkBoot(&pol, pcr4(f.loader, img), img), "entry point")
+}
+
+func TestTheStubsCommandLineAndInitrdAreTheReleases(t *testing.T) {
+	f := release(t)
+	try := func(img []byte, part string) {
+		t.Helper()
+		wantErr(t, checkBoot(f.pol, pcr4(f.loader, img), img), part)
+	}
+	try(f.image(lzbt(f.kernel, f.initrd, testCmdline+" init=/bin/sh")), "command line")
+	try(f.image(lzbt(f.kernel, f.initrd, "init=/bin/sh "+testParams)), "command line")
+	// initrds: not judged where the release lists none, judged where it does
+	pol := *f.pol
+	ih := sha256.Sum256([]byte("another initrd"))
+	pol.Initrds = []string{hex.EncodeToString(ih[:])}
+	wantErr(t, checkBoot(&pol, pcr4(f.loader, f.stub), f.stub), "initrd not the release's")
+	ih = sha256.Sum256(f.initrd)
+	pol.Initrds = append(pol.Initrds, hex.EncodeToString(ih[:]))
+	if err := checkBoot(&pol, pcr4(f.loader, f.stub), f.stub); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// what PCR 4 and PCR 7 events the judge passes over must say what was
+// extended
+func TestSkippedEventsAreBoundToTheirData(t *testing.T) {
+	f := release(t)
+	try := func(e event, part string) {
+		t.Helper()
+		log := append(pcr4(f.loader, f.stub), e)
+		wantErr(t, checkBoot(f.pol, log, f.stub), part)
+	}
+	try(ev(4, evSeparator, []byte{1, 0, 0, 0}), "not one a boot of ours makes")
+	unbound := ev(4, evSeparator, []byte{0, 0, 0, 0})
+	unbound.sha256 = make([]byte, 32)
+	try(unbound, "not one a boot of ours makes")
+	try(ev(4, evEFIAction, []byte("Something Else")), "not one a boot of ours makes")
+	action := ev(4, evEFIAction, []byte("Exit Boot Services Invocation"))
+	action.sha256 = make([]byte, 32)
+	try(action, "not one a boot of ours makes")
+
+	// PCR 7: an event of another kind is refused, not passed over
+	db := []byte("box db")
+	good := []event{
+		ev(7, evEFIVariableConfig, efiVariable(efiGlobal, "SecureBoot", []byte{1})),
+		ev(7, evEFIVariableConfig, efiVariable(efiGlobal, "PK", []byte("pk"))),
+		ev(7, evEFIVariableConfig, efiVariable(efiImageSecurity, "db", efiSigList(db))),
+		ev(7, evSeparator, []byte{0, 0, 0, 0}),
+	}
+	if _, err := secureBoot(good, db); err != nil {
+		t.Fatal(err)
+	}
+	_, err := secureBoot(append(slices.Clone(good), ev(7, evEFIAction, []byte("UEFI Debug Mode"))), db)
+	wantErr(t, err, "of kind")
+	bad := ev(7, evSeparator, []byte{0, 0, 0, 0})
+	bad.sha256 = make([]byte, 32)
+	_, err = secureBoot(append(slices.Clone(good), bad), db)
+	wantErr(t, err, "not one")
 }

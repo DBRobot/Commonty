@@ -223,9 +223,20 @@ func x509s(v []byte) ([][]byte, error) {
 // firmwares log none, and then PCR 4 (bootApps) says what ran.
 func secureBoot(log []event, db []byte) (bool, error) {
 	on, seen, pk, inDB, authorities, ours := true, false, false, false, 0, false
-	for _, e := range log {
-		if e.pcr != 7 || (e.typ != evEFIVariableConfig && e.typ != evEFIVariableAuthory) {
+	for i, e := range log {
+		if e.pcr != 7 {
 			continue
+		}
+		switch {
+		case e.typ == evNoAction:
+			continue
+		case e.typ == evSeparator:
+			if !separator(e) {
+				return false, fmt.Errorf("PCR 7 event %d: a separator that is not one", i)
+			}
+			continue
+		case e.typ != evEFIVariableConfig && e.typ != evEFIVariableAuthory:
+			return false, fmt.Errorf("%w: PCR 7 event %d is of kind %#x", ErrSecureBoot, i, e.typ)
 		}
 		guid, name, value, err := variable(e.data)
 		if err != nil {
@@ -275,8 +286,30 @@ const (
 	evEFIBootApplication = 0x80000003
 )
 
+// the EV_EFI_ACTION strings the PC Client firmware profile defines for
+// PCRs 4 and 7's part of a boot
+var efiActions = map[string]bool{
+	"Calling EFI Application from Boot Option":        true,
+	"Returning from EFI Application from Boot Option": true,
+	"Exit Boot Services Invocation":                   true,
+	"Exit Boot Services Returned with Failure":        true,
+	"Exit Boot Services Returned with Success":        true,
+}
+
+// bound: an event whose digest is its data's own (a separator, an action)
+// says what its data says
+func bound(e event) bool {
+	d := sha256.Sum256(e.data)
+	return bytes.Equal(e.sha256, d[:])
+}
+
+func separator(e event) bool {
+	return bound(e) && (bytes.Equal(e.data, []byte{0, 0, 0, 0}) || bytes.Equal(e.data, []byte{0xff, 0xff, 0xff, 0xff}))
+}
+
 // bootApps: what PCR 4 says ran - each boot application's Authenticode
-// digest, in order. Any other kind of PCR 4 event (a boot loader's own
+// digest, in order. Separators and the profile's actions must be what
+// their data says; any other kind of PCR 4 event (a boot loader's own
 // measurement: an edited command line, a file) makes the boot unknown.
 func bootApps(log []event) ([][]byte, error) {
 	var apps [][]byte
@@ -284,30 +317,39 @@ func bootApps(log []event) ([][]byte, error) {
 		if e.pcr != 4 {
 			continue
 		}
-		switch e.typ {
-		case evNoAction, evSeparator, evEFIAction:
-		case evEFIBootApplication:
+		switch {
+		case e.typ == evNoAction:
+		case e.typ == evSeparator && separator(e):
+		case e.typ == evEFIAction && bound(e) && efiActions[string(e.data)]:
+		case e.typ == evEFIBootApplication:
 			apps = append(apps, e.sha256)
 		default:
-			return nil, fmt.Errorf("PCR 4 event %d is of kind %#x", i, e.typ)
+			return nil, fmt.Errorf("PCR 4 event %d (kind %#x) is not one a boot of ours makes", i, e.typ)
 		}
 	}
 	return apps, nil
 }
 
 // Boot is what the release booted: systemd-boot as lanzaboote installs it
-// (any of the release's), its stub, and the kernels a stub may name.
+// (any of the release's), its stub, and what a box's image of the stub may
+// name: one of its kernels, its kernel parameters after the system's
+// init, and - where the release lists them - its initrds.
 type Boot struct {
 	Loaders []string `json:"loaders"` // Authenticode SHA-256, hex
 	Stubs   []Stub   `json:"stubs"`
 	Kernels []string `json:"kernels"` // sha256 of the kernel file, hex (lzbt's .linuxh)
+	Params  []string `json:"params"`  // the command line after init=..., space-joined
+	// sha256 of the initrd (.initrdh), hex; empty: not judged - a box's
+	// initrd is its own build, which a release cannot list for a box it
+	// has not seen
+	Initrds []string `json:"initrds,omitempty"`
 }
 
 // checkBoot: PCR 4 holds exactly two boot applications - one of the
-// release's systemd-boot, then stub, the box's lanzaboote image, which is
-// one of the release's stubs with only lzbt's sections added and naming
-// one of its kernels. Anything else (shim, a grub, Windows' boot manager,
-// another stub) and the boot is not ours.
+// release's systemd-boot, then stub, the box's lanzaboote image (readStub)
+// naming one of the release's kernels, its parameters and (where listed)
+// initrds. Anything else (shim, a grub, Windows' boot manager, another
+// stub) and the boot is not ours.
 func checkBoot(b *Boot, log []event, stub []byte) error {
 	if b == nil {
 		return fmt.Errorf("%w: the release names no boot images", ErrSecureBoot)
@@ -322,24 +364,24 @@ func checkBoot(b *Boot, log []event, stub []byte) error {
 	if !slices.Contains(b.Loaders, hex.EncodeToString(apps[0])) {
 		return fmt.Errorf("%w: the first boot application is not the release's systemd-boot", ErrSecureBoot)
 	}
-	d, err := Authenticode(stub)
-	if err != nil {
-		return fmt.Errorf("%w: the stub: %v", ErrSecureBoot, err)
-	}
-	if !bytes.Equal(d, apps[1]) {
-		return fmt.Errorf("%w: the second boot application is not the stub the box sent", ErrSecureBoot)
-	}
+	var img *stubImage
 	var last error = errors.New("no stub")
 	for _, st := range b.Stubs {
-		k, err := stubKernel(st, stub)
-		if err != nil {
-			last = err
-			continue
+		if img, last = readStub(st, stub); last == nil {
+			break
 		}
-		if !slices.Contains(b.Kernels, hex.EncodeToString(k)) {
-			return fmt.Errorf("%w: the stub names a kernel not the release's", ErrSecureBoot)
-		}
-		return nil
 	}
-	return fmt.Errorf("%w: not the release's lanzaboote stub: %v", ErrSecureBoot, last)
+	switch {
+	case last != nil:
+		return fmt.Errorf("%w: not the release's lanzaboote stub: %v", ErrSecureBoot, last)
+	case !bytes.Equal(img.digest, apps[1]):
+		return fmt.Errorf("%w: the second boot application is not the stub the box sent", ErrSecureBoot)
+	case !slices.Contains(b.Kernels, hex.EncodeToString(img.kernel)):
+		return fmt.Errorf("%w: the stub names a kernel not the release's", ErrSecureBoot)
+	case !cmdlineOK(b, img.cmdline):
+		return fmt.Errorf("%w: the stub's command line is not the release's", ErrSecureBoot)
+	case len(b.Initrds) > 0 && !slices.Contains(b.Initrds, hex.EncodeToString(img.initrd)):
+		return fmt.Errorf("%w: the stub names an initrd not the release's", ErrSecureBoot)
+	}
+	return nil
 }
