@@ -179,7 +179,11 @@ func verifyBegin(pol *policy, b Begin, joinSPKI string, at time.Time) (*Checked,
 	if err != nil {
 		return nil, fmt.Errorf("the EK: %v", err)
 	}
-	if !samePub(certs[0].PublicKey, ekPub) {
+	certKey, err := ekCertKey(certs[0])
+	if err != nil {
+		return nil, err
+	}
+	if !samePub(certKey, ekPub) {
 		return nil, errors.New("the EK certificate is for another key")
 	}
 	if err := ekShape(ek); err != nil {
@@ -263,22 +267,44 @@ func verifyChain(pol *policy, certs []*x509.Certificate, at time.Time) (vendor, 
 	if (software[vendor] || model == "swtpm") && !pol.test.SoftwareTPM {
 		return "", "", ErrSoftware
 	}
-	roots := pol.roots[vendor]
-	if roots == nil {
-		return "", "", fmt.Errorf("%w: %s", ErrNoRoot, vendorName(vendor))
-	}
 	inter := x509.NewCertPool()
 	for _, c := range certs[1:] {
 		tpmExtensionsHandled(c)
 		inter.AddCert(c)
 	}
 	tpmExtensionsHandled(leaf)
-	if _, err := leaf.Verify(x509.VerifyOptions{
-		Roots:         roots,
-		Intermediates: inter,
-		CurrentTime:   at,
-		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-	}); err != nil {
+	verify := func(roots *x509.CertPool) error {
+		_, err := leaf.Verify(x509.VerifyOptions{
+			Roots:         roots,
+			Intermediates: inter,
+			CurrentTime:   at,
+			KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+		})
+		return err
+	}
+	if vendor == "" {
+		// no maker named in the certificate: the maker is whose roots it
+		// chains to, tried in vendor id order
+		var ids []string
+		for id := range pol.roots {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			if verify(pol.roots[id]) == nil {
+				if software[id] && !pol.test.SoftwareTPM {
+					return "", "", ErrSoftware
+				}
+				return id, model, nil
+			}
+		}
+		return "", "", fmt.Errorf("%w: the EK certificate names no maker and chains to none", ErrNoRoot)
+	}
+	roots := pol.roots[vendor]
+	if roots == nil {
+		return "", "", fmt.Errorf("%w: %s", ErrNoRoot, vendorName(vendor))
+	}
+	if err := verify(roots); err != nil {
 		return "", "", fmt.Errorf("the EK certificate does not chain to %s's roots: %v", vendorName(vendor), err)
 	}
 	return vendor, model, nil

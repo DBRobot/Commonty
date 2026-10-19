@@ -4,9 +4,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -391,5 +393,67 @@ func TestOnlyTheRSAEKCounts(t *testing.T) {
 	}
 	if err := ekShape(rsa); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// an EK certificate's key named RSAES-OAEP (AMD's do) is the same RSA key
+func TestAnOAEPNamedEKKeyParses(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spki, err := asn1.Marshal(struct {
+		Algorithm pkix.AlgorithmIdentifier
+		Key       asn1.BitString
+	}{
+		pkix.AlgorithmIdentifier{Algorithm: oidRSAESOAEP, Parameters: asn1.NullRawValue},
+		asn1.BitString{Bytes: x509.MarshalPKCS1PublicKey(&key.PublicKey), BitLength: 8 * len(x509.MarshalPKCS1PublicKey(&key.PublicKey))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ekCertKey(&x509.Certificate{RawSubjectPublicKeyInfo: spki})
+	if err != nil || !samePub(got, &key.PublicKey) {
+		t.Fatalf("%v", err)
+	}
+	spki[8] ^= 1 // another algorithm
+	if _, err := ekCertKey(&x509.Certificate{RawSubjectPublicKeyInfo: spki}); err == nil {
+		t.Fatal("a key of another kind taken")
+	}
+}
+
+// a certificate naming no maker is the maker's whose roots it chains to
+func TestAnEKCertificateNamingNoMakerChainsToOne(t *testing.T) {
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "maker root"},
+		NotBefore: oct2026.AddDate(-1, 0, 0), NotAfter: oct2026.AddDate(10, 0, 0),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	caDER, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &caKey.PublicKey, caKey)
+	ca, _ := x509.ParseCertificate(caDER)
+	ekKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	leafDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber: big.NewInt(2), NotBefore: tmpl.NotBefore, NotAfter: tmpl.NotAfter,
+		KeyUsage: x509.KeyUsageKeyEncipherment,
+	}, ca, &ekKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, _ := x509.ParseCertificate(leafDER)
+	pool := x509.NewCertPool()
+	pool.AddCert(ca)
+	pol := &policy{roots: map[string]*x509.CertPool{"414D4400": pool, "494E5443": intelPolicy(t).roots["494E5443"]}}
+	vendor, _, err := verifyChain(pol, []*x509.Certificate{leaf}, oct2026)
+	if err != nil || vendor != "414D4400" {
+		t.Fatalf("%s %v", vendor, err)
+	}
+	pol = &policy{roots: map[string]*x509.CertPool{"00001014": pool}}
+	if _, _, err := verifyChain(pol, []*x509.Certificate{leaf}, oct2026); !errors.Is(err, ErrSoftware) {
+		t.Fatalf("a software TPM's root taken: %v", err)
+	}
+	pol = &policy{roots: map[string]*x509.CertPool{"494E5443": intelPolicy(t).roots["494E5443"]}}
+	if _, _, err := verifyChain(pol, []*x509.Certificate{leaf}, oct2026); !errors.Is(err, ErrNoRoot) {
+		t.Fatalf("want ErrNoRoot, got %v", err)
 	}
 }
