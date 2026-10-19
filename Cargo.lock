@@ -2023,6 +2023,7 @@ dependencies = [
  "base64 0.22.1",
  "ctr",
  "ed25519-dalek",
+ "ente",
  "ente-accounts",
  "ente-core",
  "getrandom 0.3.4",
@@ -2031,6 +2032,7 @@ dependencies = [
  "library",
  "poly1305 0.8.0",
  "qrcode",
+ "reqwest 0.12.28",
  "ruzstd",
  "scrypt 0.11.0",
  "serde",
@@ -2471,6 +2473,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tokio",
  "zeroize",
 ]
 

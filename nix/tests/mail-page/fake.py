@@ -119,6 +119,8 @@ def new_id():
 
 state = {
     "ikm": None,
+    # what each ask of /_dd/app/keys named
+    "keys": [],
     "registered": False,
     "objs": {},  # "name/kind/id" -> {"bytes", "from"}
     "sent": [],
@@ -286,6 +288,8 @@ class H(BaseHTTPRequestHandler):
             return self.send(b, 200, "application/octet-stream", h)
         if p == "/test/sent":
             return self.send(state["sent"])
+        if p == "/test/keys":
+            return self.send(state["keys"])
         if p == "/test/objs":
             return self.send(sorted(state["objs"]))
         self.send({"error": "not here"}, 404)
@@ -415,6 +419,19 @@ class H(BaseHTTPRequestHandler):
             if not state["ikm"]:
                 state["ikm"] = os.urandom(32)
             return self.send(self.keydoc())
+        if p == "/_dd/app/keys":
+            # the app's one key route (app/src/keys.rs), on a device that has
+            # never opened Photos
+            asked = json.loads(b)["services"]
+            state["keys"].append(asked)
+            return self.send(
+                {
+                    s: {
+                        "error": "Photos does not open on this device yet: open Photos once in the app"
+                    }
+                    for s in asked
+                }
+            )
         if p == "/_dd/app/mail/worker":
             v = json.loads(b or b"{}")
             path = v.get("path", "")

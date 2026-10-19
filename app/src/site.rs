@@ -417,6 +417,51 @@ async fn serve<R: Runtime>(
     if matches!(path.as_str(), "/_dd/login" | "/_dd/logout") {
         return Ok(plain(StatusCode::UNAUTHORIZED, SIGNED_OUT));
     }
+    // the keys a page asks for in one go, and Photos for one that holds its
+    // password (keys.rs)
+    if path == "/_dd/app/keys" && req.method() == "POST" {
+        return Ok(match crate::keys::keys(app, req.body()).await {
+            Ok(v) => no_store(&v),
+            Err((s, why)) => plain(
+                StatusCode::from_u16(s).unwrap_or(StatusCode::BAD_GATEWAY),
+                &why,
+            ),
+        });
+    }
+    if path.starts_with("/_dd/ente/") || path.starts_with("/_dd/ente-store/") {
+        let (parts, body) = req.into_parts();
+        return Ok(
+            match crate::keys::ente_send(
+                parts.method.as_str(),
+                parts.uri.path(),
+                parts.uri.query(),
+                &parts.headers,
+                body,
+            )
+            .await
+            {
+                Ok(a) => {
+                    let mut back = Response::builder()
+                        .status(a.status)
+                        .header("x-content-type-options", "nosniff")
+                        .header("content-security-policy", "sandbox; default-src 'none'")
+                        .header("cache-control", "no-store")
+                        .header(
+                            "content-type",
+                            a.kind.as_deref().unwrap_or("application/octet-stream"),
+                        );
+                    if let Some(l) = &a.location {
+                        back = back.header("location", l);
+                    }
+                    back.body(a.body).unwrap_or_default()
+                }
+                Err((s, why)) => plain(
+                    StatusCode::from_u16(s).unwrap_or(StatusCode::BAD_GATEWAY),
+                    &why,
+                ),
+            },
+        );
+    }
     if path.starts_with("/_dd/") {
         return proxy(app, req).await;
     }

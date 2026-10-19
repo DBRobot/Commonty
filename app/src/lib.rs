@@ -11,6 +11,7 @@ mod export;
 mod handoff;
 #[cfg(desktop)]
 mod installer;
+mod keys;
 mod local;
 mod mail;
 mod net;

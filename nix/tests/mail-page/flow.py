@@ -200,7 +200,13 @@ with sync_playwright() as p:
         "orders@northside.example",
         "Two M3 heat-set insert kits are on their way.",
         name="Northside Hardware",
-        html='<p>Two <b>M3 heat-set insert kits</b> are on their way.</p><img src="https://tracker.example/pixel.gif" alt="t"><p><a href="https://northside.example/track">Track it</a></p>',
+        html='<p>Two <b>M3 heat-set insert kits</b> are on their way.</p><img src="https://tracker.example/pixel.gif" alt="t"><p><a href="https://northside.example/track">Track it</a></p>'
+        # what a sender might try, to run in the page that holds the keys
+        '<script>parent.__ran = "script"</script>'
+        "<svg onload=\"parent.__ran = 'svg'\"></svg>"
+        "<details open ontoggle=\"parent.__ran = 'toggle'\"><summary>x</summary></details>"
+        "<iframe srcdoc=\"<script>parent.parent.__ran = 'frame'</script>\"></iframe>"
+        '<form action="javascript:parent.__ran=1"><button id="go">Go</button></form>',
         att="invoice-48213.pdf",
     )
     a3 = arrive(
@@ -244,6 +250,18 @@ with sync_playwright() as p:
     ok(
         fr.locator("img").count() == 1 and not fr.locator("img").get_attribute("src"),
         "the tracking picture is not loaded",
+    )
+    # nothing in a message runs: the page beside it holds the keys to the
+    # member's mail, files and photos (app/src/keys.rs)
+    time.sleep(1)
+    ok(
+        pg.evaluate("window.__ran") is None,
+        f"no script in the message ran: {pg.evaluate('window.__ran')}",
+    )
+    ok(
+        "allow-scripts"
+        not in (pg.locator("#body iframe").get_attribute("sandbox") or "allow-scripts"),
+        "the message's frame is sandboxed without scripts",
     )
     ok(pg.locator(".mail-pics").count() == 1, "it says pictures are held back")
     ok("invoice-48213.pdf" in pg.inner_text("#att"), "the attachment is there to take")
@@ -420,6 +438,10 @@ with sync_playwright() as p:
         and pg.locator('#att [data-pdf="1"]').count() == 0,
         "Edit and Sign on the PDF alone",
     )
+    ok(
+        pg.locator("#att [data-photos]").count() == 0,
+        "no Save to Photos on a PDF or text",
+    )
     pg.click('#att [data-save="0"]')
     pg.wait_for_selector("dialog.dd-pick[open]", timeout=10000)
     month = time.strftime("%Y-%m")
@@ -469,8 +491,9 @@ with sync_playwright() as p:
     pg.wait_for_selector("#ed-f")
     pg.click('[data-act="attach"]')
     ok(
-        pg.locator(".mail-attmenu:not([hidden]) button").count() == 2,
-        "Attach offers this device or Files",
+        pg.locator(".mail-attmenu:not([hidden]) button").all_inner_texts()
+        == ["From this device", "From Files", "From Photos", "Photos by link"],
+        "Attach offers this device, Files, Photos, or a link to photos",
     )
     pg.click('[data-act="attach-files"]')
     pg.wait_for_selector("dialog.dd-pick[open]", timeout=10000)
@@ -523,6 +546,37 @@ with sync_playwright() as p:
     )
     pg.screenshot(path=f"{OUT}/11-reply-with-it.png")
     pg.click('[data-act="discard"]')
+
+    # Photos: Save to Photos on a picture or a film, asking the app's one
+    # key route for Photos alone; a device Photos has not opened on yet says
+    # so (the round trip itself is checks.photos, against museum)
+    a6 = arrive_with(
+        "From the hike",
+        "lingyun@family.example",
+        "Two from the top.",
+        "Lingyun",
+        [
+            ("summit.jpg", "image/jpeg", b"\xff\xd8\xff\xe0 not a real jpeg"),
+            ("trail.mp4", "video/mp4", b"\x00\x00\x00\x18ftypmp42"),
+        ],
+    )
+    pg.click('[data-f="inbox"]')
+    pg.reload()
+    pg.wait_for_selector(f'.mail-row[data-id="{a6}"]', timeout=15000)
+    pg.click(f'.mail-row[data-id="{a6}"]')
+    until(
+        lambda: pg.locator("#att [data-photos]").count() == 2,
+        "Save to Photos on the picture and the film",
+    )
+    pg.click('#att [data-photos="0"]')
+    until(
+        lambda: "Photos does not open on this device yet" in pg.inner_text("#toast"),
+        "a device without Photos says so",
+    )
+    ok(
+        get("/test/keys") == [["photos"]],
+        f"it asked the app for Photos and nothing else: {get('/test/keys')}",
+    )
 
     ok(not errs, f"no errors on the page {errs[:5]}")
 

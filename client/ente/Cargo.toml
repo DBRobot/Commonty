@@ -15,3 +15,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zeroize = "1"
 
+tokio = { version = "1", features = ["macros", "rt"], optional = true }
+
+[features]
+# the check against a real museum (nix/tests/photos.nix): an account made,
+# a file saved, read back and shared
+roundtrip = ["dep:tokio"]
+
+[[bin]]
+name = "ente-roundtrip"
+path = "src/bin/roundtrip.rs"
+required-features = ["roundtrip"]

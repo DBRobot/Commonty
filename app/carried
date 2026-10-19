@@ -56,6 +56,8 @@ servers/mail/web/mail-mailbox.js      static/mail-mailbox.js
 servers/mail/web/mail-search.js       static/mail-search.js
 servers/mail/web/mail-filter.js       static/mail-filter.js
 servers/mail/web/mail-compose.js      static/mail-compose.js
+servers/mail/web/mail-photos.js       static/mail-photos.js
+servers/mail/web/mail-photos.css      static/mail-photos.css
 client/mail/worker/mail-hpke.js       static/mail-hpke.js
 client/mail/worker/mail-mime.js       static/mail-mime.js
 client/mail/worker/mail-ids.js        static/mail-ids.js

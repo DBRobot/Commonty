@@ -20,6 +20,7 @@ use zeroize::Zeroizing;
 pub mod archive;
 pub mod entry;
 pub mod library;
+pub mod photos;
 
 /// No prompts: the code is given up front, and an account made here has
 /// no second factor.

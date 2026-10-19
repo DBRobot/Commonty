@@ -33,6 +33,9 @@ pub struct Gallery {
     token: String,
     http: reqwest::Client,
     master: Zeroizing<Vec<u8>>,
+    /// where a presigned address to the store goes instead, as
+    /// `{via}/{host}{path}?{query}`: a page that may only ask its own origin
+    store_via: Option<String>,
 }
 
 /// An album, by the name its owner gave it.
@@ -100,8 +103,9 @@ struct Diff {
     has_more: bool,
 }
 
-/// the login asks nothing of anyone: the demo has no second factor
-struct NoUi;
+/// the login asks nothing of anyone: the demo has no second factor, nor
+/// does an account the fleet made
+pub struct NoUi;
 
 impl AuthFlowUi for NoUi {
     fn read_email_otp(&mut self, _: &str, _: crate::OtpPurpose, _: bool) -> crate::Result<String> {
@@ -149,6 +153,7 @@ fn open(sealed: &str, nonce: &str, key: &[u8]) -> Result<Vec<u8>> {
 }
 
 impl Gallery {
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn sign_in(origin: &str, email: &str, password: &str) -> Result<Self> {
         Self::sign_in_with(
             origin,
@@ -186,6 +191,7 @@ impl Gallery {
             token: b64::encode_url_safe(&account.secrets.token),
             http,
             master: Zeroizing::new(account.secrets.master_key.clone()),
+            store_via: None,
         })
     }
 
@@ -362,7 +368,7 @@ impl Gallery {
             .await?
             .error_for_status()?;
         Ok(Original {
-            resp,
+            resp: Some(resp),
             buf: Vec::new(),
             dec: crypto::stream::Decryptor::new(
                 &crypto::Header::try_from_slice(&b64::decode(&p.file)?)?,
@@ -379,6 +385,300 @@ impl Gallery {
         }
         self.fetch(format!("/files/download/v2/{}", p.id), &p.file, &p.key, cap)
             .await
+    }
+}
+
+/// The kind of a file, as Ente's metadata says it
+pub const IMAGE: i64 = 0;
+pub const VIDEO: i64 = 1;
+
+/// An album's id and key, owned by this account
+struct Owned {
+    id: i64,
+    name: String,
+    kind: String,
+    key: Vec<u8>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadUrl {
+    object_key: String,
+    url: String,
+}
+
+fn sealed_with(data: &[u8], key: &[u8]) -> Result<(String, String)> {
+    let b = crypto::secretbox::encrypt(data, &crypto::Key::try_from_slice(key)?);
+    Ok((
+        b64::encode(&b.encrypted_data),
+        b64::encode(b.nonce.as_bytes()),
+    ))
+}
+
+/// Ente's metadata and magic metadata: json sealed as one final message
+fn blob_json(v: &serde_json::Value, key: &[u8]) -> Result<(String, String)> {
+    let b = crypto::blob::encrypt(&serde_json::to_vec(v)?, &crypto::Key::try_from_slice(key)?)?;
+    Ok((
+        b64::encode(&b.encrypted_data),
+        b64::encode(b.decryption_header.as_bytes()),
+    ))
+}
+
+/// the file sealed as Ente's clients seal it: 4 MiB messages, the last one final
+fn stream_sealed(data: &[u8], key: &crypto::Key) -> Result<(Vec<u8>, String)> {
+    let mut out = Vec::with_capacity(crypto::stream::estimate_encrypted_size(data.len()));
+    let header = crypto::stream::encrypt_file(&mut std::io::Cursor::new(data), &mut out, key)?;
+    Ok((out, b64::encode(header.as_bytes())))
+}
+
+/// base58 as Bitcoin writes it, which a share link carries its album's key in
+pub fn base58(bytes: &[u8]) -> String {
+    const A: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut digits: Vec<u8> = Vec::new();
+    for &b in bytes {
+        let mut carry = b as u32;
+        for d in digits.iter_mut() {
+            carry += (*d as u32) << 8;
+            *d = (carry % 58) as u8;
+            carry /= 58;
+        }
+        while carry > 0 {
+            digits.push((carry % 58) as u8);
+            carry /= 58;
+        }
+    }
+    let zeros = bytes.iter().take_while(|&&b| b == 0).count();
+    std::iter::repeat_n('1', zeros)
+        .chain(digits.iter().rev().map(|&d| A[d as usize] as char))
+        .collect()
+}
+
+impl Gallery {
+    /// the same account, with each presigned address to the store sent by
+    /// way of `via` (see `store_via`)
+    pub fn with_store_via(mut self, via: &str) -> Self {
+        self.store_via = Some(via.trim_end_matches('/').to_string());
+        self
+    }
+
+    fn store_url(&self, url: &str) -> String {
+        match (&self.store_via, url.strip_prefix("https://")) {
+            (Some(via), Some(rest)) => format!("{via}/{rest}"),
+            _ => url.to_string(),
+        }
+    }
+
+    async fn send(&self, path: &str, body: &serde_json::Value) -> Result<reqwest::Response> {
+        let r = self
+            .http
+            .post(format!("{}{path}", self.origin))
+            .header("X-Auth-Token", &self.token)
+            .header("X-Client-Package", "org.commonty.client")
+            .json(body)
+            .send()
+            .await?;
+        if !r.status().is_success() {
+            return Err(anyhow!("{path}: {}", r.status()));
+        }
+        Ok(r)
+    }
+
+    async fn post<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<T> {
+        Ok(self.send(path, body).await?.json().await?)
+    }
+
+    async fn owned(&self) -> Result<Vec<Owned>> {
+        #[derive(Deserialize)]
+        struct Collections {
+            collections: Vec<Collection>,
+        }
+        let cs: Collections = self
+            .get("/collections/v2", &[("sinceTime", "0".into())])
+            .await?;
+        Ok(cs
+            .collections
+            .into_iter()
+            .filter(|c| !c.is_deleted)
+            .filter_map(|c| {
+                let key = open(
+                    &c.encrypted_key,
+                    c.key_decryption_nonce.as_ref()?,
+                    &self.master,
+                )
+                .ok()?;
+                let name = match (&c.encrypted_name, &c.name_decryption_nonce) {
+                    (Some(n), Some(nn)) => open(n, nn, &key)
+                        .ok()
+                        .and_then(|b| String::from_utf8(b).ok())
+                        .unwrap_or_default(),
+                    _ => c.name.clone().unwrap_or_default(),
+                };
+                Some(Owned {
+                    id: c.id,
+                    name,
+                    kind: c.kind,
+                    key,
+                })
+            })
+            .collect())
+    }
+
+    /// a new album of this account's, made as Ente's web app makes one;
+    /// `magic` its private metadata (a quick link's kind), if any
+    async fn new_album(&self, name: &str, magic: Option<serde_json::Value>) -> Result<Owned> {
+        let key = crypto::Key::generate();
+        let (encrypted_key, key_nonce) = sealed_with(key.as_bytes(), &self.master)?;
+        let (encrypted_name, name_nonce) = sealed_with(name.as_bytes(), key.as_bytes())?;
+        let mut body = serde_json::json!({
+            "encryptedKey": encrypted_key,
+            "keyDecryptionNonce": key_nonce,
+            "encryptedName": encrypted_name,
+            "nameDecryptionNonce": name_nonce,
+            "type": "album",
+        });
+        if let Some(m) = magic {
+            let count = m.as_object().map_or(0, |o| o.len());
+            let (data, header) = blob_json(&m, key.as_bytes())?;
+            body["magicMetadata"] =
+                serde_json::json!({ "version": 1, "count": count, "data": data, "header": header });
+        }
+        #[derive(Deserialize)]
+        struct Made {
+            collection: Collection,
+        }
+        let made: Made = self.post("/collections", &body).await?;
+        Ok(Owned {
+            id: made.collection.id,
+            name: name.to_string(),
+            kind: "album".into(),
+            key: key.as_bytes().to_vec(),
+        })
+    }
+
+    /// One file put in the album called `album` (made if this account has
+    /// none by that name), sealed as Ente's own apps seal one: its bytes
+    /// with a key of its own, the small picture beside it, what it is in its
+    /// metadata, and its key sealed with the album's. `taken` is in
+    /// microseconds since the epoch. Its id comes back.
+    pub async fn save(
+        &self,
+        album: &str,
+        title: &str,
+        kind: i64,
+        taken: i64,
+        data: &[u8],
+        thumbnail: &[u8],
+    ) -> Result<i64> {
+        let owned = self.owned().await?;
+        let into = match owned
+            .into_iter()
+            .find(|c| c.kind == "album" && c.name == album)
+        {
+            Some(c) => c,
+            None => self.new_album(album, None).await?,
+        };
+        let key = crypto::Key::generate();
+        let (file, file_header) = stream_sealed(data, &key)?;
+        let thumb = crypto::blob::encrypt(thumbnail, &key)?;
+        let meta = serde_json::json!({
+            "fileType": kind,
+            "title": title,
+            "creationTime": taken,
+            "modificationTime": taken,
+            "hash": b64::encode(&crypto::hash::hash(data, Some(64), None)?),
+        });
+        let (meta_data, meta_header) = blob_json(&meta, key.as_bytes())?;
+        #[derive(Deserialize)]
+        struct Urls {
+            urls: Vec<UploadUrl>,
+        }
+        let urls: Urls = self
+            .get("/files/upload-urls", &[("count", "2".into())])
+            .await?;
+        let [f, t] = <[UploadUrl; 2]>::try_from(urls.urls)
+            .map_err(|u| anyhow!("museum gave {} upload addresses, not 2", u.len()))?;
+        for (u, body) in [(&f, file.clone()), (&t, thumb.encrypted_data.clone())] {
+            let r = self
+                .http
+                .put(self.store_url(&u.url))
+                .body(body)
+                .send()
+                .await?;
+            if !r.status().is_success() {
+                return Err(anyhow!("the store took no upload: {}", r.status()));
+            }
+        }
+        let (encrypted_key, key_nonce) = sealed_with(key.as_bytes(), &into.key)?;
+        #[derive(Deserialize)]
+        struct Made {
+            id: i64,
+        }
+        let made: Made = self
+            .post(
+                "/files",
+                &serde_json::json!({
+                    "collectionID": into.id,
+                    "encryptedKey": encrypted_key,
+                    "keyDecryptionNonce": key_nonce,
+                    "file": { "objectKey": f.object_key, "decryptionHeader": file_header, "size": file.len() },
+                    "thumbnail": {
+                        "objectKey": t.object_key,
+                        "decryptionHeader": b64::encode(thumb.decryption_header.as_bytes()),
+                        "size": thumb.encrypted_data.len(),
+                    },
+                    "metadata": { "encryptedData": meta_data, "decryptionHeader": meta_header },
+                }),
+            )
+            .await?;
+        Ok(made.id)
+    }
+
+    /// A link anyone can open these photos at, as Ente's "share" makes one:
+    /// a quick-link album with them in it, its public address, and the
+    /// album's key after the `#`, which no server is sent
+    pub async fn share(&self, name: &str, photos: &[Photo]) -> Result<String> {
+        if photos.is_empty() {
+            return Err(anyhow!("nothing to share"));
+        }
+        // subType 2 is a quick link, visibility 0 is shown
+        let album = self
+            .new_album(
+                name,
+                Some(serde_json::json!({ "subType": 2, "visibility": 0 })),
+            )
+            .await?;
+        let files = photos
+            .iter()
+            .map(|p| {
+                let (k, n) = sealed_with(&p.key, &album.key)?;
+                Ok(serde_json::json!({ "id": p.id, "encryptedKey": k, "keyDecryptionNonce": n }))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // it answers with no body
+        self.send(
+            "/collections/add-files",
+            &serde_json::json!({ "collectionID": album.id, "files": files }),
+        )
+        .await?;
+        #[derive(Deserialize)]
+        struct Shared {
+            result: Url,
+        }
+        #[derive(Deserialize)]
+        struct Url {
+            url: String,
+        }
+        let s: Shared = self
+            .post(
+                "/collections/share-url",
+                &serde_json::json!({ "collectionID": album.id, "enableComment": true }),
+            )
+            .await?;
+        Ok(format!("{}#{}", s.result.url, base58(&album.key)))
     }
 }
 
@@ -404,13 +704,29 @@ impl Photo {
 /// An original as it downloads: `next` hands back its plain bytes a chunk
 /// (4 MiB) at a time, and None at its end
 pub struct Original {
-    resp: reqwest::Response,
+    resp: Option<reqwest::Response>,
     buf: Vec<u8>,
     dec: crypto::stream::Decryptor,
     done: bool,
 }
 
 impl Original {
+    /// the next bytes as they come; in a browser, where reqwest reads no
+    /// body a piece at a time, all of it at once
+    async fn more(&mut self) -> Result<Option<Vec<u8>>> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let got = match self.resp.as_mut() {
+            Some(r) => r.chunk().await?.map(|b| b.to_vec()),
+            None => None,
+        };
+        #[cfg(target_arch = "wasm32")]
+        let got = match self.resp.take() {
+            Some(r) => Some(r.bytes().await?.to_vec()),
+            None => None,
+        };
+        Ok(got)
+    }
+
     pub async fn next(&mut self) -> Result<Option<Vec<u8>>> {
         const CHUNK: usize = crypto::stream::DECRYPTION_CHUNK_SIZE;
         loop {
@@ -427,7 +743,7 @@ impl Original {
                 }
                 return Ok(Some(plain));
             }
-            match self.resp.chunk().await? {
+            match self.more().await? {
                 Some(b) => self.buf.extend_from_slice(&b),
                 None => {
                     if self.buf.is_empty() {
@@ -443,5 +759,38 @@ impl Original {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base58_reads_as_bitcoin_writes_it() {
+        assert_eq!(base58(b""), "");
+        assert_eq!(base58(&[0, 0, 1]), "112");
+        assert_eq!(base58(b"hello world"), "StV1DL6CwTryKyV");
+    }
+
+    #[test]
+    fn a_saved_file_opens_as_one_ente_made() {
+        // past one 4 MiB message, so the last one is the final one
+        let data: Vec<u8> = (0..(5 << 20)).map(|i| (i % 251) as u8).collect();
+        let key = crypto::Key::generate();
+        let (sealed, header) = stream_sealed(&data, &key).unwrap();
+        let header = crypto::Header::try_from_slice(&b64::decode(&header).unwrap()).unwrap();
+        assert_eq!(
+            crypto::stream::decrypt_file_data(&sealed, &header, &key).unwrap(),
+            data
+        );
+        let (meta, h) = blob_json(&serde_json::json!({"title": "a.jpg"}), key.as_bytes()).unwrap();
+        let plain = crypto::blob::decrypt(
+            &b64::decode(&meta).unwrap(),
+            &crypto::Header::try_from_slice(&b64::decode(&h).unwrap()).unwrap(),
+            &key,
+        )
+        .unwrap();
+        assert_eq!(plain, br#"{"title":"a.jpg"}"#);
     }
 }

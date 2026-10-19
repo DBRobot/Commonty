@@ -950,6 +950,45 @@ const PAGE_POLICY: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-ev
 /// key and the archive password from this device's keys, and every other
 /// call sent on to the boxes with this device's token. What a box answers
 /// is data: `forward` refuses anything a page would run.
+/// Museum or Photos' store for a page here, which may ask only its own
+/// origin (keys.rs)
+async fn ente(req: Request) -> Response {
+    let (parts, body) = req.into_parts();
+    let Ok(body) = axum::body::to_bytes(body, 64 << 20).await else {
+        return plain(StatusCode::PAYLOAD_TOO_LARGE, "too much");
+    };
+    let a = match crate::keys::ente_send(
+        parts.method.as_str(),
+        parts.uri.path(),
+        parts.uri.query(),
+        &parts.headers,
+        body.to_vec(),
+    )
+    .await
+    {
+        Ok(a) => a,
+        Err((s, why)) => {
+            return plain(
+                StatusCode::from_u16(s).unwrap_or(StatusCode::BAD_GATEWAY),
+                &why,
+            );
+        }
+    };
+    let mut back = Response::builder()
+        .status(a.status)
+        .header("x-content-type-options", "nosniff")
+        .header("content-security-policy", "sandbox; default-src 'none'")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header(
+            header::CONTENT_TYPE,
+            a.kind.as_deref().unwrap_or("application/octet-stream"),
+        );
+    if let Some(l) = &a.location {
+        back = back.header(header::LOCATION, l);
+    }
+    back.body(Body::from(a.body)).unwrap_or_default()
+}
+
 async fn site_pages<R: Runtime>(
     site: &Site<R>,
     req: Request,
@@ -1022,6 +1061,23 @@ async fn site_pages<R: Runtime>(
                     &why,
                 ),
             };
+        }
+        // the keys a page asks for in one go, and Photos for one that holds
+        // its password (keys.rs)
+        "/_dd/app/keys" if req.method() == axum::http::Method::POST => {
+            let Ok(body) = axum::body::to_bytes(req.into_body(), 4096).await else {
+                return plain(StatusCode::PAYLOAD_TOO_LARGE, "too much");
+            };
+            return match crate::keys::keys(&site.app, &body).await {
+                Ok(v) => json(StatusCode::OK, v),
+                Err((s, why)) => plain(
+                    StatusCode::from_u16(s).unwrap_or(StatusCode::BAD_GATEWAY),
+                    &why,
+                ),
+            };
+        }
+        p if p.starts_with("/_dd/ente/") || p.starts_with("/_dd/ente-store/") => {
+            return ente(req).await;
         }
         // taking everything out, from the Leave tab: this browser's own
         // downloads (export.rs)

@@ -134,3 +134,29 @@ assert kept == [hashlib.sha256(made["token"].encode()).hexdigest()], kept
 box.succeed(
     f"curl -sf -H 'X-Auth-Token: {made['token']}' http://127.0.0.1:8080/users/session-validity/v2"
 )
+
+# What Mail does in Photos, against museum and a store: an account, a file
+# saved into the album From Mail as Ente's apps save one, read back whole
+# with its small picture, and a link made to it (client/ente, gallery.rs)
+box.wait_for_unit("garage.service")
+box.wait_for_open_port(3901)
+node = box.succeed("garage node id -q").split("@")[0].strip()
+box.succeed(
+    f"garage layout assign -z here -c 1G {node} && garage layout apply --version 1"
+)
+box.wait_until_succeeds(
+    "garage status | grep -q HEALTHY || garage bucket list", timeout=60
+)
+box.succeed(
+    "garage key import --yes GK0123456789abcdef01234567 "
+    "1111111111111111111111111111111111111111111111111111111111111111"
+    " && garage bucket create ente"
+    " && garage bucket allow --read --write --owner ente --key GK0123456789abcdef01234567"
+)
+out = box.succeed(
+    f"{nix['roundtrip']} http://127.0.0.1:8080 mail-check@users.test.invalid "
+    "a-long-test-password 123456 2>&1"
+)
+print(out)
+assert "roundtrip ok" in out, out
+assert "https://albums.test.invalid" in out, out

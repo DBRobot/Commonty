@@ -12,6 +12,10 @@ crate-type = ["cdylib", "rlib"]
 # ente's own account protocol and crypto, the same pinned commit as crate ente
 ente-accounts = { git = "https://github.com/ente-io/ente", rev = "d28c3462e70bf63f8323700ce77797237a0fd1b4" }
 ente-core = { git = "https://github.com/ente-io/ente", rev = "d28c3462e70bf63f8323700ce77797237a0fd1b4" }
+# a member's photos from another of their pages (photos.rs): the same
+# reading the app does, and saving and sharing
+ente = { path = "../ente" }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 # a member's libraries in the browser (library.rs): the same crates the
 # app and dd use, compiled to wasm
 identity = { path = "../identity" }

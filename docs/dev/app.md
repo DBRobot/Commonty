@@ -171,6 +171,31 @@ at once and cannot be undone ([leaving.md](leaving.md)). From one of these
 pages, Photos and Passwords open through `/_dd/app/go`, a door of their
 own for the same browser, without another click.
 
+### One key route
+
+A page asks for the keys it needs with one call, in the window or a
+browser the app let in: `POST /_dd/app/keys {services: [...]}`
+([`app/src/keys.rs`](../../app/src/keys.rs)). It answers each service with
+its key or `{error}`. The services are `library` (the library key, as
+`/_dd/app/library`), `mail` (the mail key, as `GET /_dd/app/mail/key`) and
+`photos` (Photos' password, which the app made and keeps). `vault` is
+refused: Passwords' key goes only to Passwords' own origin. The route sits
+behind the same checks as the others. In the window that is the launch
+secret, and in a browser it is `admit`'s `Serve`, so a let-in browser's
+cookie on a same-origin request. Every page served at the site's origin can
+ask for every service it lists, because they are one origin and the app
+cannot tell one carried page from another. What keeps a box's or a
+message's code out is that nothing a box answers runs there (above) and
+that a message's HTML runs no script (mail.md). Mail asks for Photos this
+way; the older per-service routes still answer until every page has moved.
+
+A page with Photos' password may reach only its own origin, so the app
+passes on its calls to museum (`/_dd/ente/<path>` to `api.<domain>`) and
+to the store (`/_dd/ente-store/<host>/<path>`, for `photos-store.<domain>`
+or `s3.<domain>` alone). The app sends only the headers Ente's calls carry,
+no token of the device's. It turns museum's redirect of a download into one
+to `/_dd/ente-store/...`, and lets nothing through that would run.
+
 ```
 photos.<domain> in a browser ─ the gate's handoff page (/_dd/use-app)
   [Open with the Commonty app], or by itself once the dd_app note is set

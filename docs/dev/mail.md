@@ -172,6 +172,28 @@ it attached** hands the finished PDF to a reply. The box sees none of it:
 the attachment is opened with the mail key and sealed with the library key
 in the same tab.
 
+**Photos** ([`mail-photos.js`](../../servers/mail/web/mail-photos.js)).
+A picture or film attachment has **Save to Photos**: it goes into an album
+called From Mail (made the first time), dated with the email. The compose
+Attach menu has **From Photos**, which attaches the chosen photos up to
+the same 18 MB, and **Photos by link**, which puts a link to them in the
+email. The link opens a new album that holds only those photos, as Ente's
+own Share link does, and anyone who has the link can see them. The key to
+that album is after the link's `#`, so no server is sent it.
+
+The page asks the app for Photos' password through its one key route
+(`POST /_dd/app/keys {services: ["photos"]}`,
+[app.md](app.md#one-key-route)). It opens the account in the tab with our
+Rust in the browser ([`client/web/src/photos.rs`](../../client/web/src/photos.rs)
+over [`client/ente`](../../client/ente/src/gallery.rs)), and seals and opens
+files the same way Ente's apps do: a 4 MiB stream with its own key, a small
+picture, metadata, and the file's key sealed with the album's. The page may
+only reach its own origin, so museum calls go to `/_dd/ente/...` and the
+store's presigned addresses go to `/_dd/ente-store/<host>/...`. The app
+passes these on with no credential of the device's. Photos' master key is
+in that tab and nowhere else. Before a device has opened Photos once in the
+app, there is no password to hand over, and the page says so.
+
 ## Sending
 
 From the member's own device (`app/src/mail.rs`, `client/mailsend`):

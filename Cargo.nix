@@ -6679,6 +6679,10 @@ rec {
             packageId = "ed25519-dalek";
           }
           {
+            name = "ente";
+            packageId = "ente";
+          }
+          {
             name = "ente-accounts";
             packageId = "ente-accounts";
           }
@@ -6714,6 +6718,12 @@ rec {
             packageId = "qrcode";
             usesDefaultFeatures = false;
             features = [ "svg" ];
+          }
+          {
+            name = "reqwest";
+            packageId = "reqwest 0.12.28";
+            usesDefaultFeatures = false;
+            features = [ "json" ];
           }
           {
             name = "ruzstd";
@@ -8122,6 +8132,13 @@ rec {
         crateName = "ente";
         version = "0.1.0";
         edition = "2024";
+        crateBin = [
+          {
+            name = "ente-roundtrip";
+            path = "src/bin/roundtrip.rs";
+            requiredFeatures = [ "roundtrip" ];
+          }
+        ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./client/ente; };
         dependencies = [
           {
@@ -8152,11 +8169,20 @@ rec {
             packageId = "serde_json";
           }
           {
+            name = "tokio";
+            packageId = "tokio";
+            optional = true;
+            features = [ "macros" "rt" ];
+          }
+          {
             name = "zeroize";
             packageId = "zeroize";
           }
         ];
-
+        features = {
+          "roundtrip" = [ "dep:tokio" ];
+        };
+        resolvedDefaultFeatures = [ "roundtrip" ];
       };
       "ente-accounts" = rec {
         crateName = "ente-accounts";

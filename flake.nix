@@ -915,6 +915,9 @@
           # one file, one viewer, in memory: the compute side of the
           # encrypted libraries (modules/library/transcode.nix)
           transcode = perCrate "transcode";
+          # Photos' save, read back and share against a real museum and store,
+          # as Mail does them (nix/tests/photos.nix)
+          ente-roundtrip = cargoNix.workspaceMembers.ente.build.override { features = [ "roundtrip" ]; };
           # the home controller's door, here for the vm test (the Pi's is rust.pi.door)
           door = perCrate "smarthome-door";
           # The app: the same crates as dd behind a window (app/). Wrapped

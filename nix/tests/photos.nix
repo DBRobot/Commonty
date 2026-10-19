@@ -3,8 +3,10 @@
 # the sign-in - the page, its settings, and the fleet's verification code
 # filled in for a member's own address and nobody else's. The web apps are
 # left out: building them is most of an hour, and what they do in a browser
-# is checked by hand (docs/dev/packaged.md). Secrets are test values in the
-# store, where on a real box they come from sops (roles/photos.nix).
+# is checked by hand (docs/dev/packaged.md). What Mail does in Photos (our
+# own code, client/ente) runs against museum and a store: garage on
+# loopback, alone. Secrets are test values in the store,
+# where on a real box they come from sops (roles/photos.nix).
 {
   pkgs,
   lib,
@@ -20,7 +22,7 @@ let
     head -c 64 /dev/zero | base64 -w0 > $out/ente-key-hash
     head -c 32 /dev/zero | base64 -w0 > $out/ente-jwt-secret
     echo GK0123456789abcdef01234567 > $out/garage-key-id
-    echo unused > $out/garage-key-secret
+    echo 1111111111111111111111111111111111111111111111111111111111111111 > $out/garage-key-secret
   '';
   cert = pkgs.runCommand "test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out
@@ -80,6 +82,26 @@ in
       };
       dd.photos.admin = 1;
       services.ente.web.enable = lib.mkForce false;
+      # the store museum hands out presigned addresses at: garage on
+      # loopback, as on a box, with the bucket key's pair imported
+      services.garage = {
+        enable = true;
+        package = pkgs.garage;
+        settings = {
+          replication_factor = 1;
+          db_engine = "sqlite";
+          rpc_bind_addr = "127.0.0.1:3901";
+          rpc_secret = "0000000000000000000000000000000000000000000000000000000000000000";
+          s3_api = {
+            s3_region = "us-east-1";
+            api_bind_addr = "127.0.0.1:3900";
+          };
+        };
+      };
+      services.ente.api.settings.s3 = {
+        are_local_buckets = true;
+        b2-eu-cen.endpoint = lib.mkForce "127.0.0.1:3900";
+      };
       # what the web module sets for museum when it is on
       services.ente.api.settings = {
         apps = {
@@ -125,5 +147,6 @@ in
     };
   scriptEnv = {
     dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
+    roundtrip = "${self.packages.${pkgs.stdenv.hostPlatform.system}.ente-roundtrip}/bin/ente-roundtrip";
   };
 }

@@ -333,6 +333,7 @@ function drawFilesOf(r) {
       node('span', { class: 'nm' }, icon, node('b', { text: name }), node('span', { class: 'sz', text: size(a.body.length) })),
       node('span', { class: 'acts' },
         node('button', { type: 'button', class: 'go', 'data-save': String(i), text: 'Save to Files' }),
+        ...(forPhotos(a.type, name) ? [node('button', { type: 'button', class: 'quiet', 'data-photos': String(i), text: 'Save to Photos' })] : []),
         dl,
         ...(isPdf(a, name) ? [node('button', { type: 'button', class: 'quiet', 'data-pdf': String(i), 'data-mode': 'edit', text: 'Edit' }), node('button', { type: 'button', class: 'quiet', 'data-pdf': String(i), 'data-mode': 'sign', text: 'Sign' })] : [])));
     if (savedPath) row.append(node('span', { class: 'saved', text: `Saved to ${where(savedPath)}` }));
@@ -433,6 +434,50 @@ async function attachFromFiles() {
     drawFiles();
   } catch (err) {
     toast(`Not attached: ${err.message || err}`);
+  }
+}
+// Photos (mail-photos.js): a picture or film saved there, photos attached,
+// and a link to some put in the email. Loaded the first time it is used.
+const photosJs = () => import('./mail-photos.js');
+const forPhotos = (type, name) => /^(image|video)\//.test(type || '') || /\.(jpe?g|png|gif|webp|heic|heif|avif|mp4|mov|m4v|webm)$/i.test(name || '');
+async function savePhotos(i) {
+  const s = opened;
+  const a = s.list[i];
+  const m = mb.msgs.get(s.id);
+  try {
+    const { saveToPhotos } = await photosJs();
+    toast('Saving to Photos…');
+    const album = await saveToPhotos(attName(a), a.type || '', a.body, new Date(m?.s?.date || m?.s?.at || Date.now()).getTime());
+    toast(`Saved to Photos, in ${album}`);
+  } catch (err) {
+    toast(`Not saved: ${err.message || err}`);
+  }
+}
+async function attachPhotos() {
+  try {
+    const { attachFromPhotos } = await photosJs();
+    const now = editing ? editing.attachments.reduce((n, x) => n + x.bytes.length, 0) : 0;
+    const got = await attachFromPhotos(ATTACH_MAX - now);
+    if (!got.length || !editing) return;
+    editing.attachments.push(...got);
+    drawFiles();
+  } catch (err) {
+    toast(`Not attached: ${/too big/.test(err.message || err) ? 'those would make the email too big to send: about 18 MB of files fit' : err.message || err}`);
+  }
+}
+async function sharePhotos() {
+  try {
+    const { shareFromPhotos } = await photosJs();
+    const url = await shareFromPhotos();
+    if (!url || !editing) return;
+    const body = $('c-body');
+    const link = `<p><a href="${esc(url)}">Photos</a></p>`;
+    const at = getSelection();
+    if (at?.rangeCount && body.contains(at.anchorNode)) document.execCommand('insertHTML', false, link);
+    else body.prepend(safeNodes(link));
+    toast('Link added: anyone with it can see those photos');
+  } catch (err) {
+    toast(`No link made: ${err.message || err}`);
   }
 }
 const TYPES = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', txt: 'text/plain', csv: 'text/csv', zip: 'application/zip', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ics: 'text/calendar', vcf: 'text/vcard' };
@@ -539,7 +584,7 @@ function drawEditor() {
         <button class="ib back" type="button" data-act="close" aria-label="Back">${svg('back', 18)}</button>
         <div class="mail-fmt" role="toolbar" aria-label="Formatting" data-guide="mail-format">${fmtBar()}</div>
         <div class="mail-edright">
-          <span class="mail-attach"><button class="ib" type="button" data-act="attach" aria-haspopup="menu" aria-expanded="false">${svg('clip', 18)}<span class="lbl">Attach</span></button><span class="mail-attmenu" role="menu" hidden><button type="button" role="menuitem" data-act="attach-device">From this device</button><button type="button" role="menuitem" data-act="attach-files">From Files</button></span></span>
+          <span class="mail-attach"><button class="ib" type="button" data-act="attach" aria-haspopup="menu" aria-expanded="false">${svg('clip', 18)}<span class="lbl">Attach</span></button><span class="mail-attmenu" role="menu" hidden><button type="button" role="menuitem" data-act="attach-device">From this device</button><button type="button" role="menuitem" data-act="attach-files">From Files</button><button type="button" role="menuitem" data-act="attach-photos">From Photos</button><button type="button" role="menuitem" data-act="share-photos">Photos by link</button></span></span>
           <button class="ib" type="button" data-act="discard" aria-label="Discard" title="Discard">${svg('trash', 18)}</button>
           <button class="ib primary" type="submit" id="send">${svg('sent', 16)}Send</button>
         </div>
@@ -692,9 +737,12 @@ async function act(name, el) {
     if (!menu.hidden) menu.querySelector('button').focus();
     return;
   }
-  if (name === 'attach-device' || name === 'attach-files') {
+  if (name === 'attach-device' || name === 'attach-files' || name === 'attach-photos' || name === 'share-photos') {
     el.closest('.mail-attmenu').hidden = true;
-    if (name === 'attach-device') $('c-attach').click(); else attachFromFiles();
+    if (name === 'attach-device') $('c-attach').click();
+    else if (name === 'attach-files') attachFromFiles();
+    else if (name === 'attach-photos') attachPhotos();
+    else sharePhotos();
     return;
   }
   if (name === 'showcc' || name === 'showbcc') { const k = name === 'showcc' ? 'cc' : 'bcc'; $(`row-${k}`).hidden = false; el.hidden = true; $(`c-${k}`).focus(); return; }
@@ -731,6 +779,8 @@ document.addEventListener('click', (e) => {
     if (left.length) saveToFiles(left); else toast('Every attachment is in Files already.');
     return;
   }
+  const ph = e.target.closest('[data-photos]');
+  if (ph && opened) { savePhotos(Number(ph.dataset.photos)); return; }
   const pdf = e.target.closest('[data-pdf]');
   if (pdf && opened) { editPdf(Number(pdf.dataset.pdf), pdf.dataset.mode); return; }
   if (!e.target.closest('.mail-attach')) for (const mm of document.querySelectorAll('.mail-attmenu')) mm.hidden = true;
