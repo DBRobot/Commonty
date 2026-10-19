@@ -256,7 +256,8 @@ LOCKS = re.compile(
 CODE = re.compile(r"^(box|client|app)/.*\.(rs|go|js|py|sh)$")
 
 
-# VM tests (nix/tests/*.py): the waits that made tests fail now and then.
+# Tests under nix/tests (the VM tests' scripts, and the browser flows and
+# fakes in its folders): the waits that made tests fail now and then.
 # Only lines a pull request adds are held to it, so a test is moved over to
 # nix/tests/lib/waits.py when it is next touched (docs/dev/ci.md, "Writing
 # VM tests that don't flake").
@@ -270,11 +271,7 @@ def unit_name(u):
 
 
 def vm_test_waits(base, head):
-    paths = [
-        p
-        for p in changed(base, head, ".py")
-        if p.startswith("nix/tests/") and p.count("/") == 2
-    ]
+    paths = [p for p in changed(base, head, ".py") if p.startswith("nix/tests/")]
     for p in paths:
         diff = subprocess.run(
             ["git", "diff", "-U0", f"{base}...{head}", "--", p],
@@ -305,8 +302,16 @@ def vm_test_waits(base, head):
             if "time.sleep(" in code and not SLEEP_OK.search(ln):
                 faults.append(
                     f"vm test: {where}: time.sleep - wait for the thing itself "
-                    "(wait_until_succeeds, wait_unit_active, wait_socket); a sleep that must "
-                    "stay says why on its line: # sleep-ok: <reason>"
+                    "(wait_until_succeeds, wait_unit_active, wait_socket; in a browser flow, "
+                    "wait_for_selector or wait_for_function); a sleep that must stay says why "
+                    "on its line: # sleep-ok: <reason>"
+                )
+            # a browser flow's fixed pause (Playwright) is the same guess
+            if "wait_for_timeout(" in code and not SLEEP_OK.search(ln):
+                faults.append(
+                    f"vm test: {where}: wait_for_timeout - wait for what the page will show "
+                    "(wait_for_selector, wait_for_function, expect); one that must stay says "
+                    "why on its line: # sleep-ok: <reason>"
                 )
             if "journalctl" in code and "_SYSTEMD_INVOCATION_ID" not in code:
                 j = JOURNAL_UNIT.search(code)

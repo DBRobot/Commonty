@@ -239,7 +239,9 @@ fetch_has(box, url, s)          whether url's body holds s (curl to a file, then
 wait_fetch_has(box, url, s)     wait until it does
 ```
 
-What `lint` refuses on lines a pull request adds to `nix/tests/*.py`
+What `lint` refuses on lines a pull request adds to any `.py` under
+`nix/tests` (the VM scripts, and the browser flows and fakes in its
+folders)
 (`vm_test_waits` in [`lint.py`](../../.forgejo/checks/lint.py)); lines
 already there are moved over when their test is next touched:
 
@@ -248,10 +250,12 @@ already there are moved over when their test is next touched:
   page that held the word. Vault's `curl -sf .../use-app.js | grep -qF
   'commonty://open?'` failed with curl's exit code 23 on 2026-10-18 for
   exactly this. Use `fetch_has`, or write to a file and `grep -c` it.
-- **`time.sleep(`.** A sleep is either too short on a loaded runner or too
-  long everywhere else. Wait for the thing: `wait_until_succeeds`,
-  `wait_unit_active`, `wait_socket`. One that must stay says why on its own
-  line: `# sleep-ok: <reason>`.
+- **`time.sleep(`, and Playwright's `wait_for_timeout(`.** A fixed pause is
+  either too short on a loaded runner or too long everywhere else. Wait for
+  the thing: `wait_until_succeeds`, `wait_unit_active`, `wait_socket`; in a
+  browser flow `wait_for_selector`, `wait_for_function` or `expect`. One
+  that must stay (a polling loop's own beat, a device that ignores input
+  for a moment) says why on its own line: `# sleep-ok: <reason>`.
 - **`systemctl start X` then `journalctl -u X | grep ...`.** The unit's
   journal holds every run's lines. Store's read-back check (`journalctl -u
   dd-store-copy.service | grep -q 'read back is not what was sent'`, failed
