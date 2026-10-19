@@ -53,15 +53,8 @@ $ac make-log -db "$w/db.der" -loader "$w/loader.signed.efi" -stub "$w/image.sign
   tpm2_pcrextend "$pcr:sha256=$d"
 done
 
-# the join key, as disk-unlock-enrol makes it
+# the join key: attest-check run makes it under its approver (dd-boot-key enrol)
 mkdir -p "$w/keys"
-tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
-tpm2_startauthsession -Q -S "$w/s.ctx"
-tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"
-tpm2_flushcontext "$w/s.ctx"
-tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -L "$w/pcr.pol" \
-  -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda' -u "$w/keys/sig.pub" -r "$w/keys/sig.priv"
-tpm2_flushcontext -t
 
 mkdir -p "$w/roots/00001014"
 cp "$w/ca.pem" "$w/roots/00001014/"

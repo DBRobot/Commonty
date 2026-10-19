@@ -16,6 +16,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
@@ -42,6 +43,11 @@ type Begin struct {
 	// enrolled it in db, DER base64; empty where Secure Boot is not on,
 	// refused outside tests
 	DB string `json:"db,omitempty"`
+	// the join key's approver (TPM2B_PUBLIC as the TPM loads it) and the
+	// epoch counter (TPM2B_NV_PUBLIC), base64: the join key's policy is
+	// PolicyAuthorize by the approver (policy.go)
+	Approver string `json:"approver,omitempty"`
+	Epoch    string `json:"epoch,omitempty"`
 	// the lanzaboote image this boot ran (the ESP's EFI/Linux entry
 	// systemd-boot chose), base64: its Authenticode digest is in PCR 4
 	Stub string `json:"stub,omitempty"`
@@ -66,6 +72,12 @@ type Response struct {
 	QuoteSig   string            `json:"quoteSig"`
 	Certify    string            `json:"certify"` // TPMS_ATTEST of the join key
 	CertifySig string            `json:"certifySig"`
+	// the epoch now, certified by the AK over the nonce, and the
+	// approver's approval of this boot at it (ASN.1 ECDSA)
+	Epoch        uint64 `json:"epoch,omitempty"`
+	EpochCert    string `json:"epochCert,omitempty"` // TPMS_ATTEST of the counter
+	EpochCertSig string `json:"epochCertSig,omitempty"`
+	Approval     string `json:"approval,omitempty"`
 }
 
 // Config is the signed part, from the release: each TPM maker's roots by
@@ -137,17 +149,19 @@ func (c *Config) policy() (*policy, error) {
 // Checked is what VerifyBegin found: enough to make a challenge and to
 // judge the answer.
 type Checked struct {
-	EKHash string // sha256 of the EK's public key (SPKI DER), hex: one box per TPM
-	Vendor string // TCG vendor id, hex
-	Model  string
-	EKPub  crypto.PublicKey
-	AKName []byte // nameAlg || H(TPMT_PUBLIC)
-	DBHash string // sha256 of the box's db certificate, hex: one box per key
-	ak     *tpm2.TPMTPublic
-	join   *tpm2.TPMTPublic
-	log    []event
-	db     []byte
-	stub   []byte
+	EKHash    string // sha256 of the EK's public key (SPKI DER), hex: one box per TPM
+	Vendor    string // TCG vendor id, hex
+	Model     string
+	EKPub     crypto.PublicKey
+	AKName    []byte // nameAlg || H(TPMT_PUBLIC)
+	DBHash    string // sha256 of the box's db certificate, hex: one box per key
+	approver  *ecdsa.PublicKey
+	epochName []byte
+	ak        *tpm2.TPMTPublic
+	join      *tpm2.TPMTPublic
+	log       []event
+	db        []byte
+	stub      []byte
 }
 
 func b64(s string) ([]byte, error) { return base64.StdEncoding.DecodeString(s) }
@@ -226,6 +240,25 @@ func verifyBegin(pol *policy, b Begin, joinSPKI string, at time.Time) (*Checked,
 	if err := joinShape(join, joinSPKI); err != nil {
 		return nil, err
 	}
+	approverRaw, err := b64(b.Approver)
+	if err != nil || b.Approver == "" {
+		return nil, errors.New("no approver: the join key must be under one (PolicyAuthorize)")
+	}
+	approver, approverName, err := approverKey(approverRaw)
+	if err != nil {
+		return nil, fmt.Errorf("the approver: %v", err)
+	}
+	if !bytes.Equal(join.AuthPolicy.Buffer, PolicyAuthorize(approverName)) {
+		return nil, errors.New("the join key's policy is not its approver's PolicyAuthorize")
+	}
+	epochRaw, err := b64(b.Epoch)
+	if err != nil {
+		return nil, err
+	}
+	en, err := epochName(epochRaw)
+	if err != nil {
+		return nil, err
+	}
 	logRaw, err := b64(b.Log)
 	if err != nil {
 		return nil, fmt.Errorf("the event log: %v", err)
@@ -256,6 +289,7 @@ func verifyBegin(pol *policy, b Begin, joinSPKI string, at time.Time) (*Checked,
 	c := &Checked{
 		EKHash: hex.EncodeToString(h[:]), Vendor: vendor, Model: model, EKPub: ekPub,
 		AKName: akName.Buffer, ak: ak, join: join, log: log, db: db, stub: stub,
+		approver: approver, epochName: en,
 	}
 	if db != nil {
 		d := sha256.Sum256(db)
@@ -527,10 +561,26 @@ func verifyResponse(pol *policy, c *Checked, chals []Challenge, r Response) (*Re
 	if !bytes.Equal(ci.Name.Buffer, joinName.Buffer) {
 		return nil, errors.New("the AK certified another key than the join key")
 	}
-	// the join key was made under this same boot: its policy is PCR 7 as
-	// quoted, so it signs nothing under any other
-	if !bytes.Equal(c.join.AuthPolicy.Buffer, policyPCR7(pcrs[7])) {
-		return nil, errors.New("the join key's policy is not this boot's PCR 7")
+	// the join key opens only under a boot its approver approved at the
+	// counter's epoch: this one is, at the epoch the TPM certifies now
+	ec, err := attested(c.ak, r.EpochCert, r.EpochCertSig, nonce, tpm2.TPMSTAttestNV)
+	if err != nil {
+		return nil, fmt.Errorf("the epoch: %v", err)
+	}
+	nv, err := ec.Attested.NV()
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(nv.IndexName.Buffer, c.epochName) || nv.Offset != 0 ||
+		!bytes.Equal(nv.NVContents.Buffer, binary.BigEndian.AppendUint64(nil, r.Epoch)) {
+		return nil, errors.New("the certified epoch is not the counter's, or not the one given")
+	}
+	approval, err := b64(r.Approval)
+	if err != nil {
+		return nil, err
+	}
+	if !ecdsa.VerifyASN1(c.approver, ApprovalDigest(Approved(pcrs[4], pcrs[7], c.epochName, r.Epoch)), approval) {
+		return nil, errors.New("this boot is not approved at the epoch: the join key would not open under it")
 	}
 
 	sb, err := secureBoot(c.log, c.db)
@@ -636,17 +686,4 @@ func trimZeros(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 	return b
-}
-
-// policyPCR7: TPM2_PolicyPCR's digest for PCR 7 (SHA-256 bank) at v, from
-// an empty policy - what tpm2_policypcr -l sha256:7 gives
-func policyPCR7(v [32]byte) []byte {
-	sel := []byte{0, 0, 0, 1, 0x00, 0x0B, 3, 0x80, 0, 0} // TPML_PCR_SELECTION
-	pd := sha256.Sum256(v[:])
-	h := sha256.New()
-	h.Write(make([]byte, 32))
-	h.Write([]byte{0, 0, 0x01, 0x7F}) // TPM_CC_PolicyPCR
-	h.Write(sel)
-	h.Write(pd[:])
-	return h.Sum(nil)
 }

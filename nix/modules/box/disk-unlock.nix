@@ -25,6 +25,7 @@ let
   home = config.dd.home;
   tools = [
     pkgs.tpm2-tools
+    (import ../../lib/tpm-policy.nix pkgs)
     pkgs.curl
     pkgs.jq
     pkgs.openssl

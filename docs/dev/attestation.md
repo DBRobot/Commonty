@@ -57,8 +57,10 @@ proof is worth, and what it is not.
     PCR 7 events other than variables, separators and no-action ones are
     refused. The Authenticode digest leaves out the
     signature, so it is the same whichever box's key signed the image.
-  - The join key's policy must be PCR 7 as quoted. The record keeps all
-    four PCRs.
+  - The join key's policy must be PolicyAuthorize by the box's approver
+    (below), and this boot must be one the approver approved at the epoch
+    the TPM certifies now (TPM2_NV_Certify by the AK over the nonce). The
+    record keeps all four PCRs.
 - **One box per Secure Boot key.** The box's db certificate must be its
   own: Microsoft's (any it made or signed) and Canonical's shim key are
   refused, and the agreed state keeps the hash of each box's, so no two
@@ -71,14 +73,10 @@ proof is worth, and what it is not.
   init the command line names, and the initrd, are the box's own build,
   not checked against the release's; the kernel and kernel parameters are.
 - Anything after the boot it was made in. The quote is one moment; the
-  join key's PCR 7 policy is what keeps it to that boot afterwards - and
-  on firmware that logs no authority events, PCR 7 is the same for any
-  boot application db lets run, Microsoft-signed ones included. A box
-  enrolled with Microsoft's keys beside its own can, after attesting,
-  start a Microsoft-signed loader that reaches the join key. dbx is what
-  stands against the known-bad ones; it is not judged (a box whose keys
-  were cleared may have none, and the PCR 4 rule already refuses them at
-  the attested boot).
+  join key's policy is what keeps it to approved boots afterwards (below),
+  and an approved boot whose system was taken over can approve others.
+  dbx is not judged (a box whose keys were cleared may have none; PCR 4
+  refuses what it would at the attested boot).
 - Against an attacker with the chip on a bench (a probe on the TPM's bus,
   a fault on the CPU running a firmware TPM). A maker's key leaking, or a
   TPM whose EK certificate was issued wrong, passes.
@@ -126,11 +124,87 @@ key fixed to its TPM that this AK certified at any time lives there.
 | box side | `servers/system/control/tpm` (`Box.Begin`, `Box.Respond`); `dd-control -attest-begin` prints Begin |
 | voter side | `tpm.MakeChallenge`; dd-control's loop (`cmd/dd-control/attest.go`) challenges every box attesting, and answers for its own box |
 | roots | `fleet/tpm-roots/<vendor id>/*.pem` -> config `attest.roots` |
-| tests | `state/attest` unit tests on a swtpm exchange and node1's real Intel chain; `nix/tests/attest.nix` (swtpm, OVMF's real event log); `dd` `tpm_roots` tests |
+| join key across updates | `state/attest/policy.go`; `tpm/bootkey.go`; `cmd/boot-key` (`dd-boot-key`); `nix/modules/box/tpm-policy.sh` (`dd-tpm-policy`); `nix/modules/box/boot-key.nix` |
+| tests | `state/attest` unit tests on a swtpm exchange, node1's real Intel chain and the policies as swtpm computed them; `nix/tests/attest.nix` (swtpm, OVMF's real event log); `nix/tests/boot-key.nix` (an update across a boot-image change, a rollback, a boot never approved); `dd` `tpm_roots` tests |
 
 A box's AK files are in `/var/lib/dd-control/attest`; the AK is loaded
 under the EK again for each answer. The join key is the one
-`dd-unlock-enrol` makes (`/boot/dd/unlock/sig.pub`).
+`dd-boot-key enrol` makes (`/boot/dd/unlock/sig.pub`).
+
+## The join key across updates
+
+Decided 2026-10-19 (David): the join key is bound to PCR 4 as well as
+PCR 7, so a boot of any other loader the firmware's db lets run - a
+Microsoft-signed one, on a box enrolled with Microsoft's keys beside its
+own - gets no key, even where the firmware logs no authority events. PCR 4
+changes with every release's boot image, so the binding goes through an
+approver:
+
+- **The policy.** The join key (and what joined boxes seal beside it) has
+  the policy TPM2_PolicyAuthorize(approver A, "commonty boot v1"). A
+  session satisfies it only with an approval: A's signature over
+  PolicyPCR(4, 7 as this boot measured) then PolicyNV(the box's epoch
+  counter, 0x01500DD0, equal to the epoch the approval names).
+  `dd-tpm-policy` makes that session for every user of the key (the
+  initrd's disk unlock, dd-control, the gate's, mail's and ACME's
+  signatures); a key made before (node1, node2) keeps PCR 7 alone until
+  it is enrolled again.
+- **The approver.** A P-256 key made at enrolment; its public half beside
+  the join key, its private half sealed in the TPM under the same
+  PolicyAuthorize. So only a boot already approved can open it to approve
+  another; a boot never approved has neither the join key nor A.
+- **An update.** After a switch, lzbt has put the new generation's image
+  on the ESP; the activation step (`dd-boot-key approve-esp`) predicts
+  each of the newest three generations' PCR 4 - this boot's log, with
+  systemd-boot's and the image's Authenticode digests in place of the ones
+  that ran - and approves them at the current epoch, from the boot that is
+  running. The running boot stays approved: there is no moment when
+  neither the old nor the new boot opens the key.
+- **Settling.** At each start, `dd-boot-settle`: if this boot came up
+  approved and is new, it joins the good boots (the last three, newest
+  first); each is approved for the next epoch (and again with this boot's
+  systemd-boot, which lzbt may have replaced); then the counter is raised,
+  which retires every approval of the epoch before, and their files go.
+  So a rollback to any of the last three good boots opens the key, and an
+  approval for anything older - an old release, a file someone copied off
+  the boot partition - no longer does.
+- **The counter** is a TPM NV counter: it only goes up, and one defined
+  again (the owner can delete it) starts at the highest value any counter
+  in the TPM reached, so the epoch cannot be set back to revive an old
+  approval. Deleting it only stops the key opening.
+- **The judge.** A re-attestation after a switch quotes the new PCRs and
+  judges them as at the first (PCR 4 against the release's boot images);
+  it also checks the approval of this boot at the certified epoch.
+
+**What this cannot stop: an approved boot taken over.** Root on a boot
+that is approved can unseal A and sign approvals for any PCR values at any
+epoch, so the key would open under a boot of its choosing from then on -
+until the box enrols again. Every self-approving scheme has this (BitLocker
+and systemd-pcrlock alike): the TPM cannot know what a release is. The
+variant here is the narrowest we found:
+
+- A is sealed under its own approvals, never on disk in the clear, and
+  opens only in an approved boot: a box booted any other way (another
+  loader, a USB system, a Microsoft-signed shim) cannot approve itself.
+- Not TPM2_PolicyAuthorizeNV: the NV index holding the approved policy
+  would be the owner's to delete and define again with a password of the
+  attacker's own (the owner's authorization is empty on our boxes, and an
+  index's name leaves its password out), from any boot. A signature by A
+  has no such way round.
+- The epoch retires every approval A made honestly, but not ones a
+  taken-over boot made for epochs to come.
+- `dd-boot-key` approves only what it predicts from this boot's own log
+  and the images on the ESP, and the judge refuses a re-attestation whose
+  PCR 4 is not the release's.
+
+### For `joining-1017`
+
+Its first own-keys boot (`dd-unlock-seal`) makes the join key with
+`dd-boot-key enrol` instead of a PCR 7 policy, and seals its disk half
+under the same policy (`tpm2_create -L /boot/dd/unlock/join.policy`,
+which `dd-boot-key enrol` writes), opened
+with `dd-tpm-policy`; `nix/modules/box/boot-key.nix` is in the joined box's
+modules.
 
 ## Each maker's chain
 
@@ -209,7 +283,7 @@ with keys of the box's own, as node1 and node2 have:
    the platform key ends setup mode: from the next start Secure Boot runs
    only what the box's key signed.
 3. The first boot is under the box's own db key, and the join key is made
-   then, under its PCR 7 (`dd-unlock-seal`). Attestation checks that PCR 7
+   then, under its approver (`dd-boot-key enrol`, see below). Attestation checks that PCR 7
    (Secure Boot on, a PK, the box's `db.pem` in db) and PCR 4 (the
    release's systemd-boot and stub). Nothing to confirm at that boot.
 

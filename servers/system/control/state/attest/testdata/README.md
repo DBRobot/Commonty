@@ -7,7 +7,9 @@
   systemd-boot (systemd 260.2) and an image of the release's lanzaboote
   stub (1.2.0) with lzbt's sections added by objcopy for node1's kernel
   (6.18.45), both signed with sbsign by the run's own RSA db key; its db
-  holds that key and it logs no authority event. Its secrets are the
+  holds that key and it logs no authority event. Its join key is under an
+  approver (`dd-boot-key enrol`), and its answer carries the approval of
+  its boot and the epoch certified. Its secrets are the
   run's own, random, and open nothing.
 - `node1-ek-rsa.der`, `node1-ek-ecc.der`, `node1-ek-chain.bin`: node1's TPM
   (Intel PTT, Tiger Lake), read with `tpm2_nvread` from NV 0x01C00002,
@@ -31,3 +33,8 @@
 - `ms-uefi-ca-2011.der`, `canonical-master-ca.der`: from the laptop's
   firmware event log (its db, and shim's MokListRT): shared Secure Boot
   certificates a box may not claim as its own.
+- `policy-vector.json`: the join key's policy pieces - an approver's name
+  and PolicyAuthorize, the epoch counter's name, PolicyPCR over PCRs 4 and
+  7 and an approved policy - as swtpm computed them, made by
+  `make-policy-vector.sh` (swtpm 0.10.1, tpm2-tools 5.8). Its keys and PCR
+  values are random, the run's own.

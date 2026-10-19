@@ -148,6 +148,7 @@ in
         pkgs.jq
         pkgs.curl
         pkgs.tpm2-tools
+        (import ../../lib/tpm-policy.nix pkgs)
         pkgs.coreutils
       ];
       environment = {
@@ -184,6 +185,7 @@ in
         pkgs.jq
         pkgs.curl
         pkgs.tpm2-tools
+        (import ../../lib/tpm-policy.nix pkgs)
         pkgs.coreutils
       ];
       environment = {

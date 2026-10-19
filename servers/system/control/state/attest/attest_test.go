@@ -275,20 +275,6 @@ func TestCutLogsAreRefused(t *testing.T) {
 	}
 }
 
-func TestThePolicyIsWhatTPM2PolicyPCRGives(t *testing.T) {
-	v := load(t)
-	join, err := public(v.Begin.Join)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := base64.StdEncoding.DecodeString(v.Begin.Log)
-	log, _ := parseLog(raw)
-	pcrs, _ := replay(log)
-	if hex.EncodeToString(policyPCR7(pcrs[7])) != hex.EncodeToString(join.AuthPolicy.Buffer) {
-		t.Fatal("policy differs from tpm2_policypcr's")
-	}
-}
-
 // node1's TPM (Intel PTT, Tiger Lake), read from its NV: the RSA and ECC
 // EK certificates and the chain index 0x01C00100 (three certificates),
 // with the two above it from Intel's AIA links (testdata/README.md)

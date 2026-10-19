@@ -70,6 +70,7 @@ in
       wants = [ "network-online.target" ];
       path = [
         pkgs.tpm2-tools
+        (import ../../lib/tpm-policy.nix pkgs)
       ]
       # where the network's control server runs: where each box that joined
       # on its own key is on the network, into the agreed state

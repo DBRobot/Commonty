@@ -70,6 +70,7 @@ in
             pkgs.curl
             pkgs.openssl
             pkgs.tpm2-tools
+            (import ../../lib/tpm-policy.nix pkgs)
           ];
           environment.TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
           script = (import ../../lib/script.nix { inherit lib; }) ./acme-ask.sh {
