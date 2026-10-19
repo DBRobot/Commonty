@@ -5,6 +5,13 @@ start_all()
 for m in (a, b):
     m.wait_for_unit("dd-store-setup.service")
     m.wait_for_unit("nginx.service")
+    # every copy is one the test starts: a timer's run (a's recent copy every
+    # 30 s, b's photos back to a) undid the drop, plan and full mark below
+    m.wait_for_unit("timers.target")
+    m.succeed(
+        "systemctl stop dd-store-copy.timer dd-store-copy-recent.timer "
+        "dd-store-copy.service dd-store-copy-recent.service"
+    )
 
 # each made its own secret, and they differ
 sa = a.succeed("cat /var/lib/dd-store/rpc-secret").strip()
@@ -36,6 +43,22 @@ def copied(bucket, name, body):
             return
         time.sleep(3)
     raise AssertionError(f"{bucket}/{name} never reached b")
+
+
+def copy_run():
+    # a fresh run, as no timer's run is going; its invocation id
+    a.succeed("systemctl start dd-store-copy.service")
+    return a.succeed(
+        "systemctl show -p InvocationID --value dd-store-copy.service"
+    ).strip()
+
+
+def logged(run, text):
+    # that run's lines, once journald has them all
+    a.wait_until_succeeds(
+        f"journalctl -o cat _SYSTEMD_INVOCATION_ID={run} | grep -cF '{text}'",
+        timeout=30,
+    )
 
 
 def get(m, bucket, name):
@@ -101,14 +124,12 @@ b.succeed(
     "systemctl stop dd-store-facts.timer dd-store-facts.service; touch /run/dd-store/full"
 )
 put(a, "photos", "p3", "no room for it there")
-a.succeed("systemctl start dd-store-copy.service")
+run = copy_run()
 b.fail(
     "set -a; . /var/lib/dd-store/keys/photos.env; AWS_DEFAULT_REGION=us-east-1 "
     f"{s3} s3 ls s3://photos/p3"
 )
-a.succeed(
-    "journalctl -u dd-store-copy.service | grep -q 'b: photos not copied this time'"
-)
+logged(run, "b: photos not copied this time")
 assert get(b, "photos", "p2") == "the plan keeps it here"
 # room again: it goes
 b.succeed("rm /run/dd-store/full")
@@ -119,13 +140,7 @@ b.succeed(
     "set -a; . /var/lib/dd-store/keys/photos.env; export AWS_DEFAULT_REGION=us-east-1; "
     f"for o in p1 p2 p3; do {s3} s3 rm s3://photos/$o; done"
 )
-# a start while the timer's run is under way only waits for that run, which
-# began before the drop: start again until a run has read it back
-a.wait_until_succeeds(
-    "systemctl start dd-store-copy.service && "
-    "journalctl -u dd-store-copy.service | grep -c 'read back is not what was sent'",
-    timeout=180,
-)
+logged(copy_run(), "read back is not what was sent")
 a.succeed(
     """grep -q 'dd_store_lost{bucket="photos",box="b"} 1' /var/lib/dd-facts/store-copy.prom"""
 )
