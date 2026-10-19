@@ -1,8 +1,8 @@
 {
   "payload": {
-    "counter": 294,
-    "rev": "99d134fdb785311bd688dfa47b095a77f052f09d",
-    "issued": 1792370346,
+    "counter": 295,
+    "rev": "60fd45881fde32fb2205dc0c13082d3d464ed47c",
+    "issued": 1792370827,
     "boxes": {
       "home-controller": {
         "path": "/nix/store/3j2qhyxa0pb2996cr26cdv0hmkirybdk-nixos-system-home-controller-26.05.20260822.a9e6d84",
@@ -23,16 +23,16 @@
     "attestations": [
       {
         "attester": "node1",
-        "statement": "{\"attester\":\"node1\",\"boxes\":{\"home-controller\":{\"closure\":\"bcf7d75a46c6205e4090ea4d9ef0125e9279f716183de2a1e09f821e73bab71c\",\"path\":\"/nix/store/3j2qhyxa0pb2996cr26cdv0hmkirybdk-nixos-system-home-controller-26.05.20260822.a9e6d84\"},\"node1\":{\"closure\":\"09385081a3554e6f75b9111c3d708793e505047aa8e35b720f08b19a8c44266f\",\"path\":\"/nix/store/wvkrpfss67srry44ryz2qvwpxrjyb3d6-nixos-system-node1-26.05.20260822.a9e6d84\"},\"node2\":{\"closure\":\"6952797301745ebc0c0b3fc58dddff1f6a4ca55f8d7b63630fe0388f1c3c248f\",\"path\":\"/nix/store/a2ykc8x0hjycv95wb69qykfif85r7xdj-nixos-system-node2-26.05.20260822.a9e6d84\"}},\"flake\":\"git+https://git.commonty.org/david/commonty\",\"rev\":\"99d134fdb785311bd688dfa47b095a77f052f09d\",\"v\":1}",
-        "signature": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAghZ1NjITj4u1XvFqeQ46FbdPokd\nO1UiIkzD+PFYBEQI0AAAASY29tbW9udHktYXR0ZXN0LXYxAAAAAAAAAAZzaGE1MTIAAABT\nAAAAC3NzaC1lZDI1NTE5AAAAQHN6iroV+sqmtEK7TEYCJBDn8gl0YO+24++uUO1/uTP7M+\nLuUnXAEAhFKu3oiWDRGlEtj/aWye0mqrCUVUnykwo=\n-----END SSH SIGNATURE-----\n"
+        "statement": "{\"attester\":\"node1\",\"boxes\":{\"home-controller\":{\"closure\":\"bcf7d75a46c6205e4090ea4d9ef0125e9279f716183de2a1e09f821e73bab71c\",\"path\":\"/nix/store/3j2qhyxa0pb2996cr26cdv0hmkirybdk-nixos-system-home-controller-26.05.20260822.a9e6d84\"},\"node1\":{\"closure\":\"09385081a3554e6f75b9111c3d708793e505047aa8e35b720f08b19a8c44266f\",\"path\":\"/nix/store/wvkrpfss67srry44ryz2qvwpxrjyb3d6-nixos-system-node1-26.05.20260822.a9e6d84\"},\"node2\":{\"closure\":\"6952797301745ebc0c0b3fc58dddff1f6a4ca55f8d7b63630fe0388f1c3c248f\",\"path\":\"/nix/store/a2ykc8x0hjycv95wb69qykfif85r7xdj-nixos-system-node2-26.05.20260822.a9e6d84\"}},\"flake\":\"git+https://git.commonty.org/david/commonty\",\"rev\":\"60fd45881fde32fb2205dc0c13082d3d464ed47c\",\"v\":1}",
+        "signature": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAghZ1NjITj4u1XvFqeQ46FbdPokd\nO1UiIkzD+PFYBEQI0AAAASY29tbW9udHktYXR0ZXN0LXYxAAAAAAAAAAZzaGE1MTIAAABT\nAAAAC3NzaC1lZDI1NTE5AAAAQExWAUQsEsE+IuTNcKdCkTe6EcqWFGoTgoXQGPdep5WZ9g\n3JugXuLSxbNHGjj39b3gpSVIcW7ZTfx4pyUDWkVgY=\n-----END SSH SIGNATURE-----\n"
       },
       {
         "attester": "node2",
-        "statement": "{\"attester\":\"node2\",\"boxes\":{\"home-controller\":{\"closure\":\"bcf7d75a46c6205e4090ea4d9ef0125e9279f716183de2a1e09f821e73bab71c\",\"path\":\"/nix/store/3j2qhyxa0pb2996cr26cdv0hmkirybdk-nixos-system-home-controller-26.05.20260822.a9e6d84\"},\"node1\":{\"closure\":\"09385081a3554e6f75b9111c3d708793e505047aa8e35b720f08b19a8c44266f\",\"path\":\"/nix/store/wvkrpfss67srry44ryz2qvwpxrjyb3d6-nixos-system-node1-26.05.20260822.a9e6d84\"},\"node2\":{\"closure\":\"6952797301745ebc0c0b3fc58dddff1f6a4ca55f8d7b63630fe0388f1c3c248f\",\"path\":\"/nix/store/a2ykc8x0hjycv95wb69qykfif85r7xdj-nixos-system-node2-26.05.20260822.a9e6d84\"}},\"flake\":\"git+https://git.commonty.org/david/commonty\",\"rev\":\"99d134fdb785311bd688dfa47b095a77f052f09d\",\"v\":1}",
-        "signature": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgt8QgWsEv4yokZHSEy/UEoIKDHF\nEnMiYcWmSC/fvHVDMAAAASY29tbW9udHktYXR0ZXN0LXYxAAAAAAAAAAZzaGE1MTIAAABT\nAAAAC3NzaC1lZDI1NTE5AAAAQBpdqGRo9AESoFfVB850u8XVfm9WqRInKKUVNqq/MWc6gi\nwSobmAxysRS9g7XA4FO/iS5j4YNn12IIcg+dyFgwQ=\n-----END SSH SIGNATURE-----\n"
+        "statement": "{\"attester\":\"node2\",\"boxes\":{\"home-controller\":{\"closure\":\"bcf7d75a46c6205e4090ea4d9ef0125e9279f716183de2a1e09f821e73bab71c\",\"path\":\"/nix/store/3j2qhyxa0pb2996cr26cdv0hmkirybdk-nixos-system-home-controller-26.05.20260822.a9e6d84\"},\"node1\":{\"closure\":\"09385081a3554e6f75b9111c3d708793e505047aa8e35b720f08b19a8c44266f\",\"path\":\"/nix/store/wvkrpfss67srry44ryz2qvwpxrjyb3d6-nixos-system-node1-26.05.20260822.a9e6d84\"},\"node2\":{\"closure\":\"6952797301745ebc0c0b3fc58dddff1f6a4ca55f8d7b63630fe0388f1c3c248f\",\"path\":\"/nix/store/a2ykc8x0hjycv95wb69qykfif85r7xdj-nixos-system-node2-26.05.20260822.a9e6d84\"}},\"flake\":\"git+https://git.commonty.org/david/commonty\",\"rev\":\"60fd45881fde32fb2205dc0c13082d3d464ed47c\",\"v\":1}",
+        "signature": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgt8QgWsEv4yokZHSEy/UEoIKDHF\nEnMiYcWmSC/fvHVDMAAAASY29tbW9udHktYXR0ZXN0LXYxAAAAAAAAAAZzaGE1MTIAAABT\nAAAAC3NzaC1lZDI1NTE5AAAAQB/TSZkkY+lpdaUhPpnHEO6d3CYEcJvSnJAMsbxNvqeQwZ\n6MaWWKdJOI2Kw1ORiqIP8Z5TAajPPbDIqFRVZuhgE=\n-----END SSH SIGNATURE-----\n"
       }
     ]
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "cwD6QVglNLBailYQAtX+aDH7g6/FBrefEYY/uggyRE9pcS8ZooU4UtVdgfeJnbbGBaxS6+2JNdO8DlhidYi+AA=="
+  "signature": "AdsIBKbB7kMrZj/vgivZ2L3yxHWPN7mI8lNjvmTnJG/6UoXOcrHB3fBZJpqOLosYlu8qW9LnI0+cfKvrHF/+Dw=="
 }
