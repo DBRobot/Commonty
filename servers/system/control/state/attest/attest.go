@@ -136,6 +136,7 @@ type Checked struct {
 	Model  string
 	EKPub  crypto.PublicKey
 	AKName []byte // nameAlg || H(TPMT_PUBLIC)
+	DBHash string // sha256 of the box's db certificate, hex: one box per key
 	ak     *tpm2.TPMTPublic
 	join   *tpm2.TPMTPublic
 	log    []event
@@ -231,14 +232,23 @@ func verifyBegin(pol *policy, b Begin, joinSPKI string, at time.Time) (*Checked,
 		if db, err = b64(b.DB); err != nil {
 			return nil, fmt.Errorf("the db certificate: %v", err)
 		}
-		if _, err := x509.ParseCertificate(db); err != nil {
+		c, err := x509.ParseCertificate(db)
+		if err != nil {
 			return nil, fmt.Errorf("the db certificate: %v", err)
 		}
+		if sharedDB(c) {
+			return nil, fmt.Errorf("%w: the db certificate is a shared one, not the box's own", ErrSecureBoot)
+		}
 	}
-	return &Checked{
+	c := &Checked{
 		EKHash: hex.EncodeToString(h[:]), Vendor: vendor, Model: model, EKPub: ekPub,
 		AKName: akName.Buffer, ak: ak, join: join, log: log, db: db,
-	}, nil
+	}
+	if db != nil {
+		d := sha256.Sum256(db)
+		c.DBHash = hex.EncodeToString(d[:])
+	}
+	return c, nil
 }
 
 func parseChain(chain []string) ([]*x509.Certificate, error) {
@@ -424,7 +434,8 @@ type Record struct {
 	Model      string            `json:"model,omitempty"`
 	PCRs       map[string]string `json:"pcrs"` // "0" -> hex, from the quote
 	SecureBoot bool              `json:"secureBoot"`
-	At         int64             `json:"at"` // agreed ms
+	DB         string            `json:"db,omitempty"` // Checked.DBHash
+	At         int64             `json:"at"`           // agreed ms
 }
 
 // VerifyResponse judges the box's answer to the challenges.
@@ -513,7 +524,7 @@ func verifyResponse(pol *policy, c *Checked, chals []Challenge, r Response) (*Re
 	if err != nil && !pol.test.NoSecureBoot {
 		return nil, err
 	}
-	rec := &Record{EK: c.EKHash, Vendor: c.Vendor, Model: c.Model, PCRs: map[string]string{}, SecureBoot: sb}
+	rec := &Record{EK: c.EKHash, DB: c.DBHash, Vendor: c.Vendor, Model: c.Model, PCRs: map[string]string{}, SecureBoot: sb}
 	for _, i := range PCRs {
 		v := pcrs[i]
 		rec.PCRs[fmt.Sprint(i)] = hex.EncodeToString(v[:])

@@ -28,12 +28,14 @@ type State struct {
 	Pending map[string]*Pending `json:"pending,omitempty"`
 	Done    map[string]*Record  `json:"done,omitempty"`
 	EKs     map[string]string   `json:"eks,omitempty"` // EK hash -> the box it is
+	DBs     map[string]string   `json:"dbs,omitempty"` // db certificate hash -> the box whose it is
 }
 
 type Pending struct {
 	Begin  Begin  `json:"begin"`
 	Key    string `json:"key"` // the box's join key, SPKI base64: what signs its response
 	EK     string `json:"ek"`
+	DB     string `json:"db,omitempty"`
 	Opened int64  `json:"opened"` // agreed ms
 	// at most one per box voter, in voter order
 	Challenges []Challenge `json:"challenges,omitempty"`
@@ -51,7 +53,7 @@ const (
 )
 
 func New() *State {
-	return &State{Pending: map[string]*Pending{}, Done: map[string]*Record{}, EKs: map[string]string{}}
+	return &State{Pending: map[string]*Pending{}, Done: map[string]*Record{}, EKs: map[string]string{}, DBs: map[string]string{}}
 }
 
 func (s *State) init() {
@@ -63,6 +65,9 @@ func (s *State) init() {
 	}
 	if s.EKs == nil {
 		s.EKs = map[string]string{}
+	}
+	if s.DBs == nil {
+		s.DBs = map[string]string{}
 	}
 }
 
@@ -80,9 +85,18 @@ func (s *State) CheckOpen(cfg *Config, box, key string, b Begin, now int64) (*Ch
 	if other, ok := s.EKs[c.EKHash]; ok && other != box {
 		return nil, fmt.Errorf("this TPM is already %s", other)
 	}
+	if other, ok := s.DBs[c.DBHash]; ok && c.DBHash != "" && other != box {
+		return nil, fmt.Errorf("this Secure Boot certificate is already %s's", other)
+	}
 	for other, p := range s.Pending {
-		if other != box && p.EK == c.EKHash && now-p.Opened < TTL {
+		if other == box || now-p.Opened >= TTL {
+			continue
+		}
+		if p.EK == c.EKHash {
 			return nil, fmt.Errorf("this TPM is already enlisting as %s", other)
+		}
+		if c.DBHash != "" && p.DB == c.DBHash {
+			return nil, fmt.Errorf("this Secure Boot certificate is already enlisting as %s", other)
 		}
 	}
 	return c, nil
@@ -96,7 +110,7 @@ func (s *State) Open(cfg *Config, box, key string, b Begin, now int64) {
 	if err != nil {
 		return
 	}
-	s.Pending[box] = &Pending{Begin: b, Key: key, EK: c.EKHash, Opened: now}
+	s.Pending[box] = &Pending{Begin: b, Key: key, EK: c.EKHash, DB: c.DBHash, Opened: now}
 }
 
 func (s *State) live(box string, now int64) (*Pending, error) {
@@ -181,11 +195,16 @@ func (s *State) ApplyResponse(cfg *Config, voters []string, box string, r Respon
 	if err != nil {
 		return
 	}
+	s.init() // a state from before DBs
 	if old := s.Done[box]; old != nil {
 		delete(s.EKs, old.EK)
+		delete(s.DBs, old.DB)
 	}
 	s.Done[box] = rec
 	s.EKs[rec.EK] = box
+	if rec.DB != "" {
+		s.DBs[rec.DB] = box
+	}
 	delete(s.Pending, box)
 }
 
@@ -202,6 +221,7 @@ func (s *State) Expire(now int64) {
 func (s *State) Forget(box string) {
 	if rec := s.Done[box]; rec != nil {
 		delete(s.EKs, rec.EK)
+		delete(s.DBs, rec.DB)
 	}
 	delete(s.Done, box)
 	delete(s.Pending, box)

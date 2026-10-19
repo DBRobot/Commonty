@@ -15,3 +15,15 @@
   https://tsci.intel.com/content/OnDieCA/certs/OnDie_CA_CSME_Intermediate.cer
 - `intel-ondie-root.der`: Intel's On Die CA root, the same as
   `fleet/tpm-roots/494E5443/intel-ondie-ca-root.pem`.
+- `laptop-ek.pub`, `laptop-ek-rsa.der`: David's laptop (Lenovo Legion Pro 5
+  16ADR10, AMD fTPM). The EK's TPM2B_PUBLIC from `tpm2_createek -G rsa` on
+  2026-10-19, and its certificate from AMD's service at the link made from
+  it, https://ftpm.amd.com/pki/aia/63b28c74805e8a4ed6d8cea39729f030
+  (`tpm.AMDEKCertURL`). Public.
+- `amd-prg-rpl-ica.der`: from that certificate's AIA link,
+  http://ftpm.amd.com/pki/aia/9DE34E7EF9C15FA479A9F398BC865D60
+- `amd-root.der`: AMD's root, the same as
+  `fleet/tpm-roots/414D4400/amdtpm-root.pem`.
+- `ms-uefi-ca-2011.der`, `canonical-master-ca.der`: from the laptop's
+  firmware event log (its db, and shim's MokListRT): shared Secure Boot
+  certificates a box may not claim as its own.

@@ -27,9 +27,9 @@ publish` refuses a file here that is not a CA certificate in date.
 
 AMD's root (`CN=AMDTPM`, self-signed, 2014-2039) is where AMD's own EK
 service keeps it, the address tpm2-tools' `tpm2_getekcertificate` uses for
-AMD fTPMs; fetched again on 2026-10-19 with the same fingerprint. Its second
-source is an AMD fTPM's real chain verifying to it
-(`state/attest/testdata`).
+AMD fTPMs; fetched again on 2026-10-19 with the same fingerprint. Second
+source: David's laptop's AMD fTPM chain (EK -> `PRG-RPL` -> it) verifies to
+it, by openssl and by the judge (`servers/system/control/state/attest/testdata`).
 
 The two STM "root" files are STM's own CAs under GlobalSign's TPM root,
 kept as anchors so a chain that stops at them still counts. GlobalSign's

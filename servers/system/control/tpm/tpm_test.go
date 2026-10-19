@@ -63,3 +63,15 @@ func TestTheMakerIsReadFromGetcap(t *testing.T) {
 		t.Fatal("a maker from nothing")
 	}
 }
+
+// David's laptop's EK, and where AMD served its certificate on 2026-10-19
+func TestTheAMDLinkIsMadeFromTheEK(t *testing.T) {
+	raw, err := os.ReadFile("../state/attest/testdata/laptop-ek.pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	url, err := AMDEKCertURL(raw)
+	if err != nil || url != "https://ftpm.amd.com/pki/aia/63b28c74805e8a4ed6d8cea39729f030" {
+		t.Fatalf("%s %v", url, err)
+	}
+}
