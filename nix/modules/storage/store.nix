@@ -136,7 +136,9 @@ let
       failed=0
       # the plan's copies: kept, so a restart copies on as last agreed
       if [ -s ${plan} ] && jq -e 'type == "object"' ${plan} >/dev/null 2>&1; then
-        cp ${plan} $mine/copies.json.new && mv $mine/copies.json.new $mine/copies.json
+        # a name of this mode's own: the other mode's run, side by side, moved a
+        # shared one away first and this one's mv failed the unit
+        cp ${plan} $mine/copies.json.$MODE && mv $mine/copies.json.$MODE $mine/copies.json
       fi
       # the other boxes that keep a bucket
       targets() {
@@ -177,9 +179,9 @@ let
       # its key there, sealed to this box at its store
       key() {
         [ -s $mine/$1.env ] && return 0
-        if curl -fsS --max-time 30 "$2/_keys/${box}.age" -o $mine/$1.age \
-          && age -d -i ${cfg.identity} $mine/$1.age > $mine/$1.env.new; then
-          mv $mine/$1.env.new $mine/$1.env
+        if curl -fsS --max-time 30 "$2/_keys/${box}.age" -o $mine/$1.age.$MODE \
+          && age -d -i ${cfg.identity} $mine/$1.age.$MODE > $mine/$1.env.$MODE; then
+          mv $mine/$1.env.$MODE $mine/$1.env
         else
           echo "$1: no key from its store yet"
           return 1

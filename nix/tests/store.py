@@ -115,6 +115,9 @@ b.fail(
     f"{s3} s3 ls s3://photos/p2"
 )
 a.succeed("""echo '{"photos":["a","b"]}' > /run/dd-placed/copies.json""")
+# the full and the recent copy side by side, as their timers run them: both
+# read the plan into the same state directory
+a.succeed("systemctl start dd-store-copy.service dd-store-copy-recent.service")
 copied("photos", "p2", "the plan keeps it here")
 
 # b nearly full: what a sends is refused, what b keeps still read
