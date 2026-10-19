@@ -55,11 +55,19 @@ signed order ([`client/cli/src/build_order.rs`](../../client/cli/src/build_order
 - **A box that never answers** is passed over and the order made again,
   once, after four hours. A box that answers that it could not build stops
   the release, with its reason.
+- **An order already out is not made again.** If the build order on the
+  releases branch was signed by this release key for exactly these
+  downloads, of this tag at this commit, the laptop reads the answers the
+  boxes already gave it. It makes no new order, so the boxes don't build it
+  again. This happens when an app release stopped part way, for example
+  because the laptop that was waiting on it restarted.
 
 - **It follows releases on its own.** `app-next` builds nothing to decide:
   it evaluates the four builds at a fixed version, at the last tag and at
   `main`, and a new app is tagged only when they differ. A release that
-  changed nothing the app is made of makes no app. Its log is
+  changed nothing the app is made of makes no app. But if the last tag was
+  never signed (`app.json` on the releases branch offers an older one),
+  `app-next` finishes that tag instead of saying nothing changed. Its log is
   `~/.cache/dd/app-release.log` on the machine that published.
 - **It never holds the boxes up, and is never a pull request's wait.** The
   builds take the better part of an hour the first time; CI never runs

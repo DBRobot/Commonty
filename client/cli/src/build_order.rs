@@ -183,6 +183,47 @@ pub fn order_payload(id: &str, flake: &str, rev: &str, jobs: &[Job]) -> serde_js
     })
 }
 
+/// The order already out (its signed payload) when it asks for exactly
+/// these downloads of this tag at this commit: its id and jobs, to be
+/// waited on again. An app release that stopped part way - the laptop
+/// restarted, a box did not answer in time - finds the answers the boxes
+/// gave it instead of making a new order they must build for again.
+pub fn resumable(
+    payload: &serde_json::Value,
+    tag: &str,
+    rev: &str,
+    want: &BTreeMap<String, String>,
+) -> Option<(String, Vec<Job>)> {
+    let id = payload["id"].as_str()?;
+    if !id.starts_with(&format!("{tag}-")) || payload["rev"].as_str()? != rev {
+        return None;
+    }
+    let mut jobs = Vec::new();
+    for j in payload["jobs"].as_array()? {
+        let builders: Vec<String> = j["builders"]
+            .as_array()?
+            .iter()
+            .map(|b| b.as_str().map(str::to_string))
+            .collect::<Option<_>>()?;
+        if builders.is_empty() {
+            return None;
+        }
+        jobs.push(Job {
+            name: j["name"].as_str()?.to_string(),
+            attr: j["attr"].as_str()?.to_string(),
+            version: j["version"].as_str().map(str::to_string),
+            part: j["part"].as_str().map(str::to_string),
+            path: j["path"].as_str()?.to_string(),
+            builders,
+        });
+    }
+    let asked: BTreeMap<String, String> = jobs
+        .iter()
+        .map(|j| (j.name.clone(), j.path.clone()))
+        .collect();
+    (asked == *want && asked.len() == jobs.len()).then(|| (id.to_string(), jobs))
+}
+
 /// What a box said about one job, once its signature checks out
 #[derive(Clone, Debug, PartialEq)]
 pub enum Said {
@@ -291,6 +332,58 @@ pub fn standing(jobs: &[Job], said: &BTreeMap<(String, String), Said>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn order(id: &str, rev: &str, jobs: &[(&str, &str)]) -> serde_json::Value {
+        serde_json::json!({
+            "id": id, "rev": rev, "flake": "git+https://x",
+            "jobs": jobs.iter().map(|(n, p)| serde_json::json!({
+                "name": n, "attr": "legacyPackages.x86_64-linux.appRelease",
+                "version": "0.1.49", "part": n, "path": p, "builders": ["node1", "node2"],
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    #[test]
+    fn the_order_already_out_is_waited_on_again_when_it_is_for_these_downloads() {
+        let want: BTreeMap<String, String> =
+            [("linux", "/nix/store/a"), ("windows", "/nix/store/b")]
+                .into_iter()
+                .map(|(a, b)| (a.into(), b.into()))
+                .collect();
+        let same = order(
+            "v0.1.49-1-100",
+            "r1",
+            &[("linux", "/nix/store/a"), ("windows", "/nix/store/b")],
+        );
+        let (id, jobs) = resumable(&same, "v0.1.49", "r1", &want).unwrap();
+        assert_eq!(id, "v0.1.49-1-100");
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[0].builders, vec!["node1", "node2"]);
+        // another tag, another commit, other paths, a download missing or
+        // one more: a new order
+        assert!(resumable(&same, "v0.1.48", "r1", &want).is_none());
+        assert!(resumable(&same, "v0.1.49", "r2", &want).is_none());
+        let other = order(
+            "v0.1.49-1-100",
+            "r1",
+            &[("linux", "/nix/store/c"), ("windows", "/nix/store/b")],
+        );
+        assert!(resumable(&other, "v0.1.49", "r1", &want).is_none());
+        let short = order("v0.1.49-1-100", "r1", &[("linux", "/nix/store/a")]);
+        assert!(resumable(&short, "v0.1.49", "r1", &want).is_none());
+        let more = order(
+            "v0.1.49-1-100",
+            "r1",
+            &[
+                ("linux", "/nix/store/a"),
+                ("windows", "/nix/store/b"),
+                ("android", "/nix/store/d"),
+            ],
+        );
+        assert!(resumable(&more, "v0.1.49", "r1", &want).is_none());
+        // a v0.1.4 order is not a v0.1.49 one: the id's dash sets them apart
+        assert!(resumable(&order("v0.1.4-1-100", "r1", &[]), "v0.1.49", "r1", &want).is_none());
+    }
 
     fn cand(name: &str, owner: &str, site: &str, region: &str) -> Candidate {
         Candidate {

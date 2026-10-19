@@ -991,6 +991,27 @@ fn forge_upload(api: &str, token: &str, release: u64, file: &Path, name: &str) -
     Ok(())
 }
 
+/// what app-next does with the newest tag
+#[derive(Debug, PartialEq)]
+enum NextStep {
+    /// it is what the downloads page offers, and nothing changed since
+    Nothing,
+    /// nothing changed since it, but it was never signed: finish it
+    Resume,
+    /// the app changed: a new tag
+    New,
+}
+
+fn next_step(changed: bool, offered: Option<&str>, prev: &str) -> NextStep {
+    if changed {
+        NextStep::New
+    } else if offered == Some(prev) {
+        NextStep::Nothing
+    } else {
+        NextStep::Resume
+    }
+}
+
 fn app_next(repo: &str, keys: &auth::Store, r#ref: &str) -> Result<()> {
     let root = repo_root(repo)?;
     let stamp = || {
@@ -1010,12 +1031,35 @@ fn app_next(repo: &str, keys: &auth::Store, r#ref: &str) -> Result<()> {
     // the same version on both sides, so only what the app is made of can
     // differ; a tag from before the flake built the app always differs
     let now = app_paths(&root, &rev, "0.0.0")?;
-    if app_paths(&root, &prev_rev, "0.0.0").ok().as_ref() == Some(&now) {
-        println!(
-            "[{}] the app: nothing it is made of changed since {prev}",
-            stamp()
-        );
-        return Ok(());
+    let changed = app_paths(&root, &prev_rev, "0.0.0").ok().as_ref() != Some(&now);
+    // what the downloads page offers: the tag in app.json on the releases
+    // branch. A tag pushed and never signed - the laptop that was waiting
+    // on its builders went away - is still to finish, not nothing to do
+    let offered = git(&root, &["show", "refs/remotes/forge/releases:app.json"])
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|d| d["payload"]["tag"].as_str().map(str::to_string));
+    match next_step(changed, offered.as_deref(), &prev) {
+        NextStep::Nothing => {
+            println!(
+                "[{}] the app: nothing it is made of changed since {prev}",
+                stamp()
+            );
+            return Ok(());
+        }
+        NextStep::Resume => {
+            println!(
+                "[{}] the app: {prev} was tagged and never signed; finishing it",
+                stamp()
+            );
+            app(repo, keys, &prev, false)?;
+            println!(
+                "[{}] the app: {prev} is what the downloads page offers",
+                stamp()
+            );
+            return Ok(());
+        }
+        NextStep::New => {}
     }
     let tag = next_tag(&prev).with_context(|| format!("{prev} is not vX.Y.Z"))?;
     println!(
@@ -1991,6 +2035,82 @@ struct Built {
     by: BTreeMap<String, (Vec<String>, u8)>,
 }
 
+/// The builders' answers to order `id`, read from the log from `since`:
+/// what they agreed on, or None when someone stayed silent past
+/// BUILD_WAIT_SECS (and is then in `exclude`, passed over next time)
+#[allow(clippy::too_many_arguments)]
+fn wait_built(
+    boxes: &serde_json::Value,
+    read: &dyn Fn(u64) -> Result<(Vec<serde_json::Value>, u64)>,
+    id: &str,
+    flake: &str,
+    rev: &str,
+    jobs: &[build_order::Job],
+    mut since: u64,
+    exclude: &mut Vec<String>,
+) -> Result<Option<BTreeMap<String, (String, String)>>> {
+    let verify = |attester: &str, statement: &str, signature: &str| -> Result<()> {
+        let hk = boxes[attester]["hostKey"]
+            .as_str()
+            .with_context(|| format!("no hostKey for {attester}"))?;
+        host_signed(attester, hk, statement, signature)
+    };
+    let mut said = BTreeMap::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(BUILD_WAIT_SECS);
+    loop {
+        let (items, next) = read(since)?;
+        since = next;
+        for item in &items {
+            match build_order::read_item(item, id, flake, rev, jobs, &verify) {
+                Ok(Some((job, from, s))) => {
+                    eprintln!("   {job}: {from} answered");
+                    said.insert((job, from), s);
+                }
+                Ok(None) => {}
+                Err(e) => eprintln!("   a result refused: {e:#}"),
+            }
+        }
+        match build_order::standing(jobs, &said)? {
+            build_order::Standing::Agreed(agreed) => return Ok(Some(agreed)),
+            build_order::Standing::Waiting(w) if std::time::Instant::now() >= deadline => {
+                // whoever has not answered is passed over next time
+                for line in &w {
+                    if let Some((_, b)) = line.rsplit_once(" on ")
+                        && !exclude.iter().any(|x| x == b)
+                    {
+                        exclude.push(b.to_string());
+                    }
+                }
+                eprintln!("   no answer in time from: {}", w.join(", "));
+                return Ok(None);
+            }
+            build_order::Standing::Waiting(_) => {
+                std::thread::sleep(std::time::Duration::from_secs(120))
+            }
+        }
+    }
+}
+
+/// The order on the releases branch, signed by this release key, when it
+/// is the one for exactly these downloads of this tag at this commit
+fn standing_order(
+    root: &Path,
+    file: &str,
+    key: &ed25519_dalek::SigningKey,
+    tag: &str,
+    rev: &str,
+    want: &BTreeMap<String, String>,
+) -> Option<(String, Vec<build_order::Job>)> {
+    let _ = git(root, &["fetch", "-q", "forge", "releases"]);
+    let raw = git(
+        root,
+        &["show", &format!("refs/remotes/forge/releases:{file}")],
+    )
+    .ok()?;
+    let payload = release::verify_doc(&raw, "build-order", &key.verifying_key()).ok()?;
+    build_order::resumable(&payload, tag, rev, want)
+}
+
 /// how long builders have to answer before the order goes to others
 const BUILD_WAIT_SECS: u64 = 4 * 3600;
 
@@ -2031,6 +2151,33 @@ fn order_builds(
             "curl -sf http://127.0.0.1:4195/state",
         )?)?;
         let fleet = build_order::candidates(boxes, owners, &state);
+        // the order already out for these very downloads, waited on again
+        let resumed = if round == 1 {
+            standing_order(root, file, key, tag, rev, want)
+        } else {
+            None
+        };
+        if let Some((id, jobs)) = resumed {
+            let by = jobs
+                .iter()
+                .map(|j| {
+                    let c = |n: &str| fleet.iter().find(|c| c.name == n);
+                    let apart = match (j.builders.first(), j.builders.get(1)) {
+                        (Some(a), Some(b)) => c(a)
+                            .zip(c(b))
+                            .map(|(a, b)| build_order::separation(a, b))
+                            .unwrap_or(0),
+                        _ => 0,
+                    };
+                    (j.name.clone(), (j.builders.clone(), apart))
+                })
+                .collect();
+            eprintln!("== build order {id}: already out; reading what the builders said");
+            match wait_built(boxes, &read, &id, flake, rev, &jobs, 0, &mut exclude)? {
+                Some(agreed) => return Ok(Built { agreed, by }),
+                None => continue,
+            }
+        }
         let mut jobs = Vec::new();
         let mut by = BTreeMap::new();
         for (name, path) in want {
@@ -2050,7 +2197,7 @@ fn order_builds(
         }
         let id = format!("{tag}-{round}-{}", release::now());
         // the log from here on: an answer to this order cannot come before it
-        let (_, mut since) = read(0)?;
+        let (_, since) = read(0)?;
         let order = release::sign_doc(
             "build-order",
             build_order::order_payload(&id, flake, rev, &jobs),
@@ -2062,45 +2209,9 @@ fn order_builds(
             &format!("build order {id}"),
         )?;
         eprintln!("== build order {id}: waiting for the builders");
-        let verify = |attester: &str, statement: &str, signature: &str| -> Result<()> {
-            let hk = boxes[attester]["hostKey"]
-                .as_str()
-                .with_context(|| format!("no hostKey for {attester}"))?;
-            host_signed(attester, hk, statement, signature)
-        };
-        let mut said = BTreeMap::new();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(BUILD_WAIT_SECS);
-        loop {
-            let (items, next) = read(since)?;
-            since = next;
-            for item in &items {
-                match build_order::read_item(item, &id, flake, rev, &jobs, &verify) {
-                    Ok(Some((job, from, s))) => {
-                        eprintln!("   {job}: {from} answered");
-                        said.insert((job, from), s);
-                    }
-                    Ok(None) => {}
-                    Err(e) => eprintln!("   a result refused: {e:#}"),
-                }
-            }
-            match build_order::standing(&jobs, &said)? {
-                build_order::Standing::Agreed(agreed) => return Ok(Built { agreed, by }),
-                build_order::Standing::Waiting(w) if std::time::Instant::now() >= deadline => {
-                    // whoever has not answered is passed over next time
-                    for line in &w {
-                        if let Some((_, b)) = line.rsplit_once(" on ")
-                            && !exclude.iter().any(|x| x == b)
-                        {
-                            exclude.push(b.to_string());
-                        }
-                    }
-                    eprintln!("   no answer in time from: {}", w.join(", "));
-                    break;
-                }
-                build_order::Standing::Waiting(_) => {
-                    std::thread::sleep(std::time::Duration::from_secs(120))
-                }
-            }
+        if let Some(agreed) = wait_built(boxes, &read, &id, flake, rev, &jobs, since, &mut exclude)?
+        {
+            return Ok(Built { agreed, by });
         }
     }
     bail!(
@@ -2499,6 +2610,24 @@ mod tests {
         assert_eq!(new, 2);
     }
     use release::ATTEST_NAMESPACE;
+
+    #[test]
+    fn a_tag_never_signed_is_finished_not_skipped() {
+        // the app unchanged and the tag offered: nothing to do
+        assert_eq!(
+            next_step(false, Some("v0.1.49"), "v0.1.49"),
+            NextStep::Nothing
+        );
+        // the app unchanged, the tag pushed but never signed: finish it
+        assert_eq!(
+            next_step(false, Some("v0.1.43"), "v0.1.49"),
+            NextStep::Resume
+        );
+        assert_eq!(next_step(false, None, "v0.1.49"), NextStep::Resume);
+        // the app changed: a new tag, whatever is offered
+        assert_eq!(next_step(true, Some("v0.1.49"), "v0.1.49"), NextStep::New);
+        assert_eq!(next_step(true, Some("v0.1.43"), "v0.1.49"), NextStep::New);
+    }
 
     #[test]
     fn a_member_list_is_published_named_and_with_its_floor() {
