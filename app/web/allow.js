@@ -1,10 +1,9 @@
-// A browser asking to open Photos, Passwords or the site's pages that hold
-// a key (src/local.rs): it shows a code made from what only that browser
-// holds; the member lets it in here when the codes match. Two browsers
-// asking at once are both refused.
+// A browser asking to be linked to this device's app (src/local.rs), once,
+// for every page the app serves it: it shows a code made from what only
+// that browser holds; the member links it here when the codes match. Two
+// browsers asking at once are both refused.
 const secret = () => ({ 'x-dd-app': document.querySelector('meta[name="dd-app"]')?.content || '' });
 const $ = (id) => document.getElementById(id);
-const names = { photos: 'Photos', vault: 'Passwords', site: 'your files and settings' };
 let shown = null;
 let done = false;
 
@@ -23,13 +22,13 @@ function show(service, s) {
   $('asking').hidden = s.state !== 'asking';
   if (s.state === 'asking') {
     shown = { service, code: s.code };
-    $('title').textContent = `Allow this browser to open ${names[service]}?`;
+    $('title').textContent = 'Link this browser?';
     $('code').textContent = spaced(s.code);
     $('msg').textContent = '';
   } else if (s.state === 'crowded') {
     shown = null;
     $('title').textContent = 'Not opened';
-    $('msg').textContent = `Two browsers asked to open ${names[service]} at once, so neither was let in. Open it again from the page in your browser.`;
+    $('msg').textContent = 'Two browsers asked at once, so neither was linked. Open the page again in your browser.';
   }
 }
 
@@ -40,7 +39,7 @@ async function poll() {
     const s = await r.json();
     const service = ['photos', 'vault', 'site'].find((k) => s[k] && s[k].state !== 'idle');
     if (!service) {
-      if (!shown && !done) $('msg').textContent = 'Nothing is asking now. Open it again from its page in your browser.';
+      if (!shown && !done) $('msg').textContent = 'Nothing is asking now. Open the page again in your browser.';
       return;
     }
     if (s[service].state === 'waiting' && shown?.allowed) return;
@@ -56,8 +55,8 @@ $('allow').onclick = async () => {
     await answer(shown.code);
     shown.allowed = true;
     $('asking').hidden = true;
-    $('title').textContent = 'Allowed';
-    $('msg').textContent = `Go back to your browser: ${names[shown.service]} opens there.`;
+    $('title').textContent = 'Linked';
+    $('msg').textContent = 'Go back to your browser: it opens there.';
   } catch (e) {
     $('msg').textContent = String(e.message || e);
   } finally {
@@ -72,8 +71,8 @@ $('refuse').onclick = async () => {
   shown = null;
   done = true;
   $('asking').hidden = true;
-  $('title').textContent = 'Not opened';
-  $('msg').textContent = 'That browser was not let in.';
+  $('title').textContent = 'Not linked';
+  $('msg').textContent = 'That browser was not linked.';
 };
 
 poll().catch((e) => { $('msg').textContent = String(e.message || e); });

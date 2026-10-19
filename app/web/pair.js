@@ -37,23 +37,23 @@ async function known() {
 
 async function go() {
   if (await known()) return;
-  $('title').textContent = 'Allow this browser';
+  $('title').textContent = 'Link this browser';
   say('Getting a code…');
   const verifier = hex(crypto.getRandomValues(new Uint8Array(32)));
   const hash = hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   const r = await post('/_dd/app/pair/ask', { hash });
   if (!r.ok) {
     const { why } = await r.json().catch(() => ({}));
-    $('title').textContent = 'Not opened';
+    $('title').textContent = 'Not linked';
     say(why === 'two browsers asked at once'
-      ? 'Two browsers asked at once, so neither was let in. Go back to the page and open it again.'
-      : 'Go back to the page you came from and open it from there.');
+      ? 'Two browsers asked at once, so neither was linked. Open the page again.'
+      : 'Open the page again from the site.');
     return;
   }
   const { code } = await r.json();
   $('code').textContent = `${code.slice(0, 3)} ${code.slice(3)}`;
   $('code').hidden = false;
-  say('In the Commonty app, check it shows this code and choose "Allow this browser".');
+  say('The Commonty app shows the same code. Choose "Link this browser" there.');
   for (;;) {
     await new Promise((ok) => setTimeout(ok, 1500));
     const f = await post('/_dd/app/pair/finish', { verifier });
@@ -65,8 +65,8 @@ async function go() {
       return;
     }
     $('code').hidden = true;
-    $('title').textContent = 'Not opened';
-    say('This browser was not let in. Go back to the page and open it again.');
+    $('title').textContent = 'Not linked';
+    say('This browser was not linked. Open the page again.');
     return;
   }
 }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Open it with the Commonty app</title>
+  <title>Commonty</title>
   <link rel="stylesheet" href="/_dd/static/home.css">
   <link rel="stylesheet" href="/_dd/static/bar.css">
   <script type="module" src="/_dd/static/use-app.js"></script>
@@ -24,15 +24,14 @@
     </div>
   </header>
   <main id="main" class="auth">
-    <section class="add-device" id="use-app">
-      <h1><span id="what">This</span> opens through the Commonty app</h1>
-      <p class="lead">It holds your keys, so its code comes with the app you installed, never from a server. The app opens <span id="what-2">it</span> here in this browser, once you allow this browser in the app.</p>
-      <p><button id="open" type="button">Open it</button></p>
-      <p class="small" id="no-app">No Commonty app on this computer? <a id="download" href="/_dd/download">Get the app</a>: once it's installed and signed in, it opens <span id="what-3">it</span> from here.</p>
-      <div id="not-open" hidden>
-        <p class="lead">Nothing opened. The Commonty app isn't installed on this computer, or isn't signed in.</p>
-        <p><a class="button" id="download-2" href="/_dd/download">Get the Commonty app</a> <button class="quiet" id="retry" type="button">Try again</button></p>
-      </div>
+    <section class="add-device" id="use-app" hidden>
+      <h1 id="what">Commonty</h1>
+      <p><button id="open" type="button">Open with the Commonty app</button></p>
+      <p class="small"><a id="download" href="/_dd/download">Get the app</a></p>
+    </section>
+    <section class="add-device" id="not-open" hidden>
+      <h1>The Commonty app didn't answer</h1>
+      <p><a class="button" id="download-2" href="/_dd/download">Get the app</a> <button class="quiet" id="retry" type="button">Try again</button></p>
     </section>
     <section class="add-device" id="signed-in" hidden>
       <h1>Signed in</h1>

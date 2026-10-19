@@ -1831,6 +1831,8 @@ async fn mail_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response 
             use_app()
         }
         Some(_) => Redirect::to("/_dd/home").into_response(),
+        // the app signs in for itself: a page it serves needs no sign-in here
+        None if app_answers(&headers) => use_app(),
         None => Redirect::to("/_dd/login?rd=/_dd/mail").into_response(),
     }
 }
@@ -1855,8 +1857,72 @@ fn library_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Respons
             use_app()
         }
         Some(_) => Redirect::to("/_dd/home").into_response(),
+        None if app_answers(headers) => use_app(),
         None => Redirect::to(&format!("/_dd/login?rd={at}")).into_response(),
     }
+}
+
+/// The cookie that says the member's app answers in this browser (use-app.js
+/// reads it): set on the whole domain when the app sends the browser through
+/// here, so every page the app serves goes straight to it. It holds nothing
+/// secret and lets nothing in; the app still knows each browser itself.
+const APP_HERE: &str = "dd_app";
+
+/// The member's app sends a browser through here on its way to its own
+/// pairing page (app/src/local.rs, `entry`): the page notes that the app
+/// answers in this browser, and the browser goes on, only ever to the app's
+/// pairing page on this computer.
+async fn app_here(
+    State(app): State<Arc<App>>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let Some(to) = q.get("to").filter(|t| app_pairing_page(t)) else {
+        return (StatusCode::BAD_REQUEST, "not the app's page").into_response();
+    };
+    (
+        StatusCode::SEE_OTHER,
+        [
+            (
+                "set-cookie",
+                format!(
+                    "{APP_HERE}=1; Domain={}; Path=/; Max-Age=34560000; Secure; SameSite=Lax",
+                    app.domain
+                ),
+            ),
+            ("location", to.clone()),
+            ("cache-control", "no-store".to_string()),
+        ],
+    )
+        .into_response()
+}
+
+/// the app's pairing page, exactly: its install's name on this computer,
+/// the site's port, and which service (app/src/handoff.rs, browser_url)
+fn app_pairing_page(to: &str) -> bool {
+    let Some(rest) = to.strip_prefix("http://s-") else {
+        return false;
+    };
+    let (label, rest) = rest.split_at(rest.len().min(32));
+    label.len() == 32
+        && label
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        && matches!(
+            rest,
+            ".localhost:41660/_dd/app/pair?service=photos"
+                | ".localhost:41660/_dd/app/pair?service=vault"
+                | ".localhost:41660/_dd/app/pair?service=site"
+        )
+}
+
+/// whether the member's app has answered in this browser before (APP_HERE)
+fn app_answers(headers: &HeaderMap) -> bool {
+    headers
+        .get_all("cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .any(|c| c.trim() == format!("{APP_HERE}=1"))
 }
 
 /// The page that hands a browser to the member's app (use-app.js): for a
@@ -2014,6 +2080,7 @@ async fn chat_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response 
         Some(user) if app.role(&user) == Some(pages::Role::Demo) => page("chat"),
         Some(user) if app.role(&user) == Some(pages::Role::Member) => use_app(),
         Some(_) => Redirect::to("/_dd/home").into_response(),
+        None if app_answers(&headers) => use_app(),
         None => Redirect::to("/_dd/login?rd=/").into_response(),
     }
 }
@@ -3193,6 +3260,7 @@ pub async fn start(
         )
         // anyone's: Photos' and Passwords' sites say to open them in the app
         .route("/_dd/use-app", get(|| async { use_app() }))
+        .route("/_dd/app-here", get(app_here))
         .route("/_dd/chat/search", get(chat_search))
         .route("/_dd/adblock", get(adblock::page))
         .route("/_dd/adblock/state", get(adblock::state))
@@ -3305,6 +3373,43 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn the_app_here_stop_goes_on_only_to_the_apps_pairing_page() {
+        let l = "0123456789abcdef0123456789abcdef";
+        for s in ["photos", "vault", "site"] {
+            let to = format!("http://s-{l}.localhost:41660/_dd/app/pair?service={s}");
+            assert!(app_pairing_page(&to), "{to}");
+        }
+        for to in [
+            "https://evil.example/".to_string(),
+            format!("http://s-{l}.localhost:41660/_dd/app/pair?service=photos&x=1"),
+            format!("http://s-{l}.localhost:41660/_dd/app/pair?service=mail"),
+            format!("http://s-{l}.localhost:41661/_dd/app/pair?service=photos"),
+            format!("http://s-{l}.localhost.evil.example:41660/_dd/app/pair?service=site"),
+            format!("http://p-{l}.localhost:41660/_dd/app/pair?service=site"),
+            "http://s-0123456789ABCDEF0123456789ABCDEF.localhost:41660/_dd/app/pair?service=site"
+                .to_string(),
+            "http://s-0123.localhost:41660/_dd/app/pair?service=site".to_string(),
+            "http://s-".to_string(),
+            String::new(),
+        ] {
+            assert!(!app_pairing_page(&to), "{to}");
+        }
+    }
+
+    #[test]
+    fn the_apps_note_is_read_by_exact_name_and_value() {
+        let h = |c: &str| {
+            let mut m = HeaderMap::new();
+            m.insert("cookie", c.parse().unwrap());
+            m
+        };
+        assert!(app_answers(&h("a=b; dd_app=1")));
+        assert!(!app_answers(&h("dd_app=0")));
+        assert!(!app_answers(&h("xdd_app=1")));
+        assert!(!app_answers(&HeaderMap::new()));
+    }
 
     const PHONE: &str = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36";
 
