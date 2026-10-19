@@ -11,6 +11,18 @@
 name: test:
 let
   script = ../tests/${name}.py;
+  # `helpers = true;` gives the script nix/tests/lib's modules, as a package
+  # of the driver's own python (so its type check knows them too): `from waits
+  # import start_fresh` (docs/dev/ci.md). Only for a test that asks, so the
+  # others' drivers, and so their builds, stay as they are
+  helpers =
+    p:
+    p.toPythonModule (
+      pkgs.runCommand "dd-test-helpers" { } ''
+        mkdir -p $out/${p.python.sitePackages}
+        cp ${../tests/lib}/*.py $out/${p.python.sitePackages}/
+      ''
+    );
   body = builtins.readFile script;
   withEnv = env: "nix = ${builtins.toJSON env}\n" + body;
   testScript =
@@ -24,8 +36,14 @@ let
       withEnv test.scriptEnv;
 in
 pkgs.testers.runNixOSTest (
-  (builtins.removeAttrs test [ "scriptEnv" ])
+  (builtins.removeAttrs test [
+    "scriptEnv"
+    "helpers"
+  ])
   // lib.optionalAttrs (builtins.pathExists script) { inherit testScript; }
+  // lib.optionalAttrs (test.helpers or false) {
+    extraPythonPackages = p: [ (helpers p) ] ++ (test.extraPythonPackages or (_: [ ])) p;
+  }
   // {
     # every box gets the script helper the real boxes get (flake.nix); the
     # test's other node settings stay

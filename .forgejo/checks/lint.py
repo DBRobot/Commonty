@@ -256,6 +256,88 @@ LOCKS = re.compile(
 CODE = re.compile(r"^(box|client|app)/.*\.(rs|go|js|py|sh)$")
 
 
+# VM tests (nix/tests/*.py): the waits that made tests fail now and then.
+# Only lines a pull request adds are held to it, so a test is moved over to
+# nix/tests/lib/waits.py when it is next touched (docs/dev/ci.md, "Writing
+# VM tests that don't flake").
+SLEEP_OK = re.compile(r"#\s*sleep-ok:\s*\S+(\s+\S+){2,}")
+START = re.compile(r"systemctl\s+(?:re)?start\s+(?:--\S+\s+)*([\w@.:-]+)")
+JOURNAL_UNIT = re.compile(r"journalctl\b[^\n]*?-u\s*([\w@.:-]+)")
+
+
+def unit_name(u):
+    return u if "." in u else u + ".service"
+
+
+def vm_test_waits(base, head):
+    paths = [
+        p
+        for p in changed(base, head, ".py")
+        if p.startswith("nix/tests/") and p.count("/") == 2
+    ]
+    for p in paths:
+        diff = subprocess.run(
+            ["git", "diff", "-U0", f"{base}...{head}", "--", p],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        added = set()
+        for line in diff.splitlines():
+            m = re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", line)
+            if m:
+                first, count = int(m.group(1)), int(m.group(2) or 1)
+                added.update(range(first, first + count))
+        text = open(p, encoding="utf-8").read().splitlines()
+        for n in sorted(added):
+            if n > len(text):
+                continue
+            ln = text[n - 1]
+            # a comment line says what not to do as often as it does it
+            code = "" if ln.lstrip().startswith("#") else ln
+            where = f"{p}:{n}"
+            if re.search(r"\|\s*grep\s+(-\w*q|--quiet)", code):
+                faults.append(
+                    f"vm test: {where}: `| grep -q` - grep leaves at the first match and the "
+                    "writer dies of SIGPIPE (curl: exit 23); write to a file and grep -c it, "
+                    "or fetch_has / journal_has from nix/tests/lib/waits.py"
+                )
+            if "time.sleep(" in code and not SLEEP_OK.search(ln):
+                faults.append(
+                    f"vm test: {where}: time.sleep - wait for the thing itself "
+                    "(wait_until_succeeds, wait_unit_active, wait_socket); a sleep that must "
+                    "stay says why on its line: # sleep-ok: <reason>"
+                )
+            if "journalctl" in code and "_SYSTEMD_INVOCATION_ID" not in code:
+                j = JOURNAL_UNIT.search(code)
+                # the ten lines before, and this one up to the journal
+                before = "\n".join(
+                    text[max(0, n - 11) : n - 1] + [code[: code.index("journalctl")]]
+                )
+                started = {unit_name(u) for u in START.findall(before)}
+                if j and unit_name(j.group(1)) in started:
+                    faults.append(
+                        f"vm test: {where}: the journal of {j.group(1)} read after starting it "
+                        "holds every run's lines, an earlier run's too; start_fresh() and "
+                        "journal_of() read the one run"
+                    )
+                elif (
+                    "succeed(" in code
+                    and "grep" in code
+                    and START.search(
+                        "\n".join(
+                            text[max(0, n - 4) : n - 1]
+                            + [code[: code.index("journalctl")]]
+                        )
+                    )
+                ):
+                    faults.append(
+                        f"vm test: {where}: a journal grep held to succeed() right after a "
+                        "start - the lines may not be written yet, or be an earlier run's; "
+                        "start_fresh() + journal_has(), or wait_until_succeeds"
+                    )
+
+
 def kind_matches(files):
     m = re.match(r"^(?:WIP: )?(?:release: )?([a-z]+): ", os.environ.get("TITLE", ""))
     if not m or not files:
@@ -371,6 +453,7 @@ def main():
         ]
     )
     secrets(base, head)
+    vm_test_waits(base, head)
     pinned()
     advisories(base, head)
     stale_inputs()

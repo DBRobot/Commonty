@@ -69,6 +69,7 @@
         "unlock"
         "leaving"
         "home-controller"
+        "waits"
       ];
       rust =
         let

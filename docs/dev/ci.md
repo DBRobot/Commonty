@@ -217,6 +217,58 @@ Taking a check out needs the same care in reverse: say in the pull request
 what it was catching and why that is no longer needed, or what catches it
 now.
 
+## Writing VM tests that don't flake
+
+A VM test that fails one run in five blocks every pull request behind it,
+and is soon rerun until it passes, which hides the day it fails for a real
+reason. Most of ours that did so waited in one of four wrong ways. The
+right ways are in [`nix/tests/lib/waits.py`](../../nix/tests/lib/waits.py);
+a test gets them with `helpers = true;` in its `.nix` and `from waits import
+...` in its script (`nix/lib/vm-test.nix` hands the folder to the driver's
+python, its type check too).
+
+```
+start_fresh(box, unit)          run a oneshot once more and wait for that run to end;
+                                a run already under way is waited out, never joined.
+                                Returns the run's invocation id. Fails if the run fails.
+journal_of(box, unit, inv)      that run's journal lines, no other run's
+journal_has(box, unit, inv, s)  whether that run wrote s
+wait_unit_active(box, unit)     a long-running unit up
+wait_socket(box, port | path)   something listening on a port or a unix socket
+fetch_has(box, url, s)          whether url's body holds s (curl to a file, then grep -c)
+wait_fetch_has(box, url, s)     wait until it does
+```
+
+What `lint` refuses on lines a pull request adds to `nix/tests/*.py`
+(`vm_test_waits` in [`lint.py`](../../.forgejo/checks/lint.py)); lines
+already there are moved over when their test is next touched:
+
+- **`| grep -q`.** grep leaves at its first match, the command writing into
+  the pipe dies of SIGPIPE with the rest unwritten, and the pipe fails on a
+  page that held the word. Vault's `curl -sf .../use-app.js | grep -qF
+  'commonty://open?'` failed with curl's exit code 23 on 2026-10-18 for
+  exactly this. Use `fetch_has`, or write to a file and `grep -c` it.
+- **`time.sleep(`.** A sleep is either too short on a loaded runner or too
+  long everywhere else. Wait for the thing: `wait_until_succeeds`,
+  `wait_unit_active`, `wait_socket`. One that must stay says why on its own
+  line: `# sleep-ok: <reason>`.
+- **`systemctl start X` then `journalctl -u X | grep ...`.** The unit's
+  journal holds every run's lines. Store's read-back check (`journalctl -u
+  dd-store-copy.service | grep -q 'read back is not what was sent'`, failed
+  2026-10-19) read a run started by its timer, not the one the test
+  started, and its facts check raced a run a timer began while the test
+  was still setting up. Forge-follow's handover waited on a journal line a
+  previous run had written. `start_fresh` runs one of its own and
+  `journal_of` reads only it.
+- **A journal grep in `succeed()` just after a start.** The line may not be
+  written yet, or may be an earlier run's. `start_fresh` and `journal_has`,
+  or `wait_until_succeeds` if it truly comes later.
+
+`checks.waits` holds the helpers to it: a oneshot that a timer starts every
+three seconds, each `start_fresh` checked to be a run of its own with only
+its own lines; `fetch_has` on a 2 MB page with the word at its start, twenty
+times; a socket that comes up late.
+
 ## When a release does not land
 
 A box switches to a release and keeps it only if it comes up healthy. A
