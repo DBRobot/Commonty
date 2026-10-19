@@ -119,9 +119,12 @@ b.succeed(
     "set -a; . /var/lib/dd-store/keys/photos.env; export AWS_DEFAULT_REGION=us-east-1; "
     f"for o in p1 p2 p3; do {s3} s3 rm s3://photos/$o; done"
 )
-a.succeed("systemctl start dd-store-copy.service")
-a.succeed(
-    "journalctl -u dd-store-copy.service | grep -q 'read back is not what was sent'"
+# a start while the timer's run is under way only waits for that run, which
+# began before the drop: start again until a run has read it back
+a.wait_until_succeeds(
+    "systemctl start dd-store-copy.service && "
+    "journalctl -u dd-store-copy.service | grep -c 'read back is not what was sent'",
+    timeout=180,
 )
 a.succeed(
     """grep -q 'dd_store_lost{bucket="photos",box="b"} 1' /var/lib/dd-facts/store-copy.prom"""
