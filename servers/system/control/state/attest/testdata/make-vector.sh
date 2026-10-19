@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Makes swtpm-vector.json: one whole attestation by a software TPM, booted
 # (as its made-up event log says) under Secure Boot with a db certificate
-# of its own, for attest_test.go to judge again. Needs swtpm, tpm2-tools,
-# openssl and go on PATH. Run from this directory.
+# of its own, through systemd-boot and a lanzaboote image of the release's
+# stub, for attest_test.go to judge again. Needs swtpm, tpm2-tools,
+# openssl, sbsigntools, binutils and go on PATH, and LOADER (systemd-bootx64.efi),
+# STUB (lanzaboote_stub.efi) and KERNEL (a bzImage) set. Run from this
+# directory.
 set -euo pipefail
 here=$PWD
 w=$(mktemp -d)
@@ -23,11 +26,29 @@ $ac make-ek-cert -ek "$w/ek.pub" -ca-key "$w/ca.p8" -ca-cert "$w/ca.pem" -o "$w/
 tpm2_nvdefine -Q 0x1C00002 -C o -s "$(stat -c %s "$w/ek.der")" -a 'ownerread|ownerwrite|authread|authwrite'
 tpm2_nvwrite -Q 0x1C00002 -C o -i "$w/ek.der"
 
-# the boot: a db certificate, and the PCRs as the log says
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj /CN=test-box-db \
-  -days 3650 -keyout /dev/null -out "$w/db.pem" 2>/dev/null
+# the boot: a db key of the box's own, systemd-boot and the box's
+# lanzaboote image signed with it (sections added as lzbt adds them), and
+# the PCRs as the log says
+openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=test-box-db \
+  -days 3650 -keyout "$w/db.key" -out "$w/db.pem" 2>/dev/null
 openssl x509 -in "$w/db.pem" -outform der -out "$w/db.der"
-$ac make-log -db "$w/db.der" -o "$w/log.bin" | while IFS=: read -r pcr d; do
+printf 'ID=nixos\nVERSION_ID=Generation 1, 2026-10-19\n' >"$w/osrel"
+printf 'init=/nix/store/test-system/init' >"$w/cmdline"
+printf '\\EFI\\nixos\\initrd.efi' >"$w/initrd"
+printf '\\EFI\\nixos\\kernel.efi' >"$w/linux"
+head -c 32 /dev/zero >"$w/initrdh"
+openssl dgst -sha256 -binary "$KERNEL" >"$w/linuxh"
+off=$(objdump -h "$STUB" | awk '$1 ~ /^[0-9]+$/ { s = $3; v = $4 } END { printf "%d", strtonum("0x" v) + strtonum("0x" s) }')
+args=()
+for sec in osrel cmdline initrd linux initrdh linuxh; do
+  args+=(--add-section ".$sec=$w/$sec" --change-section-vma ".$sec=$(printf '0x%x' "$off")")
+  off=$((off + $(stat -c %s "$w/$sec")))
+done
+objcopy "${args[@]}" "$STUB" "$w/image.efi"
+sbsign --key "$w/db.key" --cert "$w/db.pem" --output "$w/image.signed.efi" "$w/image.efi"
+sbsign --key "$w/db.key" --cert "$w/db.pem" --output "$w/loader.signed.efi" "$LOADER"
+$ac boot -loader "$LOADER" -stub "$STUB" -kernel "$KERNEL" >"$w/boot.json"
+$ac make-log -db "$w/db.der" -loader "$w/loader.signed.efi" -stub "$w/image.signed.efi" -o "$w/log.bin" | while IFS=: read -r pcr d; do
   tpm2_pcrextend "$pcr:sha256=$d"
 done
 
@@ -44,4 +65,5 @@ tpm2_flushcontext -t
 mkdir -p "$w/roots/00001014"
 cp "$w/ca.pem" "$w/roots/00001014/"
 $ac run -roots "$w/roots" -keys "$w/keys" -dir "$w/ak" -log "$w/log.bin" -db "$w/db.der" \
+  -stub "$w/image.signed.efi" -boot "$w/boot.json" \
   -software -vector "$here/swtpm-vector.json"

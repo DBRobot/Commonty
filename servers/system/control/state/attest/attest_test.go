@@ -194,7 +194,7 @@ func TestASignatureByAnotherKeyIsRefused(t *testing.T) {
 func TestABootNotUnderTheBoxsOwnKeyIsRefused(t *testing.T) {
 	v := load(t)
 	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "someone else"}, NotBefore: time.Unix(0, 0), NotAfter: time.Unix(1<<40, 0)}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "someone else"}, NotBefore: time.Unix(0, 0), NotAfter: time.Unix(1<<31, 0)}
 	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &k.PublicKey, k)
 	v.Begin.DB = base64.StdEncoding.EncodeToString(der)
 	s := opened(t, v)
@@ -223,7 +223,7 @@ func TestALogThatDoesNotGiveTheQuotedPCRsIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	// its digest is unchanged, so the PCRs agree; a changed digest would not
-	off := len(raw) - len("the boot loader") - 4 - 32
+	off := len(raw) - len("a boot application") - 4 - 32
 	raw[off] ^= 1
 	v.Begin.Log = base64.StdEncoding.EncodeToString(raw)
 	s := opened(t, v)
