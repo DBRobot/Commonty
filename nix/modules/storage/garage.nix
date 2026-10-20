@@ -139,6 +139,13 @@ in
           # power can come back with a metadata db garage dies opening
           # (SIGBUS in mdb_page_search_root, pg-follow after b.crash())
           metadata_fsync = true;
+          # a request in flight to a box that dies waits this long: garage
+          # drops the box after five missed pings (about 75s) but not what it
+          # had already sent there, so with the 300s default a write taken
+          # just after a box went down hung five minutes (postgres's archive
+          # stalled in pg-follow, CI run 767). A request is one 1 MiB block
+          # or a table batch at most, which takes seconds even across houses
+          rpc_timeout_msec = 30000;
           # a daily copy of the metadata db, in ${meta}/snapshots; the backup
           # module ships it, so a cluster whose metadata is gone is rebuilt
           # from the last snapshot plus the blocks
