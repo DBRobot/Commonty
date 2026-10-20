@@ -214,7 +214,7 @@ box.succeed(
     f"DD_KEYRING_FILE=/root/bob.json {nix['dd']} identity new --born 1990-01 --agree-terms --name bob {dirs}"
 )
 box.succeed(
-    f"DD_KEYRING_FILE=/root/sarah.json {nix['dd']} member add bob --repo /root/fleet {dirs}"
+    f"DD_KEYRING_FILE=/root/sarah.json {nix['dd']} member add bob --repo /root/fleet {dirs} --confirm $(DD_KEYRING_FILE=/root/bob.json {nix['dd']} identity show {dirs} | sed -n 's/^member id: *//p')"
 )
 box.succeed(
     "printf \"[Service]\\nEnvironment='VERIFY_MEMBERS=%s'\\n\" "

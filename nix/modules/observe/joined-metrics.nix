@@ -159,6 +159,7 @@ in
         restartIfChanged = false;
         path = [
           pkgs.coreutils
+          pkgs.diffutils # cmp: nginx reloads only when the tokens change
           pkgs.gnugrep
           pkgs.age
           pkgs.curl
