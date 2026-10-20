@@ -13,6 +13,8 @@ let
   agent = self.packages.${pkgs.stdenv.hostPlatform.system}.agent;
 in
 {
+  imports = [ ./work-memory.nix ];
+
   # The box moves itself to the signed release and to nothing else. A timer
   # runs the agent; it fetches the release file, checks the signature
   # against the release key it was built with, refuses anything older than
@@ -175,6 +177,9 @@ in
         TimeoutStartSec = "6h";
       };
     };
+    # it builds as root, outside the daemon and its limit: under the work
+    # slice's with CI. A kill ends this run; the timer starts the next
+    dd.work.units.dd-build = { };
     systemd.timers.dd-build = {
       wantedBy = [ "timers.target" ];
       # never inside a switch: its first run is three minutes after the

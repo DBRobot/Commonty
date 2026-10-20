@@ -150,7 +150,9 @@ role:
 - NetworkManager with `no-auto-default = "*"`, and docker's interfaces left
   alone;
 - `nix.gc` weekly, keeping 14 days; nix-daemon at `MemoryHigh` 60% and
-  `MemoryMax` 75% of RAM; `max-jobs` one per 6G, at most threads/4;
+  `MemoryMax` 75% of RAM, and with the build orders and the runner in
+  `work.slice` under all of RAM but a fifth (at least 3G kept back);
+  `max-jobs` one per 6G, at most threads/4;
   `min-free` 10G, `max-free` 30G;
 - journald kept 14 days and 1G at most;
 - `dd.backup.paths` for the gate's state and Prometheus.

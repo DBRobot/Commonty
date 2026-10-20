@@ -74,6 +74,7 @@
         "home-controller"
         "waits"
         "switch-race"
+        "work-memory"
       ];
       rust =
         let
@@ -1805,6 +1806,8 @@
           boxes = import ./nix/tests/boxes.nix args;
           box-reports = import ./nix/tests/box-reports.nix args;
           role-fit = import ./nix/tests/role-fit.nix args;
+          # builds and CI held to a share of each box's memory, together
+          work-memory-sizes = import ./nix/tests/work-memory-sizes.nix args;
           # anything deleted is gone from every box and backup within 90 days
           retention = import ./nix/tests/retention.nix args;
           # every unit our modules define is in some service's needs, and no

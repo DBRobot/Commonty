@@ -64,6 +64,7 @@ in
     ../modules/box/netspeed.nix
     ../modules/box/timer-watch.nix
     ../modules/box/service-memory.nix
+    ../modules/box/work-memory.nix
     ../modules/net/box.nix
     ../modules/net/owner.nix
   ];
@@ -241,6 +242,9 @@ in
       MemoryHigh = "${toString (mib * 60 / 100)}M";
       MemoryMax = "${toString (mib * 75 / 100)}M";
     };
+  # and with a build order and CI's jobs, under the work slice's limit
+  # (box/work-memory.nix); a killed build fails, the daemon goes on
+  dd.work.units.nix-daemon.oomPolicy = "continue";
   nix.settings.max-jobs = lib.mkIf (config.dd.box.memoryBytes > 0) (
     lib.max 1 (
       lib.min (config.dd.box.memoryBytes / (6 * 1024 * 1024 * 1024)) (config.dd.box.threads * 3 / 4)

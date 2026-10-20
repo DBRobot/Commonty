@@ -10,6 +10,8 @@ let
   name = config.networking.hostName;
 in
 {
+  imports = [ ../box/work-memory.nix ];
+
   # what one job takes: the biggest VM test is three VMs of 1.5G, and a
   # build takes every thread it is given
   options.dd.runner.jobThreads = lib.mkOption {
@@ -111,6 +113,11 @@ in
     # is not valid"); a job evaluates from scratch, which costs seconds
     nix.settings.eval-cache = false;
 
+    # a job's own processes (evaluation, lint, cargo) run in this unit, under
+    # the work slice's limit with the builds. A process the kernel kills
+    # fails its job and nothing else: under systemd's default (stop) a kill
+    # shut the runner down and every job it held with it (node2, 2026-10-20)
+    dd.work.units."gitea-runner-${name}".oomPolicy = "continue";
     systemd.services."gitea-runner-${name}" = {
       path = [ pkgs.curl ];
       serviceConfig = {

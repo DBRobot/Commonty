@@ -269,6 +269,11 @@ and the modules it names):
 - nix-daemon held to `MemoryHigh` 60% and `MemoryMax` 75% of RAM, and
   max-jobs one per 6G, at most three for every four threads (a crate's
   build is mostly one thread): node1 6, node2 2;
+- builds and CI together (the nix daemon, the build orders' `dd-build`,
+  the host runner's jobs) in `work.slice`, held to all of RAM but a fifth,
+  at least 3G, at most half ([`nix/lib/work-memory.nix`](../../nix/lib/work-memory.nix)):
+  node1 50G, node2 11.9G. Past it the kernel kills inside the slice, and
+  the runner (`OOMPolicy=continue`) fails only the job whose process died;
 - the nix-cache bucket cleaned daily, keeping the last 10 releases'
   closures plus 7 days ([`cache-gc.sh`](../../nix/modules/storage/cache-gc.sh),
   where the forge runs);
