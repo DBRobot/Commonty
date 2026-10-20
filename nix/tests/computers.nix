@@ -52,6 +52,9 @@ let
 in
 {
   name = "computers";
+  # it takes about 20 minutes on a busy runner; one that hangs fails long
+  # before CI's hour
+  globalTimeout = 1800;
   node.specialArgs = { inherit self; };
   nodes.box = {
     imports = [

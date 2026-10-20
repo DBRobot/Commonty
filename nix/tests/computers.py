@@ -88,7 +88,13 @@ agree(record())
 
 # started as dd-control starts it
 box.succeed(f"systemctl start --no-block dd-computer@{ID}.service")
-ssh = "ssh -i /root/{k} -p 27200 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o IdentitiesOnly=yes tom@127.0.0.1"
+# every ssh is bounded: a guest that stops answering fails the step in a
+# minute, with what it said, never the run at its global limit
+ssh = (
+    "timeout 60 ssh -i /root/{k} -p 27200 -o StrictHostKeyChecking=no"
+    " -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o IdentitiesOnly=yes"
+    " -o ServerAliveInterval=5 -o ServerAliveCountMax=3 tom@127.0.0.1"
+)
 one_ssh = ssh.format(k="one")
 two_ssh = ssh.format(k="two")
 try:
@@ -96,6 +102,9 @@ try:
 except Exception:
     print(box.execute(f"tail -c 20000 {d}/console.log")[1])
     raise
+# its first boot is the system the box built: no rebuild of its own (one
+# takes most of a small computer's memory, and once starved its sshd)
+box.fail(f"{one_ssh} test -e /var/lib/dd/apply.log")
 rec = json.loads(box.succeed(f"cat {d}/record.json"))
 assert rec["owner"] == "tom" and rec["port"] == 27200, rec
 

@@ -81,6 +81,16 @@ let
         source = ./guest/member.nix;
         target = "/etc/nixos/member.nix";
       }
+      # the empty Nix file, as the box writes it for a computer whose owner
+      # wrote none, already applied: the system on this disk is the one it
+      # would build, and a first boot does not rebuild it (a rebuild's
+      # evaluation takes most of a small computer's memory)
+      {
+        source = pkgs.writeText "tried" (
+          builtins.hashString "sha256" (builtins.readFile ./guest/member.nix)
+        );
+        target = "/var/lib/dd/tried";
+      }
     ];
   };
   range = "${toString cfg.portBase}:${toString (cfg.portBase + cfg.portCount - 1)}";

@@ -246,7 +246,14 @@ in
       pkgs.git
     ];
     environment.NIX_PATH = "nixpkgs=${config.dd.guest.nixpkgs}:nixos-config=/etc/nixos/configuration.nix";
-    serviceConfig.Type = "oneshot";
+    serviceConfig = {
+      Type = "oneshot";
+      # a rebuild's evaluation can take most of a small computer's memory:
+      # it yields, and is what goes first, never the owner's way in
+      Nice = 19;
+      IOSchedulingClass = "idle";
+      OOMScoreAdjust = 1000;
+    };
     script = ''
       f=${config9p}/member.nix
       [ -r "$f" ] || exit 0
