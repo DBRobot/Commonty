@@ -1587,6 +1587,9 @@
               # bucket, never from them (README: no box talks to another)
               dd.thanos.sidecars = [ "127.0.0.1:10901" ];
             };
+          # a joined box's modules: a box's, and the flag that it joined
+          # (dd.box.joined: its agent builds it from its own report)
+          joinedBoxModules = dir: name: boxModules dir name joinedBox ++ [ { dd.box.joined = true; } ];
           joinedBox = {
             net = "";
             siteId = "joined";
@@ -1599,9 +1602,14 @@
           configs = lib.mapAttrs mkBox boxes;
           # a stranger: core alone, and its store; what it carries the
           # control plane never gives it, holding no lease
-          joined = { name, dir }: mkBoxIn dir name joinedBox;
+          joined =
+            { name, dir }:
+            lib.nixosSystem {
+              specialArgs = boxArgs;
+              modules = joinedBoxModules dir name;
+            };
           # the same, as modules, for a VM test to boot (nix/tests/joined-box.nix)
-          joinedModules = { name, dir }: boxModules dir name joinedBox;
+          joinedModules = { name, dir }: joinedBoxModules dir name;
           inherit boxArgs;
         };
     in
