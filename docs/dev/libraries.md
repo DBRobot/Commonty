@@ -392,6 +392,12 @@ the last four ciphers.
   TMDB does not know gets a still from its own frames. TMDB's art is asked
   again after five months and dropped after six.
 
+### Editing a PDF
+
+Files opens a PDF for editing and signing in the same tab, on MuPDF in
+WebAssembly, and saves it back sealed like any upload. How it works, what
+it loads and how its signatures are made is [its own page](pdf-editor.md).
+
 ### Players
 
 [servers/media/web/media.js](../../servers/media/web/media.js) asks the box

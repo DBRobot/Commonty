@@ -912,6 +912,9 @@ main.drive .act .acts { display: inline-flex; gap: 6px; white-space: nowrap; }
 .preview dd { margin: 0; font: 13px var(--mono); overflow-wrap: anywhere; }
 .pv-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .pv-actions button { height: 40px; margin: 0; padding: 0 16px; font-size: 15px; }
+/* a PDF's Edit and Sign come first, the width of the panel */
+.pv-actions .pv-edit { flex-basis: 100%; display: flex; gap: 8px; }
+.pv-actions .pv-edit button { flex: 1; }
 .uploads { position: fixed; right: 24px; bottom: 24px; width: min(360px, calc(100vw - 32px)); z-index: 25; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, .12); max-height: 50vh; overflow-y: auto; }
 .up-head { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--pick); color: #fff; font-weight: 700; font-size: 14px; }
 .up-head button, .up-head button:hover { width: 28px; height: 28px; margin: 0; padding: 0; background: none; color: #fff; font-size: 16px; }

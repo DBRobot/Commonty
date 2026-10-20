@@ -194,7 +194,8 @@ async function show(dir) {
   here = dir;
   chosen.clear();
   $('search').value = '';
-  items = await list(lib, under(dir));
+  // a save in flight writes beside the file first (pdf.js); not shown
+  items = (await list(lib, under(dir))).filter((it) => !/^\..+\.saving-\d+$/.test(it.name));
   render();
 }
 
@@ -247,6 +248,10 @@ function menu(it, anchor) {
   const add = (label, fn, danger) => m.append(el('button', { type: 'button', role: 'menuitem', class: danger ? 'danger' : '', text: label, onclick: () => { m.remove(); anchor.focus(); fn(); } }));
   if (it.dir) add('Open', () => open(it));
   else add('Download', () => download(it));
+  if (!it.dir && shows(it) === 'pdf') {
+    add('Edit', () => editPdf(it, 'edit'));
+    add('Sign', () => editPdf(it, 'sign'));
+  }
   if (!lib.reader) {
     add('Rename', () => rename(it));
     add('Move', () => relocate([it]));
@@ -352,6 +357,16 @@ function note(text) {
   note.t = setTimeout(() => { $('msg').hidden = true; }, 6000);
 }
 
+async function editPdf(it, mode) {
+  closePreview();
+  try {
+    const { openEditor } = await import('./pdf.js');
+    await openEditor({ lib, item: it, who: user, mode, saved: () => reload() });
+  } catch (e) {
+    note(`The editor did not open: ${e.message}`);
+  }
+}
+
 // ---- preview
 
 let shown = null;               // the object url on screen
@@ -381,6 +396,14 @@ async function open(it) {
         el('button', { type: 'button', class: 'danger', text: 'Delete forever', onclick: () => gone([it]) }));
     }
   } else {
+    if (shows(it) === 'pdf') {
+      // the editor and its engine load on the first click, and are fetched
+      // as the pointer reaches the button
+      const warm = () => import('./pdf-doc.js').then((m) => m.engine()).catch(() => {});
+      acts.append(el('div', { class: 'pv-edit' },
+        el('button', { type: 'button', text: 'Edit', onpointerenter: warm, onfocus: warm, onclick: () => editPdf(it, 'edit') }),
+        el('button', { type: 'button', class: 'quiet', text: 'Sign', onpointerenter: warm, onfocus: warm, onclick: () => editPdf(it, 'sign') })));
+    }
     acts.append(el('button', { type: 'button', text: 'Download', onclick: () => download(it) }));
     if (!lib.reader) {
       acts.append(

@@ -668,6 +668,58 @@
                 hash = "sha256-EiLkT5U853Rq8jgB5yNwj45vQ2uLN3pqX8dVLzSjB7M=";
               }
             } $out/elk.js
+            # the PDF editor in Files (servers/files/web/pdf-doc.js): MuPDF,
+            # loaded the first time Edit is clicked, and the metric twins of
+            # Times, Arial and Courier that edited text is set in
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdn.jsdelivr.net/npm/mupdf@1.28.1/dist/mupdf.js";
+                hash = "sha256-XSN+rcuWQFhOAFD2+VjlR4h7elTYCgQEPhK+lCCTEHY=";
+              }
+            } $out/mupdf.js
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdn.jsdelivr.net/npm/mupdf@1.28.1/dist/mupdf-wasm.js";
+                hash = "sha256-JTgqu/v1xSGR5axZ4UEqDaiGR/7PqwwdeXu1lIRD7qQ=";
+              }
+            } $out/mupdf-wasm.js
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdn.jsdelivr.net/npm/mupdf@1.28.1/dist/mupdf-wasm.wasm";
+                hash = "sha256-WjDvewJ/VB6o/FTnxz8WQUsLWZQHQaEu/l5V8f0Kmdc=";
+              }
+            } $out/mupdf-wasm.wasm
+            for f in Serif Sans Mono; do
+              for s in Regular Bold Italic BoldItalic; do
+                cp ${pkgs.liberation_ttf}/share/fonts/truetype/Liberation$f-$s.ttf $out/
+              done
+            done
+            # reading a scanned page's words (pdf-ocr.js): Tesseract, its
+            # worker, and its English model, loaded when Recognise text is used
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.esm.min.js";
+                hash = "sha256-ZIcddsdWCf1UE7iKgXHi70De7dd9WHW6I98QSy0F6yk=";
+              }
+            } $out/tesseract.esm.min.js
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/worker.min.js";
+                hash = "sha256-V2t99+M5PhN+UYSTV8mttT/nrBu2m/oGzz1hUg8YLG0=";
+              }
+            } $out/tesseract-worker.min.js
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdn.jsdelivr.net/npm/tesseract.js-core@7.0.0/tesseract-core-simd-lstm.wasm.js";
+                hash = "sha256-xYtGpMeWwLivzPd1kdW4dbaJa0XUArvOjKpvU2JEezg=";
+              }
+            } $out/tesseract-core-simd-lstm.wasm.js
+            cp ${
+              pkgs.fetchurl {
+                url = "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int/eng.traineddata.gz";
+                hash = "sha256-RbTLNGckrBd08cNvQvGCuIe82yjr5j5v/5CsQfP8/5E=";
+              }
+            } $out/eng.traineddata.gz
           '';
           # The control plane (servers/system/control, docs/dev/control-plane.md): every box
           # runs dd-control; the witness is the same validator as wasm.
@@ -1579,6 +1631,8 @@
           # the Mail page in a browser, as the app serves it, against a fake app and box
           mail-page = import ./nix/tests/mail-page.nix args;
           safe-rd = import ./nix/tests/safe-rd.nix args;
+          # the PDF editor's document and signatures, on the pinned MuPDF
+          pdf-editor = import ./nix/tests/pdf-editor.nix (args // { web = self.packages.${system}.web; });
           sso = import ./nix/tests/sso.nix args;
           dns-worker = import ./nix/tests/dns-worker.nix args;
           # the control plane: relay, witness and three validators, offline

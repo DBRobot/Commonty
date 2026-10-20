@@ -335,6 +335,32 @@ const STATIC: &[(&str, &str, &str)] = &[
         "servers/files/web/files.js",
         "text/javascript; charset=utf-8",
     ),
+    // the PDF editor, loaded by files.js when Edit is clicked
+    (
+        "pdf.js",
+        "servers/files/web/pdf.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "pdf-doc.js",
+        "servers/files/web/pdf-doc.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "pdf-sign.js",
+        "servers/files/web/pdf-sign.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "pdf-ocr.js",
+        "servers/files/web/pdf-ocr.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "pdf.css",
+        "servers/files/web/pdf.css",
+        "text/css; charset=utf-8",
+    ),
     (
         "media.js",
         "servers/media/web/media.js",
@@ -1388,6 +1414,21 @@ mod tests {
         // the player comes from this box, never from someone else's
         assert!(lib.contains("'/_dd/web/hls.js'"));
         assert!(!lib.contains("http://") && !lib.contains("https://"));
+        // the PDF editor and its engines come from this box too, loaded on
+        // the first Edit, never with the Files page itself
+        for f in ["pdf.js", "pdf-doc.js", "pdf-sign.js", "pdf-ocr.js"] {
+            let t = text(f);
+            assert!(!t.contains("https://"), "{f}");
+            assert!(
+                t.match_indices("http://")
+                    .all(|(i, _)| t[i..].starts_with("http://www.w3.org/")),
+                "{f}"
+            );
+        }
+        assert!(text("pdf-doc.js").contains("'/_dd/web/mupdf.js'"));
+        assert!(text("pdf-ocr.js").contains("workerBlobURL: false"));
+        let files = text("files.js");
+        assert!(files.contains("import('./pdf.js')") && !files.contains("from './pdf.js'"));
     }
 
     #[test]

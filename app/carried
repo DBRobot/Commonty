@@ -22,6 +22,11 @@ servers/web-shared/fonts/LICENSE             static/fonts-license.txt
 servers/home/web/pages/home.html           pages/home.html
 servers/files/web/files.js            static/files.js
 servers/files/web/pages/files.html    pages/files.html
+servers/files/web/pdf.js        static/pdf.js
+servers/files/web/pdf-doc.js    static/pdf-doc.js
+servers/files/web/pdf-sign.js   static/pdf-sign.js
+servers/files/web/pdf-ocr.js    static/pdf-ocr.js
+servers/files/web/pdf.css       static/pdf.css
 servers/media/web/media.js            static/media.js
 servers/media/web/shelf.js            static/shelf.js
 servers/media/web/icons/tmdb.svg      static/tmdb.svg

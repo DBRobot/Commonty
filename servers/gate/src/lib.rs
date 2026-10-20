@@ -1770,6 +1770,9 @@ async fn web_file(
     let ty = match file.rsplit('.').next() {
         Some("js") => "application/javascript",
         Some("wasm") => "application/wasm",
+        // the PDF editor's faces, and the text reader's model
+        Some("ttf") => "font/ttf",
+        Some("gz") => "application/gzip",
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     let known = WEB.lock().unwrap().get(&file).cloned();

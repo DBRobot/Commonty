@@ -60,6 +60,7 @@ These pages are in four parts:
 - [Data the services are built with](dev/data.md)
 - [Encrypted libraries](dev/libraries.md)
 - [Mail](dev/mail.md)
+- [The PDF editor](dev/pdf-editor.md)
 - [Leaving, and announcing a change](dev/leaving.md)
 - [Programs we package](dev/packaged.md)
 - [Pull requests, CI and releases](dev/ci.md)

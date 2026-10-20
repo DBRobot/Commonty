@@ -22,6 +22,12 @@ Then:
 - **Download:** open a file's menu, or select several and press
   **Download**.
 - **Rename and move:** from a file's menu, or **Move** for a selection.
+- **Edit and sign a PDF:** open a PDF and press **Edit** or **Sign**.
+  You can write on it, highlight, draw, comment, change its own words,
+  fill in and add form fields, sign it, redact, find, and rotate, reorder,
+  add or split its pages. A scanned page can be read so its words can be
+  searched and copied. **Save** replaces it and puts the old one in the
+  trash; **Save as a copy** keeps both.
 - **Delete:** **Move to trash**. Open **Trash** to see what is there and
   **Restore** it, or **Delete forever** to delete it at once. **Empty
   trash** deletes everything in it at once. Both ask first, since they
@@ -54,6 +60,13 @@ Every service's ratings are in the [Privacy policy](../../policies/privacy.md); 
   passkey. The app opens it and hands it to the page.
 - **The page comes from the app.** Its code is in the app's signed
   release, not sent by a box, so a box cannot change it to take your key.
+- **Editing stays on your device.** A PDF is opened, changed and locked
+  again in the page; the box only ever gets the locked file.
+- **Signing.** Signing with your key makes a signature any PDF reader can
+  check: who signed, and that nothing changed afterwards. Your signing key
+  is made on each device you sign from and never leaves it. The pictures of
+  your signature you keep are in your library, locked like your files.
+  Readers say no authority vouches for the name; you do.
 - **One door.** Every read and write goes through the gate on the box,
   which lets in only you. Other members, guests and the demo cannot open
   your library. The demo has a library of its own with nothing private
