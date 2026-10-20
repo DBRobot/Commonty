@@ -1372,7 +1372,7 @@ async fn join_start(
     }
     // the forge's own identity (nix/modules/forge/forgejo.nix), which no
     // person is
-    if user == "commonty-box" {
+    if user == directory::FORGE_IDENTITY {
         return (
             StatusCode::BAD_REQUEST,
             "that name is the boxes'; pick another",

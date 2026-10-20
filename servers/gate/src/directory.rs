@@ -700,6 +700,12 @@ impl Directory {
         if !identity::valid_name(name) {
             return Err((StatusCode::BAD_REQUEST, "bad name".into()));
         }
+        if name == FORGE_IDENTITY {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "that name is the boxes'; pick another".into(),
+            ));
+        }
         if let Err(e) = identity::accept(None, signed) {
             return Err((StatusCode::FORBIDDEN, format!("refused: {e}")));
         }
@@ -1111,6 +1117,10 @@ pub const GUEST_TTL: u64 = 15 * 60;
 
 /// how long a sign-up that has not followed through is kept
 pub const HELD_TTL: u64 = 7 * 24 * 3600;
+
+/// the forge's own identity (nix/modules/forge/forgejo.nix), which no person
+/// is: no sign-up may take the name
+pub const FORGE_IDENTITY: &str = "commonty-box";
 
 pub fn is_guest(name: &str) -> bool {
     name.starts_with(GUEST_PREFIX)
@@ -2289,6 +2299,12 @@ mod tests {
             .hold(&sign(entry("eve", &mallory, &[], 1), &mallory).unwrap())
             .unwrap_err();
         assert_eq!(status, StatusCode::CONFLICT);
+
+        // nor the forge's own identity, which no person is
+        let (status, _) = d
+            .hold(&sign(entry(FORGE_IDENTITY, &mallory, &[], 1), &mallory).unwrap())
+            .unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
 
         // one that never follows through is gone after its time
         let late = generate();

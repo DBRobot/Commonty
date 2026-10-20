@@ -50,7 +50,8 @@ let
       config = {
         # what fleet/policy.json says on a real box
         dd.failover = true;
-        dd.forgejo.admin = "tester";
+        # the forge's admin is the box's own identity (the module's default);
+        # tester is a person, whose repositories these are
         # the forge's dataset, in a pool on a disk of its own, as a box's
         # bulk pool; made by a stand-in for zfs-datasets
         dd.box.bulkPool = "tank";

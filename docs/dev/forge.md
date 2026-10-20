@@ -123,7 +123,8 @@ whoever left, cancelling and resuming CI, the push mirrors.
 Nobody signs in as it:
 
 - nginx maps no one to its name (`$forge_user`), so a person by that name
-  would be nobody here, and the gate refuses it as a member's name;
+  would be nobody here, and the gate refuses it as a member's name, at
+  sign-up and in the directory's held names (`directory::FORGE_IDENTITY`);
 - on `git.<domain>`, `/api/v1/admin` is 404, the `Sudo` header is dropped
   and a `sudo` query refused (403), whoever asks;
 - `dd-forge-rules`, at every start, takes admin from every other account
