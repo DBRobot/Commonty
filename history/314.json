@@ -1,0 +1,38 @@
+{
+  "payload": {
+    "counter": 314,
+    "rev": "51cd072ba248210f6b354610fe70fa14c6ad5cc4",
+    "issued": 1792482173,
+    "boxes": {
+      "home-controller": {
+        "path": "/nix/store/78wv2p2z68rsmdzfb2gkw2jqvxak9v1q-nixos-system-home-controller-26.05.20260822.a9e6d84",
+        "nar_hash": "sha256-8PsinzBRF8fdVmd28XSn/DOdIixAgUEGQtxan9cq3BQ=",
+        "closure": "97d4a5f02b25f6c8bc6d321c43ec911fd0a11bac5b4cd3ce53ebb3833c36f72c"
+      },
+      "node1": {
+        "path": "/nix/store/sn8i05x6zay429cvf0m86s4gsvcnrqqf-nixos-system-node1-26.05.20260822.a9e6d84",
+        "nar_hash": "sha256-3G99h12Yfkb5K8NHCBSuUZJhjCTG3KaHqTu0lw1bpDA=",
+        "closure": "a0835e89972e515ad1d638de6ce1da6b5bf0ebba346e0b56e4e8fb7e56bce765"
+      },
+      "node2": {
+        "path": "/nix/store/mkl5drhb651fagjg14m87jhilvwz67qa-nixos-system-node2-26.05.20260822.a9e6d84",
+        "nar_hash": "sha256-9VOjL63FdfpK6/1IOABgksL3ih1T5c9jBmvZSJL0RRM=",
+        "closure": "10b4b186014adfd0a648b55b8a9da3e3334df51e517212a59fffde1a2c630543"
+      }
+    },
+    "attestations": [
+      {
+        "attester": "node1",
+        "statement": "{\"attester\":\"node1\",\"boxes\":{\"home-controller\":{\"closure\":\"97d4a5f02b25f6c8bc6d321c43ec911fd0a11bac5b4cd3ce53ebb3833c36f72c\",\"path\":\"/nix/store/78wv2p2z68rsmdzfb2gkw2jqvxak9v1q-nixos-system-home-controller-26.05.20260822.a9e6d84\"},\"node1\":{\"closure\":\"a0835e89972e515ad1d638de6ce1da6b5bf0ebba346e0b56e4e8fb7e56bce765\",\"path\":\"/nix/store/sn8i05x6zay429cvf0m86s4gsvcnrqqf-nixos-system-node1-26.05.20260822.a9e6d84\"},\"node2\":{\"closure\":\"10b4b186014adfd0a648b55b8a9da3e3334df51e517212a59fffde1a2c630543\",\"path\":\"/nix/store/mkl5drhb651fagjg14m87jhilvwz67qa-nixos-system-node2-26.05.20260822.a9e6d84\"}},\"flake\":\"git+https://git.commonty.org/david/commonty\",\"rev\":\"51cd072ba248210f6b354610fe70fa14c6ad5cc4\",\"v\":1}",
+        "signature": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAghZ1NjITj4u1XvFqeQ46FbdPokd\nO1UiIkzD+PFYBEQI0AAAASY29tbW9udHktYXR0ZXN0LXYxAAAAAAAAAAZzaGE1MTIAAABT\nAAAAC3NzaC1lZDI1NTE5AAAAQLrM+xhT1DwN244/8SecMWhLtJY7yk/OOjX5+MVxHuCfRk\neib0d1rraFKXfnpsSowpLl4sDLa+TPES9bFoTIRQA=\n-----END SSH SIGNATURE-----\n"
+      },
+      {
+        "attester": "node2",
+        "statement": "{\"attester\":\"node2\",\"boxes\":{\"home-controller\":{\"closure\":\"97d4a5f02b25f6c8bc6d321c43ec911fd0a11bac5b4cd3ce53ebb3833c36f72c\",\"path\":\"/nix/store/78wv2p2z68rsmdzfb2gkw2jqvxak9v1q-nixos-system-home-controller-26.05.20260822.a9e6d84\"},\"node1\":{\"closure\":\"a0835e89972e515ad1d638de6ce1da6b5bf0ebba346e0b56e4e8fb7e56bce765\",\"path\":\"/nix/store/sn8i05x6zay429cvf0m86s4gsvcnrqqf-nixos-system-node1-26.05.20260822.a9e6d84\"},\"node2\":{\"closure\":\"10b4b186014adfd0a648b55b8a9da3e3334df51e517212a59fffde1a2c630543\",\"path\":\"/nix/store/mkl5drhb651fagjg14m87jhilvwz67qa-nixos-system-node2-26.05.20260822.a9e6d84\"}},\"flake\":\"git+https://git.commonty.org/david/commonty\",\"rev\":\"51cd072ba248210f6b354610fe70fa14c6ad5cc4\",\"v\":1}",
+        "signature": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgt8QgWsEv4yokZHSEy/UEoIKDHF\nEnMiYcWmSC/fvHVDMAAAASY29tbW9udHktYXR0ZXN0LXYxAAAAAAAAAAZzaGE1MTIAAABT\nAAAAC3NzaC1lZDI1NTE5AAAAQEx40EQdzL9jvoQD73jf/7i0n6Zx7soUCF8Inr4eXxr/qw\n8H1XFILK1nXovz13fjJ9jdFI65s8lsuCXfouAycAs=\n-----END SSH SIGNATURE-----\n"
+      }
+    ]
+  },
+  "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
+  "signature": "FP3C8DokXER+uMovDSq4i8TOuvSEkOx2LMnE85dK5/KAw5H7SKAMA7Y/wDF0ZW8ik4UYPKXEX0DuBPhcdC66Ag=="
+}
