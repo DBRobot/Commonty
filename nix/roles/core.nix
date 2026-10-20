@@ -151,8 +151,8 @@ in
   # port on it to everything that can reach it, which on the fleet's network
   # meant any member's device could talk to postgres, garage and prometheus
   # on every box. What is open is what a person needs: the gate to every
-  # member; ssh, dns and the cache push to the box's owner's devices
-  # (modules/net/owner.nix); between boxes only the channels listed above,
+  # member; ssh, dns and the cache push to the fleet's admin's devices, dns
+  # alone to the box's host's (modules/net/owner.nix); between boxes only the channels listed above,
   # only from the other boxes' addresses. Cable and wifi are untouched: ssh
   # from the LAN is the way in if any of this is ever wrong.
   networking.firewall.interfaces.commonty0.allowedTCPPorts = [ 443 ];
