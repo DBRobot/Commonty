@@ -488,7 +488,7 @@ async function fromBoxes() {
   const notes = list
     .filter((p) => BOX_SAID[p.state])
     .map((p) => el('p', 'bk-note', BOX_SAID[p.state](p.box) + (p.error ? ` ${p.error}` : '')));
-  document.querySelectorAll('.bk-from-box').forEach((n) => n.remove());
+  for (const n of document.querySelectorAll('.bk-from-box')) n.remove();
   for (const n of notes) {
     n.classList.add('bk-from-box');
     $('list').before(n);

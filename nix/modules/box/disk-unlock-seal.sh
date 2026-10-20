@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # A box that joined, at its first boot with Secure Boot on and its own keys
 # enrolled (docs/dev/joining.md): a new half of the disk key, sealed in the
 # TPM under this boot's PCR 7, the pool re-keyed to what it makes, and the

@@ -222,9 +222,9 @@ target.wait_for_unit("multi-user.target")
 target.succeed(
     "[ \"$(od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c | tr -d ' ')\" = 1 ]"
 )
-target.succeed("journalctl -b -u dd-disk-key --no-pager | grep -q 'first boot'")
+target.succeed("journalctl -b -u dd-disk-key --no-pager | grep -c 'first boot'")
 target.wait_until_succeeds(
-    "journalctl -b -u dd-unlock-seal --no-pager | grep -q 'sealed under this box'"
+    "journalctl -b -u dd-unlock-seal --no-pager | grep -c 'sealed under this box'"
 )
 target.succeed("test -s /boot/dd/unlock/half.priv")
 target.fail("test -e /boot/dd/unlock/bootstrap.priv")

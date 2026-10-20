@@ -3,6 +3,8 @@
 # with their credential taken out.
 import json
 
+from waits import wait_fetch_has
+
 start_all()
 
 box.wait_for_unit("nginx.service")
@@ -176,15 +178,19 @@ def series(tenant):
     return json.loads(out)["data"]["result"]
 
 
-box.wait_until_succeeds(
-    "curl -sf -H 'THANOS-TENANT: jbbbbbbbbbb' 'http://127.0.0.1:10913/api/v1/query?query=up'"
-    ' | grep -q \'"sender":"b"\'',
+wait_fetch_has(
+    box,
+    "http://127.0.0.1:10913/api/v1/query?query=up",
+    '"sender":"b"',
     timeout=180,
+    curl_args="-sf -H 'THANOS-TENANT: jbbbbbbbbbb'",
 )
-box.wait_until_succeeds(
-    "curl -sf -H 'THANOS-TENANT: jaaaaaaaaaa' 'http://127.0.0.1:10913/api/v1/query?query=up'"
-    ' | grep -q \'"sender":"a"\'',
+wait_fetch_has(
+    box,
+    "http://127.0.0.1:10913/api/v1/query?query=up",
+    '"sender":"a"',
     timeout=180,
+    curl_args="-sf -H 'THANOS-TENANT: jaaaaaaaaaa'",
 )
 for tenant, sender in (("jaaaaaaaaaa", "a"), ("jbbbbbbbbbb", "b")):
     got = series(tenant)

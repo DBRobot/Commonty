@@ -60,6 +60,7 @@ let
 in
 {
   name = "metrics-ui";
+  helpers = true;
   node.specialArgs = { inherit self; };
   defaults.virtualisation.memorySize = 1536;
   defaults.virtualisation.cores = 2;

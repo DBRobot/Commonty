@@ -26,12 +26,8 @@ if sys.argv[1] == "item":
         fields["ticket"] = sys.argv[4]
     fields["at"] = int(time.time())
     body = json.dumps(fields, separators=(",", ":")).encode()
-    env = {
-        "v": 2,
-        "kind": kind,
-        "body": b64(body),
-        "sig": b64(root.sign(f"commonty {kind} v2".encode() + b"\0" + body)),
-    }
+    msg = f"commonty {kind} v2".encode() + b"\0" + body
+    env = {"v": 2, "kind": kind, "body": b64(body), "sig": b64(root.sign(msg))}
     subprocess.run(
         [
             "curl",
@@ -47,7 +43,11 @@ if sys.argv[1] == "item":
             f"http://127.0.0.1:4281/_dd/boxes/{kind}",
         ],
         check=True,
+        stdout=sys.stderr,
     )
+    # the item's hash, which the judge's outcome for it is kept under
+    # (state/ident ItemHash: the signed message, then each signature)
+    print(hashlib.sha256(msg + b"\0" + env["sig"].encode()).hexdigest())
     sys.exit(0)
 
 OUT = sys.argv[1]
@@ -139,7 +139,7 @@ def until(what, cond, timeout=180):
         if cond():
             print(f"fleet: {what}", flush=True)
             return
-        time.sleep(0.5)
+        time.sleep(0.5)  # sleep-ok: this is the wait, polling cond until it holds
     for f in sorted(os.listdir(T)):
         if f.endswith(".log"):
             print(f"--- {f}\n" + open(f).read()[-1500:], flush=True)
@@ -244,7 +244,7 @@ for _ in range(120):
         if urllib.request.urlopen(req, timeout=70).status == 200:
             break
     except Exception:
-        time.sleep(1)
+        time.sleep(1)  # sleep-ok: a retry's pause; the loop is the wait
 else:
     raise SystemExit("ada's entry was not agreed")
 
@@ -274,4 +274,4 @@ open(f"{OUT}/ticket", "w").write(ticket + "\n")
 open(f"{T}/token", "w").write(token)
 open(f"{T}/ready", "w").write("ok")
 while True:
-    time.sleep(3600)
+    time.sleep(3600)  # sleep-ok: no wait here; the fleet stays up for the test
