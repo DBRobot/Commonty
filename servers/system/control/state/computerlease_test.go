@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"commonty/control/state/computers"
@@ -14,8 +13,9 @@ import (
 // A remote computer's lease, judged from the log: only while it is up, on
 // the boxes placement may give it (the release's hosts; for "my boxes
 // only", the box.json owner's), kept only while that holds.
-// node1 is a host with no owner, node2 is ann's, node3 is no host: ann
-// enlists node3, which counts for nothing here.
+// node1 is a host with no owner, node2 is ann's, node3 is no host. ann has
+// a box of her own by the release (computers' owners, as flake.nix derives
+// them from the hosts), not by an enlistment: one names a joined box alone.
 func computerFleet(t *testing.T, consent string) (*fleet, ed25519.PrivateKey, string) {
 	f := newFleet(t)
 	f.c.Rules.ComputerHosts = map[string]string{"node1": "", "node2": "ann"}
@@ -26,7 +26,7 @@ func computerFleet(t *testing.T, consent string) (*fleet, ed25519.PrivateKey, st
 	f.c.Validators = []Validator{{ID: 1, Name: "node1"}, {ID: 2, Name: "node2"}}
 	f.c.Identity = &ident.Config{}
 	f.c.Identity.Members.Members = []string{ident.MemberID(pub)}
-	f.c.Computers = &computers.Limits{Memory: 16384, Threads: 8, Disk: 200, PortBase: 27200, PortCount: 8}
+	f.c.Computers = &computers.Limits{Memory: 16384, Threads: 8, Disk: 200, PortBase: 27200, PortCount: 8, Owners: []string{"ann"}}
 	seal := func(kind string, v any) json.RawMessage {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -58,10 +58,6 @@ func computerFleet(t *testing.T, consent string) (*fleet, ed25519.PrivateKey, st
 	for _, v := range []string{"node1", "node2"} {
 		ack, _ := json.Marshal(map[string]string{"ack": ident.LogName(entry)})
 		dir(v, ack)
-	}
-	{
-		at := uint64(now / 1000)
-		dir("node1", seal("enlist", []byte(fmt.Sprintf(`{"member":%q,"box":"node3","key":"k","ticket":"00","expires":%d,"at":%d}`, ident.MemberID(pub), at+3600, at))))
 	}
 	id := "0123456789abcdef"
 	dir("node1", seal("computer", computers.Computer{Owner: "ann", ID: id, Name: "dev", Config: "default", Memory: 2048, Threads: 2, Disk: 32,
@@ -129,9 +125,9 @@ func TestMyBoxesOnlyIsLeasedToTheirBoxesAlone(t *testing.T) {
 	if f.block(f.s.Time+1, f.req("node1", "lease", lease(role, "acquire", 0))) != 0 {
 		t.Fatal("a host not the owner's took a my-boxes-only computer")
 	}
-	// enlisted by ann, but neither a host nor hers by the release
+	// neither a host nor hers by the release
 	if f.block(f.s.Time+2, f.req("node3", "lease", lease(role, "acquire", 0))) != 0 {
-		t.Fatal("an enlisted box the release does not give to ann took her computer")
+		t.Fatal("a box the release does not give to ann took her computer")
 	}
 	if f.block(f.s.Time+3, f.req("node2", "lease", lease(role, "acquire", 0))) != 1 {
 		t.Fatal("the owner's own host was refused it")
