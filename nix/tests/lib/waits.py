@@ -56,9 +56,16 @@ def start_fresh(machine, unit, timeout=300):
 
 
 def journal_of(machine, unit, invocation):
-    """The lines of one run of a unit, and no other run's."""
+    """The lines of one run of a unit, and no other run's. A line journald
+    reads after its writer has exited and the run has ended carries no
+    invocation id (journald reads it off the unit, and the run is gone), so
+    the run's lines are also found by the output streams they came on: each
+    process the run starts writes on a stream of its own, and every line
+    carries its stream's id."""
+    q = shlex.quote(invocation)
     return machine.succeed(
-        f"journalctl --no-pager -o cat _SYSTEMD_INVOCATION_ID={shlex.quote(invocation)}"
+        f"s=$(journalctl -o export _SYSTEMD_INVOCATION_ID={q} | sed -n 's/^_STREAM_ID=//p' | sort -u); "
+        f"journalctl --no-pager -o cat _SYSTEMD_INVOCATION_ID={q} $(for i in $s; do echo + _STREAM_ID=$i; done)"
     )
 
 

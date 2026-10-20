@@ -1,5 +1,6 @@
 # The VM tests' own helpers (nix/tests/lib/waits.py) against the races they
-# exist for: a oneshot a timer keeps starting, a page curl writes past where
+# exist for: a oneshot a timer keeps starting, a run's last line journald
+# reads after the run has ended, a page curl writes past where
 # grep stops reading, a socket that comes up late.
 { pkgs, ... }:
 {
@@ -26,6 +27,16 @@
         OnUnitActiveSec = "3s";
         AccuracySec = "1ms";
       };
+    };
+    # a run whose last line a child writes as the run ends, and that
+    # journald reads after the run is over (the test pauses journald)
+    systemd.services.last-word = {
+      serviceConfig.Type = "oneshot";
+      script = ''
+        echo "first word"
+        while [ ! -e /run/last-word-go ]; do sleep 0.1; done
+        ${pkgs.bash}/bin/bash -c 'echo "the last word" >&2'
+      '';
     };
     # a page of 2 MB with the word near its start: grep -q leaves early
     systemd.services.page = {

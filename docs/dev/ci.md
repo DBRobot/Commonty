@@ -328,7 +328,8 @@ python, its type check too).
 start_fresh(box, unit)          run a oneshot once more and wait for that run to end;
                                 a run already under way is waited out, never joined.
                                 Returns the run's invocation id. Fails if the run fails.
-journal_of(box, unit, inv)      that run's journal lines, no other run's
+journal_of(box, unit, inv)      that run's journal lines, no other run's; also the
+                                last lines journald reads after the run has ended
 journal_has(box, unit, inv, s)  whether that run wrote s
 wait_unit_active(box, unit)     a long-running unit up
 wait_socket(box, port | path)   something listening on a port or a unix socket
