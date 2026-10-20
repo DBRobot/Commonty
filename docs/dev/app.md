@@ -149,7 +149,9 @@ the member's own browser: Photos on port 41661, Passwords on 41662, and
 the site's pages (Files, Movies & TV, Chat, Mail, Settings) on 41660. A
 browser is linked only when the member allows it from the app's window,
 once, for every service: the app remembers it until the member forgets it. The address the app opens
-the browser at holds no secret.
+the browser at holds no secret. The bar on Photos there (`p-<own>`) and
+on Passwords (`v-<own>`) goes to the site's pages at `s-<own>`, in the same
+tab, never to a box's copy (`shell.js`, `here`).
 
 The site's pages there are the very files the window carries
 (`app/carried`), served at `s-<own>.localhost:41660`; `/_dd/app/library`

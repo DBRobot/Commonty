@@ -66,6 +66,13 @@ export const inApp = location.protocol === 'commonty:' || location.hostname === 
 /// pages, on this computer, under the name the app gave this browser. The
 /// app answers the keys here too, to this browser's own session.
 export const servedByApp = /^s-[0-9a-f]{32}\.localhost$/.test(location.hostname);
+// Photos and Passwords the app serves that browser, on the same name's p-
+// and v- hosts: the site's pages are the app's site server beside them
+// (app/src/handoff.rs, SITE_PORT)
+const appSite = (() => {
+  const m = /^[pv]-([0-9a-f]{32})\.localhost$/.exec(location.hostname);
+  return m ? `http://s-${m[1]}.localhost:41660` : '';
+})();
 
 /// a request to the app's own routes (/_dd/app/...), with the secret the
 /// app put in this page when it served it: the app answers nothing else
@@ -89,8 +96,8 @@ const carried = ['/_dd/home', '/_dd/files', '/_dd/media', '/_dd/mail', '/_dd/cal
 function served(url) {
   try {
     const u = new URL(url, location.href);
-    if (carried.includes(u.pathname) || u.pathname === '/_dd/chat') return u.pathname + u.hash;
-    if (u.hostname.startsWith('llm.')) return '/_dd/chat';
+    if (carried.includes(u.pathname) || u.pathname === '/_dd/chat') return appSite + u.pathname + u.hash;
+    if (u.hostname.startsWith('llm.')) return appSite + '/_dd/chat';
     if (u.pathname === '/_dd/photos') return '/_dd/app/go?service=photos';
     if (u.hostname.startsWith('vault.')) return '/_dd/app/go?service=vault';
     return url;
@@ -114,7 +121,7 @@ function linkable(url) {
 /// address itself in a browser, the app's own copy or door in the app
 export function here(raw) {
   const url = linkable(raw);
-  if (servedByApp) return served(url);
+  if (servedByApp || appSite) return served(url);
   if (!inApp) return url;
   try {
     const u = new URL(url, location.href);
@@ -260,7 +267,7 @@ function bar(m, slot) {
   // the logo goes home: the app's home, when this page is in the app
   const brand = document.querySelector('header.dd-bar .brand');
   if (brand && appOrigin) brand.setAttribute('href', appOrigin + '/_dd/home');
-  else if (brand) brand.setAttribute('href', homeLink(m, '/_dd/home'));
+  else if (brand) brand.setAttribute('href', here(homeLink(m, '/_dd/home')));
   const menu = el('details', { class: 'menu', 'data-guide': 'menu' }, summary, nav);
   menu.addEventListener('toggle', () => {
     if (menu.open) for (const t of nav.querySelectorAll('.toggle')) t.read();

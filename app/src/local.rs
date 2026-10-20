@@ -1280,11 +1280,22 @@ async fn client<R: Runtime>(site: &Site<R>, name: &str, path: &str, shell: bool)
                 Some("wasm" | "map" | "mjs") => mime(Path::new(&t)).to_string(),
                 _ => a.mime_type,
             };
+            // a page's bar holds its links to the fleet's domain, the app's
+            // word for it as on the site's pages (shell.js)
+            let body = if kind.starts_with("text/html") {
+                Body::from(String::from_utf8_lossy(&a.bytes).replacen(
+                    "</head>",
+                    &format!("{}</head>", crate::site::domain_meta()),
+                    1,
+                ))
+            } else {
+                Body::from(a.bytes)
+            };
             return Response::builder()
                 .header(header::CONTENT_TYPE, kind)
                 .header(header::CACHE_CONTROL, "no-cache")
                 .header("x-content-type-options", "nosniff")
-                .body(Body::from(a.bytes))
+                .body(body)
                 .unwrap_or_default();
         }
     }
