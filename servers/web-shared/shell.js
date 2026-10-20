@@ -98,10 +98,11 @@ export function toApp(path, nothing) {
 const getApp = () => el('a', { href: '/_dd/download', 'data-guide': 'get-app', text: 'Get the Commonty app' });
 export const noApp = () => el('span', {}, "Nothing opened: the Commonty app isn't installed on this computer, or isn't signed in. ", getApp());
 
-/// `text`, and one button that hands this part to the app (toApp)
-export function throughApp(text, label, path, guide) {
+/// `text`, and one button that hands this part to the app (toApp); `props`
+/// are the button's own (its data-guide for Monty)
+export function throughApp(text, label, path, props = {}) {
   const after = el('span', {}, ' No Commonty app on this computer? ', getApp());
-  const open = el('button', { class: 'inline', type: 'button', 'data-guide': guide, text: label });
+  const open = el('button', { class: 'inline', type: 'button', ...props, text: label });
   open.onclick = () => toApp(path, () => after.replaceChildren(' ', noApp()));
   return el('span', {}, `${text} `, open, after);
 }

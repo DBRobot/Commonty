@@ -1110,7 +1110,9 @@ mod tests {
                 "home" | "settings" => &["shell.js", "settings"],
                 "svc-files" => &["files"],
                 "svc-code" => &["git-home.js", "git-pulls.js"],
-                _ if id.starts_with("settings-") => &["settings", "settings.js", "backups.js"],
+                _ if id.starts_with("settings-") => {
+                    &["settings", "settings.js", "backups.js", "shell.js"]
+                }
                 _ => &[],
             };
             let src = ours(files);
