@@ -19,7 +19,7 @@ for m in (a, b):
 for m in (a, b):
     m.wait_until_succeeds(
         f"systemctl restart garage-setup.service && set -a && . {nix['rpc']} "
-        f"&& garage bucket info postgres-wal | grep -q pg-{m.name}",
+        f'&& grep -q pg-{m.name} <<<"$(garage bucket info postgres-wal)"',
         timeout=180,
     )
 

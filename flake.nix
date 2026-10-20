@@ -1637,6 +1637,8 @@
           # the Files page as the app serves it, against the same made-up app and gate
           files-page = import ./nix/tests/files-page.nix (args // { web = self.packages.${system}.web; });
           safe-rd = import ./nix/tests/safe-rd.nix args;
+          # garage-setup reads garage out whole; a closed pipe aborts garage
+          garage-setup-pipe = import ./nix/tests/garage-setup-pipe.nix args;
           # the PDF editor's document and signatures, on the pinned MuPDF
           pdf-editor = import ./nix/tests/pdf-editor.nix (args // { web = self.packages.${system}.web; });
           sso = import ./nix/tests/sso.nix args;
