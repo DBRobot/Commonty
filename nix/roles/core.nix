@@ -47,6 +47,8 @@ in
     ../modules/storage/postgres-backup.nix
     ../modules/storage/backup.nix
     ../modules/box/agent.nix
+    # and an ssh session coming or going cannot fail its switch
+    ../modules/box/logins.nix
     ../modules/observe/thanos.nix
     ../modules/box/locate.nix
     ../modules/box/netspeed.nix

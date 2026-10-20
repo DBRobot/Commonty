@@ -71,6 +71,7 @@
         "leaving"
         "home-controller"
         "waits"
+        "switch-race"
       ];
       rust =
         let
