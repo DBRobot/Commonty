@@ -6,6 +6,7 @@
 #
 # Environment: BASE, HEAD (commits), TITLE (the pull request's); and, to
 # post the warnings status, TOKEN, API (the repository's api), SHA, RUN.
+# Run by hand without BASE, it checks HEAD against where it left forge/main.
 import json
 import os
 import re
@@ -261,13 +262,28 @@ CODE = re.compile(r"^(box|client|app)/.*\.(rs|go|js|py|sh)$")
 # Only lines a pull request adds are held to it, so a test is moved over to
 # nix/tests/lib/waits.py when it is next touched (docs/dev/ci.md, "Writing
 # VM tests that don't flake").
-SLEEP_OK = re.compile(r"#\s*sleep-ok:\s*\S+(\s+\S+){2,}")
+# a reason of three words or more, on one line
+SLEEP_OK = re.compile(r"#[ \t]*sleep-ok:[ \t]*\S+([ \t]+\S+){2,}")
 START = re.compile(r"systemctl\s+(?:re)?start\s+(?:--\S+\s+)*([\w@.:-]+)")
 JOURNAL_UNIT = re.compile(r"journalctl\b[^\n]*?-u\s*([\w@.:-]+)")
 
 
 def unit_name(u):
     return u if "." in u else u + ".service"
+
+
+def call_of(text, n, start):
+    """Line n of text with the lines its call goes on to, so a sleep-ok
+    comment ruff format moved to the closing ) still counts."""
+    out, depth, at = [], 0, text[n - 1].index(start)
+    for ln in text[n - 1 :]:
+        out.append(ln)
+        code = ln.split("#", 1)[0]
+        depth += code[at:].count("(") - code[at:].count(")")
+        at = 0
+        if depth <= 0:
+            break
+    return "\n".join(out)
 
 
 def vm_test_waits(base, head):
@@ -299,7 +315,9 @@ def vm_test_waits(base, head):
                     "writer dies of SIGPIPE (curl: exit 23); write to a file and grep -c it, "
                     "or fetch_has / journal_has from nix/tests/lib/waits.py"
                 )
-            if "time.sleep(" in code and not SLEEP_OK.search(ln):
+            if "time.sleep(" in code and not SLEEP_OK.search(
+                call_of(text, n, "time.sleep(")
+            ):
                 faults.append(
                     f"vm test: {where}: time.sleep - wait for the thing itself "
                     "(wait_until_succeeds, wait_unit_active, wait_socket; in a browser flow, "
@@ -307,7 +325,9 @@ def vm_test_waits(base, head):
                     "on its line: # sleep-ok: <reason>"
                 )
             # a browser flow's fixed pause (Playwright) is the same guess
-            if "wait_for_timeout(" in code and not SLEEP_OK.search(ln):
+            if "wait_for_timeout(" in code and not SLEEP_OK.search(
+                call_of(text, n, "wait_for_timeout(")
+            ):
                 faults.append(
                     f"vm test: {where}: wait_for_timeout - wait for what the page will show "
                     "(wait_for_selector, wait_for_function, expect); one that must stay says "
@@ -444,7 +464,19 @@ def post(state, description):
 
 
 def main():
-    base, head = os.environ["BASE"], os.environ["HEAD"]
+    head = os.environ.get("HEAD") or "HEAD"
+    base = os.environ.get("BASE")
+    if not base:
+        # with no base there is nothing changed, so nothing checked: a false pass
+        code, out, _ = run(["git", "merge-base", "forge/main", head])
+        if code != 0:
+            sys.exit(
+                "lint: set BASE to the commit the change starts from (no forge/main here to find it)"
+            )
+        base = out.strip()
+        print(
+            f"(BASE not set: checking {head} from where it left forge/main, {base[:8]})"
+        )
     files = changed(base, head)
     actionlint()
     shellcheck([p for p in files if p.endswith(".sh")])

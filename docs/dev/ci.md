@@ -165,7 +165,9 @@ run, an undefined name, a JavaScript error, a secret in a new commit, an
 action not pinned to a commit hash, a vulnerable crate the pull request
 brings in, a docs link that goes nowhere. Everything else (style notes,
 spelling, advisories already in the lockfile, old flake inputs) is a yellow
-`lint/warnings` status that blocks nothing.
+`lint/warnings` status that blocks nothing. It checks what changed between
+`BASE` and `HEAD`; run by hand without them, it checks your commits since
+they left `forge/main` (uncommitted edits are not seen).
 
 ## Drafts
 
@@ -255,7 +257,8 @@ already there are moved over when their test is next touched:
   the thing: `wait_until_succeeds`, `wait_unit_active`, `wait_socket`; in a
   browser flow `wait_for_selector`, `wait_for_function` or `expect`. One
   that must stay (a polling loop's own beat, a device that ignores input
-  for a moment) says why on its own line: `# sleep-ok: <reason>`.
+  for a moment) says why on its own line: `# sleep-ok: <reason>`. When
+  ruff format wraps the call, the comment may sit on any of its lines.
 - **`systemctl start X` then `journalctl -u X | grep ...`.** The unit's
   journal holds every run's lines. Store's read-back check (`journalctl -u
   dd-store-copy.service | grep -q 'read back is not what was sent'`, failed
