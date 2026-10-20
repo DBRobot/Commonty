@@ -58,8 +58,85 @@ let
   };
   # the first disk every computer starts from; each copies it once, and
   # from then on it is the instance's own
-  image = import "${pkgs.path}/nixos/lib/make-disk-image.nix" {
+  image = reproducible madeImage;
+  # Every box rebuilds and signs what it runs, so the image must be the
+  # same bytes on each; make-disk-image's is not. Its tree is kept and the
+  # file system made again from it by mkfs (sorted, fixed seed, times
+  # clamped), with the VM's clock past the epoch so every time clamps, nix's
+  # paths renumbered, perl's hash order and the MBR's disk id fixed
+  epoch = "315532800";
+  reproducible =
+    img:
+    let
+      install = "NIXOS_INSTALL_BOOTLOADER=1 nixos-enter";
+    in
+    assert lib.assertMsg (lib.hasInfix install img.buildCommand)
+      "make-disk-image no longer runs ${install}";
+    lib.overrideDerivation img (old: {
+      buildCommand =
+        "date -s @${toString (lib.toInt epoch + 1)} >/dev/null\nexport PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0\n"
+        +
+          lib.replaceStrings
+            [ install ]
+            [
+              "touch -h -d @${epoch} $mountPoint/nix/var/nix/profiles/system-1-link\n${install}"
+            ]
+            old.buildCommand
+        + ''
+          mount /dev/vda1 /mnt
+          db=/mnt/nix/var/nix/db
+          ${pkgs.sqlite}/bin/sqlite3 -bail $db/db.sqlite < ${renumber}
+          rm -f $db/db.sqlite-shm $db/db.sqlite-wal
+          # every inode's atime fixed, and its ctime moved past the epoch;
+          # mkfs keeps /var/empty's immutable flag
+          chattr -i /mnt/var/empty
+          find /mnt -xdev -exec touch -h -a -d @${epoch} {} +
+          chattr +i /mnt/var/empty
+          mount -o remount,ro /mnt
+          truncate -s "$(blockdev --getsize64 /dev/vda1)" /tmp/xchg/root.ext4
+          SOURCE_DATE_EPOCH=${epoch} mkfs.ext4 -q -F -b 4096 -L nixos -U ${uuid} \
+            -E hash_seed=${uuid},lazy_itable_init=0,lazy_journal_init=0,nodiscard \
+            -d /mnt /tmp/xchg/root.ext4
+          umount /mnt
+          e2fsck -fn /tmp/xchg/root.ext4
+        '';
+      postVM = ''
+        eval "$(partx "$diskImage" -o START --nr 1 --pairs)"
+        [ "$START" = 2048 ] || { echo "root partition at sector $START, not 2048" >&2; exit 1; }
+        dd if=xchg/root.ext4 of="$diskImage" bs=1M seek=1 conv=notrunc status=none
+        rm xchg/root.ext4
+        ${pkgs.util-linux}/bin/sfdisk --disk-id "$diskImage" 0x64640001
+      ''
+      + old.postVM;
+    });
+  # nix-store --load-db numbers the paths in no fixed order: by path
+  # instead, registered at the epoch. A table this does not know fails it
+  renumber = pkgs.writeText "renumber.sql" ''
+    CREATE TEMP TABLE t AS SELECT group_concat(name) AS names
+      FROM (SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name);
+    SELECT CASE WHEN names = 'DerivationOutputs,Refs,SchemaMigrations,ValidPaths,sqlite_sequence'
+      THEN 1 ELSE abs(-9223372036854775807 - 1) END FROM t;
+    CREATE TEMP TABLE m AS SELECT id AS old, row_number() OVER (ORDER BY path) AS new FROM ValidPaths;
+    CREATE TEMP TABLE v AS SELECT m.new AS id, path, hash, ${epoch} AS registrationTime,
+      deriver, narSize, ultimate, sigs, ca FROM ValidPaths JOIN m ON m.old = ValidPaths.id;
+    CREATE TEMP TABLE r AS SELECT a.new AS referrer, b.new AS reference
+      FROM Refs JOIN m a ON a.old = Refs.referrer JOIN m b ON b.old = Refs.reference;
+    CREATE TEMP TABLE d AS SELECT m.new AS drv, DerivationOutputs.id AS id, path
+      FROM DerivationOutputs JOIN m ON m.old = DerivationOutputs.drv;
+    DELETE FROM Refs;
+    DELETE FROM DerivationOutputs;
+    DELETE FROM ValidPaths;
+    INSERT INTO ValidPaths SELECT * FROM v ORDER BY id;
+    INSERT INTO Refs SELECT * FROM r ORDER BY referrer, reference;
+    INSERT INTO DerivationOutputs SELECT * FROM d ORDER BY drv, id;
+    PRAGMA journal_mode = DELETE;
+    VACUUM;
+  '';
+  # make-disk-image's own default, which the guest's grub.cfg searches by
+  uuid = "F222513B-DED1-49FA-B591-20CE86A2FE7F";
+  madeImage = import "${pkgs.path}/nixos/lib/make-disk-image.nix" {
     inherit pkgs lib;
+    rootFSUID = uuid;
     inherit (guestSystem) config;
     name = "dd-computer-image";
     # compressed: copied once per computer, and through the build cache

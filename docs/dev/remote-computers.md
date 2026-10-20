@@ -126,6 +126,17 @@ browser: compute.<domain>        CLI: dd computer ...
   the guest builds its own system from it (`nixos-rebuild`, nixpkgs pinned
   by the release). The member's Nix is never evaluated or built on the
   host.
+- **The image is the same bytes on every box**, as everything a box runs
+  must be (dd-attest, [releases.md](releases.md)). make-disk-image's own is
+  not: a kernel writes its file system (a random directory hash seed and
+  inode generations, the VM's times), nix numbers its paths in no fixed
+  order and at the build's time, perl's hash order sets `/etc/shadow`, and
+  parted picks the MBR's id. So `computers.nix` keeps its tree and its
+  boot sectors and makes the file system again with `mkfs.ext4 -d`
+  (sorted, a fixed UUID and hash seed, every time clamped to 1980), with
+  nix's paths renumbered by path and the disk id fixed. No machine-id or
+  host key is in it: the guest makes those on its first boot.
+  `nix-store --realise --check` on its derivation rebuilds and compares.
 - **Stop and start** as games do: QMP `system_powerdown`, a minute, then
   `quit`. A switch never restarts a running computer.
 
