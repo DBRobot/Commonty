@@ -152,6 +152,9 @@ assert sql(a, "select count(*) from t where n = 999") == "0"
 a.succeed("ls -d /var/lib/postgresql/*.before-e3.* | grep -q .")
 # and it writes on; its archive catches up once the store takes writes
 sql(a, "insert into t values (151)")
+# b is away a minute, as on a loaded runner (CI run 767): the store write a
+# sent before it saw b go waits out garage's rpc timeout, not b's return
+a.sleep(60)
 b.start()
 b.wait_for_unit("garage.service")
 archived(a)
