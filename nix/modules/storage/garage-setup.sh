@@ -2,13 +2,16 @@
 # Stage this box in the layout, apply it once the others are in, then buckets and keys.
 set -u
 for i in $(seq 1 60); do garage status >/dev/null 2>&1 && break; sleep 2; done
+# garage aborts (SIGABRT, a core dump) when stdout closes under it, and
+# `garage ... | grep -q` closes it at the first match: read it all, then grep
+layout_has() { local out; out=$(garage layout "$1" 2>/dev/null); grep -q -- "$2" <<<"$out"; }
 
 # this box's own role in the layout; the other boxes stage theirs.
 # apply fails while the layout has fewer boxes than copies, and that
 # is fine: the timer tries again once the other box has staged
 NODE=$(garage node id -q | cut -d@ -f1)
 # layout show prints ids cut to 16 hex
-if ! garage layout show 2>/dev/null | grep -q "^${NODE:0:16}"; then
+if ! layout_has show "^${NODE:0:16}"; then
   garage layout assign -z $ZONE -c $CAPACITY "$NODE"
 fi
 # garage prints the version to apply; computing it ourselves gets
@@ -25,11 +28,11 @@ done
 # this one by gossip. Give that half a minute before deciding there
 # is no layout, or the buckets and keys below wait for the timer
 for i in $(seq 1 6); do
-  garage layout show 2>/dev/null | grep -q "Current cluster layout version: [1-9]" && break
+  layout_has show "Current cluster layout version: [1-9]" && break
   sleep 5
 done
 # no layout yet: nothing below can be stored, the timer comes back
-if ! garage layout show 2>/dev/null | grep -q "Current cluster layout version: [1-9]"; then
+if ! layout_has show "Current cluster layout version: [1-9]"; then
   echo "layout not applied yet: waiting for the other box"
   exit 0
 fi
@@ -38,7 +41,7 @@ fi
 # and a key imported then is simply gone. Wait for the cluster to
 # settle before the buckets and keys below
 for i in $(seq 1 90); do
-  garage layout history 2>/dev/null | grep -q "stable state" && break
+  layout_has history "stable state" && break
   sleep 2
 done
 
