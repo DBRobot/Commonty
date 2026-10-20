@@ -491,7 +491,7 @@ export async function images(view) {
 
 async function show() {
   if (!inApp && !servedByApp) {
-    say('', throughApp('Your disk images are locked with a key only your devices hold, so the Commonty app opens them here in this browser.', 'Open Backups', '/_dd/settings#backups', 'open-backups'));
+    say('', throughApp('Your disk images are locked with a key only your devices hold, so the Commonty app opens them here in this browser.', 'Open Backups', '/_dd/settings#backups', { 'data-guide': 'open-backups' }));
     return;
   }
   await me();
