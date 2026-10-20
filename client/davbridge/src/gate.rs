@@ -84,6 +84,9 @@ impl<S: Source> GateStore<S> {
             ),
             None => (coll, libs.iter().find(|x| x.main).context("no library")?),
         };
+        if !crate::good_name(folder) || folder.contains('~') {
+            bail!("not a calendar's name");
+        }
         Ok((lib.clone(), folder.to_string()))
     }
 
@@ -219,6 +222,9 @@ impl<S: Source> Store for GateStore<S> {
 
     async fn delete(&self, kind: Kind, coll: &str, name: &str, from: &Version) -> Result<bool> {
         let (lib, folder) = self.find(coll).await?;
+        if !lib.writable {
+            bail!("shared with you to see");
+        }
         self.gate(&lib)
             .await?
             .trash_if(&format!("{}/{folder}/{name}", kind.root()), from)
@@ -249,6 +255,9 @@ impl<S: Source> Store for GateStore<S> {
         color: Option<&str>,
     ) -> Result<()> {
         let (lib, folder) = self.find(coll).await?;
+        if !lib.writable {
+            bail!("shared with you to see");
+        }
         let g = self.gate(&lib).await?;
         let at = format!("{}/{folder}", kind.root());
         if let Some(n) = name {
@@ -268,5 +277,65 @@ impl<S: Source> Store for GateStore<S> {
             .await?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Two;
+
+    #[async_trait::async_trait]
+    impl Source for Two {
+        async fn libraries(&self) -> Result<Vec<Lib>> {
+            let lib = |id: &str, main, writable| Lib {
+                id: id.into(),
+                key: library::Key::new([7; 32]),
+                main,
+                owned: main,
+                writable,
+            };
+            Ok(vec![lib("mine", true, true), lib("seen", false, false)])
+        }
+        async fn token(&self) -> Result<(String, String)> {
+            bail!("no gate in a test")
+        }
+    }
+
+    #[tokio::test]
+    async fn a_calendar_is_named_by_one_folder_and_no_more() {
+        let s = GateStore::new(Two);
+        let (lib, folder) = s.find("personal").await.unwrap();
+        assert_eq!((lib.id.as_str(), folder.as_str()), ("mine", "personal"));
+        let (lib, folder) = s.find("trips~seen").await.unwrap();
+        assert_eq!((lib.id.as_str(), folder.as_str()), ("seen", "trips"));
+        for bad in [
+            "~seen", ".~seen", "..~seen", "a/b~seen", "a~b~seen", "..", "",
+        ] {
+            assert!(s.find(bad).await.is_err(), "{bad:?} was let through");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_calendar_shared_to_be_seen_is_not_emptied_or_renamed() {
+        let s = GateStore::new(Two);
+        let k = Kind::Calendars;
+        for e in [
+            s.delete(k, "trips~seen", "e.ics", &Version::Any)
+                .await
+                .unwrap_err(),
+            s.rename(k, "trips~seen", Some("x"), None)
+                .await
+                .unwrap_err(),
+        ] {
+            assert_eq!(e.to_string(), "shared with you to see");
+        }
+        // the member's own calendar gets as far as the gate
+        let e = s
+            .delete(k, "personal", "e.ics", &Version::Any)
+            .await
+            .unwrap_err();
+        assert_eq!(e.to_string(), "no gate in a test");
     }
 }

@@ -412,6 +412,33 @@ async fn a_calendar_shared_to_be_seen_is_not_changed() {
 }
 
 #[tokio::test]
+async fn an_item_is_read_only_from_a_calendar_that_is_there() {
+    let (app, m) = setup();
+    m.put(
+        Kind::Calendars,
+        "ghost",
+        "e.ics",
+        EVENT.as_bytes(),
+        &Version::Any,
+    )
+    .await
+    .unwrap();
+    let (s, _, _) = ask(&app, "GET", "/dav/calendars/ghost/e.ics", &[], "").await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    m.put(
+        Kind::Calendars,
+        "personal",
+        "e.ics",
+        EVENT.as_bytes(),
+        &Version::Any,
+    )
+    .await
+    .unwrap();
+    let (s, _, _) = ask(&app, "GET", "/dav/calendars/personal/e.ics", &[], "").await;
+    assert_eq!(s, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn items_come_with_their_data_by_multiget_and_by_query() {
     let (app, _) = setup();
     ask(&app, "PUT", "/dav/calendars/personal/e1.ics", &[], EVENT).await;

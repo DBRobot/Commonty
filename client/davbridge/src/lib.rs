@@ -121,7 +121,7 @@ fn at(path: &str) -> Option<At> {
 }
 
 /// a name that is one path segment and nothing more
-fn good_name(s: &str) -> bool {
+pub(crate) fn good_name(s: &str) -> bool {
     !s.is_empty() && s != "." && s != ".." && !s.contains(['/', '\\', '\0'])
 }
 
@@ -1016,6 +1016,9 @@ impl<S: Store> Bridge<S> {
         let At::Item(k, id, name) = place else {
             return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
         };
+        if self.coll(*k, id).await?.is_none() {
+            return Ok(StatusCode::NOT_FOUND.into_response());
+        }
         let Some((bytes, etag)) = self.store.get(*k, id, name).await? else {
             return Ok(StatusCode::NOT_FOUND.into_response());
         };
