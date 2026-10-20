@@ -533,9 +533,7 @@ ok(
     in open(f"{T}/systemctl3.log").readlines(),
     "and started its unit",
 )
-time.sleep(
-    11
-)  # sleep-ok: a never-runs check needs a window, two of node2's 5 s placement rounds
+time.sleep(11)  # sleep-ok: never-runs check, two placement rounds
 ok(
     not os.path.exists(comp_flag(2, OWN))
     and f"dd-computer@{OWN}" not in open(f"{T}/systemctl2.log").read(),
