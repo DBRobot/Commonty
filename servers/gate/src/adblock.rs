@@ -91,13 +91,27 @@ impl Adblock {
     }
 }
 
+/// Pi-hole writes its lists without waiting for a lock, so a write that lands
+/// in its once-a-second check of the file is 400 "database is locked":
+/// nothing written, safe to ask again
+fn busy(status: reqwest::StatusCode, body: &Value) -> bool {
+    status == reqwest::StatusCode::BAD_REQUEST
+        && body["error"]["key"] == "database_error"
+        && body["error"]["hint"]
+            .as_str()
+            .is_some_and(|h| h.contains("database is locked"))
+}
+
 async fn ftl(
     ab: &Adblock,
     method: reqwest::Method,
     path: &str,
     body: Option<Value>,
 ) -> Result<Value, StatusCode> {
-    for fresh in [false, true] {
+    let mut fresh = false;
+    // that read takes a few milliseconds; give it up to about five seconds
+    let mut waits = [20u64, 50, 100, 200, 400, 800, 1600, 1600].into_iter();
+    loop {
         let mut r = crate::http()
             .request(method.clone(), format!("{}/api{path}", ab.api))
             .timeout(Duration::from_secs(10));
@@ -111,20 +125,33 @@ async fn ftl(
             r = r.json(b);
         }
         let r = r.send().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+        let status = r.status();
         // the session lapsed or Pi-hole restarted: sign in again, once
-        if r.status() == reqwest::StatusCode::UNAUTHORIZED && !fresh && ab.password.is_some() {
+        if status == reqwest::StatusCode::UNAUTHORIZED && !fresh && ab.password.is_some() {
+            fresh = true;
             continue;
         }
-        if !r.status().is_success() {
-            eprintln!("adblock: Pi-hole said {} to {method} {path}", r.status());
-            return Err(StatusCode::BAD_GATEWAY);
-        }
-        if r.status() == reqwest::StatusCode::NO_CONTENT {
+        if status == reqwest::StatusCode::NO_CONTENT {
             return Ok(Value::Null);
         }
-        return r.json().await.map_err(|_| StatusCode::BAD_GATEWAY);
+        let text = r.text().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+        let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        if status.is_success() {
+            return if v.is_null() {
+                Err(StatusCode::BAD_GATEWAY)
+            } else {
+                Ok(v)
+            };
+        }
+        if busy(status, &v)
+            && let Some(ms) = waits.next()
+        {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+            continue;
+        }
+        eprintln!("adblock: Pi-hole said {status} to {method} {path}: {text}");
+        return Err(StatusCode::BAD_GATEWAY);
     }
-    Err(StatusCode::BAD_GATEWAY)
 }
 
 /// the household member asking, or why not
@@ -395,7 +422,9 @@ pub(crate) async fn unallow(
 
 #[cfg(test)]
 mod tests {
-    use super::domain;
+    use super::{busy, domain};
+    use reqwest::StatusCode;
+    use serde_json::json;
 
     #[test]
     fn a_site_as_people_type_it() {
@@ -408,5 +437,17 @@ mod tests {
         assert_eq!(domain("a b.com"), None);
         assert_eq!(domain("-x.com"), None);
         assert_eq!(domain(""), None);
+    }
+
+    #[test]
+    fn only_a_locked_file_is_asked_again() {
+        let locked = json!({ "error": { "key": "database_error", "message": "Could not add to gravity database", "hint": "database is locked" } });
+        assert!(busy(StatusCode::BAD_REQUEST, &locked));
+        let dup = json!({ "error": { "key": "database_error", "message": "Could not add to gravity database", "hint": "UNIQUE constraint failed: domainlist.domain, domainlist.type" } });
+        assert!(!busy(StatusCode::BAD_REQUEST, &dup));
+        let bad =
+            json!({ "error": { "key": "bad_request", "message": "Invalid domain", "hint": "x" } });
+        assert!(!busy(StatusCode::BAD_REQUEST, &bad));
+        assert!(!busy(StatusCode::INTERNAL_SERVER_ERROR, &locked));
     }
 }

@@ -185,6 +185,20 @@ box.succeed(
 house.wait_until_succeeds(
     "dig +short @192.168.1.2 tracker.example.test | grep -qx 0.0.0.0", timeout=30
 )
+# Pi-hole writes its lists without waiting for a lock, and once a second it
+# reads the file itself: a site let through while the file is being read is
+# not turned away (CI run 765). Hold a read on the file, as that check does,
+# for three seconds, and let a site through in it
+box.succeed(
+    "rm -f /tmp/held; (printf 'BEGIN;\\nSELECT count(*) FROM info;\\n.shell touch /tmp/held; sleep 3\\nCOMMIT;\\n' | sqlite3 -readonly /var/lib/pihole/gravity.db >/dev/null 2>&1 &)"
+)
+box.wait_for_file("/tmp/held")
+box.succeed(
+    f'curl -sf {sarah} {json_} -d \'{{"domain": "busy.example.test"}}\' http://127.0.0.1:4181/_dd/adblock/allow'
+)
+box.succeed(
+    f"curl -sf {sarah} -X DELETE http://127.0.0.1:4181/_dd/adblock/allow/busy.example.test"
+)
 # not from another site's form
 box.succeed(
     f"curl -s -o /dev/null -w '%{{http_code}}' {sarah} -d 'on=false' http://127.0.0.1:4181/_dd/adblock/switch | grep -cE '^(403|415)$'"
