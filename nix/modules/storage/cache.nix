@@ -8,24 +8,29 @@ let
   cfg = config.dd.cache;
   # the storage pool at this box's address for it: its own garage, or a
   # storage box's over the tailnet (dd.box.s3)
+  # what the post-build hook has queued for dd-cache-upload
+  spool = "/var/lib/dd-cache-upload";
   url = "s3://nix-cache?endpoint=${lib.removePrefix "http://" config.dd.box.s3}&scheme=http&region=us-east-1";
-  # Only the laptop's. A box's nix installs whatever it substitutes, so a
-  # key in this list is a machine allowed to decide what every box that
-  # reads the cache runs - and node2 is meant to sit in someone else's
-  # house. Boxes still upload what they build, signed with their own key;
-  # nobody has to believe them for the cache to be useful, because the
-  # agent checks the release's hashes and the whole closure under them.
-  all = lib.filter (k: k != "") (
-    lib.splitString "\n" (lib.fileContents ../../../fleet/cache-keys.pub)
-  );
-  keys = lib.filter (k: lib.hasPrefix "dd-cache-laptop-" k) all;
+  # The laptop's, and this box's own. A box's nix installs whatever it
+  # substitutes, so a key in this list is a machine allowed to decide what
+  # the box runs - and node2 is meant to sit in someone else's house. So
+  # never another box's: no box takes a build on another's word. Its own
+  # key it may believe, since it signed only what it built (a box rebuilds
+  # what a GC took from its store from its own uploads, not from scratch).
+  # The agent checks a release's hashes and the whole closure under them
+  # either way.
+  keys = import ../../lib/cache-keys.nix {
+    inherit lib;
+    host = config.networking.hostName;
+    listed = lib.fileContents ../../../fleet/cache-keys.pub;
+  };
 in
 {
   # The nix cache is the nix-cache bucket in the cluster. A box with this
   # module substitutes from it and, through a post-build hook, uploads
   # whatever it builds, signed with its own key. The laptop signs what it
-  # publishes with its key. fleet/cache-keys.pub lists every key a box's
-  # nix accepts; the agent does not rely on them, it checks nar hashes from
+  # publishes with its key. A box's nix accepts the laptop's key and its
+  # own (fleet/cache-keys.pub); the agent does not rely on them, it checks nar hashes from
   # the signed release and every path under it, so a poisoned upload can at
   # most mislead CI on the box that reads it, never a release.
   options.dd.cache = {
@@ -44,24 +49,65 @@ in
     nix.settings = {
       substituters = [ url ];
       trusted-public-keys = keys;
-      post-build-hook = pkgs.writeShellScript "upload-to-cache" ''
-        set -eu
-        export HOME=/root
-        export AWS_SHARED_CREDENTIALS_FILE=${cfg.credentialsFile}
-        # nix waits on this hook, so a VM test's 1.5 GB disk image held CI for
-        # ten minutes; nothing big is worth the wait, and test images are
-        # rebuilt in seconds
+      # Nix holds a build until its hook returns, and the upload is xz at
+      # about 4 MB/s (a 174M test binary: 37-46s on node1, 2026-10-20). So the
+      # hook only queues what was built; dd-cache-upload sends it after.
+      post-build-hook = pkgs.writeShellScript "queue-for-cache" ''
+        # a hook that fails fails the build; the cache is never worth that
+        export PATH=${pkgs.coreutils}/bin
+        { mkdir -p ${spool}/new ${spool}/queue && t=$(mktemp -p ${spool}/new) \
+          && printf '%s\n' $OUT_PATHS > "$t" && mv "$t" ${spool}/queue/; } \
+          || echo "not queued for the cache: $OUT_PATHS" >&2
+      '';
+    };
+    systemd.tmpfiles.rules = [
+      "d ${spool} 0700 root root -"
+      "d ${spool}/new 0700 root root -"
+      "d ${spool}/queue 0700 root root -"
+    ];
+    systemd.paths.dd-cache-upload = {
+      wantedBy = [ "paths.target" ];
+      pathConfig.DirectoryNotEmpty = "${spool}/queue";
+    };
+    systemd.services.dd-cache-upload = {
+      description = "Upload what this box built to the nix cache, signed with its key";
+      # a switch never cuts an upload short; the path unit starts the next
+      restartIfChanged = false;
+      environment = {
+        HOME = "/root";
+        AWS_SHARED_CREDENTIALS_FILE = cfg.credentialsFile;
+      };
+      path = [
+        config.nix.package
+        pkgs.coreutils
+        pkgs.findutils
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        Nice = 19;
+        IOSchedulingClass = "idle";
+      };
+      # never fails: the path unit would start it again at once, and the
+      # cache is a copy, not the result
+      script = ''
+        set -u
+        files=$(find ${spool}/queue -type f)
+        [ -n "$files" ] || exit 0
         paths=()
-        for p in $OUT_PATHS; do
+        for p in $(cat $files | sort -u); do
+          # gone already (a GC since), or not worth the space: a VM test's
+          # 1.5 GB disk image and anything big are rebuilt in seconds
+          [ -e "$p" ] || continue
           case $p in *-nixos-disk-image) continue ;; esac
-          [ "$(${pkgs.coreutils}/bin/du -s --block-size=1M "$p" | ${pkgs.coreutils}/bin/cut -f1)" -gt 256 ] && continue
+          [ "$(du -s --block-size=1M "$p" | cut -f1)" -gt 256 ] && continue
           paths+=("$p")
         done
+        rm -f $files
         [ ''${#paths[@]} -gt 0 ] || exit 0
-        # never fail a build over the cache; it is a copy, not the result
-        ${config.nix.package}/bin/nix --extra-experimental-features nix-command \
+        nix --extra-experimental-features nix-command \
           copy --to '${url}&secret-key=${cfg.signingKeyFile}' "''${paths[@]}" \
-          || echo "cache upload failed for ''${paths[*]}" >&2
+          || echo "cache upload failed for ''${#paths[@]} paths"
+        exit 0
       '';
     };
     # the daemon substitutes as root; its credentials live at the usual place
