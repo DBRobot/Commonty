@@ -186,8 +186,10 @@ cache bucket     s3://nix-cache in garage. publish reaches it at
                  100.64.0.2:3900 (node1, over the fleet's network); a box
                  through its own garage, or a storage box's.
 cache keys       fleet/cache-keys.pub: the laptop's, node1's, node2's. A box's
-                 nix trusts only dd-cache-laptop-*; the boxes upload what they
-                 build signed with their own key, which nobody has to believe.
+                 nix trusts dd-cache-laptop-* and its own key, never another
+                 box's; the boxes upload what they build signed with their
+                 own key, after the build (dd-cache-upload), so a box gets
+                 back what a GC took from it.
 cache writer     secrets/fleet.yaml: cache.keyId, cache.keySecret,
                  cache.signingKey, readable by the laptop's sops key alone.
 host keys        each box's ssh host key, in fleet/boxes.json (hostKey): what

@@ -115,6 +115,8 @@
     units = [
       "gitea-runner-*"
       "dd-runner-restart" # the runner into a new config once it holds no job
+      # what its builds made, sent to the nix cache (storage/cache.nix)
+      "dd-cache-upload"
     ];
     base = {
       requires = {
