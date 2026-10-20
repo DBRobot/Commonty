@@ -108,9 +108,18 @@ let
         services.nginx.appendHttpConfig = ''
           map $http_cookie $dd_cookie_stripped { default ""; }
         '';
+        # no certificate for the store's own name: plain http on 80, as the
+        # store's urls here say, not its https port for other boxes
         services.nginx.virtualHosts."store.${name}.test.invalid" = {
           useACMEHost = lib.mkForce null;
           forceSSL = lib.mkForce false;
+          onlySSL = lib.mkForce false;
+          listen = lib.mkForce [
+            {
+              addr = "0.0.0.0";
+              port = 80;
+            }
+          ];
         };
         networking.extraHosts = ''
           192.168.1.1 store.a.test.invalid

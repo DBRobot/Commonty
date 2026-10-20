@@ -7,6 +7,9 @@
 }:
 let
   cfg = config.dd.agent;
+  # the home controller (nix/controller) runs the agent with no dd.box: a
+  # device of a household, never a box that joined on its own key
+  joined = config.dd.box.joined or false;
   agent = self.packages.${pkgs.stdenv.hostPlatform.system}.agent;
 in
 {
@@ -111,7 +114,7 @@ in
         pkgs.openssh # ssh-keygen checks the boxes' signatures
       ]
       # a box that joined fetches the signed commit to build itself from
-      ++ lib.optional config.dd.box.joined pkgs.git;
+      ++ lib.optional joined pkgs.git;
       environment = {
         DD_AGENT_URL = cfg.url;
         DD_AGENT_ATTESTERS = "/etc/dd/attesters.json";
@@ -124,7 +127,7 @@ in
       // lib.optionalAttrs (cfg.cache != null) { DD_AGENT_CACHE = cfg.cache; }
       # a box that joined on its own key builds its own system, from the
       # fleet's public repository at the commit the release key signed
-      // lib.optionalAttrs config.dd.box.joined {
+      // lib.optionalAttrs joined {
         DD_AGENT_JOINED_SOURCE = "git+https://code.${config.dd.domain}/${config.dd.repo}";
         DD_AGENT_JOINED_DIR = "/var/lib/dd/box";
       };
