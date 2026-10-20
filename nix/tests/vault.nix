@@ -15,6 +15,7 @@ let
 in
 {
   name = "vault";
+  helpers = true;
   node.specialArgs = { inherit self; };
   defaults.virtualisation.memorySize = 2048;
   defaults.virtualisation.cores = 2;

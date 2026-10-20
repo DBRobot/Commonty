@@ -2,6 +2,8 @@
 # answering for it, and the Send page open to anyone.
 import json
 
+from waits import journal_has, start_fresh
+
 box.wait_for_unit("garage.service")
 box.wait_for_open_port(3901)
 box.succeed("systemctl restart garage-setup.service")
@@ -281,10 +283,11 @@ far = box.succeed("date -u -d '+40 days' +%F").strip()
 box.succeed(
     f"""echo '{{"id": "2026-10-11-far", "subject": "s", "body": "b", "to": ["tom"], "takes_effect": "{far}"}}' > /var/lib/test-announcements/far.json"""
 )
-box.succeed("systemctl start dd-announce.service")
+# a run of its own, not one its timer began before these were written
+inv = start_fresh(box, "dd-announce.service")
 box.succeed("test -e /var/lib/dd-announce/sent/2026-10-11-soon.refused.json")
 box.fail("test -e /var/lib/dd-announce/sent/2026-10-11-soon.names")
 # no mail Worker here: nothing goes, so it is not marked sent, and is tried
 # again next time rather than lost
 box.fail("test -e /var/lib/dd-announce/sent/2026-10-11-far.json")
-box.succeed("journalctl -u dd-announce | grep -q '2026-10-11-far: 1 not sent yet'")
+assert journal_has(box, "dd-announce.service", inv, "2026-10-11-far: 1 not sent yet")
