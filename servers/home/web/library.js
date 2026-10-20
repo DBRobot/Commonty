@@ -22,8 +22,15 @@ export async function unlock() {
 let opening = null;
 /// The wasm and the library's key, asked for together rather than one
 /// after the other; a page that opens a library calls this first thing.
+/// One that failed is forgotten, so the next call asks again.
 export function begin() {
-  opening ??= { wasm: init(), key: whose() };
+  if (!opening) {
+    const now = { wasm: init(), key: whose() };
+    const forget = () => { if (opening === now) opening = null; };
+    now.wasm.catch(forget);
+    now.key.catch(forget);
+    opening = now;
+  }
   return opening;
 }
 
