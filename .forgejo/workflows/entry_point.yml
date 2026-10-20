@@ -393,16 +393,16 @@ jobs:
   # in-process and try to break them. Each is a nix derivation on the same
   # compiled artifacts as the binaries (flake.nix: checks fmt, clippy,
   # tests), cached by content: a run whose rust did not change gets last
-  # time's answer in seconds.
-
-  rust_lint:
+  # time's answer in seconds. One job: clippy's test build of a crate is
+  # the one the tests run (flake.nix crateTest), so it compiles once.
+  rust:
     needs: files_modified
     if: ${{ needs.files_modified.outputs.rust == 'true' }}
     runs-on: nix
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
-      - name: fmt and clippy
-        run: nix build --no-link .#checks.x86_64-linux.fmt .#checks.x86_64-linux.clippy
+      - name: fmt, clippy and cargo test (unit tests + e2e gates on localhost; app excluded)
+        run: nix build --no-link -L .#checks.x86_64-linux.fmt .#checks.x86_64-linux.clippy .#checks.x86_64-linux.tests
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -424,17 +424,6 @@ jobs:
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
-  test:
-    needs: files_modified
-    if: ${{ needs.files_modified.outputs.rust == 'true' }}
-    runs-on: nix
-    steps:
-      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
-      - name: cargo test (unit tests + e2e gates on localhost; app excluded)
-        run: nix build --no-link -L .#checks.x86_64-linux.tests
-      - uses: ./.forgejo/actions/stop-run
-        if: failure()
-
   # ---- the one check main's rule asks for
 
   # Every job above, passed or rightly skipped, and not a draft. It runs whatever they did
@@ -442,7 +431,7 @@ jobs:
   # never reaches it and is refused the same way. nix/tests/ci.nix fails
   # the build if a job is missing from this list.
   ci_ok:
-    needs: [files_modified, style, lint, flake_check, mail_worker, build_part, build_host, same_build, vm_tests, rust_lint, app_lint, test]
+    needs: [files_modified, style, lint, flake_check, mail_worker, build_part, build_host, same_build, vm_tests, rust, app_lint]
     if: ${{ always() }}
     runs-on: nix
     steps:

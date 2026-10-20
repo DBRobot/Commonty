@@ -39,7 +39,7 @@ pull request opened, pushed, or edited
 │   ├─ build_part ──┬─ build_host (every box's system, built on every box)
 │   │               │    └─ same_build (both builds of a system are one path)
 │   │               └─ vm_tests (one job per test)
-│   ├─ rust_lint · test · app_lint
+│   ├─ rust (fmt, clippy, tests) · app_lint
 │   └─ lint ────────── real faults block; the rest is a yellow warning
 ├─ style ───────────── the title, the body, the commits, the files touched
 │
