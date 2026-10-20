@@ -1965,6 +1965,8 @@
           runner-capacity = import ./nix/tests/runner-capacity.nix args;
           # a box believes its own cache key and the laptop's, never another box's
           cache-trust = import ./nix/tests/cache-trust.nix args;
+          # garage-setup reads garage out whole; a closed pipe aborts garage
+          garage-setup-pipe = import ./nix/tests/garage-setup-pipe.nix args;
           # the PDF editor's document and signatures, on the pinned MuPDF
           pdf-editor = import ./nix/tests/pdf-editor.nix (args // { web = self.packages.${system}.web; });
           sso = import ./nix/tests/sso.nix args;
