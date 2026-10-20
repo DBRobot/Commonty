@@ -188,7 +188,8 @@ box.json
   datasets        dataset -> ZFS properties plus mountpoint; "note" is for
                   people and dropped (dd.zfs.datasets)
   arcMaxBytes     the ARC's cap (zfs_arc_max)
-  runnerCapacity  CI jobs at once on this box's runner
+  runnerCapacity  CI jobs at once on this box's runner, fixed; left out, the
+                  runner reckons it at each start (forge/runner-capacity.sh)
   gamesMemoryMiB  memory all game servers may have together
   neverSleep      no suspend, no lid or power key action
 ```

@@ -531,8 +531,11 @@ runs             the fleet's CI (runs-on: nix,      a member's workflow (runs-on
                  or a box's name for build_host)
 where            on the box, as forgejo-runner,     in a container under gVisor (runsc)
                  nix on the path, the box's store
-capacity         min(threads/4, memory GiB/6)       min(2, threads/4, memory GiB/4)
-                 (box.json runnerCapacity)          4 cpus, 4 GiB, 1024 pids, 1 h per job
+capacity         at each start, min(threads/4,      min(2, threads/4, memory GiB/4)
+                 (memory - services' measured peak  4 cpus, 4 GiB, 1024 pids, 1 h per job
+                 - 6G dd-build - members' runner
+                 - a tenth) / 6G), at least 1
+                 (runner-capacity.sh)
 token (sops)     forgejo-runner-token (admin's)     forgejo-members-runner-token (global)
 caches           act, nix and cargo-target kept;    none (cache.enabled = false);
                  untouched for 14 days goes         docker prunes what is a week old

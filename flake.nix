@@ -1869,6 +1869,8 @@
           # the Files page as the app serves it, against the same made-up app and gate
           files-page = import ./nix/tests/files-page.nix (args // { web = self.packages.${system}.web; });
           safe-rd = import ./nix/tests/safe-rd.nix args;
+          # how many jobs a runner takes, from the box as it is
+          runner-capacity = import ./nix/tests/runner-capacity.nix args;
           # the PDF editor's document and signatures, on the pinned MuPDF
           pdf-editor = import ./nix/tests/pdf-editor.nix (args // { web = self.packages.${system}.web; });
           sso = import ./nix/tests/sso.nix args;

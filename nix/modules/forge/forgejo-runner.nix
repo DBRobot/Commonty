@@ -21,12 +21,47 @@ let
         ];
       }
     );
+  cfg = config.dd.runner;
+  fixed = cfg.capacity != null;
+  # until dd-service-memory has measured them: what the needs say the
+  # services this box's roles bring hold, the runners aside
+  needs = import ../../lib/needs.nix { inherit lib; };
+  sizes =
+    (import ../../lib/capability.nix {
+      inherit lib needs;
+      boxes = { };
+      policy = { };
+    }).sizes;
+  roles = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ../../../fleet/roles.json);
+  brought = lib.unique (
+    lib.concatMap (r: roles.${r}.services or [ ]) (config.dd.control.roles or [ ])
+    ++ lib.attrNames (lib.filterAttrs (_: n: n.everyBox) needs)
+  );
+  fallback = lib.foldl' (a: s: a + sizes.${s}.memory) 0.0 (
+    lib.filter (
+      s:
+      needs ? ${s}
+      && !(builtins.elem s [
+        "forgejo-runner"
+        "members-runner"
+      ])
+    ) brought
+  );
+  members = config.dd.membersRunner or { };
+  membersGiB =
+    if (members.tokenFile or null) != null then members.capacity * members.jobMemoryGiB else 0;
+  configFile = (pkgs.formats.yaml { }).generate "config.yaml" (
+    config.services.gitea-actions-runner.instances.${name}.settings
+  );
+  live = "/var/lib/gitea-runner/${name}/config.yaml";
 in
 {
   imports = [ ../box/work-memory.nix ];
 
-  # what one job takes: the biggest VM test is three VMs of 1.5G, and a
-  # build takes every thread it is given
+  # what one job takes, measured (node1, 2026-10-20): its runner at 12.1G
+  # with two jobs, the biggest VM test's qemu at 5.3G; and builds use what
+  # threads they are given (8 threads were 85% busy at the 90th percentile
+  # with two jobs on each box)
   options.dd.runner.jobThreads = lib.mkOption {
     type = lib.types.ints.positive;
     default = 4;
@@ -35,16 +70,15 @@ in
     type = lib.types.ints.positive;
     default = 6;
   };
+  # a release build beside CI (dd-build: 6.2G on node1, 5.6G on node2 at peak)
+  options.dd.runner.buildMemoryGiB = lib.mkOption {
+    type = lib.types.ints.unsigned;
+    default = 6;
+  };
   options.dd.runner.capacity = lib.mkOption {
-    type = lib.types.ints.positive;
-    default =
-      let
-        gib = config.dd.box.memoryBytes / (1024 * 1024 * 1024);
-      in
-      lib.max 1 (
-        lib.min (config.dd.box.threads / config.dd.runner.jobThreads) (gib / config.dd.runner.jobMemoryGiB)
-      );
-    description = "Jobs this box runs at once: as many as its threads and memory hold (box.json runnerCapacity overrides)";
+    type = lib.types.nullOr lib.types.ints.positive;
+    default = null;
+    description = "Jobs this box runs at once. Null (the default): reckoned when the runner starts, from the box's threads and memory and what its services hold (runner-capacity.sh)";
   };
 
   config = {
@@ -81,7 +115,8 @@ in
           "${name}:host"
         ];
         settings.runner = {
-          inherit (config.dd.runner) capacity;
+          # 0 is a stand-in that runner-capacity.sh replaces at every start
+          capacity = if fixed then cfg.capacity else 0;
           # a stop lets the jobs under way finish first: the runner takes no
           # new one and exits when the last is done. At the default (0s) a
           # stop killed every job it held. Its own limit on a job, so no job
@@ -156,16 +191,35 @@ in
         Group = "forgejo-runner";
         # the wait for the forge (its certificate arrives after a switch)
         TimeoutStartSec = "10min";
-        ExecStartPre = lib.mkBefore [
-          # as root: which unit definition this run started from
-          "+${restartScript "started"}"
-          (pkgs.writeShellScript "runner-address" (
-            ddScript ./runner-address.sh {
-              NAME = name;
-              URL = "https://git.${base}";
-            }
-          ))
-        ];
+        ExecStartPre = lib.mkBefore (
+          [
+            # as root: which unit definition this run started from
+            "+${restartScript "started"}"
+            (pkgs.writeShellScript "runner-address" (
+              ddScript ./runner-address.sh {
+                NAME = name;
+                URL = "https://git.${base}";
+              }
+            ))
+          ]
+          ++ lib.optional (!fixed) (
+            pkgs.writeShellScript "runner-capacity" (
+              ddScript ./runner-capacity.sh {
+                JOB_THREADS = cfg.jobThreads;
+                JOB_GIB = cfg.jobMemoryGiB;
+                BUILD_GIB = cfg.buildMemoryGiB;
+                MEMBERS_GIB = membersGiB;
+                FALLBACK_GIB = toString (builtins.ceil fallback);
+                FACTS = "/var/lib/dd-facts/services.prom";
+                IN = configFile;
+                OUT = live;
+              }
+            )
+          )
+        );
+        ExecStart = lib.mkIf (!fixed) (
+          lib.mkForce "${lib.getExe config.services.gitea-actions-runner.package} daemon --config ${live}"
+        );
       };
     };
 
