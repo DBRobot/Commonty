@@ -69,6 +69,12 @@ function lease() {
 }
 
 const LEASE = lease();
+// the account number as the lease's content stream holds it: glyph ids in
+// hex, never the digits themselves. A search for the digits alone found
+// only a signature's random bytes, now and then (a 2026-10-20 flake)
+const SERIF = new mupdf.Font('LiberationSerif-Regular', fs.readFileSync(`${FONTS}/LiberationSerif-Regular.ttf`));
+const asWritten = (s) => [...s].map((c) => SERIF.encodeCharacter(c).toString(16).padStart(4, '0')).join('');
+const holdsAccount = (bytes) => raw(bytes).toLowerCase().includes(asWritten('4471')) || text(bytes).includes('4471');
 
 await t('marks are made, moved, undone and redone', async () => {
   const p = await Pdf.open(LEASE);
@@ -139,7 +145,9 @@ await t('redaction is gone from the bytes, with marks, field values and metadata
   for (const h of hits) await p.add(0, { type: 'Redact', quads: h.quads });
   await p.add(0, { type: 'Redact', rect: [296, 286, 504, 314] });
   const out = raw(p.save());
-  for (const s of ['4471', 'SECRET-FIELD-77', 'SECRET-NOTE-88', 'SECRET-TITLE-99', 'SECRET-ALT-66', 'SECRET-ACTUAL-55']) ok(!out.includes(s), `${s} survived`);
+  ok(holdsAccount(LEASE), 'the search does not see the account number before redaction');
+  ok(!holdsAccount(p.save()), 'the account number survived');
+  for (const s of ['SECRET-FIELD-77', 'SECRET-NOTE-88', 'SECRET-TITLE-99', 'SECRET-ALT-66', 'SECRET-ACTUAL-55']) ok(!out.includes(s), `${s} survived`);
 });
 
 await t('forms: fields added, filled, kept', async () => {
@@ -211,11 +219,12 @@ await t('a changed byte, or a byte range wider than the hole, fails the check', 
 });
 
 await t('redacting a signed file writes it whole: the redacted words are in no revision', async () => {
+  ok(holdsAccount(signed), 'the search does not see the account number before redaction');
   const p = await Pdf.open(signed);
   for (const h of p.match(0, /\b\d{4}-\d{4}-\d{4}\b/g)) await p.add(0, { type: 'Redact', quads: h.quads });
   const bytes = p.save();
   ok(Buffer.compare(Buffer.from(bytes.slice(0, signed.length)), Buffer.from(signed)) !== 0, 'saved as an update after the signed bytes');
-  ok(!raw(bytes).includes('4471'), 'the account number survived');
+  ok(!holdsAccount(bytes), 'the account number survived');
 });
 
 fs.rmSync(TMP, { recursive: true, force: true });
