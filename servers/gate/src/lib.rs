@@ -3048,7 +3048,7 @@ pub async fn start(
         tokio::spawn(async move {
             loop {
                 leaving::tick(&a).await;
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                tokio::time::sleep(leaving::tick_every()).await;
             }
         });
     }

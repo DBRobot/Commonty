@@ -92,7 +92,18 @@ in
       # boot does not ask: the script does, once all of this is up. The
       # certificate's base unit wants an order too; at boot that one raced
       # wrangler's start, and the script's start joined it and its failure
-      systemd.services."acme-order-renew-${base}".wantedBy = lib.mkForce [ ];
+      systemd.services."acme-order-renew-${base}" = {
+        wantedBy = lib.mkForce [ ];
+        # lego waits a minute between names and polls every 5s (acme.nix);
+        # the record is in pebble's DNS when the helper answers, so poll
+        # every second and go straight on. Read after acme.nix's file
+        serviceConfig.EnvironmentFile = lib.mkAfter [
+          (pkgs.writeText "acme-exec-test.env" ''
+            EXEC_POLLING_INTERVAL=1
+            EXEC_SEQUENCE_INTERVAL=1
+          '')
+        ];
+      };
       systemd.services."acme-${base}".wants = lib.mkForce [ "acme-setup.service" ];
       systemd.timers."acme-renew-${base}".enable = false;
 

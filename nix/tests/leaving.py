@@ -58,7 +58,7 @@ for who in ["sarah", "ann", "tom"]:
 s3 = (
     "AWS_ACCESS_KEY_ID=GK0123456789abcdef01234567 "
     "AWS_SECRET_ACCESS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef "
-    "aws --endpoint-url http://127.0.0.1:3900 --region garage"
+    "aws --endpoint-url http://127.0.0.1:3900 --region us-east-1"
 )
 box.succeed("echo ciphertext > /root/blob")
 for who in ["sarah", "ann", "tom"]:
@@ -206,11 +206,13 @@ assert (
     != "204"
 )
 
-# within the gate's next minute her libraries, images, notes and names go
+# at the gate's next look her libraries, images, notes and names go
 box.wait_until_succeeds(
     f'curl -sf {gate}/internal/leaving | jq -e \'.members[] | select(.name == "sarah") | .due and (.done | index("gate")) and (.done | index("libraries"))\'',
     timeout=150,
 )
+# and ann's, suspended, are kept: the window is short here, so this first
+assert keys(libs["ann"]), "a suspension keeps things for the window"
 assert keys(libs["sarah"]) == [], keys(libs["sarah"])
 assert keys("images-sarah") == []
 box.succeed(f"test ! -e {state}/names/sarah.bin")
@@ -224,8 +226,7 @@ box.succeed(
     f'curl -sf {gate}/internal/leaving | jq -e \'.members[] | select(.name == "sarah") | .done | index("photos")\''
 )
 
-# ann's library is kept until her window (two minutes) runs out, then goes
-assert keys(libs["ann"]), "a suspension keeps things for the window"
+# ann's library is kept until her window (a minute) runs out, then goes
 box.wait_until_succeeds(
     f'curl -sf {gate}/internal/leaving | jq -e \'.members[] | select(.name == "ann") | .due and (.done | index("libraries"))\'',
     timeout=300,

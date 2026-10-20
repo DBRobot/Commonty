@@ -24,8 +24,10 @@ in
       ../modules/library/libraries.nix
     ];
     dd.verify.role = pkgs.lib.mkForce "full";
-    # a removal keeps things two minutes, not 30 days
-    dd.verify.leaveWindowSeconds = 120;
+    # a removal keeps things a minute, not 30 days, and the gate looks
+    # every 2s: the script's checks inside the window take ~20s at most
+    dd.verify.leaveWindowSeconds = 60;
+    dd.verify.leaveTickSeconds = 2;
     dd.garage = {
       zone = "r-test";
       capacity = "1G";

@@ -107,6 +107,11 @@ in
     default = null;
     description = "how long someone's things are kept after they leave; null: 30 days. A test shortens it.";
   };
+  options.dd.verify.leaveTickSeconds = lib.mkOption {
+    type = lib.types.nullOr lib.types.ints.positive;
+    default = null;
+    description = "how often the gate deletes what is due; null: every minute. A test shortens it.";
+  };
   options.dd.verify.housePeers = lib.mkOption {
     type = lib.types.listOf lib.types.str;
     default = [ ];
@@ -431,6 +436,9 @@ in
       }
       // lib.optionalAttrs (cfg.leaveWindowSeconds != null) {
         VERIFY_LEAVE_WINDOW_SECS = toString cfg.leaveWindowSeconds;
+      }
+      // lib.optionalAttrs (cfg.leaveTickSeconds != null) {
+        VERIFY_LEAVE_TICK_SECS = toString cfg.leaveTickSeconds;
       }
       # the front door's gate asks the mail Worker to delete the address of
       # whoever left 30 days ago (servers/gate/src/leaving.rs)

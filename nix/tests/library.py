@@ -90,7 +90,7 @@ box.succeed(
 assert box.succeed(f"{rc} cat lib:Files/dd.txt").strip() == "from dd"
 
 # the bucket: ciphertext under names nobody reads, nothing plain
-aws = "AWS_ACCESS_KEY_ID=GK0123456789abcdef01234567 AWS_SECRET_ACCESS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef aws --endpoint-url http://127.0.0.1:3900 --region garage s3api list-objects-v2 --bucket libraries --query 'Contents[].Key' --output json"
+aws = "AWS_ACCESS_KEY_ID=GK0123456789abcdef01234567 AWS_SECRET_ACCESS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef aws --endpoint-url http://127.0.0.1:3900 --region us-east-1 s3api list-objects-v2 --bucket libraries --query 'Contents[].Key' --output json"
 keys = box.succeed(aws).strip()
 keys = json.loads(keys or "[]")
 assert all(k.startswith(lib + "/") for k in keys), keys

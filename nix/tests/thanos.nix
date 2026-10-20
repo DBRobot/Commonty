@@ -57,9 +57,11 @@ in
   name = "thanos";
   node.specialArgs = { inherit self; };
   defaults.virtualisation.memorySize = 2048;
-  # blocks every minute, so b's history is in the bucket within a few
-  # minutes rather than two hours
-  defaults.dd.thanos.blockDuration = "1m";
+  # blocks every half minute, so b's history is in the bucket within a
+  # minute or so rather than two hours; its facts are scraped within
+  # seconds of being written, not the next minute
+  defaults.dd.thanos.blockDuration = "30s";
+  defaults.services.prometheus.globalConfig.scrape_interval = "5s";
   defaults.virtualisation.cores = 2; # services start in parallel instead of queueing on one thread
   defaults.virtualisation.diskSize = 4096;
   nodes = {
@@ -69,7 +71,7 @@ in
         {
           # its own sidecar; b's history reaches it through the bucket
           dd.thanos.sidecars = [ "127.0.0.1:10901" ];
-          dd.thanos.storeSync = "15s";
+          dd.thanos.storeSync = "5s";
           dd.verify.role = pkgs.lib.mkForce "full";
           # the fleet the gate shows; the addresses are not asked
           dd.verify.fleet = {

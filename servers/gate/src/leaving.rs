@@ -37,6 +37,16 @@ pub fn window() -> u64 {
         .unwrap_or(WINDOW)
 }
 
+/// how often what is due goes; VERIFY_LEAVE_TICK_SECS shortens it, for a test
+pub fn tick_every() -> Duration {
+    let secs = std::env::var("VERIFY_LEAVE_TICK_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&s: &u64| s > 0)
+        .unwrap_or(60);
+    Duration::from_secs(secs)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     Member,
