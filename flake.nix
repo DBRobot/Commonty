@@ -1803,6 +1803,8 @@
           plaintext-label = import ./nix/tests/plaintext-label.nix args;
           calendar-js = import ./nix/tests/calendar-js.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
+          # the test chooser, on made-up changes against covers.json
+          ci-select = import ./nix/tests/ci-select args;
           boxes = import ./nix/tests/boxes.nix args;
           box-reports = import ./nix/tests/box-reports.nix args;
           role-fit = import ./nix/tests/role-fit.nix args;

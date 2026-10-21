@@ -219,6 +219,48 @@ Taking a check out needs the same care in reverse: say in the pull request
 what it was catching and why that is no longer needed, or what catches it
 now.
 
+## Choosing the tests
+
+`files_modified` runs
+[`nix/tests/ci-select/ciselect.py`](../../nix/tests/ci-select/ciselect.py)
+on the files the pull request changes:
+
+- **Docs alone** (`docs/`, a `.md` at the top, `.claude/`, `.github/`) run
+  style and lint, nothing else, and `ci_ok` passes. A docs file a `.nix` or
+  `.rs` file names by path (the terms, for `checks.terms-version`) counts as
+  code.
+- **Under everything** (`flake.nix`, `flake.lock`, `nix/lib/`, `.forgejo/`,
+  `Cargo.*`, `crate-hashes.json`, `client/identity`, `client/auth`, the
+  chooser itself): every test runs.
+- **A path nothing claims** (no check reads it, and no job's path list has
+  it): every test runs.
+- **Otherwise each VM test and each mail_worker check runs only if it
+  reads what changed.** What a check reads is
+  [`covers.json`](../../nix/tests/ci-select/covers.json) (every file its
+  evaluation opened, every directory it listed, every path it asked after,
+  traced from a real `nix eval`) together with every file its `.nix` files
+  name, read from the tree at both ends of the change, so an import a pull
+  request adds counts at once. A change outside all of it leaves the
+  check's derivation as it was. In `nix/tests`, `nix/modules/box`,
+  `nix/roles`, `fleet` and the top a read covers that file; anywhere else
+  it covers the directory, so a new file beside the ones a check reads
+  already counts.
+- **The app** runs when a crate it builds on changes, by its manifests'
+  path dependencies (`app` and `client/hubwriter`, followed to the end).
+
+covers.json is traced again with
+`python3 nix/tests/ci-select/ciselect.py trace` (a few minutes a check
+under load: run it on a box; `--only <check>` for one). Between traces a
+check can come to read a file covers.json does not have only through a path
+its `.nix` files build at evaluation, which the chooser covers by its
+whole directory. The other jobs keep their path lists (rust, and nix for
+the flake check and the systems).
+[`edges.py`](../../nix/tests/ci-select/edges.py) (`checks.ci-select`) holds
+the chooser to the cases above, and
+[`sim.py`](../../nix/tests/ci-select/sim.py) replays it against main's
+history and every check's real drvPath at each commit
+([the replay](../../nix/tests/ci-select/replay.md)).
+
 ## Writing VM tests that don't flake
 
 A VM test that fails one run in five blocks every pull request behind it,

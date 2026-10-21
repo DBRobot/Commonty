@@ -32,6 +32,10 @@ jobs:
       rust: ${{ steps.detect.outputs.rust }}
       vm: ${{ steps.detect.outputs.vm }}
       app: ${{ steps.detect.outputs.app }}
+      # the VM tests and mail_worker checks the change can reach, by what
+      # each one's evaluation reads (nix/tests/ci-select)
+      vm_tests: ${{ steps.detect.outputs.vm_tests }}
+      mail_worker: ${{ steps.detect.outputs.mail_worker }}
       draft: ${{ steps.detect.outputs.draft }}
       proven: ${{ steps.detect.outputs.proven }}
       # every box's system is built (hosts), on every box that runs CI
@@ -71,10 +75,13 @@ jobs:
           echo "flake_check_on=$on" >> "$GITHUB_OUTPUT"
           echo "flake check on: $on (fits: $fits)"
 
-      # Allowlists, not denylists: a new directory should not silently cost
-      # a system build until someone remembers to exclude it. A wrong list
-      # here is caught by the boxes, which build the whole system from main
-      # at every release and roll back what does not come up.
+      # Allowlists, not denylists: a path nothing claims runs everything.
+      # Docs alone run style and lint. The VM tests and the mail_worker
+      # checks are chosen one by one, by what each one's evaluation reads
+      # (covers.json, traced) and what its .nix files name (read here);
+      # the other jobs by the path lists in ciselect.py. A wrong list is caught by
+      # the boxes, which build the whole system from main at every release
+      # and roll back what does not come up.
       - name: what changed?
         id: detect
         env:
@@ -82,6 +89,7 @@ jobs:
           ACTION: ${{ github.event.action }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           STATUS: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/status?limit=100
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           echo "draft=${DRAFT:-false}" >> "$GITHUB_OUTPUT"
           # a draft builds nothing; and an edit (the title, the body) to a
@@ -93,35 +101,15 @@ jobs:
           echo "proven=$proven" >> "$GITHUB_OUTPUT"
           if [ "$DRAFT" = true ] || [ "$proven" = true ]; then
             echo "draft: $DRAFT  already passed: $proven  - nothing to build"
-            for k in nix rust vm app; do echo "$k=false" >> "$GITHUB_OUTPUT"; done
+            nix shell .#ci-tools -c python3 nix/tests/ci-select/ciselect.py select --nothing
             exit 0
           fi
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "nix=true" >> "$GITHUB_OUTPUT"
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            echo "vm=true" >> "$GITHUB_OUTPUT"
-            echo "app=true" >> "$GITHUB_OUTPUT"
+            nix shell .#ci-tools -c python3 nix/tests/ci-select/ciselect.py select --everything
             exit 0
           fi
-          changed=$(git diff --name-only ${{ github.event.pull_request.base.sha }} HEAD)
-          echo "changed files:"; echo "$changed" | sed 's/^/  /'
-          nix=false; rust=false; vm=false; app=false
-          # the rust is built by the flake too, so a rust change is a nix
-          # change; and docs/ is in every box's pages (servers/gate docs.rs),
-          # so it is built, though nothing in a vm or a test reads it; and
-          # the app's release build is held to the flake's Rust (ci.nix)
-          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|secrets/|data/|docs/|servers/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/|\.github/)' && nix=true
-          echo "$changed" | grep -qE '^(servers/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|\.forgejo/)' && rust=true
-          # boxes booted as vms: only when what a box runs changed, not for
-          # every client or host tweak. Minutes, so spent where it counts.
-          echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|nix/|fleet/|data/|servers/|client/(identity|auth)/|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/)' && vm=true
-          # the app, and the crates and toolchain it builds on
-          echo "$changed" | grep -qE '^(app/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|nix/app-release/|\.forgejo/)' && app=true
-          echo "nix=$nix" >> "$GITHUB_OUTPUT"
-          echo "rust=$rust" >> "$GITHUB_OUTPUT"
-          echo "vm=$vm" >> "$GITHUB_OUTPUT"
-          echo "app=$app" >> "$GITHUB_OUTPUT"
-          echo "nix: $nix  rust: $rust  vm: $vm  app: $app"
+          git diff --name-status "$BASE" HEAD | sed 's/^/  /'
+          nix shell .#ci-tools -c python3 nix/tests/ci-select/ciselect.py select "$BASE" HEAD
 
   # ---- nix: is the flake well-formed, and does every box still build
 
@@ -176,7 +164,7 @@ jobs:
           [ "$left" -ge 60 ] || { echo "move dd.securityTxtExpires on (nix/modules/gate/security-txt.nix), at most a year out"; exit 1; }
           [ "$left" -le 366 ] || { echo "RFC 9116 wants Expires under a year away"; exit 1; }
       - name: plaintext labels, box list, and this file
-        run: nix build --no-link .#checks.x86_64-linux.plaintext-label .#checks.x86_64-linux.boxes .#checks.x86_64-linux.box-reports .#checks.x86_64-linux.ci .#checks.x86_64-linux.stylesheet .#checks.x86_64-linux.cargo-nix .#checks.x86_64-linux.nginx .#checks.x86_64-linux.usage-facts .#checks.x86_64-linux.fleet-defaults .#checks.x86_64-linux.retention .#checks.x86_64-linux.terms-version .#checks.x86_64-linux.needs-units .#checks.x86_64-linux.placement .#checks.x86_64-linux.safe-rd .#checks.x86_64-linux.placement-fleet .#checks.x86_64-linux.pdf-editor .#checks.x86_64-linux.calendar-js
+        run: nix build --no-link .#checks.x86_64-linux.plaintext-label .#checks.x86_64-linux.boxes .#checks.x86_64-linux.box-reports .#checks.x86_64-linux.ci .#checks.x86_64-linux.ci-select .#checks.x86_64-linux.stylesheet .#checks.x86_64-linux.cargo-nix .#checks.x86_64-linux.nginx .#checks.x86_64-linux.usage-facts .#checks.x86_64-linux.fleet-defaults .#checks.x86_64-linux.retention .#checks.x86_64-linux.terms-version .#checks.x86_64-linux.needs-units .#checks.x86_64-linux.placement .#checks.x86_64-linux.safe-rd .#checks.x86_64-linux.placement-fleet .#checks.x86_64-linux.pdf-editor .#checks.x86_64-linux.calendar-js
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -185,27 +173,21 @@ jobs:
   # Seconds, and a cache hit when the Worker has not changed.
   mail_worker:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' }}
+    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.mail_worker != '[]' }}
     runs-on: nix
+    strategy:
+      fail-fast: false
+      matrix:
+        # the mail Worker (nix/tests/mail-worker), the Mail and Files pages
+        # as the app serves them, every bar link and home tile staying in
+        # its tab (same-tab), the DNS Worker at its API, sign-in once for
+        # every box (sso), the control plane's relay, witness and
+        # validators (control): those the change can reach (files_modified)
+        check: ${{ fromJSON(needs.files_modified.outputs.mail_worker) }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
-      - name: the mail Worker, in a browser
-        run: nix build --no-link -L .#checks.x86_64-linux.mail-worker
-      # and the Mail page, as the app serves it (nix/tests/mail-page)
-      - name: the Mail page, in a browser
-        run: nix build --no-link -L .#checks.x86_64-linux.mail-page .#checks.x86_64-linux.files-page
-      # every bar link and home tile stays in its tab (nix/tests/same-tab)
-      - name: links stay in their tab
-        run: nix build --no-link -L .#checks.x86_64-linux.same-tab
-      # and the DNS Worker at its API, with the box's helper (nix/tests/dns-worker)
-      - name: the DNS Worker
-        run: nix build --no-link -L .#checks.x86_64-linux.dns-worker
-      # sign-in once for every box: the gate and the id Worker in a browser (nix/tests/sso)
-      - name: sign-in, once for every box
-        run: nix build --no-link -L .#checks.x86_64-linux.sso
-      # and the control plane's relay, witness and validators (nix/tests/control)
-      - name: the control plane, end to end
-        run: nix build --no-link -L .#checks.x86_64-linux.control
+      - name: ${{ matrix.check }}
+        run: nix build --no-link -L .#checks.x86_64-linux.${{ matrix.check }}
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -338,7 +320,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [acme, console, directory, metrics, metrics-ui, backup, release, thanos, members-runner, games, computers, forge, transcode, network, library, pgrestore, photos, llm, vault, adblock, unlock, leaving, home-controller, pg-follow, store, takeover, forge-follow, net-follow, waits, switch-race, join-install, joined-box, work-memory]
+        # those the change can reach (files_modified); a test not chosen
+        # is not run, and the job still reports
+        test: ${{ fromJSON(needs.files_modified.outputs.vm_tests) }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: ${{ matrix.test }}
