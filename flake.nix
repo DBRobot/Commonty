@@ -1868,6 +1868,13 @@
           mail-page = import ./nix/tests/mail-page.nix (args // { web = self.packages.${system}.web; });
           # the Files page as the app serves it, against the same made-up app and gate
           files-page = import ./nix/tests/files-page.nix (args // { web = self.packages.${system}.web; });
+          # the site as a browser meets it: the gateway's nginx and gate, no vm
+          inherit (import ./nix/tests/site.nix args)
+            site-headers
+            site-roles
+            site-a11y
+            site-speed
+            ;
           safe-rd = import ./nix/tests/safe-rd.nix args;
           # how many jobs a runner takes, from the box as it is
           runner-capacity = import ./nix/tests/runner-capacity.nix args;
