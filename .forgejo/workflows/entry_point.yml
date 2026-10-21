@@ -205,10 +205,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # the mail Worker (nix/tests/mail-worker), the Mail and Files pages
-        # as the app serves them, every bar link and home tile staying in
-        # its tab (same-tab), the DNS Worker at its API, sign-in once for
-        # every box (sso), the control plane's relay, witness and
+        # the mail Worker (nix/tests/mail-worker), the Mail, Files and
+        # Movies & TV pages as the app serves them, every bar link and home
+        # tile staying in its tab (same-tab), the DNS Worker at its API,
+        # sign-in once for every box (sso), the control plane's relay, witness and
         # validators (control): those the change can reach (files_modified)
         check: ${{ fromJSON(needs.files_modified.outputs.mail_worker) }}
     steps:

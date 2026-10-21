@@ -34,6 +34,7 @@ MAIL_WORKER = [
     "mail-worker",
     "mail-page",
     "files-page",
+    "media-page",
     "same-tab",
     "site-headers",
     "site-roles",

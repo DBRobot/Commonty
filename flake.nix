@@ -1952,6 +1952,8 @@
           mail-page = import ./nix/tests/mail-page.nix (args // { web = self.packages.${system}.web; });
           # the Files page as the app serves it, against the same made-up app and gate
           files-page = import ./nix/tests/files-page.nix (args // { web = self.packages.${system}.web; });
+          # Movies & TV: a film's band starts the box on it, so Play does not wait
+          media-page = import ./nix/tests/media-page.nix (args // { web = self.packages.${system}.web; });
           # the site as a browser meets it: the gateway's nginx and gate, no vm
           inherit (import ./nix/tests/site.nix args)
             site-headers

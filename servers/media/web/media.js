@@ -314,6 +314,7 @@ async function openTitle(it, { at } = {}) {
     }));
     $('seasons').hidden = seasons.length < 2;
     show.next = next;
+    if (next) warmUp(next);
     await season(s);
   } else {
     const going = !!(p && !p.done && p.at > 30);
@@ -330,6 +331,7 @@ async function openTitle(it, { at } = {}) {
     $('r-over').onclick = () => play(it, { resume: false });
     $('r-remove').textContent = 'Remove from library';
     $('r-remove').onclick = () => remove(it, titleOf(it));
+    warmUp(it);
   }
   if ($('ribbon').hidden) {
     $('veil').hidden = false;
@@ -346,6 +348,7 @@ function closeTitle() {
   $('veil').hidden = true;
   opened = null;
   show = null;
+  coolDown();
   syncInert();
   render();
   const back = openedCard?.dataset?.path && [...document.querySelectorAll('main [data-path]')].find((e) => e.dataset.path === openedCard.dataset.path);
@@ -475,11 +478,48 @@ function backToFilm() {
   (at || ($('ribbon').hidden ? null : $('r-play')))?.focus();
 }
 
+// where Play starts a title: where it stopped, unless it was watched to the end
+function startOf(it, resume = true) {
+  const p = store.progress[it.path];
+  return resume && p && !p.done ? p.at : 0;
+}
+
+// The band's Play, started at the box while the band is open: the box takes
+// seconds to read a film and pack its first piece, and that is done by the
+// time Play is pressed. Starting it ends any other of the member's at the
+// box, so only while nothing plays. Not for a reader: the demo's visitors
+// share the box's few places, and one each just looking would fill them.
+let warm = null;                 // { path, from, started, when }
+function warmUp(it) {
+  if (lib.reader || playing) return;
+  playlistPlayer().catch(() => {});
+  const from = startOf(it);
+  if (warm?.path === it.path && warm.from === from) return;
+  coolDown();
+  const started = transcode(lib, it.path, it.sealed, from);
+  started.catch(() => {});
+  warm = { path: it.path, from, started, when: Date.now() };
+}
+// the one started for this, if it was; any other is stopped. The box
+// forgets a session nobody asked anything of in ten minutes.
+function takeWarm(it, from) {
+  const w = warm;
+  warm = null;
+  if (w?.path === it.path && w.from === from && Date.now() - w.when < 5 * 60000) return w.started;
+  if (w) w.started.then((s) => stopTranscode(s.url)).catch(() => {});
+  return null;
+}
+function coolDown(leaving) {
+  const w = warm;
+  warm = null;
+  w?.started.then((s) => stopTranscode(s.url, leaving)).catch(() => {});
+}
+
 async function play(it, { resume }) {
   const v = $('video');
   await stop();
-  const p = store.progress[it.path];
-  const from = resume && p && !p.done ? p.at : 0;
+  const from = startOf(it, resume);
+  const ready = takeWarm(it, from);
   showPlayer(it.path);
   $('p-title').textContent = it.label ? `${it.label}${it.parsed.episodeTitle ? ` · ${it.parsed.episodeTitle}` : ''}` : titleOf(it);
   $('p-sub').textContent = from ? `Picking up at ${minutes(from)}` : 'Unlocked on this device';
@@ -495,7 +535,7 @@ async function play(it, { resume }) {
   // everywhere else the page loads a player from the box.
   try {
     const mine = ++jumps;
-    if (!(await attach(it, from, () => mine === jumps))) return;
+    if (!(await attach(it, from, () => mine === jumps, ready))) return;
     $('p-note').textContent = '';
     v.play().catch(() => {});
     return;
@@ -529,10 +569,11 @@ async function play(it, { resume }) {
 // `current` says whether this is still the session wanted: a later jump,
 // or closing the player, may have taken over while the box was starting
 // it. One that is not is stopped at the box and never played, so two never
-// sound at once.
-async function attach(it, from, current = () => true) {
+// sound at once. `ready` is one the band started; one that failed is asked
+// for again, and says why itself.
+async function attach(it, from, current = () => true, ready = null) {
   const v = $('video');
-  const s = await transcode(lib, it.path, it.sealed, from);
+  const s = (ready && await ready.catch(() => null)) || await transcode(lib, it.path, it.sealed, from);
   if (!current() || playing?.it !== it) {
     Promise.resolve(stopTranscode(s.url)).catch(() => {});
     return false;
@@ -941,6 +982,7 @@ async function start() {
   addEventListener('pagehide', () => {
     remember(true);
     if (session) stopTranscode(session, true);
+    coolDown(true);
   });
   render();
   fillIn();

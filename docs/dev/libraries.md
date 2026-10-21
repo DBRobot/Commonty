@@ -475,6 +475,18 @@ first for every film:
    played from a Blob. Larger, the page says what the box said and offers
    to save it.
 
+The first step starts when a film's band opens, not on Play: the band
+asks the box for a session where Play would start (where it stopped, or
+the beginning) and loads hls.js, so the seconds the box takes to read the
+film and pack its first piece are spent while the member looks at the
+band. Play takes that session, or waits on it if it is still starting;
+"Play from the beginning", an episode other than the next, or a session
+older than five minutes asks for a fresh one, and the band's is stopped.
+Closing the band stops it too, and the box allows one film per member, so
+browsing leaves at most one running. A reader (the demo) does not start
+one: its visitors share the box's four places. `nix/tests/media-page`
+holds it to that, against a box that takes two seconds.
+
 The playlist grows while the box works, so the video element knows only
 the part packed so far. The page's bar counts in the film's time instead:
 the length the box read from the file, plus where the session began. A
