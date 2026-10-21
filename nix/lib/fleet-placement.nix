@@ -17,14 +17,6 @@ let
       region = b.regionId or n;
     }) list;
   };
-in
-{
-  inherit
-    needs
-    list
-    roles
-    capability
-    ;
   inputs = import ./placement-inputs.nix {
     inherit
       lib
@@ -35,4 +27,27 @@ in
       policy
       ;
   };
+  # With failover (fleet/policy.json), a box carries every role whose
+  # writers it is able to run, by its own report and the owner's rules
+  # (capability), whatever fleet/boxes.json lists: a box that joins is ready
+  # to take them over, and the control plane decides where each runs
+  writersOf = r: lib.filter (s: needs ? ${s} && needs.${s}.lease) (roles.${r}.services or [ ]);
+  ableTo = box: r: writersOf r != [ ] && lib.all (s: inputs.boxes.${box}.can ? ${s}) (writersOf r);
+  carried = lib.mapAttrs (
+    box: b:
+    b.roles
+    ++ lib.optionals (policy.failover or false) (
+      lib.filter (r: !builtins.elem r b.roles && ableTo box r) (builtins.attrNames roles)
+    )
+  ) list;
+in
+{
+  inherit
+    needs
+    list
+    roles
+    capability
+    inputs
+    carried
+    ;
 }

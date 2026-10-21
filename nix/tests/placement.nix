@@ -1,7 +1,7 @@
 # What every box can run (nix/lib/capability.nix), from the needs, its
 # signed report and its owner's box.json, against fleet/boxes.json: every
 # box joins (it can run what every box runs), every service its roles bring
-# is one it can run, and fleet/roles.json says truly what each role brings
+# (with failover, the roles it is able to carry too) is one it can run, and fleet/roles.json says truly what each role brings
 # (a service with units is found on a box by them). Fails while the flake is
 # evaluated, naming each problem; built, it is the whole table as JSON - what
 # the control plane chooses from.
@@ -17,9 +17,12 @@ let
     list
     roles
     capability
+    carried
     ;
   every = lib.attrNames (lib.filterAttrs (_: n: n.everyBox) needs);
-  brought = box: lib.unique (lib.concatMap (r: roles.${r}.services or [ ]) list.${box}.roles);
+  # the roles a box is built with: fleet/boxes.json's, and with failover
+  # every role whose writers it is able to run (fleet-placement.nix carried)
+  brought = box: lib.unique (lib.concatMap (r: roles.${r}.services or [ ]) carried.${box});
   claims = s: [ s ] ++ needs.${s}.units;
   matches = u: c: if lib.hasSuffix "*" c then lib.hasPrefix (lib.removeSuffix "*" c) u else c == u;
   running =
