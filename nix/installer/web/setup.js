@@ -67,7 +67,7 @@ function clock(s) {
 const CHECK = {
   uefi: ['Starts by UEFI', 'Set the boot mode to UEFI (not Legacy or CSM) in the firmware settings.'],
   tpm: ['Has a TPM 2.0', 'Turn on the TPM: on Intel it is often called PTT, on AMD fTPM, under Security.'],
-  setupMode: ['Secure Boot is ready for this box\'s own keys', 'Put Secure Boot in setup mode: under Boot or Security, “Reset to setup mode”, “Clear Secure Boot keys” or “Delete all keys”. The box then enrolls keys of its own and starts nothing else.'],
+  setupMode: ['Secure Boot is ready for this box\'s own keys', 'Put Secure Boot in setup mode: under Boot or Security, “Reset to setup mode”, “Clear Secure Boot keys” or “Delete all keys”, and leave Secure Boot itself on. The box then enrolls keys of its own and starts nothing else.'],
   raid: ['Its disks can be seen', 'Set the disk controller (SATA mode) to AHCI, not RAID or RST, under Storage.'],
   virt: ['Can run virtual machines', 'Turn on virtualisation: Intel VT-x or AMD-V (SVM), under CPU or Advanced.'],
 };
@@ -100,10 +100,47 @@ async function firmware() {
     }
     return li;
   }));
+  const hw = hardware(v.hardware);
+  $('fw-checks').append(...hw.rows);
   $('fw-tip').hidden = fw.already.includes('power') || changes.has('power');
   $('fw-set').hidden = fw.change.length === 0;
-  // a box needs UEFI, its TPM, setup mode, and to see its disks; the rest it can do without
-  can('firmware', ok.uefi && ok.tpm && ok.setupMode && ok.raid);
+  // a box needs UEFI, its TPM, setup mode, to see its disks, and the
+  // hardware minimum; the rest it can do without
+  can('firmware', ok.uefi && ok.tpm && ok.setupMode && ok.raid && hw.ok);
+}
+
+// the machine itself, judged by the rules its join is (dd-control
+// -check-hardware): what it lacks of the minimum, and whether it gives
+// its owner's account access
+function hardware(h) {
+  const row = (name, state, word, how) => {
+    const li = document.createElement('li');
+    const n = document.createElement('span');
+    n.textContent = name;
+    const w = document.createElement('span');
+    w.className = 'state-word';
+    w.dataset.state = state;
+    w.textContent = word;
+    li.append(n, w);
+    if (how) {
+      const p = document.createElement('p');
+      p.className = 'how';
+      p.textContent = how;
+      li.append(p);
+    }
+    return li;
+  };
+  if (!h) return { ok: true, rows: [row('Enough to run a box', 'attention', 'Not checked', 'Its hardware could not be read here; the box checks again when it joins.')] };
+  const missing = h.missing || [];
+  const rows = [missing.length
+    ? row('Enough to run a box', 'broken', 'No', `It needs ${missing.join(', ')}.`)
+    : row('Enough to run a box', 'ok', 'Yes')];
+  if (!missing.length) {
+    rows.push(h.qualifies
+      ? row('Gives your account access', 'ok', 'Yes')
+      : row('Gives your account access', 'attention', 'No', 'It joins and keeps copies, but gives access only with 8 processor threads and 16 GiB of memory, 4 TB of storage, or a graphics card with 8 GiB of memory or a video encoder.'));
+  }
+  return { ok: missing.length === 0, rows };
 }
 $('fw-again').onclick = firmware;
 $('fw-set').onclick = async () => {

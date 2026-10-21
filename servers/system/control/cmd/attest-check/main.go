@@ -8,6 +8,8 @@
 //	attest-check make-log -db db.der -loader l.efi -stub s.efi -o log.bin
 //	attest-check boot -loader systemd-bootx64.efi -stub lanzaboote_stub.efi -kernel bzImage -params '...'   (a release's Boot, JSON)
 //	attest-check run -roots dir -keys dir -dir dir -log f [-db f] [-stub f -boot f] [-software] [-no-secure-boot] [-vector out.json]
+//	attest-check join -roots dir -boot f [-software]   (a box's join through the agreed state, its TPM proving it)
+//	attest-check inspect -roots dir   (this machine's EK chain and event log, read only: real hardware)
 package main
 
 import (
@@ -21,17 +23,21 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf16"
 
+	"commonty/control/state"
 	"commonty/control/state/attest"
+	"commonty/control/state/ident"
 	"commonty/control/tpm"
 
 	"github.com/google/go-tpm/tpm2"
@@ -51,6 +57,10 @@ func main() {
 		run(os.Args[2:])
 	case "boot":
 		bootPolicy(os.Args[2:])
+	case "join":
+		join(os.Args[2:])
+	case "inspect":
+		inspect(os.Args[2:])
 	default:
 		log.Fatalf("no such command: %s", os.Args[1])
 	}
@@ -278,26 +288,7 @@ func run(args []string) {
 	vector := fs.String("vector", "", "write the whole exchange here")
 	_ = fs.Parse(args)
 
-	cfg := attest.Config{Roots: map[string][]string{}}
-	if *software || *noSB {
-		cfg.Test = &attest.Test{SoftwareTPM: *software, NoSecureBoot: *noSB}
-	}
-	if *boot != "" {
-		raw, err := os.ReadFile(*boot)
-		must(err)
-		cfg.Boot = &attest.Boot{}
-		must(json.Unmarshal(raw, cfg.Boot))
-	}
-	vendors, err := os.ReadDir(*roots)
-	must(err)
-	for _, v := range vendors {
-		files, _ := filepath.Glob(filepath.Join(*roots, v.Name(), "*.pem"))
-		for _, f := range files {
-			raw, err := os.ReadFile(f)
-			must(err)
-			cfg.Roots[v.Name()] = append(cfg.Roots[v.Name()], string(raw))
-		}
-	}
+	cfg := releaseConfig(*roots, *boot, *software, *noSB)
 
 	box := tpm.Default()
 	box.Keys, box.Dir, box.Log, box.DB, box.Fetch = *keys, *dir, *logPath, *db, nil
@@ -348,6 +339,204 @@ func run(args []string) {
 	st.ApplyResponse(&cfg, vs, name, resp, now)
 	out, _ := json.Marshal(rec)
 	fmt.Printf("attested %s: %s\n", name, out)
+}
+
+// releaseConfig: the attestation's part of a release's config, as the
+// flake makes it from fleet/tpm-roots and the boxes' boot images
+func releaseConfig(roots, boot string, software, noSB bool) attest.Config {
+	cfg := attest.Config{Roots: map[string][]string{}}
+	if software || noSB {
+		cfg.Test = &attest.Test{SoftwareTPM: software, NoSecureBoot: noSB}
+	}
+	if boot != "" {
+		raw, err := os.ReadFile(boot)
+		must(err)
+		cfg.Boot = &attest.Boot{}
+		must(json.Unmarshal(raw, cfg.Boot))
+	}
+	vendors, err := os.ReadDir(roots)
+	must(err)
+	for _, v := range vendors {
+		files, _ := filepath.Glob(filepath.Join(roots, v.Name(), "*.pem"))
+		for _, f := range files {
+			raw, err := os.ReadFile(f)
+			must(err)
+			cfg.Roots[v.Name()] = append(cfg.Roots[v.Name()], string(raw))
+		}
+	}
+	return cfg
+}
+
+// join: this box joins a control plane of two box voters, in this one
+// program, through the agreed state's own judgement (state.Block): its
+// join with Begin, signed by its join key in the TPM; each voter's
+// challenge; its answer. As dd-control does, the box first says what it
+// finds itself ("the box: <why>"); then it prints the validators' word,
+// "joined <name>" or "refused <name>: <why>" (exit 1), as the box's member
+// reads it.
+func join(args []string) {
+	fs := flag.NewFlagSet("join", flag.ExitOnError)
+	roots := fs.String("roots", "", "the makers' roots: <vendor id>/<name>.pem")
+	boot := fs.String("boot", "", "the release's Boot (attest-check boot), JSON")
+	software := fs.Bool("software", false, "let a software TPM in")
+	keys := fs.String("keys", "/boot/dd/unlock", "the join key's files (dd-boot-key enrol)")
+	dir := fs.String("dir", "/var/lib/dd-control/attest", "where the AK is kept")
+	db := fs.String("db", "/var/lib/sbctl/keys/db/db.pem", "the box's own Secure Boot certificate")
+	_ = fs.Parse(args)
+	acfg := releaseConfig(*roots, *boot, *software, false)
+	cfg := &state.Config{
+		Boxes:      map[string]state.Box{"node1": {House: "a", Key: "voter-node1"}, "node2": {House: "b", Key: "voter-node2"}},
+		Validators: []state.Validator{{Name: "node1"}, {Name: "node2"}, {Name: "witness"}},
+		Attest:     &acfg,
+	}
+	verify := func(spki string, msg []byte, sig string) bool {
+		if strings.HasPrefix(spki, "voter-") {
+			return sig == "ok:"+spki
+		}
+		return state.P256(spki, msg, sig)
+	}
+
+	box := tpm.Default()
+	box.Keys, box.Dir, box.DB, box.Fetch = *keys, *dir, *db, nil
+	if _, err := os.Stat(filepath.Join(*keys, "sig.pub")); err != nil {
+		log.Fatalf("no join key in %s", *keys)
+	}
+	begin, err := box.Begin()
+	must(err)
+	key := joinSPKI(begin.Join)
+	name, _, err := state.JoinName(key)
+	must(err)
+	seq := uint64(time.Now().UnixMilli())
+	signed := func(kind string, body any) state.Request {
+		seq++
+		b, _ := json.Marshal(body)
+		r := state.Request{Kind: kind, Box: name, Seq: seq, Body: b}
+		sig, err := tpmSign(*keys, r.Bytes())
+		if err != nil {
+			fmt.Printf("refused %s: its key would not sign: %v\n", name, err)
+			os.Exit(1)
+		}
+		r.Sig = sig
+		return r
+	}
+	voter := func(v string, c attest.Challenge) state.Request {
+		seq++
+		b, _ := json.Marshal(c)
+		return state.Request{Kind: "attest-challenge", Box: v, Seq: seq, Body: b, Sig: "ok:voter-" + v}
+	}
+	s := state.New()
+	now := time.Now().UnixMilli()
+	done := func() {
+		if j := s.Joined[name]; j != nil {
+			out, _ := json.Marshal(s.Attested(name))
+			fmt.Printf("joined %s: %s\n", name, out)
+			os.Exit(0)
+		}
+		if r := s.Refused[name]; r != nil {
+			fmt.Printf("refused %s: %s\n", name, r.Why)
+			os.Exit(1)
+		}
+	}
+	j := state.JoinReq{Key: key, Recipient: "age1test", House: "test", Facts: minimum(), Attest: &begin}
+	var rf *state.Refusal
+	if err := state.JoinRefusal(cfg, nil, name, j, now); errors.As(err, &rf) {
+		log.Printf("the box: %v", err)
+		fmt.Printf("the box: %s\n", state.Sentence(rf.Why))
+	}
+	r := signed("join", j)
+	if err := s.Check(cfg, verify, r, now); err != nil {
+		log.Printf("join: %v", err)
+	}
+	s.Block(cfg, verify, []state.Request{r}, now)
+	done()
+	if s.Joining[name] == nil {
+		log.Fatalf("the join was not taken")
+	}
+	for _, v := range cfg.BoxVoters() {
+		c, err := tpm.MakeChallenge(begin, name, v)
+		must(err)
+		s.Block(cfg, verify, []state.Request{voter(v, c)}, now+1)
+	}
+	resp, err := box.Respond(name, s.Attest.Pending[name].Challenges)
+	if err != nil {
+		fmt.Printf("refused %s: it could not answer: %v\n", name, err)
+		os.Exit(1)
+	}
+	a := signed("attest-response", resp)
+	if err := s.Check(cfg, verify, a, now+2); err != nil {
+		log.Printf("answer: %v", err)
+	}
+	s.Block(cfg, verify, []state.Request{a}, now+2)
+	done()
+	log.Fatal("neither joined nor refused")
+}
+
+// inspect: this machine's TPM and firmware as a join would judge them -
+// its EK's chain to the release's roots, the event log replayed against
+// the TPM's PCRs, Secure Boot, PCR 4's boot applications - changing nothing
+// in the TPM. For a look at real hardware (an AMD fTPM's certificate is
+// fetched from AMD, as a box's Begin fetches it).
+func inspect(args []string) {
+	fs := flag.NewFlagSet("inspect", flag.ExitOnError)
+	roots := fs.String("roots", "", "the makers' roots: <vendor id>/<name>.pem (fleet/tpm-roots)")
+	_ = fs.Parse(args)
+	cfg := releaseConfig(*roots, "", false, false)
+	box := tpm.Default()
+	d, err := os.MkdirTemp("", "attest-inspect")
+	must(err)
+	defer os.RemoveAll(d)
+	box.Dir = d
+	in, match, err := box.Inspect(&cfg)
+	if err != nil {
+		log.Fatalf("inspect: %v", err)
+	}
+	out, _ := json.MarshalIndent(map[string]any{"inspection": in, "pcrsMatchTPM": match}, "", "  ")
+	fmt.Println(string(out))
+	if in.ChainErr != "" || !match {
+		os.Exit(1)
+	}
+}
+
+// minimum: a box at the hardware minimum (a test VM is smaller; what is
+// judged here is its TPM)
+func minimum() map[string]float64 {
+	return map[string]float64{
+		"tpm_major": 2, "uefi": 1, "secure_boot_capable": 1, "arch_x86_64": 1,
+		"threads": ident.MinThreads, "mem_total_bytes": ident.MinMemTotal, "system_disk_bytes": ident.MinSystemDisk, "nics": 1,
+	}
+}
+
+// tpmSign: the join key's signature, as dd-control makes it: in a policy
+// session dd-tpm-policy satisfies
+func tpmSign(keys string, msg []byte) (string, error) {
+	d, err := os.MkdirTemp("", "attest-check-sign")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(d)
+	p := func(n string) string { return filepath.Join(d, n) }
+	if err := os.WriteFile(p("msg"), msg, 0o600); err != nil {
+		return "", err
+	}
+	for _, step := range [][]string{
+		{"tpm2_createprimary", "-Q", "-C", "o", "-G", "ecc256", "-c", p("srk.ctx")},
+		{"tpm2_load", "-Q", "-C", p("srk.ctx"), "-u", filepath.Join(keys, "sig.pub"), "-r", filepath.Join(keys, "sig.priv"), "-c", p("sig.ctx")},
+		{"tpm2_startauthsession", "-Q", "--policy-session", "-S", p("s.ctx")},
+		{"dd-tpm-policy", p("s.ctx"), keys},
+		{"tpm2_sign", "-Q", "-c", p("sig.ctx"), "-g", "sha256", "-s", "ecdsa", "-f", "plain", "-p", "session:" + p("s.ctx"), "-o", p("sig.bin"), p("msg")},
+	} {
+		if out, err := exec.Command(step[0], step[1:]...).CombinedOutput(); err != nil {
+			_ = exec.Command("tpm2_flushcontext", "-t").Run()
+			return "", fmt.Errorf("%s: %v: %s", step[0], err, strings.TrimSpace(string(out)))
+		}
+	}
+	_ = exec.Command("tpm2_flushcontext", p("s.ctx")).Run()
+	_ = exec.Command("tpm2_flushcontext", "-t").Run()
+	sig, err := os.ReadFile(p("sig.bin"))
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
 func joinSPKI(join string) string {

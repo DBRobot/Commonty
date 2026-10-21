@@ -85,6 +85,16 @@ type Join struct {
 	Until  uint64 `json:"until"` // the ticket's own expiry: when the record may go
 }
 
+// Refusal is the state machine's word that a box that came with a ticket
+// was refused (state/join.go), and why, in the person's words
+type Refusal struct {
+	Join
+	Why string `json:"why"`
+}
+
+// RefusalFor: how long a refusal is shown to its member, seconds
+const RefusalFor = 7 * 24 * 3600
+
 // Extension is the fleet admin's word that a member keeps their access
 // until a time, whatever their boxes do
 type Extension struct {
@@ -110,6 +120,8 @@ type State struct {
 	Handovers map[string][]Handover      `json:"handovers,omitempty"`
 	Enlisted  map[string]*Enlisted       `json:"enlisted,omitempty"`
 	Joins     map[string]*Join           `json:"joins,omitempty"`
+	// box -> why it was last refused, while its ticket is good
+	Refusals map[string]*Refusal `json:"refusals,omitempty"`
 	// ticket id -> the box it enlisted: a ticket is used once, for good
 	Tickets  map[string]string     `json:"tickets,omitempty"`
 	Extended map[string]*Extension `json:"extended,omitempty"`
@@ -369,12 +381,13 @@ func (s *State) Judge(cfg *Config, voters []string, from string, raw json.RawMes
 		return
 	}
 	var probe struct {
-		V      int
-		Entry  json.RawMessage
-		Inv    json.RawMessage
-		Ack    *string
-		Leave  json.RawMessage
-		Joined json.RawMessage
+		V       int
+		Entry   json.RawMessage
+		Inv     json.RawMessage
+		Ack     *string
+		Leave   json.RawMessage
+		Joined  json.RawMessage
+		Refused json.RawMessage
 	}
 	if v, ok := top["v"]; ok {
 		_ = json.Unmarshal(v, &probe.V)
@@ -389,6 +402,8 @@ func (s *State) Judge(cfg *Config, voters []string, from string, raw json.RawMes
 				probe.Leave = v
 			case "joined":
 				probe.Joined = v
+			case "refused":
+				probe.Refused = v
 			case "ack":
 				var a string
 				if json.Unmarshal(v, &a) == nil {
@@ -411,6 +426,8 @@ func (s *State) Judge(cfg *Config, voters []string, from string, raw json.RawMes
 		}
 	case probe.Joined != nil:
 		s.joined(from, probe.Joined, at)
+	case probe.Refused != nil:
+		s.refused(from, probe.Refused, at)
 	case probe.Leave != nil:
 		var sl SignedLeave
 		if err := strict(probe.Leave, &sl); err != nil {
@@ -676,6 +693,42 @@ func (s *State) joined(from string, raw json.RawMessage, at uint64) {
 		}
 	}
 	s.Joins[from] = &Join{Key: j.Key, Ticket: t.ID, Block: j.Block, User: t.User, At: at, Until: t.Expires}
+}
+
+// refused: the state machine's record of a box that came with a ticket
+// refused (state/join.go), under the box's own name; like joined, no gate
+// can put one. Kept while its ticket is good, and a week at most
+func (s *State) refused(from string, raw json.RawMessage, at uint64) {
+	var j struct {
+		Key    string `json:"key"`
+		Ticket string `json:"ticket"`
+		Block  string `json:"block"`
+		Why    string `json:"why"`
+	}
+	if strict(raw, &j) != nil || len(j.Why) > 256 {
+		return
+	}
+	again, _ := json.Marshal(&j)
+	if sameAs(raw, again) != nil || BoxName(j.Key) != from {
+		return
+	}
+	sb, err := b64.DecodeString(j.Block)
+	if err != nil {
+		return
+	}
+	t, err := blockTicket(sb)
+	if err != nil || t.ID != j.Ticket {
+		return
+	}
+	if s.Refusals == nil {
+		s.Refusals = map[string]*Refusal{}
+	}
+	for b, old := range s.Refusals {
+		if old.Until <= at || old.At+RefusalFor <= at {
+			delete(s.Refusals, b)
+		}
+	}
+	s.Refusals[from] = &Refusal{Join: Join{Key: j.Key, Ticket: t.ID, Block: j.Block, User: t.User, At: at, Until: t.Expires}, Why: j.Why}
 }
 
 // BoxName is the name a joined box's key gives it (state.JoinName): "j"

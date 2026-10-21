@@ -202,6 +202,35 @@ fn waiting(
     out
 }
 
+/// The boxes that came with a ticket of `user`'s and were refused, and why
+/// (the judge's word, the agreed identity state's `refused`): its TPM, its
+/// boot, its hardware. Gone once the box joins, or after a week.
+fn refused(refused: &HashMap<String, crate::ident::Refused>, user: &str) -> Vec<serde_json::Value> {
+    let mut out: Vec<serde_json::Value> = refused
+        .iter()
+        .filter(|(_, r)| r.owner == user)
+        .map(|(name, r)| {
+            serde_json::json!({
+                "name": name,
+                "ticket": r.ticket,
+                "refused": r.since,
+                "why": r.why,
+            })
+        })
+        .collect();
+    out.sort_by_key(|r| r["name"].as_str().unwrap_or_default().to_string());
+    out
+}
+
+fn refused_of(app: &App) -> HashMap<String, crate::ident::Refused> {
+    app.directory
+        .ident
+        .as_ref()
+        .and_then(|a| a.state())
+        .map(|s| s.refused.clone())
+        .unwrap_or_default()
+}
+
 /// The agreed identity state's waiting boxes; none when it is not read
 fn waiting_of(app: &App) -> HashMap<String, crate::ident::Owner> {
     app.directory
@@ -243,7 +272,8 @@ fn tickets_in(
 }
 
 /// GET /_dd/boxes/mine: the boxes this member set up, with how each is as
-/// its own heartbeats say (the agreed state's), for their Devices tab.
+/// its own heartbeats say (the agreed state's), for their Devices tab; and
+/// those refused, with why.
 pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let Some(user) = app.identify(&headers, "access") else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -268,7 +298,9 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
         &user,
         &enlisted(&app).unwrap_or_default(),
     );
-    axum::Json(serde_json::json!({ "boxes": rows, "waiting": waiting })).into_response()
+    let refused = refused(&refused_of(&app), &user);
+    axum::Json(serde_json::json!({ "boxes": rows, "waiting": waiting, "refused": refused }))
+        .into_response()
 }
 
 /// GET /_dd/network/joined: the same boxes, as the app reads them to move
@@ -591,6 +623,29 @@ mod tests {
         assert_eq!(got[0]["joined"], 1);
         assert_eq!(got[0]["enlisted"], false);
         assert!(waiting(&w, "eve", &enlisted).is_empty());
+    }
+
+    #[test]
+    fn a_refused_box_is_shown_to_its_member_alone() {
+        let r = |owner: &str, why: &str| crate::ident::Refused {
+            ticket: ID.to_string(),
+            owner: owner.to_string(),
+            since: 5,
+            why: why.to_string(),
+        };
+        let all = HashMap::from([
+            ("jaaaaaaaaaa".to_string(), r("ann", "Secure Boot is off")),
+            (
+                "jbbbbbbbbbb".to_string(),
+                r("bob", "its TPM is not one a TPM maker certified"),
+            ),
+        ]);
+        let got = refused(&all, "ann");
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0]["name"], "jaaaaaaaaaa");
+        assert_eq!(got[0]["why"], "Secure Boot is off");
+        assert_eq!(got[0]["refused"], 5);
+        assert!(refused(&all, "eve").is_empty());
     }
 
     const OTHER: &str = "ffeeddccbbaa99887766554433221100";

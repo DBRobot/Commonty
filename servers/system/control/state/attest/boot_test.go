@@ -262,6 +262,21 @@ func TestPCR7WithoutAuthorityEvents(t *testing.T) {
 	if _, err := secureBoot(append(base(pk, theirs, ours), auth(theirs), auth(ours)), ours); err != nil {
 		t.Fatal(err)
 	}
+	// Secure Boot off, keys or none: said so in the person's words
+	off := base(pk, theirs, ours)
+	off[0] = v7(evEFIVariableConfig, efiGlobal, "SecureBoot", []byte{0})
+	_, err = secureBoot(off, ours)
+	if Why(err) != "Secure Boot is off" {
+		t.Fatalf("%v: %q", err, Why(err))
+	}
+	_, err = secureBoot(base(nil, ours), ours)
+	if Why(err) != "Secure Boot is off" {
+		t.Fatalf("%v: %q", err, Why(err))
+	}
+	_, err = secureBoot(base(pk, theirs), ours)
+	if Why(err) != "Secure Boot is not on with this box's own keys" {
+		t.Fatalf("%v: %q", err, Why(err))
+	}
 }
 
 func efiVariable(guid []byte, name string, value []byte) []byte {
