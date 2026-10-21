@@ -76,6 +76,8 @@
         "switch-race"
         "work-memory"
         "runner-restart"
+        # each web service's one main thing, in a browser, with the real services
+        "site-journeys"
       ];
       rust =
         let
