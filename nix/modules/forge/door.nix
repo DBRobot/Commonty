@@ -206,9 +206,13 @@ in
             ''
             + heavy "dd_code_git" 20
           );
+          # crawlers index an owner's page and a repository's front page;
+          # every file, commit and diff below one is thousands of pages for
+          # the house line to serve. The page's own scripts stay open (the
+          # longer rule wins), or a crawler could not draw it
           "= /robots.txt".extraConfig = ''
             default_type text/plain;
-            return 200 "User-agent: *\nDisallow: /api/\nDisallow: /*/*/archive/\nDisallow: /*/*/raw/\n";
+            return 200 "User-agent: *\nAllow: /_dd/\nDisallow: /api/\nDisallow: /*/*/\nDisallow: /*?\n";
           '';
           # what a 401 or 403 from the forge becomes. nginx carries the
           # forge's WWW-Authenticate into an intercepted 401, which would say

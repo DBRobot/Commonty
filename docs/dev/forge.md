@@ -231,7 +231,7 @@ let through, GET or HEAD only, as nobody
   /avatars/<id>  /repo-avatars/<id>  /assets/img/<file>
   /<o>/<r>[.git]/info/refs?service=git-upload-pack
   POST /<o>/<r>[.git]/git-upload-pack              clone and fetch
-  /robots.txt                                      keep crawlers off /api, archives, raw
+  /robots.txt                                      crawlers get owner and repo front pages only
 
 refused
   any other method                                 405
