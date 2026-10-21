@@ -8,6 +8,10 @@
       "postgresql"
       "postgresql-setup"
       "dd-postgres-isolation"
+      # with failover: its base backup and its last archive on a handover,
+      # for the next holder (storage/postgres-follow.nix)
+      "dd-pg-base"
+      "dd-pg-handover"
     ];
     # one writer, which follows its lease (storage/postgres-follow.nix):
     # the next holder restores from the archive
