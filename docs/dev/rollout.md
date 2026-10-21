@@ -104,6 +104,9 @@ shift while boxes drain and switch. Never a hand-set role.
      as unlike itself as the fleet allows.
   3. ties by sha256(counter, name), so a different box goes first next
      time.
+- A box the release does not list (one that joined on its own key and
+  builds its own system) is in no wave: it takes the release once every
+  wave has passed.
 - **With two boxes:** node2 holds no writer, so wave 1 is node2 and wave
   2 is node1. If failover ever moves the writers to node2, wave 1 becomes
   node1 by the same rule.
