@@ -1865,6 +1865,8 @@
           mail-page = import ./nix/tests/mail-page.nix (args // { web = self.packages.${system}.web; });
           # the Files page as the app serves it, against the same made-up app and gate
           files-page = import ./nix/tests/files-page.nix (args // { web = self.packages.${system}.web; });
+          # Movies & TV: a film's band starts the box on it, so Play does not wait
+          media-page = import ./nix/tests/media-page.nix (args // { web = self.packages.${system}.web; });
           safe-rd = import ./nix/tests/safe-rd.nix args;
           # the PDF editor's document and signatures, on the pinned MuPDF
           pdf-editor = import ./nix/tests/pdf-editor.nix (args // { web = self.packages.${system}.web; });
