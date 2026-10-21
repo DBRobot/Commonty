@@ -3,7 +3,10 @@
 //! with its small picture, and a link made to it. Exits non-zero on the
 //! first thing that is not so.
 //!
-//! ente-roundtrip <museum> <email> <password> <code>
+//! ente-roundtrip <museum> <email> <password> <code> [picture]
+//!
+//! With a picture (a JPEG), it is saved too, as itself and its own small
+//! picture: something a gallery can show (nix/tests/site-journeys.nix).
 
 use anyhow::{Context, Result, anyhow, ensure};
 use ente::gallery::{Gallery, IMAGE, NoUi};
@@ -12,9 +15,10 @@ use zeroize::Zeroizing;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let a: Vec<String> = std::env::args().skip(1).collect();
+    let mut a: Vec<String> = std::env::args().skip(1).collect();
+    let picture = if a.len() == 5 { a.pop() } else { None };
     let [api, email, password, code] = <[String; 4]>::try_from(a)
-        .map_err(|_| anyhow!("ente-roundtrip <museum> <email> <password> <code>"))?;
+        .map_err(|_| anyhow!("ente-roundtrip <museum> <email> <password> <code> [picture]"))?;
     let client = ente::client(&api)?;
     client.send_otp(&email, "signup").await?;
     AuthFlow::new(&client, &mut NoUi)
@@ -77,6 +81,14 @@ async fn main() -> Result<()> {
     ensure!(at.starts_with("https://albums."), "the link is at {at}");
     ensure!(key.len() >= 40, "the key in the link is {key}");
     println!("link {at}#...");
+    if let Some(path) = picture {
+        let jpeg = std::fs::read(&path).with_context(|| format!("reading {path}"))?;
+        let id = g
+            .save("Otters", "otter.jpg", IMAGE, taken + 2, &jpeg, &jpeg)
+            .await
+            .context("saving the picture")?;
+        println!("saved the picture as {id}");
+    }
     println!("roundtrip ok");
     Ok(())
 }

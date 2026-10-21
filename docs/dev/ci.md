@@ -269,6 +269,43 @@ the chooser to the cases above, and
 history and every check's real drvPath at each commit
 ([the replay](../../nix/tests/ci-select/replay.md)).
 
+## The site checks
+
+The site as a browser meets it, each a check of the `mail_worker` job
+(ciselect.py `MAIL_WORKER`), beside the Mail and Files pages:
+
+- **No vm** ([`nix/tests/site.nix`](../../nix/tests/site.nix)): node1's own
+  nginx config and the real gate, with the pages a release carries, and a
+  stand-in for every service behind them
+  ([`site/stack.py`](../../nix/tests/site/stack.py)). One of each kind of
+  person is signed in ([`site/people.py`](../../nix/tests/site/people.py)):
+  signed out, a guest, a sign-up not let in, a banned member, a member by
+  invite, a member by a box (agreed identity) and the owner, who is the
+  admin. Seconds each on a quiet machine; on a busy runner headers and
+  roles take 10-25 s, speed about a minute, and accessibility two to five.
+  - `site-headers`: HSTS, nosniff, Referrer-Policy and the content policy
+    on every name, written out again from headers.nix; the session cookie's
+    flags; no cookie from the front page or the docs; every GET route of
+    the gate asked signed out is refused unless it is listed as public;
+    cross-origin reads only where llm.nix and forgejo.nix mean them; the
+    session never reaches a service.
+  - `site-roles`: a table of places by person, written from gate.md,
+    joining.md and guests.md.
+  - `site-a11y`: axe-core on every kind of page in the site map; serious
+    and critical findings fail. `site/a11y.py` `audit(page)` is the one
+    call the site-links crawler makes on every page it reaches.
+  - `site-speed`: for each main page, the page's own CPU from a click on a
+    link to it until it is drawn, in units of a fixed piece of page work
+    timed first in the same browser, and a first visit's bytes and
+    requests, against budgets a little above what main measured.
+- **A vm** ([`nix/tests/site-journeys.nix`](../../nix/tests/site-journeys.nix)),
+  its own job in the `vm_tests` matrix like every VM test: each service's
+  one main thing against the real services on one box.
+
+Each has a `KNOWN` list (or `KNOWN_BARE_404`): what main gets wrong today,
+with why. A finding on that list does not fail. One that stops being found
+fails too, so the list only gets shorter.
+
 ## Writing VM tests that don't flake
 
 A VM test that fails one run in five blocks every pull request behind it,

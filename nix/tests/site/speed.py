@@ -66,7 +66,10 @@ MEASURED = {
     "git": (1.01, 231, 34),
     "metrics": (1.04, 177, 69),
 }
-BUDGET = {k: (round(v[0] * 1.5, 1), int(v[1] * 1.10) + 1, v[2] + 3) for k, v in MEASURED.items()}
+BUDGET = {
+    k: (round(v[0] * 1.5, 1), int(v[1] * 1.10) + 1, v[2] + 3)
+    for k, v in MEASURED.items()
+}
 
 DRAWN = """(sel) => {
   const me = document.getElementById('me');

@@ -24,7 +24,9 @@ let
   gateway = self.nixosConfigurations.node1.config;
   start = gateway.systemd.services.nginx.serviceConfig.ExecStart;
   nginx = "${gateway.services.nginx.package}/bin/nginx";
-  env = pkgs.writeText "gate-env.json" (builtins.toJSON gateway.systemd.services.dd-verify.environment);
+  env = pkgs.writeText "gate-env.json" (
+    builtins.toJSON gateway.systemd.services.dd-verify.environment
+  );
   python = pkgs.python3.withPackages (ps: [
     ps.playwright
     ps.cryptography
