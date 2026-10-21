@@ -3376,10 +3376,7 @@ pub async fn start(
             "/_dd/controller/directory/{name}",
             get(controller::directory),
         )
-        .route(
-            "/_dd/controller/standing/{name}",
-            get(controller::standing),
-        )
+        .route("/_dd/controller/standing/{name}", get(controller::standing))
         .route("/_dd/controller/backup", post(controller::backup))
         .route("/_dd/controller/backup/{label}", get(controller::restore))
         .route("/_dd/controller-name", get(controller::name_page))

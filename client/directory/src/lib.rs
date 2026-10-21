@@ -270,17 +270,19 @@ pub async fn resolve_released(
 
 /// The entry in `found`, if its person is a member: the release's list
 /// naming its root (`Anchor::Released`), or, for someone it does not name -
-/// a member by a box of theirs (docs/dev/joining.md, "Access"), by an
-/// invite or a recovery since the last release - every directory asked
-/// agreeing on the root (`Anchor::FirstSight`) and saying the agreed state
-/// gives that very root the services (`agreed_member`). Never someone the
-/// list shuts out.
+/// a member by a box of theirs (docs/dev/joining.md, "Access"), or by an
+/// invite since the last release - every directory asked holding the same
+/// entry's root (each one answering, none without it) and every one saying
+/// the agreed state gives that very root the services (`agreed_member`).
+/// Never someone the list shuts out, and never another root under a name
+/// the list gives someone, unless a recovery from that root is proved
+/// (identity::follows).
 ///
 /// The second is the boxes' word, where the first is the release key's: a
-/// directory's agreed state is its own box's control plane, so one box
-/// that lies can vouch for an entry of its own making when it is the only
-/// directory asked. Asking more than one is what catches that, as it is
-/// for an entry seen the first time.
+/// directory's agreed state is its own box's control plane, so a box that
+/// lies is caught only by another directory asked. That is why every one
+/// asked must answer, and agree: one down, or saying nothing, is a refusal,
+/// never a pass.
 pub async fn resolve_member(
     found: &[(String, Result<Option<SignedEntry>>)],
     dirs: &[String],
@@ -290,60 +292,75 @@ pub async fn resolve_member(
         Ok(e) => return Ok(e),
         Err(e) => e,
     };
-    let Ok(e) = resolve(found, Anchor::FirstSight) else {
-        return Err(listed);
-    };
-    if identity::member_ids(&e.entry)
-        .iter()
-        .any(|id| list.revoked.contains(id))
-    {
-        return Err(listed);
+    let agreed = async {
+        ensure_all_hold(found)?;
+        let e = resolve(found, Anchor::FirstSight)?;
+        let name = &e.entry.name;
+        if identity::member_ids(&e.entry)
+            .iter()
+            .any(|id| list.revoked.contains(id))
+        {
+            bail!("the release shuts {name} out");
+        }
+        if let Some(from) = identity::listed_as(name, &list.members, &list.names)
+            && identity::member_id(&e.entry.root) != *from
+        {
+            identity::follows(&e, &handovers(dirs, name, &[]).await, from).with_context(|| {
+                format!("the release gives {name} another root, and no recovery from it is proved")
+            })?;
+        }
+        agreed_member(dirs, name, &e.entry.root).await?;
+        anyhow::Ok(e)
     }
-    agreed_member(dirs, &e.entry.name, &e.entry.root)
-        .await
-        .map_err(|why| listed.context(format!("nor by the agreed state: {why:#}")))?;
-    Ok(e)
+    .await;
+    agreed.map_err(|why| listed.context(format!("nor by the agreed state: {why:#}")))
 }
 
-/// Every directory that answers says the agreed state gives `name` the
-/// fleet's services under `root` (the gate's `/_dd/directory/<name>/standing`),
-/// and at least one answers. A directory that has no such name, says no,
-/// or names another root, refuses it; one that can't be reached, or has not
-/// read the agreed state yet, says nothing either way.
-pub async fn agreed_member(dirs: &[String], name: &str, root: &str) -> Result<()> {
-    let http = http()?;
-    let mut said = 0;
-    let mut silent = Vec::new();
-    for d in dirs {
-        let url = format!("{}/{name}/standing", d.trim_end_matches('/'));
-        let got = async {
-            let r = read_request(&http, &url, Some(name), &[]).send().await?;
-            match r.status().as_u16() {
-                200 => {
-                    let v: serde_json::Value = r.json().await?;
-                    Ok(Some((
-                        v["member"].as_bool() == Some(true),
-                        v["root"].as_str().unwrap_or_default().to_string(),
-                    )))
-                }
-                404 => Ok(None),
-                s => Err(anyhow!("{s} {}", r.text().await.unwrap_or_default())),
-            }
-        }
-        .await;
-        match got {
-            Ok(Some((true, r))) if r == root => said += 1,
-            Ok(Some((true, _))) => bail!("{d} says {name} is a member under another root"),
-            Ok(Some(_)) => bail!("{d} says {name} is not a member"),
-            Ok(None) => bail!("{d} has no {name}"),
-            Err(e) => silent.push(format!("{d}: {e:#}")),
+/// every directory asked answered with an entry: one that could not be
+/// reached, would not say, or has none is no agreement
+fn ensure_all_hold(found: &[(String, Result<Option<SignedEntry>>)]) -> Result<()> {
+    if found.is_empty() {
+        bail!("no directory asked");
+    }
+    for (dir, r) in found {
+        match r {
+            Ok(Some(_)) => {}
+            Ok(None) => bail!("{dir} has no such entry"),
+            Err(e) => bail!("{dir} did not answer: {e:#}"),
         }
     }
-    if said == 0 {
-        bail!(
-            "no directory said whether {name} is a member:\n  {}",
-            silent.join("\n  ")
-        );
+    Ok(())
+}
+
+/// Every directory asked says the agreed state gives `name` the fleet's
+/// services under `root` (the gate's `/_dd/directory/<name>/standing`).
+/// All of them: one that has no such name, says no, names another root,
+/// can't be reached, or does not go by the agreed state (503) refuses it.
+pub async fn agreed_member(dirs: &[String], name: &str, root: &str) -> Result<()> {
+    if dirs.is_empty() {
+        bail!("no directory asked");
+    }
+    let http = http()?;
+    for d in dirs {
+        let url = format!("{}/{name}/standing", d.trim_end_matches('/'));
+        let r = read_request(&http, &url, Some(name), &[])
+            .send()
+            .await
+            .with_context(|| format!("{d} did not answer"))?;
+        match r.status().as_u16() {
+            200 => {}
+            404 => bail!("{d} has no {name}"),
+            s => bail!(
+                "{d} did not say whether {name} is a member: {s} {}",
+                r.text().await.unwrap_or_default()
+            ),
+        }
+        let v: serde_json::Value = r.json().await.with_context(|| format!("{d}'s answer"))?;
+        match (v["member"].as_bool(), v["root"].as_str()) {
+            (Some(true), Some(r)) if r == root => {}
+            (Some(true), _) => bail!("{d} says {name} is a member under another root"),
+            _ => bail!("{d} says {name} is not a member"),
+        }
     }
     Ok(())
 }

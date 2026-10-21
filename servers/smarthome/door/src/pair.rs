@@ -669,7 +669,10 @@ mod tests {
         // the gate says she is no member: refused, and nothing kept
         r.directory.says("cat", &cat.entry.root, false);
         assert_eq!(send(&url, "/pair/finish", &finish).await.status(), 403);
-        assert!(r.app.with_store(|s| s.state.people.is_empty() && s.state.label.is_none()));
+        assert!(
+            r.app
+                .with_store(|s| s.state.people.is_empty() && s.state.label.is_none())
+        );
         assert!(r.hooks.registered.lock().unwrap().is_none());
         // a member by the gate's word: paired
         let reply: Paired = read(send(&url, "/pair", &pair()).await).await;
@@ -681,7 +684,12 @@ mod tests {
         r.directory.says("cat", &cat.entry.root, true);
         assert_eq!(send(&url, "/pair/finish", &finish).await.status(), 200);
         assert_eq!(
-            r.hooks.registered.lock().unwrap().as_ref().map(|g| g.entry.entry.name.clone()),
+            r.hooks
+                .registered
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|g| g.entry.entry.name.clone()),
             Some("cat".into())
         );
 
