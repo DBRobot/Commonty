@@ -4,9 +4,9 @@ Status: a box joins **as a stranger** (built) and builds its own system
 from its own report (built). **As a member's box**, set up from the app's
 installer window and a USB drive, is built: the ticket, the enlistment the
 member's root signs, whose a box is, the access a box gives, the pending
-backup, Your boxes. Proof that the box is real hardware (the TPM's
-attestation, docs/dev/attestation.md) is on its own branch and not yet
-asked for.
+backup, Your boxes, and the proof that the box is real hardware (its
+TPM's attestation, [attestation.md](attestation.md)): no box joins without
+it.
 
 A box the release does not list needs no one to add it. It joins the
 control plane's agreed state on its own word, and joining gives it nothing
@@ -14,9 +14,15 @@ anyone needs to trust it with.
 
 ## As a stranger
 
-- **It meets the hardware minimum** ([Hardware](#hardware)), or it can't
-  join at all: the validators refuse the join with what is missing, and
-  the box says it in its log and in `/var/lib/dd-control/join-refused`.
+- **It meets the hardware minimum** ([Hardware](#hardware)) **and proves
+  its TPM** ([attestation.md](attestation.md)): a TPM a maker certified,
+  booted under Secure Boot with its own keys into the release's own boot
+  (PCRs 4 and 7), its join key in that TPM. Its join carries the proof's
+  start; it is `Joining` until it answers the box voters' challenges, and
+  joined only then. Otherwise the validators refuse it, and keep why in
+  the agreed state (`Refused`); the box says the same in its log and in
+  `/var/lib/dd-control/join-refused`, and its member sees it on Settings >
+  Devices ("refused ... · Secure Boot is off").
 - **Its name comes from its key.** `dd-control -join-key` takes the box's
   TPM-held key and joins under `j` and ten hex of the key's hash
   ([`state/join.go`](../../servers/system/control/state/join.go)). No
@@ -337,9 +343,12 @@ QUALIFYING (ident.Qualify)    the minimum and any one of
   `raspberry_pi` (its device tree); `arch_x86_64` or `arch_aarch64` from
   the agent itself; `store_size_bytes` from its store. A join carries the
   same facts, and the validators hold them to the minimum.
-- **The box's word**: until TPM attestation is asked for, all of it is
-  what the box says of itself; a box that lies about its hardware is not
-  caught by this.
+- **The box's word, signed by its TPM**: the join and every heartbeat
+  are signed by the join key, which the attestation shows lives in a
+  maker's TPM and opens only under a boot of the release's systemd-boot,
+  stub and kernel. The numbers are still what that system measures of
+  itself; the system past the kernel (its init, its initrd) is the box's
+  own build, which the release does not check.
 
 ## The drive
 
@@ -367,6 +376,11 @@ firmware   UEFI, TPM 2.0, Secure Boot in setup mode, disks seen (not behind RAID
            virtualisation. What the firmware lets Linux change (Dell, Lenovo,
            HP, no BIOS password) it changes and restarts; the rest it says
            where to change. Power-on after an outage can't be read: a tip.
+           The machine itself, judged by the rules its join is
+           (dd-box-hardware: detect.sh, then dd-control -check-hardware):
+           what it lacks of the minimum ("It needs 8 GiB of memory (it has
+           3.8 GiB)"), which stops it here, and whether it gives its
+           member access, which does not.
 network    a cable, else the drive's Wi-Fi, else a network picked here
 disk       internal, not removable, nothing of it mounted
 back up    optional: dd-box-backup (backup.sh)
@@ -394,7 +408,7 @@ done       take the drive out, restart
 
 ## How it is tested
 
-Two VM tests, split where the box first starts:
+Three VM tests, split where the box first starts, and its proof:
 
 - **`join-install`**: the installer, through its screen's API: the
   refusals (a disk in use, two unnamed, an old or forged release, a page
@@ -403,7 +417,8 @@ Two VM tests, split where the box first starts:
   the installed disk's first boot with Secure Boot on, which seals the
   disk's key and makes the box's key under PCR 7, a boot after it that
   opens the disk with nobody there, and a changed PCR 7 that gets no key
-  and no signature. The system installed is a stand-in with the boot chain
+  and no signature. Its join key is made then, under its approver
+  (`dd-boot-key enrol`), and the disk's half under the same policy. The system installed is a stand-in with the boot chain
   of a joined box (lanzaboote, the disk unlock), not the whole of one.
 - **`joined-box`**: the real joined box (`lib.joinedBoxModules`), booted
   under its install name with a test key in its TPM (so its name is known
@@ -423,7 +438,15 @@ Two VM tests, split where the box first starts:
   the directory, a key to the network, a friend link for a guest, and a
   remote computer the judge takes on the box state its item carried, all
   on her gate in agreed mode; her unenlist makes it nobody's and shuts
-  each of them again, and the used ticket enlists nothing.
+  each of them again, and the used ticket enlists nothing. Its TPM is a
+  VM's (swtpm, no maker's certificate): the test's release lets it join on
+  its word (`attest.test.unattestedJoin`).
+- **`join-attest`**: the join's proof on a machine booted as a member's
+  box is (Secure Boot under its own keys, lanzaboote, a TPM with a maker's
+  EK certificate): it joins; refused for an EK not from its maker, a PCR 4
+  not the release's, Secure Boot off; after an update its key still opens
+  and it proves itself under the new release
+  ([attestation.md](attestation.md#how-it-is-tested-end-to-end)).
 
 Not covered by either: a real machine's firmware (the vendor table, Setup
 Mode set from Linux, an unsigned system refused by Secure Boot, which stops

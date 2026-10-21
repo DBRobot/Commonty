@@ -263,8 +263,14 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
                     .map(|s| s.trim().to_string())
                     .unwrap_or_default()
             };
+            // what the machine is, judged as its join will be: what it
+            // lacks of the minimum, and whether it gives its member access
+            let hardware = sh("dd-box-hardware", &[])
+                .ok()
+                .and_then(|o| serde_json::from_str::<Value>(&o).ok());
             Reply::Json(json!({
                 "checks": c,
+                "hardware": hardware,
                 "firmware": p,
                 "maker": product("sys_vendor"),
                 "model": product("product_name"),

@@ -128,6 +128,9 @@ cfg["computers"] = {
     "portBase": 27200,
     "portCount": 8,
 }
+# what comes after a join is judged here; the join's proof of its TPM is
+# join-attest's (a VM's swtpm has no maker's certificate)
+cfg["attest"] = {"test": {"unattestedJoin": True}}
 json.dump(cfg, open("config.json", "w"))
 json.dump(cfg, open(f"{OUT}/config.json", "w"))
 open("w/config.js", "w").write("export default " + json.dumps(cfg) + ";\n")

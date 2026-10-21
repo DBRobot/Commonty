@@ -17,10 +17,13 @@ type BoxInfo struct {
 	Facts    map[string]float64 `json:"facts,omitempty"` // its last heartbeat's
 	// the newest release the release's own boxes say they run; 0, unknown
 	Fleet float64 `json:"fleet,omitempty"`
+	// a joined box whose TPM's proof the agreed state does not hold
+	// (docs/dev/attestation.md): it counts for nothing
+	Unattested bool `json:"unattested,omitempty"`
 }
 
 // AccessFacts: every fact Access reads of a box (Minimum, Qualify,
-// OurFault), and no other. A box's state kept with a log item
+// OurFault), and no other; ForAccess keeps Unattested beside them. A box's state kept with a log item
 // (state.DirItem's Boxes) keeps these alone: a judge replaying the item
 // reads the box as it was then, and a heartbeat's other facts are no
 // business of the log's
@@ -32,7 +35,7 @@ var AccessFacts = []string{
 
 // ForAccess: info with only the facts Access reads
 func ForAccess(info BoxInfo) BoxInfo {
-	out := BoxInfo{LastSeen: info.LastSeen, Fleet: info.Fleet}
+	out := BoxInfo{LastSeen: info.LastSeen, Fleet: info.Fleet, Unattested: info.Unattested}
 	for _, k := range AccessFacts {
 		if v, ok := info.Facts[k]; ok {
 			if out.Facts == nil {
@@ -102,7 +105,7 @@ type BoxView struct {
 	Qualifies string `json:"qualifies"` // compute | storage | gpu | ""
 	LastSeen  int64  `json:"lastSeen,omitempty"`
 	// whether it keeps their access now, and why or why not: seen, our
-	// fault, extended, gone, not qualifying
+	// fault, extended, gone, not proven (its TPM), not qualifying
 	Counts bool   `json:"counts"`
 	Why    string `json:"why"`
 }
@@ -133,6 +136,8 @@ func (s *State) Access(cfg *Config, e *Entry, at uint64, boxes Boxes) (string, [
 			v.Counts, v.Why = true, "extended"
 		case !known:
 			v.Why = "gone"
+		case info.Unattested:
+			v.Why = "not proven"
 		case v.Qualifies == "":
 			v.Why = "not qualifying"
 		case int64(at)*1000-info.LastSeen <= Grace*1000:

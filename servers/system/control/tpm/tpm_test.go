@@ -105,3 +105,10 @@ func TestTheESPsNewestGenerationsAreItsBoots(t *testing.T) {
 		}
 	}
 }
+
+func TestPCRReadOutputIsReadByIndex(t *testing.T) {
+	out := []byte("  sha256:\n    0 : 0xAB01\n    2 : 0xCD02\n    4 : 0x0000\n    7 : 0xEF03\n")
+	if !pcrIn(out, "0", "ab01") || !pcrIn(out, "7", "EF03") || pcrIn(out, "2", "cd03") || pcrIn(out, "1", "ab01") {
+		t.Fatal("pcrread's lines misread")
+	}
+}

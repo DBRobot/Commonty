@@ -133,7 +133,7 @@ fi
 if [ -e "$KEYS/half.priv" ]; then
   tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/half.pub" -r "$KEYS/half.priv" -c "$w/half.ctx"
   tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
-  dd-tpm-policy "$w/h.ctx" "$KEYS"
+  dd-tpm-policy "$w/h.ctx" "$KEYS" || say "dd-unlock: this boot is not one the box approved"
   tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half" || true
   tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
 else

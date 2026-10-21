@@ -579,3 +579,33 @@ func TestTheDBCertificateIsRecordedAndForgotten(t *testing.T) {
 		t.Fatal("kept after the box left")
 	}
 }
+
+// what attest-check inspect shows of a real machine: the laptop's AMD EK
+// and its chain, and an event log (the swtpm vector's: Secure Boot on,
+// systemd-boot and a lanzaboote image)
+func TestInspectReadsARealAMDChainAndALog(t *testing.T) {
+	var chain [][]byte
+	for _, f := range []string{"laptop-ek-rsa.der", "amd-prg-rpl-ica.der"} {
+		der, err := os.ReadFile("testdata/" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		chain = append(chain, der)
+	}
+	root, _ := os.ReadFile("testdata/amd-root.der")
+	cfg := &Config{Roots: map[string][]string{"414D4400": {string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: root}))}}}
+	ek, _ := os.ReadFile("testdata/laptop-ek.pub")
+	logRaw, _ := base64.StdEncoding.DecodeString(load(t).Begin.Log)
+	in, err := Inspect(cfg, ek, chain, logRaw, oct2026)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Vendor != "414D4400" || in.ChainErr != "" || len(in.Chain) != 2 || in.SecureBoot != "on" || len(in.Apps) != 2 || len(in.PCRs) != 4 {
+		t.Fatalf("%+v", in)
+	}
+	// without AMD's CA: said, not fatal
+	in, err = Inspect(cfg, ek, chain[:1], logRaw, oct2026)
+	if err != nil || in.ChainErr == "" {
+		t.Fatalf("%+v %v", in, err)
+	}
+}

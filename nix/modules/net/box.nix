@@ -127,6 +127,7 @@ in
         pkgs.age
         pkgs.age-plugin-tpm
         pkgs.tpm2-tools
+        (import ../../lib/tpm-policy.nix pkgs)
         pkgs.coreutils
       ];
       serviceConfig = {

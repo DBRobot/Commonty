@@ -33,6 +33,15 @@ const (
 // Minimum: why a box can't join, or "" when it can. Each reason says what
 // is missing in words the person setting the box up can act on.
 func Minimum(f map[string]float64) string {
+	why := Missing(f)
+	if len(why) == 0 {
+		return ""
+	}
+	return "needs " + strings.Join(why, ", ")
+}
+
+// Missing: what the box lacks of the minimum, one item each
+func Missing(f map[string]float64) []string {
 	var why []string
 	if f["tpm_major"] != 2 {
 		why = append(why, "a TPM 2.0")
@@ -58,10 +67,7 @@ func Minimum(f map[string]float64) string {
 	if f["nics"] < 1 {
 		why = append(why, "a network link")
 	}
-	if len(why) == 0 {
-		return ""
-	}
-	return "needs " + strings.Join(why, ", ")
+	return why
 }
 
 // Qualify: what a box brings beyond the minimum, "" for nothing (it joins,

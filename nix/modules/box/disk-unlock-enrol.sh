@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Once per box, as root, after Secure Boot is on (PCR 7 is what the TPM
 # will hold this to):
 #   dd-unlock-enrol keys    the TPM's signing key and its half of the disk key,

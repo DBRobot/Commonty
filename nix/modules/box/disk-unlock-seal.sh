@@ -1,10 +1,13 @@
 # shellcheck shell=bash
 # A box that joined, at its first boot with Secure Boot on and its own keys
-# enrolled (docs/dev/joining.md): a new half of the disk key, sealed in the
-# TPM under this boot's PCR 7, the pool re-keyed to what it makes, and the
+# enrolled (docs/dev/joining.md): its key to join with, made in the TPM
+# under its approver (dd-boot-key enrol: PCRs 4 and 7 of the boots it
+# approves, docs/dev/attestation.md); a new half of the disk key, sealed
+# under the same policy; the pool re-keyed to what it makes, and the
 # installer's half, which no PCR held, gone. From now the TPM opens the
-# disk only under this box's signed boot: not a USB drive's system, not its
-# own with a changed command line, not with Secure Boot off or other keys.
+# disk only under this box's signed boot of the release's system: not a USB
+# drive's system, not another loader its firmware lets run, not its own
+# with a changed command line, not with Secure Boot off or other keys.
 # From the unit: POOL (the pool whose encryption root is POOL/enc).
 set -euo pipefail
 umask 077
@@ -33,11 +36,33 @@ fi
 w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
 export TPM2TOOLS_TCTI=device:/dev/tpmrm0
+
+# the box's own key to join with, first: made now, never before its
+# signed boot existed, under its approver, which approves this boot. Its
+# name comes from it (state.JoinName)
+if [ ! -s "$dir/sig.pub" ]; then
+  dd-boot-key enrol -keys "$dir" -dir "$w/bk"
+  tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
+  tpm2_load -Q -C "$w/srk.ctx" -u "$dir/sig.pub" -r "$dir/sig.priv" -c "$w/sig.ctx"
+  tpm2_readpublic -Q -c "$w/sig.ctx" -f der -o "$w/spki.der"
+  tpm2_flushcontext -t >/dev/null 2>&1 || true
+  mkdir -p /var/lib/dd
+  (umask 022 && base64 -w0 <"$w/spki.der" >/var/lib/dd/box-key.spki)
+  sync
+  echo "dd-unlock-seal: its key to join with, made under this boot's approval: j$(sha256sum <"$w/spki.der" | cut -c1-10)"
+fi
+
+# the disk's half under the join key's own policy (join.policy); a key
+# made before approvers were: PCR 7, as it was
 head -c 32 /dev/urandom >"$w/half"
 tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
-tpm2_startauthsession -Q -S "$w/s.ctx"
-tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"
-tpm2_flushcontext "$w/s.ctx"
+if [ -s "$dir/join.policy" ]; then
+  cp "$dir/join.policy" "$w/pcr.pol"
+else
+  tpm2_startauthsession -Q -S "$w/s.ctx"
+  tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"
+  tpm2_flushcontext "$w/s.ctx"
+fi
 tpm2_create -Q -C "$w/srk.ctx" -L "$w/pcr.pol" -a 'fixedtpm|fixedparent|noda' \
   -i "$w/half" -u "$w/half.pub" -r "$w/half.priv"
 tpm2_flushcontext -t >/dev/null 2>&1 || true
@@ -66,22 +91,3 @@ sync
 shred -u /run/dd-seal/disk.key
 echo "dd-unlock-seal: the disk's key is sealed under this box's signed boot"
 
-# the box's own key to join with, under the same boot (PCR 7), as node1's
-# and node2's: made now, never before its signed boot existed. Its name
-# comes from it (state.JoinName)
-if [ ! -s "$dir/sig.pub" ]; then
-  tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
-  tpm2_startauthsession -Q -S "$w/s.ctx"
-  tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"
-  tpm2_flushcontext "$w/s.ctx"
-  tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -L "$w/pcr.pol" \
-    -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda' \
-    -u "$dir/sig.pub" -r "$dir/sig.priv"
-  tpm2_load -Q -C "$w/srk.ctx" -u "$dir/sig.pub" -r "$dir/sig.priv" -c "$w/sig.ctx"
-  tpm2_readpublic -Q -c "$w/sig.ctx" -f der -o "$w/spki.der"
-  tpm2_flushcontext -t >/dev/null 2>&1 || true
-  mkdir -p /var/lib/dd
-  (umask 022 && base64 -w0 <"$w/spki.der" >/var/lib/dd/box-key.spki)
-  sync
-  echo "dd-unlock-seal: its key to join with, made under the same boot: j$(sha256sum <"$w/spki.der" | cut -c1-10)"
-fi

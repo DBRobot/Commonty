@@ -352,17 +352,17 @@ type Boot struct {
 // stub) and the boot is not ours.
 func checkBoot(b *Boot, log []event, stub []byte) error {
 	if b == nil {
-		return fmt.Errorf("%w: the release names no boot images", ErrSecureBoot)
+		return fmt.Errorf("%w: the release names no boot images", ErrBoot)
 	}
 	apps, err := bootApps(log)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrSecureBoot, err)
+		return fmt.Errorf("%w: %v", ErrBoot, err)
 	}
 	if len(apps) != 2 {
-		return fmt.Errorf("%w: %d boot applications ran; systemd-boot and the stub only", ErrSecureBoot, len(apps))
+		return fmt.Errorf("%w: %d boot applications ran; systemd-boot and the stub only", ErrBoot, len(apps))
 	}
 	if !slices.Contains(b.Loaders, hex.EncodeToString(apps[0])) {
-		return fmt.Errorf("%w: the first boot application is not the release's systemd-boot", ErrSecureBoot)
+		return fmt.Errorf("%w: the first boot application is not the release's systemd-boot", ErrBoot)
 	}
 	var img *stubImage
 	var last error = errors.New("no stub")
@@ -373,15 +373,15 @@ func checkBoot(b *Boot, log []event, stub []byte) error {
 	}
 	switch {
 	case last != nil:
-		return fmt.Errorf("%w: not the release's lanzaboote stub: %v", ErrSecureBoot, last)
+		return fmt.Errorf("%w: not the release's lanzaboote stub: %v", ErrBoot, last)
 	case !bytes.Equal(img.digest, apps[1]):
-		return fmt.Errorf("%w: the second boot application is not the stub the box sent", ErrSecureBoot)
+		return fmt.Errorf("%w: the second boot application is not the stub the box sent", ErrBoot)
 	case !slices.Contains(b.Kernels, hex.EncodeToString(img.kernel)):
-		return fmt.Errorf("%w: the stub names a kernel not the release's", ErrSecureBoot)
+		return fmt.Errorf("%w: the stub names a kernel not the release's", ErrBoot)
 	case !cmdlineOK(b, img.cmdline):
-		return fmt.Errorf("%w: the stub's command line is not the release's", ErrSecureBoot)
+		return fmt.Errorf("%w: the stub's command line is not the release's", ErrBoot)
 	case len(b.Initrds) > 0 && !slices.Contains(b.Initrds, hex.EncodeToString(img.initrd)):
-		return fmt.Errorf("%w: the stub names an initrd not the release's", ErrSecureBoot)
+		return fmt.Errorf("%w: the stub names an initrd not the release's", ErrBoot)
 	}
 	return nil
 }

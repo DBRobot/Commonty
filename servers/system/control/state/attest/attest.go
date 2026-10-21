@@ -94,6 +94,9 @@ type Test struct {
 	SoftwareTPM bool `json:"softwareTPM,omitempty"`
 	// a VM's firmware boots without Secure Boot
 	NoSecureBoot bool `json:"noSecureBoot,omitempty"`
+	// a box joins on its word alone, no proof of its TPM (state/join.go):
+	// for tests of what comes after the join
+	UnattestedJoin bool `json:"unattestedJoin,omitempty"`
 }
 
 // PCRs is what a quote covers: firmware (0), option ROMs (2), what was
@@ -104,6 +107,10 @@ var (
 	ErrSoftware   = errors.New("a software TPM: refused outside tests")
 	ErrNoRoot     = errors.New("no root for this TPM's maker")
 	ErrSecureBoot = errors.New("not booted under its own Secure Boot keys")
+	// PCR 4: not the release's systemd-boot and lanzaboote image
+	ErrBoot = errors.New("not the release's boot")
+	// the EK certificate does not chain to its maker's roots
+	ErrEK = errors.New("not a TPM its maker certified")
 )
 
 // software TPMs by vendor id: swtpm's own default, and IBM's simulator
@@ -322,7 +329,7 @@ func parseChain(chain []string) ([]*x509.Certificate, error) {
 func verifyChain(pol *policy, certs []*x509.Certificate, at time.Time) (vendor, model string, err error) {
 	leaf := certs[0]
 	if !ekMarked(leaf) {
-		return "", "", errors.New("not an EK certificate: no TCG EK purpose or policy")
+		return "", "", fmt.Errorf("%w: not an EK certificate: no TCG EK purpose or policy", ErrEK)
 	}
 	vendor, model = tpmInfo(leaf)
 	if (software[vendor] || model == "swtpm") && !pol.test.SoftwareTPM {
@@ -356,7 +363,7 @@ func verifyChain(pol *policy, certs []*x509.Certificate, at time.Time) (vendor, 
 		return "", "", fmt.Errorf("%w: %s", ErrNoRoot, vendorName(vendor))
 	}
 	if err := verify(roots); err != nil {
-		return "", "", fmt.Errorf("the EK certificate does not chain to %s's roots: %v", vendorName(vendor), err)
+		return "", "", fmt.Errorf("%w: the EK certificate does not chain to %s's roots: %v", ErrEK, vendorName(vendor), err)
 	}
 	return vendor, model, nil
 }
