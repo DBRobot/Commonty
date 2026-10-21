@@ -1,6 +1,8 @@
 # What a house's ad blocking needs of a box (types: nix/lib/needs-type.nix)
 {
   pihole = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "ad and tracker blocking for a household's own devices, and its owner's set to ask it on the Commonty network; lookups sent out encrypted";
     # a house's own DNS: on a box of that household, or the owner's
     trust = "household";
@@ -37,6 +39,8 @@
     };
   };
   tang = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "opens a household's home controller's card at boot, by one blinded key operation, on the house network alone; never learns the card's key";
     units = [ "tangd*" ];
     perHouse = 1;

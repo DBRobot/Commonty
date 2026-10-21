@@ -57,8 +57,13 @@ type placer struct {
 	// where the flags are (/run/dd-placed): a tmpfs, so nothing placed
 	// starts at boot before the plan says so
 	dir string
-	// service -> its units on this box, the services this box carries
+	// service -> its units on this box, the services this box carries; a
+	// template's instances as a pattern (dd-game@*.service), for stopping
 	carries map[string][]string
+	// service -> the units of it that start it (those that start at boot):
+	// a timer, not the run it starts; none of a template's instances. A
+	// service not here starts all its units
+	starts map[string][]string
 	// the carried services with one writer
 	leased map[string]bool
 	// systemctl, or a test's stand-in
@@ -73,8 +78,10 @@ type placer struct {
 	// and when it sent each request still unanswered
 	since map[string]int64
 	sent  map[string]map[uint64]int64
-	// GiB a service holds, as the release estimates it (place.Service)
-	memory map[string]float64
+	// GiB a service holds, as the release estimates it (place.Service),
+	// and what it keeps aside whatever it holds
+	memory  map[string]float64
+	reserve map[string]float64
 	// bytes of memory free now (MemAvailable), or a test's
 	free func() float64
 	// a service refused for want of room: when (uptime), told for refuseFor
@@ -87,6 +94,8 @@ type placer struct {
 	// what one member's computers may take together, and the ports' pool
 	// (fleet/policy.json computers): held to on this box too
 	limits *computers.Limits
+	// the services checked once for what of them runs without a flag
+	swept map[string]bool
 	// a writer handed over: its last writes out to the other stores, done
 	// within the time given (finalCopy); nil: none
 	final func(svc string, within time.Duration) error
@@ -193,9 +202,16 @@ func (p *placer) fits(svc string, s *state.State) bool {
 	if p.free == nil || computerFlag.MatchString(svc) {
 		return true
 	}
+	// what it held here, when it ran here (a CI runner takes as many jobs
+	// as its box holds), never under what it keeps aside; else the most
+	// any box measured it holding, never under the release's estimate
 	need := p.memory[svc] * (1 << 30)
-	for _, b := range s.Boxes {
-		need = max(need, b.Facts["svc/"+svc+"/mem"])
+	if b := s.Boxes[p.box]; b != nil && b.Facts["svc/"+svc+"/mem"] > 0 {
+		need = max(b.Facts["svc/"+svc+"/mem"], p.reserve[svc]*(1<<30))
+	} else {
+		for _, b := range s.Boxes {
+			need = max(need, b.Facts["svc/"+svc+"/mem"])
+		}
 	}
 	if free := p.free(); free > 0 && free-need < keepFree {
 		if _, ok := p.refused[svc]; !ok || p.uptime()-p.refused[svc] >= refuseFor.Milliseconds() {
@@ -257,7 +273,15 @@ func (p *placer) raise(svc string, content []byte) error {
 }
 
 func (p *placer) start(svc string) {
-	if err := p.run(append([]string{"start", "--no-block"}, p.units(svc)...)...); err != nil {
+	units := p.units(svc)
+	if us, ok := p.starts[svc]; ok && !computerFlag.MatchString(svc) {
+		units = us
+	}
+	if len(units) == 0 {
+		log.Printf("placed: %s runs here now (nothing of it starts by itself)", svc)
+		return
+	}
+	if err := p.run(append([]string{"start", "--no-block"}, units...)...); err != nil {
 		log.Printf("placed: starting %s: %v", svc, err)
 	} else {
 		log.Printf("placed: %s runs here now", svc)
@@ -473,6 +497,20 @@ func (p *placer) reconcile(plan place.Plan, s *state.State) {
 			p.start(svc)
 		case !want[svc] && p.up(svc):
 			_ = p.stop(svc, "the plan moved it", false)
+		case !want[svc] && !p.swept[svc]:
+			// once, the first time the plan does not give it here: what
+			// of it still runs without a flag stops. A switch that first
+			// gives a running service its flag's condition leaves its
+			// sockets listening (switch-to-configuration does not touch a
+			// changed socket)
+			if p.swept == nil {
+				p.swept = map[string]bool{}
+			}
+			p.swept[svc] = true
+			if p.run(append([]string{"is-active", "--quiet"}, p.units(svc)...)...) == nil {
+				log.Printf("placed: %s runs here without its flag; stopping it", svc)
+				_ = p.run(append([]string{"stop", "--no-block"}, p.units(svc)...)...)
+			}
 		}
 	}
 }

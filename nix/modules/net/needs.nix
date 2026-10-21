@@ -61,6 +61,8 @@
   };
 
   netbridge = {
+    # every box but a control box without failover, which is the server itself
+    everyBox = true;
     what = "the control server's protocol through the front door, for a box that is not the control box";
     units = [ "commonty-net-bridge" ];
     base = {

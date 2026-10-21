@@ -77,6 +77,10 @@
   };
 
   forgejo-runner = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
+    # on every box that carries it
+    spread = true;
     what = "runs the fleet's own CI: builds, checks, VM tests";
     # only a fleet that develops Commonty itself builds and checks it; the
     # rest take signed releases
@@ -136,6 +140,10 @@
   };
 
   members-runner = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
+    # on every box that carries it
+    spread = true;
     what = "runs members' own CI, sandboxed (Docker and gVisor), with no way into the fleet";
     # members' own jobs, sandboxed, with no way into the fleet
     traffic = {

@@ -1,6 +1,8 @@
 # What the front door and the gate need of a box (types: nix/lib/needs-type.nix)
 {
   nginx = {
+    # every box has it: what it serves are the box's own names
+    everyBox = true;
     what = "every page's TLS and routing on a box, each request asked of the gate first";
     # who may run it follows the services it fronts
     alwaysOn = true;
@@ -51,6 +53,10 @@
   };
 
   cloudflared = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
+    # on every box that carries it
+    spread = true;
     what = "the front door on the open internet: a tunnel this box opens outward";
     # every public request passes it in the clear
     trust = "owner";
@@ -67,8 +73,9 @@
       "dd-door"
       "dd-door-names"
     ];
-    # one public front door; dd-dns points the names at it
-    instances = 1;
+    # one public front door, the names pointed at it; with failover every
+    # box able to be the gateway keeps its own ready, and the names follow
+    # the network's lease
     base = {
       # node1, 2026-10-04: peak
       uses = {
@@ -85,6 +92,8 @@
   };
 
   acme = {
+    # every box has it: what it serves are the box's own names
+    everyBox = true;
     what = "the box's certificate from Let's Encrypt, for the names it serves; the DNS Worker writes its challenges";
     units = [ "dd-acme@" ]; # the helper that asks the Worker, one per challenge
     # any box's: it asks the DNS Worker for its own names alone
@@ -129,6 +138,8 @@
   };
 
   mail-worker-check = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "checks hourly that the mail and DNS Workers Cloudflare runs are exactly the ones this release carries";
     units = [
       "dd-mail-worker-check"
@@ -149,6 +160,8 @@
     };
   };
   harmonia = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "the home controllers' updates: this box's nix store, read-only, on the Commonty network (smarthome/cache-door.nix)";
     instances = 1;
     base = {

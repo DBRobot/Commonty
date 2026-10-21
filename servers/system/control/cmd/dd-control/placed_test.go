@@ -638,3 +638,38 @@ func TestAComputerHandedOverIsNotCopiedAndStopsFirst(t *testing.T) {
 		t.Fatalf("calls %v", *calls)
 	}
 }
+
+func TestAServiceStartsWithWhatStartsIt(t *testing.T) {
+	p, calls := newPlacer(t)
+	// a timer, not the run it starts; a template's instances not at all
+	p.carries["games"] = []string{"games.service", "games-access.service", "games-access.timer", "game@*.service"}
+	p.starts = map[string][]string{"games": {"games.service", "games-access.timer"}}
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: "games"}}}}, state.New())
+	if want := []string{"start --no-block games.service games-access.timer"}; !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls %v", *calls)
+	}
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}, state.New())
+	if want := "stop --no-block games.service games-access.service games-access.timer game@*.service"; (*calls)[1] != want {
+		t.Fatalf("calls %v", *calls)
+	}
+}
+
+func TestWhatRunsWithoutItsFlagStopsOnce(t *testing.T) {
+	p, calls := newPlacer(t)
+	// web's socket kept listening through the switch that gave it its flag
+	run := p.run
+	p.run = func(args ...string) error {
+		if args[0] == "is-active" && args[len(args)-1] == "web.service" {
+			return nil
+		}
+		return run(args...)
+	}
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: "photos"}}}}, state.New())
+	if want := []string{"start --no-block ente.service ente-web.service", "stop --no-block web.service"}; !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls %v", *calls)
+	}
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: "photos"}}}}, state.New())
+	if len(*calls) != 2 {
+		t.Fatalf("checked again: %v", *calls)
+	}
+}

@@ -607,3 +607,27 @@ func TestAMembersBoxKeepsItsCopyAsABoxOfTheReleaseDoes(t *testing.T) {
 		t.Fatalf("copies %q", got)
 	}
 }
+
+func TestASmallBoxsOwnRunnerIsSizedByItsOwnMeasure(t *testing.T) {
+	in, s := fleet()
+	// a runner on every box, taking the jobs its box holds: big's ran
+	// 12G, the nas's 3G
+	in.Services["runner"] = Service{Enabled: true, Spread: true, MemoryGiB: 6}
+	for _, b := range []string{"big", "nas"} {
+		in.Boxes[b].Can["runner"] = 1
+	}
+	s.Boxes["big"].Facts["svc/runner/mem"] = 12 * gib
+	s.Boxes["nas"].Facts["svc/runner/mem"] = 3 * gib
+	s.Boxes["nas"].Facts["svc/garage/mem"] = 6 * gib
+	p := Decide(in, s, 90_000, nil)
+	// 6 + 3 fits the nas's 13.6G; 6 + 12 would not
+	if !runs(p, "big", "runner") || !runs(p, "nas", "runner") {
+		t.Fatalf("a runner each on big and the nas: %+v", p.Boxes)
+	}
+	// a box that never ran it is sized by the most any box measured
+	in.Boxes["small"].Can["runner"] = 1
+	p = Decide(in, s, 90_000, nil)
+	if runs(p, "small", "runner") {
+		t.Fatalf("small's 6.8G holds no 12G runner: %+v", p.Boxes["small"])
+	}
+}

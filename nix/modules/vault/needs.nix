@@ -78,6 +78,8 @@
   };
 
   pwned-list = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "the breach list, so checking a password never leaves the box";
     # the public breach list, about 90G fetched on a timer
     traffic = {
@@ -101,7 +103,11 @@
         outbound = [ "api.pwnedpasswords.com" ];
         inbound = "localhost";
       };
-      depends.nginx.local = true;
+      depends = {
+        nginx.local = true;
+        # only the vault reads it, beside it: the two go together
+        vaultwarden.local = true;
+      };
       privacy = "none"; # a public list
     };
   };

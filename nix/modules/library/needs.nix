@@ -53,6 +53,8 @@
   };
 
   mail-inbox = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "members' mail, locked to their key by the mail Worker before any box has it, kept in the storage pool; and the pipe their app sends mail through";
     # ciphertext: mail the Worker locked, and TLS the member's app runs
     traffic = {
@@ -81,6 +83,8 @@
   };
 
   dd-transcode = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "plays a film a member's device cannot, decrypting it in memory only";
     # it decrypts the film it transcodes, for any member
     trust = "owner";

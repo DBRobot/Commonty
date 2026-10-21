@@ -552,6 +552,7 @@ func main() {
 	placement := flag.String("placement", "", "what each box can run and what the fleet wants (the release's placement-inputs.json); empty: no /plan")
 	every := flag.Duration("heartbeat", 30*time.Second, "how often to heartbeat")
 	placedCarries := flag.String("placed-carries", "", "the placed services this box carries and their units (nix/modules/box/placed.nix); empty: none, and nothing is switched")
+	placedStarts := flag.String("placed-starts", "", "of those units, the ones started when the plan gives the service (what starts at boot); a service not named there starts all of its units")
 	placedDir := flag.String("placed-dir", "/run/dd-placed", "where a placed service's flag is, the condition its units start on")
 	joinKey := flag.String("join-key", "", "a box the release does not list: a file with its TPM-held key (SPKI, base64), with which it joins the agreed state under the name the key gives (state/join.go); -box must be that name")
 	joinRecipient := flag.String("join-recipient", "", "with -join-key: its secrets key's age recipient, what copies' keys are sealed to")
@@ -844,11 +845,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("%s: %v", *placedCarries, err)
 	}
+	starts := map[string][]string{}
+	if *placedStarts != "" {
+		if starts, err = loadCarries(*placedStarts); err != nil {
+			log.Fatalf("%s: %v", *placedStarts, err)
+		}
+	}
 	placed := &placer{
-		box: *box, dir: *placedDir, carries: carried, leased: map[string]bool{},
+		box: *box, dir: *placedDir, carries: carried, starts: starts, leased: map[string]bool{},
 		run: systemctl, uptime: uptime, ttl: time.Duration(cfg.Rules.LeaseTTL) * time.Millisecond,
 		since: map[string]int64{}, sent: map[string]map[uint64]int64{},
-		memory: map[string]float64{}, free: memFree, refused: map[string]int64{},
+		memory: map[string]float64{}, reserve: map[string]float64{}, free: memFree, refused: map[string]int64{},
 		copies: *placedCopies,
 		ask: func(op state.LeaseOp) (uint64, error) {
 			body, _ := json.Marshal(op)
@@ -1059,6 +1066,7 @@ func main() {
 		for svc := range carried {
 			placed.leased[svc] = in.Services[svc].Lease
 			placed.memory[svc] = max(in.Services[svc].MemoryGiB, in.Services[svc].ReserveGiB)
+			placed.reserve[svc] = in.Services[svc].ReserveGiB
 		}
 		if len(carried) > 0 || *placedCopies != "" || rc != nil {
 			go func() {

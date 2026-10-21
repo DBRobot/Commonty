@@ -27,6 +27,8 @@ let
 in
 {
   dd-games = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "game servers members start for themselves, each in its own VM";
     # players connect to it; a world runs when someone starts it
     traffic = {
