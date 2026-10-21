@@ -254,7 +254,10 @@ under load: run it on a box; `--only <check>` for one). Between traces a
 check can come to read a file covers.json does not have only through a path
 its `.nix` files build at evaluation, which the chooser covers by its
 whole directory. The other jobs keep their path lists (rust, and nix for
-the flake check and the systems).
+the flake check and the systems). A new check runs on every change until
+it is traced (`--only <check>` in its own pull request or a later one);
+`checks.ci-select` names it and judges the made-up changes on the traced
+checks alone.
 [`edges.py`](../../nix/tests/ci-select/edges.py) (`checks.ci-select`) holds
 the chooser to the cases above, and
 [`sim.py`](../../nix/tests/ci-select/sim.py) replays it against main's

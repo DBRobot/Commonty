@@ -16,6 +16,9 @@ def run(root):
     flake = open(os.path.join(root, "flake.nix")).read()
     vms = cs.vm_tests(flake)
     every = set(vms + cs.MAIL_WORKER)
+    # a check covers.json has not traced yet runs on every change until it
+    # is; the cases judge the traced ones, and that it ran
+    untraced = every - covers["checks"]
 
     def named():
         for d, _, fs in os.walk(root):
@@ -183,7 +186,8 @@ def run(root):
         gone = case[4] if len(case) > 4 else []
         base = lacking(case[5]) if len(case) > 5 else None
         r = choose(changes, set(new_dirs), set(gone), base)
-        good = bool(ok(r))
+        seen = dict(r, chosen=[t for t in r["chosen"] if t not in untraced])
+        good = bool(ok(seen)) and (r["docs_only"] or untraced <= set(r["chosen"]))
         if not good:
             bad.append(title)
         kind = (
@@ -205,12 +209,17 @@ def run(root):
                 r,
             )
         )
-    return rows, bad
+    return rows, bad, sorted(untraced)
 
 
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "."
-    rows, bad = run(root)
+    rows, bad, untraced = run(root)
+    if untraced:
+        print(
+            f"not in covers.json yet, so on every change: {' '.join(untraced)}\n"
+            f"  trace it on a box: nix/tests/ci-select/ciselect.py trace --only {','.join(untraced)}"
+        )
     for title, changes, kind, chosen, good, r in rows:
         flags = " ".join(k for k in ("nix", "rust", "app") if r.get(k))
         print(
