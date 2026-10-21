@@ -383,7 +383,8 @@ function vaultExport() {
     location.href = `/_dd/app/vault?to=${encodeURIComponent(to)}`;
     return;
   }
-  window.open(`/_dd/app/go?service=vault&path=${encodeURIComponent(to)}`, '_blank', 'noopener');
+  // the app's door for this browser, in this tab
+  location.href = `/_dd/app/go?service=vault&path=${encodeURIComponent(to)}`;
 }
 
 let taken = false;

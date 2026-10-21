@@ -1869,6 +1869,8 @@
           # the PDF editor's document and signatures, on the pinned MuPDF
           pdf-editor = import ./nix/tests/pdf-editor.nix (args // { web = self.packages.${system}.web; });
           sso = import ./nix/tests/sso.nix args;
+          # every bar link and home tile stays in its tab, on a box's pages and the app's
+          same-tab = import ./nix/tests/same-tab.nix args;
           dns-worker = import ./nix/tests/dns-worker.nix args;
           # the control plane: relay, witness and three validators, offline
           control = import ./nix/tests/control.nix args;

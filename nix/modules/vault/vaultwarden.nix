@@ -435,8 +435,9 @@ in
         };
 
         # Only on the Commonty network - apps reach it through the phone's or
-        # laptop's tailnet - except what a Send needs: someone outside opening a
-        # link gets the Send page and the calls it makes, and nothing else.
+        # laptop's tailnet - except what a Send needs and the page that hands
+        # a browser to the app: someone outside opening a link gets the Send
+        # page and the calls it makes, and nothing else.
         services.nginx.virtualHosts.${host} = {
           useACMEHost = base;
           forceSSL = true;
@@ -457,22 +458,20 @@ in
             in
             {
               # The web vault holds a person's keys, so it comes with the app
-              # (app/src/local.rs) and is never served from here. Inside, a
-              # browser is told to open Passwords in the app; the same page
-              # starts a Bitwarden app's sign-in and opens a Send (use-app.js).
-              # Outside: the Send page and nothing else.
+              # (app/src/local.rs) and is never served from here. A browser
+              # is told to open Passwords in the app; the same page starts a
+              # Bitwarden app's sign-in and opens a Send (use-app.js). From
+              # outside too: a member's browser off the network reaches this
+              # name through the tunnel, and a Send-only page there was a
+              # dead end for the bar's Passwords ("Nothing to open"). The
+              # page holds no key and its sign-in calls stay inside.
               # the admin page is for dd-forget-passwords on loopback alone
               "^~ /admin".return = "404";
               "/" = {
-                extraConfig =
-                  lib.optionalString public ''
-                    error_page 418 = @send;
-                    if ($dd_inside = 0) { return 418; }
-                  ''
-                  + ''
-                    error_page 419 = @use-app;
-                    return 419;
-                  '';
+                extraConfig = ''
+                  error_page 419 = @use-app;
+                  return 419;
+                '';
               };
               "@use-app" = {
                 proxyPass = gate;
@@ -480,14 +479,8 @@ in
                   rewrite ^ /_dd/use-app break;
                 '';
               };
-              # a Send opened from inside: use-app.js sends it here
+              # a Send: use-app.js sends a #/send/ link here
               "= /send" = {
-                proxyPass = gate;
-                extraConfig = ''
-                  rewrite ^ /_dd/send break;
-                '';
-              };
-              "@send" = {
                 proxyPass = gate;
                 extraConfig = ''
                   rewrite ^ /_dd/send break;

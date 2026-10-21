@@ -194,6 +194,9 @@ jobs:
       # and the Mail page, as the app serves it (nix/tests/mail-page)
       - name: the Mail page, in a browser
         run: nix build --no-link -L .#checks.x86_64-linux.mail-page .#checks.x86_64-linux.files-page
+      # every bar link and home tile stays in its tab (nix/tests/same-tab)
+      - name: links stay in their tab
+        run: nix build --no-link -L .#checks.x86_64-linux.same-tab
       # and the DNS Worker at its API, with the box's helper (nix/tests/dns-worker)
       - name: the DNS Worker
         run: nix build --no-link -L .#checks.x86_64-linux.dns-worker

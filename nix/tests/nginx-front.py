@@ -1,8 +1,10 @@
-# The bare name's front page, run: the box's own nginx config, served in
-# the build, with a stand-in for the gate that writes down what reaches it.
-# Every request is an outsider's, through the tunnel's listener. The front
-# page is served at / (not a redirect), home's / is still the way in, and
-# the docs, the download and security.txt answer as they did.
+# The public names' fronts, run: the box's own nginx config, served in the
+# build, with a stand-in for the gate that writes down what reaches it.
+# Every request is an outsider's, through the tunnel's listener. "front":
+# the bare name's front page is served at / (not a redirect), home's / is
+# still the way in, and the docs, the download and security.txt answer as
+# they did. "vault": Passwords' / is the page that hands a browser to the
+# app, and a Send still opens.
 import os
 import re
 import signal
@@ -14,6 +16,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 conf, nginx, tmp, bare = sys.argv[1:5]
+checks = sys.argv[5:] or ["front"]
 home = "home." + bare
 seen = []
 
@@ -88,10 +91,20 @@ def ask(path, host=bare):
         capture_output=True,
         text=True,
     )
-    head = open(tmp + "/head").read().lower()
-    out = open(tmp + "/out", "rb").read().decode(errors="replace")
-    os.remove(tmp + "/head")
-    os.remove(tmp + "/out")
+
+    # a connection closed unanswered (444) leaves neither file
+    def take(name):
+        try:
+            with open(tmp + "/" + name, "rb") as f:
+                return f.read().decode(errors="replace")
+        except FileNotFoundError:
+            return ""
+        finally:
+            if os.path.exists(tmp + "/" + name):
+                os.remove(tmp + "/" + name)
+
+    head = take("head").lower()
+    out = take("out")
     return r.stdout.strip(), head, out
 
 
@@ -118,23 +131,50 @@ def moved(path, to, host=bare, want="302"):
         )
 
 
-# the front page, for anyone, at the bare name itself
-served("/", "/_dd/landing")
-served("/_dd/static/landing.css", "/_dd/static/landing.css")
-served("/_dd/static/footer.js", "/_dd/static/footer.js")
-# home's own front is still the way in
-served("/", "/_dd/home", host=home)
-# the docs, the download and everything else as before
-served("/docs", "/_dd/docs/page")
-served("/docs/guide/joining", "/_dd/docs/page/guide/joining")
-# the one fixed address; everything else a 302, which browsers don't keep
-moved("/download", f"https://{home}/_dd/download", want="301")
-moved("/_dd/login", f"https://{home}/_dd/login")
-moved("/anything", f"https://{home}/anything")
-code, _, out = ask("/.well-known/security.txt")
-told.append(f"  {code}  {bare}/.well-known/security.txt")
-if code != "200" or "Contact: mailto:security@" not in out:
-    failures.append(f"{bare}/.well-known/security.txt: {code}")
+def front():
+    # the front page, for anyone, at the bare name itself
+    served("/", "/_dd/landing")
+    served("/_dd/static/landing.css", "/_dd/static/landing.css")
+    served("/_dd/static/footer.js", "/_dd/static/footer.js")
+    # home's own front is still the way in
+    served("/", "/_dd/home", host=home)
+    # the docs, the download and everything else as before
+    served("/docs", "/_dd/docs/page")
+    served("/docs/guide/joining", "/_dd/docs/page/guide/joining")
+    # the one fixed address; everything else a 302, which browsers don't keep
+    moved("/download", f"https://{home}/_dd/download", want="301")
+    moved("/_dd/login", f"https://{home}/_dd/login")
+    moved("/anything", f"https://{home}/anything")
+    code, _, out = ask("/.well-known/security.txt")
+    told.append(f"  {code}  {bare}/.well-known/security.txt")
+    if code != "200" or "Contact: mailto:security@" not in out:
+        failures.append(f"{bare}/.well-known/security.txt: {code}")
+
+
+def vault():
+    # Passwords from outside (a member's browser off the network comes
+    # through the tunnel): the hand-off page, not the Send page that said
+    # "Nothing to open"; a Send link, which use-app.js sends on to /send,
+    # still opens; and the vault's own calls stay shut
+    host = "vault." + bare
+    for path in ("/", "/#/vault", "/index.html"):
+        code, _, out = ask(path, host)
+        told.append(f"  {code}  {host}{path}  -> {out}")
+        if code != "200" or out != "gate:/_dd/use-app":
+            failures.append(f"{host}{path}: {code} {out!r}, wanted the hand-off page")
+    code, _, out = ask("/send", host)
+    told.append(f"  {code}  {host}/send  -> {out}")
+    if code != "200" or out != "gate:/_dd/send":
+        failures.append(f"{host}/send: {code} {out!r}, wanted the Send page")
+    for path in ("/identity/connect/token", "/api/accounts/profile"):
+        code, _, _ = ask(path, host)
+        told.append(f"  {code}  {host}{path}")
+        if code != "000":
+            failures.append(f"{host}{path}: {code}, wanted the connection closed")
+
+
+for c in checks:
+    {"front": front, "vault": vault}[c]()
 
 os.kill(proc.pid, signal.SIGTERM)
 proc.wait(timeout=10)
@@ -143,4 +183,4 @@ print("\n".join(told))
 if failures:
     print("\n".join(failures))
     sys.exit(1)
-print(f"{bare}: the front page at /, home's sign-in, the docs and the download")
+print(f"{bare}: " + ", ".join(checks) + " as they should be")

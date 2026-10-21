@@ -79,7 +79,8 @@ them away.
   and the app serves them from its own assets. The boxes still build them
   from the box config, but no box serves either one to a browser.
 - In a browser, `photos.<domain>` and `vault.<domain>` show a handoff page
-  (the gate's `/_dd/use-app`,
+  (the gate's `/_dd/use-app`, from outside the network too: a member's
+  browser off it reaches `vault.<domain>` through the tunnel,
   [use-app.html](../../servers/home/web/pages/use-app.html)). Its button
   opens `commonty://open?service=photos|vault&path=…`, and the app opens
   this browser at its own copy once the member allows it in the app. If

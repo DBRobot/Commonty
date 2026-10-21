@@ -18,6 +18,7 @@ let
     let
       start = c.config.systemd.services.nginx.serviceConfig.ExecStart;
       nginx = "${c.config.services.nginx.package}/bin/nginx";
+      vault = c.config.services.nginx.virtualHosts ? "vault.${c.config.dd.domain}";
     in
     ''
       echo "== ${name}"
@@ -33,11 +34,17 @@ let
         code.${c.config.dd.domain} git.${c.config.dd.domain} ${c.config.dd.repo}
     ''
     # the bare name's front page served at /, home's / still signing in, and
-    # the docs and the download as they were
+    # the docs and the download as they were; Passwords' public name hands
+    # a browser to the app, and a Send still opens
     +
-      lib.optionalString (c.config.dd ? public && c.config.dd.public.enable && c.config.dd.public.bare)
+      lib.optionalString
+        (c.config.dd ? public && c.config.dd.public.enable && (c.config.dd.public.bare || vault))
         ''
-          python3 ${./nginx-front.py} "$conf" ${nginx} "$tmp" ${c.config.dd.domain}
+          python3 ${./nginx-front.py} "$conf" ${nginx} "$tmp" ${c.config.dd.domain} ${
+            lib.concatStringsSep " " (
+              lib.optional c.config.dd.public.bare "front" ++ lib.optional vault "vault"
+            )
+          }
         ''
     # the bare domain's security.txt: served, and saying what RFC 9116 asks
     + lib.optionalString (c.config.dd ? securityTxt) ''

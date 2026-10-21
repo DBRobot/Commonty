@@ -991,7 +991,8 @@ function build(opts) {
     const at = opts.here(url);
     if (!at || at === '#') return;
     if (at.startsWith('/_dd/app/open')) fetch(at).catch(() => {});
-    else window.open(at, '_blank', 'noopener');
+    // our own Git, in this tab: the conversation is kept (keep) and comes back
+    else location.href = at;
   }
 
   async function news() {

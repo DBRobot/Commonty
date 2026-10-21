@@ -1477,6 +1477,16 @@ mod tests {
             l("commonty://open?service=site&path=%2F_dd%2Fmail").as_deref(),
             Some("/_dd/mail")
         );
+        // Calendar and Contacts: refused by v0.1.60, which did not carry
+        // them, so their tiles went nowhere
+        assert_eq!(
+            l("commonty://open?service=site&path=%2F_dd%2Fcalendar").as_deref(),
+            Some("/_dd/calendar")
+        );
+        assert_eq!(
+            l("commonty://open?service=site&path=%2F_dd%2Fcontacts").as_deref(),
+            Some("/_dd/contacts")
+        );
         assert_eq!(
             l("commonty://open?service=site").as_deref(),
             Some("/_dd/home")
