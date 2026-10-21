@@ -60,7 +60,13 @@
       downMbps = 50;
     };
     alwaysOn = true;
-    units = [ "cloudflared-tunnel-*" ];
+    # the one tunnel's, or with failover this box's own door and its ask
+    # that the names follow what it holds (gate/public.nix ownTunnel)
+    units = [
+      "cloudflared-tunnel-*"
+      "dd-door"
+      "dd-door-names"
+    ];
     # one public front door; dd-dns points the names at it
     instances = 1;
     base = {
