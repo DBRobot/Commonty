@@ -508,6 +508,19 @@ fn run(args: &Args) -> Result<String> {
                 Gate::Stopped(why) => {
                     rollout_metric(args, counter, true);
                     drain_off(args);
+                    // a box whose wave passed before the stop keeps it
+                    if current == mine.path
+                        && let Some(r) = &a.rollout
+                        && r.counter == counter
+                        && r.proven(&name)
+                    {
+                        if soaking(args).is_some() {
+                            clear_soak(args);
+                        }
+                        write_applied(&args.state, counter, &stamp)?;
+                        record(args, &name, counter, "ok");
+                        return Ok(format!("release {counter}: proven before the stop ({why})"));
+                    }
                     // a release this box runs and has not proved goes back
                     // with the rest of its wave
                     if soaking(args).as_deref() == Some(stamp.as_str()) && current == mine.path {
