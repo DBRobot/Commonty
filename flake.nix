@@ -1872,6 +1872,9 @@
             site-a11y
             site-speed
             ;
+          # every link the site's pages show, followed in a browser against the
+          # gateway box's own nginx and gate, and the app's pages' links read
+          site-links = import ./nix/tests/site-links.nix args;
           safe-rd = import ./nix/tests/safe-rd.nix args;
           # the PDF editor's document and signatures, on the pinned MuPDF
           pdf-editor = import ./nix/tests/pdf-editor.nix (args // { web = self.packages.${system}.web; });

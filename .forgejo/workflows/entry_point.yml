@@ -183,9 +183,11 @@ jobs:
   # The mail Worker end to end: the files a release uploads, run by wrangler
   # against a fake Cloudflare and driven by a browser (nix/tests/mail-worker).
   # Seconds, and a cache hit when the Worker has not changed.
+  # The Mail and Files pages and the site's links read the app's pages
+  # too, so a change to the app alone runs it as well.
   mail_worker:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' }}
+    if: ${{ needs.files_modified.outputs.nix == 'true' || needs.files_modified.outputs.app == 'true' }}
     runs-on: nix
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
@@ -194,6 +196,10 @@ jobs:
       # and the Mail page, as the app serves it (nix/tests/mail-page)
       - name: the Mail page, in a browser
         run: nix build --no-link -L .#checks.x86_64-linux.mail-page .#checks.x86_64-linux.files-page
+      # and every link the site's pages show, followed through the gateway
+      # box's own nginx and gate (nix/tests/site-links)
+      - name: the site's links, in a browser
+        run: nix build --no-link -L .#checks.x86_64-linux.site-links
       # and the DNS Worker at its API, with the box's helper (nix/tests/dns-worker)
       - name: the DNS Worker
         run: nix build --no-link -L .#checks.x86_64-linux.dns-worker
