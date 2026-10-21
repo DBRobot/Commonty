@@ -125,6 +125,7 @@ let
         serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /etc/web";
       };
       # its name, with the hold page while it is not here (gate/verify.nix)
+      services.nginx.enable = true;
       services.nginx.virtualHosts."web.test.invalid" = {
         extraConfig = "error_page 502 504 =503 /_dd/moving/moving.html;";
         locations."/".proxyPass = "http://127.0.0.1:8080";
