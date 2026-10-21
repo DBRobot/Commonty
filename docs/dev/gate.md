@@ -663,7 +663,9 @@ verify.nix sorts them by rank and passes them as `VERIFY_HOME`.
 ## Headers, CSP and the cookie
 
 [headers.nix](../../nix/modules/gate/headers.nix) adds to every nginx
-location: HSTS, `nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`.
+location, and to every server for what no location takes (nginx's own
+404), always (error answers too): HSTS, `nosniff`,
+`Referrer-Policy: strict-origin-when-cross-origin`.
 Locations that proxy to the gate (or the games manager) get the content
 policy:
 
@@ -673,7 +675,7 @@ script-src  'self' 'wasm-unsafe-eval'
 style-src   'self' 'unsafe-inline'
 img-src     'self' data: blob: https:
 media-src   'self' blob: https://*.<domain>
-connect-src 'self' https://*.<domain> wss://*.<domain>
+connect-src 'self' https://<domain> https://*.<domain> wss://*.<domain>
             https://api.themoviedb.org https://image.tmdb.org
 font-src    'self' data:
 frame-src   'self' blob: https://*.<domain>
@@ -987,7 +989,8 @@ to the same path on `https://home.<domain>`, serves release files from the
 forge as nobody under
 `/download/vX.Y.Z/<file>`, and serves the docs (`/docs`, `/docs/...`)
 with only the gate paths their page needs: `/_dd/static/`, `/_dd/web/`,
-`/_dd/docs/`, `/_dd/me`, `/_dd/config`, `/_dd/csp`.
+`/_dd/docs/`, `/_dd/me`, `/_dd/config`, `/_dd/csp`, and
+`/_dd/releases.json` (Monty's what-is-new).
 
 It also serves `/.well-known/security.txt` (RFC 9116,
 [security-txt.nix](../../nix/modules/gate/security-txt.nix)): Contact
@@ -1126,12 +1129,15 @@ path                                        method   what                       
 /_dd/web/{file}                             GET      wasm bundle                               anyone
 /_dd/files, /_dd/media                      GET      the demo's Files, Movies & TV; a          member: the use-app page;
                                                      member's browser is handed to the app     demo if a demo library
-/_dd/settings                               GET      Settings                                  member or guest
+/_dd/settings                               GET      Settings: a member's or guest's whole;    any session with an account here,
+                                                     anyone else's, Leave alone                not the demo
 /_dd/boxes, /backups, /devices,             GET      redirect to /_dd/settings#<tab>           anyone
   /network, /storage
 /_dd/chat                                   GET      Chat (the demo's; a member's: use-app)    member or demo
 /_dd/chat/search                            GET      web search for Chat                       member, session or token
-/_dd/git, /_dd/metrics                      GET      Git, Metrics                              any session
+/_dd/git                                    GET      Git                                       any session
+/_dd/metrics                                GET      Metrics                                   member who owns a box (the release's,
+                                                                                               or one they joined and enlisted); admin
 /_dd/friends                                GET      Friends                                   member or guest
 /_dd/adblock                                GET      Ad blocking                               household member, session or token
 /_dd/add                                     GET      add-device page (QR target)               anyone
@@ -1140,6 +1146,8 @@ path                                        method   what                       
 /_dd/docs/page, /_dd/docs/page/{*}          GET      docs page                                 anyone
 /_dd/git/public                             GET      Git, read-only (the forge's public door)  anyone
 /_dd/docs/index.json, /_dd/docs/raw/{*}     GET      docs index, a page's markdown             anyone
+/_dd/releases.json                          GET      the newest release notes, from the        anyone
+                                                     public repository's releases
 /_dd/csp                                    POST     CSP report, logged                        anyone
 /_dd/player-error                           POST     Movies & TV's player error, logged        anyone
 -- directory

@@ -19,16 +19,7 @@ IMPACTS = ("serious", "critical")
 
 # (rule, page) -> why it is there today. A page is its path, without a
 # query or a fragment. To be fixed; take a line out when it is.
-KNOWN = {
-    (
-        "definition-list",
-        "/_dd/settings",
-    ): "Settings' Account and Sign-in sections put something other than <dt>/<dd> pairs (or <div>s of them) straight in their <dl> (servers/home/web/settings.js)",
-    (
-        "link-in-text-block",
-        "/new",
-    ): "Git's new-repository page has a link in its <small> fine print told apart by colour alone (servers/forge/web)",
-}
+KNOWN = {}
 
 
 _src = []

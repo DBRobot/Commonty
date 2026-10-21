@@ -2182,17 +2182,29 @@ async fn git_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
 async fn metrics_page(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.signed_in(cookie) {
-        // the page is anyone's who owns a box, or the admin's; what it then
-        // shows is each box's to say (metrics_sources)
+        // the page is anyone's who owns a box - one of the release's, or
+        // one they joined and enlisted - or the admin's; what it then shows
+        // is each box's to say (metrics_sources)
         Some(u)
             if u == pages::DEMO_USER
                 || !app.member(&u)
-                || (!app.sees_box(&u) && app.boxes_seen(&u).is_empty()) =>
+                || (!app.sees_box(&u)
+                    && app.boxes_seen(&u).is_empty()
+                    && !owns_joined(&app, &u).await) =>
         {
             StatusCode::FORBIDDEN.into_response()
         }
         _ => signed_in_page(&app, &headers, "metrics"),
     }
+}
+
+/// a box this person joined and enlisted: theirs, its metrics theirs
+async fn owns_joined(app: &Arc<App>, user: &str) -> bool {
+    member_boxes::current(app)
+        .await
+        .1
+        .iter()
+        .any(|o| o.user == user)
 }
 
 fn signed_in_page(app: &App, headers: &HeaderMap, name: &str) -> Response {

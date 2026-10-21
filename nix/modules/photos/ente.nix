@@ -322,6 +322,9 @@ in
           ${d "photos"} = {
             useACMEHost = base;
             forceSSL = true;
+            # the ente module names albums here too; albums has its own
+            # server above, and nginx would answer it from the first anyway
+            serverAliases = lib.mkForce [ ];
             locations = {
               # Ente's client holds a person's keys, so it comes with the app
               # (app/src/local.rs) and is never served from here: a browser is

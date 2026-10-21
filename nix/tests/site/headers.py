@@ -443,12 +443,32 @@ def check_cors(s, fail):
 # names whose unknown addresses nginx answers itself, bare (no `/` location):
 # main today. A name that starts carrying the headers there, or a new one
 # that stops, fails.
-KNOWN_BARE_404 = {
-    "home": "home has no `/` location (only exact ones), so nginx's own 404 carries no HSTS, nosniff or CSP: headers.nix adds them per location",
-    "llm": "the same: llm's locations are /, /v1/ and /running? its unknown paths fall to nginx's own 404",
-    "demo-llm": "the same as llm",
-    "albums": "albums.<domain> is named by two servers (Photos' and its own); nginx takes the first, and an unknown address there is nginx's own 404",
-}
+KNOWN_BARE_404 = {}
+
+
+def check_names(s, fail):
+    """each name is one server's on each port: a second is never answered
+    (nginx takes the first, and only warns)"""
+    conf = open(s.tmp + "/nginx.conf").read()
+    seen = {}
+    ports = []
+    for line in conf.splitlines():
+        w = line.split()
+        if w[:2] == ["server", "{"]:
+            ports = []
+        elif w[:1] == ["listen"] and len(w) > 1:
+            ports.append(w[1].rsplit(":", 1)[-1])
+        elif w[:1] == ["server_name"]:
+            for name in " ".join(w[1:]).rstrip(";").split():
+                if name == "_":
+                    continue
+                for port in set(ports):
+                    seen[(name, port)] = seen.get((name, port), 0) + 1
+    for (name, port), n in sorted(seen.items()):
+        if n > 1:
+            fail(
+                f"{name}: named by {n} servers on port {port}; nginx answers from the first"
+            )
 
 
 def run(s, src):
@@ -464,6 +484,7 @@ def run(s, src):
         fail(
             f"{h}: its unknown addresses carry the headers now; take it off KNOWN_BARE_404"
         )
+    check_names(s, fail)
     check_cookies(s, fail)
     m, routes = check_signed_out(s, src, fail)
     check_cors(s, fail)

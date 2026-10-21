@@ -46,8 +46,8 @@ let
     "frame-ancestors 'self'"
     "report-uri /_dd/csp"
   ];
-  # every location, not the server: nginx drops a server's add_header in
-  # any location with one of its own, and upstream modules add their own
+  # every location, not only the server: nginx drops a server's add_header
+  # in any location with one of its own, and upstream modules add their own
   location =
     { config, ... }:
     let
@@ -85,11 +85,28 @@ in
 {
   options.services.nginx.virtualHosts = lib.mkOption {
     type = lib.types.attrsOf (
-      lib.types.submodule {
-        options.locations = lib.mkOption {
-          type = lib.types.attrsOf (lib.types.submodule location);
-        };
-      }
+      lib.types.submodule (
+        { config, ... }:
+        {
+          options.locations = lib.mkOption {
+            type = lib.types.attrsOf (lib.types.submodule location);
+          };
+          # and the server: what no location takes (nginx's own 404, a
+          # name with exact locations alone) is answered at this level, and
+          # every location above sets its own, so this one reaches nothing
+          # else. Vaultwarden's name keeps to its locations' HSTS alone.
+          config.extraConfig = lib.mkAfter (
+            if
+              lib.any (
+                l: lib.hasInfix ":${toString vaultPort}" (if l.proxyPass == null then "" else l.proxyPass)
+              ) (lib.attrValues config.locations)
+            then
+              hsts
+            else
+              common
+          );
+        }
+      )
     );
   };
 }

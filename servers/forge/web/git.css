@@ -248,6 +248,7 @@ textarea.write { min-height: 110px; resize: vertical; }
 .field > label, .field > .lbl { font-weight: 600; }
 .field input:not([type=checkbox]):not([type=radio]), .field textarea, .field select, select.btn { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); }
 .field small { color: var(--ink-2); }
+.field small a { text-decoration: underline; }
 .choice { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; font-weight: 400; }
 .settings { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; }
 .settings nav a { display: block; padding: 6px 10px; border-radius: 4px; color: var(--ink) !important; }

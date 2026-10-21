@@ -228,18 +228,7 @@ OUTSIDE = [
 ]
 
 # main today, cell by cell: (host, path, person) -> why it is wrong there
-KNOWN = {
-    (
-        "home",
-        "/_dd/metrics",
-        "bob",
-    ): "the Metrics page is refused to a member whose only box is a joined one (metrics_page: sees_box/boxes_seen read the release's boxes alone); joining.md says it shows them their own",
-    (
-        "metrics",
-        "/",
-        "bob",
-    ): "the same: verify() lets a member onto metrics.<domain> only if sees_box, so the page never loads for them, though their /joined/<box>/ query is let through",
-}
+KNOWN = {}
 
 
 def outcome(r, signed_in):
