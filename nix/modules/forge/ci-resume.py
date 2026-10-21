@@ -140,13 +140,19 @@ def main():
                 flush=True,
             )
             continue
-        code, _ = ask("POST", "/%s/actions/runs/%d/rerun" % (repo, r["index_in_repo"]))
+        code, said = ask(
+            "POST", "/%s/actions/runs/%d/rerun" % (repo, r["index_in_repo"])
+        )
         print(
-            "run #%d (%s): killed from outside, run again -> %s"
-            % (r["index_in_repo"], r.get("prettyref"), code),
+            "run #%d (%s): killed from outside, run again -> %s %s"
+            % (r["index_in_repo"], r.get("prettyref"), code, said[:200]),
             flush=True,
         )
-        retried.add(r["id"])
+        # only a rerun that happened counts: the forge refuses one while any
+        # job of the run is still going (run 786's was, and was never tried
+        # again), so a refusal is "next time"
+        if code == 200:
+            retried.add(r["id"])
     os.makedirs(os.path.dirname(state), exist_ok=True)
     with open(state, "w") as f:
         json.dump(sorted(retried)[-500:], f)

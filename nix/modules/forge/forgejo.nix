@@ -551,6 +551,20 @@ in
         # same list (FORGE in servers/forge/web/git-core.js): change both.
         locations."~ ^/(api|assets|avatars|repo-avatars|attachments|user|login|-|\\.well-known)(/|$)" =
           toForge;
+        # the runners' own: a runner is no one the gate knows (its token is
+        # its name to the forge), so it goes as nobody, and never through
+        # the gate. Through the gate, a release that restarted it left the
+        # runners with no way to say a job had ended (502s for the 67s of
+        # node1's switch in release 331), and a job they could not report
+        # was failed
+        locations."^~ /api/actions/" = {
+          proxyPass = "http://unix:${sock}:";
+          extraConfig = ''
+            client_max_body_size 0;
+            proxy_set_header X-WEBAUTH-USER "";
+          '';
+          ddCookie = "";
+        };
         locations."~ ^/[^/]+/[^/]+\\.git(/|$)" = toForge;
         locations."~ ^/[^/]+/[^/]+/(info/refs|info/lfs|git-upload-pack|git-receive-pack)" = toForge;
         locations."~ ^/[^/]+/[^/]+/(raw|archive|media|releases/download|attachments)/" = toForge;

@@ -112,7 +112,10 @@
       class = "high";
       downMbps = 100;
     };
-    units = [ "gitea-runner-*" ];
+    units = [
+      "gitea-runner-*"
+      "dd-runner-restart" # the runner into a new config once it holds no job
+    ];
     base = {
       requires = {
         threads = 4;

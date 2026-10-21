@@ -99,8 +99,11 @@ pull request opened, pushed, or edited
   at a time). The app's checks keep no target dir
   (`doInstallCargoArtifacts = false` on clippy-app and tests-app): keeping
   it made CI upload a 198M target to the cache after every run.
-- **A run killed from outside** (the forge or a runner restarting under it,
-  as a release can) is run again once, by
+- **A release never kills a job.** A switch leaves a runner alone, and
+  it restarts into a new config only once it holds no job
+  ([forge.md, The runners](forge.md#the-runners)).
+- **A run killed from outside** (the forge restarting under it, a runner
+  stopped by hand) is run again once, by
   [`ci-resume.py`](../../nix/modules/forge/ci-resume.py) on the forge box.
 
 ## Making a change

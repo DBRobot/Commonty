@@ -75,6 +75,7 @@
         "waits"
         "switch-race"
         "work-memory"
+        "runner-restart"
       ];
       rust =
         let

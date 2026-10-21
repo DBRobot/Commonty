@@ -28,6 +28,7 @@ nix/modules/forge/
   forgejo-runner.nix                  the host runner: the fleet's own CI
   members-runner.nix                  the members' runner: Docker under gVisor
   runner-address.sh                   a runner waits for the forge before it registers
+  runner-restart.sh                   a release's runner config waits for no job running
   forgejo-mirror.nix                  push mirrors to GitHub
   needs.nix                           what each part needs of a box
 servers/forge/web/                    the Git pages (pages/git-public.html: the public door's)
@@ -35,6 +36,7 @@ servers/gate/src/forge_events.rs      the pages' live updates, from the gate
 nix/tests/forge.nix, forge.py         the forge, booted
 nix/tests/nginx-door.py               the public door, served and asked (the nginx check)
 nix/tests/members-runner.nix, .py     a member's job, kept in its box
+nix/tests/runner-restart.nix, .py     a switch under a running job: it ends green
 ```
 
 The `forge` role runs on one box (`fleet/boxes.json`; node1 today), always
@@ -401,14 +403,17 @@ through the socket.
   takes no secret: all anyone can do with it is stop a run that already
   failed.
 - **ci-resume** ([`ci-resume.py`](../../nix/modules/forge/ci-resume.py)):
-  a run killed from outside (the forge or a runner restarting under it, as
-  a release can) has jobs that end "failed" with `context canceled` in
-  their logs. Every 3 minutes (first 5 minutes after the timer starts,
+  a run killed from outside (the forge restarting under it, or a runner
+  stopped by hand) has jobs that end "failed" with `context canceled` in
+  their logs. A release no longer stops a runner under a job (The
+  runners, below). Every 3 minutes (first 5 minutes after the timer starts,
   never inside a switch) it looks at the last 50 runs and reruns a pull
   request's run once when: it is that pull request's newest run, it
   stopped within the last 3 hours, every job that failed has `context
   canceled` in the last 4000 bytes of its log, and it has not been rerun
-  before (kept in `/var/lib/dd-ci-resume/retried.json`, the last 500). The
+  before (kept in `/var/lib/dd-ci-resume/retried.json`, the last 500; only
+  a rerun the forge accepted counts: it refuses one while any job of the
+  run is still going, and run 786's refusal was once taken for done). The
   forge not answering is "next time", exit 0. It has
   `restartIfChanged = false`: release 213 rolled back because it ran while
   the forge restarted under the switch.
@@ -545,6 +550,28 @@ trigger in its database (`dd-forge-rules`) moves any runner registered
 for every repository to the admin's own scope, unless `members` is its
 only label. A pull request from someone else's fork of the admin's
 repository runs only once the admin approves it (Forgejo's own rule).
+**A release never stops the host runner under a job.** Release 331
+changed its unit, the switch restarted it, and the next pull request's run
+(786), in flight, died ("context canceled ... signal: terminated"). So:
+
+- `restartIfChanged = false`: a switch leaves the running runner alone,
+  on its old config.
+- `dd-runner-restart` (a timer, every minute) compares the unit on disk
+  with the one the runner started from (`systemctl cat`, hashed, recorded
+  by an `ExecStartPre` as root in `/run/dd-runner-restart/`) and restarts
+  the runner when they differ and no process but the runner's own is in
+  its unit, which is when it holds no job
+  ([`runner-restart.sh`](../../nix/modules/forge/runner-restart.sh)).
+- A stop is a drain: `shutdown_timeout = 3h` (the runner's job limit) and
+  `KillMode = mixed`, so the runner alone gets the signal, takes no new
+  job, and exits once its jobs have ended. A job taken in the instant
+  before the restart finishes. So does a box shutting down: it waits for
+  the jobs, up to 3 h.
+- The runners' own API (`/api/actions/`) goes to Forgejo as nobody,
+  never through the gate: the runner's token is its name there, and a
+  switch that restarts the gate (67 s on node1 in 331) left the runner
+  unable to report a job's end, which the forge then failed.
+
 `nix.settings.eval-cache` is off on a runner box: it remembered derivation
 paths a garbage collection had removed. The `<box>:host` label is how
 `build_host` builds every box's system on every box

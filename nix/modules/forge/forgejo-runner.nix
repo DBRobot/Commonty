@@ -8,6 +8,19 @@
 let
   base = config.dd.domain;
   name = config.networking.hostName;
+  restartScript =
+    mode:
+    pkgs.writeShellScript "runner-restart-${mode}" (
+      ddScript ./runner-restart.sh {
+        MODE = mode;
+        UNIT = "gitea-runner-${name}.service";
+        PATH = lib.makeBinPath [
+          config.systemd.package
+          pkgs.coreutils
+          pkgs.gnugrep
+        ];
+      }
+    );
 in
 {
   imports = [ ../box/work-memory.nix ];
@@ -67,7 +80,14 @@ in
           "nix:host"
           "${name}:host"
         ];
-        settings.runner.capacity = config.dd.runner.capacity;
+        settings.runner = {
+          inherit (config.dd.runner) capacity;
+          # a stop lets the jobs under way finish first: the runner takes no
+          # new one and exits when the last is done. At the default (0s) a
+          # stop killed every job it held. Its own limit on a job, so no job
+          # is ever cut short for it (TimeoutStopSec below)
+          shutdown_timeout = "3h";
+        };
         hostPackages = with pkgs; [
           bash
           coreutils
@@ -120,13 +140,25 @@ in
     dd.work.units."gitea-runner-${name}".oomPolicy = "continue";
     systemd.services."gitea-runner-${name}" = {
       path = [ pkgs.curl ];
+      # A switch never stops it: a release that changed the runner stopped
+      # it under the next pull request's CI and failed the run (release 331,
+      # run 786). The new config waits for dd-runner-restart, below.
+      restartIfChanged = false;
       serviceConfig = {
         DynamicUser = lib.mkForce false;
+        # A stop is a drain: the signal goes to the runner alone (systemd
+        # would otherwise send it to every job's processes too: "signal:
+        # terminated"), and it may take the runner's job limit (3h) and a
+        # little to let them end
+        KillMode = "mixed";
+        TimeoutStopSec = "190min";
         User = lib.mkForce "forgejo-runner";
         Group = "forgejo-runner";
         # the wait for the forge (its certificate arrives after a switch)
         TimeoutStartSec = "10min";
         ExecStartPre = lib.mkBefore [
+          # as root: which unit definition this run started from
+          "+${restartScript "started"}"
           (pkgs.writeShellScript "runner-address" (
             ddScript ./runner-address.sh {
               NAME = name;
@@ -134,6 +166,26 @@ in
             }
           ))
         ];
+      };
+    };
+
+    # The runner restarts into its new config once it holds no job: every
+    # minute this compares the unit on disk with the one the runner started
+    # from, and restarts it only when no job's process is left in it. A job
+    # taken in the instant between is drained, not killed (shutdown_timeout).
+    systemd.services.dd-runner-restart = {
+      description = "Restart the runner into its new config once it holds no job";
+      restartIfChanged = false;
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = restartScript "check";
+      };
+    };
+    systemd.timers.dd-runner-restart = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "1min";
+        OnUnitActiveSec = "1min";
       };
     };
 
