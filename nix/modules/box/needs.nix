@@ -24,7 +24,10 @@
 
   dd-agent = {
     what = "moves the box to the signed release, and back if the box comes up worse";
-    units = [ "dd-build" ];
+    units = [
+      "dd-build"
+      "dd-agent-soak" # a soaking box runs the agent every minute (docs/dev/rollout.md)
+    ];
     everyBox = true;
     base = {
       uses = {
