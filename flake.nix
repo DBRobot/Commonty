@@ -322,7 +322,7 @@
           perCrate = n: cargoNix.workspaceMembers.${n}.build;
           # One crate's tests, built and run from the very builds the boxes'
           # programs use. A crate's features are what the program that
-          # carries it asks for; tested on its own it resolved its own, and
+          # carried it asks for; tested on its own it resolved its own, and
           # every dependency it shares came out a different build (660 of
           # them, PR 264). So each crate is tested inside the first box
           # program whose graph holds it, against that program's own
@@ -454,7 +454,7 @@
               "client/gitremote"
             ];
             web = crateSrc "web" [ "client/web" ];
-            # and the card writer it carries (dd-hub-writer, the home
+            # and the card writer it carried (dd-hub-writer, the home
             # controller's installer), built beside it
             app = crateSrc "app" [
               "app"
@@ -846,7 +846,7 @@
                     go build -trimpath -ldflags="-s -w" -o $out/witness.wasm ./cmd/witness
                   '';
             };
-          # What the app carries for its window, never fetched from a box:
+          # What the app carried for its window, never fetched from a box:
           # the wasm bundle and the players (app/src/site.rs), and Photos'
           # and Passwords' clients (app/src/local.rs): the very builds the
           # boxes serve, so the code that holds a person's keys comes with
@@ -1418,27 +1418,13 @@
       fleetBoxes =
         let
           lib = nixpkgs.lib;
-          # With failover (fleet/policy.json), a box carries every role whose
-          # writers it is able to run, by its own report and the owner's
-          # rules (capability), whatever fleet/boxes.json lists: a box that
-          # joins is ready to take them over, and the control plane decides
-          # where each runs. No hand-written list to keep.
-          failover = (lib.importJSON ./fleet/policy.json).failover or false;
+          # its roles: with failover, every role whose writers it is able
+          # to run as well (nix/lib/fleet-placement.nix carried), whatever
+          # fleet/boxes.json lists. No hand-written list to keep.
           fp = import ./nix/lib/fleet-placement.nix { inherit lib; };
-          roleList = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ./fleet/roles.json);
-          writersOf =
-            r: lib.filter (s: fp.needs ? ${s} && fp.needs.${s}.lease) (roleList.${r}.services or [ ]);
-          ableTo =
-            name: r: writersOf r != [ ] && lib.all (s: fp.inputs.boxes.${name}.can ? ${s}) (writersOf r);
-          boxes = lib.mapAttrs (
-            name: box:
-            box
-            // lib.optionalAttrs failover {
-              roles =
-                box.roles
-                ++ lib.filter (r: !builtins.elem r box.roles && ableTo name r) (builtins.attrNames roleList);
-            }
-          ) (builtins.fromJSON (builtins.readFile ./fleet/boxes.json));
+          boxes = lib.mapAttrs (name: box: box // { roles = fp.carried.${name}; }) (
+            builtins.fromJSON (builtins.readFile ./fleet/boxes.json)
+          );
           directoryOf =
             name: box:
             if box.public then
@@ -1605,7 +1591,7 @@
         in
         {
           configs = lib.mapAttrs mkBox boxes;
-          # a stranger: core alone, and its store; what it carries the
+          # a stranger: core alone, and its store; what it carried the
           # control plane never gives it, holding no lease
           joined =
             { name, dir }:
@@ -1894,7 +1880,7 @@
           dns-worker = import ./nix/tests/dns-worker.nix args;
           # the control plane: relay, witness and three validators, offline
           control = import ./nix/tests/control.nix args;
-          # the app carries the site's signed-in pages, their scripts, the
+          # the app carried the site's signed-in pages, their scripts, the
           # stylesheet and the fonts at the site's paths (app/carried
           # lists them, scripts/sync-app-web copies them); two copies, kept
           # one here
