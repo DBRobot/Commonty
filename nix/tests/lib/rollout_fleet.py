@@ -93,6 +93,7 @@ class Fleet:
         self.nix = nix
         self.paths = nix["paths"]
         self.env = "DD_KEYRING_FILE=/root/keys.json"
+        self.cursor = {}
 
     def up(self):
         relay, nix = self.relay, self.nix
@@ -254,6 +255,29 @@ class Fleet:
             m, f'.counter == {counter} and .status == "{status}"', timeout
         )
 
+    # what the agents said since the newest release was published: the
+    # journal from a cursor taken before it, no earlier release's lines
+    def _since(self, m):
+        c = self.cursor.get(m.name)
+        return f"--after-cursor='{c}'" if c else ""
+
+    def agent_said(self, m, text):
+        return (
+            m.succeed(
+                f"journalctl -u dd-agent {self._since(m)} -o cat | grep -c -F '{text}' || true"
+            ).strip()
+            != "0"
+        )
+
+    def wait_agent_said(self, m, text, timeout=300):
+        m.wait_until_succeeds(
+            f"journalctl -u dd-agent {self._since(m)} -o cat | grep -c -F '{text}'",
+            timeout=timeout,
+        )
+
+    def agent_log(self, m):
+        return m.succeed(f"journalctl -u dd-agent {self._since(m)} -o cat | tail -60")
+
     def nar_hash(self, path):
         m = next(iter(self.boxes.values()))
         info = json.loads(
@@ -288,23 +312,11 @@ class Fleet:
             "mkdir -p /srv/release && install -m 644 /root/current.json /srv/release/current.json"
         )
         for m in self.boxes.values():
-            m.succeed("systemctl start --no-block dd-agent.service")
-
-    def agent_said(self, m, text):
-        return (
-            m.succeed(
-                f"journalctl -u dd-agent -o cat | grep -c -F '{text}' || true"
+            self.cursor[m.name] = m.succeed(
+                "journalctl -n 0 --show-cursor | sed -n 's/^-- cursor: //p'"
             ).strip()
-            != "0"
-        )
-
-    def wait_agent_said(self, m, text, timeout=300):
-        m.wait_until_succeeds(
-            f"journalctl -u dd-agent -o cat | grep -c -F '{text}'", timeout=timeout
-        )
-
-    def agent_log(self, m):
-        return m.succeed("journalctl -u dd-agent -o cat | tail -60")
+        for m in self.boxes.values():
+            m.succeed("systemctl start --no-block dd-agent.service")
 
     def probe_start(self):
         relay = self.relay
