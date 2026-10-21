@@ -352,6 +352,13 @@ fn publish(
     } else {
         attestations = attest(&boxes, url, &rev, &built)?;
     }
+    // Staging (docs/dev/rollout.md): what is never tried first on a real
+    // box - a planned handover, a box joining with its TPM - on VMs on one
+    // box, before anything is signed. DD_STAGE=off skips it, for a fleet
+    // whose boxes have no KVM.
+    if !dry_run && std::env::var("DD_STAGE").as_deref() != Ok("off") {
+        stage(&boxes, url, &rev)?;
+    }
 
     // The counter only ever goes up. A current release that cannot be
     // fetched is not "none yet" if the releases branch has history: the
@@ -1220,6 +1227,41 @@ fn nudge(boxes: &serde_json::Value) {
             _ => eprintln!("   {name}: not reached; it looks on its own timer"),
         }
     }
+}
+
+/// The staging VMs, on the first box (by name) that answers: its store
+/// builds `checks.<system>.rollout-stage` at this commit. A box that cannot
+/// be reached is passed over; a stage that fails stops the publish.
+fn stage(boxes: &serde_json::Value, url: &str, rev: &str) -> Result<()> {
+    let boxes = boxes.as_object().context("boxes.json is not an object")?;
+    let base = url
+        .split("/raw/")
+        .next()
+        .filter(|b| b.starts_with("https://"))
+        .context("the release url is not a forge raw url")?;
+    let check = format!("git+{base}?rev={rev}#checks.x86_64-linux.rollout-stage");
+    for (name, b) in boxes {
+        let net = b["net"].as_str().unwrap_or_default();
+        eprintln!("== staging on {name}: {check}");
+        let status = Command::new("ssh")
+            .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+            .args(["-o", "ServerAliveInterval=30"])
+            .arg(format!("admin@{net}"))
+            .args(["nix", "build", "--no-link", "-L", &check])
+            .stdin(std::process::Stdio::null())
+            .status()
+            .context("ssh")?;
+        match status.code() {
+            Some(0) => {
+                eprintln!("   staged on {name}");
+                return Ok(());
+            }
+            // ssh itself: the box is not there; another may be
+            Some(255) => eprintln!("   {name} did not answer"),
+            _ => bail!("staging failed on {name}; nothing is signed (its log is above)"),
+        }
+    }
+    bail!("no box answered to stage the release; DD_STAGE=off to publish without")
 }
 
 /// Ask every box, at once, to vouch for the release; each answer is

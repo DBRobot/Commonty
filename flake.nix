@@ -1779,6 +1779,9 @@
               (import ./nix/tests/${name}.nix args);
         in
         {
+          # the staging run before a release is signed (docs/dev/rollout.md),
+          # asked of a box by `dd release publish`; not one of CI's
+          rollout-stage = vm "rollout-stage";
         }
         // nixpkgs.lib.genAttrs vmTests vm
         // {

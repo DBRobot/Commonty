@@ -1,7 +1,8 @@
 # Staged rollout
 
-Status: design (2026-10-21), branch rollout-1021, on top of failover
-being on (failover-on-1020). Nothing here is built yet.
+Status: built on branch rollout-1021, on top of failover being on
+(failover-on-1020). David's calls (2026-10-21): the hold page for a
+moving name (decision 2a below), and the proposed defaults for the rest.
 
 The goal: a release that fails keeps everything up. Today every box takes a
 release within minutes of publish, and a box whose switch fails spends up
@@ -120,8 +121,8 @@ before its switch:
 - **switched clean**: the switch and probe passed with no rollback, and the
   guard never fired;
 - **health**: the switch probe again (no newly failed unit, sshd, the gate
-  on 4181, reach to the fleet), and every placed service whose flag is up
-  has its units active;
+  on 4181, reach to the fleet); a placed service's unit that fails is a
+  newly failed unit;
 - **restarts**: no service restarted more than 3 times in the window
   (`NRestarts`): a crash loop never shows as failed;
 - **metrics**: no scrape target of the box's own Prometheus that was up
@@ -178,11 +179,14 @@ soaking                               ─► the checks above ─► POST good|b
 
 - **Held** is a result like `ok` or `rollback` (`dd_agent_info{result="held"}`),
   on the Network page and in `dd release status` ("held for wave 1").
-- **Soaking**: `/var/lib/dd-agent/soaking` holds `<counter> <path>` and the
-  baseline taken before the switch (failed units, restarts, scrape targets
-  up, alert conditions). The counter is written only when the soak passes,
-  so `release` in the heartbeat names only proven releases. A reboot while
-  soaking resumes the soak (the clean time restarts).
+- **Soaking**: `/var/lib/dd-agent/soaking` holds `<counter> <path>`,
+  `soak-base.json` the baseline taken before the switch (restarts, scrape
+  targets down, alert conditions), `failed-before` the failed units, and
+  `soak-streak.json` each failing check's samples in a row. The counter is
+  written only when the box's wave passes, so `release` in the heartbeat
+  names only proven releases. A reboot while soaking proves the box again
+  and carries on. A release that names what the box already runs is soaked
+  the same way: its wave still owes its word.
 - **Bootstrap:** the release that first carries all this is taken the old
   way: a box takes a release at once when the record has no rollout
   support yet, which it knows from `/rollout` answering 404. From the next
@@ -335,7 +339,24 @@ node2 but fails on node1 alone still costs node1's group its restart and
 a rollback; that goes away when the old pool is retired and the group fits
 on node2.
 
+## The hold page
+
+While a single writer moves, its names on the old box have nothing to
+proxy to. Every name the gate serves answers that with `503`,
+`Retry-After: 5` and a small page in the site's look (the mark turning,
+"Give us a second", "Trying again"), from
+[`servers/web-shared/moving/`](../../servers/web-shared/moving/), set in
+[`gate/verify.nix`](../../nix/modules/gate/verify.nix). The page asks
+again on the Retry-After rhythm and loads what the member came for as soon
+as the answer is anything else; without scripts a meta refresh does the
+same. An API client sees the 503 and Retry-After and retries. The same
+page covers any moment a service there is down, which is better than
+nginx's own 502.
+
 ## Decisions for David
+
+Decided 2026-10-21: 2a, with the page above; the rest as proposed.
+
 
 1. **Where the mark lives**: a new `rollout` request in the agreed log
    (above), or plain heartbeat facts that every box judges the same way
