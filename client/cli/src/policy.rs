@@ -53,18 +53,22 @@ pub fn check_notice(today: i64, takes_effect: &str) -> Result<()> {
     Ok(())
 }
 
-/// Who is told: everyone the release lets in and not shut out or gone by
-/// their own word. Names only; each is written to at <name>@<domain>. Each
-/// entry with what the directory proved of its recoveries; held to the
-/// list as a client holds one (identity::anchored), a recovery since
-/// followed from the root listed for the name (identity::follows), or an
-/// invite the release key signed, proved by the root the entry has now:
-/// a directory's word for earlier roots lets nobody in.
+/// Who is told: every member, not shut out or gone by their own word.
+/// Names only; each is written to at <name>@<domain>. Each entry with what
+/// the directory proved of its recoveries; held to the list as a client
+/// holds one (identity::anchored), a recovery since followed from the root
+/// listed for the name (identity::follows), or an invite the release key
+/// signed, proved by the root the entry has now: a directory's word for
+/// earlier roots lets nobody in. A member the list does not name - by a box
+/// of theirs - is in `agreed`, by name and the root the agreed state gives
+/// the services to (directory::agreed_member), and counts under that root
+/// alone.
 pub fn recipients(
     entries: &[(identity::SignedEntry, Vec<identity::Handover>)],
     members: &crate::member::Members,
     release: Option<&ed25519_dalek::VerifyingKey>,
     left: &BTreeSet<String>,
+    agreed: &BTreeSet<(String, String)>,
 ) -> Vec<String> {
     let m = members;
     let let_in = |e: &identity::SignedEntry, h: &[identity::Handover]| {
@@ -76,6 +80,7 @@ pub fn recipients(
             return false;
         }
         identity::anchored(e, &m.members, &m.revoked, &m.names).is_ok()
+            || agreed.contains(&(name.clone(), e.entry.root.clone()))
             || identity::listed_as(name, &m.members, &m.names)
                 .is_some_and(|from| identity::follows(e, h, from).is_ok())
             || (e.entry.recovered_from.is_empty()
@@ -134,8 +139,8 @@ pub async fn announce(a: Announce<'_>) -> Result<()> {
         .and_then(|s| identity::decode_public(s.trim()).ok());
     let members = crate::member::read(a.repo)?;
 
-    let (entries, left) = directory_now(a.dirs).await?;
-    let to = recipients(&entries, &members, release.as_ref(), &left);
+    let (entries, left, agreed) = directory_now(a.dirs).await?;
+    let to = recipients(&entries, &members, release.as_ref(), &left, &agreed);
     ensure!(
         !to.is_empty(),
         "nobody to tell: no member found in the directory"
@@ -191,12 +196,14 @@ pub async fn announce(a: Announce<'_>) -> Result<()> {
     Ok(())
 }
 
-/// the list's names, each one's entry, and who has left by their own word
+/// the list's names, each one's entry, who has left by their own word,
+/// and (name, root) for each one the agreed state gives the services to
 async fn directory_now(
     dirs: &[String],
 ) -> Result<(
     Vec<(identity::SignedEntry, Vec<identity::Handover>)>,
     BTreeSet<String>,
+    BTreeSet<(String, String)>,
 )> {
     let d = dirs.first().context("no directory")?;
     let http = crate::who::http()?;
@@ -206,11 +213,18 @@ async fn directory_now(
     let base = base.strip_suffix("/_dd/directory").unwrap_or(base);
     let mut entries = Vec::new();
     let mut left = BTreeSet::new();
+    let mut agreed = BTreeSet::new();
     for n in &listed {
         if let Ok(e) = directory::resolve(
             &crate::who::fetch(&dirs[..1], n).await,
             directory::Anchor::FirstSight,
         ) {
+            if directory::agreed_member(&dirs[..1], n, &e.entry.root)
+                .await
+                .is_ok()
+            {
+                agreed.insert((n.to_string(), e.entry.root.clone()));
+            }
             entries.push((e, directory::handovers(&dirs[..1], n, &[]).await));
         }
         if let Ok(r) = directory::read(&http, &format!("{base}/_dd/leaving/{n}"))
@@ -223,7 +237,7 @@ async fn directory_now(
             left.insert(n.to_string());
         }
     }
-    Ok((entries, left))
+    Ok((entries, left, agreed))
 }
 
 /// a box with the vault role, whose units write to members, of this fleet
@@ -319,6 +333,83 @@ mod tests {
         .unwrap()
     }
 
+    /// a directory stand-in over plain HTTP: path -> (status, body);
+    /// anything else 404
+    fn stand_in(routes: Vec<(String, u16, String)>) -> String {
+        use std::io::{BufRead as _, Write as _};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let a = l.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for c in l.incoming() {
+                let Ok(mut c) = c else { continue };
+                let mut r = std::io::BufReader::new(c.try_clone().unwrap());
+                let mut first = String::new();
+                let _ = r.read_line(&mut first);
+                loop {
+                    let mut line = String::new();
+                    if r.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                let path = first.split(' ').nth(1).unwrap_or("").to_string();
+                let (status, body) = routes
+                    .iter()
+                    .find(|(p, _, _)| *p == path)
+                    .map(|(_, s, b)| (*s, b.clone()))
+                    .unwrap_or((404, String::new()));
+                let _ = write!(
+                    c,
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        format!("http://{a}/_dd/directory")
+    }
+
+    /// A member the release's list does not name - by a box of theirs - is
+    /// held to the agreed state as every directory says it: each that
+    /// answers says yes for the root they agree on, and at least one
+    /// answers. The list's revocation beats it.
+    #[tokio::test]
+    async fn a_member_by_a_box_resolves_on_every_directorys_word() {
+        let ann = identity::generate();
+        let cat = identity::generate();
+        let cat_e = entry("cat", &cat);
+        let other = identity::encode_public(&identity::generate().verifying_key());
+        let list = |revoked: Vec<String>| identity::MemberList {
+            counter: 1,
+            members: vec![identity::member_id(&identity::encode_public(&ann.verifying_key()))],
+            revoked,
+            names: Default::default(),
+        };
+        let dir = |standing: (u16, serde_json::Value)| {
+            stand_in(vec![
+                ("/_dd/directory/cat".into(), 200, serde_json::to_string(&cat_e).unwrap()),
+                ("/_dd/directory/cat/standing".into(), standing.0, standing.1.to_string()),
+            ])
+        };
+        let yes = (200, serde_json::json!({"member": true, "root": cat_e.entry.root}));
+        let no = (200, serde_json::json!({"member": false, "root": cat_e.entry.root}));
+        let elsewhere = (200, serde_json::json!({"member": true, "root": other}));
+        let unread = (503, serde_json::json!("not read yet"));
+        let ok = |dirs: Vec<String>, l: identity::MemberList| async move {
+            directory::resolve_released(&dirs, "cat", &l).await
+        };
+        assert!(ok(vec![dir(yes.clone())], list(vec![])).await.is_ok());
+        assert!(ok(vec![dir(yes.clone()), dir(yes.clone())], list(vec![])).await.is_ok());
+        assert!(ok(vec![dir(unread.clone()), dir(yes.clone())], list(vec![])).await.is_ok());
+        // one says no, or names another root: not a member
+        assert!(ok(vec![dir(yes.clone()), dir(no.clone())], list(vec![])).await.is_err());
+        assert!(ok(vec![dir(elsewhere), dir(yes.clone())], list(vec![])).await.is_err());
+        // nobody said: not a member
+        assert!(ok(vec![dir(unread.clone())], list(vec![])).await.is_err());
+        // shut out by the list, whatever the directories say
+        let id = identity::member_id(&cat_e.entry.root);
+        let e = ok(vec![dir(yes)], list(vec![id])).await.unwrap_err();
+        assert!(!format!("{e:#}").contains("agreed state"), "{e:#}");
+    }
+
     #[test]
     fn only_members_are_told() {
         let keys: Vec<_> = (0..5).map(|_| identity::generate()).collect();
@@ -351,10 +442,31 @@ mod tests {
         let left = BTreeSet::from(["dan".to_string()]);
         // bob is shut out, cat is not on the list, the guest is no member,
         // dan left, eve and fay are the box's
-        assert_eq!(recipients(&es, &m, None, &left), vec!["ann".to_string()]);
+        let none = BTreeSet::new();
         assert_eq!(
-            recipients(&es, &m, None, &BTreeSet::new()),
+            recipients(&es, &m, None, &left, &none),
+            vec!["ann".to_string()]
+        );
+        assert_eq!(
+            recipients(&es, &m, None, &BTreeSet::new(), &none),
             vec!["ann".to_string(), "dan".to_string()]
+        );
+        // cat, a member by a box of hers as the agreed state says it, is
+        // told under the root it gave the services to and no other; bob,
+        // shut out by the list, is not, whatever it says
+        let cat_root = es[2].0.entry.root.clone();
+        let agreed = BTreeSet::from([
+            ("cat".to_string(), cat_root),
+            ("bob".to_string(), es[1].0.entry.root.clone()),
+        ]);
+        assert_eq!(
+            recipients(&es, &m, None, &left, &agreed),
+            vec!["ann".to_string(), "cat".to_string()]
+        );
+        let elsewhere = BTreeSet::from([("cat".to_string(), es[0].0.entry.root.clone())]);
+        assert_eq!(
+            recipients(&es, &m, None, &left, &elsewhere),
+            vec!["ann".to_string()]
         );
     }
 

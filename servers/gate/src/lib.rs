@@ -462,12 +462,38 @@ impl App {
         seen
     }
 
-    /// on the member list by root, and not shut out
-    fn listed(&self, root: &str) -> bool {
+    /// A sign-up that may go into the directory now rather than be held:
+    /// its root on the member list and not shut out, or (agreed) a name the
+    /// agreed state already gives the services to under this very root - a
+    /// member by an invite or by a box, signing up again on this box.
+    /// Shadow serves the list's answer and logs where the agreed state's
+    /// differs.
+    fn earned(&self, name: &str, root: &str) -> bool {
         let id = identity::member_id(root);
-        self.members
+        let listed = self
+            .members
             .as_ref()
-            .is_some_and(|m| m.members.contains(&id) && !m.revoked.contains(&id))
+            .is_some_and(|m| m.members.contains(&id) && !m.revoked.contains(&id));
+        let agreed = || {
+            let m = self.directory.agreed_member(name);
+            let ok = m
+                .as_ref()
+                .is_some_and(|m| m.has_access() && (m.ids.contains(&id) || m.id == id));
+            (ok, m)
+        };
+        match self.directory.ident_from {
+            ident::From::Replay => listed,
+            ident::From::Agreed => listed || agreed().0,
+            ident::From::Shadow => {
+                if self.directory.agreed_known() {
+                    let (a, m) = agreed();
+                    if listed != (listed || a) {
+                        ident::shadow_differs(name, "sign-up let in", &listed, &a, m.as_ref());
+                    }
+                }
+                listed
+            }
+        }
     }
 
     /// Signed in is not let in: the person's root has to be on the member
@@ -594,31 +620,10 @@ impl App {
         if user == pages::DEMO_USER {
             return self.demo();
         }
-        use ident::From;
-        // the agreed view's access alone: an invite or a box that counts;
-        // not read yet, nobody's in
-        let agreed = || {
-            self.directory
-                .agreed_member(user)
-                .is_some_and(|m| m.has_access())
-        };
-        match self.directory.ident_from {
-            From::Agreed => agreed(),
-            From::Replay => self.replay_member(user),
-            From::Shadow => {
-                let r = self.replay_member(user);
-                if self
-                    .directory
-                    .ident
-                    .as_ref()
-                    .is_some_and(|a| a.state().is_some())
-                    && r != agreed()
-                {
-                    eprintln!("identity shadow: {user}: member: replay {r}, agreed {}", !r);
-                }
-                r
-            }
-        }
+        // agreed: the agreed view's access alone, an invite or a box that
+        // counts; not read yet, nobody's in
+        self.directory
+            .has_access(user, "member", || self.replay_member(user))
     }
 
     /// Signed up and not shut out - left, suspended or removed - whatever
@@ -628,21 +633,34 @@ impl App {
         if user == pages::DEMO_USER {
             return false;
         }
-        if self.directory.ident_from == ident::From::Agreed {
-            return self
-                .directory
+        let agreed = || {
+            self.directory
                 .agreed_member(user)
-                .is_some_and(|m| m.not_banned());
-        }
-        let Some(e) = self.directory.replay_or_held(user) else {
-            return false;
+                .is_some_and(|m| m.not_banned())
         };
-        !self.directory.has_left(user)
-            && self.members.as_ref().is_none_or(|m| {
-                !identity::member_ids(&e.entry)
-                    .iter()
-                    .any(|id| m.revoked.contains(id))
-            })
+        let replay = || {
+            let Some(e) = self.directory.replay_or_held(user) else {
+                return false;
+            };
+            !self.directory.leaving.has_left(user)
+                && self.members.as_ref().is_none_or(|m| {
+                    !identity::member_ids(&e.entry)
+                        .iter()
+                        .any(|id| m.revoked.contains(id))
+                })
+        };
+        match self.directory.ident_from {
+            ident::From::Agreed => agreed(),
+            ident::From::Replay => replay(),
+            ident::From::Shadow => {
+                let r = replay();
+                if self.directory.agreed_known() && r != agreed() {
+                    let m = self.directory.agreed_member(user);
+                    ident::shadow_differs(user, "registered", &r, &!r, m.as_ref());
+                }
+                r
+            }
+        }
     }
 
     /// Membership as this box's replay judges it: a root on the list, or an
@@ -700,7 +718,7 @@ impl App {
         // agreed: the judge said suspended, and why; the window still runs
         // from when the list removed them (the release's list, which the
         // gate is configured with as every box is)
-        if self.directory.ident_from == ident::From::Agreed {
+        let agreed = || {
             let a = self.directory.agreed_member(user)?;
             if a.status != "suspended" {
                 return None;
@@ -711,14 +729,37 @@ impl App {
                 .iter()
                 .find_map(|id| m.removed.get(id))?
                 .saturating_add(leaving::window());
-            return (identity::now() < until).then_some((why, until));
+            (identity::now() < until).then_some((why, until))
+        };
+        let replay = || {
+            let e = self.entry(user).ok().flatten()?;
+            identity::member_ids(&e.entry).into_iter().find_map(|id| {
+                let why = m.suspended.get(&id).filter(|_| m.revoked.contains(&id))?;
+                let until = m.removed.get(&id)?.saturating_add(leaving::window());
+                (identity::now() < until).then(|| (why.clone(), until))
+            })
+        };
+        match self.directory.ident_from {
+            ident::From::Agreed => agreed(),
+            ident::From::Replay => replay(),
+            ident::From::Shadow => {
+                let r = replay();
+                if self.directory.agreed_known() {
+                    let a = agreed();
+                    if r.is_some() != a.is_some() {
+                        let m = self.directory.agreed_member(user);
+                        ident::shadow_differs(
+                            user,
+                            "suspended",
+                            &r.is_some(),
+                            &a.is_some(),
+                            m.as_ref(),
+                        );
+                    }
+                }
+                r
+            }
         }
-        let e = self.entry(user).ok().flatten()?;
-        identity::member_ids(&e.entry).into_iter().find_map(|id| {
-            let why = m.suspended.get(&id).filter(|_| m.revoked.contains(&id))?;
-            let until = m.removed.get(&id)?.saturating_add(leaving::window());
-            (identity::now() < until).then(|| (why.clone(), until))
-        })
     }
 
     /// The hosts a guest may reach through the gate: the game servers'
@@ -1576,7 +1617,7 @@ async fn join_sign(
     // directory like any other. Otherwise it is held on this box until the
     // list names it - the same sign-in, the same waiting screen for someone
     // not yet in. The accept rule checks the assertion in both.
-    let earned = app.listed(&signed.entry.root);
+    let earned = app.earned(&user, &signed.entry.root);
     if earned {
         if let Err((status, why)) = app.directory.admit(signed).await {
             return (status, why).into_response();
@@ -3020,7 +3061,7 @@ pub async fn start(
                     let Some(h) = a.directory.held(&name) else {
                         continue;
                     };
-                    if !a.listed(&h.entry.root) {
+                    if !a.earned(&name, &h.entry.root) {
                         continue;
                     }
                     match a.directory.admit(h).await {
@@ -3334,6 +3375,10 @@ pub async fn start(
         .route(
             "/_dd/controller/directory/{name}",
             get(controller::directory),
+        )
+        .route(
+            "/_dd/controller/standing/{name}",
+            get(controller::standing),
         )
         .route("/_dd/controller/backup", post(controller::backup))
         .route("/_dd/controller/backup/{label}", get(controller::restore))

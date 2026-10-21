@@ -412,3 +412,35 @@ func TestOnlyAMembersOwnTicketWaitsForThem(t *testing.T) {
 		t.Fatalf("an expired ticket waits: %+v", v.Waiting)
 	}
 }
+
+// What a log item keeps of a box (ident.ForAccess) decides access as the
+// whole of its facts would: every fact Access reads is in AccessFacts
+func TestTheFactsKeptForAccessAreTheOnesItReads(t *testing.T) {
+	cases := []map[string]float64{
+		computeBox, minimumBox,
+		with(computeBox, "raspberry_pi", 1),
+		with(minimumBox, "store_size_bytes", StorageBytes),
+		with(minimumBox, "gpu_vram_bytes", GPUVRAM),
+		with(minimumBox, "video_encoders", 1),
+		with(minimumBox, "arch_x86_64", 0, "arch_aarch64", 1, "threads", ComputeThreads, "mem_total_bytes", ComputeMemTotal),
+		with(computeBox, "agent_ok", 0, "release", 3),
+	}
+	for i, f := range cases {
+		full := with(f, "load", 7, "temp_c", 60, "cores", 32, "disk_free_bytes", 1e15)
+		kept := ForAccess(BoxInfo{LastSeen: 5, Facts: full, Fleet: 4})
+		if Qualify(kept.Facts) != Qualify(full) || Minimum(kept.Facts) != Minimum(full) || OurFault(kept.Facts, 4) != OurFault(full, 4) {
+			t.Errorf("case %d: kept %v decides otherwise than %v", i, kept.Facts, full)
+		}
+		if kept.LastSeen != 5 || kept.Fleet != 4 {
+			t.Errorf("case %d: %+v", i, kept)
+		}
+		for _, k := range []string{"load", "temp_c", "cores", "disk_free_bytes"} {
+			if _, ok := kept.Facts[k]; ok {
+				t.Errorf("case %d: kept %s", i, k)
+			}
+		}
+	}
+	if BoxesAt(nil) != nil {
+		t.Fatal("an item that kept no boxes knows some")
+	}
+}

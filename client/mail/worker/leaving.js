@@ -58,7 +58,7 @@ export async function forgetApi(req, env, body, json, h) {
     } catch (err) {
       ownWhy = String(err.message || err);
     }
-    if (how === 'shadow') h.differ('forget', name, { due: !ownWhy }, { due: !agreedWhy });
+    if (how === 'shadow') h.differ('forget', name, { due: !ownWhy }, { due: !agreedWhy }, { own: ownWhy, agreed: agreedWhy ?? null });
     if (ownWhy) return json({ error: ownWhy }, 403);
   }
   const z = await h.zone(env);

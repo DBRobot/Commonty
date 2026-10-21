@@ -549,7 +549,14 @@ signed item once and the gate reads the result. `VERIFY_IDENTITY_FROM`
 - `replay` (the default for now): the gate's own replay of the log, as
   above;
 - `shadow`: both; the replay's answer is served and every difference is
-  logged (`identity shadow: <name>: <field>`), names and public fields only;
+  logged, names and public fields only: an entry's
+  (`identity shadow: <name>: <field>`), and each check's
+  (`identity shadow: <name>: <check>: replay <answer>, agreed <answer>
+  (agreed status <s>, access <a>, boxes: <box> <why>; ...)`, the same line
+  once in ten minutes). The checks: `member` (the services), `house member`
+  (a house's Wi-Fi on a directory-only box), `registered`, `suspended`,
+  `left`, `sign-up let in`. The Workers log the same as one JSON line
+  (`{"identity-shadow": <check>, name, own, agreed, why}`);
 - `agreed`: dd-control's `/identity` alone (ident.rs). It is read in the
   background, `?since` answering 304 when nothing changed, so a request
   never waits on it; until the first read, it knows nobody.

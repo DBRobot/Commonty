@@ -504,8 +504,10 @@ fn unxml(s: &str) -> String {
 }
 
 /// every library this machine can open: the member's own, then those
-/// shared with them by members of the release (`released`, the signed
-/// member list: account::released). None: the member's own alone.
+/// shared with them by members (`released`, the signed member list:
+/// account::released, or for someone it does not name, the agreed state as
+/// the directories say it: directory::resolve_member). None: the member's
+/// own alone.
 pub async fn openable(
     dirs: &[String],
     user: &str,
@@ -524,7 +526,8 @@ pub async fn openable(
     let mine = match (&anchor, released) {
         (Some(r), _) => directory::resolve(&found, directory::Anchor::Root(r))
             .context("no directory has a usable entry for you")?,
-        (None, Some(list)) => directory::resolve(&found, directory::Anchor::Released(list))
+        (None, Some(list)) => directory::resolve_member(&found, dirs, list)
+            .await
             .with_context(|| format!("your entry is {}", account::NOT_RELEASED))?,
         (None, None) => bail!(
             "this device has not pinned your entry and has no signed member list to hold it to"

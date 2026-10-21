@@ -72,6 +72,37 @@ pub enum SignIn {
 /// only withhold or replay; whatever comes back goes through identity::accept.
 pub trait Directory: Send + Sync {
     fn entry<'a>(&'a self, domain: &'a str, name: &'a str) -> Fut<'a, Option<SignedEntry>>;
+    /// Whether the gate gives this person the fleet's services, by the
+    /// root their entry has (the gate's /_dd/controller/standing/<name>):
+    /// a member the release's list does not name, by an invite since or a
+    /// box of theirs. Asked as `reg` says, or as this door's registration
+    /// once it has one. None: the gate does not say.
+    fn standing<'a>(
+        &'a self,
+        _reg: Option<&'a crate::pair::Registration>,
+        _name: &'a str,
+    ) -> Fut<'a, Option<Standing>> {
+        Box::pin(async { Ok(None) })
+    }
+}
+
+/// The gate's word on someone (Directory::standing)
+#[derive(Debug, Clone, serde::Deserialize, PartialEq, Eq)]
+pub struct Standing {
+    pub root: String,
+    pub member: bool,
+}
+
+/// Ask the gate about someone the release's list does not name, and keep
+/// its answer for a while (App::member): before a sign-in is checked, and
+/// for everyone in at each refresh
+pub async fn vouch(app: &App, reg: Option<&crate::pair::Registration>, name: &str) {
+    match app.directory.standing(reg, name).await {
+        Ok(Some(s)) if s.member => app.vouched(name, &s.root),
+        Ok(_) => app.unvouched(name),
+        // not reached: what it said before stands until it runs out
+        Err(e) => eprintln!("door: asking the gate about {name}: {e:#}"),
+    }
 }
 
 /// `<label>.home.<domain>` → `<domain>`
@@ -107,6 +138,7 @@ async fn entry_for(
     }
     if let Some(e) = &offered
         && !app.member(e)
+        && !app.member_vouching(e).await
     {
         return Err(no(StatusCode::FORBIDDEN, "not a member of this fleet"));
     }
@@ -163,7 +195,7 @@ async fn member_entry(
     offered: Option<SignedEntry>,
 ) -> Result<(SignedEntry, bool), Refusal> {
     let (e, is_in) = entry_for(app, name, offered).await?;
-    if !app.member(&e) {
+    if !app.member(&e) && !app.member_vouching(&e).await {
         return Err(no(StatusCode::FORBIDDEN, "not a member of this fleet"));
     }
     Ok((e, is_in))
@@ -357,6 +389,11 @@ pub async fn refresh(app: &App) {
             .collect()
     });
     for (name, saved) in people {
+        // whoever the list does not name is asked about again, so a
+        // member by a box stays in while the gate says so and no longer
+        if !app.cfg.members.as_ref().is_none_or(|m| m.has(&saved)) {
+            vouch(app, None, &name).await;
+        }
         let Ok(Some(new)) = app.directory.entry(&domain, &name).await else {
             continue;
         };
@@ -817,6 +854,69 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), 401);
+    }
+
+    /// A member the release's list does not name - by a box of theirs, or
+    /// an invite since - is let through while the gate says so for the
+    /// root their entry has, and never past the list's own revocation
+    #[tokio::test]
+    async fn a_member_the_list_does_not_name_is_let_through_on_the_gates_word() {
+        let (bob, _) = signed_entry("bob");
+        let (cat, ck) = signed_entry("cat");
+        let (eve, ek) = signed_entry("cat");
+        let list = crate::members::Members::listing(&[&bob]);
+        let r = rig_with("vouched", |c| {
+            c.members = Some(crate::members::Members::parse(&list).unwrap())
+        });
+        let url = serve(crate::router(r.app.clone())).await;
+        let sign = |e: &SignedEntry, k: &identity::SigningKey, n: &str| serde_json::json!({"name": e.entry.name, "entry": e, "device": pk(e), "sig": device_sig(k, NAME, n, &e.entry.name), "nonce": n});
+        // the gate says nothing of her, or that she is no member
+        let n = nonce(&url).await;
+        assert_eq!(post(&url, sign(&cat, &ck, &n)).await.status(), 403);
+        r.directory.says("cat", &cat.entry.root, false);
+        let n = nonce(&url).await;
+        assert_eq!(post(&url, sign(&cat, &ck, &n)).await.status(), 403);
+        // a member, by the gate: in
+        r.directory.says("cat", &cat.entry.root, true);
+        let n = nonce(&url).await;
+        assert_eq!(post(&url, sign(&cat, &ck, &n)).await.status(), 200);
+        // the gate's word is for her root: another root under her name is not her
+        let n = nonce(&url).await;
+        assert_eq!(post(&url, sign(&eve, &ek, &n)).await.status(), 403);
+        // a session lasts while the gate says so, and ends with its word at
+        // the next refresh
+        let (_, _, cookie) = person(&r.app, "cat");
+        r.app.with_store(|s| {
+            let p = s.state.people.get_mut("cat").unwrap();
+            p.entry = cat.clone();
+            p.root = cat.entry.root.clone();
+        });
+        let people = |c: &str| {
+            client()
+                .get(format!("{url}/_door/people"))
+                .header("cookie", c.to_string())
+                .send()
+        };
+        assert_ne!(people(&cookie).await.unwrap().status(), 401);
+        r.directory.says("cat", &cat.entry.root, false);
+        refresh(&r.app).await;
+        assert_eq!(people(&cookie).await.unwrap().status(), 401);
+        // someone the release revokes, whatever the gate says
+        let mut gone: serde_json::Value = serde_json::from_str(&list).unwrap();
+        gone["revoked"] = serde_json::json!([identity::member_id(&cat.entry.root)]);
+        let m = crate::members::Members::parse(&gone.to_string()).unwrap();
+        assert!(m.shut_out(&cat) && !m.shut_out(&bob));
+        r.directory.says("cat", &cat.entry.root, true);
+        refresh(&r.app).await;
+        assert!(r.app.member(&cat));
+        let r2 = rig_with("vouched-revoked", |c| c.members = Some(m));
+        r2.directory.says("cat", &cat.entry.root, true);
+        crate::signin::vouch(&r2.app, None, "cat").await;
+        assert!(!r2.app.member(&cat), "revoked by the release");
+        // a listed member is never asked about
+        let asked = *r.directory.2.lock().unwrap();
+        assert!(r.app.member_vouching(&bob).await);
+        assert_eq!(*r.directory.2.lock().unwrap(), asked);
     }
 
     #[tokio::test]

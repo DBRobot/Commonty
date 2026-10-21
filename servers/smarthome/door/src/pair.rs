@@ -226,7 +226,16 @@ pub async fn pair(
         return refuse(StatusCode::FORBIDDEN, "the clocks disagree; try again");
     }
     let entry = m.entry;
-    if !app.member(&entry) {
+    // someone the release's list does not name (a member by a box, or by an
+    // invite since) is asked about at /pair/finish, when this door has its
+    // name to ask the gate with; until then they are paired and nothing
+    // more: no sign-in lets them in (App::member)
+    if app
+        .cfg
+        .members
+        .as_ref()
+        .is_some_and(|m| !m.has(&entry) && m.shut_out(&entry))
+    {
         return refuse(StatusCode::FORBIDDEN, "not a member of this fleet");
     }
     if identity::accept(None, &entry).is_err() {
@@ -340,6 +349,20 @@ pub async fn finish(
         entry,
         name_sig: f.name_sig,
     };
+    if !app.member(&reg.entry) {
+        crate::signin::vouch(&app, Some(&reg), &reg.entry.entry.name).await;
+        if !app.member(&reg.entry) {
+            // not theirs to pair: the card pairs again from the start
+            let _ = app.with_store(|s| {
+                s.state.label = None;
+                s.state.paired = None;
+                s.state.pairer = None;
+                s.state.people.clear();
+                s.save()
+            });
+            return refuse(StatusCode::FORBIDDEN, "not a member of this fleet");
+        }
+    }
     if let Err(e) = app.hooks.register(&reg).await {
         eprintln!("pair: name: {e:#}");
         return refuse(StatusCode::BAD_GATEWAY, "could not register the name");
@@ -616,6 +639,63 @@ mod tests {
 
         // and pairing is over
         assert_eq!(send(&url, "/pair/finish", &finish).await.status(), 404);
+    }
+
+    /// Someone the release's list does not name pairs on the gate's word,
+    /// asked at the finish with the name they signed; without it the card
+    /// pairs again from the start. The list's revocation refuses at once.
+    #[tokio::test]
+    async fn a_member_the_list_does_not_name_pairs_on_the_gates_word() {
+        let (bob, _) = signed_entry("bob");
+        let list = crate::members::Members::listing(&[&bob]);
+        let r = rig_with("pair-vouched", |c| {
+            c.name = None;
+            c.members = Some(crate::members::Members::parse(&list).unwrap());
+        });
+        std::fs::write(&r.app.cfg.pair_key, KEY).unwrap();
+        let url = serve(crate::pair_router(r.app.clone())).await;
+        let (cat, ck) = signed_entry("cat");
+        let pair = || Pair {
+            entry: cat.clone(),
+            at: identity::now(),
+        };
+        let reply: Paired = read(send(&url, "/pair", &pair()).await).await;
+        let name = format!("{}.home.commonty.org", reply.label);
+        let finish = Finish {
+            network_key: library::seal_to(&reply.controller, b"hskey-auth-123").unwrap(),
+            name_sig: sign_name(&ck, &name, &reply.controller),
+            domain: "commonty.org".into(),
+        };
+        // the gate says she is no member: refused, and nothing kept
+        r.directory.says("cat", &cat.entry.root, false);
+        assert_eq!(send(&url, "/pair/finish", &finish).await.status(), 403);
+        assert!(r.app.with_store(|s| s.state.people.is_empty() && s.state.label.is_none()));
+        assert!(r.hooks.registered.lock().unwrap().is_none());
+        // a member by the gate's word: paired
+        let reply: Paired = read(send(&url, "/pair", &pair()).await).await;
+        let name = format!("{}.home.commonty.org", reply.label);
+        let finish = Finish {
+            name_sig: sign_name(&ck, &name, &reply.controller),
+            ..finish
+        };
+        r.directory.says("cat", &cat.entry.root, true);
+        assert_eq!(send(&url, "/pair/finish", &finish).await.status(), 200);
+        assert_eq!(
+            r.hooks.registered.lock().unwrap().as_ref().map(|g| g.entry.entry.name.clone()),
+            Some("cat".into())
+        );
+
+        // revoked by the release: refused at /pair
+        let mut gone: serde_json::Value = serde_json::from_str(&list).unwrap();
+        gone["revoked"] = serde_json::json!([identity::member_id(&cat.entry.root)]);
+        let r = rig_with("pair-revoked", |c| {
+            c.name = None;
+            c.members = Some(crate::members::Members::parse(&gone.to_string()).unwrap());
+        });
+        std::fs::write(&r.app.cfg.pair_key, KEY).unwrap();
+        let url = serve(crate::pair_router(r.app.clone())).await;
+        r.directory.says("cat", &cat.entry.root, true);
+        assert_eq!(send(&url, "/pair", &pair()).await.status(), 403);
     }
 
     #[tokio::test]

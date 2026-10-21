@@ -70,11 +70,19 @@ impl Gate {
     }
 
     fn request(&self, method: reqwest::Method, path: &str) -> Result<reqwest::RequestBuilder> {
-        let reg = self.registration()?;
-        let h = header(&reg, &self.key, method.as_str(), path, identity::now());
+        self.request_as(&self.registration()?, method, path)
+    }
+
+    fn request_as(
+        &self,
+        reg: &Registration,
+        method: reqwest::Method,
+        path: &str,
+    ) -> Result<reqwest::RequestBuilder> {
+        let h = header(reg, &self.key, method.as_str(), path, identity::now());
         Ok(self
             .http
-            .request(method, format!("{}{path}", self.base(&reg)?))
+            .request(method, format!("{}{path}", self.base(reg)?))
             .header(HEADER, h))
     }
 }
@@ -90,6 +98,35 @@ impl signin::Directory for Gate {
                 .await?;
             if r.status() == reqwest::StatusCode::NOT_FOUND {
                 return Ok(None);
+            }
+            Ok(Some(r.error_for_status()?.json().await?))
+        })
+    }
+
+    fn standing<'a>(
+        &'a self,
+        reg: Option<&'a Registration>,
+        name: &'a str,
+    ) -> Fut<'a, Option<signin::Standing>> {
+        Box::pin(async move {
+            let path = format!("/_dd/controller/standing/{}", segment(name));
+            let req = match reg {
+                Some(r) => self.request_as(r, reqwest::Method::GET, &path)?,
+                None => self.request(reqwest::Method::GET, &path)?,
+            };
+            let r = req
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await?;
+            // no such name, or the asker no member: nobody the gate vouches for
+            if matches!(
+                r.status(),
+                reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::FORBIDDEN
+            ) {
+                return Ok(Some(signin::Standing {
+                    root: String::new(),
+                    member: false,
+                }));
             }
             Ok(Some(r.error_for_status()?.json().await?))
         })

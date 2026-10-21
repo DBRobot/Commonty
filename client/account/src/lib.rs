@@ -197,9 +197,10 @@ pub async fn released(keys: &impl KeyStore, dirs: &[String]) -> Result<identity:
 
 /// what a person let in by an invite sees until a release lists them, for
 /// any check that holds an entry to the released list
-pub const NOT_RELEASED: &str = "not in a signed release yet: an account let in by an invite, or \
-     recovered since the last release, is unverified until the next release lists the root it has \
-     now, and until then cannot be shared with";
+pub const NOT_RELEASED: &str = "neither in a signed release nor a member by the agreed state: an \
+     account let in by an invite or a box of theirs is checked against what the directories say the \
+     agreed state gives it, and one recovered since the last release is unverified until the \
+     directories agree on the root it has now";
 
 /// This member's entry, as this device can vouch for it: under the root it
 /// holds, or the one it pinned the first time it looked (kept from then on).
@@ -215,7 +216,8 @@ pub async fn own_entry(keys: &impl KeyStore, dirs: &[String], name: &str) -> Res
             .context("your entry is not one this device can vouch for (signed out and in again after a recovery elsewhere?)")?,
         None => {
             let list = released(keys, dirs).await?;
-            directory::resolve(&found, directory::Anchor::Released(&list))
+            directory::resolve_member(&found, dirs, &list)
+                .await
                 .with_context(|| format!("your entry is {NOT_RELEASED}"))?
         }
     };

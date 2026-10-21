@@ -1,7 +1,8 @@
 # A joined box's own system after its first boot: named by its key, moved
 # to that name's system by its own agent, joined with its member's ticket;
 # its member's once her root enlists it on that ticket, which opens the
-# services to her; and nobody's, and the services shut, once she removes it.
+# services to her - every one an invited member has, her gate reading the
+# agreed state - and nobody's, and the services shut, once she removes it.
 import json
 
 # boxNamed is never started: it is the system the box moves to
@@ -246,6 +247,70 @@ assert json.loads(
     fleet.succeed(f"curl -sf {auth} http://127.0.0.1:4281/_dd/network/joined")
 )[0]["enlisted"]
 
+# ...every one of them, as for a member by an invite, on her gate in agreed
+# mode. She signs in: a browser session of hers (the gate's own cookie,
+# made with its secret as a sign-in makes it; the passkey ceremony is the
+# gate's own tests')
+cookie = fleet.succeed(
+    "python3 -c 'import base64,hashlib,hmac,time;"
+    "s=open(\"/root/f/g1/session.secret\",\"rb\").read();w=\"ada~vmtest\";e=int(time.time())+3600;"
+    "m=base64.urlsafe_b64encode(hmac.new(s,f\"{w}.{e}\".encode(),hashlib.sha256).digest()).decode().rstrip(\"=\");"
+    "print(f\"dd_session={w}.{e}.{m}\")'"
+).strip()
+ck = f"-H 'cookie: {cookie}'"
+me = json.loads(fleet.succeed(f"curl -sf {ck} http://127.0.0.1:4281/_dd/me"))
+assert me["user"] == "ada", me
+
+
+def door(host, how=ck):
+    """What nginx's auth subrequest to her gate says for a service's door"""
+    return fleet.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' {how} -H 'x-original-host: {host}.commonty.test'"
+        f" -H 'x-original-method: GET' -H 'x-original-uri: /' http://127.0.0.1:4281/verify"
+    ).strip()
+
+
+# Files, Mail, Photos, Passwords, the forge and the games: each door lets
+# her through, in the browser and with her device's token
+services = ["files", "mail", "photos", "vault", "git", "games"]
+for host in services:
+    assert door(host) == "200", (host, door(host))
+    assert door(host, auth) == "200", (host, door(host, auth))
+# the directory is members' to read, and says she is one, under her root
+fleet.succeed(f"curl -sf {ck} http://127.0.0.1:4281/_dd/directory")
+st = json.loads(
+    fleet.succeed(f"curl -sf {auth} http://127.0.0.1:4281/_dd/directory/ada/standing")
+)
+assert st["member"] and st["access"] == "box" and st["from"] == "agreed", st
+# a key to the fleet's network, for a device of hers
+key = json.loads(
+    fleet.succeed(f"curl -sf -X POST {auth} http://127.0.0.1:4281/_dd/network/join")
+)
+assert key["key"] == "test-preauth-key" and key["user"] == "ada", key
+# a guest brought in: a friend link
+link = json.loads(
+    fleet.succeed(
+        f"curl -sf -X POST {ck} -H 'content-type: application/json' -d '{{}}'"
+        " http://127.0.0.1:4281/_dd/friends/link"
+    )
+)
+assert "/_dd/friend/" in link["url"], link
+# a remote computer of hers: the judge takes it on the box her item found
+# (the box state the log kept with it), and it is up while her box counts
+cid = "00000000000000a1"
+item = fleet.succeed(f"cd /root/f && python3 {nix['fleet']} item computer {cid}").strip()
+fleet.wait_until_succeeds(
+    f"curl -sf http://127.0.0.1:4191/computers | jq -e '.outcomes[\"{item}\"] != null'",
+    timeout=120,
+)
+comps = json.loads(fleet.succeed("curl -sf http://127.0.0.1:4191/computers"))
+assert comps["outcomes"][item] == "ok", comps["outcomes"][item]
+assert comps["computers"][cid]["owner"] == "ada" and comps["computers"][cid]["up"], comps
+directory = json.loads(fleet.succeed("curl -sf http://127.0.0.1:4191/directory"))
+kept = [i for i in directory["items"] if i.get("boxes")]
+assert kept and nix["keyName"] in kept[-1]["boxes"], kept
+assert "load" not in kept[-1]["boxes"][nix["keyName"]].get("facts", {}), kept[-1]
+
 # she removes it: nobody's at once, and the services shut again
 fleet.succeed(f"cd /root/f && python3 {nix['fleet']} item unenlist {nix['keyName']}")
 fleet.wait_until_succeeds(f"{mine} | jq -e '.boxes == []'", timeout=120)
@@ -254,6 +319,27 @@ ident = json.loads(fleet.succeed("curl -sf 'http://127.0.0.1:4191/identity?name=
     "member"
 ]
 assert ident["access"] == "none" and ident["enlisted"] == [], ident
+# and every door with them: no service, no network key, no guest, her
+# computer down
+for host in services:
+    assert door(host) == "403", (host, door(host))
+assert (
+    fleet.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' -X POST {auth} http://127.0.0.1:4281/_dd/network/join"
+    ).strip()
+    == "403"
+)
+assert (
+    fleet.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' -X POST {ck} -H 'content-type: application/json'"
+        " -d '{}' http://127.0.0.1:4281/_dd/friends/link"
+    ).strip()
+    == "403"
+)
+fleet.wait_until_succeeds(
+    f"curl -sf http://127.0.0.1:4191/computers | jq -e '.computers[\"{cid}\"].up == false'",
+    timeout=120,
+)
 # and its ticket is used: enlisting it again on it is refused
 refused(
     fleet.succeed(

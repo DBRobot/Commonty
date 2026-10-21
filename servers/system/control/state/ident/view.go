@@ -16,6 +16,10 @@ type Item struct {
 	Time int64           `json:"time"` // agreed, ms
 	Box  string          `json:"box"`
 	Item json.RawMessage `json:"item"`
+	// the joined boxes as the agreed state had them when the item was
+	// ordered, for a judge whose rules count a member's boxes (a remote
+	// computer's owner): state.DirItem's Boxes
+	Boxes map[string]BoxInfo `json:"boxes,omitempty"`
 }
 
 // Replayer keeps the judged state up to the log's end, judging what is new

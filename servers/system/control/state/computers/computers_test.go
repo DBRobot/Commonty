@@ -112,7 +112,7 @@ func (f *fleet) now() uint64 { return uint64(f.at / 1000) }
 
 func (f *fleet) view() *View {
 	id, s := f.r.CatchN(len(f.log), func(i int) ident.Item { return f.log[i] })
-	return s.View(id, f.cfg, 1, f.at)
+	return s.View(id, f.cfg, 1, f.at, nil)
 }
 
 func make1(owner, id, name string, mem, thr, version uint64) Computer {
@@ -322,7 +322,7 @@ func TestServe(t *testing.T) {
 	f.add(seal(t, "computer", body(t, make1("ann", "00000000000000b1", "lab", 2048, 1, 1)), ann.root))
 	sv := NewServer(f.cfg, f.lim, voters)
 	item := func(i int) ident.Item { return f.log[i] }
-	code, b := sv.Answer(len(f.log), item, 7, f.at, "tom", false, 0)
+	code, b := sv.Answer(len(f.log), item, 7, f.at, nil, "tom", false, 0)
 	var mine struct {
 		Changed   uint64             `json:"changed"`
 		Computers map[string]*Listed `json:"computers"`
@@ -330,7 +330,7 @@ func TestServe(t *testing.T) {
 	if code != 200 || json.Unmarshal(b, &mine) != nil || len(mine.Computers) != 1 || mine.Computers["00000000000000a1"] == nil {
 		t.Fatalf("%d %s", code, b)
 	}
-	if code, _ := sv.Answer(len(f.log), item, 8, f.at, "", false, mine.Changed); code != 304 {
+	if code, _ := sv.Answer(len(f.log), item, 8, f.at, nil, "", false, mine.Changed); code != 304 {
 		t.Fatalf("unchanged: %d", code)
 	}
 }
@@ -352,7 +352,7 @@ func TestServeAtOnce(t *testing.T) {
 		go func(g int) {
 			defer func() { done <- struct{}{} }()
 			for n := len(f.log) - 20; n <= len(f.log); n++ {
-				sv.Answer(n, func(i int) ident.Item { return f.log[i] }, uint64(n), f.at, "", false, 0)
+				sv.Answer(n, func(i int) ident.Item { return f.log[i] }, uint64(n), f.at, nil, "", false, 0)
 			}
 		}(g)
 	}
@@ -553,7 +553,7 @@ func TestOwners(t *testing.T) {
 	raw := seal(t, "computer", body(t, make1("tom", "00000000000000a1", "dev", 1024, 1, 1)), tom.root)
 	f.add(raw)
 	sv := NewServer(f.cfg, f.lim, voters)
-	code, b := sv.Answer(len(f.log), func(i int) ident.Item { return f.log[i] }, 3, f.at, "", true, 0)
+	code, b := sv.Answer(len(f.log), func(i int) ident.Item { return f.log[i] }, 3, f.at, nil, "", true, 0)
 	var o struct {
 		Owners    map[string]string `json:"owners"`
 		Outcomes  map[string]string `json:"outcomes"`
@@ -610,4 +610,71 @@ func TestSSHKeys(t *testing.T) {
 	if k := f.view().Computers[c.ID].Keys; len(k) != 2 || k[1] != good+" ann@laptop" {
 		t.Fatalf("keys %v", k)
 	}
+}
+
+// A member by a box of theirs (docs/dev/joining.md, "Access") is a member
+// here too, judged as each item found their box: the box state the item
+// was ordered with (ident.Item's Boxes), never the state now. The
+// enlistment itself is the identity judge's (state/ident access_test.go);
+// here it stands as that judge would leave it.
+func TestABoxEarnedMemberAsEachItemFoundTheirBox(t *testing.T) {
+	tom, ann := who("tom", 1), who("ann", 10)
+	f := newFleet(t, tom) // ann is on no list: her box lets her in
+	f.claim(tom)
+	f.claim(ann)
+	const box = "j00000000a1"
+	id, _ := f.r.CatchN(len(f.log), func(i int) ident.Item { return f.log[i] })
+	id.Enlisted = map[string]*ident.Enlisted{box: {Member: "ann", ID: ident.MemberID(pub(ann.root)), Box: box, Ticket: fmt.Sprintf("%032x", 1), Since: f.now()}}
+	compute := map[string]float64{
+		"tpm_major": 2, "uefi": 1, "secure_boot_capable": 1, "arch_x86_64": 1, "nics": 1,
+		"threads": ident.ComputeThreads, "mem_total_bytes": ident.ComputeMemTotal, "system_disk_bytes": ident.MinSystemDisk,
+	}
+	seen := func(ms int64) map[string]ident.BoxInfo {
+		return map[string]ident.BoxInfo{box: {LastSeen: ms, Facts: compute}}
+	}
+	c := make1("ann", "00000000000000d1", "dev", 1024, 1, 1)
+	if got := f.addWith(seal(t, "computer", body(t, c), ann.root), nil); got == "ok" {
+		t.Fatal("an item that kept no boxes let a box's member in")
+	}
+	if got := f.addWith(seal(t, "computer", body(t, c), ann.root), seen(0)); got == "ok" {
+		t.Fatal("a box gone since 1970 counted")
+	}
+	if got := f.addWith(seal(t, "computer", body(t, c), ann.root), seen(f.at)); got != "ok" {
+		t.Fatal(got)
+	}
+	// up while the agreed state counts her box now, down when it does not
+	up := func(boxes map[string]ident.BoxInfo) bool {
+		id, s := f.r.CatchN(len(f.log), func(i int) ident.Item { return f.log[i] })
+		return s.View(id, f.cfg, 1, f.at, ident.BoxesAt(boxes)).Computers[c.ID].Up
+	}
+	if !up(seen(f.at)) || up(nil) || up(seen(f.at-31*24*3600*1000)) {
+		t.Fatal("up by the box as it is now")
+	}
+	// she is someone tom may let in, by the box his item found
+	tc := make1("tom", "00000000000000a1", "tc", 1024, 1, 1)
+	tc.Players = []string{"ann"}
+	if got := f.addWith(seal(t, "computer", body(t, tc), tom.root), nil); got == "ok" {
+		t.Fatal("let in by a box no item kept")
+	}
+	if got := f.addWith(seal(t, "computer", body(t, tc), tom.root), seen(f.at)); got != "ok" {
+		t.Fatal(got)
+	}
+	// a later item that found her box gone 31 days is hers no longer;
+	// what was taken before stays taken
+	f.at += 31 * 24 * 3600 * 1000
+	p := Power{ID: c.ID, Up: false, At: f.now()}
+	if got := f.addWith(seal(t, "computer-power", body(t, p), ann.device), seen(f.at-31*24*3600*1000)); got == "ok" {
+		t.Fatal("a box gone 31 days still counted")
+	}
+	if _, s := f.r.CatchN(len(f.log), func(i int) ident.Item { return f.log[i] }); s.Computers[c.ID] == nil {
+		t.Fatal("what was taken before went")
+	}
+}
+
+// addWith: an item ordered while the agreed state had these joined boxes
+func (f *fleet) addWith(raw json.RawMessage, boxes map[string]ident.BoxInfo) string {
+	f.at += 1000
+	f.log = append(f.log, ident.Item{Time: f.at, Box: "node1", Item: raw, Boxes: boxes})
+	_, s := f.r.CatchN(len(f.log), func(i int) ident.Item { return f.log[i] })
+	return s.Outcomes[ident.ItemHash(raw)]
 }

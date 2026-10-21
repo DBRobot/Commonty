@@ -13,10 +13,47 @@ import "sort"
 // BoxInfo is what the agreed state says of a box now: from its heartbeats
 // (state.BoxState), the release's validators' word on when it was heard
 type BoxInfo struct {
-	LastSeen int64              // agreed ms; 0, never heard
-	Facts    map[string]float64 // its last heartbeat's
+	LastSeen int64              `json:"lastSeen"`        // agreed ms; 0, never heard
+	Facts    map[string]float64 `json:"facts,omitempty"` // its last heartbeat's
 	// the newest release the release's own boxes say they run; 0, unknown
-	Fleet float64
+	Fleet float64 `json:"fleet,omitempty"`
+}
+
+// AccessFacts: every fact Access reads of a box (Minimum, Qualify,
+// OurFault), and no other. A box's state kept with a log item
+// (state.DirItem's Boxes) keeps these alone: a judge replaying the item
+// reads the box as it was then, and a heartbeat's other facts are no
+// business of the log's
+var AccessFacts = []string{
+	"tpm_major", "uefi", "secure_boot_capable", "arch_x86_64", "arch_aarch64",
+	"threads", "mem_total_bytes", "system_disk_bytes", "nics", "raspberry_pi",
+	"store_size_bytes", "gpu_vram_bytes", "video_encoders", "agent_ok", "release",
+}
+
+// ForAccess: info with only the facts Access reads
+func ForAccess(info BoxInfo) BoxInfo {
+	out := BoxInfo{LastSeen: info.LastSeen, Fleet: info.Fleet}
+	for _, k := range AccessFacts {
+		if v, ok := info.Facts[k]; ok {
+			if out.Facts == nil {
+				out.Facts = map[string]float64{}
+			}
+			out.Facts[k] = v
+		}
+	}
+	return out
+}
+
+// BoxesAt: the boxes as a log item kept them when it was ordered; nil (an
+// item from before items kept them) knows none, so no box counts
+func BoxesAt(m map[string]BoxInfo) Boxes {
+	if m == nil {
+		return nil
+	}
+	return func(name string) (BoxInfo, bool) {
+		b, ok := m[name]
+		return b, ok
+	}
 }
 
 // Boxes looks a box up in the agreed state: false when it is not there

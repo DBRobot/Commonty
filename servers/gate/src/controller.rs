@@ -302,6 +302,26 @@ pub(crate) async fn directory(
     }
 }
 
+/// GET /_dd/controller/standing/{name}: whether the agreed state gives this
+/// person the fleet's services (an invite, or a box of theirs that counts),
+/// and under which root, where this gate goes by it (agreed): what a door
+/// holds someone the release's list does not name to
+pub(crate) async fn standing(
+    State(app): State<Arc<App>>,
+    Path(name): Path<String>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(r) = caller(&app, &headers, &method, &uri) {
+        return r;
+    }
+    if !identity::valid_name(&name) || name == pages::DEMO_USER {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    crate::directory::standing_answer(&app.directory, &name)
+}
+
 /// POST /_dd/controller/backup: urls to put and get its one backup
 pub(crate) async fn backup(
     State(app): State<Arc<App>>,

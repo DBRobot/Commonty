@@ -39,6 +39,14 @@ impl Members {
         identity::anchored(e, &self.members, &self.revoked, &self.names).is_ok()
     }
 
+    /// shut out by the release: any of the entry's roots revoked. Nobody
+    /// the gate vouches for gets past this
+    pub fn shut_out(&self, e: &SignedEntry) -> bool {
+        identity::member_ids(&e.entry)
+            .iter()
+            .any(|id| self.revoked.contains(id))
+    }
+
     /// a list naming each of these entries' roots as theirs (tests)
     #[cfg(test)]
     pub fn listing(entries: &[&SignedEntry]) -> String {

@@ -20,7 +20,7 @@
 import { initSync, admit, login, readProof, forgetDue } from './dd_mail.js';
 import wasm from './dd_mail_bg.wasm';
 import { MEMBERS, RELEASE, ALIASES } from './fleet.js';
-import { mode, agreedMember, isMember, entryOf, differ } from './identity.js';
+import { mode, agreedMember, isMember, entryOf, differ, said } from './identity.js';
 import { boxApi, memberApi } from './unlock.js';
 import { forgetApi } from './leaving.js';
 import { sendApi } from './send.js';
@@ -198,7 +198,7 @@ async function entry(env, name) {
       console.warn(JSON.stringify({ 'identity-shadow': 'unread', name, error: String(e.message || e) }));
     }
     const ver = (t) => (t ? JSON.parse(t).entry.version : null);
-    differ('member', name, { member: !why, version: ver(take) }, { member: isMember(m), version: isMember(m) ? ver(entryOf(m)) : null });
+    differ('member', name, { member: !why, version: ver(take) }, { member: isMember(m), version: isMember(m) ? ver(entryOf(m)) : null }, { own: why ? String(why.message || why) : null, agreed: said(m) });
   }
   if (why) throw why;
   return take;

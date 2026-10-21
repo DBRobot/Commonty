@@ -257,13 +257,95 @@ pub async fn handovers(
     out
 }
 
-/// The entry for `name`, anchored to a member list (`Anchor::Released`)
+/// The entry for `name`, held to a member list (`Anchor::Released`), or,
+/// for a member the list does not name, to the agreed state
+/// (`resolve_member`)
 pub async fn resolve_released(
     dirs: &[String],
     name: &str,
     list: &identity::MemberList,
 ) -> Result<SignedEntry> {
-    resolve(&fetch(dirs, name).await, Anchor::Released(list))
+    resolve_member(&fetch(dirs, name).await, dirs, list).await
+}
+
+/// The entry in `found`, if its person is a member: the release's list
+/// naming its root (`Anchor::Released`), or, for someone it does not name -
+/// a member by a box of theirs (docs/dev/joining.md, "Access"), by an
+/// invite or a recovery since the last release - every directory asked
+/// agreeing on the root (`Anchor::FirstSight`) and saying the agreed state
+/// gives that very root the services (`agreed_member`). Never someone the
+/// list shuts out.
+///
+/// The second is the boxes' word, where the first is the release key's: a
+/// directory's agreed state is its own box's control plane, so one box
+/// that lies can vouch for an entry of its own making when it is the only
+/// directory asked. Asking more than one is what catches that, as it is
+/// for an entry seen the first time.
+pub async fn resolve_member(
+    found: &[(String, Result<Option<SignedEntry>>)],
+    dirs: &[String],
+    list: &identity::MemberList,
+) -> Result<SignedEntry> {
+    let listed = match resolve(found, Anchor::Released(list)) {
+        Ok(e) => return Ok(e),
+        Err(e) => e,
+    };
+    let Ok(e) = resolve(found, Anchor::FirstSight) else {
+        return Err(listed);
+    };
+    if identity::member_ids(&e.entry)
+        .iter()
+        .any(|id| list.revoked.contains(id))
+    {
+        return Err(listed);
+    }
+    agreed_member(dirs, &e.entry.name, &e.entry.root)
+        .await
+        .map_err(|why| listed.context(format!("nor by the agreed state: {why:#}")))?;
+    Ok(e)
+}
+
+/// Every directory that answers says the agreed state gives `name` the
+/// fleet's services under `root` (the gate's `/_dd/directory/<name>/standing`),
+/// and at least one answers. A directory that has no such name, says no,
+/// or names another root, refuses it; one that can't be reached, or has not
+/// read the agreed state yet, says nothing either way.
+pub async fn agreed_member(dirs: &[String], name: &str, root: &str) -> Result<()> {
+    let http = http()?;
+    let mut said = 0;
+    let mut silent = Vec::new();
+    for d in dirs {
+        let url = format!("{}/{name}/standing", d.trim_end_matches('/'));
+        let got = async {
+            let r = read_request(&http, &url, Some(name), &[]).send().await?;
+            match r.status().as_u16() {
+                200 => {
+                    let v: serde_json::Value = r.json().await?;
+                    Ok(Some((
+                        v["member"].as_bool() == Some(true),
+                        v["root"].as_str().unwrap_or_default().to_string(),
+                    )))
+                }
+                404 => Ok(None),
+                s => Err(anyhow!("{s} {}", r.text().await.unwrap_or_default())),
+            }
+        }
+        .await;
+        match got {
+            Ok(Some((true, r))) if r == root => said += 1,
+            Ok(Some((true, _))) => bail!("{d} says {name} is a member under another root"),
+            Ok(Some(_)) => bail!("{d} says {name} is not a member"),
+            Ok(None) => bail!("{d} has no {name}"),
+            Err(e) => silent.push(format!("{d}: {e:#}")),
+        }
+    }
+    if said == 0 {
+        bail!(
+            "no directory said whether {name} is a member:\n  {}",
+            silent.join("\n  ")
+        );
+    }
+    Ok(())
 }
 
 /// The release key a member list must be signed by: fleet/release.pub as

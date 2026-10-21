@@ -231,6 +231,25 @@ and the gates open the services by it alone, from the agreed state, and
 to nobody while it is not read (a gate in `agreed` mode; one still
 replaying the directory serves its replay, which knows invites only).
 
+- **Everywhere, as an invite does**: every check of who is a member
+  counts a box's member as an invited one, on a gate in `agreed` mode: the
+  services' doors, the directory's reads, a house's Wi-Fi on a
+  directory-only box, a sign-up let straight into the directory. The
+  remote computers judge replays the log item by item, so each item of a
+  computer's carries the joined boxes as the agreed state had them when it
+  was ordered (`DirItem.Boxes`, the facts access reads and no other); an
+  item from before carries none, and no box counts for it. Whether a
+  computer runs, and its lease, are read with the boxes as they are now.
+  A home controller holds someone its release's list does not name to the
+  gate's word (`/_dd/controller/standing/<name>`, asked at sign-in, at
+  each refresh, and at the end of pairing). A client (`dd git signers`,
+  `dd policy announce`, a shared library, a device's first look at its
+  own entry) holds them to every directory it asks agreeing on their root
+  and saying the agreed state gives it the services
+  (`/_dd/directory/<name>/standing`, `directory::resolve_member`): the
+  boxes' word, where the release's list is the release key's. Only a gate
+  in `agreed` mode answers either standing; one replaying, or in shadow,
+  says nothing, and the list alone decides as before.
 - **What qualifies**: the [Hardware](#hardware) section's qualifying
   level. Wired or Wi-Fi alike.
 - **Many boxes**: access stands while any qualifying box of theirs is
@@ -390,8 +409,12 @@ Two VM tests, split where the box first starts:
   403) and the box waits for her;
   an enlist naming another ticket is refused; her root's enlist on its
   ticket, through her gate's PUT, makes it hers (`/_dd/boxes/mine`) and
-  opens the services (`access: box`, `/verify` 200); her unenlist makes it
-  nobody's and shuts them again, and the used ticket enlists nothing.
+  opens the services (`access: box`, `/verify` 200): signed in, every
+  service's door (Files, Mail, Photos, Passwords, the forge, the games),
+  the directory, a key to the network, a friend link for a guest, and a
+  remote computer the judge takes on the box state its item carried, all
+  on her gate in agreed mode; her unenlist makes it nobody's and shuts
+  each of them again, and the used ticket enlists nothing.
 
 Not covered by either: a real machine's firmware (the vendor table, Setup
 Mode set from Linux, an unsigned system refused by Secure Boot, which stops
