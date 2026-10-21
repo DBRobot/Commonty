@@ -137,7 +137,21 @@ state = {
     "uploads": {},
     # every request, as (method, path): what the page asked of the box
     "log": [],
+    # the box's transcode (Movies & TV): its key, and each session asked
+    # for, by id, with whether it was answered and whether it was ended
+    "box": X25519PrivateKey.generate(),
+    "sessions": {},
 }
+# how long the box takes to pack a film's first piece
+BOX_SECS = 2.0
+PLAYLIST = """#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:4
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:4.0,
+00000.ts
+#EXT-X-ENDLIST
+"""
 DEV_FP = "a1b2c3d4e5f6"
 
 
@@ -211,6 +225,26 @@ class H(BaseHTTPRequestHandler):
             return self.file("pages/mail.html")
         if p == "/_dd/files":
             return self.file("pages/files.html")
+        if p == "/_dd/media":
+            return self.file("pages/media.html")
+        if p == "/_dd/transcode/key":
+            pub = (
+                state["box"]
+                .public_key()
+                .public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)
+            )
+            return self.send({"key": b64u(pub)})
+        if p.startswith("/_dd/transcode/session/"):
+            id_, file = p[len("/_dd/transcode/session/") :].split("/", 1)
+            s = state["sessions"].get(id_)
+            if not s or s["ended"]:
+                return self.send("no such session", 404, "text/plain")
+            if file == "index.m3u8":
+                return self.send(PLAYLIST, 200, "application/vnd.apple.mpegurl")
+            # a piece no browser can play: the test is of when it is asked for
+            return self.send(b"\x47" + bytes(187), 200, "video/mp2t")
+        if p == "/test/sessions":
+            return self.send(state["sessions"])
         if p.startswith("/_dd/static/"):
             return self.file("static/" + p[len("/_dd/static/") :])
         if p.startswith("/_dd/web/") and BUNDLE:
@@ -221,6 +255,10 @@ class H(BaseHTTPRequestHandler):
             b = state["dav"].get(self.dav_path())
             if b is None:
                 return self.send({"error": "no"}, 404)
+            if self.headers.get("x-dd-presign"):
+                return self.send(
+                    {"url": f"http://127.0.0.1:{PORT}/s3/{self.dav_path()}"}
+                )
             rng = self.headers.get("range")
             if rng:
                 # a range of the sealed file, as the gate serves it (library.js pieces)
@@ -392,6 +430,11 @@ class H(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         p = urlparse(self.path).path
+        if p.startswith("/_dd/transcode/session/"):
+            s = state["sessions"].get(p.rsplit("/", 1)[1])
+            if s:
+                s["ended"] = time.time()
+            return self.send(b"", 204, "text/plain")
         if p.startswith("/_dd/dav/"):
             state["dav"].pop(self.dav_path(), None)
             return self.send(b"", 204, "text/plain")
@@ -415,6 +458,30 @@ class H(BaseHTTPRequestHandler):
             parts = state["uploads"].pop(up)
             state["dav"][self.dav_path()] = b"".join(parts[k] for k in sorted(parts))
             return self.send(b"", 200, "text/plain")
+        if p == "/_dd/transcode/session":
+            v = json.loads(b)
+            id_ = os.urandom(8).hex()
+            s = {
+                "asked": time.time(),
+                "from": v["from"],
+                "answered": None,
+                "ended": None,
+            }
+            # one at a time per member, as the box: a new one ends the rest
+            for o in state["sessions"].values():
+                if not o["ended"]:
+                    o["ended"] = time.time()
+            state["sessions"][id_] = s
+            time.sleep(BOX_SECS)  # sleep-ok: the box packing the first piece
+            s["answered"] = time.time()
+            return self.send(
+                {
+                    "id": id_,
+                    "playlist": f"/session/{id_}/index.m3u8",
+                    "from": v["from"],
+                    "duration": 5400,
+                }
+            )
         if p == "/_dd/app/mail/key":
             if not state["ikm"]:
                 state["ikm"] = os.urandom(32)

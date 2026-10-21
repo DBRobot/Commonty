@@ -38,9 +38,9 @@ GROUPS = {
     # the Cloudflare Workers under wrangler: mail, DNS, sign-in (the id
     # Worker with the gate), the control plane's relay and validators
     "worker_tests": ["mail-worker", "dns-worker", "sso", "control"],
-    # the Mail and Files pages as the app serves them, and every bar link
+    # the Mail, Files and Movies & TV pages as the app serves them, and every bar link
     # and home tile staying in its tab
-    "page_tests": ["mail-page", "files-page", "same-tab"],
+    "page_tests": ["mail-page", "files-page", "media-page", "same-tab"],
     # the site as a browser meets it, through node1's nginx and the gate
     "site_checks": [
         "site-headers",
