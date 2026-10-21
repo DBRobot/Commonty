@@ -27,5 +27,6 @@
     "portBase": 27200,
     "portCount": 200
   },
-  "identityFrom": "agreed"
+  "identityFrom": "agreed",
+  "failover": true
 }
