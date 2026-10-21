@@ -223,14 +223,25 @@ fn device_key(name: &str) -> Result<String> {
     device_key_in(&keys_dir()?, name)
 }
 
+// this user's own file, readable by no one else (on Windows the profile
+// directory's ACL is what keeps it private)
+#[cfg(unix)]
+fn own_private(m: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    // SAFETY: geteuid has no preconditions
+    m.uid() == unsafe { libc::geteuid() } && m.mode() & 0o777 == 0o600
+}
+
+#[cfg(not(unix))]
+fn own_private(_: &std::fs::Metadata) -> bool {
+    true
+}
+
 fn device_key_in(dir: &std::path::Path, name: &str) -> Result<String> {
-    use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
     let path = key_path_in(dir, name)?;
     match std::fs::symlink_metadata(&path) {
         Ok(m) => {
-            // SAFETY: geteuid has no preconditions
-            let me = unsafe { libc::geteuid() };
-            if !m.file_type().is_file() || m.uid() != me || m.mode() & 0o777 != 0o600 {
+            if !m.file_type().is_file() || !own_private(&m) {
                 bail!(
                     "{} is not a key this device made for {name} (not your own file, or not 0600); move it away",
                     path.display()
@@ -254,15 +265,19 @@ fn device_key_in(dir: &std::path::Path, name: &str) -> Result<String> {
     let mut key = ssh_key::PrivateKey::from(ssh_key::private::Ed25519Keypair::from_seed(&seed));
     key.set_comment(marker(name));
     std::fs::create_dir_all(dir)?;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
     let tmp = dir.join(format!(".{name}.device-key.tmp"));
     {
         let _ = std::fs::remove_file(&tmp);
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&tmp)?;
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        let mut f = o.open(&tmp)?;
         f.write_all(key.to_openssh(ssh_key::LineEnding::LF)?.as_bytes())?;
     }
     std::fs::rename(&tmp, &path)?;
