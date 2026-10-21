@@ -272,6 +272,7 @@ let
         pkgs.age
         pkgs.age-plugin-tpm
         pkgs.tpm2-tools
+        (import ../../lib/tpm-policy.nix pkgs)
         pkgs.curl
         pkgs.jq
         pkgs.coreutils

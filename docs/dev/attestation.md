@@ -1,8 +1,8 @@
 # Attestation: proof of real hardware
 
-Status: built on branch `attest-1019`; nothing calls it yet. The
-enlistment (branch `joining-1017`) opens an attestation when a member's box
-asks to enlist, and counts the box only once it has attested.
+Status: wired into joining. A box's join carries its TPM's proof (Begin);
+the box is joined only once its answer to the box voters' challenges
+holds, and a refusal is kept with why, for the box and its member.
 
 A member's box earns its owner access by being real hardware: a TPM 2.0
 chip of its own, one box per chip, booted under Secure Boot with the box's
@@ -85,13 +85,17 @@ proof is worth, and what it is not.
 ## The flow
 
 ```
-enlisting box       Begin rides in its request to enlist:
+joining box         Begin rides in its join (JoinReq.Attest):
                       EK public, EK certificate + chain, AK public,
                       join key public, event log, its own Secure Boot cert,
                       the lanzaboote image it booted
-enlistment judge    CheckAttestOpen / AttestOpen: chain to a maker's root,
-                      shapes of EK/AK/join key, join key = the box's key,
-                      EK not another box's -> Attest.Pending[box]
+every validator     state.JoinRefusal: the hardware minimum, then
+                      CheckAttestOpen (chain to a maker's root, shapes of
+                      EK/AK/join key, join key = the box's key, EK and db
+                      certificate not another box's) and JudgeBoot (PCR 7:
+                      Secure Boot on with its own certificate; PCR 4: the
+                      release's systemd-boot and stub, from the log)
+                      -> Joining[box], Attest.Pending[box]
 each box voter      attest-challenge: {box, validator, cred, secret,
                       commit = sha256(secret)}, once per attestation
 enlisting box       when a majority of box voters have challenged:
@@ -101,8 +105,35 @@ enlisting box       when a majority of box voters have challenged:
                       tpm2_certify of the join key; attest-response, signed
                       by the join key
 every validator     the secrets match their commits, the quote and the
-                      certification verify -> Attest.Done[box], EKs[hash]
+                      certification verify -> Attest.Done[box], EKs[hash],
+                      and the box is Joined (its `joined` record, with its
+                      member's ticket, in the directory log)
 ```
+
+A join refused for what the box is - below the minimum, its TPM, its
+boot - and an answer that does not hold are kept in the agreed state with
+why (`Refused`, a week; the same one again only after a day; 64 at once,
+a ticketless one given up first), in the person's words (`attest.Why`): "its TPM is
+not one a TPM maker certified", "Secure Boot is off", "it did not start
+the fleet's own system", "it needs 8 GiB of memory (it has 3.8 GiB)". Where
+the join carried a member's ticket, the identity judge is told too
+(`{"refused": ...}`, written by the state machine alone) and shows it to
+that member only (`View.Refused`, their Devices page). A join with no
+answer within the hour is refused as such. The box says the same before
+it asks, by the same function (`state.JoinRefusal`, dd-control's
+`join-refused`). A joined box that has not proved its TPM (a record lost)
+counts for no one's access (`BoxInfo.Unattested`).
+
+Bounds, so junk cannot crowd out a member's refusal or be replayed: a
+join's Seq is its sender's clock and must be within ten minutes of the
+agreed time and above any Seq of that box already judged (`JoinFresh`;
+a refusal keeps it), so an old signed join replayed is stale before it is
+judged. Ticketless refusals have their own bucket (4 an hour) and never
+reach the directory log; refusals with a ticket have theirs (16 an hour,
+one a ticket). What is left: the state machine cannot tell a member's
+ticket from one a stranger minted with a device key of its own (only the
+identity judge can, against the member's entry), so junk with made-up
+tickets can still spend that hour's 16, and is then shown to no one.
 
 One honest voter is enough. Its secret is only in its sealed challenge, so
 no answer that holds it could have been made earlier, by another TPM, or
@@ -120,12 +151,13 @@ key fixed to its TPM that this AK certified at any time lives there.
 | | |
 |---|---|
 | judge | `servers/system/control/state/attest` (`Begin`, `Challenge`, `Response`, `State`); `state.go` kinds `attest-challenge`, `attest-response` |
-| enlistment's calls | `State.CheckAttestOpen`, `State.AttestOpen`, `State.Attested(box)`, `attest.State.Forget` |
+| the join's calls | `state.JoinRefusal`, `State.CheckAttestOpen`, `State.AttestOpen`, `State.Attested(box)`, `attest.State.Forget` (a joined box gone); `state/join.go` `Joining`, `Refused` |
 | box side | `servers/system/control/tpm` (`Box.Begin`, `Box.Respond`); `dd-control -attest-begin` prints Begin |
 | voter side | `tpm.MakeChallenge`; dd-control's loop (`cmd/dd-control/attest.go`) challenges every box attesting, and answers for its own box |
 | roots | `fleet/tpm-roots/<vendor id>/*.pem` -> config `attest.roots` |
 | join key across updates | `state/attest/policy.go`; `tpm/bootkey.go`; `cmd/boot-key` (`dd-boot-key`); `nix/modules/box/tpm-policy.sh` (`dd-tpm-policy`); `nix/modules/box/boot-key.nix` |
-| tests | `state/attest` unit tests on a swtpm exchange, node1's real Intel chain and the policies as swtpm computed them; `nix/tests/attest.nix` (swtpm, OVMF's real event log); `nix/tests/boot-key.nix` (an update across a boot-image change, a rollback, a boot never approved); `dd` `tpm_roots` tests |
+| tests | `state/attest` unit tests on a swtpm exchange, node1's real Intel chain, the laptop's real AMD chain and the policies as swtpm computed them; `state` tests of the join through the agreed state (joined on its proof; refused for its EK, a software TPM, PCR 4, the minimum, no proof, a proof that does not hold, no answer); `nix/tests/attest.nix` (swtpm, OVMF's real event log); `nix/tests/boot-key.nix` (an update across a boot-image change, a rollback, a boot never approved); `nix/tests/join-attest.nix` (below); `dd` `tpm_roots` tests |
+| real hardware | `attest-check inspect -roots fleet/tpm-roots`: the EK's chain, the log replayed against the TPM's PCRs, Secure Boot, PCR 4's applications; changes nothing in the TPM |
 
 A box's AK files are in `/var/lib/dd-control/attest`; the AK is loaded
 under the EK again for each answer. The join key is the one
@@ -197,14 +229,34 @@ variant here is the narrowest we found:
   and the images on the ESP, and the judge refuses a re-attestation whose
   PCR 4 is not the release's.
 
-### For `joining-1017`
+### On a joined box
 
 Its first own-keys boot (`dd-unlock-seal`) makes the join key with
-`dd-boot-key enrol` instead of a PCR 7 policy, and seals its disk half
-under the same policy (`tpm2_create -L /boot/dd/unlock/join.policy`,
-which `dd-boot-key enrol` writes), opened
-with `dd-tpm-policy`; `nix/modules/box/boot-key.nix` is in the joined box's
-modules.
+`dd-boot-key enrol` first, then seals its disk half under the same policy
+(`/boot/dd/unlock/join.policy`), opened with `dd-tpm-policy` in the
+initrd; `dd-join-prepare` does the same where the seal did not.
+`nix/modules/box/boot-key.nix` is in every box's modules. The release's
+PCR 4 list (`attestBoot`) has a joined box's kernel parameters beside the
+release's boxes': a joined box is built on itself, so the release builds
+one from a stand-in report, with and without a USB network link's
+parameter.
+
+## How it is tested end to end
+
+`join-attest` (VM): OVMF with Secure Boot under keys of the box's own,
+lanzaboote's signed image, swtpm with an EK certificate from a test maker,
+the join key made by `dd-boot-key enrol`; the join through the agreed
+state's own judgement (`attest-check join`: `state.Block`, two box voters'
+challenges, the TPM's answer). A good box joins. An EK from a CA not its
+maker's, and a software TPM under the release's real roots, are refused
+("its TPM is not one a TPM maker certified"); a release whose PCR 4 list
+is not this boot's refuses it ("it did not start the fleet's own
+system"). An update: the box restarts (dd-boot-settle approves what its
+ESP starts), then starts the next image (another command line): its join
+key opens there with no one doing anything, it is refused by the release
+that did not list that boot and joins under the one that does. Secure
+Boot off (keys cleared): the key opens nothing and the box says "Secure
+Boot is off".
 
 ## Each maker's chain
 

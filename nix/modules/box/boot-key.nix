@@ -19,6 +19,10 @@ let
 in
 lib.mkIf config.boot.lanzaboote.enable {
   environment.systemPackages = [ pkg.dd-boot-key ];
+  # a joined box's first boot makes its join key with it (disk-unlock-seal.sh)
+  systemd.services.dd-unlock-seal = lib.mkIf (config.dd.unlock.tpmOnly or false) {
+    path = [ pkg.dd-boot-key ];
+  };
   # after a switch's lzbt install: the new generation's image is on the ESP
   system.activationScripts.dd-boot-approve = {
     deps = [ "specialfs" ];

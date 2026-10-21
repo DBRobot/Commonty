@@ -73,6 +73,7 @@
         "unlock"
         "attest"
         "boot-key"
+        "join-attest"
         "leaving"
         "home-controller"
         "waits"
@@ -880,13 +881,32 @@
                   boxes = builtins.filter (c: c.config.boot.lanzaboote.enable or false) (
                     builtins.attrValues self.nixosConfigurations
                   );
+                  # a joined box: built on itself from its own report, so
+                  # the release has none of its own. Its boot is a box's
+                  # (lib.joinedBoxModules) with whatever its hardware adds to
+                  # the kernel's parameters: a USB network link's
+                  joined = nixpkgs.lib.nixosSystem {
+                    specialArgs = fleetBoxes.boxArgs;
+                    modules =
+                      fleetBoxes.joinedModules {
+                        name = "jattest";
+                        dir = ./nix/tests/joined-box-vm;
+                      }
+                      ++ [ { nixpkgs.hostPlatform = system; } ];
+                  };
                   stub = "${lanzaboote.packages.${system}.stub}/bin/lanzaboote_stub.efi";
                   one =
-                    c:
-                    "${attest-check}/bin/attest-check boot -loader ${c.config.systemd.package}/lib/systemd/boot/efi/systemd-bootx64.efi -stub ${stub} -kernel ${c.config.boot.kernelPackages.kernel}/${c.config.system.boot.loader.kernelFile} -params ${nixpkgs.lib.escapeShellArg (builtins.concatStringsSep " " c.config.boot.kernelParams)}";
+                    c: params:
+                    "${attest-check}/bin/attest-check boot -loader ${c.config.systemd.package}/lib/systemd/boot/efi/systemd-bootx64.efi -stub ${stub} -kernel ${c.config.boot.kernelPackages.kernel}/${c.config.system.boot.loader.kernelFile} -params ${nixpkgs.lib.escapeShellArg (builtins.concatStringsSep " " params)}";
+                  runs =
+                    map (c: one c c.config.boot.kernelParams) boxes
+                    ++ map (one joined) [
+                      joined.config.boot.kernelParams
+                      ([ "usbcore.autosuspend=-1" ] ++ joined.config.boot.kernelParams)
+                    ];
                 in
                 pkgs.runCommand "attest-boot.json" { nativeBuildInputs = [ pkgs.jq ]; } ''
-                  { ${nixpkgs.lib.concatMapStringsSep "\n" one boxes}; } | jq -s '{
+                  { ${nixpkgs.lib.concatStringsSep "\n" runs}; } | jq -s '{
                     loaders: (map(.loaders[]) | unique),
                     stubs: (map(.stubs[]) | unique),
                     kernels: (map(.kernels[]) | unique),

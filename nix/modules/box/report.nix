@@ -75,12 +75,9 @@ in
           exit 1
         fi
         if [ ! -s $K/sig.pub ]; then
-          tpm2_startauthsession -Q -S "$w/s.ctx"
-          tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 -L "$w/pcr.pol"
-          tpm2_flushcontext "$w/s.ctx"
-          tpm2_create -Q -C "$w/srk.ctx" -G ecc256:ecdsa-sha256 -L "$w/pcr.pol" \
-            -a 'fixedtpm|fixedparent|sensitivedataorigin|sign|noda' \
-            -u $K/sig.pub -r $K/sig.priv
+          # under its approver: PCRs 4 and 7 of the boots it approves
+          # (docs/dev/attestation.md), what a join's proof asks for
+          ${pkg.dd-boot-key}/bin/dd-boot-key enrol -keys $K -dir "$w/bk"
           echo "this box's key to join the fleet, made in its TPM"
         fi
         tpm2_load -Q -C "$w/srk.ctx" -u $K/sig.pub -r $K/sig.priv -c "$w/sig.ctx"
@@ -120,6 +117,8 @@ in
         config.boot.zfs.package
         config.system.build.nixos-generate-config
         pkg.dd-control
+        # its signature is the join key's, in the session dd-tpm-policy makes
+        (import ../../lib/tpm-policy.nix pkgs)
       ];
       serviceConfig = {
         Type = "oneshot";

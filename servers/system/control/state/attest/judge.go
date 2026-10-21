@@ -159,8 +159,10 @@ func (s *State) ApplyChallenge(c Challenge) {
 	sort.Slice(p.Challenges, func(i, j int) bool { return p.Challenges[i].Validator < p.Challenges[j].Validator })
 }
 
-// CheckResponse: box answers every challenge made of it, and enough were.
-func (s *State) CheckResponse(cfg *Config, voters []string, box string, r Response, now int64) (*Record, error) {
+// Ready: box may answer now - it is attesting, the answer is its own, and
+// enough box voters have challenged it. Short of this an answer is early
+// or misplaced, never a judgement on the box.
+func (s *State) Ready(voters []string, box string, r Response, now int64) (*Pending, error) {
 	p, err := s.live(box, now)
 	if err != nil {
 		return nil, err
@@ -176,6 +178,15 @@ func (s *State) CheckResponse(cfg *Config, voters []string, box string, r Respon
 	}
 	if n < Need(voters) {
 		return nil, fmt.Errorf("%d of %d box voters have challenged; %d needed", n, len(voters), Need(voters))
+	}
+	return p, nil
+}
+
+// CheckResponse: box answers every challenge made of it, and enough were.
+func (s *State) CheckResponse(cfg *Config, voters []string, box string, r Response, now int64) (*Record, error) {
+	p, err := s.Ready(voters, box, r, now)
+	if err != nil {
+		return nil, err
 	}
 	c, err := s.CheckOpen(cfg, box, p.Key, p.Begin, now)
 	if err != nil {

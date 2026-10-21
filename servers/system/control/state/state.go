@@ -192,9 +192,17 @@ type State struct {
 	// the build results, in agreed order (BuiltItem)
 	Built []BuiltItem `json:"built,omitempty"`
 	// boxes the release does not list, joined on their own keys (join.go)
-	Joined     map[string]*Joined `json:"joined,omitempty"`
-	JoinWindow int64              `json:"joinWindow,omitempty"`
-	JoinCount  int                `json:"joinCount,omitempty"`
+	Joined map[string]*Joined `json:"joined,omitempty"`
+	// joins waiting on their TPM's proof, and why boxes were refused lately
+	Joining      map[string]*Joining `json:"joining,omitempty"`
+	Refused      map[string]*Refused `json:"refused,omitempty"`
+	RefuseWindow int64               `json:"refuseWindow,omitempty"`
+	RefuseCount  int                 `json:"refuseCount,omitempty"`
+	// the ticketless refusals' own bucket
+	StrangerWindow int64 `json:"strangerWindow,omitempty"`
+	StrangerCount  int   `json:"strangerCount,omitempty"`
+	JoinWindow     int64 `json:"joinWindow,omitempty"`
+	JoinCount      int   `json:"joinCount,omitempty"`
 	// the newest release's staged rollout (rollout.go)
 	Rollout *Rollout `json:"rollout,omitempty"`
 	// boxes proving they are real hardware, and what those that did proved
@@ -226,10 +234,14 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 	if !verify(key, r.Bytes(), r.Sig) {
 		return ErrBadSig
 	}
-	// a box that joined on its own key says only how it is: no directory
-	// item, build result, lease or anything else
-	if _, listed := cfg.Boxes[r.Box]; !listed && r.Kind != "heartbeat" {
+	// a box that joined on its own key says only how it is, and proves its
+	// TPM: no directory item, build result, lease or anything else
+	if _, listed := cfg.Boxes[r.Box]; !listed && r.Kind != "heartbeat" && r.Kind != "attest-response" {
 		return fmt.Errorf("%s joined on its own key and only sends heartbeats", r.Box)
+	}
+	// one still proving its TPM sends nothing but its proof
+	if _, joined := s.Joined[r.Box]; !joined && s.Joining[r.Box] != nil && r.Kind != "attest-response" {
+		return fmt.Errorf("%s is still proving its TPM", r.Box)
 	}
 	if b := s.Boxes[r.Box]; b != nil && r.Seq <= b.Seq {
 		return ErrStale
@@ -299,8 +311,14 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 		if s.Attest == nil {
 			return fmt.Errorf("%s is not attesting", r.Box)
 		}
-		_, err := s.Attest.CheckResponse(cfg.Attest, cfg.BoxVoters(), r.Box, a, now)
-		return err
+		if _, err := s.Attest.Ready(cfg.BoxVoters(), r.Box, a, now); err != nil {
+			return err
+		}
+		// a proof that does not hold is a judgement on the box: kept, with why
+		if _, err := s.Attest.CheckResponse(cfg.Attest, cfg.BoxVoters(), r.Box, a, now); err != nil {
+			return &Refusal{Why: attest.Why(err), Err: err}
+		}
+		return nil
 	}
 	return fmt.Errorf("no such request: %q", r.Kind)
 }
@@ -401,7 +419,7 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 	b.LastSeen = now
 	switch r.Kind {
 	case "join":
-		s.applyJoin(r, now)
+		s.applyJoin(cfg, r, now)
 	case "netaddr":
 		if now-b.DirWindow >= 60_000 {
 			b.DirWindow, b.DirCount = now, 0
@@ -461,6 +479,7 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 		var a attest.Response
 		_ = json.Unmarshal(r.Body, &a)
 		s.Attest.ApplyResponse(cfg.Attest, cfg.BoxVoters(), r.Box, a, now)
+		s.attested(r.Box, now)
 	}
 }
 
@@ -482,10 +501,16 @@ func (s *State) Block(cfg *Config, verify Verify, reqs []Request, now int64) (ap
 	if s.Attest != nil {
 		s.Attest.Expire(s.Time)
 	}
+	s.expireJoining(s.Time)
 	for _, r := range reqs {
-		if s.Check(cfg, verify, r, s.Time) == nil {
+		err := s.Check(cfg, verify, r, s.Time)
+		var rf *Refusal
+		switch {
+		case err == nil:
 			s.Apply(cfg, r, s.Time)
 			applied++
+		case errors.As(err, &rf):
+			s.refused(r, rf, s.Time)
 		}
 	}
 	s.judge(cfg, prev, s.Time)

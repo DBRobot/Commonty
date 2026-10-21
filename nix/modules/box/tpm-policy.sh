@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # dd-tpm-policy SESSION [KEYS]: satisfies the policy session SESSION for
 # the box's join key (and what is sealed beside it) in KEYS (/boot/dd/unlock).
 # A key under the box's approver (dd-boot-key, docs/dev/attestation.md):

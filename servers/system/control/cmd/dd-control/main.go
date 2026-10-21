@@ -41,6 +41,7 @@ import (
 
 	"commonty/control/place"
 	"commonty/control/state"
+	"commonty/control/state/attest"
 	"commonty/control/tpm"
 	"commonty/control/validator"
 	"commonty/control/wire"
@@ -218,6 +219,35 @@ func memFree() float64 {
 		}
 	}
 	return 0
+}
+
+// hardwareCheck: what the installer shows before it starts, by the same
+// rules a join and access are judged by (state/ident hardware.go). Its
+// system disk is not chosen yet: the largest disk not on USB stands for it
+func hardwareCheck(f map[string]float64, report string) map[string]any {
+	if f["system_disk_bytes"] == 0 {
+		var r struct {
+			Disks []struct {
+				USB   bool    `json:"usb"`
+				Bytes float64 `json:"bytes"`
+			} `json:"disks"`
+		}
+		if b, err := os.ReadFile(report); err == nil && json.Unmarshal(b, &r) == nil {
+			for _, d := range r.Disks {
+				if !d.USB {
+					f["system_disk_bytes"] = max(f["system_disk_bytes"], d.Bytes)
+				}
+			}
+		}
+	}
+	return map[string]any{"missing": nz(ident.Missing(f)), "qualifies": ident.Qualify(f)}
+}
+
+func nz(xs []string) []string {
+	if xs == nil {
+		return []string{}
+	}
+	return xs
 }
 
 // the box's own signed report on its hardware (nix/modules/box/report.nix)
@@ -575,8 +605,14 @@ func main() {
 	testWedge := flag.String("test-wedge", "", "tests only: while this file exists, delivering a decision hangs, as a wedged consensus does")
 	testDeaf := flag.String("test-deaf", "", "tests only: while this file exists, consensus frames from the relay are dropped")
 	attestBegin := flag.Bool("attest-begin", false, "print this box's attestation Begin (state/attest) for its request to enlist, and exit")
+	checkHardware := flag.Bool("check-hardware", false, "judge -report (detect.sh's) as a join would - the minimum, and what qualifies - print it as json, and exit; the installer's check before it starts")
 	flag.Parse()
 	log.SetFlags(0)
+
+	if *checkHardware {
+		_ = json.NewEncoder(os.Stdout).Encode(hardwareCheck(facts(), *reportPath))
+		return
+	}
 
 	if *printKey {
 		k, err := validatorKey(filepath.Join(*dir, "validator.key"))
@@ -866,21 +902,52 @@ func main() {
 	}
 
 	// a box the release does not list asks to join until the agreed state
-	// has it; its heartbeats count from then. Below the hardware minimum the
-	// validators refuse it, and it says why here (and in join-refused)
+	// has it; its heartbeats count from then. Its join carries the start of
+	// its TPM's proof (docs/dev/attestation.md); the attesting loop below
+	// answers the box voters' challenges. Refused - below the hardware
+	// minimum, its TPM, its boot - it says why here and in join-refused,
+	// by the same judgement the validators make (state.JoinRefusal), or by
+	// their word kept in the agreed state
 	if joining != nil {
 		refused := filepath.Join(*dir, "join-refused")
+		say := func(why string) {
+			log.Printf("join: refused: %s", state.Sentence(why))
+			_ = os.WriteFile(refused, []byte(state.Sentence(why)+"\n"), 0o644)
+		}
 		go func() {
+			var begin *attest.Begin
 			for {
-				if s := n.State(); s != nil && s.Joined[*box] != nil {
+				s := n.State()
+				if s != nil && s.Joined[*box] != nil {
 					log.Printf("joined the fleet as %s", *box)
 					_ = os.Remove(refused)
 					return
 				}
+				if s != nil && s.Joining[*box] != nil {
+					time.Sleep(10 * time.Second) // proving its TPM: the attesting loop's
+					continue
+				}
+				if begin == nil && cfg.Attest != nil && (cfg.Attest.Test == nil || !cfg.Attest.Test.UnattestedJoin) {
+					t := tpm.Default()
+					t.Keys = *tpmKeys
+					b, err := t.Begin()
+					if err != nil {
+						log.Printf("join: reading its TPM: %v", err)
+						say("it could not read its TPM")
+						time.Sleep(time.Minute)
+						continue
+					}
+					begin = &b
+				}
 				joining.Facts = facts()
-				if why := ident.Minimum(joining.Facts); why != "" {
-					log.Printf("join: refused: this box %s", why)
-					_ = os.WriteFile(refused, []byte("this box "+why+"\n"), 0o644)
+				joining.Attest = begin
+				now := time.Now().UnixMilli()
+				var rf *state.Refusal
+				if err := state.JoinRefusal(cfg, s, *box, *joining, now); errors.As(err, &rf) {
+					log.Printf("join: %v", err)
+					say(rf.Why)
+				} else if s != nil && s.Refused[*box] != nil {
+					say(s.Refused[*box].Why)
 				}
 				body, _ := json.Marshal(joining)
 				if _, err := submit("join", body); err != nil {

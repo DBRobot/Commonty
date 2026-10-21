@@ -26,12 +26,40 @@ let
     ];
     text = builtins.readFile ./backup.sh;
   };
+  # what this machine is, by the rules a join is judged by (dd-control
+  # -check-hardware, state/ident hardware.go): the screen's first step
+  hardware = pkgs.writeShellApplication {
+    name = "dd-box-hardware";
+    runtimeInputs = [
+      self.packages.${sys}.dd-control
+      pkgs.bash
+      pkgs.jq
+      pkgs.util-linux
+      pkgs.coreutils
+      pkgs.gawk
+      pkgs.gnused
+      pkgs.gnugrep
+      pkgs.findutils
+      pkgs.tpm2-tools
+      pkgs.libva-utils
+      config.boot.zfs.package
+    ];
+    text = ''
+      w=$(mktemp -d)
+      trap 'rm -rf "$w"' EXIT
+      BOOT=/nonexistent bash "$DETECT" >"$w/hw.json" 2>"$w/detect.log" || { tail -5 "$w/detect.log" >&2; exit 1; }
+      dd-control -check-hardware -report "$w/hw.json"
+    '';
+  };
 in
 {
   options.dd.setup.screen = lib.mkEnableOption "the full-screen browser showing the installer's steps";
 
   config = {
-    environment.systemPackages = [ backup ];
+    environment.systemPackages = [
+      backup
+      hardware
+    ];
     networking.networkmanager.enable = true;
     # the screen's secret, made at each boot: root's and the kiosk's alone.
     # The kiosk opens the page with it; the page sends it with every ask
