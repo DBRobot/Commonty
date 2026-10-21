@@ -120,9 +120,12 @@ class Fleet:
             if name in nix["tpm"]:
                 spki[name] = m.succeed(TPM_ENROL).strip()
             else:
+                # PKCS#8, as dd-control -box-key reads it (genpkey's own
+                # DER is the EC key alone)
                 relay.succeed(
                     "openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 "
-                    f"-outform DER -out /root/{name}.p8"
+                    f"-out /root/{name}.pem && openssl pkcs8 -topk8 -nocrypt "
+                    f"-in /root/{name}.pem -outform DER -out /root/{name}.p8"
                 )
                 p8 = relay.succeed(f"base64 -w0 /root/{name}.p8").strip()
                 spki[name] = relay.succeed(
