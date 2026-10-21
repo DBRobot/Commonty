@@ -168,6 +168,21 @@ jobs:
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
+  # What the jobs keep through a box's GC (keep-inputs.sh) covers what a GC
+  # made CI build again: the cross rustc, crane's dependency builds, the
+  # crates. It reads the .drv files under each, so a job of its own beside
+  # flake_check (4-9 min, 1.5-1.8G on node1), on a box with that room.
+  keep_check:
+    needs: files_modified
+    if: ${{ needs.files_modified.outputs.nix == 'true' }}
+    runs-on: ${{ needs.files_modified.outputs.flake_check_on }}
+    steps:
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
+      - name: the keep steps cover the slow builds
+        run: nix eval --impure --raw --file nix/tests/ci-keep.nix
+      - uses: ./.forgejo/actions/stop-run
+        if: failure()
+
   # The mail Worker end to end: the files a release uploads, run by wrangler
   # against a fake Cloudflare and driven by a browser (nix/tests/mail-worker).
   # Seconds, and a cache hit when the Worker has not changed.
@@ -187,7 +202,10 @@ jobs:
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: ${{ matrix.check }}
-        run: nix build --no-link -L .#checks.x86_64-linux.${{ matrix.check }}
+        run: nix build --no-link -L .#checks.x86_64-linux.${{ matrix.check }} --print-out-paths >> "$RUNNER_TEMP/built"
+      # what it was built from, kept through the box's GC (keep-inputs.sh)
+      - name: keep what it was built from
+        run: .forgejo/checks/keep-inputs.sh mail_worker-${{ matrix.check }} "$RUNNER_TEMP/built"
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -210,9 +228,12 @@ jobs:
       - name: build ${{ matrix.part }}
         run: |
           case "${{ matrix.part }}" in
-            cli) nix build --no-link .#dd .#web ;;
-            boxes) nix build --no-link .#verify .#agent .#games .#computers .#transcode ;;
+            cli) nix build --no-link .#dd .#web --print-out-paths >> "$RUNNER_TEMP/built" ;;
+            boxes) nix build --no-link .#verify .#agent .#games .#computers .#transcode --print-out-paths >> "$RUNNER_TEMP/built" ;;
           esac
+      # what these were built from, kept through the box's GC (keep-inputs.sh)
+      - name: keep what it was built from
+        run: .forgejo/checks/keep-inputs.sh part-${{ matrix.part }} "$RUNNER_TEMP/built"
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -244,6 +265,10 @@ jobs:
           mkdir -p "$HOME/ci-roots"
           nix build --print-out-paths --out-link "$HOME/ci-roots/${{ matrix.host }}" \
             .#nixosConfigurations.${{ matrix.host }}.config.system.build.toplevel | tee "$RUNNER_TEMP/toplevel"
+      # what it was built from, kept through the box's GC (keep-inputs.sh):
+      # the home controller's holds the aarch64 cross rustc
+      - name: keep what it was built from
+        run: .forgejo/checks/keep-inputs.sh host-${{ matrix.host }} "$RUNNER_TEMP/toplevel"
       # the token on stdin, not curl's command line, which any process on
       # the box can read while it runs
       - name: record the path
@@ -389,7 +414,10 @@ jobs:
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: fmt, clippy and cargo test (unit tests + e2e gates on localhost; app excluded)
-        run: nix build --no-link -L .#checks.x86_64-linux.fmt .#checks.x86_64-linux.clippy .#checks.x86_64-linux.tests
+        run: nix build --no-link -L .#checks.x86_64-linux.fmt .#checks.x86_64-linux.clippy .#checks.x86_64-linux.tests --print-out-paths >> "$RUNNER_TEMP/built"
+      # what these were built from, kept through the box's GC (keep-inputs.sh)
+      - name: keep what it was built from
+        run: .forgejo/checks/keep-inputs.sh rust "$RUNNER_TEMP/built"
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -407,7 +435,10 @@ jobs:
       # its lint, its tests, and its network engine's vet and tests: one
       # job, on the app's own cached dependency build
       - name: the app's lint and tests, and its engine's
-        run: nix build --no-link -L .#checks.x86_64-linux.clippy-app .#checks.x86_64-linux.tests-app .#checks.x86_64-linux.net-check .#legacyPackages.x86_64-linux.appReleaseEvaluates
+        run: nix build --no-link -L .#checks.x86_64-linux.clippy-app .#checks.x86_64-linux.tests-app .#checks.x86_64-linux.net-check .#legacyPackages.x86_64-linux.appReleaseEvaluates --print-out-paths >> "$RUNNER_TEMP/built"
+      # what these were built from, kept through the box's GC (keep-inputs.sh)
+      - name: keep what it was built from
+        run: .forgejo/checks/keep-inputs.sh app_lint "$RUNNER_TEMP/built"
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -418,7 +449,7 @@ jobs:
   # never reaches it and is refused the same way. nix/tests/ci.nix fails
   # the build if a job is missing from this list.
   ci_ok:
-    needs: [files_modified, style, lint, flake_check, mail_worker, build_part, build_host, same_build, vm_tests, rust, app_lint]
+    needs: [files_modified, style, lint, flake_check, keep_check, mail_worker, build_part, build_host, same_build, vm_tests, rust, app_lint]
     if: ${{ always() }}
     runs-on: nix
     steps:
