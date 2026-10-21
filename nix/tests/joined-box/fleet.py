@@ -26,9 +26,20 @@ if sys.argv[1] == "item":
     rpub = b64(root.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw))
     if kind == "computer":
         fields = {
-            "owner": "ada", "id": box, "name": "dev", "config": "default",
-            "memory": 1024, "threads": 1, "disk": 32, "nix": "", "ports": [],
-            "players": [], "keys": [], "consent": "any", "anywhere": True, "version": 1,
+            "owner": "ada",
+            "id": box,
+            "name": "dev",
+            "config": "default",
+            "memory": 1024,
+            "threads": 1,
+            "disk": 32,
+            "nix": "",
+            "ports": [],
+            "players": [],
+            "keys": [],
+            "consent": "any",
+            "anywhere": True,
+            "version": 1,
         }
     else:
         fields = {"member": hashlib.sha256(rpub.encode()).hexdigest(), "box": box}
@@ -111,7 +122,11 @@ cfg["identity"] = {
 }
 # members' remote computers, so a member by a box makes one (state/computers)
 cfg["computers"] = {
-    "memory": 16384, "threads": 8, "disk": 200, "portBase": 27200, "portCount": 8,
+    "memory": 16384,
+    "threads": 8,
+    "disk": 200,
+    "portBase": 27200,
+    "portCount": 8,
 }
 json.dump(cfg, open("config.json", "w"))
 json.dump(cfg, open(f"{OUT}/config.json", "w"))

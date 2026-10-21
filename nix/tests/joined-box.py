@@ -253,9 +253,9 @@ assert json.loads(
 # gate's own tests')
 cookie = fleet.succeed(
     "python3 -c 'import base64,hashlib,hmac,time;"
-    "s=open(\"/root/f/g1/session.secret\",\"rb\").read();w=\"ada~vmtest\";e=int(time.time())+3600;"
-    "m=base64.urlsafe_b64encode(hmac.new(s,f\"{w}.{e}\".encode(),hashlib.sha256).digest()).decode().rstrip(\"=\");"
-    "print(f\"dd_session={w}.{e}.{m}\")'"
+    's=open("/root/f/g1/session.secret","rb").read();w="ada~vmtest";e=int(time.time())+3600;'
+    'm=base64.urlsafe_b64encode(hmac.new(s,f"{w}.{e}".encode(),hashlib.sha256).digest()).decode().rstrip("=");'
+    'print(f"dd_session={w}.{e}.{m}")\''
 ).strip()
 ck = f"-H 'cookie: {cookie}'"
 me = json.loads(fleet.succeed(f"curl -sf {ck} http://127.0.0.1:4281/_dd/me"))
@@ -298,14 +298,18 @@ assert "/_dd/friend/" in link["url"], link
 # a remote computer of hers: the judge takes it on the box her item found
 # (the box state the log kept with it), and it is up while her box counts
 cid = "00000000000000a1"
-item = fleet.succeed(f"cd /root/f && python3 {nix['fleet']} item computer {cid}").strip()
+item = fleet.succeed(
+    f"cd /root/f && python3 {nix['fleet']} item computer {cid}"
+).strip()
 fleet.wait_until_succeeds(
     f"curl -sf http://127.0.0.1:4191/computers | jq -e '.outcomes[\"{item}\"] != null'",
     timeout=120,
 )
 comps = json.loads(fleet.succeed("curl -sf http://127.0.0.1:4191/computers"))
 assert comps["outcomes"][item] == "ok", comps["outcomes"][item]
-assert comps["computers"][cid]["owner"] == "ada" and comps["computers"][cid]["up"], comps
+assert comps["computers"][cid]["owner"] == "ada" and comps["computers"][cid]["up"], (
+    comps
+)
 directory = json.loads(fleet.succeed("curl -sf http://127.0.0.1:4191/directory"))
 kept = [i for i in directory["items"] if i.get("boxes")]
 assert kept and nix["keyName"] in kept[-1]["boxes"], kept
