@@ -250,28 +250,33 @@ run.
 
 ## Staging on node1
 
-Before publish signs, `dd release publish` runs one VM test on node1's
-store (`--store ssh-ng://admin@100.64.0.2`): `checks.rollout-stage`, with
-the running release's rev and the new one.
+Before publish signs, it builds `checks.x86_64-linux.rollout-stage` at the
+commit on the first box that answers, by name (node1 today), over ssh:
+[`rollout-stage.nix`](../../nix/tests/rollout-stage.nix), the same fleet
+as the rollout test ([`rollout-fleet.nix`](../../nix/tests/rollout-fleet.nix)).
 
 ```
-stage-a   a generic box, failover on, swtpm   starts on the running
-                                               release, holds the writers
-stage-b   a generic box, swtpm                joins with its simulated
-                                               TPM (enlistment, join ticket)
-witness   relay and validator, the cache     one small VM
+relay   the control plane's Worker and witness under wrangler, and the
+        release files                                        1.5 GiB
+node1   a box holding the writer (web, on a lease)           1.5 GiB
+node2   a box whose key is made in its simulated TPM (swtpm) as
+        dd-unlock-enrol makes it, and whose dd-control signs
+        with it: a box that has just joined                  1.5 GiB
 ```
 
-It checks: b joins and is given carries; a drains to b by the planned
-handover (postgres and a page probed the whole time); a switches to the
-new release; the group stays on b. Small on purpose: the services are a
-stand-in group (postgres, a page on a lease), not the fleet's.
+It checks: node2's TPM-signed heartbeats are agreed; a release goes to
+node2 (wave 1), soaks, and node1 hands the writer to node2 by the planned
+handover while a member's probe of it never fails; node1 then switches.
 
-Cost on node1: about 4.5 GiB of RAM for 10–15 minutes (two boxes at 2
-GiB, the witness at 512 MiB), and the builds of both releases' generic box,
-which attest has mostly built already. A failure stops publish before
-anything is signed, like a refused attestation. It runs the old rev's
-generic box only, not node1's or node2's full systems.
+Cost on node1: about 4.5 GiB of RAM for 10 to 15 minutes. The VMs are
+this commit's modules, not the boxes' full systems; once a commit has
+been staged, publishing it again is a cache hit. A failure stops publish
+before anything is signed, like a refused attestation. `DD_STAGE=off`
+skips it.
+
+Not covered yet: booting the release before (the fleet's running one)
+and moving to this one. The VMs start on this commit's base system and
+switch to its specialisations.
 
 ## Timeouts
 
