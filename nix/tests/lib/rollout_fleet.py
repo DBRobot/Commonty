@@ -281,8 +281,9 @@ class Fleet:
     def agent_log(self, m):
         return m.succeed(f"journalctl -u dd-agent {self._since(m)} -o cat | tail -60")
 
-    def nar_hash(self, path):
-        m = next(iter(self.boxes.values()))
+    def nar_hash(self, name, path):
+        # each box's store knows its own systems only
+        m = self.boxes[name]
         info = json.loads(
             m.succeed(
                 f"nix --extra-experimental-features nix-command path-info --json {path}"
@@ -300,7 +301,7 @@ class Fleet:
                 "boxes": {
                     n: {
                         "path": self.paths[n][w],
-                        "nar_hash": self.nar_hash(self.paths[n][w]),
+                        "nar_hash": self.nar_hash(n, self.paths[n][w]),
                     }
                     for n, w in which.items()
                 },
