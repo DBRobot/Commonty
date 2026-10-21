@@ -931,13 +931,8 @@ pub fn download(
     ];
     render(Download {
         domain,
-        // the forge the app was released from; a manifest from before
-        // names its GitHub repository instead
-        source: if from.starts_with("https://") {
-            format!("{from}/src/commit/{commit}")
-        } else {
-            format!("https://github.com/{from}/tree/{commit}")
-        },
+        // the forge the app was released from
+        source: format!("{from}/src/commit/{commit}"),
         tag,
         manifest,
         groups,
@@ -1349,16 +1344,6 @@ mod tests {
         );
         assert!(!html.contains("commonty.apk"));
         assert_eq!(html.matches("class=\"os off\"").count(), 3);
-        // a manifest from the GitHub days names its repository, not a url
-        let old = download(
-            "commonty.org",
-            "x/y",
-            "abc123",
-            "v0.2.0",
-            "https://m/app.json",
-            &signed,
-        );
-        assert!(old.contains("https://github.com/x/y/tree/abc123"));
         assert!(html.contains("Nothing signed yet"));
     }
 

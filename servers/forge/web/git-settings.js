@@ -196,7 +196,7 @@ route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m, current }) =>
 
   if (pane === 'keys') {
     const keys = await api(`${A}/keys`);
-    const title = el('input', { placeholder: 'github mirror push', 'aria-label': 'Name', required: true });
+    const title = el('input', { placeholder: 'laptop', 'aria-label': 'Name', required: true });
     const key = el('textarea', { class: 'write', style: 'min-height:70px', placeholder: 'ssh-ed25519 AAAA…', 'aria-label': 'Public key', required: true });
     const [write, writeRow] = check('May push, not only read', false);
     const form = el('form', { style: 'padding:12px 14px;display:grid;gap:8px;max-width:640px' }, title, key, writeRow, el('div', {}, el('button', { class: 'btn go', type: 'submit', text: 'Add deploy key' })));
@@ -236,7 +236,7 @@ route(/^\/([^/]+)\/([^/]+)\/settings(?:\/([a-z]+))?$/, async ({ m, current }) =>
     const form = el('form', { class: 'hrow', style: 'padding:12px 14px' }, url, user, pass, el('button', { class: 'btn', type: 'submit', text: 'Add a mirror' }));
     form.onsubmit = async (e) => { e.preventDefault(); try { await api(`${A}/push_mirrors`, { method: 'POST', body: { remote_address: url.value, remote_username: user.value, remote_password: pass.value, interval: '8h', sync_on_commit: true } }); reload(); } catch (err) { toast(err.message); } };
     body.append(el('h2', { class: 'ph', text: 'Mirror' }),
-      el('p', { class: 'muted small', text: 'Another place this repository is pushed to after changes. The fleet repository\'s GitHub mirror is pushed by the release queue, not from here.' }),
+      el('p', { class: 'muted small', text: 'Another place this repository is pushed to after changes.' }),
       el('div', { class: 'box' }, el('div', { class: 'list' }, ...mirrors.map((x) => el('div', {}, el('span', { class: `dot ${x.last_error ? 'broken' : 'ok'}` }), el('div', { style: 'flex:1;min-width:0' }, el('b', { class: 'mono', text: x.remote_address }), el('div', { class: 'sub', text: x.last_error || `last pushed ${x.last_update ? ago(x.last_update) : 'never'}` })),
         el('button', { class: 'btn plain', text: 'Push now', onclick: async () => { await api(`${A}/push_mirrors-sync`, { method: 'POST' }); toast('Pushing'); } }),
         delBtn('this mirror', async () => { await api(`${A}/push_mirrors/${encodeURIComponent(x.remote_name)}`, { method: 'DELETE' }); reload(); })))), form));

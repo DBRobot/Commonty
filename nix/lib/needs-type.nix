@@ -249,7 +249,7 @@ t.attrsOf (
       when = lib.mkOption {
         type = t.nullOr t.str;
         default = null;
-        description = "a fleet/policy.json setting that must be on (true, or a list with something in it) for the fleet to want it at all: the fleet's own CI only where the fleet develops Commonty (develops), mirrors only where it names some (forgeMirrors)";
+        description = "a fleet/policy.json setting that must be on (true, or a list with something in it) for the fleet to want it at all: the fleet's own CI only where the fleet develops Commonty (develops)";
       };
       everyBox = lib.mkOption {
         type = t.bool;

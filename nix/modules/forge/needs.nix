@@ -76,31 +76,6 @@
     };
   };
 
-  forgejo-mirror = {
-    what = "pushes the fleet's chosen repositories to their copies elsewhere (fleet/policy.json forgeMirrors)";
-    when = "forgeMirrors";
-    # it holds the token that pushes to the mirrors
-    trust = "owner";
-    traffic = {
-      class = "medium";
-      upMbps = 5;
-    };
-    units = [ "forgejo-mirrors" ];
-    base = {
-      uses = {
-        memory = "64M";
-        storage = "0";
-        estimated = true; # a few git pushes, every eight hours and on push
-      };
-      network = {
-        outbound = "internet"; # whichever hosts forgeMirrors names
-        inbound = "localhost";
-      };
-      depends.forgejo.local = true; # it reads the forge's socket
-      privacy = "none";
-    };
-  };
-
   forgejo-runner = {
     what = "runs the fleet's own CI: builds, checks, VM tests";
     # only a fleet that develops Commonty itself builds and checks it; the

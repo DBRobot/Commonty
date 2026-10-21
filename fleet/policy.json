@@ -1,5 +1,5 @@
 {
-  "_": "Where the fleet's owner wants things. ownHardware: services that run and serve only on boxes the owner owns (box.json owner), because their box hands people the code that handles their secrets (needs servesCode). Checked by nix/tests/role-fit.nix. forgeMirrors: the forge's push mirrors (repo defaults to the fleet's own; the token is sops github-mirror-token). The one here is the GitHub copy, still at its old name DBRobot/Home-Server (GitHub redirects it to DBRobot/Commonty); the account is suspended since 2026-10-04, so its pushes fail and nothing depends on them (docs/dev/mirror.md). domain and repo: the fleet's name and its repository on its forge. people: each box owner's keys - their ssh keys are the box's admin login, their paper key gets a copy of the box's disk keys (box.json owner picks whose). allowanceGb: each member's storage allowance across every service and box. mailAliases: <alias>@domain forwarded to that member's confirmed address by the mail Worker (lowercase a-z0-9-, never a member's name; dropping one removes its rule). develops: this fleet develops Commonty itself, so it runs its own CI (needs when).",
+  "_": "Where the fleet's owner wants things. ownHardware: services that run and serve only on boxes the owner owns (box.json owner), because their box hands people the code that handles their secrets (needs servesCode). Checked by nix/tests/role-fit.nix. domain and repo: the fleet's name and its repository on its forge. people: each box owner's keys - their ssh keys are the box's admin login, their paper key gets a copy of the box's disk keys (box.json owner picks whose). allowanceGb: each member's storage allowance across every service and box. mailAliases: <alias>@domain forwarded to that member's confirmed address by the mail Worker (lowercase a-z0-9-, never a member's name; dropping one removes its rule). develops: this fleet develops Commonty itself, so it runs its own CI (needs when).",
   "owner": "david",
   "domain": "commonty.org",
   "repo": "david/commonty",
@@ -19,12 +19,6 @@
   "ownHardware": [
     "vaultwarden",
     "vaultwarden-send"
-  ],
-  "forgeMirrors": [
-    {
-      "to": "https://github.com/DBRobot/Home-Server.git",
-      "user": "DBRobot"
-    }
   ],
   "computers": {
     "memory": 16384,

@@ -10,13 +10,12 @@ and does the work; the pages people see are ours, and draw themselves from
 Forgejo's API as whoever the gate says is looking.
 
 This page is how the forge is put together. How CI uses it (the workflow,
-what blocks a merge, how to change a check) is [its own page](ci.md); the
-GitHub copy is [the mirror](mirror.md).
+what blocks a merge, how to change a check) is [its own page](ci.md).
 
 ## Where it is
 
 ```
-nix/roles/forge.nix                   the role: forgejo, the mirror, the tile on home, backups
+nix/roles/forge.nix                   the role: forgejo, the tile on home, backups
 nix/roles/runner.nix                  the runner role: both runners and the nix cache key
 nix/modules/forge/
   forgejo.nix                         Forgejo's settings, sign-in, nginx, the setup units
@@ -29,7 +28,6 @@ nix/modules/forge/
   members-runner.nix                  the members' runner: Docker under gVisor
   runner-address.sh                   a runner waits for the forge before it registers
   runner-restart.sh                   a release's runner config waits for no job running
-  forgejo-mirror.nix                  push mirrors to GitHub
   needs.nix                           what each part needs of a box
 servers/forge/web/                    the Git pages (pages/git-public.html: the public door's)
 servers/gate/src/forge_events.rs      the pages' live updates, from the gate
@@ -65,13 +63,12 @@ browser ── https://git.<domain>/... ──> nginx (the forge's box)
      └── /_dd/git/events?repo=<id> ── Server-Sent Events ──> the page
 
 runner boxes ── https://git.<domain> ──> nginx ──> Forgejo   (fetch jobs, report, push statuses)
-ci-resume.py (timer) ──> socket          forgejo-mirrors (oneshot) ──> socket
-Forgejo ── push mirror, on every push and every 8 h ──> github.com
+ci-resume.py (timer) ──> socket
 ```
 
 Forgejo listens on nothing but its socket. Everything outside the box
 reaches it through nginx, and everything on the box that acts for someone
-(the setup units, ci-cancel, ci-resume, the mirror's setup) opens the
+(the setup units, ci-cancel, ci-resume) opens the
 socket as the admin.
 
 ## Signing in
@@ -140,7 +137,7 @@ nginx            users.users.nginx.extraGroups = [ "forgejo" ]
 dd-ci-cancel     DynamicUser, SupplementaryGroups = [ "forgejo" ]
 dd-ci-resume     DynamicUser, SupplementaryGroups = [ "forgejo" ]
 forgejo-admin    runs as forgejo
-forgejo-protection, forgejo-mirrors   run as root
+forgejo-protection   runs as root
 ```
 
 The runner's user, which is what a CI job runs as, is not in it. Adding a
@@ -343,7 +340,6 @@ forgejo-secrets      Forgejo's own secrets; makes its state dirs as root first
 forgejo              after zfs-datasets, RequiresMountsFor the state dir
 forgejo-admin        the admin account, if missing
 forgejo-protection   main's rule (forgejo-setup.sh); "nothing to protect" until the repo exists
-forgejo-mirrors      each declared push mirror, made again when its token changes (forgejo-mirror.nix)
 dd-forge-rules       no private repositories; host runners for the admin's alone (forgejo.nix)
 dd-forge-notify      the trigger for live updates (live.nix), after every Forgejo start
 dd-ci-cancel         the cancel route, always running
@@ -591,28 +587,6 @@ own name server is reached by NAT rules gVisor does not carry, and nothing
 resolved. The `members-runner` VM test checks that a container reaches
 none of it and sees gVisor's kernel.
 
-## The mirror
-
-[`forgejo-mirror.nix`](../../nix/modules/forge/forgejo-mirror.nix) makes
-sure each push mirror listed in `forgeMirrors` in
-[`fleet/policy.json`](../../fleet/policy.json) exists on the forge (the
-repository defaults to the fleet's own). Today that is one: the fleet's
-repository to `https://github.com/DBRobot/Home-Server.git` as `DBRobot`,
-with the token in sops as `github-mirror-token`. Forgejo pushes on every
-commit and every 8 hours, and keeps its own encrypted copy of the token
-once told.
-
-The unit adds a mirror that is missing (by its address), and makes one
-again when the token in sops is not the one it last gave it: Forgejo's
-API cannot change a mirror's token, and keeps the token encrypted, so the
-unit keeps a hash of what it gave each mirror in
-`/var/lib/forgejo-mirrors`. A rotated token reaches Forgejo on the next
-release.
-
-GitHub suspended the account on 2026-10-04, and the mirror's pushes have
-failed since; nothing else notices or depends on it. The rest (the rename,
-the Workflows permission) is on [the mirror's page](mirror.md).
-
 ## Storage and backups
 
 ```
@@ -705,4 +679,3 @@ It is one job in CI's `vm_tests` matrix.
   change by `members-runner`; anything a host job needs on its path goes
   in `hostPackages`. A unit on a timer follows the rules in
   [ci.md](ci.md#when-a-release-does-not-land).
-- **A mirror** is an entry in `forgeMirrors` in `fleet/policy.json`.
