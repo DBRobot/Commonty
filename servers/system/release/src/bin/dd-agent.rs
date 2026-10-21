@@ -584,11 +584,18 @@ fn run(args: &Args) -> Result<String> {
             }
         }
         let _ = fs::remove_file(&pending);
-        if owed && let Some(r) = &rollout {
-            // proved again after a reboot; its soak starts over
-            if !r.proven(&name) {
-                return start_soak(args, &name, counter, &stamp, r);
+        // its wave still has to say how it went: proved again after a
+        // reboot, or a release that changes nothing on this box. Nothing
+        // switched here, so there is nothing to go back to but what runs
+        if let Some(r) = &rollout
+            && !r.proven(&name)
+        {
+            if !owed {
+                fs::write(args.state.join("previous"), &current)?;
+                fs::write(args.state.join("failed-before"), failed_units().join("\n"))?;
+                let _ = fs::remove_file(args.state.join("soak-base.json"));
             }
+            return start_soak(args, &name, counter, &stamp, r);
         }
         let _ = fs::remove_file(args.state.join("failed-before"));
         write_applied(&args.state, counter, &stamp)?;
