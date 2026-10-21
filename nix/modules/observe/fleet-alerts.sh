@@ -2,10 +2,11 @@
 # What is wrong on any box, as the fleet view has it, mailed once per change:
 # disk events in the last week, a pool that is not healthy, a backup over a
 # day old, a runner's new config pending over an hour, the network reaper's
-# brake on. QUERY is thanos-query's api; STATE remembers what was mailed;
-# SENDMAIL is dd-sendmail; WINDOW is how far back to look: another box's
-# newest numbers are only in the bucket once its block is cut, so an
-# instant query would not see them.
+# brake on, a release's rollout that stopped (docs/dev/rollout.md). QUERY is
+# thanos-query's api; STATE remembers what was mailed; SENDMAIL is
+# dd-sendmail; WINDOW is how far back to look: another box's newest numbers
+# are only in the bucket once its block is cut, so an instant query would not
+# see them.
 set -eu
 # Every box writes its own numbers and its own name into what this reads,
 # and no box is trusted: a name is kept only if it is a name, a value only if
@@ -23,6 +24,8 @@ lines=$(
     ask "max by (box) (max_over_time(dd_disk_warnings[$WINDOW])) > 0" | while read -r b v; do echo "$b: $v disk warning(s) in the last week (journalctl -u smartd there)"; done
     ask "max by (box) (max_over_time(dd_pool_unhealthy[$WINDOW])) > 0" | while read -r b _; do echo "$b: a ZFS pool is not healthy (zpool status -x there)"; done
     ask "max by (box) (last_over_time(dd_reap_brake[$WINDOW])) > 0" | while read -r b _; do echo "$b: the network reaper refuses a state that looks wrong and has taken nothing off (journalctl -u dd-verify there: 'the brake is on')"; done
+    # every box says so of the same agreed stop: one line is enough
+    ask "topk(1, max by (box) (max_over_time(dd_rollout_bad[$WINDOW]))) > 0" | while read -r b _; do echo "a release's staged rollout stopped, so no other box takes it (seen by $b; dd release status says why)"; done
     ask "max by (box) (max_over_time(dd_backup_last_success_seconds[$WINDOW])) < $((now - 26 * 3600))" | while read -r b v; do
       echo "$b: last good backup $(((now - v) / 3600)) hours ago"
     done

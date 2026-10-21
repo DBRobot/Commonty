@@ -97,6 +97,8 @@ in
           # a box the release does not list joins on its own key: the one
           # its TPM holds, and its secrets key's recipient (dd-join-prepare)
           (lib.optionalString config.dd.box.joined "-join-key /var/lib/dd/box-key.spki -join-recipient-file /var/lib/dd/secrets-recipient -join-house joined -join-ticket-file /var/lib/dd/join-ticket")
+          # dd-agent begins a release's rollout and gives its verdicts here
+          "-rollouts /run/dd-control/rollout.sock"
         ];
         StateDirectory = "dd-control";
         StateDirectoryMode = "0700";

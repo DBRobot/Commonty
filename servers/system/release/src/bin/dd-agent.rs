@@ -10,6 +10,7 @@
 //! a push; the only input is a signed file and the only authority is the
 //! key that signed it.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -17,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
+use release::rollout::{Answer, Baseline, Gate, Rollout, gate};
 
 #[derive(Parser)]
 struct Args {
@@ -79,6 +81,38 @@ struct Args {
     /// it was, never installs old code on a new box
     #[arg(long, default_value_t = 0)]
     not_before: u64,
+    /// this box's dd-control, where the staged rollout is read
+    /// (docs/dev/rollout.md); empty: none, and a release is taken at once
+    #[arg(long, env = "DD_AGENT_CONTROL", default_value = "")]
+    control: String,
+    /// dd-control's socket, root's alone, for the rollout's begin and this
+    /// box's verdicts
+    #[arg(
+        long,
+        env = "DD_AGENT_ROLLOUT_SOCK",
+        default_value = "/run/dd-control/rollout.sock"
+    )]
+    rollout_sock: PathBuf,
+    /// how long a drain may take before the box switches anyway
+    #[arg(long, env = "DD_AGENT_DRAIN_SECS", default_value = "600")]
+    drain_secs: u64,
+    /// the placed services this box carries (box/placed.nix)
+    #[arg(
+        long,
+        env = "DD_AGENT_CARRIES",
+        default_value = "/etc/dd-placed/carries.json"
+    )]
+    carries: PathBuf,
+    /// where a placed service's flag is
+    #[arg(long, env = "DD_AGENT_PLACED_DIR", default_value = "/run/dd-placed")]
+    placed_dir: PathBuf,
+    /// the box's own Prometheus, judged in a soak; empty: metrics are not
+    #[arg(long, env = "DD_AGENT_PROMETHEUS", default_value = "")]
+    prometheus: String,
+    /// json [{"flag", "url", "resolve"}]: the names a soak probes while
+    /// this box holds the flag
+    #[arg(long, env = "DD_AGENT_SITE_PROBES")]
+    site_probes: Option<PathBuf>,
 }
 
 /// A box that joined on its own key builds its system itself, from the
@@ -418,6 +452,77 @@ fn run(args: &Args) -> Result<String> {
             mine.path
         );
     }
+    // Staged rollout: the release says what, the control plane's agreed
+    // record says when. Without a control plane (a home controller, the
+    // release test) or with one from before rollouts, a release is taken
+    // at once, as it always was.
+    let mut rollout = None;
+    if !args.control.is_empty() {
+        let digest = release::rollout::digest(&body);
+        let mut ans = match rollout_answer(args) {
+            Ok(a) => a,
+            Err(e) => {
+                record(args, &name, last, "held");
+                drain_off(args);
+                return Ok(format!(
+                    "release {counter}: held, the control plane here does not answer: {e:#}"
+                ));
+            }
+        };
+        if let Some(a) = &ans {
+            let mut g = gate(a, counter, &digest, &name);
+            if g == Gate::Begin {
+                post_rollout(
+                    args,
+                    &serde_json::json!({"op": "begin", "release": body}).to_string(),
+                )
+                .context("beginning the rollout")?;
+                // agreed within seconds when the control plane is up
+                let asked = Instant::now();
+                while asked.elapsed() < Duration::from_secs(60) {
+                    std::thread::sleep(Duration::from_secs(2));
+                    if let Ok(Some(a)) = rollout_answer(args) {
+                        g = gate(&a, counter, &digest, &name);
+                        ans = Some(a);
+                        if g != Gate::Begin {
+                            break;
+                        }
+                    }
+                }
+            }
+            let a = ans.as_ref().expect("an answer");
+            match g {
+                Gate::Go => {}
+                Gate::Begin => {
+                    record(args, &name, last, "held");
+                    return Ok(format!(
+                        "release {counter}: held, its rollout is not agreed yet"
+                    ));
+                }
+                Gate::Held(why) => {
+                    record(args, &name, last, "held");
+                    rollout_metric(args, counter, false);
+                    drain_off(args);
+                    return Ok(format!("held: {why}"));
+                }
+                Gate::Stopped(why) => {
+                    rollout_metric(args, counter, true);
+                    drain_off(args);
+                    // a release this box runs and has not proved goes back
+                    // with the rest of its wave
+                    if soaking(args).as_deref() == Some(stamp.as_str()) && current == mine.path {
+                        let back = soak_rollback(args, &stamp);
+                        record(args, &name, last, "rollback");
+                        bail!("{why}; back on {back}");
+                    }
+                    record(args, &name, last, "held");
+                    return Ok(format!("held: {why}"));
+                }
+            }
+            rollout = a.rollout.clone();
+        }
+    }
+
     // Running it is not the same as having proved it. The profile is set
     // before the switch and the guard is a transient unit, so a box that
     // power-cycles inside the probe window comes back running the new
@@ -426,6 +531,19 @@ fn run(args: &Args) -> Result<String> {
     // "not proved yet", and it is this path, after a reboot, that owes the
     // probe.
     let pending = args.state.join("pending");
+    if current == mine.path
+        && let Some(r) = &rollout
+        && soaking(args).as_deref() == Some(stamp.as_str())
+    {
+        drain_off(args);
+        if r.proven(&name) {
+            clear_soak(args);
+            write_applied(&args.state, counter, &stamp)?;
+            record(args, &name, counter, "ok");
+            return Ok(format!("release {counter}: proven, its wave passed"));
+        }
+        return soak(args, &name, counter, &stamp, r);
+    }
     if current == mine.path {
         // nothing to switch to, so nothing to refuse; but a release that
         // runs here on the boxes' word is where requiring it starts
@@ -466,6 +584,12 @@ fn run(args: &Args) -> Result<String> {
             }
         }
         let _ = fs::remove_file(&pending);
+        if owed && let Some(r) = &rollout {
+            // proved again after a reboot; its soak starts over
+            if !r.proven(&name) {
+                return start_soak(args, &name, counter, &stamp, r);
+            }
+        }
         let _ = fs::remove_file(args.state.join("failed-before"));
         write_applied(&args.state, counter, &stamp)?;
         record(args, &name, counter, "ok");
@@ -557,6 +681,16 @@ fn run(args: &Args) -> Result<String> {
         }
     }
 
+    // its writers to a healthy box first, so the switch, and a rollback,
+    // happen with nothing members use running here
+    if rollout.is_some() {
+        eprintln!("release {counter}: {}", drain(args, &name, counter));
+        fs::write(
+            args.state.join("soak-base.json"),
+            serde_json::to_string(&baseline(args))?,
+        )?;
+    }
+
     // switch, with a way back: the previous system is kept by name, and a
     // transient unit brings it back if this process dies mid-way
     fs::write(args.state.join("previous"), &current)?;
@@ -565,6 +699,10 @@ fn run(args: &Args) -> Result<String> {
     // failed units are kept: a reboot inside the window owes the probe
     // against this list, not against whatever is failing when it is back.
     let reached_before = reaches_any(&args.reach);
+    let _ = fs::write(
+        args.state.join("reached-before"),
+        if reached_before { "1" } else { "0" },
+    );
     let failed_before = failed_units();
     fs::write(args.state.join("failed-before"), failed_before.join("\n"))?;
     // before anything changes: if the box reboots from here, the next run
@@ -676,6 +814,15 @@ fn run(args: &Args) -> Result<String> {
         // back on the old system: nothing is owed for the new one
         let _ = fs::remove_file(&pending);
         let _ = fs::remove_file(args.state.join("failed-before"));
+        drain_off(args);
+        if rollout.is_some() {
+            let reason = format!("switch: {} did not come up healthy", mine.path);
+            let _ = post_rollout(
+                args,
+                &serde_json::json!({"op": "verdict", "counter": counter, "verdict": "bad", "reason": reason})
+                    .to_string(),
+            );
+        }
         record(args, &name, last, "rollback");
         bail!(
             "release {counter}: {} did not come up healthy{}; back on {current}",
@@ -692,6 +839,11 @@ fn run(args: &Args) -> Result<String> {
     let _ = disarm();
     // probed and good: nothing is owed any more
     let _ = fs::remove_file(&pending);
+    drain_off(args);
+    if let Some(r) = &rollout {
+        // proved as a box; now proved as a release, over its wave's soak
+        return start_soak(args, &name, counter, &stamp, r);
+    }
     let _ = fs::remove_file(args.state.join("failed-before"));
     write_applied(&args.state, counter, &stamp)?;
     record(args, &name, counter, "ok");
@@ -887,6 +1039,428 @@ fn joined_name(spki_b64: &str) -> Result<String> {
             .map(|b| format!("{b:02x}"))
             .collect::<String>()
     ))
+}
+
+/// The agreed rollout record from this box's dd-control. None: a
+/// dd-control from before rollouts (404), so a release is taken at once.
+fn rollout_answer(args: &Args) -> Result<Option<Answer>> {
+    match ureq::get(&format!("{}/rollout", args.control)).call() {
+        Ok(mut r) => Ok(Some(serde_json::from_str(&r.body_mut().read_to_string()?)?)),
+        Err(ureq::Error::StatusCode(404)) => Ok(None),
+        Err(e) => Err(e).context("reading the rollout"),
+    }
+}
+
+fn control_json(args: &Args, path: &str) -> Result<serde_json::Value> {
+    let mut r = ureq::get(&format!("{}{path}", args.control))
+        .call()
+        .with_context(|| format!("reading {path}"))?;
+    Ok(serde_json::from_str(&r.body_mut().read_to_string()?)?)
+}
+
+/// Hands dd-control a rollout request, over its socket: plain HTTP/1.0
+fn post_rollout(args: &Args, body: &str) -> Result<()> {
+    use std::io::{Read as _, Write as _};
+    let mut c = std::os::unix::net::UnixStream::connect(&args.rollout_sock)
+        .with_context(|| format!("{}", args.rollout_sock.display()))?;
+    c.set_read_timeout(Some(Duration::from_secs(30)))?;
+    write!(
+        c,
+        "POST /rollout HTTP/1.0\r\nHost: dd-control\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )?;
+    let mut out = String::new();
+    c.read_to_string(&mut out)?;
+    let status = out.split_whitespace().nth(1).unwrap_or("");
+    if status != "202" {
+        bail!(
+            "dd-control said {}",
+            out.lines().next().unwrap_or("nothing")
+        );
+    }
+    Ok(())
+}
+
+fn verdict(args: &Args, counter: u64, verdict: &str, reason: &str) -> Result<()> {
+    post_rollout(
+        args,
+        &serde_json::json!({"op": "verdict", "counter": counter, "verdict": verdict, "reason": reason})
+            .to_string(),
+    )
+}
+
+fn soaking(args: &Args) -> Option<String> {
+    fs::read_to_string(args.state.join("soaking"))
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+fn clear_soak(args: &Args) {
+    for f in [
+        "soaking",
+        "soak-base.json",
+        "soak-streak.json",
+        "failed-before",
+    ] {
+        let _ = fs::remove_file(args.state.join(f));
+    }
+}
+
+/// Whether the rollout this box follows has stopped, for the owner's mail
+/// (observe/fleet-alerts.sh)
+fn rollout_metric(args: &Args, counter: u64, bad: bool) {
+    let body = format!(
+        "# HELP dd_rollout_bad Whether the rollout of the newest release stopped.\n\
+         # TYPE dd_rollout_bad gauge\n\
+         dd_rollout_bad{{counter=\"{counter}\"}} {}\n",
+        u8::from(bad)
+    );
+    let tmp = args.facts.join("dd_rollout.prom.tmp");
+    if fs::write(&tmp, body).is_ok() {
+        let _ = fs::rename(tmp, args.facts.join("dd_rollout.prom"));
+    }
+}
+
+fn drain_file(args: &Args) -> PathBuf {
+    args.facts.join("release-drain.prom")
+}
+
+/// the box is an ordinary box again: placement may move things back to it,
+/// by its normal rules only
+fn drain_off(args: &Args) {
+    let _ = fs::remove_file(drain_file(args));
+}
+
+/// The placed services this box runs now: their flags are up
+fn placed_here(args: &Args) -> Vec<String> {
+    let carries: BTreeMap<String, Vec<String>> = fs::read_to_string(&args.carries)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    carries
+        .into_keys()
+        .filter(|svc| args.placed_dir.join(svc).exists())
+        .collect()
+}
+
+/// Asks placement to move what this box runs to boxes that will not
+/// switch under it, and waits until each has gone and runs elsewhere, or
+/// until the plan says it restarts here, or `drain_secs`. Then the switch
+/// goes on regardless: what is still here restarts in place, as it would
+/// without a drain.
+fn drain(args: &Args, name: &str, counter: u64) -> String {
+    let here = placed_here(args);
+    if here.is_empty() {
+        return "nothing to hand over".into();
+    }
+    let _ = fs::create_dir_all(&args.facts);
+    let tmp = args.facts.join("release-drain.prom.tmp");
+    if fs::write(&tmp, format!("dd_release_drain {counter}\n"))
+        .and_then(|_| fs::rename(&tmp, drain_file(args)))
+        .is_err()
+    {
+        return "could not ask for a drain; switching in place".into();
+    }
+    let start = Instant::now();
+    loop {
+        let plan = control_json(args, "/plan").unwrap_or_default();
+        let st = control_json(args, "/state").unwrap_or_default();
+        let mut stays = vec![];
+        let mut waiting = vec![];
+        for svc in &here {
+            let why = plan["boxes"][name]
+                .as_array()
+                .and_then(|ds| ds.iter().find(|d| d["service"] == svc.as_str()))
+                .and_then(|d| d["why"].as_str())
+                .map(str::to_string);
+            if why
+                .as_deref()
+                .is_some_and(|w| w.contains("restarts in place"))
+            {
+                stays.push(svc.clone());
+                continue;
+            }
+            let elsewhere = st["boxes"].as_object().is_some_and(|bs| {
+                bs.iter().any(|(b, v)| {
+                    b != name && v["facts"][format!("runs/{svc}")].as_f64().unwrap_or(0.0) > 0.0
+                })
+            });
+            if args.placed_dir.join(svc).exists() || !elsewhere {
+                waiting.push(svc.clone());
+            }
+        }
+        if waiting.is_empty() {
+            return format!(
+                "handed over {}{}",
+                if stays.len() == here.len() {
+                    "nothing".to_string()
+                } else {
+                    here.iter()
+                        .filter(|s| !stays.contains(s))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                },
+                if stays.is_empty() {
+                    String::new()
+                } else {
+                    format!("; restarting in place: {}", stays.join(" "))
+                }
+            );
+        }
+        if start.elapsed() > Duration::from_secs(args.drain_secs) {
+            return format!(
+                "the drain took over {}s with {} still here; switching, they restart in place",
+                args.drain_secs,
+                waiting.join(" ")
+            );
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    }
+}
+
+/// What a soak compares with: the box before its switch
+fn baseline(args: &Args) -> Baseline {
+    Baseline {
+        restarts: restarts_now(),
+        down: prom_list(args, "up == 0", &["job", "instance"]),
+        alerts: prom_list(
+            args,
+            "dd_pool_unhealthy > 0 or dd_disk_warnings > 0",
+            &["__name__"],
+        ),
+    }
+}
+
+fn restarts_now() -> BTreeMap<String, u64> {
+    let out = sh(
+        "systemctl",
+        &["show", "--property=Id,NRestarts", "*.service"],
+    )
+    .unwrap_or_default();
+    let mut m = BTreeMap::new();
+    for block in out.split("\n\n") {
+        let mut id = None;
+        let mut n = None;
+        for l in block.lines() {
+            if let Some(v) = l.strip_prefix("Id=") {
+                id = Some(v.to_string());
+            } else if let Some(v) = l.strip_prefix("NRestarts=") {
+                n = v.trim().parse::<u64>().ok();
+            }
+        }
+        if let (Some(id), Some(n)) = (id, n)
+            && !id.starts_with("dd-game@")
+        {
+            m.insert(id, n);
+        }
+    }
+    m
+}
+
+/// The series an instant query of the box's own Prometheus returns, each
+/// named by `labels`; None when it does not answer
+fn prom_list(args: &Args, query: &str, labels: &[&str]) -> Option<Vec<String>> {
+    if args.prometheus.is_empty() {
+        return None;
+    }
+    let mut r = ureq::get(&format!("{}/api/v1/query", args.prometheus))
+        .query("query", query)
+        .call()
+        .ok()?;
+    let v: serde_json::Value = serde_json::from_str(&r.body_mut().read_to_string().ok()?).ok()?;
+    let mut out: Vec<String> = v["data"]["result"]
+        .as_array()?
+        .iter()
+        .map(|x| {
+            labels
+                .iter()
+                .map(|l| x["metric"][*l].as_str().unwrap_or(""))
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    Some(out)
+}
+
+/// Each name this box serves, while it holds the service's flag: an
+/// answer under 500 is up
+fn site_failures(args: &Args) -> Vec<String> {
+    #[derive(serde::Deserialize)]
+    struct P {
+        flag: String,
+        url: String,
+        resolve: String,
+    }
+    let Some(path) = &args.site_probes else {
+        return vec![];
+    };
+    let probes: Vec<P> = fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    probes
+        .iter()
+        .filter(|p| args.placed_dir.join(&p.flag).exists())
+        .filter_map(|p| {
+            let code = sh(
+                "curl",
+                &[
+                    "-sk",
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{http_code}",
+                    "--max-time",
+                    "10",
+                    "--resolve",
+                    &p.resolve,
+                    &p.url,
+                ],
+            )
+            .unwrap_or_default();
+            let n = code.trim().parse::<u16>().unwrap_or(0);
+            (n == 0 || n >= 500).then(|| format!("{} answered {}", p.url, code.trim()))
+        })
+        .collect()
+}
+
+/// Switched and probed: the soak begins. The counter is not written until
+/// the wave passes, so the heartbeat's `release` names only proven ones.
+fn start_soak(args: &Args, name: &str, counter: u64, stamp: &str, r: &Rollout) -> Result<String> {
+    fs::write(args.state.join("soaking"), format!("{stamp}\n"))?;
+    let _ = fs::remove_file(args.state.join("soak-streak.json"));
+    if !args.state.join("soak-base.json").exists() {
+        fs::write(
+            args.state.join("soak-base.json"),
+            serde_json::to_string(&baseline(args))?,
+        )?;
+    }
+    if let Err(e) = verdict(args, counter, "took", "") {
+        eprintln!("release {counter}: took not said yet: {e:#}");
+    }
+    record(args, name, read_counter(&args.state), "soaking");
+    let _ = r;
+    Ok(format!("release {counter}: switched; soaking"))
+}
+
+/// One minute's look at a soaking box, against its baseline. A check fails
+/// the soak on its third failing sample in a row; a crash loop at once.
+/// Clean: good is said again, and the control plane counts the soak by
+/// agreed time.
+fn soak(args: &Args, name: &str, counter: u64, stamp: &str, r: &Rollout) -> Result<String> {
+    let base: Baseline = fs::read_to_string(args.state.join("soak-base.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let before = read_failed_before(&args.state).unwrap_or_default();
+    let mut failing = BTreeMap::new();
+    if let Err(e) = probe(args, &before) {
+        failing.insert("probe".to_string(), format!("{e:#}"));
+    }
+    let reached =
+        fs::read_to_string(args.state.join("reached-before")).is_ok_and(|t| t.trim() == "1");
+    if reached && !reaches_any(&args.reach) {
+        failing.insert("reach".into(), "it no longer reaches the fleet".into());
+    }
+    let down = release::rollout::newly(
+        &base.down,
+        &prom_list(args, "up == 0", &["job", "instance"]),
+    );
+    if !down.is_empty() {
+        failing.insert(
+            "metrics".into(),
+            format!("scrape targets down: {}", down.join(" ")),
+        );
+    }
+    let alerts = release::rollout::newly(
+        &base.alerts,
+        &prom_list(
+            args,
+            "dd_pool_unhealthy > 0 or dd_disk_warnings > 0",
+            &["__name__"],
+        ),
+    );
+    if !alerts.is_empty() {
+        failing.insert("alerts".into(), format!("new: {}", alerts.join(" ")));
+    }
+    let site = site_failures(args);
+    if !site.is_empty() {
+        failing.insert("site".into(), site.join("; "));
+    }
+    let prev: BTreeMap<String, u32> = fs::read_to_string(args.state.join("soak-streak.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let keys: Vec<String> = failing.keys().cloned().collect();
+    let streak = release::rollout::streak(&prev, &keys);
+    let _ = fs::write(
+        args.state.join("soak-streak.json"),
+        serde_json::to_string(&streak)?,
+    );
+    let mut fatal: Vec<String> = streak
+        .iter()
+        .filter(|(_, n)| **n >= 3)
+        .map(|(k, _)| format!("{k}: {}", failing[k]))
+        .collect();
+    fatal.extend(release::rollout::restarted(
+        &base.restarts,
+        &restarts_now(),
+        3,
+    ));
+    if !fatal.is_empty() {
+        let reason = fatal.join("; ");
+        if let Err(e) = verdict(args, counter, "bad", &reason) {
+            eprintln!("release {counter}: bad not said: {e:#}");
+        }
+        rollout_metric(args, counter, true);
+        let back = soak_rollback(args, stamp);
+        record(args, name, read_counter(&args.state), "rollback");
+        bail!("release {counter}: the soak failed ({reason}); back on {back}");
+    }
+    for (k, why) in &failing {
+        eprintln!("soak: {k}: {why} ({} in a row)", streak[k]);
+    }
+    if !r.reports.get(name).is_some_and(|x| x.took > 0) {
+        verdict(args, counter, "took", "").context("saying took")?;
+    }
+    if failing.is_empty() {
+        verdict(args, counter, "good", "").context("saying good")?;
+    }
+    rollout_metric(args, counter, false);
+    record(args, name, read_counter(&args.state), "soaking");
+    Ok(format!(
+        "release {counter}: soaking{}",
+        if failing.is_empty() { ", clean" } else { "" }
+    ))
+}
+
+/// Back to the system before the switch, and the release remembered as
+/// tried: a soak that failed, or a wave that was stopped
+fn soak_rollback(args: &Args, stamp: &str) -> String {
+    let tried = args.state.join("refused");
+    let mut seen = fs::read_to_string(&tried).unwrap_or_default();
+    seen.push_str(stamp);
+    seen.push('\n');
+    let _ = fs::write(&tried, seen);
+    let previous = fs::read_to_string(args.state.join("previous")).unwrap_or_default();
+    let previous = previous.trim().to_string();
+    if !previous.is_empty() {
+        let _ = sh(
+            "nix-env",
+            &["-p", "/nix/var/nix/profiles/system", "--set", &previous],
+        );
+        if let Err(e) = sh(
+            &format!("{previous}/bin/switch-to-configuration"),
+            &["switch"],
+        ) {
+            eprintln!("switching back: {e:#}");
+        }
+    }
+    clear_soak(args);
+    previous
 }
 
 fn hostname() -> Result<String> {
