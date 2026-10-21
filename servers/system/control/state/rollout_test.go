@@ -296,7 +296,7 @@ func TestARealReleaseChecks(t *testing.T) {
 	if err != nil || p.Counter == 0 || len(p.Boxes) == 0 {
 		t.Fatalf("%v %+v", err, p)
 	}
-	if _, err := readRelease(c, strings.Replace(string(raw), "nixos-system", "nixos-systen", 1)); err == nil {
+	if _, err := readRelease(c, strings.Replace(string(raw), `"nar_hash": "sha256-`, `"nar_hash": "sha256-X`, 1)); err == nil {
 		t.Fatal("a changed path checked")
 	}
 }
