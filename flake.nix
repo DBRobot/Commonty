@@ -79,6 +79,7 @@
         "cache-upload"
         # each web service's one main thing, in a browser, with the real services
         "site-journeys"
+        "rollout"
       ];
       rust =
         let
