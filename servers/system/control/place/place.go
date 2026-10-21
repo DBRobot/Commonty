@@ -209,6 +209,15 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	// a draining box (dd-drain) is given nothing new, and what may move
 	// moves off it
 	draining := func(name string) bool { return s.Boxes[name].Facts["draining"] > 0 }
+	// a box switching to a new release (docs/dev/rollout.md) hands what it
+	// runs to another first: like draining, but what fits nowhere else
+	// stays and restarts in place, and a box already on that release is
+	// the better home
+	relDrain := func(name string) bool { return s.Boxes[name].Facts["release_drain"] > 0 }
+	drainTo := 0.0
+	for _, name := range live {
+		drainTo = max(drainTo, s.Boxes[name].Facts["release_drain"])
+	}
 	// a placed service can run only on a box that carries it, and not
 	// where the box itself refused to start it for want of room
 	// (cmd/dd-control/placed.go)
@@ -333,6 +342,99 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		}
 		return out
 	}
+	// what a releasing box runs, by group (a service and what must share
+	// its box with it), and whether some other box could take the whole
+	// group; a group that fits nowhere stays, so a drain never leaves a
+	// service with nowhere to run
+	// whether some box other than from, not itself switching or draining,
+	// can run all of group and has the memory and store room for it
+	groupFits := func(group []string, from string) bool {
+		for _, t := range live {
+			if t == from || relDrain(t) || draining(t) {
+				continue
+			}
+			ok, mem, d := true, 0.0, 0.0
+			for _, x := range group {
+				if !can(t, x) {
+					ok = false
+					break
+				}
+				for _, dep := range in.Services[x].Local {
+					if dd := in.Services[dep]; dd.Enabled && !dd.EveryBox && !contains(group, dep) && !can(t, dep) {
+						ok = false
+					}
+				}
+				mem += memory[x]
+				for _, b := range bucketsOf[x] {
+					if anyStore && !stored(t) {
+						ok = false
+					}
+					d += needs(t, b)
+				}
+			}
+			if !ok {
+				continue
+			}
+			if anyStore && d > 0 && d > spare(t) {
+				continue
+			}
+			if c := capacity(t); c > 0 {
+				for svc := range now {
+					if now[svc][t] && !contains(group, svc) {
+						mem += memory[svc]
+					}
+				}
+				if mem > c {
+					continue
+				}
+			}
+			return true
+		}
+		return false
+	}
+	stays := map[string]map[string]bool{} // box -> services staying put
+	movingOff := map[string]bool{}
+	for _, d := range live {
+		if !relDrain(d) {
+			continue
+		}
+		stays[d] = map[string]bool{}
+		mine := []string{}
+		for svc := range now {
+			if now[svc][d] && in.Services[svc].Placed && in.Services[svc].Enabled {
+				mine = append(mine, svc)
+			}
+		}
+		sort.Strings(mine)
+		seen := map[string]bool{}
+		for _, start := range mine {
+			if seen[start] {
+				continue
+			}
+			group := []string{start}
+			seen[start] = true
+			for i := 0; i < len(group); i++ {
+				for _, x := range mine {
+					if seen[x] {
+						continue
+					}
+					if contains(in.Services[group[i]].Local, x) || contains(in.Services[x].Local, group[i]) {
+						seen[x] = true
+						group = append(group, x)
+					}
+				}
+			}
+			if !groupFits(group, d) {
+				for _, x := range group {
+					stays[d][x] = true
+				}
+			} else {
+				for _, x := range group {
+					movingOff[x] = true
+				}
+			}
+		}
+	}
 	count := map[string]int{} // service -> boxes planned to run it
 	// whether what svc brings with it may run one more time: a service
 	// that needs one which is already at its count goes where that one is
@@ -409,6 +511,12 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 			}
 		}
 		f += 0.4 * float64(min(near, 3))
+		// leaving a box that is switching: one already on that release
+		// takes it, so it moves once
+		if movingOff[svc] && drainTo > 0 && facts(name, "release") >= drainTo {
+			f += 1
+			why += ", on the new release"
+		}
 		if c := capacity(name); c > 0 {
 			m := 0.0
 			for _, x := range adds(name, svc) {
@@ -512,7 +620,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		best := func(from []string) []string {
 			out := []string{}
 			for _, name := range from {
-				if !planned[name][svc] && can(name, svc) && !draining(name) && allowed(name, svc) && room(name, svc) {
+				if !planned[name][svc] && can(name, svc) && !draining(name) && (!relDrain(name) || stays[name][svc]) && allowed(name, svc) && room(name, svc) {
 					out = append(out, name)
 				}
 			}
@@ -528,6 +636,15 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		}
 		// the best of from, unless what runs now is within the margin of it
 		choose := func(from []string, why0 string) bool {
+			// a releasing box keeps what no other box can hold: it
+			// restarts there with the switch
+			for _, name := range from {
+				if stays[name][svc] && now[svc][name] && !planned[name][svc] {
+					f, why := fit(name, svc)
+					place(name, svc, f, why0+"restarts in place: no other box holds its group; "+why)
+					return true
+				}
+			}
 			// one that moves on failure stays on a live box that runs it;
 			// fit and room are for choosing a new one
 			if sticky {
@@ -710,4 +827,13 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		}
 	}
 	return p
+}
+
+func contains(xs []string, x string) bool {
+	for _, y := range xs {
+		if y == x {
+			return true
+		}
+	}
+	return false
 }
