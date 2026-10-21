@@ -15,7 +15,7 @@ not Nix: what the box found on itself and what its owner chose
     library   members' encrypted libraries and their locked mail behind the gate, and the transcoder
     llm       llama-cpp, its Chat page and web search
     game      game servers a member starts, each in a guest of its own
-    forge     forgejo and the github mirror
+    forge     forgejo
     runner    a CI runner for the forge; any box can run one
     observe   our Metrics page over Thanos, alerting, mail
     vault     Passwords: vaultwarden and the breach list

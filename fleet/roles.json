@@ -132,7 +132,6 @@
     "why": "git.<domain>, and postgres shared with photos and vault",
     "services": [
       "forgejo",
-      "forgejo-mirror",
       "forgejo-public",
       "postgresql",
       "postgres-dumps",

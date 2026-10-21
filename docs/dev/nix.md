@@ -127,7 +127,7 @@ media     user accounts, webdav-media (Movies & TV, Files)
 library   the libraries bucket behind the gate, the transcoder
 llm       llama-cpp, the Chat page, search
 game      the games manager
-forge     forgejo, the GitHub mirror
+forge     forgejo
 runner    the forge's runner, the members' runner, the cache's signing key
 observe   the Metrics page, alerting, mail
 vault     vaultwarden, the breach list, member mail
@@ -168,7 +168,7 @@ box/       what makes a box: host.nix (the box's folder), box.nix (dd.box.*),
            secure-boot.nix, report.nix (+ report/detect.sh), ports.nix,
            zfs-datasets.nix, home-network.nix (+ wifi scripts), locate.nix
 forge/     forgejo.nix, forgejo-runner.nix, members-runner.nix,
-           forgejo-mirror.nix, live.nix (the Git pages' events); ci-cancel.py,
+           live.nix (the Git pages' events); ci-cancel.py,
            ci-resume.py, forgejo-setup.sh, runner-address.sh
 games/     games.nix (the manager), game-guest.nix (the VM a world runs in),
            game-run.py, games-access.sh, games-measure.sh

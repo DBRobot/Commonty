@@ -44,8 +44,8 @@ def changed(base, head, *suffixes):
     ]
 
 
-# every workflow: the forge's ci, and the app's release build on GitHub
-FLOW_DIRS = (".forgejo/workflows", ".github/workflows")
+# every workflow: the forge's ci
+FLOW_DIRS = (".forgejo/workflows",)
 
 
 def workflows():

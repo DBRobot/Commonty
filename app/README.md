@@ -103,7 +103,7 @@ rclone is enough to tear it down, so there is no `fusermount` there.
 The installer is cross-built on Linux (`nix/app-release/windows.nix`)
 and carries the app and its engine's dll. It does not carry `rclone.exe`
 or WinFsp: the app has no drive on Windows yet (that is `dd.exe`'s, which
-finds rclone on PATH). The GitHub build downloaded both but never put them
+finds rclone on PATH). The old build downloaded both but never put them
 in the installer. WebView2 is **not** bundled: the installer fetches it from Microsoft
 if the machine lacks it.
 

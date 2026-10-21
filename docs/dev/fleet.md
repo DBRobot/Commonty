@@ -254,7 +254,7 @@ domain         the fleet's domain                    dd.domain (core.nix)
 repo           owner/name of the fleet's repository on its forge
                                                      dd.repo: the agent's
                                                      release url, the demo's
-                                                     Code tile, forgeMirrors
+                                                     Code tile
 people.<name>
   ssh          their ssh public keys: the admin login on the boxes they own
   paperKey     the ssh-ed25519 public half of their paper recovery key: each
@@ -264,13 +264,7 @@ allowanceGb    each member's storage across every service and box
                                                      dd.storage.budgetGb
                                                      (storage/view.nix)
 ownHardware    services that run only on the owner's own boxes (role-fit)
-forgeMirrors   the forge's push mirrors: [{to, user, repo?}]; repo defaults
-               to the fleet's own (roles/forge.nix); the token is the sops
-               secret github-mirror-token
 ```
-
-The one mirror listed is the GitHub copy. Its account is suspended, so
-its pushes fail and nothing depends on them ([mirror.md](mirror.md)).
 
 ## The other files
 

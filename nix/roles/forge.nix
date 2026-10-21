@@ -3,12 +3,11 @@ let
   policy = lib.importJSON ../../fleet/policy.json;
 in
 {
-  # The forge and the mirror that keeps GitHub's copy current. Its runner
-  # is the runner role: any box can run one, the forge runs on one.
+  # The forge. Its runner is the runner role: any box can run one, the
+  # forge runs on one.
   imports = [
     ./_sops.nix
     ../modules/forge/forgejo.nix
-    ../modules/forge/forgejo-mirror.nix
   ];
   dd.home.services = [
     {
@@ -26,11 +25,7 @@ in
       rank = 50;
     }
   ];
-  # the fleet's owner administers its forge; the mirrors are the fleet's
-  # choice too (fleet/policy.json)
+  # the fleet's owner administers its forge (fleet/policy.json)
   dd.forgejo.admin = policy.owner;
   dd.backup.paths = [ config.dd.forgejo.stateDir ]; # repositories, lfs, custom config; its db is in the postgres dumps
-  dd.forgejo.mirrors = map (m: m // { repo = m.repo or config.dd.repo; }) (
-    policy.forgeMirrors or [ ]
-  );
 }

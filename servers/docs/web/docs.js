@@ -36,7 +36,7 @@ let view = 'page';
 
 // pages that moved under another name; a move into a folder needs no
 // entry (below)
-const renamed = { github: 'dev/mirror' };
+const renamed = {};
 
 /// a page's file from the address: a folder's README, or the page itself;
 /// an old address (from before the pages moved into folders) finds the one

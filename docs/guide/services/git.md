@@ -46,8 +46,7 @@ requests, no code view and no CI.
   requests, comments, attachments and CI logs.
 - **Who else can read it:** anyone. Every repository can be read by
   every member, and by anyone on the internet through the
-  demo, which passes through Cloudflare.
-- **Commonty's own repository** is also copied to GitHub.
+  demo and the public code site, which pass through Cloudflare.
 - **CI jobs** reach the internet, so whatever a job sends there goes out.
 - **Encrypted repositories** are 🔒 **Locked**: the box sees only their
   size and when they change.

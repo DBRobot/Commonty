@@ -117,7 +117,7 @@ game      x86_64 + /dev/kvm (TCG only for tests);    /var/lib/dd-games: installs
           budget (excludes qemu overhead);           each), 64G sparse qcow2 each    GitHub
           32-bit libs in the guest (steamcmd, wine)
 forge     -                                          /vault/forgejo (node1: HDD over ssh :22 + git.<domain>;         postgres (shared), the gate,
-                                                     USB), postgres                  github mirror out                  nginx/ACME
+                                                     USB), postgres                                                     nginx/ACME
 runner    /dev/kvm (VM tests); nested KVM (games     /nix/store grows (every box's   out to github (checkout),          garage on the same box (cache
           test); 2 jobs; >=4 CPUs, 8G for            closure built on every box);    git.<domain>                       127.0.0.1:3900 + storage's keys)
           members' 2 jobs; docker + gVisor;          1.5G VM images; /var/lib/docker

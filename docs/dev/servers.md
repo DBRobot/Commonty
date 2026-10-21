@@ -16,7 +16,7 @@ scripts/   what a person runs around a box: reports, reinstall, restore, the lap
 secrets/   each box's secrets, sops-encrypted
 fleet/     what the fleet is: the boxes, their roles, the members, and the
            owner's policy (policy.json: owner, domain, repo, allowanceGb,
-           people.<name>.{ssh,paperKey}, ownHardware, forgeMirrors)
+           people.<name>.{ssh,paperKey}, ownHardware)
 data/      data the services are built with (data/games/catalogue.json)
 ```
 
