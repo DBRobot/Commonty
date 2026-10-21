@@ -2,12 +2,12 @@
 // site's names (home., git., the docs on the bare name...). Each name has
 // its own storage, so the assistant on each page keeps it here, in a frame
 // of home.<domain> it never shows: this tab's storage of one name, in the
-// browser and nowhere else. Only the pages the assistant runs on may ask,
-// the same names the model answers (modules/llm/llm.nix); the frame's
-// frame-ancestors says so too (roles/gateway.nix).
+// browser and nowhere else. Only the pages the assistant runs on may ask:
+// the names the model answers (nix/lib/guide-pages.nix) and Chat's (llm.);
+// the frame's frame-ancestors says so too (modules/gate/verify.nix).
 
 const base = location.hostname.replace(/^home\./, '');
-const ours = new RegExp(`^https://((demo-)?(home|files|git|games|metrics)\\.)?${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+const ours = new RegExp(`^https://((demo-)?(home|files|git|games|metrics|llm)\\.)?${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
 const KEY = 'dd-guide-carry';
 const MOST = 256 * 1024;
 

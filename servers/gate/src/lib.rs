@@ -32,6 +32,7 @@ mod oidc;
 pub mod pages;
 mod photos;
 mod private;
+mod releases;
 mod session;
 mod signins;
 mod sitemap;
@@ -109,6 +110,9 @@ struct App {
     /// the app manifest as last read, and when: a good one for ten
     /// minutes, the lack of one for one
     app_seen: Mutex<Option<(Instant, Option<SignedApp>)>>,
+    /// the forge's release notes (releases.rs), from where the member
+    /// list is published; None: there are none to tell
+    releases: Option<releases::Notes>,
     fleet: fleet::Fleet,
     thanos: Option<String>,
     /// this box's dd-control: the agreed state the fleet pages read
@@ -2060,6 +2064,27 @@ async fn site_map(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     }
 }
 
+/// What is new, for the assistant on every page (releases.rs): a public
+/// repository's release notes, so for anyone. A box told of no forge has
+/// none to list.
+async fn release_notes(State(app): State<Arc<App>>) -> Response {
+    let Some(notes) = &app.releases else {
+        return (
+            [("cache-control", "no-cache")],
+            Json(serde_json::json!({ "releases": [] })),
+        )
+            .into_response();
+    };
+    match notes.get().await {
+        Some(v) => ([("cache-control", "no-cache")], Json(v)).into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the release notes could not be read just now",
+        )
+            .into_response(),
+    }
+}
+
 /// What Monty answers a question about Monty Python from (joke.rs): for
 /// members and the demo, like the site map
 async fn joke_lookup(
@@ -2958,6 +2983,10 @@ pub async fn start(
         tmdb: cfg.tmdb,
         search: cfg.search,
         app_seen: Mutex::new(None),
+        releases: cfg
+            .member_list
+            .as_deref()
+            .and_then(releases::Notes::from_member_list),
         fleet: cfg.fleet,
         thanos: cfg.thanos,
         control: cfg.control.as_ref().map(|(c, _, _)| c.clone()),
@@ -3241,6 +3270,7 @@ pub async fn start(
         .route("/_dd/me", get(me))
         .route("/_dd/sitemap.json", get(site_map))
         .route("/_dd/joke", get(joke_lookup))
+        .route("/_dd/releases.json", get(release_notes))
         .route("/_dd/guide-keep", get(|| async { page("guide-keep") }))
         // Ente comes with the app: a browser here is handed to it
         .route("/_dd/photos", get(|| async { use_app() }))

@@ -161,6 +161,8 @@ in
     # only (the gate answers 401 to anyone else), so nothing a stranger may not have
     locations."= /_dd/sitemap.json" = docsGate;
     locations."= /_dd/joke" = docsGate;
+    # what is new, for the assistant: the forge's public release notes
+    locations."= /_dd/releases.json" = docsGate;
     # what Monty looks up of a member's own, for the docs' own pages too:
     # the gate answers only a member (401/403 to anyone else)
     locations."= /_dd/house" = docsGate;

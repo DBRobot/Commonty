@@ -3,7 +3,7 @@
 // markdown as it is; this draws them, cleaned of anything that could run.
 // Anyone may read them; a member also gets the way to the source.
 
-import { me, slug, docsPath } from './shell.js';
+import { me, slug, docsPath, onFleet } from './shell.js';
 import { $, el, load, prefetch } from './kit.js';
 
 // where the pages are: /docs on the bare name, or the gate's own address
@@ -117,8 +117,11 @@ function relink(md) {
   for (const a of md.querySelectorAll('a[href]')) {
     const href = a.getAttribute('href');
     if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//')) {
-      a.target = '_blank';
-      a.rel = 'noopener';
+      // our own names stay in this tab; another site opens beside it
+      if (!onFleet(href)) {
+        a.target = '_blank';
+        a.rel = 'noopener';
+      }
       continue;
     }
     if (href.startsWith('#')) continue;

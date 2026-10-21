@@ -44,6 +44,18 @@ in
     # a member's app reaches its mail at files.<domain>, as it does its
     # libraries: bodies up to the gate's own cap, and the pipe a WebSocket
     services.nginx.virtualHosts."files.${config.dd.domain}".locations = {
+      # the page itself (the tile's address), as the gate's other pages: a
+      # prefix location ending in / would answer this name with a 301 to
+      # /_dd/mail/, which nothing serves
+      "= /_dd/mail" = {
+        proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/mail";
+        extraConfig = ''
+          proxy_set_header X-Original-URI $request_uri;
+          limit_req zone=dd_user burst=300 nodelay;
+          limit_req zone=dd_visitor burst=500 nodelay;
+          limit_req_status 429;
+        '';
+      };
       "/_dd/mail/" = {
         proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/mail/";
         extraConfig = ''

@@ -11,12 +11,22 @@ import { consent } from './age.js';
 const button = document.getElementById('go');
 const ready = await consent(button);
 
+// The terms open in this tab: the name typed is kept for this tab alone
+// and put back on the way back. The birth date is never kept, so it is
+// asked again.
+const nameField = document.getElementById('u');
+const KEEP = 'dd_join_name';
+try { nameField.value ||= sessionStorage.getItem(KEEP) || ''; } catch { /* storage off */ }
+nameField.addEventListener('input', () => {
+  try { sessionStorage.setItem(KEEP, nameField.value); } catch { /* storage off */ }
+});
+
 async function go() {
   if (!ready()) return;
   button.disabled = true;
   say('…');
   try {
-    const username = document.getElementById('u').value.trim().toLowerCase();
+    const username = nameField.value.trim().toLowerCase();
 
     // the passkey
     const start = await post('/_dd/join/start', { username, agree: true });
@@ -30,7 +40,7 @@ async function go() {
     const a = await navigator.credentials.get({ publicKey: requestOptions(sign.publicKey) });
     await post('/_dd/join/sign', assertion(a), { 'x-dd-ceremony': sign.ceremony });
 
-    try { localStorage.setItem('dd_user', username); } catch { /* storage off */ }
+    try { localStorage.setItem('dd_user', username); sessionStorage.removeItem(KEEP); } catch { /* storage off */ }
     location.href = new URL(safeRd(new URLSearchParams(location.search).get('rd') || '/_dd/home'), location.href).href;
   } catch (e) {
     say('Could not create the account: ' + e.message);

@@ -110,6 +110,16 @@ function served(url) {
 // (javascript:, data:, another site). The domain is what the app wrote into
 // a page it serves (never what a box says), or this page's own name's on a box.
 const fleet = document.querySelector('meta[name="dd-domain"]')?.content || location.hostname.split('.').slice(-2).join('.');
+/// whether an address is one of the fleet's own names (a link there stays
+/// in its tab; one anywhere else may open beside the page)
+export function onFleet(url) {
+  try {
+    const h = new URL(url, location.href).hostname;
+    return h === fleet || h.endsWith('.' + fleet);
+  } catch {
+    return false;
+  }
+}
 function linkable(url) {
   if (/^\/(?![/\\])/.test(String(url))) return url;
   const w = webUrl(url);

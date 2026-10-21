@@ -14,6 +14,10 @@ let
   base = config.dd.domain;
   port = config.dd.verify.port;
   guidePages = import ../../lib/guide-pages.nix;
+  # the names whose pages may hold the assistant's conversation frame: its
+  # pages, and Chat's (llm.), where it runs too but asks its model on the
+  # page's own name, so llm is not one of guide-pages' cross-name readers
+  keepPages = guidePages ++ [ "llm" ];
   user = "dd-verify";
   # a tile's service by its host: https://git.<domain>/ is "git"
   tileHost =
@@ -649,10 +653,10 @@ in
                 "frame-ancestors ${
                   lib.concatMapStringsSep " " (h: "https://${h}") (
                     [ base ]
-                    ++ map (n: "${n}.${base}") guidePages
+                    ++ map (n: "${n}.${base}") keepPages
                     # a demo- name only where the demo has a door (roles/gateway.nix)
                     ++ map (n: "demo-${n}.${base}") (
-                      lib.intersectLists guidePages (lib.attrByPath [ "dd" "public" "demoDoors" ] [ ] config)
+                      lib.intersectLists keepPages (lib.attrByPath [ "dd" "public" "demoDoors" ] [ ] config)
                     )
                   )
                 }"
