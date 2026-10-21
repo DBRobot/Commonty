@@ -66,7 +66,9 @@ in
       "shadow"
       "agreed"
     ];
-    default = "replay";
+    # fleet/policy.json identityFrom, where the box has the agreed log to read
+    default =
+      if agreed then (lib.importJSON ../../../fleet/policy.json).identityFrom or "replay" else "replay";
     description = "Where the gate learns who is who (docs/dev/identity-state.md): its own replay of the directory log; shadow, both with the replay served and every difference logged; or agreed, the control plane's judged state alone. shadow and agreed need the agreed log (dd-control on the box).";
   };
   options.dd.verify.enable = lib.mkOption {
