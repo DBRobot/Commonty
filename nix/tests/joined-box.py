@@ -106,7 +106,21 @@ assert f"j{name}" == nix["keyName"], name
 
 # its agent: named by the key, it takes the release's commit, builds its
 # system under that name, and moves to it
-box.succeed("systemctl start dd-agent", timeout=900)
+try:
+    box.succeed("systemctl start dd-agent", timeout=900)
+except Exception:
+    print(
+        box.execute(
+            "journalctl --no-pager _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value dd-agent)"
+            " | tail -100; ps axf -o pid,etime,args"
+        )[1]
+    )
+    raise
+# and collected no garbage on the way: the VM's store is the host's whole
+# store under an overlay, so a collection would walk all of it over 9p and
+# leave a whiteout for each path it removed (nix/lib/vm-test.nix)
+gone = box.succeed("find /nix/.rw-store/upper -maxdepth 1 -type c | wc -l").strip()
+assert gone == "0", f"nix collected garbage in the VM: {gone} store paths removed"
 assert box.succeed("cat /etc/hostname").strip() == nix["keyName"]
 assert box.succeed("readlink -f /run/current-system").strip() == named
 

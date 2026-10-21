@@ -45,6 +45,17 @@ pkgs.testers.runNixOSTest (
     extraPythonPackages = p: [ (helpers p) ] ++ (test.extraPythonPackages or (_: [ ])) p;
   }
   // {
+    # A test VM's store is the host's whole store under an overlay whose
+    # writable half is a tmpfs of a gigabyte or two, far below a box's
+    # min-free (roles/core.nix): the first store write of any nix in the VM
+    # collected garbage first, and every host path the VM had not registered
+    # was garbage, removed one walk at a time over 9p. On node1's store that
+    # took from four minutes to past the joined-box test's fifteen
+    # (2026-10-21). Nothing in a test frees store space on purpose.
+    defaults = {
+      imports = [ (test.defaults or { }) ];
+      nix.settings.min-free = lib.mkForce 0;
+    };
     # every box gets the script helper the real boxes get (flake.nix); the
     # test's other node settings stay
     node = (test.node or { }) // {
