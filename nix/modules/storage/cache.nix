@@ -161,6 +161,12 @@ in
         BUCKET = "nix-cache";
         ENDPOINT = config.dd.box.s3;
       };
+      # with failover every box able to hold the forge has it, but only the
+      # holder's releases branch is current: a box that held it once keeps a
+      # stale copy, whose older releases would let go of what is wanted now
+      unitConfig = lib.mkIf (config.dd.failover or false) {
+        ConditionPathExists = "/run/dd-placed/forgejo";
+      };
       serviceConfig = {
         Type = "oneshot";
         PrivateTmp = true;
