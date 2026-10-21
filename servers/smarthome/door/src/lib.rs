@@ -172,7 +172,11 @@ impl App {
 
     /// how long the gate's word on someone lasts: past the next refresh
     pub fn vouch_for(&self) -> u64 {
-        self.cfg.ct_every.as_secs().saturating_mul(2).saturating_add(600)
+        self.cfg
+            .ct_every
+            .as_secs()
+            .saturating_mul(2)
+            .saturating_add(600)
     }
 
     pub fn vouched(&self, name: &str, root: &str) {

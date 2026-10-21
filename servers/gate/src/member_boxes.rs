@@ -1250,7 +1250,11 @@ mod tests {
                 .send()
                 .await
                 .unwrap();
-            assert_eq!(r.status().as_u16(), if want == 200 { 200 } else { 401 }, "{name} lists");
+            assert_eq!(
+                r.status().as_u16(),
+                if want == 200 { 200 } else { 401 },
+                "{name} lists"
+            );
         }
         // and a client reads whether someone is a member, by their root
         let c = cookie_of(&s.issue("ivy"));

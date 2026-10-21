@@ -3003,11 +3003,31 @@ mod tests {
             "agreed state: no such name"
         );
         let who = format!("shadowtest{}", std::process::id());
-        assert!(crate::ident::shadow_differs(&who, "member", &false, &true, Some(&m)));
-        assert!(!crate::ident::shadow_differs(&who, "member", &false, &true, Some(&m)));
+        assert!(crate::ident::shadow_differs(
+            &who,
+            "member",
+            &false,
+            &true,
+            Some(&m)
+        ));
+        assert!(!crate::ident::shadow_differs(
+            &who,
+            "member",
+            &false,
+            &true,
+            Some(&m)
+        ));
         // another check, or another answer, is another line
-        assert!(crate::ident::shadow_differs(&who, "registered", &false, &true, Some(&m)));
-        assert!(crate::ident::shadow_differs(&who, "member", &true, &false, None));
+        assert!(crate::ident::shadow_differs(
+            &who,
+            "registered",
+            &false,
+            &true,
+            Some(&m)
+        ));
+        assert!(crate::ident::shadow_differs(
+            &who, "member", &true, &false, None
+        ));
     }
 
     #[tokio::test]

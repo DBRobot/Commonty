@@ -80,7 +80,11 @@ pub fn recipients(
             return false;
         }
         identity::anchored(e, &m.members, &m.revoked, &m.names).is_ok()
-            || agreed.contains(&(name.clone(), e.entry.root.clone()))
+            // the agreed state's word counts for a name the list gives
+            // nobody: one it gives someone is theirs, by their root or a
+            // recovery proved from it (below), and nobody else's
+            || (identity::listed_as(name, &m.members, &m.names).is_none()
+                && agreed.contains(&(name.clone(), e.entry.root.clone())))
             || identity::listed_as(name, &m.members, &m.names)
                 .is_some_and(|from| identity::follows(e, h, from).is_ok())
             || (e.entry.recovered_from.is_empty()
@@ -219,7 +223,9 @@ async fn directory_now(
             &crate::who::fetch(&dirs[..1], n).await,
             directory::Anchor::FirstSight,
         ) {
-            if directory::agreed_member(&dirs[..1], n, &e.entry.root)
+            // every directory asked, as a client holds anyone the list does
+            // not name (directory::resolve_member): one down is a no
+            if directory::agreed_member(dirs, n, &e.entry.root)
                 .await
                 .is_ok()
             {
@@ -379,35 +385,99 @@ mod tests {
         let other = identity::encode_public(&identity::generate().verifying_key());
         let list = |revoked: Vec<String>| identity::MemberList {
             counter: 1,
-            members: vec![identity::member_id(&identity::encode_public(&ann.verifying_key()))],
+            members: vec![identity::member_id(&identity::encode_public(
+                &ann.verifying_key(),
+            ))],
             revoked,
             names: Default::default(),
         };
         let dir = |standing: (u16, serde_json::Value)| {
             stand_in(vec![
-                ("/_dd/directory/cat".into(), 200, serde_json::to_string(&cat_e).unwrap()),
-                ("/_dd/directory/cat/standing".into(), standing.0, standing.1.to_string()),
+                (
+                    "/_dd/directory/cat".into(),
+                    200,
+                    serde_json::to_string(&cat_e).unwrap(),
+                ),
+                (
+                    "/_dd/directory/cat/standing".into(),
+                    standing.0,
+                    standing.1.to_string(),
+                ),
             ])
         };
-        let yes = (200, serde_json::json!({"member": true, "root": cat_e.entry.root}));
-        let no = (200, serde_json::json!({"member": false, "root": cat_e.entry.root}));
+        let yes = (
+            200,
+            serde_json::json!({"member": true, "root": cat_e.entry.root}),
+        );
+        let no = (
+            200,
+            serde_json::json!({"member": false, "root": cat_e.entry.root}),
+        );
         let elsewhere = (200, serde_json::json!({"member": true, "root": other}));
         let unread = (503, serde_json::json!("not read yet"));
         let ok = |dirs: Vec<String>, l: identity::MemberList| async move {
             directory::resolve_released(&dirs, "cat", &l).await
         };
         assert!(ok(vec![dir(yes.clone())], list(vec![])).await.is_ok());
-        assert!(ok(vec![dir(yes.clone()), dir(yes.clone())], list(vec![])).await.is_ok());
-        assert!(ok(vec![dir(unread.clone()), dir(yes.clone())], list(vec![])).await.is_ok());
+        assert!(
+            ok(vec![dir(yes.clone()), dir(yes.clone())], list(vec![]))
+                .await
+                .is_ok()
+        );
         // one says no, or names another root: not a member
-        assert!(ok(vec![dir(yes.clone()), dir(no.clone())], list(vec![])).await.is_err());
-        assert!(ok(vec![dir(elsewhere), dir(yes.clone())], list(vec![])).await.is_err());
-        // nobody said: not a member
+        assert!(
+            ok(vec![dir(yes.clone()), dir(no.clone())], list(vec![]))
+                .await
+                .is_err()
+        );
+        assert!(
+            ok(vec![dir(elsewhere), dir(yes.clone())], list(vec![]))
+                .await
+                .is_err()
+        );
+        // one that says nothing (not going by the agreed state), or is down,
+        // is a no too: never a pass on the others' word
+        assert!(
+            ok(vec![dir(unread.clone()), dir(yes.clone())], list(vec![]))
+                .await
+                .is_err()
+        );
         assert!(ok(vec![dir(unread.clone())], list(vec![])).await.is_err());
+        let down = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let a = l.local_addr().unwrap();
+            drop(l);
+            format!("http://{a}/_dd/directory")
+        };
+        assert!(
+            ok(vec![down, dir(yes.clone())], list(vec![]))
+                .await
+                .is_err()
+        );
+        // one without her entry at all, though it says she is a member
+        let no_entry = stand_in(vec![(
+            "/_dd/directory/cat/standing".into(),
+            yes.0,
+            yes.1.to_string(),
+        )]);
+        assert!(
+            ok(vec![no_entry, dir(yes.clone())], list(vec![]))
+                .await
+                .is_err()
+        );
+        // the list gives "cat" to another root: the agreed state's word for
+        // this one is not enough without a recovery proved from it
+        let theirs = identity::member_id(&other);
+        let mut taken = list(vec![]);
+        taken.members.push(theirs.clone());
+        taken
+            .names
+            .insert(theirs.clone(), identity::name_tag(&theirs, "cat"));
+        assert!(ok(vec![dir(yes.clone())], taken).await.is_err());
         // shut out by the list, whatever the directories say
         let id = identity::member_id(&cat_e.entry.root);
         let e = ok(vec![dir(yes)], list(vec![id])).await.unwrap_err();
-        assert!(!format!("{e:#}").contains("agreed state"), "{e:#}");
+        assert!(format!("{e:#}").contains("shuts cat out"), "{e:#}");
     }
 
     #[test]
@@ -466,6 +536,16 @@ mod tests {
         let elsewhere = BTreeSet::from([("cat".to_string(), es[0].0.entry.root.clone())]);
         assert_eq!(
             recipients(&es, &m, None, &left, &elsewhere),
+            vec!["ann".to_string()]
+        );
+        // a name the list gives someone: the agreed state's word for another
+        // root under it is no one's (dan is listed; this is not his root)
+        let mut es2 = es.clone();
+        let other = identity::generate();
+        es2[4] = (entry("dan", &other), vec![]);
+        let dans = BTreeSet::from([("dan".to_string(), es2[4].0.entry.root.clone())]);
+        assert_eq!(
+            recipients(&es2, &m, None, &BTreeSet::new(), &dans),
             vec!["ann".to_string()]
         );
     }
