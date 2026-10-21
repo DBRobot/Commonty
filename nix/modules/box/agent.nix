@@ -10,6 +10,22 @@ let
   # the home controller (nix/controller) runs the agent with no dd.box: a
   # device of a household, never a box that joined on its own key
   joined = config.dd.box.joined or false;
+  # the names a soaking box probes while it holds their service: each name
+  # of a service with one writer (docs/dev/rollout.md)
+  needs = import ../../lib/needs.nix {
+    inherit lib;
+    on = config.dd.failover or false;
+  };
+  siteProbes = lib.concatLists (
+    lib.mapAttrsToList (
+      svc: n:
+      map (h: {
+        flag = svc;
+        url = "https://${h}.${config.dd.domain}/";
+        resolve = "${h}.${config.dd.domain}:443:127.0.0.1";
+      }) n.hosts
+    ) (lib.filterAttrs (_: n: n.lease) needs)
+  );
   agent = self.packages.${pkgs.stdenv.hostPlatform.system}.agent;
 in
 {
@@ -71,6 +87,16 @@ in
       default = true;
       description = "Whether sshd must be up after a switch. A home controller runs none.";
     };
+    rollout = lib.mkOption {
+      type = lib.types.bool;
+      default = config.dd.control.enable or false;
+      description = "Follow the staged rollout the control plane agrees (docs/dev/rollout.md): hold a release until this box's wave, drain before the switch, soak after it. Off: a release is taken at once.";
+    };
+    drainSeconds = lib.mkOption {
+      type = lib.types.int;
+      default = 600;
+      description = "How long a drain may take before the box switches anyway, what is left restarting in place.";
+    };
     probeSeconds = lib.mkOption {
       type = lib.types.int;
       default = 600;
@@ -114,6 +140,7 @@ in
         pkgs.systemd
         pkgs.coreutils
         pkgs.openssh # ssh-keygen checks the boxes' signatures
+        pkgs.curl # a soak's probes of the names this box serves
       ]
       # a box that joined fetches the signed commit to build itself from
       ++ lib.optional joined pkgs.git;
@@ -127,6 +154,12 @@ in
         DD_AGENT_REACH = lib.concatStringsSep " " cfg.reach;
       }
       // lib.optionalAttrs (cfg.cache != null) { DD_AGENT_CACHE = cfg.cache; }
+      // lib.optionalAttrs cfg.rollout {
+        DD_AGENT_CONTROL = "http://127.0.0.1:4195";
+        DD_AGENT_DRAIN_SECS = toString cfg.drainSeconds;
+        DD_AGENT_SITE_PROBES = "/etc/dd/site-probes.json";
+        DD_AGENT_PROMETHEUS = lib.optionalString config.services.prometheus.enable "http://127.0.0.1:${toString config.services.prometheus.port}";
+      }
       # a box that joined on its own key builds its own system, from the
       # fleet's public repository at the commit the release key signed
       // lib.optionalAttrs joined {
@@ -187,6 +220,28 @@ in
       timerConfig = {
         OnActiveSec = "3m";
         OnUnitInactiveSec = "2m";
+      };
+    };
+
+    environment.etc."dd/site-probes.json" = lib.mkIf cfg.rollout {
+      text = builtins.toJSON siteProbes;
+    };
+    # a soaking box looks at itself every minute (docs/dev/rollout.md); one
+    # that is not, every interval as before
+    systemd.services.dd-agent-soak = lib.mkIf cfg.rollout {
+      description = "Run the release agent again while this box soaks a release";
+      restartIfChanged = false;
+      unitConfig.ConditionPathExists = "/var/lib/dd-agent/soaking";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.systemd}/bin/systemctl start --no-block dd-agent.service";
+      };
+    };
+    systemd.timers.dd-agent-soak = lib.mkIf cfg.rollout {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "1m";
+        OnUnitActiveSec = "1m";
       };
     };
 

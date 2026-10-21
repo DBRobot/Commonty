@@ -20,6 +20,8 @@ use base64::engine::general_purpose::STANDARD as B64;
 use ed25519_dalek::{Signature, Signer as _, SigningKey, Verifier as _, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
+pub mod rollout;
+
 pub use identity::{decode_public, decode_secret, encode_public, encode_secret, generate};
 
 #[derive(Debug, thiserror::Error)]

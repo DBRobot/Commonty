@@ -567,7 +567,22 @@ in
         (builtins.listToAttrs (
           map (h: {
             name = "${h}.${base}";
+            # a name whose service is not answering here, as when it moves
+            # to another box (docs/dev/rollout.md), answers "one moment"
+            # with Retry-After rather than an error; the page asks again
+            value.extraConfig = ''
+              error_page 502 504 =503 /_dd/moving/moving.html;
+            '';
             value.locations = {
+              "/_dd/moving/" = {
+                alias = "${../../../servers/web-shared/moving}/";
+                ddCsp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'";
+                extraConfig = ''
+                  auth_request off;
+                  add_header Retry-After 5 always;
+                  add_header Cache-Control "no-store" always;
+                '';
+              };
               # A flood from one credential is told to wait; a request with
               # none is counted at the public door (gate/public.nix)
               "/_dd/" = {
