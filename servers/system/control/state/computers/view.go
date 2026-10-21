@@ -50,7 +50,7 @@ func (r *Replayer) CatchN(n int, item func(int) ident.Item) (*ident.State, *Stat
 			Kind string `json:"kind"`
 		}
 		if json.Unmarshal(it.Item, &probe) == nil && probe.V == 2 && Kind(probe.Kind) {
-			r.s.Judge(r.id, r.cfg, r.lim, it.Item, at)
+			r.s.Judge(r.id, r.cfg, r.lim, it.Item, at, ident.BoxesAt(it.Boxes))
 		}
 	}
 	r.next = n
@@ -94,7 +94,9 @@ type View struct {
 	Outcomes  map[string]string             `json:"outcomes"`
 }
 
-func (s *State) View(id *ident.State, cfg *ident.Config, height uint64, timeMs int64) *View {
+// View: the state at agreed time timeMs, boxes what the agreed state says of
+// each box at the same height (state.IdentBoxes; nil knows none)
+func (s *State) View(id *ident.State, cfg *ident.Config, height uint64, timeMs int64, boxes ident.Boxes) *View {
 	at := uint64(0)
 	if timeMs > 0 {
 		at = uint64(timeMs / 1000)
@@ -115,7 +117,7 @@ func (s *State) View(id *ident.State, cfg *ident.Config, height uint64, timeMs i
 		h := s.Computers[k]
 		member := false
 		if e := id.Entries[h.Owner]; e != nil && e.Signed != nil {
-			st, _, _ := id.Status(cfg, &e.Signed.Entry, at, nil)
+			st, _, _ := id.Status(cfg, &e.Signed.Entry, at, boxes)
 			member = st == "member"
 		}
 		c := &Listed{
@@ -164,13 +166,13 @@ func NewServer(cfg *ident.Config, lim *Limits, voters []string) *Server {
 
 // current is the view at a log of n items, made again only when the log
 // or the minute changes; the caller holds sv.mu
-func (sv *Server) current(n int, item func(int) ident.Item, height uint64, timeMs int64) *View {
+func (sv *Server) current(n int, item func(int) ident.Item, height uint64, timeMs int64, boxes ident.Boxes) *View {
 	// a status can change with the time alone (a suspension's window), so a
 	// view is kept for a minute at most
 	key := [2]uint64{uint64(n), uint64(timeMs / 60000)}
 	if sv.view == nil || key != sv.key {
 		id, s := sv.r.CatchN(n, item)
-		v := s.View(id, sv.cfg, 0, timeMs)
+		v := s.View(id, sv.cfg, 0, timeMs, boxes)
 		v.Height, v.Time = 0, 0
 		b, _ := json.Marshal(v)
 		if h := sha256.Sum256(b); h != sv.last || sv.changed == 0 {
@@ -183,10 +185,10 @@ func (sv *Server) current(n int, item func(int) ident.Item, height uint64, timeM
 
 // Computers is every computer as /computers lists it, for placement in the
 // same process; the view's own, not to be changed
-func (sv *Server) Computers(n int, item func(int) ident.Item, height uint64, timeMs int64) []*Listed {
+func (sv *Server) Computers(n int, item func(int) ident.Item, height uint64, timeMs int64, boxes ident.Boxes) []*Listed {
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
-	v := sv.current(n, item, height, timeMs)
+	v := sv.current(n, item, height, timeMs, boxes)
 	out := make([]*Listed, 0, len(v.Computers))
 	for _, c := range v.Computers {
 		out = append(out, c)
@@ -197,13 +199,13 @@ func (sv *Server) Computers(n int, item func(int) ident.Item, height uint64, tim
 
 // Answer: the log is n items; owner, if not empty, asks for one member's
 // alone; since, as /identity's, answers 304 while nothing changed
-func (sv *Server) Answer(n int, item func(int) ident.Item, height uint64, timeMs int64, owner string, owners bool, since uint64) (int, []byte) {
+func (sv *Server) Answer(n int, item func(int) ident.Item, height uint64, timeMs int64, boxes ident.Boxes, owner string, owners bool, since uint64) (int, []byte) {
 	// one at a time from the catching up to the answer: the states are the
 	// replayer's own, and another request catching up would change them
 	// under this one's reading
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
-	v := *sv.current(n, item, height, timeMs)
+	v := *sv.current(n, item, height, timeMs, boxes)
 	v.Height, v.Time, v.Changed = height, timeMs, sv.changed
 	if since != 0 && since >= sv.changed {
 		return http.StatusNotModified, nil

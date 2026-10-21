@@ -150,7 +150,13 @@ type State struct {
 	Deleted  map[string]string `json:"deleted"` // id -> owner
 	Outcomes map[string]string `json:"outcomes"`
 	Order    []string          `json:"outcomeOrder"`
+	// the boxes the item being judged kept (Judge), never kept itself
+	boxes ident.Boxes
 }
+
+// boxes: while an item is judged, the joined boxes as the item kept them
+// (ident.Item's Boxes); nil, none counts
+func (s *State) setBoxes(b ident.Boxes) { s.boxes = b }
 
 func New() *State {
 	return &State{Configs: map[string]map[string]*Config{}, Computers: map[string]*Held{}, Deleted: map[string]string{}, Outcomes: map[string]string{}}
@@ -182,14 +188,15 @@ func Kind(kind string) bool {
 	return false
 }
 
-// who signed: the owner's entry, and whether they are a member now
+// who signed: the owner's entry, and whether they are a member at the
+// item's time - by an invite, or by a box of theirs as the item found it
 func (s *State) owner(id *ident.State, cfg *ident.Config, name string, at uint64) (*ident.Entry, error) {
 	h := id.Entry(name, at)
 	if h == nil || h.Signed == nil {
 		return nil, errors.New("no such member")
 	}
 	e := &h.Signed.Entry
-	if st, _, _ := id.Status(cfg, e, at, nil); st != "member" {
+	if st, _, _ := id.Status(cfg, e, at, s.boxes); st != "member" {
 		return nil, fmt.Errorf("%s is not a member (%s)", name, st)
 	}
 	return e, nil
@@ -277,7 +284,9 @@ func (s *State) shape(id *ident.State, cfg *ident.Config, lim *Limits, owner str
 
 // Judge takes one item of a kind this judges, agreed at `at` (seconds),
 // against the identity state at the same point in the log
-func (s *State) Judge(id *ident.State, cfg *ident.Config, lim *Limits, raw json.RawMessage, at uint64) {
+func (s *State) Judge(id *ident.State, cfg *ident.Config, lim *Limits, raw json.RawMessage, at uint64, boxes ident.Boxes) {
+	s.setBoxes(boxes)
+	defer s.setBoxes(nil)
 	hash := ident.ItemHash(raw)
 	env, err := ident.ReadEnvelope(raw)
 	if err != nil {

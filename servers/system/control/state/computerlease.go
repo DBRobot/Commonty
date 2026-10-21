@@ -60,7 +60,7 @@ func (s *State) computerAt(cfg *Config, id string, now int64) (*computers.Held, 
 	}
 	ids, cs := rp.r.CatchN(n, func(i int) ident.Item {
 		d := s.Directory[i]
-		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item, Boxes: d.Boxes}
 	})
 	rp.n = n
 	if n > 0 {
@@ -84,7 +84,8 @@ func (s *State) checkComputerLease(cfg *Config, box, id string, now int64) error
 	e := ids.Entries[h.Owner]
 	member := false
 	if e != nil && e.Signed != nil {
-		st, _, _ := ids.Status(cfg.Identity, &e.Signed.Entry, at, nil)
+		// the boxes as this state has them now: the check is of now
+		st, _, _ := ids.Status(cfg.Identity, &e.Signed.Entry, at, s.IdentBoxes())
 		member = st == "member"
 	}
 	if !h.Up || !member {

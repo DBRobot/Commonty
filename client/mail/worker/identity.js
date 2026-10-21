@@ -48,8 +48,16 @@ export function entryOf(m) {
 }
 
 // Where its own judgment and the agreed state differ, the Worker says so
-// once a request; what it goes by stays its own until IDENTITY_FROM=agreed
-export function differ(what, name, own, agreed) {
+// once a request; what it goes by stays its own until IDENTITY_FROM=agreed.
+// One line: who, which check, both answers, and `why` - what each side
+// said beside its answer (the agreed record's status and access, the
+// reason a check refused), logged but never compared
+export function differ(what, name, own, agreed, why) {
   if (JSON.stringify(own) === JSON.stringify(agreed)) return;
-  console.warn(JSON.stringify({ 'identity-shadow': what, name, own, agreed }));
+  const line = { 'identity-shadow': what, name, own, agreed };
+  if (why !== undefined) line.why = why;
+  console.warn(JSON.stringify(line));
 }
+
+// the agreed record, as the shadow log says it: public words only
+export const said = (m) => (m ? { status: m.status ?? null, access: m.access ?? null } : 'no such name');

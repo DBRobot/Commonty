@@ -97,6 +97,9 @@ pub struct App {
     pub pairing_done: tokio::sync::Notify,
     /// someone was let in or paired: make their Home Assistant user
     pub reconcile: tokio::sync::Notify,
+    /// people the release's list does not name whom the gate said are
+    /// members (signin::vouch): name -> (root, until)
+    vouched: Mutex<HashMap<String, (String, u64)>>,
 }
 
 pub struct Parts {
@@ -131,12 +134,56 @@ impl App {
             restoring: Mutex::new(None),
             pairing_done: tokio::sync::Notify::new(),
             reconcile: tokio::sync::Notify::new(),
+            vouched: Mutex::new(HashMap::new()),
         }))
     }
 
-    /// a member of the fleet, as this release says
+    /// A member of the fleet: as this release's list says, or, for someone
+    /// it does not name (let in by an invite since, or by a box of theirs),
+    /// as the gate said lately for the root this entry has. Never someone
+    /// the release shuts out.
     pub fn member(&self, e: &identity::SignedEntry) -> bool {
-        self.cfg.members.as_ref().is_none_or(|m| m.has(e))
+        let Some(m) = &self.cfg.members else {
+            return true;
+        };
+        if m.has(e) {
+            return true;
+        }
+        !m.shut_out(e)
+            && self
+                .vouched
+                .lock()
+                .unwrap()
+                .get(&e.entry.name)
+                .is_some_and(|(root, until)| *root == e.entry.root && *until > identity::now())
+    }
+
+    /// member, asking the gate first for someone the list does not name
+    pub async fn member_vouching(&self, e: &identity::SignedEntry) -> bool {
+        if self.member(e) {
+            return true;
+        }
+        if self.cfg.members.as_ref().is_some_and(|m| m.shut_out(e)) {
+            return false;
+        }
+        signin::vouch(self, None, &e.entry.name).await;
+        self.member(e)
+    }
+
+    /// how long the gate's word on someone lasts: past the next refresh
+    pub fn vouch_for(&self) -> u64 {
+        self.cfg.ct_every.as_secs().saturating_mul(2).saturating_add(600)
+    }
+
+    pub fn vouched(&self, name: &str, root: &str) {
+        let until = identity::now().saturating_add(self.vouch_for());
+        let mut v = self.vouched.lock().unwrap();
+        v.retain(|_, (_, u)| *u > identity::now());
+        v.insert(name.to_string(), (root.to_string(), until));
+    }
+
+    pub fn unvouched(&self, name: &str) {
+        self.vouched.lock().unwrap().remove(name);
     }
 
     pub fn controller(&self) -> String {
@@ -207,7 +254,8 @@ impl App {
                 .map(|p| &p.entry)
                 .or(sess.entry.as_ref())
                 .or(s.state.asked.get(&sess.name).map(|a| &a.entry));
-            if !entry.is_some_and(|e| m.has(e)) {
+            let _ = m;
+            if !entry.is_some_and(|e| self.member(e)) {
                 return None;
             }
         }
@@ -603,10 +651,37 @@ pub(crate) mod tests {
     }
 
     #[derive(Default)]
-    pub struct FakeDirectory(pub Mutex<HashMap<String, SignedEntry>>);
+    pub struct FakeDirectory(
+        pub Mutex<HashMap<String, SignedEntry>>,
+        /// what the gate says of each name, and how often it was asked
+        pub Mutex<HashMap<String, signin::Standing>>,
+        pub Mutex<usize>,
+    );
     impl signin::Directory for FakeDirectory {
         fn entry<'a>(&'a self, _domain: &'a str, name: &'a str) -> Fut<'a, Option<SignedEntry>> {
             Box::pin(async move { Ok(self.0.lock().unwrap().get(name).cloned()) })
+        }
+        fn standing<'a>(
+            &'a self,
+            _reg: Option<&'a pair::Registration>,
+            name: &'a str,
+        ) -> Fut<'a, Option<signin::Standing>> {
+            Box::pin(async move {
+                *self.2.lock().unwrap() += 1;
+                Ok(self.1.lock().unwrap().get(name).cloned())
+            })
+        }
+    }
+    impl FakeDirectory {
+        /// the gate says this of name: a member, under this root, or not
+        pub fn says(&self, name: &str, root: &str, member: bool) {
+            self.1.lock().unwrap().insert(
+                name.into(),
+                signin::Standing {
+                    root: root.into(),
+                    member,
+                },
+            );
         }
     }
 

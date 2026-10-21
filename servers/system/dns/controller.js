@@ -69,6 +69,13 @@ async function memberWord(env, entry, label, controller, sig) {
     }
   }
   let agreed, agreedWhy;
+  // who the word claims to be, for the shadow log: the entry's name
+  let who = '';
+  try {
+    who = String(JSON.parse(entry).entry.name || '');
+  } catch {
+    /* not an entry: the checks say so */
+  }
   if (how !== 'replay') {
     try {
       const name = JSON.parse(entry).entry.name;
@@ -79,7 +86,7 @@ async function memberWord(env, entry, label, controller, sig) {
       agreedWhy = String(e.message || e);
     }
   }
-  if (how === 'shadow') differ('controller', own || agreed || '', { name: own || null }, { name: agreed || null });
+  if (how === 'shadow') differ('controller', who, { name: own || null }, { name: agreed || null }, { own: ownWhy ?? null, agreed: agreedWhy ?? null, label });
   if (how === 'agreed') {
     if (agreedWhy) throw new Error(agreedWhy);
     return agreed;

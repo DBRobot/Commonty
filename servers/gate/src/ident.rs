@@ -213,6 +213,62 @@ impl Agreed {
     }
 }
 
+/// The shadow log's one line for a check the two answers differ on: who,
+/// which check, the replay's answer and the agreed state's, and what the
+/// agreed state has of them (status, access, why their boxes count or not).
+/// The same line is written once in ten minutes: a check made on every
+/// request would otherwise fill the journal with it.
+pub fn shadow_differs(
+    name: &str,
+    check: &str,
+    replay: &dyn std::fmt::Display,
+    agreed: &dyn std::fmt::Display,
+    m: Option<&Member>,
+) -> bool {
+    let line = format!(
+        "identity shadow: {name}: {check}: replay {replay}, agreed {agreed} ({})",
+        agreed_said(m)
+    );
+    static SEEN: std::sync::LazyLock<Mutex<HashMap<String, std::time::Instant>>> =
+        std::sync::LazyLock::new(Default::default);
+    let now = std::time::Instant::now();
+    let mut seen = SEEN.lock().unwrap();
+    seen.retain(|_, at| now.duration_since(*at) < SHADOW_AGAIN);
+    if seen.len() >= 4096 || seen.contains_key(&line) {
+        return false;
+    }
+    seen.insert(line.clone(), now);
+    eprintln!("{line}");
+    true
+}
+
+/// how long the shadow log keeps quiet about a line it wrote
+pub const SHADOW_AGAIN: Duration = Duration::from_secs(600);
+
+/// what the agreed state has of someone, for the shadow log: public words
+/// only (a status, an access, box names and why each counts)
+pub fn agreed_said(m: Option<&Member>) -> String {
+    let Some(m) = m else {
+        return "agreed state: no such name".into();
+    };
+    let boxes: Vec<String> = m
+        .enlisted
+        .iter()
+        .map(|b| {
+            format!(
+                "{} {}",
+                b["box"].as_str().unwrap_or("?"),
+                b["why"].as_str().unwrap_or("?")
+            )
+        })
+        .collect();
+    let mut s = format!("agreed status {}, access {}", m.status, m.access);
+    if !boxes.is_empty() {
+        s.push_str(&format!(", boxes: {}", boxes.join("; ")));
+    }
+    s
+}
+
 /// What two answers about one person differ in, for the shadow log: field
 /// names and values that are public (names, versions, fingerprints, key
 /// ids), never a secret

@@ -1754,8 +1754,10 @@ async fn main() -> Result<()> {
                 GitCmd::Signers => {
                     let mut lines = std::collections::BTreeSet::new();
                     let mut people = 0;
-                    // whose keys git trusts is the release's to say: an
-                    // entry any box serves would otherwise put a key of its
+                    // whose keys git trusts is the release's to say, or for
+                    // a member it does not name (by a box of theirs) the
+                    // agreed state's as every directory says it: an entry
+                    // any box serves would otherwise put a key of its
                     // choosing behind a member's name
                     let list = account::released(&keys, &directories)
                         .await

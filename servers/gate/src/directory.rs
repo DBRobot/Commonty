@@ -402,11 +402,10 @@ impl Directory {
             From::Shadow => {
                 let replay = r();
                 if self.agreed_known() {
-                    let agreed = self.agreed_member(name).is_some_and(|m| m.has_left());
+                    let m = self.agreed_member(name);
+                    let agreed = m.as_ref().is_some_and(|m| m.has_left());
                     if replay != agreed {
-                        eprintln!(
-                            "identity shadow: {name}: left: replay {replay}, agreed {agreed}"
-                        );
+                        crate::ident::shadow_differs(name, "left", &replay, &agreed, m.as_ref());
                     }
                 }
                 replay
@@ -810,16 +809,61 @@ impl Directory {
         let _ = self.caller.set(c);
     }
 
-    /// On the release's list (or let in by a code the owner signed), and not
-    /// revoked. With no list, anyone with an entry.
+    /// The fleet's services are theirs. Replaying: on the release's list
+    /// (or let in by a code the owner signed), and not revoked; with no
+    /// list, anyone with an entry. Agreed: the agreed state's access, an
+    /// invite or a box that counts.
     pub fn member(&self, name: &str) -> bool {
-        let Some(e) = self.entry(name).ok().flatten() else {
-            return false;
-        };
-        let Some(m) = &self.members else {
-            return true;
-        };
-        identity::is_member(&e.entry, &m.members, &m.revoked, self.release())
+        self.has_access(name, "member", || {
+            let Some(e) = self.replay_entry(name).ok().flatten() else {
+                return false;
+            };
+            let Some(m) = &self.members else {
+                return true;
+            };
+            identity::is_member(&e.entry, &m.members, &m.revoked, self.release())
+        })
+    }
+
+    /// Whether the fleet's services are this person's, where who-is-who
+    /// comes from (ident.rs): `replay` is this box's own judgement; agreed,
+    /// the agreed state's access (an invite, or a box of theirs that
+    /// counts), nobody's while it is not read; shadow, the replay's, with a
+    /// line in the log where the two differ naming who, `check`, and both
+    /// answers.
+    pub fn has_access(&self, name: &str, check: &str, replay: impl FnOnce() -> bool) -> bool {
+        use crate::ident::From;
+        let agreed = |m: Option<&crate::ident::Member>| m.is_some_and(|m| m.has_access());
+        match self.ident_from {
+            From::Replay => replay(),
+            From::Agreed => self.agreed_known() && agreed(self.agreed_member(name).as_ref()),
+            From::Shadow => {
+                let r = replay();
+                if self.agreed_known() {
+                    let m = self.agreed_member(name);
+                    let a = agreed(m.as_ref());
+                    if r != a {
+                        crate::ident::shadow_differs(name, check, &r, &a, m.as_ref());
+                    }
+                }
+                r
+            }
+        }
+    }
+
+    /// The agreed state's word on someone, for a client holding an entry
+    /// the release's list does not name (GET /_dd/directory/{name}/standing,
+    /// /_dd/controller/standing/{name}): the root the agreed state has for
+    /// them and whether it gives them the services. Only where the agreed
+    /// state is what this box goes by (agreed): replaying, or in shadow,
+    /// it says nothing, and a client holds them to the list alone as before.
+    pub fn standing(&self, name: &str) -> Option<(String, bool, String)> {
+        if self.ident_from != crate::ident::From::Agreed || !self.agreed_known() {
+            return None;
+        }
+        let m = self.agreed_member(name)?;
+        let root = m.entry()?.entry.root;
+        Some((root, m.has_access(), m.access.clone()))
     }
 
     fn identify(&self, headers: &HeaderMap) -> Option<String> {
@@ -885,6 +929,7 @@ pub fn router(d: Arc<Directory>) -> Router {
             axum::routing::put(crate::computers::put),
         )
         .route("/_dd/directory/{name}/recoveries", get(get_recoveries))
+        .route("/_dd/directory/{name}/standing", get(get_standing))
         .route("/_dd/members", get(get_members))
         .route("/_dd/invite/{key}", get(get_invite).put(put_invite))
         .with_state(d)
@@ -942,6 +987,47 @@ async fn get_recoveries(
         return refused();
     }
     Json(d.handovers(&name)).into_response()
+}
+
+/// Whether the services are this person's, by the root their entry has:
+/// read as the entry is. A client holds an entry to the release's list;
+/// someone the list does not name (a member by a box) it holds to this,
+/// asked of every directory it knows (client/directory standing)
+async fn get_standing(
+    State(d): State<Arc<Directory>>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !identity::valid_name(&name) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    if !d.may_read(&headers, Some(&name)) {
+        return refused();
+    }
+    standing_answer(&d, &name)
+}
+
+/// a standing, or why there is none: 503 where this box does not go by
+/// the agreed state or has not read it (a client then hears nothing, which
+/// is not "nobody"), 404 for a name the agreed state does not have
+pub(crate) fn standing_answer(d: &Directory, name: &str) -> Response {
+    if d.ident_from != crate::ident::From::Agreed || !d.agreed_known() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "this box does not go by the agreed state, or has not read it yet",
+        )
+            .into_response();
+    }
+    match d.standing(name) {
+        Some((root, member, access)) => (
+            [("cache-control", "no-store")],
+            Json(serde_json::json!({
+                "name": name, "root": root, "member": member, "access": access, "from": "agreed",
+            })),
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 /// The signed member list, for anyone: member ids and revoked ids, which
@@ -2829,6 +2915,99 @@ mod tests {
         assert!(diff.iter().any(|x| x.starts_with("devices")), "{diff:?}");
         // and the same entry both ways differs in nothing
         assert!(crate::ident::entry_differences(Some(&mine), Some(&mine)).is_empty());
+    }
+
+    /// A member by a box of theirs (docs/dev/joining.md, "Access"): on no
+    /// list, so the replay never counts them, and the agreed state's access
+    /// does in agreed - for the directory's reads (may_read), a house's
+    /// Wi-Fi (DirHouse) and a client's standing; shadow serves the replay
+    /// and names the difference
+    #[test]
+    fn a_member_by_a_box_counts_wherever_the_agreed_state_is_read() {
+        use crate::home::Vouch as _;
+        let ann = generate();
+        let cat = generate();
+        let list = crate::Members::list(vec![identity::member_id(&encode_public(
+            &ann.verifying_key(),
+        ))]);
+        let cat_e = sign(entry("cat", &cat, &[], 1), &cat).unwrap();
+        let cat_id = identity::member_id(&cat_e.entry.root);
+        let state = |access: &str, status: &str| {
+            serde_json::json!({"cat": {"id": cat_id, "ids": [cat_id], "status": status, "access": access,
+                "enlisted": [{"box": "j0000000001", "counts": access == "box", "why": "seen"}],
+                "item": {"entry": cat_e}}})
+        };
+        let open = |from, members: serde_json::Value| {
+            let dir = scratch(&format!("boxmember-{from:?}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("cat.json"), serde_json::to_vec(&cat_e).unwrap()).unwrap();
+            let d = if from == crate::ident::From::Replay {
+                Directory::open(dir, None).unwrap()
+            } else {
+                agreed_with(dir, from, members)
+            };
+            Arc::new(d.with_members(Some(list.clone())))
+        };
+        let house = |d: &Arc<Directory>| crate::home::DirHouse {
+            home: crate::home::Home::new(None, &[]),
+            directory: d.clone(),
+            members: Some(list.clone()),
+        };
+        // agreed: her box counts
+        let d = open(crate::ident::From::Agreed, state("box", "member"));
+        assert!(d.member("cat"));
+        assert!(house(&d).is_member("cat"));
+        let st = d.standing("cat").unwrap();
+        assert_eq!(st, (cat_e.entry.root.clone(), true, "box".to_string()));
+        // her box gone: signed up, no access
+        let d = open(crate::ident::From::Agreed, state("none", "none"));
+        assert!(!d.member("cat"));
+        assert!(!house(&d).is_member("cat"));
+        assert!(!d.standing("cat").unwrap().1);
+        // the agreed state not read yet: nobody, not everybody
+        let dir = scratch("boxmember-unread");
+        let unread = Directory::open(dir, None)
+            .unwrap()
+            .identity_from(crate::ident::From::Agreed, Some("http://127.0.0.1:1"))
+            .with_members(Some(list.clone()));
+        assert!(!unread.member("cat"));
+        // replay: the list alone, as before
+        let d = open(crate::ident::From::Replay, state("box", "member"));
+        assert!(!d.member("cat"));
+        assert!(!house(&d).is_member("cat"));
+        assert!(d.standing("cat").is_none(), "a replaying box says nothing");
+        // shadow: the replay's answer, and the difference said once
+        let d = open(crate::ident::From::Shadow, state("box", "member"));
+        assert!(!d.member("cat"));
+        assert!(!house(&d).is_member("cat"));
+        assert!(d.standing("cat").is_none(), "shadow goes by the replay");
+    }
+
+    /// The shadow log's line says who, which check, both answers and what
+    /// the agreed state has of them; the same line is not written again
+    /// within SHADOW_AGAIN
+    #[test]
+    fn the_shadow_log_names_who_the_check_and_both_answers_once() {
+        let m: crate::ident::Member = serde_json::from_value(serde_json::json!({
+            "status": "member", "access": "box",
+            "enlisted": [{"box": "j0000000001", "why": "seen"}, {"box": "j0000000002", "why": "not qualifying"}]
+        }))
+        .unwrap();
+        let said = crate::ident::agreed_said(Some(&m));
+        assert_eq!(
+            said,
+            "agreed status member, access box, boxes: j0000000001 seen; j0000000002 not qualifying"
+        );
+        assert_eq!(
+            crate::ident::agreed_said(None),
+            "agreed state: no such name"
+        );
+        let who = format!("shadowtest{}", std::process::id());
+        assert!(crate::ident::shadow_differs(&who, "member", &false, &true, Some(&m)));
+        assert!(!crate::ident::shadow_differs(&who, "member", &false, &true, Some(&m)));
+        // another check, or another answer, is another line
+        assert!(crate::ident::shadow_differs(&who, "registered", &false, &true, Some(&m)));
+        assert!(crate::ident::shadow_differs(&who, "member", &true, &false, None));
     }
 
     #[tokio::test]

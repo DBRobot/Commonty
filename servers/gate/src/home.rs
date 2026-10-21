@@ -123,12 +123,18 @@ impl Vouch for DirHouse {
         self.directory.entry(user).ok().flatten()
     }
     fn is_member(&self, user: &str) -> bool {
-        // no list, no members: this box does not guess
-        let (Some(m), Some(e)) = (&self.members, self.entry_of(user)) else {
+        if user == crate::pages::DEMO_USER {
             return false;
-        };
-        !self.directory.has_left(user)
-            && identity::is_member(&e.entry, &m.members, &m.revoked, self.directory.release())
+        }
+        // agreed: the agreed state's access, an invite or a box that counts
+        self.directory.has_access(user, "house member", || {
+            // no list, no members: this box does not guess
+            let (Some(m), Some(e)) = (&self.members, self.entry_of(user)) else {
+                return false;
+            };
+            !self.directory.leaving.has_left(user)
+                && identity::is_member(&e.entry, &m.members, &m.revoked, self.directory.release())
+        })
     }
     fn house(&self) -> &Home {
         &self.home

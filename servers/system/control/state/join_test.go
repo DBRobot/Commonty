@@ -306,3 +306,47 @@ func TestAStrangersWordAloneIsNotOurFault(t *testing.T) {
 		}
 	}
 }
+
+// A remote computer's item keeps the joined boxes as the state has them
+// as it is ordered (DirItem's Boxes): the judges replay it later, and a
+// member by a box is a member as of the item, not of the replay. Only the
+// facts access reads are kept, and only on a computer's item.
+func TestAComputersItemKeepsTheJoinedBoxesAsTheyWere(t *testing.T) {
+	f := newFleet(t)
+	k := strangerKey(1)
+	name, _, _ := JoinName(k)
+	f.block(1000, joinReq(k, 1))
+	hb := Request{Kind: "heartbeat", Box: name, Seq: 2, Sig: "ok:" + k}
+	facts := map[string]float64{"load": 3, "threads": 8, "release": 40, "agent_ok": 1}
+	hb.Body, _ = json.Marshal(Heartbeat{Facts: facts})
+	if f.block(2000, hb) != 1 {
+		t.Fatal("heartbeat refused")
+	}
+	f.beat("node1", 2500)
+	computer, _ := json.Marshal(ident.Envelope{V: 2, Kind: "computer-power", Body: "e30=", Sig: "x"})
+	entry, _ := json.Marshal(ident.Envelope{V: 2, Kind: "entry", Body: "e30=", Sig: "x"})
+	if f.block(3000, f.req("node1", "directory", json.RawMessage(entry)), f.req("node1", "directory", json.RawMessage(computer))) != 2 {
+		t.Fatal("items refused")
+	}
+	d := f.s.Directory
+	if d[0].Boxes != nil {
+		t.Fatalf("an entry kept boxes: %+v", d[0].Boxes)
+	}
+	got, ok := d[1].Boxes[name]
+	if !ok || len(d[1].Boxes) != 1 {
+		t.Fatalf("the computer's item kept %+v", d[1].Boxes)
+	}
+	if got.LastSeen != 2000 || got.Fleet != 0 || got.Facts["threads"] != 8 || got.Facts["agent_ok"] != 1 || got.Facts["release"] != 40 {
+		t.Fatalf("%+v", got)
+	}
+	if _, kept := got.Facts["load"]; kept {
+		t.Fatal("a fact access does not read was kept")
+	}
+	// the box heard again later changes nothing the item kept
+	hb.Seq, facts["threads"] = 3, 2
+	hb.Body, _ = json.Marshal(Heartbeat{Facts: facts})
+	f.block(9000, hb)
+	if f.s.Directory[1].Boxes[name].LastSeen != 2000 || f.s.Directory[1].Boxes[name].Facts["threads"] != 8 {
+		t.Fatal("the item's boxes moved with the box")
+	}
+}

@@ -1242,6 +1242,30 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(r.status().as_u16(), want, "{name}");
+            // the directory is members' to read (may_read), a member by a
+            // box's as an invited one's
+            let r = reqwest::Client::new()
+                .get(format!("{url}/_dd/directory"))
+                .header("cookie", &c)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status().as_u16(), if want == 200 { 200 } else { 401 }, "{name} lists");
+        }
+        // and a client reads whether someone is a member, by their root
+        let c = cookie_of(&s.issue("ivy"));
+        for (name, i, member) in [("bo", 1, true), ("ivy", 0, true), ("nan", 2, false)] {
+            let v: serde_json::Value = reqwest::Client::new()
+                .get(format!("{url}/_dd/directory/{name}/standing"))
+                .header("cookie", &c)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(v["member"], member, "{name}: {v}");
+            assert_eq!(v["root"], es[i].entry.root.as_str());
         }
     }
 }

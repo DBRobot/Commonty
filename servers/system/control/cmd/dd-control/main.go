@@ -972,7 +972,7 @@ func main() {
 	logItem := func(s *state.State) func(int) ident.Item {
 		return func(i int) ident.Item {
 			d := s.Directory[i]
-			return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+			return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item, Boxes: d.Boxes}
 		}
 	}
 	// what the fleet would run, from the agreed state now
@@ -989,7 +989,7 @@ func main() {
 		decide := func(s *state.State) place.Plan {
 			i := in
 			if rc != nil {
-				i.Computers = rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time)
+				i.Computers = rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time, s.IdentBoxes())
 			}
 			return place.Decide(i, s, cfg.Rules.GoneAfter, memberBoxes(ids, s))
 		}
@@ -999,7 +999,7 @@ func main() {
 				return nil, errors.New("the release has no rules for computers")
 			}
 			up := map[string]*computers.Listed{}
-			for _, c := range rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time) {
+			for _, c := range rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time, s.IdentBoxes()) {
 				up[place.ComputerService(c.ID)] = c
 			}
 			return up, nil
@@ -1066,13 +1066,13 @@ func main() {
 			}
 			s := n.State()
 			w.Header().Set("content-type", "application/json")
-			_ = json.NewEncoder(w).Encode(computerLease(s, cfg, id, rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time)))
+			_ = json.NewEncoder(w).Encode(computerLease(s, cfg, id, rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time, s.IdentBoxes())))
 		})
 		http.HandleFunc("/computers", func(w http.ResponseWriter, req *http.Request) {
 			q := req.URL.Query()
 			since, _ := strconv.ParseUint(q.Get("since"), 10, 64)
 			s := n.State()
-			code, b := rc.Answer(len(s.Directory), logItem(s), s.Height, s.Time, q.Get("owner"), q.Get("owners") == "1", since)
+			code, b := rc.Answer(len(s.Directory), logItem(s), s.Height, s.Time, s.IdentBoxes(), q.Get("owner"), q.Get("owners") == "1", since)
 			w.Header().Set("content-type", "application/json")
 			w.WriteHeader(code)
 			_, _ = w.Write(b)
@@ -1104,7 +1104,7 @@ func memberBoxes(ids *ident.Server, s *state.State) map[string]bool {
 	}
 	v := ids.View(len(s.Directory), func(i int) ident.Item {
 		d := s.Directory[i]
-		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item, Boxes: d.Boxes}
 	}, s.Height, s.Time, s.IdentBoxes())
 	for _, m := range v.Members {
 		if m.Status != "member" {

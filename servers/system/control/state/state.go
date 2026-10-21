@@ -125,6 +125,11 @@ type DirItem struct {
 	Time int64           `json:"time"`
 	Box  string          `json:"box"`
 	Item json.RawMessage `json:"item"`
+	// for a remote computer's item alone: the joined boxes as this state
+	// has them as it is ordered (what access reads of each, ident.ForAccess).
+	// The judges replay the log later, item by item, and whether its signer
+	// is a member by a box of theirs is a question of then, not of now
+	Boxes map[string]ident.BoxInfo `json:"boxes,omitempty"`
 }
 
 // BuiltItem is a box's word on one job of a build order: what it built
@@ -353,7 +358,11 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 			b.DirWindow, b.DirCount = now, 0
 		}
 		b.DirCount++
-		s.Directory = append(s.Directory, DirItem{Height: s.Height, Time: now, Box: r.Box, Item: append(json.RawMessage(nil), r.Body...)})
+		d := DirItem{Height: s.Height, Time: now, Box: r.Box, Item: append(json.RawMessage(nil), r.Body...)}
+		if computerItem(r.Body) {
+			d.Boxes = s.joinedBoxes()
+		}
+		s.Directory = append(s.Directory, d)
 	case "built":
 		if now-b.BuiltWindow >= 60_000 {
 			b.BuiltWindow, b.BuiltCount = now, 0
@@ -384,6 +393,29 @@ func (s *State) Block(cfg *Config, verify Verify, reqs []Request, now int64) (ap
 		}
 	}
 	return applied
+}
+
+// computerItem: a v2 item of a kind the computers judge reads
+// (state/computers), the same probe its replayer makes
+func computerItem(body []byte) bool {
+	var probe struct {
+		V    int    `json:"v"`
+		Kind string `json:"kind"`
+	}
+	return json.Unmarshal(body, &probe) == nil && probe.V == 2 && computers.Kind(probe.Kind)
+}
+
+// joinedBoxes: each joined box as access reads it now (none: no box
+// counts, as for an item from before items kept them)
+func (s *State) joinedBoxes() map[string]ident.BoxInfo {
+	out := map[string]ident.BoxInfo{}
+	look := s.IdentBoxes()
+	for name := range s.Joined {
+		if info, ok := look(name); ok {
+			out[name] = ident.ForAccess(info)
+		}
+	}
+	return out
 }
 
 // Alive: heard from within GoneAfter of now.

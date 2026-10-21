@@ -16,15 +16,25 @@ if sys.argv[1] == "item":
     # as a v2 envelope, and her device's token puts it to her gate
     # (PUT /_dd/boxes/<kind>), which checks it and hands it to the log.
     # The body is written as the judge reads it (state/ident enlist).
+    # `fleet.py item computer <id>`: a remote computer of hers, signed by
+    # her root as the computers judge reads it (state/computers Computer,
+    # its fields in that order), put to PUT /_dd/computers/computer
     kind, box = sys.argv[2], sys.argv[3]
     root = ed.Ed25519PrivateKey.from_private_bytes(
         bytes.fromhex(open("root.hex").read())
     )
     rpub = b64(root.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw))
-    fields = {"member": hashlib.sha256(rpub.encode()).hexdigest(), "box": box}
-    if kind == "enlist":
-        fields["ticket"] = sys.argv[4]
-    fields["at"] = int(time.time())
+    if kind == "computer":
+        fields = {
+            "owner": "ada", "id": box, "name": "dev", "config": "default",
+            "memory": 1024, "threads": 1, "disk": 32, "nix": "", "ports": [],
+            "players": [], "keys": [], "consent": "any", "anywhere": True, "version": 1,
+        }
+    else:
+        fields = {"member": hashlib.sha256(rpub.encode()).hexdigest(), "box": box}
+        if kind == "enlist":
+            fields["ticket"] = sys.argv[4]
+        fields["at"] = int(time.time())
     body = json.dumps(fields, separators=(",", ":")).encode()
     msg = f"commonty {kind} v2".encode() + b"\0" + body
     env = {"v": 2, "kind": kind, "body": b64(body), "sig": b64(root.sign(msg))}
@@ -40,7 +50,9 @@ if sys.argv[1] == "item":
             "content-type: application/json",
             "--data-binary",
             json.dumps(env),
-            f"http://127.0.0.1:4281/_dd/boxes/{kind}",
+            f"http://127.0.0.1:4281/_dd/computers/{kind}"
+            if kind == "computer"
+            else f"http://127.0.0.1:4281/_dd/boxes/{kind}",
         ],
         check=True,
         stdout=sys.stderr,
@@ -97,6 +109,10 @@ cfg["identity"] = {
     "release": b64(rel.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)),
     "members": {"members": [], "revoked": []},
 }
+# members' remote computers, so a member by a box makes one (state/computers)
+cfg["computers"] = {
+    "memory": 16384, "threads": 8, "disk": 200, "portBase": 27200, "portCount": 8,
+}
 json.dump(cfg, open("config.json", "w"))
 json.dump(cfg, open(f"{OUT}/config.json", "w"))
 open("w/config.js", "w").write("export default " + json.dumps(cfg) + ";\n")
@@ -147,6 +163,43 @@ def until(what, cond, timeout=180):
 
 
 until("the relay up", lambda: up("http://127.0.0.1:8789/health"))
+
+
+# a stand-in for headscale's API, for the member gate's network door: a
+# user per name, and a key for each ask (network.rs)
+def headscale():
+    import http.server, threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def answer(self, v):
+            b = json.dumps(v).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+        def do_GET(self):
+            if self.path.startswith("/api/v1/user"):
+                name = self.path.partition("name=")[2]
+                self.answer({"users": [{"id": "7", "name": name}]})
+            else:
+                self.answer({"nodes": []})
+
+        def do_POST(self):
+            n = int(self.headers.get("content-length") or 0)
+            self.rfile.read(n)
+            self.answer({"preAuthKey": {"id": "9", "key": "test-preauth-key"}})
+
+        def log_message(self, *a):
+            pass
+
+    s = http.server.ThreadingHTTPServer(("127.0.0.1", 8790), H)
+    threading.Thread(target=s.serve_forever, daemon=True).start()
+
+
+headscale()
+open("headscale.key", "w").write("test")
 for i in (1, 2, 3):
     os.makedirs(f"placed{i}", exist_ok=True)
     json.dump({}, open(f"carries{i}.json", "w"))
@@ -212,6 +265,12 @@ for i in (1, 2, 3):
         VERIFY_DOMAIN="commonty.test",
         VERIFY_MEMBERS=members,
     )
+    if i == 1:
+        env.update(
+            VERIFY_HEADSCALE_API="http://127.0.0.1:8790",
+            VERIFY_HEADSCALE_KEY_FILE=f"{T}/headscale.key",
+            VERIFY_HEADSCALE_URL="https://net.commonty.test",
+        )
     os.makedirs(f"g{i}/keys", exist_ok=True)
     subprocess.Popen(
         ["./verify"], env=env, stdout=log(f"g{i}"), stderr=subprocess.STDOUT
