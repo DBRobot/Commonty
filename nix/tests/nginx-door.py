@@ -74,6 +74,10 @@ class UnixHTTP(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 
 sock = tmp + "/forgejo.sock"
+# the last box's run left its socket in the shared tmp; a unix socket's path
+# that exists cannot be bound again (with failover more boxes carry the door)
+if os.path.exists(sock):
+    os.unlink(sock)
 for srv in (UnixHTTP(sock, Forge), ThreadingHTTPServer(("127.0.0.1", 4181), Gate)):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
