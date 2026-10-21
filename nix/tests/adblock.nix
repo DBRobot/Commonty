@@ -28,8 +28,6 @@ in
       enable = true;
       lan = "192.168.1.2";
       household = [ "sarah" ];
-      passwordEnv = pkgs.writeText "pihole.env" "FTLCONF_webserver_api_password=test-pihole-password\n";
-      passwordFile = pkgs.writeText "pihole-password" "test-pihole-password";
       lists = [
         {
           url = "file://${blocklist}";

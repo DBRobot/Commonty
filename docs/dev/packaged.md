@@ -510,8 +510,10 @@ comes up blocking.
 ### Data and secrets
 
 Pi-hole's own state under `/var/lib/pihole` (counts and the gravity
-database). Secret: `pihole-api-password` in sops, as Pi-hole's
-`FTLCONF_webserver_api_password` and to the gate as a systemd credential.
+database). Secret: its api password, made on the box by `dd-pihole-key`
+(`/var/lib/dd-pihole-key`, root only) before Pi-hole or the gate starts,
+as Pi-hole's `FTLCONF_webserver_api_password` and to the gate as a systemd
+credential. No secrets file has it.
 
 ### Tests
 

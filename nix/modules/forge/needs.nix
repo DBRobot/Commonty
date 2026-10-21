@@ -96,6 +96,8 @@
       "dd-runner-restart" # the runner into a new config once it holds no job
       # what its builds made, sent to the nix cache (storage/cache.nix)
       "dd-cache-upload"
+      # the key what it builds is signed with in the cache, made on the box
+      "dd-cache-key"
     ];
     base = {
       requires = {

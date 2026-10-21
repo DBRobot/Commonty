@@ -6,8 +6,9 @@ let
   # the gateway holds a token for the zone only until the DNS Worker does
   byToken = config.dd.dnsWorker == "";
   canReadWorker = config.dd.hasSecret "cloudflare-workers-read";
-  # the one tunnel's credentials, until each box has its own (dd.public.ownTunnel)
-  oneTunnel = config.dd.hasSecret "cloudflared-credentials";
+  # the one tunnel's credentials, until each box has its own
+  # (dd.public.ownTunnel, whose secret the box makes): then not read at all
+  oneTunnel = config.dd.hasSecret "cloudflared-credentials" && !config.dd.public.ownTunnel;
   # a gate path on the bare name, under the same flood limits as on home
   docsGate = {
     proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}";

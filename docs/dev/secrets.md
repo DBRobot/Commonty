@@ -66,7 +66,7 @@ storage     garage-rpc-secret            garage's cluster secret, shared by stor
             cache-key-id/-secret         read key to the nix-cache bucket (also runner)
 runner      forgejo-runner-token         forge/forgejo-runner.nix
             forgejo-members-runner-token the members' runner
-            nix-cache-signing-key        signs what this box uploads to the cache
+            nix-cache-signing-key        no longer read: the box makes its own (below)
 gateway     cloudflare-token             the zone's names (dd-dns) and the ACME challenge,
                                          only until `dd dns setup`: then unused,
                                          deleted at Cloudflare and from this file
@@ -78,7 +78,7 @@ photos      ente-key-encryption, ente-key-hash, ente-jwt-secret, ente-ott,
             garage-key-id/-secret        ente's own bucket key
 library     library-key-id/-secret       the libraries bucket
 vault       vault-key-id/-secret, vault-oidc-secret
-adblock     pihole-api-password
+adblock     pihole-api-password          no longer read: the box makes its own (below)
 ```
 
 node1 runs every role and has every key above. node2 runs core, storage
@@ -134,9 +134,9 @@ takes a path option, never a value:
 
 ```nix
 # in the role
-imports = [ ./_sops.nix ../modules/adblock/pihole.nix ];
-sops.secrets.pihole-api-password = { };
-dd.adblock.passwordFile = config.sops.secrets.pihole-api-password.path;
+imports = [ ./_sops.nix ];
+sops.secrets.tmdb-token = { owner = "dd-verify"; };
+dd.verify.tmdbKeyFile = config.sops.secrets.tmdb-token.path;
 ```
 
 The options used here:
@@ -157,16 +157,99 @@ config.sops.templates."<file>".path   where it lands
 
 A template is how a program that wants an environment file gets one
 (`garage.env`, `restic.env`, `cloudflare.env`). A unit reads the file with
-`EnvironmentFile`, or is handed it with `LoadCredential` (cloudflared, and
-the gate's copy of the Pi-hole password).
+`EnvironmentFile`, or is handed it with `LoadCredential` (cloudflared).
 
 Nothing here sets `restartUnits`, so a unit sees a changed value the next
 time it starts, not when the release that changed it lands. Restart it on
 the box when it has to take the new value at once.
 
 In VM tests there is no sops. A test passes the module a store file
-(`pkgs.writeText "pihole-password" "test-pihole-password"`), so a test
-never needs a real secret.
+(`pkgs.writeText "token" "test-token"`), or lets the box make its own, so
+a test never needs a real secret.
+
+## Where each box's secrets are going
+
+Roles are going away (a box carries what its capability allows, and the
+control plane switches each service on where it is placed), and with them
+the secrets a role brings in a box's file: a box that takes a service over
+has no file with that service's secret in it. Each secret goes one of four
+ways.
+
+**Made on the box.** The box makes it the first time it needs it, keeps it
+on its own disk, and nobody else has it: a box that takes the service over
+makes its own.
+
+```
+pihole-api-password      dd-pihole-key (adblock/pihole.nix): Pi-hole and the gate here
+nix-cache-signing-key    dd-cache-key (storage/cache.nix): what this box uploads, its
+                         public half beside it (/var/lib/dd-cache-key/signing.pub),
+                         which this box alone believes (its nix.conf there); the old
+                         key in fleet/cache-keys.pub stays believed for what it signed
+ente-key-*, ente-jwt-secret, ente-ott, garage-key-id/-secret
+                         dd-ente-keys, with failover (photos/ente.nix)
+vault-key-id/-secret, vault-oidc-secret
+                         dd-vault-keys, with failover (vault/vaultwarden.nix)
+cloudflared-credentials  dd-door's own tunnel, with failover (gate/public.nix)
+```
+
+**Its bucket moves into the box's own store**, whose keys `dd-store-setup`
+makes on the box ([storage](storage.md)), and the shared pool's key goes
+with it. Each needs its data copied over first, by `dd-store-migrate`,
+copying and never deleting, and room for it in the store:
+
+```
+garage-backup-key-id/-secret   backups-<box>, into the store's own backups bucket
+thanos-key-id/-secret          metrics: each box's blocks into its own store; the
+                               observe box reads the copies the plan sends it
+cache-key-id/-secret           nix-cache: the cache a box reads is its own store's
+library-key-id/-secret         libraries: a bucket of the library's holder, as ente's
+garage-rpc-secret              retires with the shared pool
+```
+
+**Sealed to the box by the box that holds it.** The holder seals the
+value with age to each box able to take the service over (their
+`secretsKey`, the recipients postgres-follow seals its archive key to),
+beside the service's data in its own store, which the plan copies to
+those boxes; the next holder opens its own copy with its TPM key as it
+starts. The first holder's value comes from its file once, then the entry
+goes from the file.
+
+```
+ente-storage-password    the storage ledger's museum account: keys/ledger-<box>.age
+                         in the ente bucket, sealed by museum's holder
+ente-demo-password       the demo gallery's account, the same way
+forgejo-runner-token,    made by the forge's holder (forgejo actions generate-runner-token)
+forgejo-members-runner-token
+                         when it starts, sealed to each box that can run a runner and
+                         served beside the forge (git.<domain>/_runner/<box>.age); a
+                         runner fetches and opens its own only to register, once
+restic-password          made on the box, added to its repository with `restic key add`
+                         under the old one before the box reads it (above), and sealed
+                         to its owner's paper key (fleet/policy.json people.<owner>.paperKey)
+                         beside the repository, so the owner can restore a box that died
+wifi-psk                 the house's: sealed to each box of the house by the app's Wi-Fi
+                         change and the installer (box.json house.sealedWifi), as a
+                         joined box has it already
+```
+
+**The fleet's own, with an outside service.** A token another company
+issued, one per fleet. They stay in the holder's file; a box that takes
+the service over runs without it (`dd.hasSecret`) until the owner puts it
+in that box's file:
+
+```
+cloudflare-workers-read  the Worker checks (Cloudflare)
+tmdb-token               posters on Movies & TV (TMDB)
+console-password-hash    the owner's passphrase at a box's keyboard, every box
+```
+
+No longer read by anything, and to be taken out of `secrets/node1.yaml`:
+`ente-smtp-password`, `alert-recipient` and `alert-smtp-password` (mail
+goes through the mail Worker), `github-mirror-token` (no mirror), and with failover on the ones made on the
+box above (`ente-key-encryption`, `ente-key-hash`, `ente-jwt-secret`,
+`ente-ott`, `garage-key-id`, `garage-key-secret`, `vault-key-id`,
+`vault-key-secret`, `vault-oidc-secret`, `cloudflared-credentials`,
+`pihole-api-password`, `nix-cache-signing-key`; node2's too for the last).
 
 ## Editing
 
