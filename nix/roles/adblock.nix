@@ -7,15 +7,10 @@
     ../modules/adblock/pihole.nix
     ../modules/smarthome/tang.nix
   ];
-  # Pi-hole's api password, from sops: the gate holds it, nothing else does
-  sops.secrets.pihole-api-password = { };
-  sops.templates."pihole.env".content = ''
-    FTLCONF_webserver_api_password=${config.sops.placeholder.pihole-api-password}
-  '';
+  # Pi-hole's api password is made on the box (modules/adblock/pihole.nix):
+  # the gate holds it, nothing else does
   dd.adblock = {
     enable = true;
-    passwordEnv = config.sops.templates."pihole.env".path;
-    passwordFile = config.sops.secrets.pihole-api-password.path;
     lan = lib.mkDefault (lib.head (lib.splitString "/" config.dd.home.address));
   };
   # the house's home controllers open their cards through this box: the

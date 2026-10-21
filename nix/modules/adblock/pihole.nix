@@ -28,6 +28,10 @@ let
   house = config.dd.home.address;
   # Unbound on the box: Pi-hole's only upstream, over TLS from here on
   unbound = "127.0.0.1#5335";
+  # Pi-hole's api password, made on this box once and kept (dd-pihole-key):
+  # Pi-hole and the gate here hold it, nobody else. No secrets file has it,
+  # so a box that takes the house's DNS over makes its own
+  keys = "/var/lib/dd-pihole-key";
 in
 {
   options.dd.adblock = {
@@ -38,10 +42,12 @@ in
     };
     passwordEnv = lib.mkOption {
       type = lib.types.path;
-      description = "env file with FTLCONF_webserver_api_password: Pi-hole's api password";
+      default = "${keys}/env";
+      description = "env file with FTLCONF_webserver_api_password: Pi-hole's api password; by default the one this box made";
     };
     passwordFile = lib.mkOption {
       type = lib.types.path;
+      default = "${keys}/password";
       description = "the same password alone, for the gate";
     };
     household = lib.mkOption {
@@ -111,6 +117,35 @@ in
           # the app's network on.
         ];
       };
+    };
+    # the gate's and Pi-hole's password, before either starts; the gate's
+    # (gate/needs.nix dd-verify), so it is there wherever the gate is
+    systemd.services.dd-pihole-key = {
+      description = "Make Pi-hole's api password on this box";
+      wantedBy = [
+        "pihole-ftl.service"
+        "dd-verify.service"
+      ];
+      before = [
+        "pihole-ftl.service"
+        "dd-verify.service"
+      ];
+      path = [
+        pkgs.openssl
+        pkgs.coreutils
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        set -eu
+        umask 077
+        install -d -m 0700 ${keys}
+        [ -s ${keys}/password ] || { openssl rand -hex 24 > ${keys}/password.new && mv ${keys}/password.new ${keys}/password; }
+        want="FTLCONF_webserver_api_password=$(cat ${keys}/password)"
+        [ "$(cat ${keys}/env 2>/dev/null)" = "$want" ] || { printf '%s\n' "$want" > ${keys}/env.new && mv ${keys}/env.new ${keys}/env; }
+      '';
     };
     systemd.services.pihole-ftl = {
       serviceConfig.EnvironmentFile = [ cfg.passwordEnv ];

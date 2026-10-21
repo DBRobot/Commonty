@@ -6,11 +6,15 @@ import json
 
 start_all()
 
-# Pi-hole's api, as only the gate may use it: with the password, signed
-# in once (Pi-hole turns away a sign-in every few seconds)
+# Pi-hole's api, as only the gate may use it: with the password the box
+# made itself (no secrets file has it), signed in once (Pi-hole turns away
+# a sign-in every few seconds)
 box.wait_for_open_port(8053, addr="127.0.0.1")
+password = box.succeed("cat /var/lib/dd-pihole-key/password").strip()
+assert len(password) == 48, "a password of the box's own"
+box.succeed("test $(stat -c %a /var/lib/dd-pihole-key) = 700")
 sid = box.wait_until_succeeds(
-    'curl -sf -X POST http://127.0.0.1:8053/api/auth -d \'{"password": "test-pihole-password"}\' | jq -er .session.sid',
+    f'curl -sf -X POST http://127.0.0.1:8053/api/auth -d \'{{"password": "{password}"}}\' | jq -er .session.sid',
     timeout=120,
 ).strip()
 ftl = f"curl -sf -H 'X-FTL-SID: {sid}'"

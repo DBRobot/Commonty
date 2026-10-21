@@ -8,7 +8,7 @@
   # A CI runner for the forge, registered under this box's name with the
   # nix label. Stateless: any box can run one, jobs land on whichever is
   # free, and CI keeps going while another box is being reinstalled. What
-  # it builds goes to the nix-cache bucket, signed with this box's key, so
+  # it builds goes to the nix-cache bucket, signed with a key this box made, so
   # the next run and the next reinstall find it there.
   imports = [
     ./_sops.nix
@@ -29,8 +29,7 @@
       # its own programs are cross-built, everything else comes from
       # cache.nixos.org, and the few steps left run here under qemu
       boot.binfmt.emulatedSystems = [ "aarch64-linux" ];
-      sops.secrets.nix-cache-signing-key = { };
-      dd.cache.signingKeyFile = config.sops.secrets.nix-cache-signing-key.path;
+      # what it uploads is signed with a key it made itself (storage/cache.nix)
       # the box's cache key, as nix reads credentials; write is granted below
       sops.templates."aws-credentials" = {
         path = "/root/.aws/credentials";

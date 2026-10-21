@@ -25,6 +25,10 @@ let
     host = config.networking.hostName;
     listed = lib.fileContents ../../../fleet/cache-keys.pub;
   };
+  # where the box keeps the key it signs its uploads with, made here once
+  # (dd-cache-key) and in no secrets file: its public half beside it, and a
+  # nix.conf line that has the box believe it (its own, never another's)
+  keysDir = "/var/lib/dd-cache-key";
 in
 {
   # The nix cache is the nix-cache bucket in the cluster. A box with this
@@ -37,7 +41,8 @@ in
   options.dd.cache = {
     signingKeyFile = lib.mkOption {
       type = lib.types.str;
-      description = "This box's nix signing key, root-only.";
+      default = "${keysDir}/secret";
+      description = "This box's nix signing key, root-only: by default the one it made itself (dd-cache-key).";
     };
     credentialsFile = lib.mkOption {
       type = lib.types.str;
@@ -132,6 +137,41 @@ in
         sleep 60
       '';
     };
+    # the key this box signs what it uploads with: made here the first time,
+    # named for the box and when, and kept; only its public half leaves the
+    # box (signing.pub, for whoever chooses to believe it)
+    systemd.services.dd-cache-key = lib.mkIf (cfg.signingKeyFile == "${keysDir}/secret") {
+      description = "Make the key this box signs its nix cache uploads with";
+      wantedBy = [ "multi-user.target" ];
+      path = [
+        config.nix.package
+        pkgs.coreutils
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        set -eu
+        umask 077
+        install -d -m 0755 ${keysDir}
+        if [ ! -s ${keysDir}/secret ]; then
+          nix --extra-experimental-features nix-command key generate-secret \
+            --key-name "dd-cache-${config.networking.hostName}-$(date +%Y%m%d)" > ${keysDir}/secret.new
+          mv ${keysDir}/secret.new ${keysDir}/secret
+        fi
+        nix --extra-experimental-features nix-command key convert-secret-to-public < ${keysDir}/secret > ${keysDir}/signing.pub.new
+        chmod 0644 ${keysDir}/signing.pub.new && mv ${keysDir}/signing.pub.new ${keysDir}/signing.pub
+        # the box believes its own uploads (lib/cache-keys.nix: its own key,
+        # never another box's): read by nix-daemon from its next start
+        printf 'extra-trusted-public-keys = %s\n' "$(cat ${keysDir}/signing.pub)" > ${keysDir}/nix.conf.new
+        chmod 0644 ${keysDir}/nix.conf.new && mv ${keysDir}/nix.conf.new ${keysDir}/nix.conf
+      '';
+    };
+    # the key the box made itself, as it says (missing: nothing more)
+    nix.extraOptions = lib.mkIf (cfg.signingKeyFile == "${keysDir}/secret") ''
+      !include ${keysDir}/nix.conf
+    '';
     # the daemon substitutes as root; its credentials live at the usual place
     systemd.services.nix-daemon.environment.AWS_SHARED_CREDENTIALS_FILE = cfg.credentialsFile;
     systemd.services.nix-daemon.environment.HOME = "/root";
