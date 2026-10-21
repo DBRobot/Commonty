@@ -40,7 +40,7 @@ func releasing() (Inputs, *state.State) {
 
 func TestNothingMovesWithoutADrain(t *testing.T) {
 	in, s := releasing()
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	for _, svc := range []string{"postgres", "museum", "web"} {
 		if !runs(p, "node1", svc) {
 			t.Fatalf("%s left node1: %+v", svc, p.Boxes)
@@ -52,7 +52,7 @@ func TestAReleasingBoxHandsItsGroupToABoxOnTheNewRelease(t *testing.T) {
 	in, s := releasing()
 	s.Boxes["node1"].Facts["release_drain"] = 7
 	s.Boxes["node3"].Facts["release"] = 7
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	for _, svc := range []string{"postgres", "museum", "web"} {
 		if runs(p, "node1", svc) || !runs(p, "node3", svc) {
 			t.Fatalf("%s not handed to node3, on release 7: %+v", svc, p.Boxes)
@@ -74,7 +74,7 @@ func TestAGroupThatFitsNowhereRestartsInPlace(t *testing.T) {
 	delete(s.Boxes, "node3")
 	s.Boxes["node1"].Facts["release_drain"] = 7
 	s.Boxes["node2"].Facts["store_free_bytes"] = 150 * gib
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "node1", "postgres") || !runs(p, "node1", "museum") || runs(p, "node2", "postgres") {
 		t.Fatalf("the group split or left: %+v", p.Boxes)
 	}
@@ -96,7 +96,7 @@ func TestWithNoneOnTheReleaseAHeldBoxTakesIt(t *testing.T) {
 	delete(in.Boxes, "node3")
 	delete(s.Boxes, "node3")
 	s.Boxes["node1"].Facts["release_drain"] = 7
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	for _, svc := range []string{"postgres", "museum", "web"} {
 		if !runs(p, "node2", svc) {
 			t.Fatalf("%s not on node2: %+v", svc, p.Boxes)
@@ -114,7 +114,7 @@ func TestAfterTheSwitchNothingMovesBack(t *testing.T) {
 	}
 	s.Boxes["node3"].Facts["store/ente/bytes"] = 300 * gib
 	s.Leases["svc/museum"] = &state.Lease{Holder: "node3", Epoch: 2, Expires: s.Time + 10_000}
-	p := Decide(in, s, 90_000)
+	p := Decide(in, s, 90_000, nil)
 	for _, svc := range []string{"postgres", "museum", "web"} {
 		if !runs(p, "node3", svc) {
 			t.Fatalf("%s moved back: %+v", svc, p.Boxes)
