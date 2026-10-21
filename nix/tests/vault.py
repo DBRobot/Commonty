@@ -1,17 +1,12 @@
-# The vault test: Vaultwarden up on postgres and garage, the gate's issuer
-# answering for it, and the Send page open to anyone.
+# The vault test: Vaultwarden up on postgres and the box's own store, the
+# gate's issuer answering for it, and the Send page open to anyone.
 import json
 
-box.wait_for_unit("garage.service")
-box.wait_for_open_port(3901)
-box.succeed("systemctl restart garage-setup.service")
-box.wait_until_succeeds(
-    f"set -a; . {nix['rpc']}; garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l"
-)
-box.succeed(
-    "systemctl restart garage-setup.service"
-)  # the bucket and its key, now that the layout exists
-
+box.wait_for_unit("dd-store-setup.service")
+box.wait_for_unit("dd-vault-keys.service")
+# its sign-in secret was made here, for the gate here and Vaultwarden alike
+box.succeed("test -s /var/lib/dd-vault-keys/oidc")
+box.succeed("grep -q '^SSO_CLIENT_SECRET=.' /var/lib/dd-vault-keys/env")
 box.succeed("systemctl restart vaultwarden.service")
 box.wait_for_unit("vaultwarden.service")
 box.wait_until_succeeds("curl -sf http://127.0.0.1:8222/alive", timeout=120)
@@ -19,9 +14,8 @@ box.wait_until_succeeds("curl -sf http://127.0.0.1:8222/alive", timeout=120)
 # its files are in the bucket; the key its sessions are signed with is the
 # box's own, on its disk, never in the bucket that is copied to other boxes
 s3 = (
-    "AWS_ACCESS_KEY_ID=GK0123456789abcdef01234567 "
-    "AWS_SECRET_ACCESS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef "
-    "AWS_DEFAULT_REGION=us-east-1 aws --endpoint-url http://127.0.0.1:3900"
+    "set -a; . /var/lib/dd-store/keys/vaultwarden.env; set +a; "
+    "AWS_DEFAULT_REGION=us-east-1 aws --endpoint-url http://127.0.0.1:3910"
 )
 # made before it answers /alive
 box.succeed("ls /var/lib/vaultwarden/rsa_key.pem")
