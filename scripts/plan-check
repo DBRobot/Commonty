@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# What a release would run where, by the control plane's plan, against what
+# each box runs now:
+#
+#   scripts/plan-check [flake-ref] [-- dd-plan-check flags, e.g. -sticky -json]
+#
+# Read-only on the boxes: the agreed state from one box's control plane
+# (127.0.0.1:4195/state) and `systemctl list-units` from each. The release
+# side (.#plan-release, .#dd-control) is built with $NIX_FLAGS; with
+#   NIX_FLAGS="--store ssh-ng://admin@100.64.0.2 --eval-store auto"
+# it is built there, and dd-plan-check runs there too, on what was read
+# here. Or set PLAN_RELEASE to a built plan-release and PLAN_CHECK to a
+# dd-plan-check binary, both in this store. PLAN_LIVE=1 compares the plan
+# the boxes serve now (127.0.0.1:4195/plan), as if it were carried out
+# whole, in place of the release's. Exits 1 when something that runs now
+# would stop.
+set -euo pipefail
+here=$(cd "$(dirname "$0")/.." && pwd)
+flake=$here
+if [ $# -gt 0 ] && [ "$1" != "--" ]; then flake=$1; shift; fi
+[ "${1:-}" = "--" ] && shift
+tmp=$(mktemp -d)
+trap 'rm -r "$tmp"' EXIT
+# shellcheck disable=SC2086
+rel=${PLAN_RELEASE:-$(nix build --no-link --print-out-paths ${NIX_FLAGS:-} "$flake#plan-release")}
+# shellcheck disable=SC2086
+check=${PLAN_CHECK:-$(nix build --no-link --print-out-paths ${NIX_FLAGS:-} "$flake#dd-control")/bin/dd-plan-check}
+# built in another store: dd-plan-check runs there, on copies of what is read here
+remote=
+case "${NIX_FLAGS:-}" in
+  *ssh-ng://*) remote=$(sed -E 's/.*--store ssh-ng:\/\/([^ ?]+).*/\1/' <<<"$NIX_FLAGS") ;;
+esac
+dir=$tmp
+[ -n "$remote" ] && dir=$(ssh -n -o BatchMode=yes "$remote" mktemp -d)
+args=()
+first=
+while read -r box addr; do
+  ssh -n -o BatchMode=yes "admin@$addr" systemctl list-units --all --no-legend --plain --type=service,timer,socket,path >"$tmp/units-$box"
+  if [ -z "$first" ]; then
+    ssh -n -o BatchMode=yes "admin@$addr" curl -fsS 127.0.0.1:4195/state >"$tmp/state.json"
+    if [ -n "${PLAN_LIVE:-}" ]; then
+      ssh -n -o BatchMode=yes "admin@$addr" curl -fsS 127.0.0.1:4195/plan >"$tmp/plan.json"
+      args+=(-plan "$dir/plan.json")
+    fi
+    first=$box
+  fi
+  args+=(-units "$box=$dir/units-$box" -built "$box=$rel/built-$box.json")
+done < <(jq -r 'to_entries[] | "\(.key) \(.value.net)"' "$here/fleet/boxes.json")
+run=("$check" -state "$dir/state.json" -placement "$rel/placement-inputs.json" -needs "$rel/needs.json" "${args[@]}" "$@")
+if [ -z "$remote" ]; then
+  "${run[@]}"
+else
+  tar -C "$tmp" -cf - . | ssh -o BatchMode=yes "$remote" tar -C "$dir" -xf -
+  code=0
+  ssh -n -o BatchMode=yes "$remote" "${run[*]@Q}; c=\$?; rm -r ${dir@Q}; exit \$c" || code=$?
+  exit "$code"
+fi

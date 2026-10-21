@@ -3,6 +3,8 @@
 # (llama-cpp.nix: dd.llm).
 {
   llama-swap = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "runs one language model at a time, for the chat page and the API";
     # every member's chats, in the clear
     trust = "owner";
@@ -68,6 +70,8 @@
   };
 
   searxng = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "web search for members, and the chat's search";
     # what members search for
     trust = "owner";

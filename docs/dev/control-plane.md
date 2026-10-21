@@ -3,8 +3,9 @@
 Status: running on node1 and node2 with the Cloudflare witness (since
 release 176). Boxes heartbeat into it; the gates keep the directory in it
 (below). It plans placement at `/plan`, and switches the placed services
-on and off by it (below); every other service still runs where its roles
-put it.
+on and off by it (below): every service but what runs on every box and a
+few with no unit of their own. Which boxes have each built in is still
+their roles'.
 
 ## What it is for
 
@@ -160,6 +161,9 @@ each service holds, the roles each box runs. It is greedy, not optimal:
   one vault and its send page together, one postgres for all its users.
 - Memory is what a box measured the service holding, never below what it
   keeps aside (the largest model), and the needs' estimate until measured.
+  On a box that measured it itself, what it held there: a CI runner takes
+  as many jobs as its box holds, so a small box's is not sized by a big
+  one's.
 - What runs stays unless another box is better by a margin: 0.3, plus
   0.01 for each GiB the move would carry. 100G of game worlds moves for a
   much better box; a stateless page moves for a clearly better one.
@@ -228,10 +232,33 @@ A service whose needs say `placed = true` is switched by the plan
 ([`box/placed.nix`](../../nix/modules/box/placed.nix),
 [`placed.go`](../../servers/system/control/cmd/dd-control/placed.go)):
 
-- Its roles still decide which boxes have it built in: a box *carries* it
-  (`/etc/dd-placed/carries.json`). Its units start only while
-  `/run/dd-placed/<service>` exists; /run is empty at boot, so nothing
-  placed runs until the agreed state puts it somewhere.
+- Every service that does not run on every box is placed (or a writer,
+  below), but for a few that have no unit of their own: pages nginx and
+  the gate serve (`disk-images`, `libraries`, `metrics-page`,
+  `forgejo-public`, `ente-web`, `vaultwarden-send`, `dd-dns`), the
+  shared pool's `garage`, which every box's agent fetches its releases
+  through, and members' computers, each switched by its own lease.
+- Its roles still decide which boxes have it built in. A box *carries*
+  it (`/etc/dd-placed/carries.json`) when a role it has in
+  fleet/boxes.json brings it. With failover a box is built with the roles
+  whose writers it is able to run as well, and of those it carries only
+  the writers, what they need beside them, what needs them beside it and
+  what is spread over every box: those go wherever their writer does. The
+  rest of such a role is built in and never runs there.
+- Its units start only while `/run/dd-placed/<service>` exists; /run is
+  empty at boot, so nothing placed runs until the agreed state puts it
+  somewhere. Its units are its own name and its needs' units as they are
+  on the box: a name ending in `*` every unit starting so, one ending in
+  `@` a template and its instances, with their timers, sockets and paths.
+  A unit two services claim is the one's that claims it most closely
+  (`gitea-runner-members*` before `gitea-runner-*`).
+- When its flag goes up, dd-control starts what of it starts at boot
+  (`/etc/dd-placed/starts.json`): a timer, not the run it starts; no
+  template's instance. When it goes, every unit of it stops, instances by
+  their pattern. The first round that does not give a carried service to
+  its box also stops what of it still runs without a flag: the switch that
+  first gives a running service its condition stops its services and
+  timers, but leaves its sockets listening.
 - Each box reports `carries/<service>` and `runs/<service>` in its
   heartbeat. The plan puts a placed service only on a box that carries it,
   and counts it running where its box says so (not by roles).
@@ -246,6 +273,22 @@ A service whose needs say `placed = true` is switched by the plan
   access.
 - Without a lease this is for what may run twice for a moment: two boxes
   running a stateless page while one hands over is harmless.
+
+### Checking a plan against the boxes
+
+`scripts/plan-check` says what a release would change, before it ships.
+It reads the agreed state from a box's control plane (`/state`) and each
+box's `systemctl list-units`, nothing else, and plans with the release's
+own inputs (`.#plan-release`: its placement inputs and needs, each box's
+roles and what it carries) as the first round after the switch would:
+no placed service's flag up yet, so the plan alone says where each
+starts. It prints, per box, each service that runs there now and would
+not (`STOPS`, and it exits 1), and each that would start. `-sticky`
+plans as later rounds do, with what runs now counted as running;
+`-fact box:svc/<service>/mem=<bytes>` tries a measure the box does not
+report yet; `PLAN_LIVE=1` compares the plan the boxes serve now, as if
+it were carried out whole. Build on node1 with
+`NIX_FLAGS="--store ssh-ng://admin@100.64.0.2 --eval-store auto"`.
 
 ### Writers: leases
 

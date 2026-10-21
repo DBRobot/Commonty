@@ -61,6 +61,8 @@
   };
 
   thanos-store = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "every box's history, read out of the bucket";
     base = {
       # node1, 2026-10-04: peak; its index cache
@@ -78,6 +80,8 @@
   };
 
   thanos-query = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "the fleet view: this box's own sidecar and the bucket, as one";
     alwaysOn = true;
     base = {
@@ -99,6 +103,8 @@
   };
 
   joined-metrics = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "the metrics the boxes members set up send, each box apart, for its member alone";
     units = [
       "thanos-receive-joined"
@@ -124,6 +130,8 @@
   };
 
   thanos-compact = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "merges and thins the history in the bucket";
     # two at once would fight over the same blocks
     instances = 1;
@@ -206,6 +214,8 @@
   };
 
   fleet-alerts = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "mails what is wrong on any box (disks, pools, backups), read from the fleet view";
     # a box that is down cannot say so: this has to stay up
     alwaysOn = true;

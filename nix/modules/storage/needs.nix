@@ -97,6 +97,8 @@
   };
 
   postgres-dumps = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "every database on this box dumped daily, on the encrypted bulk pool, and backed up";
     units = [
       "postgresqlBackup-*"
@@ -121,6 +123,8 @@
   };
 
   nix-cache = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "the fleet's built closures, in the bucket, for every box's releases";
     traffic = {
       class = "high";
@@ -140,12 +144,19 @@
         outbound = "none";
         inbound = "network"; # boxes fetch, builders and the owner push
       };
-      depends.garage.local = false;
+      depends = {
+        garage.local = false;
+        # its collection keeps what the releases branch wants: the one the
+        # forge holding the lease has (storage/cache.nix)
+        forgejo.local = true;
+      };
       privacy = "none"; # what any build of this public repo makes
     };
   };
 
   storage-ledger = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
     what = "what each member keeps across every service, against their allowance";
     # it holds a Photos admin login, which can set anyone's limit
     trust = "owner";

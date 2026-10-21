@@ -231,7 +231,9 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 
 	// what a service holds: the most any live box measured it holding
 	// (nix/modules/box/service-memory.nix), never under what it reserves;
-	// the needs' estimate until one has
+	// the needs' estimate until one has. On a box that measures it itself,
+	// what it holds there: a CI runner takes as many jobs as its box holds,
+	// so a small box's runner is not sized by a big box's
 	memory := map[string]float64{}
 	for svc, sv := range in.Services {
 		m, seen := 0.0, false
@@ -245,6 +247,12 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		} else {
 			memory[svc] = sv.MemoryGiB
 		}
+	}
+	memOn := func(name, svc string) float64 {
+		if v, ok := s.Boxes[name].Facts["svc/"+svc+"/mem"]; ok {
+			return max(v/gib, in.Services[svc].ReserveGiB)
+		}
+		return memory[svc]
 	}
 
 	planned := map[string]map[string]bool{} // box -> services
@@ -468,7 +476,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		}
 		m := 0.0
 		for _, x := range adds(name, svc) {
-			m += memory[x]
+			m += memOn(name, x)
 		}
 		return used[name]+m <= capacity(name)
 	}
@@ -520,7 +528,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		if c := capacity(name); c > 0 {
 			m := 0.0
 			for _, x := range adds(name, svc) {
-				m += memory[x]
+				m += memOn(name, x)
 			}
 			// room weighs only as a box fills: below 60% one box is as good
 			// as another, and what suits a service best keeps it
@@ -536,7 +544,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 			if !planned[name][x] {
 				planned[name][x] = true
 				count[x]++
-				used[name] += memory[x]
+				used[name] += memOn(name, x)
 				for _, b := range bucketsOf[x] {
 					disk[name] += needs(name, b)
 				}

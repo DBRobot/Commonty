@@ -58,6 +58,7 @@ in
         pkg.control-config
         pkg.placement-inputs
         config.environment.etc."dd-placed/carries.json".source
+        config.environment.etc."dd-placed/starts.json".source
       ];
       description = "The control plane: heartbeats and the agreed state";
       # a box that joined, still under the name it was installed with: it
@@ -88,6 +89,7 @@ in
           # services this box carries
           "-placement ${pkg.placement-inputs}"
           "-placed-carries /etc/dd-placed/carries.json"
+          "-placed-starts /etc/dd-placed/starts.json"
           # which boxes' stores keep each bucket, for this box's copier
           (lib.optionalString (config.dd.store.enable or false) "-placed-copies /run/dd-placed/copies.json")
           # the gate hands in directory items here (servers/gate/src/directory.rs)

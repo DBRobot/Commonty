@@ -116,9 +116,11 @@ in
     # server blocks and certificate serve both sides.
     # over tcp: quic to the edge kept dropping through the carrier's nat
     # ("no recent network activity" every minute); http2 holds
-    systemd.services."cloudflared-tunnel-${cfg.tunnel}".environment.TUNNEL_TRANSPORT_PROTOCOL =
-      lib.mkIf (cfg.enable && !cfg.ownTunnel)
-        "http2";
+    # only where the one tunnel runs: with its own door instead, a name
+    # set here alone would make an empty unit
+    systemd.services."cloudflared-tunnel-${cfg.tunnel}" = lib.mkIf (cfg.enable && !cfg.ownTunnel) {
+      environment.TUNNEL_TRANSPORT_PROTOCOL = "http2";
+    };
     services.cloudflared = lib.mkIf (cfg.enable && !cfg.ownTunnel) {
       enable = true;
       tunnels.${cfg.tunnel} = {

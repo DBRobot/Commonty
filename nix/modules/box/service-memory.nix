@@ -31,15 +31,24 @@ let
     # a block per unit, its properties in systemd's order, a blank line after
     systemctl show -p Id,MemoryPeak,MemoryCurrent $units | awk -v claims=${claims} '
       BEGIN { while ((getline l < claims) > 0) { split(l, f, " "); n++; svc[n] = f[1]; pat[n] = f[2] } }
-      function flush(   u, i, p, m) {
+      function flush(   u, i, p, m, c, best, who) {
         if (id == "") return
         u = id; sub(/\.service$/, "", u)
         m = (peak ~ /^[0-9]+$/) ? peak : cur
-        if (m ~ /^[0-9]+$/ && m > 0)
+        # the service that claims it most closely: its exact name, else the
+        # longest prefix (gitea-runner-members* over gitea-runner-*), a
+        # template (dd-mail@) its instances
+        if (m ~ /^[0-9]+$/ && m > 0) {
+          best = 0; who = ""
           for (i = 1; i <= n; i++) {
-            p = pat[i]
-            if (p ~ /\*$/ ? index(u, substr(p, 1, length(p) - 1)) == 1 : u == p) { mem[svc[i]] += m; break }
+            p = pat[i]; c = 0
+            if (p ~ /\*$/) { if (index(u, substr(p, 1, length(p) - 1)) == 1) c = length(p) }
+            else if (p ~ /@$/) { if (index(u, p) == 1) c = length(p) }
+            else if (u == p) c = 1000
+            if (c > best) { best = c; who = svc[i] }
           }
+          if (who != "") mem[who] += m
+        }
         id = peak = cur = ""
       }
       /^$/ { flush() }

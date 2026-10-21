@@ -94,6 +94,10 @@
   };
 
   dd-mail = {
+    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
+    placed = true;
+    # on every box that carries it
+    spread = true;
     what = "mail from the box to members and the owner, signed by its TPM and handed to the mail Worker (modules/mail.nix)";
     # one instance per message, behind the dd-mail socket
     units = [ "dd-mail@" ];

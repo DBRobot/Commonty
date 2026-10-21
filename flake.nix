@@ -80,6 +80,7 @@
         # each web service's one main thing, in a browser, with the real services
         "site-journeys"
         "rollout"
+        "placed"
       ];
       rust =
         let
@@ -818,7 +819,11 @@
                 version = "0.1.0";
                 inherit src;
                 vendorHash = "sha256-sYPGMtJetj/Ou1Q52s2tfRJkNcaiPlhuqIiq/H/1UjY=";
-                subPackages = [ "cmd/dd-control" ];
+                # and dd-plan-check: a release's plan against what the boxes run (scripts/plan-check)
+                subPackages = [
+                  "cmd/dd-control"
+                  "cmd/dd-plan-check"
+                ];
                 # every package's tests, not only the program's (state,
                 # validator and place went untested by the build)
                 checkPhase = ''
@@ -1570,6 +1575,10 @@
               {
                 dd.control.enable = true;
                 dd.control.roles = box.roles;
+                # the placed services it carries are its own roles' in the
+                # list; with failover, of the rest of dd.control.roles only
+                # the writers and what goes with them (box/placed.nix)
+                dd.placed.roles = (lib.importJSON ./fleet/boxes.json).${name}.roles or box.roles;
               }
             ]
             ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops
@@ -1714,6 +1723,30 @@
             runtimeInputs = [ pkgs.age-plugin-tpm ];
             text = ''exec ${pkgs.sops}/bin/sops "$@"'';
           };
+          # what this release would run where, for scripts/plan-check: its
+          # placement inputs and needs, and each box's roles and the placed
+          # services it carries (box/placed.nix)
+          plan-release = pkgs.linkFarm "plan-release" (
+            [
+              {
+                name = "placement-inputs.json";
+                path = rust.placement-inputs;
+              }
+              {
+                name = "needs.json";
+                path = rust.needs;
+              }
+            ]
+            ++ nixpkgs.lib.mapAttrsToList (n: c: {
+              name = "built-${n}.json";
+              path = pkgs.writeText "built-${n}.json" (
+                builtins.toJSON {
+                  inherit (c.config.dd.control) roles;
+                  carries = builtins.fromJSON c.config.environment.etc."dd-placed/carries.json".text;
+                }
+              );
+            }) fleetBoxes.configs
+          );
         };
 
       # what the home controller runs of ours, cross-built on x86 (rust.pi):

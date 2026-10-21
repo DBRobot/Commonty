@@ -259,7 +259,7 @@ t.attrsOf (
       placed = lib.mkOption {
         type = t.bool;
         default = false;
-        description = "the control plane switches it on and off: its units start only where the plan puts it, among the boxes that carry it (box/placed.nix); a role still decides where it is built in. Its units then name every service unit it is, its own name included if that is one";
+        description = "the control plane switches it on and off: its units start only where the plan puts it, among the boxes that carry it (box/placed.nix); a role still decides where it is built in. Every service that does not run on every box is placed, or a writer, but for one with no unit of its own. A writer's units name every service unit it is, its own name included if that is one; for the rest, every unit its name and units claim on the box is switched";
       };
       lease = lib.mkOption {
         type = t.bool;
