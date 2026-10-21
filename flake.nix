@@ -1865,6 +1865,13 @@
           mail-page = import ./nix/tests/mail-page.nix (args // { web = self.packages.${system}.web; });
           # the Files page as the app serves it, against the same made-up app and gate
           files-page = import ./nix/tests/files-page.nix (args // { web = self.packages.${system}.web; });
+          # the site as a browser meets it: the gateway's nginx and gate, no vm
+          inherit (import ./nix/tests/site.nix args)
+            site-headers
+            site-roles
+            site-a11y
+            site-speed
+            ;
           safe-rd = import ./nix/tests/safe-rd.nix args;
           # the PDF editor's document and signatures, on the pinned MuPDF
           pdf-editor = import ./nix/tests/pdf-editor.nix (args // { web = self.packages.${system}.web; });
