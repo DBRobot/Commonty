@@ -245,6 +245,11 @@ a system built with a new public half.
    everything after it, for good. If the file cannot be fetched but the
    releases branch exists, publish stops rather than start again at 1.
 
+Then it stages the release: the first box (by name) that answers
+builds `checks.x86_64-linux.rollout-stage` at the commit, VMs that try a
+box joining with a TPM and a planned handover ([staged
+rollout](rollout.md#staging-on-node1)). A failure stops publish.
+
 Then it signs, copies the closures to the cache (only if it built them
 itself; CI's are already there, signed with the laptop's cache key from
 `secrets/fleet.yaml`), pushes `current.json` and `history/<n>.json`, and
@@ -309,6 +314,11 @@ app](app-release.md).
 
 ## What the agent does
 
+With a control plane on the box, each box takes a release only when the
+agreed rollout record says it is its turn, hands its writers over before it
+switches, and soaks after: [staged rollout](rollout.md). What follows is
+the switch itself, which is the same either way.
+
 `dd-agent.service` is a oneshot. Its timer fires 2 minutes after boot and
 then every `interval` (5 min) after its last start, with up to 30 s of
 jitter; `dd release publish` also starts it. A switch never restarts it
@@ -324,6 +334,9 @@ failed-before  the units failed before that switch, one a line
 refused        "<counter> <path>" lines: tried here and rolled back
 attested       the first release this box took on two boxes' word; from
                then on it takes nothing else
+soaking        "<counter> <path>": switched and probed, its wave not yet
+               passed (rollout.md); with soak-base.json, soak-streak.json
+reached-before whether it reached the fleet before the switch
 ```
 
 Step by step:
@@ -454,7 +467,9 @@ Each run writes `/var/lib/dd-facts/dd_agent.prom` for the node exporter:
 ```
 dd_agent_counter{box}                  the counter this box last applied
 dd_agent_info{box,path,result}         what it runs; how the last run ended:
-                                       ok, rollback, refused, absent, none
+                                       ok, rollback, refused, absent, none,
+                                       held, soaking
+dd_rollout_bad{counter}                1 when the rollout it follows stopped
 dd_agent_last_run_seconds{box}         when the agent last ran
 ```
 
@@ -531,7 +546,7 @@ no current release could be read, yet …      the forge is not answering
 
 ## The bridges
 
-Three environment variables exist for one-off crossings. None is for
+Four environment variables exist for one-off crossings. None is for
 everyday use.
 
 - **`DD_ATTEST=off`**: publish without asking any box to vouch, for
@@ -544,6 +559,9 @@ everyday use.
   attestations and the bootstrap mark. For the
   one release that carried the v2-reading agent to boxes still running the
   old one. Any value but `legacy` or `v2` is an error.
+- **`DD_STAGE=off`**: publish without the staging run (`checks.rollout-stage`
+  on the first box that answers, [staged rollout](rollout.md)), for a
+  fleet with no box that can run VMs.
 - **`DD_BUILD_STORE=ssh-ng://admin@<box>`**: when publish has to build
   (CI's paths missing or not in the cache), build on that box rather than
   on the laptop. Unset, the laptop builds.

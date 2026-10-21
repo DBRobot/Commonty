@@ -58,6 +58,7 @@ only if it passes the rule, run identically by every validator:
 | membership {add/remove house, box, witness} | signed by the owner key(s): today the release key, later k of n house owners |
 | directory {an entry, an invite, or an ack} | signed by a box of the fleet; at most 64K; at most 60 a minute per box. Its content is the gates' to judge, not the validators' |
 | built {a build result} | signed by a box of the fleet; at most 16K; at most 20 a minute per box. Its content (what the box built for a build order, signed by its host key) is the laptop's to judge, not the validators' |
+| rollout {begin a release's rollout, or a box's verdict on it} | begin: carries the release file, signed by the release key, with a counter above the record's. verdict: signed by a box of the record's newest admitted wave, about the record's release. Judged at every batch ([staged rollout](rollout.md)) |
 
 Rules, copy counts and role requirements come from the signed release, not
 from the log.
