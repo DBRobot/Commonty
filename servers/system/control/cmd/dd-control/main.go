@@ -280,7 +280,7 @@ func facts() map[string]float64 {
 	// and what it can run, judged by the release's rules on its report as
 	// it is now (nix/modules/box/capability.nix); whether its owner is
 	// draining it (dd-drain); and its room for remote computers
-	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom", "/var/lib/dd-facts/can.prom", "/var/lib/dd-facts/draining.prom", "/var/lib/dd-facts/computers.prom") {
+	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom", "/var/lib/dd-facts/can.prom", "/var/lib/dd-facts/draining.prom", "/var/lib/dd-facts/release-drain.prom", "/var/lib/dd-facts/computers.prom") {
 		f[name] = v
 	}
 	for name, v := range reportFacts(*reportPath, "/sys/firmware/devicetree/base/model") {
@@ -480,6 +480,10 @@ func promFacts(files ...string) map[string]float64 {
 				if ok && ok2 && len(fs) == 2 && usageName(svc) && len(out) < maxFacts {
 					out["svc/"+svc+"/mem"] = v
 				}
+			case "dd_release_drain":
+				// dd-agent hands its writers over before it switches to
+				// this release (docs/dev/rollout.md)
+				out["release_drain"] = v
 			case "dd_box_draining":
 				// any file saying so drains it
 				out["draining"] = max(out["draining"], v)
@@ -561,6 +565,7 @@ func main() {
 	submitSock := flag.String("submit", "", "a unix socket where this box's gate hands in directory items (POST /submit); empty: none")
 	submitGroup := flag.String("submit-group", "", "the group that may open -submit (the gate's)")
 	builtSock := flag.String("builds", "", "a unix socket, root's alone, where dd-attest hands in build results (POST /built); empty: none")
+	rolloutSock := flag.String("rollouts", "", "a unix socket, root's alone, where dd-agent begins a rollout and gives its verdicts (POST /rollout); empty: none")
 	report := flag.String("sign-report", "", "sign the box's report in this directory (hardware.json, hardware-configuration.nix) as -box, into report.sig, and exit")
 	join := flag.Bool("sign-join", false, "print a request for a join key to the fleet's network, signed as -box now, and exit")
 	computerJoin := flag.String("sign-computer-join", "", "print a request for a network key for the remote computer with this id, which this box runs, signed as -box now, and exit")
@@ -955,6 +960,46 @@ func main() {
 		}()
 	}
 
+	// dd-agent's way in: the release it found, to begin its rollout, and
+	// how its own switch and soak went (docs/dev/rollout.md). Root's alone,
+	// like the build results; the validators judge what it may say
+	if *rolloutSock != "" {
+		_ = os.Remove(*rolloutSock)
+		l, err := net.Listen("unix", *rolloutSock)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := os.Chmod(*rolloutSock, 0o600); err != nil {
+			log.Fatal(err)
+		}
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /rollout", func(w http.ResponseWriter, req *http.Request) {
+			body, err := io.ReadAll(io.LimitReader(req.Body, state.MaxRollout+1))
+			var op state.RolloutOp
+			if err != nil || len(body) > state.MaxRollout || json.Unmarshal(body, &op) != nil {
+				http.Error(w, "a rollout request: json, at most 128K", http.StatusBadRequest)
+				return
+			}
+			if _, err := submit("rollout", body); err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+		})
+		go func() {
+			s := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+			if err := s.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatal(err)
+			}
+		}()
+	}
+	// the newest release's rollout as agreed, and the agreed time it is
+	// judged at: what each box's agent follows
+	http.HandleFunc("/rollout", func(w http.ResponseWriter, _ *http.Request) {
+		s := n.State()
+		w.Header().Set("content-type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"rollout": s.Rollout, "height": s.Height, "time": s.Time})
+	})
 	http.HandleFunc("/state", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("content-type", "application/json")
 		_ = json.NewEncoder(w).Encode(n.State())

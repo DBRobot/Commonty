@@ -66,6 +66,8 @@ type Rules struct {
 	// bar them, the only ones a remote computer's lease goes to
 	// (computerlease.go)
 	ComputerHosts map[string]string `json:"computerHosts,omitempty"`
+	// staged rollout's waves and timings (rollout.go); absent, the defaults
+	Rollout *RolloutRules `json:"rollout,omitempty"`
 }
 
 type LeaseRule struct {
@@ -74,7 +76,7 @@ type LeaseRule struct {
 
 // Request is what a box asks for, signed by its TPM-held key over Bytes().
 type Request struct {
-	Kind string          `json:"kind"` // heartbeat | lease | directory | built | join | netaddr
+	Kind string          `json:"kind"` // heartbeat | lease | directory | built | join | netaddr | rollout
 	Box  string          `json:"box"`
 	Seq  uint64          `json:"seq"` // strictly increasing per box
 	Body json.RawMessage `json:"body"`
@@ -185,6 +187,8 @@ type State struct {
 	Joined     map[string]*Joined `json:"joined,omitempty"`
 	JoinWindow int64              `json:"joinWindow,omitempty"`
 	JoinCount  int                `json:"joinCount,omitempty"`
+	// the newest release's staged rollout (rollout.go)
+	Rollout *Rollout `json:"rollout,omitempty"`
 }
 
 func New() *State {
@@ -260,6 +264,8 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 			return fmt.Errorf("%s has sent %d build results this minute", r.Box, b.BuiltCount)
 		}
 		return nil
+	case "rollout":
+		return s.checkRollout(cfg, r.Box, r.Body, now)
 	}
 	return fmt.Errorf("no such request: %q", r.Kind)
 }
@@ -369,6 +375,8 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 		}
 		b.BuiltCount++
 		s.Built = append(s.Built, BuiltItem{Height: s.Height, Time: now, Box: r.Box, Item: append(json.RawMessage(nil), r.Body...)})
+	case "rollout":
+		s.applyRollout(cfg, r.Box, r.Body, now)
 	}
 }
 
@@ -376,6 +384,7 @@ func (s *State) Apply(cfg *Config, r Request, now int64) {
 // their check (another validator's view may differ until the batch is
 // agreed) are skipped, the same way on every validator.
 func (s *State) Block(cfg *Config, verify Verify, reqs []Request, now int64) (applied int) {
+	prev := s.Time
 	if now > s.Time {
 		s.Time = now
 	}
@@ -392,6 +401,7 @@ func (s *State) Block(cfg *Config, verify Verify, reqs []Request, now int64) (ap
 			applied++
 		}
 	}
+	s.judge(cfg, prev, s.Time)
 	return applied
 }
 
