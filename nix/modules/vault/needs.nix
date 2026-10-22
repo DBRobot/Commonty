@@ -36,7 +36,7 @@
       };
       depends = {
         postgresql.local = true;
-        garage.local = false;
+        store.local = true;
         nginx.local = true;
         # sign-in, and /run/dd-ended. The issuer is home.<domain>'s gate
         # and sessions are per box, so this box is the gateway's

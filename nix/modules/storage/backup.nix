@@ -9,7 +9,6 @@ let
   cfg = config.dd.backup;
   box = config.networking.hostName;
   facts = "/var/lib/dd-facts";
-  garage = config.services.garage.enable;
   # where the box can mail (modules/mail.nix)
   mail = options.dd ? mail;
   # the box's own store (storage/store.nix): its repository is there, in a
@@ -63,13 +62,11 @@ let
 in
 {
   # A box backs itself up: restic, encrypted here with this box's own
-  # password, into a bucket of its own in the garage cluster, with a key
-  # that reaches no other bucket. The cluster keeps two copies, so the
-  # backup survives the loss of any box, including this one. No box holds
-  # another box's ssh key or password; what leaves a box is ciphertext.
-  # Roles add the paths their state lives in. Garage's own blocks are not
-  # here: the cluster replicates those itself, and its metadata snapshots
-  # ride along so the cluster can be rebuilt from blocks plus snapshot.
+  # password, into a bucket of its own in its own store, with a key that
+  # reaches no other bucket. The store copies it to another box's where the
+  # plan finds room, so the backup survives the loss of this box. No box
+  # holds another box's ssh key or password; what leaves a box is
+  # ciphertext. Roles add the paths their state lives in.
   options.dd.backup = {
     paths = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -82,7 +79,7 @@ in
     };
     endpoint = lib.mkOption {
       type = lib.types.str;
-      default = if store then "http://127.0.0.1:${toString config.dd.store.port}" else config.dd.box.s3;
+      default = "http://127.0.0.1:${toString config.dd.store.port}";
       description = "S3 endpoint: this box's own store";
     };
     envFile = lib.mkOption {
@@ -98,36 +95,6 @@ in
   };
 
   config = lib.mkMerge [
-    {
-      # a snapshot of the metadata db before each backup, shipped with it
-      dd.backup.paths = lib.mkIf garage [ "/var/lib/garage/meta/snapshots" ];
-      systemd.services.garage-meta-snapshot = lib.mkIf garage {
-        description = "Snapshot garage's metadata db";
-        after = [ "garage.service" ];
-        requires = [ "garage.service" ];
-        path = [
-          config.services.garage.package
-          pkgs.findutils
-        ];
-        serviceConfig = {
-          Type = "oneshot";
-          # As garage, not as root. The directory being pruned belongs to
-          # garage, so the names `find` collects are names garage chooses,
-          # and `rm -rf` looks each one up again a moment later - long
-          # enough for its owner to have pointed it somewhere else. Root
-          # doing that is how a compromised garage deletes /etc; garage
-          # doing it can reach nothing it could not already reach.
-          User = "garage";
-          Group = "garage";
-          EnvironmentFile = config.dd.garage.envFile;
-        };
-        script = ''
-          garage meta snapshot
-          # a week of them, as long as the blocks' own snapshots (garage.nix)
-          find /var/lib/garage/meta/snapshots -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} +
-        '';
-      };
-    }
     (lib.mkIf (cfg.paths != [ ] && cfg.passwordFile != null && cfg.envFile != null) {
       # What this box covers, from boot, whether or not a run has ever
       # worked. Written by the backup only, it would say "nothing here is
@@ -230,13 +197,8 @@ in
         after = [
           "network-online.target"
         ]
-        ++ lib.optional store "dd-store-setup.service"
-        ++ lib.optionals garage [
-          "garage-setup.service"
-          "garage-meta-snapshot.service"
-        ];
+        ++ lib.optional store "dd-store-setup.service";
         wants = [ "network-online.target" ];
-        requires = lib.optionals garage [ "garage-meta-snapshot.service" ];
         # samples, not events: the box dashboard shows the age of the last
         # good backup; ExecStartPost runs only when the backup succeeded
         serviceConfig.ExecStartPost = "+${mark}";

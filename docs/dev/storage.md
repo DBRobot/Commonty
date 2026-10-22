@@ -1,10 +1,9 @@
 # Storage
 
-Status: two kinds side by side. The services still use the garage
-**cluster** that node1 and node2 share. Each box's own **store**
-([`storage/store.nix`](../../nix/modules/storage/store.nix)) runs on every
-box beside it, and the buckets are copied into it; the services read it
-once failover is on (below).
+Status: each box's own **store**
+([`storage/store.nix`](../../nix/modules/storage/store.nix)), on every box,
+holds every bucket. The old shared cluster is gone from the config
+(below).
 
 ## Why each box gets its own
 
@@ -68,30 +67,14 @@ until the other is back.
   moves to a box holding a copy reads it there at once, and writes there.
   The writes copy back out the same way.
 
-## Off the old pool
+## The old pool
 
-`dd-store-migrate` copies each bucket from the old pool into the store of
-the box that writes it, every hour, and never deletes on either side. It
-says per bucket whether all of it is there
-(`dd_store_migrated` in `/var/lib/dd-facts/store-migrate.prom`). Once a
-service writes its store, its bucket is copied until it is all there one
-more time, then no more, so a member's delete is not undone from the old
-pool.
-
-What moves, and what does not:
-
-- ente, vaultwarden: copied; they switch with failover, and are copied
-  once more after it.
-- libraries, mail: copied into the store of the box built with them. The
-  gate and the transcoder reach it on loopback, with the store's own keys
-  (`dd-library-keys`).
-- metrics: copied into its home's store. Every box's sidecar writes there;
-  the objstore file is made on the box (`dd-thanos-objstore`).
-- nix-cache: copied into its home's store, on the same disk; it could
-  start empty.
-- backups-<box>: not copied. Each box starts a new repository in its own
-  store (`backups-<box>`, forgotten by host alone); the old one stays
-  readable in the old pool until the old pool goes.
+Until 2026-10, the services used a garage cluster node1 and node2 shared
+(two copies of everything, one rpc secret). Each bucket was copied into the
+store of the box that writes it (`dd-store-migrate`, copying, never
+deleting), the services moved, and the cluster was taken out of the
+config. Its two halves are deleted by hand, with the owner's yes
+([pool-retire.md](pool-retire.md)).
 
 ## Turning it on
 

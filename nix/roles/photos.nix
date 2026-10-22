@@ -1,8 +1,4 @@
 { config, lib, ... }:
-let
-  # this box has ente's key to the old pool
-  pool = config.dd.hasSecret "garage-key-id";
-in
 {
   imports = [
     ./_sops.nix
@@ -15,13 +11,6 @@ in
       # without it has no demo gallery
       ente-demo-password.owner = "dd-verify";
     }
-    // lib.optionalAttrs (pool || !(config.dd.failover or false)) {
-      # ente's key to the old pool: museum's until failover, and after it
-      # what the last copy into the store reads with, until the pool goes.
-      # Only a box whose secrets have it: failover may give photos to one
-      garage-key-id.owner = "ente";
-      garage-key-secret.owner = "ente";
-    }
     // lib.optionalAttrs (!(config.dd.failover or false)) {
       # museum's verification code for addresses under users.<domain>: the
       # photos page sends it when it makes a person's account, so it is read
@@ -32,6 +21,8 @@ in
         key = "ente-ott";
         owner = "dd-verify";
       };
+      garage-key-id.owner = "ente";
+      garage-key-secret.owner = "ente";
       ente-key-encryption.owner = "ente";
       ente-key-hash.owner = "ente";
       ente-jwt-secret.owner = "ente";
@@ -76,66 +67,4 @@ in
       rank = 10;
     }
   ];
-
-  # ente's bucket and key. The key is IMPORTED from sops rather than minted
-  # here, so ente is configured with the same credentials at deploy time.
-  sops.templates."garage-ente-key.env" = lib.mkIf (pool || !(config.dd.failover or false)) {
-    content = ''
-      GARAGE_KEY_ID=${config.sops.placeholder.garage-key-id}
-      GARAGE_KEY_SECRET=${config.sops.placeholder.garage-key-secret}
-    '';
-  };
-  # the photos, copied into this box's own store ahead of failover; once
-  # failover has museum writing the store, once more and then no more, so
-  # what was uploaded in the last hour before the switch is there too
-  dd.store.migrate.ente = lib.mkIf (pool || !(config.dd.failover or false)) {
-    envFile = config.sops.templates."garage-ente-key.env".path;
-    id = "GARAGE_KEY_ID";
-    secret = "GARAGE_KEY_SECRET";
-    once = config.dd.failover or false;
-  };
-  dd.garage.setupEnvFiles = lib.mkIf (!(config.dd.failover or false)) [
-    config.sops.templates."garage-ente-key.env".path
-  ];
-  dd.garage.buckets.ente = lib.mkIf (!(config.dd.failover or false)) {
-    key = {
-      name = "ente";
-      envPrefix = "GARAGE_KEY";
-    };
-    allow = [
-      "read"
-      "write"
-      "owner"
-    ];
-    # Browsers upload blobs straight to garage, so the bucket needs CORS or
-    # every upload fails the preflight with "This CORS request is not
-    # allowed".
-    cors = {
-      CORSRules = [
-        {
-          # Must be "*". Ente decrypts in a web worker, which is a sandboxed
-          # context, so the browser sends Origin: null - it cannot send the
-          # photos origin even in principle. Listing real origins also makes
-          # garage emit them comma-separated, which is invalid and silently
-          # rejected. CORS is not the access control here: the presigned URL
-          # signature is, and the objects are ciphertext regardless.
-          AllowedOrigins = [ "*" ];
-          AllowedMethods = [
-            "GET"
-            "PUT"
-            "POST"
-            "DELETE"
-            "HEAD"
-          ];
-          AllowedHeaders = [ "*" ];
-          ExposeHeaders = [
-            "etag"
-            "ETag"
-            "x-amz-request-id"
-          ];
-          MaxAgeSeconds = 3000;
-        }
-      ];
-    };
-  };
 }

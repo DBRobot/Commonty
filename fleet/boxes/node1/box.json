@@ -16,12 +16,6 @@
   ],
   "arcMaxBytes": 8589934592,
   "datasets": {
-    "vault/enc/photos": {
-      "note": "garage's blocks: ente's and the media tier's ciphertext; a week of snapshots, set by the garage module (storage/garage.nix)",
-      "mountpoint": "/vault/photos",
-      "recordsize": "1M",
-      "com.sun:auto-snapshot": "true"
-    },
     "tank/enc/games": {
       "note": "members' game servers: each one's record, saves and guest disk",
       "mountpoint": "/var/lib/dd-games"

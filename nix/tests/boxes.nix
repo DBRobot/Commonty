@@ -1,8 +1,8 @@
 # Evaluation only: the box list is well-formed. No box names a role (what
 # it is built with comes from its capability, nix/lib/fleet-placement.nix),
 # every box is built with core, every box builds, and the wiring the flake
-# derives (peers, garage's addresses, thanos on its own box) says what the
-# boxes are built with.
+# derives (its store, thanos on its own box) says what the boxes are built
+# with.
 {
   pkgs,
   self,
@@ -33,11 +33,12 @@ let
           (cfgs.${name}.config.users.mutableUsers == false)
         ]
         ++ [ (cfgs.${name}.config.services.prometheus.listenAddress == "127.0.0.1") ]
-        ++ lib.optionals (has name "garage") [
-          # garage: this box's own address is public, its peers never include itself
-          (cfgs.${name}.config.dd.garage.publicAddr == "${box.net}:3901")
-          (builtins.all (p: !lib.hasInfix box.net p) cfgs.${name}.config.dd.garage.peers)
-          (cfgs.${name}.config.dd.garage.zone == box.regionId)
+        ++ lib.optionals (builtins.elem name fp.stores) [
+          # its own store, whose peers never include itself, and no garage
+          # of the old shared pool
+          cfgs.${name}.config.dd.store.enable
+          (!(cfgs.${name}.config.dd.store.peers ? ${name}))
+          (!cfgs.${name}.config.services.garage.enable)
           (lib.hasPrefix "127.0.0.1:" cfgs.${name}.config.services.thanos.sidecar.grpc-address)
         ]
         ++ lib.optionals (has name "thanos-query") [

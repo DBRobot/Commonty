@@ -13,25 +13,18 @@ let
       }
     else
       policy.people.${config.dd.box.owner};
-  # the other boxes, by their address on the fleet's network
-  peersNet = lib.mapAttrsToList (_: b: b.net) (
-    lib.filterAttrs (n: b: n != config.networking.hostName && b ? net) boxes
-  );
   # the other boxes in this house
   housePeersNet = lib.mapAttrsToList (_: b: b.net) (
     lib.filterAttrs (
       n: b: n != config.networking.hostName && b ? net && (b.siteId or null) == (me.siteId or "")
     ) boxes
   );
-  # the channels between boxes that are still here, each waiting on the
-  # change that ends it (README: no box talks to another box)
-  #   3900  garage S3, for a box with no garage of its own (its backups,
-  #         the nix cache) - until there is one per box
-  #   3901  garage RPC - one cluster, until there is one per box
-  # and, between the boxes of one house only:
+  # the one channel between boxes still here, waiting on the change that
+  # ends it (README: no box talks to another box), between the boxes of one
+  # house only:
   #   4181  the house's Wi-Fi relay and page (the directory itself is the
   #         control plane's agreed log now, pulled by nobody)
-  boxPorts = "3900,3901";
+  # The stores' port, 3443, is each store's own (storage/store.nix).
 in
 {
   # What every box is, before any role: its identity in the directory, a
@@ -56,6 +49,7 @@ in
     ../modules/storage/postgres-isolation.nix
     ../modules/storage/postgres-backup.nix
     ../modules/storage/backup.nix
+    ../modules/storage/snapshots.nix
     ../modules/box/agent.nix
     # and an ssh session coming or going cannot fail its switch
     ../modules/box/logins.nix
@@ -110,6 +104,19 @@ in
   # the write-ahead log of a running prometheus does not restore (segments
   # out of order); the blocks do, at the cost of the last two hours
   dd.backup.exclude = [ "/var/lib/prometheus2/data/wal" ];
+  # the datasets the box's pool holds, kept: snapshots and scrubs, on each
+  # box of the release's (a box that joined on its own key keeps nothing of
+  # its own worth them). Its backup's password is the one secret of its
+  # own, shared with nobody, where its file holds it; the repository is in
+  # the box's own store, under the store's key to its bucket
+  # (storage/backup.nix)
+  services.zfs.autoSnapshot.enable = !config.dd.box.joined;
+  services.zfs.autoScrub.enable = !config.dd.box.joined;
+  sops.secrets.restic-password = lib.mkIf (config.dd.hasSecret "restic-password") { };
+  dd.backup.passwordFile = lib.mkIf (config.dd.hasSecret "restic-password") config.sops.secrets.restic-password.path;
+  # the metric blocks go to the store that keeps the metrics bucket, its
+  # home's, with this box's own key there (observe/thanos.nix)
+  dd.thanos.fromStore = true;
   dd.domain = policy.domain;
   dd.repo = policy.repo;
   # the box owner's paper key (their entry's recovery key): the box's disk keys
@@ -181,18 +188,14 @@ in
   # port on it to everything that can reach it, which on the fleet's network
   # meant any member's device could talk to postgres, garage and prometheus
   # on every box. What is open is what a person needs: the gate to every
-  # member; ssh, dns and the cache push to the box's owner's devices
-  # (modules/net/owner.nix); between boxes only the channels listed above,
-  # only from the other boxes' addresses. Cable and wifi are untouched: ssh
+  # member; ssh and dns to the box's owner's devices (modules/net/owner.nix);
+  # the store's port (storage/store.nix); between boxes only the channel
+  # listed above, only from the house's other boxes' addresses. Cable and wifi are untouched: ssh
   # from the LAN is the way in if any of this is ever wrong.
   networking.firewall.interfaces.commonty0.allowedTCPPorts = [ 443 ];
-  networking.firewall.extraCommands =
-    lib.concatMapStrings (a: ''
-      iptables -A nixos-fw -i commonty0 -s ${a} -p tcp -m multiport --dports ${boxPorts} -j nixos-fw-accept
-    '') peersNet
-    + lib.concatMapStrings (a: ''
-      iptables -A nixos-fw -i commonty0 -s ${a} -p tcp --dport 4181 -j nixos-fw-accept
-    '') housePeersNet;
+  networking.firewall.extraCommands = lib.concatMapStrings (a: ''
+    iptables -A nixos-fw -i commonty0 -s ${a} -p tcp --dport 4181 -j nixos-fw-accept
+  '') housePeersNet;
   networking.networkmanager.enable = true;
   # never invent a "Wired connection 1": on a first boot NetworkManager can
   # see the cable before the declared profile exists, make a dhcp profile

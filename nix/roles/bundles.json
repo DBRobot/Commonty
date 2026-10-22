@@ -27,10 +27,7 @@
     ]
   },
   "gateway": {
-    "why": "one public front door (dd-dns points *.domain at it); s3.<domain> proxies its own garage",
-    "with": [
-      "storage"
-    ],
+    "why": "one public front door (dd-dns points *.domain at it)",
     "services": [
       "nginx",
       "acme",
@@ -39,22 +36,6 @@
       "headscale",
       "mail-worker-check",
       "harmonia"
-    ]
-  },
-  "storage": {
-    "why": "garage: a dataset for blocks; rf=2, so the smallest box caps the usable space",
-    "secrets": [
-      "garage-rpc-secret",
-      "garage-backup-key-id",
-      "garage-backup-key-secret",
-      "restic-password",
-      "thanos-key-id",
-      "thanos-key-secret",
-      "cache-key-id",
-      "cache-key-secret"
-    ],
-    "services": [
-      "garage"
     ]
   },
   "photos": {
@@ -72,7 +53,7 @@
     ]
   },
   "vault": {
-    "why": "passwords; its sign-in issuer is the gate at home.<domain>, the gateway's, and sessions are per box; garage reached at the storage pool's address, not localhost",
+    "why": "passwords; its sign-in issuer is the gate at home.<domain>, the gateway's, and sessions are per box; its files in the box's own store",
     "with": [
       "gateway"
     ],
@@ -98,10 +79,6 @@
   },
   "library": {
     "why": "transcode: H.264 encode on a GPU (Intel only today), else every core",
-    "secrets": [
-      "library-key-id",
-      "library-key-secret"
-    ],
     "services": [
       "libraries",
       "mail-inbox",
@@ -137,12 +114,10 @@
     ]
   },
   "runner": {
-    "why": "VM tests (games nests one) and members' jobs; the nix cache at the storage pool's address (nix/modules/forge/needs.nix)",
+    "why": "VM tests (games nests one) and members' jobs; the nix cache in its home's store (nix/modules/forge/needs.nix)",
     "secrets": [
       "forgejo-runner-token",
-      "forgejo-members-runner-token",
-      "cache-key-id",
-      "cache-key-secret"
+      "forgejo-members-runner-token"
     ],
     "services": [
       "forgejo-runner",
@@ -150,9 +125,8 @@
     ]
   },
   "observe": {
-    "why": "thanos keeps to local garage; the dumps take ente's and forgejo's databases",
+    "why": "thanos reads the metrics bucket in its home's store; the dumps take ente's and forgejo's databases",
     "with": [
-      "storage",
       "photos",
       "forge"
     ],

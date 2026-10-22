@@ -37,7 +37,7 @@
       network = {
         outbound = [
           "git"
-          "s3"
+          "store"
         ]; # the release on the forge, closures from the cache
         inbound = "none";
       };

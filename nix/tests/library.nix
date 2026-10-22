@@ -4,14 +4,6 @@
 # them, reading them back, and deleting one (which lands in the trash).
 # The bucket holds ciphertext under names it cannot read.
 { pkgs, self, ... }:
-let
-  # the old pool's key: only what a copy from it would read with; the gate's
-  # keys are the store's, made on the box
-  libraryKey = pkgs.writeText "library-key.env" ''
-    LIBRARY_ID=GK0123456789abcdef01234567
-    LIBRARY_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-  '';
-in
 {
   name = "library";
   node.specialArgs = { inherit self; };
@@ -46,10 +38,7 @@ in
           }
         ];
       };
-      dd.libraries = {
-        enable = true;
-        keyFile = libraryKey;
-      };
+      dd.libraries.enable = true;
       # a tile the demo may use is what makes the demo account exist at all
       dd.home.services = [
         {

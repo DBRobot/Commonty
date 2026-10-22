@@ -1473,44 +1473,6 @@
             builtins.any (r: lib.hasInfix "_sops.nix" (builtins.readFile ./nix/roles/${r}.nix)) bundles;
           # a box built with service s (fleet-placement.nix built)
           has = s: name: builtins.elem s (fp.built.${name} or [ ]);
-          storage = lib.filterAttrs (n: _: has "garage" n) boxes;
-          # the garage cluster: every box built with garage, each told about the others
-          # whose ids are known (a box's id exists once it has started once)
-          garageOf = name: box: {
-            dd.garage = {
-              zone = box.regionId;
-              inherit (box.garage) capacity dataDir;
-              publicAddr = "${box.net}:3901";
-              peers = lib.mapAttrsToList (_: b: "${b.garage.id}@${b.net}:3901") (
-                lib.filterAttrs (n: b: n != name && b.garage ? id) storage
-              );
-            };
-          };
-          # The storage pool, for a box: its own garage, or a storage box's
-          # over the fleet's network - one in the same house when there is
-          # one, then any - each serves the whole cluster. Closures (the
-          # nix-cache bucket), backups, the vault's files and the gateway's
-          # s3. all go there (dd.box.s3).
-          poolFor =
-            name: box:
-            if has "garage" name then
-              "127.0.0.1"
-            else
-              let
-                order = lib.sort (a: b: a.name < b.name) (
-                  lib.mapAttrsToList (name: b: b // { inherit name; }) storage
-                );
-                near = lib.filter (b: b.siteId == box.siteId) order;
-              in
-              (builtins.head (if near != [ ] then near else order)).net;
-          cacheOf =
-            name: box:
-            let
-              host = poolFor name box;
-            in
-            {
-              dd.box.s3 = "http://${host}:3900";
-            };
           # what a member's device may reach for games, on any box: each
           # box built with them, its own list (dd.games.reach: its range and
           # every port a game insists on)
@@ -1610,8 +1572,6 @@
               })
             ]
             ++ map (r: ./nix/roles/${r}.nix) box.bundles
-            ++ lib.optional (has "garage" name) (garageOf name box)
-            ++ [ (cacheOf name box) ]
             ++ [
               lanzaboote.nixosModules.lanzaboote
               ./nix/modules/box/secure-boot.nix
