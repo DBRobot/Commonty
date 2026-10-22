@@ -345,6 +345,10 @@ pub struct Door {
     /// what a device is told to join
     control_url: String,
     key: String,
+    /// read at each call when set: headscale makes it where it runs, and
+    /// under failover that is whichever box holds its lease, so a box
+    /// without it yet still starts its gate
+    key_file: Option<std::path::PathBuf>,
     http: reqwest::Client,
     /// the boxes that may ask for a key of their own: the key each signs
     /// with (in its TPM) and the age recipient the answer is sealed to (its
@@ -395,17 +399,17 @@ pub fn from_env() -> Result<Option<Door>> {
     let Ok(api) = std::env::var("VERIFY_HEADSCALE_API") else {
         return Ok(None);
     };
-    let key = std::fs::read_to_string(
+    let key_file = std::path::PathBuf::from(
         std::env::var("VERIFY_HEADSCALE_KEY_FILE").context("VERIFY_HEADSCALE_KEY_FILE")?,
-    )
-    .context("reading the headscale api key")?;
+    );
     let bound_file = std::env::var("VERIFY_DIR")
         .ok()
         .map(|d| std::path::Path::new(&d).join("computer-nodes.json"));
     Ok(Some(Door {
         api: api.trim_end_matches('/').to_string(),
         control_url: std::env::var("VERIFY_HEADSCALE_URL").context("VERIFY_HEADSCALE_URL")?,
-        key: key.trim().to_string(),
+        key: String::new(),
+        key_file: Some(key_file),
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?,
@@ -485,10 +489,19 @@ impl Door {
         path: &str,
         body: Option<serde_json::Value>,
     ) -> Result<serde_json::Value> {
+        let key = match &self.key_file {
+            Some(f) => std::fs::read_to_string(f)
+                .with_context(|| {
+                    format!("headscale's api key ({}): not on this box yet", f.display())
+                })?
+                .trim()
+                .to_string(),
+            None => self.key.clone(),
+        };
         let mut r = self
             .http
             .request(method, format!("{}{path}", self.api))
-            .bearer_auth(&self.key);
+            .bearer_auth(key);
         if let Some(b) = body {
             r = r.json(&b);
         }
@@ -1431,6 +1444,7 @@ mod tests {
             api: format!("http://{addr}"),
             control_url: String::new(),
             key: "k".into(),
+            key_file: None,
             http: reqwest::Client::new(),
             boxes: HashMap::new(),
             age: "age".into(),
@@ -1492,6 +1506,7 @@ mod tests {
             api: format!("http://{addr}"),
             control_url: String::new(),
             key: "k".into(),
+            key_file: None,
             http: reqwest::Client::new(),
             boxes: HashMap::new(),
             age: "age".into(),
@@ -1792,6 +1807,7 @@ mod tests {
             api: format!("http://{addr}"),
             control_url: String::new(),
             key: "k".into(),
+            key_file: None,
             http: reqwest::Client::new(),
             boxes,
             age: age.display().to_string(),
@@ -1989,6 +2005,7 @@ mod tests {
             api,
             control_url: "https://headscale.test.invalid".into(),
             key: "k".into(),
+            key_file: None,
             http: reqwest::Client::new(),
             boxes,
             age,
@@ -1997,6 +2014,47 @@ mod tests {
             bound_file: None,
             last_good: Mutex::default(),
         }
+    }
+
+    /// A box headscale has not run on has no api key file: its gate still
+    /// starts, a call says why it cannot reach headscale, and once headscale
+    /// comes here and writes its key the next call carries it
+    #[tokio::test]
+    async fn a_gate_without_the_headscale_key_starts_and_reads_it_when_it_comes() {
+        use axum::{Json, Router, http::HeaderMap, routing::get};
+        let app = Router::new().route(
+            "/api/v1/node",
+            get(|h: HeaderMap| async move {
+                let auth = h
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+                Json(serde_json::json!({ "auth": auth }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let file = std::env::temp_dir().join(format!("headscale-api-key-{}", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        let mut door = door_at(format!("http://{addr}"), HashMap::new(), "age".into());
+        door.key_file = Some(file.clone());
+        let err = door
+            .call(reqwest::Method::GET, "/api/v1/node", None)
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("not on this box yet"),
+            "{err:#}"
+        );
+        std::fs::write(&file, "fresh\n").unwrap();
+        let got = door
+            .call(reqwest::Method::GET, "/api/v1/node", None)
+            .await
+            .unwrap();
+        assert_eq!(got["auth"], "Bearer fresh");
+        let _ = std::fs::remove_file(&file);
     }
 
     fn computer_node(id: &str, kid: &str, ip: &str) -> serde_json::Value {
