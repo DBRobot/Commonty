@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# pool-check: is every object of the old shared pool in a box's own store?
+#
+#   scripts/pool-check            the old pool against the stores, per bucket
+#   scripts/pool-check copies     each store's buckets against their copies
+#                                 on the other boxes, as the plan keeps them
+#
+# Read-only: it lists buckets, reads key files and runs restic with
+# --no-lock. It writes nothing on any box and deletes nothing. Run it from
+# the checkout on the owner's machine; it logs in as admin on each box over
+# the fleet's network (DD_NODE1 / DD_NODE2 override the addresses).
+#
+# For each bucket of the old pool: its objects and bytes on both sides, and
+# a diff of the two key-and-size listings. Exit 0 only when every bucket
+# that has to move is all in its store, and every box's backup has a new
+# repository with a snapshot from the last day. docs/dev/pool-retire.md says
+# what to do with the answer.
+set -uo pipefail
+cd "$(dirname "$0")/.." || exit 1
+mode=${1:-old}
+net() { jq -r --arg b "$1" '.[$b].net' fleet/boxes.json; }
+node1=${DD_NODE1:-admin@$(net node1)}
+node2=${DD_NODE2:-admin@$(net node2)}
+
+# what runs on a box, as root: the functions, then one command
+remote=$(
+  cat <<'EOF'
+set -uo pipefail
+unit_bin() { systemctl cat "$1" 2>/dev/null | grep -o "/nix/store/[^ :\"]*-$2-[^/ :\"]*/bin" | head -1; }
+RCLONE=$(unit_bin dd-store-copy.service rclone)/rclone
+RESTIC=$(unit_bin restic-backups-dd.service restic)/restic
+JQ=$(unit_bin dd-store-copy.service jq)/jq
+export RCLONE_CONFIG=/dev/null
+rendered=/run/secrets/rendered
+# the old pool's key to a bucket: the env file and its two variable names
+oldkey() {
+  case "$1" in
+  ente) echo "$rendered/garage-ente-key.env GARAGE_KEY_ID GARAGE_KEY_SECRET" ;;
+  vaultwarden)
+    if [ -e $rendered/vault-pool.env ]; then echo "$rendered/vault-pool.env VAULT_ID VAULT_SECRET"
+    else echo "$rendered/vault.env VAULT_ID VAULT_SECRET"; fi ;;
+  libraries | mail) echo "$rendered/library-key.env LIBRARY_ID LIBRARY_SECRET" ;;
+  metrics) echo "$rendered/garage-metrics-key.env GARAGE_METRICS_KEY_ID GARAGE_METRICS_KEY_SECRET" ;;
+  nix-cache) echo "$rendered/garage-cache-key.env GARAGE_CACHE_KEY_ID GARAGE_CACHE_KEY_SECRET" ;;
+  backups-*) echo "$rendered/garage-backup-key.env GARAGE_BACKUP_KEY_ID GARAGE_BACKUP_KEY_SECRET" ;;
+  *) return 1 ;;
+  esac
+}
+# "key<TAB>size" of every object, sorted
+listing() { # listing old|new <bucket>
+  (
+    if [ "$1" = old ]; then
+      read -r f id secret <<<"$(oldkey "$2")" || exit 3
+      [ -r "$f" ] || exit 3
+      set -a; . "$f"; set +a
+      export RCLONE_CONFIG_X_ENDPOINT=http://127.0.0.1:3900 \
+        RCLONE_CONFIG_X_ACCESS_KEY_ID=${!id} RCLONE_CONFIG_X_SECRET_ACCESS_KEY=${!secret}
+    else
+      [ -r /var/lib/dd-store/keys/$2.env ] || exit 3
+      set -a; . /var/lib/dd-store/keys/$2.env; set +a
+      export RCLONE_CONFIG_X_ENDPOINT=http://127.0.0.1:3910 \
+        RCLONE_CONFIG_X_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID RCLONE_CONFIG_X_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+    fi
+    export RCLONE_CONFIG_X_TYPE=s3 RCLONE_CONFIG_X_PROVIDER=Other RCLONE_CONFIG_X_REGION=us-east-1 \
+      RCLONE_CONFIG_X_FORCE_PATH_STYLE=true
+    "$RCLONE" lsf -R --files-only --fast-list --format ps --separator $'\t' "x:$2" | LC_ALL=C sort
+  )
+}
+# the old pool's buckets, by garage's own count (needs its rpc secret)
+oldbuckets() {
+  ( set -a; . $rendered/garage.env; set +a
+    garage bucket list | awk 'NR > 1 && $1 != "" { print $1 }' )
+}
+compare() { # compare <bucket>: OLD/NEW/MISSING/DIFFERS/EXTRA lines
+  local d; d=$(mktemp -d)
+  listing old "$1" > "$d/old" || { echo "NOKEY old"; rm -r "$d"; return; }
+  listing new "$1" > "$d/new" || { echo "NOKEY new"; rm -r "$d"; return; }
+  sum() { awk -F'\t' '{ n++; b += $2 } END { printf "%d %.0f", n, b }' "$1"; }
+  echo "OLD $(sum "$d/old")"
+  echo "NEW $(sum "$d/new")"
+  # by key alone: there, but not here
+  cut -f1 "$d/old" > "$d/ok"; cut -f1 "$d/new" > "$d/nk"
+  LC_ALL=C comm -23 "$d/ok" "$d/nk" > "$d/missing"
+  LC_ALL=C comm -13 "$d/ok" "$d/nk" > "$d/extra"
+  # here under the same key, at another size
+  LC_ALL=C join -t $'\t' "$d/old" "$d/new" | awk -F'\t' '$2 != $3 { print $1 }' > "$d/differs"
+  echo "MISSING $(wc -l < "$d/missing")"; head -20 "$d/missing" | sed 's/^/  missing: /'
+  echo "DIFFERS $(wc -l < "$d/differs")"; head -20 "$d/differs" | sed 's/^/  differs: /'
+  echo "EXTRA $(wc -l < "$d/extra")"
+  rm -r "$d"
+}
+# the box's new repository: its snapshots, and the newest one's age
+newrepo() { # newrepo <box>
+  [ -r /var/lib/dd-store/keys/backups-$1.env ] || { echo "SNAPSHOTS 0 none (no bucket in the store yet)"; return; }
+  ( set -a; . /var/lib/dd-store/keys/backups-$1.env; set +a
+    export RESTIC_REPOSITORY=s3:http://127.0.0.1:3910/backups-$1 RESTIC_PASSWORD_FILE=/run/secrets/restic-password \
+      AWS_DEFAULT_REGION=us-east-1 RESTIC_CACHE_DIR=$(mktemp -d)
+    "$RESTIC" --no-lock snapshots --json 2>/dev/null \
+      | "$JQ" -r 'if length == 0 then "SNAPSHOTS 0 0" else "SNAPSHOTS \(length) \(map(.time) | sort | last)" end' \
+      || echo "SNAPSHOTS 0 none (no repository yet)" )
+}
+# a bucket of this store against another box's copy, by the copy's own key
+# there (dd-store-copy's, sealed to this box): "copy <bucket> <their url> <their name>"
+copylisting() {
+  ( set -a; . /var/lib/dd-store-copy/$3.env; set +a
+    export RCLONE_CONFIG_X_TYPE=s3 RCLONE_CONFIG_X_PROVIDER=Other RCLONE_CONFIG_X_REGION=us-east-1 \
+      RCLONE_CONFIG_X_FORCE_PATH_STYLE=true RCLONE_CONFIG_X_ENDPOINT=$2 \
+      RCLONE_CONFIG_X_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID RCLONE_CONFIG_X_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+    "$RCLONE" lsf -R --files-only --fast-list --format ps --separator $'\t' "x:$1" | LC_ALL=C sort )
+}
+EOF
+)
+on() { # on <host> <command...>: the functions above, then the command, as root
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "$1" "sudo bash -s" <<<"$remote
+${*:2}"
+}
+gib() { awk -v b="$1" 'BEGIN { printf "%.1f GiB", b / 1073741824 }'; }
+
+failed=0
+verdict() { # verdict <bucket> <ok|FAIL|note> <why>
+  printf '%-14s %-5s %s\n' "$1" "$2" "$3"
+  [ "$2" = FAIL ] && failed=1
+}
+
+if [ "$mode" = old ]; then
+  echo "== the old pool against the stores ($(date -u +%FT%TZ))"
+  buckets=$(on "$node1" oldbuckets) || { echo "cannot list the old pool's buckets on node1"; exit 2; }
+  for b in $buckets; do
+    case "$b" in
+    ente | vaultwarden | libraries | mail | metrics | nix-cache) host=$node1 ;;
+    backups-node1) host=$node1 ;;
+    backups-node2) host=$node2 ;;
+    media)
+      n=$(on "$node1" "( set -a; . \$rendered/garage.env; garage bucket info media ) | awk '/^Objects:/ { print \$2 }'")
+      if [ "$n" = 0 ]; then verdict media ok "empty in the old pool; nothing to move"; else verdict media FAIL "$n objects, and no service writes it"; fi
+      continue ;;
+    *) verdict "$b" FAIL "not a bucket this check knows: look before anything is deleted"; continue ;;
+    esac
+    case "$b" in
+    backups-*)
+      box=${b#backups-}
+      r=$(on "$host" "newrepo $box")
+      old=$(on "$host" "listing old $b | awk -F'\t' '{ n++; s += \$2 } END { printf \"%d %.0f\", n, s }'")
+      read -r _ n last _ <<<"$r"
+      if [ "${n:-0}" -gt 0 ] 2>/dev/null && [ "$(($(date +%s) - $(date -d "$last" +%s)))" -lt 93600 ]; then
+        verdict "$b" ok "not copied, by design: the new repository has $n snapshots, the newest $last; the old one is ${old%% *} objects, $(gib "${old##* }")"
+      else
+        verdict "$b" FAIL "the new repository in $box's store has no snapshot from the last day ($r)"
+      fi
+      continue ;;
+    esac
+    out=$(on "$host" "compare $b")
+    if grep -q '^NOKEY' <<<"$out"; then verdict "$b" FAIL "no key on $host to list it ($(grep NOKEY <<<"$out"))"; continue; fi
+    read -r _ on_ ob <<<"$(grep '^OLD' <<<"$out")"
+    read -r _ nn nb <<<"$(grep '^NEW' <<<"$out")"
+    m=$(awk '/^MISSING/ { print $2 }' <<<"$out")
+    d=$(awk '/^DIFFERS/ { print $2 }' <<<"$out")
+    x=$(awk '/^EXTRA/ { print $2 }' <<<"$out")
+    what="old $on_ objects $(gib "$ob"), store $nn objects $(gib "$nb"); missing $m, other size $d, only in the store $x"
+    if [ "$m" = 0 ] && [ "$d" = 0 ]; then
+      verdict "$b" ok "$what"
+    else
+      case "$b" in
+      # rebuildable: what its GC or compactor let go of since the switch
+      metrics | nix-cache) verdict "$b" note "$what (can be made again: thanos compacts, the cache GCs)" ;;
+      *) verdict "$b" FAIL "$what" ;;
+      esac
+      grep -E '^  (missing|differs):' <<<"$out"
+    fi
+  done
+elif [ "$mode" = copies ]; then
+  echo "== each store's buckets against their copies on the other box ($(date -u +%FT%TZ))"
+  for pair in "node1 node2" "node2 node1"; do
+    read -r me them <<<"$pair"
+    host=$node1; [ "$me" = node2 ] && host=$node2
+    url="https://store.$them.$(jq -r .domain fleet/policy.json):3443"
+    plan=$(on "$host" "cat /run/dd-placed/copies.json 2>/dev/null || echo '{}'")
+    for b in $(jq -r --arg t "$them" 'to_entries[] | select(.value | index($t)) | .key' <<<"$plan"); do
+      out=$(on "$host" "d=\$(mktemp -d); listing new $b > \$d/a; copylisting $b $url $them > \$d/b || echo NOKEY; LC_ALL=C comm -23 <(cut -f1 \$d/a) <(cut -f1 \$d/b) | wc -l; wc -l < \$d/a; rm -r \$d")
+      if grep -q NOKEY <<<"$out"; then verdict "$b" FAIL "$me cannot read its copy on $them"; continue; fi
+      read -r missing total <<<"$(tr '\n' ' ' <<<"$out")"
+      if [ "$missing" = 0 ]; then verdict "$b" ok "$me's $total objects all on $them"; else verdict "$b" FAIL "$missing of $me's $total objects not on $them yet"; fi
+    done
+  done
+else
+  echo "usage: scripts/pool-check [old|copies]" >&2
+  exit 2
+fi
+[ "$failed" = 0 ] && echo "== complete" || echo "== NOT complete: nothing may be deleted"
+exit "$failed"
