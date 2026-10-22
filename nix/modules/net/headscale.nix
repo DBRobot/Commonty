@@ -29,6 +29,8 @@ let
     "80"
     "443"
     "3900"
+    # the box's store: the cache push, into the nix cache it keeps
+    "3443"
   ];
   policy = pkgs.writeText "headscale-policy.json" (
     builtins.toJSON {
@@ -45,7 +47,7 @@ let
       tagOwners."tag:joined" = [ "boxes@" ];
       # A person's devices reach a box's front door and its game servers.
       # A box's owner's devices reach that box, and only that box, for what
-      # an admin needs: ssh, its dns, the cache push. Boxes reach each other
+      # an admin needs: ssh, its dns, the cache push (at its store). Boxes reach each other
       # on the channels still between them (roles/core.nix lists them; each
       # box's firewall narrows them again to its peers' addresses). No rule
       # has a person's device as its destination, so devices do not see one

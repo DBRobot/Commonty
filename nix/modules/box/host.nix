@@ -190,6 +190,12 @@ in
         boxes = stores;
       };
     }
+    # the agent fetches each release's closure from the nix cache, in the
+    # store that keeps it, with this box's key there
+    (lib.mkIf (!config.dd.box.joined && placement.homes ? nix-cache) {
+      dd.agent.cache = config.dd.store.at.nix-cache.s3Url;
+      dd.agent.cacheEnvFile = config.dd.store.at.nix-cache.envFile;
+    })
     # where the shared buckets are kept (placement's homes: the first store
     # able to run each one's service, pinned there in the plan) and who
     # writes the libraries: boxes of the release's, which a joined box's
