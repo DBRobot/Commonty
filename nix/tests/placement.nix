@@ -1,8 +1,8 @@
 # What every box can run (nix/lib/capability.nix), from the needs, its
 # signed report and its owner's box.json, against fleet/boxes.json: every
-# box joins (it can run what every box runs), every service its roles bring
-# (with failover, the roles it is able to carry too) is one it can run, and fleet/roles.json says truly what each role brings
-# (a service with units is found on a box by them). Fails while the flake is
+# box joins (it can run what every box runs), every service it carries is
+# one it can run, and nix/roles/bundles.json says truly what each bundle
+# brings (a service with units is found on a box by them). Fails while the flake is
 # evaluated, naming each problem; built, it is the whole table as JSON - what
 # the control plane chooses from.
 {
@@ -15,14 +15,13 @@ let
   inherit (import ../lib/fleet-placement.nix { inherit lib; })
     needs
     list
-    roles
     capability
-    carried
+    built
+    carries
     ;
   every = lib.attrNames (lib.filterAttrs (_: n: n.everyBox) needs);
-  # the roles a box is built with: fleet/boxes.json's, and with failover
-  # every role whose writers it is able to run (fleet-placement.nix carried)
-  brought = box: lib.unique (lib.concatMap (r: roles.${r}.services or [ ]) carried.${box});
+  # what a box is built with, from its capability (fleet-placement.nix built)
+  brought = box: built.${box};
   claims = s: [ s ] ++ needs.${s}.units;
   matches = u: c: if lib.hasSuffix "*" c then lib.hasPrefix (lib.removeSuffix "*" c) u else c == u;
   running =
@@ -79,11 +78,11 @@ let
       in
       map (w: "${box}: cannot join the fleet: ${w}") t.why
       ++ lib.concatMap (
-        s: map (w: "${box}: its roles bring ${s}, which it cannot run: ${w}") (t.cannot.${s} or [ ])
-      ) (brought box)
-      ++ map (s: "${box}: runs ${s}, which none of its roles brings (fleet/roles.json services)") (
-        lib.filter (s: !(builtins.elem s (brought box ++ every))) (running box)
-      )
+        s: map (w: "${box}: it carries ${s}, which it cannot run: ${w}") (t.cannot.${s} or [ ])
+      ) carries.${box}
+      ++ map (
+        s: "${box}: runs ${s}, which none of its bundles brings (nix/roles/bundles.json services)"
+      ) (lib.filter (s: !(builtins.elem s (brought box ++ every))) (running box))
     ) (builtins.attrNames list);
 in
 if problems == [ ] then

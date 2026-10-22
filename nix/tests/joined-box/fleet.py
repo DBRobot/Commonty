@@ -140,7 +140,6 @@ json.dump(
     {
         "boxes": {},
         "services": {},
-        "roles": {},
         "damping": {"base": 0.3, "perGiB": 0.01},
     },
     open("placement.json", "w"),
@@ -235,8 +234,6 @@ for i in (1, 2, 3):
             f"127.0.0.1:419{i}",
             "-heartbeat",
             "1s",
-            "-roles",
-            f"r{i}",
             "-submit",
             f"s{i}.sock",
             "-submit-group",

@@ -42,8 +42,8 @@ box.succeed("systemctl is-active dd-snapshot-trim.service")
 carries = json.loads(box.succeed("cat /etc/dd-placed/carries.json"))
 starts = json.loads(box.succeed("cat /etc/dd-placed/starts.json"))
 print(json.dumps(carries, indent=1), json.dumps(starts, indent=1))
-# what it carries: its own roles' placed services; not pihole or tang, of
-# the role it is only built with
+# what it carries: what the release gives it; not pihole or tang, which
+# it is only built with
 assert set(carries) == {
     "dd-games",
     "forgejo-runner",

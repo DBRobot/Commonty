@@ -1,12 +1,20 @@
 # The fleet's own capability table and placement inputs, from its files:
 # the needs, fleet/boxes.json, each box's signed report and box.json, the
-# roles and the policy. One place for the check (tests/placement.nix) and
-# the release (placement-inputs) to read.
+# module bundles and the policy. One place for the check
+# (tests/placement.nix) and the release (placement-inputs) to read.
+#
+# What a box is built with comes from its capability, never a list kept by
+# hand: every bundle of modules (nix/roles/bundles.json) of which it can
+# run a service that does not run everywhere (capability.nix: its own
+# report, its owner's box.json and the policy), whose secrets its own sops
+# file holds (bundles.json secrets: what the modules read whatever else),
+# and whose companions (with) it is built with too; core always. The
+# control plane decides where each placed service runs (box/placed.nix).
 { lib }:
 let
   needs = import ./needs.nix { inherit lib; };
   list = lib.importJSON ../../fleet/boxes.json;
-  roles = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ../../fleet/roles.json);
+  bundles = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ../roles/bundles.json);
   policy = lib.importJSON ../../fleet/policy.json;
   capability = import ./capability.nix {
     inherit lib needs policy;
@@ -22,11 +30,10 @@ let
       lib
       needs
       capability
-      roles
       policy
+      built
       ;
-    # each box with the roles it is built with (carried, below)
-    list = lib.mapAttrs (n: b: b // { roles = carried.${n}; }) list;
+    inherit list;
   };
   # whether a box's own sops file holds a secret (its names are in the
   # clear there): what roles/_sops.nix dd.hasSecret says on the box
@@ -36,61 +43,107 @@ let
       f = ../../secrets + "/${box}.yaml";
     in
     builtins.pathExists f && lib.hasInfix "\n${name}:" ("\n" + builtins.readFile f);
-  # With failover (fleet/policy.json), what a box is built with comes from
-  # its capability, never a hand-set list: every role of which it can run
-  # a service that does not run everywhere (by its own report, its owner's
-  # box.json and the policy: capability.nix), whose secrets its own file
-  # holds (roles.json secrets: what its modules read whatever else), and
-  # whose companions (roles.json with) it is built with too. core always.
-  # The control plane decides where each service runs (box/placed.nix).
-  able =
-    box: r:
-    r == "core"
-    || builtins.any (s: needs ? ${s} && !needs.${s}.everyBox && capability.boxes.${box}.can ? ${s}) (
-      roles.${r}.services or [ ]
-    );
-  buildable = box: r: able box r && lib.all (hasSecret box) (roles.${r}.secrets or [ ]);
-  # drop what lacks a companion, until nothing more drops
-  withCompanions =
-    rs:
+  # the order the bundles' modules are imported in, which lists like home's
+  # tiles keep; one not named here comes after, by name
+  order = [
+    "core"
+    "gateway"
+    "storage"
+    "photos"
+    "media"
+    "llm"
+    "game"
+    "forge"
+    "observe"
+    "runner"
+    "library"
+    "vault"
+    "adblock"
+    "compute"
+  ];
+  ordered = rs: lib.filter (r: builtins.elem r rs) order ++ lib.filter (r: !builtins.elem r order) rs;
+  # the bundles for a box, from what it can run (a capability row's can)
+  # and what its own file holds; `allowed`: of its services, which the box
+  # may be given at all (a joined box: only its tier's)
+  bundlesFor =
+    {
+      can,
+      has,
+      allowed ? (_: true),
+    }:
     let
-      kept = lib.filter (r: lib.all (w: builtins.elem w rs) (roles.${r}."with" or [ ])) rs;
+      able =
+        r:
+        r == "core"
+        || builtins.any (s: needs ? ${s} && !needs.${s}.everyBox && can ? ${s} && allowed s) (
+          bundles.${r}.services or [ ]
+        );
+      buildable = r: able r && lib.all has (bundles.${r}.secrets or [ ]);
+      # drop what lacks a companion, until nothing more drops
+      withCompanions =
+        rs:
+        let
+          kept = lib.filter (r: lib.all (w: builtins.elem w rs) (bundles.${r}."with" or [ ])) rs;
+        in
+        if kept == rs then rs else withCompanions kept;
     in
-    if kept == rs then rs else withCompanions kept;
-  fromCapability = box: withCompanions (lib.filter (buildable box) (builtins.attrNames roles));
-  # (in fleet/boxes.json's order where it still lists them: the order the
-  # modules are imported in, which lists like home's tiles keep)
+    ordered (withCompanions (lib.filter buildable (builtins.attrNames bundles)));
+  servicesOf = rs: lib.unique (lib.concatMap (r: bundles.${r}.services or [ ]) rs);
   carried = lib.mapAttrs (
-    box: b:
-    if policy.failover or false then
-      let
-        rs = fromCapability box;
-      in
-      lib.filter (r: builtins.elem r rs) (b.roles or [ ])
-      ++ lib.filter (r: !builtins.elem r (b.roles or [ ])) rs
-    else
-      b.roles
+    box: _:
+    bundlesFor {
+      inherit (capability.boxes.${box}) can;
+      has = hasSecret box;
+    }
   ) list;
+  # the services each box is built with: what the rest of the release picks
+  # a box by (the storage pool, the mail boxes, the ports a member's device
+  # may reach, CI's builders), never a name given by hand
+  built = lib.mapAttrs (_: servicesOf) carried;
   # the placed services a box carries: of those it is built with, each it
   # is able to run (capability); the plan gives it only these
-  carries = lib.mapAttrs (
-    box: _:
-    lib.filter (
-      s: needs ? ${s} && (needs.${s}.placed || needs.${s}.lease) && capability.boxes.${box}.can ? ${s}
-    ) built.${box}
-  ) list;
-  # the services each box is built with, by what it carries: what the rest
-  # of the release picks a box by (the storage pool, the mail boxes, the
-  # ports a member's device may reach), never a role's name
-  built = lib.mapAttrs (_: rs: lib.unique (lib.concatMap (r: roles.${r}.services or [ ]) rs)) carried;
+  carriesOf =
+    can: services:
+    lib.filter (s: needs ? ${s} && (needs.${s}.placed || needs.${s}.lease) && can ? ${s}) services;
+  carries = lib.mapAttrs (box: _: carriesOf capability.boxes.${box}.can built.${box}) list;
   # the boxes built with service s, by name
   builtWith = s: builtins.filter (n: builtins.elem s built.${n}) (builtins.attrNames list);
+  # A box that joined on its own key, built from its own report and box.json
+  # (its dir), with no secrets file: the bundles of the services its tier
+  # allows (placement-inputs joined) that it can run, and nothing else. It
+  # carries those; the plan gives it one only once joined boxes are attested
+  joined =
+    { dir, name }:
+    let
+      cap =
+        (import ./capability.nix {
+          inherit lib needs policy;
+          boxes.${name} = {
+            hw = lib.importJSON (dir + "/hardware.json");
+            own = lib.importJSON (dir + "/box.json");
+            site = "joined";
+            region = "joined";
+          };
+        }).boxes.${name};
+      rs = bundlesFor {
+        inherit (cap) can;
+        has = _: false;
+        allowed = s: builtins.elem s inputs.joined.services;
+      };
+    in
+    {
+      bundles = rs;
+      built = servicesOf rs;
+      carries = lib.filter (s: builtins.elem s inputs.joined.services) (
+        carriesOf cap.can (servicesOf rs)
+      );
+    };
 in
 {
   inherit
     needs
     list
-    roles
+    bundles
     capability
     inputs
     carried
@@ -98,5 +151,6 @@ in
     built
     builtWith
     hasSecret
+    joined
     ;
 }

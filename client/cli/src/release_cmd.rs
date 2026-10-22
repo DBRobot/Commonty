@@ -635,6 +635,23 @@ fn app_paths(root: &Path, rev: &str, version: &str) -> Result<BTreeMap<String, S
     Ok(serde_json::from_str(&out)?)
 }
 
+/// What the release at rev builds each box with (nix/lib/fleet-placement.nix
+/// built, the flake's fleetBuilt): what a box can be asked to build by
+fn fleet_built(root: &Path, rev: &str) -> Result<BTreeMap<String, Vec<String>>> {
+    let out = sh(
+        "nix",
+        &[
+            "eval",
+            "--json",
+            &format!(
+                "git+file://{}?rev={rev}#legacyPackages.x86_64-linux.fleetBuilt",
+                root.display()
+            ),
+        ],
+    )?;
+    Ok(serde_json::from_str(&out)?)
+}
+
 /// What each download needs of the box that builds it (`passthru.needs`)
 fn app_needs(root: &Path, rev: &str) -> Result<BTreeMap<String, build_order::Need>> {
     let names = APP_BUILDS
@@ -2301,13 +2318,15 @@ fn order_builds(
             v["next"].as_u64().unwrap_or(since),
         ))
     };
+    // what each box is built with, by the release being built
+    let built_with = fleet_built(root, rev)?;
     let mut exclude: Vec<String> = Vec::new();
     for round in 1..=2 {
         let state: serde_json::Value = serde_json::from_str(&on_box_patient(
             home,
             "curl -sf http://127.0.0.1:4195/state",
         )?)?;
-        let fleet = build_order::candidates(boxes, owners, &state);
+        let fleet = build_order::candidates(boxes, owners, &built_with, &state);
         // the order already out for these very downloads, waited on again
         let resumed = if round == 1 {
             standing_order(root, file, key, tag, flake, rev, version, want)

@@ -1,17 +1,17 @@
 # What the control plane places from (servers/system/control/place): each
 # box's capability, scored (capability.nix), and what the fleet wants of
-# each service - wanted when some box's roles in fleet/boxes.json bring it
-# and the policy setting it waits on (needs when) is on,
+# each service - wanted when some box is built with it (fleet-placement.nix
+# built) and the policy setting it waits on (needs when) is on,
 # how many, spread or by house, the line it wants, its memory, what moving
-# it carries, what must share its box - with fleet/roles.json to read what a
-# box runs from the roles its heartbeat names. Ships as the release's
-# placement-inputs.json; dd-control -placement reads it.
+# it carries, what must share its box - and what each box is built with, so
+# what runs there unswitched is known by the release, not by its word.
+# Ships as the release's placement-inputs.json; dd-control -placement reads it.
 {
   lib,
   needs,
   capability,
   list,
-  roles,
+  built,
   policy,
 }:
 let
@@ -24,22 +24,20 @@ let
       in
       v == true || (builtins.isList v && v != [ ])
     );
-  brought = lib.unique (
-    lib.concatMap (b: lib.concatMap (r: roles.${r}.services or [ ]) b.roles) (builtins.attrValues list)
-  );
+  brought = lib.unique (lib.concatLists (builtins.attrValues built));
 in
 {
   boxes = lib.mapAttrs (n: b: {
     site = b.siteId or n;
     region = b.regionId or n;
-    # members' computers only where a role of the box brings their host
-    # (fleet/roles.json compute): a box that could run them but does not
-    # carry the units has none placed on it nor its lease
+    # what it can run and is built with: a box that could run a service
+    # but has not its units (members' computers' host among them) has none
+    # placed on it, nor its lease
     can = lib.mapAttrs (_: c: c.score) (
-      lib.filterAttrs (
-        s: _: s != "computers" || builtins.elem s (lib.concatMap (r: roles.${r}.services or [ ]) b.roles)
-      ) capability.boxes.${n}.can
+      lib.filterAttrs (s: _: builtins.elem s built.${n}) capability.boxes.${n}.can
     );
+    # what it is built with, by the release: what runs there unswitched
+    built = built.${n};
     # what its owner's box.json or the policy keep off it: a box's own
     # judgment in its heartbeat (box/capability.nix) never adds these
     # and whose box it is, for a member's computer kept to their own boxes
@@ -77,7 +75,6 @@ in
       }) n.buckets
     ) needs
   );
-  roles = lib.mapAttrs (_: r: r.services or [ ]) roles;
   # what a box that joined on its own key may be given (place.JoinedRules):
   # by the policy's trust tiers, a placed service any box may run, that
   # hands nobody the code holding their secrets, that the owner keeps to

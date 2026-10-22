@@ -21,7 +21,8 @@ pub struct Need {
     pub kvm: bool,
     pub ram_gb: u64,
     /// an aarch64 build (the home controller's card): the runner boxes run
-    /// aarch64 under emulation (roles/runner.nix)
+    /// aarch64 under emulation (roles/runner.nix, on a box built with the
+    /// CI runner)
     pub aarch64: bool,
 }
 
@@ -63,11 +64,13 @@ impl Candidate {
     }
 }
 
-/// The boxes from boxes.json, their owners (fleet/boxes/<box>/box.json) and
-/// the agreed state (dd-control's /state)
+/// The boxes from boxes.json, their owners (fleet/boxes/<box>/box.json),
+/// what the release builds each with (the flake's fleetBuilt) and the
+/// agreed state (dd-control's /state)
 pub fn candidates(
     boxes: &serde_json::Value,
     owners: &BTreeMap<String, String>,
+    built: &BTreeMap<String, Vec<String>>,
     state: &serde_json::Value,
 ) -> Vec<Candidate> {
     let now = state["time"].as_i64().unwrap_or(0);
@@ -87,9 +90,10 @@ pub fn candidates(
                 .is_some_and(|seen| now - seen <= gone_after),
             ram_bytes: s["facts"]["ram_bytes"].as_f64(),
             kvm: s["facts"]["kvm"].as_f64().map(|v| v >= 1.0),
-            aarch64: b["roles"]
-                .as_array()
-                .is_some_and(|r| r.iter().any(|x| x.as_str() == Some("runner"))),
+            // a box built with the CI runner emulates aarch64 (roles/runner.nix)
+            aarch64: built
+                .get(name)
+                .is_some_and(|s| s.iter().any(|x| x == "forgejo-runner")),
         });
     }
     out

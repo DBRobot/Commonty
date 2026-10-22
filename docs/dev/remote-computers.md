@@ -15,9 +15,11 @@ are not built yet (below, Open).
    `dd computer`, the outbound rules and the allowance.
 4. **Snapshots**, so a computer can come back on another box. Not built.
 
-A box hosts computers when a role of its brings `computers` (fleet/roles.json
-`compute`) and its own report says it has KVM on x86_64: the release's
-table then gives it `computers` (nix/lib/placement-inputs.nix).
+A box hosts computers when its own report says it has KVM on x86_64 and
+its owner does not bar them: it is then built with the `compute` bundle
+(nix/lib/fleet-placement.nix, nix/roles/bundles.json) and the release's
+table gives it `computers` (nix/lib/placement-inputs.nix). No list says
+which boxes; node1 hosts them by its capability.
 
 A member keeps a computer of their own on the fleet: a VM with its own
 disk, reached over the Commonty network, that reaches the web. They make

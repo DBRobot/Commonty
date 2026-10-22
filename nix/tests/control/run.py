@@ -83,8 +83,6 @@ def run(i):
             f"127.0.0.1:419{i}",
             "-heartbeat",
             "1s",
-            "-roles",
-            f"r{i}",
             "-submit",
             f"{T}/s{i}.sock",
             "-submit-group",
@@ -128,8 +126,11 @@ if until(
     s = [state(i) for i in (1, 2, 3)]
     ok(True, f"three validators and the witness agree, height {s[0]['height']}")
     ok(
-        all(x["boxes"]["node2"]["roles"] == ["r2"] for x in s),
-        "each box's heartbeat and roles are in the agreed state",
+        all(
+            x["boxes"]["node2"].get("facts") and not x["boxes"]["node2"].get("roles")
+            for x in s
+        ),
+        "each box's heartbeat is in the agreed state, and names no roles",
     )
     h = json.load(urllib.request.urlopen("http://127.0.0.1:8789/health"))
     ok(h["witness"] and h["connected"] == 3, f"relay health {h}")

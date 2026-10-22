@@ -51,8 +51,8 @@ is the only way those three files change. Nobody edits them by hand.
 - **Needs:** ssh to `admin@<net>` (or the address given).
 - **Safety:** reads only. Each file is written to `.new` first and moved
   into place once all three have arrived. Commit the result in its own
-  pull request; `checks.role-fit` then says whether the box still fits its
-  roles.
+  pull request; `checks.placement` then says what the box can run on it,
+  and the release builds it with that.
 
 ## sync-app-web
 

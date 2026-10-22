@@ -147,7 +147,7 @@ reached over the fleet's network:
    fleet's network - one in the same house when there is one, then any
    (flake.nix, `poolFor`). The vault's files, the nix cache, backups and the
    gateway's `s3.` all use it. Only what lives with garage (its own setup,
-   the storage role's Thanos store) names 127.0.0.1.
+   the storage bundle's Thanos store) names 127.0.0.1.
 3. **The gate is on every box** (`everyBox`), and every service that asks it
    about a request says `depends.dd-verify.local`.
 4. **Alerts need no secret** (mail.nix): a box signs each mail with its TPM

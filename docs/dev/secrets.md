@@ -54,7 +54,7 @@ able to read what another box runs.
 ## What is in each file
 
 `secrets/<box>.yaml` is a flat map, one key per secret. The names, and the
-role that reads each:
+bundle that reads each:
 
 ```
 every box   wifi-psk                     host.nix: the house Wi-Fi
@@ -81,8 +81,9 @@ vault       vault-key-id/-secret, vault-oidc-secret
 adblock     pihole-api-password          no longer read: the box makes its own (below)
 ```
 
-node1 runs every role and has every key above. node2 runs core, storage
-and runner, and has those keys only.
+node1's file has every key above. node2's has core's, storage's and the
+runners' only, so node2 is built only with the bundles those cover
+(below).
 
 `secrets/fleet.yaml` is nested:
 
@@ -104,7 +105,7 @@ publish` (the cache writer's keys, [releases: the keys](releases.md#the-keys)).
 
 ## How a box reads its file
 
-[`nix/roles/_sops.nix`](../../nix/roles/_sops.nix), imported by every role
+[`nix/roles/_sops.nix`](../../nix/roles/_sops.nix), imported by every bundle
 that declares a secret (and by `core`, so by every box):
 
 ```nix
@@ -129,11 +130,11 @@ which the gateway hands over encrypted to the box's `secretsKey`
 
 ## How a module reads a secret
 
-A role declares the secret and passes its path to the module. The module
+A bundle declares the secret and passes its path to the module. The module
 takes a path option, never a value:
 
 ```nix
-# in the role
+# in the bundle
 imports = [ ./_sops.nix ];
 sops.secrets.tmdb-token = { owner = "dd-verify"; };
 dd.verify.tmdbKeyFile = config.sops.secrets.tmdb-token.path;
@@ -169,9 +170,9 @@ a test never needs a real secret.
 
 ## Where each box's secrets are going
 
-Roles are going away (a box carries what its capability allows, and the
+Roles are gone (a box carries what its capability allows, and the
 control plane switches each service on where it is placed), and with them
-the secrets a role brings in a box's file: a box that takes a service over
+go the secrets a bundle brings in a box's file: a box that takes a service over
 has no file with that service's secret in it. Each secret goes one of four
 ways.
 
@@ -244,7 +245,7 @@ console-password-hash    the owner's passphrase at a box's keyboard, every box
 ```
 
 Until a secret goes one of these ways, the bundle of modules that reads
-it (`fleet/roles.json` `secrets`: storage's pool keys, the runners'
+it ([`nix/roles/bundles.json`](../../nix/roles/bundles.json) `secrets`: storage's pool keys, the runners'
 tokens, the libraries' key) is built only on a box whose own file holds
 it, and so the control plane places its services nowhere else
 (`nix/lib/fleet-placement.nix`). That is the one thing still set by hand
@@ -252,11 +253,12 @@ about where a service may run, and it goes with the secret.
 
 No longer read by anything, and to be taken out of `secrets/node1.yaml`:
 `ente-smtp-password`, `alert-recipient` and `alert-smtp-password` (mail
-goes through the mail Worker), `github-mirror-token` (no mirror), and with failover on the ones made on the
-box above (`ente-key-encryption`, `ente-key-hash`, `ente-jwt-secret`,
-`ente-ott`, `garage-key-id`, `garage-key-secret`, `vault-key-id`,
-`vault-key-secret`, `vault-oidc-secret`, `cloudflared-credentials`,
-`pihole-api-password`, `nix-cache-signing-key`; node2's too for the last).
+goes through the mail Worker), `github-mirror-token` (no mirror), and
+with failover on the ones made on the box above (`ente-key-encryption`,
+`ente-key-hash`, `ente-jwt-secret`, `ente-ott`, `garage-key-id`,
+`garage-key-secret`, `vault-key-id`, `vault-key-secret`,
+`vault-oidc-secret`, `cloudflared-credentials`, `pihole-api-password`,
+`nix-cache-signing-key`; node2's too for the last).
 
 ## Editing
 
@@ -286,9 +288,10 @@ top of the checkout.
    ```
 
    Or open the file in sops's editor: `dd secret run -- edit secrets/node1.yaml`.
-3. Declare it in the role (`sops.secrets.new-secret = { };`, with `owner`
+3. Declare it in the bundle (`sops.secrets.new-secret = { };`, with `owner`
    if a non-root unit reads it) and pass its path to the module.
-4. Commit the encrypted file with the role. The secret has to be in the
+4. Commit the encrypted file with the bundle. A secret its modules read
+   whatever else goes in its `secrets` in `nix/roles/bundles.json`. The secret has to be in the
    file before the release that declares it reaches the box, or sops-nix
    fails the activation and the box rolls back.
 5. If another box needs its own value, put a value of its own in that

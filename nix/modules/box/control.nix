@@ -15,7 +15,6 @@
 let
   cfg = config.dd.control;
   pkg = self.packages.${pkgs.stdenv.hostPlatform.system};
-  roles = lib.concatStringsSep "," cfg.roles;
 in
 {
   options.dd.control = {
@@ -24,10 +23,11 @@ in
       type = lib.types.str;
       default = "wss://control.${config.dd.domain}/relay";
     };
-    roles = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      description = "the roles this box runs, as its heartbeat reports them";
+    placement = lib.mkOption {
+      type = lib.types.path;
+      default = pkg.placement-inputs;
+      defaultText = "the release's placement-inputs.json";
+      description = "what the plan is made from: the release's placement inputs (a test may switch on its rules for joined boxes)";
     };
   };
 
@@ -84,10 +84,9 @@ in
           "-state /var/lib/dd-control"
           "-tpm-keys /boot/dd/unlock"
           "-listen 127.0.0.1:4195"
-          (lib.optionalString (roles != "") "-roles ${roles}")
           # what the fleet would run, at /plan; switched here for the placed
           # services this box carries
-          "-placement ${pkg.placement-inputs}"
+          "-placement ${cfg.placement}"
           "-placed-carries /etc/dd-placed/carries.json"
           "-placed-starts /etc/dd-placed/starts.json"
           # which boxes' stores keep each bucket, for this box's copier

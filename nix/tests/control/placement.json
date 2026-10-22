@@ -54,7 +54,6 @@
       "lease": true
     }
   },
-  "roles": {},
   "damping": {
     "base": 0.3,
     "perGiB": 0.01

@@ -177,39 +177,36 @@ fn usage_facts(counted: &serde_json::Map<String, Value>) -> String {
 /// The fleet's count, from the control plane's agreed state: every box's
 /// `usage/<service>/<member>` added up, for this box's gate. A service on
 /// two boxes is counted on both, as it keeps things on both.
-pub async fn view(
-    control: &str,
-    budget: u64,
-    roles: &std::path::Path,
-    out: &std::path::Path,
-) -> Result<()> {
-    // which box may count what: from the signed release's list of boxes,
-    // never from what a box says of itself
-    let roles: BTreeMap<String, Vec<String>> =
-        serde_json::from_slice(&std::fs::read(roles).with_context(|| roles.display().to_string())?)
-            .context("the boxes' roles")?;
-    let asked = async {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()?
-            .get(format!("{}/state", control.trim_end_matches('/')))
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<Value>()
-            .await
-            .context("the control plane's state")
+pub async fn view(control: &str, budget: u64, out: &std::path::Path) -> Result<()> {
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+    let get = |path: &'static str| {
+        let http = http.clone();
+        let url = format!("{}/{path}", control.trim_end_matches('/'));
+        async move {
+            http.get(url)
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<Value>()
+                .await
+                .with_context(|| format!("the control plane's {path}"))
+        }
     };
-    // the control plane not answering (restarting under a switch) is next
-    // time: the last count stands, and a failure here would fail the switch
-    let s = match asked.await {
-        Ok(s) => s,
-        Err(e) => {
+    // the agreed state, and the plan every box makes from it: which box may
+    // count what is where the plan puts the service, never what a box says
+    // of itself. The control plane not answering (restarting under a
+    // switch) is next time: the last count stands, and a failure here
+    // would fail the switch
+    let (s, plan) = match (get("state").await, get("plan").await) {
+        (Ok(s), Ok(p)) => (s, p),
+        (Err(e), _) | (_, Err(e)) => {
             eprintln!("the control plane did not answer ({e:#}); counting next time");
             return Ok(());
         }
     };
-    let doc = sum(&s, budget, &roles)?;
+    let doc = sum(&s, &plan, budget)?;
     // whole or not at all: the gate reads it while this writes
     let tmp = out.with_extension("tmp");
     std::fs::write(&tmp, serde_json::to_vec_pretty(&doc)?)?;
@@ -217,24 +214,41 @@ pub async fn view(
     Ok(())
 }
 
-/// What each kind of count is, and the role a box must have, in the
-/// release's list, for its count of that kind to be believed. A box can only
-/// add to the count - nothing it says lowers anyone's - and only for what it
-/// runs: one that claims to count Photos without running Photos is not heard.
+/// What each kind of count is, and the service the agreed plan must put on
+/// a box for its count of that kind to be believed (for a writer, the box
+/// must hold its lease too). A box can only add to the count - nothing it
+/// says lowers anyone's - and only for what it runs: one that claims to
+/// count Photos where the plan runs no Photos is not heard.
 const KINDS: [(&str, &str); 6] = [
-    ("photos", "photos"),
-    ("libraries", "photos"),
-    ("code", "forge"),
-    ("passwords", "vault"),
+    ("photos", "ente-museum"),
+    ("libraries", "ente-museum"),
+    ("code", "forgejo"),
+    ("passwords", "vaultwarden"),
     // game servers and kept worlds, members' computers: what their disks hold
-    ("games", "game"),
-    ("computers", "compute"),
+    ("games", "dd-games"),
+    ("computers", "computers"),
 ];
 
-fn sum(state: &Value, budget: u64, roles: &BTreeMap<String, Vec<String>>) -> Result<Value> {
+/// whether the agreed plan puts svc on box, and for a writer whose lease
+/// the agreed state names, whether box holds it now. Members' computers:
+/// any computer the plan puts there (computer-<id>)
+fn placed(state: &Value, plan: &Value, name: &str, svc: &str) -> bool {
+    let on = plan["boxes"][name]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|d| d["service"].as_str())
+        .any(|x| x == svc || (svc == "computers" && x.starts_with("computer-")));
+    let l = &state["leases"][format!("svc/{svc}")];
+    let lease_ok = l.is_null()
+        || (l["holder"].as_str() == Some(name)
+            && l["expires"].as_i64().unwrap_or(0) > state["time"].as_i64().unwrap_or(i64::MAX));
+    on && lease_ok
+}
+
+fn sum(state: &Value, plan: &Value, budget: u64) -> Result<Value> {
     let mut members: BTreeMap<String, BTreeMap<&str, u64>> = BTreeMap::new();
     for (name, b) in state["boxes"].as_object().into_iter().flatten() {
-        let has = |role: &str| roles.get(name).is_some_and(|r| r.iter().any(|x| x == role));
         for (k, v) in b["facts"].as_object().into_iter().flatten() {
             let mut parts = k.splitn(3, '/');
             let (Some("usage"), Some(svc), Some(member)) =
@@ -242,7 +256,10 @@ fn sum(state: &Value, budget: u64, roles: &BTreeMap<String, Vec<String>>) -> Res
             else {
                 continue;
             };
-            let Some((kind, _)) = KINDS.iter().find(|(x, role)| *x == svc && has(role)) else {
+            let Some((kind, _)) = KINDS
+                .iter()
+                .find(|(x, by)| *x == svc && placed(state, plan, name, by))
+            else {
                 continue;
             };
             // a count is a whole number of bytes; anything else counts nothing
@@ -277,25 +294,36 @@ fn sum(state: &Value, budget: u64, roles: &BTreeMap<String, Vec<String>>) -> Res
 
 #[cfg(test)]
 mod view_tests {
-    /// Every box's counts added up per member, whatever box a service is
-    /// on, and anything that is not a count left out
+    use serde_json::json;
+
+    fn plan(boxes: &[(&str, &[&str])]) -> serde_json::Value {
+        let mut o = serde_json::Map::new();
+        for (b, svcs) in boxes {
+            o.insert(
+                b.to_string(),
+                json!(
+                    svcs.iter()
+                        .map(|s| json!({ "service": s }))
+                        .collect::<Vec<_>>()
+                ),
+            );
+        }
+        json!({ "boxes": o })
+    }
+
+    /// Every box's counts added up per member, wherever the plan runs each
+    /// service, and anything that is not a count left out
     #[test]
     fn the_fleet_adds_up() {
-        let state = serde_json::json!({ "boxes": {
+        let state = json!({ "time": 1000, "boxes": {
             "node1": { "facts": { "usage/photos/tom": 100.0, "usage/libraries/tom": 20.0, "usage/code/tom": 5.0, "cores": 8.0 } },
             "node2": { "facts": { "usage/code/tom": 7.0, "usage/passwords/sarah": 3.0, "usage/weird/tom": 9.0 } }
         }});
-        let roles = std::collections::BTreeMap::from([
-            (
-                "node1".to_string(),
-                vec!["photos".to_string(), "forge".to_string()],
-            ),
-            (
-                "node2".to_string(),
-                vec!["forge".to_string(), "vault".to_string()],
-            ),
+        let p = plan(&[
+            ("node1", &["ente-museum", "forgejo"]),
+            ("node2", &["forgejo", "vaultwarden"]),
         ]);
-        let v = super::sum(&state, 1000, &roles).unwrap();
+        let v = super::sum(&state, &p, 1000).unwrap();
         assert_eq!(v["budget"], 1000);
         assert_eq!(v["members"]["tom"]["photos"], 100);
         assert_eq!(v["members"]["tom"]["libraries"], 20);
@@ -304,26 +332,51 @@ mod view_tests {
         assert_eq!(v["members"]["sarah"]["passwords"], 3);
     }
 
-    /// A box counts only what the release says it runs, and no number it
-    /// sends is more than bytes: not negative, not a NaN, not past the top
+    /// A box counts only what the plan runs there, and no number it sends
+    /// is more than bytes: not negative, not a NaN, not past the top
     #[test]
     fn a_box_counts_only_what_it_runs() {
-        let state = serde_json::json!({ "boxes": {
+        let state = json!({ "time": 1000, "boxes": {
             "node2": { "facts": { "usage/photos/tom": 999.0, "usage/code/tom": -5.0 } },
             "node3": { "facts": { "usage/code/sarah": 1e30 } },
             "node4": { "facts": { "usage/code/sarah": 1e30 } }
         }});
-        let roles = std::collections::BTreeMap::from([
-            ("node2".to_string(), vec!["forge".to_string()]),
-            ("node3".to_string(), vec!["forge".to_string()]),
-            ("node4".to_string(), vec!["forge".to_string()]),
+        let p = plan(&[
+            ("node2", &["forgejo"]),
+            ("node3", &["forgejo"]),
+            ("node4", &["forgejo"]),
         ]);
-        let v = super::sum(&state, 1000, &roles).unwrap();
+        let v = super::sum(&state, &p, 1000).unwrap();
         // node2 runs no Photos; its -5 counts nothing
         assert_eq!(v["members"]["tom"]["photos"], 0);
         assert_eq!(v["members"]["tom"]["code"], 0);
         // two huge counts add up to the top, not round past it
         assert_eq!(v["members"]["sarah"]["code"], u64::MAX);
+    }
+
+    /// Being built with a service is not running it: a box the plan does not
+    /// give Photos (though every box is built with it) is not heard on it;
+    /// and a writer's count is believed only from its lease's holder
+    #[test]
+    fn built_is_not_placed_and_a_writer_counts_from_its_holder() {
+        let state = json!({ "time": 1000,
+        "leases": { "svc/vaultwarden": { "holder": "node1", "expires": 2000 },
+                    "svc/forgejo": { "holder": "node1", "expires": 500 } },
+        "boxes": {
+            "node1": { "facts": { "usage/passwords/ann": 4.0, "usage/code/ann": 6.0 } },
+            "node2": { "facts": { "usage/photos/ann": 50.0, "usage/passwords/ann": 9.0, "usage/computers/ann": 8.0 } }
+        }});
+        // node2 is planned vaultwarden too (as if a plan said so), but node1
+        // holds the lease; forgejo's lease has lapsed; node2 runs a computer
+        let p = plan(&[
+            ("node1", &["vaultwarden", "forgejo"]),
+            ("node2", &["vaultwarden", "computer-0123456789abcdef"]),
+        ]);
+        let v = super::sum(&state, &p, 1000).unwrap();
+        assert_eq!(v["members"]["ann"]["photos"], 0);
+        assert_eq!(v["members"]["ann"]["passwords"], 4);
+        assert_eq!(v["members"]["ann"]["code"], 0);
+        assert_eq!(v["members"]["ann"]["computers"], 8);
     }
 }
 

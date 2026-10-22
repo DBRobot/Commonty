@@ -1,7 +1,8 @@
-# Evaluation only: the box list is well-formed. Every role a box names is a
-# file, every box has core, every box builds, and the wiring the flake
-# derives from the list (peers, garage's addresses, thanos on its own box)
-# says what the list says.
+# Evaluation only: the box list is well-formed. No box names a role (what
+# it is built with comes from its capability, nix/lib/fleet-placement.nix),
+# every box is built with core, every box builds, and the wiring the flake
+# derives (peers, garage's addresses, thanos on its own box) says what the
+# boxes are built with.
 {
   pkgs,
   self,
@@ -10,14 +11,17 @@
 }:
 let
   boxes = builtins.fromJSON (builtins.readFile ../../fleet/boxes.json);
+  fp = import ../lib/fleet-placement.nix { inherit lib; };
+  has = name: s: builtins.elem s fp.built.${name};
   cfgs = self.nixosConfigurations;
   ok = builtins.all (x: x) (
     lib.flatten (
       lib.mapAttrsToList (
         name: box:
         [
-          (builtins.elem "core" box.roles)
-          (builtins.all (r: builtins.pathExists (../roles + "/${r}.nix")) box.roles)
+          (!(box ? roles))
+          (builtins.elem "core" fp.carried.${name})
+          (builtins.all (r: builtins.pathExists (../roles + "/${r}.nix")) fp.carried.${name})
           (builtins.hasAttr name cfgs)
           (cfgs.${name}.config.networking.hostName == name)
           # every box has its address on the fleet's network recorded
@@ -29,14 +33,14 @@ let
           (cfgs.${name}.config.users.mutableUsers == false)
         ]
         ++ [ (cfgs.${name}.config.services.prometheus.listenAddress == "127.0.0.1") ]
-        ++ lib.optionals (builtins.elem "storage" box.roles) [
+        ++ lib.optionals (has name "garage") [
           # garage: this box's own address is public, its peers never include itself
           (cfgs.${name}.config.dd.garage.publicAddr == "${box.net}:3901")
           (builtins.all (p: !lib.hasInfix box.net p) cfgs.${name}.config.dd.garage.peers)
           (cfgs.${name}.config.dd.garage.zone == box.regionId)
           (lib.hasPrefix "127.0.0.1:" cfgs.${name}.config.services.thanos.sidecar.grpc-address)
         ]
-        ++ lib.optionals (builtins.elem "observe" box.roles) [
+        ++ lib.optionals (has name "thanos-query") [
           # the fleet view is thanos on this box: its own sidecar and the
           # bucket, never another box's sidecar (README: no box talks to
           # another), and every sidecar answers its own box alone
@@ -47,7 +51,7 @@ let
           (!cfgs.${name}.config.services.grafana.enable)
           (lib.hasPrefix "127.0.0.1:" cfgs.${name}.config.services.thanos.query.http-address)
         ]
-        ++ lib.optionals (builtins.elem "llm" box.roles) (
+        ++ lib.optionals (has name "llama-swap") (
           let
             c = cfgs.${name}.config;
           in

@@ -548,7 +548,6 @@ func main() {
 	dir := flag.String("state", "/var/lib/dd-control", "where the validator keeps its key, log and state")
 	tpmKeys := flag.String("tpm-keys", "/boot/dd/unlock", "the TPM-held key's files")
 	listen := flag.String("listen", "127.0.0.1:4195", "the agreed state, for this box")
-	roles := flag.String("roles", "", "roles this box runs, comma separated")
 	placement := flag.String("placement", "", "what each box can run and what the fleet wants (the release's placement-inputs.json); empty: no /plan")
 	every := flag.Duration("heartbeat", 30*time.Second, "how often to heartbeat")
 	placedCarries := flag.String("placed-carries", "", "the placed services this box carries and their units (nix/modules/box/placed.nix); empty: none, and nothing is switched")
@@ -881,7 +880,7 @@ func main() {
 					maps.Copy(f, extra)
 				}
 			}
-			body, _ := json.Marshal(state.Heartbeat{Facts: f, Roles: splitRoles(*roles)})
+			body, _ := json.Marshal(state.Heartbeat{Facts: f})
 			if _, err := submit("heartbeat", body); err != nil {
 				log.Printf("heartbeat: %v", err)
 			}
@@ -1167,16 +1166,6 @@ func memberBoxes(ids *ident.Server, s *state.State) map[string]bool {
 			if b.Qualifies != "" {
 				out[b.Box] = true
 			}
-		}
-	}
-	return out
-}
-
-func splitRoles(s string) []string {
-	var out []string
-	for _, r := range strings.Split(s, ",") {
-		if r = strings.TrimSpace(r); r != "" {
-			out = append(out, r)
 		}
 	}
 	return out

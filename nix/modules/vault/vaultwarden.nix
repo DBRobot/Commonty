@@ -118,7 +118,7 @@ in
     # sessions it reads are this box's alone (session.rs), and it gets the
     # client's settings below. It is reached at home.<domain>, which the
     # fleet's names point at the gateway, so Passwords runs on the gateway
-    # (fleet/roles.json: with gateway; asserted below).
+    # (nix/roles/bundles.json: with gateway; asserted below).
     issuer = lib.mkOption {
       type = lib.types.str;
       default = homeIssuer;

@@ -28,10 +28,11 @@ import (
 	"commonty/control/state"
 )
 
-// a box under the release: the roles it is built with (dd.control.roles)
-// and the placed services it carries, with their units
+// a box under the release: the services it is built with
+// (fleet-placement.nix built) and the placed services it carries, with
+// their units
 type built struct {
-	Roles   []string            `json:"roles"`
+	Built   []string            `json:"built"`
 	Carries map[string][]string `json:"carries"`
 }
 
@@ -153,17 +154,13 @@ func main() {
 		now[box] = running(p, needs)
 	}
 
-	// each box as the release would have it: its roles, what it carries,
-	// and (first round) no placed service running
+	// each box as the release would have it: what it is built with, what
+	// it carries, and (first round) no placed service running
 	rel := map[string]built{}
 	for box, p := range builds {
 		var b built
 		readJSON(p, &b)
 		rel[box] = b
-	}
-	before := map[string][]string{}
-	for name, b := range s.Boxes {
-		before[name] = b.Roles
 	}
 	for name, b := range s.Boxes {
 		r, ok := rel[name]
@@ -183,7 +180,6 @@ func main() {
 			}
 		}
 		b.Facts = f
-		b.Roles = r.Roles
 	}
 	for k, v := range facts {
 		box, fact, ok := strings.Cut(k, ":")
@@ -202,13 +198,10 @@ func main() {
 	}
 
 	// what the release runs on each box: what the plan gives it of what
-	// it carries or runs on every box, and what its roles bring that the
+	// it carries or runs on every box, and what it is built with that the
 	// control plane does not switch
 	after := map[string]map[string]string{}
 	for box := range units {
-		if _, ok := rel[box]; !ok {
-			rel[box] = built{Roles: before[box]}
-		}
 		a := map[string]string{}
 		for _, d := range plan.Boxes[box] {
 			sv := in.Services[d.Service]
@@ -218,8 +211,8 @@ func main() {
 				continue
 			}
 			if !sv.Placed {
-				// not switched: it runs where its roles bring it, whatever
-				// the plan says
+				// not switched: it runs where it is built, whatever the
+				// plan says
 				continue
 			}
 			if _, ok := rel[box].Carries[d.Service]; ok {
@@ -234,11 +227,9 @@ func main() {
 				a[svc] = "every box"
 				continue
 			}
-			for _, r := range rel[box].Roles {
-				for _, x := range in.Roles[r] {
-					if x == svc {
-						a[svc] = "its role " + r + " (not switched)"
-					}
+			for _, x := range rel[box].Built {
+				if x == svc {
+					a[svc] = "built in (not switched)"
 				}
 			}
 		}
@@ -249,8 +240,9 @@ func main() {
 		Stops  map[string][]string `json:"stops"`  // service -> the units active now
 		Starts map[string]string   `json:"starts"` // service -> the plan's why
 		Same   []string            `json:"same"`
-		// built in by roles it has now as well, or on every box, with no
-		// unit active now: a service of nginx's or the gate's, a oneshot
+		// not switched, with no unit active now: a page nginx or the gate
+		// serves, a oneshot; whether it was built in before is the boxes'
+		// systems' to say, not the agreed state's
 		Quiet []string `json:"quiet"`
 	}
 	out := map[string]diff{}
@@ -268,17 +260,11 @@ func main() {
 				d.Stops[svc] = us
 			}
 		}
-		had := map[string]bool{}
-		for _, r := range before[box] {
-			for _, x := range in.Roles[r] {
-				had[x] = true
-			}
-		}
 		for svc, why := range after[box] {
 			if _, ok := now[box][svc]; ok {
 				continue
 			}
-			if !in.Services[svc].Placed && (had[svc] || in.Services[svc].EveryBox) {
+			if !in.Services[svc].Placed {
 				d.Quiet = append(d.Quiet, svc)
 				continue
 			}
@@ -304,7 +290,7 @@ func main() {
 			fmt.Printf("  starts %-22s %s\n", svc, d.Starts[svc])
 		}
 		if len(d.Quiet) > 0 {
-			fmt.Printf("  built in as before, no unit active now: %s\n", strings.Join(d.Quiet, " "))
+			fmt.Printf("  built in, not switched, no unit active now: %s\n", strings.Join(d.Quiet, " "))
 		}
 	}
 	for svc, why := range plan.Unplaced {

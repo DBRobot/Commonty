@@ -1,10 +1,13 @@
 # The fleet of boxes
 
-`fleet/` is what the fleet is, as data: the boxes and the roles each one
-runs, what each box reported about its own hardware, what its owner chose
-for it, who the members are, and the owner's policy. No Nix in it says what
-a box runs; [`flake.nix`](../../flake.nix) reads these files and builds one
-NixOS system per box from them. This page is how the folder is laid out,
+`fleet/` is what the fleet is, as data: the boxes, what each box reported
+about its own hardware, what its owner chose for it, who the members are,
+and the owner's policy. Nothing in it says what a box runs: a box is built
+with what its capability allows
+([`nix/lib/fleet-placement.nix`](../../nix/lib/fleet-placement.nix)), and
+the control plane decides where each service runs.
+[`flake.nix`](../../flake.nix) reads these files and builds one NixOS
+system per box from them. This page is how the folder is laid out,
 who reads each file, and how to change it.
 
 The folder holds no secret. Every file here is public by design: keys are
@@ -15,13 +18,12 @@ the cache writer's key) is in `secrets/fleet.yaml`, encrypted with sops.
 
 ```
 fleet/
-  boxes.json              every box: its roles, its addresses, its public keys
+  boxes.json              every box: its addresses, its public keys
   boxes/<box>/
     hardware.json         what the box found on itself (signed by its TPM)
     hardware-configuration.nix   nixos-generate-config's output (signed with it)
     report.sig            the TPM's signature over the two files above
     box.json              what the box's owner chose: house, pools, datasets
-  roles.json              what each role needs of a box
   policy.json             the fleet owner's choices: domain, repo, people, allowance
   members.json            who may use the services, as hashes of their roots
   release.pub             the release key's public half
@@ -84,9 +86,7 @@ under `fleet/boxes/`.
               else at http://<net>:4181/_dd/directory
   siteId      an opaque id for the house the box is in (s-xxxxxxxx)
   regionId    an opaque id for its region (r-xxxxxxxx); garage's zone
-  roles       the roles it runs: one file each in nix/roles/<role>.nix;
-              core always
-  garage      on a box with the storage role:
+  garage      on a box built with garage (the storage bundle):
     id          its garage node id, once garage has started there once
     capacity    the space it offers the cluster ("3T", "400G")
     dataDir     where its blocks live (a dataset in its box.json)
@@ -101,18 +101,20 @@ to whoever holds the release signer's sops key.
 ### Who reads it
 
 ```
-flake.nix                nixosConfigurations: one per entry, its roles' files, and
+flake.nix                nixosConfigurations: one per entry, the bundles its
+                         capability allows (fleet-placement.nix carried), and
                          the wiring derived from the list: peers, house peers,
                          garage's peers and zone, where the cache and backups go,
                          the agent's reach list, headscale's owners and box keys
 flake.nix (control)      the control plane's boxes: ids 101.., house, key
 flake.nix (mail-worker)  BOXES in the Worker's fleet.js: each unlockKey
 nix/roles/core.nix       the other boxes' net addresses, and this house's
-nix/modules/storage/view.nix   each box's roles, for who may count what
+nix/modules/storage/view.nix   what each box is built with, for who may count what
 nix/tests/boxes.nix      checks.boxes: the list against the built systems
-nix/tests/role-fit.nix   checks.role-fit (below)
+nix/lib/fleet-placement.nix    what each box is built with, carries and can run (below)
 box-reports/check.py     checks.box-reports: report.sig against unlockKey
-entry_point.yml          CI's hosts (every box) and builders (boxes with runner)
+entry_point.yml          CI's hosts (every box) and builders (built with the
+                         CI runner: the flake's fleetBuilt)
 dd release               which boxes to build, ask to vouch, and nudge
 dd box list | public     what the list says, and what the box says
 scripts/install-box      hostKey and net, to find and check the box
@@ -175,12 +177,13 @@ only file in the folder that is.
 box.json
   owner           a name in policy.json people: whose box this is. Picks
                   the paper key its disk keys are copied to, and the
-                  owner checks in role-fit, headscale and build orders
+                  owner checks in capability.nix, headscale and build orders
   house
     ssid          the house's Wi-Fi                     dd.home.ssid
     address       the box's fixed address on the house LAN, with prefix
-    household     who lives there (switches its ad blocking); a role with
-                  "box": ["household"] needs it
+    household     who lives there (switches its ad blocking); makes it the
+                  house's own box, which the house's DNS and Tang ask for
+                  (needs requires.place = "house")
   encrypted       datasets under <pool>/enc, unlocked at boot from the TPM
                   and the unlock Worker (disk-unlock.nix)
   extraPools      pools other than tank to import at boot
@@ -196,52 +199,54 @@ box.json
 are read without defaults: a box.json without one of them fails to
 evaluate. The others are optional.
 
-## roles.json
+## What a box is built with
 
-What each role needs of a box. The keys are role names, which are also
-the file names in [`nix/roles/`](../../nix/roles); `_` is a note.
+No list says it. [`fleet-placement.nix`](../../nix/lib/fleet-placement.nix)
+works it out for each box from its signed report, its `box.json` and the
+policy, by the services' needs (`.#needs`,
+[nix/lib/needs.nix](../../nix/lib/needs.nix)) and
+[`capability.nix`](../../nix/lib/capability.nix):
 
 ```
-<role>
-  requires    against the box's hardware.json:
-                arch, uefi, tpmP256, wiredInitrd, memoryGiB, threads,
-                cpuFlags, kvm, nestedKvm
-  box         fields its box.json house must have (["household"])
-  with        roles that must be on the same box: the code reaches them
+carried    the module bundles it is built with (nix/roles/<bundle>.nix):
+           core, and every bundle of which it can run a service that does
+           not run everywhere, whose secrets its own sops file holds, and
+           whose companions (with) it is built with too
+built      every service those bundles bring
+carries    of those, the placed services it can run: the plan gives it
+           only these (box/placed.nix)
+joined     the same for a box that joined on its own key, from its own
+           report and box.json, limited to what a member's box may run
+           (placement-inputs joined)
+```
+
+[`nix/roles/bundles.json`](../../nix/roles/bundles.json) says what each
+bundle brings:
+
+```
+<bundle>
+  services    the needs' service names it brings
+  secrets     what its modules read from the box's own sops file whatever
+              else it has; a box whose file lacks one is not built with it
+  with        bundles that must be built beside it: the code reaches them
               on localhost
-  perFleet    exactly this many boxes run it (gateway: 1)
-  services    the needs' service names it runs, for policy.json ownHardware
-  prefers     what makes it faster ({"gpuEncode": "H264"}); a note today,
-              nothing checks it
   why         one line on why, for people
 ```
 
-### Role-fit
-
-[`nix/lib/fit.nix`](../../nix/lib/fit.nix) takes `roles.json`,
-`boxes.json`, the `fleet/boxes/` folder and `policy.json`, and returns the
-problems as sentences. `checks.role-fit`
-([nix/tests/role-fit.nix](../../nix/tests/role-fit.nix)) fails with them;
-`checks.box-reports` builds it too. A box fails when:
-
-- it does not run `core`;
-- it names a role `roles.json` does not have;
-- its report misses a `requires` (an unknown requirement is a problem
-  too, so a typo cannot pass);
-- a `with` role is not on it, or a `box` field is not in its house;
-- it runs a role whose `services` include one in `ownHardware`, and its
-  `box.json` owner is not the policy's `owner`.
-
-And the fleet fails when a `perFleet` role runs on another number of
-boxes.
+What a box can run is capability's: its `joins` (a TPM 2.0 with P-256,
+UEFI, a wired NIC its initrd has a driver for), each service's
+`requires` against its report, and its owner's choices: `trust`, the
+policy's `ownHardware` (only on boxes whose `box.json` owner is the
+policy's `owner`), a metered line. `checks.placement` and
+`checks.placement-fleet` hold the rules to the fleet and to a dozen
+made-up computers.
 
 ### Placement
 
-Placement is `boxes.json`, by hand. Nothing chooses roles for boxes yet.
-Role-fit is the check that keeps the hand-written list honest; placement
-will read the same rules, with each service's needs (`.#needs`,
-[nix/lib/needs.nix](../../nix/lib/needs.nix)), when it exists
-([servers.md](servers.md#needs-and-placement), [hardware.md](hardware.md)).
+The control plane decides where each placed service runs, from the
+release's placement inputs and the agreed state
+([control-plane.md](control-plane.md#placement)). A box's own word only
+narrows what the release's table says it can run.
 
 ## policy.json
 
@@ -262,7 +267,7 @@ people.<name>
 allowanceGb    each member's storage across every service and box
                                                      dd.storage.budgetGb
                                                      (storage/view.nix)
-ownHardware    services that run only on the owner's own boxes (role-fit)
+ownHardware    services that run only on the owner's own boxes (capability.nix)
 ```
 
 ## The other files
@@ -285,7 +290,7 @@ control.json         validators [{id, name, key}]: each voting box's
                      Worker's config and dd-control's (control-plane.md)
 control-worker.json  {domain, account, zone, script}: where the relay is
 mail.json            {domain, account, zone, kv, script}: where the mail
-                     Worker is; the gateway role reads it
+                     Worker is; the gateway bundle reads it
 devices.json         systems the fleet builds and signs that run on a
                      household's device, not a box: today home-controller
                      (home-controller.md). CI builds each like a box's
@@ -325,10 +330,10 @@ from the forge; it is built into the system the release names.
 ## Checks
 
 ```
-checks.role-fit       fit.nix over the four files
-checks.box-reports    each report.sig, every folder against boxes.json; and role-fit
-checks.boxes          every role is a file, every box has core and builds, and
-                      the derived wiring says what the list says: peers,
+checks.box-reports    each report.sig, every folder against boxes.json
+checks.boxes          no box names a role, every bundle a box is built with is
+                      a file, every box has core and builds, and the derived
+                      wiring says what it is built with: peers,
                       dd.box.net, garage's address, zone and peers, Thanos on
                       its own box, the admin's console password, llama-swap
                       shut in
@@ -337,7 +342,7 @@ checks.ci             the VM test lists in flake.nix and entry_point.yml agree
 
 A change under `fleet/` turns on CI's nix and VM parts
 ([ci.md](ci.md#how-a-run-fits-together)); every box's system is built,
-on every box with the runner role.
+on every box built with the CI runner.
 
 ## Adding a box
 
@@ -358,9 +363,9 @@ has to exist, in the order each part depends on the last:
 3. **Its entry in `boxes.json`.** `hostKey` (its
    `/etc/ssh/ssh_host_ed25519_key.pub`, type and key, no comment),
    `unlockKey`, `siteId` and `regionId` (an existing house's, or new
-   opaque ids with their names in `secrets/fleet.yaml`), `public: false`,
-   and `roles: ["core"]` to start. `net` once it has joined the fleet's
-   network (`/run/commonty-net-address` on the box).
+   opaque ids with their names in `secrets/fleet.yaml`) and
+   `public: false`. `net` once it has joined the fleet's network
+   (`/run/commonty-net-address` on the box).
 4. **Its folder.** `scripts/box-report <box> <address>` copies the signed
    report into `fleet/boxes/<box>/`. Write its `box.json` by hand: owner
    (a name in `policy.json` people), house, `encrypted`, `extraPools`,
@@ -368,10 +373,11 @@ has to exist, in the order each part depends on the last:
 5. **Its secrets.** Its TPM recipient (`secretsKey` in the report) in
    `.sops.yaml`, and `secrets/<box>.yaml` with at least `wifi-psk`
    (`host.nix` asks for it), encrypted with `dd secret run`.
-6. **Its roles.** Add them to its list. `nix build
-   .#checks.x86_64-linux.role-fit` and `.#checks.x86_64-linux.box-reports`
-   say what it cannot carry. A storage box gets a `garage` block; its `id`
-   comes after garage first starts there.
+6. **What it is built with** follows from its report, its `box.json` and
+   its secrets file; nothing is added by hand. `nix build
+   .#checks.x86_64-linux.placement` says what it can and cannot run, and
+   why. A box built with garage gets a `garage` block; its `id` comes
+   after garage first starts there.
 7. **A release.** The box is built, and asked to vouch, from then on
    ([releases.md](releases.md#changing-it)). Then `dd-unlock-enrol share`
    on the box hands the unlock Worker its half of the disk key
@@ -388,16 +394,20 @@ pools, the same `net`, no failed units.
 
 ## Changing it
 
-- **A role for a box**: add it to the box's `roles`, run role-fit, and
-  read what it says. A role that needs another on the same box says so in
-  `with`; adding the role means adding both.
-- **A new role**: `nix/roles/<role>.nix`, an entry in `roles.json` with
-  its `why` and what it `requires`, then a box's list
-  ([servers.md](servers.md#adding-a-service)).
-- **A new requirement kind** goes in `need` in `fit.nix`, read from
+- **A service on a box** is never put there by hand. If a box should run
+  something it does not, `checks.placement` says why it cannot (its
+  report, its `box.json`, its secrets file, the policy); fix that, not a
+  list.
+- **A new bundle**: `nix/roles/<bundle>.nix` and an entry in
+  [`nix/roles/bundles.json`](../../nix/roles/bundles.json) with its
+  `services`, `secrets`, `with` and `why`; its services' needs say what
+  they need of a box ([servers.md](servers.md#adding-a-service)).
+- **A new requirement kind** goes in the needs' `requires`
+  ([`needs-type.nix`](../../nix/lib/needs-type.nix)) and `lacksIn` in
+  [`capability.nix`](../../nix/lib/capability.nix), read from
   `hardware.json`. If the report does not have the fact yet, `detect.sh`
-  gets it first, and every box has to report again before the check can
-  pass.
+  gets it first, and every box has to report again before a box is
+  judged by it.
 - **A new box.json field** is read in `host.nix`. Read it with a default
   (`box.x or ...`) unless every box's file gets it in the same change.
 - **A new person** in `people` needs `ssh` and `paperKey` before a box
@@ -414,9 +424,9 @@ pools, the same `net`, no failed units.
 - **`net` changes when a box joins as a new node.** Update `boxes.json`
   in the same change as anything else that follows from it; a stale
   `net` makes the box's peers and the agent's reach check wrong.
-- **The first storage box is special.** A box without the storage role
-  takes the nix cache and its backups from the first storage box in the
-  list, over the fleet's network (`cacheOf`, `backupEndpoint` in the
+- **The first storage box is special.** A box not built with garage
+  takes the nix cache and its backups from the first box built with it in
+  the list, over the fleet's network (`cacheOf`, `backupEndpoint` in the
   flake). Reordering `boxes.json` can move that.
 - **Opaque ids stay opaque.** Names of places and people beyond
   `policy.json` go in `secrets/fleet.yaml`, not here.

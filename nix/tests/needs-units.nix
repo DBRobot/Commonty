@@ -60,7 +60,7 @@ let
       c: if lib.hasSuffix "*" c then lib.hasPrefix (lib.removeSuffix "*" c) u else c == u
     ) claims;
   boxes = builtins.attrNames (lib.importJSON ../../fleet/boxes.json);
-  # built in where their roles bring them and run there, not switched
+  # built in where the box is built with them and run there, not switched
   unswitched = {
     # the shared pool: every box's agent fetches its release's closures
     # through it, so it must not wait on the control plane agreeing

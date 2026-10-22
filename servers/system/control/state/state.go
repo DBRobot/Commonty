@@ -85,7 +85,12 @@ type Request struct {
 
 type Heartbeat struct {
 	Facts map[string]float64 `json:"facts"` // cores, ram_bytes, disk_free_bytes, load, temp_c, ...
-	Roles []string           `json:"roles"` // what it runs now
+	// what the roles of the release before ran: boxes no longer send any
+	// (what a box is built with is the release's, nix/lib/fleet-placement.nix).
+	// It stays in the agreed state's format while a box or validator of that
+	// release may still be in the fleet: its hash is compared between the
+	// validators, and an older one copies it. A later release drops it.
+	Roles []string `json:"roles,omitempty"`
 }
 
 type LeaseOp struct {

@@ -231,7 +231,7 @@ enum Command {
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES)]
         directories: Vec<String>,
     },
-    /// The fleet: every box, its roles and where it stands. Reads
+    /// The fleet: every box and where it stands. Reads
     /// fleet/boxes.json; with --private, the owner and place behind the ids
     /// (secrets/fleet.yaml, readable by the release signer's dd key).
     Box {
@@ -330,10 +330,6 @@ enum Command {
         /// each member's allowance, in GB
         #[arg(long)]
         budget_gb: u64,
-        /// the release's boxes and their roles ({"node1": ["photos", ...]}):
-        /// which box may count what
-        #[arg(long)]
-        roles: std::path::PathBuf,
         #[arg(long)]
         out: std::path::PathBuf,
     },
@@ -1556,10 +1552,6 @@ async fn main() -> Result<()> {
                     _ => None,
                 };
                 for (name, b) in boxes.as_object().context("boxes.json is not an object")? {
-                    let roles: Vec<&str> = b["roles"]
-                        .as_array()
-                        .map(|a| a.iter().filter_map(|r| r.as_str()).collect())
-                        .unwrap_or_default();
                     println!(
                         "{name}  {} {}  net {}  {}",
                         b["siteId"].as_str().unwrap_or("-"),
@@ -1571,7 +1563,6 @@ async fn main() -> Result<()> {
                             "network only"
                         },
                     );
-                    println!("  roles: {}", roles.join(" "));
                     // what the box itself says, from the fleet's Metrics as a
                     // member: a box's own prometheus answers only the box
                     if let Some((http, url, token)) = &metrics {
@@ -2016,16 +2007,9 @@ async fn main() -> Result<()> {
         Command::StorageView {
             control,
             budget_gb,
-            roles,
             out,
         } => {
-            storage_ledger::view(
-                &control,
-                budget_gb.saturating_mul(1_000_000_000),
-                &roles,
-                &out,
-            )
-            .await?;
+            storage_ledger::view(&control, budget_gb.saturating_mul(1_000_000_000), &out).await?;
         }
 
         Command::PhotosDemo {

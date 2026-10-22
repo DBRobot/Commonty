@@ -1,12 +1,6 @@
 {
-  "_": "What each role needs from a box (docs/dev/hardware.md has the evidence). requires: against the box's signed report (fleet/boxes/<box>/hardware.json); box: against its owner's box.json; with: roles that must be on the same box, because the code reaches them on localhost; perFleet: exactly that many boxes run it. nix/tests/role-fit.nix fails when fleet/boxes.json breaks any of it. services: what the role brings, by the names in the needs (.#needs, nix/lib/needs.nix); a service may come with several roles. nix/lib/capability.nix holds each box to the needs of every service its roles bring, and checks this list against what the box really runs (nix/tests/placement.nix). secrets: what its modules read from the box's own sops file whatever else it has; a box whose file lacks one is not built with the role (nix/lib/fleet-placement.nix), until the secret is made on the box or sealed to it (docs/dev/secrets.md).",
+  "_": "The module bundles (nix/roles/<name>.nix) and what each brings, by the services' names in the needs (.#needs, nix/lib/needs.nix). No box is given a bundle by hand: a box is built with every bundle of which it can run a service that does not run everywhere (nix/lib/capability.nix: its signed report, its owner's box.json, the policy), whose secrets its own sops file holds, and whose companions it is built with too (nix/lib/fleet-placement.nix); the control plane decides where each placed service runs. services: what the bundle brings. secrets: what its modules read from the box's own sops file whatever else it has (docs/dev/secrets.md: until each is made on the box or sealed to it). with: the bundles that must be built beside it, because its code reaches them on localhost. why: what it is for.",
   "core": {
-    "requires": {
-      "arch": "x86_64",
-      "uefi": true,
-      "tpmP256": true,
-      "wiredInitrd": true
-    },
     "why": "every box: the disk unlock needs the TPM and a cable its initrd has the driver for",
     "services": [
       "dd-agent",
@@ -33,11 +27,10 @@
     ]
   },
   "gateway": {
-    "perFleet": 1,
+    "why": "one public front door (dd-dns points *.domain at it); s3.<domain> proxies its own garage",
     "with": [
       "storage"
     ],
-    "why": "one public front door (dd-dns points *.domain at it); s3.<domain> proxies its own garage",
     "services": [
       "nginx",
       "acme",
@@ -50,9 +43,6 @@
   },
   "storage": {
     "why": "garage: a dataset for blocks; rf=2, so the smallest box caps the usable space",
-    "services": [
-      "garage"
-    ],
     "secrets": [
       "garage-rpc-secret",
       "garage-backup-key-id",
@@ -62,13 +52,16 @@
       "thanos-key-secret",
       "cache-key-id",
       "cache-key-secret"
+    ],
+    "services": [
+      "garage"
     ]
   },
   "photos": {
+    "why": "photos.<domain> and the gate; its database is its own (the ledger reads counts, not databases)",
     "with": [
       "gateway"
     ],
-    "why": "photos.<domain> and the gate; its database is its own (the ledger reads counts, not databases)",
     "services": [
       "ente-museum",
       "ente-web",
@@ -79,10 +72,10 @@
     ]
   },
   "vault": {
+    "why": "passwords; its sign-in issuer is the gate at home.<domain>, the gateway's, and sessions are per box; garage reached at the storage pool's address, not localhost",
     "with": [
       "gateway"
     ],
-    "why": "passwords; its sign-in issuer is the gate at home.<domain>, the gateway's, and sessions are per box; garage reached at the storage pool's address, not localhost",
     "services": [
       "vaultwarden",
       "vaultwarden-send",
@@ -94,34 +87,28 @@
     ]
   },
   "media": {
+    "why": "files.<domain>: Files, Movies & TV and the disk images, through the gate",
     "with": [
       "gateway"
     ],
-    "why": "files.<domain>: Files, Movies & TV and the disk images, through the gate",
     "services": [
       "disk-images",
       "nginx"
     ]
   },
   "library": {
-    "prefers": {
-      "gpuEncode": "H264"
-    },
     "why": "transcode: H.264 encode on a GPU (Intel only today), else every core",
+    "secrets": [
+      "library-key-id",
+      "library-key-secret"
+    ],
     "services": [
       "libraries",
       "mail-inbox",
       "dd-transcode"
-    ],
-    "secrets": [
-      "library-key-id",
-      "library-key-secret"
     ]
   },
   "llm": {
-    "requires": {
-      "memoryGiB": 48
-    },
     "why": "a 22G model held in RAM beside the rest; any GPU, any SIMD (nix/modules/llm/needs.nix)",
     "services": [
       "llama-swap",
@@ -130,20 +117,16 @@
     ]
   },
   "game": {
-    "requires": {
-      "kvm": true,
-      "memoryGiB": 24
-    },
     "why": "every world is a KVM guest of 6-8G; the budget is 20G",
     "services": [
       "dd-games"
     ]
   },
   "forge": {
+    "why": "git.<domain>, and postgres shared with photos and vault",
     "with": [
       "gateway"
     ],
-    "why": "git.<domain>, and postgres shared with photos and vault",
     "services": [
       "forgejo",
       "forgejo-public",
@@ -154,31 +137,25 @@
     ]
   },
   "runner": {
-    "requires": {
-      "kvm": true,
-      "nestedKvm": true,
-      "threads": 4,
-      "memoryGiB": 12
-    },
     "why": "VM tests (games nests one) and members' jobs; the nix cache at the storage pool's address (nix/modules/forge/needs.nix)",
-    "services": [
-      "forgejo-runner",
-      "members-runner"
-    ],
     "secrets": [
       "forgejo-runner-token",
       "forgejo-members-runner-token",
       "cache-key-id",
       "cache-key-secret"
+    ],
+    "services": [
+      "forgejo-runner",
+      "members-runner"
     ]
   },
   "observe": {
+    "why": "thanos keeps to local garage; the dumps take ente's and forgejo's databases",
     "with": [
       "storage",
       "photos",
       "forge"
     ],
-    "why": "thanos keeps to local garage; the dumps take ente's and forgejo's databases",
     "services": [
       "fleet-alerts",
       "thanos-query",
@@ -191,9 +168,6 @@
     ]
   },
   "adblock": {
-    "box": [
-      "household"
-    ],
     "why": "it answers the house's DNS: the box has to be in the house, with who lives there",
     "services": [
       "pihole",
@@ -201,10 +175,6 @@
     ]
   },
   "compute": {
-    "requires": {
-      "kvm": true,
-      "memoryGiB": 4
-    },
     "why": "members' computers are KVM guests, each its own size: a box takes those that fit (its computers.prom says how big), so a small box still runs small ones",
     "services": [
       "computers"

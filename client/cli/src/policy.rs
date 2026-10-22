@@ -246,20 +246,31 @@ async fn directory_now(
     Ok((entries, left, agreed))
 }
 
-/// a box with the vault role, whose units write to members, of this fleet
+/// a box built with the vault, whose units write to members (the flake's
+/// fleetBuilt: what the release builds each box with), first by name
 fn mail_box(root: &Path) -> Result<String> {
     let boxes: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("fleet/boxes.json"))?)?;
-    for (_, b) in boxes.as_object().into_iter().flatten() {
-        let roles = b["roles"].as_array().cloned().unwrap_or_default();
-        if roles.iter().any(|r| r == "vault")
-            && let Some(t) = b["net"].as_str()
+    let out = Command::new("nix")
+        .args(["eval", "--json"])
+        .arg(format!(
+            "{}#legacyPackages.x86_64-linux.fleetBuilt",
+            root.display()
+        ))
+        .output()
+        .context("nix eval")?;
+    ensure!(out.status.success(), "nix eval of fleetBuilt failed");
+    let built: std::collections::BTreeMap<String, Vec<String>> =
+        serde_json::from_slice(&out.stdout)?;
+    for (name, svcs) in &built {
+        if svcs.iter().any(|s| s == "vaultwarden")
+            && let Some(t) = boxes[name]["net"].as_str()
             && t.parse::<std::net::IpAddr>().is_ok()
         {
             return Ok(t.to_string());
         }
     }
-    bail!("no box in fleet/boxes.json writes to members (the vault role)")
+    bail!("no box is built with the vault, which writes to members")
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String> {

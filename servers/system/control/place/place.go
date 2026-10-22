@@ -24,9 +24,7 @@ import (
 type Inputs struct {
 	Boxes    map[string]Box     `json:"boxes"`
 	Services map[string]Service `json:"services"`
-	// role -> its services, to read what a heartbeat's roles run
-	Roles   map[string][]string `json:"roles"`
-	Damping Damping             `json:"damping"`
+	Damping  Damping            `json:"damping"`
 	// bucket -> how many stores keep it, and the service that writes it
 	Buckets map[string]Bucket `json:"buckets"`
 	// members' remote computers as agreed (state/computers, /computers):
@@ -78,6 +76,9 @@ type Box struct {
 	MemoryGiB float64 `json:"memoryGiB"`
 	Threads   float64 `json:"threads"`
 	PoolGiB   float64 `json:"poolGiB"`
+	// what the release builds it with (nix/lib/fleet-placement.nix built):
+	// a service not switched by the plan runs wherever it is built
+	Built []string `json:"built"`
 }
 
 type Service struct {
@@ -171,8 +172,8 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	}
 	sort.Strings(live)
 
-	// what runs now, by the roles each heartbeat names, and the placed
-	// services each box says it runs
+	// what runs now: what the release builds each box with, of what the
+	// plan does not switch, and the placed services each box says it runs
 	now := map[string]map[string]bool{}
 	runs := func(svc, name string) {
 		if now[svc] == nil {
@@ -183,12 +184,10 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	for _, name := range live {
 		// a box that joined on its own key runs, as far as the plan
 		// believes, only what the release may give it
-		_, listed := in.Boxes[name]
-		for _, r := range s.Boxes[name].Roles {
-			for _, svc := range in.Roles[r] {
-				if listed && !in.Services[svc].Placed {
-					runs(svc, name)
-				}
+		rel, listed := in.Boxes[name]
+		for _, svc := range rel.Built {
+			if listed && !in.Services[svc].Placed {
+				runs(svc, name)
 			}
 		}
 		mayRun := joinedCan(in, s.Boxes[name].Facts)

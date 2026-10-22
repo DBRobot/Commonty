@@ -25,30 +25,18 @@ in
         ./box.nix
         ../modules/box/placed.nix
       ];
-      options.dd.control = {
-        enable = lib.mkEnableOption "placement";
-        roles = lib.mkOption {
-          type = lib.types.listOf lib.types.str;
-          default = [ ];
-        };
-      };
+      options.dd.control.enable = lib.mkEnableOption "placement";
       config = {
         system.switch.enable = true;
         dd.verify.enable = false;
         dd.failover = true;
-        # the box's own roles, and one more it is built with (as with
-        # failover, a role it is able to take over): of that one it carries
-        # only writers, what goes with them and what is spread - not pihole
-        dd.control.roles = [
-          "game"
-          "runner"
-          "observe"
-          "adblock"
-        ];
-        dd.placed.roles = [
-          "game"
-          "runner"
-          "observe"
+        # what the release gives it to carry (fleet-placement.nix carries):
+        # not pihole, whose units it is built with all the same
+        dd.placed.services = [
+          "dd-games"
+          "forgejo-runner"
+          "members-runner"
+          "thanos-store"
         ];
         # units by the names the needs give them (nix/lib/needs.nix)
         systemd.services = {
@@ -63,9 +51,9 @@ in
           # closer gitea-runner-members*
           gitea-runner-box = boot;
           gitea-runner-members-box = boot;
-          # thanos-store: placed, of a role the box has
+          # thanos-store: placed, and carried
           thanos-store = boot;
-          # pihole: placed, of a role it is built with and does not carry
+          # pihole: placed, built in and not carried
           pihole-ftl = boot;
           # zfs-datasets runs on every box: never switched
           dd-snapshot-trim = boot;

@@ -26,15 +26,10 @@ let
   # (as a box's: modules/net/box.nix)
   netbridge = self.packages.${pkgs.stdenv.hostPlatform.system}.netbridge;
   control = self.packages.${pkgs.stdenv.hostPlatform.system}.dd-control;
-  # what the services this box's roles bring keep aside (the needs' sizes,
+  # what the services this box is built with keep aside (the needs' sizes,
   # GiB), never given to a computer
   fp = import ../../lib/fleet-placement.nix { inherit lib; };
-  roleList = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ../../../fleet/roles.json);
-  brought = lib.unique (
-    lib.concatMap (r: roleList.${r}.services or [ ]) (
-      lib.attrByPath [ "dd" "control" "roles" ] [ ] config
-    )
-  );
+  brought = lib.attrByPath [ "dd" "built" ] [ ] config;
   keptGiB = lib.foldl' (a: s: a + (fp.capability.sizes.${s}.memory or 0)) 0 (
     lib.filter (s: s != "computers") brought
   );
@@ -357,7 +352,7 @@ in
     reserveMiB = lib.mkOption {
       type = lib.types.ints.unsigned;
       default = 2048 + builtins.ceil (keptGiB * 1024);
-      description = "memory the box keeps for itself and the services its roles bring, never given to a computer";
+      description = "memory the box keeps for itself and the services it is built with, never given to a computer";
     };
     network = lib.mkOption {
       type = lib.types.bool;

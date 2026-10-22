@@ -156,6 +156,11 @@ let
       n = needs.${s};
     in
     lib.optional (n.trust == "owner" && f.owner != policy.owner) "only on ${policy.owner}'s boxes"
+    # what hands people the code that holds their secrets, kept to the
+    # owner's own hardware by the policy (fleet/policy.json ownHardware)
+    ++ lib.optional (
+      n.trust != "owner" && builtins.elem s (policy.ownHardware or [ ]) && f.owner != policy.owner
+    ) "only on ${policy.owner}'s own hardware (the policy's ownHardware)"
     ++ lib.optional (
       n.trust == "household" && f.owner != policy.owner && f.household == [ ]
     ) "only on ${policy.owner}'s boxes or a household's"

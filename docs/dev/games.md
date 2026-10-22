@@ -17,8 +17,8 @@ nix/modules/games/game-guest.nix   the guest machine, the same for every game
 nix/modules/games/game-run.py      what runs in the guest: install, configure, run, report
 nix/modules/games/games-access.sh  fills the firewall chain from the manager and the gate
 nix/modules/games/games-measure.sh records each game's real memory peak
-nix/modules/games/needs.nix        what the role asks of a box, per game
-nix/roles/game.nix                 the role: the module, the home tile, the backups
+nix/modules/games/needs.nix        what the games ask of a box, per game
+nix/roles/game.nix                 the bundle: the module, the home tile, the backups
 nix/tests/games.nix, games.py      the VM test
 ```
 
@@ -396,8 +396,7 @@ port), and lists any other ports.
 have together. It defaults to a third of the box's RAM, from the hardware
 report (`dd.box.memoryBytes`), and never less than 4096; a box's
 `box.json` can set it as `gamesMemoryMiB`. On node1 (62.5 GiB)
-that is about 21300 MiB, the "budget is 20G" in
-[fleet/roles.json](../../fleet/roles.json).
+that is about 21300 MiB.
 
 ```
 each running server counts   memory + 512 (QEMU_OVERHEAD_MIB)
@@ -412,8 +411,11 @@ Disk is not budgeted at run time. Placement uses
 [needs.nix](../../nix/modules/games/needs.nix): the base asks for x86_64,
 KVM, 100G of disk, internet out, players in over the network, and nginx,
 the gate and the Commonty network on the same box. Each catalogue game is a
-variant with its own memory, threads and disk (above). The role's own entry
-in [fleet/roles.json](../../fleet/roles.json) asks for KVM and 24 GiB.
+variant with its own memory, threads and disk (above). The worlds are on
+the box's own disk and nowhere else, so the base also asks for its
+dataset (`requires.dataset = "/var/lib/dd-games"`): only a box whose
+owner gave it one in `box.json` is built with games and carries them, and
+they stay on it while it is up (`moves = "on-failure"`).
 
 ## Someone who left
 

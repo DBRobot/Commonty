@@ -42,7 +42,6 @@ let
         lease = true;
         memoryGiB = 0.05;
       };
-      roles = { };
       damping = {
         base = 0.3;
         perGiB = 0.01;

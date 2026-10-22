@@ -31,32 +31,10 @@ let
   };
   dir = "/run/dd-placed";
   isPlaced = s: needs.${s}.placed || needs.${s}.lease;
-  roles = lib.filterAttrs (_: v: builtins.isAttrs v) (lib.importJSON ../../../fleet/roles.json);
-  bring = rs: lib.unique (lib.concatMap (r: roles.${r}.services or [ ]) rs);
-  # what this box carries: the placed services of the roles it is given
-  # (fleet/boxes.json); and with failover, of the roles it is able to take
-  # over (dd.control.roles), the writers and what goes with them - what
-  # they need beside them, what needs them beside it - and what is spread
-  # over every box that has it
-  writers = lib.filter (s: needs.${s}.lease) (builtins.attrNames needs);
-  local =
-    s:
-    lib.filter (d: needs ? ${d} && needs.${s}.base.depends.${d}.local) (
-      builtins.attrNames needs.${s}.base.depends
-    );
-  follows =
-    s:
-    needs.${s}.lease
-    || needs.${s}.spread
-    || builtins.any (w: builtins.elem w writers) (local s)
-    || builtins.any (w: builtins.elem s (local w)) writers;
-  carried =
-    if config.dd.placed.services != null then
-      lib.filter (s: needs ? ${s} && isPlaced s) config.dd.placed.services
-    else
-      lib.filter isPlaced (
-        bring config.dd.placed.roles ++ lib.filter follows (bring config.dd.control.roles)
-      );
+  # what this box carries: the placed services the release gives it, of
+  # those it is built with what its capability lets it run
+  # (nix/lib/fleet-placement.nix carries)
+  carried = lib.filter (s: needs ? ${s} && isPlaced s) config.dd.placed.services;
 
   # the units the box has, by name with their kind (foo.service, foo.timer)
   kinds = [
@@ -197,15 +175,14 @@ let
 in
 {
   options.dd.placed.services = lib.mkOption {
-    type = lib.types.nullOr (lib.types.listOf lib.types.str);
-    default = null;
-    description = "the placed services this box carries, as the release gives them (nix/lib/fleet-placement.nix carries: of what it is built with, what its capability lets it run). Null: from its roles (dd.placed.roles), as a test's box has them";
-  };
-  options.dd.placed.roles = lib.mkOption {
     type = lib.types.listOf lib.types.str;
-    default = config.dd.control.roles;
-    defaultText = "dd.control.roles";
-    description = "the roles whose placed services this box carries: its own in fleet/boxes.json. With failover it carries as well, of the roles it is able to take over (dd.control.roles), the writers and what goes with them";
+    default = [ ];
+    description = "the placed services this box carries, as the release gives them (nix/lib/fleet-placement.nix carries: of what it is built with, what its capability lets it run)";
+  };
+  options.dd.built = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    description = "every service this box is built with (nix/lib/fleet-placement.nix built): what its own room is kept for, beside members' computers";
   };
 
   config = lib.mkIf config.dd.control.enable {

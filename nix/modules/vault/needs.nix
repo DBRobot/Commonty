@@ -40,7 +40,7 @@
         nginx.local = true;
         # sign-in, and /run/dd-ended. The issuer is home.<domain>'s gate
         # and sessions are per box, so this box is the gateway's
-        # (fleet/roles.json: with gateway)
+        # (nix/roles/bundles.json: with gateway)
         dd-verify.local = true;
         # where the gateway's names point, home.<domain> among them: the
         # network's lease's box (failover)

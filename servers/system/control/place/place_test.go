@@ -22,7 +22,6 @@ func fleet() (Inputs, *state.State) {
 			"postgres": {Enabled: true, Instances: 1, MemoryGiB: 0.5},
 			"games":    {Enabled: true, Class: "high", UpMbps: 10, MemoryGiB: 8, StorageGiB: 100},
 		},
-		Roles:   map[string][]string{"games": {"games"}},
 		Damping: Damping{Base: 0.3, PerGiB: 0.02},
 	}
 	s := state.New()
@@ -36,6 +35,13 @@ func fleet() (Inputs, *state.State) {
 	}
 	s.Boxes["dead"] = &state.BoxState{LastSeen: 0, Facts: map[string]float64{"ram_bytes": 64 * gib}}
 	return in, s
+}
+
+// built: the release builds box with svc, which runs there unswitched
+func built(in Inputs, box string, svc ...string) {
+	b := in.Boxes[box]
+	b.Built = append(b.Built, svc...)
+	in.Boxes[box] = b
 }
 
 func runs(p Plan, box, svc string) bool {
@@ -97,7 +103,7 @@ func TestACostlyMoveIsDamped(t *testing.T) {
 	in, s := fleet()
 	// games run on the nas now; big suits them more, but not by enough to
 	// carry 100G
-	s.Boxes["nas"].Roles = []string{"games"}
+	built(in, "nas", "games")
 	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "nas", "games") || runs(p, "big", "games") {
 		t.Fatalf("games should stay on the nas: %+v", p)
@@ -165,8 +171,7 @@ func TestEveryBoxCountsAgainstRoom(t *testing.T) {
 func TestAHouseKeepsItsDNSWhereItIs(t *testing.T) {
 	in, s := fleet()
 	in.Boxes["small"].Can["pihole"] = 1.1 // a little better than big, not by the margin
-	s.Boxes["big"].Roles = []string{"dns"}
-	in.Roles["dns"] = []string{"pihole"}
+	built(in, "big", "pihole")
 	p := Decide(in, s, 90_000, nil)
 	if !runs(p, "big", "pihole") || runs(p, "small", "pihole") {
 		t.Fatalf("pihole should stay on big: big %+v small %+v", p.Boxes["big"], p.Boxes["small"])
@@ -176,8 +181,7 @@ func TestAHouseKeepsItsDNSWhereItIs(t *testing.T) {
 func TestAHouseMovesItsDNSWhenFarBetter(t *testing.T) {
 	in, s := fleet()
 	in.Boxes["small"].Can["pihole"] = 2
-	s.Boxes["big"].Roles = []string{"dns"}
-	in.Roles["dns"] = []string{"pihole"}
+	built(in, "big", "pihole")
 	p := Decide(in, s, 90_000, nil)
 	if runs(p, "big", "pihole") || !runs(p, "small", "pihole") {
 		t.Fatalf("pihole should move to small: big %+v small %+v", p.Boxes["big"], p.Boxes["small"])
@@ -258,12 +262,12 @@ func TestAPlacedServiceRunsWhereItsBoxSaysItDoes(t *testing.T) {
 	if !runs(p, "small", "web") || runs(p, "nas", "web") {
 		t.Fatalf("web moved off the box running it: %+v", p)
 	}
-	// and a role naming it does not count: only the box's own report
+	// and being built with it does not count: a placed service runs where
+	// the box's own report says, under its flag
 	s.Boxes["small"].Facts["runs/web"] = 0
-	in.Roles["web"] = []string{"web"}
-	s.Boxes["small"].Roles = []string{"web"}
+	built(in, "small", "web")
 	if p := Decide(in, s, 90_000, nil); !runs(p, "nas", "web") {
-		t.Fatalf("web stayed by a role: %+v", p)
+		t.Fatalf("web stayed by what small is built with: %+v", p)
 	}
 }
 
@@ -361,8 +365,7 @@ func TestACopyFoundMissingIsNotKeptThere(t *testing.T) {
 		t.Fatalf("a box that does not write it moved its copy: %q", got)
 	}
 	// big runs photos, so writes it, and found nas without it
-	in.Roles["photos"] = []string{"photos"}
-	s.Boxes["big"].Roles = []string{"photos"}
+	built(in, "big", "photos")
 	s.Boxes["big"].Facts["store/ente/lost/nas"] = 1
 	p := Decide(in, s, 90_000, nil)
 	if got := strings.Join(p.Copies["ente"], ","); got != "big,small" {
@@ -457,7 +460,7 @@ func TestADrainingBoxIsGivenNothingNewAndWhatMovesLeaves(t *testing.T) {
 	in, s := sticky()
 	// games run on the nas, damped there (TestACostlyMoveIsDamped); web,
 	// sticky, also runs there
-	s.Boxes["nas"].Roles = []string{"games"}
+	built(in, "nas", "games")
 	s.Boxes["small"].Facts["runs/web"] = 0
 	s.Boxes["nas"].Facts["runs/web"] = 1
 	s.Boxes["nas"].Facts["draining"] = 1

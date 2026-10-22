@@ -520,7 +520,7 @@ when the door gives it.
   `aarch64-linux`. Our programs in it are cross-compiled on the x86
   runners; everything else comes from cache.nixos.org; the runners run the
   few remaining aarch64 steps under qemu (`boot.binfmt.emulatedSystems` on
-  the runner role). The card's image steps (the ext4, the partitions,
+  the runner bundle). The card's image steps (the ext4, the partitions,
   zstd) only copy files, so `cardImage` (nix/controller/image.nix) runs
   them with x86 tools rather than nixpkgs' `sdImage` under qemu. `build_host` builds it on every runner and
   `same_build` holds them to one path, as for a box.

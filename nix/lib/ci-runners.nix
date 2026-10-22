@@ -5,7 +5,8 @@
 { lib }:
 let
   needs = import ./needs.nix { inherit lib; };
-  boxes = lib.importJSON ../../fleet/boxes.json;
+  # the boxes built with the runner (fleet-placement.nix built)
+  fp = import ./fleet-placement.nix { inherit lib; };
   runner = needs.forgejo-runner;
   bytes =
     s:
@@ -20,9 +21,7 @@ let
       };
     in
     builtins.fromJSON (lib.elemAt m 0) * unit.${lib.elemAt m 1};
-  runners = lib.sort (a: b: a < b) (
-    lib.attrNames (lib.filterAttrs (_: b: builtins.elem "runner" (b.roles or [ ])) boxes)
-  );
+  runners = lib.sort (a: b: a < b) (fp.builtWith "forgejo-runner");
   memoryOf = name: (lib.importJSON ../../fleet/boxes/${name}/hardware.json).memoryBytes;
   holds =
     v: name:

@@ -11,7 +11,7 @@ committed encrypted rather than kept out of tree.
       boxes/<box>/     one box as data: its own hardware report, its owner's choices
     nix/               what a box is
       modules/         NixOS modules, grouped by concern (box, gate, forge, games, ...)
-      roles/           what a box runs, by role; a box lists its roles in fleet/
+      roles/           bundles of modules; a box is built with what its capability allows
       tests/           VM tests: boxes booted and driven
     servers/           what runs on boxes: our programs (the gate, the release agent,
                        the games manager, the control plane), the pages, patches

@@ -15,8 +15,8 @@ what blocks a merge, how to change a check) is [its own page](ci.md).
 ## Where it is
 
 ```
-nix/roles/forge.nix                   the role: forgejo, the tile on home, backups
-nix/roles/runner.nix                  the runner role: both runners and the nix cache key
+nix/roles/forge.nix                   the bundle: forgejo, the tile on home, backups
+nix/roles/runner.nix                  the runner bundle: both runners and the nix cache key
 nix/modules/forge/
   forgejo.nix                         Forgejo's settings, sign-in, nginx, the setup units
   door.nix                            code.<domain>: the public repositories, read-only, as nobody
@@ -37,10 +37,12 @@ nix/tests/members-runner.nix, .py     a member's job, kept in its box
 nix/tests/runner-restart.nix, .py     a switch under running jobs, host and member: they end green
 ```
 
-The `forge` role runs on one box (`fleet/boxes.json`; node1 today), always
-beside the `gateway` role ([`fleet/roles.json`](../../fleet/roles.json)):
+Forgejo runs on one box at a time, the holder of its lease (node1 today),
+and the `forge` bundle is built only beside the `gateway` one
+([`nix/roles/bundles.json`](../../nix/roles/bundles.json) `with`):
 Forgejo uses the box's PostgreSQL, the one Photos and Passwords use. The
-`runner` role is separate and goes on any box that can run VM tests.
+`runner` bundle is separate: every box that can run VM tests and holds
+the runners' tokens is built with it.
 
 ## Who talks to whom
 
@@ -508,9 +510,9 @@ minutes.
 
 ## The runners
 
-Two runners, both from the `runner` role
-([`nix/roles/runner.nix`](../../nix/roles/runner.nix)), on every box that
-has it (node1 and node2 today). Both run as the plain system user
+Two runners, both from the `runner` bundle
+([`nix/roles/runner.nix`](../../nix/roles/runner.nix)), on every box built
+with it (node1 and node2 today). Both run as the plain system user
 `forgejo-runner` (not the NixOS module's dynamic user, whose state
 directory is mounted `noexec` and broke every cargo build script), share
 `/var/lib/gitea-runner`, and before they start wait up to five minutes for

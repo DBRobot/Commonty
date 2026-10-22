@@ -1,0 +1,14 @@
+{
+  "owner": null,
+  "house": {
+    "ssid": "",
+    "address": "192.168.1.50/24",
+    "household": [
+      "ada"
+    ]
+  },
+  "encrypted": true,
+  "unlock": "tpm",
+  "extraPools": [],
+  "datasets": {}
+}

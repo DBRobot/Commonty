@@ -65,6 +65,7 @@
         "net-follow"
         "join-install"
         "joined-box"
+        "joined-serves"
         "photos"
         "llm"
         "vault"
@@ -1147,7 +1148,7 @@
             builtins.toJSON (import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; }).inputs
           );
           # every service's needs, typed (nix/lib/needs.nix): what placement
-          # reads, with fleet/roles.json
+          # reads
           needs = pkgs.writeText "needs.json" (
             builtins.toJSON (import ./nix/lib/needs.nix { lib = nixpkgs.lib; })
           );
@@ -1442,23 +1443,30 @@
       fleetBoxes =
         let
           lib = nixpkgs.lib;
-          # its roles: with failover, every role whose writers it is able
-          # to run as well (nix/lib/fleet-placement.nix carried), whatever
-          # fleet/boxes.json lists. No hand-written list to keep.
+          # the module bundles each box is built with, from its capability
+          # (nix/lib/fleet-placement.nix carried); with what it carries and
+          # every service it is built with. No hand-written list to keep.
           fp = import ./nix/lib/fleet-placement.nix { inherit lib; };
-          boxes = lib.mapAttrs (name: box: box // { roles = fp.carried.${name}; }) (
-            builtins.fromJSON (builtins.readFile ./fleet/boxes.json)
-          );
+          boxes = lib.mapAttrs (
+            name: box:
+            box
+            // {
+              bundles = fp.carried.${name};
+              carries = fp.carries.${name};
+              built = fp.built.${name};
+            }
+          ) (builtins.fromJSON (builtins.readFile ./fleet/boxes.json));
           directoryOf =
             name: box:
             if box.public then
               "https://files.${(lib.importJSON ./fleet/policy.json).domain}/_dd/directory"
             else
               "http://${box.net}:4181/_dd/directory";
-          # a role that declares secrets imports roles/_sops.nix; the sops
-          # module has to be present for it. Roles are files; look inside.
+          # a bundle that declares secrets imports roles/_sops.nix; the sops
+          # module has to be present for it. Bundles are files; look inside.
           needsSops =
-            roles: builtins.any (r: lib.hasInfix "_sops.nix" (builtins.readFile ./nix/roles/${r}.nix)) roles;
+            bundles:
+            builtins.any (r: lib.hasInfix "_sops.nix" (builtins.readFile ./nix/roles/${r}.nix)) bundles;
           # a box built with service s (fleet-placement.nix built)
           has = s: name: builtins.elem s (fp.built.${name} or [ ]);
           storage = lib.filterAttrs (n: _: has "garage" n) boxes;
@@ -1598,7 +1606,7 @@
                     );
               })
             ]
-            ++ map (r: ./nix/roles/${r}.nix) box.roles
+            ++ map (r: ./nix/roles/${r}.nix) box.bundles
             ++ lib.optional (has "garage" name) (garageOf name box)
             ++ [ (cacheOf name box) ]
             ++ [
@@ -1611,35 +1619,43 @@
               ./nix/modules/box/report.nix
               {
                 dd.control.enable = true;
-                dd.control.roles = box.roles;
                 # the placed services it carries: of what it is built with,
                 # what its capability lets it run (fleet-placement.nix
-                # carries); a joined box's from its roles (box/placed.nix)
-                dd.placed.services = fp.carries.${name} or null;
+                # carries)
+                dd.placed.services = box.carries;
+                dd.built = box.built;
               }
             ]
-            ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops
+            ++ lib.optional (needsSops box.bundles) sops-nix.nixosModules.sops
             ++ [ disko.nixosModules.disko ]
             ++ lib.optional (has "thanos-query" name) {
               # this box's own sidecar; the others' history is read from the
               # bucket, never from them (README: no box talks to another)
               dd.thanos.sidecars = [ "127.0.0.1:10901" ];
             };
-          # a joined box's modules: a box's, and the flag that it joined
-          # (dd.box.joined: its agent builds it from its own report)
-          joinedBoxModules = dir: name: boxModules dir name joinedBox ++ [ { dd.box.joined = true; } ];
-          joinedBox = {
-            net = "";
-            siteId = "joined";
-            regionId = "joined";
-            public = false;
-            roles = [ "core" ];
-          };
+          # a joined box's modules: a box's, built by its capability on its
+          # own report and box.json, of what its tier allows (fleet-placement
+          # joined), and the flag that it joined (dd.box.joined: its agent
+          # builds it from its own report)
+          joinedBoxModules =
+            dir: name:
+            let
+              j = fp.joined { inherit dir name; };
+            in
+            boxModules dir name {
+              net = "";
+              siteId = "joined";
+              regionId = "joined";
+              public = false;
+              inherit (j) bundles carries built;
+            }
+            ++ [ { dd.box.joined = true; } ];
         in
         {
           configs = lib.mapAttrs mkBox boxes;
-          # a stranger: core alone, and its store; what it carried the
-          # control plane never gives it, holding no lease
+          # a stranger: what its capability and tier allow, and its store;
+          # the control plane gives it a service only once joined boxes are
+          # attested (place.JoinedRules), and never a lease
           joined =
             { name, dir }:
             lib.nixosSystem {
@@ -1778,7 +1794,7 @@
               name = "built-${n}.json";
               path = pkgs.writeText "built-${n}.json" (
                 builtins.toJSON {
-                  inherit (c.config.dd.control) roles;
+                  built = c.config.dd.built;
                   carries = builtins.fromJSON c.config.environment.etc."dd-placed/carries.json".text;
                 }
               );
@@ -1806,6 +1822,10 @@
         # which runner boxes can take each of the runner's variants, from its
         # needs and the boxes' reports: CI places its jobs by this
         ciRunners = import ./nix/lib/ci-runners.nix { lib = nixpkgs.lib; };
+        # what the release builds each box with (nix/lib/fleet-placement.nix
+        # built): what `dd` picks boxes by (build orders, the announcement
+        # outbox) and CI its builders, never a list kept by hand
+        fleetBuilt = (import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; }).built;
         # The four downloads still evaluate: their recipes only, never a build
         # of them (that is the boxes', after a release). Not one of `checks`:
         # the Linux image's package list and the web bundle are made by a
@@ -1871,7 +1891,6 @@
           ci-select = import ./nix/tests/ci-select args;
           boxes = import ./nix/tests/boxes.nix args;
           box-reports = import ./nix/tests/box-reports.nix args;
-          role-fit = import ./nix/tests/role-fit.nix args;
           # builds and CI held to a share of each box's memory, together
           work-memory-sizes = import ./nix/tests/work-memory-sizes.nix args;
           # anything deleted is gone from every box and backup within 90 days

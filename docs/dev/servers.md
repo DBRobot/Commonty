@@ -11,10 +11,10 @@ folder to a page a member opens on a box: served, placed, built and tested.
 servers/   what runs on a box: programs, pages, patches
 client/    what runs on people's devices: the dd cli, its libraries, the browser wasm
 app/       the app: the same client crates behind a window, and copies of the pages
-nix/       how a box is made of those: modules, roles, tests
+nix/       how a box is made of those: modules, bundles, tests
 scripts/   what a person runs around a box: reports, reinstall, restore, the laptop
 secrets/   each box's secrets, sops-encrypted
-fleet/     what the fleet is: the boxes, their roles, the members, and the
+fleet/     what the fleet is: the boxes, their reports, the members, and the
            owner's policy (policy.json: owner, domain, repo, allowanceGb,
            people.<name>.{ssh,paperKey}, ownHardware)
 data/      data the services are built with (data/games/catalogue.json)
@@ -229,8 +229,8 @@ same pull request.
 ## How a service gets onto a box
 
 ```
-fleet/boxes.json        node1: roles [core, gateway, ..., adblock]
-   │                       checked against fleet/roles.json (checks.role-fit)
+nix/lib/fleet-placement.nix   node1: core, gateway, ..., adblock, from its capability
+   │                       (its report, box.json, secrets file; nix/roles/bundles.json)
    ▼
 nix/roles/adblock.nix   imports the modules; its secrets; its tile; its backups
    │
@@ -239,28 +239,32 @@ nix/modules/adblock/pihole.nix   options.dd.adblock, the units, the gate's envir
 nix/modules/adblock/needs.nix    what it needs of a box (typed, nix/lib/needs-type.nix)
    │
    ▼
-flake.nix   nixosConfigurations.node1 = core modules + every role file it names
+flake.nix   nixosConfigurations.node1 = core modules + every bundle it is built with
 ```
 
-### Roles
+### Bundles
 
-A box is its hardware plus a list of roles in
-[`fleet/boxes.json`](../../fleet/boxes.json). The flake builds one
-`nixosConfiguration` per box: `nix/roles/<role>.nix` for each role it
-names, and the modules every box gets (secure boot, disk unlock, the
-control plane, ports, the box report). A role is a bundle of modules that
-move together, with what they read from sops, their tile on the home page
+A bundle (`nix/roles/<bundle>.nix`) is modules that move together, with
+what they read from sops, their tile on the home page
 (`dd.home.services`), and the paths to back up (`dd.backup.paths`).
+Nobody gives a box a bundle. The flake builds one `nixosConfiguration`
+per box: the bundles its capability allows
+([`nix/lib/fleet-placement.nix`](../../nix/lib/fleet-placement.nix)
+`carried`), and the modules every box gets (secure boot, disk unlock,
+the control plane, ports, the box report).
 
-[`fleet/roles.json`](../../fleet/roles.json) says what each role needs of
-a box: `requires` against the box's signed hardware report, `box` against
-its owner's `box.json`, `with` for roles that must share the box (they
-reach each other on localhost), `perFleet` for a role exactly that many
-boxes run. `checks.role-fit` ([`nix/lib/fit.nix`](../../nix/lib/fit.nix))
-fails when a box in `fleet/boxes.json` breaks any of it, or names a role
-`roles.json` does not have. `services` lists the needs' service names a
-role runs; one listed in the policy's `ownHardware` may only run on a box
-whose `box.json` owner is the fleet's owner, and `role-fit` checks it.
+[`nix/roles/bundles.json`](../../nix/roles/bundles.json) says what each
+bundle brings (`services`, by the needs' names), what its modules read
+from the box's own sops file (`secrets`), and which bundles must share the
+box (`with`: they reach each other on localhost). A box is built with
+core, and with every bundle of which it can run a service that does not
+run everywhere, whose secrets its file holds and whose companions it is
+built with too. What it can run is
+[`capability.nix`](../../nix/lib/capability.nix)'s, from its signed
+report and its owner's `box.json`; a service in the policy's
+`ownHardware` only on a box whose `box.json` owner is the fleet's owner.
+The control plane then switches each placed service on where the plan
+puts it.
 
 Every box also keeps itself tidy ([`nix/roles/core.nix`](../../nix/roles/core.nix)
 and the modules it names):
@@ -352,8 +356,8 @@ one set of rules; `checks.placement` fails if a box judged this way, on
 the release's report, would come to anything but the release's table.
 
 `checks.placement` ([`nix/tests/placement.nix`](../../nix/tests/placement.nix))
-fails when a box cannot join, when its roles bring a service it cannot
-run, or when it runs a service none of its roles lists.
+fails when a box cannot join, when it carries a service it cannot run, or
+when it runs a service none of its bundles lists.
 `checks.placement-fleet` holds the same rules to a dozen made-up computers
 (a mini PC, NASes, Xeon servers, a gaming PC, laptops, a Pi, a VPS, a thin
 client, an office PC, in
@@ -366,12 +370,14 @@ answers stop making sense fails there, by name.
 ([`nix/lib/placement-inputs.nix`](../../nix/lib/placement-inputs.nix)) is
 the table the control plane places from: each box's scores, what its
 owner's box.json or the policy bar it from whatever its hardware
-(`barred`: trust, a metered line), and per service whether the fleet wants it (some box's roles bring it, and the
-policy setting in its `when` is on), how many, spread or by house, the line
-it wants, its memory, what moving it carries, and `moves`: `better` (the
-default) or `on-failure`. Roles stay a convenient
-bundle of services, and still what a box's config installs. How the
-control plane chooses is in [the control plane](control-plane.md#placement).
+(`barred`: trust, a metered line), what it is built with (`built`), and
+per service whether the fleet wants it (some box is built with it, and
+the policy setting in its `when` is on), how many, spread or by house, the
+line it wants, its memory, what moving it carries, and `moves`: `better`
+(the default) or `on-failure`; and what a box that joined on its own key
+may run (`joined`: by the policy's trust tiers, given nothing until
+`attested`). How the control plane chooses is in
+[the control plane](control-plane.md#placement).
 
 Each box measures what it can tell only by running: its line, once a day
 against Cloudflare's speed endpoints, unless it is metered
@@ -479,7 +485,7 @@ into the gate's config; unset, that part of the gate is off.
   with `counts` and `memberSuffix`), which becomes `usage/<service>/<member>`
   facts in the box's heartbeat. A new kind of data also needs its value in
   `counts`, its field in the gate's `Usage`
-  ([`storage.rs`](../../servers/gate/src/storage.rs)) and its role in
+  ([`storage.rs`](../../servers/gate/src/storage.rs)) and its service in
   storage-view's list of who may count what (`KINDS` in
   [`storage_ledger.rs`](../../client/cli/src/storage_ledger.rs))
   ([libraries.md](libraries.md#storage)).
@@ -570,8 +576,9 @@ deleted things for a time adds its setting there.
   the script one name, `nix`, holding what the Nix side computed (its
   `scriptEnv`), so nothing is pasted into the Python. Run one with
   `nix build .#checks.x86_64-linux.<name>`.
-- **Evaluation checks**, seconds each: `boxes` (every role is a file, every
-  box builds), `role-fit`, `nginx` (every box's config through
+- **Evaluation checks**, seconds each: `boxes` (no box names a role,
+  every bundle is a file, every box builds), `placement`, `nginx` (every
+  box's config through
   `nginx -t`), `stylesheet` (the app's copies), `cargo-nix`, `ci`,
   `plaintext-label` (a module that reads plaintext labels itself),
   `box-reports`, `net-check` (the app's network engine: go vet and its
@@ -624,13 +631,13 @@ door, and one role.
 5. **Its needs.** `nix/modules/<service>/needs.nix`, measured where it
    runs (`estimated = true` until it has run anywhere), and the file in
    the list in `nix/lib/needs.nix`.
-6. **Its role.** `nix/roles/<role>.nix`: the module, `./_sops.nix` and its
-   `sops.secrets` if it has any, `enable = true`, its tile in
+6. **Its bundle.** `nix/roles/<bundle>.nix`: the module, `./_sops.nix`
+   and its `sops.secrets` if it has any, `enable = true`, its tile in
    `dd.home.services` (with `demo` set if the demo may look), its
-   `dd.backup.paths`. The role in `fleet/roles.json` with its `why`, then
-   in the box's `roles` in `fleet/boxes.json`. Its secrets in
-   `secrets/<box>.yaml` with `dd secret run`, before the release that
-   needs them.
+   `dd.backup.paths`. The bundle in `nix/roles/bundles.json` with its
+   `services`, `secrets` and `why`; every box able to run it is then
+   built with it. Its secrets in `secrets/<box>.yaml` with `dd secret
+   run`, before the release that needs them.
 7. **Its test.** `nix/tests/<service>.nix` and `.py`, booting
    `./box.nix` and the module with test values for the secrets, driving
    the failure cases as well as the working one. The name in `vmTests` and

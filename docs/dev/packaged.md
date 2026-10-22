@@ -379,7 +379,7 @@ Bitwarden app or web vault
 - The issuer is the gate on Passwords' own box, reached at
   `home.<domain>`: sessions are per box, and the fleet's names send `home`
   to the gateway. So Passwords runs on the gateway (`with` in
-  [fleet/roles.json](../../fleet/roles.json), and an assertion in the
+  [nix/roles/bundles.json](../../nix/roles/bundles.json), and an assertion in the
   module).
 - One client (`vaultwarden`), one redirect, codes good once for five
   minutes, PKCE checked. The signing key is made on first start

@@ -2,8 +2,10 @@
 
 `nix/` is what a box is made of. The flake at the top of the tree builds
 one NixOS system per box from three things: the box's folder in
-`fleet/boxes/`, its list of roles in `fleet/boxes.json`, and the roles and
-modules in this folder. This page is how that folder is laid out, how a box
+`fleet/boxes/`, its entry in `fleet/boxes.json`, and the bundles and
+modules in this folder. Which bundles a box is built with comes from its
+capability ([`nix/lib/fleet-placement.nix`](../../nix/lib/fleet-placement.nix)),
+never from a list. This page is how that folder is laid out, how a box
 is put together from it, how it is tested, and the rules that came out of
 releases that rolled back.
 
@@ -22,20 +24,23 @@ nix/
   modules/mail.nix       dd-sendmail: a box's mail, TPM-signed, to the mail Worker
   modules/member-mail.nix  mail to members at <name>@<domain>
   roles/
-    <role>.nix           one role: the modules it imports, its secrets, tile, backups
-    _sops.nix            the sops setup every role that reads a secret imports
-    _member-mail.nix     member mail, for roles that write to members
-    README.md            the roles in one list
+    <bundle>.nix         one bundle: the modules it imports, its secrets, tile, backups
+    bundles.json         what each bundle brings: services, secrets, with, why
+    _sops.nix            the sops setup every bundle that reads a secret imports
+    _member-mail.nix     member mail, for bundles that write to members
+    README.md            the bundles in one list
   lib/
     needs-type.nix       the type every needs.nix is checked against
     needs.nix            every needs.nix, merged; .#needs is this as JSON
-    fit.nix              does each box's role list fit its report and box.json
+    capability.nix       what each box can run, from its report, box.json, policy
+    fleet-placement.nix  what each box is built with (carried, built, carries),
+                         and a joined box's (joined); the placement inputs
     vm-test.nix          wraps a test's .nix and .py into a NixOS VM test
     script.nix           ddScript: a unit's script from a file, with variables
   tests/
     <name>.nix, <name>.py  a VM test: the boxes, and the scenario
     box.nix              the smallest box a VM test builds on
-    ci.nix, boxes.nix, role-fit.nix, nginx.nix, plaintext-label.nix,
+    ci.nix, boxes.nix, placement.nix, nginx.nix, plaintext-label.nix,
     box-reports.nix      evaluation checks (no VM)
     control/, mail-worker/, dns-worker/, sso/, unlock/, box-reports/   helpers for one test
   app-release/           the app's downloads: Linux, Windows, Android, and their tests
@@ -52,7 +57,7 @@ no Nix file per box. A box is data:
 
 ```
 fleet/boxes.json            per box: hostKey, net, public, siteId, regionId,
-                            roles, garage, unlockKey
+                            garage, unlockKey
 fleet/boxes/<box>/
   hardware-configuration.nix  what nixos-generate-config found (the box's report)
   hardware.json               disks, links, GPUs, firmware, TPM, secretsKey (the box's report)
@@ -80,23 +85,30 @@ fleet/boxes/<box>/
    peers (other boxes with the same `siteId`), the whole fleet for the
    Network tab, and `dd.agent.reach` (each other box's 4181 and 443, which
    the agent checks a switch did not cut off).
-3. **Gateway extras**, on a box with the `gateway` role: game ports for the
+3. **Gateway extras**, on a box built with headscale: game ports for the
    network's rules, the owners of each box's address, and each box's
    unlock key and secrets recipient for headscale.
-4. **`nix/roles/<role>.nix`** for every role the box names.
-5. **Derived wiring**: garage's zone, capacity and peers on a storage box
-   (`garageOf`); the nix cache and S3 address, local on a storage box,
-   else the first storage box's over the fleet's network (`cacheOf`); the
+4. **`nix/roles/<bundle>.nix`** for every bundle it is built with
+   (`fleet-placement.nix` `carried`), with the placed services it carries
+   (`dd.placed.services`) and every service it is built with (`dd.built`).
+5. **Derived wiring**: garage's zone, capacity and peers on a box built
+   with garage (`garageOf`); the nix cache and S3 address, local on such a
+   box, else the first one's over the fleet's network (`cacheOf`); the
    backup endpoint for a box without garage (`backupEndpoint`).
 6. **What every box gets**: lanzaboote and
    [`secure-boot.nix`](../../nix/modules/box/secure-boot.nix),
    [`disk-unlock.nix`](../../nix/modules/box/disk-unlock.nix),
-   [`control.nix`](../../nix/modules/box/control.nix) (enabled, with the
-   box's roles), [`ports.nix`](../../nix/modules/box/ports.nix),
+   [`control.nix`](../../nix/modules/box/control.nix) (enabled),
+   [`ports.nix`](../../nix/modules/box/ports.nix),
    [`report.nix`](../../nix/modules/box/report.nix), disko, and sops-nix
-   when any of its roles imports `_sops.nix` (`core` does, so today every
-   box).
-7. **Thanos**, on an `observe` box: its own sidecar only.
+   when any of its bundles imports `_sops.nix` (`core` does, so today
+   every box).
+7. **Thanos**, on a box built with the fleet view: its own sidecar only.
+
+A box that joined on its own key is built the same way
+(`lib.joinedBoxModules`), from its own report and box.json
+(`fleet-placement.nix` `joined`), with only the bundles of what a
+member's box may run (placement-inputs `joined`).
 
 Every module gets three extra arguments (`specialArgs`): `self` (the flake,
 for `self.packages`), `vmTests` and `boxNames`, and `ddScript`.
@@ -105,14 +117,16 @@ for `self.packages`), `vmTests` and `boxNames`, and `ddScript`.
 in `core.nix`. The member list (`fleet/members.json`) and the release key's
 public half (`fleet/release.pub`) are built into every box there too.
 
-## Roles
+## Bundles
 
-A role is a bundle of modules that move together, with what they read from
-sops, their tile on the home page (`dd.home.services`) and the paths to
-back up (`dd.backup.paths`). The list is in
-[`nix/roles/README.md`](../../nix/roles/README.md); what each role needs of a
-box is [`fleet/roles.json`](../../fleet/roles.json)
-([servers: roles](servers.md#roles)).
+A bundle is modules that move together, with what they read from sops,
+their tile on the home page (`dd.home.services`) and the paths to back up
+(`dd.backup.paths`). The list is in
+[`nix/roles/README.md`](../../nix/roles/README.md); what each brings, the
+secrets it reads and the bundles it needs beside it are in
+[`nix/roles/bundles.json`](../../nix/roles/bundles.json)
+([servers: bundles](servers.md#bundles)). The folder is still called
+`roles/`; nothing hands a box one.
 
 ```
 core      every box: domain, box facts, the gate as a directory replica, metrics,
@@ -134,12 +148,13 @@ vault     vaultwarden, the breach list, member mail
 adblock   Pi-hole for the house
 ```
 
-Files whose names start with `_` are not roles. They are pieces roles
+Files whose names start with `_` are not bundles. They are pieces bundles
 import: `_sops.nix` and `_member-mail.nix`. `checks.boxes` fails if a box
-names a role with no file, or a box lacks `core`.
+is built with a bundle with no file, lacks `core`, or names a role in
+`fleet/boxes.json`.
 
 [`core.nix`](../../nix/roles/core.nix) holds what every box is before any
-role:
+other bundle:
 
 - the `admin` user with the owner's ssh keys from the policy, and a console
   password whose hash comes from sops (`neededForUsers`, with
@@ -160,7 +175,7 @@ role:
 ## Modules
 
 One folder per area. A module declares `options.dd.<thing>`, and is enabled
-by a role or by `core`.
+by a bundle or by `core`.
 
 ```
 adblock/   pihole.nix: Pi-hole and unbound for the house
@@ -243,7 +258,7 @@ not know fails evaluation.
 ```
 <service> = {
   what         one line
-  everyBox     runs on every box, whatever its roles (placement does not choose it)
+  everyBox     runs on every box, whatever else it is built with (placement does not choose it)
   perHouse     at most this many in one house
   instances    at most this many at once (null: any)
   servesCode   the box hands people code that handles their secrets
@@ -282,13 +297,12 @@ merged set as JSON:
 nix build .#needs && jq 'keys' result
 ```
 
-Nothing places roles from the needs yet. `fleet/boxes.json` is written by
-hand and held to `fleet/roles.json` by `checks.role-fit`
-([`nix/lib/fit.nix`](../../nix/lib/fit.nix)), which checks each role's
-`requires` against the box's signed `hardware.json` (`arch`, `uefi`,
-`tpmP256`, `wiredInitrd`, `memoryGiB`, `threads`, `cpuFlags`, `kvm`,
-`nestedKvm`), `box` against `box.json`, `with` (roles that must share the
-box), `perFleet`, and the policy's `ownHardware`
+What a box is built with comes from the needs:
+[`capability.nix`](../../nix/lib/capability.nix) holds each service's
+`requires` to the box's signed `hardware.json`, its owner's `box.json`
+and the policy (`trust`, `ownHardware`, a metered line), and
+[`fleet-placement.nix`](../../nix/lib/fleet-placement.nix) builds each box
+with the bundles of what it can run whose secrets its file holds
 ([what each service needs from a box](hardware.md)).
 
 ## Tests
@@ -300,10 +314,12 @@ All of them are `checks.x86_64-linux.<name>` in the flake.
 Seconds each, no VM:
 
 ```
-boxes            every role is a file, every box has core and builds; peers,
-                 garage addresses, thanos and llm wiring say what the list says;
-                 two services on one port fail (ports.nix)
-role-fit         every box fits its roles (fit.nix)
+boxes            no box names a role; every bundle it is built with is a file,
+                 every box has core and builds; peers, garage addresses, thanos
+                 and llm wiring say what it is built with; two services on one
+                 port fail (ports.nix)
+placement        every box joins, carries only what it can run, runs only what
+                 its bundles bring; a name follows one service
 box-reports      fleet/boxes/<box>/ is what the box signed (box-reports/check.py)
 nginx            every box's nginx config through `nginx -t` (nginx-t.py)
 plaintext-label  a module that reads plaintext registers in dd.box.plaintext
@@ -471,20 +487,22 @@ rule below is a release that rolled back.
 
 1. Add it to the module's `options.dd.<thing>` with a type and a
    `description` that says where its value comes from.
-2. Set it in the role, or in `host.nix` when it comes from the box's folder.
+2. Set it in the bundle, or in `host.nix` when it comes from the box's folder.
 3. `nix eval` it on each box it touches, then run the area's VM test.
 4. If a page documents the option, change it in the same pull request.
 
-### A role
+### A bundle
 
-1. `nix/roles/<role>.nix`: imports (`./_sops.nix` first if it has secrets),
-   `enable = true`, its secrets, its tile, its `dd.backup.paths`.
-2. The role in [`fleet/roles.json`](../../fleet/roles.json) with its `why`,
-   and in [`nix/roles/README.md`](../../nix/roles/README.md).
-3. The role in a box's `roles` in `fleet/boxes.json`; `checks.role-fit`
-   and `checks.boxes` say whether it fits.
-4. Its secrets in that box's file before the release
-   ([secrets](secrets.md)).
+1. `nix/roles/<bundle>.nix`: imports (`./_sops.nix` first if it has
+   secrets), `enable = true`, its secrets, its tile, its `dd.backup.paths`.
+2. The bundle in [`nix/roles/bundles.json`](../../nix/roles/bundles.json)
+   with its `services`, `secrets`, `with` and `why`, and in
+   [`nix/roles/README.md`](../../nix/roles/README.md).
+3. Every box able to run one of its services, whose file holds its
+   secrets, is built with it; `checks.placement` and `checks.boxes` say
+   which.
+4. Its secrets in the files of the boxes that should have it, before the
+   release ([secrets](secrets.md)).
 
 ### A unit on a timer
 
@@ -509,11 +527,11 @@ rule below is a release that rolled back.
   is missing from the build ("path does not exist"), even on a dirty tree.
 - `nixfmt --check` runs on every changed `.nix` file in CI (style).
   Run `nix shell .#ci-tools -c nixfmt <file>`.
-- `checks.boxes` builds every box's `drvPath`; a mistake in any role shows
+- `checks.boxes` builds every box's `drvPath`; a mistake in any bundle shows
   there first.
 - A module that needs another's option checks it exists
   (`lib.optionalAttrs (options.dd ? games) ...`), as `host.nix` does, so a
-  box without that role still evaluates.
+  box without that bundle still evaluates.
 - VM tests take secrets as store files. Something that works in a test
   can still fail on a box because the secret's `owner` is wrong; set
   `owner` on every secret a non-root unit reads.

@@ -52,7 +52,7 @@ only if it passes the rule, run identically by every validator:
 
 | Request | Valid when |
 |---|---|
-| heartbeat {box, seq, facts, roles running} | signed by that box's TPM key from the signed box list; seq above the last |
+| heartbeat {box, seq, facts} | signed by that box's TPM key from the signed box list; seq above the last |
 | lease acquire {role, box} | signed by the box; lease free or expired; placement (from agreed state) says the box may hold it |
 | lease renew {role, box, epoch} | signed by the current holder, before expiry |
 | lease release {role, box, epoch} | signed by the holder |
@@ -145,7 +145,8 @@ Every box computes the same plan from the same agreed state
 ([`place`](../../servers/system/control/place/place.go)), from the
 release's placement inputs ([servers](servers.md#needs-and-placement)) and
 what the heartbeats say: who is alive, each line as measured, memory, what
-each service holds, the roles each box runs. It is greedy, not optimal:
+each service holds, what the release builds each box with (what is not
+switched runs wherever it is built). It is greedy, not optimal:
 
 - What every box runs comes first.
 - Then the service the fewest live boxes can run, and so on. What a
@@ -250,7 +251,7 @@ A service whose needs say `placed = true` is switched by the plan
 - What a box is built with comes from its capability
   ([`fleet-placement.nix`](../../nix/lib/fleet-placement.nix)
   `carried`), never a hand-set list: every bundle of modules
-  (`fleet/roles.json`) of which it can run a service that does not run
+  ([`nix/roles/bundles.json`](../../nix/roles/bundles.json)) of which it can run a service that does not run
   everywhere (its signed report, its owner's box.json and the policy:
   `capability.nix`), whose secrets its own sops file holds (`secrets`:
   what the bundle's modules read whatever else; [secrets](secrets.md)),
@@ -281,7 +282,10 @@ A service whose needs say `placed = true` is switched by the plan
   timers, but leaves its sockets listening.
 - Each box reports `carries/<service>` and `runs/<service>` in its
   heartbeat. The plan puts a placed service only on a box that carries it,
-  and counts it running where its box says so (not by roles).
+  and counts it running where its box says so. What the plan does not
+  switch it counts running where the release builds it (`built` in the
+  placement inputs). Heartbeats name no roles; the agreed state keeps an
+  empty `roles` field only while a box of an older release may send one.
 - Every 10 seconds each box raises the flags the plan gives it and starts
   their units, and lowers the rest and stops them. Only from agreed state
   at most 30 seconds old, and only from a plan this box is in: a box cut
@@ -309,8 +313,9 @@ A service whose needs say `placed = true` is switched by the plan
 `scripts/plan-check` says what a release would change, before it ships.
 It reads the agreed state from a box's control plane (`/state`) and each
 box's `systemctl list-units`, nothing else, and plans with the release's
-own inputs (`.#plan-release`: its placement inputs and needs, each box's
-roles and what it carries) as the first round after the switch would:
+own inputs (`.#plan-release`: its placement inputs and needs, and each
+box's `built-<box>.json`: what it is built with and what it carries) as
+the first round after the switch would:
 no placed service's flag up yet, so the plan alone says where each
 starts. It prints, per box, each service that runs there now and would
 not (`STOPS`, and it exits 1), and each that would start. `-sticky`

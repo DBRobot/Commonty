@@ -2,8 +2,9 @@
 # heartbeat says what its members keep in the services it runs
 # (storage/usage.nix, storage/ledger.nix), and this adds them up from the
 # control plane's agreed state for this box's gate, which shows it and
-# holds uploads to it. Where a service runs, or on how many boxes, does not
-# matter; no box reads another.
+# holds uploads to it. A box's count is believed only for a service the
+# agreed plan puts on it (dd-control's /plan; a writer, only from its
+# lease's holder), never on its own word. No box reads another.
 {
   config,
   lib,
@@ -53,13 +54,6 @@ in
           "storage-view"
           "--budget-gb"
           (toString cfg.budgetGb)
-          # which box may count what: the release's list, not a box's word
-          "--roles"
-          (toString (
-            pkgs.writeText "box-roles.json" (
-              builtins.toJSON (import ../../lib/fleet-placement.nix { inherit lib; }).carried
-            )
-          ))
           "--out"
           "${dir}/ledger.json"
         ];

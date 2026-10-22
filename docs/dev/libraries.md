@@ -717,9 +717,12 @@ The demo may start a film: the gate counts a POST to
   ([nix/modules/storage/view.nix](../../nix/modules/storage/view.nix),
   every 10 minutes), which adds up the control plane's agreed state into
   `/var/lib/dd-storage/ledger.json` for its own gate.
-  - A box's count is believed only for services the release's
-    `fleet/boxes.json` roles say it runs: photos and libraries need the
-    photos role, code needs forge, passwords needs vault.
+  - A box's count is believed only for a service the agreed plan puts on
+    it (dd-control's `/plan`), and for a writer only from its lease's
+    holder: photos and libraries need ente-museum, code forgejo, passwords
+    vaultwarden, games dd-games, computers a member's computer. Being built
+    with a service is not running it, and a box's own word counts for
+    nothing.
   - Counts saturate rather than overflow.
 - **The counts never fail a switch.** dd-storage-view and
   dd-usage-<service> (hourly) first run 2 minutes and 90 seconds after

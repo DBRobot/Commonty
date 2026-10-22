@@ -275,7 +275,7 @@ everyone on the member list or in by an invite the release key signed,
 not revoked and not gone by their own word. Cloudflare forwards it to the
 address each gave the mail Worker; no box ever holds that address.
 
-The mail leaves from the box with the vault role, which already writes to
+The mail leaves from the first box built with the vault, which already writes to
 members ([member-mail.nix](../../nix/modules/member-mail.nix)): `dd` puts
 the change in `/var/lib/dd-announce/outbox` over ssh, and `dd-announce`
 (every five minutes) refuses it there too if it is under 30 days away,

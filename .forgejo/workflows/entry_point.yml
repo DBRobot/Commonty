@@ -40,8 +40,9 @@ jobs:
       draft: ${{ steps.detect.outputs.draft }}
       proven: ${{ steps.detect.outputs.proven }}
       # every box's system is built (hosts), on every box that runs CI
-      # (builders): both from fleet/boxes.json, so a box that joins is built
-      # and builds without this file changing
+      # (builders): from fleet/boxes.json and what the release builds each
+      # box with (fleetBuilt), so a box that joins is built and builds
+      # without this file changing
       hosts: ${{ steps.boxes.outputs.hosts }}
       builders: ${{ steps.boxes.outputs.builders }}
       hosts_list: ${{ steps.boxes.outputs.hosts_list }}
@@ -62,7 +63,9 @@ jobs:
           // and the devices' systems (the home controller): built like a box's
           const d = require("./fleet/devices.json");
           const hosts = [...Object.keys(b), ...Object.keys(d).filter((k) => k !== "_")].sort();
-          const builders = hosts.filter((h) => (b[h]?.roles || []).includes("runner"));
+          // the boxes built with the CI runner, by the release (fleetBuilt)
+          const built = JSON.parse(require("child_process").execFileSync("nix", ["eval", "--json", ".#legacyPackages.x86_64-linux.fleetBuilt"]).toString());
+          const builders = hosts.filter((h) => (built[h] || []).includes("forgejo-runner"));
           require("fs").appendFileSync(process.env.GITHUB_OUTPUT, [
             `hosts=${JSON.stringify(hosts)}`,
             `builders=${JSON.stringify(builders)}`,
