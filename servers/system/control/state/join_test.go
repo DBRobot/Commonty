@@ -3,6 +3,7 @@ package state
 import (
 	"commonty/control/state/attest"
 	"commonty/control/state/ident"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -194,6 +195,63 @@ func claimFor(t *testing.T, key string) *ident.Claim {
 		t.Fatal(err)
 	}
 	return c
+}
+
+// ticketMember: the identity state f holds gets the member cliTicket
+// names, signed up with device as their one device - the ticket's own
+// signer (ticketDevice()) makes its claims good tickets, any other makes
+// them forgeries. It returns how many directory items that took.
+func ticketMember(t *testing.T, f *fleet, device string, now int64) int {
+	t.Helper()
+	tk := ticketOf(t)
+	seed := make([]byte, ed25519.SeedSize)
+	seed[0] = 9
+	root := ed25519.NewKeyFromSeed(seed)
+	pub := base64.StdEncoding.EncodeToString(root.Public().(ed25519.PublicKey))
+	if len(f.c.BoxVoters()) == 0 {
+		f.c.Validators = []Validator{{ID: 1, Name: "node1"}, {ID: 2, Name: "node2"}}
+	}
+	if f.c.Identity == nil {
+		f.c.Identity = &ident.Config{}
+	}
+	f.c.Identity.Members.Members = append(f.c.Identity.Members.Members, ident.MemberID(pub))
+	e := ident.Entry{Name: tk.User, Root: pub, Recovery: pub, Version: 1, Updated: 1,
+		Devices: []ident.Device{{Fingerprint: "f", PublicKey: device, Added: 1}}}
+	eb, err := e.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := json.Marshal(ident.Envelope{V: 2, Kind: "entry", Body: base64.StdEncoding.EncodeToString(eb),
+		Sig: base64.StdEncoding.EncodeToString(ed25519.Sign(root, ident.Message("entry", eb)))})
+	reqs := []Request{f.req("node1", "directory", json.RawMessage(entry))}
+	for _, v := range f.c.BoxVoters() {
+		ack, _ := json.Marshal(map[string]string{"ack": ident.LogName(entry)})
+		reqs = append(reqs, f.req(v, "directory", json.RawMessage(ack)))
+	}
+	if n := f.block(now, reqs...); n != len(reqs) {
+		t.Fatalf("%d of %d directory items taken", n, len(reqs))
+	}
+	if f.s.ticketOwner(f.c, claimFor(t, strangerKey(0)), now) != (map[bool]string{true: tk.User, false: ""})[device == ticketDevice()] {
+		t.Fatal("the identity state does not judge the ticket as meant")
+	}
+	return len(reqs)
+}
+
+// ticketDevice: the device key that signed cliTicket (seed 3)
+func ticketDevice() string {
+	seed := make([]byte, ed25519.SeedSize)
+	seed[0] = 3
+	return base64.StdEncoding.EncodeToString(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
+}
+
+// ticketOf: what cliTicket says
+func ticketOf(t *testing.T) *ident.Ticket {
+	t.Helper()
+	tk, err := ident.CheckClaim(claimFor(t, strangerKey(0)), strangerKey(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
 }
 
 func ticketJoin(key string, c *ident.Claim, seq uint64) Request {

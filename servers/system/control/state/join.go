@@ -38,6 +38,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 type Joined struct {
@@ -66,9 +67,12 @@ type Joining struct {
 // Refused is why a box's join was refused, kept a week for the box and its
 // member to read
 type Refused struct {
-	Why    string `json:"why"`
-	At     int64  `json:"at"`
+	Why string `json:"why"`
+	At  int64  `json:"at"`
+	// its ticket and that ticket's member, only where the identity state
+	// held the ticket good when it was refused (ticketOwner)
 	Ticket string `json:"ticket,omitempty"`
+	Owner  string `json:"owner,omitempty"`
 	// the newest Seq of that box's judged: a replay at or below is stale
 	Seq uint64 `json:"seq,omitempty"`
 }
@@ -345,11 +349,69 @@ func (s *State) attested(box string, now int64) {
 	s.joined(box, jn.Req, now, false)
 }
 
+// ticketOwner: the member whose ticket claim is, where the identity state
+// the log holds now says a current device of theirs signed it, for them,
+// and it is unexpired and unused (ident.TicketOwner); "" otherwise. The
+// claim's id is the joining box's word: a ticket counts only once its
+// member's signature on it does.
+func (s *State) ticketOwner(cfg *Config, claim *ident.Claim, now int64) string {
+	if claim == nil || cfg.Identity == nil {
+		return ""
+	}
+	rp := identReplayOf(cfg)
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	n := len(s.Directory)
+	if rp.r == nil || n < rp.n || (rp.n > 0 && !sameItem(s.Directory[rp.n-1], rp.last)) {
+		rp.r = ident.NewReplayer(cfg.Identity, cfg.BoxVoters())
+	}
+	ids := rp.r.CatchN(n, func(i int) ident.Item {
+		d := s.Directory[i]
+		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item, Boxes: d.Boxes}
+	})
+	rp.n = n
+	if n > 0 {
+		rp.last = s.Directory[n-1]
+	}
+	if owner, id := ids.TicketOwner(cfg.Identity, claim.Block, uint64(now/1000)); id == claim.ID {
+		return owner
+	}
+	return ""
+}
+
+// identReplay: the identity state judged from a log, kept per release so
+// each refusal judges only what is new (its own, never the computers'
+// replay, whose state its callers read outside its lock)
+type identReplay struct {
+	mu   sync.Mutex
+	r    *ident.Replayer
+	n    int
+	last DirItem
+}
+
+var (
+	identReplaysMu sync.Mutex
+	identReplays   = map[*Config]*identReplay{}
+)
+
+func identReplayOf(c *Config) *identReplay {
+	identReplaysMu.Lock()
+	defer identReplaysMu.Unlock()
+	r := identReplays[c]
+	if r == nil {
+		r = &identReplay{}
+		identReplays[c] = r
+	}
+	return r
+}
+
 // refuse keeps why box was refused (claim: the ticket it came with, if
-// any), within the bounds above; where a ticket came with it, the
-// identity judge is told too ({"refused": ...}), and says it to the
-// ticket's member alone (ident's View.Refused)
-func (s *State) refuse(box string, claim *ident.Claim, key, why string, seq uint64, now int64) {
+// any), within the bounds above. A ticket counts only where its member's
+// device signed it (ticketOwner): then it is in the ticketed bound, one a
+// ticket and member an hour, the identity judge is told too ({"refused":
+// ...}), and says it to the ticket's member alone (ident's View.Refused).
+// Any other claim, which anyone can make up, is a stranger's.
+func (s *State) refuse(cfg *Config, box string, claim *ident.Claim, key, why string, seq uint64, now int64) {
 	old := s.Refused[box]
 	if old != nil {
 		old.Seq = max(old.Seq, seq) // a replay of what was judged is stale either way
@@ -357,7 +419,9 @@ func (s *State) refuse(box string, claim *ident.Claim, key, why string, seq uint
 	if old != nil && old.Why == why && now-old.At < refusedAgain {
 		return
 	}
-	if claim == nil {
+	owner := s.ticketOwner(cfg, claim, now)
+	if owner == "" {
+		claim = nil
 		if now-s.StrangerWindow >= 3_600_000 {
 			s.StrangerWindow, s.StrangerCount = now, 0
 		}
@@ -368,7 +432,7 @@ func (s *State) refuse(box string, claim *ident.Claim, key, why string, seq uint
 	} else {
 		// one a ticket an hour, whatever box comes with it
 		for b, x := range s.Refused {
-			if b != box && x.Ticket == claim.ID && now-x.At < 3_600_000 {
+			if b != box && x.Ticket == claim.ID && x.Owner == owner && now-x.At < 3_600_000 {
 				return
 			}
 		}
@@ -388,7 +452,7 @@ func (s *State) refuse(box string, claim *ident.Claim, key, why string, seq uint
 		rf.Seq = max(rf.Seq, old.Seq)
 	}
 	if claim != nil {
-		rf.Ticket = claim.ID
+		rf.Ticket, rf.Owner = claim.ID, owner
 	}
 	s.Refused[box] = rf
 	for len(s.Refused) > MaxRefused {
@@ -410,21 +474,21 @@ func (s *State) refuse(box string, claim *ident.Claim, key, why string, seq uint
 }
 
 // refused: a request Check refused for what the box is (a Refusal), kept
-func (s *State) refused(r Request, rf *Refusal, now int64) {
+func (s *State) refused(cfg *Config, r Request, rf *Refusal, now int64) {
 	switch r.Kind {
 	case "join":
 		var j JoinReq
 		if json.Unmarshal(r.Body, &j) != nil {
 			return
 		}
-		s.refuse(r.Box, j.Claim, j.Key, rf.Why, r.Seq, now)
+		s.refuse(cfg, r.Box, j.Claim, j.Key, rf.Why, r.Seq, now)
 	case "attest-response":
 		// its proof did not hold: it starts again, from its join
 		jn := s.Joining[r.Box]
 		if jn == nil {
 			return
 		}
-		s.refuse(r.Box, jn.Req.Claim, jn.Req.Key, rf.Why, r.Seq, now)
+		s.refuse(cfg, r.Box, jn.Req.Claim, jn.Req.Key, rf.Why, r.Seq, now)
 		s.dropJoining(r.Box)
 	}
 }
@@ -446,7 +510,7 @@ func (s *State) dropJoining(box string) {
 
 // expireJoining: joins whose proof did not come within the attestation's
 // hour are refused, and refusals a week old are forgotten
-func (s *State) expireJoining(now int64) {
+func (s *State) expireJoining(cfg *Config, now int64) {
 	var gone []string
 	for box, jn := range s.Joining {
 		if s.Attest == nil || s.Attest.Pending[box] == nil || now-jn.At >= attest.TTL {
@@ -456,7 +520,7 @@ func (s *State) expireJoining(now int64) {
 	sort.Strings(gone)
 	for _, box := range gone {
 		jn := s.Joining[box]
-		s.refuse(box, jn.Req.Claim, jn.Req.Key, "it did not finish proving its TPM within an hour", 0, now)
+		s.refuse(cfg, box, jn.Req.Claim, jn.Req.Key, "it did not finish proving its TPM within an hour", 0, now)
 		s.dropJoining(box)
 	}
 	for box, rf := range s.Refused {

@@ -128,12 +128,14 @@ Bounds, so junk cannot crowd out a member's refusal or be replayed: a
 join's Seq is its sender's clock and must be within ten minutes of the
 agreed time and above any Seq of that box already judged (`JoinFresh`;
 a refusal keeps it), so an old signed join replayed is stale before it is
-judged. Ticketless refusals have their own bucket (4 an hour) and never
-reach the directory log; refusals with a ticket have theirs (16 an hour,
-one a ticket). What is left: the state machine cannot tell a member's
-ticket from one a stranger minted with a device key of its own (only the
-identity judge can, against the member's entry), so junk with made-up
-tickets can still spend that hour's 16, and is then shown to no one.
+judged. A refusal counts as a member's only when the identity state the
+directory log holds says its ticket is theirs: signed by a current device
+of the member it names, who is not banned, and unused
+(`ident.TicketOwner`, read from the log's replay). Those have their own
+bucket (16 an hour, one a ticket and member) and go to the identity judge
+to be shown to that member. Every other refusal, a made-up ticket's
+included, is a stranger's: its own bucket (4 an hour), never in the
+directory log, and the first given up when too many are kept.
 
 One honest voter is enough. Its secret is only in its sealed challenge, so
 no answer that holds it could have been made earlier, by another TPM, or

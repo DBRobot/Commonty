@@ -4,10 +4,12 @@ import (
 	"commonty/control/state/attest"
 	"commonty/control/state/ident"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -167,6 +169,7 @@ func TestAJoinIsRefusedForWhatTheBoxIsAndItsMemberToldWhy(t *testing.T) {
 		cfg := v.Config
 		change(&cfg)
 		f.c.Attest = &cfg
+		n := ticketMember(t, f, ticketDevice(), v.At-1000)
 		c := claimFor(t, v.Key)
 		if f.block(v.At, v.join(c, 1)) != 0 || f.s.Joining[v.Box] != nil {
 			t.Fatal("joined")
@@ -177,12 +180,12 @@ func TestAJoinIsRefusedForWhatTheBoxIsAndItsMemberToldWhy(t *testing.T) {
 		}
 		// the identity judge hears it, for the ticket's member
 		want := `{"refused":{"block":"` + c.Block + `","key":"` + v.Key + `","ticket":"` + c.ID + `","why":"` + why + `"}}`
-		if len(f.s.Directory) != 1 || string(f.s.Directory[0].Item) != want {
+		if len(f.s.Directory) != n+1 || string(f.s.Directory[n].Item) != want {
 			t.Fatalf("%+v", f.s.Directory)
 		}
 		// the box asks again every minute: kept once a day, not once a minute
 		f.block(v.At+60_000, v.join(c, 2))
-		if len(f.s.Directory) != 1 {
+		if len(f.s.Directory) != n+1 {
 			t.Fatal("the same refusal logged twice")
 		}
 		// and the box can say the same before it asks
@@ -282,6 +285,7 @@ func TestAProofThatDoesNotHoldOrNeverComesIsRefused(t *testing.T) {
 func TestRefusalsAreBoundedAndJunkCannotSpendAMembersShare(t *testing.T) {
 	f := newFleet(t)
 	f.c.Attest = &attest.Config{}
+	n := ticketMember(t, f, ticketDevice(), 500)
 	junk := func(i int, now int64) {
 		k := strangerKey(i)
 		name, _, _ := JoinName(k)
@@ -291,7 +295,7 @@ func TestRefusalsAreBoundedAndJunkCannotSpendAMembersShare(t *testing.T) {
 	for i := range 3 * StrangersRefusedPerHour {
 		junk(i, 1000)
 	}
-	if len(f.s.Refused) != StrangersRefusedPerHour || len(f.s.Directory) != 0 {
+	if len(f.s.Refused) != StrangersRefusedPerHour || len(f.s.Directory) != n {
 		t.Fatalf("%d ticketless refusals kept in an hour, %d logged", len(f.s.Refused), len(f.s.Directory))
 	}
 	// a member's box is refused, and told, whatever the junk did
@@ -300,7 +304,7 @@ func TestRefusalsAreBoundedAndJunkCannotSpendAMembersShare(t *testing.T) {
 	c := claimFor(t, k)
 	b, _ := json.Marshal(JoinReq{Key: k, Recipient: "age1x", House: "h", Facts: enough, Claim: c})
 	f.block(1000, Request{Kind: "join", Box: name, Seq: 1000, Body: b, Sig: "ok:" + k})
-	if r := f.s.Refused[name]; r == nil || r.Ticket != c.ID || len(f.s.Directory) != 1 {
+	if r := f.s.Refused[name]; r == nil || r.Ticket != c.ID || len(f.s.Directory) != n+1 {
 		t.Fatalf("%+v", r)
 	}
 	// junk, however long, never pushes a member's refusal out
@@ -317,10 +321,11 @@ func TestAnOldSignedJoinReplayedIsNotJudgedAgain(t *testing.T) {
 	cfg := v.Config
 	cfg.Test = nil // a software TPM: refused
 	f.c.Attest = &cfg
+	n := ticketMember(t, f, ticketDevice(), v.At-1000)
 	c := claimFor(t, v.Key)
 	old := v.join(c, 1)
 	f.block(v.At, old)
-	if len(f.s.Directory) != 1 {
+	if len(f.s.Directory) != n+1 {
 		t.Fatal("not refused")
 	}
 	// replayed a day on, when the same refusal would be kept again: stale
@@ -331,13 +336,80 @@ func TestAnOldSignedJoinReplayedIsNotJudgedAgain(t *testing.T) {
 	// and within its ten minutes, the same request again: at or below the
 	// Seq the refusal kept
 	f.block(v.At+1000, old)
-	if len(f.s.Directory) != 1 {
+	if len(f.s.Directory) != n+1 {
 		t.Fatalf("a replay logged again: %d", len(f.s.Directory))
 	}
 	// a fresh one from the box is judged as ever
 	fresh := v.join(c, refusedAgain+2)
 	f.block(v.At+refusedAgain+2, fresh)
-	if len(f.s.Directory) != 2 {
+	if len(f.s.Directory) != n+2 {
 		t.Fatal("a fresh join was not judged")
+	}
+}
+
+// A ticket's claim is the joining box's word: its refusal is a member's -
+// in the ticketed bound, one a ticket and member, told to the identity
+// judge - only once the identity state holds the ticket signed by a
+// current device of the member it names. A ticket any other key signed is
+// a stranger's refusal, however many there are.
+func TestAForgedTicketsRefusalIsAStrangers(t *testing.T) {
+	f := newFleet(t)
+	f.c.Attest = &attest.Config{}
+	other := base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
+	n := ticketMember(t, f, other, 500)
+	join := func(i int, now int64) string {
+		k := strangerKey(i)
+		name, _, _ := JoinName(k)
+		f.block(now, ticketJoin(k, claimFor(t, k), uint64(now)))
+		return name
+	}
+	for i := range 3 * StrangersRefusedPerHour {
+		join(i, 1000)
+	}
+	if len(f.s.Refused) != StrangersRefusedPerHour || f.s.RefuseCount != 0 || len(f.s.Directory) != n {
+		t.Fatalf("%d forged refusals kept, %d counted as ticketed, %d logged", len(f.s.Refused), f.s.RefuseCount, len(f.s.Directory)-n)
+	}
+	for b, r := range f.s.Refused {
+		if r.Ticket != "" || r.Owner != "" {
+			t.Fatalf("%s: a forged ticket kept as one: %+v", b, r)
+		}
+	}
+	// nor with no identity state at all
+	g := newFleet(t)
+	g.c.Attest = &attest.Config{}
+	k := strangerKey(1)
+	name, _, _ := JoinName(k)
+	g.block(1000, ticketJoin(k, claimFor(t, k), 1000))
+	if r := g.s.Refused[name]; r == nil || r.Ticket != "" || g.s.StrangerCount != 1 || g.s.RefuseCount != 0 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestARealTicketsRefusalIsCountedForItsOwner(t *testing.T) {
+	f := newFleet(t)
+	f.c.Attest = &attest.Config{}
+	tk := ticketOf(t)
+	n := ticketMember(t, f, ticketDevice(), 500)
+	// the stranger bucket full first
+	for i := range StrangersRefusedPerHour {
+		k := strangerKey(100 + i)
+		name, _, _ := JoinName(k)
+		b, _ := json.Marshal(JoinReq{Key: k, Recipient: "age1x", House: "h", Facts: enough})
+		f.block(1000, Request{Kind: "join", Box: name, Seq: 1000, Body: b, Sig: "ok:" + k})
+	}
+	k := strangerKey(1)
+	name, _, _ := JoinName(k)
+	c := claimFor(t, k)
+	f.block(1000, ticketJoin(k, c, 1000))
+	r := f.s.Refused[name]
+	if r == nil || r.Ticket != c.ID || r.Owner != tk.User || f.s.RefuseCount != 1 || len(f.s.Directory) != n+1 {
+		t.Fatalf("%+v, %d ticketed, %d logged", r, f.s.RefuseCount, len(f.s.Directory)-n)
+	}
+	// the same ticket with another box, within the hour: one a ticket
+	k2 := strangerKey(2)
+	name2, _, _ := JoinName(k2)
+	f.block(2000, ticketJoin(k2, claimFor(t, k2), 2000))
+	if f.s.Refused[name2] != nil || f.s.RefuseCount != 1 {
+		t.Fatalf("a second refusal on one ticket in an hour: %+v", f.s.Refused[name2])
 	}
 }

@@ -283,6 +283,37 @@ func (s *State) waiting(cfg *Config, at uint64) map[string]*Owner {
 	return out
 }
 
+// TicketOwner: the member a ticket's signed block is theirs for at `at` -
+// signed by a current device of the member it names, who is not banned,
+// and unused - with its id; "" for any other block, which no one can be
+// told of. Its expiry is the enlisting's to judge, as refusedView does.
+func (s *State) TicketOwner(cfg *Config, block string, at uint64) (owner, id string) {
+	sb, err := b64.DecodeString(block)
+	if err != nil {
+		return "", ""
+	}
+	named, err := blockTicket(sb)
+	if err != nil {
+		return "", ""
+	}
+	h := s.entry(named.User, at)
+	if h == nil || s.banned(cfg, &h.Signed.Entry, at) != "" {
+		return "", ""
+	}
+	var keys []string
+	for _, d := range h.Signed.Entry.Devices {
+		keys = append(keys, d.PublicKey)
+	}
+	t, err := ReadClaim(block, keys)
+	if err != nil || t.User != named.User {
+		return "", ""
+	}
+	if _, used := s.Tickets[t.ID]; used {
+		return "", ""
+	}
+	return t.User, t.ID
+}
+
 // refusedView: the refused boxes whose ticket a device of its member's
 // signed, for them, good now and unused, and that have not joined since;
 // Since is when it was refused
