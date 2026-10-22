@@ -8,19 +8,6 @@
 let
   base = config.dd.domain;
   name = config.networking.hostName;
-  restartScript =
-    mode:
-    pkgs.writeShellScript "runner-restart-${mode}" (
-      ddScript ./runner-restart.sh {
-        MODE = mode;
-        UNIT = "gitea-runner-${name}.service";
-        PATH = lib.makeBinPath [
-          config.systemd.package
-          pkgs.coreutils
-          pkgs.gnugrep
-        ];
-      }
-    );
   cfg = config.dd.runner;
   fixed = cfg.capacity != null;
   # until dd-service-memory has measured them: what the needs say the
@@ -53,7 +40,10 @@ let
   live = "/var/lib/gitea-runner/${name}/config.yaml";
 in
 {
-  imports = [ ../box/work-memory.nix ];
+  imports = [
+    ../box/work-memory.nix
+    ./runner-restart.nix
+  ];
 
   # builds use what threads they are given (8 threads were 85% busy at the
   # 90th percentile with two jobs on each box, 2026-10-20)
@@ -170,10 +160,6 @@ in
     dd.work.units."gitea-runner-${name}".oomPolicy = "continue";
     systemd.services."gitea-runner-${name}" = {
       path = [ pkgs.curl ];
-      # A switch never stops it: a release that changed the runner stopped
-      # it under the next pull request's CI and failed the run (release 331,
-      # run 786). The new config waits for dd-runner-restart, below.
-      restartIfChanged = false;
       serviceConfig = {
         DynamicUser = lib.mkForce false;
         # A stop is a drain: the signal goes to the runner alone (systemd
@@ -188,8 +174,6 @@ in
         TimeoutStartSec = "10min";
         ExecStartPre = lib.mkBefore (
           [
-            # as root: which unit definition this run started from
-            "+${restartScript "started"}"
             (pkgs.writeShellScript "runner-address" (
               ddScript ./runner-address.sh {
                 NAME = name;
@@ -216,24 +200,13 @@ in
       };
     };
 
-    # The runner restarts into its new config once it holds no job: every
-    # minute this compares the unit on disk with the one the runner started
-    # from, and restarts it only when no job's process is left in it. A job
-    # taken in the instant between is drained, not killed (shutdown_timeout).
-    systemd.services.dd-runner-restart = {
-      description = "Restart the runner into its new config once it holds no job";
-      restartIfChanged = false;
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = restartScript "check";
-      };
-    };
-    systemd.timers.dd-runner-restart = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnActiveSec = "1min";
-        OnUnitActiveSec = "1min";
-      };
+    # A switch never stops it; it restarts into its new config once it
+    # holds no job's process (runner-restart.nix). A job taken in the
+    # instant between is drained, not killed (shutdown_timeout). Not past
+    # its job limit and a little: then it drains and restarts all the same.
+    dd.runnerRestart.units."gitea-runner-${name}" = {
+      job = "cgroup";
+      limit = (180 + 10) * 60;
     };
 
     sops.secrets.forgejo-runner-token = { };

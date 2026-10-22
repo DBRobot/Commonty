@@ -18,6 +18,30 @@ let
   # carry, so nothing resolved. On the default bridge a container gets the
   # box's own nameservers and asks them directly.
   subnet = "172.30.0.0/24";
+  unit = "gitea-runner-${utils.escapeSystemdPath name}";
+  # on every container this runner starts, job's and services' alike (a
+  # workflow's own options cannot set labels): what counts as a member's job
+  label = "dd.runner=${name}";
+  docker = config.virtualisation.docker.daemon.settings;
+  # what of docker's config is the sandbox: the runtime and its flags, and
+  # what a container's network may do
+  sandboxKeys = [
+    "runtimes"
+    "default-runtime"
+    "bip"
+    "icc"
+    "iptables"
+    "ip6tables"
+    "ip-forward"
+    "ip-masq"
+    "fixed-cidr"
+    "default-address-pools"
+    "userland-proxy"
+    "no-new-privileges"
+    "userns-remap"
+    "seccomp-profile"
+  ];
+  runnerSettings = config.services.gitea-actions-runner.instances.${name}.settings;
 in
 {
   # one member's job, and how many of them this box holds at once
@@ -40,6 +64,11 @@ in
     );
     description = "members' jobs at once: what the box's threads and memory hold, at most two";
   };
+  options.dd.membersRunner.drainMinutes = lib.mkOption {
+    type = lib.types.ints.positive;
+    default = 65;
+    description = "How long a stop of the members' runner lets its jobs run on (its job limit is 1 h)";
+  };
   options.dd.membersRunner.tokenFile = lib.mkOption {
     type = lib.types.nullOr lib.types.str;
     default = null;
@@ -56,6 +85,8 @@ in
   # alone, which the forge enforces (dd-forge-rules in forgejo.nix): this
   # runner may stay registered for every repo only while `members` is its
   # one label. A member's workflow says `runs-on: members` and lands here.
+  imports = [ ./runner-restart.nix ];
+
   config = {
     dd.box.plaintext = [ "members-runner (runs members' code, sandboxed)" ];
 
@@ -78,6 +109,28 @@ in
         icc = false;
       };
     };
+    # A switch never restarts docker or the members' runner: either one
+    # stopping killed the jobs under way. Each restarts into its new config
+    # once none of the runner's containers runs (runner-restart.nix), or
+    # past the drain and a little, or at once on a new sandbox. Docker's
+    # restart stops the runner first, a drain, and starts it after.
+    dd.runnerRestart.units = {
+      docker = {
+        job = "docker";
+        inherit label;
+        limit = (cfg.drainMinutes + 10) * 60;
+        drain = lib.optional (cfg.tokenFile != null) unit;
+        sandbox = builtins.toJSON (lib.filterAttrs (k: _: lib.elem k sandboxKeys) docker);
+      };
+    }
+    // lib.optionalAttrs (cfg.tokenFile != null) {
+      ${unit} = {
+        job = "docker";
+        inherit label;
+        limit = (cfg.drainMinutes + 10) * 60;
+        sandbox = builtins.toJSON runnerSettings.container;
+      };
+    };
 
     services.gitea-actions-runner.instances.${name} = lib.mkIf (cfg.tokenFile != null) {
       enable = true;
@@ -90,6 +143,8 @@ in
         runner = {
           inherit (cfg) capacity;
           timeout = "1h";
+          # a stop lets the jobs under way finish first (KillMode below)
+          shutdown_timeout = "${toString cfg.drainMinutes}m";
         };
         container = {
           network = "bridge";
@@ -97,7 +152,7 @@ in
           # nothing of the host mounted; no socket handed in
           valid_volumes = [ ];
           docker_host = "-";
-          options = "--cpus=${toString cfg.jobThreads} --memory=${toString cfg.jobMemoryGiB}g --pids-limit=1024 --security-opt=no-new-privileges";
+          options = "--label=${label} --cpus=${toString cfg.jobThreads} --memory=${toString cfg.jobMemoryGiB}g --pids-limit=1024 --security-opt=no-new-privileges";
           force_pull = false;
         };
         cache.enabled = false;
@@ -106,9 +161,13 @@ in
     # the nixos module names the unit with systemd's escaping: the dash in
     # members-<host> becomes \x2d, and settings under the plain name went
     # to a unit that does not exist
-    systemd.services."gitea-runner-${utils.escapeSystemdPath name}" = lib.mkIf (cfg.tokenFile != null) {
+    systemd.services.${unit} = lib.mkIf (cfg.tokenFile != null) {
+      # Wants, not requires: a docker that restarts (a crash, or the
+      # restart above) leaves the runner be. Under requires it stopped the
+      # runner first, which waited out its job while the job waited on the
+      # docker that waited on the runner: an hour of nothing.
       after = [ "docker.service" ];
-      requires = [ "docker.service" ];
+      wants = [ "docker.service" ];
       # The same plain user as the host runner, not the module's dynamic
       # one: both instances live under /var/lib/gitea-runner, and a dynamic
       # user turns that into a symlink into /var/lib/private that the host
@@ -120,6 +179,10 @@ in
         User = lib.mkForce "forgejo-runner";
         Group = "forgejo-runner";
         SupplementaryGroups = [ "docker" ];
+        # A stop is a drain: the signal goes to the runner alone, and it may
+        # take the runner's job limit (1h) and a little to let them end
+        KillMode = "mixed";
+        TimeoutStopSec = "${toString (cfg.drainMinutes + 5)}min";
         # the forge must answer first, and at this address (runner-address.sh)
         TimeoutStartSec = "10min";
         ExecStartPre = lib.mkBefore [

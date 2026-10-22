@@ -27,14 +27,14 @@ nix/modules/forge/
   forgejo-runner.nix                  the host runner: the fleet's own CI
   members-runner.nix                  the members' runner: Docker under gVisor
   runner-address.sh                   a runner waits for the forge before it registers
-  runner-restart.sh                   a release's runner config waits for no job running
+  runner-restart.nix, .sh             a release's runner and docker config wait for no job running, up to a limit
   needs.nix                           what each part needs of a box
 servers/forge/web/                    the Git pages (pages/git-public.html: the public door's)
 servers/gate/src/forge_events.rs      the pages' live updates, from the gate
 nix/tests/forge.nix, forge.py         the forge, booted
 nix/tests/nginx-door.py               the public door, served and asked (the nginx check)
 nix/tests/members-runner.nix, .py     a member's job, kept in its box
-nix/tests/runner-restart.nix, .py     a switch under a running job: it ends green
+nix/tests/runner-restart.nix, .py     a switch under running jobs, host and member: they end green
 ```
 
 The `forge` role runs on one box (`fleet/boxes.json`; node1 today), always
@@ -559,7 +559,15 @@ changed its unit, the switch restarted it, and the next pull request's run
   by an `ExecStartPre` as root in `/run/dd-runner-restart/`) and restarts
   the runner when they differ and no process but the runner's own is in
   its unit, which is when it holds no job
-  ([`runner-restart.sh`](../../nix/modules/forge/runner-restart.sh)).
+  ([`runner-restart.nix`](../../nix/modules/forge/runner-restart.nix),
+  `dd.runnerRestart.units`).
+- The wait has a limit: the job limit and 10 minutes (3 h 10 min here).
+  When a change was first seen is kept in `/run/dd-runner-restart/`
+  across the timer's runs. Past the limit the runner is restarted all the
+  same, which is a drain (below), so a stream of jobs back to back cannot
+  hold a release off for good. How long each change has waited is a fact,
+  `dd_runner_restart_pending_seconds{unit=...}`, and `dd-fleet-alerts`
+  mails a box where one has waited over an hour.
 - A stop is a drain: `shutdown_timeout = 3h` (the runner's job limit) and
   `KillMode = mixed`, so the runner alone gets the signal, takes no new
   job, and exits once its jobs have ended. A job taken in the instant
@@ -586,6 +594,50 @@ Docker's default bridge on purpose: on a user-defined network, Docker's
 own name server is reached by NAT rules gVisor does not carry, and nothing
 resolved. The `members-runner` VM test checks that a container reaches
 none of it and sees gVisor's kernel.
+
+**A release never kills a member's job either.** A member's job is a
+container, so it dies when the members' runner stops (its default stop
+cancelled the job) or when docker stops (dockerd stops its containers).
+Both units are in `dd.runnerRestart.units` with a job counted as a
+running container the members' runner started: each carries the label
+`dd.runner=members-<box>` (the runner's container options; a workflow's
+own options cannot set labels), and other containers on the box do not
+count. A switch leaves both on their old config, and `dd-runner-restart`
+restarts each once none of those containers runs. The runner's stop is a
+drain, as the host runner's (`shutdown_timeout = 65m`, its job limit is
+1 h; `KillMode = mixed`).
+
+The wait is bounded, since a member who keeps jobs running back to back
+would otherwise put off a fix to the sandbox for good:
+
+- **Past the limit** (the 65 min drain and 10 min) the change goes in
+  anyway. For docker: the members' runner is stopped, so it takes no new
+  job and its jobs get the drain; once it is down docker restarts and the
+  runner starts again. A job still running at the end of the drain is
+  cancelled.
+- **A change to the sandbox itself** does not wait for idle at all: the
+  runtime (`runsc`'s path, so a new gVisor, and its flags), docker's
+  `default-runtime`, and its network and iptables settings (`bip`, `icc`,
+  `iptables`, ...), or the runner's container settings. The next pass
+  stops the members' runner and **cancels the jobs running on the old
+  sandbox** (their containers are killed, and the forge records them as
+  failed); docker restarts on the pass after. A sandbox it cannot tell
+  counts as a change: each start of docker or the runner records the
+  sandbox's hash (a boot's too), so no record means one started before
+  this release or a record that went, and that restarts the same way
+  (once, on the release that brings this). The firewall's `DOCKER-USER`
+  rules are not in this: a switch reloads the firewall, and they apply to
+  running containers at once. The runner `wants`
+docker and no more: under `requires`, a docker restart (a crash, say)
+first stopped the runner, whose drain waited on a job that waited on
+docker, for an hour. Docker's `live-restore` is not on: it keeps the
+container through a restart of dockerd, but the runner runs each step
+through dockerd (`docker exec`), and losing dockerd fails the step and the
+job all the same (tried in the VM test). The `runner-restart` VM test runs a member's job
+through a switch that changes the members' runner and docker's
+`daemon.json`; then a member's job that never ends through one past a
+shortened limit, beside a container that is no job's, and one through a
+change to gVisor's flags.
 
 ## Storage and backups
 
