@@ -15,7 +15,6 @@
     "vault"
   ],
   "arcMaxBytes": 8589934592,
-  "runnerCapacity": 2,
   "datasets": {
     "vault/enc/photos": {
       "note": "garage's blocks: ente's and the media tier's ciphertext; a week of snapshots, set by the garage module (storage/garage.nix)",

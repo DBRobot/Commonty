@@ -59,7 +59,7 @@ fleet/boxes/<box>/
   report.sig                  the box's TPM signature over the two above
   box.json                    the owner's choices: owner, house, encrypted,
                               extraPools, neverSleep, datasets (and optional
-                              pools, runnerCapacity, gamesMemoryMiB, arcMaxBytes)
+                              pools, gamesMemoryMiB, arcMaxBytes)
 ```
 
 `mkBox` puts these modules together, in this order:
