@@ -95,8 +95,6 @@ let
   sharedHere = lib.attrNames (lib.filterAttrs (_: b: b.shared && b.home == box) cfg.buckets);
   # every bucket a peer's key here is allowed: its copies, and what it writes here
   peerBuckets = lib.unique (copied ++ sharedHere);
-  # a shared bucket kept in another box's store: this box writes it there
-  remote = lib.filterAttrs (_: b: b.shared && b.home != null && b.home != box) cfg.buckets;
   homed = lib.filterAttrs (_: b: b.shared && b.home != null) cfg.buckets;
   # the plan, as dd-control writes it, and the last one this box saw
   plan = "/run/dd-placed/copies.json";
