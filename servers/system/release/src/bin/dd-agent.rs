@@ -457,7 +457,7 @@ fn run(args: &Args) -> Result<String> {
     // release test) or with one from before rollouts, a release is taken
     // at once, as it always was.
     let mut rollout = None;
-    if !args.control.is_empty() {
+    if waits_for_rollout(&args.control, self_built, &hostname()?, &name) {
         let digest = release::rollout::digest(&body);
         let mut ans = match rollout_answer(args) {
             Ok(a) => a,
@@ -1061,6 +1061,15 @@ fn joined_name(spki_b64: &str) -> Result<String> {
     ))
 }
 
+/// Whether a release waits on the control plane's rollout here. Not without
+/// a control plane; and not on a box that joined on its own key while it
+/// still runs under its install name: it is not in the fleet yet (its
+/// dd-control starts under the name its key gives, which this release moves
+/// it to), serves nothing, and is in no wave.
+fn waits_for_rollout(control: &str, self_built: bool, host: &str, name: &str) -> bool {
+    !control.is_empty() && (!self_built || host == name)
+}
+
 /// The agreed rollout record from this box's dd-control. None: a
 /// dd-control from before rollouts (404), so a release is taken at once.
 fn rollout_answer(args: &Args) -> Result<Option<Answer>> {
@@ -1506,6 +1515,38 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_box_not_yet_joined_takes_its_first_release_at_once() {
+        // a release box, and a joined box under its key's name: they wait
+        assert!(super::waits_for_rollout(
+            "http://127.0.0.1:4195",
+            false,
+            "node1",
+            "node1"
+        ));
+        assert!(super::waits_for_rollout(
+            "http://127.0.0.1:4195",
+            true,
+            "j0123456789",
+            "j0123456789"
+        ));
+        // a joined box still under its install name has no control plane yet
+        assert!(!super::waits_for_rollout(
+            "http://127.0.0.1:4195",
+            true,
+            "joining",
+            "j0123456789"
+        ));
+        // a release box under another name still waits; no control plane, never
+        assert!(super::waits_for_rollout(
+            "http://127.0.0.1:4195",
+            false,
+            "joining",
+            "node1"
+        ));
+        assert!(!super::waits_for_rollout("", false, "node1", "node1"));
+    }
+
     #[test]
     fn a_joined_boxs_name_is_its_keys() {
         // sha256("abc") starts ba7816bf8f
