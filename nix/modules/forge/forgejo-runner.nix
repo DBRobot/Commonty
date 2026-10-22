@@ -47,9 +47,6 @@ let
       ])
     ) brought
   );
-  members = config.dd.membersRunner or { };
-  membersGiB =
-    if (members.tokenFile or null) != null then members.capacity * members.jobMemoryGiB else 0;
   configFile = (pkgs.formats.yaml { }).generate "config.yaml" (
     config.services.gitea-actions-runner.instances.${name}.settings
   );
@@ -58,22 +55,20 @@ in
 {
   imports = [ ../box/work-memory.nix ];
 
-  # what one job takes, measured (node1, 2026-10-20): its runner at 12.1G
-  # with two jobs, the biggest VM test's qemu at 5.3G; and builds use what
-  # threads they are given (8 threads were 85% busy at the 90th percentile
-  # with two jobs on each box)
+  # builds use what threads they are given (8 threads were 85% busy at the
+  # 90th percentile with two jobs on each box, 2026-10-20)
   options.dd.runner.jobThreads = lib.mkOption {
     type = lib.types.ints.positive;
     default = 4;
   };
+  # what a typical job holds in the work slice, its own processes and the
+  # builds it sends the nix daemon together (node2 at one job, 2026-10-22,
+  # 44 minutes: 2.3G at the median, 3.9G at the 90th percentile). Not the
+  # rare big one (CI's evaluation at 7G, a VM test's VMs at 5.6G, biome at
+  # 10.5G): past the slice's limit the kernel kills that job alone
   options.dd.runner.jobMemoryGiB = lib.mkOption {
     type = lib.types.ints.positive;
-    default = 6;
-  };
-  # a release build beside CI (dd-build: 6.2G on node1, 5.6G on node2 at peak)
-  options.dd.runner.buildMemoryGiB = lib.mkOption {
-    type = lib.types.ints.unsigned;
-    default = 6;
+    default = 4;
   };
   options.dd.runner.capacity = lib.mkOption {
     type = lib.types.nullOr lib.types.ints.positive;
@@ -207,8 +202,6 @@ in
               ddScript ./runner-capacity.sh {
                 JOB_THREADS = cfg.jobThreads;
                 JOB_GIB = cfg.jobMemoryGiB;
-                BUILD_GIB = cfg.buildMemoryGiB;
-                MEMBERS_GIB = membersGiB;
                 FALLBACK_GIB = toString (builtins.ceil fallback);
                 FACTS = "/var/lib/dd-facts/services.prom";
                 IN = configFile;
