@@ -153,12 +153,12 @@ a.succeed("! grep -q dd_store_lost /var/lib/dd-facts/store-copy.prom")
 
 # a bucket a box writes alone: a's copy goes to b, and what b holds of it
 # never comes back, so what a deletes stays deleted
-put(a, "ours", "o1", "a's own")
+put(a, "ours", "o1", "written by a alone")
 a.succeed(
     """echo '{"photos":["a","b"],"ours":["a","b"]}' > /run/dd-placed/copies.json"""
 )
-copied("ours", "o1", "a's own")
-put(b, "ours", "o2", "b's word only")
+copied("ours", "o1", "written by a alone")
+put(b, "ours", "o2", "written by b only")
 b.succeed("systemctl start dd-store-copy.service")
 a.fail(
     "set -a; . /var/lib/dd-store/keys/ours.env; AWS_DEFAULT_REGION=us-east-1 "
