@@ -836,7 +836,7 @@
                   ./servers/system/control/third_party
                 ];
               };
-              vendorHash = "sha256-u/ZqaWhogP9sIydZKA9BOP/MdlN93RrcPnNIYKqsxWw=";
+              vendorHash = "sha256-ZpcH1WvSuwwuUt+ssCDFbG05/5TTlnuJUitTe3oL/Ac=";
               dd-control = pkgs.buildGoModule {
                 pname = "dd-control";
                 version = "0.1.0";
