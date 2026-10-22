@@ -373,6 +373,9 @@ pub(crate) async fn make_link(State(app): State<Arc<App>>, headers: HeaderMap) -
     if app.role(&user) != Some(Role::Member) {
         return (StatusCode::FORBIDDEN, "only a member brings someone in").into_response();
     }
+    if let Some(r) = app.no_new_session() {
+        return r;
+    }
     match app.friends.make_link(&user) {
         Ok((secret, link)) => (
             [("cache-control", "no-store")],
@@ -499,6 +502,9 @@ pub(crate) async fn accept(
             return (status, why).into_response();
         }
         app.directory.unhold(&user);
+    }
+    if let Some(r) = app.no_new_session() {
+        return r;
     }
     match app.friends.accept(&secret, &user, as_guest) {
         Ok(Ok(by)) => {

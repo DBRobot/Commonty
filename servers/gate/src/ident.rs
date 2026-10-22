@@ -13,7 +13,42 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// An answer about someone that may not be known yet. Unknown is never
+/// No: what cannot be undone (a device off the network, a session ended,
+/// anything deleted) is done only on a No, and never while it is Unknown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Answer {
+    Yes,
+    No,
+    Unknown,
+}
+
+impl Answer {
+    pub fn of(b: bool) -> Self {
+        if b { Self::Yes } else { Self::No }
+    }
+    /// either one: Yes if either is, No only if both are
+    pub fn or(self, other: impl FnOnce() -> Answer) -> Answer {
+        match self {
+            Self::Yes => Self::Yes,
+            a => match (a, other()) {
+                (_, Self::Yes) => Self::Yes,
+                (Self::No, Self::No) => Self::No,
+                _ => Self::Unknown,
+            },
+        }
+    }
+}
+
+/// how long since the last good read the agreed state still counts as
+/// fresh: past it, dd-control has not answered for a while and what is
+/// held may be behind
+pub const STALE: Duration = Duration::from_secs(90);
+/// how far behind now an answer's agreed time may be and still be the
+/// fleet's current state, not a dd-control still catching up on the log
+pub const BEHIND_MS: u64 = 120_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum From {
@@ -116,6 +151,9 @@ impl Member {
 pub struct State {
     #[serde(default)]
     pub height: u64,
+    /// the agreed time of the state answered (ms)
+    #[serde(default)]
+    pub time: u64,
     #[serde(default)]
     pub members: HashMap<String, Member>,
     /// what became of each recent item, by its item hash (the judge's
@@ -148,6 +186,26 @@ pub struct Agreed {
     url: String,
     http: reqwest::Client,
     state: Mutex<Option<Arc<State>>>,
+    reads: Mutex<Reads>,
+}
+
+/// how the reads have gone: what says whether the state held is the
+/// fleet's current one (fresh) or only the last one seen
+#[derive(Default, Clone, Copy)]
+struct Reads {
+    /// the last read dd-control answered (a state, or 304: still the same)
+    ok: Option<Instant>,
+    /// the last state answered was at the fleet's current agreed time, not
+    /// one dd-control was still catching up to
+    current: bool,
+    /// fresh without a break since then
+    since: Option<Instant>,
+}
+
+impl Reads {
+    fn fresh(&self, now: Instant) -> bool {
+        self.current && self.ok.is_some_and(|t| now.duration_since(t) <= STALE)
+    }
 }
 
 impl Agreed {
@@ -161,6 +219,39 @@ impl Agreed {
                 .build()
                 .expect("an http client"),
             state: Mutex::new(None),
+            reads: Mutex::new(Reads::default()),
+        }
+    }
+
+    /// Read, current and recent: what may be acted on where acting cannot
+    /// be undone. Last read a while ago, or behind the fleet, it is only
+    /// what was last seen - good for letting someone in, never for putting
+    /// anyone out.
+    pub fn fresh(&self) -> bool {
+        self.state().is_some() && self.reads.lock().unwrap().fresh(Instant::now())
+    }
+
+    /// how long it has been fresh without a break; None while it is not
+    pub fn fresh_for(&self) -> Option<Duration> {
+        let now = Instant::now();
+        let r = *self.reads.lock().unwrap();
+        (self.state().is_some() && r.fresh(now)).then(|| now.duration_since(r.since.unwrap_or(now)))
+    }
+
+    /// a read answered: `current` is None for a 304 (as current as the
+    /// state it confirms)
+    fn answered(&self, current: Option<bool>) {
+        let now = Instant::now();
+        let mut r = self.reads.lock().unwrap();
+        let was = r.fresh(now);
+        r.ok = Some(now);
+        if let Some(c) = current {
+            r.current = c;
+        }
+        if !r.fresh(now) {
+            r.since = None;
+        } else if !was || r.since.is_none() {
+            r.since = Some(now);
         }
     }
 
@@ -174,20 +265,49 @@ impl Agreed {
         self.state()?.members.get(name).cloned()
     }
 
-    /// One read: the whole state, or nothing new since the height held
+    /// One read: the whole state, or nothing new since the height held.
+    /// Until a state at the fleet's current time has come, every read asks
+    /// for the whole of it: a 304 says only "the same as you hold".
     pub async fn refresh(&self) -> anyhow::Result<bool> {
-        let since = self.state().map(|s| s.height);
+        let held = self.state();
+        let current = self.reads.lock().unwrap().current;
         let mut req = self.http.get(&self.url);
-        if let Some(h) = since {
-            req = req.query(&[("since", h)]);
+        if let Some(s) = held.as_ref().filter(|_| current) {
+            req = req.query(&[("since", s.height)]);
         }
         let res = req.send().await?;
         if res.status() == reqwest::StatusCode::NOT_MODIFIED {
+            if held.is_some() {
+                self.answered(None);
+            }
             return Ok(false);
         }
         let res = res.error_for_status()?;
         let s: State = res.json().await?;
+        // never back: a dd-control that started again and is replaying the
+        // log answers an older state, which says less than the one held
+        if let Some(h) = &held
+            && s.height < h.height
+        {
+            anyhow::bail!(
+                "dd-control answered height {}, behind the {} held",
+                s.height,
+                h.height
+            );
+        }
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let current = s.time > 0 && now_ms.saturating_sub(s.time) <= BEHIND_MS;
+        if !current {
+            eprintln!(
+                "identity: dd-control's state is {} s behind; not acting on it yet",
+                now_ms.saturating_sub(s.time) / 1000
+            );
+        }
         *self.state.lock().unwrap() = Some(Arc::new(s));
+        self.answered(Some(current));
         Ok(true)
     }
 
@@ -207,9 +327,26 @@ impl Agreed {
         }
     }
 
+    /// as if just read, current
     #[cfg(test)]
     pub fn set(&self, s: State) {
         *self.state.lock().unwrap() = Some(Arc::new(s));
+        self.answered(Some(true));
+    }
+
+    /// as last read `ago`, current then
+    #[cfg(test)]
+    pub fn read_ago(&self, ago: Duration) {
+        let mut r = self.reads.lock().unwrap();
+        r.ok = Instant::now().checked_sub(ago);
+        r.since = r.ok;
+    }
+
+    /// as read now, but behind the fleet (a dd-control catching up)
+    #[cfg(test)]
+    pub fn set_behind(&self, s: State) {
+        *self.state.lock().unwrap() = Some(Arc::new(s));
+        self.answered(Some(false));
     }
 }
 
@@ -423,6 +560,115 @@ impl Envelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_is_never_no() {
+        use Answer::*;
+        for (a, b, want) in [
+            (Yes, Yes, Yes),
+            (Yes, No, Yes),
+            (Yes, Unknown, Yes),
+            (No, Yes, Yes),
+            (Unknown, Yes, Yes),
+            (No, No, No),
+            (No, Unknown, Unknown),
+            (Unknown, No, Unknown),
+            (Unknown, Unknown, Unknown),
+        ] {
+            assert_eq!(a.or(|| b), want, "{a:?} or {b:?}");
+        }
+        assert_eq!(Answer::of(true), Yes);
+        assert_eq!(Answer::of(false), No);
+    }
+
+    /// A stand-in dd-control: /identity answers what `answer` holds (a
+    /// status and a body), or nothing at all while it holds None
+    async fn control(
+        answer: Arc<Mutex<Option<(u16, String)>>>,
+    ) -> (String, Arc<Mutex<Vec<String>>>) {
+        use axum::{Router, extract::RawQuery, routing::get};
+        let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+        let seen = asked.clone();
+        let app = Router::new().route(
+            "/identity",
+            get(move |RawQuery(q): RawQuery| {
+                let answer = answer.clone();
+                let seen = seen.clone();
+                async move {
+                    seen.lock().unwrap().push(q.unwrap_or_default());
+                    let (code, body) = answer
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .unwrap_or((503, String::new()));
+                    (axum::http::StatusCode::from_u16(code).unwrap(), body)
+                }
+            }),
+        );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+        (format!("http://{addr}"), asked)
+    }
+
+    fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    }
+
+    fn state_at(height: u64, time: u64) -> String {
+        serde_json::json!({
+            "height": height, "time": time,
+            "members": {"david": {"status": "member", "access": "invite"}},
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn fresh_only_once_read_current_and_recent() {
+        let answer: Arc<Mutex<Option<(u16, String)>>> = Arc::default();
+        let (url, asked) = control(answer.clone()).await;
+        let a = Agreed::new(&url);
+        // down: nothing held, nothing fresh
+        assert!(a.refresh().await.is_err());
+        assert!(a.state().is_none() && !a.fresh() && a.fresh_for().is_none());
+
+        // up, but still replaying an old stretch of the log: held, not fresh,
+        // and asked for whole again (a 304 would only say "the same")
+        *answer.lock().unwrap() = Some((200, state_at(5, now_ms() - 10 * BEHIND_MS)));
+        assert!(a.refresh().await.unwrap());
+        assert!(a.state().is_some() && !a.fresh());
+        a.refresh().await.unwrap();
+        assert!(
+            asked.lock().unwrap().iter().all(|q| q.is_empty()),
+            "{asked:?}"
+        );
+
+        // caught up: fresh, and from now on only asked what changed
+        *answer.lock().unwrap() = Some((200, state_at(9, now_ms())));
+        a.refresh().await.unwrap();
+        assert!(a.fresh());
+        assert!(a.fresh_for().unwrap() < Duration::from_secs(5));
+        *answer.lock().unwrap() = Some((304, String::new()));
+        assert!(!a.refresh().await.unwrap());
+        assert!(a.fresh(), "a 304 says the state held is still the one");
+        assert_eq!(asked.lock().unwrap().last().unwrap(), "since=9");
+
+        // dd-control started again and answers from further back: refused,
+        // the newer state is kept
+        *answer.lock().unwrap() = Some((200, state_at(3, now_ms())));
+        assert!(a.refresh().await.is_err());
+        assert_eq!(a.state().unwrap().height, 9);
+
+        // and not answering for a while: what is held is no longer fresh
+        *answer.lock().unwrap() = None;
+        assert!(a.refresh().await.is_err());
+        a.read_ago(STALE + Duration::from_secs(1));
+        assert!(!a.fresh() && a.fresh_for().is_none());
+        assert!(a.state().is_some(), "still held, for letting people in");
+    }
 
     #[test]
     fn modes_parse() {

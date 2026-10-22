@@ -81,6 +81,11 @@ in
     default = "";
     description = "the fleet's admin (fleet/policy.json owner): sees every box's metrics. A box's own owner sees that box's";
   };
+  options.dd.verify.people = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    description = "the people the release names (fleet/policy.json owner and people): the network reaper never takes a device of theirs off, whatever it reads of them (servers/gate/src/network.rs Guard)";
+  };
   options.dd.verify.role = lib.mkOption {
 
     type = lib.types.enum [
@@ -359,6 +364,11 @@ in
     # own signed entry; a cookie against the passkeys enrolled here. It holds
     # no key that can sign, so there is nothing in it worth stealing, and it
     # asks no identity server because there is none.
+    # the reaper's brake, where node-exporter reads it (observe/metrics.nix)
+    systemd.tmpfiles.rules = lib.optionals (full && cfg.network != null) [
+      "d /var/lib/dd-verify-facts 0755 ${user} ${user} -"
+      "L+ /var/lib/dd-facts/reap-brake.prom - - - - /var/lib/dd-verify-facts/reap-brake.prom"
+    ];
     systemd.services.dd-verify = {
       description = "Verify user-signed tokens and this box's passkey sessions";
       after = [
@@ -394,6 +404,7 @@ in
         # who sees every box's
         VERIFY_OWNER = lib.optionalString (config.dd.box.owner or null != null) config.dd.box.owner;
         VERIFY_ADMIN = cfg.admin;
+        VERIFY_PEOPLE = lib.concatStringsSep "," cfg.people;
       }
       # the directory as the control plane's agreed log
       // lib.optionalAttrs agreed {
@@ -423,6 +434,8 @@ in
         VERIFY_HEADSCALE_API = cfg.network.api;
         VERIFY_HEADSCALE_URL = cfg.network.url;
         VERIFY_HEADSCALE_KEY_FILE = cfg.network.keyFile;
+        # the reaper's brake, as a fact the fleet's alerts mail (network.rs Brake)
+        VERIFY_REAP_FACTS = "/var/lib/dd-verify-facts/reap-brake.prom";
         VERIFY_NETWORK_BOXES = "${pkgs.writeText "network-boxes.json" (builtins.toJSON cfg.network.boxes)}";
         # the boxes' recipients are TPM keys: age needs the plugin to seal to one
         VERIFY_AGE = "${pkgs.writeShellScript "age-for-boxes" ''
@@ -498,7 +511,20 @@ in
         # the gate's bucket key, read by systemd before the drop to `user`
         EnvironmentFile = lib.optional (full && cfg.library != null) cfg.library.keyFile;
         StateDirectory = "dd-verify";
+        ReadWritePaths = lib.optional (full && cfg.network != null) "/var/lib/dd-verify-facts";
         StateDirectoryMode = "0700";
+        # dd-control's start is not its readiness (it is Type=simple): wait,
+        # a little, for it to answer, so the gate does not start knowing
+        # nobody. Never longer, and never a failure - the gate is safe
+        # without it, and holds everything that cannot be undone until it
+        # has read the agreed state (ident.rs fresh)
+        ExecStartPre = lib.optional agreed "${pkgs.writeShellScript "dd-verify-wait-control" ''
+          for _ in $(seq 30); do
+            (exec 3<>/dev/tcp/127.0.0.1/4195) 2>/dev/null && exit 0
+            sleep 1
+          done
+          echo "dd-control is not answering yet; starting anyway, knowing nobody until it does"
+        ''}";
         ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.verify}/bin/verify";
         Restart = "on-failure";
         RestartSec = 5;

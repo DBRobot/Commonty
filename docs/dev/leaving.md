@@ -136,7 +136,10 @@ word at once, a suspension the window after. Both live where every box
 agrees on them, never on one box's disk.
 
 **At once**, on every box (the gate's `leaving::tick`, every minute, and
-`member()` the moment the statement is replayed):
+`member()` the moment the statement is replayed) - once the box knows who
+is who: while a gate in agreed mode has not read a current agreed state,
+it ends and deletes nothing and tells the other services nothing is due
+([gate.md](gate.md#who-is-who-read-from-the-control-plane)):
 
 - they are no member: every page, token and service refuses them (a
   suspended member's own files excepted, to read, above);

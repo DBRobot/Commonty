@@ -1,5 +1,8 @@
 # The network test: a box on its own network, a device handed the way in.
 import json
+import time
+
+from waits import journal_of
 
 box.wait_for_unit("headscale.service")
 box.wait_for_unit("headscale-seed.service")
@@ -188,3 +191,122 @@ assert other.succeed("tailscale ip -4").strip() not in members, members
 # sarah's laptop reaches ssh on the box; kim's does not
 laptop.wait_until_succeeds(f"nc -z -w 5 {box_ip} 22", timeout=60)
 other.fail(f"nc -z -w 5 {box_ip} 22")
+
+# Who is who, not known yet, is nobody's loss (2026-10-22: a gate that
+# started before dd-control answered read everyone as no member and took the
+# fleet owner's laptop off the network for two hours). The gate goes by the
+# control plane's agreed state, with dd-control down at its start.
+# The replay gate before it would take kim's devices off on its own next
+# pass (she is on no member list): it is stopped while they are made.
+box.succeed("systemctl stop dd-verify.service")
+
+
+def node_names():
+    return set(
+        box.succeed("headscale nodes list -o json | jq -r '.[].given_name'").split()
+    )
+
+
+# three more devices, made in headscale itself: kim's (her membership is
+# revoked), ivy's (a member) and zed's, whom the agreed state does not have
+for user, node, reg in (
+    ("kim", "phone", "c" * 24),
+    ("ivy", "tablet", "a" * 24),
+    ("zed", "pc", "b" * 24),
+):
+    box.execute(f"headscale users create {user}")
+    box.succeed(f"headscale debug create-node --name {node} --user {user} --key {reg}")
+    box.succeed(f"headscale nodes register --user {user} --key {reg}")
+everyone = {"laptop", "phone", "tablet", "pc"}
+assert everyone <= node_names(), node_names()
+box.succeed("mkdir -p /run/dd-test")
+box.succeed(
+    'echo \'{"boxes": {"box": {}}, "validators": [{"name": "box"}]}\' > /run/dd-test/control.json'
+)
+# sarah (the box's owner) and ivy are members, kim's membership was revoked
+box.succeed(
+    "jq -n '{height: 5, members: {"
+    'sarah: {status: "member", access: "invite"}, '
+    'ivy: {status: "member", access: "invite"}, '
+    'kim: {status: "revoked", access: "none"}}}\' > /run/dd-test/identity.json'
+)
+box.succeed(
+    "printf '[Service]\\n"
+    "Environment=VERIFY_CONTROL=http://127.0.0.1:4195\\n"
+    "Environment=VERIFY_CONTROL_SUBMIT=/run/dd-test/submit.sock\\n"
+    "Environment=VERIFY_CONTROL_CONFIG=/run/dd-test/control.json\\n"
+    "Environment=VERIFY_IDENTITY_FROM=agreed\\n"
+    "Environment=VERIFY_BOX=box\\n"
+    "Environment=VERIFY_REAP_SECS=2\\n"
+    "Environment=VERIFY_REAP_GRACE_SECS=8\\n"
+    "Environment=VERIFY_LEAVE_TICK_SECS=2\\n' "
+    "> /run/systemd/system/dd-verify.service.d/agreed.conf"
+)
+box.succeed("systemctl daemon-reload && systemctl start dd-verify.service")
+box.wait_for_open_port(4181)
+# this run of the gate's lines alone
+run = box.succeed("systemctl show -p InvocationID --value dd-verify").strip()
+
+
+def seen(text):
+    return journal_of(box, "dd-verify", run).count(text)
+
+
+def wait_seen(text, times=1, timeout=60):
+    end = time.monotonic() + timeout
+    while seen(text) < times:
+        assert time.monotonic() < end, f"not {times} x in {timeout}s: {text}"
+        box.sleep(1)
+
+
+# dd-control not answering: the reaper has passed several times, keeping
+# everyone and saying why
+wait_seen("kept laptop - whether sarah is a member is not known", times=3, timeout=60)
+assert everyone <= node_names(), node_names()
+assert seen("kept phone - whether kim is a member is not known"), (
+    "kept phone - whether kim is a member is not known"
+)
+assert not seen("network: removed"), "network: removed"
+# nothing ended or deleted, and the services that delete hear nothing to do
+wait_seen("leaving: nothing ended or deleted", timeout=30)
+
+
+def code(path):
+    return box.succeed(
+        f"curl -s -o /dev/null -w '%{{http_code}}' http://127.0.0.1:4181{path}"
+    ).strip()
+
+
+assert code("/internal/leaving") == "503", code("/internal/leaving")
+assert code("/internal/storage/members") == "503"
+
+# dd-control answers: who is who is known, then the grace runs, then kim's
+# devices come off, and zed's (known now: the agreed state has no zed); the
+# owner's and ivy's stay
+box.succeed(
+    f"systemd-run --unit dd-control-standin $(command -v python3) {nix['standin']} /run/dd-test/identity.json"
+)
+wait_seen("NOT reaping: who is a member has been known for", timeout=60)
+wait_seen("network: removed phone - kim is not a member", timeout=60)
+wait_seen("network: removed pc - zed is not a member", timeout=30)
+left = node_names()
+assert {"laptop", "tablet"} <= left and not {"phone", "other", "pc"} & left, left
+assert code("/internal/leaving") == "200", code("/internal/leaving")
+box.succeed("grep -qx 'dd_reap_brake 0' /var/lib/dd-facts/reap-brake.prom")
+
+# The agreed state suddenly drops ivy (half of who has access): more likely
+# wrong than true. Nothing comes off, pass after pass, and the brake is up
+# where the fleet's alerts read it; restored, it is off, and ivy kept hers.
+box.succeed(
+    "jq 'del(.members.ivy) | .height = 6' /run/dd-test/identity.json > /run/dd-test/i && mv /run/dd-test/i /run/dd-test/identity.json"
+)
+wait_seen("NOT reaping, the brake is on: 1 of the 2", times=3, timeout=60)
+assert "tablet" in node_names(), node_names()
+box.succeed("grep -qx 'dd_reap_brake 1' /var/lib/dd-facts/reap-brake.prom")
+box.succeed(
+    'jq \'.members.ivy = {status: "member", access: "invite"} | .height = 7\' /run/dd-test/identity.json > /run/dd-test/i && mv /run/dd-test/i /run/dd-test/identity.json'
+)
+wait_seen("the state is consistent again; the brake is off", timeout=60)
+box.succeed("grep -qx 'dd_reap_brake 0' /var/lib/dd-facts/reap-brake.prom")
+assert {"laptop", "tablet"} <= node_names(), node_names()
+box.succeed("systemctl stop dd-control-standin.service")

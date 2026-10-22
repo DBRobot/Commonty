@@ -218,6 +218,11 @@ impl Ledger {
 /// passes /_dd/ and nothing else): every member, and what their libraries,
 /// disk images and mail hold in the buckets, trash included until it is emptied
 pub(crate) async fn members(State(app): State<Arc<App>>) -> Response {
+    // who is who not known: no answer, so the ledger leaves every limit as
+    // it is rather than taking a missing member for no member
+    if !app.directory.settled() {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     let Ok(listed) = app.directory.list() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };

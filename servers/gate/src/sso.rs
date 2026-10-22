@@ -180,6 +180,9 @@ pub(crate) async fn finish(
     // the browser chose the sign-in's id; this box's own is made from it and
     // the person, so nobody's sign-in can take the id of anyone else's here
     let id = session_id(&d.user, &d.sid);
+    if let Some(r) = app.no_new_session() {
+        return r;
+    }
     let set = app.sessions.issue_as(&d.user, &id, exp);
     app.signins.saw(&d.user, &id, exp, agent, None);
     // the passkey was shown just now, not hours ago from a kept sign-in

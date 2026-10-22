@@ -22,6 +22,323 @@ use crate::App;
 /// how long a join key is good for: long enough to hand it over, no more
 const TTL: Duration = Duration::from_secs(600);
 
+/// A node the reaper would take off
+#[derive(Debug, Clone)]
+struct Off {
+    id: String,
+    /// headscale's id as a number, for the order when `made` is missing
+    num: u64,
+    /// when headscale made it (RFC 3339, sorts as text)
+    made: String,
+    label: String,
+    why: String,
+    /// whose: the person, or the computer's owner
+    whose: String,
+    /// a person's own device (not a computer's node): what the brake counts
+    person: bool,
+}
+
+impl Off {
+    fn names(off: &[Off]) -> String {
+        off.iter()
+            .map(|o| format!("{} ({})", o.label, o.why))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// What holds the reaper back (App::reap_guard)
+pub struct Guard {
+    /// whose devices never come off: the fleet's admin, the people the
+    /// release names, the boxes' owners. One of them reading as no member is
+    /// a fault to look into, not a reason to cut them off
+    pub keep: std::collections::BTreeSet<String>,
+    /// why nothing may come off now, if anything holds it
+    pub hold: Option<String>,
+    /// who has access by the state this pass goes by: what the brake holds
+    /// against the last state the reaper acted on
+    pub members: std::collections::BTreeSet<String>,
+    /// the sanity brake on the state itself; None: none (tests)
+    pub brake: Option<Arc<Brake>>,
+}
+
+impl Guard {
+    #[cfg(test)]
+    pub fn open() -> Self {
+        Self {
+            keep: Default::default(),
+            hold: None,
+            members: Default::default(),
+            brake: None,
+        }
+    }
+}
+
+/// The sanity brake on the state the reaper goes by. A person known to be
+/// no member loses every device, however many; but a state that has
+/// shrunk sharply since the last one acted on (empty, or more than a
+/// quarter of its members gone at once), or one that would turn more than a
+/// couple of people out in one pass, is more likely wrong than true: then
+/// nothing comes off, the last good state is kept, and the brake is on - a
+/// loud log line every pass, and `dd_reap_brake 1` in this box's facts,
+/// which the fleet's alerts mail - until the state is consistent again or
+/// the fleet's owner acknowledges that exact state (POST
+/// /_dd/network/reap-brake, lib.rs reap_brake_ack). An empty state, never.
+pub struct Brake {
+    state: Mutex<BrakeState>,
+    /// where the last good state is kept across restarts
+    file: Option<std::path::PathBuf>,
+    /// the facts file the alerts read (textfile collector)
+    facts: Option<std::path::PathBuf>,
+    /// the most people one pass turns out
+    most_people: usize,
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct BrakeState {
+    /// who had access in the last state the reaper acted on
+    acted: Option<std::collections::BTreeSet<String>>,
+    /// on since (s), why, and the refused state's hash (`refused_hash`)
+    #[serde(skip)]
+    on: Option<(u64, String, String)>,
+    /// the owner's acknowledgement: of that refused state alone, until (s)
+    #[serde(skip)]
+    ack: Option<(String, u64)>,
+}
+
+/// the brake's word for a state that gives nobody access
+const EMPTY: &str = "the state gives nobody access";
+
+/// how long an owner's acknowledgement waits for its pass
+pub const ACK_FOR: u64 = 600;
+
+/// What an acknowledgement is tied to: the state refused (who has access)
+/// and who it would turn out, so an ack of one state never lets another
+/// through
+pub fn refused_hash(
+    members: &std::collections::BTreeSet<String>,
+    people: &std::collections::BTreeSet<String>,
+) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(b"commonty reap-brake v1\0");
+    for m in members {
+        h.update(m.as_bytes());
+        h.update(b"\0");
+    }
+    h.update(b"\0");
+    for p in people {
+        h.update(p.as_bytes());
+        h.update(b"\0");
+    }
+    format!("{:x}", h.finalize())
+}
+
+/// why an acknowledgement was not taken
+#[derive(Debug, PartialEq, Eq)]
+pub enum AckRefused {
+    /// the brake is off: nothing to acknowledge
+    Off,
+    /// not the state the brake refused (it changed since, or a guess)
+    NotThatState,
+    /// an empty state is never reaped from, acknowledged or not
+    Empty,
+}
+
+impl Brake {
+    pub fn new(
+        file: Option<std::path::PathBuf>,
+        facts: Option<std::path::PathBuf>,
+        most_people: usize,
+    ) -> Self {
+        let acted = file
+            .as_ref()
+            .and_then(|f| std::fs::read(f).ok())
+            .and_then(|b| serde_json::from_slice::<BrakeState>(&b).ok())
+            .and_then(|s| s.acted);
+        let b = Self {
+            state: Mutex::new(BrakeState {
+                acted,
+                ..Default::default()
+            }),
+            file,
+            facts,
+            most_people,
+        };
+        b.report();
+        b
+    }
+
+    /// from the environment: VERIFY_REAP_PEOPLE (2), VERIFY_REAP_FACTS
+    pub fn from_env(state_dir: &std::path::Path) -> Self {
+        Self::new(
+            Some(state_dir.join("reap-acted.json")),
+            std::env::var("VERIFY_REAP_FACTS")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(Into::into),
+            env_secs("VERIFY_REAP_PEOPLE", 2) as usize,
+        )
+    }
+
+    /// on, and why
+    pub fn on(&self) -> Option<String> {
+        self.state
+            .lock()
+            .unwrap()
+            .on
+            .as_ref()
+            .map(|(_, w, _)| w.clone())
+    }
+
+    /// on: why, and the hash an acknowledgement must name
+    pub fn refused(&self) -> Option<(String, String)> {
+        self.state
+            .lock()
+            .unwrap()
+            .on
+            .as_ref()
+            .map(|(_, w, h)| (w.clone(), h.clone()))
+    }
+
+    /// The owner's word that the state the brake refused is right: taken
+    /// only while the brake is on, only for that exact state (`hash`), and
+    /// only for the next ACK_FOR seconds; never for an empty state
+    pub fn acknowledge(&self, hash: &str, now: u64) -> Result<(), AckRefused> {
+        let mut st = self.state.lock().unwrap();
+        let Some((_, why, h)) = st.on.as_ref() else {
+            return Err(AckRefused::Off);
+        };
+        if h != hash {
+            return Err(AckRefused::NotThatState);
+        }
+        if why == EMPTY {
+            return Err(AckRefused::Empty);
+        }
+        st.ack = Some((hash.to_string(), now + ACK_FOR));
+        eprintln!(
+            "network: the owner acknowledged the state the brake refused; the next pass within {ACK_FOR} s goes by it if the state is still that one"
+        );
+        Ok(())
+    }
+
+    /// May a pass that would turn `people` out go by `members`? Ok, and
+    /// `members` is the last good state from now; or why not, and the brake
+    /// is on
+    fn check(
+        &self,
+        members: &std::collections::BTreeSet<String>,
+        people: &std::collections::BTreeSet<String>,
+    ) -> Result<(), String> {
+        let mut st = self.state.lock().unwrap();
+        let hash = refused_hash(members, people);
+        // an acknowledgement is spent on its pass, and counts only for the
+        // state it named, before it runs out
+        let acked = st
+            .ack
+            .take()
+            .is_some_and(|(h, until)| h == hash && crate::session::now() <= until);
+        let why = if members.is_empty() {
+            Some(EMPTY.to_string())
+        } else if acked {
+            None
+        } else if let Some(lost) = st.acted.as_ref().and_then(|a| {
+            let lost = a.difference(members).count();
+            (lost * 4 > a.len()).then_some((lost, a.len()))
+        }) {
+            Some(format!(
+                "{} of the {} people with access in the last state acted on have none in this one",
+                lost.0, lost.1
+            ))
+        } else if people.len() > self.most_people {
+            Some(format!(
+                "{} people would be turned out in one pass, more than {}: {}",
+                people.len(),
+                self.most_people,
+                people.iter().cloned().collect::<Vec<_>>().join(", ")
+            ))
+        } else {
+            None
+        };
+        match why {
+            Some(w) => {
+                let since = st
+                    .on
+                    .as_ref()
+                    .map_or_else(crate::session::now, |(t, _, _)| *t);
+                st.on = Some((since, w.clone(), hash));
+                drop(st);
+                self.report();
+                Err(w)
+            }
+            None => {
+                let was = st.on.take();
+                st.acted = Some(members.clone());
+                if let Some(f) = &self.file {
+                    let b = serde_json::to_vec(&*st).unwrap_or_default();
+                    let tmp = f.with_extension("tmp");
+                    if let Err(e) = std::fs::write(&tmp, b).and_then(|()| std::fs::rename(&tmp, f))
+                    {
+                        eprintln!("network: keeping the last good state: {e}");
+                    }
+                }
+                drop(st);
+                if was.is_some() {
+                    eprintln!("network: the state is consistent again; the brake is off");
+                }
+                self.report();
+                Ok(())
+            }
+        }
+    }
+
+    /// `dd_reap_brake` for the fleet's alerts
+    fn report(&self) {
+        let Some(f) = &self.facts else { return };
+        let on = self.state.lock().unwrap().on.as_ref().map(|(t, _, _)| *t);
+        let text = format!(
+            "# HELP dd_reap_brake 1 while the network reaper refuses a state that looks wrong\n# TYPE dd_reap_brake gauge\ndd_reap_brake {}\n# TYPE dd_reap_brake_since_seconds gauge\ndd_reap_brake_since_seconds {}\n",
+            u8::from(on.is_some()),
+            on.unwrap_or(0)
+        );
+        let tmp = f.with_extension("tmp");
+        if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, f)) {
+            eprintln!("network: writing {}: {e}", f.display());
+        }
+    }
+}
+
+fn env_secs(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+}
+
+/// how often the reaper runs; VERIFY_REAP_SECS shortens it, for a test
+pub fn reap_every() -> Duration {
+    Duration::from_secs(env_secs("VERIFY_REAP_SECS", 300).max(1))
+}
+
+/// how long who-is-who must have been known before anything comes off
+/// (VERIFY_REAP_GRACE_SECS): a gate that just started, or just read the
+/// agreed state again after an outage, waits it out
+pub fn reap_grace() -> Duration {
+    Duration::from_secs(env_secs("VERIFY_REAP_GRACE_SECS", 120))
+}
+
+/// the people the release names (fleet/policy.json owner and people),
+/// VERIFY_PEOPLE, comma separated
+pub fn people_named() -> std::collections::BTreeSet<String> {
+    std::env::var("VERIFY_PEOPLE")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 pub struct Door {
     /// headscale's api, on this box
     api: String,
@@ -289,15 +606,23 @@ impl Door {
     /// reach, for good. Boxes are left alone - they are tagged, and they
     /// joined on the boxes' key, not a person's.
     ///
+    /// `member` answers for a person (App::network_answer): a node comes off
+    /// only on a No. Unknown - the agreed state not read yet, behind, or a
+    /// name it does not have - leaves it on, and says so. `guard` holds the
+    /// rest back: nobody it names comes off, and nothing at all while it
+    /// says hold, or when more would come off at once than it allows.
+    ///
     /// A remote computer's node goes too once its computer is no longer
     /// agreed up, or its owner no longer a member: `computer` says what the
     /// agreed state has of an id (owner, up), Err while it is unread, when
     /// none goes. One whose key the gate never made is no one's.
     pub async fn reap(
         &self,
-        member: impl Fn(&str) -> bool,
+        member: impl Fn(&str) -> crate::ident::Answer,
         control: Option<&str>,
+        guard: &Guard,
     ) -> Result<usize> {
+        use crate::ident::Answer;
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -305,11 +630,17 @@ impl Door {
         let v = self
             .call(reqwest::Method::GET, "/api/v1/node", None)
             .await?;
-        let mut gone = 0;
         let mut used = std::collections::HashSet::new();
         let mut seen = std::collections::HashSet::new();
+        let mut off: Vec<Off> = Vec::new();
         for n in v["nodes"].as_array().into_iter().flatten() {
             let tags = Self::tags(n);
+            let label = n["givenName"]
+                .as_str()
+                .or(n["name"].as_str())
+                .unwrap_or("?")
+                .to_string();
+            let whose;
             let user = if tags.contains(&COMPUTER_TAG) {
                 let b = self.bound_to(n);
                 if let Ok(k) = id_of(&n["preAuthKey"]) {
@@ -320,9 +651,11 @@ impl Door {
                     (None, _) | (_, None) => false,
                     (Some(b), Some(c)) => {
                         // the same box still holding its lease: a node given
-                        // to the guest on one box is not another's
+                        // to the guest on one box is not another's. Its
+                        // owner's membership comes off it only on a No
                         let judge = |snap: &Snapshot| {
-                            qualifies(snap, &b.on).is_ok_and(|o| o == b.owner) && member(&b.owner)
+                            qualifies(snap, &b.on).is_ok_and(|o| o == b.owner)
+                                && member(&b.owner) != Answer::No
                         };
                         match read_snapshot(&self.http, c, &b.id).await {
                             Read::Refused => false,
@@ -351,6 +684,7 @@ impl Door {
                 if keep {
                     continue;
                 }
+                whose = b.as_ref().map(|b| b.owner.clone()).unwrap_or_default();
                 b.map(|b| format!("{}'s computer {}", b.owner, b.id))
                     .unwrap_or_else(|| "no one's computer".into())
             } else if !tags.is_empty() {
@@ -359,9 +693,23 @@ impl Door {
                 let Some(user) = n["user"]["name"].as_str() else {
                     continue;
                 };
-                if member(user) {
+                match member(user) {
+                    Answer::Yes => continue,
+                    Answer::Unknown => {
+                        eprintln!(
+                            "network: kept {label} - whether {user} is a member is not known"
+                        );
+                        continue;
+                    }
+                    Answer::No => {}
+                }
+                if guard.keep.contains(user) {
+                    eprintln!(
+                        "network: NOT removing {label}: {user} reads as no member, but the release names {user}; kept. Look into it"
+                    );
                     continue;
                 }
+                whose = user.to_string();
                 format!("{user} is not a member")
             };
             let id = match &n["id"] {
@@ -369,15 +717,56 @@ impl Door {
                 serde_json::Value::Number(i) => i.to_string(),
                 _ => continue,
             };
-            self.call(reqwest::Method::DELETE, &format!("/api/v1/node/{id}"), None)
-                .await?;
+            off.push(Off {
+                made: n["createdAt"].as_str().unwrap_or_default().to_string(),
+                num: id.parse().unwrap_or(u64::MAX),
+                id,
+                label,
+                why: user,
+                person: !tags.contains(&COMPUTER_TAG),
+                whose,
+            });
+        }
+        let mut gone = 0;
+        if !off.is_empty()
+            && let Some(why) = &guard.hold
+        {
             eprintln!(
-                "network: removed {} - {user}",
-                n["givenName"]
-                    .as_str()
-                    .or(n["name"].as_str())
-                    .unwrap_or(&id)
+                "network: NOT reaping: {why}; {} device(s) would come off: {}",
+                off.len(),
+                Off::names(&off)
             );
+            off.clear();
+        }
+        // a person known to be no member loses every device; the brake
+        // holds a state that looks wrong
+        if guard.hold.is_none()
+            && let Some(brake) = &guard.brake
+        {
+            let people = off
+                .iter()
+                .filter(|o| o.person)
+                .map(|o| o.whose.clone())
+                .collect();
+            if let Err(why) = brake.check(&guard.members, &people) {
+                eprintln!(
+                    "network: ALERT: NOT reaping, the brake is on: {why}. The last good state is kept; nothing comes off until the state is consistent again or the owner acknowledges this state (POST /_dd/network/reap-ack {{\"state\": \"{}\"}}, signed in as the owner). {} device(s) would have come off: {}",
+                    brake.refused().map(|(_, h)| h).unwrap_or_default(),
+                    off.len(),
+                    Off::names(&off)
+                );
+                off.clear();
+            }
+        }
+        off.sort_by(|a, b| (&a.made, a.num).cmp(&(&b.made, b.num)));
+        for o in off {
+            self.call(
+                reqwest::Method::DELETE,
+                &format!("/api/v1/node/{}", o.id),
+                None,
+            )
+            .await?;
+            eprintln!("network: removed {} - {}", o.label, o.why);
             gone += 1;
         }
         self.last_good
@@ -586,8 +975,21 @@ pub(crate) async fn join(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
     // A guest joins too: their devices come under the same rule as a
     // member's (the web port, which is public anyway, and the game ports,
     // which the games box opens per server to the players invited).
-    if !(app.member(&user) || app.guest(&user)) || user == crate::pages::DEMO_USER {
-        return (StatusCode::FORBIDDEN, "not a member of this fleet").into_response();
+    // and nothing new while who is who is not known (Unknown is not yes)
+    match app.network_answer(&user) {
+        crate::ident::Answer::Yes
+            if (app.member(&user) || app.guest(&user)) && user != crate::pages::DEMO_USER => {}
+        crate::ident::Answer::Unknown => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "this box is still reading who is who; try again in a moment",
+            )
+                .into_response();
+        }
+        _ => return (StatusCode::FORBIDDEN, "not a member of this fleet").into_response(),
+    }
+    if let Some(r) = app.no_new_session() {
+        return r;
     }
     match door.join_key(&user).await {
         Ok((key, expires)) => Json(serde_json::json!({
@@ -620,6 +1022,13 @@ pub(crate) async fn controller_join(State(app): State<Arc<App>>, headers: Header
         Ok(u) => u,
         Err(e) => return (StatusCode::UNAUTHORIZED, e.to_string()).into_response(),
     };
+    if app.member_answer(&user) == crate::ident::Answer::Unknown {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "this box is still reading who is who; try again in a moment",
+        )
+            .into_response();
+    }
     if !app.member(&user) || user == crate::pages::DEMO_USER {
         return (
             StatusCode::FORBIDDEN,
@@ -638,6 +1047,9 @@ pub(crate) async fn controller_join(State(app): State<Arc<App>>, headers: Header
             return (StatusCode::TOO_MANY_REQUESTS, "one a minute").into_response();
         }
         asked.insert(at, (now, 0));
+    }
+    if let Some(r) = app.no_new_session() {
+        return r;
     }
     match door.mint("boxes", &["tag:controller"]).await {
         Ok((key, expires)) => Json(serde_json::json!({
@@ -906,6 +1318,10 @@ pub(crate) async fn computer_join(
     let Some(door) = app.network.as_ref() else {
         return (StatusCode::NOT_FOUND, "this box has no network door").into_response();
     };
+    // nothing new while who is who is not known
+    if let Some(r) = app.no_new_session() {
+        return r;
+    }
     let snap = match app.control.as_deref() {
         Some(control) => match read_snapshot(&door.http, control, &ask.id).await {
             Read::Got(s) => Ok(s),
@@ -1023,9 +1439,305 @@ mod tests {
             bound_file: None,
             last_good: Mutex::default(),
         };
-        let gone = door.reap(|u| u == "david", None).await.unwrap();
+        let gone = door
+            .reap(
+                |u| crate::ident::Answer::of(u == "david"),
+                None,
+                &Guard::open(),
+            )
+            .await
+            .unwrap();
         assert_eq!(gone, 1);
         assert_eq!(*deleted.lock().unwrap(), vec!["3".to_string()]);
+    }
+
+    /// A fake headscale holding `nodes`, and what was deleted from it (gone
+    /// from the list as well)
+    async fn headscale_with(
+        nodes: serde_json::Value,
+    ) -> (Door, Arc<std::sync::Mutex<Vec<String>>>) {
+        use axum::{
+            Json, Router,
+            extract::{Path, State},
+            routing::{delete, get},
+        };
+        type Held = (
+            Arc<std::sync::Mutex<serde_json::Value>>,
+            Arc<std::sync::Mutex<Vec<String>>>,
+        );
+        let deleted: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+        let held: Held = (Arc::new(std::sync::Mutex::new(nodes)), deleted.clone());
+        let app = Router::new()
+            .route(
+                "/api/v1/node",
+                get(|State((n, _)): State<Held>| async move { Json(n.lock().unwrap().clone()) }),
+            )
+            .route(
+                "/api/v1/node/{id}",
+                delete(
+                    |State((n, d)): State<Held>, Path(id): Path<String>| async move {
+                        if let Some(a) = n.lock().unwrap()["nodes"].as_array_mut() {
+                            a.retain(|x| x["id"] != id.as_str());
+                        }
+                        d.lock().unwrap().push(id);
+                        Json(serde_json::json!({}))
+                    },
+                ),
+            )
+            .with_state(held);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let door = Door {
+            api: format!("http://{addr}"),
+            control_url: String::new(),
+            key: "k".into(),
+            http: reqwest::Client::new(),
+            boxes: HashMap::new(),
+            age: "age".into(),
+            asked: Mutex::default(),
+            bound: Mutex::default(),
+            bound_file: None,
+            last_good: Mutex::default(),
+        };
+        (door, deleted)
+    }
+
+    fn person_node(id: &str, name: &str, user: &str, made: &str) -> serde_json::Value {
+        serde_json::json!({ "id": id, "givenName": name, "user": { "name": user }, "tags": [], "createdAt": made })
+    }
+
+    /// The incident of 2026-10-22: the gate started before dd-control
+    /// answered, read everyone as no member, and took the fleet owner's
+    /// laptop off. Unknown keeps a device on; a hold keeps every device on;
+    /// a person the release names is never taken off
+    #[tokio::test]
+    async fn nothing_comes_off_on_what_is_not_known() {
+        use crate::ident::Answer;
+        let (door, deleted) = headscale_with(serde_json::json!({ "nodes": [
+            { "id": "1", "givenName": "node1", "user": { "name": "tagged-devices" }, "tags": ["tag:box"] },
+            person_node("2", "laptop", "david", "2026-01-01T00:00:00Z"),
+            person_node("3", "phone", "kim", "2026-02-01T00:00:00Z"),
+            person_node("4", "tablet", "kim", "2026-03-01T00:00:00Z"),
+        ]}))
+        .await;
+        let answers = |u: &str| match u {
+            "david" => Answer::Yes,
+            _ => Answer::No,
+        };
+        let gone = || deleted.lock().unwrap().clone();
+
+        // not known yet: nobody comes off, the owner least of all
+        assert_eq!(
+            door.reap(|_| Answer::Unknown, None, &Guard::open())
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(gone().is_empty());
+
+        // held (not settled, or in the grace): nothing, though kim is out
+        let held = Guard {
+            hold: Some("not known yet".into()),
+            ..Guard::open()
+        };
+        assert_eq!(door.reap(answers, None, &held).await.unwrap(), 0);
+        assert!(gone().is_empty());
+
+        // a person the release names, read as no member: kept, whatever
+        let named = Guard {
+            keep: ["david".to_string()].into(),
+            ..Guard::open()
+        };
+        assert_eq!(door.reap(|_| Answer::No, None, &named).await.unwrap(), 2);
+        assert_eq!(gone(), vec!["3".to_string(), "4".to_string()]);
+    }
+
+    fn brake_guard(brake: &Arc<Brake>, members: &[&str]) -> Guard {
+        Guard {
+            members: members.iter().map(|m| m.to_string()).collect(),
+            brake: Some(brake.clone()),
+            ..Guard::open()
+        }
+    }
+
+    fn facts(what: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("dd-brake-{what}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn set(xs: &[&str]) -> std::collections::BTreeSet<String> {
+        xs.iter().map(|x| x.to_string()).collect()
+    }
+
+    /// The owner's acknowledgement counts only while the brake is on, only
+    /// for the exact state it refused, only for a while, and never for an
+    /// empty state
+    #[test]
+    fn an_ack_is_for_that_refused_state_alone_and_not_for_long() {
+        let now = crate::session::now();
+        let b = Brake::new(None, None, 2);
+        let all = set(&["ann", "bob", "cy", "dee"]);
+        b.check(&all, &set(&[])).unwrap();
+        // off: nothing to acknowledge
+        assert_eq!(b.acknowledge("x", now), Err(AckRefused::Off));
+
+        // a drop to one member: refused, and an ack must name it
+        let one = set(&["ann"]);
+        let out = set(&["bob", "cy", "dee"]);
+        assert!(b.check(&one, &out).is_err());
+        let (_, h) = b.refused().unwrap();
+        assert_eq!(h, refused_hash(&one, &out));
+        assert_eq!(b.acknowledge("guess", now), Err(AckRefused::NotThatState));
+
+        // acknowledged, but the next state is another one: void, still on
+        b.acknowledge(&h, now).unwrap();
+        let other = set(&["ann", "zed"]);
+        assert!(b.check(&other, &out).is_err());
+        // and spent: the first state again is refused too
+        assert!(b.check(&one, &out).is_err());
+
+        // acknowledged, and run out before its pass: void
+        let (_, h) = b.refused().unwrap();
+        b.acknowledge(&h, now - ACK_FOR - 1).unwrap();
+        assert!(b.check(&one, &out).is_err());
+
+        // acknowledged, in time, the same state: it goes through, once
+        b.acknowledge(&h, now).unwrap();
+        assert!(b.check(&one, &out).is_ok());
+        assert!(b.on().is_none());
+
+        // empty: never, acknowledged or not
+        let none = set(&[]);
+        assert!(b.check(&none, &set(&["ann"])).is_err());
+        let (_, h) = b.refused().unwrap();
+        assert_eq!(b.acknowledge(&h, now), Err(AckRefused::Empty));
+        b.state.lock().unwrap().ack = Some((h, now + ACK_FOR));
+        assert!(b.check(&none, &set(&["ann"])).is_err(), "even a forced ack");
+    }
+
+    /// One person known to be no member loses every device, however many
+    #[tokio::test]
+    async fn a_revoked_person_loses_all_six_devices() {
+        use crate::ident::Answer;
+        let mut nodes = vec![person_node("1", "laptop", "david", "2026-01-01T00:00:00Z")];
+        for i in 0..6 {
+            nodes.push(person_node(
+                &format!("{}", 10 + i),
+                &format!("kim{i}"),
+                "kim",
+                &format!("2026-02-0{}T00:00:00Z", i + 1),
+            ));
+        }
+        let (door, deleted) = headscale_with(serde_json::json!({ "nodes": nodes })).await;
+        let d = facts("six");
+        let brake = Arc::new(Brake::new(
+            Some(d.join("acted.json")),
+            Some(d.join("f.prom")),
+            2,
+        ));
+        let members = ["david", "ann", "bob", "cy"];
+        let g = brake_guard(&brake, &members);
+        let answers = |u: &str| Answer::of(u != "kim");
+        assert_eq!(door.reap(answers, None, &g).await.unwrap(), 6);
+        assert_eq!(deleted.lock().unwrap().len(), 6);
+        assert!(brake.on().is_none());
+        let f = std::fs::read_to_string(d.join("f.prom")).unwrap();
+        assert!(f.contains("dd_reap_brake 0"), "{f}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// An agreed state that suddenly drops most of its members is more
+    /// likely wrong than true: nothing comes off, pass after pass, and the
+    /// alert stays up; restored, the brake is off and only who is really
+    /// out goes. The owner's word lets a state through as it is
+    #[tokio::test]
+    async fn a_state_that_drops_most_members_removes_nothing_until_restored() {
+        use crate::ident::Answer;
+        let (door, deleted) = headscale_with(serde_json::json!({ "nodes": [
+            person_node("1", "laptop", "david", "2026-01-01T00:00:00Z"),
+            person_node("2", "phone", "ann", "2026-01-02T00:00:00Z"),
+            person_node("3", "tablet", "bob", "2026-01-03T00:00:00Z"),
+            person_node("4", "pc", "cy", "2026-01-04T00:00:00Z"),
+            person_node("5", "watch", "kim", "2026-01-05T00:00:00Z"),
+        ]}))
+        .await;
+        let d = facts("drop");
+        let acted = d.join("acted.json");
+        let brake = Arc::new(Brake::new(Some(acted.clone()), Some(d.join("f.prom")), 2));
+        let keep = |g: Guard| Guard {
+            keep: ["david".to_string()].into(),
+            ..g
+        };
+        let all = ["david", "ann", "bob", "cy", "dee"];
+        // a good state, nobody out: it is the one acted on
+        let good = |u: &str| Answer::of(all.contains(&u));
+        let g = keep(brake_guard(&brake, &all));
+        assert_eq!(
+            door.reap(|u| Answer::of(u != "kim").or(|| good(u)), None, &g)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(*deleted.lock().unwrap(), vec!["5".to_string()]);
+        deleted.lock().unwrap().clear();
+
+        // the state drops everyone but the owner: nothing, every pass
+        let bad = |u: &str| Answer::of(u == "david");
+        for _ in 0..3 {
+            let g = keep(brake_guard(&brake, &["david"]));
+            assert_eq!(door.reap(bad, None, &g).await.unwrap(), 0);
+            assert!(deleted.lock().unwrap().is_empty());
+            assert!(
+                brake.on().unwrap().contains("4 of the 5"),
+                "{:?}",
+                brake.on()
+            );
+            let f = std::fs::read_to_string(d.join("f.prom")).unwrap();
+            assert!(f.contains("dd_reap_brake 1"), "{f}");
+        }
+        // an empty state, the same
+        let g = keep(brake_guard(&brake, &[]));
+        assert_eq!(door.reap(|_| Answer::No, None, &g).await.unwrap(), 0);
+        assert!(brake.on().is_some());
+        // a gate started again keeps the last good state, and the brake
+        let again = Arc::new(Brake::new(Some(acted.clone()), Some(d.join("f.prom")), 2));
+        let g = keep(brake_guard(&again, &["david"]));
+        assert_eq!(door.reap(bad, None, &g).await.unwrap(), 0);
+        assert!(again.on().is_some());
+
+        // restored: the brake is off, and nobody is out
+        let g = keep(brake_guard(&brake, &all));
+        assert_eq!(door.reap(good, None, &g).await.unwrap(), 0);
+        assert!(brake.on().is_none());
+        let f = std::fs::read_to_string(d.join("f.prom")).unwrap();
+        assert!(f.contains("dd_reap_brake 0"), "{f}");
+
+        // three people out at once, from a state that keeps most: held too
+        let few = ["david", "dee"];
+        let shrunk_a_little = ["david", "ann", "bob", "cy"];
+        let g = keep(brake_guard(&brake, &shrunk_a_little));
+        assert_eq!(
+            door.reap(|u| Answer::of(few.contains(&u)), None, &g)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(brake.on().unwrap().contains("3 people"), "{:?}", brake.on());
+        // the owner says that state is right: the next pass goes by it
+        let (_, h) = brake.refused().unwrap();
+        brake.acknowledge(&h, crate::session::now()).unwrap();
+        let g = keep(brake_guard(&brake, &shrunk_a_little));
+        assert_eq!(
+            door.reap(|u| Answer::of(few.contains(&u)), None, &g)
+                .await
+                .unwrap(),
+            3
+        );
+        assert!(brake.on().is_none());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// A box's key: only for a box of the fleet, signed by that box, now,
@@ -1498,6 +2210,12 @@ mod tests {
     /// the computers are unread. Its address is its owner's.
     #[tokio::test]
     async fn a_computers_node_lives_only_as_long_as_its_grant() {
+        // the reaper takes one person's at a time; which comes off, not the order
+        let sorted = |d: &Mutex<Vec<String>>| {
+            let mut v = d.lock().unwrap().clone();
+            v.sort();
+            v
+        };
         let f = Arc::new(Fake::default());
         let api = fake_headscale(f.clone()).await;
         let door = door_at(api.clone(), HashMap::new(), "age".into());
@@ -1525,9 +2243,15 @@ mod tests {
         assert!(!by.contains_key("boxes"));
 
         // no agreed state here at all: no computer has a node
-        door.reap(|u| u == "ann", None).await.unwrap();
+        door.reap(
+            |u| crate::ident::Answer::of(u == "ann"),
+            None,
+            &Guard::open(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
-            *f.deleted.lock().unwrap(),
+            sorted(&f.deleted),
             ["10", "11", "12", "13"].map(String::from).to_vec()
         );
         f.deleted.lock().unwrap().clear();
@@ -1569,10 +2293,17 @@ mod tests {
             ("e".to_string(), snap("ann", true, "any")),
             ("f".to_string(), lapsed),
         ]);
-        let gone = door.reap(|u| u == "ann", Some(&api)).await.unwrap();
+        let gone = door
+            .reap(
+                |u| crate::ident::Answer::of(u == "ann"),
+                Some(&api),
+                &Guard::open(),
+            )
+            .await
+            .unwrap();
         assert_eq!(gone, 6);
         assert_eq!(
-            *f.deleted.lock().unwrap(),
+            sorted(&f.deleted),
             ["11", "12", "13", "15", "16", "17"]
                 .map(String::from)
                 .to_vec()
@@ -1584,37 +2315,108 @@ mod tests {
         let mut moved = snap("ann", true, "own");
         moved["lease"]["holder"] = "node2".into();
         f.snaps.lock().unwrap().insert("a".into(), moved);
-        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 1);
+        assert_eq!(
+            door.reap(
+                |u| crate::ident::Answer::of(u == "ann"),
+                Some(&api),
+                &Guard::open()
+            )
+            .await
+            .unwrap(),
+            1
+        );
         f.snaps
             .lock()
             .unwrap()
             .insert("a".into(), snap("ann", true, "own"));
         // and back on node1, it stays
         f.deleted.lock().unwrap().clear();
-        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 0);
+        assert_eq!(
+            door.reap(
+                |u| crate::ident::Answer::of(u == "ann"),
+                Some(&api),
+                &Guard::open()
+            )
+            .await
+            .unwrap(),
+            0
+        );
+        // whether ann is a member not known (the gate just started): it stays
+        assert_eq!(
+            door.reap(
+                |_| crate::ident::Answer::Unknown,
+                Some(&api),
+                &Guard::open()
+            )
+            .await
+            .unwrap(),
+            0
+        );
 
         // dd-control down: a's node stays on its last good word, for a while
         f.deleted.lock().unwrap().clear();
         *f.nodes.lock().unwrap() = vec![computer_node("10", "1", "100.64.0.10")];
         *f.down.lock().unwrap() = true;
-        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 0);
+        assert_eq!(
+            door.reap(
+                |u| crate::ident::Answer::of(u == "ann"),
+                Some(&api),
+                &Guard::open()
+            )
+            .await
+            .unwrap(),
+            0
+        );
         // past the while, it comes off
         door.last_good.lock().unwrap().get_mut("a").unwrap().1 -= LAST_GOOD_MS + 1;
-        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 1);
+        assert_eq!(
+            door.reap(
+                |u| crate::ident::Answer::of(u == "ann"),
+                Some(&api),
+                &Guard::open()
+            )
+            .await
+            .unwrap(),
+            1
+        );
         // and with no last good word at all, at once
         door.last_good.lock().unwrap().clear();
         f.deleted.lock().unwrap().clear();
-        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 1);
+        assert_eq!(
+            door.reap(
+                |u| crate::ident::Answer::of(u == "ann"),
+                Some(&api),
+                &Guard::open()
+            )
+            .await
+            .unwrap(),
+            1
+        );
         // a last good word that says it is down takes it off as well
         *f.down.lock().unwrap() = false;
         f.snaps
             .lock()
             .unwrap()
             .insert("a".into(), snap("ann", false, "own"));
-        door.reap(|u| u == "ann", Some(&api)).await.unwrap();
+        door.reap(
+            |u| crate::ident::Answer::of(u == "ann"),
+            Some(&api),
+            &Guard::open(),
+        )
+        .await
+        .unwrap();
         *f.down.lock().unwrap() = true;
         f.deleted.lock().unwrap().clear();
-        assert_eq!(door.reap(|u| u == "ann", Some(&api)).await.unwrap(), 1);
+        assert_eq!(
+            door.reap(
+                |u| crate::ident::Answer::of(u == "ann"),
+                Some(&api),
+                &Guard::open()
+            )
+            .await
+            .unwrap(),
+            1
+        );
     }
 
     #[test]

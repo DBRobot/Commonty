@@ -119,6 +119,7 @@ in
   # the full verifier with the browser login
   dd.verify.role = lib.mkDefault "directory";
   dd.verify.admin = policy.owner;
+  dd.verify.people = lib.unique ([ policy.owner ] ++ builtins.attrNames (policy.people or { }));
 
   # The logs name members, their addresses and where they connected from:
   # two weeks is enough to look into a problem, and no more is kept

@@ -559,7 +559,35 @@ signed item once and the gate reads the result. `VERIFY_IDENTITY_FROM`
   (`{"identity-shadow": <check>, name, own, agreed, why}`);
 - `agreed`: dd-control's `/identity` alone (ident.rs). It is read in the
   background, `?since` answering 304 when nothing changed, so a request
-  never waits on it; until the first read, it knows nobody.
+  never waits on it; until the first read, it lets nobody in.
+
+**Not known is not "no".** Letting someone in goes by what was last read:
+until the first read nobody is let in, and after it, with dd-control
+quiet, the last state still serves. Anything that cannot be undone goes
+by more: the agreed state read, current (its agreed time within two
+minutes of now, so not a dd-control still replaying the log) and recent
+(read within 90 s) - `Directory::settled`, `ident::Agreed::fresh`. A
+state never goes back to a lower height. Until it is settled the answer
+about anyone is `Unknown` (`ident::Answer`, `App::member_answer`,
+`App::network_answer`); settled, it is Yes or No, and a name the agreed
+state does not have is No. On Unknown nothing is taken away and nothing
+new is given: no network key (`/_dd/network/join`, `/controller`,
+`/computer` answer 503) and no new session (sign-in, sign-up and the id
+Worker's hand-off answer 503); what was given before goes on. Every
+destructive path acts on a No alone:
+
+- the network reaper takes a device off only on a No (below);
+- `leaving::tick` ends and deletes nothing, and `/internal/leaving` and
+  `/internal/leaving/done` answer 503, so photos, passwords, forge and
+  games delete nothing either;
+- a session a device signed in ends only when the person's entry is
+  there without the device (`device_kept`), never for want of an entry;
+- `/internal/storage/members` answers 503, so the ledger leaves every
+  Photos limit as it is;
+- a pending backup goes to the trash only on a fresh state.
+
+dd-verify starts after dd-control and waits up to 30 s for it to answer,
+then starts anyway: the code is safe either way.
 
 **A PUT to the directory or leaving**, in order (directory.rs `read_put`,
 `submit_envelope`):
@@ -793,7 +821,41 @@ With `VERIFY_HEADSCALE_API` set (the gateway, `dd.verify.network`):
 - Every 300 s, devices of people who are no longer members or guests are
   deleted from Headscale. Tagged nodes (boxes) are left alone, and so is
   everything when the member list is empty (a broken release, not
-  everyone revoked).
+  everyone revoked). A device comes off only on a known No: the person
+  known to be no member (left, suspended, revoked, no access, or a name
+  the settled state does not have), and not a guest a member still
+  vouches for. While who is who is not known (agreed mode, the state not
+  settled) the device stays and the log says `kept <device> - whether
+  <name> is a member is not known`. Then the guard (`network::Guard`):
+  nobody the release names (`VERIFY_PEOPLE`, the admin, the box owners)
+  comes off, whatever they read as (`NOT removing`); nothing comes off
+  until who is who has been known for 120 s without a break (a start, or
+  a return after an outage; `NOT reaping`). A person known to be no
+  member loses every device, however many. The brake (`network::Brake`)
+  holds the state itself: if who has access has shrunk sharply since the
+  last state the reaper acted on (none at all, or more than a quarter of
+  them gone at once), or more than 2 people would be turned out in one
+  pass, nothing comes off, the last good state is kept
+  (`reap-acted.json`), and every pass logs `ALERT: NOT reaping, the brake
+  is on` and sets `dd_reap_brake 1` in the box's facts, which
+  dd-fleet-alerts mails. It comes off when the state is consistent again,
+  or when the owner says that state is right: `GET
+  /_dd/network/reap-brake` gives why and the refused state's hash, and
+  `POST /_dd/network/reap-brake {"state": "<hash>"}` acknowledges it.
+  Only the fleet's owner (the admin), by a device of theirs or a browser
+  that showed the passkey in the last five minutes; being on the box is
+  nothing. It is taken only while the brake is on, only for that exact
+  state (who has access and who would be turned out): if the next pass
+  sees another state the ack is void. It is spent on that pass and runs
+  out after ten minutes. A state that gives nobody access is never reaped
+  from, acknowledged or not (2026-10-22: a gate started before dd-control
+  answered took the owner's laptop off for two hours).
+
+  Nothing new is given while who is who is not known: every place the
+  gate makes a session, an OIDC code or token, a network key, a friend
+  link, a guest, or a device being added asks `App::no_new_session`
+  first, and `every_issuer_asks_first` finds each such place in the
+  source and fails on one that does not.
 
 ### Home controllers ([controller.rs](../../servers/gate/src/controller.rs))
 
@@ -1311,6 +1373,11 @@ VERIFY_HEADSCALE_API, _URL     Headscale's api, and what a device joins (network
 VERIFY_HEADSCALE_KEY_FILE      file: the api key
 VERIFY_NETWORK_BOXES           file: {box: {key, recipient}}
 VERIFY_AGE                     age with the TPM plugin on its path
+VERIFY_PEOPLE                  the release's people (policy.json owner, people): never reaped
+VERIFY_REAP_SECS               how often the network reaper runs, 300 (network.rs; tests)
+VERIFY_REAP_GRACE_SECS         who is who known this long before anything comes off, 120
+VERIFY_REAP_PEOPLE             the most people one pass turns out before the brake, 2
+VERIFY_REAP_FACTS              where the brake's dd_reap_brake fact is written
 VERIFY_ADBLOCK, _HOUSEHOLD,    Pi-hole's api, the household, the box's LAN address,
   _LAN, _STATE                 where on/off is remembered (adblock/pihole.nix)
 VERIFY_ADBLOCK_PASSWORD_FILE   file: Pi-hole's api password
@@ -1353,7 +1420,7 @@ The unit runs as `dd-verify` with `ProtectSystem=strict`,
 ```
 directory follow       every 1 s (agreed mode): replay, ack, migrate
 held sign-ups          every 300 s: publish those the member list now names
-network reap           every 300 s: remove non-members' devices from Headscale
+network reap           every 300 s: remove known non-members' devices from Headscale (guarded)
 library trash          daily (hourly after a failure): empty 30-day-old trash
 leaving                every 60 s: end the ways in of whoever left or was removed,
                            and delete this gate's share once due: at once for
@@ -1399,7 +1466,11 @@ control.nix     the agreed log end to end: relay, three validators, a gate
 library.nix     full gate + garage: rclone over the gate's WebDAV; disk images
                 under /_dd/images; the allowance held by what an upload carries
 vault.nix       Vaultwarden signed in only through the gate's issuer; Send
-network.nix     Headscale: a box joins as a box, a member's device gets a key
+network.nix     Headscale: a box joins as a box, a member's device gets a key; in agreed
+                mode with dd-control down at the start nothing is reaped or deleted,
+                and once it answers the revoked member's and an unknown name's
+                devices come off, the owner's and a member's stay; a state that
+                drops half its members holds the brake on until it is restored
 adblock.nix     the household switching Pi-hole through the gate
 games.nix       the gate answers who is whose friend for invites
 forge.nix       the full gate, for the Git pages' live changes

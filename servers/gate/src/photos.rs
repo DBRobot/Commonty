@@ -217,6 +217,9 @@ pub(crate) async fn handoff_open(State(app): State<Arc<App>>, headers: HeaderMap
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let id = hex(&raw);
+    if let Some(r) = app.no_new_session() {
+        return r;
+    }
     let mut slots = app.handoffs.lock().unwrap();
     slots.retain(|_, h| h.until > Instant::now());
     if slots.len() >= HANDOFFS {
@@ -329,6 +332,9 @@ pub(crate) async fn app_signin(
     };
     // the app's session belongs to the device that signed it in: removing
     // the device ends it (signins.rs)
+    if let Some(r) = app.no_new_session() {
+        return r;
+    }
     let (set, id, exp) = app.sessions.issue_noted(&user);
     let agent = headers
         .get("user-agent")

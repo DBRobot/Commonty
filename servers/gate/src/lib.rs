@@ -117,6 +117,8 @@ struct App {
     thanos: Option<String>,
     /// this box's dd-control: the agreed state the fleet pages read
     control: Option<String>,
+    /// the network reaper's brake on a state that looks wrong (network.rs)
+    reap_brake: Arc<network::Brake>,
     /// the joined boxes members set up, as last read (member_boxes.rs)
     member_boxes: Mutex<member_boxes::Cache>,
     /// Ad blocking at home: Pi-hole's api on this box, and its household
@@ -676,6 +678,138 @@ impl App {
             && identity::is_member(&e.entry, &m.members, &m.revoked, self.directory.release())
     }
 
+    /// Membership as a tri-state (ident.rs Answer): Unknown only while the
+    /// identity this box goes by is not settled (agreed: not read, behind,
+    /// or not recent); settled, a name it has nothing of is No. Nothing is
+    /// taken away on Unknown, and nothing new is given (a network key, a
+    /// session). `member` is the same answer for what was already given,
+    /// where the last state read still serves.
+    pub(crate) fn member_answer(&self, user: &str) -> ident::Answer {
+        if user == pages::DEMO_USER {
+            return ident::Answer::of(self.demo());
+        }
+        self.directory.access_answer(user, || {
+            if self.members.is_none() {
+                return ident::Answer::Yes;
+            }
+            ident::Answer::of(self.replay_member(user))
+        })
+    }
+
+    /// Whether this person's devices belong on the fleet's network: a
+    /// member, or a guest a member still vouches for. No on what is known
+    /// once settled: not a member, and their own leaving, no guest record,
+    /// or every friend no member. Unknown while not settled. The demo's
+    /// never do.
+    pub(crate) fn network_answer(&self, user: &str) -> ident::Answer {
+        if user == pages::DEMO_USER {
+            return ident::Answer::No;
+        }
+        let friends = || {
+            self.friends
+                .friends_of(user)
+                .into_iter()
+                .filter(|(f, _)| f != pages::DEMO_USER)
+                .map(|(f, _)| self.member_answer(&f))
+                .collect::<Vec<_>>()
+        };
+        on_network(
+            self.member_answer(user),
+            self.directory.has_left(user),
+            self.friends.guest(user).is_some(),
+            friends,
+        )
+    }
+
+    /// What may hold the network reaper back (network.rs Guard): who it
+    /// never takes off, how many it takes off at most, and whether it may
+    /// take anyone off now
+    fn reap_guard(&self) -> network::Guard {
+        let mut keep: std::collections::BTreeSet<String> = network::people_named();
+        keep.extend(self.admin.iter().cloned());
+        keep.extend(self.owner.iter().cloned());
+        keep.extend(self.boxes.values().filter_map(|b| b.owner.clone()));
+        let grace = network::reap_grace();
+        let hold = if !self.directory.settled() {
+            Some("who is a member is not known yet: the agreed state is not read, not current, or not recent".to_string())
+        } else {
+            match self.directory.settled_for() {
+                Some(t) if t >= grace => None,
+                t => Some(format!(
+                    "who is a member has been known for {} s, under the {} s grace",
+                    t.unwrap_or_default().as_secs(),
+                    grace.as_secs()
+                )),
+            }
+        };
+        network::Guard {
+            keep,
+            hold,
+            members: self.members_now(),
+            brake: Some(self.reap_brake.clone()),
+        }
+    }
+
+    /// Who has access by the state this box goes by: the agreed state's
+    /// members with access, or the replay's members. What the reaper's
+    /// brake compares with the last state it acted on
+    fn members_now(&self) -> std::collections::BTreeSet<String> {
+        if self.directory.ident_from == ident::From::Agreed {
+            return self
+                .directory
+                .ident
+                .as_ref()
+                .and_then(|a| a.state())
+                .map(|s| {
+                    s.members
+                        .iter()
+                        .filter(|(_, m)| m.has_access())
+                        .map(|(n, _)| n.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+        self.directory
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|l| l.name)
+            .filter(|n| n != pages::DEMO_USER && self.replay_member(n))
+            .collect()
+    }
+
+    /// A new session, while who is who is not known: none (503). One held
+    /// already goes on; nothing new is given on Unknown
+    pub(crate) fn no_new_session(&self) -> Option<Response> {
+        (!self.directory.settled()).then(|| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "this box is still reading who is who; try again in a moment",
+            )
+                .into_response()
+        })
+    }
+
+    /// One pass of the network reaper, guarded (reap_guard)
+    pub(crate) async fn reap_network(&self) {
+        let Some(door) = &self.network else { return };
+        // an empty member list is a broken release rather than everyone
+        // revoked, and it would take every device off at once
+        if self.members.as_ref().is_none_or(|m| m.members.is_empty()) {
+            return;
+        }
+        if let Err(e) = door
+            .reap(
+                |u| self.network_answer(u),
+                self.control.as_deref(),
+                &self.reap_guard(),
+            )
+            .await
+        {
+            eprintln!("network: reaping: {e:#}");
+        }
+    }
+
     /// Someone who came in through a friend link and is not a member: let
     /// in to the game servers they are invited to and nowhere else, and
     /// only while a member is still their friend. A guest made a member
@@ -984,17 +1118,142 @@ impl App {
             return false;
         }
         if let Some(device) = self.signins.device_of(id) {
-            let still = self
-                .entry(user)
-                .ok()
-                .flatten()
-                .is_some_and(|e| e.entry.devices.iter().any(|d| d.fingerprint == device));
-            if !still {
-                self.signins.end(id);
-                return false;
+            let entry = self.entry(user).ok().flatten();
+            match device_kept(entry.as_ref(), &device) {
+                ident::Answer::Yes => {}
+                // their entry, without the device: removed, so it ends
+                ident::Answer::No => {
+                    self.signins.end(id);
+                    return false;
+                }
+                // no entry to go by (not read yet): not let in now, and
+                // not ended either
+                ident::Answer::Unknown => return false,
             }
         }
         true
+    }
+}
+
+/// Whether a session a device signed in may go on: Yes while the
+/// person's entry has the device, No once their entry is there without it
+/// (removed), Unknown with no entry to go by - which never ends a session
+pub(crate) fn device_kept(entry: Option<&identity::SignedEntry>, device: &str) -> ident::Answer {
+    match entry {
+        None => ident::Answer::Unknown,
+        Some(e) => ident::Answer::of(e.entry.devices.iter().any(|d| d.fingerprint == device)),
+    }
+}
+
+/// On the fleet's network or not (App::network_answer): a member; or a
+/// guest who has not left and whom some friend vouches for as a member.
+/// No only where every part is known.
+pub(crate) fn on_network(
+    member: ident::Answer,
+    left: bool,
+    guest_record: bool,
+    friends: impl FnOnce() -> Vec<ident::Answer>,
+) -> ident::Answer {
+    use ident::Answer;
+    member.or(|| {
+        if left || !guest_record {
+            return Answer::No;
+        }
+        friends().into_iter().fold(Answer::No, |a, f| a.or(|| f))
+    })
+}
+
+/// Who may acknowledge the reaper's brake: the fleet's owner (the admin),
+/// by a device of theirs or a browser session that showed its passkey in
+/// the last five minutes. Being on the box (loopback) is not enough.
+pub(crate) fn may_ack(
+    user: Option<&str>,
+    admin: Option<&str>,
+    by_device: bool,
+    passkey_fresh: bool,
+) -> Result<(), StatusCode> {
+    let Some(user) = user else {
+        return Err(StatusCode::UNAUTHORIZED);
+    };
+    if admin != Some(user) || user == pages::DEMO_USER {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if !by_device && !passkey_fresh {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(())
+}
+
+fn reap_brake_who(app: &App, headers: &HeaderMap) -> Result<(), Box<Response>> {
+    let who = app.identify_how(headers, "access");
+    let session = app
+        .sessions
+        .session(headers.get("cookie").and_then(|v| v.to_str().ok()))
+        .map(|s| s.1)
+        .unwrap_or_default();
+    may_ack(
+        who.as_ref().map(|(u, _)| u.as_str()),
+        app.admin.as_deref(),
+        who.as_ref().is_some_and(|(_, d)| *d),
+        app.passkey_fresh(&session),
+    )
+    .map_err(|c| {
+        Box::new(
+            (
+                c,
+                "the fleet's owner, with a device or a passkey shown just now",
+            )
+                .into_response(),
+        )
+    })
+}
+
+/// GET /_dd/network/reap-brake: the owner's view of the brake: on, why,
+/// and the state's hash an acknowledgement names
+async fn reap_brake_state(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    if let Err(r) = reap_brake_who(&app, &headers) {
+        return *r;
+    }
+    let on = app.reap_brake.refused();
+    Json(serde_json::json!({
+        "on": on.is_some(),
+        "why": on.as_ref().map(|o| o.0.clone()),
+        "state": on.map(|o| o.1),
+    }))
+    .into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct ReapAck {
+    state: String,
+}
+
+/// POST /_dd/network/reap-brake {state}: the owner says the state the
+/// brake refused is right; the next pass within ten minutes goes by it,
+/// if it is still that state (network.rs Brake::acknowledge)
+async fn reap_brake_ack(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Json(a): Json<ReapAck>,
+) -> Response {
+    if let Err(r) = reap_brake_who(&app, &headers) {
+        return *r;
+    }
+    match app.reap_brake.acknowledge(&a.state, session::now()) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(network::AckRefused::Off) => {
+            (StatusCode::CONFLICT, "the brake is not on").into_response()
+        }
+        Err(network::AckRefused::NotThatState) => (
+            StatusCode::CONFLICT,
+            "not the state the brake refused: it has changed since; look again",
+        )
+            .into_response(),
+        Err(network::AckRefused::Empty) => (
+            StatusCode::CONFLICT,
+            "a state that gives nobody access is never reaped from",
+        )
+            .into_response(),
     }
 }
 
@@ -1627,6 +1886,9 @@ async fn join_sign(
         return (status, why).into_response();
     }
     // the entry was just signed with the passkey made a moment ago
+    if let Some(r) = app.no_new_session() {
+        return r;
+    }
     let (set, id, _) = app.sessions.issue_noted(&user);
     app.saw_passkey(&id);
     let mut r = Json(serde_json::json!({ "user": user })).into_response();
@@ -1714,6 +1976,9 @@ async fn login_finish(
         && !id.is_empty()
     {
         app.signins.end(&id);
+    }
+    if let Some(r) = app.no_new_session() {
+        return r;
     }
     let (set, id, exp) = app.sessions.issue_noted(&user);
     app.signins.saw(&user, &id, exp, agent, None);
@@ -2764,6 +3029,9 @@ async fn oidc_authorize(
     if !app.member(&user) || user == pages::DEMO_USER {
         return Redirect::to("/_dd/home").into_response();
     }
+    if let Some(r) = app.no_new_session() {
+        return r;
+    }
     let code = issuer.code(&user, q.nonce, q.code_challenge);
     let mut to = format!("{}?code={}", q.redirect_uri, urlencode(&code));
     if let Some(st) = q.state {
@@ -2812,6 +3080,9 @@ async fn oidc_token(
             Json(serde_json::json!({"error": "invalid_client"})),
         )
             .into_response();
+    }
+    if let Some(r) = app.no_new_session() {
+        return r;
     }
     match issuer.redeem(&f.code, f.code_verifier.as_deref()) {
         Some(v) => Json(v).into_response(),
@@ -3049,6 +3320,7 @@ pub async fn start(
         storage: storage::Ledger::new(cfg.storage_ledger.clone()),
         fresh: Mutex::new(HashMap::new()),
         member_boxes: Mutex::new(member_boxes::Cache::default()),
+        reap_brake: Arc::new(network::Brake::from_env(&state_dir)),
         friends: friends::Store::open(&state_dir)?,
         controllers: controller::Store::open(Some(state_dir.join("controller-backups.json"))),
     });
@@ -3085,25 +3357,14 @@ pub async fn start(
             }
         });
     }
-    // Devices of people who are no longer members come off the network. An
-    // empty member list is a broken release rather than everyone revoked,
-    // and it would take every device off at once, so that is left alone.
+    // Devices of people who are no longer members come off the network:
+    // only on what is known, never while who is a member is not (reap_guard)
     if app.network.is_some() {
         let a = app.clone();
         tokio::spawn(async move {
             loop {
-                if let Some(door) = &a.network
-                    && a.members.as_ref().is_some_and(|m| !m.members.is_empty())
-                    && let Err(e) = door
-                        .reap(
-                            |u| (a.member(u) || a.guest(u)) && u != pages::DEMO_USER,
-                            a.control.as_deref(),
-                        )
-                        .await
-                {
-                    eprintln!("network: reaping: {e:#}");
-                }
-                tokio::time::sleep(Duration::from_secs(300)).await;
+                a.reap_network().await;
+                tokio::time::sleep(network::reap_every()).await;
             }
         });
     }
@@ -3379,6 +3640,11 @@ pub async fn start(
         .route("/_dd/app/signin", post(photos::app_signin))
         // the network's door: a join key for an admitted device
         .route("/_dd/network/join", post(network::join))
+        // the owner's word on the state the reaper's brake refused
+        .route(
+            "/_dd/network/reap-brake",
+            get(reap_brake_state).post(reap_brake_ack),
+        )
         // a box's own: signed by its TPM, answered sealed to it
         .route("/_dd/network/box", post(network::box_join))
         .route("/_dd/network/controller", post(network::controller_join))
@@ -3525,6 +3791,237 @@ pub async fn start(
 
 #[cfg(test)]
 mod tests {
+
+    /// A session a device signed in ends when the person's entry is known
+    /// to be without the device, never because there is no entry to go by
+    /// (the agreed state not read yet, after a restart)
+    #[test]
+    fn a_session_ends_only_on_a_device_known_removed() {
+        use ident::Answer;
+        let k = identity::generate();
+        let p = identity::encode_public(&k.verifying_key());
+        let fp = identity::fingerprint(&p);
+        let e = |devices: Vec<identity::Device>| {
+            identity::sign(
+                identity::Entry {
+                    name: "david".into(),
+                    root: p.clone(),
+                    recovery: String::new(),
+                    recovered_from: vec![],
+                    devices,
+                    passkeys: vec![],
+                    grant: None,
+                    libraries: vec![],
+                    terms: None,
+                    removed_boxes: vec![],
+                    version: 1,
+                    updated: 1,
+                },
+                &k,
+            )
+            .unwrap()
+        };
+        let with = e(vec![identity::Device {
+            fingerprint: fp.clone(),
+            public_key: p.clone(),
+            added: 1,
+        }]);
+        assert_eq!(device_kept(Some(&with), &fp), Answer::Yes);
+        assert_eq!(device_kept(Some(&e(vec![])), &fp), Answer::No);
+        assert_eq!(device_kept(None, &fp), Answer::Unknown);
+    }
+
+    /// The brake is the fleet owner's to lift, by a device of theirs or a
+    /// passkey shown just now; being on the box is nothing
+    #[test]
+    fn only_the_owner_lifts_the_brake() {
+        let admin = Some("david");
+        assert_eq!(
+            may_ack(None, admin, false, false),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+        assert_eq!(
+            may_ack(Some("kim"), admin, true, true),
+            Err(StatusCode::FORBIDDEN)
+        );
+        assert_eq!(
+            may_ack(Some("david"), None, true, true),
+            Err(StatusCode::FORBIDDEN)
+        );
+        assert_eq!(
+            may_ack(Some(pages::DEMO_USER), Some(pages::DEMO_USER), true, true),
+            Err(StatusCode::FORBIDDEN)
+        );
+        // a browser of theirs that has not shown the passkey just now
+        assert_eq!(
+            may_ack(Some("david"), admin, false, false),
+            Err(StatusCode::FORBIDDEN)
+        );
+        assert_eq!(may_ack(Some("david"), admin, false, true), Ok(()));
+        assert_eq!(may_ack(Some("david"), admin, true, false), Ok(()));
+    }
+
+    /// and over http: no sign-in (a process on the box) or anyone but the
+    /// owner gets nothing; the owner's tab without a fresh passkey neither
+    #[tokio::test]
+    async fn the_brake_is_not_lifted_from_the_box() {
+        let (url, s) = gate("reap-brake", None, vec![]).await;
+        let http = client();
+        let post = |c: Option<String>| {
+            let mut r = http
+                .post(format!("{url}/_dd/network/reap-brake"))
+                .json(&serde_json::json!({"state": "x"}));
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            async move { r.send().await.unwrap().status().as_u16() }
+        };
+        assert_eq!(post(None).await, 401);
+        assert_eq!(post(Some(cookie(&s.issue("stranger")))).await, 403);
+        // tom is this gate's admin; his tab has not shown a passkey
+        assert_eq!(post(Some(cookie(&s.issue("tom")))).await, 403);
+    }
+
+    /// Every way the gate hands out something new - a session, a code or
+    /// token, a network key, a link, a device - refuses while who is who is
+    /// not known (App::no_new_session). Each place one is made is found
+    /// here, and each must ask first; a new one that does not fails this.
+    #[test]
+    fn every_issuer_asks_first() {
+        let files = [
+            ("lib.rs", include_str!("lib.rs")),
+            ("sso.rs", include_str!("sso.rs")),
+            ("photos.rs", include_str!("photos.rs")),
+            ("friends.rs", include_str!("friends.rs")),
+            ("adddevice.rs", include_str!("adddevice.rs")),
+            ("network.rs", include_str!("network.rs")),
+            ("oidc.rs", include_str!("oidc.rs")),
+            ("signins.rs", include_str!("signins.rs")),
+            ("controller.rs", include_str!("controller.rs")),
+            ("home.rs", include_str!("home.rs")),
+            ("member_boxes.rs", include_str!("member_boxes.rs")),
+        ];
+        // what makes something new, by file
+        let makes: &[(&str, &str)] = &[
+            ("*", "sessions.issue"),
+            ("*", "issuer.code("),
+            ("*", "issuer.redeem("),
+            ("*", "friends.make_link("),
+            ("*", "friends.accept("),
+            ("*", "door.join_key("),
+            ("*", "door.mint("),
+            ("*", "door.mint_id("),
+            ("photos.rs", "slots.insert("),
+            ("adddevice.rs", "m.insert("),
+            ("adddevice.rs", "p.offer = Some("),
+            ("adddevice.rs", "p.revealed = Some("),
+        ];
+        // made without asking, and why that is right
+        let exempt: &[(&str, &str, &str)] = &[
+            (
+                "lib.rs",
+                "demo",
+                "the demo's session: the demo is the release's, not anyone's identity",
+            ),
+            (
+                "network.rs",
+                "box_key",
+                "a box's key: by the release's box list and its TPM, not who is who",
+            ),
+            (
+                "network.rs",
+                "computer_key",
+                "its one caller, computer_join, asks first",
+            ),
+        ];
+        let mut found = std::collections::BTreeSet::new();
+        for (file, src) in files {
+            let code = src.split("#[cfg(test)]\nmod tests").next().unwrap();
+            for (only, needle) in makes {
+                if *only != "*" && *only != file {
+                    continue;
+                }
+                for (at, _) in code.match_indices(needle) {
+                    // the function it is in: the nearest `fn ` before it
+                    let start = code[..at]
+                        .rmatch_indices("fn ")
+                        .find(|(i, _)| {
+                            let line = &code[code[..*i].rfind('\n').map_or(0, |n| n + 1)..*i];
+                            line.trim_start()
+                                .trim_start_matches("pub(crate) ")
+                                .trim_start_matches("pub ")
+                                .trim_start_matches("async ")
+                                .is_empty()
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap();
+                    let name: String = code[start + 3..]
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    found.insert((file, name.clone()));
+                    if exempt.iter().any(|(f, n, _)| *f == file && *n == name) {
+                        continue;
+                    }
+                    assert!(
+                        code[start..at].contains("no_new_session()"),
+                        "{file}: {name} makes something new ({needle}) without asking no_new_session() first"
+                    );
+                }
+            }
+        }
+        // the ones there are, so a change here is looked at
+        let want: std::collections::BTreeSet<(&str, String)> = [
+            ("lib.rs", "demo"),
+            ("lib.rs", "oidc_authorize"),
+            ("lib.rs", "oidc_token"),
+            ("lib.rs", "join_sign"),
+            ("lib.rs", "login_finish"),
+            ("sso.rs", "finish"),
+            ("photos.rs", "app_signin"),
+            ("photos.rs", "handoff_open"),
+            ("friends.rs", "make_link"),
+            ("friends.rs", "accept"),
+            ("adddevice.rs", "start"),
+            ("adddevice.rs", "offer"),
+            ("adddevice.rs", "reveal"),
+            ("network.rs", "join"),
+            ("network.rs", "controller_join"),
+            ("network.rs", "box_key"),
+            ("network.rs", "computer_key"),
+        ]
+        .into_iter()
+        .map(|(f, n)| (f, n.to_string()))
+        .collect();
+        assert_eq!(found, want);
+        // computer_key's caller asks
+        let net = include_str!("network.rs");
+        let cj = &net[net.find("async fn computer_join(").unwrap()..];
+        let cj = &cj[..cj.find("computer_key(").unwrap()];
+        assert!(cj.contains("no_new_session()"));
+    }
+
+    /// Who belongs on the network: No only on what is known
+    #[test]
+    fn on_the_network_is_no_only_on_what_is_known() {
+        use ident::Answer::{self, *};
+        let none = Vec::<Answer>::new;
+        // a member, whatever else
+        assert_eq!(on_network(Yes, false, false, none), Yes);
+        // not known to be a member: not known, unless a friend vouches
+        assert_eq!(on_network(Unknown, false, false, none), Unknown);
+        assert_eq!(on_network(Unknown, false, true, || vec![Yes]), Yes);
+        // known no member, with no guest record: off
+        assert_eq!(on_network(No, false, false, none), No);
+        // a guest of theirs left: off; a guest whose friend is a member: on
+        assert_eq!(on_network(No, true, true, || vec![Yes]), No);
+        assert_eq!(on_network(No, false, true, || vec![No, Yes]), Yes);
+        // a guest whose friends are all known no member: off; one not known
+        // yet keeps them on
+        assert_eq!(on_network(No, false, true, || vec![No, No]), No);
+        assert_eq!(on_network(No, false, true, || vec![No, Unknown]), Unknown);
+        assert_eq!(on_network(No, false, true, none), No);
+    }
 
     #[test]
     fn a_suspension_and_its_reason_come_with_the_list() {

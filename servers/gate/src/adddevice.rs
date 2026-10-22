@@ -95,6 +95,9 @@ pub(crate) async fn start(State(app): State<Arc<App>>, headers: HeaderMap) -> Re
     let Some(user) = person(&app, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    if let Some(r) = app.no_new_session() {
+        return r;
+    }
     let mut m = app.adding.0.lock().unwrap();
     Adding::tidy(&mut m);
     // one at a time for each person
@@ -200,6 +203,9 @@ pub(crate) async fn offer(
         )
             .into_response();
     }
+    if let Some(r) = app.no_new_session() {
+        return r;
+    }
     p.offer = Some(Offer {
         fingerprint: identity::fingerprint(&o.public_key),
         public_key: o.public_key,
@@ -257,6 +263,9 @@ pub(crate) async fn reveal(State(app): State<Arc<App>>, Json(n): Json<NonceIn>) 
     let mut m = app.adding.0.lock().unwrap();
     match m.get_mut(&normal(&n.code)) {
         Some(p) if p.theirs.is_some() && p.revealed.is_none() => {
+            if let Some(r) = app.no_new_session() {
+                return r;
+            }
             p.revealed = Some(n.nonce);
             StatusCode::NO_CONTENT.into_response()
         }

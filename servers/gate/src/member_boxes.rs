@@ -219,6 +219,11 @@ fn waiting_of(app: &App) -> HashMap<String, crate::ident::Owner> {
 /// With them, the time to judge a week by: the earlier of this box's clock
 /// and the agreed time, and only when the two are within ten minutes.
 pub(crate) async fn joined_tickets(app: &Arc<App>) -> Option<(BTreeSet<String>, u64)> {
+    // which boxes were enlisted, from an identity state that is current:
+    // one held from before an outage may not have the enlistment yet
+    if !app.directory.ident.as_ref().is_some_and(|a| a.fresh()) {
+        return None;
+    }
     let st = state(app).await;
     let agreed = st.get("time")?.as_u64()? / 1000;
     let now = identity::now();

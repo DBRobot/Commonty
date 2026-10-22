@@ -212,6 +212,15 @@ gate (refusing an item already sent or already judged, Rust
   witness's agreed state (cmd/witness exports `controlIdentity`), to Workers
   that bind it. Never reachable from outside (the front passes only
   `/relay` and `/health`). 503 until the witness runs.
+- **Unread is not "nobody".** A reader lets people in by the state it last
+  read, but does nothing that cannot be undone (a device off the network,
+  a session ended, anything deleted) until it holds a state that is read,
+  current (its `time` near now: not a dd-control still replaying the log)
+  and recent; and gives nothing new (a network key, a session) until then.
+  Settled, a name the state does not have is no member. The gate:
+  `Directory::settled`, `ident::Answer` ([gate.md](gate.md#who-is-who-read-from-the-control-plane)).
+  The mail Worker's leaving takes `left`, or `revoked`/`suspended` past
+  the window, and refuses when the state cannot be read.
 - The judged state is a view kept beside the agreed state, not part of it:
   each server judges the agreed log itself (state/ident Replayer), so a
   judge bug cannot split the validators while the gates still decide.

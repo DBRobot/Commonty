@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # What is wrong on any box, as the fleet view has it, mailed once per change:
 # disk events in the last week, a pool that is not healthy, a backup over a
-# day old, a runner's new config pending over an hour. QUERY is thanos-query's api; STATE remembers what was mailed;
+# day old, a runner's new config pending over an hour, the network reaper's
+# brake on. QUERY is thanos-query's api; STATE remembers what was mailed;
 # SENDMAIL is dd-sendmail; WINDOW is how far back to look: another box's
 # newest numbers are only in the bucket once its block is cut, so an
 # instant query would not see them.
@@ -21,6 +22,7 @@ lines=$(
   {
     ask "max by (box) (max_over_time(dd_disk_warnings[$WINDOW])) > 0" | while read -r b v; do echo "$b: $v disk warning(s) in the last week (journalctl -u smartd there)"; done
     ask "max by (box) (max_over_time(dd_pool_unhealthy[$WINDOW])) > 0" | while read -r b _; do echo "$b: a ZFS pool is not healthy (zpool status -x there)"; done
+    ask "max by (box) (last_over_time(dd_reap_brake[$WINDOW])) > 0" | while read -r b _; do echo "$b: the network reaper refuses a state that looks wrong and has taken nothing off (journalctl -u dd-verify there: 'the brake is on')"; done
     ask "max by (box) (max_over_time(dd_backup_last_success_seconds[$WINDOW])) < $((now - 26 * 3600))" | while read -r b v; do
       echo "$b: last good backup $(((now - v) / 3600)) hours ago"
     done

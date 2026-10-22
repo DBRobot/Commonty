@@ -71,6 +71,9 @@ pub struct Directory {
     >,
     /// who has left by their own word, and what this box did about it
     pub leaving: crate::leaving::Store,
+    /// when this gate opened it: the replay's startup, for the network
+    /// reaper's grace (network.rs `Guard`)
+    opened: std::time::Instant,
     /// where who-is-who comes from (VERIFY_IDENTITY_FROM, ident.rs): this
     /// box's replay, the control plane's agreed state, or both compared
     pub ident_from: crate::ident::From,
@@ -287,6 +290,7 @@ impl Directory {
             ident: None,
             computers: None,
             guard: Default::default(),
+            opened: std::time::Instant::now(),
         })
     }
 
@@ -365,6 +369,45 @@ impl Directory {
     /// knows nothing, which is not "nobody"
     pub(crate) fn agreed_known(&self) -> bool {
         self.ident.as_ref().is_some_and(|a| a.state().is_some())
+    }
+
+    /// Whether who-is-who on this box may be acted on where acting cannot
+    /// be undone. The replay (and shadow, which serves it) is this box's own
+    /// copy, kept on disk; agreed is only while the agreed state is read,
+    /// current and recent (ident.rs `fresh`).
+    pub(crate) fn settled(&self) -> bool {
+        self.ident_from != crate::ident::From::Agreed
+            || self.ident.as_ref().is_some_and(|a| a.fresh())
+    }
+
+    /// How long it has been settled without a break: agreed, since the
+    /// agreed state became fresh; else since this gate opened its directory
+    pub(crate) fn settled_for(&self) -> Option<std::time::Duration> {
+        match self.ident_from {
+            crate::ident::From::Agreed => self.ident.as_ref()?.fresh_for(),
+            _ => Some(self.opened.elapsed()),
+        }
+    }
+
+    /// The services' answer for someone as a tri-state, for what cannot be
+    /// undone and for what is granted anew: agreed, Unknown until the state
+    /// is settled (read, current, recent); once it is, a name it does not
+    /// have is No. Otherwise the replay's word (`replay`)
+    pub(crate) fn access_answer(
+        &self,
+        name: &str,
+        replay: impl FnOnce() -> crate::ident::Answer,
+    ) -> crate::ident::Answer {
+        use crate::ident::{Answer, From};
+        match self.ident_from {
+            From::Agreed => {
+                if !self.settled() {
+                    return Answer::Unknown;
+                }
+                Answer::of(self.agreed_member(name).is_some_and(|m| m.has_access()))
+            }
+            From::Replay | From::Shadow => replay(),
+        }
     }
 
     /// The person's own signed entry: this box's replay, the agreed state,
@@ -2875,6 +2918,74 @@ mod tests {
         assert!(!d.has_left("ann"));
     }
 
+    /// The incident of 2026-10-22: a gate in agreed mode, started before
+    /// dd-control answered, took "not read yet" for "not a member" and took
+    /// the owner's laptop off the network. Unread, behind or not recent,
+    /// the answer is Unknown - never No - and nothing is settled; settled,
+    /// it is Yes or No, a name it does not have included
+    #[test]
+    fn not_read_yet_is_unknown_never_no() {
+        use crate::ident::Answer;
+        let d = Directory::open(scratch("unknown-unread"), None)
+            .unwrap()
+            .identity_from(crate::ident::From::Agreed, Some("http://127.0.0.1:1"));
+        assert!(!d.settled());
+        assert_eq!(d.settled_for(), None);
+        let never = || -> Answer { panic!("agreed mode asked the replay") };
+        assert_eq!(d.access_answer("david", never), Answer::Unknown);
+        assert_eq!(d.access_answer("kim", never), Answer::Unknown);
+
+        let state = serde_json::json!({
+            "david": {"status": "member", "access": "invite"},
+            "kim": {"status": "revoked", "access": "none"},
+            "lou": {"status": "left", "access": "none"},
+            "nan": {"status": "none", "access": "none"},
+        });
+        let d = agreed_with(
+            scratch("unknown-read"),
+            crate::ident::From::Agreed,
+            state.clone(),
+        );
+        assert!(d.settled());
+        assert_eq!(d.access_answer("david", never), Answer::Yes);
+        for gone in ["kim", "lou", "nan"] {
+            assert_eq!(d.access_answer(gone, never), Answer::No, "{gone}");
+        }
+        // settled, a name the agreed state does not have is no member
+        assert_eq!(d.access_answer("stranger", never), Answer::No);
+
+        // not recent: dd-control stopped answering a while ago
+        let a = d.ident.as_ref().unwrap();
+        a.read_ago(crate::ident::STALE + Duration::from_secs(1));
+        assert!(!d.settled());
+        assert_eq!(d.access_answer("kim", never), Answer::Unknown);
+        // and access, which is not destructive, still goes by what was read
+        assert!(d.has_access("david", "member", || false));
+
+        // behind: a dd-control still replaying the log
+        let s: crate::ident::State =
+            serde_json::from_value(serde_json::json!({"height": 7, "members": state})).unwrap();
+        a.set_behind(s.clone());
+        assert!(!d.settled());
+        assert_eq!(d.access_answer("kim", never), Answer::Unknown);
+        a.set(s);
+        assert!(d.settled());
+        assert!(d.settled_for().unwrap() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn replay_and_shadow_answer_from_the_replay() {
+        use crate::ident::Answer;
+        for from in [crate::ident::From::Replay, crate::ident::From::Shadow] {
+            let d = Directory::open(scratch(&format!("unknown-{from:?}")), None)
+                .unwrap()
+                .identity_from(from, Some("http://127.0.0.1:1"));
+            assert!(d.settled(), "{from:?}: the replay is on disk");
+            assert_eq!(d.access_answer("kim", || Answer::No), Answer::No);
+            assert_eq!(d.access_answer("kim", || Answer::Unknown), Answer::Unknown);
+        }
+    }
+
     #[test]
     fn a_v2_envelope_reads_as_the_entry_it_carries() {
         use base64::Engine;
@@ -3045,8 +3156,13 @@ mod tests {
                         if q.get("since").map(String::as_str) == Some("9") {
                             return StatusCode::NOT_MODIFIED.into_response();
                         }
+                        // at the fleet's current time, as dd-control answers
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64;
                         axum::Json(serde_json::json!({
-                            "height": 9,
+                            "height": 9, "time": now,
                             "members": {"ann": {"status": "member", "item": {}}}
                         }))
                         .into_response()

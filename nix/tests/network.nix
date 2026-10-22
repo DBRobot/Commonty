@@ -6,6 +6,8 @@
 { self, pkgs, ... }:
 {
   name = "network";
+  # nix/tests/lib's waits: one run's journal (journal_of)
+  helpers = true;
   node.specialArgs = { inherit self; };
   defaults.virtualisation.memorySize = 2048;
   defaults.virtualisation.cores = 2;
@@ -59,6 +61,8 @@
       pkgs.sqlite
       pkgs.openssl
       pkgs.age
+      # the stand-in for dd-control (network/control.py)
+      pkgs.python3
     ];
   };
   # the owner's laptop and another member's, each on the network as a person
@@ -87,5 +91,6 @@
   scriptEnv = {
     dd = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd}/bin/dd";
     control = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd-control}/bin/dd-control";
+    standin = ./network/control.py;
   };
 }

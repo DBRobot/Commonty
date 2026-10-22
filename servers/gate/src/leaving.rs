@@ -426,6 +426,13 @@ pub fn held_leavers(d: &Directory) -> Vec<(String, u64)> {
 /// theirs on their own boxes and report back here (`done`).
 pub(crate) async fn tick(app: &App) {
     let Some(m) = &app.members else { return };
+    // Nothing is ended or deleted on what is not known: until the agreed
+    // state is read, current and recent, nobody's entry is there to go by,
+    // and a name with none would read as a sign-up still waiting
+    if !app.directory.settled() {
+        unsettled_said();
+        return;
+    }
     let mail = std::env::var("VERIFY_MAIL_FORGET").ok();
     let mut reap = false;
     let demo = app.demo_library.as_ref().map(|(id, _)| id.as_str());
@@ -547,18 +554,30 @@ pub(crate) async fn tick(app: &App) {
         app.directory.leaving.forget_said(&name);
         eprintln!("leaving: a waiting sign-up is out and its account is gone");
     }
-    if reap
-        && let Some(door) = &app.network
-        && !m.members.is_empty()
-        && let Err(e) = door
-            .reap(
-                |u| (app.member(u) || app.guest(u)) && u != crate::pages::DEMO_USER,
-                app.control.as_deref(),
-            )
-            .await
-    {
-        eprintln!("network: reaping: {e:#}");
+    if reap {
+        app.reap_network().await;
     }
+}
+
+/// "nothing done: not known", once in ten minutes
+fn unsettled_said() {
+    static SAID: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let mut said = SAID.lock().unwrap();
+    if said.is_none_or(|t| t.elapsed() >= Duration::from_secs(600)) {
+        *said = Some(std::time::Instant::now());
+        eprintln!(
+            "leaving: nothing ended or deleted: who is who is not known yet (the agreed state is not read, not current, or not recent)"
+        );
+    }
+}
+
+/// a service asking who is due while who is who is not known: not now
+fn unsettled() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        "who is who is not known yet; try again",
+    )
+        .into_response()
 }
 
 /// what this box's gate keeps of someone: the names they gave their
@@ -638,6 +657,9 @@ pub(crate) fn internal_router<S: Clone + Send + Sync + 'static>(c: Arc<Ctx>) -> 
 /// own share (photos, passwords, forge, games)
 async fn internal(State(c): State<Arc<Ctx>>) -> Response {
     let d = &c.d;
+    if !d.settled() {
+        return unsettled();
+    }
     let Some(m) = &c.m else {
         return Json(serde_json::json!({ "members": [] })).into_response();
     };
@@ -662,6 +684,9 @@ struct Done {
 /// POST /internal/leaving/done: a service on this box deleted its share
 async fn done(State(c): State<Arc<Ctx>>, Json(x): Json<Done>) -> Response {
     let (d, m) = (&c.d, c.m.as_ref());
+    if !d.settled() {
+        return unsettled();
+    }
     let ok_service = !x.service.is_empty()
         && x.service.len() <= 32
         && x.service
@@ -925,6 +950,46 @@ pub(crate) async fn sign(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Who is due, asked by the services that delete (photos, passwords,
+    /// forge, games), while who is who is not known: no answer, so none of
+    /// them deletes anything on it; once known, the list as before
+    #[tokio::test]
+    async fn nobody_is_due_while_who_is_who_is_not_known() {
+        let dir = std::env::temp_dir().join(format!("dd-leaving-unknown-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let m = crate::Members::list(vec!["abc".into()]);
+        let ctx = |from: crate::ident::From| {
+            let d = Directory::open(dir.join(format!("{from:?}")), None)
+                .unwrap()
+                .identity_from(from, Some("http://127.0.0.1:1"));
+            Arc::new(Ctx {
+                d: Arc::new(d),
+                m: Some(m.clone()),
+                demo: None,
+            })
+        };
+        let unread = ctx(crate::ident::From::Agreed);
+        assert_eq!(
+            internal(State(unread.clone())).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let said = Done {
+            name: "kim".into(),
+            service: "forge".into(),
+        };
+        assert_eq!(
+            done(State(unread), Json(said)).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            internal(State(ctx(crate::ident::From::Replay)))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     const DAY: u64 = 24 * 3600;
 
