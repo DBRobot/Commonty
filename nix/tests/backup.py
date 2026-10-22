@@ -1,26 +1,20 @@
-# The backup test: a backs up to the cluster, a dies, b restores a's files.
-
+# The backup test: a backs up to its own store, the copy goes to b's, a
+# dies, b restores a's files from its copy.
 start_all()
 for m in (a, b):
-    m.wait_for_unit("garage.service")
-    m.wait_for_open_port(3901)
-
-# the boxes find each other the way the real ones do: b is told a's id
-# (in the fleet it comes from the box list), then each stages its own
-# role and the layout applies once both are in
-a_id = a.succeed(f"set -a; . {nix['rpc']}; garage node id -q").strip().split("@")[0]
-b.succeed(f"set -a; . {nix['rpc']}; garage node connect {a_id}@a:3901")
-for m in (a, b):
-    m.succeed("systemctl restart garage-setup.service")
-# both boxes hold the applied layout before the buckets and keys are made
-for m in (a, b):
-    m.wait_until_succeeds(
-        f"set -a; . {nix['rpc']}; garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l"
-    )
-for m in (a, b):
+    m.wait_for_unit("dd-store-setup.service")
+    m.wait_for_unit("nginx.service")
+    m.wait_for_unit("timers.target")
+    # every copy is one the test starts
     m.succeed(
-        "systemctl restart garage-setup.service"
-    )  # buckets and keys, now that the layout exists
+        "systemctl stop dd-store-copy.timer dd-store-copy-recent.timer "
+        "dd-store-copy.service dd-store-copy-recent.service"
+    )
+
+# each box's repository is a bucket of its own in its own store, under the
+# store's own key to it
+a.succeed("test -s /var/lib/dd-store/keys/backups-a.env")
+a.succeed("systemctl cat restic-backups-dd | grep -c '127.0.0.1:3910/backups-a'")
 
 # a backs up, b backs up
 a.succeed(
@@ -47,47 +41,45 @@ a.succeed(
 a.succeed("systemctl start dd-timer-watch.service")
 a.succeed("grep -q '^dd_timers_restarted 0' /var/lib/dd-facts/timers.prom")
 
-# every block is on both boxes
-a.wait_until_succeeds("[ $(find /srv/garage -type f | wc -l) -ge 3 ]")
-b.wait_until_succeeds("[ $(find /srv/garage -type f | wc -l) -ge 3 ]")
-
-# blocks are not the bucket: b reads bucket names from its own tables, and
-# a write that missed b (one copy of two is enough) reaches it later. Wait
-# until b alone resolves backups-a and serves a's snapshots
-b_restic = (
-    f"set -a; . {nix['a_env']}; "
-    f"restic -r s3:http://127.0.0.1:3900/backups-a --password-file {nix['a_password']} --no-lock"
+# the copy: a's repository goes to b's store; b's copy of it never goes back
+s3 = "AWS_DEFAULT_REGION=us-east-1 aws --endpoint-url http://127.0.0.1:3910"
+# a copy that finds b not ready yet is next time: read back from b's store
+# with the key b handed a
+a.wait_until_succeeds(
+    "systemctl start dd-store-copy.service && set -a && . /var/lib/dd-store-copy/b.env && "
+    "AWS_DEFAULT_REGION=us-east-1 aws --endpoint-url http://store.b.test.invalid:3443 s3 ls s3://backups-a/config",
+    timeout=180,
+)
+# what b holds of a's repository is b's word only: it never goes back to a
+b.succeed(
+    f"set -a; . /var/lib/dd-store/keys/backups-a.env; echo x > /tmp/x; {s3} s3 cp /tmp/x s3://backups-a/probe"
+)
+b.succeed("systemctl start dd-store-copy.service")
+a.fail(
+    f"set -a; . /var/lib/dd-store/keys/backups-a.env; {s3} s3 ls s3://backups-a/probe"
+)
+# b's own goes to a the same way
+b.wait_until_succeeds(
+    "systemctl start dd-store-copy.service && set -a && . /var/lib/dd-store-copy/a.env && "
+    "AWS_DEFAULT_REGION=us-east-1 aws --endpoint-url http://store.a.test.invalid:3443 s3 ls s3://backups-b/config",
+    timeout=180,
 )
 
+# b serves a's snapshots from its own copy before a goes
+b_restic = (
+    "set -a; . /var/lib/dd-store/keys/backups-a.env; "
+    f"restic -r s3:http://127.0.0.1:3910/backups-a --password-file {nix['a_password']} --no-lock"
+)
+b.wait_until_succeeds(f"{b_restic} snapshots latest", timeout=180)
 
-def b_view():
-    return b.execute(
-        f"set -a; . {nix['rpc']}; garage bucket list; garage bucket info backups-a 2>&1; garage key list"
-    )[1]
-
-
-b.wait_until_succeeds(f"set -a; . {nix['rpc']}; garage bucket info backups-a")
-b.wait_until_succeeds(f"{b_restic} snapshots latest")
-view_before = b_view()
-
-# a is gone. b still answers, and a's repository - a's password, a's key -
-# restores a's files on b. Without the lock: a lock is a write, and the
-# cluster takes no writes with one box down
+# a is gone. b's copy - a's password, b's own key to its copy - restores
+# a's files on b
 a.shutdown()
-try:
-    b.succeed(f"{b_restic} restore latest --target /tmp/restore")
-except Exception:
-    print(f"b before a went:\n{view_before}\nb now:\n{b_view()}")
-    raise
+b.succeed(f"{b_restic} restore latest --target /tmp/restore")
 b.succeed("grep -q 'worth having tomorrow' /tmp/restore/srv/state/file")
 b.succeed("[ $(stat -c %s /tmp/restore/srv/state/blob) = 2000000 ]")
 
-# with a down the cluster refuses new writes: two copies or nothing.
-# Asked directly, not through restic, which retries for a quarter hour
-# before it agrees
-# b learns a is gone a moment after it is; until then a write may still
-# land on a as it dies. Wait for the refusal rather than expect it at once
-b.wait_until_fails(
-    f"set -a; . {nix['b_env']}; "
-    "AWS_MAX_ATTEMPTS=1 aws --endpoint-url http://127.0.0.1:3900 s3 cp /etc/hostname s3://backups-b/probe"
+# and with a gone, b still backs itself up: its store is its own
+b.succeed(
+    "echo 'b, later' >> /srv/state/file && systemctl start restic-backups-dd.service"
 )

@@ -80,13 +80,18 @@ pool.
 
 What moves, and what does not:
 
-- ente, vaultwarden: copied; they switch with failover.
-- libraries, mail: copied into the store of the box built with them.
-- metrics: copied into its home's store.
+- ente, vaultwarden: copied; they switch with failover, and are copied
+  once more after it.
+- libraries, mail: copied into the store of the box built with them. The
+  gate and the transcoder reach it on loopback, with the store's own keys
+  (`dd-library-keys`).
+- metrics: copied into its home's store. Every box's sidecar writes there;
+  the objstore file is made on the box (`dd-thanos-objstore`).
 - nix-cache: copied into its home's store, on the same disk; it could
   start empty.
 - backups-<box>: not copied. Each box starts a new repository in its own
-  store; the old one stays readable until the old pool goes.
+  store (`backups-<box>`, forgotten by host alone); the old one stays
+  readable in the old pool until the old pool goes.
 
 ## Turning it on
 

@@ -10,6 +10,16 @@ let
   tsdb = "/var/lib/${prom.stateDir}/data";
   sidecar = cfg.objstoreFile != null;
   observe = cfg.sidecars != [ ];
+  # the metrics bucket in the store that keeps it, its home's
+  # (storage/store.nix shared): this box's key there, as dd-store-at hands it
+  at = config.dd.store.at.metrics or null;
+  generated = "/run/dd-thanos/objstore.yaml";
+  units =
+    lib.optional sidecar "thanos-sidecar"
+    ++ lib.optionals observe [
+      "thanos-store"
+      "thanos-compact"
+    ];
 in
 {
   # The fleet-wide view, on top of the per-box one and changing nothing
@@ -36,6 +46,11 @@ in
       default = "2h";
       description = "how often prometheus cuts a block the sidecar uploads: how long other boxes' newest history takes to reach the fleet view (a test makes it minutes)";
     };
+    fromStore = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "the bucket in the store that keeps it (dd.store.at.metrics): the objstore file is made on the box from this box's key there";
+    };
     storeSync = lib.mkOption {
       type = lib.types.str;
       default = "3m";
@@ -44,6 +59,53 @@ in
   };
 
   config = lib.mkMerge [
+    (lib.mkIf (cfg.fromStore && at != null) {
+      dd.thanos.objstoreFile = generated;
+      systemd.services.dd-thanos-objstore = {
+        description = "The metrics bucket's objstore file, with this box's key to the store that keeps it";
+        after = [ "dd-store-at.service" ];
+        requires = [ "dd-store-at.service" ];
+        before = map (u: "${u}.service") units;
+        requiredBy = map (u: "${u}.service") units;
+        path = [
+          pkgs.coreutils
+          pkgs.systemd
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          RuntimeDirectory = "dd-thanos";
+          RuntimeDirectoryPreserve = true;
+          TimeoutStartSec = "6min";
+        };
+        script = ''
+          set -euo pipefail
+          umask 077
+          # the home's store may not have handed this box its key yet
+          for _ in $(seq 1 30); do
+            [ -s ${at.envFile} ] && break
+            systemctl restart dd-store-at.service || true
+            sleep 10
+          done
+          . ${at.envFile}
+          cat > ${generated}.new <<EOF
+          type: S3
+          config:
+            bucket: metrics
+            endpoint: ${lib.removePrefix "https://" (lib.removePrefix "http://" at.endpoint)}
+            region: us-east-1
+            access_key: $AWS_ACCESS_KEY_ID
+            secret_key: $AWS_SECRET_ACCESS_KEY
+            insecure: ${lib.boolToString (lib.hasPrefix "http://" at.endpoint)}
+            signature_version2: false
+            bucket_lookup_type: path
+          EOF
+          chown prometheus ${generated}.new
+          chmod 0400 ${generated}.new
+          mv ${generated}.new ${generated}
+        '';
+      };
+    })
     (lib.mkIf sidecar {
       # thanos needs prometheus to cut blocks it never compacts locally
       services.prometheus = {
