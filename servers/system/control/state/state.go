@@ -501,7 +501,7 @@ func (s *State) Block(cfg *Config, verify Verify, reqs []Request, now int64) (ap
 	if s.Attest != nil {
 		s.Attest.Expire(s.Time)
 	}
-	s.expireJoining(s.Time)
+	s.expireJoining(cfg, s.Time)
 	for _, r := range reqs {
 		err := s.Check(cfg, verify, r, s.Time)
 		var rf *Refusal
@@ -510,7 +510,7 @@ func (s *State) Block(cfg *Config, verify Verify, reqs []Request, now int64) (ap
 			s.Apply(cfg, r, s.Time)
 			applied++
 		case errors.As(err, &rf):
-			s.refused(r, rf, s.Time)
+			s.refused(cfg, r, rf, s.Time)
 		}
 	}
 	s.judge(cfg, prev, s.Time)
