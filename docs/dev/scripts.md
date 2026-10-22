@@ -18,6 +18,7 @@ scripts/
   deploy          switch one box to one git ref by hand, with a rollback armed
   install-box     reinstall a box from scratch, keeping its identity
   restore-box     after install-box: put back what the boot disk held
+  pool-check      is every object of the old shared pool in a box's own store
 ```
 
 All are bash, run from anywhere inside the checkout (each finds the
@@ -250,3 +251,19 @@ Run after `install-box`. On the box, as root:
 5. Run shellcheck on it by hand, and the script once against a real box
    or a VM, before the pull request.
 6. Change this page in the same pull request.
+
+## pool-check
+
+```
+scripts/pool-check            the old pool against the stores, per bucket
+scripts/pool-check copies     each store's buckets against their copies
+```
+
+Read-only: it lists buckets with the keys already on each box, and opens
+each box's new backup repository with `--no-lock`. For each bucket of the
+old pool it prints the objects and bytes on both sides and the keys missing
+from the store or at another size, and it exits non-zero unless every
+bucket that has to move is all there and every box's new repository has a
+snapshot from the last day. `copies` holds each store's buckets against
+their copy on the other box, as the plan keeps them. What to do with the
+answer: [pool-retire.md](pool-retire.md).
