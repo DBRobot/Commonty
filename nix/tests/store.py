@@ -151,6 +151,37 @@ a.succeed(
 copied("photos", "p3", "no room for it there")
 a.succeed("! grep -q dd_store_lost /var/lib/dd-facts/store-copy.prom")
 
+# a bucket a box writes alone: a's copy goes to b, and what b holds of it
+# never comes back, so what a deletes stays deleted
+put(a, "ours", "o1", "a's own")
+a.succeed(
+    """echo '{"photos":["a","b"],"ours":["a","b"]}' > /run/dd-placed/copies.json"""
+)
+copied("ours", "o1", "a's own")
+put(b, "ours", "o2", "b's word only")
+b.succeed("systemctl start dd-store-copy.service")
+a.fail(
+    "set -a; . /var/lib/dd-store/keys/ours.env; AWS_DEFAULT_REGION=us-east-1 "
+    f"{s3} s3 ls s3://ours/o2"
+)
+
+# a shared bucket, kept in a's store: b writes it there with its key to a's
+# store, which dd-store-at hands it; at home, a's own key
+b.wait_until_succeeds(
+    "systemctl restart dd-store-at.service && test -s /var/lib/dd-store/at/blocks.env",
+    timeout=120,
+)
+a.succeed(
+    "systemctl restart dd-store-at.service && test -s /var/lib/dd-store/at/blocks.env"
+)
+b.succeed(
+    "set -a; . /var/lib/dd-store/at/blocks.env; echo 'a block of b' > /tmp/x; "
+    "AWS_DEFAULT_REGION=us-east-1 aws --endpoint-url http://store.a.test.invalid:3443 "
+    "s3 cp /tmp/x s3://blocks/b1"
+)
+assert get(a, "blocks", "b1") == "a block of b"
+assert b.succeed("stat -c %a /var/lib/dd-store/at/blocks.env").strip() == "400"
+
 # a is gone; b serves what a wrote
 a.crash()
 assert get(b, "photos", "p3") == "no room for it there"

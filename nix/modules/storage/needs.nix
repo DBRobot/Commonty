@@ -81,6 +81,9 @@
       "garage-meta-snapshot"
     ];
     everyBox = true;
+    # each box's own repository, in its own store, and a copy where the
+    # plan finds room (backups-<box>)
+    buckets.backups.perBox = true;
     base = {
       # node1, 2026-10-04: peak of a run
       uses = {
@@ -134,6 +137,12 @@
       "dd-cache-gc"
     ];
     instances = 1;
+    # one cache, in one box's store, which every box writes and reads with
+    # its key there; nothing in it that a build cannot make again
+    buckets.nix-cache = {
+      copies = 1;
+      shared = true;
+    };
     base = {
       # node1, 2026-10-04: the nix-cache bucket (its copies are garage's)
       uses = {
@@ -197,6 +206,7 @@
       "dd-store-copy-final@" # a writer's last writes, when dd-control hands it over
       "dd-store-facts"
       "dd-store-migrate" # the move off the old shared pool
+      "dd-store-at" # keys to the shared buckets, at the stores that keep them
       "dd-store-joined" # keys for the boxes that joined on their own keys
     ];
     base = {

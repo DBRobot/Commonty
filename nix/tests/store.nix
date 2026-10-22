@@ -40,6 +40,15 @@ let
         buckets.photos = { };
         # this box's own, kept here alone
         buckets.scratch.copies = 1;
+        # a's alone to write (a box's backup): b keeps a copy, and never
+        # sends one back
+        buckets.ours.writer = "a";
+        # kept in a's store, written there by both (the metric blocks)
+        buckets.blocks = {
+          copies = 1;
+          shared = true;
+          home = "a";
+        };
       };
       environment.etc."age-identity" = {
         text = ages.${name}.identity;

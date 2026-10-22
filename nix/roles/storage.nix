@@ -1,4 +1,4 @@
-{ config, ... }:
+{ config, lib, ... }:
 {
   # A node of the garage cluster and the datasets its pool holds. Which
   # pool, how much of it, and where the blocks live are facts of the
@@ -76,6 +76,28 @@
     AWS_SECRET_ACCESS_KEY=${config.sops.placeholder.cache-key-secret}
   '';
   dd.agent.cacheEnvFile = config.sops.templates."aws-cache.env".path;
+
+  # the metric blocks and the nix cache, copied into the store that keeps
+  # each (its home) ahead of the move off the old pool. The cache could
+  # start empty; on the same disk, copying it saves the first release after
+  # the move from building every box again
+  dd.store.migrate =
+    lib.optionalAttrs (config.dd.store.buckets.metrics.home or null == config.networking.hostName) {
+      metrics = {
+        envFile = config.sops.templates."garage-metrics-key.env".path;
+        id = "GARAGE_METRICS_KEY_ID";
+        secret = "GARAGE_METRICS_KEY_SECRET";
+      };
+    }
+    //
+      lib.optionalAttrs (config.dd.store.buckets.nix-cache.home or null == config.networking.hostName)
+        {
+          nix-cache = {
+            envFile = config.sops.templates."garage-cache-key.env".path;
+            id = "GARAGE_CACHE_KEY_ID";
+            secret = "GARAGE_CACHE_KEY_SECRET";
+          };
+        };
 
   dd.garage.setupEnvFiles = [
     config.sops.templates."garage-backup-key.env".path

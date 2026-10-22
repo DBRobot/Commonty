@@ -32,6 +32,9 @@ let
   # box sends its own to metrics.<domain> on the store's port, a name that
   # follows the fleet view, and the receive with it (observe/needs.nix)
   gathered = placement.builtWith "joined-metrics" != [ ];
+  # the box that serves the members' libraries, the one built with them:
+  # the one box that writes them (store.nix writer)
+  libraryBox = lib.findFirst (_: true) null (placement.builtWith "libraries");
 in
 {
   imports = [
@@ -183,8 +186,19 @@ in
           url = "https://store.${n}.${config.dd.domain}:${toString config.dd.store.publicPort}";
           recipient = secretsKey n;
         });
+        # a bucket for each of them where each writes its own (backups-<box>)
+        boxes = stores;
       };
     }
+    # where the shared buckets are kept (placement's homes: the first store
+    # able to run each one's service, pinned there in the plan) and who
+    # writes the libraries: boxes of the release's, which a joined box's
+    # store never keeps. The mail follows its placed service
+    (lib.mkIf (!config.dd.box.joined) {
+      dd.store.buckets =
+        lib.mapAttrs (_: h: { home = h; }) placement.homes
+        // lib.optionalAttrs (libraryBox != null) { libraries.writer = libraryBox; };
+    })
     # a box that joined on its own key sends its metrics to whichever box
     # the plan gives joined-metrics: metrics.<domain> follows it
     (lib.mkIf (config.dd.box.joined && gathered) {

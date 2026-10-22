@@ -32,9 +32,29 @@ let
       capability
       policy
       built
+      homes
       ;
     inherit list;
   };
+  # the boxes with a store of their own: every one with a secrets key
+  # (box/host.nix)
+  stores = lib.filter (
+    n: ((lib.importJSON ../../fleet/boxes/${n}/hardware.json).secretsKey or null) != null
+  ) (builtins.attrNames list);
+  # a shared bucket (needs shared: one copy, which every box writes) is kept
+  # in one store, its home: the first store, by name, of a box built with
+  # its service and able to run it. The plan keeps it there, wherever the
+  # service runs (place.Bucket Box); none such, none
+  homes = lib.filterAttrs (_: h: h != null) (
+    lib.foldl' (a: b: a // b) { } (
+      lib.mapAttrsToList (
+        s: n:
+        lib.mapAttrs (
+          _: _: lib.findFirst (x: builtins.elem s built.${x} && capability.boxes.${x}.can ? ${s}) null stores
+        ) (lib.filterAttrs (_: b: b.shared) n.buckets)
+      ) needs
+    )
+  );
   # whether a box's own sops file holds a secret (its names are in the
   # clear there): what roles/_sops.nix dd.hasSecret says on the box
   hasSecret =
@@ -152,5 +172,7 @@ in
     builtWith
     hasSecret
     joined
+    stores
+    homes
     ;
 }

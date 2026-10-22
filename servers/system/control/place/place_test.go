@@ -744,3 +744,44 @@ func TestALiveWordNeverAddsAService(t *testing.T) {
 		t.Fatalf("small said it can run games, which the release does not give it: %+v", p.Boxes["small"])
 	}
 }
+
+// a box's own bucket (its backup): kept on that box and where it fits,
+// though every box runs the service writing it; its size is that box's word
+func TestABoxsOwnBucketIsKeptOnItAndWhereItFits(t *testing.T) {
+	in, s := stores()
+	in.Services["backup"] = Service{Enabled: true, EveryBox: true}
+	in.Buckets["backups-small"] = Bucket{Copies: 2, Service: "backup", Box: "small"}
+	s.Boxes["small"].Facts["store/backups-small/bytes"] = 5 * gib
+	// big says it keeps far more of it than small wrote: only small's word counts
+	s.Boxes["big"].Facts["store/backups-small/bytes"] = 500 * gib
+	p := Decide(in, s, 90_000, nil)
+	if got := strings.Join(p.Copies["backups-small"], ","); got != "big,small" {
+		t.Fatalf("copies %q, unplaced %v", got, p.Unplaced)
+	}
+	// with no other store having room, small alone, and said so
+	s.Boxes["big"].Facts["store/backups-small/bytes"] = 0
+	s.Boxes["big"].Facts["store_free_bytes"] = 50 * gib
+	s.Boxes["nas"].Facts["store_free_bytes"] = 40 * gib
+	s.Boxes["small"].Facts["store/backups-small/bytes"] = 200 * gib
+	p = Decide(in, s, 90_000, nil)
+	if got := strings.Join(p.Copies["backups-small"], ","); got != "small" || p.Unplaced["copies/backups-small"] == "" {
+		t.Fatalf("copied where it does not fit: %q %v", got, p.Unplaced)
+	}
+}
+
+// a shared bucket (the metric blocks): kept in its home's store alone,
+// wherever its service runs, and never counted against that box's room
+func TestASharedBucketStaysInItsHomeWhereverItsServiceRuns(t *testing.T) {
+	in, s := stores()
+	in.Buckets["blocks"] = Bucket{Copies: 1, Service: "photos", Box: "nas"}
+	s.Boxes["nas"].Facts["store_size_bytes"], s.Boxes["nas"].Facts["store_free_bytes"] = 2000*gib, 700*gib
+	s.Boxes["nas"].Facts["store/blocks/bytes"] = 1200 * gib
+	p := Decide(in, s, 90_000, nil)
+	if got := strings.Join(p.Copies["blocks"], ","); got != "nas" {
+		t.Fatalf("copies %q, unplaced %v", got, p.Unplaced)
+	}
+	// big has no room for 1200 GiB, and needs none: photos stays
+	if !runs(p, "big", "photos") {
+		t.Fatalf("photos moved off big for a bucket kept on nas: %+v", p.Boxes)
+	}
+}
