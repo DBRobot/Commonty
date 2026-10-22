@@ -8,6 +8,7 @@
       upMbps = 25;
     };
     alwaysOn = true;
+    buckets.libraries = { };
     base = {
       # the files are the pool's; the gate moves them
       uses = {
@@ -62,6 +63,7 @@
       upMbps = 2;
     };
     alwaysOn = true;
+    buckets.mail = { };
     units = [ "dd-mail-hold-sign*" ];
     base = {
       uses = {

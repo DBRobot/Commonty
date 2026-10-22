@@ -56,6 +56,9 @@ type JoinedRules struct {
 type Bucket struct {
 	Copies  int    `json:"copies"`
 	Service string `json:"service"`
+	// the one box that writes it, wherever its service runs (each box's
+	// backup); empty: wherever its service runs
+	Box string `json:"box,omitempty"`
 }
 
 type Box struct {
@@ -316,11 +319,18 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		_, can := canOf[name][svc]
 		return can && now[svc][name]
 	}
-	for b, bk := range in.Buckets {
+	// whether a box writes a bucket: its own box alone, if it has one
+	writes := func(name, b string) bool {
+		if bk := in.Buckets[b]; bk.Box != "" {
+			return name == bk.Box
+		}
+		return writer(name, in.Buckets[b].Service)
+	}
+	for b := range in.Buckets {
 		least, any := 0.0, false
 		for _, name := range live {
 			v := facts(name, "store/"+b+"/bytes") / gib
-			if writer(name, bk.Service) {
+			if writes(name, b) {
 				size[b] = max(size[b], v)
 			} else if v > 0 && (!any || v < least) {
 				least, any = v, true
@@ -335,7 +345,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	// copy back) keeps nothing
 	lost := func(name, b string) bool {
 		for _, w := range live {
-			if writer(w, in.Buckets[b].Service) && facts(w, "store/"+b+"/lost/"+name) > 0 {
+			if writes(w, b) && facts(w, "store/"+b+"/lost/"+name) > 0 {
 				return true
 			}
 		}
@@ -353,6 +363,16 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	}
 	for _, bs := range bucketsOf {
 		sort.Strings(bs)
+	}
+	// a service's buckets on a box: a box's own bucket only on that box
+	bucketsAt := func(name, svc string) []string {
+		out := []string{}
+		for _, b := range bucketsOf[svc] {
+			if bx := in.Buckets[b].Box; bx == "" || bx == name {
+				out = append(out, b)
+			}
+		}
+		return out
 	}
 	disk := map[string]float64{} // box -> GiB of its store the plan fills
 	// what a store has to give: free, less what the plan fills, less a
@@ -400,7 +420,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 					}
 				}
 				mem += memory[x]
-				for _, b := range bucketsOf[x] {
+				for _, b := range bucketsAt(t, x) {
 					if anyStore && !stored(t) {
 						ok = false
 					}
@@ -487,7 +507,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		if anyStore {
 			d := 0.0
 			for _, x := range adds(name, svc) {
-				for _, b := range bucketsOf[x] {
+				for _, b := range bucketsAt(name, x) {
 					if !stored(name) {
 						return false
 					}
@@ -572,7 +592,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 				planned[name][x] = true
 				count[x]++
 				used[name] += memOn(name, x)
-				for _, b := range bucketsOf[x] {
+				for _, b := range bucketsAt(name, x) {
 					disk[name] += needs(name, b)
 				}
 				w := why
@@ -792,9 +812,14 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 				keep = append(keep, name)
 			}
 		}
-		// where it is written: its room was judged with the service
+		// where it is written: its room was judged with the service. A
+		// box's own bucket only on that box, though every box runs its service
 		for _, name := range live {
-			if planned[name][bk.Service] && stored(name) && !lost(name, b) {
+			at := planned[name][bk.Service]
+			if bk.Box != "" {
+				at = name == bk.Box
+			}
+			if at && stored(name) && !lost(name, b) {
 				add(name)
 			}
 		}

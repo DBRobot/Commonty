@@ -292,6 +292,16 @@ t.attrsOf (
               default = 2;
               description = "in how many boxes' stores it is kept, the one it is written on included";
             };
+            options.perBox = lib.mkOption {
+              type = t.bool;
+              default = false;
+              description = "one bucket for each box, <name>-<box>, written by that box alone (each box's backup)";
+            };
+            options.shared = lib.mkOption {
+              type = t.bool;
+              default = false;
+              description = "kept in the store of the box its service runs on, and the other boxes write it there, each with its own key to that store (every box's metric blocks, the nix cache)";
+            };
           }
         );
         default = { };

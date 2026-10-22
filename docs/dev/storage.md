@@ -39,8 +39,23 @@ until the other is back.
   only where it fits. Until a plan has been seen, the first boxes by name.
   A copy is added to, never pruned: what is deleted here stays there.
   Deletes reaching the copies is a decision still to make.
+- **Whose a bucket is**: most are written where their service runs. A
+  box's own (its backup, `backups-<box>`) is written by that box alone,
+  wherever it is kept, and only that box copies it out; so are the
+  libraries, by the one box built with them. The mail is written where the
+  plan runs its service. A copy held elsewhere is never sent back, so what
+  the writer deletes stays deleted.
+- **Shared buckets**: the metric blocks and the nix cache are kept in one
+  box's store, its home: the first store, by name, of a box built with
+  and able to run the bucket's service (`homes` in
+  `nix/lib/fleet-placement.nix`). The plan keeps it there wherever the
+  service runs, and every box writes it there with its own key to that store, handed to it sealed as its
+  copies' key is (`dd-store-at`, in `/var/lib/dd-store/at/<bucket>.env`).
+  One copy: what is in them can be made again.
 - **Room**: each store says how big it is, what it has free and what it
-  keeps of each bucket, in its box's heartbeat. With a twentieth left it
+  keeps of each bucket, in its box's heartbeat. It keeps a fifth of its
+  pool for the box's other services, measured on the pool, not the
+  store's dataset. With a twentieth left it
   refuses what other boxes send (`507`), and still serves what it keeps.
   Its dataset's quota is its capacity, so its own services can't fill the
   pool either. A service isn't placed where its buckets wouldn't fit, and
@@ -52,6 +67,26 @@ until the other is back.
 - **Failover**: a bucket's copies carry the same name, so a service that
   moves to a box holding a copy reads it there at once, and writes there.
   The writes copy back out the same way.
+
+## Off the old pool
+
+`dd-store-migrate` copies each bucket from the old pool into the store of
+the box that writes it, every hour, and never deletes on either side. It
+says per bucket whether all of it is there
+(`dd_store_migrated` in `/var/lib/dd-facts/store-migrate.prom`). Once a
+service writes its store, its bucket is copied until it is all there one
+more time, then no more, so a member's delete is not undone from the old
+pool.
+
+What moves, and what does not:
+
+- ente, vaultwarden: copied; they switch with failover.
+- libraries, mail: copied into the store of the box built with them.
+- metrics: copied into its home's store.
+- nix-cache: copied into its home's store, on the same disk; it could
+  start empty.
+- backups-<box>: not copied. Each box starts a new repository in its own
+  store; the old one stays readable until the old pool goes.
 
 ## Turning it on
 

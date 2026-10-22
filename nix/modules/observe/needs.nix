@@ -64,6 +64,13 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "every box's history, read out of the bucket";
+    # every box's blocks, in its home's store (fleet-placement.nix homes);
+    # each box's sidecar writes them there. History, not anyone's data: one
+    # copy
+    buckets.metrics = {
+      copies = 1;
+      shared = true;
+    };
     base = {
       # node1, 2026-10-04: peak; its index cache
       uses = {

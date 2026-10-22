@@ -13,6 +13,8 @@
   list,
   built,
   policy,
+  # a shared bucket's home store, by bucket (fleet-placement.nix homes)
+  homes ? { },
 }:
 let
   on =
@@ -65,14 +67,34 @@ in
       builtins.attrNames n.base.depends
     );
   }) needs;
-  # each bucket a service writes: how many stores keep it, and whose it is
+  # each bucket a service writes: how many stores keep it, and whose it is;
+  # one a box writes alone (perBox) is that box's, wherever its service runs,
+  # and a shared one is its home's
   buckets = lib.foldl' (a: b: a // b) { } (
     lib.mapAttrsToList (
       s: n:
-      lib.mapAttrs (_: b: {
-        inherit (b) copies;
-        service = s;
-      }) n.buckets
+      lib.foldl' (a: b: a // b) { } (
+        lib.mapAttrsToList (
+          name: b:
+          if b.perBox then
+            lib.mapAttrs' (
+              box: _:
+              lib.nameValuePair "${name}-${box}" {
+                inherit (b) copies;
+                service = s;
+                inherit box;
+              }
+            ) list
+          else
+            {
+              ${name} = {
+                inherit (b) copies;
+                service = s;
+              }
+              // lib.optionalAttrs (homes ? ${name}) { box = homes.${name}; };
+            }
+        ) n.buckets
+      )
     ) needs
   );
   # what a box that joined on its own key may be given (place.JoinedRules):

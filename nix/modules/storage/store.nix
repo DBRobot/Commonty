@@ -58,19 +58,46 @@ let
     on = config.dd.failover or false;
   };
   # every bucket a service writes, fleet-wide: any store may be picked to
-  # keep any of them
+  # keep any of them. One a box writes alone (perBox) is one bucket for
+  # each box, <name>-<box>, which only that box copies out
   declared = lib.foldl' (a: b: a // b) { } (
-    lib.mapAttrsToList (
-      s: n:
-      lib.mapAttrs (_: b: {
-        inherit (b) copies;
-        service = s;
-      }) n.buckets
-    ) needs
+    lib.concatLists (
+      lib.mapAttrsToList (
+        s: n:
+        lib.mapAttrsToList (
+          name: b:
+          if b.perBox then
+            lib.listToAttrs (
+              map (
+                x:
+                lib.nameValuePair "${name}-${x}" {
+                  inherit (b) copies shared;
+                  service = s;
+                  writer = x;
+                }
+              ) cfg.boxes
+            )
+          else
+            {
+              ${name} = {
+                inherit (b) copies shared;
+                service = s;
+              };
+            }
+        ) n.buckets
+      ) needs
+    )
   );
   sorted = lib.sort lib.lessThan (builtins.attrNames cfg.peers);
   # what is copied anywhere, and so may come here from other boxes
   copied = lib.attrNames (lib.filterAttrs (_: b: b.copies > 1) cfg.buckets);
+  # what other boxes write here, each with its key, when this is its home
+  sharedHere = lib.attrNames (lib.filterAttrs (_: b: b.shared && b.home == box) cfg.buckets);
+  # every bucket a peer's key here is allowed: its copies, and what it writes here
+  peerBuckets = lib.unique (copied ++ sharedHere);
+  # a shared bucket kept in another box's store: this box writes it there
+  remote = lib.filterAttrs (_: b: b.shared && b.home != null && b.home != box) cfg.buckets;
+  homed = lib.filterAttrs (_: b: b.shared && b.home != null) cfg.buckets;
   # the plan, as dd-control writes it, and the last one this box saw
   plan = "/run/dd-placed/copies.json";
   # a placed service's bucket is written where the service runs; another's,
@@ -212,7 +239,10 @@ let
         ${lib.concatStrings (
           lib.mapAttrsToList (
             b: v:
-            if v.service != null && placedSvc v.service then
+            # a box's own: written there alone
+            if v.writer != null then
+              "  ${b}) ${if v.writer == box then "true" else "false"} ;;\n"
+            else if v.service != null && placedSvc v.service then
               "  ${b}) [ -e /run/dd-placed/${v.service} ] ;;\n"
             else
               "  ${b}) true ;;\n"
@@ -378,10 +408,42 @@ in
               default = null;
               description = "the service that writes it (its needs' buckets); null: this box writes it whenever it has it";
             };
+            writer = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "the one box that writes it, and the only one that copies it out (a box's backup, the libraries); null: as its service says";
+            };
+            shared = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "kept in one box's store (home), and every box writes it there with its own key to that store";
+            };
+            home = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "a shared bucket's box: whose store keeps it";
+            };
           };
         }
       );
       default = { };
+    };
+    boxes = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ box ];
+      description = "every box with a store: a bucket each box writes alone (needs perBox) is one bucket for each";
+    };
+    at = lib.mkOption {
+      type = lib.types.attrsOf lib.types.attrs;
+      readOnly = true;
+      default = lib.mapAttrs (b: v: {
+        endpoint =
+          if v.home == box then "http://127.0.0.1:${toString cfg.port}" else cfg.peers.${v.home}.url;
+        # the key there: this box's own for the bucket at home, its key to
+        # the home's store elsewhere (dd-store-at)
+        envFile = "${state}/at/${b}.env";
+      }) homed;
+      description = "where this box reaches each shared bucket, and the file with its key there (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY), readable by the bucket's owner";
     };
     handover = lib.mkOption {
       type = lib.types.attrsOf (lib.types.listOf lib.types.str);
@@ -398,6 +460,11 @@ in
             };
             id = lib.mkOption { type = lib.types.str; };
             secret = lib.mkOption { type = lib.types.str; };
+            once = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "the service writes this store now: copied until it is all here once more, then never again, so what a member deletes here does not come back from the old pool";
+            };
           };
         }
       );
@@ -422,10 +489,15 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    dd.store.buckets = lib.mapAttrs (_: b: {
-      copies = lib.mkDefault b.copies;
-      service = lib.mkDefault b.service;
-    }) declared;
+    dd.store.buckets = lib.mapAttrs (
+      _: b:
+      {
+        copies = lib.mkDefault b.copies;
+        service = lib.mkDefault b.service;
+        shared = lib.mkDefault b.shared;
+      }
+      // lib.optionalAttrs (b ? writer) { writer = lib.mkDefault b.writer; }
+    ) declared;
 
     users.users.dd-store = {
       isSystemUser = true;
@@ -553,7 +625,8 @@ in
           lib.mapAttrsToList (p: v: ''
             key peer-${p} > ${state}/from/${p}.env
             id=$(awk -F= '/ACCESS_KEY_ID/ { print $2 }' ${state}/from/${p}.env)
-            for b in ${lib.concatStringsSep " " copied}; do
+            # its copies, and the shared buckets it writes here
+            for b in ${lib.concatStringsSep " " peerBuckets}; do
               g bucket allow --read --write "$b" --key "$id" >/dev/null
             done
             age -r ${lib.escapeShellArg v.recipient} -o ${sealed}/${p}.age.new ${state}/from/${p}.env
@@ -584,18 +657,32 @@ in
     };
 
     # the move off the old shared pool: each bucket this box writes there,
-    # copied here every hour, so failover finds it in place
+    # copied here every hour, so failover finds it in place. Once the
+    # service writes here (once), one more copy brings what it wrote there
+    # before its switch, and then no more: a member's delete here stays
+    # deleted. Each bucket's state, for the box's page and the check
+    # before the old pool goes: dd_store_migrated 1 all here, 0 not yet
     systemd.services.dd-store-migrate = lib.mkIf (cfg.migrate != { }) {
       description = "Copy this box's buckets from the old storage pool into its own store";
       after = [ "dd-store-setup.service" ];
       restartIfChanged = false;
-      path = [ pkgs.rclone ];
+      path = [
+        pkgs.rclone
+        pkgs.coreutils
+      ];
       serviceConfig.Type = "oneshot";
       script = ''
         set -uo pipefail
         export RCLONE_CONFIG=/dev/null
+        done=${state}/migrated
+        mkdir -p $done
+        out=$(mktemp)
         ${lib.concatStrings (
           lib.mapAttrsToList (b: m: ''
+            if ${lib.boolToString m.once} && [ -e $done/${b} ]; then
+              echo "${b}: copied once since its switch; no more"
+              echo 'dd_store_migrated{bucket="${b}",once="${lib.boolToString m.once}"} 1' >> $out
+            else
             (
               set -a; . ${m.envFile}; . ${state}/keys/${b}.env; set +a
               export RCLONE_CONFIG_POOL_TYPE=s3 RCLONE_CONFIG_POOL_PROVIDER=Other \
@@ -608,14 +695,90 @@ in
                 RCLONE_CONFIG_HERE_FORCE_PATH_STYLE=true
               # copy, never sync: nothing is deleted on either side
               rclone copy --checksum --s3-no-check-bucket --fast-list pool:${b} here:${b} \
-                && rclone check --one-way --fast-list pool:${b} here:${b} \
-                && echo "${b}: all of it here" \
-                || echo "${b}: not all here yet"
-            )
+                && rclone check --one-way --fast-list pool:${b} here:${b}
+            ) && {
+              echo "${b}: all of it here"
+              echo 'dd_store_migrated{bucket="${b}",once="${lib.boolToString m.once}"} 1' >> $out
+              ${lib.optionalString m.once "touch $done/${b}"}
+            } || {
+              echo "${b}: not all here yet"
+              echo 'dd_store_migrated{bucket="${b}",once="${lib.boolToString m.once}"} 0' >> $out
+            }
+            fi
           '') cfg.migrate
         )}
+        install -d /var/lib/dd-facts
+        chmod 0644 $out
+        mv $out /var/lib/dd-facts/store-migrate.prom
         exit 0
       '';
+    };
+
+    # the shared buckets (thanos' blocks, the nix cache): kept in one box's
+    # store, which the others write with their own key to it. Here, each
+    # one's key in ${state}/at/<bucket>.env, for its owner: this box's own
+    # at home, and its key to the home's store elsewhere, handed to it
+    # sealed as its copies' is (dd-store-copy), fetched again every hour
+    systemd.services.dd-store-at = lib.mkIf (homed != { }) {
+      description = "Keys to the shared buckets, at the stores that keep them";
+      after = [ "dd-store-setup.service" ];
+      wants = [ "dd-store-setup.service" ];
+      wantedBy = [ "multi-user.target" ];
+      restartIfChanged = true;
+      path = [
+        pkgs.coreutils
+        pkgs.curl
+        pkgs.age
+        pkgs.findutils
+      ]
+      ++ cfg.agePlugins;
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        set -uo pipefail
+        umask 077
+        install -d -m 0755 ${state}/at
+        install -d -m 0700 ${state}/remote
+        failed=0
+        put() { # put <bucket> <owner> <env file>
+          cp "$3" ${state}/at/$1.env.new && chown "$2" ${state}/at/$1.env.new \
+            && chmod 0400 ${state}/at/$1.env.new && mv ${state}/at/$1.env.new ${state}/at/$1.env
+        }
+        ${lib.concatStrings (
+          lib.mapAttrsToList (
+            b: v:
+            if v.home == box then
+              ''
+                put ${b} ${v.owner} ${state}/keys/${b}.env || failed=1
+              ''
+            else
+              ''
+                f=${state}/remote/${v.home}.env
+                if [ -z "$(find "$f" -mmin -60 2>/dev/null)" ]; then
+                  if curl -fsS --max-time 30 ${cfg.peers.${v.home}.url}/_keys/${box}.age -o $f.age \
+                    && age -d -i ${cfg.identity} $f.age > $f.new; then
+                    mv $f.new $f
+                  else
+                    echo "${v.home}: no key from its store yet"
+                  fi
+                fi
+                if [ -s "$f" ]; then put ${b} ${v.owner} "$f" || failed=1; else failed=1; fi
+              ''
+          ) homed
+        )}
+        # a home away is not this box failing: the timer asks again
+        [ "$failed" = 0 ] || echo "some keys wait for the next run"
+        exit 0
+      '';
+    };
+    systemd.timers.dd-store-at = lib.mkIf (homed != { }) {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "5min";
+        OnUnitActiveSec = "15min";
+      };
     };
     systemd.timers.dd-store-migrate = lib.mkIf (cfg.migrate != { }) {
       wantedBy = [ "timers.target" ];
@@ -703,7 +866,8 @@ in
       path = [
         pkgs.coreutils
         pkgs.gawk
-      ];
+      ]
+      ++ lib.optional (cfg.dataset != null) config.boot.zfs.package;
       serviceConfig.Type = "oneshot";
       script = ''
         set -uo pipefail
@@ -726,8 +890,19 @@ in
           if cfg.capacity == "auto" then
             ''
               # what it keeps, and what its pool has free less a fifth of
-              # the pool: the rest is the box's other services'
-              pool=$(df -B1 --output=size ${cfg.dataDir} | tail -1)
+              # the pool: the rest is the box's other services'. The pool's
+              # own size: df's is the dataset's, what it holds and what is
+              # free, and on a box whose pool is nearly full (node2, 94%)
+              # that kept back a fifth of almost nothing
+              ${
+                if cfg.dataset != null then
+                  ''
+                    pool=$(zfs get -Hp -o value used,available ${lib.head (lib.splitString "/" cfg.dataset)} | awk '{ s += $1 } END { printf "%.0f", s }')
+                    [ -n "$pool" ] && [ "$pool" -gt 0 ] || pool=$(df -B1 --output=size ${cfg.dataDir} | tail -1)
+                  ''
+                else
+                  "pool=$(df -B1 --output=size ${cfg.dataDir} | tail -1)"
+              }
               spare=$((avail - pool / 5))
               [ "$spare" -lt 0 ] && spare=0
               cap=$((used + spare))
