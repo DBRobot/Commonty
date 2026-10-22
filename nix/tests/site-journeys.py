@@ -109,12 +109,33 @@ box.wait_for_unit("nginx.service")
 box.wait_for_unit("dd-games.service")
 
 # the browser: each journey, its result kept
-box.succeed(
+status, _ = box.execute(
     f"cd /tmp && PLAYWRIGHT_BROWSERS_PATH={nix['browsers']} FONTCONFIG_FILE={nix['fonts']} "
     f"SITE_CA={nix['ca']} {nix['python']} {nix['journeys']} "
     f"{d} {nix['app']} {nix['carried']} {nix['web']} /root/app-state.json /tmp/journeys.json {nix['picture']} "
-    f"> /tmp/journeys.log 2>&1 || (cat /tmp/journeys.log; echo '--- app'; tail -40 /tmp/app.log; echo '--- gate'; journalctl -u dd-verify --no-pager -o cat | tail -40; exit 1)"
+    f"> /tmp/journeys.log 2>&1"
 )
+if status != 0:
+    print(
+        box.execute(
+            "echo '--- app'; tail -40 /tmp/app.log; echo '--- gate'; journalctl -u dd-verify --no-pager -o cat | tail -40; "
+            "echo '--- nginx, what did not answer 2xx/3xx'; grep -vE '\" [23][0-9][0-9] ' /var/log/nginx/access.log | cut -c1-300 | tail -40"
+        )[1]
+    )
+    # a picture of each page a journey stopped on, in the build's output
+    if box.execute("test -d /tmp/journeys-shots")[0] == 0:
+        box.copy_from_machine("/tmp/journeys-shots")
+    jlog = box.execute("cat /tmp/journeys.log")[1]
+    print(jlog)
+    # the journeys that failed, last, where the build's tail shows them
+    raise AssertionError(
+        "site-journeys failed\n"
+        + "\n".join(
+            ln
+            for ln in jlog.splitlines()
+            if ln.startswith(("failed:", "site-journeys:"))
+        )
+    )
 print(box.succeed("cat /tmp/journeys.log"))
 
 # what the journeys left behind, as the box keeps it

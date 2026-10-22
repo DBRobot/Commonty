@@ -87,6 +87,8 @@ let index = [];                   // [{ id, title, model, updated }]
 let current = null;               // the open chat
 let chosen = null;                // the model the next answer comes from
 let busy = null;                  // the answer being written: { ctrl }
+let listed;                       // settles modelsListed, once start() asks
+const modelsListed = new Promise((r) => { listed = r; });
 let demo = false;
 const searchOn = () => !demo && $('search-web').getAttribute('aria-pressed') === 'true';
 
@@ -386,6 +388,8 @@ function system() {
 }
 
 async function send(text) {
+  // sent before the box said which models it has: it goes once it has
+  if (!chosen) await modelsListed;
   if (busy || !text.trim() || !chosen) return;
   if (!current) current = { id: newId(), title: titleFrom(text), model: chosen, messages: [], created: now(), updated: now() };
   current.model = chosen;
@@ -637,6 +641,7 @@ async function start() {
     $('hint').textContent = `The models could not be listed: ${e.message}`;
     $('hint').classList.add('bad');
   });
+  listed(models$);
   if (demo) {
     sayKept('This is the demo: chats stay in this tab and go when it closes.');
   } else {
