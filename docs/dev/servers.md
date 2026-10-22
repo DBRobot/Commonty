@@ -343,9 +343,11 @@ the box's own box.json, on the report the box made at this boot
 `/var/lib/dd-facts/can.prom` (`dd_can_live 1`, `dd_can{service=…}`
 scores), which the heartbeat carries. It runs at boot after the report
 and again on every switch whose needs or rules changed; on no report or a
-failed judgment it removes the file and the release's table stands. So a
-box that gains a GPU or memory is placed for it the next round, with no
-release. Running the Nix rules on the box, not a Go copy of them, keeps
+failed judgment it removes the file and the release's table stands. Its
+judgment only narrows the release's table (a box that lost memory or a
+disk stops being given what no longer fits), never widens it: no box's
+own word gives it work. A box that gains a GPU or memory is placed for it
+once its new report is in a release (`scripts/box-report`). Running the Nix rules on the box, not a Go copy of them, keeps
 one set of rules; `checks.placement` fails if a box judged this way, on
 the release's report, would come to anything but the release's table.
 

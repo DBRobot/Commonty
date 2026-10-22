@@ -172,14 +172,23 @@ each service holds, the roles each box runs. It is greedy, not optimal:
   hold: fit and room are checked only when choosing a new box, once that
   one is gone. One that stays where it no longer fits is named in the
   plan's `doesNotFit` for that box.
-- What a box can run is its heartbeat's word when it sends one
-  (`can_live`, `can/<service>`: the release's rules run on the box's own
-  report, [servers](servers.md#needs-and-placement)), else the release's
-  table. Its word never adds a service the release's `barred` names for it
-  (its owner's trust and line choices), nor a lease service the release
-  does not let it hold: the lease rules, and the keys sealed to those
-  boxes, are the release's. A box claiming more than it has only draws
-  work it then fails, which moves it: availability, never access.
+- What a box can run is the release's table (its signed report, judged
+  by the release's rules), narrowed by its heartbeat's word when it sends
+  one (`can_live`, `can/<service>`: the same rules on its report as it is
+  now, [servers](servers.md#needs-and-placement)). Its word only takes
+  away: a service the release does not give it, its `barred` (its owner's
+  trust and line choices) or a lease the release does not let it hold
+  never comes from what it says. New hardware counts from the release
+  that carries its new report.
+- A box that joined on its own key is in no release's table. The
+  release's rules for such boxes (`joined` in the placement inputs) name
+  what a member's box may run by the policy's trust tiers (trust `any`,
+  no code handing people their secrets, nothing the owner keeps to their
+  own hardware, no lease), and its word only narrows that. Until its
+  hardware and boot are attested in the agreed state (`attested`, off
+  today) it is given no service at all and holds copies only; and what it
+  says it runs counts for nothing, so it can neither keep a service nor
+  draw a name.
 - A box whose facts say `draining` (below) is given nothing new: no
   service, no new copy. What may move moves off it; what moves on failure
   stays until the box leaves. A copy it keeps already stays listed only
@@ -213,8 +222,8 @@ each service holds, the roles each box runs. It is greedy, not optimal:
   its signed report.
 
 So when the needs or a box's capability change, the next round plans
-again: needs with the release that changes them, a box's hardware at its
-next boot, with no release.
+again: needs with the release that changes them, a box's hardware with
+the release that carries its new report.
 
 ### Draining a box
 
