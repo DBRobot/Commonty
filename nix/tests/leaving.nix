@@ -1,7 +1,7 @@
 # Leaving (docs/dev/leaving.md): a member leaves with their root's signed
 # word, every way in ends at once and the gate deletes their libraries, disk
 # images, notes and names straight away; a member the owner removes keeps
-# everything for the (shortened) window, then loses it the same way; another
+# everything for the window, then loses it the same way; another
 # member's things are never touched.
 { pkgs, self, ... }:
 let
@@ -24,9 +24,8 @@ in
       ../modules/library/libraries.nix
     ];
     dd.verify.role = pkgs.lib.mkForce "full";
-    # a removal keeps things a minute, not 30 days, and the gate looks
-    # every 2s: the script's checks inside the window take ~20s at most
-    dd.verify.leaveWindowSeconds = 60;
+    # the real window: the script never races it, it moves a removal back
+    # in the release instead; the gate looks every 2s
     dd.verify.leaveTickSeconds = 2;
     dd.garage = {
       zone = "r-test";
