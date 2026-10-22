@@ -50,9 +50,13 @@ let
     || needs.${s}.spread
     || builtins.any (w: builtins.elem w writers) (local s)
     || builtins.any (w: builtins.elem s (local w)) writers;
-  carried = lib.filter isPlaced (
-    bring config.dd.placed.roles ++ lib.filter follows (bring config.dd.control.roles)
-  );
+  carried =
+    if config.dd.placed.services != null then
+      lib.filter (s: needs ? ${s} && isPlaced s) config.dd.placed.services
+    else
+      lib.filter isPlaced (
+        bring config.dd.placed.roles ++ lib.filter follows (bring config.dd.control.roles)
+      );
 
   # the units the box has, by name with their kind (foo.service, foo.timer)
   kinds = [
@@ -192,6 +196,11 @@ let
   startsOf = s: lib.unique (map service carries.${s} ++ lib.filter atBoot (owned.${s} or [ ]));
 in
 {
+  options.dd.placed.services = lib.mkOption {
+    type = lib.types.nullOr (lib.types.listOf lib.types.str);
+    default = null;
+    description = "the placed services this box carries, as the release gives them (nix/lib/fleet-placement.nix carries: of what it is built with, what its capability lets it run). Null: from its roles (dd.placed.roles), as a test's box has them";
+  };
   options.dd.placed.roles = lib.mkOption {
     type = lib.types.listOf lib.types.str;
     default = config.dd.control.roles;

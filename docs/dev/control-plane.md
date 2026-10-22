@@ -4,8 +4,8 @@ Status: running on node1 and node2 with the Cloudflare witness (since
 release 176). Boxes heartbeat into it; the gates keep the directory in it
 (below). It plans placement at `/plan`, and switches the placed services
 on and off by it (below): every service but what runs on every box and a
-few with no unit of their own. Which boxes have each built in is still
-their roles'.
+few with no unit of their own. Which boxes have each built in comes from
+their capability, not a list kept by hand (below).
 
 ## What it is for
 
@@ -247,13 +247,24 @@ A service whose needs say `placed = true` is switched by the plan
   `forgejo-public`, `ente-web`, `vaultwarden-send`, `dd-dns`), the
   shared pool's `garage`, which every box's agent fetches its releases
   through, and members' computers, each switched by its own lease.
-- Its roles still decide which boxes have it built in. A box *carries*
-  it (`/etc/dd-placed/carries.json`) when a role it has in
-  fleet/boxes.json brings it. With failover a box is built with the roles
-  whose writers it is able to run as well, and of those it carries only
-  the writers, what they need beside them, what needs them beside it and
-  what is spread over every box: those go wherever their writer does. The
-  rest of such a role is built in and never runs there.
+- What a box is built with comes from its capability
+  ([`fleet-placement.nix`](../../nix/lib/fleet-placement.nix)
+  `carried`), never a hand-set list: every bundle of modules
+  (`fleet/roles.json`) of which it can run a service that does not run
+  everywhere (its signed report, its owner's box.json and the policy:
+  `capability.nix`), whose secrets its own sops file holds (`secrets`:
+  what the bundle's modules read whatever else; [secrets](secrets.md)),
+  and whose companions (`with`) it is built with too. It *carries* a
+  placed service (`/etc/dd-placed/carries.json`, from `carries`) when it
+  is built with it and able to run it, and has units of it: a module
+  that runs without a secret the box lacks (`dd.hasSecret`) makes none.
+- What keeps state on its box's own disk alone asks for its dataset
+  (needs `requires.dataset`: the games' worlds), so only a box whose
+  owner gave it one carries it, and a box that would start it empty
+  never does. The house's DNS and Tang ask for the house's own box
+  (`requires.place = "house"`: its household in box.json), the address
+  the router hands out and the keys a controller's card opens with; and
+  stay there while it is up (`moves = "on-failure"`).
 - Its units start only while `/run/dd-placed/<service>` exists; /run is
   empty at boot, so nothing placed runs until the agreed state puts it
   somewhere. Its units are its own name and its needs' units as they are

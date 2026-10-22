@@ -243,6 +243,13 @@ tmdb-token               posters on Movies & TV (TMDB)
 console-password-hash    the owner's passphrase at a box's keyboard, every box
 ```
 
+Until a secret goes one of these ways, the bundle of modules that reads
+it (`fleet/roles.json` `secrets`: storage's pool keys, the runners'
+tokens, the libraries' key) is built only on a box whose own file holds
+it, and so the control plane places its services nowhere else
+(`nix/lib/fleet-placement.nix`). That is the one thing still set by hand
+about where a service may run, and it goes with the secret.
+
 No longer read by anything, and to be taken out of `secrets/node1.yaml`:
 `ente-smtp-password`, `alert-recipient` and `alert-smtp-password` (mail
 goes through the mail Worker), `github-mirror-token` (no mirror), and with failover on the ones made on the

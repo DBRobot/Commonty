@@ -144,10 +144,11 @@
   };
 
   thanos-compact = {
-    # switched by the control plane: it runs where the plan puts it (box/placed.nix)
-    placed = true;
+    # two at once would fight over the same blocks, even for the moment a
+    # move takes: it runs only under the lease, which the box it leaves
+    # gives back once it has stopped (box/placed.nix)
+    lease = true;
     what = "merges and thins the history in the bucket";
-    # two at once would fight over the same blocks
     instances = 1;
     base = {
       # it downloads blocks to merge them: room for the biggest, overestimated

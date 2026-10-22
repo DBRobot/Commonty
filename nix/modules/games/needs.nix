@@ -33,6 +33,9 @@ in
     # games.<domain>: the DNS Worker points it at the box running this
     hosts = [ "games" ];
     instances = 1;
+    # members' worlds are on this box's disk, not in a bucket: they stay
+    # while it is up, and the games move only when it is gone
+    moves = "on-failure";
     # players connect to it; a world runs when someone starts it
     traffic = {
       class = "high";
@@ -51,6 +54,9 @@ in
         arch = [ "x86_64" ];
         kvm = true;
         disk.size.min = "100G"; # a few worlds' installs and their saves
+        # the worlds are on this dataset and nowhere else (backed up, not
+        # copied): only a box whose owner gave it one runs the games
+        dataset = "/var/lib/dd-games";
       };
       # node1, 2026-10-04: the manager; worlds are what the variants take
       uses = {

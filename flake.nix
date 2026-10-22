@@ -1612,10 +1612,10 @@
               {
                 dd.control.enable = true;
                 dd.control.roles = box.roles;
-                # the placed services it carries are its own roles' in the
-                # list; with failover, of the rest of dd.control.roles only
-                # the writers and what goes with them (box/placed.nix)
-                dd.placed.roles = (lib.importJSON ./fleet/boxes.json).${name}.roles or box.roles;
+                # the placed services it carries: of what it is built with,
+                # what its capability lets it run (fleet-placement.nix
+                # carries); a joined box's from its roles (box/placed.nix)
+                dd.placed.services = fp.carries.${name} or null;
               }
             ]
             ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops

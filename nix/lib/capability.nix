@@ -91,7 +91,11 @@ let
       metered = net.metered or true;
       owner = own.owner or null;
       household = (own.house or { }).household or [ ];
-      inHouse = own ? house;
+      # the mountpoints its owner gave datasets in box.json
+      mounts = lib.mapAttrsToList (_: d: d.mountpoint or "") (own.datasets or { });
+      # on a household's own network as its main box: its box.json says who
+      # lives there (the box the router hands out as the house's)
+      inHouse = own ? house && (own.house.household or [ ]) != [ ];
     };
 
   # what one requirement block asks that the box lacks
@@ -118,7 +122,12 @@ let
       ) "needs a GPU that encodes ${lib.concatStringsSep ", " g.encode}"
     )
     ++ lib.optional (((r.disk or { }).kind or "any") == "ssd" && !f.ssd) "needs an SSD"
-    ++ lib.optional ((r.place or "any") == "house" && !f.inHouse) "runs in a house";
+    ++ lib.optional (
+      (r.dataset or null) != null && !(builtins.elem r.dataset f.mounts)
+    ) "keeps its state at ${r.dataset}, a dataset this box's box.json does not give it"
+    ++ lib.optional (
+      (r.place or "any") == "house" && !f.inHouse
+    ) "runs on a house's own box, its household in box.json";
 
   # everything that keeps service s off box `name`, before its dependencies
   ownLacks =
