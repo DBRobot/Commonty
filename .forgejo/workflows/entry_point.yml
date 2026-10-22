@@ -306,13 +306,22 @@ jobs:
           node --input-type=module - <<'EOF'
           const { TOKEN, API, SHA, RUN, HOSTS, BUILDERS } = process.env;
           const headers = { authorization: `token ${TOKEN}`, 'content-type': 'application/json' };
-          const all = [];
-          for (let page = 1; ; page++) {
-            const r = await fetch(`${API}/commits/${SHA}/statuses?limit=50&page=${page}`, { headers });
-            if (!r.ok) throw new Error(`statuses: http ${r.status}`);
-            const got = await r.json();
-            all.push(...got);
-            if (got.length < 50) break;
+          // newest first, so a status other jobs add while this pages shifts
+          // the rest down a page and one can fall between two pages: read
+          // until no build/ status is missing, or five reads
+          const want = HOSTS.split(' ').flatMap((h) => BUILDERS.split(' ').map((b) => `build/${h}@${b}`));
+          let all = [];
+          for (let read = 1; read <= 5; read++) {
+            all = [];
+            for (let page = 1; ; page++) {
+              const r = await fetch(`${API}/commits/${SHA}/statuses?limit=50&page=${page}`, { headers });
+              if (!r.ok) throw new Error(`statuses: http ${r.status}`);
+              const got = await r.json();
+              all.push(...got);
+              if (got.length < 50) break;
+            }
+            if (want.every((c) => all.some((s) => s.context === c && s.status === 'success'))) break;
+            await new Promise((d) => setTimeout(d, 3000));
           }
           // newest first: the first success per context is the one that counts
           const path = (ctx) => all.find((s) => s.context === ctx && s.status === 'success')?.description;
