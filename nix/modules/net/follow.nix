@@ -82,7 +82,13 @@ let
     [ "$E" -gt 0 ] || { echo "the server has not started here yet"; exit 0; }
     umask 077
     failed=0
-    if sqlite3 ${state}/db.sqlite ".backup ${mine}/db.sqlite" \
+    # headscale makes its database a few seconds after it starts, and
+    # sqlite3 would make an empty one first, root's and 0600, which
+    # headscale then can never open
+    if [ ! -e ${state}/db.sqlite ]; then
+      echo "no database here yet"
+      failed=1
+    elif sqlite3 ${state}/db.sqlite ".backup ${mine}/db.sqlite" \
       && age ${recipients} -o ${mine}/db.sqlite.age ${mine}/db.sqlite \
       && rclone copyto ${mine}/db.sqlite.age here:headscale/db.sqlite.age \
       && echo "$E" | rclone rcat here:headscale/epoch; then
