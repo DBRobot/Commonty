@@ -1,7 +1,6 @@
 {
   config,
   lib,
-  options,
   ...
 }:
 {
@@ -31,17 +30,7 @@
       boot.binfmt.emulatedSystems = [ "aarch64-linux" ];
       # what it uploads is signed with a key it made itself (storage/cache.nix);
       # nix's key to the cache is this box's key to the store that keeps it
-      # (storage/cache.nix); the sops one is the old pool's, until it goes
-      sops.secrets.cache-key-id = { };
-      sops.secrets.cache-key-secret = { };
+      # (storage/cache.nix)
     }
-    (lib.optionalAttrs (options.dd ? garage) {
-      # a runner writes the cache it reads: where this box runs garage, its key
-      # gets write as well as read
-      dd.garage.buckets.nix-cache.allow = [
-        "read"
-        "write"
-      ];
-    })
   ];
 }

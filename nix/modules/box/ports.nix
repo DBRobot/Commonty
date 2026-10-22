@@ -50,13 +50,6 @@ in
         ];
       })
       (lib.mkIf (has "postgresql") { postgresql = [ config.services.postgresql.settings.port ]; })
-      (lib.mkIf (has "garage") {
-        garage = [
-          3900
-          3901
-          3903
-        ];
-      })
       (lib.mkIf (has "prometheus") { prometheus = [ config.services.prometheus.port ]; })
       (lib.mkIf (has "prometheus-node-exporter") {
         node-exporter = [ config.services.prometheus.exporters.node.port ];

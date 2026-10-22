@@ -50,7 +50,7 @@
         outbound = [
           "git.<domain>"
           "api.<domain>"
-          "s3"
+          "store"
           "the house's boxes"
         ];
         inbound = "localhost"; # nginx asks it; the network's door through nginx

@@ -3,13 +3,8 @@
 # once the window runs out; nothing of anyone else's.
 import json
 
-box.wait_for_unit("garage.service")
-box.wait_for_open_port(3901)
-box.succeed("systemctl restart garage-setup.service")
-box.wait_until_succeeds(
-    f"set -a; . {nix['rpc']}; garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l"
-)
-box.succeed("systemctl restart garage-setup.service")
+box.wait_for_unit("dd-store-setup.service")
+box.wait_for_unit("dd-library-keys.service")
 box.wait_for_open_port(4181)
 
 gate = "http://127.0.0.1:4181"
@@ -56,9 +51,8 @@ for who in ["sarah", "ann", "tom"]:
 # something in each library and in sarah's disk images, straight into the
 # bucket: the gate deletes by prefix, whatever the bytes are
 s3 = (
-    "AWS_ACCESS_KEY_ID=GK0123456789abcdef01234567 "
-    "AWS_SECRET_ACCESS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef "
-    "aws --endpoint-url http://127.0.0.1:3900 --region us-east-1"
+    "set -a; . /var/lib/dd-store/keys/libraries.env; set +a; "
+    "aws --endpoint-url http://127.0.0.1:3910 --region us-east-1"
 )
 box.succeed("echo ciphertext > /root/blob")
 for who in ["sarah", "ann", "tom"]:

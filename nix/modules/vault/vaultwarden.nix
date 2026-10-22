@@ -203,6 +203,13 @@ in
       {
         assertions = [
           {
+            # its files are in this box's own store, which it reaches with
+            # the store's key only with failover on: the old shared pool,
+            # where they were before, is gone
+            assertion = own || config.dd.box.s3 != null;
+            message = "Passwords keeps its files in the box's own store, and its key there comes with failover: turn failover on (fleet/policy.json)";
+          }
+          {
             assertion = issuer != homeIssuer || public;
             message = "Passwords signs in through home.${base}, which is the gateway's gate: run the vault role on the gateway, or set dd.vault.issuer to this box's own gate";
           }
@@ -229,10 +236,14 @@ in
             DOMAIN = "https://${host}";
             ROCKET_ADDRESS = "127.0.0.1";
             ROCKET_PORT = port;
-            # the storage pool, wherever it is: this box's garage or a
-            # storage box's over the tailnet
+            # this box's own store, copied to others' where the plan says
             DATA_FOLDER = "s3://vaultwarden/data?endpoint=${
-              if own then "http://127.0.0.1:${toString config.dd.store.port}" else config.dd.box.s3
+              if own then
+                "http://127.0.0.1:${toString config.dd.store.port}"
+              else if config.dd.box.s3 != null then
+                config.dd.box.s3
+              else
+                throw "Passwords keeps its files in the box's own store, and its key there comes with failover: turn failover on (fleet/policy.json)"
             }&region=us-east-1&enable_virtual_host_style=false&default_storage_class=STANDARD";
             # the key its sessions are signed with: this box's, on its own
             # disk, never in the bucket that is copied to other boxes. A box

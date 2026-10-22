@@ -127,7 +127,7 @@
       };
       depends = {
         forgejo.local = false; # git.<domain>, from anywhere
-        garage.local = false; # the nix cache, at the storage pool's address
+        store.local = true; # its key to the nix cache, in the store that keeps it
       };
       privacy = "none"; # the fleet's own public code
     };

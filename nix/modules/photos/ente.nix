@@ -54,6 +54,16 @@ in
   };
 
   config = lib.mkMerge [
+    {
+      # the photos are in this box's own store, which museum reaches with the
+      # store's key only with failover on: the old shared pool is gone
+      assertions = [
+        {
+          assertion = own || config.dd.box.s3 != null;
+          message = "Photos keeps its files in the box's own store, and its key there comes with failover: turn failover on (fleet/policy.json)";
+        }
+      ];
+    }
     (lib.optionalAttrs (options.dd ? store) {
       # browsers upload to the bucket straight (see the role's cors)
       dd.store.buckets.ente.cors = lib.mkIf own true;
@@ -288,7 +298,13 @@ in
               b2-eu-cen = {
                 # browsers fetch and upload at this name: the pool's, or with
                 # failover this box's own store, wherever photos runs
-                endpoint = if own then "https://${d "photos-store"}" else "https://${d "s3"}";
+                endpoint =
+                  if own then
+                    "https://${d "photos-store"}"
+                  else if config.dd.box.s3 != null then
+                    config.dd.box.s3
+                  else
+                    throw "Photos keeps its files in the box's own store, and its key there comes with failover: turn failover on (fleet/policy.json)";
                 region = "us-east-1"; # required internally by ente regardless of reality
                 bucket = "ente";
                 key._secret = secret "s3-key" "garage-key-id";

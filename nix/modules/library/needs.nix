@@ -16,13 +16,13 @@
         storage = "0";
       };
       network = {
-        outbound = [ "s3" ];
+        outbound = [ "store" ];
         inbound = "network";
       };
       depends = {
         dd-verify.local = true;
         nginx.local = true;
-        garage.local = false;
+        store.local = true;
       };
       privacy = "none"; # names and bytes encrypted on the device
     };
@@ -41,13 +41,13 @@
         storage = "0";
       }; # the gate's and the pool's
       network = {
-        outbound = [ "s3" ];
+        outbound = [ "store" ];
         inbound = "network";
       };
       depends = {
         dd-verify.local = true;
         nginx.local = true;
-        garage.local = false;
+        store.local = true;
       };
       privacy = "none";
     };
@@ -78,7 +78,7 @@
       };
       depends = {
         dd-verify.local = true;
-        garage.local = false;
+        store.local = true;
         # its pipe is files.<domain>/_dd/mail/, a name of the gateway's
         # (`*`): on the box holding the network's lease
         headscale.local = true;
@@ -116,7 +116,7 @@
         storage = "0";
       };
       network = {
-        outbound = [ "s3.<domain>" ]; # the library, by range
+        outbound = [ "store" ]; # the library, by range, from the store on loopback
         inbound = "localhost"; # files.<domain>'s nginx in front
       };
       depends = {

@@ -38,7 +38,7 @@
         outbound = [
           "git"
           "control"
-          "s3"
+          "store"
         ]; # the release on the forge and the relay, closures from the cache
         inbound = "none";
       };

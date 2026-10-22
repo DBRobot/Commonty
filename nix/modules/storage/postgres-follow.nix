@@ -303,7 +303,7 @@ in
     };
     endpoint = lib.mkOption {
       type = lib.types.str;
-      default = "http://127.0.0.1:3900";
+      default = "http://127.0.0.1:3910";
     };
     envFile = lib.mkOption {
       type = lib.types.path;

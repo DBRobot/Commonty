@@ -128,16 +128,18 @@ token) is something it runs without: `dd.hasSecret`.
 
 1. **The tunnel token**: `dd dns tunnels`, once. The Worker holds it; no
    box does.
-2. **The move off the shared pool**: each box copies its buckets from the
-   old pool into its own store every hour (`dd-store-migrate`), copying and
-   never deleting. Once every bucket is all there, the switch.
+2. **The move off the shared pool**: done; every service uses its box's
+   own store (storage.md, [The old pool](storage.md#the-old-pool)).
+   Photos and Passwords reach their store only with failover on, and say
+   so if it is off.
 3. **The switch**: `"failover": true` in `fleet/policy.json`. The release
    that turns it on restarts postgres and what follows it once, on the box
    holding them; they start again as soon as the control plane grants
    their leases.
-4. **Room on node2**: node2 still keeps its half of the old pool. Until
-   that is deleted, with David's yes, the photos don't fit in its store,
-   so photos can't fail over to it; the smaller buckets can.
+4. **Room on node2**: a store keeps a fifth of its pool for the box's
+   other services, so node2 takes no copies while its half of the old pool
+   is on its disk. Once that is deleted, with David's yes
+   ([pool-retire.md](pool-retire.md)), the copies come to it by room.
 
 ## Known gaps
 

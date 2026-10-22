@@ -177,22 +177,6 @@ in
     locations."= /_dd/storage/mine" = docsGate;
   };
 
-  # garage's public face: ente's browser uploads and any other s3 client
-  # reach the cluster through the gateway's name
-  services.nginx.virtualHosts."s3.${config.dd.domain}" = {
-    useACMEHost = config.dd.domain;
-    forceSSL = true;
-    locations."/" = {
-      # the pool at this box's address for it: its own garage, or a storage
-      # box's over the fleet's network when the gateway keeps none
-      proxyPass = config.dd.box.s3;
-      extraConfig = ''
-        client_max_body_size 0;
-        proxy_request_buffering off;
-      '';
-    };
-  };
-
   # the home controllers' updates, read-only from this box's store
   dd.cacheDoor.enable = true;
 }

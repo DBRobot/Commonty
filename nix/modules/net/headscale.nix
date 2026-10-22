@@ -28,7 +28,6 @@ let
     "53"
     "80"
     "443"
-    "3900"
     # the box's store: the cache push, into the nix cache it keeps
     "3443"
   ];
@@ -110,8 +109,6 @@ let
   );
   boxPorts = [
     "443"
-    "3900"
-    "3901"
     "4181"
   ];
   # every name nginx serves on this box, answered on the network with this

@@ -25,8 +25,8 @@ in
   options.dd.transcode.enable = lib.mkEnableOption "transcoding one file at a time for the libraries' players";
   options.dd.transcode.source = lib.mkOption {
     type = lib.types.str;
-    default = "https://s3.${base}/libraries/";
-    description = "the only url prefix a session may fetch from: the libraries bucket, as the gate presigns it. A member sends the url, so anything else is this box fetching wherever a member points it.";
+    default = "http://127.0.0.1:${toString config.dd.store.port}/libraries/";
+    description = "the only url prefix a session may fetch from: the libraries bucket in this box's store, as the gate presigns it. A member sends the url, so anything else is this box fetching wherever a member points it.";
   };
 
   config = lib.mkIf cfg.enable {

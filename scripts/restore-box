@@ -32,19 +32,6 @@ peers=$(jq -r --arg b "$box" --arg d "$domain" 'keys[] | select(. != $b) | "http
 # shellcheck disable=SC2029 # the names expand here on purpose
 ssh "$addr" "sudo BOX=$box PEERS='$peers' bash -s" <<'EOF'
 set -euo pipefail
-if command -v garage >/dev/null; then
-  echo "== garage back in the cluster"
-  for _ in $(seq 1 120); do
-    n=$(garage status 2>/dev/null | grep -cE '^[0-9a-f]{16}\s' || true)
-    [ "$n" -ge 2 ] && break
-    sleep 5
-  done
-  garage status | tail -n +2
-  # this box's blocks are still on its data dir; tell the index so
-  garage repair -a --yes blocks >/dev/null
-  garage repair -a --yes tables >/dev/null
-fi
-
 echo "== this box's store"
 # install-box carries the store's metadata in, so its buckets are as they
 # were. A box that came back without it has an empty store: each bucket
@@ -91,7 +78,7 @@ for _ in $(seq 1 60); do restic-dd --no-lock snapshots >/dev/null 2>&1 && break;
 restic-dd --no-lock snapshots | tail -3
 # only what lives on the boot disk: the pool paths are still there. The
 # verifier's state came with the box (install-box), newer than any backup
-paths="/var/lib/prometheus2 /var/lib/garage/meta/snapshots /var/lib/headscale/snapshot
+paths="/var/lib/prometheus2 /var/lib/headscale/snapshot
   /var/lib/dd-games/instances /var/lib/dd-games/records /var/lib/dd-games/players /var/lib/dd-games/worlds"
 [ -n "$(ls -A /var/lib/dd-verify 2>/dev/null)" ] || paths="$paths /var/lib/dd-verify"
 for p in $paths; do

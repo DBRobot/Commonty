@@ -41,7 +41,7 @@
       };
       depends = {
         postgresql.local = true; # its database, on the local socket
-        garage.local = false; # the photos, wherever the storage pool keeps them
+        store.local = true; # the photos, in this box's own store
         nginx.local = true;
         dd-verify.local = true; # verify-email goes through the gate
       };
