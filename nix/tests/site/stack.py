@@ -143,7 +143,8 @@ class Control(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/identity"):
-            b = json.dumps(Control.state).encode()
+            # a state read now: the gate acts on none older than two minutes
+            b = json.dumps(dict(Control.state, time=int(time.time() * 1000))).encode()
         elif self.path.startswith("/state"):
             b = json.dumps(people.control_state()).encode()
         elif self.path.startswith("/directory"):
