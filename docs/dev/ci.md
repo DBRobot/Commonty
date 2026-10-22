@@ -40,6 +40,8 @@ pull request opened, pushed, or edited
 │   │               │    └─ same_build (both builds of a system are one path)
 │   │               └─ vm_tests (one job per test)
 │   ├─ rust (fmt, clippy, tests) · app_lint
+│   ├─ installer_repro (the box installer's drive, built and --rebuilt on every runner box)
+│   │    └─ same_installer (every box made the same bytes)
 │   └─ lint ────────── real faults block; the rest is a yellow warning
 ├─ style ───────────── the title, the body, the commits, the files touched
 │
@@ -378,6 +380,11 @@ restarting under the same switch). When a box stays on an old release, its
   so it does not catch a build that is not reproducible. That is dd-attest's
   at publish: two boxes must report the same closure digest
   ([releases.md](releases.md#dd-attest-accounting-for-every-path)).
+- **same_installer** means the runner boxes built the box installer's
+  drive (`installers.x86_64-linux.box`) to different bytes, and the next
+  app release would stop on it. It runs when `nix/installer/` or
+  `flake.lock` changed; [joining.md](joining.md#the-drive) says what
+  made it differ before and how it is made now.
 - **"context canceled"** in a log means the run was killed from outside,
   not that the code failed. ci-resume runs it again within a few minutes.
 - **Never merge around a red run.** If a check is wrong, fix the check in

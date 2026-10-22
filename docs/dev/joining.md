@@ -328,7 +328,15 @@ The app's installer window writes `commonty-box-installer-<version>.img.zst`
 the `box-installer` download). It is a GPT disk: partition 1 the FAT boot
 partition (systemd-boot, the installer, and `commonty/`, which the app
 fills), partition 2 the installer's system, grown to the drive at its
-first boot. It starts to one screen, a browser filling it and nothing to
+first boot. Two boxes build it and must make the same bytes (dd-attest),
+so partition 2's ext4 is made by `image.nix` itself, not by
+systemd-repart: repart sized it by asking the builder's file system where
+a trial image's holes are (ZFS answers per 128K record, ext4 per block)
+and copied the store with the builder's hard links, xattrs and reflinks.
+`image.nix` copies plainly, sizes by the files' own lengths, and mkfs adds
+them sorted, with a fixed UUID and hash seed and every time
+SOURCE_DATE_EPOCH; repart only places it (`CopyBlocks=`). CI builds it on
+each runner box and once more with `--rebuild` (`installer_repro`). It starts to one screen, a browser filling it and nothing to
 click away to ([`setup.nix`](../../nix/installer/setup.nix)). The screen's
 steps are `dd-box-setup`'s
 ([`dd-box-setup.rs`](../../servers/system/release/src/bin/dd-box-setup.rs)),

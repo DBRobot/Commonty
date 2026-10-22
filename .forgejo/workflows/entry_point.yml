@@ -36,6 +36,7 @@ jobs:
       # each one's evaluation reads (nix/tests/ci-select)
       vm_tests: ${{ steps.detect.outputs.vm_tests }}
       mail_worker: ${{ steps.detect.outputs.mail_worker }}
+      installer: ${{ steps.detect.outputs.installer }}
       draft: ${{ steps.detect.outputs.draft }}
       proven: ${{ steps.detect.outputs.proven }}
       # every box's system is built (hosts), on every box that runs CI
@@ -102,14 +103,22 @@ jobs:
           if [ "$DRAFT" = true ] || [ "$proven" = true ]; then
             echo "draft: $DRAFT  already passed: $proven  - nothing to build"
             nix shell .#ci-tools -c python3 nix/tests/ci-select/ciselect.py select --nothing
+            echo "installer=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             nix shell .#ci-tools -c python3 nix/tests/ci-select/ciselect.py select --everything
+            echo "installer=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git diff --name-status "$BASE" HEAD | sed 's/^/  /'
           nix shell .#ci-tools -c python3 nix/tests/ci-select/ciselect.py select "$BASE" HEAD
+          # the box installer's drive: what builds it, and the nixpkgs it
+          # builds with, whose tools can stop making the same bytes
+          installer=false
+          git diff --name-only "$BASE" HEAD | grep -qE '^(nix/installer/|flake\.lock)' && installer=true
+          echo "installer=$installer" >> "$GITHUB_OUTPUT"
+          echo "installer: $installer"
 
   # ---- nix: is the flake well-formed, and does every box still build
 
@@ -451,6 +460,72 @@ jobs:
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
+  # The box installer's drive (nix/installer/image.nix) is an app download,
+  # and two boxes must build it to the same bytes or no app ships
+  # (docs/dev/app-release.md). Built on every runner box and again there
+  # with --rebuild, each recording its NAR hash; same_installer holds the
+  # boxes to one hash. One machine agreeing with itself is not enough, so
+  # both halves count. Only when the installer's files or nixpkgs changed.
+  installer_repro:
+    needs: files_modified
+    if: ${{ needs.files_modified.outputs.installer == 'true' }}
+    runs-on: ${{ matrix.on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        on: ${{ fromJSON(needs.files_modified.outputs.builders) }}
+    steps:
+      - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
+      - name: build the installer's drive on ${{ matrix.on }}, then again to compare
+        run: |
+          out=$(nix build --no-link --print-out-paths .#installers.x86_64-linux.box)
+          nix build --no-link --rebuild .#installers.x86_64-linux.box
+          nix path-info --json-format 1 --json "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(Object.values(JSON.parse(s))[0].narHash))' | tee "$RUNNER_TEMP/nar"
+      - name: record the hash
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf 'Authorization: token %s\n' "$TOKEN" | curl -fsS --retry 12 --retry-delay 10 --retry-all-errors --retry-max-time 300 -X POST -H @- -H 'content-type: application/json' \
+            -d "{\"state\":\"success\",\"context\":\"installer@${{ matrix.on }}\",\"description\":\"$(cat "$RUNNER_TEMP/nar")\",\"target_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}\"}" \
+            "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha || github.sha }}"
+      - uses: ./.forgejo/actions/stop-run
+        if: failure()
+
+  same_installer:
+    needs: [files_modified, installer_repro]
+    if: ${{ needs.files_modified.outputs.installer == 'true' }}
+    runs-on: nix
+    steps:
+      - name: every builder made the same bytes
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BUILDERS: ${{ needs.files_modified.outputs.builders_list }}
+        run: |
+          node --input-type=module - <<'EOF'
+          const { TOKEN, API, SHA, BUILDERS } = process.env;
+          const headers = { authorization: `token ${TOKEN}` };
+          const all = [];
+          for (let page = 1; ; page++) {
+            const r = await fetch(`${API}/commits/${SHA}/statuses?limit=50&page=${page}`, { headers });
+            if (!r.ok) throw new Error(`statuses: http ${r.status}`);
+            const got = await r.json();
+            all.push(...got);
+            if (got.length < 50) break;
+          }
+          // newest first: the first success per context is the one that counts
+          const by = BUILDERS.split(' ').map((b) => [b, all.find((s) => s.context === `installer@${b}` && s.status === 'success')?.description]);
+          for (const [b, h] of by) console.log(`${b}: ${h ?? 'nothing recorded'}`);
+          const hashes = new Set(by.map(([, h]) => h));
+          if (hashes.size !== 1 || hashes.has(undefined)) {
+            console.log('the builders made different bytes (or one did not record): diff the two images (docs/dev/joining.md)');
+            process.exit(1);
+          }
+          EOF
+      - uses: ./.forgejo/actions/stop-run
+        if: failure()
+
   # ---- the one check main's rule asks for
 
   # Every job above, passed or rightly skipped, and not a draft. It runs whatever they did
@@ -458,7 +533,7 @@ jobs:
   # never reaches it and is refused the same way. nix/tests/ci.nix fails
   # the build if a job is missing from this list.
   ci_ok:
-    needs: [files_modified, style, lint, flake_check, keep_check, mail_worker, build_part, build_host, same_build, vm_tests, rust, app_lint]
+    needs: [files_modified, style, lint, flake_check, keep_check, mail_worker, build_part, build_host, same_build, vm_tests, rust, app_lint, installer_repro, same_installer]
     if: ${{ always() }}
     runs-on: nix
     steps:
