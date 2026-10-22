@@ -12,6 +12,9 @@ let
   garage = config.services.garage.enable;
   # where the box can mail (modules/mail.nix)
   mail = options.dd ? mail;
+  # the box's own store (storage/store.nix): its repository is there, in a
+  # bucket of its own, and copied where the plan finds room
+  store = options.dd ? store && config.dd.store.enable;
 
   # After a good run: when it ended, and what the repository holds, so the
   # backups page can say how far back this box goes without anything but
@@ -79,13 +82,13 @@ in
     };
     endpoint = lib.mkOption {
       type = lib.types.str;
-      default = config.dd.box.s3;
-      description = "S3 endpoint: the storage pool at this box's address for it (dd.box.s3): its own garage, or a storage box's over the fleet's network";
+      default = if store then "http://127.0.0.1:${toString config.dd.store.port}" else config.dd.box.s3;
+      description = "S3 endpoint: this box's own store";
     };
     envFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY of this box's backup key; null: no backup (a box that joined on its own key keeps nothing of its own worth one)";
+      default = if store then "/var/lib/dd-store/keys/backups-${box}.env" else null;
+      description = "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY of this box's backup key: the store's key to its bucket, made on the box; null: no backup";
     };
     passwordFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
@@ -155,10 +158,14 @@ in
           Persistent = true; # a box that was off at 03:00 backs up when it wakes
         };
         # forget --prune after every backup; at most about 5 weeks back
-        # (nix/tests/retention.nix)
+        # (nix/tests/retention.nix). By host alone: restic groups by host
+        # and paths, so each time a role added or dropped a path the old
+        # set became a group of its own and was never forgotten (node1's
+        # old repository kept 79 GiB of /srv/images snapshots that way)
         pruneOpts = [
           "--keep-daily 7"
           "--keep-weekly 4"
+          "--group-by host"
         ];
         # read a slice of the data back every run: a repository that lists
         # fine and restores nothing is the common failure
@@ -167,9 +174,11 @@ in
       };
 
       systemd.services.restic-backups-dd = {
+        environment.AWS_DEFAULT_REGION = "us-east-1";
         after = [
           "network-online.target"
         ]
+        ++ lib.optional store "dd-store-setup.service"
         ++ lib.optionals garage [
           "garage-setup.service"
           "garage-meta-snapshot.service"

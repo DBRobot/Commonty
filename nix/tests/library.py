@@ -1,16 +1,12 @@
 # The library test: rclone over the gate, ciphertext in the bucket.
 import json
 
-box.wait_for_unit("garage.service")
-box.wait_for_open_port(3901)
-box.succeed("systemctl restart garage-setup.service")
-box.wait_until_succeeds(
-    f"set -a; . {nix['rpc']}; garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l"
-)
-box.succeed(
-    "systemctl restart garage-setup.service"
-)  # buckets and keys, now that the layout exists
+box.wait_for_unit("dd-store-setup.service")
+box.wait_for_unit("dd-library-keys.service")
 box.wait_for_open_port(4181)
+# the gate's keys are the store's own, one per bucket, root's alone
+assert box.succeed("stat -c %a /var/lib/dd-library-keys/env").strip() == "400"
+box.succeed("grep -c '^MAIL_ID=' /var/lib/dd-library-keys/env")
 
 # a member with a library, made on this box with dd (the root is here)
 env = "DD_KEYRING_FILE=/root/keys.json"
@@ -90,12 +86,12 @@ box.succeed(
 assert box.succeed(f"{rc} cat lib:Files/dd.txt").strip() == "from dd"
 
 # the bucket: ciphertext under names nobody reads, nothing plain
-aws = "AWS_ACCESS_KEY_ID=GK0123456789abcdef01234567 AWS_SECRET_ACCESS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef aws --endpoint-url http://127.0.0.1:3900 --region us-east-1 s3api list-objects-v2 --bucket libraries --query 'Contents[].Key' --output json"
+aws = "set -a; . /var/lib/dd-store/keys/libraries.env; aws --endpoint-url http://127.0.0.1:3910 --region us-east-1 s3api list-objects-v2 --bucket libraries --query 'Contents[].Key' --output json"
 keys = box.succeed(aws).strip()
 keys = json.loads(keys or "[]")
 assert all(k.startswith(lib + "/") for k in keys), keys
 assert not any("film.mkv" in k or "note.txt" in k or "Movies" in k for k in keys), keys
-box.fail("grep -rl 'a note' /srv/garage")
+box.fail("grep -rl 'a note' /srv/store")
 
 # delete is a move into the trash; nothing leaves the bucket
 box.succeed(f"{rc} deletefile lib:Files/note.txt")
