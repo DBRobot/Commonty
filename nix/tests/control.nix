@@ -69,6 +69,8 @@ pkgs.runCommand "control-e2e"
     cfg["identity"]["members"]["members"].append(hashlib.sha256(croot.encode()).hexdigest())
     cfg["computers"] = {"memory": 16384, "threads": 8, "disk": 200, "portBase": 27200, "portCount": 8, "owners": ["cara"]}
     cfg["rules"]["computerHosts"] = {"node2": "", "node3": "cara"}
+    # the stranger here has no TPM; a join's proof of one is join-attest's
+    cfg["attest"] = {"test": {"unattestedJoin": True}}
     json.dump(cfg, open("config.json", "w"))
     open("w/config.js", "w").write("export default " + json.dumps(cfg) + ";\n")
     open("w/.dev.vars", "w").write("WITNESS_KEY=" + base64.b64encode(w.private_bytes(S.Encoding.Raw, S.PrivateFormat.Raw, S.NoEncryption())).decode() + "\n")
