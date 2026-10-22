@@ -77,6 +77,9 @@
       depends = {
         dd-verify.local = true;
         garage.local = false;
+        # its pipe is files.<domain>/_dd/mail/, a name of the gateway's
+        # (`*`): on the box holding the network's lease
+        headscale.local = true;
       };
       privacy = "none"; # locked to the member's key before it arrives
     };
@@ -117,6 +120,9 @@
       depends = {
         nginx.local = true;
         dd-verify.local = true;
+        # it plays at files.<domain>/_dd/transcode/, a name of the
+        # gateway's (`*`): on the box holding the network's lease
+        headscale.local = true;
       };
       privacy = "plaintext"; # a film, in memory while it plays; never on disk
     };

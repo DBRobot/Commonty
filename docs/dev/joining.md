@@ -149,8 +149,9 @@ box installer (full screen)        fleet
 - **Its metrics** are its member's
   ([`observe/joined-metrics.nix`](../../nix/modules/observe/joined-metrics.nix)).
   It has no key to the metrics bucket the release boxes' sidecars upload
-  to, so its prometheus writes to the observe box instead, over the store's
-  port (`/_metrics/write`). There it has a token of its own, sealed to its
+  to, so its prometheus writes to whichever box the plan gives
+  joined-metrics instead, at `metrics.<domain>` over the store's port
+  (`/_metrics/write`); the name follows that box. There it has a token of its own, sealed to its
   secrets key and served beside its store keys (`/_keys/<box>-metrics.age`,
   `dd-metrics-joined`; a box joining under the same name with another
   recipient gets a new one). nginx names the box from the token and

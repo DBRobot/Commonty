@@ -273,6 +273,15 @@ A service whose needs say `placed = true` is switched by the plan
   access.
 - Without a lease this is for what may run twice for a moment: two boxes
   running a stateless page while one hands over is harmless.
+- Its names (needs `hosts`) follow it: the DNS Worker points each at a
+  live box whose heartbeat says it runs the service
+  ([failover: the names](failover.md#the-names)). A service that answers
+  under another's name depends on it locally, so the two go together;
+  `checks.placement` refuses a name two services claim.
+- What the rest of the release picks a box by (the storage pool, the
+  mail boxes, the ports a member's device may reach, the observe
+  sidecar, the app's clients) is the services the box is built with
+  (`nix/lib/fleet-placement.nix` `built`), never a role's name.
 
 ### Checking a plan against the boxes
 

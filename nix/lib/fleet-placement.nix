@@ -40,6 +40,12 @@ let
       lib.filter (r: !builtins.elem r b.roles && ableTo box r) (builtins.attrNames roles)
     )
   ) list;
+  # the services each box is built with, by what it carries: what the rest
+  # of the release picks a box by (the storage pool, the mail boxes, the
+  # ports a member's device may reach), never a role's name
+  built = lib.mapAttrs (_: rs: lib.unique (lib.concatMap (r: roles.${r}.services or [ ]) rs)) carried;
+  # the boxes built with service s, by name
+  builtWith = s: builtins.filter (n: builtins.elem s built.${n}) (builtins.attrNames list);
 in
 {
   inherit
@@ -49,5 +55,7 @@ in
     capability
     inputs
     carried
+    built
+    builtWith
     ;
 }

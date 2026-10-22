@@ -81,6 +81,7 @@ class H(BaseHTTPRequestHandler):
                     "time": t,
                     "leases": control["leases"],
                     "joined": control.get("joined", {}),
+                    "runs": control.get("runs", {}),
                 },
             )
         if u.path == "/tunnels":

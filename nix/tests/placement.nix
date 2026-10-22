@@ -47,7 +47,24 @@ let
     }) list;
   };
   scores = t: lib.mapAttrs (_: c: c.score) t.can;
+  # a name follows one service (needs hosts), placed or under a lease: two
+  # claiming one name, or one that nothing places, could not be followed
+  named = lib.concatLists (lib.mapAttrsToList (s: n: map (h: { inherit s h; }) n.hosts) needs);
+  hostProblems =
+    lib.concatMap (
+      h:
+      let
+        by = map (x: x.s) (lib.filter (x: x.h == h) named);
+      in
+      lib.optional (builtins.length by > 1) "${h}.<domain> is claimed by ${lib.concatStringsSep " and " by} (needs hosts): a name follows one service"
+    ) (lib.unique (map (x: x.h) named))
+    ++ map (x: "${x.s}: its hosts follow nothing, as it is neither placed nor under a lease") (
+      lib.filter (x: (policyOn) && !(needs.${x.s}.placed || needs.${x.s}.lease)) named
+    );
+  policyOn = (lib.importJSON ../../fleet/policy.json).failover or false;
   problems =
+    hostProblems
+    ++
     map (b: "${b}: judged on the box, its capability is not the release's") (
       lib.filter (b: scores judged.boxes.${b} != scores capability.boxes.${b}) (builtins.attrNames list)
     )

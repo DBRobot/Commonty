@@ -1,8 +1,8 @@
 # A box a member set up (docs/dev/joining.md) has no key to the metrics
 # bucket, which every release box's sidecar uploads to. It sends its
-# numbers instead: its prometheus writes them to the box that gathers the
-# fleet's (the observe box), over the store's port, the one a joined box
-# reaches. There each joined box has a token of its own, sealed to it and
+# numbers instead: its prometheus writes them to the box the plan gives
+# joined-metrics, at metrics.<domain> over the store's port, the one a
+# joined box reaches. There each joined box has a token of its own, sealed to it and
 # served beside its store keys (/_keys/<box>-metrics.age); nginx names the
 # box from the token and nothing else, so a box never writes as another.
 # A Thanos receive keeps each joined box's series apart, labelled box=<its
@@ -39,7 +39,7 @@ in
     to = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
-      description = "a joined box: the observe box's store, https://store.<box>.<domain>:3443, where it sends its metrics";
+      description = "a joined box: where it sends its metrics, https://metrics.<domain>:3443, the store's port of whichever box runs joined-metrics (the name follows it)";
     };
     maxBytes = lib.mkOption {
       type = lib.types.int;
@@ -124,8 +124,11 @@ in
         }
         limit_req_zone $dd_metrics_box zone=dd_metrics_joined:1m rate=2r/s;
       '';
-      services.nginx.virtualHosts."store.${config.networking.hostName}.${base}".locations."= /_metrics/write" =
-        {
+      # the joined boxes ask for metrics.<domain> on the store's port: the
+      # name the DNS Worker points at whichever box runs this (needs hosts)
+      services.nginx.virtualHosts."store.${config.networking.hostName}.${base}" = {
+        serverAliases = [ "metrics.${base}" ];
+        locations."= /_metrics/write" = {
           proxyPass = "http://127.0.0.1:10910/api/v1/receive";
           ddCookie = "";
           extraConfig = ''
@@ -138,6 +141,7 @@ in
             proxy_set_header THANOS-TENANT $dd_metrics_box;
           '';
         };
+      };
       # the Metrics page asks for one joined box: /joined/<its name>/api/v1/...,
       # once the gate has said it is this person's (lib.rs verify)
       services.nginx.virtualHosts."metrics.${base}".locations."~ ^/joined/(?<dd_jbox>j[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])/api/v1/(?<dd_japi>query|query_range|series|labels|label/[a-zA-Z0-9_]+/values)$" =

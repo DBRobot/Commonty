@@ -26,7 +26,8 @@
 // key, as a box does with its TPM's.
 //
 // Failover. Where a name points follows the control plane's agreed state:
-// a service with one writer at the box holding its lease, the gateway's
+// a service with one writer at the box holding its lease, a placed one
+// with none at a live box whose heartbeat says it runs it, the gateway's
 // names (`*`, the bare name, the public hosts) at the box holding the
 // gateway's. Each box has a tunnel of its own, whose secret the box made
 // (it asks for the tunnel here, signed); a public name is a CNAME to the
@@ -132,6 +133,12 @@ export async function holders(env) {
       joined[name] = [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
     }
     Object.defineProperty(out, 'joined', { value: joined });
+    // which live boxes run each placed service, by their heartbeats
+    const runs = {};
+    for (const [svc, bs] of Object.entries(v.runs || {})) {
+      if (Array.isArray(bs)) runs[svc] = bs.filter((b) => typeof b === 'string' && b).sort();
+    }
+    Object.defineProperty(out, 'runs', { value: runs });
     return out;
   } catch {
     return null;
@@ -280,8 +287,16 @@ export async function converge(env) {
   const own = await tunnels(env);
   const tunnelOf = (box) => (own[box] ? own[box] : box === RECORDS.home || !RECORDS.home ? tunnel : null);
   const gateway = (held && RECORDS.gateway && held[`svc/${RECORDS.gateway}`]) || RECORDS.home;
-  const addressOf = (box) => (RECORDS.addresses && box && RECORDS.addresses[box]) || address;
-  const targetOf = (h) => (follow[h] && held && held[`svc/${follow[h]}`]) || gateway;
+  const addressOf = (box) =>
+    (RECORDS.addresses && box && RECORDS.addresses[box]) || (held && box && held.joined[box]) || address;
+  // a name's box: its service's lease holder; for a placed service with no
+  // lease, a live box running it, the gateway's first if it is one of them
+  // (no name moves while it still runs there); else the gateway's
+  const runnerOf = (svc) => {
+    const on = (held && held.runs[svc]) || [];
+    return on.includes(gateway) ? gateway : on.find((b) => RECORDS.addresses?.[b] || held.joined[b]);
+  };
+  const targetOf = (h) => (follow[h] && held && (held[`svc/${follow[h]}`] || runnerOf(follow[h]))) || gateway;
   const cnameTo = (box) => {
     const t = tunnelOf(box);
     return t ? `${t}.cfargotunnel.com` : null;

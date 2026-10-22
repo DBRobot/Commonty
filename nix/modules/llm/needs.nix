@@ -12,6 +12,8 @@
       class = "medium";
       downMbps = 50;
     };
+    # llm.<domain>: the DNS Worker points it at the box running this
+    hosts = [ "llm" ];
     units = [
       "llm-proxy"
       "fetch-model-*"
@@ -94,7 +96,12 @@
         outbound = "internet";
         inbound = "localhost";
       };
-      depends.dd-verify.local = true;
+      depends = {
+        dd-verify.local = true;
+        # it answers under llm.<domain> (/search), the chat's name, and the
+        # chat reads it there: on the chat's box
+        llama-swap.local = true;
+      };
       privacy = "plaintext";
     };
   };

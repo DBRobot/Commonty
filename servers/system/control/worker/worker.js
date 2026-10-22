@@ -9,8 +9,8 @@
 // both from the signed config. A hello older than a minute is refused, so
 // nobody can sit on another node's address.
 //
-// Its agreed state's leases go to the DNS Worker, which binds this object
-// (/leases), and nowhere else.
+// Its agreed state's leases, and which live boxes run each placed service,
+// go to the DNS Worker, which binds this object (/leases), and nowhere else.
 //
 // Bindings: RELAY (this class), WITNESS_KEY (secret, the witness's ed25519
 // seed; unset: no witness here).
@@ -41,6 +41,23 @@ function rawSig(sig) {
   const out = new Uint8Array(64);
   out.set(part());
   out.set(part(), 32);
+  return out;
+}
+
+// which live boxes run each placed service, by their own heartbeats
+// (runs/<service>, a flag up): where a name of a service with no lease
+// points (servers/system/dns). A box unheard for goneAfterMs runs nothing.
+function runsOf(s) {
+  const gone = (CONFIG.rules && CONFIG.rules.goneAfterMs) || 90000;
+  const out = {};
+  for (const [box, b] of Object.entries(s.boxes || {})) {
+    if (!b || typeof b.lastSeen !== 'number' || s.time - b.lastSeen > gone) continue;
+    for (const [k, v] of Object.entries(b.facts || {})) {
+      if (!k.startsWith('runs/') || !(v > 0)) continue;
+      (out[k.slice(5)] ??= []).push(box);
+    }
+  }
+  for (const v of Object.values(out)) v.sort();
   return out;
 }
 
@@ -166,7 +183,7 @@ export class Relay {
         for (const [name, j] of Object.entries(s.joined || {})) {
           if (typeof j.ipv4 === 'number') joined[name] = { ipv4: j.ipv4 };
         }
-        return Response.json({ time: s.time, leases: s.leases || {}, joined });
+        return Response.json({ time: s.time, leases: s.leases || {}, joined, runs: runsOf(s) });
       } catch {
         return new Response('no state yet', { status: 503 });
       }
