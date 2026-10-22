@@ -86,7 +86,7 @@ box.succeed(
 assert box.succeed(f"{rc} cat lib:Files/dd.txt").strip() == "from dd"
 
 # the bucket: ciphertext under names nobody reads, nothing plain
-aws = "set -a; . /var/lib/dd-store/keys/libraries.env; aws --endpoint-url http://127.0.0.1:3910 --region us-east-1 s3api list-objects-v2 --bucket libraries --query 'Contents[].Key' --output json"
+aws = "env $(cat /var/lib/dd-store/keys/libraries.env) aws --endpoint-url http://127.0.0.1:3910 --region us-east-1 s3api list-objects-v2 --bucket libraries --query 'Contents[].Key' --output json"
 keys = box.succeed(aws).strip()
 keys = json.loads(keys or "[]")
 assert all(k.startswith(lib + "/") for k in keys), keys
@@ -297,7 +297,7 @@ assert (
     == "404"
 )
 # in the bucket beside the libraries, ciphertext as sent
-box.succeed(f"set -a; . {nix['rpc']}; garage bucket info libraries >/dev/null")
+box.succeed("dd-store-garage bucket info libraries >/dev/null")
 # another member sees his own (empty) images, never hers
 assert box.succeed(
     f"curl -s -o /dev/null -w '%{{http_code}}' {as_tom} {img}/config"
