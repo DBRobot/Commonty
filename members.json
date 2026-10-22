@@ -1,6 +1,6 @@
 {
   "list": {
-    "counter": 339,
+    "counter": 340,
     "members": [
       "26a1cf1d1dd2d2ecd586c50283efa4c362bb030bda8db091bd7baf15bfcb65dc"
     ],
@@ -10,5 +10,5 @@
     }
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "PXu8rvIDKwPQuSB7a31IgUE5LwDR3gD7prv/O9+ZccS2aCmNytaAIuVg8Rk77vwRsl5y/IpEWarYvFs74BWKBA=="
+  "signature": "fr7WMXGRQfGleZohbld7mE9EPvdgoblUFTvHxdvGVt9hHMUcSrwBzbjmIQpKL9eo2tfESqc8W2RNWoF0P5JdBw=="
 }
