@@ -1443,7 +1443,7 @@ fn soak(args: &Args, name: &str, counter: u64, stamp: &str, r: &Rollout) -> Resu
     for (k, why) in &failing {
         eprintln!("soak: {k}: {why} ({} in a row)", streak[k]);
     }
-    if !r.reports.get(name).is_some_and(|x| x.took > 0) {
+    if r.reports.get(name).is_none_or(|x| x.took <= 0) {
         verdict(args, counter, "took", "").context("saying took")?;
     }
     if failing.is_empty() {
