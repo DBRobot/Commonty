@@ -502,9 +502,14 @@ ok(
     and json.load(open(comp_flag(3, OWN)))["epoch"] == lease_of(1, OWN).get("epoch"),
     "cara's own box holds its lease and runs it at that epoch",
 )
+# dd-control raises the flag, then starts the unit (its condition is the
+# flag): wait for the start, not just the flag
+started = lambda i, unit: (
+    f"start --no-block {unit}\n" in open(f"{T}/systemctl{i}.log").readlines()
+)
+until("its unit started", lambda: started(3, f"dd-computer@{OWN}.service"), 30)
 ok(
-    f"start --no-block dd-computer@{OWN}.service\n"
-    in open(f"{T}/systemctl3.log").readlines(),
+    started(3, f"dd-computer@{OWN}.service"),
     "and started its unit",
 )
 time.sleep(11)  # sleep-ok: never-runs check, two placement rounds
@@ -560,8 +565,9 @@ ok(
     relay_placed().get("web") == [f"node{first}"] and "db" in relay_placed(),
     "the relay's agreed placement is the plan's",
 )
+until("its units started", lambda: started(first, "web.service"), 30)
 ok(
-    "start --no-block web.service\n" in open(f"{T}/systemctl{first}.log").readlines(),
+    started(first, "web.service"),
     "its box started its units",
 )
 ok(
