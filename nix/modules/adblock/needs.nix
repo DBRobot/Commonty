@@ -12,6 +12,9 @@
       "dd-pihole-lists"
     ];
     perHouse = 1;
+    # the house's devices ask it at this box's address (the router hands
+    # that out): it stays while the box is up, and moves only when it is gone
+    moves = "on-failure";
     base = {
       # on the house's own network, with its household in box.json: only
       # a household with a box of its own has this
@@ -44,6 +47,9 @@
     what = "opens a household's home controller's card at boot, by one blinded key operation, on the house network alone; never learns the card's key";
     units = [ "tangd*" ];
     perHouse = 1;
+    # its keys are this box's: a controller's card opens only with them, so
+    # it stays while the box is up, and moves only when it is gone
+    moves = "on-failure";
     base = {
       requires.place = "house";
       uses = {

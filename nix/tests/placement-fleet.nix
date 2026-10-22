@@ -43,21 +43,27 @@ let
     (!(joins "xeon-r720") && lib.hasInfix "TPM" (joinWhy "xeon-r720"))
     (!(joins "sister-laptop") && lib.hasInfix "wired NIC" (joinWhy "sister-laptop"))
     # the owner's boxes can run everything their hardware allows
-    (joins "david-laptop" && cap.boxes."david-laptop".cannot == { })
+    # but the games, whose worlds want a dataset of their own (box.json)
+    (joins "david-laptop" && builtins.attrNames cap.boxes."david-laptop".cannot == [ "dd-games" ])
+    (lib.hasInfix "dataset" (why "david-laptop" "dd-games"))
     # (and search, which answers under the chat's name, beside it)
     (
       joins "n100-minipc"
-      &&
-        builtins.attrNames cap.boxes."n100-minipc".cannot == [
-          "llama-swap"
-          "searxng"
-        ]
+      && builtins.attrNames cap.boxes."n100-minipc".cannot == [
+        "dd-games"
+        "llama-swap"
+        "searxng"
+      ]
     )
     (lib.hasInfix "memory" (why "n100-minipc" "llama-swap"))
     (
+      # (and the house's DNS and Tang: no household says it is theirs)
       builtins.attrNames cap.boxes."xeon-r740".cannot == [
+        "dd-games"
         "llama-swap"
+        "pihole"
         "searxng"
+        "tang"
       ]
     )
     (lib.hasInfix "GPU" (why "xeon-r740" "llama-swap"))
@@ -91,7 +97,8 @@ let
     "vps cannot join: no TPM"
     "xeon-r720 cannot join: TPM 1.2"
     "sister-laptop cannot join: no wired NIC at boot"
-    "david-laptop can run everything"
+    "david-laptop can run everything but the games, without their dataset"
+    "david-laptop: games for want of a dataset"
     "n100-minipc can run all but llama-swap and its search"
     "n100-minipc: llama-swap for memory"
     "xeon-r740 can run all but llama-swap and its search"

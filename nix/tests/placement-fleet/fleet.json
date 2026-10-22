@@ -360,6 +360,11 @@
   },
   "own": {
    "owner": "brother",
+   "datasets": {
+    "tank/games": {
+     "mountpoint": "/var/lib/dd-games"
+    }
+   },
    "internet": {
     "metered": false
    },

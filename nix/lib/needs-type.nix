@@ -90,6 +90,11 @@ let
         );
         default = null;
       };
+      dataset = lib.mkOption {
+        type = t.nullOr t.str;
+        default = null;
+        description = "a dataset its owner gave it in box.json (datasets, by mountpoint): for what keeps state on the box's own disk and nowhere else, so it is carried only where that state is, never by a box that would start it empty";
+      };
       place = lib.mkOption {
         type = t.enum [
           "any"

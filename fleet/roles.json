@@ -1,5 +1,5 @@
 {
-  "_": "What each role needs from a box (docs/dev/hardware.md has the evidence). requires: against the box's signed report (fleet/boxes/<box>/hardware.json); box: against its owner's box.json; with: roles that must be on the same box, because the code reaches them on localhost; perFleet: exactly that many boxes run it. nix/tests/role-fit.nix fails when fleet/boxes.json breaks any of it. services: what the role brings, by the names in the needs (.#needs, nix/lib/needs.nix); a service may come with several roles. nix/lib/capability.nix holds each box to the needs of every service its roles bring, and checks this list against what the box really runs (nix/tests/placement.nix).",
+  "_": "What each role needs from a box (docs/dev/hardware.md has the evidence). requires: against the box's signed report (fleet/boxes/<box>/hardware.json); box: against its owner's box.json; with: roles that must be on the same box, because the code reaches them on localhost; perFleet: exactly that many boxes run it. nix/tests/role-fit.nix fails when fleet/boxes.json breaks any of it. services: what the role brings, by the names in the needs (.#needs, nix/lib/needs.nix); a service may come with several roles. nix/lib/capability.nix holds each box to the needs of every service its roles bring, and checks this list against what the box really runs (nix/tests/placement.nix). secrets: what its modules read from the box's own sops file whatever else it has; a box whose file lacks one is not built with the role (nix/lib/fleet-placement.nix), until the secret is made on the box or sealed to it (docs/dev/secrets.md).",
   "core": {
     "requires": {
       "arch": "x86_64",
@@ -52,6 +52,16 @@
     "why": "garage: a dataset for blocks; rf=2, so the smallest box caps the usable space",
     "services": [
       "garage"
+    ],
+    "secrets": [
+      "garage-rpc-secret",
+      "garage-backup-key-id",
+      "garage-backup-key-secret",
+      "restic-password",
+      "thanos-key-id",
+      "thanos-key-secret",
+      "cache-key-id",
+      "cache-key-secret"
     ]
   },
   "photos": {
@@ -102,6 +112,10 @@
       "libraries",
       "mail-inbox",
       "dd-transcode"
+    ],
+    "secrets": [
+      "library-key-id",
+      "library-key-secret"
     ]
   },
   "llm": {
@@ -150,6 +164,12 @@
     "services": [
       "forgejo-runner",
       "members-runner"
+    ],
+    "secrets": [
+      "forgejo-runner-token",
+      "forgejo-members-runner-token",
+      "cache-key-id",
+      "cache-key-secret"
     ]
   },
   "observe": {

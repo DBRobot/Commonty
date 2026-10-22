@@ -22,23 +22,61 @@ let
       lib
       needs
       capability
-      list
       roles
       policy
       ;
+    # each box with the roles it is built with (carried, below)
+    list = lib.mapAttrs (n: b: b // { roles = carried.${n}; }) list;
   };
-  # With failover (fleet/policy.json), a box carries every role whose
-  # writers it is able to run, by its own report and the owner's rules
-  # (capability), whatever fleet/boxes.json lists: a box that joins is ready
-  # to take them over, and the control plane decides where each runs
-  writersOf = r: lib.filter (s: needs ? ${s} && needs.${s}.lease) (roles.${r}.services or [ ]);
-  ableTo = box: r: writersOf r != [ ] && lib.all (s: inputs.boxes.${box}.can ? ${s}) (writersOf r);
+  # whether a box's own sops file holds a secret (its names are in the
+  # clear there): what roles/_sops.nix dd.hasSecret says on the box
+  hasSecret =
+    box: name:
+    let
+      f = ../../secrets + "/${box}.yaml";
+    in
+    builtins.pathExists f && lib.hasInfix "\n${name}:" ("\n" + builtins.readFile f);
+  # With failover (fleet/policy.json), what a box is built with comes from
+  # its capability, never a hand-set list: every role of which it can run
+  # a service that does not run everywhere (by its own report, its owner's
+  # box.json and the policy: capability.nix), whose secrets its own file
+  # holds (roles.json secrets: what its modules read whatever else), and
+  # whose companions (roles.json with) it is built with too. core always.
+  # The control plane decides where each service runs (box/placed.nix).
+  able =
+    box: r:
+    r == "core"
+    || builtins.any (s: needs ? ${s} && !needs.${s}.everyBox && capability.boxes.${box}.can ? ${s}) (
+      roles.${r}.services or [ ]
+    );
+  buildable = box: r: able box r && lib.all (hasSecret box) (roles.${r}.secrets or [ ]);
+  # drop what lacks a companion, until nothing more drops
+  withCompanions =
+    rs:
+    let
+      kept = lib.filter (r: lib.all (w: builtins.elem w rs) (roles.${r}."with" or [ ])) rs;
+    in
+    if kept == rs then rs else withCompanions kept;
+  fromCapability =
+    box: withCompanions (lib.filter (buildable box) (builtins.attrNames roles));
+  # (in fleet/boxes.json's order where it still lists them: the order the
+  # modules are imported in, which lists like home's tiles keep)
   carried = lib.mapAttrs (
     box: b:
-    b.roles
-    ++ lib.optionals (policy.failover or false) (
-      lib.filter (r: !builtins.elem r b.roles && ableTo box r) (builtins.attrNames roles)
-    )
+    if policy.failover or false then
+      let
+        rs = fromCapability box;
+      in
+      lib.filter (r: builtins.elem r rs) (b.roles or [ ])
+      ++ lib.filter (r: !builtins.elem r (b.roles or [ ])) rs
+    else
+      b.roles
+  ) list;
+  # the placed services a box carries: of those it is built with, each it
+  # is able to run (capability); the plan gives it only these
+  carries = lib.mapAttrs (
+    box: _:
+    lib.filter (s: needs ? ${s} && (needs.${s}.placed || needs.${s}.lease) && capability.boxes.${box}.can ? ${s}) built.${box}
   ) list;
   # the services each box is built with, by what it carries: what the rest
   # of the release picks a box by (the storage pool, the mail boxes, the
@@ -55,7 +93,9 @@ in
     capability
     inputs
     carried
+    carries
     built
     builtWith
+    hasSecret
     ;
 }

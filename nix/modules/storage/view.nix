@@ -57,7 +57,7 @@ in
           "--roles"
           (toString (
             pkgs.writeText "box-roles.json" (
-              builtins.toJSON (lib.mapAttrs (_: b: b.roles) (lib.importJSON ../../../fleet/boxes.json))
+              builtins.toJSON (import ../../lib/fleet-placement.nix { inherit lib; }).carried
             )
           ))
           "--out"

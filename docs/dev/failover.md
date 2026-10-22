@@ -110,9 +110,11 @@ Nothing is set up by hand:
 
 - **Its store**, on a dataset of its pool, as big as the pool allows less
   a fifth kept for its other services, measured every minute.
-- **What it carries**: every role whose writers it is able to run, by its
-  own report and the owner's rules (`nix/lib/capability.nix`), whatever
-  `fleet/boxes.json` lists. The control plane decides what runs where.
+- **What it carries**: every service its capability lets it run, by its
+  own report, the owner's rules (`nix/lib/capability.nix`) and the
+  secrets its own file holds, built in by the bundles that bring them
+  (`nix/lib/fleet-placement.nix` `carried`). Nothing is listed by hand;
+  the control plane decides what runs where.
 - **Its tunnel**, which it asks the DNS Worker for with a secret it makes.
 - **Its names**: `store.<box>.<domain>` and its certificate.
 - **The keys sealed to it** (postgres's archive, the network's database)
