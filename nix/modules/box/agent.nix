@@ -89,7 +89,10 @@ in
     };
     rollout = lib.mkOption {
       type = lib.types.bool;
-      default = config.dd.control.enable or false;
+      # off until validators keep one version through it: release 356 left
+      # node1 and node2 on different control planes, their states split and
+      # consensus stopped (2026-10-22). Every box takes a release at once
+      default = false;
       description = "Follow the staged rollout the control plane agrees (docs/dev/rollout.md): hold a release until this box's wave, drain before the switch, soak after it. Off: a release is taken at once.";
     };
     drainSeconds = lib.mkOption {

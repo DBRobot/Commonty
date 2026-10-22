@@ -1,8 +1,13 @@
 # Staged rollout
 
-Status: built on branch rollout-1021, on top of failover being on
-(failover-on-1020). David's calls (2026-10-21): the hold page for a
-moving name (decision 2a below), and the proposed defaults for the rest.
+Status: built, and OFF (`dd.agent.rollout` defaults to false) since
+2026-10-22. Release 356 reached node1 while its rollout held node2 back:
+the two ran different control planes, their states split ("built on
+height 97955, here is 97955"), consensus stopped, and every leased service
+stopped with it. David chose failover over staging: every box takes a
+release at once until a rollout never splits the validators. David's
+calls (2026-10-21): the hold page for a moving name (decision 2a below),
+and the proposed defaults for the rest.
 
 The goal: a release that fails keeps everything up. Today every box takes a
 release within minutes of publish, and a box whose switch fails spends up
