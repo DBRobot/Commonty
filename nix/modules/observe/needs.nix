@@ -45,6 +45,8 @@
   thanos-sidecar = {
     what = "puts this box's metric blocks in the bucket, where the fleet view reads them";
     everyBox = true;
+    # its objstore file, with this box's key to the store that keeps the bucket
+    units = [ "dd-thanos-objstore" ];
     base = {
       # node2, 2026-10-04: peak
       uses = {

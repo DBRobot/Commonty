@@ -29,12 +29,9 @@
     GARAGE_BACKUP_KEY_ID=${config.sops.placeholder.garage-backup-key-id}
     GARAGE_BACKUP_KEY_SECRET=${config.sops.placeholder.garage-backup-key-secret}
   '';
-  sops.templates."restic.env".content = ''
-    AWS_ACCESS_KEY_ID=${config.sops.placeholder.garage-backup-key-id}
-    AWS_SECRET_ACCESS_KEY=${config.sops.placeholder.garage-backup-key-secret}
-    AWS_DEFAULT_REGION=us-east-1
-  '';
-  dd.backup.envFile = config.sops.templates."restic.env".path;
+  # the repository is in the box's own store now, under the store's own key
+  # to its bucket (storage/backup.nix); the old one stays where it was, in
+  # the old pool, until that goes
   dd.backup.passwordFile = config.sops.secrets.restic-password.path;
   # this box's key to the metrics bucket, for its thanos sidecar; the
   # observe box's store and compactor use the same key of their own box
@@ -44,22 +41,9 @@
     GARAGE_METRICS_KEY_ID=${config.sops.placeholder.thanos-key-id}
     GARAGE_METRICS_KEY_SECRET=${config.sops.placeholder.thanos-key-secret}
   '';
-  sops.templates."thanos-objstore.yaml" = {
-    owner = "prometheus";
-    content = ''
-      type: S3
-      config:
-        bucket: metrics
-        endpoint: 127.0.0.1:3900
-        region: us-east-1
-        access_key: ${config.sops.placeholder.thanos-key-id}
-        secret_key: ${config.sops.placeholder.thanos-key-secret}
-        insecure: true
-        signature_version2: false
-        bucket_lookup_type: path
-    '';
-  };
-  dd.thanos.objstoreFile = config.sops.templates."thanos-objstore.yaml".path;
+  # the blocks go to the store that keeps the metrics bucket, its home's,
+  # with this box's own key there (observe/thanos.nix)
+  dd.thanos.fromStore = true;
 
   # this box's read key to the nix cache bucket: the agent fetches its
   # release closures from there. The one key that writes lives on the
@@ -87,6 +71,8 @@
         envFile = config.sops.templates."garage-metrics-key.env".path;
         id = "GARAGE_METRICS_KEY_ID";
         secret = "GARAGE_METRICS_KEY_SECRET";
+        # thanos writes the store: once more, then no more
+        once = true;
       };
     }
     //

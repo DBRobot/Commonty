@@ -93,6 +93,9 @@ let
       (lib.toInt (builtins.elemAt m 1) + 1) * minutes.${builtins.elemAt m 0}
     else if w != null then
       lib.toInt (builtins.elemAt w 1) * minutes.daily
+    # how snapshots are grouped, which keeps nothing longer
+    else if builtins.match "--group-by [a-z,]*" opt != null then
+      0
     else
       null;
   resticLongest =
