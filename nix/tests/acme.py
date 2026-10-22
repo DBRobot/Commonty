@@ -37,7 +37,20 @@ with subtest("the box's certificate, issued through the Worker"):
     box1.succeed(
         'test -z "$(systemctl show -P InvocationID acme-order-renew-test.invalid.service)"'
     )
-    start_fresh(box1, "acme-order-renew-test.invalid.service")
+    try:
+        start_fresh(box1, "acme-order-renew-test.invalid.service")
+    except Exception:
+        # one CI run in forty: every name's present failed within 8 s, and
+        # the helper's and the Worker's words were above the log's tail
+        print(
+            box1.execute(
+                "journalctl -b --no-pager -o short-monotonic -u 'dd-acme@*'"
+                " -u dns-worker -u fake-cloudflare -u challtestsrv | tail -n 150;"
+                " journalctl -b --no-pager -o cat -u acme-order-renew-test.invalid"
+                " | grep -E 'acme challenge|error' | tail -n 20"
+            )[1]
+        )
+        raise
     cert = "/var/lib/acme/test.invalid/cert.pem"
     issuer = box1.succeed(f"openssl x509 -in {cert} -noout -issuer")
     assert "Pebble" in issuer, issuer
