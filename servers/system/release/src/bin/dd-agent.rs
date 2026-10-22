@@ -458,7 +458,7 @@ fn run(args: &Args) -> Result<String> {
     // at once, as it always was.
     let mut rollout = None;
     if waits_for_rollout(&args.control, self_built, &hostname()?, &name) {
-        let digest = release::rollout::digest(&body);
+        let digests = release::rollout::digests(&body).map_err(|e| anyhow::anyhow!("{e}"))?;
         let mut ans = match rollout_answer(args) {
             Ok(a) => a,
             Err(e) => {
@@ -470,8 +470,10 @@ fn run(args: &Args) -> Result<String> {
             }
         };
         if let Some(a) = &ans {
-            let mut g = gate(a, counter, &digest, &name);
-            if g == Gate::Begin {
+            let mut g = gate(a, counter, &digests, &name);
+            // only a box the release lists begins it; one building its own
+            // waits for them
+            if g == Gate::Begin && !self_built {
                 post_rollout(
                     args,
                     &serde_json::json!({"op": "begin", "release": body}).to_string(),
@@ -482,7 +484,7 @@ fn run(args: &Args) -> Result<String> {
                 while asked.elapsed() < Duration::from_secs(60) {
                     std::thread::sleep(Duration::from_secs(2));
                     if let Ok(Some(a)) = rollout_answer(args) {
-                        g = gate(&a, counter, &digest, &name);
+                        g = gate(&a, counter, &digests, &name);
                         ans = Some(a);
                         if g != Gate::Begin {
                             break;

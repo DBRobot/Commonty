@@ -52,7 +52,8 @@ The agreed state keeps one record, the newest rollout:
 ```
 Rollout {
   counter     the release's counter
-  digest      sha256 of the release file: what every box must be fetching
+  digest      sha256 of the canonical payload, then the signature's bytes:
+              what every box must be fetching, however the file is written
   began       agreed time of the begin
   waves       [[box…], [box…], …]   fixed at begin
   admitted    how many waves may take it (1 at begin)
@@ -75,8 +76,18 @@ validators, the same as `/state` and `/plan`.
   whole signed file and the validators check it against the release key
   (the one already in the control config for the identity judge). Only a
   real release can start a rollout, and only one with a higher counter
-  than the record has.
-- **Each box's TPM key** signs its own `begin` and its verdicts. A box may
+  than the record has. The file is exactly payload, signer and signature;
+  any other key, or any key twice at any depth, is refused, and the payload
+  is read from the bytes the signature covers. Its digest is over what the
+  signature covers, so a box that re-writes the file before it hands it in
+  begins the same rollout every other box recognises. A second `begin` of
+  the record's release changes nothing. An agent also takes a record
+  named by sha256 of the exact file it fetched: what validators from
+  before the digest wrote, so the release that brings the digest can roll
+  out under them.
+- **Each box's TPM key** signs its own `begin` and its verdicts. Only a
+  box the release lists may begin it; a joined box building its own system
+  waits for one of them. A box may
   give a verdict only on the release of the current record, only while its
   wave is admitted, and only about itself.
 - **The validators** (node1, node2 and the Cloudflare witness today; a

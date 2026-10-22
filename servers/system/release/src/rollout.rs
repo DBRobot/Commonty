@@ -73,14 +73,38 @@ impl Rollout {
     }
 }
 
-/// sha256 hex of the release file as fetched: the record names the file
-/// its rollout is of by this
-pub fn digest(raw: &str) -> String {
+/// What the record names a release by: sha256 hex of its canonical payload
+/// (what the signature covers), then the signature's bytes - the Go
+/// state's Digest. Two writings of one signed release have one digest, so
+/// a box that hands in a re-written file cannot make the record name
+/// something no agent fetched.
+pub fn digest(raw: &str) -> crate::Result<String> {
+    use base64::Engine as _;
     use sha2::Digest as _;
-    sha2::Sha256::digest(raw.as_bytes())
+    let v: serde_json::Value = serde_json::from_str(raw)?;
+    let sig = v["signature"]
+        .as_str()
+        .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
+        .ok_or(crate::Error::Signature)?;
+    let mut h = sha2::Sha256::new();
+    h.update(crate::canonical_v2(&v["payload"])?);
+    h.update(&sig);
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The names a record may give the release fetched as `raw`: its digest,
+/// and sha256 of the file itself, which is what a validator from before
+/// the digest named it by. That one only ever matches the exact bytes
+/// fetched here, so it cannot be steered by another box; it is for the
+/// rollout of the release that brings the digest, begun by validators that
+/// did not know it yet.
+pub fn digests(raw: &str) -> crate::Result<Vec<String>> {
+    use sha2::Digest as _;
+    let file: String = sha2::Sha256::digest(raw.as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
-        .collect()
+        .collect();
+    Ok(vec![digest(raw)?, file])
 }
 
 /// What the agent does with a release, by the record
@@ -96,7 +120,7 @@ pub enum Gate {
     Go,
 }
 
-pub fn gate(ans: &Answer, counter: u64, digest: &str, name: &str) -> Gate {
+pub fn gate(ans: &Answer, counter: u64, digests: &[String], name: &str) -> Gate {
     let r = match &ans.rollout {
         Some(r) if r.counter == counter => r,
         Some(r) if r.counter > counter => {
@@ -107,7 +131,7 @@ pub fn gate(ans: &Answer, counter: u64, digest: &str, name: &str) -> Gate {
         }
         _ => return Gate::Begin,
     };
-    if r.digest != digest {
+    if !digests.contains(&r.digest) {
         return Gate::Stopped(format!(
             "the rollout of release {counter} is of another file than the one fetched here"
         ));
@@ -190,32 +214,64 @@ mod tests {
         serde_json::from_str(json).unwrap()
     }
 
+    // the Go state's TestDigestVector: one file, one digest in both
+    const VECTOR: &str = r#"{"payload":{"boxes":{"node1":{"nar_hash":"sha256-x","path":"/nix/store/x-node1"}},"counter":3,"issued":1,"rev":"r"},"signature":"XPJ3sq51slhHO4CBqoPxLlGwAp6BKkm8tlanu+NBO+EEwOPkP9Li2DG9gIDgtsDnZE7x0PKs33zqlV4DRvoGCA==","signer":"O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik="}"#;
+    const VECTOR_DIGEST: &str = "161eba379dbae48c31d29f4e371761f4182bfe8a57d208ffbdc64816cc6fabef";
+
+    #[test]
+    fn digest_is_the_go_states_and_ignores_how_the_file_is_written() {
+        assert_eq!(digest(VECTOR).unwrap(), VECTOR_DIGEST);
+        let v: serde_json::Value = serde_json::from_str(VECTOR).unwrap();
+        let pretty = serde_json::to_string_pretty(&v).unwrap();
+        let reordered = format!(
+            "\n{{ \"signer\": {},\n  \"signature\": {}, \"payload\":\t{} }}",
+            v["signer"],
+            v["signature"],
+            serde_json::to_string_pretty(&v["payload"]).unwrap()
+        );
+        assert_ne!(pretty, VECTOR);
+        assert_eq!(digest(&pretty).unwrap(), VECTOR_DIGEST);
+        assert_eq!(digest(&reordered).unwrap(), VECTOR_DIGEST);
+        // the file's own hash, for a record begun before the digest
+        assert_eq!(digests(&pretty).unwrap()[0], VECTOR_DIGEST);
+        assert_ne!(digests(&pretty).unwrap()[1], digests(VECTOR).unwrap()[1]);
+        // another signature is another release
+        let forged = VECTOR.replace("XPJ3", "XPJ4");
+        assert_ne!(digest(&forged).unwrap(), VECTOR_DIGEST);
+    }
+
     const TWO: &str = r#"{"rollout":{"counter":7,"digest":"d","waves":[["node2"],["node1"]],"admitted":1,"since":1000,"reports":{"node2":{"took":2000}},"status":"soaking"},"height":5,"time":722000}"#;
 
     #[test]
     fn wave_one_goes_and_the_rest_are_held() {
         let a = record(TWO);
-        assert_eq!(gate(&a, 7, "d", "node2"), Gate::Go);
+        assert_eq!(gate(&a, 7, &["d".into()], "node2"), Gate::Go);
         assert_eq!(
-            gate(&a, 7, "d", "node1"),
+            gate(&a, 7, &["d".into()], "node1"),
             Gate::Held("release 7 waits for wave 1 (node2), which has had it 12 min".into())
         );
         // a box in no wave (not this fleet's control config) waits for all
-        assert!(matches!(gate(&a, 7, "d", "home-controller"), Gate::Held(_)));
+        assert!(matches!(
+            gate(&a, 7, &["d".into()], "home-controller"),
+            Gate::Held(_)
+        ));
     }
 
     #[test]
     fn no_record_or_an_older_one_begins() {
         let none = record(r#"{"rollout":null,"time":1}"#);
-        assert_eq!(gate(&none, 7, "d", "node1"), Gate::Begin);
-        assert_eq!(gate(&record(TWO), 8, "d", "node1"), Gate::Begin);
-        assert!(matches!(gate(&record(TWO), 6, "d", "node1"), Gate::Held(_)));
+        assert_eq!(gate(&none, 7, &["d".into()], "node1"), Gate::Begin);
+        assert_eq!(gate(&record(TWO), 8, &["d".into()], "node1"), Gate::Begin);
+        assert!(matches!(
+            gate(&record(TWO), 6, &["d".into()], "node1"),
+            Gate::Held(_)
+        ));
     }
 
     #[test]
     fn another_file_or_a_stop_is_never_taken() {
         assert!(matches!(
-            gate(&record(TWO), 7, "x", "node2"),
+            gate(&record(TWO), 7, &["x".into()], "node2"),
             Gate::Stopped(_)
         ));
         let bad = TWO.replace(
@@ -223,7 +279,7 @@ mod tests {
             r#""status":"bad","why":"node2: probe""#,
         );
         assert_eq!(
-            gate(&record(&bad), 7, "d", "node2"),
+            gate(&record(&bad), 7, &["d".into()], "node2"),
             Gate::Stopped("release 7 stopped: node2: probe".into())
         );
     }

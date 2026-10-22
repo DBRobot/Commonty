@@ -2,7 +2,9 @@ package state
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -64,7 +66,7 @@ func TestBeginTakesOnlyAReleaseSignedByTheReleaseKey(t *testing.T) {
 	if f.roll("node1", 2000, RolloutOp{Op: "begin", Release: release(t, 5, other, "node1")}) {
 		t.Fatal("a release signed by another key began a rollout")
 	}
-	good := release(t, 5, relKey, "node1")
+	good := release(t, 5, relKey, "node1", "node2")
 	tampered := strings.Replace(good, `"counter":5`, `"counter":6`, 1)
 	if f.roll("node1", 2000, RolloutOp{Op: "begin", Release: tampered}) {
 		t.Fatal("a changed release began a rollout")
@@ -72,13 +74,14 @@ func TestBeginTakesOnlyAReleaseSignedByTheReleaseKey(t *testing.T) {
 	if !f.roll("node1", 2000, RolloutOp{Op: "begin", Release: good}) {
 		t.Fatal("the release did not begin a rollout")
 	}
-	if r := f.s.Rollout; r.Counter != 5 || r.Digest != Digest(good) || r.Status != "soaking" {
+	if r := f.s.Rollout; r.Counter != 5 || r.Digest != agentDigest(t, good) || r.Status != "soaking" {
 		t.Fatalf("rollout %+v", r)
 	}
-	if f.roll("node2", 2100, RolloutOp{Op: "begin", Release: good}) {
-		t.Fatal("the same release began twice")
+	began := *f.s.Rollout
+	if !f.roll("node2", 2100, RolloutOp{Op: "begin", Release: good}) || f.s.Rollout.Began != began.Began {
+		t.Fatal("the same release, begun again, was not a no-op")
 	}
-	if f.roll("node2", 2100, RolloutOp{Op: "begin", Release: release(t, 4, relKey, "node1")}) {
+	if f.roll("node2", 2100, RolloutOp{Op: "begin", Release: release(t, 4, relKey, "node1", "node2")}) {
 		t.Fatal("an older release replaced the rollout")
 	}
 }
@@ -292,11 +295,143 @@ func TestARealReleaseChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &Config{Identity: &ident.Config{Release: "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo="}}
-	p, err := readRelease(c, string(raw))
-	if err != nil || p.Counter == 0 || len(p.Boxes) == 0 {
+	p, d, err := readRelease(c, string(raw))
+	if err != nil || p.Counter == 0 || len(p.Boxes) == 0 || d != agentDigest(t, string(raw)) {
 		t.Fatalf("%v %+v", err, p)
 	}
-	if _, err := readRelease(c, strings.Replace(string(raw), `"nar_hash": "sha256-`, `"nar_hash": "sha256-X`, 1)); err == nil {
+	if _, _, err := readRelease(c, strings.Replace(string(raw), `"nar_hash": "sha256-`, `"nar_hash": "sha256-X`, 1)); err == nil {
 		t.Fatal("a changed path checked")
+	}
+}
+
+// what dd-agent computes (release::rollout::digest): sha256 of the payload
+// with keys sorted and no whitespace, then the signature's bytes
+func agentDigest(t *testing.T, raw string) string {
+	t.Helper()
+	var top struct {
+		Payload   json.RawMessage
+		Signature string
+	}
+	if err := json.Unmarshal([]byte(raw), &top); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := ident.CanonicalValue(top.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, _ := base64.StdEncoding.DecodeString(top.Signature)
+	h := sha256.Sum256(append(msg, sig...))
+	return hex.EncodeToString(h[:])
+}
+
+// the release written another way: indented, its keys in another order
+func rewritten(t *testing.T, raw string) string {
+	t.Helper()
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &top); err != nil {
+		t.Fatal(err)
+	}
+	var p map[string]any
+	if err := json.Unmarshal(top["payload"], &p); err != nil {
+		t.Fatal(err)
+	}
+	pb, _ := json.MarshalIndent(p, "  ", "    ")
+	return "\n {\"signature\" : " + string(top["signature"]) + ",\n\t\"payload\":" + string(pb) +
+		", \"signer\":" + string(top["signer"]) + "}\n\n"
+}
+
+// A box hands in the release re-written: it begins the rollout the agents
+// recognise, so it cannot block the release by being first
+func TestARewrittenReleaseHasTheDigestAgentsCompute(t *testing.T) {
+	f := rolloutFleet(t)
+	f.beat("node1", 1000)
+	f.beat("node2", 1000)
+	good := release(t, 5, relKey, "node1", "node2")
+	bad := rewritten(t, good)
+	if bad == good || !strings.Contains(bad, "\n\t") {
+		t.Fatal("not re-written")
+	}
+	if !f.roll("node2", 2000, RolloutOp{Op: "begin", Release: bad}) {
+		t.Fatal("the re-written release did not begin")
+	}
+	if f.s.Rollout.Digest != agentDigest(t, good) {
+		t.Fatalf("digest %s, the agents compute %s", f.s.Rollout.Digest, agentDigest(t, good))
+	}
+	// the honest box's begin is the same release: nothing changes
+	if !f.roll("node1", 2100, RolloutOp{Op: "begin", Release: good}) || f.s.Rollout.Began != 2000 {
+		t.Fatalf("rollout %+v", f.s.Rollout)
+	}
+}
+
+// A field the release key did not sign is refused at the top, and inside
+// the payload it breaks the signature
+func TestAReleaseWithAnExtraFieldIsRefused(t *testing.T) {
+	f := rolloutFleet(t)
+	f.beat("node1", 1000)
+	good := release(t, 5, relKey, "node1")
+	for _, bad := range []string{
+		strings.Replace(good, `{"payload"`, `{"extra":1,"payload"`, 1),
+		strings.Replace(good, `{"payload"`, `{"Payload":{},"payload"`, 1),
+		strings.Replace(good, `{"payload"`, `{"signer":"x","payload"`, 1),
+		strings.Replace(good, `"counter":5`, `"counter":5,"extra":1`, 1),
+		strings.Replace(good, `"counter":5`, `"counter":9,"counter":5`, 1),
+		strings.Replace(good, `"counter":5`, `"counter":5,"counter":9`, 1),
+		strings.Replace(good, `"path":`, `"path":"/nix/store/y","path":`, 1),
+		good + " {}",
+	} {
+		if bad == good {
+			t.Fatal("not changed")
+		}
+		if f.roll("node1", 2000, RolloutOp{Op: "begin", Release: bad}) {
+			t.Fatalf("began with %s", bad)
+		}
+	}
+	if f.s.Rollout != nil {
+		t.Fatal("a rollout began")
+	}
+}
+
+// Only a box the release is for begins it
+func TestBeginOnlyFromABoxOfTheRelease(t *testing.T) {
+	f := rolloutFleet(t)
+	f.beat("node1", 1000)
+	f.beat("node3", 1000)
+	if f.roll("node3", 2000, RolloutOp{Op: "begin", Release: release(t, 5, relKey, "node1")}) {
+		t.Fatal("a box outside the release began it")
+	}
+	if !f.roll("node1", 2000, RolloutOp{Op: "begin", Release: release(t, 5, relKey, "node1")}) {
+		t.Fatal("the release's own box could not begin it")
+	}
+}
+
+// the cross-language vector: release::rollout::digest gives the same hex
+// for the same file (servers/system/release/src/rollout.rs)
+const (
+	vectorRelease = `{"payload":{"boxes":{"node1":{"nar_hash":"sha256-x","path":"/nix/store/x-node1"}},"counter":3,"issued":1,"rev":"r"},"signature":"XPJ3sq51slhHO4CBqoPxLlGwAp6BKkm8tlanu+NBO+EEwOPkP9Li2DG9gIDgtsDnZE7x0PKs33zqlV4DRvoGCA==","signer":"O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik="}`
+	vectorDigest  = "161eba379dbae48c31d29f4e371761f4182bfe8a57d208ffbdc64816cc6fabef"
+)
+
+func TestDigestVector(t *testing.T) {
+	if release(t, 3, relKey, "node1") != vectorRelease {
+		t.Fatal("the vector is not this release")
+	}
+	p, d, err := readRelease(&Config{Identity: &ident.Config{Release: relPub()}}, vectorRelease)
+	if err != nil || p.Counter != 3 || d != vectorDigest || agentDigest(t, vectorRelease) != vectorDigest {
+		t.Fatalf("%v %s", err, d)
+	}
+}
+
+// A key twice in the payload: the canonical form keeps the last, so the
+// signature still verifies; the file is refused for the key, not for that
+func TestADuplicatedCounterIsRefused(t *testing.T) {
+	c := &Config{Identity: &ident.Config{Release: relPub()}}
+	good := release(t, 5, relKey, "node1")
+	for _, bad := range []string{
+		strings.Replace(good, `"counter":5`, `"counter":9,"counter":5`, 1),
+		strings.Replace(good, `"counter":5`, `"counter":5,"counter":9`, 1),
+	} {
+		if _, _, err := readRelease(c, bad); err == nil || !strings.Contains(err.Error(), "twice") {
+			t.Fatalf("%s: %v", bad, err)
+		}
 	}
 }

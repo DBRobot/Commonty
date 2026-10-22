@@ -654,6 +654,7 @@ func noDuplicates(raw []byte) error {
 // for the judges beside this one (state/computers)
 func Strict(raw []byte, v any) error   { return strict(raw, v) }
 func SameAs(raw, rebuilt []byte) error { return sameAs(raw, rebuilt) }
+func NoDuplicates(raw []byte) error    { return noDuplicates(raw) }
 
 func sameAs(raw, rebuilt []byte) error {
 	if err := noDuplicates(raw); err != nil {

@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"sort"
 	"strings"
@@ -90,7 +91,8 @@ type Report struct {
 // Rollout is the newest release's: there is only ever one
 type Rollout struct {
 	Counter uint64 `json:"counter"`
-	// sha256 hex of the release file: what an agent checks it fetched
+	// sha256 hex of the release's canonical payload and signature (Digest):
+	// what an agent checks it fetched
 	Digest string     `json:"digest"`
 	Began  int64      `json:"began"`
 	Waves  [][]string `json:"waves"`
@@ -143,13 +145,6 @@ func (r *Rollout) Proven(box string) bool {
 	return k >= 0 && k < r.Admitted-1 || (k == 0 && r.Status == "good")
 }
 
-// signedRelease is as much of current.json as begin reads
-type signedRelease struct {
-	Payload   json.RawMessage `json:"payload"`
-	Signer    string          `json:"signer"`
-	Signature string          `json:"signature"`
-}
-
 type releasePayload struct {
 	Counter uint64                     `json:"counter"`
 	Boxes   map[string]json.RawMessage `json:"boxes"`
@@ -157,43 +152,96 @@ type releasePayload struct {
 
 // readRelease checks a release file against the release key, as the
 // agent's verify_json does in its v2 form (the payload as published, keys
-// sorted at every level), and gives its counter and boxes
-func readRelease(cfg *Config, raw string) (*releasePayload, error) {
+// sorted at every level), and gives its counter, boxes and digest. The file
+// is exactly payload, signer and signature: any other key is refused.
+func readRelease(cfg *Config, raw string) (*releasePayload, string, error) {
 	if cfg.Identity == nil || cfg.Identity.Release == "" {
-		return nil, errors.New("this fleet's config names no release key")
+		return nil, "", errors.New("this fleet's config names no release key")
 	}
-	var sr signedRelease
-	if err := json.Unmarshal([]byte(raw), &sr); err != nil {
-		return nil, fmt.Errorf("not a release: %v", err)
+	// a key twice anywhere would let what is read here differ from what
+	// the signature covers
+	if err := ident.NoDuplicates([]byte(raw)); err != nil {
+		return nil, "", fmt.Errorf("not a release: %v", err)
 	}
-	if sr.Signer != cfg.Identity.Release {
-		return nil, errors.New("not signed by the release key")
+	top, err := releaseFields(raw)
+	if err != nil {
+		return nil, "", fmt.Errorf("not a release: %v", err)
+	}
+	var signer, signature string
+	if json.Unmarshal(top["signer"], &signer) != nil || json.Unmarshal(top["signature"], &signature) != nil {
+		return nil, "", errors.New("not a release: signer and signature are strings")
+	}
+	payload := top["payload"]
+	if signer != cfg.Identity.Release {
+		return nil, "", errors.New("not signed by the release key")
 	}
 	pub, err := ident.DecodePublic(cfg.Identity.Release)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	sig, err := base64.StdEncoding.DecodeString(sr.Signature)
+	sig, err := base64.StdEncoding.Strict().DecodeString(signature)
 	if err != nil || len(sig) != ed25519.SignatureSize {
-		return nil, errors.New("not a signature")
+		return nil, "", errors.New("not a signature")
 	}
-	msg, err := ident.CanonicalValue(sr.Payload)
+	msg, err := ident.CanonicalValue(payload)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if !ed25519.Verify(pub, msg, sig) {
-		return nil, errors.New("not signed by the release key")
+		return nil, "", errors.New("not signed by the release key")
 	}
+	// read from the bytes the signature covers, not the bytes handed in
 	var p releasePayload
-	if err := json.Unmarshal(sr.Payload, &p); err != nil {
-		return nil, err
+	if err := json.Unmarshal(msg, &p); err != nil {
+		return nil, "", err
 	}
-	return &p, nil
+	return &p, Digest(msg, sig), nil
 }
 
-func Digest(raw string) string {
-	h := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(h[:])
+// releaseFields reads the top of a release file: payload, signer and
+// signature, each once and named exactly so, and nothing after
+func releaseFields(raw string) (map[string]json.RawMessage, error) {
+	d := json.NewDecoder(strings.NewReader(raw))
+	if t, err := d.Token(); err != nil || t != json.Delim('{') {
+		return nil, errors.New("an object")
+	}
+	top := map[string]json.RawMessage{}
+	for d.More() {
+		t, err := d.Token()
+		if err != nil {
+			return nil, err
+		}
+		k, _ := t.(string)
+		if _, seen := top[k]; seen || k != "payload" && k != "signer" && k != "signature" {
+			return nil, fmt.Errorf("a field %q", k)
+		}
+		var v json.RawMessage
+		if err := d.Decode(&v); err != nil {
+			return nil, err
+		}
+		top[k] = v
+	}
+	if _, err := d.Token(); err != nil {
+		return nil, err
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return nil, errors.New("something after the release")
+	}
+	if len(top) != 3 {
+		return nil, errors.New("payload, signer and signature, each once")
+	}
+	return top, nil
+}
+
+// Digest names a release by what its signature covers: sha256 hex of the
+// canonical payload, then the signature. However a box re-writes the file
+// it hands in, the digest is the one every agent computes from the file it
+// fetched (release::rollout::digest in Rust).
+func Digest(canonical, sig []byte) string {
+	h := sha256.New()
+	h.Write(canonical)
+	h.Write(sig)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (s *State) checkRollout(cfg *Config, box string, body json.RawMessage, now int64) error {
@@ -207,11 +255,22 @@ func (s *State) checkRollout(cfg *Config, box string, body json.RawMessage, now 
 	r := s.Rollout
 	switch op.Op {
 	case "begin":
-		p, err := readRelease(cfg, op.Release)
+		p, digest, err := readRelease(cfg, op.Release)
 		if err != nil {
 			return err
 		}
-		if r != nil && p.Counter <= r.Counter {
+		// only a box the release is for begins it: a box outside it, a
+		// joined one building its own, takes it once every wave has
+		if _, ok := p.Boxes[box]; !ok {
+			return fmt.Errorf("release %d is not for %s", p.Counter, box)
+		}
+		if r != nil && p.Counter == r.Counter {
+			if digest != r.Digest {
+				return fmt.Errorf("release %d began as another file", p.Counter)
+			}
+			return nil // begun already: nothing to do
+		}
+		if r != nil && p.Counter < r.Counter {
 			return fmt.Errorf("release %d is not newer than the rollout of %d", p.Counter, r.Counter)
 		}
 		return nil
@@ -248,9 +307,12 @@ func (s *State) applyRollout(cfg *Config, box string, body json.RawMessage, now 
 	_ = json.Unmarshal(body, &op)
 	switch op.Op {
 	case "begin":
-		p, _ := readRelease(cfg, op.Release)
+		p, digest, _ := readRelease(cfg, op.Release)
+		if r := s.Rollout; r != nil && r.Counter == p.Counter {
+			return
+		}
 		s.Rollout = &Rollout{
-			Counter: p.Counter, Digest: Digest(op.Release), Began: now,
+			Counter: p.Counter, Digest: digest, Began: now,
 			Waves: s.waves(cfg, p, now), Admitted: 1, Since: now,
 			Reports: map[string]Report{}, Status: "soaking",
 		}
