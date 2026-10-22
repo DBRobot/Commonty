@@ -135,6 +135,10 @@ in
           db_engine = "lmdb";
           replication_factor = cfg.replicationFactor;
           consistency_mode = "consistent";
+          # lmdb syncs each write: unsynced (the default) a box that loses
+          # power can come back with a metadata db garage dies opening
+          # (SIGBUS in mdb_page_search_root, pg-follow after b.crash())
+          metadata_fsync = true;
           # a daily copy of the metadata db, in ${meta}/snapshots; the backup
           # module ships it, so a cluster whose metadata is gone is rebuilt
           # from the last snapshot plus the blocks
