@@ -15,7 +15,7 @@ fleet.wait_for_unit("nginx.service")
 fleet.succeed(
     "mkdir -p /root/f/w /srv/test && cd /root/f"
     f" && cp {nix['control']} dd-control && cp {nix['verify']} verify"
-    f" && cp {nix['worker']}/worker.js {nix['worker']}/wasm_exec.js {nix['worker']}/witness.wasm w/"
+    f" && cp {nix['worker']}/worker.js {nix['worker']}/wasm_exec.js {nix['worker']}/witness.wasm {nix['worker']}/placement.js w/"
     " && chmod -R u+w ."
 )
 fleet.succeed(
