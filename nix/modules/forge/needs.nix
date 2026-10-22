@@ -98,6 +98,8 @@
       "dd-cache-upload"
       # the key what it builds is signed with in the cache, made on the box
       "dd-cache-key"
+      # its key to the cache, as nix reads it (storage/cache.nix)
+      "dd-cache-credentials"
     ];
     base = {
       requires = {

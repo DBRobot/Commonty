@@ -9,9 +9,11 @@ let
   inherit (cfg) url;
   # what the post-build hook has queued for dd-cache-upload
   spool = "/var/lib/dd-cache-upload";
-  # the storage pool at this box's address for it: its own garage, or a
-  # storage box's over the tailnet (dd.box.s3)
-  s3 = "s3://nix-cache?endpoint=${lib.removePrefix "http://" config.dd.box.s3}&scheme=http&region=us-east-1";
+  # the nix-cache bucket, in the store that keeps it (storage/store.nix
+  # shared): on loopback at home, at store.<home>.<domain> elsewhere
+  at = config.dd.store.at.nix-cache;
+  # the endpoint as aws reads it
+  endpoint = at.endpoint;
   # The laptop's, and this box's own. A box's nix installs whatever it
   # substitutes, so a key in this list is a machine allowed to decide what
   # the box runs - and node2 is meant to sit in someone else's house. So
@@ -46,12 +48,12 @@ in
     };
     credentialsFile = lib.mkOption {
       type = lib.types.str;
-      default = "/root/.aws/credentials";
-      description = "AWS credentials file with this box's cache key, for nix as root.";
+      default = "/var/lib/dd-cache/credentials";
+      description = "AWS credentials file with this box's key to the cache, for nix as root: made from its key to the store that keeps it (dd-cache-credentials).";
     };
     url = lib.mkOption {
       type = lib.types.str;
-      default = s3;
+      default = at.s3Url;
       description = "The cache's nix store url; a test points it at a file:// cache.";
     };
     uploadTimeout = lib.mkOption {
@@ -172,9 +174,37 @@ in
     nix.extraOptions = lib.mkIf (cfg.signingKeyFile == "${keysDir}/secret") ''
       !include ${keysDir}/nix.conf
     '';
-    # the daemon substitutes as root; its credentials live at the usual place
+    # the daemon substitutes as root, with this box's key to the store that
+    # keeps the cache, in the form nix's s3 client reads
     systemd.services.nix-daemon.environment.AWS_SHARED_CREDENTIALS_FILE = cfg.credentialsFile;
     systemd.services.nix-daemon.environment.HOME = "/root";
+    systemd.services.dd-cache-credentials = {
+      description = "This box's key to the nix cache, as nix reads it";
+      after = [ "dd-store-at.service" ];
+      wants = [ "dd-store-at.service" ];
+      wantedBy = [ "multi-user.target" ];
+      path = [ pkgs.coreutils ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        set -euo pipefail
+        umask 077
+        # the home's store may not have handed this box its key yet: the
+        # timer comes back, and nix builds without the cache meanwhile
+        [ -s ${at.envFile} ] || { echo "no key to the cache yet"; exit 0; }
+        . ${at.envFile}
+        install -d -m 0700 ${dirOf cfg.credentialsFile}
+        printf '[default]\naws_access_key_id = %s\naws_secret_access_key = %s\n' \
+          "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" > ${cfg.credentialsFile}.new
+        mv ${cfg.credentialsFile}.new ${cfg.credentialsFile}
+      '';
+    };
+    systemd.timers.dd-cache-credentials = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "6min";
+        OnUnitActiveSec = "1h";
+      };
+    };
 
     # The cache is held to what is still wanted, or it grows for good (95G
     # in its first two weeks): the closures of the last ten releases, and
@@ -201,7 +231,7 @@ in
         AGE = "2";
         CACHE = url;
         BUCKET = "nix-cache";
-        ENDPOINT = config.dd.box.s3;
+        ENDPOINT = endpoint;
       };
       # with failover every box able to hold the forge has it, but only the
       # holder's releases branch is current: a box that held it once keeps a

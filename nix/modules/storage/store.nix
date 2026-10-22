@@ -445,9 +445,15 @@ in
     at = lib.mkOption {
       type = lib.types.attrsOf lib.types.attrs;
       readOnly = true;
-      default = lib.mapAttrs (b: v: {
+      default = lib.mapAttrs (b: v: rec {
         endpoint =
           if v.home == box then "http://127.0.0.1:${toString cfg.port}" else cfg.peers.${v.home}.url;
+        # the bucket as nix names an s3 store (the nix cache)
+        s3Url =
+          let
+            scheme = lib.head (lib.splitString "://" endpoint);
+          in
+          "s3://${b}?endpoint=${lib.removePrefix "${scheme}://" endpoint}&scheme=${scheme}&region=us-east-1";
         # the key there: this box's own for the bucket at home, its key to
         # the home's store elsewhere (dd-store-at)
         envFile = "${state}/at/${b}.env";

@@ -12,7 +12,16 @@
     {
       imports = [
         ../modules/storage/cache.nix
-        { options.dd.box.s3 = lib.mkOption { default = "http://127.0.0.1:1"; }; }
+        # the store that keeps the cache: none here, the test's cache is a file
+        {
+          options.dd.store.at = lib.mkOption {
+            default.nix-cache = {
+              s3Url = "s3://nix-cache?endpoint=127.0.0.1:1&scheme=http&region=us-east-1";
+              endpoint = "http://127.0.0.1:1";
+              envFile = "/var/lib/test-no-store.env";
+            };
+          };
+        }
       ];
       dd.cache = {
         url = "file:///var/lib/test-cache";
