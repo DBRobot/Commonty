@@ -39,6 +39,7 @@ MAIL_WORKER = [
     "site-roles",
     "site-a11y",
     "site-speed",
+    "site-links",
     "dns-worker",
     "sso",
     "control",

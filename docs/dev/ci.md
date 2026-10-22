@@ -298,6 +298,14 @@ The site as a browser meets it, each a check of the `mail_worker` job
     link to it until it is drawn, in units of a fixed piece of page work
     timed first in the same browser, and a first visit's bytes and
     requests, against budgets a little above what main measured.
+  - `site-links` ([`nix/tests/site-links`](../../nix/tests/site-links)):
+    every link the site's pages show, followed in a browser as a member and
+    a stranger, each way a browser finds the box (public DNS, the fleet's
+    DNS, from outside), failing on a link that opens no real page, a new
+    tab, or nothing, and on a page with a script error, a content-policy
+    refusal or a failed request; the app's pages' links are read against
+    what the app and the site serve. Every page it opens is audited by
+    `a11y.audit` too.
 - **A vm** ([`nix/tests/site-journeys.nix`](../../nix/tests/site-journeys.nix)),
   its own job in the `vm_tests` matrix like every VM test: each service's
   one main thing against the real services on one box.
