@@ -64,13 +64,7 @@ in
         static_configs = [ { targets = [ "127.0.0.1:9633" ]; } ];
       }
     ]
-    # Garage's own figures come from its admin port (storage/garage.nix).
-    # 2112 was never garage: on node1 it is ente's museum, which answered
-    # as "garage" while garage itself was not measured anywhere.
-    ++ lib.optional config.services.garage.enable {
-      job_name = "garage";
-      static_configs = [ { targets = [ "127.0.0.1:3903" ]; } ];
-    }
+    # 2112 is ente's museum, which once answered as "garage"
     ++ lib.optional (config.services.ente.api.enable or false) {
       job_name = "ente-museum";
       static_configs = [ { targets = [ "127.0.0.1:2112" ]; } ];

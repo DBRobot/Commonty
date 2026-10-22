@@ -5,11 +5,6 @@
     "public": true,
     "siteId": "s-c844d9db",
     "regionId": "r-696be5ea",
-    "garage": {
-      "id": "eca3acbf439670efa8070ef9e1c8baaa9aac7092163aaab9447102f710e81cfe",
-      "capacity": "3T",
-      "dataDir": "/vault/photos"
-    },
     "unlockKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELRZDrWYKFKtGq+do2nX7R9PlilX4RYtwQpU4wXvvusU17sPvF+unSH47FDRYCLeBcWZre2c23qpunpO4VQxcew=="
   },
   "node2": {
@@ -18,11 +13,6 @@
     "public": false,
     "siteId": "s-c844d9db",
     "regionId": "r-696be5ea",
-    "garage": {
-      "capacity": "400G",
-      "dataDir": "/srv/garage",
-      "id": "1ed04b4160b765e2f019a9891afe0919f1645230dea8706d09775fdf60682c6e"
-    },
     "unlockKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAErdNeAqS43JeMu981L3PiMhDBjRBM6xuS1S9ccMWGTGuJsLpLCL2jQgLBTmGkABbmzQnt0agYO1GlLNgL5SZZ1Q=="
   }
 }

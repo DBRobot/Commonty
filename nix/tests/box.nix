@@ -12,6 +12,9 @@
   ];
   dd.domain = "test.invalid";
   dd.repo = "tester/commonty";
+  # a test's own garage, where one runs one: Photos and Passwords with
+  # failover off keep their files there (box/box.nix)
+  dd.box.s3 = "http://127.0.0.1:3900";
   dd.verify.role = "directory";
   # a test chooses its own failover mode, never the fleet's switch
   # (fleet/policy.json): off, a service runs from the test's own secrets as

@@ -58,9 +58,9 @@
     description = "Every GPU the box has, whatever its maker: Vulkan is on for all of them.";
   };
   options.dd.box.s3 = lib.mkOption {
-    type = lib.types.str;
-    default = "http://127.0.0.1:3900";
-    description = "the storage pool's S3 address for this box: its own garage, or a storage box's over the fleet's network (flake.nix)";
+    type = lib.types.nullOr lib.types.str;
+    default = null;
+    description = "an S3 address beside the box's own store, for a test's own garage (nix/tests/box.nix): what Photos and Passwords use with failover off. No box has one; the old shared pool is gone (docs/dev/storage.md)";
   };
   options.dd.box.bulkPool = lib.mkOption {
     type = lib.types.str;

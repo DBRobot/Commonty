@@ -27,20 +27,9 @@ in
     assertions = [
       {
         assertion = config.dd.libraries.enable;
-        message = "the mail bucket lives beside the libraries, under their key";
+        message = "the mail bucket lives beside the libraries, in the same store, its key with theirs (dd-library-keys)";
       }
     ];
-    dd.garage.buckets.mail = {
-      key = {
-        name = "dd-library";
-        envPrefix = "LIBRARY";
-      };
-      allow = [
-        "read"
-        "write"
-      ];
-      # no CORS: only the gate reaches it
-    };
     # a member's app reaches its mail at files.<domain>, as it does its
     # libraries: bodies up to the gate's own cap, and the pipe a WebSocket
     services.nginx.virtualHosts."files.${config.dd.domain}".locations = {

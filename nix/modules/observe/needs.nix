@@ -51,12 +51,12 @@
         storage = "0";
       };
       network = {
-        outbound = [ "s3" ];
+        outbound = [ "store" ];
         inbound = "localhost"; # this box's own query only
       };
       depends = {
         prometheus.local = true;
-        garage.local = false;
+        store.local = true;
       };
       privacy = "metadata";
     };
@@ -80,10 +80,10 @@
         storage = "3M";
       };
       network = {
-        outbound = [ "s3" ];
+        outbound = [ "store" ];
         inbound = "localhost";
       };
-      depends.garage.local = false;
+      depends.store.local = true;
       privacy = "metadata";
     };
   };
@@ -168,10 +168,10 @@
         storage = "1M";
       };
       network = {
-        outbound = [ "s3" ];
+        outbound = [ "store" ];
         inbound = "localhost";
       };
-      depends.garage.local = false;
+      depends.store.local = true;
       privacy = "metadata";
     };
   };

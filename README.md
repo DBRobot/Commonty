@@ -34,24 +34,18 @@ ref of the forge's repository: `scripts/deploy node1 [ref]`.
 - **No box talks to another box.** A box is reached by people and by
   services through its front door, the way any client reaches it, and never
   through a channel that exists because the other end is also a box. Today
-  these remain, all on the fleet's own network, open in its rules to boxes
-  alone and fenced again by each box's firewall to its peers' addresses:
-  garage S3 and RPC (3900, 3901), and, inside one house, the Wi-Fi relay
-  (4181). Each goes when the change it waits on lands: one store per box
-  for garage, the agreed log for the Wi-Fi.
-- **One Garage per box, or per trust domain, not one cluster.** A Garage
-  cluster shares one RPC secret and every member of it is an admin, so a box
-  in someone else's house cannot be a peer. What replaces the cluster has to
-  let contributed boxes *grow* the usable pool, not only hold copies:
-  placement and replication across independent stores, each with its own
-  credentials. Erasure coding is the eventual shape and nothing off the shelf
+  one remains, on the fleet's own network, open in its rules to boxes alone
+  and fenced again by each box's firewall: inside one house, the Wi-Fi relay
+  (4181), which goes with the agreed log. The stores' own port (3443) is
+  each store's door, sealed keys and all.
+- **Contributed boxes grow the pool.** Each box has its own store now, and
+  copies are placed across them by room. What it still lacks: a bucket is
+  kept whole on each box that keeps it, so the pool is as big as one box's
+  store, not their sum. Erasure coding is the eventual shape and nothing off the shelf
   fits (Garage has none by design, MinIO is archived, SeaweedFS shares a
   signing key across volume servers, Tahoe-LAFS fits the trust model but not
   S3). It stops mattering until there are five or six houses; below that,
   replication is optimal anyway.
-- **Metrics without pulling.** Once each box's store is its own, the thanos
-  sidecar channel goes too and a box's history reaches the fleet view only
-  through the bucket.
 - **An off-site copy.** Every copy of every member's data is in one building.
 - **One vote per house in the control plane.** It starts with three voters:
   node1, node2 and the Cloudflare witness (docs/dev/control-plane.md). That

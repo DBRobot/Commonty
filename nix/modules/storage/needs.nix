@@ -38,47 +38,12 @@
     };
   };
 
-  garage = {
-    what = "the storage pool: buckets of ciphertext, kept on two boxes";
-    # one cluster today, whose shared secret makes every peer its admin: only the owner's boxes until each box keeps its own store (box isolation)
-    trust = "owner";
-    traffic = {
-      class = "high";
-      upMbps = 50;
-      downMbps = 50;
-    };
-    alwaysOn = true;
-    spread = true;
-    grows = [
-      "photos"
-      "libraries"
-    ];
-    units = [ "garage-setup" ];
-    base = {
-      # below this a storage box adds little; with two copies of everything
-      # the smallest box caps what the pool can hold
-      requires.disk.size.min = "250G";
-      # node1, 2026-10-04: blocks 257G (node2 holds the same), metadata 641M
-      uses = {
-        memory = "516M";
-        storage = "258G";
-      };
-      network = {
-        outbound = "none";
-        inbound = "network"; # S3 for the boxes, RPC between storage boxes
-      };
-      depends = { };
-      privacy = "none"; # what it holds is encrypted before it arrives
-    };
-  };
-
   restic-backup = {
-    what = "this box's own state, encrypted here, into its own bucket (two copies, on two boxes)";
+    what = "this box's own state, encrypted here, into its own bucket in its own store, copied where the plan finds room";
     units = [
       "restic-backups-*"
       "dd-backup-stale"
       "dd-alert@*"
-      "garage-meta-snapshot"
     ];
     everyBox = true;
     # each box's own repository, in its own store, and a copy where the
@@ -91,10 +56,10 @@
         storage = "0";
       };
       network = {
-        outbound = [ "s3" ];
+        outbound = [ "store" ];
         inbound = "none";
       };
-      depends.garage.local = false;
+      depends.store.local = true;
       privacy = "none"; # ciphertext leaves the box
     };
   };
@@ -144,7 +109,7 @@
       shared = true;
     };
     base = {
-      # node1, 2026-10-04: the nix-cache bucket (its copies are garage's)
+      # node1, 2026-10-04: the nix-cache bucket
       uses = {
         memory = "0";
         storage = "95G";
@@ -154,7 +119,7 @@
         inbound = "network"; # boxes fetch, builders and the owner push
       };
       depends = {
-        garage.local = false;
+        store.local = true;
         # its collection keeps what the releases branch wants: the one the
         # forge holding the lease has (storage/cache.nix)
         forgejo.local = true;
@@ -205,7 +170,6 @@
       "dd-store-copy-recent"
       "dd-store-copy-final@" # a writer's last writes, when dd-control hands it over
       "dd-store-facts"
-      "dd-store-migrate" # the move off the old shared pool
       "dd-store-at" # keys to the shared buckets, at the stores that keep them
       "dd-store-joined" # keys for the boxes that joined on their own keys
     ];

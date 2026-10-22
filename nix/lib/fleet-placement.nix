@@ -68,7 +68,6 @@ let
   order = [
     "core"
     "gateway"
-    "storage"
     "photos"
     "media"
     "llm"

@@ -151,7 +151,7 @@ in
     {
       # No box sleeps, whatever it is (David, 2026-10-11): no suspend on close,
       # on battery or not, and no idle action. A box that sleeps is a box that
-      # is gone - garage's second copy, the front door, a game - until there is
+      # is gone - a store's copies, the front door, a game - until there is
       # a sleep that hands its work on first
       services.logind.settings.Login = {
         HandleLidSwitchDocked = "ignore";

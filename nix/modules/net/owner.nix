@@ -22,7 +22,6 @@ in
       22
       53
       80
-      3900
     ];
     description = "what the box's owner reaches from their devices on commonty0 (tcp; 53 on udp too), beside the 443 every member has";
   };

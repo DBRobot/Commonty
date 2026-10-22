@@ -12,7 +12,6 @@ decides where each placed service runs.
 
     core      every box: identity, directory replica, metrics, the fleet's network, ssh, admin
     gateway   certificates, the public front door (tunnel, bare domain), headscale
-    storage   a node of the garage cluster; the box's own backup key
     photos    ente
     media     Movies & TV and Files tiles, uploads, per-user directories
     library   members' encrypted libraries and their locked mail behind the gate, and the transcoder
@@ -26,8 +25,8 @@ decides where each placed service runs.
     compute   members' remote computers
 
 Every box backs itself up (nix/modules/storage/backup.nix): restic, encrypted on the
-box, into its own bucket in the garage cluster, which keeps two copies. A
-bundle adds the paths its state lives in with `dd.backup.paths`. A box's
+box, into its own bucket in its own store, copied where the plan finds room;
+core keeps its pool's datasets (snapshots and scrubs). A bundle adds the paths its state lives in with `dd.backup.paths`. A box's
 datasets are declared in its `fleet/boxes/<box>/box.json` (`datasets`),
 which modules/box/host.nix turns into `dd.zfs.datasets`.
 

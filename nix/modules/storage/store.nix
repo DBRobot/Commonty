@@ -454,27 +454,6 @@ in
       default = { };
       description = "a service's units run to their end, in order, on its planned handover, before its final copy (the forge's own copy into this store)";
     };
-    migrate = lib.mkOption {
-      type = lib.types.attrsOf (
-        lib.types.submodule {
-          options = {
-            envFile = lib.mkOption {
-              type = lib.types.str;
-              description = "the env file with the bucket's key on the storage pool";
-            };
-            id = lib.mkOption { type = lib.types.str; };
-            secret = lib.mkOption { type = lib.types.str; };
-            once = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = "the service writes this store now: copied until it is all here once more, then never again, so what a member deletes here does not come back from the old pool";
-            };
-          };
-        }
-      );
-      default = { };
-      description = "buckets copied hourly from the old shared storage pool (dd.box.s3) into this store, until failover reads them here: copied, never deleted from either";
-    };
     publicPort = lib.mkOption {
       type = lib.types.port;
       default = 3443;
@@ -662,64 +641,6 @@ in
       };
     };
 
-    # the move off the old shared pool: each bucket this box writes there,
-    # copied here every hour, so failover finds it in place. Once the
-    # service writes here (once), one more copy brings what it wrote there
-    # before its switch, and then no more: a member's delete here stays
-    # deleted. Each bucket's state, for the box's page and the check
-    # before the old pool goes: dd_store_migrated 1 all here, 0 not yet
-    systemd.services.dd-store-migrate = lib.mkIf (cfg.migrate != { }) {
-      description = "Copy this box's buckets from the old storage pool into its own store";
-      after = [ "dd-store-setup.service" ];
-      restartIfChanged = false;
-      path = [
-        pkgs.rclone
-        pkgs.coreutils
-      ];
-      serviceConfig.Type = "oneshot";
-      script = ''
-        set -uo pipefail
-        export RCLONE_CONFIG=/dev/null
-        done=${state}/migrated
-        mkdir -p $done
-        out=$(mktemp)
-        ${lib.concatStrings (
-          lib.mapAttrsToList (b: m: ''
-            if ${lib.boolToString m.once} && [ -e $done/${b} ]; then
-              echo "${b}: copied once since its switch; no more"
-              echo 'dd_store_migrated{bucket="${b}",once="${lib.boolToString m.once}"} 1' >> $out
-            else
-            (
-              set -a; . ${m.envFile}; . ${state}/keys/${b}.env; set +a
-              export RCLONE_CONFIG_POOL_TYPE=s3 RCLONE_CONFIG_POOL_PROVIDER=Other \
-                RCLONE_CONFIG_POOL_ENDPOINT=${config.dd.box.s3} RCLONE_CONFIG_POOL_REGION=us-east-1 \
-                RCLONE_CONFIG_POOL_ACCESS_KEY_ID=''${${m.id}} RCLONE_CONFIG_POOL_SECRET_ACCESS_KEY=''${${m.secret}} \
-                RCLONE_CONFIG_POOL_FORCE_PATH_STYLE=true \
-                RCLONE_CONFIG_HERE_TYPE=s3 RCLONE_CONFIG_HERE_PROVIDER=Other \
-                RCLONE_CONFIG_HERE_ENDPOINT=http://127.0.0.1:${toString cfg.port} RCLONE_CONFIG_HERE_REGION=us-east-1 \
-                RCLONE_CONFIG_HERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID RCLONE_CONFIG_HERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
-                RCLONE_CONFIG_HERE_FORCE_PATH_STYLE=true
-              # copy, never sync: nothing is deleted on either side
-              rclone copy --checksum --s3-no-check-bucket --fast-list pool:${b} here:${b} \
-                && rclone check --one-way --fast-list pool:${b} here:${b}
-            ) && {
-              echo "${b}: all of it here"
-              echo 'dd_store_migrated{bucket="${b}",once="${lib.boolToString m.once}"} 1' >> $out
-              ${lib.optionalString m.once "touch $done/${b}"}
-            } || {
-              echo "${b}: not all here yet"
-              echo 'dd_store_migrated{bucket="${b}",once="${lib.boolToString m.once}"} 0' >> $out
-            }
-            fi
-          '') cfg.migrate
-        )}
-        install -d /var/lib/dd-facts
-        chmod 0644 $out
-        mv $out /var/lib/dd-facts/store-migrate.prom
-        exit 0
-      '';
-    };
-
     # the shared buckets (thanos' blocks, the nix cache): kept in one box's
     # store, which the others write with their own key to it. Here, each
     # one's key in ${state}/at/<bucket>.env, for its owner: this box's own
@@ -784,13 +705,6 @@ in
       timerConfig = {
         OnActiveSec = "5min";
         OnUnitActiveSec = "15min";
-      };
-    };
-    systemd.timers.dd-store-migrate = lib.mkIf (cfg.migrate != { }) {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnActiveSec = "10min";
-        OnUnitActiveSec = "1h";
       };
     };
 

@@ -71,7 +71,6 @@ let
     # what holds keys or reads everyone's data stays on the owner's boxes
     (!(can "gaming-pc" "llama-swap") && lib.hasInfix "only on" (why "gaming-pc" "llama-swap"))
     (!(can "gaming-pc" "vaultwarden"))
-    (!(can "diy-nas" "garage"))
     # a household's own DNS on that household's box
     (can "diy-nas" "pihole" && can "office-desktop" "pihole" && can "thin-client" "pihole")
     # postgres wants an SSD; a NAS of spinning disks has none
@@ -87,7 +86,6 @@ let
     (can "gaming-pc" "dd-games")
     # rankings: the biggest pool for storage, a video encoder for
     # transcoding, mains over battery for what must always answer
-    (best "garage" == "xeon-r740")
     (before "dd-transcode" "n100-minipc" "xeon-r740")
     (before "pihole" "office-desktop" "david-laptop")
     (best "members-runner" == "xeon-r740")
@@ -106,14 +104,12 @@ let
     "xeon-r740: llama-swap for want of a GPU"
     "gaming-pc: llama-swap is the owner's"
     "gaming-pc: no vault"
-    "diy-nas: no garage (one cluster, the owner's)"
     "pihole on households' boxes"
     "diy-nas: no postgres without an SSD"
     "office-desktop: postgres"
     "thin-client: no nix cache"
     "members-runner on helpers' boxes"
     "gaming-pc: no games until certificates move"
-    "garage best on the biggest pool"
     "transcode: an encoder first"
     "pihole: mains before battery"
     "members-runner best on the most threads"
