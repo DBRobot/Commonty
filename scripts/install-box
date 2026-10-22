@@ -70,15 +70,18 @@ mkdir -p "$tree"
 # node key (the layout names it), the uid map (files on its other pools
 # are owned by those numbers), the verifier's keys, certificates it holds,
 # its secrets key (a handle into this box's TPM: without it the box cannot
-# read secrets/<box>.yaml at first boot) and its control-plane vote key
+# read secrets/<box>.yaml at first boot), its control-plane vote key, and
+# its own store's state: the metadata that makes the blocks on its pool
+# objects, its secret and its keys. The store is stopped first, so its
+# database is whole; the box is about to be wiped anyway
 identity="etc/ssh/ssh_host_ed25519_key etc/ssh/ssh_host_ed25519_key.pub var/lib/commonty-net \
   var/lib/garage/meta/node_key var/lib/garage/meta/node_key.pub var/lib/nixos var/lib/dd-verify var/lib/acme \
-  var/lib/dd/secrets-key.txt var/lib/dd-control/validator.key"
+  var/lib/dd/secrets-key.txt var/lib/dd-control/validator.key var/lib/dd-store"
 # shellcheck disable=SC2029 # the list expands here on purpose
-ssh "${ssh_opts[@]}" "admin@$lan" "sudo sh -c 'for p in $identity; do [ -e /\$p ] && echo \$p; done | tar czf - -C / -T -'" \
+ssh "${ssh_opts[@]}" "admin@$lan" "sudo sh -c 'systemctl stop dd-store.service 2>/dev/null; for p in $identity; do [ -e /\$p ] && echo \$p; done | tar czf - -C / -T -'" \
   | (umask 022; tar xzf - -C "$tree" --no-same-owner --no-same-permissions)
 # a box need not have each (no garage on a box without storage)
-for d in var/lib/commonty-net var/lib/garage/meta var/lib/dd-verify; do
+for d in var/lib/commonty-net var/lib/garage/meta var/lib/dd-verify var/lib/dd-store; do
   [ ! -d "$tree/$d" ] || chmod 700 "$tree/$d"
 done
 if [ ! -s "$tree/var/lib/commonty-net/tailscaled.state" ]; then
