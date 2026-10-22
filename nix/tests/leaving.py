@@ -194,6 +194,28 @@ box.succeed(
     f"{as_('tom')} member suspend ann --reason 'sent spam again' --repo /root/fleet {dirs} --confirm {ann_id}"
 )
 release_members()
+removed = json.loads(box.succeed("jq -c .removed /root/fleet/fleet/members.json"))
+assert len(removed) == 1, removed
+ann_member, ann_removed = next(iter(removed.items()))
+
+
+# the gate takes her as newly out once per removal time, and logs it in
+# the same look that would delete what is due
+def ann_looked_at(times):
+    box.wait_until_succeeds(
+        f"[ $(journalctl -u dd-verify -o cat | grep -c 'leaving: member {ann_member[:8]} is out') -ge {times} ]",
+        timeout=120,
+    )
+
+
+def ann_kept(why):
+    assert keys(libs["ann"]), why
+    listed = json.loads(box.succeed(f"curl -sf {gate}/internal/leaving"))
+    ann = [m for m in listed["members"] if m["name"] == "ann"]
+    assert ann and not ann[0]["due"] and "libraries" not in ann[0]["done"], ann
+
+
+ann_looked_at(2)
 
 # a statement from someone else's root is refused
 forged = box.succeed(
@@ -211,8 +233,9 @@ box.wait_until_succeeds(
     f'curl -sf {gate}/internal/leaving | jq -e \'.members[] | select(.name == "sarah") | .due and (.done | index("gate")) and (.done | index("libraries"))\'',
     timeout=150,
 )
-# and ann's, suspended, are kept: the window is short here, so this first
-assert keys(libs["ann"]), "a suspension keeps things for the window"
+# and ann's, suspended, are kept: the gate has looked at her since (above),
+# and her window is the real one, which no slowness of the box runs out
+ann_kept("a suspension keeps things for the window")
 assert keys(libs["sarah"]) == [], keys(libs["sarah"])
 assert keys("images-sarah") == []
 box.succeed(f"test ! -e {state}/names/sarah.bin")
@@ -226,7 +249,26 @@ box.succeed(
     f'curl -sf {gate}/internal/leaving | jq -e \'.members[] | select(.name == "sarah") | .done | index("photos")\''
 )
 
-# ann's library is kept until her window (a minute) runs out, then goes
+# ann's library is kept until her window runs out, then goes. The time is
+# not waited out: the release says she was removed longer ago
+window = json.loads(box.succeed(f"curl -sf {gate}/internal/leaving"))["window"]
+
+
+def ann_removed_ago(secs):
+    box.succeed(
+        f"jq '.removed[\"{ann_member}\"] = {ann_removed - secs}' /root/fleet/fleet/members.json > /root/m.json"
+        " && mv /root/m.json /root/fleet/fleet/members.json"
+    )
+    release_members()
+
+
+# six hours of it left: a new removal time is a new leaving to the gate,
+# so it looks at her again, and keeps everything
+ann_removed_ago(window - 6 * 3600)
+ann_looked_at(3)
+ann_kept("deleted before the window ran out")
+# and the whole window gone
+ann_removed_ago(window)
 box.wait_until_succeeds(
     f'curl -sf {gate}/internal/leaving | jq -e \'.members[] | select(.name == "ann") | .due and (.done | index("libraries"))\'',
     timeout=300,

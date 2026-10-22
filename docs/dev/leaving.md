@@ -109,7 +109,7 @@ the time under `removed` and the reason under `suspended`; the signed
 release carries all three to every box, and the reason is there for the
 member and everyone to read. A reason is required. Everything of theirs is
 kept for the window (`WINDOW`, 90 days; `dd.verify.leaveWindowSeconds`
-shortens it in tests). In it they are the gate's `suspended` role
+shortens it). In it they are the gate's `suspended` role
 (`App::suspension`): every sign-in of theirs has ended, and a new one opens
 only their own files, to read and take (GET, HEAD, OPTIONS and PROPFIND on
 `files.<domain>` and `home.<domain>`, their own libraries as a reader,
@@ -241,8 +241,10 @@ Headscale keeps a user record by their name with no devices.
 
 ### Testing it
 
-[leaving.nix](../../nix/tests/leaving.nix) runs it with a two-minute
-window (`dd.verify.leaveWindowSeconds`): `dd leave` without `--yes` does
+[leaving.nix](../../nix/tests/leaving.nix) runs it with the real window
+and the gate looking every 2 seconds (`dd.verify.leaveTickSeconds`); it
+never waits a window out, but moves the removal time back in the release
+the gate is started with, so how slow the box is changes nothing: `dd leave` without `--yes` does
 nothing; a member leaves with `dd leave --yes`, their session and token
 stop at once, they are due at once, and their library, disk images,
 notes and names are gone within the gate's next minute; leaving again is
@@ -250,7 +252,8 @@ refused; a second member is suspended with a reason (a suspension without
 one is refused): their browser session ends, their device opens their own
 library to read and nothing to write, and `/_dd/me` gives the reason; lifted,
 they are a member again with everything; suspended again, they keep their
-library until the window is out, then lose it; nobody else's is touched. The schedule is
+library after the gate has looked at them, still with six hours of the
+window left, and lose it once it is out; nobody else's is touched. The schedule is
 unit-tested in leaving.rs, the statement in the identity crate, the
 Worker's check in client/mail, the games manager's share in its own
 tests, the library prefix check in dav.rs, and a home controller's
