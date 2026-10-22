@@ -32,6 +32,24 @@ type Inputs struct {
 	// members' remote computers as agreed (state/computers, /computers):
 	// not the release's, so dd-control sets them each round
 	Computers []*computers.Listed `json:"-"`
+	// what a box that joined on its own key may be given (JoinedRules);
+	// absent, nothing but copies
+	Joined *JoinedRules `json:"joined,omitempty"`
+}
+
+// JoinedRules: what the release lets a box that joined on its own key (a
+// member's) run. Such a box is in no release's capability table, so what
+// it says of itself can only narrow this, never widen it. Until its
+// hardware and boot are attested in the agreed state (docs/dev/attestation.md)
+// the release keeps Attested false and it runs nothing, holding copies
+// only.
+type JoinedRules struct {
+	// the switch, on in the release that brings attestation
+	Attested bool `json:"attested"`
+	// what the policy's trust tiers allow on a member's box: never what
+	// only the owner's boxes run (ownHardware, servesCode, trust owner), a
+	// writer under a lease, or what reads a secret from the box's own file
+	Services []string `json:"services"`
 }
 
 // Bucket is one a service writes to its box's own store
@@ -163,15 +181,19 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		now[svc][name] = true
 	}
 	for _, name := range live {
+		// a box that joined on its own key runs, as far as the plan
+		// believes, only what the release may give it
+		_, listed := in.Boxes[name]
 		for _, r := range s.Boxes[name].Roles {
 			for _, svc := range in.Roles[r] {
-				if !in.Services[svc].Placed {
+				if listed && !in.Services[svc].Placed {
 					runs(svc, name)
 				}
 			}
 		}
+		mayRun := joinedCan(in, s.Boxes[name].Facts)
 		for svc, sv := range in.Services {
-			if sv.Placed && s.Boxes[name].Facts["runs/"+svc] > 0 {
+			if _, ok := mayRun[svc]; (listed || ok) && sv.Placed && s.Boxes[name].Facts["runs/"+svc] > 0 {
 				runs(svc, name)
 			}
 		}
@@ -189,6 +211,10 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	canOf := map[string]map[string]float64{}
 	for _, name := range live {
 		f, rel := s.Boxes[name].Facts, in.Boxes[name]
+		if _, listed := in.Boxes[name]; !listed {
+			canOf[name] = joinedCan(in, f)
+			continue
+		}
 		if f["can_live"] == 0 {
 			canOf[name] = rel.Can
 			continue
@@ -198,9 +224,11 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 			barred[svc] = true
 		}
 		c := map[string]float64{}
-		for svc, sv := range in.Services {
+		for svc := range in.Services {
+			// its word only narrows the release's table: a service the
+			// release does not give it stays off it, however it judges itself
 			v, ok := f["can/"+svc]
-			if _, rok := rel.Can[svc]; ok && !barred[svc] && (!sv.Lease || rok) {
+			if _, rok := rel.Can[svc]; ok && rok && !barred[svc] {
 				c[svc] = v
 			}
 		}
@@ -862,4 +890,25 @@ func Placed(in Inputs, p Plan) map[string][]string {
 		sort.Strings(bs)
 	}
 	return out
+}
+
+// joinedCan: what a box that joined on its own key may be given, from the
+// release's rules for such boxes narrowed by its own word (can/<svc>, a
+// service it says it cannot run stays off it). Nothing until the release
+// says joined boxes are attested.
+func joinedCan(in Inputs, f map[string]float64) map[string]float64 {
+	c := map[string]float64{}
+	if in.Joined == nil || !in.Joined.Attested || f["can_live"] == 0 {
+		return c
+	}
+	for _, svc := range in.Joined.Services {
+		sv, ok := in.Services[svc]
+		if !ok || sv.Lease {
+			continue
+		}
+		if v, said := f["can/"+svc]; said {
+			c[svc] = v
+		}
+	}
+	return c
 }

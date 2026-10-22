@@ -495,19 +495,26 @@ func TestADrainingStoreGetsNoNewCopyAndGivesItsOwnUp(t *testing.T) {
 	}
 }
 
-func TestABoxWhoseHeartbeatGainsHardwareIsEligibleNextRound(t *testing.T) {
+func TestABoxWhoseHeartbeatGainsHardwareIsEligibleOnceTheReleaseSaysSo(t *testing.T) {
 	in, s := fleet()
 	in.Services["llm"] = Service{Enabled: true, Instances: 1, MemoryGiB: 7}
 	p := Decide(in, s, 90_000, nil)
 	if _, ok := p.Unplaced["llm"]; !ok {
 		t.Fatalf("llm placed with no box able: %+v", p)
 	}
-	// nas got a GPU: its report, judged on the box, says it can now
+	// nas got a GPU: its report, judged on the box, says it can now. Its
+	// word alone adds nothing
 	f := s.Boxes["nas"].Facts
 	f["can_live"], f["can/llm"], f["can/garage"], f["can/pihole"] = 1, 2, 3, 1
 	p = Decide(in, s, 90_000, nil)
+	if runs(p, "nas", "llm") {
+		t.Fatalf("llm on a box by its own word: %+v", p)
+	}
+	// its signed report, in the next release, does
+	in.Boxes["nas"].Can["llm"] = 2
+	p = Decide(in, s, 90_000, nil)
 	if !runs(p, "nas", "llm") {
-		t.Fatalf("llm not on the box that can now: %+v", p)
+		t.Fatalf("llm not on the box the release says can now: %+v", p)
 	}
 	// and a box whose word leaves a service out cannot run it any more
 	if runs(p, "nas", "games") {
@@ -661,5 +668,76 @@ func TestPlacedIsThePlanNotABoxsWord(t *testing.T) {
 	}
 	if len(want) == 0 || strings.Join(got["pihole"], ",") != strings.Join(want, ",") {
 		t.Fatalf("pihole: placed %v, the plan %v", got["pihole"], want)
+	}
+}
+
+// a joined box that says it can run, carries and runs a service is given
+// nothing, nor counted as running it, until the release says joined boxes
+// are attested; and nothing then that the release's rules for them leave out
+func joinedClaiming(svcs ...string) (Inputs, *state.State) {
+	in, s := fleet()
+	// web: placed, runnable by small alone in the release's table
+	in.Services["web"] = Service{Enabled: true, Placed: true, Class: "low", MemoryGiB: 0.1, Moves: "on-failure"}
+	in.Boxes["small"].Can["web"] = 0.1
+	s.Boxes["small"].Facts["carries/web"] = 1
+	s.Joined = map[string]*state.Joined{"jabc": {Key: "k"}}
+	f := map[string]float64{"ram_bytes": 64 * gib, "net_up_mbps": 1000, "net_down_mbps": 1000, "can_live": 1}
+	for _, svc := range svcs {
+		f["can/"+svc], f["carries/"+svc], f["runs/"+svc] = 5, 1, 1
+	}
+	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: f}
+	return in, s
+}
+
+func TestAJoinedBoxClaimingAServiceIsNotPlaced(t *testing.T) {
+	for _, rules := range []*JoinedRules{nil, {Attested: false, Services: []string{"web", "photos"}}} {
+		in, s := joinedClaiming("web", "photos", "postgres")
+		in.Joined = rules
+		p := Decide(in, s, 90_000, nil)
+		if len(p.Boxes["jabc"]) != 0 {
+			t.Fatalf("rules %+v: a joined box on its own word was given %+v", rules, p.Boxes["jabc"])
+		}
+		if !runs(p, "small", "web") {
+			t.Fatalf("rules %+v: web, which it said it runs (and moves on failure), was kept off its real box: %+v", rules, p.Boxes)
+		}
+		if got := Placed(in, p)["web"]; strings.Join(got, ",") != "small" {
+			t.Fatalf("rules %+v: web's names would go to %v", rules, got)
+		}
+	}
+}
+
+func TestAnAttestedJoinedBoxRunsOnlyWhatItsTierAllows(t *testing.T) {
+	in, s := joinedClaiming("web", "photos", "postgres")
+	// photos is the owner's alone, and postgres a writer: left out
+	in.Joined = &JoinedRules{Attested: true, Services: []string{"web", "postgres"}}
+	pg := in.Services["postgres"]
+	pg.Lease, pg.Placed = true, true
+	in.Services["postgres"] = pg
+	p := Decide(in, s, 90_000, nil)
+	if !runs(p, "jabc", "web") {
+		t.Fatalf("web, allowed and claimed, sticky where it runs: %+v", p.Boxes)
+	}
+	for _, svc := range []string{"photos", "postgres"} {
+		if runs(p, "jabc", svc) {
+			t.Fatalf("%s on a member's box: %+v", svc, p.Boxes["jabc"])
+		}
+	}
+	// and its word only narrows: not claimed, not given
+	in2, s2 := joinedClaiming()
+	in2.Joined = &JoinedRules{Attested: true, Services: []string{"web"}}
+	if p := Decide(in2, s2, 90_000, nil); len(p.Boxes["jabc"]) != 0 {
+		t.Fatalf("given what it did not say it can: %+v", p.Boxes["jabc"])
+	}
+}
+
+// a release box's own word narrows the release's table, never widens it
+func TestALiveWordNeverAddsAService(t *testing.T) {
+	in, s := fleet()
+	s.Boxes["small"].Facts["can_live"] = 1
+	s.Boxes["small"].Facts["can/games"] = 9
+	s.Boxes["small"].Facts["can/garage"] = 1
+	p := Decide(in, s, 90_000, nil)
+	if runs(p, "small", "games") {
+		t.Fatalf("small said it can run games, which the release does not give it: %+v", p.Boxes["small"])
 	}
 }
