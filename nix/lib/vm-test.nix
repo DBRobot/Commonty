@@ -55,6 +55,12 @@ pkgs.testers.runNixOSTest (
     defaults = {
       imports = [ (test.defaults or { }) ];
       nix.settings.min-free = lib.mkForce 0;
+      # QEMU's user network reaches the internet when the driver runs outside
+      # the build sandbox, as a stress run on node1 does: joined-box's box
+      # then ordered real Let's Encrypt certificates, and once rate limited
+      # its retries held the switch, and the test, past fifteen minutes
+      # (2026-10-22). Offline wherever the driver runs, as in CI
+      virtualisation.restrictNetwork = true;
     };
     # every box gets the script helper the real boxes get (flake.nix); the
     # test's other node settings stay
