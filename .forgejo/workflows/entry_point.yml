@@ -96,7 +96,7 @@ jobs:
           # commit whose ci_ok already passed has nothing new to build
           proven=false
           if [ "$ACTION" = edited ]; then
-            proven=$(printf 'Authorization: token %s\n' "$TOKEN" | curl -fsS -H @- "$STATUS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const st=JSON.parse(s).statuses||[];console.log(st.some(x=>x.context==="entry_point / ci_ok (pull_request)"&&x.status==="success")?"true":"false")})') || proven=false
+            proven=$(printf 'Authorization: token %s\n' "$TOKEN" | curl -fsS --retry 12 --retry-delay 10 --retry-all-errors --retry-max-time 300 -H @- "$STATUS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const st=JSON.parse(s).statuses||[];console.log(st.some(x=>x.context==="entry_point / ci_ok (pull_request)"&&x.status==="success")?"true":"false")})') || proven=false
           fi
           echo "proven=$proven" >> "$GITHUB_OUTPUT"
           if [ "$DRAFT" = true ] || [ "$proven" = true ]; then
@@ -250,7 +250,7 @@ jobs:
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf 'Authorization: token %s\n' "$TOKEN" | curl -fsS -X POST -H @- -H 'content-type: application/json' \
+          printf 'Authorization: token %s\n' "$TOKEN" | curl -fsS --retry 12 --retry-delay 10 --retry-all-errors --retry-max-time 300 -X POST -H @- -H 'content-type: application/json' \
             -d "{\"state\":\"success\",\"context\":\"build/${{ matrix.host }}@${{ matrix.on }}\",\"description\":\"$(cat "$RUNNER_TEMP/toplevel")\",\"target_url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}\"}" \
             "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha || github.sha }}"
       - uses: ./.forgejo/actions/stop-run
