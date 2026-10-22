@@ -106,7 +106,10 @@ shift while boxes drain and switch. Never a hand-set role.
      time.
 - A box the release does not list (one that joined on its own key and
   builds its own system) is in no wave: it takes the release once every
-  wave has passed.
+  wave has passed. Before it has joined, while it still runs under its
+  install name, it has no control plane to ask (its dd-control starts
+  under the name its key gives): it takes the release at once, which
+  moves it to that name.
 - **With two boxes:** node2 holds no writer, so wave 1 is node2 and wave
   2 is node1. If failover ever moves the writers to node2, wave 1 becomes
   node1 by the same rule.
