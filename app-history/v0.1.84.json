@@ -1,0 +1,92 @@
+{
+  "payload": {
+    "built": {
+      "android": {
+        "apart": 0,
+        "by": [
+          "node1",
+          "node2"
+        ]
+      },
+      "box-installer": {
+        "apart": 0,
+        "by": [
+          "node1",
+          "node2"
+        ]
+      },
+      "dd-windows": {
+        "apart": 0,
+        "by": [
+          "node1",
+          "node2"
+        ]
+      },
+      "home-controller": {
+        "apart": 0,
+        "by": [
+          "node2",
+          "node1"
+        ]
+      },
+      "linux": {
+        "apart": 0,
+        "by": [
+          "node2",
+          "node1"
+        ]
+      },
+      "windows": {
+        "apart": 0,
+        "by": [
+          "node2",
+          "node1"
+        ]
+      }
+    },
+    "commit": "01d5fb395d86a254b4a6c96371c5557f1893b837",
+    "files": {
+      "commonty-box-installer-0.1.84.img.zst": {
+        "sha256": "c62b56232ef9905211b76efdd1561ba8a61167cf80c8a2edfe064832e136377c",
+        "size": 2024074758,
+        "url": "https://commonty.org/download/v0.1.84/commonty-box-installer-0.1.84.img.zst"
+      },
+      "commonty-home-controller-0.1.84.img.zst": {
+        "sha256": "1f6451378bb930c45c28f7a56f03f8a0abe923c08a482161e2ed5bff7646c76f",
+        "size": 1947551465,
+        "url": "https://commonty.org/download/v0.1.84/commonty-home-controller-0.1.84.img.zst"
+      },
+      "commonty-setup.exe": {
+        "sha256": "25b770f76769b09e07b4068f5422d747c20edfd6fd29207c3d86b074c0c11c0a",
+        "size": 51283020,
+        "url": "https://commonty.org/download/v0.1.84/commonty-setup.exe"
+      },
+      "commonty.apk": {
+        "sha256": "92d3832a27fb51aa3b155e9143f07392335ff9295296a5e3273ec4e9ee566211",
+        "size": 185145376,
+        "url": "https://commonty.org/download/v0.1.84/commonty.apk"
+      },
+      "commonty_0.1.84_amd64.AppImage": {
+        "sha256": "9987a8c00cb3b63eaea1e2469738cbbcf9fdf101266fa481588a20fd28ba8e06",
+        "size": 204290552,
+        "url": "https://commonty.org/download/v0.1.84/commonty_0.1.84_amd64.AppImage"
+      },
+      "commonty_0.1.84_amd64.deb": {
+        "sha256": "c6d4c614394d177336083b739d979138298130f00d47c1c64cb30f36b3368663",
+        "size": 53216688,
+        "url": "https://commonty.org/download/v0.1.84/commonty_0.1.84_amd64.deb"
+      },
+      "dd.exe": {
+        "sha256": "f808c7207457fdb40de6cef7c6dd2b981613f661fdd0bc964bde6b25e29661ca",
+        "size": 20246528,
+        "url": "https://commonty.org/download/v0.1.84/dd.exe"
+      }
+    },
+    "from": "https://git.commonty.org/david/commonty",
+    "issued": 1792641607,
+    "kind": "app",
+    "tag": "v0.1.84"
+  },
+  "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
+  "signature": "vlmZJfS74xZ6TNN22U6NButQBvDZNC0yPgNCLCl40WddD2ni88ZzrVqIRfEsOaxC1GNG6gOi7B99xBgNOXMpDw=="
+}

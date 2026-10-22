@@ -4,15 +4,22 @@
       "android": {
         "apart": 0,
         "by": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
+        ]
+      },
+      "box-installer": {
+        "apart": 0,
+        "by": [
+          "node1",
+          "node2"
         ]
       },
       "dd-windows": {
         "apart": 0,
         "by": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ]
       },
       "home-controller": {
@@ -25,8 +32,8 @@
       "linux": {
         "apart": 0,
         "by": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ]
       },
       "windows": {
@@ -37,44 +44,49 @@
         ]
       }
     },
-    "commit": "0e61efb19397b16bb645cc891d75db96596c6a59",
+    "commit": "01d5fb395d86a254b4a6c96371c5557f1893b837",
     "files": {
-      "commonty-home-controller-0.1.60.img.zst": {
-        "sha256": "5b8460ff33c1360cb8cf961a17b877a4640971050e44e0f8025401c811640a10",
-        "size": 1946309622,
-        "url": "https://commonty.org/download/v0.1.60/commonty-home-controller-0.1.60.img.zst"
+      "commonty-box-installer-0.1.84.img.zst": {
+        "sha256": "c62b56232ef9905211b76efdd1561ba8a61167cf80c8a2edfe064832e136377c",
+        "size": 2024074758,
+        "url": "https://commonty.org/download/v0.1.84/commonty-box-installer-0.1.84.img.zst"
+      },
+      "commonty-home-controller-0.1.84.img.zst": {
+        "sha256": "1f6451378bb930c45c28f7a56f03f8a0abe923c08a482161e2ed5bff7646c76f",
+        "size": 1947551465,
+        "url": "https://commonty.org/download/v0.1.84/commonty-home-controller-0.1.84.img.zst"
       },
       "commonty-setup.exe": {
-        "sha256": "6db538465494d33992340dcdeacf9f273335488f680fa7461cb03a9a33710ec4",
-        "size": 39447913,
-        "url": "https://commonty.org/download/v0.1.60/commonty-setup.exe"
+        "sha256": "25b770f76769b09e07b4068f5422d747c20edfd6fd29207c3d86b074c0c11c0a",
+        "size": 51283020,
+        "url": "https://commonty.org/download/v0.1.84/commonty-setup.exe"
       },
       "commonty.apk": {
-        "sha256": "1d5612d82a1dbacdaba57e282984e2bcc63aff54b6d1900de4cc42c0da674ab3",
-        "size": 161781792,
-        "url": "https://commonty.org/download/v0.1.60/commonty.apk"
+        "sha256": "92d3832a27fb51aa3b155e9143f07392335ff9295296a5e3273ec4e9ee566211",
+        "size": 185145376,
+        "url": "https://commonty.org/download/v0.1.84/commonty.apk"
       },
-      "commonty_0.1.60_amd64.AppImage": {
-        "sha256": "9f1804d6ba9cec861f77add53cd9b120333212648fc4790b7e90d9e712bcfdda",
-        "size": 191953400,
-        "url": "https://commonty.org/download/v0.1.60/commonty_0.1.60_amd64.AppImage"
+      "commonty_0.1.84_amd64.AppImage": {
+        "sha256": "9987a8c00cb3b63eaea1e2469738cbbcf9fdf101266fa481588a20fd28ba8e06",
+        "size": 204290552,
+        "url": "https://commonty.org/download/v0.1.84/commonty_0.1.84_amd64.AppImage"
       },
-      "commonty_0.1.60_amd64.deb": {
-        "sha256": "b1f089a7e8f8f4f93d7d519def56b0125b7f4d48f4c66d6eeb23978dab7474a8",
-        "size": 41286168,
-        "url": "https://commonty.org/download/v0.1.60/commonty_0.1.60_amd64.deb"
+      "commonty_0.1.84_amd64.deb": {
+        "sha256": "c6d4c614394d177336083b739d979138298130f00d47c1c64cb30f36b3368663",
+        "size": 53216688,
+        "url": "https://commonty.org/download/v0.1.84/commonty_0.1.84_amd64.deb"
       },
       "dd.exe": {
-        "sha256": "b1bee74295afbb713864666991a6f301ad96f4fc83c56b1ecf3a3a67a625620a",
-        "size": 19887616,
-        "url": "https://commonty.org/download/v0.1.60/dd.exe"
+        "sha256": "f808c7207457fdb40de6cef7c6dd2b981613f661fdd0bc964bde6b25e29661ca",
+        "size": 20246528,
+        "url": "https://commonty.org/download/v0.1.84/dd.exe"
       }
     },
     "from": "https://git.commonty.org/david/commonty",
-    "issued": 1792452975,
+    "issued": 1792641607,
     "kind": "app",
-    "tag": "v0.1.60"
+    "tag": "v0.1.84"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "fLrr90H7Kj5XgXPkHO4p9wnQ8jixsj/9EwqiRrgq9AS44DML/NKgMQX+NiuVLyfCl47CFWa/SYoCrT5nCurYAA=="
+  "signature": "vlmZJfS74xZ6TNN22U6NButQBvDZNC0yPgNCLCl40WddD2ni88ZzrVqIRfEsOaxC1GNG6gOi7B99xBgNOXMpDw=="
 }
