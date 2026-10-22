@@ -862,16 +862,16 @@
             let
               appClients =
                 let
-                  boxes = builtins.fromJSON (builtins.readFile ./fleet/boxes.json);
-                  withRole =
-                    r:
+                  fp = import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; };
+                  # the clients as a box built with the service serves them
+                  # (every such box builds the same)
+                  builtWith =
+                    s:
                     self.nixosConfigurations.${
-                      nixpkgs.lib.findFirst (n: builtins.elem r boxes.${n}.roles) (throw "no ${r} box") (
-                        builtins.attrNames boxes
-                      )
+                      nixpkgs.lib.findFirst (_: true) (throw "no box is built with ${s}") (fp.builtWith s)
                     }.config;
-                  photos = withRole "photos";
-                  vault = withRole "vault";
+                  photos = builtWith "ente-web";
+                  vault = builtWith "vaultwarden";
                 in
                 {
                   photos = photos.services.nginx.virtualHosts."photos.${photos.dd.domain}".locations."/".root;
@@ -1227,8 +1227,9 @@
                       addresses = nixpkgs.lib.filterAttrs (_: a: a != "") (
                         nixpkgs.lib.mapAttrs (n: _: self.nixosConfigurations.${n}.config.dd.box.net) boxList
                       );
-                      # each name of a service with one writer (needs hosts),
-                      # at the box holding its lease
+                      # each name of a service the control plane places (needs
+                      # hosts): at the box holding its lease, or with none at a
+                      # live box running it
                       follow = builtins.listToAttrs (
                         nixpkgs.lib.concatLists (
                           nixpkgs.lib.mapAttrsToList (
@@ -1237,7 +1238,7 @@
                               name = h;
                               value = svc;
                             }) n.hosts
-                          ) (nixpkgs.lib.filterAttrs (_: n: n.lease) fp.needs)
+                          ) (nixpkgs.lib.filterAttrs (_: n: n.lease || n.placed) fp.needs)
                         )
                       );
                       # every box's address on the fleet's network: an A at one
@@ -1331,8 +1332,13 @@
                   echo "export const OWNER = $(jq -c '.owner' ${./fleet/policy.json});"
                   # each box's TPM-held unlock key, where it has one (unlock.js)
                   echo "export const BOXES = $(jq -c 'with_entries(select(.value.unlockKey) | .value = .value.unlockKey)' ${./fleet/boxes.json});"
-                  # the boxes that keep members' mail, and so may take it (inbox.js)
-                  echo "export const MAIL_BOXES = $(jq -c '[to_entries[] | select((.value.roles // []) | index("library")) | .key]' ${./fleet/boxes.json});"
+                  # the boxes that keep members' mail, and so may take it
+                  # (inbox.js): those built with its inbox
+                  printf 'export const MAIL_BOXES = %s;\n' ${
+                    nixpkgs.lib.escapeShellArg (
+                      builtins.toJSON ((import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; }).builtWith "mail-inbox")
+                    )
+                  }
                 } > $out/fleet.js
               '';
 
@@ -1441,8 +1447,10 @@
           # module has to be present for it. Roles are files; look inside.
           needsSops =
             roles: builtins.any (r: lib.hasInfix "_sops.nix" (builtins.readFile ./nix/roles/${r}.nix)) roles;
-          storage = lib.filterAttrs (_: b: builtins.elem "storage" b.roles) boxes;
-          # the garage cluster: every storage box, each told about the others
+          # a box built with service s (fleet-placement.nix built)
+          has = s: name: builtins.elem s (fp.built.${name} or [ ]);
+          storage = lib.filterAttrs (n: _: has "garage" n) boxes;
+          # the garage cluster: every box built with garage, each told about the others
           # whose ids are known (a box's id exists once it has started once)
           garageOf = name: box: {
             dd.garage = {
@@ -1460,8 +1468,8 @@
           # nix-cache bucket), backups, the vault's files and the gateway's
           # s3. all go there (dd.box.s3).
           poolFor =
-            box:
-            if builtins.elem "storage" box.roles then
+            name: box:
+            if has "garage" name then
               "127.0.0.1"
             else
               let
@@ -1474,24 +1482,23 @@
           cacheOf =
             name: box:
             let
-              host = poolFor box;
+              host = poolFor name box;
             in
             {
               dd.agent.cache = "s3://nix-cache?endpoint=${host}:3900&scheme=http&region=us-east-1";
               dd.box.s3 = "http://${host}:3900";
             };
           # what a member's device may reach for games, on any box: each
-          # games box's own list (dd.games.reach: its range and every port
-          # a game insists on)
+          # box built with them, its own list (dd.games.reach: its range and
+          # every port a game insists on)
           fleetGamePorts = lib.unique (
-            lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.games.reach) (
-              builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "game" b.roles) boxes)
-            )
+            lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.games.reach) (fp.builtWith "dd-games")
           );
-          # and for members' computers: each compute box's pool (dd.computers.reach)
+          # and for members' computers: the pool of each box built with
+          # them (dd.computers.reach)
           fleetComputerPorts = lib.unique (
             lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.computers.reach) (
-              builtins.attrNames (lib.filterAttrs (_: b: builtins.elem "compute" b.roles) boxes)
+              fp.builtWith "computers"
             )
           );
           mkBox = name: box: mkBoxIn ./fleet/boxes/${name} name box;
@@ -1513,6 +1520,22 @@
             dir: name: box:
             [
               (import ./nix/modules/box/host.nix dir)
+              # every box's tiles, one per url: the services the fleet runs,
+              # wherever the plan puts them (their names follow). Its own
+              # first, in their order, then the others'
+              (
+                { config, ... }:
+                {
+                  dd.home.shown = lib.foldl' (
+                    acc: t: if builtins.any (a: a.url == t.url) acc then acc else acc ++ [ t ]
+                  ) [ ] (
+                    config.dd.home.services
+                    ++ lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.home.services) (
+                      builtins.attrNames (removeAttrs boxes [ name ])
+                    )
+                  );
+                }
+              )
               {
                 networking.hostName = name;
                 dd.box.net = box.net;
@@ -1543,7 +1566,9 @@
                   ]) (lib.filterAttrs (n: _: n != name) boxes)
                 );
               }
-              (lib.optionalAttrs (builtins.elem "gateway" box.roles) {
+              # a box able to hold the network's lease: its control server's
+              # rules for every box
+              (lib.optionalAttrs (has "headscale" name) {
                 dd.headscale.gamePorts = fleetGamePorts;
                 dd.headscale.computerPorts = fleetComputerPorts;
                 dd.headscale.owners = lib.mapAttrs' (
@@ -1562,7 +1587,7 @@
               })
             ]
             ++ map (r: ./nix/roles/${r}.nix) box.roles
-            ++ lib.optional (builtins.elem "storage" box.roles) (garageOf name box)
+            ++ lib.optional (has "garage" name) (garageOf name box)
             ++ [ (cacheOf name box) ]
             ++ [
               lanzaboote.nixosModules.lanzaboote
@@ -1583,7 +1608,7 @@
             ]
             ++ lib.optional (needsSops box.roles) sops-nix.nixosModules.sops
             ++ [ disko.nixosModules.disko ]
-            ++ lib.optional (builtins.elem "observe" box.roles) {
+            ++ lib.optional (has "thanos-query" name) {
               # this box's own sidecar; the others' history is read from the
               # bucket, never from them (README: no box talks to another)
               dd.thanos.sidecars = [ "127.0.0.1:10901" ];

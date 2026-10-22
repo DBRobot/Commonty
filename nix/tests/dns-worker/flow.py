@@ -464,6 +464,63 @@ check(
 )
 
 
+
+# a placed service with no lease: its name at a live box running it, by
+# their heartbeats (the relay's runs), the gateway's box first while it is
+# one of them; at the gateway's when none runs it
+def runs_control(runs, joined=None):
+    req = urllib.request.Request(
+        "http://127.0.0.1:8899/control",
+        data=json.dumps({"fresh": True, "runs": runs, "joined": joined or {}}).encode(),
+        method="POST",
+    )
+    urllib.request.urlopen(req).read()
+
+
+runs_control({"llama-swap": ["box2"]})
+converge(8789)
+check(
+    "placed: a name at the box running its service",
+    names().get("llm.commonty.test"),
+    [("A", "100.64.0.5", False)],
+)
+check(
+    "placed: the gateway's names stay at the gateway's lease's box",
+    names().get("*.commonty.test"),
+    [("A", "100.64.0.2", False)],
+)
+runs_control({"llama-swap": ["box1", "box2"]})
+converge(8789)
+check(
+    "placed: run on two boxes, the gateway's box first",
+    names().get("llm.commonty.test"),
+    [("A", "100.64.0.2", False)],
+)
+runs_control({})
+converge(8789)
+check(
+    "placed: run nowhere, at the gateway's box",
+    names().get("llm.commonty.test"),
+    [("A", "100.64.0.2", False)],
+)
+ipj = (100 << 24) | (64 << 16) | 7
+runs_control({"llama-swap": ["j00000000aa"]}, {"j00000000aa": {"ipv4": ipj}})
+converge(8789)
+check(
+    "placed: on a box that joined on its own key, at its address",
+    names().get("llm.commonty.test"),
+    [("A", "100.64.0.7", False)],
+)
+runs_control({"llama-swap": ["nobody"]})
+converge(8789)
+check(
+    "placed: a box the release and the agreed state do not know names nothing",
+    names().get("llm.commonty.test"),
+    [("A", "100.64.0.2", False)],
+)
+lease(True, headscale="box1", ente_museum="box1")
+
+
 # a box that joined on its own key: its store's name at the address it
 # gives, if that is on the fleet's network, and none otherwise
 def joined_control(joined):

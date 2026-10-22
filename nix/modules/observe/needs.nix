@@ -84,6 +84,12 @@
     placed = true;
     what = "the fleet view: this box's own sidecar and the bucket, as one";
     alwaysOn = true;
+    # metrics.<domain>, with the page over it (metrics-page, beside it), and
+    # grafana.<domain>'s way there: the DNS Worker points them at its box
+    hosts = [
+      "metrics"
+      "grafana"
+    ];
     base = {
       # node1, 2026-10-04: peak
       uses = {
@@ -124,7 +130,12 @@
         outbound = "none";
         inbound = "network"; # the joined boxes, on the store's port
       };
-      depends.nginx.local = true;
+      depends = {
+        nginx.local = true;
+        # its pages are under metrics.<domain> (/joined/), and the joined
+        # boxes send to that name: on the fleet view's box
+        thanos-query.local = true;
+      };
       privacy = "metadata";
     };
   };

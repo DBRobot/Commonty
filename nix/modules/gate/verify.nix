@@ -197,6 +197,16 @@ in
     default = [ ];
   };
 
+  # the tiles home.<domain> shows: every box's, whichever box serves the
+  # page (the flake gives each box the fleet's), so a service placed on
+  # another box is still there to open; its name follows it
+  options.dd.home.shown = lib.mkOption {
+    type = lib.types.listOf lib.types.anything;
+    default = config.dd.home.services;
+    defaultText = "dd.home.services";
+    description = "the tiles shown at home.<domain>: in a fleet, every box's dd.home.services, one per url";
+  };
+
   options.dd.members = lib.mkOption {
     type = lib.types.attrsOf lib.types.anything;
     description = "fleet/members.json: `members`, ids let in, and `revoked`, ids shut out (dd member add|remove); `removed`, when, and `names`, each id's name tag, beside them. Comes with the signed release; a box cannot add to it.";
@@ -501,7 +511,7 @@ in
                 "https://demo-" + lib.removePrefix "https://" t.url
               else
                 null;
-          }) (lib.sort (a: b: a.rank < b.rank) config.dd.home.services)
+          }) (lib.sort (a: b: a.rank < b.rank) config.dd.home.shown)
         );
       };
       serviceConfig = {

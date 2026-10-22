@@ -30,6 +30,8 @@ in
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "game servers members start for themselves, each in its own VM";
+    # games.<domain>: the DNS Worker points it at the box running this
+    hosts = [ "games" ];
     # players connect to it; a world runs when someone starts it
     traffic = {
       class = "high";

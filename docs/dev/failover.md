@@ -53,8 +53,21 @@ state from the control plane's witness:
 - Each service's names point at the box holding its lease: `photos`,
   `api` and the rest at museum's, `vault` at the vault's, `git` and
   `code` at the forge's.
+- A placed service with no lease (needs `hosts`) has its names at a live
+  box whose heartbeat says it runs it (`runs/<service>`, which the relay
+  hands the Worker beside the leases), the gateway's box first while it
+  is one of them: `llm` at the chat's, `metrics` and `grafana` at the
+  fleet view's, `games` at the games', `cache` at harmonia's. Run
+  nowhere, at the gateway's box, whose page says one moment.
+- A service answering under another's name goes where that one does
+  (its needs depend on it locally): search under `llm`, the joined
+  boxes' metrics under `metrics`, mail's pipe and the transcoder under
+  `files`, which is the gateway's. A box that joined on its own key sends
+  its metrics to `metrics.<domain>` on the store's port, so they follow
+  too.
 - `*`, the bare name and the public hosts point at the box holding the
   network's lease.
+- Home's tiles are the whole fleet's, whichever box serves the page.
 - A public name is a CNAME to that box's own tunnel. Each box makes its
   tunnel's secret itself. It asks the Worker, signed with its TPM key, to
   make the tunnel at Cloudflare under its name, and keeps the secret. The

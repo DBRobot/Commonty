@@ -167,6 +167,8 @@
     placed = true;
     what = "the home controllers' updates: this box's nix store, read-only, on the Commonty network (smarthome/cache-door.nix)";
     instances = 1;
+    # cache.<domain>: the DNS Worker points it at the box running this
+    hosts = [ "cache" ];
     base = {
       uses = {
         memory = "20M";

@@ -28,10 +28,10 @@ let
   placement = import ../../lib/fleet-placement.nix { inherit lib; };
   pgAble = lib.filter (n: placement.inputs.boxes.${n}.can ? postgresql) stores;
   netAble = lib.filter (n: placement.inputs.boxes.${n}.can ? headscale) stores;
-  # the box that gathers the fleet's metrics: where a joined box sends its own
-  observeBox = lib.findFirst (
-    n: builtins.elem "observe" ((lib.importJSON ../../../fleet/boxes.json).${n}.roles or [ ])
-  ) null fleet;
+  # whether a box of the release gathers joined boxes' metrics: a joined
+  # box sends its own to metrics.<domain> on the store's port, a name that
+  # follows the fleet view, and the receive with it (observe/needs.nix)
+  gathered = placement.builtWith "joined-metrics" != [ ];
 in
 {
   imports = [
@@ -185,9 +185,10 @@ in
         });
       };
     }
-    # a box that joined on its own key sends its metrics to the observe box
-    (lib.mkIf (config.dd.box.joined && observeBox != null) {
-      dd.joinedMetrics.to = "https://store.${observeBox}.${config.dd.domain}:${toString config.dd.store.publicPort}";
+    # a box that joined on its own key sends its metrics to whichever box
+    # the plan gives joined-metrics: metrics.<domain> follows it
+    (lib.mkIf (config.dd.box.joined && gathered) {
+      dd.joinedMetrics.to = "https://metrics.${config.dd.domain}:${toString config.dd.store.publicPort}";
     })
     # with failover on, postgres follows its lease through this store
     (lib.mkIf (config.dd.failover && config.services.postgresql.enable) {
