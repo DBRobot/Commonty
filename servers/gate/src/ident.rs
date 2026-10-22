@@ -110,23 +110,16 @@ impl Member {
         if let Some(e) = self.item.get("entry") {
             return serde_json::from_value(e.clone()).ok();
         }
+        // a v2 item keeps its envelope's signature with the body it covers
+        // (`v2:<body>:<sig>`): the bare sig as a v1 signature verified
+        // nowhere, and a device admitted from the cli broke the entry for
+        // every reader of it (2026-10-22)
         if self.item.get("v").and_then(|v| v.as_u64()) == Some(2)
             && self.item.get("kind").and_then(|k| k.as_str()) == Some("entry")
         {
-            use base64::Engine;
-            let body = base64::engine::general_purpose::STANDARD
-                .decode(self.item.get("body")?.as_str()?)
-                .ok()?;
-            let entry: identity::Entry = serde_json::from_slice(&body).ok()?;
-            return Some(identity::SignedEntry {
-                entry,
-                signature: self.item.get("sig")?.as_str()?.to_string(),
-                recovery_signature: self
-                    .item
-                    .get("recovery_sig")
-                    .and_then(|s| s.as_str())
-                    .map(str::to_string),
-            });
+            let env: identity::envelope::Envelope =
+                serde_json::from_value(self.item.clone()).ok()?;
+            return identity::SignedEntry::from_envelope(&env).ok();
         }
         None
     }
@@ -560,6 +553,43 @@ impl Envelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A v2 entry the agreed state keeps is served as one that verifies:
+    /// the envelope's signature with the body it covers, not the bare sig
+    #[test]
+    fn a_v2_entry_from_the_agreed_state_verifies() {
+        let root = identity::SigningKey::from_bytes(&[7; 32]);
+        let entry = identity::Entry {
+            name: "mia".into(),
+            root: identity::encode_public(&root.verifying_key()),
+            recovery: String::new(),
+            recovered_from: vec![],
+            terms: None,
+            devices: vec![identity::Device {
+                fingerprint: "f".into(),
+                public_key: identity::encode_public(&root.verifying_key()),
+                added: 1,
+            }],
+            passkeys: vec![],
+            grant: None,
+            libraries: vec![],
+            removed_boxes: vec![],
+            version: 8,
+            updated: 1,
+        };
+        let env = identity::envelope::seal_json(identity::envelope::ENTRY, &entry, &root).unwrap();
+        let m = Member {
+            item: serde_json::to_value(&env).unwrap(),
+            ..Member::default()
+        };
+        let got = m.entry().expect("the entry");
+        assert_eq!(got.entry.version, 8);
+        identity::verify(&got).expect("verifies");
+        // what a reader is sent, read back as any client reads it
+        let wire: identity::SignedEntry =
+            serde_json::from_str(&serde_json::to_string(&got).unwrap()).unwrap();
+        identity::verify(&wire).expect("verifies over the wire");
+    }
 
     #[test]
     fn unknown_is_never_no() {
