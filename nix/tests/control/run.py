@@ -543,12 +543,18 @@ other = 5 - first
 # witness's own plan on the agreed state, the box the boxes' plans agree on
 def relay_placed():
     try:
-        return json.load(urllib.request.urlopen("http://127.0.0.1:8789/leases", timeout=3)).get("placed", {})
+        return json.load(
+            urllib.request.urlopen("http://127.0.0.1:8789/leases", timeout=3)
+        ).get("placed", {})
     except Exception:
         return {}
 
 
-until("the relay's placement has web", lambda: relay_placed().get("web") == [f"node{first}"], 30)
+until(
+    "the relay's placement has web",
+    lambda: relay_placed().get("web") == [f"node{first}"],
+    30,
+)
 ok(
     relay_placed().get("web") == [f"node{first}"] and "db" in relay_placed(),
     "the relay's agreed placement is the plan's",

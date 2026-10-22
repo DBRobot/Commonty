@@ -464,7 +464,6 @@ check(
 )
 
 
-
 # a placed service with no lease: its name at a box the agreed plan gives
 # it (the relay's placed: the witness's plan on the agreed state), the
 # gateway's box first while it is one of them; at the gateway's when the
@@ -532,7 +531,9 @@ check(
     names().get("llm.commonty.test"),
     [("A", "100.64.0.2", False)],
 )
-placed_control({"ente-museum": ["box2"]}, runs={"ente-museum": ["box2"]}, headscale="box1")
+placed_control(
+    {"ente-museum": ["box2"]}, runs={"ente-museum": ["box2"]}, headscale="box1"
+)
 converge(8789)
 check(
     "lease: with no holder, the plan and a box's word move nothing; the gateway's",
