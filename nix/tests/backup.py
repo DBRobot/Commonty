@@ -72,6 +72,16 @@ b_restic = (
 )
 b.wait_until_succeeds(f"{b_restic} snapshots latest", timeout=180)
 
+# a's store loses a's repository (a box reinstalled without its store): a
+# starts no new one over the copy b keeps, and says to bring it back
+a.succeed(
+    f"set -a; . /var/lib/dd-store/keys/backups-a.env; {s3} s3 rm --recursive s3://backups-a/"
+)
+a.fail("systemctl start restic-backups-dd.service")
+a.succeed(
+    "journalctl -u restic-backups-dd -o cat | grep -c 'b keeps a copy of backups-a: bring it back'"
+)
+
 # a is gone. b's copy - a's password, b's own key to its copy - restores
 # a's files on b
 a.shutdown()

@@ -3,14 +3,14 @@
 #
 #   scripts/restore-box node1
 #
-# The box came back with its identity (host key, network node, garage node key,
-# uid map, the verifier's state) and its other pools untouched; what the boot
-# disk held is in two places: the box's restic backup in the garage cluster,
-# and, for postgres, the hourly dumps on the bulk pool. This waits for the
-# box's garage to be back in the cluster (its metadata comes from the other
-# box, its blocks were never lost), restores the backed-up directories, the
-# network's database where this box runs the control server, loads the
-# database dumps, and starts everything again.
+# The box came back with its identity (host key, network node, uid map, the
+# verifier's state, its store's metadata) and its other pools untouched;
+# what the boot disk held is in two places: the box's restic backup in its
+# own store, copied to another box's, and, for postgres, the hourly dumps on
+# the bulk pool. This brings back any bucket its store lost from a copy on
+# another box's store, restores the backed-up directories, the network's
+# database where this box runs the control server, loads the database dumps,
+# and starts everything again.
 set -euo pipefail
 
 box=${1:?box}
@@ -26,7 +26,11 @@ if [ -z "$addr" ]; then
     || { echo "no box $box in fleet/boxes.json" >&2; exit 1; }
   addr=admin@$net
 fi
-ssh "$addr" 'sudo bash -s' <<'EOF'
+# the other boxes' stores, where this box's buckets have their copies
+domain=$(jq -r .domain "$repo/fleet/policy.json")
+peers=$(jq -r --arg b "$box" --arg d "$domain" 'keys[] | select(. != $b) | "https://store.\(.).\($d):3443"' "$repo/fleet/boxes.json" | tr '\n' ' ')
+# shellcheck disable=SC2029 # the names expand here on purpose
+ssh "$addr" "sudo BOX=$box PEERS='$peers' bash -s" <<'EOF'
 set -euo pipefail
 if command -v garage >/dev/null; then
   echo "== garage back in the cluster"
@@ -39,6 +43,37 @@ if command -v garage >/dev/null; then
   # this box's blocks are still on its data dir; tell the index so
   garage repair -a --yes blocks >/dev/null
   garage repair -a --yes tables >/dev/null
+fi
+
+echo "== this box's store"
+# install-box carries the store's metadata in, so its buckets are as they
+# were. A box that came back without it has an empty store: each bucket
+# empty here is copied back from a copy on another box's store, with the key
+# that store sealed to this box. Copying only: nothing is deleted anywhere
+if systemctl cat dd-store.service >/dev/null 2>&1; then
+  systemctl start dd-store-setup.service
+  p=$(systemctl show -p Environment --value dd-store-copy.service | tr ' ' '\n' | sed -n 's/^PATH=//p')
+  for b in $(dd-store-garage bucket list | awk 'NR > 1 && $1 != "" { print $1 }'); do
+    n=$(dd-store-garage bucket info "$b" | awk '/^Objects:/ { print $2 }')
+    [ "${n:-0}" = 0 ] || continue
+    for url in $PEERS; do
+      peer=${url#https://store.}; peer=${peer%%.*}
+      ( export PATH=$p:$PATH RCLONE_CONFIG=/dev/null
+        k=$(mktemp)
+        curl -fsS --max-time 30 "$url/_keys/$BOX.age" | age -d -i /var/lib/dd/secrets-key.txt > "$k" || exit 1
+        set -a; . "$k"; set +a; rm -f "$k"
+        export RCLONE_CONFIG_THERE_TYPE=s3 RCLONE_CONFIG_THERE_PROVIDER=Other RCLONE_CONFIG_THERE_ENDPOINT="$url" \
+          RCLONE_CONFIG_THERE_REGION=us-east-1 RCLONE_CONFIG_THERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+          RCLONE_CONFIG_THERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY RCLONE_CONFIG_THERE_FORCE_PATH_STYLE=true
+        [ -n "$(rclone lsf --files-only --max-depth 1 "there:$b" 2>/dev/null | head -1)" ] || exit 1
+        set -a; . "/var/lib/dd-store/keys/$b.env"; set +a
+        export RCLONE_CONFIG_HERE_TYPE=s3 RCLONE_CONFIG_HERE_PROVIDER=Other RCLONE_CONFIG_HERE_ENDPOINT=http://127.0.0.1:3910 \
+          RCLONE_CONFIG_HERE_REGION=us-east-1 RCLONE_CONFIG_HERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+          RCLONE_CONFIG_HERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY RCLONE_CONFIG_HERE_FORCE_PATH_STYLE=true
+        rclone copy --s3-no-check-bucket --fast-list "there:$b" "here:$b"
+      ) && { echo "   $b from $peer's copy"; break; }
+    done
+  done
 fi
 
 echo "== restic restore of the backed-up directories"
