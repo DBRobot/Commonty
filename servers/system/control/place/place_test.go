@@ -747,7 +747,7 @@ func TestALiveWordNeverAddsAService(t *testing.T) {
 
 // a box's own bucket (its backup): kept on that box and where it fits,
 // though every box runs the service writing it; its size is that box's word
-func TestABoxsOwnBucketIsKeptOnItAndWhereItFits(t *testing.T) {
+func TestTheBucketABoxWritesAloneIsKeptOnItAndWhereItFits(t *testing.T) {
 	in, s := stores()
 	in.Services["backup"] = Service{Enabled: true, EveryBox: true}
 	in.Buckets["backups-small"] = Bucket{Copies: 2, Service: "backup", Box: "small"}
