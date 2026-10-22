@@ -6,11 +6,12 @@
 }:
 let
   cfg = config.dd.cache;
-  # the storage pool at this box's address for it: its own garage, or a
-  # storage box's over the tailnet (dd.box.s3)
+  inherit (cfg) url;
   # what the post-build hook has queued for dd-cache-upload
   spool = "/var/lib/dd-cache-upload";
-  url = "s3://nix-cache?endpoint=${lib.removePrefix "http://" config.dd.box.s3}&scheme=http&region=us-east-1";
+  # the storage pool at this box's address for it: its own garage, or a
+  # storage box's over the tailnet (dd.box.s3)
+  s3 = "s3://nix-cache?endpoint=${lib.removePrefix "http://" config.dd.box.s3}&scheme=http&region=us-east-1";
   # The laptop's, and this box's own. A box's nix installs whatever it
   # substitutes, so a key in this list is a machine allowed to decide what
   # the box runs - and node2 is meant to sit in someone else's house. So
@@ -43,10 +44,21 @@ in
       default = "/root/.aws/credentials";
       description = "AWS credentials file with this box's cache key, for nix as root.";
     };
+    url = lib.mkOption {
+      type = lib.types.str;
+      default = s3;
+      description = "The cache's nix store url; a test points it at a file:// cache.";
+    };
     uploadTimeout = lib.mkOption {
       type = lib.types.ints.positive;
       default = 120;
-      description = "Seconds the post-build hook may spend uploading one build's outputs before it gives up; the build goes on either way.";
+      description = "Seconds one upload may take, plus one per MiB of the closure it may send; one cut off is tried again.";
+    };
+    retryDelay = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 30;
+      internal = true;
+      description = "Seconds before a failed upload is tried again, doubling each time up to half an hour.";
     };
   };
 
@@ -70,17 +82,37 @@ in
       "d ${spool}/new 0700 root root -"
       "d ${spool}/queue 0700 root root -"
     ];
-    systemd.paths.dd-cache-upload = {
+    # A new name for the path unit: the old one went failed with the
+    # service's start limit (2026-10-22), and a switch starts a new unit
+    # where it might leave a failed one as it is.
+    systemd.paths.dd-cache-queue = {
       wantedBy = [ "paths.target" ];
-      pathConfig.DirectoryNotEmpty = "${spool}/queue";
+      pathConfig = {
+        DirectoryNotEmpty = "${spool}/queue";
+        Unit = "dd-cache-upload.service";
+      };
     };
     systemd.services.dd-cache-upload = {
       description = "Upload what this box built to the nix cache, signed with its key";
       # a switch never cuts an upload short; the path unit starts the next
       restartIfChanged = false;
+      # Every build queues a file, and the path unit starts this whenever
+      # the queue is not empty and it is not running: past five starts in
+      # ten seconds systemd refused it for good, and nothing more was sent.
+      # It runs until the queue is empty and never fails (cache-upload.sh).
+      startLimitIntervalSec = 0;
       environment = {
         HOME = "/root";
         AWS_SHARED_CREDENTIALS_FILE = cfg.credentialsFile;
+        NIX_CONFIG = "extra-experimental-features = nix-command";
+        SPOOL = spool;
+        CACHE = "${url}${if lib.hasInfix "?" url then "&" else "?"}secret-key=${cfg.signingKeyFile}";
+        TIMEOUT = toString cfg.uploadTimeout;
+        RETRY_DELAY = toString cfg.retryDelay;
+        MAX_TRIES = "24";
+        # not worth the space on its own: a VM test's disk image and
+        # anything this big are rebuilt in seconds
+        MAX_MB = "256";
       };
       path = [
         config.nix.package
@@ -88,34 +120,16 @@ in
         pkgs.findutils
       ];
       serviceConfig = {
-        Type = "oneshot";
+        Type = "simple";
         Nice = 19;
         IOSchedulingClass = "idle";
       };
-      # never fails: the path unit would start it again at once, and the
-      # cache is a copy, not the result
+      # with no start limit, a script that broke would be started again at
+      # once, for ever: it waits a minute first
       script = ''
-        set -u
-        files=$(find ${spool}/queue -type f)
-        [ -n "$files" ] || exit 0
-        paths=()
-        for p in $(cat $files | sort -u); do
-          # gone already (a GC since), or not worth the space: a VM test's
-          # 1.5 GB disk image and anything big are rebuilt in seconds
-          [ -e "$p" ] || continue
-          case $p in *-nixos-disk-image) continue ;; esac
-          [ "$(du -s --block-size=1M "$p" | cut -f1)" -gt 256 ] && continue
-          paths+=("$p")
-        done
-        rm -f $files
-        [ ''${#paths[@]} -gt 0 ] || exit 0
-        # nor hold the queue: nix retries a cache that refuses or does not
-        # answer, and a build once waited about half an hour per output on it
-        timeout -k 10 ${toString cfg.uploadTimeout} \
-          nix --extra-experimental-features nix-command \
-          copy --to '${url}&secret-key=${cfg.signingKeyFile}' "''${paths[@]}" \
-          || echo "cache upload failed for ''${#paths[@]} paths"
-        exit 0
+        ${pkgs.bash}/bin/bash ${./cache-upload.sh} && exit 0
+        echo "cache upload stopped (status $?); again in a minute" >&2
+        sleep 60
       '';
     };
     # the daemon substitutes as root; its credentials live at the usual place
