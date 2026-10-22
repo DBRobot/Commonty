@@ -125,12 +125,44 @@ assert gone == "0", f"nix collected garbage in the VM: {gone} store paths remove
 assert box.succeed("cat /etc/hostname").strip() == nix["keyName"]
 assert box.succeed("readlink -f /run/current-system").strip() == named
 
+
+def dump():
+    """On a failed wait: the validators' and gates' logs, and how the box's
+    dd-control came up (or did not), so a flake says where it stalled"""
+    print(
+        fleet.execute(
+            'cd /root/f && for f in n1 n2 n3 g1 relay; do echo "--- $f.log"; tail -n 150 $f.log; done;'
+            " curl -s http://127.0.0.1:4191/state | head -c 4000; echo; uptime"
+        )[1]
+    )
+    print(
+        box.execute(
+            "uptime; systemctl list-jobs --no-pager; systemctl status dd-control --no-pager;"
+            " systemd-analyze critical-chain dd-control.service --no-pager;"
+            " systemd-analyze blame --no-pager | head -n 30;"
+            " journalctl -b --no-pager -o short-monotonic | tail -n 400"
+        )[1]
+    )
+
+
+def wait(machine, cmd, timeout):
+    try:
+        machine.wait_until_succeeds(cmd, timeout=timeout)
+    except Exception:
+        dump()
+        raise
+
+
 # below the hardware minimum it can't join, and says why (the VM is
 # smaller than any box): then its report says it meets it, and has a GPU
 # (a TPM 2.0, UEFI with Secure Boot, 4 threads, 8 GiB, a 256 GB system
 # disk, a network link, 8 GiB of VRAM; the test's VM has some of it)
-box.wait_for_unit("dd-control.service")
-box.wait_until_succeeds("grep -q needs /var/lib/dd-control/join-refused", timeout=120)
+try:
+    box.wait_for_unit("dd-control.service")
+except Exception:
+    dump()
+    raise
+wait(box, "grep -q needs /var/lib/dd-control/join-refused", timeout=120)
 print(box.succeed("cat /var/lib/dd-control/join-refused"))
 hw = json.loads(box.succeed("cat /var/lib/dd/report/hardware.json"))
 hw.setdefault("firmware", {}).update(
@@ -153,7 +185,8 @@ def joined():
     return s.get("joined", {}).get(nix["keyName"])
 
 
-fleet.wait_until_succeeds(
+wait(
+    fleet,
     f"curl -sf http://127.0.0.1:4191/state | jq -e '.joined.{nix['keyName']}'",
     timeout=300,
 )
@@ -162,7 +195,7 @@ assert j["ticket"] == "00112233445566778899aabbccddeeff", j
 ticket = box.succeed("cat /var/lib/dd/join-ticket").strip()
 st = fleet.succeed("curl -sf http://127.0.0.1:4191/state")
 assert ticket[-40:] not in st, "the ticket is in the agreed state"
-box.wait_until_succeeds("test ! -e /var/lib/dd-control/join-refused", timeout=120)
+wait(box, "test ! -e /var/lib/dd-control/join-refused", timeout=120)
 assert j["key"] == spki, j
 
 # not hers on its ticket alone, and signing up opened nothing: the box waits
@@ -175,7 +208,8 @@ verify = f"curl -s -o /dev/null -w '%{{http_code}}' {auth} http://127.0.0.1:4281
 
 def refused(item, why):
     """Wait for the judge's word on one item, and that it refused it."""
-    fleet.wait_until_succeeds(
+    wait(
+        fleet,
         f"curl -sf http://127.0.0.1:4191/identity | jq -e '.outcomes[\"{item}\"] != null'",
         timeout=120,
     )
@@ -210,7 +244,8 @@ assert waiting == [
 assert fleet.succeed(verify).strip() == "403"
 
 # its heartbeats carry what its report says: it qualifies by its GPU
-fleet.wait_until_succeeds(
+wait(
+    fleet,
     f"curl -sf http://127.0.0.1:4191/state | jq -e '.boxes.{nix['keyName']}.facts | .gpus == 1 and .gpu_vram_bytes >= 8589934592 and .tpm_major == 2 and .uefi == 1'",
     timeout=180,
 )
@@ -230,7 +265,8 @@ assert json.loads(fleet.succeed(mine))["boxes"] == []
 fleet.succeed(
     f"cd /root/f && python3 {nix['fleet']} item enlist {nix['keyName']} 00112233445566778899aabbccddeeff"
 )
-fleet.wait_until_succeeds(
+wait(
+    fleet,
     f'{mine} | jq -e \'.boxes[] | select(.name == "{nix["keyName"]}" and .ticket == "00112233445566778899aabbccddeeff")\'',
     timeout=120,
 )
@@ -242,7 +278,7 @@ assert ident["enlisted"][0]["qualifies"] == "gpu" and ident["enlisted"][0]["coun
     ident
 )
 # the services are open to her now
-fleet.wait_until_succeeds(f"test $({verify}) = 200", timeout=60)
+wait(fleet, f"test $({verify}) = 200", timeout=60)
 assert json.loads(
     fleet.succeed(f"curl -sf {auth} http://127.0.0.1:4281/_dd/network/joined")
 )[0]["enlisted"]
@@ -301,7 +337,8 @@ cid = "00000000000000a1"
 item = fleet.succeed(
     f"cd /root/f && python3 {nix['fleet']} item computer {cid}"
 ).strip()
-fleet.wait_until_succeeds(
+wait(
+    fleet,
     f"curl -sf http://127.0.0.1:4191/computers | jq -e '.outcomes[\"{item}\"] != null'",
     timeout=120,
 )
@@ -317,8 +354,8 @@ assert "load" not in kept[-1]["boxes"][nix["keyName"]].get("facts", {}), kept[-1
 
 # she removes it: nobody's at once, and the services shut again
 fleet.succeed(f"cd /root/f && python3 {nix['fleet']} item unenlist {nix['keyName']}")
-fleet.wait_until_succeeds(f"{mine} | jq -e '.boxes == []'", timeout=120)
-fleet.wait_until_succeeds(f"test $({verify}) = 403", timeout=60)
+wait(fleet, f"{mine} | jq -e '.boxes == []'", timeout=120)
+wait(fleet, f"test $({verify}) = 403", timeout=60)
 ident = json.loads(fleet.succeed("curl -sf 'http://127.0.0.1:4191/identity?name=ada'"))[
     "member"
 ]
@@ -340,7 +377,8 @@ assert (
     ).strip()
     == "403"
 )
-fleet.wait_until_succeeds(
+wait(
+    fleet,
     f"curl -sf http://127.0.0.1:4191/computers | jq -e '.computers[\"{cid}\"].up == false'",
     timeout=120,
 )
