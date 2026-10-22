@@ -56,7 +56,8 @@ let
       let
         by = map (x: x.s) (lib.filter (x: x.h == h) named);
       in
-      lib.optional (builtins.length by > 1) "${h}.<domain> is claimed by ${lib.concatStringsSep " and " by} (needs hosts): a name follows one service"
+      lib.optional (builtins.length by > 1)
+        "${h}.<domain> is claimed by ${lib.concatStringsSep " and " by} (needs hosts): a name follows one service"
     ) (lib.unique (map (x: x.h) named))
     ++ map (x: "${x.s}: its hosts follow nothing, as it is neither placed nor under a lease") (
       lib.filter (x: (policyOn) && !(needs.${x.s}.placed || needs.${x.s}.lease)) named
@@ -68,8 +69,7 @@ let
   policyOn = (lib.importJSON ../../fleet/policy.json).failover or false;
   problems =
     hostProblems
-    ++
-    map (b: "${b}: judged on the box, its capability is not the release's") (
+    ++ map (b: "${b}: judged on the box, its capability is not the release's") (
       lib.filter (b: scores judged.boxes.${b} != scores capability.boxes.${b}) (builtins.attrNames list)
     )
     ++ lib.concatMap (

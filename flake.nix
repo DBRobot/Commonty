@@ -1346,7 +1346,9 @@
                   # (inbox.js): those built with its inbox
                   printf 'export const MAIL_BOXES = %s;\n' ${
                     nixpkgs.lib.escapeShellArg (
-                      builtins.toJSON ((import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; }).builtWith "mail-inbox")
+                      builtins.toJSON (
+                        (import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; }).builtWith "mail-inbox"
+                      )
                     )
                   }
                 } > $out/fleet.js
@@ -1536,14 +1538,14 @@
               (
                 { config, ... }:
                 {
-                  dd.home.shown = lib.foldl' (
-                    acc: t: if builtins.any (a: a.url == t.url) acc then acc else acc ++ [ t ]
-                  ) [ ] (
-                    config.dd.home.services
-                    ++ lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.home.services) (
-                      builtins.attrNames (removeAttrs boxes [ name ])
-                    )
-                  );
+                  dd.home.shown =
+                    lib.foldl' (acc: t: if builtins.any (a: a.url == t.url) acc then acc else acc ++ [ t ]) [ ]
+                      (
+                        config.dd.home.services
+                        ++ lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.home.services) (
+                          builtins.attrNames (removeAttrs boxes [ name ])
+                        )
+                      );
                 }
               )
               {

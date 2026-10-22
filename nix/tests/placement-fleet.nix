@@ -47,10 +47,11 @@ let
     # (and search, which answers under the chat's name, beside it)
     (
       joins "n100-minipc"
-      && builtins.attrNames cap.boxes."n100-minipc".cannot == [
-        "llama-swap"
-        "searxng"
-      ]
+      &&
+        builtins.attrNames cap.boxes."n100-minipc".cannot == [
+          "llama-swap"
+          "searxng"
+        ]
     )
     (lib.hasInfix "memory" (why "n100-minipc" "llama-swap"))
     (

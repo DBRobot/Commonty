@@ -98,7 +98,11 @@ in
           && !builtins.elem s (policy.ownHardware or [ ])
         ) needs
       );
-      localOf = s: lib.filter (d: needs ? ${d} && needs.${s}.base.depends.${d}.local) (builtins.attrNames needs.${s}.base.depends);
+      localOf =
+        s:
+        lib.filter (d: needs ? ${d} && needs.${s}.base.depends.${d}.local) (
+          builtins.attrNames needs.${s}.base.depends
+        );
       keep =
         ss:
         let
