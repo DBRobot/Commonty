@@ -1514,7 +1514,6 @@
               host = poolFor name box;
             in
             {
-              dd.agent.cache = "s3://nix-cache?endpoint=${host}:3900&scheme=http&region=us-east-1";
               dd.box.s3 = "http://${host}:3900";
             };
           # what a member's device may reach for games, on any box: each
@@ -1937,11 +1936,14 @@
               policy = nixpkgs.lib.importJSON ./fleet/policy.json;
               boxes = nixpkgs.lib.importJSON ./fleet/boxes.json;
               src = ./client/identity/src/fleet.rs;
+              # the box whose store keeps the nix cache, as placement has it
+              cacheHome = (import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; }).homes.nix-cache;
             in
             pkgs.runCommand "fleet-defaults" { } ''
               grep -qF '"${policy.domain}"' ${src}
               grep -qF '"${policy.repo}"' ${src}
-              grep -qF '"${boxes.node1.net}"' ${src}
+              grep -qF '"${boxes.${cacheHome}.net}"' ${src}
+              grep -qF '"${cacheHome}"' ${src}
               grep -qF '"${nixpkgs.lib.trim (builtins.readFile ./fleet/release.pub)}"' ${src}
               touch $out
             '';

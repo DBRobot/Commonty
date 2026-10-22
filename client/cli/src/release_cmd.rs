@@ -1988,8 +1988,11 @@ fn forge_release(
     Ok(())
 }
 
-/// The key that writes the cache bucket: in the private half of the fleet
-/// file, readable by this machine's sops key and nobody else's.
+/// The key that writes the cache bucket, and the key that signs what goes
+/// in it. The signing key is in the private half of the fleet file,
+/// readable by this machine's sops key and nobody else's. The bucket is in
+/// the cache box's own store, whose key to it is made there: read over
+/// ssh, as the owner's every release step is, never kept here.
 fn cache_writer(root: &Path) -> Result<(String, String, String)> {
     let out = Command::new(std::env::current_exe()?)
         .args(["secret", "run", "--", "-d", "--output-type", "json"])
@@ -1997,16 +2000,28 @@ fn cache_writer(root: &Path) -> Result<(String, String, String)> {
         .output()?;
     ensure!(out.status.success(), "decrypting secrets/fleet.yaml");
     let v: serde_json::Value = serde_json::from_slice(&out.stdout)?;
-    let id = v["cache"]["keyId"]
-        .as_str()
-        .context("fleet.yaml: cache.keyId")?;
-    let secret = v["cache"]["keySecret"]
-        .as_str()
-        .context("fleet.yaml: cache.keySecret")?;
     let signing = v["cache"]["signingKey"]
         .as_str()
         .context("fleet.yaml: cache.signingKey")?;
-    Ok((id.to_owned(), secret.to_owned(), signing.to_owned()))
+    let env = on_box(
+        identity::fleet::CACHE_BOX,
+        "sudo -n cat /var/lib/dd-store/keys/nix-cache.env",
+    )
+    .context("the cache box's key to its store's nix-cache bucket")?;
+    let (id, secret) = store_key(&env)?;
+    Ok((id, secret, signing.to_owned()))
+}
+
+/// AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from a store's key file
+fn store_key(env: &str) -> Result<(String, String)> {
+    let get = |k: &str| {
+        env.lines()
+            .find_map(|l| l.strip_prefix(k)?.strip_prefix('='))
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+            .with_context(|| format!("no {k} in the store's key file"))
+    };
+    Ok((get("AWS_ACCESS_KEY_ID")?, get("AWS_SECRET_ACCESS_KEY")?))
 }
 
 /// `refused` is why the file did not verify; then the signer it names is
@@ -2837,6 +2852,15 @@ fn device_systems(root: &Path) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_store_key_file_gives_its_id_and_secret() {
+        let (id, secret) =
+            store_key("AWS_ACCESS_KEY_ID=GK123\nAWS_SECRET_ACCESS_KEY=abc\n").unwrap();
+        assert_eq!((id.as_str(), secret.as_str()), ("GK123", "abc"));
+        assert!(store_key("AWS_ACCESS_KEY_ID=GK123\n").is_err());
+        assert!(store_key("AWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=abc\n").is_err());
+    }
 
     #[test]
     fn members_still_on_v1_are_counted_by_their_agreed_item() {

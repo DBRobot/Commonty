@@ -17,6 +17,11 @@ macro_rules! cache_box {
         "100.64.0.2"
     };
 }
+macro_rules! cache_box_name {
+    () => {
+        "node1"
+    };
+}
 
 pub const DOMAIN: &str = domain!();
 /// the front door's directory: the one name that answers from anywhere
@@ -43,9 +48,15 @@ pub const RELEASES: &str = concat!(
     repo!(),
     "/raw/branch/releases/current.json"
 );
-/// the nix-cache bucket, through the first storage box's garage (node1)
+/// the nix-cache bucket, in the store of its home (node1: the first store
+/// able to run the cache, nix/lib/fleet-placement.nix homes), at its name on
+/// the fleet's network (nix/modules/storage/store.nix shared)
 pub const CACHE: &str = concat!(
-    "s3://nix-cache?endpoint=",
-    cache_box!(),
-    ":3900&scheme=http&region=us-east-1"
+    "s3://nix-cache?endpoint=store.",
+    cache_box_name!(),
+    ".",
+    domain!(),
+    ":3443&scheme=https&region=us-east-1"
 );
+/// that box over ssh, where its store's key to the cache is read
+pub const CACHE_BOX: &str = cache_box!();

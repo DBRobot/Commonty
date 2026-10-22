@@ -226,16 +226,21 @@ release key      ed25519. The private half in the laptop's OS keyring
                  and into the control relay Worker; and into every client
                  (identity::fleet::RELEASE_KEY), which checks the member
                  list against it.
-cache bucket     s3://nix-cache in garage. publish reaches it at
-                 100.64.0.2:3900 (node1, over the fleet's network); a box
-                 through its own garage, or a storage box's.
+cache bucket     s3://nix-cache in node1's own store (a shared bucket,
+                 storage/store.nix). publish reaches it at
+                 store.node1.<domain>:3443 over the fleet's network; node1
+                 on loopback; another box there with its own key to node1's
+                 store (dd-store-at).
 cache keys       fleet/cache-keys.pub: the laptop's, node1's, node2's. A box's
                  nix trusts dd-cache-laptop-* and its own key, never another
                  box's; the boxes upload what they build signed with their
                  own key, after the build (dd-cache-upload), so a box gets
                  back what a GC took from it.
-cache writer     secrets/fleet.yaml: cache.keyId, cache.keySecret,
-                 cache.signingKey, readable by the laptop's sops key alone.
+cache writer     the key: node1's store's own key to its nix-cache bucket,
+                 read by publish over ssh (sudo cat
+                 /var/lib/dd-store/keys/nix-cache.env), never kept. The
+                 signing key: secrets/fleet.yaml cache.signingKey, readable
+                 by the laptop's sops key alone.
 host keys        each box's ssh host key, in fleet/boxes.json (hostKey): what
                  dd-attest signs with, namespace commonty-attest-v1.
 ```
