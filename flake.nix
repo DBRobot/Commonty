@@ -1877,6 +1877,9 @@
             site-a11y
             site-speed
             ;
+          # every link the site's pages show, followed in a browser against the
+          # gateway box's own nginx and gate, and the app's pages' links read
+          site-links = import ./nix/tests/site-links.nix args;
           safe-rd = import ./nix/tests/safe-rd.nix args;
           # how many jobs a runner takes, from the box as it is
           runner-capacity = import ./nix/tests/runner-capacity.nix args;
