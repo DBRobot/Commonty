@@ -50,7 +50,7 @@ let
   # the model: one fixed answer, in the stream the Chat page reads, and only
   # for the secret nginx was given at boot (llm.nix proxy.conf)
   model = pkgs.writeText "model-stand-in.py" ''
-    import json, os, socketserver
+    import json, os, socketserver, time
     from http.server import BaseHTTPRequestHandler
 
     def key():
@@ -76,6 +76,9 @@ let
             if self.headers.get("authorization") != "Bearer " + key():
                 return self.send(401, "text/plain", b"no")
             if self.path.startswith("/v1/models"):
+                # late, as from a box busy waking a model: the Chat journey
+                # sends before the page has the list
+                time.sleep(3)
                 return self.send(200, "application/json", json.dumps({"object": "list", "data": [{"id": "stand-in", "object": "model"}]}).encode())
             if self.path == "/running":
                 return self.send(200, "application/json", b'{"running": []}')

@@ -12,6 +12,7 @@ import ssl
 import subprocess
 import sys
 import time
+import traceback
 import urllib.parse
 import urllib.request
 
@@ -24,6 +25,7 @@ APP_PORT = 8790
 APPURL = f"http://s-{'0' * 32}.localhost:{APP_PORT}"
 TLS = ssl.create_default_context(cafile=os.environ["SITE_CA"])
 T = 30_000  # ms any one thing on a page may take before the journey fails
+SHOTS = "/tmp/journeys-shots"
 
 
 def url(host, path="/"):
@@ -84,22 +86,37 @@ def journey(name):
                     text = page.locator("body").inner_text(timeout=2000)[:600]
                 except Exception:
                     text = "?"
+                try:
+                    os.makedirs(SHOTS, exist_ok=True)
+                    page.screenshot(
+                        path=f"{SHOTS}/{name.replace(' ', '-')}.png", timeout=5000
+                    )
+                except Exception:
+                    pass
                 print(f"     at {page.url}: {text!r}", flush=True)
                 for line in console[-15:]:
                     print(f"     console: {line}", flush=True)
-                results.append(
-                    {
-                        "journey": name,
-                        "ok": False,
-                        "ms": round((time.monotonic() - t0) * 1000),
-                        "detail": str(e)[:2000],
-                    }
-                )
-                print(f"FAIL {name:14} {e}", flush=True)
+                failed(name, e, round((time.monotonic() - t0) * 1000))
 
         return run
 
     return wrap
+
+
+def failed(name, e, ms=0):
+    """a journey that did not finish: the line of it that failed, and why"""
+    here = [f for f in traceback.extract_tb(e.__traceback__) if f.filename == __file__]
+    step = f"line {here[-1].lineno}: {here[-1].line}" if here else "?"
+    results.append(
+        {
+            "journey": name,
+            "ok": False,
+            "ms": ms,
+            "step": step,
+            "detail": str(e)[:2000],
+        }
+    )
+    print(f"FAIL {name:14} {step}\n{e}", flush=True)
 
 
 @journey("settings")
@@ -342,14 +359,21 @@ def main():
             demo = browser.new_context(ignore_https_errors=True)
             photos(demo.new_page(), PICTURE)
             browser.close()
+    except Exception as e:
+        # outside any one journey: the browser, the sign-in
+        failed("setup", e)
     finally:
         app.terminate()
         app.wait()
     json.dump(results, open(OUT, "w"), indent=1)
     bad = [r for r in results if not r["ok"]]
-    print(f"site-journeys: {len(results) - len(bad)} of {len(results)} journeys")
     if errors:
         print("page errors:", errors[:10])
+    print(f"site-journeys: {len(results) - len(bad)} of {len(results)} journeys")
+    # last, so the tail of a failed build names them
+    for r in bad:
+        why = r["detail"].strip().splitlines()[0][:200] if r["detail"].strip() else "?"
+        print(f"failed: {r['journey']} at {r['step']}: {why}")
     sys.exit(1 if bad else 0)
 
 
