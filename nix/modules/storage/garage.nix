@@ -234,6 +234,11 @@ in
               in
               ''
                 garage bucket create ${q} 2>/dev/null || true
+                # a bucket's name is its own table: create sends it to every box
+                # and is done once one has it, and the grant below resends the
+                # bucket and key but never the name. A box the name missed finds
+                # no such bucket until anti-entropy, up to ten minutes. Resend it
+                garage bucket alias ${q} ${q} >/dev/null 2>&1 || true
               ''
               + lib.optionalString (b.key != null) ''
                 # The secret goes in argv, and /proc/<pid>/cmdline is readable

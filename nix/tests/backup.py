@@ -51,14 +51,34 @@ a.succeed("grep -q '^dd_timers_restarted 0' /var/lib/dd-facts/timers.prom")
 a.wait_until_succeeds("[ $(find /srv/garage -type f | wc -l) -ge 3 ]")
 b.wait_until_succeeds("[ $(find /srv/garage -type f | wc -l) -ge 3 ]")
 
+# blocks are not the bucket: b reads bucket names from its own tables, and
+# a write that missed b (one copy of two is enough) reaches it later. Wait
+# until b alone resolves backups-a and serves a's snapshots
+b_restic = (
+    f"set -a; . {nix['a_env']}; "
+    f"restic -r s3:http://127.0.0.1:3900/backups-a --password-file {nix['a_password']} --no-lock"
+)
+
+
+def b_view():
+    return b.execute(
+        f"set -a; . {nix['rpc']}; garage bucket list; garage bucket info backups-a 2>&1; garage key list"
+    )[1]
+
+
+b.wait_until_succeeds(f"set -a; . {nix['rpc']}; garage bucket info backups-a")
+b.wait_until_succeeds(f"{b_restic} snapshots latest")
+view_before = b_view()
+
 # a is gone. b still answers, and a's repository - a's password, a's key -
 # restores a's files on b. Without the lock: a lock is a write, and the
 # cluster takes no writes with one box down
 a.shutdown()
-b.succeed(
-    f"set -a; . {nix['a_env']}; "
-    f"restic -r s3:http://127.0.0.1:3900/backups-a --password-file {nix['a_password']} --no-lock restore latest --target /tmp/restore"
-)
+try:
+    b.succeed(f"{b_restic} restore latest --target /tmp/restore")
+except Exception:
+    print(f"b before a went:\n{view_before}\nb now:\n{b_view()}")
+    raise
 b.succeed("grep -q 'worth having tomorrow' /tmp/restore/srv/state/file")
 b.succeed("[ $(stat -c %s /tmp/restore/srv/state/blob) = 2000000 ]")
 
