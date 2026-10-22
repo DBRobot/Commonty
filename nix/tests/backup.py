@@ -1,3 +1,5 @@
+from waits import journal_has, journal_of
+
 # The backup test: a backs up to its own store, the copy goes to b's, a
 # dies, b restores a's files from its copy.
 start_all()
@@ -78,9 +80,10 @@ a.succeed(
     f"set -a; . /var/lib/dd-store/keys/backups-a.env; {s3} s3 rm --recursive s3://backups-a/"
 )
 a.fail("systemctl start restic-backups-dd.service")
-a.succeed(
-    "journalctl -u restic-backups-dd -o cat | grep -c 'b keeps a copy of backups-a: bring it back'"
-)
+run = a.succeed("systemctl show -p InvocationID --value restic-backups-dd").strip()
+assert journal_has(
+    a, "restic-backups-dd", run, "b keeps a copy of backups-a: bring it back"
+), journal_of(a, "restic-backups-dd", run)
 
 # a is gone. b's copy - a's password, b's own key to its copy - restores
 # a's files on b
