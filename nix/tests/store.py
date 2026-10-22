@@ -67,10 +67,10 @@ put(a, "scratch", "s1", "kept on a alone")
 # b's key for a is at b's store, sealed: a opens it, b's own copy of it
 # (not the sealed one) is root's alone
 a.succeed(
-    "curl -sf http://store.b.test.invalid/_keys/a.age -o /tmp/k && age -d -i /etc/age-identity /tmp/k | grep -c AWS_ACCESS_KEY_ID"
+    "curl -sf http://store.b.test.invalid:3443/_keys/a.age -o /tmp/k && age -d -i /etc/age-identity /tmp/k | grep -c AWS_ACCESS_KEY_ID"
 )
 b.fail(
-    "curl -sf http://store.b.test.invalid/_keys/a.age -o /tmp/k && age -d -i /etc/age-identity /tmp/k"
+    "curl -sf http://store.b.test.invalid:3443/_keys/a.age -o /tmp/k && age -d -i /etc/age-identity /tmp/k"
 )
 assert b.succeed("stat -c %a /var/lib/dd-store/from").strip() == "700"
 
@@ -83,7 +83,13 @@ b.fail(
 # a's key at b writes what a copies and nothing else
 a.fail(
     "set -a; . /var/lib/dd-store-copy/b.env; AWS_DEFAULT_REGION=us-east-1 "
-    "aws --endpoint-url http://store.b.test.invalid s3 ls s3://scratch/"
+    "aws --endpoint-url http://store.b.test.invalid:3443 s3 ls s3://scratch/"
+)
+# and through b's door, its signature holds: the Host it signed, port and
+# all, is the one b's store checks (a dropped port was "Invalid signature")
+a.succeed(
+    "set -a; . /var/lib/dd-store-copy/b.env; AWS_DEFAULT_REGION=us-east-1 "
+    "aws --endpoint-url http://store.b.test.invalid:3443 s3 ls s3://photos/ > /tmp/ls && grep -c p1 /tmp/ls"
 )
 # nothing is deleted there: gone here, still there after the next copy
 a.succeed(

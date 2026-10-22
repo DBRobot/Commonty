@@ -95,6 +95,31 @@ in
         ];
       })
       (lib.mkIf (has "thanos-compact") { thanos-compact = [ 10908 ]; })
+      # the joined boxes' metrics (observe/joined-metrics.nix), all on 127.0.0.1
+      (lib.mkIf (has "thanos-receive-joined") {
+        thanos-receive-joined = [
+          10910
+          10911
+          10912
+          10915
+        ];
+      })
+      (lib.mkIf (has "thanos-query-joined") {
+        thanos-query-joined = [
+          config.dd.joinedMetrics.queryPort
+          (config.dd.joinedMetrics.queryPort + 1)
+        ];
+      })
+      # this box's own store (storage/store.nix) on 127.0.0.1, and nginx's
+      # door to it for other boxes
+      (lib.mkIf (has "dd-store") {
+        store = [
+          config.dd.store.port
+          config.dd.store.rpcPort
+          config.dd.store.adminPort
+        ];
+        store-door = [ config.dd.store.publicPort ];
+      })
       # its metrics, which nothing reads yet
       (lib.mkIf (lib.any (lib.hasPrefix "cloudflared-tunnel-") (lib.attrNames config.systemd.services)) {
         cloudflared = [ 20241 ];

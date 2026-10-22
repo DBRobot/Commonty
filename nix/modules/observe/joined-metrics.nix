@@ -73,6 +73,9 @@ in
             "--grpc-address=127.0.0.1:10911"
             "--http-address=127.0.0.1:10912"
             "--remote-write.address=127.0.0.1:10910"
+            # receivers replicating to each other; there is one, and thanos
+            # otherwise opens it on every address
+            "--receive.capnproto-address=127.0.0.1:10915"
             # systemd keeps the quotes inside single ones; thanos wants them
             "'--label=receiver=\"joined\"'"
             "--receive.tenant-header=THANOS-TENANT"

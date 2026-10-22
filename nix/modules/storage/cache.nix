@@ -43,6 +43,11 @@ in
       default = "/root/.aws/credentials";
       description = "AWS credentials file with this box's cache key, for nix as root.";
     };
+    uploadTimeout = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 120;
+      description = "Seconds the post-build hook may spend uploading one build's outputs before it gives up; the build goes on either way.";
+    };
   };
 
   config = {
@@ -104,7 +109,10 @@ in
         done
         rm -f $files
         [ ''${#paths[@]} -gt 0 ] || exit 0
-        nix --extra-experimental-features nix-command \
+        # nor hold the queue: nix retries a cache that refuses or does not
+        # answer, and a build once waited about half an hour per output on it
+        timeout -k 10 ${toString cfg.uploadTimeout} \
+          nix --extra-experimental-features nix-command \
           copy --to '${url}&secret-key=${cfg.signingKeyFile}' "''${paths[@]}" \
           || echo "cache upload failed for ''${#paths[@]} paths"
         exit 0

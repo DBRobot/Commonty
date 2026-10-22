@@ -33,7 +33,8 @@ let
         identity = "/etc/age-identity";
         agePlugins = [ ];
         peers.${other name} = {
-          url = "http://store.${other name}.test.invalid";
+          # at its own port, as on a box: the Host it signs carries the port
+          url = "http://store.${other name}.test.invalid:3443";
           inherit (ages.${other name}) recipient;
         };
         buckets.photos = { };
@@ -44,7 +45,8 @@ let
         text = ages.${name}.identity;
         mode = "0400";
       };
-      # no certificate in a test: the store's name over plain http
+      # no certificate in a test: the store's name over plain http, on
+      # the port boxes reach it at
       services.nginx.enable = true;
       services.nginx.virtualHosts."store.${name}.test.invalid" = {
         useACMEHost = lib.mkForce null;
@@ -52,7 +54,7 @@ let
         listen = lib.mkForce [
           {
             addr = "0.0.0.0";
-            port = 80;
+            port = 3443;
           }
         ];
       };

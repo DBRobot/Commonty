@@ -766,6 +766,15 @@ in
     # on a port of its own, which is all a box that joined on its own key
     # may reach of another box on the fleet's network (net/headscale.nix)
     networking.firewall.interfaces.commonty0.allowedTCPPorts = [ cfg.publicPort ];
+    # a client signs no port when it is the scheme's own (the follow tests
+    # serve the store on plain 80)
+    services.nginx.appendHttpConfig = ''
+      map $scheme:$server_port $dd_store_port {
+        default ":$server_port";
+        "http:80" "";
+        "https:443" "";
+      }
+    '';
     services.nginx.virtualHosts."store.${box}.${base}" = {
       useACMEHost = base;
       onlySSL = true;
@@ -784,6 +793,12 @@ in
       locations."/".proxyPass = "http://127.0.0.1:${toString cfg.port}";
       # s3 signs its requests; no cookie of anyone's goes to the store
       locations."/".ddCookie = "";
+      # the Host a box signed: the recommended headers send $host, which
+      # drops the port, and since the store moved off 443 every copy in
+      # failed "Invalid signature" (2026-10-20). The port it came in on, not
+      # the client's $http_host (gixy refuses it), so the name is still
+      # server_name's
+      locations."/".recommendedProxySettings = false;
       # nearly full, nothing more from other boxes: what they send is
       # refused, what they read still served
       locations."/".extraConfig = ''
@@ -793,7 +808,10 @@ in
         if ($dd_store_refuse = "full-write") { return 507; }
         client_max_body_size 0;
         proxy_request_buffering off;
-        proxy_set_header Host $host;
+        proxy_set_header Host $host$dd_store_port;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
       '';
       locations."/_keys/".alias = "${sealed}/";
     };
