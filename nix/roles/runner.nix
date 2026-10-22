@@ -29,18 +29,9 @@
       # its own programs are cross-built, everything else comes from
       # cache.nixos.org, and the few steps left run here under qemu
       boot.binfmt.emulatedSystems = [ "aarch64-linux" ];
-      # what it uploads is signed with a key it made itself (storage/cache.nix)
-      # the box's cache key, as nix reads credentials; write is granted below
-      sops.templates."aws-credentials" = {
-        path = "/root/.aws/credentials";
-        mode = "0600";
-        content = ''
-          [default]
-          aws_access_key_id = ${config.sops.placeholder.cache-key-id}
-          aws_secret_access_key = ${config.sops.placeholder.cache-key-secret}
-        '';
-      };
-      # the box's own cache key, whether or not it stores anything itself
+      # what it uploads is signed with a key it made itself (storage/cache.nix);
+      # nix's key to the cache is this box's key to the store that keeps it
+      # (storage/cache.nix); the sops one is the old pool's, until it goes
       sops.secrets.cache-key-id = { };
       sops.secrets.cache-key-secret = { };
     }

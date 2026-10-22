@@ -45,21 +45,16 @@
   # with this box's own key there (observe/thanos.nix)
   dd.thanos.fromStore = true;
 
-  # this box's read key to the nix cache bucket: the agent fetches its
-  # release closures from there. The one key that writes lives on the
-  # laptop that publishes (secrets/fleet.yaml), imported into garage once
-  # by hand as "cache-writer".
+  # this box's key to the nix cache bucket in the old pool, until it goes:
+  # what the copy into the store reads with. The agent and nix reach the
+  # cache in the store that keeps it, with this box's key there (box/host.nix,
+  # storage/cache.nix)
   sops.secrets.cache-key-id = { };
   sops.secrets.cache-key-secret = { };
   sops.templates."garage-cache-key.env".content = ''
     GARAGE_CACHE_KEY_ID=${config.sops.placeholder.cache-key-id}
     GARAGE_CACHE_KEY_SECRET=${config.sops.placeholder.cache-key-secret}
   '';
-  sops.templates."aws-cache.env".content = ''
-    AWS_ACCESS_KEY_ID=${config.sops.placeholder.cache-key-id}
-    AWS_SECRET_ACCESS_KEY=${config.sops.placeholder.cache-key-secret}
-  '';
-  dd.agent.cacheEnvFile = config.sops.templates."aws-cache.env".path;
 
   # the metric blocks and the nix cache, copied into the store that keeps
   # each (its home) ahead of the move off the old pool. The cache could
@@ -82,6 +77,8 @@
             envFile = config.sops.templates."garage-cache-key.env".path;
             id = "GARAGE_CACHE_KEY_ID";
             secret = "GARAGE_CACHE_KEY_SECRET";
+            # the boxes write the store's: once more, then no more
+            once = true;
           };
         };
 
