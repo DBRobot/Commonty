@@ -28,8 +28,13 @@
     what = "the gate: sign-in, who may reach what, the directory's replica, settings pages";
     everyBox = true;
     # Pi-hole's api password, made on the box where it has Pi-hole, before
-    # the gate that holds it starts (adblock/pihole.nix)
-    units = [ "dd-pihole-key" ];
+    # the gate that holds it starts (adblock/pihole.nix); and its keys to
+    # the libraries and the mail in the store of the box writing them
+    # (library/libraries.nix)
+    units = [
+      "dd-pihole-key"
+      "dd-library-keys"
+    ];
     base = {
       # node1, node2, 2026-10-04: peak; its state (sessions, replay, keys)
       uses = {

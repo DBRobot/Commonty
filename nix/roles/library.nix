@@ -1,4 +1,4 @@
-{ config, lib, ... }:
+{ config, ... }:
 {
   # The members' encrypted libraries: their bucket on this box's garage and
   # the gate in this box's verifier. The gate's key is imported from sops so
@@ -20,13 +20,7 @@
     enable = true;
     keyFile = config.sops.templates."library-key.env".path;
   };
-  # the libraries and the mail, copied into this box's own store ahead of
-  # the move off the old pool (storage/store.nix migrate)
-  dd.store.migrate = lib.genAttrs [ "libraries" "mail" ] (_: {
-    envFile = config.sops.templates."library-key.env".path;
-    id = "LIBRARY_ID";
-    secret = "LIBRARY_SECRET";
-  });
+
   dd.transcode.enable = true;
   # members' locked mail, beside their libraries (modules/library/mail.nix)
   dd.mailInbox.enable = true;
