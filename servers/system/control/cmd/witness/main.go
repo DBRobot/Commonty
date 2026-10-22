@@ -146,7 +146,7 @@ func placed(in place.Inputs, s *state.State, goneAfter int64, ids *ident.Server,
 		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
 	}
 	if rc != nil {
-		in.Computers = rc.Computers(len(s.Directory), item, s.Height, s.Time)
+		in.Computers = rc.Computers(len(s.Directory), item, s.Height, s.Time, s.IdentBoxes())
 	}
 	members := map[string]bool{}
 	if ids != nil {
