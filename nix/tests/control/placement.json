@@ -1,0 +1,62 @@
+{
+  "boxes": {
+    "node1": {
+      "site": "h1",
+      "region": "r",
+      "can": {
+        "web": 1,
+        "db": 1
+      },
+      "owner": "",
+      "memoryGiB": 32,
+      "threads": 8,
+      "poolGiB": 500
+    },
+    "node2": {
+      "site": "h2",
+      "region": "r",
+      "can": {
+        "web": 1,
+        "db": 1,
+        "computers": 1
+      },
+      "owner": "",
+      "memoryGiB": 32,
+      "threads": 8,
+      "poolGiB": 500
+    },
+    "node3": {
+      "site": "h3",
+      "region": "r",
+      "can": {
+        "web": 1,
+        "db": 1,
+        "computers": 1
+      },
+      "owner": "cara",
+      "memoryGiB": 32,
+      "threads": 8,
+      "poolGiB": 500
+    }
+  },
+  "services": {
+    "web": {
+      "enabled": true,
+      "instances": 1,
+      "class": "low",
+      "placed": true
+    },
+    "db": {
+      "enabled": true,
+      "instances": 1,
+      "class": "low",
+      "placed": true,
+      "lease": true
+    }
+  },
+  "roles": {},
+  "damping": {
+    "base": 0.3,
+    "perGiB": 0.01
+  }
+}

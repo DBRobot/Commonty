@@ -274,8 +274,9 @@ A service whose needs say `placed = true` is switched by the plan
 - Without a lease this is for what may run twice for a moment: two boxes
   running a stateless page while one hands over is harmless.
 - Its names (needs `hosts`) follow it: the DNS Worker points each at a
-  live box whose heartbeat says it runs the service
-  ([failover: the names](failover.md#the-names)). A service that answers
+  box the agreed plan gives the service, which the witness computes on
+  the agreed state with the release's inputs, never at a box on its own
+  word ([failover: the names](failover.md#the-names)). A service that answers
   under another's name depends on it locally, so the two go together;
   `checks.placement` refuses a name two services claim.
 - What the rest of the release picks a box by (the storage pool, the

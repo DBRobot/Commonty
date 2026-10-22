@@ -631,3 +631,35 @@ func TestASmallBoxsOwnRunnerIsSizedByItsOwnMeasure(t *testing.T) {
 		t.Fatalf("small's 6.8G holds no 12G runner: %+v", p.Boxes["small"])
 	}
 }
+
+// Placed names each placed service's boxes from the plan alone: a box's own
+// runs/<service> fact gives it nothing the plan did not (the DNS Worker
+// points names by this)
+func TestPlacedIsThePlanNotABoxsWord(t *testing.T) {
+	in, s := fleet()
+	sv := in.Services["pihole"]
+	sv.Placed = true
+	in.Services["pihole"] = sv
+	for _, b := range []string{"big", "small", "nas"} {
+		s.Boxes[b].Facts["carries/pihole"] = 1
+	}
+	// small says it runs games, which it cannot, and the plan never gives it
+	s.Boxes["small"].Facts["runs/games"] = 1
+	p := Decide(in, s, 90_000, nil)
+	got := Placed(in, p)
+	if _, ok := got["games"]; ok {
+		t.Fatalf("games is not placed, so it has no boxes here: %v", got)
+	}
+	if _, ok := got["garage"]; ok {
+		t.Fatalf("garage is not placed: %v", got)
+	}
+	want := []string{}
+	for _, b := range []string{"big", "nas", "small"} {
+		if runs(p, b, "pihole") {
+			want = append(want, b)
+		}
+	}
+	if len(want) == 0 || strings.Join(got["pihole"], ",") != strings.Join(want, ",") {
+		t.Fatalf("pihole: placed %v, the plan %v", got["pihole"], want)
+	}
+}

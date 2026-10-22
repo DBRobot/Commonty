@@ -465,22 +465,28 @@ check(
 
 
 
-# a placed service with no lease: its name at a live box running it, by
-# their heartbeats (the relay's runs), the gateway's box first while it is
-# one of them; at the gateway's when none runs it
-def runs_control(runs, joined=None):
+# a placed service with no lease: its name at a box the agreed plan gives
+# it (the relay's placed: the witness's plan on the agreed state), the
+# gateway's box first while it is one of them; at the gateway's when the
+# plan gives it none. A box's own word (runs) moves nothing
+def placed_control(placed, joined=None, runs=None, **holders):
+    leases = {
+        "svc/" + svc.replace("_", "-"): {"holder": b, "epoch": 1, "expires": 2**53}
+        for svc, b in holders.items()
+    }
+    body = {"fresh": True, "placed": placed, "joined": joined or {}, "runs": runs or {}}
+    if holders:
+        body["leases"] = leases
     req = urllib.request.Request(
-        "http://127.0.0.1:8899/control",
-        data=json.dumps({"fresh": True, "runs": runs, "joined": joined or {}}).encode(),
-        method="POST",
+        "http://127.0.0.1:8899/control", data=json.dumps(body).encode(), method="POST"
     )
     urllib.request.urlopen(req).read()
 
 
-runs_control({"llama-swap": ["box2"]})
+placed_control({"llama-swap": ["box2"]})
 converge(8789)
 check(
-    "placed: a name at the box running its service",
+    "placed: a name at the box the agreed plan gives its service",
     names().get("llm.commonty.test"),
     [("A", "100.64.0.5", False)],
 )
@@ -489,36 +495,65 @@ check(
     names().get("*.commonty.test"),
     [("A", "100.64.0.2", False)],
 )
-runs_control({"llama-swap": ["box1", "box2"]})
+placed_control({"llama-swap": ["box1", "box2"]})
 converge(8789)
 check(
-    "placed: run on two boxes, the gateway's box first",
+    "placed: given two boxes, the gateway's box first",
     names().get("llm.commonty.test"),
     [("A", "100.64.0.2", False)],
 )
-runs_control({})
+placed_control({}, runs={"llama-swap": ["box2"]})
 converge(8789)
 check(
-    "placed: run nowhere, at the gateway's box",
+    "placed: a box saying it runs a service takes no name",
     names().get("llm.commonty.test"),
     [("A", "100.64.0.2", False)],
 )
 ipj = (100 << 24) | (64 << 16) | 7
-runs_control({"llama-swap": ["j00000000aa"]}, {"j00000000aa": {"ipv4": ipj}})
+joinedj = {"j00000000aa": {"ipv4": ipj}}
+placed_control({}, joined=joinedj, runs={"llama-swap": ["j00000000aa"]})
 converge(8789)
 check(
-    "placed: on a box that joined on its own key, at its address",
-    names().get("llm.commonty.test"),
-    [("A", "100.64.0.7", False)],
-)
-runs_control({"llama-swap": ["nobody"]})
-converge(8789)
-check(
-    "placed: a box the release and the agreed state do not know names nothing",
+    "placed: nor does a box that joined on its own key, on its own word",
     names().get("llm.commonty.test"),
     [("A", "100.64.0.2", False)],
 )
-lease(True, headscale="box1", ente_museum="box1")
+placed_control({"llama-swap": ["j00000000aa"]}, joined=joinedj)
+converge(8789)
+check(
+    "placed: a box that joined, given the service by the agreed plan, at its address",
+    names().get("llm.commonty.test"),
+    [("A", "100.64.0.7", False)],
+)
+placed_control({"llama-swap": ["nobody"]})
+converge(8789)
+check(
+    "placed: a box with no address in the release or the agreed state names nothing",
+    names().get("llm.commonty.test"),
+    [("A", "100.64.0.2", False)],
+)
+placed_control({"ente-museum": ["box2"]}, runs={"ente-museum": ["box2"]}, headscale="box1")
+converge(8789)
+check(
+    "lease: with no holder, the plan and a box's word move nothing; the gateway's",
+    names().get("photos.commonty.test"),
+    [("A", "100.64.0.2", False)],
+)
+placed_control({"pub-page": ["j00000000aa"]}, joined=joinedj, headscale="box1")
+converge(8789)
+check(
+    "public: given a box with no tunnel, at the gateway's tunnel, not removed",
+    names().get("pub.commonty.test"),
+    [("CNAME", T1, True)],
+)
+placed_control({"pub-page": ["box2", "j00000000aa"]}, joined=joinedj, headscale="box1")
+converge(8789)
+check(
+    "public: the first of its boxes with a tunnel",
+    names().get("pub.commonty.test"),
+    [("CNAME", B2, True)],
+)
+placed_control({}, headscale="box1", ente_museum="box1")
 
 
 # a box that joined on its own key: its store's name at the address it

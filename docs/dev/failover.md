@@ -53,12 +53,20 @@ state from the control plane's witness:
 - Each service's names point at the box holding its lease: `photos`,
   `api` and the rest at museum's, `vault` at the vault's, `git` and
   `code` at the forge's.
-- A placed service with no lease (needs `hosts`) has its names at a live
-  box whose heartbeat says it runs it (`runs/<service>`, which the relay
-  hands the Worker beside the leases), the gateway's box first while it
-  is one of them: `llm` at the chat's, `metrics` and `grafana` at the
-  fleet view's, `games` at the games', `cache` at harmonia's. Run
-  nowhere, at the gateway's box, whose page says one moment.
+- A placed service with no lease (needs `hosts`) has its names at a box
+  the agreed plan gives it: the witness plans on the agreed state with the
+  release's placement inputs, as every box does, and the relay hands the
+  Worker that beside the leases (`placed`). The gateway's box goes first
+  while it is one of them: `llm` at the chat's, `metrics` and `grafana`
+  at the fleet view's, `games` at the games', `cache` at harmonia's. A
+  box's own word that it runs something (`runs/<service>`) moves no name,
+  and a box that joined on its own key gets one only when the plan gives
+  it the service, at the address the agreed state has for it. Placed
+  nowhere, the name is the gateway's, whose page says one moment.
+- A service under a lease follows its holder alone: with the lease lapsed
+  its names are the gateway's, whatever the plan says.
+- A public name goes to the first of its boxes with a tunnel, else the
+  gateway's.
 - A service answering under another's name goes where that one does
   (its needs depend on it locally): search under `llm`, the joined
   boxes' metrics under `metrics`, mail's pipe and the transcoder under

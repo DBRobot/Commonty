@@ -27,7 +27,7 @@
 //
 // Failover. Where a name points follows the control plane's agreed state:
 // a service with one writer at the box holding its lease, a placed one
-// with none at a live box whose heartbeat says it runs it, the gateway's
+// with none at a box the agreed plan gives it (never a box's own word), the gateway's
 // names (`*`, the bare name, the public hosts) at the box holding the
 // gateway's. Each box has a tunnel of its own, whose secret the box made
 // (it asks for the tunnel here, signed); a public name is a CNAME to the
@@ -133,12 +133,14 @@ export async function holders(env) {
       joined[name] = [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
     }
     Object.defineProperty(out, 'joined', { value: joined });
-    // which live boxes run each placed service, by their heartbeats
-    const runs = {};
-    for (const [svc, bs] of Object.entries(v.runs || {})) {
-      if (Array.isArray(bs)) runs[svc] = bs.filter((b) => typeof b === 'string' && b).sort();
+    // the boxes the agreed plan gives each placed service: the witness's
+    // plan on the agreed state with the release's inputs, as every box
+    // plans it - never a box's own word that it runs something
+    const placed = {};
+    for (const [svc, bs] of Object.entries(v.placed || {})) {
+      if (Array.isArray(bs)) placed[svc] = bs.filter((b) => typeof b === 'string' && b).sort();
     }
-    Object.defineProperty(out, 'runs', { value: runs });
+    Object.defineProperty(out, 'placed', { value: placed });
     return out;
   } catch {
     return null;
@@ -285,21 +287,41 @@ export async function converge(env) {
   const held = moving ? await holders(env) : null;
   const stay = moving && held === null;
   const own = await tunnels(env);
-  const tunnelOf = (box) => (own[box] ? own[box] : box === RECORDS.home || !RECORDS.home ? tunnel : null);
-  const gateway = (held && RECORDS.gateway && held[`svc/${RECORDS.gateway}`]) || RECORDS.home;
-  const addressOf = (box) =>
-    (RECORDS.addresses && box && RECORDS.addresses[box]) || (held && box && held.joined[box]) || address;
-  // a name's box: its service's lease holder; for a placed service with no
-  // lease, a live box running it, the gateway's first if it is one of them
-  // (no name moves while it still runs there); else the gateway's
-  const runnerOf = (svc) => {
-    const on = (held && held.runs[svc]) || [];
-    return on.includes(gateway) ? gateway : on.find((b) => RECORDS.addresses?.[b] || held.joined[b]);
+  const has = (o, k) => Boolean(o) && typeof k === 'string' && Object.hasOwn(o, k);
+  const tunnelOf = (box) => (has(own, box) ? own[box] : box === RECORDS.home || !RECORDS.home ? tunnel : null);
+  const lease = (svc) => (held && has(held, `svc/${svc}`) ? held[`svc/${svc}`] : null);
+  const gateway = (RECORDS.gateway && lease(RECORDS.gateway)) || RECORDS.home;
+  // a release box's address; a box that joined on its own key has one only
+  // where the agreed plan places a service on it (placedOn), from the agreed
+  // state (the network's control server gave it), never its own word
+  const releaseAddress = (box) => (has(RECORDS.addresses, box) ? RECORDS.addresses[box] : null);
+  const joinedAddress = (box) => (held && has(held.joined, box) ? held.joined[box] : null);
+  const addressOf = (box) => releaseAddress(box) || joinedAddress(box) || address;
+  const leased = new Set(RECORDS.leased || []);
+  // the boxes a name may go to: a service under a lease, its holder alone
+  // (a lapsed lease is no one's, and the name stays the gateway's); a
+  // placed one, the boxes the agreed plan gives it, the gateway's first
+  // (no name moves while it is one of them). Each with an address
+  const placedOn = (svc) => {
+    const on = (held && has(held.placed, svc) ? held.placed[svc] : []).filter((b) => releaseAddress(b) || joinedAddress(b));
+    return on.includes(gateway) ? [gateway, ...on.filter((b) => b !== gateway)] : on;
   };
-  const targetOf = (h) => (follow[h] && held && (held[`svc/${follow[h]}`] || runnerOf(follow[h]))) || gateway;
+  const candidates = (h) => {
+    if (!held || !has(follow, h)) return [];
+    const svc = follow[h];
+    if (leased.has(svc)) return lease(svc) ? [lease(svc)] : [];
+    return placedOn(svc);
+  };
+  const targetOf = (h) => candidates(h)[0] || gateway;
   const cnameTo = (box) => {
     const t = tunnelOf(box);
     return t ? `${t}.cfargotunnel.com` : null;
+  };
+  // a public name: the first of its boxes with a tunnel; none has one, the
+  // gateway's
+  const publicTo = (h) => {
+    for (const b of candidates(h)) if (cnameTo(b)) return cnameTo(b);
+    return cnameTo(gateway);
   };
   const tunnelsOurs = new Set([tunnel, ...Object.values(own)].filter(Boolean).map((t) => `${t}.cfargotunnel.com`));
   const ours = cnameTo(gateway) || `${tunnel}.cfargotunnel.com`;
@@ -316,7 +338,7 @@ export async function converge(env) {
     [`*.${zone}`]: ['A', gw, false],
   };
   for (const h of hosts) {
-    const to = cnameTo(targetOf(h));
+    const to = publicTo(h);
     want[`${h}.${zone}`] = open && to ? ['CNAME', to, true] : null;
   }
   // a name of a service with one writer, on the fleet's network only: at

@@ -90,6 +90,9 @@
       "metrics"
       "grafana"
     ];
+    # one, which its name follows: what answers under it (the joined
+    # boxes' metrics) goes where this one is
+    instances = 1;
     base = {
       # node1, 2026-10-04: peak
       uses = {

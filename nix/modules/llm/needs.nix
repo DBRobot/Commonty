@@ -12,8 +12,10 @@
       class = "medium";
       downMbps = 50;
     };
-    # llm.<domain>: the DNS Worker points it at the box running this
+    # llm.<domain>: the DNS Worker points it at the box running this. One,
+    # so what answers under it (search) goes where this one is
     hosts = [ "llm" ];
+    instances = 1;
     units = [
       "llm-proxy"
       "fetch-model-*"
