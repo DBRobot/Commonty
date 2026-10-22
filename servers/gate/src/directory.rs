@@ -3003,7 +3003,10 @@ mod tests {
         .unwrap();
         let got = m.entry().unwrap();
         assert_eq!(got.entry, e);
-        assert_eq!(got.signature, "c2ln");
+        // the envelope's signature with the body it covers, as
+        // identity::verify reads a v2 signature (a bare sig verified nowhere)
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&body);
+        assert_eq!(got.signature, format!("v2:{b64}:c2ln"));
     }
 
     #[test]
