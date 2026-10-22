@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"commonty/control/state"
@@ -82,15 +83,40 @@ type Validator struct {
 	st    *state.State
 	saved Saved
 	syncs chan answer
+	// frames for consensus, handed on by goroutines of their own: a
+	// consensus that hangs never stops the relay's reader, nor the answers
+	// to peers catching up (two wedges on 2026-10-22). The validators'
+	// own messages and the boxes' requests wait apart, so a flood of
+	// requests never pushes out a vote
+	peers   chan frame
+	clients chan frame
+	limit   limiter
+	asks    chan uint64
+	done    chan struct{}
+	stop    sync.Once
+	running atomic.Bool
+	pulse
 	// what every decision told the outside, for whoever runs this
 	Decided func(*state.State)
 }
+
+type frame struct {
+	from    uint64
+	kind    byte
+	payload []byte
+}
+
+// how many frames wait for consensus before the oldest is dropped; the
+// relay drops frames too, and consensus asks again for what it misses
+const inbox = 4096
 
 func New(o Options) (*Validator, error) {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	v := &Validator{o: o, pubs: map[uint64]ed25519.PublicKey{}, st: state.New(), syncs: make(chan answer, 64)}
+	v := &Validator{o: o, pubs: map[uint64]ed25519.PublicKey{}, st: state.New(), syncs: make(chan answer, 64),
+		peers: make(chan frame, inbox), clients: make(chan frame, inbox), asks: make(chan uint64, 64), done: make(chan struct{})}
+	v.pulse.init(o.Now())
 	var nodes []uint64
 	for _, val := range o.Config.Validators {
 		k, err := base64.StdEncoding.DecodeString(val.Key)
@@ -136,11 +162,29 @@ func New(o Options) (*Validator, error) {
 		v.c.LastSignatures = o.Saved.Sigs
 	}
 	_ = nodes
+	// answering a peer that catches up needs nothing of consensus, and
+	// starts before it
+	go v.answer()
 	return v, nil
 }
 
-func (v *Validator) Start() error { return v.c.Start() }
-func (v *Validator) Stop()        { v.c.Stop() }
+func (v *Validator) Start() error {
+	if err := v.c.Start(); err != nil {
+		return err
+	}
+	v.pulse.started(v.o.Now())
+	v.running.Store(true)
+	go v.intake(v.peers, true)
+	go v.intake(v.clients, false)
+	return nil
+}
+
+func (v *Validator) Stop() {
+	v.stop.Do(func() { close(v.done) })
+	if v.running.Swap(false) {
+		v.c.Stop()
+	}
+}
 
 // State is a copy of the agreed state.
 func (v *Validator) State() *state.State {
@@ -149,35 +193,149 @@ func (v *Validator) State() *state.State {
 	return clone(v.st)
 }
 
-// Receive is a frame from the relay.
+// Receive is a frame from the relay. It never waits on consensus: frames
+// for it are queued, and a peer's "send me your latest" is answered from
+// what was last decided, however consensus is doing.
 func (v *Validator) Receive(from uint64, kind byte, payload []byte) {
 	switch kind {
 	case wire.Consensus:
-		m := &smartbftprotos.Message{}
-		if proto.Unmarshal(payload, m) == nil {
-			v.c.HandleMessage(from, m)
+		// votes only from the validators
+		if _, ok := v.pubs[from]; ok && from != v.o.ID {
+			v.queue(v.peers, frame{from, kind, payload}, true)
 		}
-	case wire.Forward:
-		v.c.HandleRequest(from, payload)
-	case wire.Submit:
-		_ = v.c.SubmitRequest(payload)
+	case wire.Forward, wire.Submit:
+		// a request passed on comes only from a validator; any sender but
+		// this box itself is held to a rate; and only one some box signed
+		// goes on to consensus
+		if _, ok := v.pubs[from]; kind == wire.Forward && (!ok || from == v.o.ID) {
+			return
+		}
+		if from != v.o.ID && !v.limit.allow(from, v.o.Now()) {
+			return
+		}
+		signed, fresh := v.check(payload)
+		if !signed {
+			return
+		}
+		// it counts as waiting only if it is newer than what was agreed of
+		// its box and not a join: replays never make a stall
+		if fresh && v.pulse.idle() {
+			v.pulse.request(v.o.Now())
+		}
+		v.queue(v.clients, frame{from, kind, payload}, false)
 	case wire.SyncAsk:
 		// always answered, if only with "nothing yet": the asker stops
 		// waiting once enough validators have spoken
-		v.mu.Lock()
-		s := v.saved
-		v.mu.Unlock()
-		b, _ := json.Marshal(s)
-		v.o.Transport.Send(from, wire.SyncState, b)
+		select {
+		case v.asks <- from:
+		default:
+		}
 	case wire.SyncState:
 		var s Saved
 		if json.Unmarshal(payload, &s) == nil {
+			v.heard(from, s)
 			select {
 			case v.syncs <- answer{from, s}:
 			default:
 			}
 		}
 	}
+}
+
+// check: whether a request is signed as VerifyRequest wants (a join by
+// the key it brings), and whether it is fresh: signed by a box of the
+// fleet, not a join, and above that box's last agreed sequence
+func (v *Validator) check(raw []byte) (signed, fresh bool) {
+	var q state.Request
+	if json.Unmarshal(raw, &q) != nil {
+		return false, false
+	}
+	if _, err := v.VerifyRequest(raw); err != nil {
+		return false, false
+	}
+	if q.Kind == "join" {
+		return true, false
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	b := v.st.Boxes[q.Box]
+	return true, b == nil || q.Seq > b.Seq
+}
+
+// queue: full, the oldest frame goes, and that is said once in a while
+func (v *Validator) queue(q chan frame, f frame, peer bool) {
+	for {
+		select {
+		case q <- f:
+			return
+		default:
+		}
+		select {
+		case <-q:
+			if n := v.pulse.drop(v.o.Now(), peer); n > 0 {
+				v.o.Logger.Warnf("consensus is not taking frames: %d dropped, oldest first", n)
+			}
+		default:
+		}
+	}
+}
+
+// intake hands one queue's frames to consensus, one at a time. How long
+// a vote in hand has taken is what the watchdog reads; a request may wait
+// on a full pool, which a box can cause, and is not timed
+func (v *Validator) intake(q chan frame, timed bool) {
+	for {
+		select {
+		case <-v.done:
+			return
+		case f := <-q:
+			if timed {
+				v.pulse.enter(&v.pulse.calling, v.o.Now())
+			}
+			switch f.kind {
+			case wire.Consensus:
+				m := &smartbftprotos.Message{}
+				if proto.Unmarshal(f.payload, m) == nil {
+					v.c.HandleMessage(f.from, m)
+				}
+			case wire.Forward:
+				v.c.HandleRequest(f.from, f.payload)
+			case wire.Submit:
+				_ = v.c.SubmitRequest(f.payload)
+			}
+			if timed {
+				v.pulse.leave(&v.pulse.calling)
+			}
+		}
+	}
+}
+
+// answer sends the askers what was last decided, off the relay's reader
+func (v *Validator) answer() {
+	for {
+		select {
+		case <-v.done:
+			return
+		case to := <-v.asks:
+			v.mu.Lock()
+			s := v.saved
+			v.mu.Unlock()
+			b, _ := json.Marshal(s)
+			v.o.Transport.Send(to, wire.SyncState, b)
+		}
+	}
+}
+
+// heard: a peer's latest, kept only if a quorum signed it
+func (v *Validator) heard(from uint64, s Saved) {
+	if _, ok := v.pubs[from]; !ok || from == v.o.ID {
+		return
+	}
+	var h header
+	if len(s.Proposal.Header) > 0 && (json.Unmarshal(s.Proposal.Header, &h) != nil || !v.signedByQuorum(s.Proposal, s.Sigs)) {
+		return
+	}
+	v.pulse.peer(from, h.Height, v.o.Now())
 }
 
 // ---- the state, its hash, and catching up
@@ -238,6 +396,9 @@ func (v *Validator) adopt(s Saved) error {
 		return errors.New("not newer than what is here")
 	}
 	v.apply(before, s.Proposal, s.Sigs, h)
+	if v.o.Now != nil {
+		v.pulse.moved(h.Height, v.o.Now())
+	}
 	return nil
 }
 
@@ -399,10 +560,13 @@ func (v *Validator) MembershipChange() bool { return false }
 func (v *Validator) Deliver(p bft.Proposal, sigs []bft.Signature) bft.Reconfig {
 	var h header
 	_ = json.Unmarshal(p.Header, &h)
+	v.pulse.enter(&v.pulse.delivering, v.o.Now())
+	defer v.pulse.leave(&v.pulse.delivering)
 	v.mu.Lock()
 	v.apply(v.st, p, sigs, h)
 	st, saved := clone(v.st), v.saved
 	v.mu.Unlock()
+	v.pulse.moved(h.Height, v.o.Now())
 	if v.o.Persist != nil {
 		v.o.Persist(saved)
 	}

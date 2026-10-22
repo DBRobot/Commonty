@@ -2,7 +2,8 @@
 # What is wrong on any box, as the fleet view has it, mailed once per change:
 # disk events in the last week, a pool that is not healthy, a backup over a
 # day old, a runner's new config pending over an hour, the network reaper's
-# brake on, a release's rollout that stopped (docs/dev/rollout.md). QUERY is
+# brake on, a release's rollout that stopped (docs/dev/rollout.md), a
+# validator that restarted itself over a wedged consensus. QUERY is
 # thanos-query's api; STATE remembers what was mailed; SENDMAIL is
 # dd-sendmail; WINDOW is how far back to look: another box's newest numbers
 # are only in the bucket once its block is cut, so an instant query would not
@@ -26,6 +27,11 @@ lines=$(
     ask "max by (box) (last_over_time(dd_reap_brake[$WINDOW])) > 0" | while read -r b _; do echo "$b: the network reaper refuses a state that looks wrong and has taken nothing off (journalctl -u dd-verify there: 'the brake is on')"; done
     # every box says so of the same agreed stop: one line is enough
     ask "topk(1, max by (box) (max_over_time(dd_rollout_bad[$WINDOW]))) > 0" | while read -r b _; do echo "a release's staged rollout stopped, so no other box takes it (seen by $b; dd release status says why)"; done
+    # a validator that found its consensus wedged and restarted itself in
+    # the last day: once per restart, by when (docs/dev/control-plane.md)
+    ask "max by (box) (max_over_time(dd_control_selfheal_last_seconds[$WINDOW])) > $((now - 24 * 3600))" | while read -r b v; do
+      echo "$b: dd-control found its consensus wedged and restarted itself at $(date -u -d "@$v" '+%F %H:%M') UTC (journalctl -u dd-control there: 'self-heal')"
+    done
     ask "max by (box) (max_over_time(dd_backup_last_success_seconds[$WINDOW])) < $((now - 26 * 3600))" | while read -r b v; do
       echo "$b: last good backup $(((now - v) / 3600)) hours ago"
     done

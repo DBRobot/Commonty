@@ -813,13 +813,15 @@
                   ./servers/system/control/validator
                   ./servers/system/control/wire
                   ./servers/system/control/cmd
+                  # SmartBFT with the upstream fixes no release has yet (go.mod)
+                  ./servers/system/control/third_party
                 ];
               };
               dd-control = pkgs.buildGoModule {
                 pname = "dd-control";
                 version = "0.1.0";
                 inherit src;
-                vendorHash = "sha256-sYPGMtJetj/Ou1Q52s2tfRJkNcaiPlhuqIiq/H/1UjY=";
+                vendorHash = "sha256-0Pw/n4fnU3oM71OMEp2MkneaDXRXEmILhvF4VKTuAJE=";
                 # and dd-plan-check: a release's plan against what the boxes run (scripts/plan-check)
                 subPackages = [
                   "cmd/dd-control"

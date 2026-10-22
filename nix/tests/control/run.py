@@ -1,7 +1,10 @@
 # The control plane end to end, with no network and no vm: the relay and
 # witness under wrangler (workerd), three dd-control validators with test
 # box keys, agreeing; one killed and the rest carrying on; it restarted and
-# catching up from its log; a hello signed by the wrong key refused. Then
+# catching up from its log; one left exactly a sequence behind rejoining by
+# itself; one whose consensus hangs finding that out, exiting to be started
+# afresh, and catching up, while the rest decide throughout; a hello signed
+# by the wrong key refused. Then
 # a gate on each box with the directory as the agreed log: a new name is
 # its claimant's once every voting box's gate has acknowledged it, and not
 # before; an update by its owner reaches every box. Last, a placed
@@ -97,6 +100,12 @@ def run(i):
             f"{T}/placed{i}",
             "-test-facts",
             f"{T}/facts{i}.json",
+            "-test-wedge",
+            f"{T}/wedge{i}",
+            "-test-deaf",
+            f"{T}/deaf{i}",
+            "-metrics",
+            f"{T}/control{i}.prom",
         ],
         env=env,
         stdout=open(f"{T}/n{i}.log", "a"),
@@ -159,6 +168,89 @@ ok(
     state(1).get("height", 0) > h0 + 3,
     "a restarted validator replays its log and catches up",
 )
+
+# ---- a validator one sequence behind: deaf to consensus until the others
+# have decided exactly one more, then hearing again. It rejoins by itself,
+# not by restarting (SmartBFT #700)
+height = lambda i: state(i).get("height", 0)
+
+
+def log_of(i):
+    return open(f"{T}/n{i}.log").read()
+
+
+heals_before = log_of(1).count("self-heal:")
+gap = 0
+for attempt in range(8):
+    h = height(1)
+    open(f"{T}/deaf1", "w").close()
+    end = time.time() + 20
+    while time.time() < end and max(height(2), height(3)) <= h:
+        time.sleep(0.02)  # sleep-ok: polling 20 ms apart, to see exactly one decision
+    gap = max(height(2), height(3)) - height(1)
+    os.remove(f"{T}/deaf1")
+    if gap == 1:
+        break
+    until("node1 level again", lambda: height(1) >= max(height(2), height(3)), 60)
+ok(
+    gap == 1,
+    f"node1 was left exactly one sequence behind (attempt {attempt + 1}, gap {gap})",
+)
+ahead = max(height(2), height(3))
+until(
+    "the one behind rejoins",
+    lambda: height(1) > ahead and height(1) >= max(height(2), height(3)) - 1,
+    45,
+)
+ok(
+    height(1) > ahead and height(1) >= max(height(2), height(3)) - 1,
+    "a validator one sequence behind rejoins and decides with the others",
+)
+ok(
+    log_of(1).count("self-heal:") == heals_before and procs[1].poll() is None,
+    "by itself: it did not have to restart",
+)
+
+# ---- a validator whose consensus hangs (a decision's delivery never ends,
+# as in the controller deadlocks): it notices, says why, exits for systemd
+# to start it afresh, and catches up; the fleet decides throughout
+h2 = height(2)
+h1 = height(1)
+open(f"{T}/wedge2", "w").close()
+# the decision it hangs on is applied before it is kept: one more at most
+until("node2 wedged", lambda: height(2) <= h2 + 1 and height(1) > h1 + 3, 60)
+# 30 s hung, then its turn among the four validators' 30 s slots
+until("node2 heals itself", lambda: procs[2].poll() is not None, 240)
+code = procs[2].poll()
+os.remove(f"{T}/wedge2")
+reason = [l for l in log_of(2).splitlines() if l.startswith("self-heal:")]
+ok(
+    code == 3 and reason,
+    f"a wedged validator finds itself wedged and exits for a restart ({code}: {reason[-1:]})",
+)
+ok(
+    height(1) > h1 + 10 and height(3) > h1 + 10,
+    f"the others decided all along ({h1} -> {height(1)})",
+)
+prom = open(f"{T}/control2.prom").read()
+ok(
+    "dd_control_selfheal_total 1\n" in prom
+    and "dd_control_selfheal_last_seconds 0\n" not in prom,
+    "and says so in its metrics, for the alert mail",
+)
+procs[2] = run(2)  # as systemd's Restart=always would
+until(
+    "node2 back with the others",
+    lambda: height(2) >= max(height(1), height(3)) - 1 and height(2) > h1 + 10,
+    60,
+)
+ok(
+    height(2) >= max(height(1), height(3)) - 1,
+    "started afresh, it catches up and decides again",
+)
+mark = height(2)
+until("node2 deciding", lambda: height(2) > mark, 30)
+ok(height(2) > mark, "and keeps deciding")
 
 req = urllib.request.Request(
     f"http://127.0.0.1:8789/relay?id=1&at={int(time.time())}&sig=AAAA",

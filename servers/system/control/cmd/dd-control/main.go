@@ -569,6 +569,9 @@ func main() {
 	report := flag.String("sign-report", "", "sign the box's report in this directory (hardware.json, hardware-configuration.nix) as -box, into report.sig, and exit")
 	join := flag.Bool("sign-join", false, "print a request for a join key to the fleet's network, signed as -box now, and exit")
 	computerJoin := flag.String("sign-computer-join", "", "print a request for a network key for the remote computer with this id, which this box runs, signed as -box now, and exit")
+	metrics := flag.String("metrics", "", "a validator writes its progress and self-heals here, as metrics (node_exporter's textfile); empty: nowhere")
+	testWedge := flag.String("test-wedge", "", "tests only: while this file exists, delivering a decision hangs, as a wedged consensus does")
+	testDeaf := flag.String("test-deaf", "", "tests only: while this file exists, consensus frames from the relay are dropped")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -722,6 +725,9 @@ func main() {
 		v, err := validator.New(validator.Options{
 			Config: cfg, ID: mine.ID, Key: key, Transport: r, Logger: logger{}, WAL: w, WALEntries: walEntries, Saved: saved,
 			Persist: func(s validator.Saved) {
+				for *testWedge != "" && exists(*testWedge) {
+					time.Sleep(100 * time.Millisecond)
+				}
 				b, _ := json.Marshal(s)
 				tmp := filepath.Join(*dir, "saved.json.tmp")
 				if os.WriteFile(tmp, b, 0o600) == nil {
@@ -752,6 +758,29 @@ func main() {
 				log.Fatal(err)
 			}
 			log.Printf("validator %d voting", mine.ID)
+			heals := loadHeals(filepath.Join(*dir, "selfheal.json"))
+			go func() {
+				for {
+					writeMetrics(*metrics, v.Health(), heals)
+					time.Sleep(15 * time.Second)
+				}
+			}()
+			// a wedged consensus does not come back by itself (SmartBFT
+			// #700, #713, #724 and whatever is next): exit, and systemd
+			// starts a fresh one, which catches up from its peers
+			var healed time.Time
+			if heals.Last > 0 {
+				healed = time.Unix(heals.Last, 0)
+			}
+			v.Watch(validator.DefaultLimits, 5*time.Second, healed, func(why string) {
+				log.Printf("self-heal: %s; exiting so that dd-control is started afresh", why)
+				heals.Count++
+				heals.Last = time.Now().Unix()
+				heals.Reason = why
+				saveHeals(filepath.Join(*dir, "selfheal.json"), heals)
+				writeMetrics(*metrics, v.Health(), heals)
+				os.Exit(3)
+			})
 		}()
 	} else {
 		rd, err := validator.NewReader(cfg, r)
@@ -761,7 +790,16 @@ func main() {
 		n = rd
 		ask = rd.Ask
 	}
-	go r.run(n.Receive, ask)
+	receive := n.Receive
+	if *testDeaf != "" {
+		receive = func(from uint64, kind byte, p []byte) {
+			if kind == wire.Consensus && exists(*testDeaf) {
+				return
+			}
+			n.Receive(from, kind, p)
+		}
+	}
+	go r.run(receive, ask)
 
 	// Everything this box asks the validators, signed by the TPM, under one
 	// rising sequence: a heartbeat and a directory item never share a number
@@ -1144,6 +1182,56 @@ func main() {
 	srv := &http.Server{Addr: *listen, ReadHeaderTimeout: 5 * time.Second}
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
+	}
+}
+
+func exists(path string) bool { _, err := os.Stat(path); return err == nil }
+
+// heals: how often this validator found itself wedged and restarted, kept
+// across the restarts it makes
+type heals struct {
+	Count  uint64 `json:"count"`
+	Last   int64  `json:"last"` // unix seconds; 0: never
+	Reason string `json:"reason"`
+}
+
+func loadHeals(path string) heals {
+	var h heals
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &h)
+	}
+	return h
+}
+
+func saveHeals(path string, h heals) {
+	b, _ := json.Marshal(h)
+	if os.WriteFile(path+".tmp", b, 0o600) == nil {
+		_ = os.Rename(path+".tmp", path)
+	}
+}
+
+// writeMetrics: the validator's progress and its self-heals, for
+// node_exporter and the fleet's alert mail (observe/fleet-alerts.sh)
+func writeMetrics(path string, h validator.Health, hs heals) {
+	if path == "" {
+		return
+	}
+	m := fmt.Sprintf(`# HELP dd_control_selfheal_total Times this validator found its consensus wedged and restarted itself.
+# TYPE dd_control_selfheal_total counter
+dd_control_selfheal_total %d
+# HELP dd_control_selfheal_last_seconds When it last did, unix seconds; 0 never.
+# TYPE dd_control_selfheal_last_seconds gauge
+dd_control_selfheal_last_seconds %d
+# HELP dd_control_height The agreed height this validator holds.
+# TYPE dd_control_height gauge
+dd_control_height %d
+# HELP dd_control_dropped_total Frames for consensus dropped because it was not taking them, since start.
+# TYPE dd_control_dropped_total counter
+dd_control_dropped_total %d
+`, hs.Count, hs.Last, h.Height, h.Dropped)
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, []byte(m), 0o644) == nil {
+		_ = os.Rename(tmp, path)
 	}
 }
 

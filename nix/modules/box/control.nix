@@ -100,11 +100,16 @@ in
           (lib.optionalString config.dd.box.joined "-join-key /var/lib/dd/box-key.spki -join-recipient-file /var/lib/dd/secrets-recipient -join-house joined -join-ticket-file /var/lib/dd/join-ticket")
           # dd-agent begins a release's rollout and gives its verdicts here
           "-rollouts /run/dd-control/rollout.sock"
+          # a validator's height and self-heals, for node_exporter and the
+          # alert mail (observe/fleet-alerts.sh)
+          "-metrics /var/lib/dd-facts/control.prom"
         ];
         StateDirectory = "dd-control";
         StateDirectoryMode = "0700";
         RuntimeDirectory = "dd-control";
         RuntimeDirectoryMode = "0755";
+        # also how a validator heals: it exits when it finds its consensus
+        # wedged, and starts afresh (control-plane.md, "When consensus wedges")
         Restart = "always";
         RestartSec = 10;
         # root for the TPM, the key files on /boot and starting placed
@@ -114,6 +119,8 @@ in
           "/var/lib/dd-control"
           # made by tmpfiles (box/placed.nix); a switch may start this first
           "-/run/dd-placed"
+          # -metrics, where node_exporter reads (observe/metrics.nix)
+          "-/var/lib/dd-facts"
         ];
         ProtectHome = true;
         PrivateTmp = true;

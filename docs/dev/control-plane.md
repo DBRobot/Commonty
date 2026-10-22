@@ -130,6 +130,63 @@ about $5.50/month.
 - **A box can't reach the relay.** It stops any writer role when its lease
   runs out and keeps serving read-only where the role allows.
 
+### When consensus wedges
+
+SmartBFT v1.0.2 can wedge a validator for good: one left a sequence behind
+never rejoins (upstream #700), and the controller and view changer can
+deadlock (#713, #724). It happened twice on 2026-10-22, and under failover
+a wedge stops every writer once its lease lapses.
+
+- **The fixes.** `servers/system/control/third_party/smartbft` is v1.0.2
+  with those three upstream commits picked on, and nothing else (go.mod's
+  `replace`). Messages, the log and the WAL are unchanged, so validators
+  on either side of a release agree. A new leader's heartbeat now names the
+  sequence it proposes next, so a follower still on v1.0.2 looks one behind
+  and syncs every few seconds until it is switched too. Drop the copy for
+  the first upstream release that has them.
+- **Nothing waits on consensus but consensus.** The relay's reader queues
+  frames for it and goroutines of their own hand them on, so a wedged
+  validator never also holds up its peers' catch-up: a peer's "send me
+  your latest" is answered from what was last decided, however consensus
+  is doing.
+  - Votes come only from validators; any other sender's are dropped. They
+    wait in a queue of their own (4096, the oldest dropped first, said in
+    the log), apart from the boxes' requests, so a flood of requests can
+    push out only requests, never a vote.
+  - A request passed on comes only from a validator. A request is checked
+    before it is queued: at most 20 a second (200 at once) from any one
+    sender but the box itself, and only one some box signed goes on.
+- **A validator heals itself.** Every 5 s it checks itself. It exits, and
+  systemd starts it afresh (`Restart=always`), when:
+  - a call into consensus, or the delivery of a decision, has not returned
+    for 30 s;
+  - its peers are at a higher height that a quorum signed, and its own has
+    not moved for 60 s;
+  - requests have waited 120 s, enough peers answer to make a quorum, and
+    no height has moved. Only a request signed by a box of the fleet, newer
+    than what was agreed of that box and not a join, counts as waiting:
+    junk or a replay from whoever reaches the relay never makes a stall.
+
+  And only when all of these hold too:
+  - it is more than 60 s since it started, and more than 10 minutes since
+    it last healed itself, whatever the reason;
+  - it is its turn: the validators take 30 s slots in the order of their
+    ids, so no two restart at once;
+  - a peer it heard from in the last 30 s is at least as far as it is, so
+    it is never the only one up to date when it goes.
+
+  While any sign stands, it asks the peers for their latest to learn their
+  heights; while decisions come, it asks nothing. A fleet that is down (no
+  peers answer) is not a wedge, and nothing restarts.
+- **It says so.** The log line starts `self-heal:` and gives the reason.
+  `/var/lib/dd-control/selfheal.json` keeps the count across restarts, and
+  `/var/lib/dd-facts/control.prom` has `dd_control_selfheal_total`,
+  `dd_control_selfheal_last_seconds`, `dd_control_height` and
+  `dd_control_dropped_total`. The fleet's alert mail names a box that
+  healed itself in the last day.
+- The witness runs the same validator, queue included. It can't restart
+  itself; a stuck witness is one voter down, and the boxes still decide.
+
 ## Trust
 
 - Box keys are the TPM-held keys already in fleet/boxes.json (unlockKey).
