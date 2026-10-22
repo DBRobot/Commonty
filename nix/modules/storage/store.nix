@@ -531,6 +531,8 @@ in
             umask 077
             [ -s ${state}/rpc-secret ] || ${pkgs.openssl}/bin/openssl rand -hex 32 > ${state}/rpc-secret
             chown dd-store:dd-store ${state}/rpc-secret
+            # its metadata, as a reinstall carries it in (scripts/install-box), root's
+            chown -R dd-store:dd-store ${state}/meta
             ${pkgs.coreutils}/bin/install -d -o dd-store -g dd-store -m 0750 ${cfg.dataDir}
           ''}"
         ];
