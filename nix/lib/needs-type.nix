@@ -277,7 +277,7 @@ t.attrsOf (
       hosts = lib.mkOption {
         type = t.listOf t.str;
         default = [ ];
-        description = "the names under the fleet's domain it answers at (photos, for photos.<domain>), each one service's: the DNS Worker points them at the box holding its lease, or for a placed service with no lease at a live box running it (its heartbeat's runs/<service>). Every other name is the gateway's (`*`, at the box holding headscale's lease). A service answering under another's name depends on it locally, so the plan puts them together";
+        description = "the names under the fleet's domain it answers at (photos, for photos.<domain>), each one service's: the DNS Worker points them at the box holding its lease, or for a placed service with no lease at a box the agreed plan gives it (the witness's plan, never a box's own word). Every other name is the gateway's (`*`, at the box holding headscale's lease). A service answering under another's name depends on it locally, so the plan puts them together";
       };
       buckets = lib.mkOption {
         type = t.attrsOf (

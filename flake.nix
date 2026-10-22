@@ -1131,6 +1131,13 @@
             cp ${pkgs.go}/share/go/lib/wasm/wasm_exec.js $out/wasm_exec.js
             cp ${control.witness}/witness.wasm $out/witness.wasm
             echo "export default $(cat ${control.configFile});" > $out/config.js
+            # the release's placement inputs: the witness plans on the agreed
+            # state with them, for the DNS Worker (cmd/witness controlPlaced)
+            echo "export default $(cat ${
+              pkgs.writeText "placement-inputs.json" (
+                builtins.toJSON (import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; }).inputs
+              )
+            });" > $out/placement.js
           '';
           dd-control = control.dd-control;
           control-config = control.configFile;
@@ -1241,6 +1248,9 @@
                           ) (nixpkgs.lib.filterAttrs (_: n: n.lease || n.placed) fp.needs)
                         )
                       );
+                      # the services of those under a lease: their names go to
+                      # its holder alone, never to the plan's choice
+                      leased = builtins.attrNames (nixpkgs.lib.filterAttrs (_: n: n.lease) fp.needs);
                       # every box's address on the fleet's network: an A at one
                       # of these is a record of ours
                       fleet = map (n: self.nixosConfigurations.${n}.config.dd.box.net) (builtins.attrNames boxList);

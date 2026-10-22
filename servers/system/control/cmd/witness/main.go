@@ -14,7 +14,9 @@ import (
 	"fmt"
 	"syscall/js"
 
+	"commonty/control/place"
 	"commonty/control/state"
+	"commonty/control/state/computers"
 	"commonty/control/validator"
 )
 
@@ -105,9 +107,59 @@ func main() {
 			return js.ValueOf([]any{code, string(b)})
 		}))
 	}
+	// the agreed placement: the release's placement inputs
+	// (controlInit.placement) planned on the agreed state, as every box
+	// plans it (dd-control -placement). For the DNS Worker, which points a
+	// placed service's names at the boxes this plan gives it, and never at
+	// a box on its own word: controlPlaced() -> {service: [box...]}
+	if p := init.Get("placement"); p.Type() == js.TypeString && p.String() != "" {
+		in := place.Inputs{}
+		if err := json.Unmarshal([]byte(p.String()), &in); err != nil {
+			panic(fmt.Sprintf("the placement inputs: %v", err))
+		}
+		var ids *ident.Server
+		if cfg.Identity != nil {
+			ids = ident.NewServer(cfg.Identity, cfg.BoxVoters())
+		}
+		var rc *computers.Server
+		if cfg.Identity != nil && cfg.Computers != nil {
+			rc = computers.NewServer(cfg.Identity, cfg.Computers, cfg.BoxVoters())
+		}
+		js.Global().Set("controlPlaced", js.FuncOf(func(js.Value, []js.Value) any {
+			s := v.State()
+			b, _ := json.Marshal(placed(in, s, cfg.Rules.GoneAfter, ids, rc))
+			return string(b)
+		}))
+	}
 	if err := v.Start(); err != nil {
 		panic(err)
 	}
 	js.Global().Call("controlReady", int(id))
 	select {}
+}
+
+// placed: of the plan at s, each placed service and the boxes it is given,
+// sorted by box
+func placed(in place.Inputs, s *state.State, goneAfter int64, ids *ident.Server, rc *computers.Server) map[string][]string {
+	item := func(i int) ident.Item {
+		d := s.Directory[i]
+		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+	}
+	if rc != nil {
+		in.Computers = rc.Computers(len(s.Directory), item, s.Height, s.Time)
+	}
+	members := map[string]bool{}
+	if ids != nil {
+		for _, m := range ids.View(len(s.Directory), item, s.Height, s.Time, s.IdentBoxes()).Members {
+			if m.Status != "member" {
+				continue
+			}
+			for _, b := range m.Enlisted {
+				if b.Qualifies != "" {
+					members[b.Box] = true
+				}
+			}
+		}
+	}
+	return place.Placed(in, place.Decide(in, s, goneAfter, members))
 }

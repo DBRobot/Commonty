@@ -33,36 +33,9 @@ def state(i):
 # what the fleet wants: one "web", which node2 and node3 carry (their
 # carries file) and node1 does not; systemctl a stand-in that writes down
 # what it was asked
-json.dump(
-    {
-        "boxes": {
-            f"node{i}": {
-                "site": f"h{i}",
-                "region": "r",
-                # node1 is no host of computers; node3 is cara's
-                "can": {"web": 1, "db": 1} | ({"computers": 1} if i > 1 else {}),
-                "owner": "cara" if i == 3 else "",
-                "memoryGiB": 32,
-                "threads": 8,
-                "poolGiB": 500,
-            }
-            for i in (1, 2, 3)
-        },
-        "services": {
-            "web": {"enabled": True, "instances": 1, "class": "low", "placed": True},
-            "db": {
-                "enabled": True,
-                "instances": 1,
-                "class": "low",
-                "placed": True,
-                "lease": True,
-            },
-        },
-        "roles": {},
-        "damping": {"base": 0.3, "perGiB": 0.01},
-    },
-    open(f"{T}/placement.json", "w"),
-)
+# (control/placement.json, $PLACEMENT; the relay's witness plans with it too)
+with open(os.environ["PLACEMENT"]) as f:
+    open(f"{T}/placement.json", "w").write(f.read())
 for i in (2, 3):
     json.dump(
         {"web": ["web.service"], "db": ["db.service"]},
@@ -564,6 +537,22 @@ until("web placed", lambda: placed(2) != placed(3), 60)
 ok(placed(2) != placed(3) and not placed(1), "web runs on one box that carries it")
 first = 2 if placed(2) else 3
 other = 5 - first
+
+
+# the relay's agreed placement, which the DNS Worker points names by: the
+# witness's own plan on the agreed state, the box the boxes' plans agree on
+def relay_placed():
+    try:
+        return json.load(urllib.request.urlopen("http://127.0.0.1:8789/leases", timeout=3)).get("placed", {})
+    except Exception:
+        return {}
+
+
+until("the relay's placement has web", lambda: relay_placed().get("web") == [f"node{first}"], 30)
+ok(
+    relay_placed().get("web") == [f"node{first}"] and "db" in relay_placed(),
+    "the relay's agreed placement is the plan's",
+)
 ok(
     "start --no-block web.service\n" in open(f"{T}/systemctl{first}.log").readlines(),
     "its box started its units",

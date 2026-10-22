@@ -60,6 +60,10 @@ let
     ) (lib.unique (map (x: x.h) named))
     ++ map (x: "${x.s}: its hosts follow nothing, as it is neither placed nor under a lease") (
       lib.filter (x: (policyOn) && !(needs.${x.s}.placed || needs.${x.s}.lease)) named
+    )
+    # one box to point at, and what answers under it goes there too
+    ++ map (s: "${s}: a name follows one box, so it runs once (instances = 1)") (
+      lib.unique (map (x: x.s) (lib.filter (x: needs.${x.s}.instances != 1) named))
     );
   policyOn = (lib.importJSON ../../fleet/policy.json).failover or false;
   problems =

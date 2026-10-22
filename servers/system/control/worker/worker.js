@@ -9,14 +9,16 @@
 // both from the signed config. A hello older than a minute is refused, so
 // nobody can sit on another node's address.
 //
-// Its agreed state's leases, and which live boxes run each placed service,
-// go to the DNS Worker, which binds this object (/leases), and nowhere else.
+// Its agreed state's leases, and the boxes the agreed plan gives each placed
+// service, go to the DNS Worker, which binds this object (/leases), and
+// nowhere else.
 //
 // Bindings: RELAY (this class), WITNESS_KEY (secret, the witness's ed25519
 // seed; unset: no witness here).
 import './wasm_exec.js';
 import witnessWasm from './witness.wasm';
 import CONFIG from './config.js';
+import PLACEMENT from './placement.js';
 
 const TO_VALIDATORS = 2n ** 50n;
 const TO_ALL = 2n ** 50n + 1n;
@@ -41,23 +43,6 @@ function rawSig(sig) {
   const out = new Uint8Array(64);
   out.set(part());
   out.set(part(), 32);
-  return out;
-}
-
-// which live boxes run each placed service, by their own heartbeats
-// (runs/<service>, a flag up): where a name of a service with no lease
-// points (servers/system/dns). A box unheard for goneAfterMs runs nothing.
-function runsOf(s) {
-  const gone = (CONFIG.rules && CONFIG.rules.goneAfterMs) || 90000;
-  const out = {};
-  for (const [box, b] of Object.entries(s.boxes || {})) {
-    if (!b || typeof b.lastSeen !== 'number' || s.time - b.lastSeen > gone) continue;
-    for (const [k, v] of Object.entries(b.facts || {})) {
-      if (!k.startsWith('runs/') || !(v > 0)) continue;
-      (out[k.slice(5)] ??= []).push(box);
-    }
-  }
-  for (const v of Object.values(out)) v.sort();
   return out;
 }
 
@@ -130,7 +115,7 @@ export class Relay {
     this.booting ??= (async () => {
       if (!this.env.WITNESS_KEY) return;
       const saved = (await this.ctx.storage.get('saved')) || '';
-      globalThis.controlInit = { config: JSON.stringify(CONFIG), key: this.env.WITNESS_KEY, saved };
+      globalThis.controlInit = { config: JSON.stringify(CONFIG), key: this.env.WITNESS_KEY, saved, placement: JSON.stringify(PLACEMENT) };
       globalThis.controlSend = (to, kind, arr) => this.route(BigInt(to), this.witness, kind, arr);
       globalThis.controlPersist = (s) => { this.ctx.storage.put('saved', s); };
       const ready = new Promise((r) => { globalThis.controlReady = r; });
@@ -183,7 +168,12 @@ export class Relay {
         for (const [name, j] of Object.entries(s.joined || {})) {
           if (typeof j.ipv4 === 'number') joined[name] = { ipv4: j.ipv4 };
         }
-        return Response.json({ time: s.time, leases: s.leases || {}, joined, runs: runsOf(s) });
+        // and where the agreed plan puts each placed service: the
+        // release's placement inputs planned by the witness on the agreed
+        // state, as every box plans it. Never a box's own word
+        let placed = {};
+        try { if (typeof globalThis.controlPlaced === 'function') placed = JSON.parse(globalThis.controlPlaced()); } catch { placed = {}; }
+        return Response.json({ time: s.time, leases: s.leases || {}, joined, placed });
       } catch {
         return new Response('no state yet', { status: 503 });
       }

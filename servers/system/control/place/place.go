@@ -845,3 +845,21 @@ func contains(xs []string, x string) bool {
 	}
 	return false
 }
+
+// Placed: of a plan, each placed service (needs placed or lease) and the
+// boxes it is given, sorted. What the DNS Worker points a service's names
+// at (servers/system/dns): the agreed placement, never a box's own word.
+func Placed(in Inputs, p Plan) map[string][]string {
+	out := map[string][]string{}
+	for box, ds := range p.Boxes {
+		for _, d := range ds {
+			if sv, ok := in.Services[d.Service]; ok && sv.Placed {
+				out[d.Service] = append(out[d.Service], box)
+			}
+		}
+	}
+	for _, bs := range out {
+		sort.Strings(bs)
+	}
+	return out
+}

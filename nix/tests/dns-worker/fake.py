@@ -81,6 +81,8 @@ class H(BaseHTTPRequestHandler):
                     "time": t,
                     "leases": control["leases"],
                     "joined": control.get("joined", {}),
+                    "placed": control.get("placed", {}),
+                    # a box's own word, which the Worker must not follow
                     "runs": control.get("runs", {}),
                 },
             )

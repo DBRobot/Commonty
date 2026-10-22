@@ -24,6 +24,21 @@ pkgs.runCommand "control-e2e"
     cp -r ${self.packages.${sys}.dd-control.goModules} src/vendor
     (cd src && GOFLAGS=-mod=vendor GOCACHE=$TMPDIR/go-cache CGO_ENABLED=0 go test ./state/ ./validator/ ./cmd/dd-control/)
     mkdir w && cp ${self.packages.${sys}.control-worker}/{worker.js,wasm_exec.js,witness.wasm} w/
+    # the test fleet's placement inputs, for the witness as for the boxes
+    echo "export default $(cat ${./control/placement.json});" > w/placement.js
+    # and /leases, which only the DNS Worker reaches (by its binding), here
+    # through a front of the test's own
+    cat > w/front.js <<'JS'
+    import relay from './worker.js';
+    export { Relay } from './worker.js';
+    export default {
+      async fetch(req, env) {
+        if (new URL(req.url).pathname === '/leases') return env.RELAY.get(env.RELAY.idFromName('relay')).fetch(req);
+        return relay.fetch(req, env);
+      },
+    };
+    JS
+    sed -i 's/^    //' w/front.js
     cp ${self.packages.${sys}.dd-control}/bin/dd-control . && chmod u+w w/*
     # each box's gate, for the directory over the agreed log
     cp ${self.packages.${sys}.verify}/bin/verify .
@@ -60,7 +75,7 @@ pkgs.runCommand "control-e2e"
     PY
     cat > w/wrangler.toml <<'TOML'
     name = "control-e2e"
-    main = "worker.js"
+    main = "front.js"
     compatibility_date = "2026-05-01"
     no_bundle = true
     rules = [
@@ -80,7 +95,7 @@ pkgs.runCommand "control-e2e"
     for i in $(seq 1 120); do curl -sf -o /dev/null http://127.0.0.1:8789/health && break; sleep 0.5; done
     curl -sf -o /dev/null http://127.0.0.1:8789/health || { cat wrangler.log; exit 1; }
     status=0
-    python3 ${./control/run.py} || status=$?
+    PLACEMENT=${./control/placement.json} python3 ${./control/run.py} || status=$?
     kill $worker 2>/dev/null || true
     if [ $status -ne 0 ]; then
       echo "--- relay"; tail -30 wrangler.log; for i in 1 2 3; do echo "--- node$i"; tail -15 n$i.log; echo "--- gate$i"; tail -15 g$i.log 2>/dev/null; done
