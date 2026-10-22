@@ -57,8 +57,7 @@ let
       kept = lib.filter (r: lib.all (w: builtins.elem w rs) (roles.${r}."with" or [ ])) rs;
     in
     if kept == rs then rs else withCompanions kept;
-  fromCapability =
-    box: withCompanions (lib.filter (buildable box) (builtins.attrNames roles));
+  fromCapability = box: withCompanions (lib.filter (buildable box) (builtins.attrNames roles));
   # (in fleet/boxes.json's order where it still lists them: the order the
   # modules are imported in, which lists like home's tiles keep)
   carried = lib.mapAttrs (
@@ -76,7 +75,9 @@ let
   # is able to run (capability); the plan gives it only these
   carries = lib.mapAttrs (
     box: _:
-    lib.filter (s: needs ? ${s} && (needs.${s}.placed || needs.${s}.lease) && capability.boxes.${box}.can ? ${s}) built.${box}
+    lib.filter (
+      s: needs ? ${s} && (needs.${s}.placed || needs.${s}.lease) && capability.boxes.${box}.can ? ${s}
+    ) built.${box}
   ) list;
   # the services each box is built with, by what it carries: what the rest
   # of the release picks a box by (the storage pool, the mail boxes, the
