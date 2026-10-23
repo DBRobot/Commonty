@@ -243,6 +243,9 @@ class H(BaseHTTPRequestHandler):
                 return self.send(PLAYLIST, 200, "application/vnd.apple.mpegurl")
             # a piece no browser can play: the test is of when it is asked for
             return self.send(b"\x47" + bytes(187), 200, "video/mp2t")
+        if p == "/_dd/app/open":
+            # the app opens the address in the device's browser: nothing to show
+            return self.send(b"", 204, "text/plain")
         if p == "/test/sessions":
             return self.send(state["sessions"])
         if p.startswith("/_dd/static/"):
