@@ -44,6 +44,8 @@ func rolloutFleet(t *testing.T) *fleet {
 	f := newFleet(t)
 	f.c.Identity = &ident.Config{Release: relPub()}
 	f.c.Rules.Rollout = &RolloutRules{SoakMs: []int64{30_000, 0}, TookMs: 60_000, GraceMs: 60_000}
+	// rollout requests are version 2's (machine.go)
+	f.s.Machine = 2
 	return f
 }
 

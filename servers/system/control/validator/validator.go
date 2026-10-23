@@ -50,6 +50,9 @@ type Options struct {
 	// called after every decision with the new state, for a box to keep
 	Persist func(Saved)
 	Now     func() time.Time
+	// tests only: run as this state machine version instead of
+	// state.Machine; 1 sends no stand, as release 359
+	Machine int
 }
 
 // Saved is what a validator keeps across restarts, and what it hands a
@@ -67,6 +70,9 @@ type header struct {
 	Time   int64  `json:"t"` // the agreed clock, ms
 	Before string `json:"b"` // hash of the state this batch applies to
 	Data   string `json:"d"` // hash of the payload
+	// a version and config every validator stood for, agreed from this
+	// block on (stand.go); never in a block a validator of 359 votes on
+	Activate *activation `json:"a,omitempty"`
 }
 
 // an answer to "send me your latest", and who gave it
@@ -100,6 +106,12 @@ type Validator struct {
 	done    chan struct{}
 	stop    sync.Once
 	running atomic.Bool
+	// each validator's newest stand (stand.go), under its own lock: the
+	// relay's reader takes it, and never waits on a decision being applied
+	standsMu sync.Mutex
+	stands   map[uint64]Stand
+	// this validator's newest stand, what it proposes with
+	mine Stand
 	pulse
 	// what every decision told the outside, for whoever runs this
 	Decided func(*state.State)
@@ -124,7 +136,7 @@ func New(o Options) (*Validator, error) {
 		o.Now = time.Now
 	}
 	v := &Validator{o: o, pubs: map[uint64]ed25519.PublicKey{}, st: state.New(), syncs: make(chan answer, 64),
-		peers: map[uint64]chan frame{}, voted: make(chan struct{}, 1), clients: make(chan frame, inbox), asks: make(chan uint64, 64), done: make(chan struct{})}
+		peers: map[uint64]chan frame{}, voted: make(chan struct{}, 1), clients: make(chan frame, inbox), asks: make(chan uint64, 64), done: make(chan struct{}), stands: map[uint64]Stand{}}
 	v.pulse.init(o.Now())
 	var nodes []uint64
 	for _, val := range o.Config.Validators {
@@ -193,6 +205,7 @@ func (v *Validator) Start() error {
 	v.running.Store(true)
 	go v.intakeVotes()
 	go v.intake(v.clients)
+	go v.say()
 	return nil
 }
 
@@ -250,6 +263,11 @@ func (v *Validator) Receive(from uint64, kind byte, payload []byte) {
 		select {
 		case v.asks <- from:
 		default:
+		}
+	case wire.Stand:
+		var s Stand
+		if json.Unmarshal(payload, &s) == nil && s.ID == from {
+			v.heardStand(s)
 		}
 	case wire.SyncState:
 		var s Saved
@@ -434,6 +452,14 @@ func clone(st *state.State) *state.State {
 	return n
 }
 
+// activated: the version a decision makes agreed, 0 for none
+func activated(h header) int {
+	if h.Activate == nil {
+		return 0
+	}
+	return h.Activate.Machine
+}
+
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 func (v *Validator) quorum() int {
@@ -471,6 +497,9 @@ func (v *Validator) adopt(s Saved) error {
 	if hashOf(before) != h.Before {
 		return errors.New("the state does not match the decision")
 	}
+	if m := max(before.Version(), activated(h)); m > v.machine() {
+		return fmt.Errorf("agreed on state machine %d; this code runs %d", m, v.machine())
+	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if h.Height <= v.st.Height {
@@ -496,7 +525,21 @@ func (v *Validator) apply(before *state.State, p bft.Proposal, sigs []bft.Signat
 	}
 	snap, _ := json.Marshal(before)
 	after := clone(before)
-	after.Block(v.o.Config, state.P256, reqs, h.Time)
+	if a := h.Activate; a != nil {
+		prev := before.In(v.o.Config)
+		after.Machine, after.Config, after.ConfigTime = a.Machine, a.Config, h.Time
+		// across the change, a request counts only if both configs know its
+		// box by the same key
+		next := after.In(v.o.Config)
+		kept := reqs[:0]
+		for _, q := range reqs {
+			if before.SameKey(prev, next, q) {
+				kept = append(kept, q)
+			}
+		}
+		reqs = kept
+	}
+	after.Block(after.In(v.o.Config), state.P256, reqs, h.Time)
 	v.st = after
 	v.saved = Saved{Before: snap, Proposal: p, Sigs: sigs}
 }
@@ -530,13 +573,14 @@ func (v *Validator) RequestID(req []byte) bft.RequestInfo {
 func (v *Validator) AssembleProposal(md []byte, reqs [][]byte) bft.Proposal {
 	v.mu.Lock()
 	st := v.st
-	v.mu.Unlock()
-	data, _ := json.Marshal(reqs)
 	t := v.o.Now().UnixMilli()
 	if t <= st.Time {
 		t = st.Time + 1
 	}
-	h, _ := json.Marshal(header{Height: st.Height + 1, Time: t, Before: hashOf(st), Data: digest(data)})
+	a := v.activate(st, t)
+	v.mu.Unlock()
+	data, _ := json.Marshal(reqs)
+	h, _ := json.Marshal(header{Height: st.Height + 1, Time: t, Before: hashOf(st), Data: digest(data), Activate: a})
 	return bft.Proposal{Header: h, Payload: data, Metadata: md}
 }
 
@@ -560,6 +604,11 @@ func (v *Validator) VerifyProposal(p bft.Proposal) ([]bft.RequestInfo, error) {
 	}
 	if d := v.o.Now().UnixMilli() - h.Time; d > ClockTolerance || d < -ClockTolerance {
 		return nil, fmt.Errorf("the proposer's clock is %d ms off", d)
+	}
+	if h.Activate != nil {
+		if err := h.Activate.check(v, st, h.Time); err != nil {
+			return nil, fmt.Errorf("activation: %w", err)
+		}
 	}
 	return v.RequestsFromProposal(p), nil
 }
@@ -591,7 +640,7 @@ func (v *Validator) VerifyRequest(raw []byte) (bft.RequestInfo, error) {
 		}
 	} else {
 		v.mu.Lock()
-		key, ok = v.st.BoxKey(v.o.Config, q.Box)
+		key, ok = v.st.BoxKey(v.st.In(v.o.Config), q.Box)
 		v.mu.Unlock()
 	}
 	if !ok || !state.P256(key, q.Bytes(), q.Sig) {

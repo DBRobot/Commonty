@@ -187,6 +187,111 @@ a wedge stops every writer once its lease lapses.
 - The witness runs the same validator, queue included. It can't restart
   itself; a stuck witness is one voter down, and the boxes still decide.
 
+## Changing the state machine
+
+A release reaches the validators one at a time: a box switches when its
+agent gets to it, the witness when the relay is deployed. Each proposal
+names the hash of the state it builds on, so validators that apply a block
+differently, or write the state out differently, stop agreeing. That
+happened on 2026-10-22: release 359's validators and main's computed
+different states from the same blocks. Main's config had lease rules for
+the placed writers (`svc/postgresql` and the rest) and 359's had none.
+Each side refused the other's proposals, consensus stopped, and under
+failover the writers stopped once their leases lapsed.
+
+So the state machine has a version (`state.Machine`,
+[state/machine.go](../../servers/system/control/state/machine.go)), and so
+does the config it applies under:
+
+- **Each validator says what it runs.** Every 5 s it sends the others a
+  stand, signed with its validator key: its version, the digest of its
+  config, when it first stood for that config, and its clock
+  ([validator/stand.go](../../servers/system/control/validator/stand.go),
+  frame kind 6, which a validator of 359 drops). Each box also reports its
+  version in its heartbeat (the fact `machine`).
+- **The validators decide; a new version and config take effect in one
+  agreed block.** A proposer that holds a stand from every validator, each
+  under 60 s old and all with its own config, puts the stands and the
+  config in the proposal's header. Each validator checks them before it
+  votes. From that block on, the agreed state holds `machine`, `config`
+  and `configTime` (the block's agreed time), and every block applies
+  under that config.
+- **No stale stand rolls a config back.** A validator votes for an
+  activation only if it carries the config its own release ships, its own
+  stand is no older than the latest it has kept, and every stand is newer
+  than the block that agreed the config now in force.
+- **A box's word counts only for a while.** A live box whose heartbeat
+  reports an older version holds activation back for at most 30 minutes
+  after the last validator stood for the config. After that it counts for
+  nothing. A box the new config drops, or knows by another key, never
+  counts. So a box that never reports, or reports low, can't veto a
+  change.
+- **Across the change, keys must hold under both configs.** In the block
+  that activates, a request applies only if the configs before and after
+  know its box by the same key, and joins wait for the next block. So a
+  key one of the two configs drops never acts across the change.
+- **Until then, nothing changes.** With no config agreed, a block applies
+  under the config the release before ran, which the release ships as
+  `before` ([fleet/control-before.json](../../fleet/control-before.json),
+  release 359's config, exactly). The state's new fields stay empty and
+  are left out of its JSON, so the hash matches the old code's. A validator
+  of 359 accepts what a new one proposes, and the reverse, so either side
+  can decide.
+- **After that, a config change waits for every validator.** A later
+  release that changes the config, a new lease rule or a new member, takes
+  effect only once every validator stands for it. Until then each one
+  applies the agreed config, whatever file its release ships.
+
+What that costs:
+
+- A validator that is off holds activation back. With the witness off,
+  nothing new is agreed.
+- A validator's "first stood" time is kept in memory. A validator that
+  restarts starts the 30 minutes again, which delays a laggard's cutoff
+  and nothing else.
+- A reading box still on the older version when the grace runs out stops
+  following the agreed state (below).
+- A placed writer whose lease rule is new waits for the activation. On the
+  move from 359, a box that has switched holds no `svc/*` lease until every
+  validator and every live box has switched too. That is about 30 s after
+  the last one. Until then the writer runs nowhere, unless a 359 box runs
+  it by its roles.
+- Activation is one way. After it, a validator or a reading box moved back
+  to 359 can't follow the agreed state; it needs this release again. A
+  reading box that stays on the older version stops at the last state it
+  could check, and says nothing. Its writers stop once their leases could
+  have lapsed.
+
+### Adding a change to the state machine
+
+Anything that changes what `Check`, `Apply` or `Block` decide, or what the
+state's JSON holds, follows these rules:
+
+1. **Raise `state.Machine`** and gate the new behaviour on
+   `s.Version() >= N`. Below N, `Check` and `Apply` do exactly what the
+   version before did, down to which requests are refused. A refused
+   request takes no sequence number either.
+2. **A new field in the state** is `omitempty`, and stays empty or zero
+   until version N is agreed. An empty field adds nothing to the hash. Never
+   rename a field, reorder fields or change a field's type. Sorting or
+   normalizing an old field counts as a change too.
+3. **Read the config through `s.In(cfg)`**, never the release's own
+   `cfg`, in anything a block applies: `Block` already receives it. A
+   change to the config's data alone (`fleet/*.json` feeding
+   `control-config`) is safe from version 2 on, because the config is
+   agreed. Keep `before` as it is until the fleet has agreed a config;
+   after that it is read by nothing and can go.
+4. **Test it from the release before.** `checks.control-upgrade`
+   ([nix/tests/control-upgrade.nix](../../nix/tests/control-upgrade.nix))
+   builds release 359's dd-control and witness from its commit, starts a
+   fleet on them, and switches it a box at a time in two orders. It checks
+   that every box holds the same state at each height, that `svc/db`
+   keeps its holder and epoch, that decisions keep coming, and that
+   version 2 and the new lease rule arrive only after the last switch.
+   After a change to the state machine, point `old` at the release the
+   fleet runs. The validators' own test
+   (`TestVersionsSwitchOneAtATime`) does the same in one process.
+
 ## Trust
 
 - Box keys are the TPM-held keys already in fleet/boxes.json (unlockKey).

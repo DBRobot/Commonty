@@ -916,6 +916,9 @@ func main() {
 			for k, v := range placed.facts() {
 				f[k] = v
 			}
+			// the state machine this box runs: none agreed above the lowest
+			// a live box says (state/machine.go)
+			f[state.MachineFact] = state.Machine
 			if *testFacts != "" {
 				extra := map[string]float64{}
 				if raw, err := os.ReadFile(*testFacts); err == nil && json.Unmarshal(raw, &extra) == nil {
