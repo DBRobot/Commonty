@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # A unit as it is on disk now, against the one its run started from.
-# `started UNIT SANDBOX` records it (ExecStartPre); `check ENTRY...`
+# `started UNIT SANDBOX` records it (ExecStartPost); `check ENTRY...`
 # restarts each unit whose definition differs once it holds no job
 # (dd-runner-restart). An ENTRY is UNIT|HOW|LABEL|LIMIT|SANDBOX|DRAIN:
 #   HOW: what a job is. `cgroup`, processes in the unit besides its main one

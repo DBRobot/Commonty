@@ -60,6 +60,11 @@ pkgs.runCommand "control-e2e"
     # the identity judge's part: a release key, and nobody on the list
     rel = ed25519.Ed25519PrivateKey.generate()
     cfg["identity"] = {"release": base64.b64encode(rel.public_key().public_bytes(S.Encoding.Raw, S.PublicFormat.Raw)).decode(), "members": {"members": [], "revoked": []}}
+    # and its private half, for the relay's copy of the release: dd signs
+    # with it from a key file, as on the laptop
+    fd = os.open("keys.json", os.O_WRONLY | os.O_CREAT, 0o600)
+    os.write(fd, json.dumps({"release-key": base64.b64encode(rel.private_bytes(S.Encoding.Raw, S.PrivateFormat.Raw, S.NoEncryption())).decode()}).encode())
+    os.close(fd)
     # a member's remote computers: cara, let in by the release, whose box
     # node3 is; node2 hosts anyone's, node1 none
     import hashlib
@@ -95,7 +100,7 @@ pkgs.runCommand "control-e2e"
     for i in $(seq 1 120); do curl -sf -o /dev/null http://127.0.0.1:8789/health && break; sleep 0.5; done
     curl -sf -o /dev/null http://127.0.0.1:8789/health || { cat wrangler.log; exit 1; }
     status=0
-    PLACEMENT=${./control/placement.json} python3 ${./control/run.py} || status=$?
+    DD=${self.packages.${sys}.dd}/bin/dd PLACEMENT=${./control/placement.json} python3 ${./control/run.py} || status=$?
     kill $worker 2>/dev/null || true
     if [ $status -ne 0 ]; then
       echo "--- relay"; tail -30 wrangler.log; for i in 1 2 3; do echo "--- node$i"; tail -15 n$i.log; echo "--- gate$i"; tail -15 g$i.log 2>/dev/null; done
