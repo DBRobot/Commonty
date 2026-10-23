@@ -848,6 +848,155 @@ ok(
 )
 stranger.terminate()
 
+# The relay's copy of the box release (docs/dev/releases.md, "Where a box
+# finds the release"): kept only when the release key signed it, as dd signs,
+# and only when it is newer
+RELEASE = "http://127.0.0.1:8789/release"
+keyfile = json.load(open(f"{T}/keys.json"))["release-key"]
+rkey = ed.Ed25519PrivateKey.from_private_bytes(base64.b64decode(keyfile))
+
+
+def raw(method, body=None):
+    req = urllib.request.Request(RELEASE, method=method, data=body)
+    try:
+        r = urllib.request.urlopen(req, timeout=10)
+        return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def by_dd(counter):
+    json.dump(
+        {
+            "counter": counter,
+            "rev": "0123456789abcdef",
+            "issued": 1,
+            "boxes": {"node1": {"path": "/nix/store/x-system", "nar_hash": "sha256-x"}},
+        },
+        open(f"{T}/payload.json", "w"),
+    )
+    subprocess.run(
+        [
+            os.environ["DD"],
+            "release",
+            "sign",
+            f"{T}/payload.json",
+            "--out",
+            f"{T}/rel.json",
+        ],
+        env={**os.environ, "DD_KEYRING_FILE": f"{T}/keys.json"},
+        check=True,
+        capture_output=True,
+    )
+    return open(f"{T}/rel.json", "rb").read()
+
+
+def by_hand(payload, key=rkey):
+    # release::canonical_v2: every key sorted, no whitespace
+    msg = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
+    return json.dumps(
+        {"payload": payload, "signer": pub(key), "signature": b64(key.sign(msg))},
+        indent=2,
+    ).encode()
+
+
+def canon(v):
+    return json.dumps(
+        v, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
+
+
+ok(raw("GET")[0] == 404, "the relay has no release before one is handed in")
+five = by_dd(5)
+doc = json.loads(five)
+# whoever hands in release 5 first, in whatever encoding that still
+# verifies, cannot keep dd's own file out: the relay keeps the document it
+# verified, so both are the same one
+body = json.dumps(doc["payload"], indent=4).replace('"counter": 5', '"counter": 5.0')
+ok(
+    raw(
+        "PUT",
+        (
+            '{"signer":%s,"signature":%s,"payload":%s}'
+            % (json.dumps(doc["signer"]), json.dumps(doc["signature"]), body)
+        ).encode(),
+    )[0]
+    == 400,
+    "a number written as a float is refused",
+)
+dup = five.decode().replace('"rev":', '"rev": "ff", "rev":', 1)
+ok(raw("PUT", dup.encode())[0] == 400, "a key twice is refused")
+extra = dict(doc, note="x")
+ok(
+    raw("PUT", json.dumps(extra).encode())[0] == 400,
+    "a field beside payload, signer and signature is refused",
+)
+reencoded = json.dumps(
+    {"signature": doc["signature"], "payload": doc["payload"], "signer": doc["signer"]},
+    indent=7,
+).encode()
+ok(raw("PUT", reencoded)[0] == 201, "release 5, re-encoded, is kept")
+ok(
+    raw("PUT", five)[0] == 200,
+    "and dd's own file of it is the same release, not blocked",
+)
+ok(
+    raw("GET") == (200, canon(doc)),
+    "served as the document verified: sorted, no whitespace",
+)
+ok(raw("PUT", five)[0] == 200, "the same release again is fine")
+ok(raw("PUT", by_dd(4))[0] == 409, "an older one is refused")
+other5 = by_hand({"counter": 5, "rev": "ff", "issued": 2, "boxes": {}})
+ok(raw("PUT", other5)[0] == 409, "another release under a counter kept is refused")
+six = by_hand(
+    {
+        "counter": 6,
+        "rev": "0123",
+        "issued": 3,
+        "boxes": {
+            "node2": {"path": "/nix/store/y", "nar_hash": "sha256-y", "closure": "ab"}
+        },
+        "attestations": [
+            {"attester": "node1", "statement": '{"v":1}', "signature": "s"}
+        ],
+        "later": {"z": [1, {"b": True, "a": None}], "a": "\u00e9\n"},
+    }
+)
+ok(
+    raw("PUT", six)[0] == 201,
+    "a newer one with fields this relay never heard of is kept",
+)
+tampered = json.loads(by_dd(7))
+tampered["payload"]["counter"] = 70
+ok(
+    raw("PUT", json.dumps(tampered).encode())[0] == 400,
+    "a release changed after signing is refused",
+)
+ok(
+    raw(
+        "PUT",
+        by_hand(
+            {"counter": 8, "rev": "0", "issued": 1, "boxes": {}},
+            ed.Ed25519PrivateKey.generate(),
+        ),
+    )[0]
+    == 400,
+    "a release signed by another key is refused",
+)
+ok(
+    raw(
+        "PUT",
+        by_hand({"kind": "app", "counter": 9, "rev": "0", "issued": 1, "boxes": {}}),
+    )[0]
+    == 400,
+    "a document of another kind, signed by the release key, is refused",
+)
+ok(raw("PUT", b"x" * (2 << 20))[0] == 413, "a body too big for a release is refused")
+ok(raw("POST", six)[0] == 404, "nothing else is asked of /release")
+ok(json.loads(raw("GET")[1])["payload"]["counter"] == 6, "the newest is what is served")
+
 for p in procs.values():
     p.terminate()
 if failed:

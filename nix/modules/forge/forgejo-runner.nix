@@ -38,6 +38,7 @@ let
     config.services.gitea-actions-runner.instances.${name}.settings
   );
   live = "/var/lib/gitea-runner/${name}/config.yaml";
+  instance = config.services.gitea-actions-runner.instances.${name};
 in
 {
   imports = [
@@ -145,9 +146,9 @@ in
     systemd.tmpfiles.rules = [
       "e /var/lib/gitea-runner/cargo-target - - - 14d"
     ];
-    # (the nixos module registers again by itself when the token or the
-    # labels change, so a new scope reaches the forge on the next start; a
-    # changed address is ours to notice, runner-address.sh)
+    # (runner-start.sh registers again when the token, the labels or the
+    # forge's address change, so a new scope reaches the forge on the next
+    # start)
     # no flake evaluation cache on a runner: it remembers derivation paths
     # that a later collection removed and then refuses them ("path ...drv
     # is not valid"); a job evaluates from scratch, which costs seconds
@@ -160,6 +161,9 @@ in
     dd.work.units."gitea-runner-${name}".oomPolicy = "continue";
     systemd.services."gitea-runner-${name}" = {
       path = [ pkgs.curl ];
+      # a forge that is down (it is on another box, or between boxes) is
+      # waited out: never a failed unit, and never a switch held for it
+      startLimitIntervalSec = 0;
       serviceConfig = {
         DynamicUser = lib.mkForce false;
         # A stop is a drain: the signal goes to the runner alone (systemd
@@ -170,18 +174,14 @@ in
         TimeoutStopSec = "190min";
         User = lib.mkForce "forgejo-runner";
         Group = "forgejo-runner";
-        # the wait for the forge (its certificate arrives after a switch)
-        TimeoutStartSec = "10min";
-        ExecStartPre = lib.mkBefore (
-          [
-            (pkgs.writeShellScript "runner-address" (
-              ddScript ./runner-address.sh {
-                NAME = name;
-                URL = "https://git.${base}";
-              }
-            ))
-          ]
-          ++ lib.optional (!fixed) (
+        Restart = lib.mkForce "always";
+        RestartSec = lib.mkForce 5;
+        RestartSteps = 6;
+        RestartMaxDelaySec = "5min";
+        # nothing before the runner that needs the network: the module's
+        # registration moves into runner-start.sh, after the forge answers
+        ExecStartPre = lib.mkForce (
+          lib.optional (!fixed) (
             pkgs.writeShellScript "runner-capacity" (
               ddScript ./runner-capacity.sh {
                 JOB_THREADS = cfg.jobThreads;
@@ -194,8 +194,16 @@ in
             )
           )
         );
-        ExecStart = lib.mkIf (!fixed) (
-          lib.mkForce "${lib.getExe config.services.gitea-actions-runner.package} daemon --config ${live}"
+        ExecStart = lib.mkForce (
+          pkgs.writeShellScript "runner-start" (
+            ddScript ./runner-start.sh {
+              NAME = name;
+              URL = instance.url;
+              LABELS = lib.concatStringsSep "," instance.labels;
+              RUNNER = lib.getExe config.services.gitea-actions-runner.package;
+              CONFIG = if fixed then configFile else live;
+            }
+          )
         );
       };
     };

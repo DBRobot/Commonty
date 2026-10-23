@@ -66,6 +66,8 @@ in
     };
   };
 
+  imports = [ ../box/remote-jobs.nix ];
+
   config = lib.mkIf cfg.enable {
     services.dnsmasq.enable = lib.mkForce false;
     services.pihole-ftl = {
@@ -183,9 +185,11 @@ in
     # removed if no longer declared, left alone otherwise), then fetched and
     # built, then Pi-hole told to read them. Safe to run any number of times:
     # at every start, and weekly.
+    # gravity fetches every list from the internet, and a fetch that stalls
+    # has no end: after a switch, never in one (box/remote-jobs.nix)
+    dd.remoteJobs.dd-pihole-lists = { };
     systemd.services.dd-pihole-lists = {
       description = "Load and update the ad blocking lists";
-      wantedBy = [ "multi-user.target" ];
       after = [
         "pihole-ftl.service"
         "network-online.target"

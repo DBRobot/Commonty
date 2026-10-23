@@ -144,6 +144,50 @@ own `kind` (`sign_doc`, `verify_doc`): `app.json` (kind `app`) and the
 build orders (kind `build-order`). A box release has no `kind` and a
 different shape, so neither can be passed off as the other.
 
+## Where a box finds the release
+
+The forge is one box's at a time (a leased service), so it cannot be the
+only place a box learns of a release: with it down, no box could take
+even the release that fixes it. Each box reads every source it knows and
+takes the newest file that verifies:
+
+```
+the forge     https://git.<domain>/<repo>/raw/branch/releases/current.json
+              (dd.agent.url; code.<domain> for a box that joined)
+the relay     https://control.<domain>/release (dd.agent.mirrors, set in
+              core.nix from fleet/control-worker.json): the control plane's
+              relay at Cloudflare keeps a copy
+```
+
+Neither is trusted: each file is checked against `/etc/dd/release.pub`
+on its own, as before, and everything after (counter, entry, vouchers,
+nar hash, closure digest, probe) is the same for a file from either. A
+source that is down costs a line (`source down: …`); one serving a file
+that does not verify, or an older one, costs a line (`source refused:
+…`) and is passed over for the newest that does. Nothing a source serves
+can move a box that the release key and two boxes did not agree to; the
+most one can do is hold back a release, and only from a box that cannot
+reach the other.
+
+The relay keeps a file only if it verifies under the release key (its
+config carries the public half), is a box release (no `kind`), and is
+newer than the one it keeps. It reads the file strictly (no key twice,
+every number an integer, nothing beside `payload`, `signer` and
+`signature`) and keeps the document rebuilt from what it verified, keys
+sorted and no whitespace, so two encodings of one signed release are one
+document and neither can keep the other out; another release under a
+counter it keeps is refused (`409`). So anyone may hand it one, and the
+most a stranger can do is hand in a release a little early: `dd release publish` does
+right after the push, and every agent that reads a release newer than
+the relay's hands it over with a `PUT`, so the relay has it as soon as
+any one box has read it from the forge. Publish also reads the relay's
+copy for the next counter, so a release the relay kept while the forge
+lost it (a restore from backup) is never reused.
+
+What this does not cover: publishing needs the forge (the ref, CI's
+statuses, the releases branch), so a release cannot be published while
+the forge is down. One already published reaches every box.
+
 ## The releases branch
 
 An orphan branch on the forge, never merged anywhere: the history of what
@@ -341,10 +385,14 @@ reached-before whether it reached the fleet before the switch
 
 Step by step:
 
-1. **Fetch** `current.json`. A 404 is "no release yet", not an error.
-2. **Verify** against `/etc/dd/release.pub`, over the bytes as published.
-   Refused: the unit fails with `release refused: …`. The metrics keep the
-   counter this box applied, with result `refused`.
+1. **Fetch** `current.json` from the forge and each mirror ([where a box
+   finds the release](#where-a-box-finds-the-release)), a minute at most
+   each. A 404 from every source that answered is "no release yet", not an
+   error; none answering is.
+2. **Verify** each against `/etc/dd/release.pub`, over the bytes as
+   published, and take the newest that holds; hand it to a mirror that
+   has an older one. None holds: the unit fails with `release refused: …`.
+   The metrics keep the counter this box applied, with result `refused`.
 3. **The counter.** Lower than the one in `counter`: refused, the unit
    fails. Equal or higher goes on.
 4. **Its entry.** No entry for this box's hostname: nothing to do
@@ -504,7 +552,9 @@ journalctl -u dd-build                         build orders (the app; not the bo
 What the agent's last line means:
 
 ```
-release refused: …                     not signed by the release key
+release refused: …                     no source had a file signed by the release key
+no source answered: …                  the forge and the relay both down, from here
+source down: … / source refused: …     one source passed over; the release came from another
 release N is older than the M …        a counter going backwards
 … applied N as something else          the same counter naming another system
 release N has nothing for <box>        the box is not in the release
@@ -606,6 +656,31 @@ puts in the release is what a box checks and takes. The digest, the two
 forms and the documents have unit tests in lib.rs too, including one that
 plays the old agent against a bridging release; reach has one in
 dd-agent.rs.
+
+[nix/tests/switch-remote.nix](../../nix/tests/switch-remote.nix) is the
+switch other machines cannot hold up. The forge's machine also plays the
+relay (a stand-in that keeps what it is handed, on port 8080) and an ACME
+server that takes the connection and never answers; the box has the real
+certificate module and the real host runner, its forge nowhere:
+
+```
+release 1  from the forge                  taken; handed to the relay, which had none
+           the order hangs on the ACME server, and the forge's port drops everything
+release 2  next, on the relay only         switched, not rolled back: the switch changes
+                                           the certificate's names and starts the runner;
+                                           the order still hangs, the runner waits, running
+release 3  next again, on the relay        taken without a switch
+release 4  later, forge back; relay forged taken from the forge; the relay handed 4
+           neither answering               the box stays as it is: no source answered
+```
+
+The relay's own checks are in the `control` check
+([control/run.py](../../nix/tests/control/run.py)), against the Worker
+itself under wrangler: release 5 re-encoded, handed in first, does not
+keep `dd release sign`'s own file of it out, and both are served as the one
+document verified; a float, a key twice, a field more, older, another
+release under a kept counter, a changed one, another key's, another kind,
+too big: refused.
 
 ## Changing it
 

@@ -97,10 +97,15 @@ in
       # the objstore file is readable by prometheus; run these as it too
       # rather than as a dynamic user that cannot read it
       systemd.services = lib.genAttrs [ "thanos-store" "thanos-compact" ] (_: {
+        # a bucket that does not answer (its store on another box) is waited
+        # out, never a failed unit after a switch: systemd's default 100ms
+        # between tries spends the start limit in a second
+        startLimitIntervalSec = 0;
         serviceConfig = {
           DynamicUser = lib.mkForce false;
           User = "prometheus";
           Group = "prometheus";
+          RestartSec = "30s";
         };
       });
     })

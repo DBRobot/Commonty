@@ -90,10 +90,10 @@ in
       };
       security.pki.certificateFiles = [ "${pebbleCerts}/pebble.minica.pem" ];
       # boot does not ask: the script does, once all of this is up. The
-      # certificate's base unit wants an order too; at boot that one raced
-      # wrangler's start, and the script's start joined it and its failure
+      # order's own timer (box/remote-jobs.nix) would ask a minute after
+      # boot, and race wrangler's start
+      systemd.timers."acme-order-renew-${base}-after-switch".enable = false;
       systemd.services."acme-order-renew-${base}" = {
-        wantedBy = lib.mkForce [ ];
         # lego waits a minute between names and polls every 5s (acme.nix);
         # the record is in pebble's DNS when the helper answers, so poll
         # every second and go straight on. Read after acme.nix's file
@@ -104,7 +104,6 @@ in
           '')
         ];
       };
-      systemd.services."acme-${base}".wants = lib.mkForce [ "acme-setup.service" ];
       systemd.timers."acme-renew-${base}".enable = false;
 
       services.nginx.virtualHosts = {

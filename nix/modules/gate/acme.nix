@@ -24,8 +24,19 @@ in
     };
   };
 
+  imports = [ ../box/remote-jobs.nix ];
+
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
+      {
+        # An order asks Let's Encrypt, and the DNS Worker for the
+        # challenge: never inside a switch (box/remote-jobs.nix). nixpkgs
+        # has the certificate's own unit want the order, which put it in
+        # the switch's transaction whenever the certificate's names
+        # changed; the order's timer starts it after the switch instead
+        dd.remoteJobs."acme-order-renew-${base}" = { };
+        systemd.services."acme-${base}".wants = lib.mkForce [ "acme-setup.service" ];
+      }
       (lib.mkIf (cfg.worker != "") {
         # The names this box serves and no others, each proved by a challenge
         # the DNS Worker writes: no box holds a token for the zone. lego asks
