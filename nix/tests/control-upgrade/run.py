@@ -37,8 +37,11 @@ cfg = {
     "boxes": {},
     "validators": [],
     "rules": {
-        "leaseTtlMs": 15000,
-        "goneAfterMs": 10000,
+        # longer than the 30s a witness switch may go without a decision
+        # (wrangler's restart, 13s under load): a lease expires by the
+        # clock at the first decision after, and svc/db must outlast it
+        "leaseTtlMs": 45000,
+        "goneAfterMs": 90000,
         "leases": {"svc/db": {"eligible": ["node2", "node3"]}},
     },
 }
