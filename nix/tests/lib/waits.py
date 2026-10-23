@@ -56,8 +56,12 @@ def start_fresh(machine, unit, timeout=300):
 
 
 def journal_of(machine, unit, invocation):
-    """The lines of one run of a unit, and no other run's."""
+    """The lines of one run of a unit, and no other run's. journald takes a
+    unit's output on its own time: a run that just ended can be missing its
+    last lines, so it writes out what it holds first (waits flaked so under
+    load, 2026-10-23)"""
     return machine.succeed(
+        "journalctl --sync && "
         f"journalctl --no-pager -o cat _SYSTEMD_INVOCATION_ID={shlex.quote(invocation)}"
     )
 
