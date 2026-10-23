@@ -142,7 +142,7 @@ func TestFourValidatorsAgreeAndARestartedOneCatchesUp(t *testing.T) {
 	submit := func(raw []byte) {
 		for id, v := range vals {
 			if !r.down[id] {
-				v.Receive(boxes["node1"].seq, wire.Submit, raw)
+				v.Receive(cfg.Boxes["node1"].ID, wire.Submit, raw)
 			}
 		}
 	}
