@@ -49,6 +49,7 @@
         "metrics-ui"
         "backup"
         "release"
+        "switch-remote"
         "thanos"
         "members-runner"
         "games"

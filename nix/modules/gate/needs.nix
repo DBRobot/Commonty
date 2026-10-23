@@ -98,7 +98,10 @@
     # every box has it: what it serves are the box's own names
     everyBox = true;
     what = "the box's certificate from Let's Encrypt, for the names it serves; the DNS Worker writes its challenges";
-    units = [ "dd-acme@" ]; # the helper that asks the Worker, one per challenge
+    units = [
+      "dd-acme@" # the helper that asks the Worker, one per challenge
+      "acme-order-renew-*" # the order's own timer, after a switch (box/remote-jobs.nix)
+    ];
     # any box's: it asks the DNS Worker for its own names alone
     alwaysOn = true;
     base = {

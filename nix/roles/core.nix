@@ -89,6 +89,10 @@ in
     url = "https://${
       if config.dd.box.joined then "code" else "git"
     }.${config.dd.domain}/${config.dd.repo}/raw/branch/releases/current.json";
+    # and the control plane's relay at Cloudflare, which keeps the newest
+    # release any box hands it, signature checked: what a box reads when
+    # the forge, on one box, is down (docs/dev/releases.md)
+    mirrors = lib.optional (builtins.pathExists ../../fleet/control-worker.json) "https://control.${(lib.importJSON ../../fleet/control-worker.json).domain}/release";
     publicKey = lib.fileContents ../../fleet/release.pub;
     # each box's host key, as dd-attest signs with it: two of them must
     # vouch for a closure before a box switches to it

@@ -37,8 +37,9 @@
       network = {
         outbound = [
           "git"
+          "control"
           "s3"
-        ]; # the release on the forge, closures from the cache
+        ]; # the release on the forge and the relay, closures from the cache
         inbound = "none";
       };
       depends = { };
