@@ -111,7 +111,10 @@ export class Relay {
   // the witness, if this deployment has its key
   boot() {
     this.booting ??= (async () => {
-      if (!this.env.WITNESS_KEY) return;
+      // off until it can start from what it saved without spinning the
+      // isolate (2026-10-23): node1 and node2 are a quorum without it
+      const WITNESS_OFF = true;
+      if (!this.env.WITNESS_KEY || WITNESS_OFF) return;
       const saved = (await this.ctx.storage.get('saved')) || '';
       globalThis.controlInit = { config: JSON.stringify(CONFIG), key: this.env.WITNESS_KEY, saved };
       globalThis.controlSend = (to, kind, arr) => this.route(BigInt(to), this.witness, kind, arr);
