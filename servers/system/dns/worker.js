@@ -47,6 +47,10 @@ import * as fleet from './fleet.js';
 import { controllerApi, controllerSigned } from './controller.js';
 
 const { BOXES, NAMES, RECORDS } = fleet;
+
+// the relay's object, as its Worker names it (servers/system/control/worker,
+// RELAY_NAME): a fresh one since 'relay' wedged on 2026-10-22
+const RELAY = 'relay-1023';
 // a fleet.js from before mail has no MAIL
 const MAIL = fleet.MAIL ?? null;
 
@@ -114,7 +118,7 @@ const unquote = (s) => String(s).replace(/^"(.*)"$/, '$1');
 export async function holders(env) {
   try {
     let r;
-    if (env.CONTROL) r = await env.CONTROL.get(env.CONTROL.idFromName('relay')).fetch('https://control/leases');
+    if (env.CONTROL) r = await env.CONTROL.get(env.CONTROL.idFromName(RELAY)).fetch('https://control/leases');
     else if (env.CONTROL_URL) r = await fetch(env.CONTROL_URL);
     else return null;
     if (!r.ok) return null;

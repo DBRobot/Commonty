@@ -85,12 +85,17 @@ type Validator struct {
 	syncs chan answer
 	// frames for consensus, handed on by goroutines of their own: a
 	// consensus that hangs never stops the relay's reader, nor the answers
-	// to peers catching up (two wedges on 2026-10-22). The validators'
-	// own messages and the boxes' requests wait apart, so a flood of
-	// requests never pushes out a vote
-	peers   chan frame
+	// to peers catching up (two wedges on 2026-10-22). The boxes' requests
+	// wait apart from the votes, and each validator's votes in a queue of
+	// their own, taken in turn: one sender's flood drops only its own
+	// oldest frames, never another validator's votes
+	peers   map[uint64]chan frame
+	order   []uint64
+	turn    int
+	voted   chan struct{}
 	clients chan frame
 	limit   limiter
+	boxIDs  map[uint64]bool
 	asks    chan uint64
 	done    chan struct{}
 	stop    sync.Once
@@ -106,16 +111,20 @@ type frame struct {
 	payload []byte
 }
 
-// how many frames wait for consensus before the oldest is dropped; the
-// relay drops frames too, and consensus asks again for what it misses
-const inbox = 4096
+// how many frames wait for consensus before the oldest is dropped, of the
+// boxes' requests and of each validator's votes; the relay drops frames
+// too, and consensus asks again for what it misses
+const (
+	inbox     = 4096
+	peerInbox = 1024
+)
 
 func New(o Options) (*Validator, error) {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
 	v := &Validator{o: o, pubs: map[uint64]ed25519.PublicKey{}, st: state.New(), syncs: make(chan answer, 64),
-		peers: make(chan frame, inbox), clients: make(chan frame, inbox), asks: make(chan uint64, 64), done: make(chan struct{})}
+		peers: map[uint64]chan frame{}, voted: make(chan struct{}, 1), clients: make(chan frame, inbox), asks: make(chan uint64, 64), done: make(chan struct{})}
 	v.pulse.init(o.Now())
 	var nodes []uint64
 	for _, val := range o.Config.Validators {
@@ -125,9 +134,17 @@ func New(o Options) (*Validator, error) {
 		}
 		v.pubs[val.ID] = ed25519.PublicKey(k)
 		nodes = append(nodes, val.ID)
+		if val.ID != o.ID && v.peers[val.ID] == nil {
+			v.peers[val.ID] = make(chan frame, peerInbox)
+			v.order = append(v.order, val.ID)
+		}
 	}
 	if _, ok := v.pubs[o.ID]; !ok {
 		return nil, fmt.Errorf("%d is not a validator", o.ID)
+	}
+	v.boxIDs = map[uint64]bool{}
+	for _, b := range o.Config.Boxes {
+		v.boxIDs[b.ID] = true
 	}
 	cfg := bft.DefaultConfig
 	cfg.SelfID = o.ID
@@ -174,8 +191,8 @@ func (v *Validator) Start() error {
 	}
 	v.pulse.started(v.o.Now())
 	v.running.Store(true)
-	go v.intake(v.peers, true)
-	go v.intake(v.clients, false)
+	go v.intakeVotes()
+	go v.intake(v.clients)
 	return nil
 }
 
@@ -200,8 +217,12 @@ func (v *Validator) Receive(from uint64, kind byte, payload []byte) {
 	switch kind {
 	case wire.Consensus:
 		// votes only from the validators
-		if _, ok := v.pubs[from]; ok && from != v.o.ID {
-			v.queue(v.peers, frame{from, kind, payload}, true)
+		if q := v.peers[from]; q != nil {
+			v.queue(q, frame{from, kind, payload}, true)
+			select {
+			case v.voted <- struct{}{}:
+			default:
+			}
 		}
 	case wire.Forward, wire.Submit:
 		// a request passed on comes only from a validator; any sender but
@@ -210,7 +231,7 @@ func (v *Validator) Receive(from uint64, kind byte, payload []byte) {
 		if _, ok := v.pubs[from]; kind == wire.Forward && (!ok || from == v.o.ID) {
 			return
 		}
-		if from != v.o.ID && !v.limit.allow(from, v.o.Now()) {
+		if from != v.o.ID && !v.limit.allow(from, v.sender(from), v.o.Now()) {
 			return
 		}
 		signed, fresh := v.check(payload)
@@ -240,6 +261,29 @@ func (v *Validator) Receive(from uint64, kind byte, payload []byte) {
 			}
 		}
 	}
+}
+
+// sender: who from is - a validator, a box of the release or one that
+// joined, a box joining on its own key (an address in the joined range), or
+// nobody the fleet knows
+func (v *Validator) sender(from uint64) sender {
+	if _, ok := v.pubs[from]; ok {
+		return aValidator
+	}
+	if v.boxIDs[from] {
+		return aBox
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for _, j := range v.st.Joined {
+		if j.ID == from {
+			return aBox
+		}
+	}
+	if from >= state.JoinedIDBase && from < 2*state.JoinedIDBase {
+		return aStranger
+	}
+	return unknown
 }
 
 // check: whether a request is signed as VerifyRequest wants (a join by
@@ -280,33 +324,70 @@ func (v *Validator) queue(q chan frame, f frame, peer bool) {
 	}
 }
 
-// intake hands one queue's frames to consensus, one at a time. How long
-// a vote in hand has taken is what the watchdog reads; a request may wait
-// on a full pool, which a box can cause, and is not timed
-func (v *Validator) intake(q chan frame, timed bool) {
+// intakeVotes hands the validators' votes to consensus, one at a time and
+// one validator after another. How long a vote in hand has taken is what
+// the watchdog reads
+func (v *Validator) intakeVotes() {
+	for {
+		f, ok := v.nextVote()
+		if !ok {
+			select {
+			case <-v.done:
+				return
+			case <-v.voted:
+			}
+			continue
+		}
+		v.pulse.enter(&v.pulse.calling, v.o.Now())
+		v.hand(f)
+		v.pulse.leave(&v.pulse.calling)
+		select {
+		case <-v.done:
+			return
+		default:
+		}
+	}
+}
+
+// nextVote: the oldest vote of the next validator in turn that has one, so
+// a validator that sends without end gets its turn and no more
+func (v *Validator) nextVote() (frame, bool) {
+	for i := range v.order {
+		n := (v.turn + i) % len(v.order)
+		select {
+		case f := <-v.peers[v.order[n]]:
+			v.turn = n + 1
+			return f, true
+		default:
+		}
+	}
+	return frame{}, false
+}
+
+// intake hands the boxes' requests to consensus, one at a time. A request
+// may wait on a full pool, which a box can cause, and is not timed
+func (v *Validator) intake(q chan frame) {
 	for {
 		select {
 		case <-v.done:
 			return
 		case f := <-q:
-			if timed {
-				v.pulse.enter(&v.pulse.calling, v.o.Now())
-			}
-			switch f.kind {
-			case wire.Consensus:
-				m := &smartbftprotos.Message{}
-				if proto.Unmarshal(f.payload, m) == nil {
-					v.c.HandleMessage(f.from, m)
-				}
-			case wire.Forward:
-				v.c.HandleRequest(f.from, f.payload)
-			case wire.Submit:
-				_ = v.c.SubmitRequest(f.payload)
-			}
-			if timed {
-				v.pulse.leave(&v.pulse.calling)
-			}
+			v.hand(f)
 		}
+	}
+}
+
+func (v *Validator) hand(f frame) {
+	switch f.kind {
+	case wire.Consensus:
+		m := &smartbftprotos.Message{}
+		if proto.Unmarshal(f.payload, m) == nil {
+			v.c.HandleMessage(f.from, m)
+		}
+	case wire.Forward:
+		v.c.HandleRequest(f.from, f.payload)
+	case wire.Submit:
+		_ = v.c.SubmitRequest(f.payload)
 	}
 }
 
