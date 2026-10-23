@@ -1899,6 +1899,8 @@
           work-memory-sizes = import ./nix/tests/work-memory-sizes.nix args;
           # what a box finds of its network links, and the config made of it
           net-report = import ./nix/tests/net-report.nix args;
+          # the wired watchdog's fallback, choice by choice
+          wired-watch-logic = import ./nix/tests/wired-watch-logic.nix args;
           # anything deleted is gone from every box and backup within 90 days
           retention = import ./nix/tests/retention.nix args;
           # every unit our modules define is in some service's needs, and no

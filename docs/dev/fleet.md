@@ -216,12 +216,16 @@ over the cable every 30 s (`ping -I`). After 90 s without an answer it
 resets the adapter if it is USB (its `authorized` 0 then 1), and if the
 cable still does not answer while the router answers over the wifi, it
 takes `house-wired` down so the wifi carries everything (with the wifi
-down too, or a router that answers neither, the cable stays). While on wifi it listens for the router on the cable with an
-ARP probe (no address, so no route moves), and every 10 minutes brings the
-profile up to try it outright; `house-wired` comes back the moment the
-router answers over it. It never reboots, and writes `dd_wired_state`
+down too, or a router that answers neither, the cable stays). While on
+wifi it listens for the router on the cable with an ARP probe (no address,
+so no route moves), and every 10 minutes brings the profile up to try it
+outright; `house-wired` comes back the moment the router answers over it,
+and at once if the wifi stops answering too, so the box is never left with
+neither. It never reboots, and writes `dd_wired_state`
 (0 ok, 1 failing, 2 on wifi), `dd_wired_since_seconds`, `dd_wired_resets`
-and `dd_wired_last_reset_seconds` to the box's facts.
+and `dd_wired_last_reset_seconds` to the box's facts. Its every choice is
+held by `checks.wired-watch-logic` (made-up links, run by run); the
+`wired-watch` VM test has a real cable going quiet and coming back.
 
 **The owner's choices**: `box.json`. It is written by hand, and it is the
 only file in the folder that is.
