@@ -43,6 +43,7 @@ MAIL_WORKER = [
     "dns-worker",
     "sso",
     "control",
+    "control-upgrade",
 ]
 
 # Under everything: a change here can move any check, so all of them run.

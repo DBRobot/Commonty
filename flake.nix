@@ -803,6 +803,10 @@
                   leases = (ctl.rules.leases or { }) // leases;
                   inherit computerHosts;
                 };
+                # release 359's config, exactly: what every validator applies
+                # under until the fleet agrees a config (state/machine.go),
+                # so one on this release decides alike with one still on 359
+                before = builtins.fromJSON (builtins.readFile ./fleet/control-before.json);
               };
               src = pkgs.lib.fileset.toSource {
                 root = ./servers/system/control;
@@ -1980,6 +1984,9 @@
           control = import ./nix/tests/control.nix args;
           # the relay answers without a witness that cannot start
           control-relay = import ./nix/tests/control-relay.nix args;
+          # and moving from release 359's to this one's, a box at a time,
+          # while it decides
+          control-upgrade = import ./nix/tests/control-upgrade.nix args;
           # the app carried the site's signed-in pages, their scripts, the
           # stylesheet and the fonts at the site's paths (app/carried
           # lists them, scripts/sync-app-web copies them); two copies, kept
