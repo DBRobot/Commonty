@@ -827,7 +827,11 @@ async function start() {
     $('g-code').textContent = await codeOf(user, k.device.fp, pk);
     if (k.pk && k.pk !== pk) throw new Error('your app and this page disagree about your mail key');
     const frag = new URLSearchParams({ name: user, pk, fp: k.device.fp, key: k.device.key, sig: k.sig });
-    $('confirm').href = `https://mail.${domain}/inbox#${frag}`;
+    // the app's window opens no new tab: there it is a link the app opens
+    // in the device's browser (/_dd/app/open, which shell.js asks for when
+    // it is clicked, as for every link out of the window)
+    const url = `https://mail.${domain}/inbox#${frag}`;
+    $('confirm').href = inApp ? `/_dd/app/open?url=${encodeURIComponent(url)}` : url;
     while (!(await registered(user, pk, k.device.fp))) await new Promise((r) => setTimeout(r, 3000));
   }
   gate(null);

@@ -4,6 +4,7 @@
 # bar, sending out and to a member, and the actions. Screenshots of each
 # look go to $out for the pull request.
 import json, os, sys, time, urllib.request
+from urllib.parse import quote
 from playwright.sync_api import sync_playwright
 
 PORT = int(sys.argv[1])
@@ -184,6 +185,40 @@ with sync_playwright() as p:
         f"the passkey page is the Worker's own, with the key in the fragment {href[:60]}",
     )
     pg.screenshot(path=f"{OUT}/2-confirm.png")
+
+    # the app's window opens no new tab: there the button is the app's to
+    # open in the device's browser (/_dd/app/open), and the window stays put
+    win = ctx.new_page()
+    win.on("pageerror", lambda e: errs.append(str(e)))
+    WIN = f"http://commonty.localhost:{PORT}"
+    win.goto(f"{WIN}/_dd/mail")
+    win.wait_for_selector("#g-confirm:not([hidden])", timeout=15000)
+    whref = win.get_attribute("#confirm", "href") or ""
+    ok(
+        whref.startswith(
+            "/_dd/app/open?url=" + quote("https://mail.commonty.test/inbox#", safe="")
+        ),
+        f"in the app's window the passkey page is the app's to open {whref[:70]}",
+    )
+    before = len(win.context.pages)
+    win.click("#confirm")
+    ok(
+        until(
+            lambda: any(
+                m == "GET"
+                and q.startswith("/_dd/app/open?url=https://mail.commonty.test/inbox#")
+                for m, q in get("/test/log")
+            ),
+            "the window asked the app to open the passkey page",
+        ),
+        "Confirm with passkey in the app's window asks the app to open it",
+    )
+    ok(
+        win.url.endswith("/_dd/mail") and len(win.context.pages) == before,
+        f"the window stays on Mail, no new tab {win.url}",
+    )
+    win.close()
+
     post("/test/register", {})
     pg.wait_for_selector("#app:not([hidden])", timeout=15000)
     ok(True, "confirmed: the mailbox opens by itself")
