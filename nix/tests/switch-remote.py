@@ -74,7 +74,14 @@ def gone(unit):
     return f'case "$(systemctl show -P ActiveState {unit})" in inactive|failed) ;; *) false ;; esac'
 
 
+# where the journal stood as the last run began
+run = {"since": ""}
+
+
 def agent(expect_ok=True):
+    run["since"] = box.succeed(
+        "journalctl -n 1 -o export | sed -n 's/^__CURSOR=//p'"
+    ).strip()
     before = box.succeed("systemctl show -P InvocationID dd-agent.service").strip()
     box.succeed("systemctl start --no-block dd-agent.service")
     box.wait_until_succeeds(
@@ -86,16 +93,22 @@ def agent(expect_ok=True):
     assert (result == "success") == expect_ok, (result, run_log())
 
 
+# a run that ends before journald reads its output (no source answering:
+# 40 ms) leaves its lines no invocation id; the agent's name since the run
+# began finds them (CI, 2026-10-23)
 def run_log():
     return box.succeed(
-        "journalctl -o cat _SYSTEMD_INVOCATION_ID=$(systemctl show -P InvocationID dd-agent.service)"
+        f"journalctl --sync && journalctl -o cat --after-cursor='{run['since']}' "
+        "_SYSTEMD_INVOCATION_ID=$(systemctl show -P InvocationID dd-agent.service) "
+        "+ SYSLOG_IDENTIFIER=dd-agent"
     )
 
 
 def said(text):
     box.wait_until_succeeds(
-        "journalctl -o cat _SYSTEMD_INVOCATION_ID=$(systemctl show -P InvocationID dd-agent.service)"
-        f" | grep -c -F '{text}'",
+        f"journalctl --sync && journalctl -o cat --after-cursor='{run['since']}' "
+        "_SYSTEMD_INVOCATION_ID=$(systemctl show -P InvocationID dd-agent.service) "
+        f"+ SYSLOG_IDENTIFIER=dd-agent | grep -c -F '{text}'",
         timeout=30,
     )
 
