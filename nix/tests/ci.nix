@@ -1,6 +1,8 @@
 # The ci workflow against the flake, which yaml cannot read: its vm matrix
 # is the tests files_modified chose, from the flake's own list as the
-# chooser reads it (nix/tests/ci-select), and ci_ok - the one check main's
+# chooser reads it (nix/tests/ci-select), each browser and Worker job's
+# matrix is its group's choice, the installer jobs follow the installer's
+# choice, and ci_ok - the one check main's
 # rule asks for - waits on every other job, so no job can fail without
 # blocking the merge.
 {
@@ -32,6 +34,26 @@ pkgs.runCommand "ci-matches-the-flake"
       echo "the vm matrix is $matrix, not the tests files_modified chose" >&2
       exit 1
     fi
+    # each browser and Worker job the chooser names exists, and runs the
+    # checks it chose for that job
+    for g in $(python3 ${./ci-select/ciselect.py} groups | tr -d '[]",' ); do
+      want="\''${{ fromJSON(needs.files_modified.outputs.$g) }}"
+      have=$(yq ".jobs.$g.strategy.matrix.check" ${workflow})
+      if [ "$have" != "$want" ]; then
+        echo "job $g's matrix is '$have', not the checks files_modified chose for it" >&2
+        exit 1
+      fi
+      if ! yq ".jobs.$g.if" ${workflow} | grep -qF "outputs.$g != '[]'"; then
+        echo "job $g must skip when files_modified chose none of its checks" >&2
+        exit 1
+      fi
+    done
+    for j in build_installer installer_agrees; do
+      if [ "$(yq ".jobs.$j.if" ${workflow})" != "\''${{ needs.files_modified.outputs.installer == 'true' }}" ]; then
+        echo "job $j must run when files_modified chose the installer, and only then" >&2
+        exit 1
+      fi
+    done
     jobs=$(yq -o=json -I=0 '[.jobs | keys | .[] | select(. != "ci_ok")] | sort' ${workflow})
     gate=$(yq -o=json -I=0 '.jobs.ci_ok.needs | sort' ${workflow})
     if [ "$jobs" != "$gate" ]; then

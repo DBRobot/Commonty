@@ -14,8 +14,7 @@ import ciselect as cs  # noqa: E402
 def run(root):
     covers = cs.load_covers(open(os.path.join(root, cs.COVERS)).read())
     flake = open(os.path.join(root, "flake.nix")).read()
-    vms = cs.vm_tests(flake)
-    every = set(vms + cs.MAIL_WORKER)
+    every = set(cs.traced_names(flake))
     # a check covers.json has not traced yet runs on every change until it
     # is; the cases judge the traced ones, and that it ran
     untraced = every - covers["checks"]
@@ -136,12 +135,95 @@ def run(root):
         (
             "the workflow changed",
             [("M", ".forgejo/workflows/entry_point.yml")],
-            lambda r: r["all"],
+            lambda r: (
+                r["all"]
+                and r["installer"]
+                and all(r[g] == ts for g, ts in cs.GROUPS.items())
+            ),
         ),
         (
             "docs alone",
             [("M", "docs/dev/ci.md"), ("A", "docs/guide/new.md"), ("M", "README.md")],
-            lambda r: r["docs_only"] and not r["nix"],
+            lambda r: (
+                r["docs_only"]
+                and not (r["nix"] or r["rust"] or r["app"] or r["installer"])
+                and not r["vm_tests"]
+                and not any(r[g] for g in cs.GROUPS)
+            ),
+        ),
+        (
+            "a page script the app carries",
+            [("M", "app/web/_dd/static/calendar.js")],
+            lambda r: (
+                r["page_tests"] == cs.GROUPS["page_tests"]
+                and r["site_checks"] == ["site-links"]
+                and not r["worker_tests"]
+                and set(r["vm_tests"]) <= {"site-journeys"}
+                and not r["installer"]
+                and not r["all"]
+            ),
+        ),
+        (
+            "a box page's script",
+            [("M", "servers/mail/web/mail-search.js")],
+            lambda r: (
+                set(r["worker_tests"]) <= {"mail-worker", "sso"}
+                and not r["page_tests"]
+                and r["site_checks"]
+                and not r["installer"]
+                and not r["all"]
+            ),
+        ),
+        (
+            "a Worker's source",
+            [("M", "client/mail/worker/worker.js")],
+            lambda r: (
+                "mail-worker" in r["worker_tests"]
+                and "control" not in r["worker_tests"]
+                and not r["page_tests"]
+                and not r["site_checks"]
+                and not r["installer"]
+            ),
+        ),
+        (
+            "the installer's own module",
+            [("M", "nix/installer/setup.nix")],
+            lambda r: (
+                r["installer"]
+                and r["nix"]
+                and not r["all"]
+                and not any(r[g] for g in cs.GROUPS)
+                and set(r["chosen"]) <= {"installer", "join-install"}
+            ),
+        ),
+        (
+            "the installer's screen",
+            [("M", "nix/installer/web/setup.js")],
+            lambda r: r["installer"] and not r["all"],
+        ),
+        (
+            "the program the installer carries (the agent's crate)",
+            [("M", "servers/system/release/src/bin/dd-attest.rs")],
+            lambda r: r["installer"] and not r["all"],
+        ),
+        (
+            "a box module the installer does not embed",
+            [("M", "nix/modules/forge/forgejo.nix")],
+            lambda r: not r["installer"] and not r["all"],
+        ),
+        (
+            "the chooser itself",
+            [("M", "nix/tests/ci-select/ciselect.py")],
+            lambda r: (
+                r["all"]
+                and r["installer"]
+                and all(r[g] == ts for g, ts in cs.GROUPS.items())
+            ),
+        ),
+        (
+            "flake.lock bumped (the installer's nixpkgs)",
+            [("M", "flake.lock")],
+            lambda r: r["all"] and r["installer"],
         ),
         (
             "the terms (a check reads them by name)",
@@ -186,7 +268,11 @@ def run(root):
         gone = case[4] if len(case) > 4 else []
         base = lacking(case[5]) if len(case) > 5 else None
         r = choose(changes, set(new_dirs), set(gone), base)
-        seen = dict(r, chosen=[t for t in r["chosen"] if t not in untraced])
+        seen = dict(
+            r,
+            chosen=[t for t in r["chosen"] if t not in untraced],
+            vm_tests=[t for t in r["vm_tests"] if t not in untraced],
+        )
         good = bool(ok(seen)) and (r["docs_only"] or untraced <= set(r["chosen"]))
         if not good:
             bad.append(title)
@@ -221,7 +307,7 @@ def main():
             f"  trace it on a box: nix/tests/ci-select/ciselect.py trace --only {','.join(untraced)}"
         )
     for title, changes, kind, chosen, good, r in rows:
-        flags = " ".join(k for k in ("nix", "rust", "app") if r.get(k))
+        flags = " ".join(k for k in ("nix", "rust", "app", "installer") if r.get(k))
         print(
             f"{'ok  ' if good else 'FAIL'} {title}: {changes}\n     -> {kind}; jobs: {flags or 'style, lint'}"
         )

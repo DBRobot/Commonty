@@ -592,7 +592,7 @@ A VM test is listed twice: in `vmTests` in `flake.nix`, and in the
 `checks.ci` fails when the two differ. In CI, `files_modified` decides what
 runs: a change under `servers/` turns on the nix, rust and VM parts, a
 change under `docs/` only the nix part (the pages are built). The VM tests
-run as one job each, after `build_part` has built the box programs
+run as one job each, after `build_programs` has built the box programs
 ([CI](ci.md)).
 
 ## Adding a service
@@ -606,7 +606,7 @@ door, and one role.
    - a program: `Cargo.toml` and `src/`, a member in the root
      `Cargo.toml`, then `nix run nixpkgs#crate2nix -- generate`, a package
      in `flake.nix` (`perCrate "<crate>"`), and the package in the `boxes`
-     part of `build_part` in `entry_point.yml`;
+     part of `build_programs` in `entry_point.yml`;
    - an upstream program: nothing here unless it needs a patch,
      `servers/<service>/<what>.patch`, applied in its module.
 2. **Its page in the gate.** Each file in `STATIC`, under a name no other

@@ -522,8 +522,8 @@ when the door gives it.
   few remaining aarch64 steps under qemu (`boot.binfmt.emulatedSystems` on
   the runner bundle). The card's image steps (the ext4, the partitions,
   zstd) only copy files, so `cardImage` (nix/controller/image.nix) runs
-  them with x86 tools rather than nixpkgs' `sdImage` under qemu. `build_host` builds it on every runner and
-  `same_build` holds them to one path, as for a box.
+  them with x86 tools rather than nixpkgs' `sdImage` under qemu. `build_systems` builds it on every runner and
+  `systems_agree` holds them to one path, as for a box.
 - **Tests.** The door's and the writer's crate tests run with the rest.
   The `home-controller` VM test runs the same modules on x86: pairing,
   sign-in, refusal, the users file, Tang unlock. Nothing boots the real
