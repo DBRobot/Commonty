@@ -214,6 +214,11 @@ const STATIC: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "git-path.js",
+        "servers/forge/web/git-path.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "git-pulls.js",
         "servers/forge/web/git-pulls.js",
         "text/javascript; charset=utf-8",

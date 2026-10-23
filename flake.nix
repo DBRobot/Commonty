@@ -1888,6 +1888,8 @@
             ;
           plaintext-label = import ./nix/tests/plaintext-label.nix args;
           calendar-js = import ./nix/tests/calendar-js.nix args;
+          # the Git pages' early ask stays inside /repos/<owner>/<name>
+          git-path = import ./nix/tests/git-path.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           # the test chooser, on made-up changes against covers.json
           ci-select = import ./nix/tests/ci-select args;

@@ -482,7 +482,10 @@ box and its release.
 
 - The code and commits views ask for their list alongside the
   repository, taking the address's first part as the ref, and ask again
-  only if the refs say otherwise. A file's page asks for every open
+  only if the refs say otherwise or the forge's repository is not the one
+  the address named. The address's owner and name are encoded into the
+  API path (`git-path.js`, tested under node by `checks.git-path`), and
+  `.` or `..` asks nothing early. A file's page asks for every open
   folder of the tree beside it at once.
 - What a list asks for each row (a commit's or a pull request's checks,
   a branch's "ahead · behind") is asked only once the row is near the
