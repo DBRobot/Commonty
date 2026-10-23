@@ -37,6 +37,7 @@ mod session;
 mod signins;
 mod sitemap;
 mod sso;
+pub mod status;
 mod storage;
 
 use std::collections::{BTreeMap, HashMap};
@@ -115,6 +116,10 @@ struct App {
     releases: Option<releases::Notes>,
     fleet: fleet::Fleet,
     thanos: Option<String>,
+    /// which boxes may say whether each service works (status.rs)
+    service_boxes: status::Speakers,
+    /// the uptime page's answer, worked out now and then (status.rs)
+    status: status::Cache,
     /// this box's dd-control: the agreed state the fleet pages read
     control: Option<String>,
     /// the network reaper's brake on a state that looks wrong (network.rs)
@@ -232,6 +237,9 @@ pub struct Config {
     /// Thanos on this box, which holds every box's facts (fleet.rs). None:
     /// this box does not gather them, and every box shows as unknown.
     pub thanos: Option<String>,
+    /// service -> the boxes the release builds with it: only their word on
+    /// it counts (status.rs)
+    pub service_boxes: status::Speakers,
     /// Pi-hole on this box (adblock.rs). None: no ad blocking here.
     pub adblock: Option<adblock::Adblock>,
     /// how to reach Forgejo's database to listen for its changes
@@ -2612,6 +2620,25 @@ async fn fleet_json(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
     }
 }
 
+/// GET /_dd/status.json: whether each service works, now and each of the
+/// last 90 days. Anyone may ask: it names services, never a box, and says
+/// nothing of releases.
+async fn status_json(State(app): State<Arc<App>>) -> Response {
+    match app
+        .status
+        .status(app.thanos.as_deref(), &app.service_boxes)
+        .await
+    {
+        Some(s) => ([("cache-control", "public, max-age=30")], Json(s)).into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [("cache-control", "no-store")],
+            Json(serde_json::json!({ "services": [] })),
+        )
+            .into_response(),
+    }
+}
+
 /// POST /_dd/csp: what a page's content policy would have blocked, as the
 /// browser reports it. Logged, one line each, for whoever tunes the policy;
 /// anyone may send one, so it is read small and never answered with more
@@ -3313,6 +3340,8 @@ pub async fn start(
             .and_then(releases::Notes::from_member_list),
         fleet: cfg.fleet,
         thanos: cfg.thanos,
+        service_boxes: cfg.service_boxes,
+        status: Default::default(),
         control: cfg.control.as_ref().map(|(c, _, _)| c.clone()),
         adblock: cfg.adblock,
         forge_events: cfg.forge_events.map(forge_events::ForgeEvents::start),
@@ -3581,6 +3610,9 @@ pub async fn start(
         .route("/_dd/docs/index.json", get(docs_index))
         .route("/_dd/docs/raw/{*path}", get(docs_raw))
         .route("/_dd/fleet.json", get(fleet_json))
+        // anyone's: whether the services work (status.rs)
+        .route("/_dd/status", get(|| async { page("status") }))
+        .route("/_dd/status.json", get(status_json))
         .route("/_dd/me", get(me))
         .route("/_dd/sitemap.json", get(site_map))
         .route("/_dd/joke", get(joke_lookup))
@@ -4276,6 +4308,32 @@ mod tests {
         library: Option<library::Gate>,
         mail: Option<mail::Mail>,
     ) -> (String, session::Sessions) {
+        gate_reading(
+            what,
+            members,
+            home,
+            directory_readers,
+            library,
+            mail,
+            None,
+            Default::default(),
+        )
+        .await
+    }
+
+    /// the same, reading thanos at this address for the uptime page, and
+    /// believing these boxes on each service (status.rs)
+    #[allow(clippy::too_many_arguments)]
+    async fn gate_reading(
+        what: &str,
+        members: Option<Members>,
+        home: Vec<pages::Service>,
+        directory_readers: Vec<String>,
+        library: Option<library::Gate>,
+        mail: Option<mail::Mail>,
+        thanos: Option<String>,
+        service_boxes: status::Speakers,
+    ) -> (String, session::Sessions) {
         let d = std::env::temp_dir().join(format!("dd-gate-{what}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
@@ -4301,7 +4359,8 @@ mod tests {
             app_manifest: None,
             member_list: None,
             fleet: Default::default(),
-            thanos: None,
+            thanos,
+            service_boxes,
             adblock: None,
             forge_events: None,
             storage_ledger: None,
@@ -4366,6 +4425,138 @@ mod tests {
         // and a header that is no device's token changes nothing
         assert_eq!(ask("DELETE", Some("x")).await, 403);
         assert_eq!(ask("PUT", Some("not-a-biscuit")).await, 403);
+    }
+
+    /// A stand-in for thanos on a free port: every answer carries a box's
+    /// name and address, as a real one could, and none of it may reach what
+    /// the gate tells anyone.
+    async fn thanos_stand_in() -> String {
+        use axum::extract::Query;
+        let now = session::now();
+        let point = move |v: &str| serde_json::json!([now, v]);
+        let app = Router::new()
+            .route(
+                "/api/v1/query",
+                get(move || async move {
+                    Json(serde_json::json!({"status": "success", "data": {"resultType": "vector", "result": [
+                        {"metric": {"service": "photos", "box": "node1", "instance": "100.64.0.2:9100"}, "value": point("1")},
+                        {"metric": {"service": "git", "box": "node1"}, "value": point("0")},
+                        // a box not built with Git says it works: not asked
+                        {"metric": {"service": "git", "box": "node2"}, "value": point("1")},
+                        {"metric": {"service": "node1-secret"}, "value": point("1")}
+                    ]}}))
+                }),
+            )
+            .route(
+                "/api/v1/query_range",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    let start: u64 = q["start"].parse().unwrap();
+                    let end: u64 = q["end"].parse().unwrap();
+                    let step: u64 = q["step"].parse().unwrap();
+                    let values: Vec<_> = (0..)
+                        .map(|i| start + i * step)
+                        .take_while(|t| *t <= end)
+                        .map(|t| serde_json::json!([t, "1"]))
+                        .collect();
+                    let down: Vec<_> = values
+                        .iter()
+                        .map(|v| serde_json::json!([v[0], "0"]))
+                        .collect();
+                    Json(serde_json::json!({"status": "success", "data": {"resultType": "matrix", "result": [
+                        {"metric": {"service": "photos", "box": "node1", "site": "s-c844d9db"}, "values": values},
+                        {"metric": {"service": "git", "box": "node1"}, "values": values},
+                        {"metric": {"service": "photos", "box": "node2"}, "values": down}
+                    ]}}))
+                }),
+            );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, app).await });
+        format!("http://{addr}")
+    }
+
+    /// The uptime page's answer is the same for anyone: services, never a
+    /// box, an address, a place, how many boxes there are or a release.
+    #[tokio::test]
+    async fn the_status_is_services_alone_and_the_same_for_anyone() {
+        let fake = thanos_stand_in().await;
+        // node1 is built with Photos and Git, node2 with neither
+        let speakers: status::Speakers = [("photos", "node1"), ("git", "node1")]
+            .into_iter()
+            .map(|(s, b)| (s.to_string(), vec![b.to_string()]))
+            .collect();
+        let (url, s) = gate_reading(
+            "status",
+            None,
+            vec![demo_tile()],
+            vec![],
+            None,
+            None,
+            Some(fake),
+            speakers,
+        )
+        .await;
+        let http = client();
+        let mut seen = vec![];
+        for c in [
+            None,
+            Some(cookie(&s.issue("tom"))),
+            Some(cookie(&s.issue("demo"))),
+        ] {
+            let mut r = http.get(format!("{url}/_dd/status.json"));
+            if let Some(c) = c {
+                r = r.header("cookie", c);
+            }
+            let r = r.send().await.unwrap();
+            assert_eq!(r.status(), 200);
+            assert_eq!(r.headers()["cache-control"], "public, max-age=30");
+            let body = r.text().await.unwrap();
+            for no in [
+                "node",
+                "box",
+                "100.64",
+                "instance",
+                "s-c844",
+                "site\":\"s",
+                "release",
+            ] {
+                assert!(!body.contains(no), "{no} in {body}");
+            }
+            seen.push(body);
+        }
+        assert!(seen.iter().all(|b| *b == seen[0]));
+        let v: serde_json::Value = serde_json::from_str(&seen[0]).unwrap();
+        assert_eq!(v.as_object().unwrap().len(), 3, "{v}");
+        let services = v["services"].as_array().unwrap();
+        let ids: Vec<_> = services.iter().map(|x| x["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["photos", "git"]);
+        assert_eq!(services[0]["label"], "Photos");
+        assert_eq!(services[0]["up"], true);
+        assert_eq!(services[1]["up"], false);
+        assert_eq!(services[0]["days"].as_array().unwrap().len(), 90);
+        assert_eq!(services[0]["days"][89], 1.0);
+        assert!(services[0]["since"].is_u64());
+
+        // and the page, for anyone
+        let page = http.get(format!("{url}/_dd/status")).send().await.unwrap();
+        assert_eq!(page.status(), 200);
+        let html = page.text().await.unwrap();
+        for f in ["status.js", "status.css", "shell.js", "home.css"] {
+            assert!(html.contains(&format!("/_dd/static/{f}")), "{f}");
+        }
+    }
+
+    /// Where nothing is measured, the gate says so rather than guessing.
+    #[tokio::test]
+    async fn no_thanos_is_no_status_rather_than_a_guess() {
+        let (url, _) = gate("status-none", None, vec![]).await;
+        let r = client()
+            .get(format!("{url}/_dd/status.json"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 503);
+        assert_eq!(r.headers()["cache-control"], "no-store");
     }
 
     /// The bare name's front page is for anyone, signed in or not, and

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Status · Commonty</title>
+  <meta name="description" content="Whether each Commonty service is working now, and over the last 90 days.">
+  <link rel="icon" type="image/svg+xml" href="/_dd/static/favicon.svg">
+  <link rel="stylesheet" href="/_dd/static/home.css">
+  <link rel="stylesheet" href="/_dd/static/status.css">
+</head>
+<body class="statuspage">
+  <a class="skip-to" href="#main">Skip to content</a>
+  <header class="dd-bar" data-public>
+    <div class="bar">
+      <a class="brand" href="/" aria-label="Commonty">
+        <svg viewBox="0 0 22 22" aria-hidden="true">
+          <rect class="mark-line" x="1" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="12" y="1" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-line" x="1" y="12" width="9" height="9" fill="none" stroke-width="1.6"/>
+          <rect class="mark-fill" x="12" y="12" width="9" height="9"/>
+        </svg>
+        <span>Commonty</span>
+      </a>
+      <div class="me" id="me"></div>
+    </div>
+  </header>
+
+  <main class="wide status" id="main" tabindex="-1">
+    <div class="intro">
+      <h1>Status</h1>
+      <p>Whether each service is working right now, and how it has been over the last 90 days.</p>
+    </div>
+
+    <section class="now" aria-labelledby="now-h">
+      <h2 id="now-h" class="sr-only">Right now</h2>
+      <p class="overall" id="overall" role="status" aria-busy="true"><span class="skel"></span></p>
+      <p class="checked" id="checked">&#8212;</p>
+    </section>
+
+    <section aria-labelledby="svc-h">
+      <h2 id="svc-h">Services</h2>
+      <!-- the shape of the list, until it draws (docs/dev/ui.md: no "Loading…") -->
+      <ul class="uptime" id="services" aria-busy="true">
+        <li class="svc skel-row"><span class="skel"></span><span class="skel bars"></span></li>
+        <li class="svc skel-row"><span class="skel"></span><span class="skel bars"></span></li>
+        <li class="svc skel-row"><span class="skel"></span><span class="skel bars"></span></li>
+      </ul>
+      <p class="key">
+        <span><i data-state="ok"></i>Working all day</span>
+        <span><i data-state="attention"></i>Down part of the day</span>
+        <span><i data-state="broken"></i>Down much of the day</span>
+        <span><i data-state="off"></i>Not measured</span>
+      </p>
+      <p class="note">Each bar is one day, midnight to midnight UTC. Times are in your own time zone.</p>
+    </section>
+  </main>
+
+  <script type="module" src="/_dd/static/shell.js"></script>
+  <script type="module" src="/_dd/static/status.js"></script>
+</body>
+</html>

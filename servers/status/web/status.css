@@ -1,0 +1,81 @@
+/* The uptime page: a line for now, then a panel per service with a bar for
+   each day. Colours are home.css's state tokens. */
+
+main.status { display: grid; gap: 28px; }
+main.status .intro { margin-bottom: 0; }
+main.status h2 { margin-bottom: 12px; }
+
+.now { display: grid; gap: 4px; }
+.overall {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 18px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 20px;
+  font-weight: 700;
+}
+.overall .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: var(--off); }
+.overall[data-state="ok"] .dot { background: var(--ok); }
+.overall[data-state="attention"] .dot { background: var(--attention); }
+.overall[data-state="broken"] .dot { background: var(--broken); }
+.checked { margin: 0; color: var(--ink-2); font-size: 14px; font-variant-numeric: tabular-nums; }
+
+.uptime { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.svc {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.svc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.svc-head h3 { margin: 0; font-size: 17px; font-weight: 700; }
+
+.bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 2px;
+  height: 34px;
+}
+.bars li { flex: 1 1 0; min-width: 0; border-radius: 1px; background: var(--off-bg); }
+.bars li[data-state="ok"] { background: var(--ok); }
+.bars li[data-state="attention"] { background: var(--attention); }
+.bars li[data-state="broken"] { background: var(--broken); }
+.bars li[data-state="off"] { background: var(--off); }
+
+.svc-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.svc-foot .pct { text-align: center; }
+
+.key { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 0; color: var(--ink-2); font-size: 14px; }
+.key span { display: inline-flex; align-items: center; gap: 6px; }
+.key i { width: 10px; height: 14px; border-radius: 1px; background: var(--off); }
+.key i[data-state="ok"] { background: var(--ok); }
+.key i[data-state="attention"] { background: var(--attention); }
+.key i[data-state="broken"] { background: var(--broken); }
+.note { margin: 6px 0 0; color: var(--ink-2); font-size: 14px; }
+
+/* the shape of what is coming */
+.skel { display: block; height: 16px; width: 40%; border-radius: var(--radius); background: var(--line-2); }
+.overall .skel { height: 22px; width: 45%; }
+.skel-row .skel.bars { height: 34px; width: 100%; }
+
+@media (max-width: 640px) {
+  .overall { font-size: 17px; padding: 14px 16px; }
+  .svc { padding: 14px 16px; }
+  .bars { gap: 2px; height: 30px; }
+  .svc-foot { font-size: 12px; }
+}

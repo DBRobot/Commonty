@@ -115,6 +115,7 @@ def run(s, browser):
             [
                 s.url("@", "/"),
                 s.url("@", "/docs"),
+                s.url("@", "/status"),
                 s.url("home", "/_dd/login"),
                 s.url("home", "/_dd/join"),
                 s.url("home", "/_dd/download"),

@@ -158,6 +158,12 @@ in
     locations."= /_dd/me" = docsGate;
     locations."= /_dd/config" = docsGate;
     locations."= /_dd/csp" = docsGate;
+    # whether the services work, for anyone (servers/gate/src/status.rs):
+    # the page, and its one answer, which names no box and no release
+    locations."= /status" = docsGate // {
+      proxyPass = "http://127.0.0.1:${toString config.dd.verify.port}/_dd/status";
+    };
+    locations."= /_dd/status.json" = docsGate;
     # the assistant's map, for the docs' own pages: members and the demo
     # only (the gate answers 401 to anyone else), so nothing a stranger may not have
     locations."= /_dd/sitemap.json" = docsGate;

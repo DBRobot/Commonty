@@ -962,6 +962,7 @@ mod tests {
             member_list: None,
             fleet: Default::default(),
             thanos: None,
+            service_boxes: Default::default(),
             adblock: None,
             forge_events: None,
             storage_ledger: None,

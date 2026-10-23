@@ -77,6 +77,7 @@ async fn commits_are_signed_by_the_device_and_verified_through_the_directory() {
         home: vec![],
         fleet: Default::default(),
         thanos: None,
+        service_boxes: Default::default(),
         adblock: None,
         forge_events: None,
         storage_ledger: None,
