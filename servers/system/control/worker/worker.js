@@ -119,8 +119,24 @@ export class Relay {
       const ready = new Promise((r) => { globalThis.controlReady = r; });
       const go = new Go();
       const inst = await WebAssembly.instantiate(witnessWasm, go.importObject);
-      go.run(inst);
-      this.witness = BigInt(await ready);
+      // a witness that panics or hangs on what it saved must not take the
+      // relay with it: every box's connection waits on this boot, and one
+      // that never ended stopped the fleet's consensus (2026-10-22)
+      const exited = go.run(inst).then(() => { throw new Error('the witness exited before it was ready'); });
+      const late = new Promise((_, no) => setTimeout(() => no(new Error('the witness was not ready in 20 s')), 20000));
+      try {
+        this.witness = BigInt(await Promise.race([ready, exited, late]));
+      } catch (e) {
+        if (saved !== '') {
+          // what it saved is the one thing it brings: without it, it catches
+          // up from the boxes like any validator that was away
+          console.log(`witness: ${e.message}; starting again without what it saved`);
+          await this.ctx.storage.delete('saved');
+          this.ctx.abort(e.message);
+        }
+        // nothing saved and still no witness: the relay carries the boxes' frames without it
+        console.log(`witness: ${e.message}; relaying without it`);
+      }
     })();
     return this.booting;
   }
