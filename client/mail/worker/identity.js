@@ -11,13 +11,17 @@
 // CONTROL is the relay's Durable Object namespace (bound by `dd mail deploy`
 // and `dd dns deploy`); IDENTITY_URL stands in for it in the tests.
 
+// the relay's object, as its Worker names it (servers/system/control/worker,
+// RELAY_NAME): a fresh one since 'relay' wedged on 2026-10-22
+const RELAY = 'relay-1023';
+
 export const mode = (env) => (['shadow', 'agreed'].includes(env.IDENTITY_FROM) ? env.IDENTITY_FROM : 'replay');
 
 // a member's agreed record, or null when the agreed state has no such name
 export async function agreedMember(env, name) {
   const q = `?name=${encodeURIComponent(name)}`;
   let r;
-  if (env.CONTROL) r = await env.CONTROL.get(env.CONTROL.idFromName('relay')).fetch(`https://control/identity${q}`);
+  if (env.CONTROL) r = await env.CONTROL.get(env.CONTROL.idFromName(RELAY)).fetch(`https://control/identity${q}`);
   else if (env.IDENTITY_URL) r = await fetch(`${env.IDENTITY_URL}${q}`);
   else throw new Error('no agreed identity to read: CONTROL is not bound');
   if (r.status === 404) return null;

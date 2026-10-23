@@ -98,7 +98,11 @@ func (r *relay) run(receive func(from uint64, kind byte, p []byte), connected fu
 		if r.key != "" {
 			u += "&key=" + url.QueryEscape(r.key)
 		}
-		c, _, err := websocket.Dial(context.Background(), u, nil)
+		// bounded: a relay that never answers a handshake held every box
+		// here for nine hours (2026-10-22)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		c, _, err := websocket.Dial(ctx, u, nil)
+		cancel()
 		if err != nil {
 			log.Printf("relay: %v; again in %s", err, wait)
 			time.Sleep(wait)

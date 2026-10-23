@@ -67,13 +67,22 @@ func main() {
 			saved = nil
 		}
 	}
-	v, err := validator.New(validator.Options{
+	o := validator.Options{
 		Config: cfg, ID: id, Key: key, Transport: jsTransport{}, Logger: logger{}, WAL: memWAL{}, Saved: saved,
 		Persist: func(s validator.Saved) {
 			b, _ := json.Marshal(s)
 			js.Global().Call("controlPersist", string(b))
 		},
-	})
+	}
+	v, err := validator.New(o)
+	if err != nil && saved != nil {
+		// another release's state hashes differently here (a field this one
+		// does not know is dropped); panicking on it wedged the relay
+		// (2026-10-22). It catches up from the validators instead
+		fmt.Printf("witness warn: %v; starting without it, to catch up from the validators\n", err)
+		o.Saved = nil
+		v, err = validator.New(o)
+	}
 	if err != nil {
 		panic(err)
 	}
