@@ -10,6 +10,8 @@
     units = [
       "pihole-ftl"
       "dd-pihole-lists"
+      # its run after boot, a switch, or the flag going up (box/remote-jobs.nix)
+      "dd-pihole-lists-after-switch"
     ];
     perHouse = 1;
     # the house's devices ask it at this box's address (the router hands

@@ -187,7 +187,7 @@ box/       what makes a box: host.nix (the box's folder), box.nix (dd.box.*),
            wired-watch.sh), locate.nix
 forge/     forgejo.nix, forgejo-runner.nix, members-runner.nix,
            live.nix (the Git pages' events); ci-cancel.py,
-           ci-resume.py, forgejo-setup.sh, runner-address.sh
+           ci-resume.py, forgejo-setup.sh, runner-start.sh
 games/     games.nix (the manager), game-guest.nix (the VM a world runs in),
            game-run.py, games-access.sh, games-measure.sh
 gate/      verify.nix (the gate's unit, nginx's sign-in check, dd.verify.*,
@@ -464,6 +464,28 @@ rule below is a release that rolled back.
   read. `checks.nginx` runs `nginx -t` on every box's config.
 - **The agent's own units are never restarted by a switch.** `dd-agent`
   and `dd-build` have `restartIfChanged = false` and `stopIfChanged = false`.
+- **Nothing a switch waits on talks to another machine.** A switch waits
+  on every job it starts, on what those jobs are ordered after, and on a
+  service's `ExecStartPre` across each of its restarts; a oneshot has no
+  start timeout. Release 358's switch on node2 sat over ten minutes on
+  `acme-order-renew` (Let's Encrypt and the DNS Worker), and failed both
+  runners when the forge, on node1, was down (2026-10-22). So:
+  - a oneshot whose work is another machine's answer is a remote job
+    ([`box/remote-jobs.nix`](../../nix/modules/box/remote-jobs.nix),
+    `dd.remoteJobs.<unit> = { };`): no switch starts it, its own timer
+    starts it a minute after boot and after any switch that changed it,
+    with a start timeout, and the agent does not count it failing against
+    a release (`/etc/dd/remote-jobs`). The certificate's order and the
+    ad lists are two;
+  - a long-running service that needs another box does that inside its
+    main process and waits there, never in `ExecStartPre`, with
+    `Restart = "always"` and `startLimitIntervalSec = 0`, so a box that is
+    down is waited out and never a failed unit
+    ([`forge/runner-start.sh`](../../nix/modules/forge/runner-start.sh),
+    `dd-door`);
+  - a unit started by a path, or anything that restarts in bursts, has
+    `startLimitIntervalSec = 0`: a switch moves many flags at once
+    (`dd-door-names` hit the start limit on the first switch to 358).
 
 ## Building
 

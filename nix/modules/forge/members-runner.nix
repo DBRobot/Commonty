@@ -174,6 +174,9 @@ in
       # runner cannot work through ("mkdir: file exists" on every job). The
       # docker group is this unit's alone; host jobs do not get it.
       path = [ pkgs.curl ];
+      # a forge that is down is waited out (runner-start.sh): never a failed
+      # unit, and never a switch held for it
+      startLimitIntervalSec = 0;
       serviceConfig = {
         DynamicUser = lib.mkForce false;
         User = lib.mkForce "forgejo-runner";
@@ -183,16 +186,25 @@ in
         # take the runner's job limit (1h) and a little to let them end
         KillMode = "mixed";
         TimeoutStopSec = "${toString (cfg.drainMinutes + 5)}min";
-        # the forge must answer first, and at this address (runner-address.sh)
-        TimeoutStartSec = "10min";
-        ExecStartPre = lib.mkBefore [
-          (pkgs.writeShellScript "runner-address" (
-            ddScript ./runner-address.sh {
+        Restart = lib.mkForce "always";
+        RestartSec = lib.mkForce 5;
+        RestartSteps = 6;
+        RestartMaxDelaySec = "5min";
+        # the forge, the registration and the runner, all in the main
+        # process (runner-start.sh); the module's registration before it
+        # held a switch for as long as the forge was down
+        ExecStartPre = lib.mkForce [ ];
+        ExecStart = lib.mkForce (
+          pkgs.writeShellScript "runner-start" (
+            ddScript ./runner-start.sh {
               NAME = name;
               URL = "https://git.${base}";
+              LABELS = lib.concatStringsSep "," config.services.gitea-actions-runner.instances.${name}.labels;
+              RUNNER = lib.getExe config.services.gitea-actions-runner.package;
+              CONFIG = (pkgs.formats.yaml { }).generate "config.yaml" runnerSettings;
             }
-          ))
-        ];
+          )
+        );
       };
     };
 

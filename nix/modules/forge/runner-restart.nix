@@ -90,8 +90,10 @@ in
     systemd.services =
       lib.mapAttrs (unit: u: {
         restartIfChanged = false;
-        # as root: which unit definition this run started from
-        serviceConfig.ExecStartPre = lib.mkBefore [
+        # as root: which unit definition this run started from. After the
+        # main process starts, not before it: the runners keep nothing
+        # before theirs (runner-start.sh), and replace the module's list
+        serviceConfig.ExecStartPost = lib.mkBefore [
           "+${
             exec [
               "started"
