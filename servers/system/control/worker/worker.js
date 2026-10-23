@@ -486,7 +486,7 @@ export default {
     const path = new URL(req.url).pathname;
     // and the release: read by any box, handed in by any box or publish
     if (path === '/release' && (req.method === 'GET' || req.method === 'PUT')) {
-      return env.RELAY.get(env.RELAY.idFromName('relay')).fetch(req);
+      return env.RELAY.get(env.RELAY.idFromName(RELAY_NAME)).fetch(req);
     }
     if (req.method !== 'GET' || (path !== '/relay' && path !== '/health')) {
       await req.text().catch(() => '');
