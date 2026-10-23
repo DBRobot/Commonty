@@ -25,6 +25,11 @@ struct Args {
     /// where the signed release file is
     #[arg(long, env = "DD_AGENT_URL")]
     url: String,
+    /// more places that keep it, whitespace separated (docs/dev/releases.md,
+    /// "Where a box finds the release"): read beside `url`, and handed the
+    /// release when they hold an older one
+    #[arg(long, env = "DD_AGENT_MIRRORS", default_value = "")]
+    mirrors: String,
     /// file holding the release key's public half, base64
     #[arg(long, env = "DD_AGENT_KEY_FILE")]
     key_file: PathBuf,
@@ -330,6 +335,122 @@ fn reaches_within(reach: &str, window: Duration) -> bool {
     }
 }
 
+/// What one source gave
+enum Fetched {
+    Body(String),
+    /// it answered that it has no file
+    Absent,
+    /// it did not answer, or not with a file
+    Failed(String),
+}
+
+/// A source that does not answer in a minute is a source that is down; the
+/// next run asks again
+fn http() -> ureq::Agent {
+    ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(60)))
+            .build(),
+    )
+}
+
+fn fetch(url: &str) -> Fetched {
+    match http().get(url).call() {
+        Ok(mut r) => match r.body_mut().read_to_string() {
+            Ok(b) => Fetched::Body(b),
+            Err(e) => Fetched::Failed(format!("{url}: {e}")),
+        },
+        Err(ureq::Error::StatusCode(404)) => Fetched::Absent,
+        Err(e) => Fetched::Failed(format!("{url}: {e}")),
+    }
+}
+
+enum Newest {
+    /// the newest file that verifies, and what the other sources said
+    Release {
+        body: String,
+        signed: release::Signed,
+        notes: Vec<String>,
+    },
+    /// nobody has a file, and none that has one failed to say so
+    None(Vec<String>),
+    /// nothing answered with a file or its absence
+    Unreachable(Vec<String>),
+    /// files came, and not one verifies
+    Refused(Vec<String>),
+}
+
+/// The newest release among what the sources gave, each checked against
+/// the bytes as published, unknown fields and all: a newer publisher may
+/// add one, and this agent must still be able to take the release that
+/// brings its own replacement. A tie goes to the first source (the forge).
+fn newest(fetched: &[(&str, Fetched)], trusted: &ed25519_dalek::VerifyingKey) -> Newest {
+    let mut best: Option<(String, release::Signed)> = None;
+    let (mut refused, mut failed, mut absent) = (Vec::new(), Vec::new(), Vec::new());
+    for (url, got) in fetched {
+        match got {
+            Fetched::Body(b) => match release::verify_json(b, trusted) {
+                Ok(s) => {
+                    if best
+                        .as_ref()
+                        .is_none_or(|(_, x)| s.payload.counter > x.payload.counter)
+                    {
+                        best = Some((b.clone(), s));
+                    }
+                }
+                Err(e) => refused.push(format!("{url}: {e}")),
+            },
+            Fetched::Absent => absent.push(format!("{url}: none")),
+            Fetched::Failed(e) => failed.push(e.clone()),
+        }
+    }
+    match best {
+        Some((body, signed)) => Newest::Release {
+            body,
+            signed,
+            notes: refused
+                .into_iter()
+                .map(|r| format!("source refused: {r}"))
+                .chain(failed.into_iter().map(|f| format!("source down: {f}")))
+                .collect(),
+        },
+        None if !refused.is_empty() => Newest::Refused(refused),
+        None if absent.is_empty() => Newest::Unreachable(failed),
+        None => Newest::None(absent.into_iter().chain(failed).collect()),
+    }
+}
+
+/// A mirror that answered with an older release, none, or one that does not
+/// verify is handed this one. It is signed, so a mirror needs no word of
+/// this box's to keep it; one that is down is left for the next run.
+fn hand_on(
+    fetched: &[(&str, Fetched)],
+    body: &str,
+    counter: u64,
+    trusted: &ed25519_dalek::VerifyingKey,
+) {
+    for (url, got) in fetched.iter().skip(1) {
+        let behind = match got {
+            Fetched::Body(b) => {
+                !release::verify_json(b, trusted).is_ok_and(|s| s.payload.counter >= counter)
+            }
+            Fetched::Absent => true,
+            Fetched::Failed(_) => false,
+        };
+        if !behind {
+            continue;
+        }
+        match http()
+            .put(*url)
+            .header("content-type", "application/json")
+            .send(body)
+        {
+            Ok(_) => eprintln!("release {counter}: handed to {url}"),
+            Err(e) => eprintln!("release {counter}: {url} did not take it: {e}"),
+        }
+    }
+}
+
 fn main() {
     let args = Args::parse();
     let outcome = run(&args);
@@ -368,28 +489,41 @@ fn run(args: &Args) -> Result<String> {
     )
     .map_err(|e| anyhow::anyhow!("release key: {e}"))?;
 
-    // no file yet is not an error: a fleet before its first release
-    let mut response = match ureq::get(&args.url).call() {
-        Ok(r) => r,
-        Err(ureq::Error::StatusCode(404)) => {
+    // The forge, and every mirror beside it: each file is checked against
+    // the release key on its own, and the newest that holds is the release.
+    // Where it came from decides nothing, so a source that is down, or one
+    // that serves an old or a forged file, only costs itself.
+    let sources: Vec<&str> = std::iter::once(args.url.as_str())
+        .chain(args.mirrors.split_whitespace())
+        .collect();
+    let fetched: Vec<(&str, Fetched)> = sources.iter().map(|u| (*u, fetch(u))).collect();
+    let (body, signed) = match newest(&fetched, &trusted) {
+        Newest::Release {
+            body,
+            signed,
+            notes,
+        } => {
+            for n in notes {
+                eprintln!("{n}");
+            }
+            (body, signed)
+        }
+        // no file yet is not an error: a fleet before its first release
+        Newest::None(why) => {
             record(args, &name, read_counter(&args.state), "none");
-            return Ok(format!("no release at {} yet", args.url));
+            return Ok(format!("no release yet ({})", why.join("; ")));
         }
-        Err(e) => return Err(e).with_context(|| format!("fetching {}", args.url)),
-    };
-    let body = response.body_mut().read_to_string()?;
-    // checked against the bytes as published, unknown fields and all: a
-    // newer publisher may add one, and this agent must still be able to
-    // take the release that brings its own replacement
-    let signed = match release::verify_json(&body, &trusted) {
-        Ok(s) => s,
-        Err(e) => {
-            // what this box runs has not changed: the counter stays the one
-            // it applied, and the refusal is the result
+        Newest::Unreachable(why) => bail!("no source answered: {}", why.join("; ")),
+        // what this box runs has not changed: the counter stays the one it
+        // applied, and the refusal is the result
+        Newest::Refused(why) => {
             record(args, &name, read_counter(&args.state), "refused");
-            bail!("release refused: {e}");
+            bail!("release refused: {}", why.join("; "));
         }
     };
+    if !args.print_rev {
+        hand_on(&fetched, &body, signed.payload.counter, &trusted);
+    }
     let counter = signed.payload.counter;
     if args.print_rev {
         anyhow::ensure!(
@@ -944,13 +1078,27 @@ fn read_failed_before(state: &Path) -> Option<Vec<String>> {
 }
 
 /// Which units are failed right now, games aside: a member's game that
-/// crashed is that game's trouble, not a release's.
+/// crashed is that game's trouble, not a release's. And the jobs whose work
+/// is another machine's answer (box/remote-jobs.nix): a certificate's order
+/// that Let's Encrypt did not answer is not this release failing.
 fn failed_units() -> Vec<String> {
-    sh("systemctl", &["--failed", "--no-legend", "--plain"])
-        .unwrap_or_default()
+    let remote = fs::read_to_string(REMOTE_JOBS).unwrap_or_default();
+    judged(
+        &sh("systemctl", &["--failed", "--no-legend", "--plain"]).unwrap_or_default(),
+        &remote,
+    )
+}
+
+/// as the system running now declares them
+const REMOTE_JOBS: &str = "/etc/dd/remote-jobs";
+
+fn judged(failed: &str, remote: &str) -> Vec<String> {
+    let remote: Vec<&str> = remote.lines().map(str::trim).collect();
+    failed
         .lines()
         .filter(|l| !l.trim_start().starts_with("dd-game@"))
         .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        .filter(|u| !remote.contains(&u.as_str()))
         .collect()
 }
 
@@ -1556,6 +1704,107 @@ mod tests {
     }
 
     use super::*;
+
+    fn file(n: u64, key: &ed25519_dalek::SigningKey) -> String {
+        let p = release::Payload {
+            counter: n,
+            rev: "0123".into(),
+            issued: 1,
+            boxes: Default::default(),
+            attestations: vec![],
+            bootstrap: false,
+        };
+        serde_json::to_string(&release::sign(p, key).unwrap()).unwrap()
+    }
+
+    fn counter_of(n: Newest) -> u64 {
+        match n {
+            Newest::Release { signed, .. } => signed.payload.counter,
+            _ => panic!("no release"),
+        }
+    }
+
+    #[test]
+    fn a_remote_job_failing_is_not_the_release_failing() {
+        let failed = "acme-order-renew-x.org.service loaded failed failed Order\n\
+                      dd-game@a.service loaded failed failed A game\n\
+                      nginx.service loaded failed failed Nginx\n";
+        assert_eq!(
+            judged(failed, "acme-order-renew-x.org.service\n"),
+            vec!["nginx.service"]
+        );
+        assert_eq!(judged(failed, "").len(), 2);
+    }
+
+    #[test]
+    fn the_newest_file_that_verifies_wins_wherever_it_came_from() {
+        let k = release::generate();
+        let pk = k.verifying_key();
+        // the forge down, the mirror has it
+        let got = [
+            ("forge", Fetched::Failed("forge: down".into())),
+            ("mirror", Fetched::Body(file(7, &k))),
+        ];
+        assert_eq!(counter_of(newest(&got, &pk)), 7);
+        // a source serving an older one does not hold the box back
+        let got = [
+            ("forge", Fetched::Body(file(9, &k))),
+            ("mirror", Fetched::Body(file(7, &k))),
+        ];
+        assert_eq!(counter_of(newest(&got, &pk)), 9);
+        // nor does one serving a higher counter under another key, or a
+        // tampered one: neither is a release
+        let tampered = file(8, &k).replace("\"counter\":8", "\"counter\":99");
+        let got = [
+            ("forge", Fetched::Body(file(8, &k))),
+            ("mirror", Fetched::Body(file(50, &release::generate()))),
+            ("other", Fetched::Body(tampered)),
+        ];
+        let n = newest(&got, &pk);
+        match &n {
+            Newest::Release { notes, .. } => assert_eq!(notes.len(), 2),
+            _ => panic!("no release"),
+        }
+        assert_eq!(counter_of(n), 8);
+    }
+
+    #[test]
+    fn without_a_good_file_the_answer_says_why() {
+        let k = release::generate();
+        let pk = k.verifying_key();
+        let forged = file(3, &release::generate());
+        assert!(matches!(
+            newest(
+                &[
+                    ("forge", Fetched::Body(forged)),
+                    ("mirror", Fetched::Absent)
+                ],
+                &pk
+            ),
+            Newest::Refused(_)
+        ));
+        assert!(matches!(
+            newest(
+                &[("forge", Fetched::Absent), ("mirror", Fetched::Absent)],
+                &pk
+            ),
+            Newest::None(_)
+        ));
+        assert!(matches!(
+            newest(
+                &[
+                    ("forge", Fetched::Failed("x".into())),
+                    ("mirror", Fetched::Absent)
+                ],
+                &pk
+            ),
+            Newest::None(_)
+        ));
+        assert!(matches!(
+            newest(&[("forge", Fetched::Failed("x".into()))], &pk),
+            Newest::Unreachable(_)
+        ));
+    }
 
     #[test]
     fn the_guard_outlasts_the_whole_decision() {

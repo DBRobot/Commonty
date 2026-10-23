@@ -26,7 +26,7 @@ nix/modules/forge/
   ci-resume.py                        a run a restart killed is run again
   forgejo-runner.nix                  the host runner: the fleet's own CI
   members-runner.nix                  the members' runner: Docker under gVisor
-  runner-address.sh                   a runner waits for the forge before it registers
+  runner-start.sh                     a runner waits for the forge, registers, and runs
   runner-restart.nix, .sh             a release's runner and docker config wait for no job running, up to a limit
   needs.nix                           what each part needs of a box
 servers/forge/web/                    the Git pages (pages/git-public.html: the public door's)
@@ -515,11 +515,14 @@ Two runners, both from the `runner` bundle
 with it (node1 and node2 today). Both run as the plain system user
 `forgejo-runner` (not the NixOS module's dynamic user, whose state
 directory is mounted `noexec` and broke every cargo build script), share
-`/var/lib/gitea-runner`, and before they start wait up to five minutes for
-the forge to answer at `https://git.<domain>` with a certificate the box
-believes. If the registration on disk is for another address, it is
-deleted and the runner registers again
-([`runner-address.sh`](../../nix/modules/forge/runner-address.sh)).
+`/var/lib/gitea-runner`. Each one's main process waits for the forge to
+answer at `https://git.<domain>` with a certificate the box believes, for
+as long as it takes, then registers and runs the runner
+([`runner-start.sh`](../../nix/modules/forge/runner-start.sh)). Nothing
+waits before the main process: a switch would wait with it, and the forge
+is on another box (release 358 on node2 failed both runners while it was
+down). If the registration on disk is for another address, or the token
+or labels changed, the runner registers again.
 
 ```
                  host runner (<box>)                members' runner (members-<box>)

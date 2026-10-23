@@ -370,6 +370,13 @@ fn publish(
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
+    // and the relay's copy (the boxes' second source): one that took a
+    // release the forge has lost, from a backup restored, still counts
+    let relayed = relay_url(&root)
+        .and_then(|u| ureq_get(&u).ok())
+        .and_then(|raw| release::verify_json(&raw, &trusted_key(&root).ok()?).ok())
+        .map(|s| s.payload.counter)
+        .unwrap_or(0);
     let counter = match ureq_get(url).ok() {
         Some(raw) => {
             // The forge serves this file and does not sign it. Taking the
@@ -383,6 +390,7 @@ fn publish(
             current
                 .payload
                 .counter
+                .max(relayed)
                 .checked_add(1)
                 .context("the release counter is at its limit")?
         }
@@ -391,7 +399,7 @@ fn publish(
                 "no current release could be read, yet the releases branch exists: the forge is not answering; not starting over at 1"
             )
         }
-        None => 1,
+        None => relayed + 1,
     };
     // DD_RELEASE_FORM=legacy for exactly one release: the one that carries
     // an agent able to read the newer form to boxes whose agent cannot. It
@@ -477,6 +485,16 @@ fn publish(
         &format!("release {counter}: {}", &rev[..12]),
     )?;
     print(&signed, None);
+    // the relay keeps a copy, for a box whose forge is down: the boxes hand
+    // it on too, from the first that reads it
+    if let Some(u) = relay_url(&root) {
+        match put_release(&u, &body) {
+            Ok(()) => eprintln!("== {u} keeps release {counter}"),
+            Err(e) => eprintln!(
+                "== {u} did not take release {counter}: {e:#}\n   the first box that reads it from the forge hands it on"
+            ),
+        }
+    }
     // the DNS Worker this release carries, with the names each box now
     // serves: up before the boxes are told, so a box that switches and asks
     // for a new name finds it there
@@ -2049,6 +2067,41 @@ fn checked(
 }
 
 struct NotFound;
+
+/// where the control plane's relay keeps its copy of the release
+/// (servers/system/control/worker), once `dd control setup` has made it
+fn relay_url(root: &Path) -> Option<String> {
+    let raw = std::fs::read(root.join("fleet/control-worker.json")).ok()?;
+    let s: crate::control_worker::Setup = serde_json::from_slice(&raw).ok()?;
+    Some(format!("https://control.{}/release", s.domain))
+}
+
+fn put_release(url: &str, body: &str) -> Result<()> {
+    use std::io::Write as _;
+    let mut c = Command::new("curl")
+        .args([
+            "-sS",
+            "-f",
+            "--max-time",
+            "60",
+            "-X",
+            "PUT",
+            "-H",
+            "content-type: application/json",
+            "--data-binary",
+            "@-",
+            url,
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()?;
+    c.stdin
+        .take()
+        .context("curl's stdin")?
+        .write_all(body.as_bytes())?;
+    ensure!(c.wait()?.success(), "curl failed");
+    Ok(())
+}
 
 /// every id on the member list has the name it was confirmed under
 fn named_all(m: &crate::member::Members) -> Result<()> {

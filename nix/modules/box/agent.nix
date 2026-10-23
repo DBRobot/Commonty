@@ -29,7 +29,11 @@ let
   agent = self.packages.${pkgs.stdenv.hostPlatform.system}.agent;
 in
 {
-  imports = [ ./work-memory.nix ];
+  imports = [
+    ./work-memory.nix
+    # what the probe leaves out (/etc/dd/remote-jobs)
+    ./remote-jobs.nix
+  ];
 
   # The box moves itself to the signed release and to nothing else. A timer
   # runs the agent; it fetches the release file, checks the signature
@@ -42,6 +46,11 @@ in
     url = lib.mkOption {
       type = lib.types.str;
       description = "Where the signed release file is.";
+    };
+    mirrors = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "More places that keep the signed release, read beside url (docs/dev/releases.md, \"Where a box finds the release\"). The newest file that verifies wins, wherever it came from; one holding an older release is handed the newer with a PUT.";
     };
     publicKey = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
@@ -149,6 +158,7 @@ in
       ++ lib.optional joined pkgs.git;
       environment = {
         DD_AGENT_URL = cfg.url;
+        DD_AGENT_MIRRORS = lib.concatStringsSep " " cfg.mirrors;
         DD_AGENT_ATTESTERS = "/etc/dd/attesters.json";
         DD_AGENT_KEY_FILE = cfg.publicKeyFile;
         DD_AGENT_PROBE_SECS = toString cfg.probeSeconds;
