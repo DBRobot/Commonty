@@ -45,6 +45,8 @@ cat >"$t/bin/sleep" <<'X'
 #!/usr/bin/env bash
 if [ -e "$T/reset-mends" ] && [ "$(cat "$T/sys/devices/usb1/1-1/authorized")" = 0 ]; then touch "$T/cable-ok"; fi
 X
+# the build sandbox has no /usr/bin/env or /bin/sh
+sed -i "1s|.*|#!$(command -v bash)|" "$t/bin"/*
 chmod +x "$t/bin"/*
 
 mac=00:E0:4C:3A:46:58
