@@ -169,6 +169,20 @@ func (s *Signed) Verify() error {
 	return checkWithKey(s.Sig, s, s.Entry.Root)
 }
 
+// ReservedNames is identity::RESERVED_NAMES: the boxes' own identities on
+// the forge, which no person is
+var ReservedNames = []string{"commonty-box", "commonty-ci"}
+
+// ReservedName is identity::reserved_name
+func ReservedName(n string) bool {
+	for _, r := range ReservedNames {
+		if n == r {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidName is identity::valid_name
 func ValidName(n string) bool {
 	if n == "" || len(n) > 64 || strings.HasPrefix(n, ".") {
@@ -207,6 +221,9 @@ func Accept(cur, next *Signed) error {
 	n := &next.Entry
 	if !ValidName(n.Name) {
 		return Rejected("bad name")
+	}
+	if ReservedName(n.Name) {
+		return Rejected("that name is the boxes'")
 	}
 	if len(n.Devices) == 0 && !strings.HasPrefix(n.Root, WebauthnRoot) {
 		return Rejected("an entry needs at least one device")

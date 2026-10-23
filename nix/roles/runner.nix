@@ -18,12 +18,10 @@
 
   config = lib.mkMerge [
     {
-      # the members' runner registers for every repo; its token is global
-      sops.secrets.forgejo-members-runner-token = { };
-      sops.templates."forgejo-members-runner.env".content = ''
-        TOKEN=${config.sops.placeholder.forgejo-members-runner-token}
-      '';
-      dd.membersRunner.tokenFile = config.sops.templates."forgejo-members-runner.env".path;
+      # the members' runner registers for every repo; its global token is
+      # made by the forge's box and sealed to this one, like the host
+      # runner's (modules/forge/runner-keys.nix)
+      dd.membersRunner.tokenFile = "/var/lib/dd-runner-token/members.env";
       # the home controller's system is aarch64 (docs/dev/home-controller.md):
       # its own programs are cross-built, everything else comes from
       # cache.nixos.org, and the few steps left run here under qemu

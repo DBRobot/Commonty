@@ -180,8 +180,13 @@ in
       else
         null;
     extraGroups = [ "wheel" ];
-    # the box's owner (box.json) logs in as admin
-    openssh.authorizedKeys.keys = owner.ssh;
+    # the fleet's admin (policy.json owner) logs in as admin, on every box
+    # of the fleet's; the box's host (box.json owner) has no shell on it - a
+    # host is not an admin, and a box holds other people's work. A box that
+    # joined on its own key is nobody's (above): nobody logs in to it
+    openssh.authorizedKeys.keys = lib.optionals (
+      config.dd.box.owner != null
+    ) policy.people.${policy.owner}.ssh;
   };
 
   # Every box is on the fleet's own network, and on no other: the owner's
@@ -192,7 +197,8 @@ in
   # port on it to everything that can reach it, which on the fleet's network
   # meant any member's device could talk to postgres, garage and prometheus
   # on every box. What is open is what a person needs: the gate to every
-  # member; ssh and dns to the box's owner's devices (modules/net/owner.nix);
+  # member; ssh, dns and the cache push (at its store) to the fleet's
+  # admin's devices, dns alone to the box's host's (modules/net/owner.nix);
   # the store's port (storage/store.nix); between boxes only the channel
   # listed above, only from the house's other boxes' addresses. Cable and wifi are untouched: ssh
   # from the LAN is the way in if any of this is ever wrong.

@@ -1,6 +1,7 @@
 # shellcheck shell=bash
-# The owner's devices' addresses on the fleet's network, into the sets the
-# firewall lets in on the admin ports (roles/core.nix). From this box's own
+# A person's devices' addresses on the fleet's network, into a set the
+# firewall reads (owner.nix): the admin's (SET=dd-owner, the admin ports) or
+# the host's (SET=dd-host, dns alone). From this box's own
 # view of the network: each peer and the user it belongs to. Swapped in
 # whole, so a device that left is out by the next run. The owner's name is
 # matched whole: a member called "david@else" is not david.
@@ -21,6 +22,6 @@ fill() {
   ipset swap "$1-new" "$1"
   ipset destroy "$1-new"
 }
-fill dd-owner inet '^[0-9.]+$'
-fill dd-owner6 inet6 ':'
-echo "owner $OWNER: $(ipset list dd-owner | grep -c '^[0-9]') devices"
+fill "$SET" inet '^[0-9.]+$'
+fill "${SET}6" inet6 ':'
+echo "$SET $OWNER: $(ipset list "$SET" | grep -c '^[0-9]') devices"

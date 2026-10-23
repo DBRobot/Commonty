@@ -152,7 +152,6 @@ in
         codeFile = "${photoSecrets}/ente-ott";
         demoPasswordFile = "${photoSecrets}/ente-demo-password";
       };
-      dd.photos.admin = 1;
       services.ente.web.enable = lib.mkForce false;
       services.ente.api.settings = {
         s3 = {
@@ -196,7 +195,6 @@ in
         buckets.mail.writer = "box";
       };
       dd.libraries.enable = true;
-      dd.forgejo.admin = "mia";
       systemd.services.zfs-datasets = {
         wantedBy = [ "multi-user.target" ];
         serviceConfig = {

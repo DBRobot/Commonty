@@ -45,7 +45,7 @@ type JoinedRules struct {
 	// the switch, on in the release that brings attestation
 	Attested bool `json:"attested"`
 	// what the policy's trust tiers allow on a member's box: never what
-	// only the owner's boxes run (ownHardware, servesCode, trust owner), a
+	// only the owner's boxes run (servesCode, trust owner), a
 	// writer under a lease, or what reads a secret from the box's own file
 	Services []string `json:"services"`
 }

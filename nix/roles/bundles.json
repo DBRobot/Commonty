@@ -116,10 +116,6 @@
   },
   "runner": {
     "why": "VM tests (games nests one) and members' jobs; the nix cache in its home's store (nix/modules/forge/needs.nix)",
-    "secrets": [
-      "forgejo-runner-token",
-      "forgejo-members-runner-token"
-    ],
     "services": [
       "forgejo-runner",
       "members-runner"

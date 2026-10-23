@@ -301,7 +301,7 @@ nix build .#needs && jq 'keys' result
 What a box is built with comes from the needs:
 [`capability.nix`](../../nix/lib/capability.nix) holds each service's
 `requires` to the box's signed `hardware.json`, its owner's `box.json`
-and the policy (`trust`, `ownHardware`, a metered line), and
+and the policy (`trust`, a metered line), and
 [`fleet-placement.nix`](../../nix/lib/fleet-placement.nix) builds each box
 with the bundles of what it can run whose secrets its file holds
 ([what each service needs from a box](hardware.md)).

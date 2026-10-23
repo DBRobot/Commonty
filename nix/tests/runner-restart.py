@@ -12,12 +12,12 @@ from waits import (
 
 runner = nix["runner"]
 members = nix["members"]
-admin = nix["admin"]
-as_admin = (
-    f"curl -sf --unix-socket {nix['sock']} -H 'X-WEBAUTH-USER: {admin}' "
+owner = nix["owner"]
+as_owner = (
+    f"curl -sf --unix-socket {nix['sock']} -H 'X-WEBAUTH-USER: {owner}' "
     "-H 'content-type: application/json'"
 )
-api = f"http://forgejo/api/v1/repos/{admin}/commonty"
+api = f"http://forgejo/api/v1/repos/{owner}/commonty"
 
 
 def show(prop, unit=runner):
@@ -33,14 +33,14 @@ def config_capacity(unit=runner):
 
 
 def run_of(number):
-    runs = json.loads(box.succeed(f"{as_admin} '{api}/actions/runs?limit=20'"))
+    runs = json.loads(box.succeed(f"{as_owner} '{api}/actions/runs?limit=20'"))
     return next(r for r in runs["workflow_runs"] if r["index_in_repo"] == number)
 
 
 def wait_run(number, *status):
     want = " or ".join(f'.status == "{s}"' for s in status)
     box.wait_until_succeeds(
-        f"{as_admin} '{api}/actions/runs?limit=20' | jq -e "
+        f"{as_owner} '{api}/actions/runs?limit=20' | jq -e "
         f"'.workflow_runs[] | select(.index_in_repo == {number}) | {want}'",
         timeout=300,
     )
@@ -65,17 +65,14 @@ box.wait_until_succeeds(
 )
 box.wait_for_unit("nginx.service")
 box.succeed(
-    f'{as_admin} -X POST -d \'{{"name":"commonty","default_branch":"main","auto_init":true}}\' '
+    f'{as_owner} -X POST -d \'{{"name":"commonty","default_branch":"main","auto_init":true}}\' '
     "http://forgejo/api/v1/user/repos >/dev/null"
 )
 
-# the runner registers with a token the forge mints, as on a box
-token = json.loads(
-    box.succeed(
-        f"{as_admin} http://forgejo/api/v1/admin/actions/runners/registration-token"
-    )
-)["token"]
-box.succeed(f"umask 077; echo TOKEN={token} > /run/runner.env")
+# the runners register with tokens the forge's box makes and seals to this
+# one, as on a box: nobody mints one by hand
+box.succeed("systemctl start dd-runner-keys.service")
+box.succeed("test -s /var/lib/dd-runner-keys/box.host.age")
 for unit in (runner, members):
     u = shlex.quote(unit)
     box.succeed(f"systemctl reset-failed {u} || true; systemctl restart {u}")
@@ -84,6 +81,8 @@ for unit in (runner, members):
         f"journalctl -u {u} > /tmp/runner.log; grep -c 'declared successfully' /tmp/runner.log"
     )
     assert config_capacity(unit) == "1"
+box.succeed("grep -q '^TOKEN=.' /var/lib/dd-runner-token/host.env")
+box.succeed("grep -q '^TOKEN=.' /var/lib/dd-runner-token/members.env")
 # what a member's job runs in, there before the job asks for it
 box.succeed(f"docker load < {nix['jobImage']}")
 # the runners and docker on their first config are current: the restart
@@ -131,7 +130,7 @@ in_job = f"docker exec $({jobs}) "
 def push(name, job=job):
     content = base64.b64encode(job.encode()).decode()
     box.succeed(
-        f'{as_admin} -X POST -d \'{{"branch":"main","new_branch":"{name}","content":"{content}"}}\' '
+        f'{as_owner} -X POST -d \'{{"branch":"main","new_branch":"{name}","content":"{content}"}}\' '
         f"{api}/contents/.forgejo/workflows/{name}.yml >/dev/null"
     )
 
