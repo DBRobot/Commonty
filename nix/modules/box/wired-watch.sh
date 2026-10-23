@@ -9,8 +9,10 @@
 # cable is tried again until it answers. Never a reboot.
 # Environment: MAC (the wired adapter's), GATEWAY, PROFILE (house-wired),
 # WIFI (the wifi interface), DIR (this unit's state), FACTS (node_exporter's textfile folder), GRACE,
-# RETRY (seconds between full tries of the cable while on wifi).
+# RETRY (seconds between full tries of the cable while on wifi), SYS (default
+# /sys, a test's tree).
 set -u
+sys=${SYS:-/sys}
 # NetworkManager not up (stopped under a switch, or still starting): next time
 nmcli -t -f RUNNING general >/dev/null 2>&1 || exit 0
 
@@ -40,7 +42,7 @@ to() { # to <state>: a new state, from now
 
 iface() {
   local d
-  for d in /sys/class/net/*; do
+  for d in "$sys"/class/net/*; do
     [ "$(cat "$d/address" 2>/dev/null)" = "${MAC,,}" ] && { echo "${d##*/}"; return 0; }
   done
   return 1
@@ -73,7 +75,7 @@ comes_back() {
 # authorized again, which is a disconnect and a fresh probe of the driver
 usb_reset() {
   local dev usb
-  dev=$(readlink -f "/sys/class/net/$1/device" 2>/dev/null) || return 1
+  dev=$(readlink -f "$sys/class/net/$1/device" 2>/dev/null) || return 1
   [ "$(basename "$(readlink -f "$dev/subsystem" 2>/dev/null)")" = usb ] || return 1
   usb=${dev%/*}
   [ -w "$usb/authorized" ] || return 1
@@ -90,6 +92,21 @@ wired_down() {
 }
 
 dev=$(iface) || dev=""
+wifi_answers() {
+  [[ $(nmcli -t -g GENERAL.STATE device show "$WIFI" 2>/dev/null) == 100* ]] && answers "$WIFI"
+}
+# on the wifi and the wifi has stopped answering too: the cable back up at
+# once, so the box is never left with neither; a failing from now, so the
+# adapter's reset is tried once more after GRACE
+if [ "$state" = wifi ] && ! wifi_answers; then
+  echo "the router does not answer over the wifi ($WIFI) either: $PROFILE up again"
+  nmcli connection up "$PROFILE" >/dev/null 2>&1 || true
+  tried=$now
+  fail=$now
+  to failing
+  save
+  exit 0
+fi
 if [ "$state" = wifi ]; then
   # back the moment the router hears the cable again, and every RETRY a
   # full try in case this router does not answer a probe from no address
@@ -150,7 +167,7 @@ fi
 # only for a wifi the router answers on: with the wifi down too there is
 # nothing to fall back on, and a router that answers neither is the router
 # (or one that does not answer a ping), not the cable
-if [[ $(nmcli -t -g GENERAL.STATE device show "$WIFI" 2>/dev/null) == 100* ]] && answers "$WIFI"; then
+if wifi_answers; then
   wired_down
 elif [ "$acted" = "$now" ]; then
   echo "the router does not answer over the wifi ($WIFI) either: $PROFILE stays up"
