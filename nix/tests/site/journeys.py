@@ -146,6 +146,50 @@ def backups(page):
     return "the Backups tab opens"
 
 
+@journey("keys in a browser")
+def keys_in_browser(page):
+    """the parts of Settings that hold a key, in a plain browser: on the
+    box's page each is one button that hands it to the app (shell.js
+    throughApp), and says so plainly when no app takes it; the app's copy
+    in the same browser opens them"""
+    nothing = "Nothing opened: the Commonty app"
+    for tab, button in (
+        ("backups", '[data-pane="backups"] button:has-text("Open Backups")'),
+        ("devices", "#dv-show"),
+        ("leave", "#lv-files-go"),
+    ):
+        page.goto(url("home", f"/_dd/settings#{tab}"))
+        pane = page.locator(f'[data-pane="{tab}"]')
+        expect(pane).to_be_visible(timeout=T)
+        b = page.locator(button).first
+        expect(b).to_be_enabled(timeout=T)
+        if tab == "devices":
+            # the box hands this to the app once it knows it is no demo
+            page.wait_for_load_state("networkidle")
+        b.click()
+        # no app on this computer: the page says so, with the download
+        expect(pane.get_by_text(nothing).first).to_be_visible(timeout=T)
+        expect(
+            pane.locator('a[href="/_dd/download"]', has_text="Get the Commonty app").first
+        ).to_be_visible(timeout=T)
+        expect(page).to_have_url(url("home", f"/_dd/settings#{tab}"))
+    # the app's copy of Settings, in the same browser: the names open
+    page.goto(APPURL + "/_dd/settings#devices")
+    show = page.locator("#dv-show")
+    expect(show).to_be_enabled(timeout=T)
+    show.click()
+    expect(show).to_be_enabled(timeout=T)
+    page.wait_for_load_state("networkidle")
+    msg = page.locator("#dv-msg").inner_text()
+    assert not msg.strip(), f"Show names in the app's copy: {msg!r}"
+    # and the Leave tab's downloads are live there, not handed on
+    page.goto(APPURL + "/_dd/settings#leave")
+    expect(page.locator("#lv-take-box")).to_be_visible(timeout=T)
+    expect(page.locator("#lv-not-app")).to_be_hidden(timeout=T)
+    expect(page.locator("#lv-files-go")).to_be_enabled(timeout=T)
+    return "disk images, device names and Leave's downloads hand off to the app, and open in its copy"
+
+
 @journey("docs")
 def docs(page):
     page.goto(url("home", "/_dd/home"))
@@ -343,6 +387,7 @@ def main():
                 settings,
                 devices,
                 backups,
+                keys_in_browser,
                 docs,
                 git,
                 metrics,
