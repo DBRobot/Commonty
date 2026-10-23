@@ -251,6 +251,9 @@ export default {
       await req.text().catch(() => '');
       return new Response('not here', { status: 404 });
     }
-    return env.RELAY.get(env.RELAY.idFromName('relay')).fetch(req);
+    // a fresh object: the one named 'relay' wedged on its witness's saved
+    // state and answered nothing, however often the code was replaced
+    // (2026-10-23)
+    return env.RELAY.get(env.RELAY.idFromName('relay-1023')).fetch(req);
   },
 };
