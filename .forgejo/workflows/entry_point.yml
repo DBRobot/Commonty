@@ -524,7 +524,9 @@ jobs:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       - name: build the installer's drive on ${{ matrix.on }}, then again to compare
         run: |
-          out=$(nix build --no-link --print-out-paths .#installers.x86_64-linux.box)
+          # an out-link is a root: the box's GC deleted the unrooted first
+          # build before the rebuild could compare against it (2026-10-23)
+          out=$(nix build --out-link "$RUNNER_TEMP/installer" --print-out-paths .#installers.x86_64-linux.box)
           nix build --no-link --rebuild .#installers.x86_64-linux.box
           nix path-info --json-format 1 --json "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(Object.values(JSON.parse(s))[0].narHash))' | tee "$RUNNER_TEMP/nar"
       - name: record the hash
