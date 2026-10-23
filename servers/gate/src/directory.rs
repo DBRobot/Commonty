@@ -1243,10 +1243,6 @@ pub const GUEST_TTL: u64 = 15 * 60;
 /// how long a sign-up that has not followed through is kept
 pub const HELD_TTL: u64 = 7 * 24 * 3600;
 
-/// the boxes' own identities on the forge, which no person is: the accept
-/// rule refuses an entry under either (identity::RESERVED_NAMES)
-pub use identity::RESERVED_NAMES as BOX_IDENTITIES;
-
 pub fn is_guest(name: &str) -> bool {
     name.starts_with(GUEST_PREFIX)
 }
@@ -2450,7 +2446,7 @@ mod tests {
         assert_eq!(status, StatusCode::CONFLICT);
 
         // nor the boxes' own identities on the forge, which no person is
-        for name in BOX_IDENTITIES {
+        for name in identity::RESERVED_NAMES {
             let (status, _) = d
                 .hold(&sign(entry(name, &mallory, &[], 1), &mallory).unwrap())
                 .unwrap_err();
@@ -2574,7 +2570,7 @@ mod tests {
         let dir = scratch("reserved");
         let d = Directory::open(dir.clone(), None).unwrap();
         let k = generate();
-        for name in BOX_IDENTITIES {
+        for name in identity::RESERVED_NAMES {
             let signed = sign(entry(name, &k, &[], 1), &k).unwrap();
             let (status, _) = d.admit(signed.clone()).await.unwrap_err();
             assert_eq!(status, StatusCode::FORBIDDEN, "{name}: admit");
