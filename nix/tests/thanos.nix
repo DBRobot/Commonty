@@ -31,6 +31,7 @@ let
       ./box.nix
       ../modules/storage/garage.nix
       ../modules/observe/thanos.nix
+      ../modules/observe/uptime.nix
     ];
     dd.garage = {
       zone = "r-test";
@@ -79,10 +80,22 @@ in
             b = "192.168.1.2";
           };
           environment.systemPackages = [ pkgs.jq ];
+          # a stand-in for a service members use, for the uptime page
+          systemd.services.dd-games = {
+            wantedBy = [ "multi-user.target" ];
+            script = "exec sleep infinity";
+          };
+          # a is built with Games; b is not, and its word on Games is not asked
+          dd.verify.serviceBoxes = pkgs.lib.mkForce { games = [ "a" ]; };
         }
       ];
     };
-    b = box "b";
+    b = {
+      imports = [ (box "b") ];
+      # a Games that is not running, on a box not built with it: b notes it
+      # down, and the uptime page must not believe it
+      systemd.services.dd-games.script = "exec sleep infinity";
+    };
   };
   scriptEnv = {
     inherit rpc;

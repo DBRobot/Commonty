@@ -274,6 +274,15 @@ in
     defaultText = lib.literalExpression ''"https://git.''${config.dd.domain}/''${config.dd.repo}/raw/branch/releases/members.json"'';
     description = "url of the signed member list (releases branch, members.json), served at /_dd/members; null: not served";
   };
+  # Whose word counts on whether a service works, for the uptime page: the
+  # boxes the release builds with it (observe/uptime.nix, from
+  # nix/lib/fleet-placement.nix). Any other box's note about it is ignored
+  # (servers/gate/src/status.rs).
+  options.dd.verify.serviceBoxes = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+    default = { };
+    description = "uptime service id -> the boxes the release builds with it; empty: no service is shown";
+  };
   # Posters for Movies & TV: a member's device asks TMDB for a title's art
   # with this key and keeps it, sealed, in the library. The key goes to
   # signed-in pages (/_dd/me); the titles never come near the box.
@@ -425,6 +434,9 @@ in
       }
       // lib.optionalAttrs (cfg.memberList != null) {
         VERIFY_MEMBER_LIST = cfg.memberList;
+      }
+      // lib.optionalAttrs full {
+        VERIFY_SERVICE_BOXES = builtins.toJSON cfg.serviceBoxes;
       }
       // lib.optionalAttrs (full && cfg.appManifest != null) {
         VERIFY_APP_MANIFEST = cfg.appManifest;

@@ -79,6 +79,10 @@ async fn main() -> Result<()> {
         thanos: std::env::var("VERIFY_THANOS")
             .ok()
             .filter(|s| !s.is_empty()),
+        // which boxes the release builds with each service the uptime page
+        // shows (status.rs): only their word counts
+        service_boxes: serde_json::from_str(&env_or("VERIFY_SERVICE_BOXES", "{}"))
+            .context("VERIFY_SERVICE_BOXES")?,
         forge_events: std::env::var("VERIFY_FORGE_EVENTS")
             .ok()
             .filter(|s| !s.is_empty()),

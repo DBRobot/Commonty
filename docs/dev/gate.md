@@ -944,6 +944,51 @@ gate passes on only those that say `"private": false`.
 The Git and Metrics pages are served to anyone signed in; the forge's
 API and the metrics queries (behind `auth_request`) decide what each sees.
 
+### Status ([status.rs](../../servers/gate/src/status.rs))
+
+`/_dd/status.json` (anyone): whether each service members use works now,
+and each of the last 90 days. Uptime alone: no release, box or place in
+it. Every box notes its own services each minute
+([uptime.nix](../../nix/modules/observe/uptime.nix)): a service is up there
+when every unit it needs on that box runs and, where it has one, its own
+address on loopback answers short of a 5xx. A placed service (needs
+`placed` or `lease`) is noted only on the box the plan runs it on, where
+its flag `/run/dd-placed/<service>` is; elsewhere the box says nothing of
+it. The note is `dd_service_up{service="<id>"}` in
+`/var/lib/dd-facts/uptime.prom`, read by node_exporter like the other
+facts. No box asks another.
+
+The gate reads the notes from thanos on its own box (`VERIFY_THANOS`), by
+service and box, and counts a box's note on a service only when the
+release builds that box with it (`VERIFY_SERVICE_BOXES`,
+`dd.verify.serviceBoxes`, which uptime.nix works out from
+`nix/lib/fleet-placement.nix` builtWith): no box is trusted, and one not
+built with it cannot make a service look up or down. A service noted on
+two boxes is as up as the worse of them.
+Now is the instant value (a service noted before and silent now is down);
+when it changed is from the last six hours by the minute, else from the
+quarter hours; each day is the share of its quarter hours up
+(`avg_over_time(...[15m])`), a missing quarter hour counting as down,
+except the three hours after a service's newest note, which another box's
+block may still bring. Days are UTC days; a day before a service's first
+note is `null`.
+
+```
+{"services": [{"id": "photos", "label": "Photos", "up": true,
+               "since": <unix secs>, "days": [1.0, 0.99, null, ...]}],
+ "checked": <unix secs>, "start": <the first day's midnight, UTC>}
+```
+
+The ids and labels are the gate's own list (`SERVICES`): site, files,
+movies, photos, passwords, chat, games, git. A service a box names that is
+not on it is dropped, and nothing of a box (its name, address, site, how
+many there are) is in the answer, for members or anyone else. No thanos on
+this box: 503. Mail forwarding is not on it: it runs at Cloudflare, and
+nothing a box can see says whether it delivers.
+
+The page is `/_dd/status` ([servers/status](../../servers/status/web)),
+at `<domain>/status`, linked from every page's footer.
+
 ### Chat search
 
 `GET /_dd/chat/search?q=` (members only): asks SearXNG on this box
@@ -1052,7 +1097,8 @@ forge as nobody under
 `/download/vX.Y.Z/<file>`, and serves the docs (`/docs`, `/docs/...`)
 with only the gate paths their page needs: `/_dd/static/`, `/_dd/web/`,
 `/_dd/docs/`, `/_dd/me`, `/_dd/config`, `/_dd/csp`, and
-`/_dd/releases.json` (Monty's what-is-new).
+`/_dd/releases.json` (Monty's what-is-new). And the uptime page,
+`/status`, with its one answer `/_dd/status.json`.
 
 It also serves `/.well-known/security.txt` (RFC 9116,
 [security-txt.nix](../../nix/modules/gate/security-txt.nix)): Contact
@@ -1150,6 +1196,7 @@ chat search                  query under 300 chars, 6 results, 12 s
 biscuit authorizer           200 ms
 app manifest                 kept 10 min (1 min when missing)
 fleet.json                   kept 15 s
+status.json                  worked out once a minute, its days every 10 min; public, max-age 30 s
 ```
 
 ## Routes
@@ -1286,6 +1333,8 @@ path                                        method   what                       
                                                                                                name and key allowances, sent once)
 -- the rest
 /_dd/fleet.json                             GET      boxes' release, agent, backup             member (session or token)
+/_dd/status                                 GET      the uptime page                           anyone
+/_dd/status.json                            GET      each service up, and its 90 days          anyone
 /_dd/git/events                             GET      forge changes (SSE)                       member (session or token)
 /_dd/chat/search                            GET      web search                                member
 /_dd/adblock/state                          GET      on/off, totals, lists                     household member, session or token
@@ -1354,7 +1403,8 @@ VERIFY_HOUSE_PEERS             the house's boxes
 VERIFY_NAMES                   names besides the domain's a token may be for (the box's fleet address)
 VERIFY_DIRECTORY_READERS       keys that may read one entry, never the list (the mail Worker's)
 VERIFY_FLEET                   box -> address, json
-VERIFY_THANOS                  Thanos query, when there is no control plane
+VERIFY_THANOS                  Thanos query, when there is no control plane, and the uptime page (status.rs)
+VERIFY_SERVICE_BOXES           service -> the boxes the release builds with it, json (status.rs)
 VERIFY_HOUSE                   /run/dd-wifi (home-network.nix; home.rs)
 VERIFY_HOUSE_ORIGINS           where a Wi-Fi change may be signed (home.rs)
 VERIFY_ENDED                   /run/dd-ended, for Passwords (vaultwarden.nix; directory.rs)

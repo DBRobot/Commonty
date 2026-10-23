@@ -76,6 +76,37 @@ assert set(by) == {"a", "b"}, seen
 for n in ("a", "b"):
     assert by[n]["up"], (n, seen)
 
+# the uptime page's answer: each box notes its own services, and the gate
+# reads them from thanos as services alone, for anyone: no token here
+a.wait_for_unit("dd-games.service")
+a.succeed("systemctl start dd-uptime.service")
+a.succeed("grep -q 'dd_service_up{service=\"games\"} 1' /var/lib/dd-facts/uptime.prom")
+b.succeed("systemctl start dd-uptime.service")
+b.succeed("grep -q 'dd_service_up{service=\"games\"} 0' /var/lib/dd-facts/uptime.prom")
+a.wait_until_succeeds(
+    "curl -sf http://127.0.0.1:4181/_dd/status.json -o /tmp/s && jq -e '.services[0].id == \"games\" and .services[0].up' /tmp/s",
+    timeout=300,
+)
+status = json.loads(a.succeed("cat /tmp/s"))
+assert set(status) == {"services", "checked", "start"}, status
+assert [x["id"] for x in status["services"]] == ["games"], status
+assert set(status["services"][0]) == {"id", "label", "up", "since", "days"}, status
+assert len(status["services"][0]["days"]) == 90, status
+for no in ("box", "release", "192.168", '"a"', '"b"'):
+    assert no not in json.dumps(status), (no, status)
+
+# b's "down" reaches thanos with its next block, and changes nothing
+a.wait_until_succeeds(
+    "curl -sf 'http://127.0.0.1:10903/api/v1/query?query=dd_service_up' -o /tmp/q && grep -q '\"box\":\"b\"' /tmp/q",
+    timeout=600,
+)
+a.succeed("systemctl restart dd-verify.service")
+a.wait_for_open_port(4181)
+a.wait_until_succeeds(
+    "curl -sf http://127.0.0.1:4181/_dd/status.json -o /tmp/s && jq -e '.services[0].id == \"games\" and .services[0].up' /tmp/s",
+    timeout=60,
+)
+
 # b goes away: a still answers, with what it has
 b.shutdown()
 a.wait_until_succeeds(

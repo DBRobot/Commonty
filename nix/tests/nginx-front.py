@@ -141,6 +141,10 @@ def front():
     # the docs, the download and everything else as before
     served("/docs", "/_dd/docs/page")
     served("/docs/guide/joining", "/_dd/docs/page/guide/joining")
+    # the uptime page and its one answer, for anyone
+    served("/status", "/_dd/status")
+    served("/_dd/status.json", "/_dd/status.json")
+    served("/_dd/static/status.js", "/_dd/static/status.js")
     # the one fixed address; everything else a 302, which browsers don't keep
     moved("/download", f"https://{home}/_dd/download", want="301")
     moved("/_dd/login", f"https://{home}/_dd/login")

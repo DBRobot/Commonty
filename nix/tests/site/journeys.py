@@ -170,7 +170,9 @@ def keys_in_browser(page):
         # no app on this computer: the page says so, with the download
         expect(pane.get_by_text(nothing).first).to_be_visible(timeout=T)
         expect(
-            pane.locator('a[href="/_dd/download"]', has_text="Get the Commonty app").first
+            pane.locator(
+                'a[href="/_dd/download"]', has_text="Get the Commonty app"
+            ).first
         ).to_be_visible(timeout=T)
         expect(page).to_have_url(url("home", f"/_dd/settings#{tab}"))
     # the app's copy of Settings, in the same browser: the names open

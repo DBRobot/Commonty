@@ -94,6 +94,8 @@ PUBLIC = {
     "/_dd/oidc/jwks": "the OIDC signing key",
     "/_dd/controller-name": "the passkey naming page; it signs in itself",
     "/_dd/landing": "the front page",
+    "/_dd/status": "the uptime page",
+    "/_dd/status.json": "each service up, and its 90 days: names no box and no release (status.rs)",
     "/_dd/joke": "an easter egg page, no data",
     "/_dd/sso/start": "sign-in at the id Worker",
     "/_dd/sso/creds": "the passkey ids a name has, for the id Worker",
