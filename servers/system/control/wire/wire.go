@@ -27,6 +27,9 @@ const (
 	Submit    byte = 3 // a box's signed request, to the validators
 	SyncAsk   byte = 4 // "send me your latest", from anyone
 	SyncState byte = 5 // the answer: a state and the decision after it
+	// a validator's state machine version and config, to the others
+	// (validator/stand.go); a validator of release 359 drops it unread
+	Stand byte = 6
 )
 
 const header = 17

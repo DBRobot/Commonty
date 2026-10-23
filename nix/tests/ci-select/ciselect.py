@@ -37,7 +37,13 @@ SYSTEM = "x86_64-linux"
 GROUPS = {
     # the Cloudflare Workers under wrangler: mail, DNS, sign-in (the id
     # Worker with the gate), the control plane's relay and validators
-    "worker_tests": ["mail-worker", "dns-worker", "sso", "control"],
+    "worker_tests": [
+        "mail-worker",
+        "dns-worker",
+        "sso",
+        "control",
+        "control-upgrade",
+    ],
     # the Mail and Files pages as the app serves them, and every bar link
     # and home tile staying in its tab
     "page_tests": ["mail-page", "files-page", "same-tab"],

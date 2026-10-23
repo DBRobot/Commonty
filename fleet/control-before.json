@@ -1,0 +1,58 @@
+{
+  "boxes": {
+    "node1": {
+      "house": "s-c844d9db",
+      "id": 101,
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELRZDrWYKFKtGq+do2nX7R9PlilX4RYtwQpU4wXvvusU17sPvF+unSH47FDRYCLeBcWZre2c23qpunpO4VQxcew=="
+    },
+    "node2": {
+      "house": "s-c844d9db",
+      "id": 102,
+      "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAErdNeAqS43JeMu981L3PiMhDBjRBM6xuS1S9ccMWGTGuJsLpLCL2jQgLBTmGkABbmzQnt0agYO1GlLNgL5SZZ1Q=="
+    }
+  },
+  "computers": {
+    "disk": 200,
+    "memory": 16384,
+    "owners": [],
+    "portBase": 27200,
+    "portCount": 200,
+    "threads": 8
+  },
+  "identity": {
+    "admin": "david",
+    "members": {
+      "members": [
+        "26a1cf1d1dd2d2ecd586c50283efa4c362bb030bda8db091bd7baf15bfcb65dc"
+      ],
+      "names": {
+        "26a1cf1d1dd2d2ecd586c50283efa4c362bb030bda8db091bd7baf15bfcb65dc": "57250a53bfb2ed651b8bd68340fc6cce00dcf74388edc41a86d3d3504e1ccef5"
+      },
+      "revoked": []
+    },
+    "release": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo="
+  },
+  "rules": {
+    "computerHosts": {},
+    "goneAfterMs": 90000,
+    "leaseTtlMs": 15000,
+    "leases": {}
+  },
+  "validators": [
+    {
+      "id": 1,
+      "key": "ySFFY9wNa5OP5y2jx/XbQn6Lzn54yL5u/MpVEezyHtc=",
+      "name": "node1"
+    },
+    {
+      "id": 2,
+      "key": "JD/J+8G9wKZRaXFn/DsNEsicGaMQhaT9EOhN4pdsU2Y=",
+      "name": "node2"
+    },
+    {
+      "id": 3,
+      "key": "zF+A+n3gV0ijMsv6g9VIMlnmH/KSUkGOM05fhSGKEKQ=",
+      "name": "cloudflare"
+    }
+  ]
+}

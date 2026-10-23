@@ -29,6 +29,9 @@ type Config struct {
 	// what members' remote computers may take (state/computers); absent:
 	// no /computers
 	Computers *computers.Limits `json:"computers,omitempty"`
+	// the config the release before this one ran, exactly: what every
+	// validator applies under until a config is agreed (machine.go)
+	Before *Config `json:"before,omitempty"`
 }
 
 // BoxVoters: the validators that are boxes, whose gates acknowledge a new
@@ -194,6 +197,14 @@ type State struct {
 	JoinCount  int                `json:"joinCount,omitempty"`
 	// the newest release's staged rollout (rollout.go)
 	Rollout *Rollout `json:"rollout,omitempty"`
+	// the agreed state machine and config (machine.go): absent until every
+	// validator and live box runs version 2, so a state before that hashes
+	// as release 359's does
+	Machine int             `json:"machine,omitempty"`
+	Config  json.RawMessage `json:"config,omitempty"`
+	// the agreed time of the block that agreed Config: a stand from before
+	// it never agrees another (validator/stand.go)
+	ConfigTime int64 `json:"configTime,omitempty"`
 }
 
 func New() *State {
@@ -270,7 +281,10 @@ func (s *State) Check(cfg *Config, verify Verify, r Request, now int64) error {
 		}
 		return nil
 	case "rollout":
-		return s.checkRollout(cfg, r.Box, r.Body, now)
+		// version 2's; version 1 knew no such request
+		if s.Version() >= 2 {
+			return s.checkRollout(cfg, r.Box, r.Body, now)
+		}
 	}
 	return fmt.Errorf("no such request: %q", r.Kind)
 }

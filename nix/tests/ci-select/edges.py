@@ -18,6 +18,8 @@ def run(root):
     # a check covers.json has not traced yet runs on every change until it
     # is; the cases judge the traced ones, and that it ran
     untraced = every - covers["checks"]
+    # the group jobs as the cases judge them: of the traced checks only
+    groups = {g: [t for t in ts if t not in untraced] for g, ts in cs.GROUPS.items()}
 
     def named():
         for d, _, fs in os.walk(root):
@@ -138,7 +140,7 @@ def run(root):
             lambda r: (
                 r["all"]
                 and r["installer"]
-                and all(r[g] == ts for g, ts in cs.GROUPS.items())
+                and all(r[g] == ts for g, ts in groups.items())
             ),
         ),
         (
@@ -155,7 +157,7 @@ def run(root):
             "a page script the app carries",
             [("M", "app/web/_dd/static/calendar.js")],
             lambda r: (
-                r["page_tests"] == cs.GROUPS["page_tests"]
+                r["page_tests"] == groups["page_tests"]
                 and r["site_checks"] == ["site-links"]
                 and not r["worker_tests"]
                 and set(r["vm_tests"]) <= {"site-journeys"}
@@ -217,7 +219,7 @@ def run(root):
             lambda r: (
                 r["all"]
                 and r["installer"]
-                and all(r[g] == ts for g, ts in cs.GROUPS.items())
+                and all(r[g] == ts for g, ts in groups.items())
             ),
         ),
         (
@@ -272,6 +274,7 @@ def run(root):
             r,
             chosen=[t for t in r["chosen"] if t not in untraced],
             vm_tests=[t for t in r["vm_tests"] if t not in untraced],
+            **{g: [t for t in r[g] if t not in untraced] for g in cs.GROUPS},
         )
         good = bool(ok(seen)) and (r["docs_only"] or untraced <= set(r["chosen"]))
         if not good:
