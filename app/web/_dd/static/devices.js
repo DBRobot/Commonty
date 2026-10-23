@@ -4,7 +4,7 @@
 // names from a file only your library key opens, which the box keeps
 // without being able to read it.
 
-import init, { file_seal, file_open, entry_without, box_item_plan, box_item_envelope, entry_signed, entry_with_device, entry_resign, entry_envelope, qr_svg } from '/_dd/web/dd_web.js';
+import init, { file_seal, file_open, entry_without, box_item_plan, box_item_envelope, signout_plan, entry_signed, entry_with_device, entry_resign, entry_envelope, qr_svg } from '/_dd/web/dd_web.js';
 import { unlock } from './library.js';
 import { requestOptions, assertion, post, b64u, u8b64 } from './webauthn.js';
 import { me, inApp, servedByApp, appFetch, pageConfig, entryOf, forgetEntry } from './shell.js';
@@ -99,6 +99,39 @@ function endMailElsewhere() {
   frame.contentWindow.postMessage('end-others', new URL(frame.src).origin);
 }
 
+// Every other box too: the account's main key signs that every sign-in
+// before now is over, but this one (state/ident signout.go). The app signs
+// it where it holds the main key, a passkey account here. False where
+// neither can.
+async function signOutEverywhere() {
+  const keep = (signins.sessions || []).find((s) => s.current)?.id || '';
+  if (rootHere) {
+    const r = await appFetch('/_dd/app/signout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keep }) });
+    if (!r.ok) throw new Error(await r.text() || `the app said ${r.status}`);
+    return true;
+  }
+  if (!canSignBoxes()) return false;
+  await init();
+  const plan = JSON.parse(signout_plan(JSON.stringify(entry), keep, BigInt(Math.floor(Date.now() / 1000))));
+  const cfg = await pageConfig();
+  const a = await navigator.credentials.get({
+    publicKey: {
+      challenge: b64u(plan.challenge),
+      rpId: cfg.rpId,
+      allowCredentials: [{ type: 'public-key', id: b64u(entry.entry.root.split(':')[1]) }],
+      userVerification: 'preferred',
+    },
+  });
+  const env = box_item_envelope('signout', plan.body, JSON.stringify({
+    authenticatorData: u8b64(a.response.authenticatorData),
+    clientDataJSON: u8b64(a.response.clientDataJSON),
+    signature: u8b64(a.response.signature),
+  }));
+  const r = await fetch('/_dd/boxes/signout', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: env });
+  if (!r.ok) throw new Error(await r.text() || `the box said ${r.status}`);
+  return true;
+}
+
 async function endSessions(body, button) {
   button.disabled = true;
   const send = () => fetch('/_dd/signins/end', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -109,9 +142,16 @@ async function endSessions(body, button) {
       r = await send();
     }
     if (!r.ok) throw new Error(await r.text());
-    if (body.others) endMailElsewhere();
+    let said = '';
+    if (body.others) {
+      endMailElsewhere();
+      said = (await signOutEverywhere())
+        ? 'Signed out everywhere else.'
+        : 'Signed out of this box. Your main key is on your own device: sign out everywhere from the app there.';
+    }
     await load();
     render();
+    if (said) $('dv-msg').textContent = said;
   } catch (e) {
     button.disabled = false;
     $('dv-msg').textContent = e.name === 'NotAllowedError' ? 'Your passkey was not used.' : String(e.message || e);
@@ -306,7 +346,8 @@ function render() {
   const sessions = signins.sessions || [];
   $('dv-sessions').replaceChildren(...sessions.map(sessionRow));
   $('dv-none').hidden = sessions.length > 0;
-  $('dv-others').hidden = sessions.filter((s) => !s.current).length === 0;
+  // it also reaches other boxes' sessions, which are not listed here
+  $('dv-others').hidden = !canSignBoxes() && sessions.filter((s) => !s.current).length === 0;
   let d = 0;
   let p = 0;
   $('dv-keys').replaceChildren(...keys().map((k) => keyRow(k, k.passkey ? ++p : ++d)));

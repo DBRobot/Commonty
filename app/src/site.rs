@@ -305,6 +305,10 @@ async fn serve<R: Runtime>(
     {
         return box_item(app, kind, req.body()).await;
     }
+    // signed out everywhere, signed by the main key here
+    if path == "/_dd/app/signout" && req.method() == "POST" {
+        return sign_out_everywhere(app, req.body()).await;
+    }
     // the Leave tab's downloads, written to the Downloads folder here
     // (export.rs): the window's scheme cannot stream a download
     if path.starts_with("/_dd/app/export") {
@@ -892,12 +896,48 @@ pub(crate) async fn send_box_item<R: Runtime>(
         identity::now(),
     );
     let env = identity::envelope::seal_json(kind, &body, root).map_err(|e| e.to_string())?;
+    put_signed(app, kind, &env).await
+}
+
+/// Sign out everywhere (state/ident signout.go), signed by the account's
+/// main key here: every sign-in before now ends on every box, but `keep`,
+/// the session of the window that asked, if it keeps its own.
+async fn sign_out_everywhere<R: Runtime>(
+    app: &AppHandle<R>,
+    body: &[u8],
+) -> Result<Response<Vec<u8>>, String> {
+    let keys = app.state::<crate::account::Keys>();
+    let v: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    let Some(root) = account::load_root(&keys.0).map_err(|e| e.to_string())? else {
+        return Ok(plain(
+            StatusCode::FORBIDDEN,
+            "the account's main key is not on this device",
+        ));
+    };
+    let so = identity::envelope::SignOut::new(
+        &identity::encode_public(&root.verifying_key()),
+        identity::now(),
+        v["keep"].as_str().unwrap_or_default(),
+    );
+    let env = identity::envelope::seal_json(identity::envelope::SIGNOUT, &so, &root)
+        .map_err(|e| e.to_string())?;
+    put_signed(app, identity::envelope::SIGNOUT, &env).await?;
+    Ok(json_response(&serde_json::json!({ "ok": true })))
+}
+
+/// A root-signed item put to the member's door (member_boxes.rs put_item).
+/// Sent already is sent.
+async fn put_signed<R: Runtime>(
+    app: &AppHandle<R>,
+    kind: &str,
+    env: &identity::envelope::Envelope,
+) -> Result<(), String> {
     let base = media::gate::door_base(&crate::account::dirs()).map_err(|e| e.to_string())?;
     let r = directory::http()
         .map_err(|e| e.to_string())?
         .put(format!("{base}/_dd/boxes/{kind}"))
         .bearer_auth(token(app)?)
-        .json(&env)
+        .json(env)
         .send()
         .await
         .map_err(|e| format!("the box did not answer: {e}"))?;

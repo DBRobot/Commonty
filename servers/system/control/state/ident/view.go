@@ -92,6 +92,10 @@ type Member struct {
 	Enlisted []BoxView `json:"enlisted"`
 	// the admin's extension, while it runs (ms)
 	GraceUntil uint64 `json:"grace_until,omitempty"`
+	// every sign-in of theirs begun before this (ms) is over, on every box,
+	// but the one session id in SignedOutKeep (signout.go)
+	SignedOut     uint64 `json:"signed_out,omitempty"`
+	SignedOutKeep string `json:"signed_out_keep,omitempty"`
 }
 
 // Owner is whose an enlisted box is, and the ticket it was enlisted with
@@ -215,6 +219,7 @@ func (s *State) View(cfg *Config, height uint64, timeMs int64, boxes Boxes) *Vie
 			Removed: removedOf(cfg, e) * 1000, Boxes: nz(s.boxesOf(n, at)), Format: format, Item: h.Item,
 			Access: access, Enlisted: nz(enlisted), GraceUntil: grace * 1000,
 		}
+		m.SignedOut, m.SignedOutKeep = s.signedOut(n, e)
 		v.Members[n] = m
 		for _, b := range m.Boxes {
 			en := s.Enlisted[b]

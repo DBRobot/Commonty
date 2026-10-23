@@ -17,6 +17,7 @@ pub const INVITE: &str = "invite";
 pub const ENLIST: &str = "enlist";
 pub const UNENLIST: &str = "unenlist";
 pub const EXTEND: &str = "extend";
+pub const SIGNOUT: &str = "signout";
 
 /// A member's root naming a box as theirs: the box joined with `ticket`
 /// (the id of a join ticket of theirs), `at` its own date (seconds). The
@@ -54,6 +55,30 @@ pub struct Extend {
     pub name: String,
     pub until: u64,
     pub at: u64,
+}
+
+/// A member's root signing them out everywhere: every sign-in begun before
+/// `at` (seconds) is over, on every box, but `keep` - the session id of the
+/// browser or app that asked, if it keeps its own. The judge (state/ident
+/// signout.go) holds the rest.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SignOut {
+    /// member_id of the root signing it
+    pub member: String,
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub keep: String,
+}
+
+impl SignOut {
+    pub fn new(root: &str, at: u64, keep: &str) -> Self {
+        Self {
+            member: crate::member_id(root),
+            at,
+            keep: keep.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -41,6 +41,9 @@ struct State {
     ended: BTreeMap<String, u64>,
     /// by user, then by device fingerprint or "passkey:<id>"
     keys: BTreeMap<String, BTreeMap<String, KeyUse>>,
+    /// by user, the newest sign-out everywhere (ms) taken here: taken once
+    #[serde(default)]
+    signed_out: BTreeMap<String, u64>,
 }
 
 pub struct SignIns {
@@ -128,6 +131,43 @@ impl SignIns {
         let taken = self.save(&mut s, fresh);
         drop(s);
         self.write(taken);
+    }
+
+    /// When this box first saw a session (seconds), if it knows it.
+    pub fn first_of(&self, id: &str) -> Option<u64> {
+        self.state
+            .lock()
+            .unwrap()
+            .0
+            .sessions
+            .get(id)
+            .map(|s| s.first)
+    }
+
+    /// A sign-out everywhere at `at` (ms) not taken here before: every
+    /// session of `user` this box began before it ends, but `keep`. Whether
+    /// it was new here.
+    pub fn sign_out(&self, user: &str, at: u64, keep: &str) -> bool {
+        let mut s = self.state.lock().unwrap();
+        if s.0.signed_out.get(user).is_some_and(|t| *t >= at) {
+            return false;
+        }
+        let gone: Vec<(String, u64)> = s
+            .0
+            .sessions
+            .iter()
+            .filter(|(id, v)| v.user == user && crate::ident::signed_out_of(at, keep, id, v.first))
+            .map(|(id, v)| (id.clone(), v.exp))
+            .collect();
+        for (id, exp) in gone {
+            s.0.sessions.remove(&id);
+            s.0.ended.insert(id, exp);
+        }
+        s.0.signed_out.insert(user.to_string(), at);
+        let taken = self.save(&mut s, true);
+        drop(s);
+        self.write(taken);
+        true
     }
 
     /// The device a session was signed in by, if one was.
@@ -282,6 +322,27 @@ mod tests {
         assert_eq!(kind(safari), "Safari on iOS");
         assert_eq!(kind("dd/0.1.0 (linux)"), "Linux computer");
         assert_eq!(kind(""), "Something unrecognised");
+    }
+
+    #[test]
+    fn a_sign_out_everywhere_ends_this_persons_older_sessions_once() {
+        let s = SignIns::open(None);
+        let exp = now() + 3600;
+        s.saw("tom", "old", exp, "", None);
+        s.saw("tom", "kept", exp, "", None);
+        s.saw("sam", "other", exp, "", None);
+        let at = (now() + 1) * 1000;
+        assert!(s.sign_out("tom", at, "kept"));
+        assert!(s.is_ended("old"));
+        assert!(!s.is_ended("kept"), "the session that asked");
+        assert!(!s.is_ended("other"), "someone else's");
+        assert!(s.first_of("kept").is_some_and(|t| t <= now()));
+        // taken once: begun after it, a session stays when it comes again
+        s.saw("tom", "new", exp, "", None);
+        assert!(!s.sign_out("tom", at, "kept"));
+        assert!(!s.sign_out("tom", at - 1000, ""), "an older one is no news");
+        assert!(!s.is_ended("new"));
+        assert!(s.first_of("gone").is_none());
     }
 
     #[test]

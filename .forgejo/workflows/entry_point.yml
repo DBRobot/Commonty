@@ -209,7 +209,8 @@ jobs:
         # as the app serves them, every bar link and home tile staying in
         # its tab (same-tab), the DNS Worker at its API, sign-in once for
         # every box (sso), the control plane's relay, witness and
-        # validators (control): those the change can reach (files_modified)
+        # validators (control), signing out everywhere across them
+        # (signout): those the change can reach (files_modified)
         check: ${{ fromJSON(needs.files_modified.outputs.mail_worker) }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved

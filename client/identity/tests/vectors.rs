@@ -259,6 +259,13 @@ fn all() -> serde_json::Value {
     )
     .unwrap();
 
+    let signout_v2 = envelope::seal_json(
+        envelope::SIGNOUT,
+        &envelope::SignOut::new(&ada2.root, 1_791_700_000, "kept_sign-in1"),
+        &ada_new_root,
+    )
+    .unwrap();
+
     // random entries: every awkward string serde writes, nested values with
     // awkward keys, the Go rebuild held to each byte
     let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
@@ -330,6 +337,7 @@ fn all() -> serde_json::Value {
             "leave": {"envelope": leave_v2, "key": ada2.root},
             "invite": {"envelope": invite_v2, "key": encode_public(&release.verifying_key())},
             "enlist": {"envelope": enlist_v2, "key": ada2.root},
+            "signout": {"envelope": signout_v2, "key": ada2.root},
         }
     })
 }

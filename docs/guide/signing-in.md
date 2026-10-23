@@ -52,8 +52,10 @@ several, and remove one in Settings, under Devices.
 - **The app on this device:** **Sign out on this device** on the app's
   own screen. It forgets your name and the keys it held for Photos here.
 - **Everywhere else:** Settings, Devices, **Sign out everywhere else**.
-  It ends every other sign-in at once, including Passwords and your
-  email page. You may be asked for your passkey again first. You can also
+  It ends every other sign-in at once, on every box, including Passwords
+  and your email page. You may be asked for your passkey again first. If
+  your account's main key is on a device, not a passkey, do it in the app
+  on that device, or with `dd device sign-out`. You can also
   sign out one sign-in at a time from the list under **Signed in now**.
 - **Removing a device or passkey** also ends every sign-in it made, and
   signs you out of Passwords everywhere.

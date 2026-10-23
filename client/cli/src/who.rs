@@ -38,3 +38,35 @@ pub fn print_recovery(recovery: &str) {
     println!("  It is not stored anywhere, and nobody can issue another.\n");
     println!("    {recovery}\n");
 }
+
+/// Sign out everywhere (state/ident signout.go): every sign-in before now
+/// ends on every box. Signed by the root here and put at the door with this
+/// device's token; sent already is sent.
+pub async fn sign_out_everywhere(
+    keys: &auth::Store,
+    dirs: &[String],
+    root: &ed25519_dalek::SigningKey,
+) -> Result<()> {
+    let (_, _, token) = media::gate::Opener::load(keys)?;
+    let door = media::gate::door_base(dirs)?;
+    let body = identity::envelope::SignOut::new(
+        &identity::encode_public(&root.verifying_key()),
+        identity::now(),
+        "",
+    );
+    let env = identity::envelope::seal_json(identity::envelope::SIGNOUT, &body, root)?;
+    let r = http()?
+        .put(format!("{door}/_dd/boxes/{}", identity::envelope::SIGNOUT))
+        .bearer_auth(&token)
+        .json(&env)
+        .send()
+        .await?;
+    let status = r.status();
+    if status.is_success() || status == reqwest::StatusCode::CONFLICT {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "the gate said {status}: {}",
+        r.text().await.unwrap_or_default()
+    )
+}

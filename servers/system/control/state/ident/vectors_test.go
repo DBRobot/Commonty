@@ -187,7 +187,7 @@ func TestV2Envelopes(t *testing.T) {
 		t.Fatalf("passkey entry: %v", err)
 	}
 	// statements by the root on file
-	for _, k := range []string{"leave", "enlist"} {
+	for _, k := range []string{"leave", "enlist", "signout"} {
 		env := v.V2[k].Envelope
 		if err := VerifyRoot(&env, &rec.Entry); err != nil {
 			t.Fatalf("%s: %v", k, err)
@@ -196,6 +196,19 @@ func TestV2Envelopes(t *testing.T) {
 		if VerifyRoot(&env, &rec.Entry) == nil {
 			t.Fatalf("%s passed as another kind", k)
 		}
+	}
+	// a sign-out as Rust writes it reads back as the judge holds it
+	so := v.V2["signout"].Envelope
+	if so.Kind != "signout" {
+		t.Fatalf("signout vector: kind %q", so.Kind)
+	}
+	l := &log{t: t, s: New(), at: 1_791_700_000}
+	l.s.Entries[rec.Entry.Name] = &Held{Signed: rec, Item: rec.Raw}
+	if got := l.put(mustJSON(t, so)); got != "ok" {
+		t.Fatalf("the signout vector: %s", got)
+	}
+	if o := l.s.SignedOut[rec.Entry.Name]; o == nil || o.Keep != "kept_sign-in1" || o.At != 1_791_700_000 {
+		t.Fatalf("the signout vector, held: %+v", o)
 	}
 	// an invite in an envelope, by the release key
 	inv := v.V2["invite"].Envelope

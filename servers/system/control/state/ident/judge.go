@@ -113,6 +113,8 @@ type State struct {
 	// ticket id -> the box it enlisted: a ticket is used once, for good
 	Tickets  map[string]string     `json:"tickets,omitempty"`
 	Extended map[string]*Extension `json:"extended,omitempty"`
+	// name -> the newest sign-out everywhere its root said (signout.go)
+	SignedOut map[string]*SignOut `json:"signed_out,omitempty"`
 	// per box, the newest enlist or unenlist taken: an older one, signed
 	// before, never counts again
 	BoxAt    map[string]uint64 `json:"box_at,omitempty"`       // box -> its enlistment
@@ -162,6 +164,9 @@ func (s *State) UnmarshalJSON(b []byte) error {
 	if s.Outcomes == nil {
 		s.Outcomes = map[string]string{}
 	}
+	if s.SignedOut == nil {
+		s.SignedOut = map[string]*SignOut{}
+	}
 	for n, h := range s.Entries {
 		sg, err := readSigned(h.Item)
 		if err != nil {
@@ -196,7 +201,7 @@ func New() *State {
 		Entries: map[string]*Held{}, Invites: map[string]json.RawMessage{}, Acks: map[string][]string{},
 		Said: map[string]*Said{}, Handovers: map[string][]Handover{}, Enlisted: map[string]*Enlisted{},
 		BoxAt: map[string]uint64{}, Outcomes: map[string]string{}, Joins: map[string]*Join{},
-		Tickets: map[string]string{}, Extended: map[string]*Extension{},
+		Tickets: map[string]string{}, Extended: map[string]*Extension{}, SignedOut: map[string]*SignOut{},
 	}
 }
 
@@ -505,6 +510,8 @@ func (s *State) judgeV2(cfg *Config, voters []string, from string, raw json.RawM
 		s.outcome(hash, s.enlist(cfg, env, body, raw, at))
 	case "extend":
 		s.outcome(hash, s.extend(cfg, env, body, raw, at))
+	case "signout":
+		s.outcome(hash, s.signout(env, body, raw, at))
 	case "computer-config", "computer", "computer-power", "computer-delete":
 		// members' remote computers: judged by state/computers, beside this, in
 		// the same pass over the log; no outcome of identity's

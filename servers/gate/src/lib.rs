@@ -1094,26 +1094,54 @@ impl App {
         }
         let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
         let (user, id, exp) = self.sessions.session(cookie)?;
-        if id.is_empty() {
-            return Some((user, false));
-        }
-        if !self.session_live(&user, &id) {
+        if !self.session_live(&user, &id, exp) {
             return None;
         }
-        self.signins.saw(&user, &id, exp, agent, None);
+        if !id.is_empty() {
+            self.signins.saw(&user, &id, exp, agent, None);
+        }
         Some((user, false))
     }
 
     /// The user of a session cookie that this box made, that has not run
     /// out, and that has not been ended since. Every handler asks this.
     fn signed_in(&self, cookie: Option<&str>) -> Option<String> {
-        let (user, id, _) = self.sessions.session(cookie)?;
-        (id.is_empty() || self.session_live(&user, &id)).then_some(user)
+        let (user, id, exp) = self.sessions.session(cookie)?;
+        self.session_live(&user, &id, exp).then_some(user)
     }
 
-    /// Not ended from the Devices tab, and if a device signed it in, that
-    /// device is still the user's.
-    fn session_live(&self, user: &str, id: &str) -> bool {
+    /// Whether the person signed out everywhere after this session began
+    /// (state/ident signout.go): begun when this box first saw it, or, for
+    /// one it never noted, the earliest its cookie could have been made.
+    fn signed_out(&self, user: &str, id: &str, exp: u64) -> bool {
+        let Some(a) = &self.directory.ident else {
+            return false;
+        };
+        let (at, keep) = a.signed_out(user);
+        if at == 0 {
+            return false;
+        }
+        let begun = self
+            .signins
+            .first_of(id)
+            .unwrap_or(exp.saturating_sub(session::TTL));
+        ident::signed_out_of(at, &keep, id, begun)
+    }
+
+    /// Not signed out everywhere since, not ended from the Devices tab, and
+    /// if a device signed it in, that device is still the user's. `exp` is
+    /// the cookie's own end.
+    fn session_live(&self, user: &str, id: &str, exp: u64) -> bool {
+        if self.signed_out(user, id, exp) {
+            if !id.is_empty() {
+                self.signins.end(id);
+            }
+            return false;
+        }
+        // a session from before ids: nothing else here can end it
+        if id.is_empty() {
+            return true;
+        }
         if self.signins.is_ended(id) {
             return false;
         }
@@ -1132,6 +1160,29 @@ impl App {
             }
         }
         true
+    }
+}
+
+impl App {
+    /// Each sign-out everywhere in the agreed state that this box has not
+    /// taken yet: the person's sessions here begun before it end, and so
+    /// do their sign-ins to the services behind this gate (Passwords),
+    /// which cannot tell one sign-in's age from another's.
+    fn take_signouts(&self) {
+        let Some(state) = self.directory.ident.as_ref().and_then(|a| a.state()) else {
+            return;
+        };
+        for (name, m) in &state.members {
+            if m.signed_out > 0
+                && valid_user(name)
+                && self
+                    .signins
+                    .sign_out(name, m.signed_out, &m.signed_out_keep)
+            {
+                eprintln!("{name} signed out everywhere: their sessions here before it ended");
+                self.directory.end_elsewhere(name);
+            }
+        }
     }
 }
 
@@ -1962,10 +2013,10 @@ async fn login_finish(
     // session, fresh. With sign-in at the id Worker it is the fleet
     // sign-in's own, which a new one here would split off from
     if app.id_origin.is_some()
-        && let Some((was, id, _)) = app.sessions.session(cookie)
+        && let Some((was, id, exp)) = app.sessions.session(cookie)
         && was == user
         && !id.is_empty()
-        && app.session_live(&user, &id)
+        && app.session_live(&user, &id, exp)
     {
         app.saw_passkey(&id);
         return StatusCode::OK.into_response();
@@ -3382,6 +3433,18 @@ pub async fn start(
                     a.demo_photos.warm(g, all);
                 }
                 tokio::time::sleep(demo_photos::FRESH).await;
+            }
+        });
+    }
+    // signed out everywhere (state/ident signout.go): each person's sessions
+    // here begun before it end, and their sign-ins to this box's other
+    // services with them, once
+    if app.directory.ident.is_some() {
+        let a = app.clone();
+        tokio::spawn(async move {
+            loop {
+                a.take_signouts();
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         });
     }

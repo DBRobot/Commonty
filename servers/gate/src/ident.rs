@@ -95,6 +95,12 @@ pub struct Member {
     /// their enlisted boxes, each with whether it keeps their access
     #[serde(default)]
     pub enlisted: Vec<serde_json::Value>,
+    /// every sign-in of theirs begun before this (ms) is over, on every
+    /// box, but the session `signed_out_keep` (state/ident signout.go)
+    #[serde(default)]
+    pub signed_out: u64,
+    #[serde(default)]
+    pub signed_out_keep: String,
 }
 
 impl Member {
@@ -138,6 +144,13 @@ impl Member {
     pub fn has_left(&self) -> bool {
         self.status == "left"
     }
+}
+
+/// Whether a sign-out everywhere at `signed_out` (ms, 0: none) keeping the
+/// session `keep` ends the session `id` begun at `begun` (seconds). A
+/// session from before ids ("") is never the one kept.
+pub fn signed_out_of(signed_out: u64, keep: &str, id: &str, begun: u64) -> bool {
+    signed_out > 0 && (id.is_empty() || id != keep) && begun.saturating_mul(1000) < signed_out
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
@@ -256,6 +269,20 @@ impl Agreed {
 
     pub fn member(&self, name: &str) -> Option<Member> {
         self.state()?.members.get(name).cloned()
+    }
+
+    /// The person's sign-out everywhere as last read: when (ms, 0 for
+    /// none) and the session it keeps. Acted on from any state read, fresh
+    /// or not: it only ever moves forward, so an older read says no more
+    /// than a newer one would.
+    pub fn signed_out(&self, name: &str) -> (u64, String) {
+        self.state()
+            .and_then(|s| {
+                s.members
+                    .get(name)
+                    .map(|m| (m.signed_out, m.signed_out_keep.clone()))
+            })
+            .unwrap_or_default()
     }
 
     /// One read: the whole state, or nothing new since the height held.
@@ -698,6 +725,29 @@ mod tests {
         a.read_ago(STALE + Duration::from_secs(1));
         assert!(!a.fresh() && a.fresh_for().is_none());
         assert!(a.state().is_some(), "still held, for letting people in");
+    }
+
+    /// A sign-out everywhere ends what began before it, but the session it
+    /// keeps; nothing begun after it, nor in the same second
+    #[test]
+    fn a_sign_out_ends_what_began_before_it_but_the_one_kept() {
+        let at = 1_791_700_000_000;
+        assert!(!signed_out_of(0, "", "a", 1), "no sign-out ends nothing");
+        assert!(signed_out_of(at, "", "a", at / 1000 - 1));
+        assert!(!signed_out_of(at, "", "a", at / 1000));
+        assert!(!signed_out_of(at, "", "a", at / 1000 + 60));
+        assert!(!signed_out_of(at, "a", "a", 1), "the one kept");
+        assert!(signed_out_of(at, "a", "b", 1));
+        assert!(
+            signed_out_of(at, "", "", 1),
+            "a session from before ids is never the one kept"
+        );
+        let m: Member = serde_json::from_value(serde_json::json!({"status": "member"})).unwrap();
+        assert_eq!(
+            (m.signed_out, m.signed_out_keep.as_str()),
+            (0, ""),
+            "a dd-control from before says nothing of it"
+        );
     }
 
     #[test]

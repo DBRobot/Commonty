@@ -60,6 +60,7 @@ language checks a v2 item with a hash, a signature check and a JSON parse.
 | `invite` | the release key | `public_key, issued, expires` |
 | `enlist` | the root on file for the member | `member` (sha256 hex of the root), `box` (the joined box's name), `ticket` (the id of the join ticket it joined with, 32 hex), `at` |
 | `unenlist` | the root on file for the member | `member, box, at` |
+| `signout` | the root on file for the member | `member` (sha256 hex of the root), `at` (seconds), `keep?` (a session id) - [below](#signing-out-everywhere) |
 | `extend` | the root on file for the fleet's admin (the release's `identity.admin`, fleet/policy.json `owner`) | `name` (whose grace), `until`, `at` (seconds) |
 | `computer-config`, `computer`, `computer-power`, `computer-delete` | see [remote computers](remote-computers.md#the-records) | judged beside this, by state/computers: the identity judge passes these kinds through and records no outcome for them |
 
@@ -270,6 +271,9 @@ moved, not changed. Each item is judged at its agreed time `at`.
   like a leave, the newest standing; an `until` already past takes it back.
   It keeps a member's access while their enlisted boxes are gone, until
   `until`.
+- **signout**: signed by the root on file whose id is `member`; `at`
+  dated like a leave; newer than the sign-out on record, the same one
+  twice a no-op. See [below](#signing-out-everywhere).
 - **an item that says more than its signature** is refused: unknown fields,
   a key twice, keys in another case, `null` for a field left out, floats,
   anything that does not read back to the same value that is checked.
@@ -282,6 +286,73 @@ moved, not changed. Each item is judged at its agreed time `at`.
 - **the release's member list** (`fleet/members.json` in the release, the
   release key, and the admin, fleet/policy.json `owner`) is part of the
   control plane's config, as the box list is.
+
+## Signing out everywhere
+
+A member ends every sign-in made before now, on every box, in one signed
+item: `signout`, `{member, at, keep?}`. Each box then ends that person's
+sessions it began before `at`, except the session `keep` (the browser or
+app that asked; a fleet sign-in's session id is the same on every box).
+
+Three ways were weighed:
+
+- **A signed field in the entry** (the old `fleet-signout` branch,
+  `signed_out`). A judge from before it refuses the entry's unknown field,
+  and since the field only moves forward, every later update of that
+  entry too: old boxes freeze the member at the version before. The
+  entry feeds `Status`, which the state machine reads (a remote
+  computer's lease), so mixed validators could decide differently. Old
+  clients that rewrite the entry drop the field. Rejected.
+- **A revocation epoch per device.** Covers sessions a device key made,
+  not passkey or fleet sign-ins (no device), and changes the entry the
+  same way. Rejected.
+- **A separate signed item in the directory log.** Chosen.
+
+Why the item meets each requirement:
+
+- **Only the member orders it.** The judge checks the signature against
+  the root on file whose id is `member` (`VerifyRoot`: ed25519 or the
+  root passkey). The gate checks the same before it submits. No box key,
+  device key or recovery key alone signs one.
+- **Old boxes ignore it safely.** The state machine takes any directory
+  item, so `Check`, `Apply` and `Block` are unchanged and `state.Machine`
+  is not raised ([control-plane.md](control-plane.md), "Changing the state
+  machine"). A judge from before refuses it as `no such item` and changes
+  nothing else: the entry, status, access and boxes, everything the state
+  machine reads of the judge, come out the same either way
+  (`TestASignOutChangesNothingAnOldJudgeDecides`). A box on the old code
+  keeps its sessions until it runs the new code, when its judge replays the
+  log and ends them.
+- **Replay can't undo it.** The newest `at` per name stands; an older one,
+  or one more than 24 h old when agreed, is refused. A later entry
+  version, a recovery or a rewrite of the entry doesn't touch it.
+- **Plain browser and app.** The Devices tab's **Sign out everywhere
+  else** signs it with the root passkey in the page
+  (`signout_plan`, `PUT /_dd/boxes/signout`). Where the root is a device
+  key, the app signs it (`POST /_dd/app/signout`), or `dd device
+  sign-out`.
+- **No one else's sessions, and nothing begun after it.** It applies to
+  the name's holder only while `member` is one of their ids (a recovery
+  keeps it; a lapsed guest name's next holder starts clean). It counts
+  from `min(at, agreed time)`, so a clock running ahead ends nothing begun
+  after the fleet took it. A box that was offline ends only sessions that
+  began before `at`, never the ones made since.
+
+What each box does (servers/gate): `/identity` gives each member
+`signed_out` (ms) and `signed_out_keep`. A session ends when it began
+before `signed_out` and isn't the one kept. "Began" is when the box first
+saw it (signins.json), or for one it never noted, `exp - 8 h`, the
+earliest its cookie could have been made. A fleet sign-in kept in the id
+page from before it starts no new session (`/_dd/sso`). Each box acts on
+it once from the state it last read, fresh or not. That's safe because
+`signed_out` only moves forward. It also signs the person out of
+Passwords on that box, once. Passwords can't tell sign-ins apart by age,
+so a box that applies it late also ends Passwords sign-ins made since.
+
+What it doesn't end: device keys. The app and `dd` sign in again with
+their keys; a lost device is removed instead. A box whose gate judges
+the log itself (`identityFrom: replay`) doesn't act on it. The mail
+Worker's sessions end through the Devices tab, as before.
 
 ## 4. Shadow check
 

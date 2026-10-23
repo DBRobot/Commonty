@@ -161,6 +161,19 @@ pub(crate) async fn finish(
             (!app.signins.is_ended(&session_id(&d.user, &d.sid)))
                 .then_some(())
                 .ok_or_else(|| "signed out".into())
+        })
+        .and_then(|()| {
+            // a sign-in made before the person signed out everywhere, kept
+            // in the id page, starts nothing new here (state/ident signout.go)
+            let (at, keep) = app
+                .directory
+                .ident
+                .as_ref()
+                .map(|a| a.signed_out(&d.user))
+                .unwrap_or_default();
+            (!crate::ident::signed_out_of(at, &keep, &session_id(&d.user, &d.sid), d.iat))
+                .then_some(())
+                .ok_or_else(|| "signed out everywhere since".into())
         });
     if let Err(why) = checked {
         eprintln!("sso: {}: refused: {why}", d.user);

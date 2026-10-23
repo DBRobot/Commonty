@@ -17646,6 +17646,15 @@
         "v": 2
       },
       "key": "bnoc3Smwt4/ROvTFWY/v9O8qlxZuPKby5Pv8zYBQW/E="
+    },
+    "signout": {
+      "envelope": {
+        "body": "eyJtZW1iZXIiOiJlZDA5NmIyYmY2ZmYyMzhmZDM0NmViOWYxYWQ1ZmRiNmQwMzBiMzQ3NTA1NGQxNGUwYzM3MTIyOWExN2MyZDUxIiwiYXQiOjE3OTE3MDAwMDAsImtlZXAiOiJrZXB0X3NpZ24taW4xIn0=",
+        "kind": "signout",
+        "sig": "WUDTtV17hGnaQLqyrLYw6tfwRB88zjJKyJsoNqypgEPnB9d1Yszh4Lm0x22I1ExMghqsmzQAIHK04CChpCzmBA==",
+        "v": 2
+      },
+      "key": "bnoc3Smwt4/ROvTFWY/v9O8qlxZuPKby5Pv8zYBQW/E="
     }
   }
 }

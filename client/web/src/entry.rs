@@ -178,8 +178,36 @@ pub fn box_item_plan(
     run().map_err(|e| JsValue::from_str(&e))
 }
 
-/// The box item's envelope: its plan's `body` and the passkey's answer to
-/// its challenge (base64url parts, as the browser hands them over)
+/// A sign-out everywhere for the root passkey to sign (state/ident
+/// signout.go): every sign-in before `now` ends on every box, but `keep`,
+/// the session of the browser asking. Its plan, as a box item's.
+fn signout_plan_of(signed: &str, keep: &str, now: u64) -> R<String> {
+    use identity::envelope::{SIGNOUT, SignOut, passkey_challenge};
+    let s: SignedEntry = serde_json::from_str(signed).map_err(|e| e.to_string())?;
+    if !s.entry.root.starts_with(identity::WEBAUTHN_ROOT) {
+        return Err("this entry's root is a device key: the app signs it".into());
+    }
+    let body =
+        serde_json::to_vec(&SignOut::new(&s.entry.root, now, keep)).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "body": B64.encode(&body),
+        "challenge": B64_URL.encode(passkey_challenge(SIGNOUT, &body)),
+    })
+    .to_string())
+}
+
+#[wasm_bindgen]
+pub fn signout_plan(signed: &str, keep: &str, now: u64) -> Result<String, JsValue> {
+    let run = || -> R<String> {
+        verified(signed)?;
+        signout_plan_of(signed, keep, now)
+    };
+    run().map_err(|e| JsValue::from_str(&e))
+}
+
+/// The box item's envelope (an enlist, an unenlist, or a sign-out): its
+/// plan's `body` and the passkey's answer to its challenge (base64url
+/// parts, as the browser hands them over)
 #[wasm_bindgen]
 pub fn box_item_envelope(kind: &str, body: &str, assertion: &str) -> Result<String, JsValue> {
     let run = || -> R<String> {
@@ -187,7 +215,13 @@ pub fn box_item_envelope(kind: &str, body: &str, assertion: &str) -> Result<Stri
         let raw = B64
             .decode(body)
             .map_err(|_| "the body is not base64".to_string())?;
-        serde_json::from_slice::<identity::envelope::Enlist>(&raw).map_err(|e| e.to_string())?;
+        if kind == identity::envelope::SIGNOUT {
+            serde_json::from_slice::<identity::envelope::SignOut>(&raw)
+                .map_err(|e| e.to_string())?;
+        } else {
+            serde_json::from_slice::<identity::envelope::Enlist>(&raw)
+                .map_err(|e| e.to_string())?;
+        }
         let env = identity::envelope::Envelope {
             v: 2,
             kind: kind.to_string(),
@@ -301,6 +335,36 @@ mod tests {
             );
         }
         assert!(box_plan("entry", &signed, "jaaaaaaaaaa", id, 7).is_err());
+    }
+
+    /// A sign-out's plan is the body the judge reads (state/ident
+    /// signout.go): the root's id, the time, and the session it keeps, if any
+    #[test]
+    fn a_signout_signs_what_the_judge_reads() {
+        let signed = serde_json::json!({"entry": {"name": "pia", "root": "webauthn:abc:def",
+            "recovery": "", "devices": [], "version": 1, "updated": 1}, "signature": "x"})
+        .to_string();
+        let member = identity::member_id("webauthn:abc:def");
+        for (keep, want) in [
+            ("", format!(r#"{{"member":"{member}","at":7}}"#)),
+            (
+                "abc_D-9",
+                format!(r#"{{"member":"{member}","at":7,"keep":"abc_D-9"}}"#),
+            ),
+        ] {
+            let p: serde_json::Value =
+                serde_json::from_str(&signout_plan_of(&signed, keep, 7).unwrap()).unwrap();
+            let body = B64.decode(p["body"].as_str().unwrap()).unwrap();
+            assert_eq!(String::from_utf8(body.clone()).unwrap(), want);
+            assert_eq!(
+                B64_URL.decode(p["challenge"].as_str().unwrap()).unwrap(),
+                identity::envelope::passkey_challenge("signout", &body)
+            );
+        }
+        let device_root = serde_json::json!({"entry": {"name": "pia", "root": "AAAA",
+            "recovery": "", "devices": [], "version": 1, "updated": 1}, "signature": "x"})
+        .to_string();
+        assert!(signout_plan_of(&device_root, "", 7).is_err());
     }
 
     /// The plan's v2 body is the entry's bytes as the envelope carries them,

@@ -294,8 +294,9 @@ pub(crate) async fn joined_mine(State(app): State<Arc<App>>, headers: HeaderMap)
 }
 
 /// PUT /_dd/boxes/{kind}: a member's root-signed `enlist` or `unenlist` of
-/// a box, or the fleet admin's `extend` of a member's grace, into the
-/// control plane's log. The directory's PUT, step for step: the one
+/// a box, the fleet admin's `extend` of a member's grace, or a member's
+/// `signout` everywhere (state/ident signout.go), into the control plane's
+/// log. The directory's PUT, step for step: the one
 /// per-visitor limiter, a body of 64 KiB at most, the kind the path names,
 /// signed in, the item theirs, its signature checked against the root the
 /// agreed identity state has for them now, then the shared path
@@ -312,8 +313,8 @@ pub(crate) async fn put_item(
         Ok(b) => b,
         Err(r) => return r,
     };
-    use identity::envelope::{ENLIST, EXTEND, UNENLIST};
-    if ![ENLIST, UNENLIST, EXTEND].contains(&kind.as_str()) {
+    use identity::envelope::{ENLIST, EXTEND, SIGNOUT, UNENLIST};
+    if ![ENLIST, UNENLIST, EXTEND, SIGNOUT].contains(&kind.as_str()) {
         return StatusCode::NOT_FOUND.into_response();
     }
     let Some(user) = app.identify(&headers, "access") else {
@@ -359,6 +360,7 @@ pub(crate) async fn put_item(
         _ if env.field("member") != Some(identity::member_id(&on_file.entry.root).as_str()) => {
             false
         }
+        SIGNOUT => true,
         UNENLIST => owner == Some(user.as_str()),
         _ => owner.is_none(),
     };
