@@ -33,26 +33,70 @@ so one job can wait on every other.
 ```
 pull request opened, pushed, or edited
 │
-├─ files_modified ── what changed: nix, rust, vm, app (and: a draft? already passed?)
-│   ├─ flake_check ─── the flake evaluates; plaintext labels, box list, needs units, this file
-│   ├─ mail_worker ─── the mail, DNS and id Workers and the control plane, end to end
-│   ├─ build_part ──┬─ build_host (every box's system, built on every box)
-│   │               │    └─ same_build (both builds of a system are one path)
-│   │               └─ vm_tests (one job per test)
-│   ├─ rust (fmt, clippy, tests) · app_lint
-│   ├─ installer_repro (the box installer's drive, built and --rebuilt on every runner box)
-│   │    └─ same_installer (every box made the same bytes)
-│   └─ lint ────────── real faults block; the rest is a yellow warning
-├─ style ───────────── the title, the body, the commits, the files touched
+├─ files_modified ──── what changed, and so which jobs and checks run
+│   ├─ flake_check ───── the flake evaluates; plaintext labels, box list, needs units, this file
+│   ├─ inputs_kept ───── every job's keep step roots the builds a GC made CI redo
+│   ├─ worker_tests ──── the mail, DNS, id and control Workers under wrangler (one job per check)
+│   ├─ page_tests ────── the Mail and Files pages, links staying in their tab (one job per check)
+│   ├─ site_checks ───── the site through nginx and the gate: headers, roles, a11y, speed, links
+│   ├─ build_programs ┬─ build_systems (every box's system, built on every box)
+│   │                 │    └─ systems_agree (both builds of a system are one path)
+│   │                 └─ vm_tests (one job per test)
+│   ├─ rust ──────────── fmt, clippy, the workspace's tests
+│   ├─ app_checks ────── the app's lint and tests, its network engine's
+│   ├─ build_installer ─ the box installer's drive, built and --rebuilt on every runner box
+│   │    └─ installer_agrees (every box made the same bytes)
+│   └─ lint ──────────── real faults block; the rest is a yellow warning
+├─ style ─────────────── the title, the body, the commits, the files touched
 │
-└─ ci_ok ───────────── every job passed or was rightly skipped
+└─ ci_ok ─────────────── every job passed or was rightly skipped
+```
+
+## The jobs, and when each runs
+
+"Chosen" means check by check from covers.json (Choosing the tests, below):
+a job whose checks were all left out skips, and the skip still counts as a
+pass for `ci_ok`. A draft runs `style` and `lint` alone; an edit to a
+commit that already passed runs `style` alone.
+
+```
+files_modified    always. Says what changed: the nix, rust, app and installer
+                  switches, and the chosen VM tests, worker_tests, page_tests
+                  and site_checks (nix/tests/ci-select/ciselect.py).
+style             always (a draft too). The title, body, commits, files touched.
+lint              unless the commit already passed. Real faults block.
+flake_check       nix changed. Evaluates every check, package and system
+                  (nix-eval-jobs), then the evaluation-only checks.
+inputs_kept       nix changed. nix/tests/ci-keep.nix: each job's keep step
+                  (keep-inputs.sh) names the builds a box's GC made CI do
+                  again (the cross rustc, crane's dependency builds, crates).
+worker_tests      its chosen checks: mail-worker, dns-worker, sso, control.
+page_tests        its chosen checks: mail-page, files-page, same-tab.
+site_checks       its chosen checks: site-headers, site-roles, site-a11y,
+                  site-speed, site-links.
+build_programs    nix changed. dd and the pages (cli); verify, agent, games,
+                  computers, transcode (boxes): what the systems and VM tests
+                  carry, built once per box.
+build_systems     nix changed. Every box's system on every runner box,
+                  recorded as build/<box>@<runner>.
+systems_agree     nix changed. Both runners' paths for a system are one;
+                  records build/<box>, which dd release publish signs.
+vm_tests          the chosen VM tests, one job each.
+rust              rust changed (servers/, client/, Cargo.*). fmt, clippy, tests.
+app_checks        a crate the app builds on changed. clippy-app, tests-app,
+                  net-check, the app release evaluating.
+build_installer   the installer was chosen (covers.json "installer"). The
+                  box installer's drive, built and --rebuilt on each runner,
+                  recorded as installer@<runner>.
+installer_agrees  with build_installer. Every runner made the same bytes.
+ci_ok             always. Every job above passed or was rightly skipped.
 ```
 
 - **files_modified** decides what the change can affect, from the paths it
   touches, and every other job skips itself when its part did not change. A
   skipped job still reports, so the run always has an answer.
 - **The jobs run side by side.** Nothing waits on another job unless it
-  needs that job's output (the VM tests need the programs `build_part`
+  needs that job's output (the VM tests need the programs `build_programs`
   built). A failure anywhere stops the whole run at once
   ([stop-run](../../.forgejo/actions/stop-run/action.yml)), so running things
   in parallel costs nothing when something is wrong.
@@ -239,8 +283,9 @@ on the files the pull request changes:
   chooser itself): every test runs.
 - **A path nothing claims** (no check reads it, and no job's path list has
   it): every test runs.
-- **Otherwise each VM test and each mail_worker check runs only if it
-  reads what changed.** What a check reads is
+- **Otherwise each VM test, each check of `worker_tests`, `page_tests` and
+  `site_checks`, and the box installer run only if they read what
+  changed.** What a check reads is
   [`covers.json`](../../nix/tests/ci-select/covers.json) (every file its
   evaluation opened, every directory it listed, every path it asked after,
   traced from a real `nix eval`) together with every file its `.nix` files
@@ -252,10 +297,20 @@ on the files the pull request changes:
   already counts.
 - **The app** runs when a crate it builds on changes, by its manifests'
   path dependencies (`app` and `client/hubwriter`, followed to the end).
+- **The box installer** (`build_installer`, `installer_agrees`) is traced
+  like a check, as the name `installer`: what evaluating
+  `installers.x86_64-linux.box` reads (ciselect.py `TARGETS`), which is
+  `nix/installer/`, the crates of the agent it carries, the shared pages
+  its screen uses, the fleet files it embeds, and `flake.nix` and
+  `flake.lock` (under everything anyway). A box module it does not import
+  leaves it out. Its version file is the commit's short hash, so its
+  derivation moves on every commit; that alone cannot change whether two
+  boxes make the same bytes, so it is not a reason to build it.
 
 covers.json is traced again with
 `python3 nix/tests/ci-select/ciselect.py trace` (a few minutes a check
-under load: run it on a box; `--only <check>` for one). Between traces a
+under load: run it on a box; `--only <check>` for one, `--only installer`
+for the installer). Between traces a
 check can come to read a file covers.json does not have only through a path
 its `.nix` files build at evaluation, which the chooser covers by its
 whole directory. The other jobs keep their path lists (rust, and nix for
@@ -271,8 +326,9 @@ history and every check's real drvPath at each commit
 
 ## The site checks
 
-The site as a browser meets it, each a check of the `mail_worker` job
-(ciselect.py `MAIL_WORKER`), beside the Mail and Files pages:
+The site as a browser meets it. The no-vm ones are the `site_checks` job
+(ciselect.py `GROUPS`), beside `page_tests` (the Mail and Files pages as
+the app serves them) and `worker_tests` (the Workers):
 
 - **No vm** ([`nix/tests/site.nix`](../../nix/tests/site.nix)): node1's own
   nginx config and the real gate, with the pages a release carries, and a
@@ -418,17 +474,17 @@ restarting under the same switch). When a box stays on an old release, its
 - **style or lint** list what to fix, by file and line. Run the same script
   locally with the pull request's base:
   `BASE=$(git rev-parse forge/main) HEAD=$(git rev-parse HEAD) TITLE='…' BODY='…' nix shell .#ci-tools -c python3 .forgejo/checks/style.py`.
-- **same_build** means the two boxes got a different store path for one
+- **systems_agree** means the two boxes got a different store path for one
   system: they evaluated the commit differently (a different input, an
   impure evaluation), or one recorded nothing. It compares paths only, and
   a system's path is fixed by its derivation, not by the bytes it builds,
   so it does not catch a build that is not reproducible. That is dd-attest's
   at publish: two boxes must report the same closure digest
   ([releases.md](releases.md#dd-attest-accounting-for-every-path)).
-- **same_installer** means the runner boxes built the box installer's
+- **installer_agrees** means the runner boxes built the box installer's
   drive (`installers.x86_64-linux.box`) to different bytes, and the next
-  app release would stop on it. It runs when `nix/installer/` or
-  `flake.lock` changed; [joining.md](joining.md#the-drive) says what
+  app release would stop on it. It runs when the installer was chosen
+  (above); [joining.md](joining.md#the-drive) says what
   made it differ before and how it is made now.
 - **"context canceled"** in a log means the run was killed from outside,
   not that the code failed. ci-resume runs it again within a few minutes.

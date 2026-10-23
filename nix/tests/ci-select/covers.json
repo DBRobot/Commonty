@@ -1,6 +1,6 @@
 {
  "_": "made by nix/tests/ci-select/ciselect.py trace",
- "rev": "0b9ba35f9c18aba5b5189401fca4d6c88b5afd1f",
+ "rev": "3cb590ef137bb9dace923775452cadfd26914c04",
  "checks": [
   "acme",
   "adblock",
@@ -15,6 +15,7 @@
   "forge-follow",
   "games",
   "home-controller",
+  "installer",
   "join-install",
   "joined-box",
   "leaving",
@@ -167,6 +168,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -750,6 +752,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -786,6 +789,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -822,6 +826,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -1365,9 +1370,11 @@
    "site-speed"
   ],
   "nix/installer": [
+   "installer",
    "join-install"
   ],
   "nix/installer/web": [
+   "installer",
    "join-install"
   ],
   "nix/lib": [
@@ -1426,6 +1433,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -1473,6 +1481,7 @@
    "takeover"
   ],
   "nix/modules/box/report": [
+   "installer",
    "join-install",
    "joined-box"
   ],
@@ -1849,6 +1858,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -3418,6 +3428,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -3589,6 +3600,7 @@
    "forge",
    "forge-follow",
    "games",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -3623,6 +3635,7 @@
    "forge",
    "forge-follow",
    "games",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -3657,6 +3670,7 @@
    "forge",
    "forge-follow",
    "games",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -3806,6 +3820,7 @@
    "files-page",
    "forge",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -3831,6 +3846,7 @@
    "adblock",
    "forge",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -3854,6 +3870,7 @@
    "adblock",
    "forge",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -3871,6 +3888,9 @@
    "sso",
    "thanos",
    "vault"
+  ],
+  "servers/web-shared/moving": [
+   "installer"
   ]
  },
  "files": {
@@ -3888,6 +3908,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -4117,6 +4138,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -4260,6 +4282,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -4376,6 +4399,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -4425,6 +4449,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -4469,6 +4494,7 @@
    "files-page",
    "forge",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -4550,6 +4576,7 @@
   "fleet/layout.nix": [
    "acme",
    "dns-worker",
+   "installer",
    "join-install",
    "joined-box",
    "site-a11y",
@@ -4587,6 +4614,7 @@
    "control",
    "dns-worker",
    "forge",
+   "installer",
    "joined-box",
    "mail-worker",
    "network",
@@ -4605,6 +4633,7 @@
    "acme",
    "control",
    "dns-worker",
+   "installer",
    "join-install",
    "joined-box",
    "mail-worker",
@@ -4632,6 +4661,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -4678,6 +4708,7 @@
    "site-speed"
   ],
   "nix/installer": [
+   "installer",
    "join-install"
   ],
   "nix/lib": [
@@ -4736,6 +4767,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",
@@ -4996,6 +5028,7 @@
    "site-speed"
   ],
   "nix/modules/box/report": [
+   "installer",
    "join-install",
    "joined-box"
   ],
@@ -5678,6 +5711,7 @@
    "forge-follow",
    "games",
    "home-controller",
+   "installer",
    "join-install",
    "joined-box",
    "leaving",

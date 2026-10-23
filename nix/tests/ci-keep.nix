@@ -4,7 +4,7 @@
 # clippy and the tests. Each job's keep step must name these installables,
 # and their build graphs must hold those derivations.
 # It reads .drv files, which pure evaluation forbids, so it is no flake
-# check: CI's keep_check job runs `nix eval --impure --file nix/tests/ci-keep.nix`.
+# check: CI's inputs_kept job runs `nix eval --impure --file nix/tests/ci-keep.nix`.
 let
   self = builtins.getFlake (toString ../..);
   lib = self.inputs.nixpkgs.lib;
@@ -37,7 +37,7 @@ let
     }
     {
       g = "app";
-      key = "app_lint";
+      key = "app_checks";
       items = [
         [
           ".#checks.x86_64-linux.clippy-app"
@@ -70,7 +70,7 @@ let
       must = [ "dd-web-deps-deps-[0-9.]*\\.drv" ];
     }
     {
-      # build_host keeps each host's; the home controller's holds the cross rustc
+      # build_systems keeps each host's; the home controller's holds the cross rustc
       g = "host";
       key = "host-\${{ matrix.host }}";
       items = [
@@ -83,7 +83,7 @@ let
     }
   ];
   # a step keeps what the job's build lines wrote down (--print-out-paths,
-  # or build_host's tee of its toplevel)
+  # or build_systems' tee of its toplevel)
   lines = lib.splitString "\n" workflow;
   recorded =
     i:

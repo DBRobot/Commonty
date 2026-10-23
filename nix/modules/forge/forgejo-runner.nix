@@ -93,7 +93,7 @@ in
         tokenFile = config.sops.templates."forgejo-runner.env".path;
         # nix: the job runs on a box with nix. And the box's own name, for a
         # job that must run on this box and no other: each box building every
-        # box's system (entry_point.yml, build_host), so that what it later
+        # box's system (entry_point.yml, build_systems), so that what it later
         # vouches for it has built itself
         labels = [
           "nix:host"

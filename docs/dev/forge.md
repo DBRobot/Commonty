@@ -526,7 +526,7 @@ deleted and the runner registers again
 module           forgejo-runner.nix                 members-runner.nix
 labels           nix:host  <box>:host                members:docker://ghcr.io/catthehacker/ubuntu:act-22.04
 runs             the fleet's CI (runs-on: nix,      a member's workflow (runs-on: members)
-                 or a box's name for build_host)
+                 or a box's name for build_systems)
 where            on the box, as forgejo-runner,     in a container under gVisor (runsc)
                  nix on the path, the box's store
 capacity         at each start, min(threads/4,      min(2, threads/4, memory GiB/4)
@@ -582,7 +582,7 @@ changed its unit, the switch restarted it, and the next pull request's run
 
 `nix.settings.eval-cache` is off on a runner box: it remembered derivation
 paths a garbage collection had removed. The `<box>:host` label is how
-`build_host` builds every box's system on every box
+`build_systems` builds every box's system on every box
 ([`ci.md`](ci.md)).
 
 **The members' runner** gives every member CI without letting a job reach

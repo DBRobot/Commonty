@@ -13,9 +13,9 @@ are in [CI](ci.md).
 
 ```
 pull request, inside the release lock (ci.md)
-  CI: build_host builds every box's system on every builder box
+  CI: build_systems builds every box's system on every builder box
       ─► status build/<box>@<builder> = the toplevel's store path
-      same_build: all builders recorded one path ─► status build/<box>
+      systems_agree: all builders recorded one path ─► status build/<box>
         (one path is one evaluation; the bytes are dd-attest's, below)
   merge to main
 │
@@ -304,7 +304,7 @@ With `--box` (publish's path), for each box named:
    `{"v":1,"attester","flake","rev","boxes":{<name>:{path,closure}}}`.
 
 One attestation runs at a time (`/var/lib/dd-attest/lock`). CI builds every
-box's system on every builder box first (`build_host`), so at publish time
+box's system on every builder box first (`build_systems`), so at publish time
 the paths are this box's own builds and the check takes seconds.
 
 With `--order` (the `dd-build` timer), the same rules over the jobs of a

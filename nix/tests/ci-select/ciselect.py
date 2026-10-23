@@ -3,7 +3,8 @@
 #
 # A check's derivation is a function of the files its evaluation reads, the
 # directories it lists and the paths it asks after. covers.json holds that
-# for every VM test and every check of the mail_worker job, traced from a
+# for every VM test, every browser and Worker check (worker_tests,
+# page_tests, site_checks) and the box installer's drive, traced from a
 # real evaluation (strace of `nix eval`, from a store copy of the tree, in
 # a fresh cache so nothing is skipped as already copied). To it the chooser
 # adds, at both ends of the change, every file the check's .nix files name
@@ -15,6 +16,7 @@
 #   trace    write covers.json again (all of it, or --only some checks);
 #            about a minute a check, so run it on a box
 #   matches  does this script read the flake's test list right (ci.nix)
+#   groups   the browser and Worker jobs and their checks (ci.nix)
 import json
 import os
 import posixpath
@@ -29,21 +31,32 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 COVERS = "nix/tests/ci-select/covers.json"
 SYSTEM = "x86_64-linux"
 
-# the mail_worker job's checks: browsers and fakes, not VMs
-MAIL_WORKER = [
-    "mail-worker",
-    "mail-page",
-    "files-page",
-    "same-tab",
-    "site-headers",
-    "site-roles",
-    "site-a11y",
-    "site-speed",
-    "site-links",
-    "dns-worker",
-    "sso",
-    "control",
-]
+# The checks run by a browser or wrangler against fakes, not VMs, by the
+# workflow job that runs them (each job's matrix is its list, chosen check
+# by check like the VM tests)
+GROUPS = {
+    # the Cloudflare Workers under wrangler: mail, DNS, sign-in (the id
+    # Worker with the gate), the control plane's relay and validators
+    "worker_tests": ["mail-worker", "dns-worker", "sso", "control"],
+    # the Mail and Files pages as the app serves them, and every bar link
+    # and home tile staying in its tab
+    "page_tests": ["mail-page", "files-page", "same-tab"],
+    # the site as a browser meets it, through node1's nginx and the gate
+    "site_checks": [
+        "site-headers",
+        "site-roles",
+        "site-a11y",
+        "site-speed",
+        "site-links",
+    ],
+}
+BROWSER = [t for ts in GROUPS.values() for t in ts]
+# Traced like a check but not one: name -> (the attribute evaluated, the
+# .nix file its static references start from). The box installer's drive,
+# for build_installer and installer_agrees.
+TARGETS = {
+    "installer": (f"installers.{SYSTEM}.box", "nix/installer/image.nix"),
+}
 
 # Under everything: a change here can move any check, so all of them run.
 FOUNDATION = re.compile(
@@ -83,6 +96,12 @@ def git(*args, cwd=None):
 def vm_tests(flake_text):
     m = re.search(r"\n\s*vmTests = \[(.*?)\];", flake_text, re.S)
     return re.findall(r'"([^"]+)"', m.group(1)) if m else None
+
+
+def traced_names(flake_text):
+    # every name chosen one by one: the VM tests, the browser and Worker
+    # checks, and the targets that are not checks
+    return (vm_tests(flake_text) or []) + BROWSER + list(TARGETS)
 
 
 def named_docs(read):
@@ -239,7 +258,7 @@ def add_static(c, checks, read, isdir):
         k: {p: set(v) for p, v in c[k].items()} for k in ("dirs", "files", "listed")
     } | {"checks": set(c["checks"])}
     for t in checks:
-        entry = f"nix/tests/{t}.nix"
+        entry = TARGETS[t][1] if t in TARGETS else f"nix/tests/{t}.nix"
         if read(entry) is None:
             entry = f"nix/tests/{t}/default.nix"
         fs, ds = static_refs(entry, read, isdir)
@@ -287,7 +306,7 @@ def crate_closure(roots, read):
     return seen
 
 
-# the app's crates (flake.nix sources.app): a change to any runs app_lint
+# the app's crates (flake.nix sources.app): a change to any runs app_checks
 APP_ROOTS = ["app", "client/hubwriter"]
 
 
@@ -297,7 +316,7 @@ def select(
     """changes: [(status, path)], status A/M/D (renames as a D and an A).
     exists(rev, dir) -> bool, rev "base" or "head". Returns a dict."""
     vms = vm_tests(flake_text) or []
-    traced = vms + MAIL_WORKER
+    traced = vms + BROWSER + list(TARGETS)
     why = {}
     out = {"docs_only": False, "all": False}
     code = [(s, p) for s, p in changes if not (DOCS.match(p) and p not in docs_named)]
@@ -310,8 +329,9 @@ def select(
             chosen=[],
             why={},
             vm_tests=[],
-            mail_worker=[],
+            installer=False,
             reason=None,
+            **{g: [] for g in GROUPS},
         )
         return out
     allr = None
@@ -386,7 +406,9 @@ def select(
         reason=allr,
     )
     out["vm_tests"] = [t for t in vms if t in chosen]
-    out["mail_worker"] = [t for t in MAIL_WORKER if t in chosen]
+    for g, ts in GROUPS.items():
+        out[g] = [t for t in ts if t in chosen]
+    out["installer"] = "installer" in chosen
     return out
 
 
@@ -438,7 +460,7 @@ def select_revs(base, head, cwd=None):
                 yield f, show(head, f, cwd)
 
     flake = show(head, "flake.nix", cwd)
-    checks = (vm_tests(flake) or []) + MAIL_WORKER
+    checks = traced_names(flake)
     return select(
         changes,
         covers_at(head, checks, cwd),
@@ -466,7 +488,8 @@ def cmd_select(args):
             "chosen": [],
             "why": {},
             "vm_tests": vms if on else [],
-            "mail_worker": MAIL_WORKER if on else [],
+            "installer": on,
+            **{g: ts if on else [] for g, ts in GROUPS.items()},
         }
     else:
         r = select_revs(args[0], args[1])
@@ -477,19 +500,20 @@ def cmd_select(args):
     for t in r.get("chosen", []):
         print(f"  {t}: {r['why'][t]}")
     print(
-        f"nix: {r['nix']}  rust: {r['rust']}  app: {r['app']}  "
-        f"vm tests: {len(r.get('vm_tests', []))}  mail_worker: {len(r.get('mail_worker', []))}"
+        f"nix: {r['nix']}  rust: {r['rust']}  app: {r['app']}  installer: {r['installer']}  "
+        f"vm tests: {len(r.get('vm_tests', []))}  "
+        + "  ".join(f"{g}: {len(r.get(g, []))}" for g in GROUPS)
     )
     gh = os.environ.get("GITHUB_OUTPUT")
     if gh:
         with open(gh, "a") as f:
-            for k in ("nix", "rust", "app"):
+            for k in ("nix", "rust", "app", "installer"):
                 f.write(f"{k}={'true' if r[k] else 'false'}\n")
             vm = r.get("vm_tests", [])
             f.write(f"vm={'true' if vm else 'false'}\n")
             f.write(f"vm_tests={json.dumps(vm)}\n")
-            mw = r.get("mail_worker", [])
-            f.write(f"mail_worker={json.dumps(mw)}\n")
+            for g in GROUPS:
+                f.write(f"{g}={json.dumps(r.get(g, []))}\n")
     return 0
 
 
@@ -575,7 +599,8 @@ def trace_one(src, check, build=False, keep=None):
     tmp = tempfile.mkdtemp(prefix="ciselect-trace.")
     try:
         env = {**os.environ, "XDG_CACHE_HOME": os.path.join(tmp, "cache")}
-        attr = f"path:{src}#checks.{SYSTEM}.{check}"
+        what = TARGETS[check][0] if check in TARGETS else f"checks.{SYSTEM}.{check}"
+        attr = f"path:{src}#{what}"
         cmd = (
             ["nix", "build", "--no-link", "-L", attr]
             if build
@@ -623,7 +648,7 @@ def cmd_trace(args):
         elif a == "--out":
             out = args.pop(0)
     sha = git("rev-parse", rev).strip()
-    checks = only or (vm_tests(show(sha, "flake.nix")) + MAIL_WORKER)
+    checks = only or traced_names(show(sha, "flake.nix"))
     c = load_covers(open(out).read() if only and os.path.exists(out) else "")
     if only:
         for m in ("dirs", "files", "listed"):
@@ -668,6 +693,9 @@ def main():
         return cmd_trace(args)
     if cmd == "matches":
         print(json.dumps(sorted(vm_tests(open(args[0]).read()) or [])))
+        return 0
+    if cmd == "groups":
+        print(json.dumps(sorted(GROUPS)))
         return 0
     print(f"unknown command {cmd}", file=sys.stderr)
     return 2

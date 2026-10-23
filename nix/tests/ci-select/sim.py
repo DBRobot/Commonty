@@ -34,14 +34,15 @@ APP_LINT = {"clippy-app", "tests-app", "net-check"}
 def job_of(check, vms):
     if check in vms:
         return "vm_tests"
-    if check in cs.MAIL_WORKER:
-        return "mail_worker"
+    for g, ts in cs.GROUPS.items():
+        if check in ts:
+            return g
     if check in RUST_LINT:
         return "rust_lint"
     if check in TEST:
         return "test"
     if check in APP_LINT:
-        return "app_lint"
+        return "app_checks"
     return "flake_check"
 
 
@@ -124,8 +125,8 @@ def main():
 
         r = cs.select(
             changes,
-            cs.covers_at(head, vms + cs.MAIL_WORKER, covers=covers),
-            cs.covers_at(base, vms + cs.MAIL_WORKER, covers=covers),
+            cs.covers_at(head, cs.traced_names(flake), covers=covers),
+            cs.covers_at(base, cs.traced_names(flake), covers=covers),
             flake,
             cs.named_docs(read),
             lambda which, d: cs.dir_exists(base if which == "base" else head, d),
@@ -136,19 +137,20 @@ def main():
         moved = {c for c in th if th.get(c) != tb.get(c)}
         ran_new = {
             "vm_tests": set(r.get("vm_tests", [])),
-            "mail_worker": set(r.get("mail_worker", [])),
+            **{g: set(r.get(g, [])) for g in cs.GROUPS},
             "flake_check": r["nix"],
             "rust_lint": r["rust"],
             "test": r["rust"],
-            "app_lint": r["app"],
+            "app_checks": r["app"],
         }
+        browser = set().union(*(ran_new[g] for g in cs.GROUPS))
         ran_old = {
             "vm_tests": old["vm"],
-            "mail_worker": old["nix"],
+            **{g: old["nix"] for g in cs.GROUPS},
             "flake_check": old["nix"],
             "rust_lint": old["rust"],
             "test": old["rust"],
-            "app_lint": old["app"],
+            "app_checks": old["app"],
         }
         old_missed = sorted(
             c for c in moved if th.get(c) is not None and not ran_old[job_of(c, vms)]
@@ -197,7 +199,7 @@ def main():
         # replay traces those. CI traces every check it runs regardless.
         traced_now = [
             t
-            for t in sorted(ran_new["vm_tests"] | ran_new["mail_worker"])
+            for t in sorted(ran_new["vm_tests"] | browser)
             if not fixed
             and th.get(t) is not None
             and (t in reach or t not in covers["checks"])
@@ -231,7 +233,7 @@ def main():
                 ]
             return times["job"][job]
 
-        traced = vms + cs.MAIL_WORKER
+        traced = vms + cs.BROWSER
         old_min = new_min = 0.0
         old_vm = vms if old["vm"] else []
         for t in vms:
@@ -242,16 +244,18 @@ def main():
         for job, o, n in [
             ("flake_check", old["nix"], r["nix"]),
             ("build_all", old["nix"], r["nix"]),
-            ("mail_worker", old["nix"], bool(ran_new["mail_worker"])),
+            # the browser and Worker jobs, timed together as mail_worker
+            # before they were split
+            ("mail_worker", old["nix"], bool(browser)),
             ("rust_lint", old["rust"], r["rust"]),
             ("test", old["rust"], r["rust"]),
             ("app_lint", old["app"], r["app"]),
         ]:
             old_min += cost(job) if o else 0
             new_min += cost(job) if n else 0
-        if ran_new["mail_worker"] and old["nix"]:
-            # mail_worker builds only its chosen checks: by their share
-            share = len(ran_new["mail_worker"]) / len(cs.MAIL_WORKER)
+        if browser and old["nix"]:
+            # they build only their chosen checks: by their share
+            share = len(browser) / len(cs.BROWSER)
             new_min -= cost("mail_worker") * (1 - share)
         rows.append(
             {
@@ -264,8 +268,8 @@ def main():
                 "old_vm": len(old_vm),
                 "new_vm": len(ran_new["vm_tests"]),
                 "moved_vm": len([t for t in vms if t in moved]),
-                "new_mail": len(ran_new["mail_worker"]),
-                "moved_mail": len([t for t in cs.MAIL_WORKER if t in moved]),
+                "new_mail": len(browser),
+                "moved_mail": len([t for t in cs.BROWSER if t in moved]),
                 "old_min": round(old_min, 1),
                 "new_min": round(new_min, 1),
                 "traced": len(traced_now),
