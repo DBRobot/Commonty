@@ -3,8 +3,9 @@
 
 import {
   put, $, app, el, ic, api, text, q, enc, ago, when, plural, bytes, avatar, route, go, statusDot,
-  markdown, toast, copy, setTitle, firstLine, short, pop, pager, whoami, warmers, ghost, open, local, whenSeen } from './git-core.js';
+  markdown, toast, copy, setTitle, firstLine, short, pop, pager, whoami, warmers, ghost, open, local, whenSeen, ApiError } from './git-core.js';
 import { heatmap, lineChart, languages, dayKey } from './git-charts.js';
+import { repoPath, sameRepo } from './git-path.js';
 import * as diff from './git-diff.js';
 import { feedLine } from './git-home.js';
 import { webUrl } from './kit.js';
@@ -16,7 +17,9 @@ const main = () => app();
 const repos = new Map();
 export async function repo(owner, name, fresh = false) {
   const k = `${owner}/${name}`.toLowerCase();
-  if (fresh || !repos.has(k)) repos.set(k, api(`/repos/${enc(owner)}/${enc(name)}`));
+  const full = repoPath(owner, name);
+  if (!full) throw new ApiError(404, 'No such repository.');
+  if (fresh || !repos.has(k)) repos.set(k, api(`/repos/${full}`));
   try { return await repos.get(k); } catch (e) { repos.delete(k); throw e; }
 }
 export const forget = (r) => repos.delete(r.full_name.toLowerCase());
@@ -52,12 +55,16 @@ const warm = (a, fetchIt) => { a.addEventListener('pointerenter', () => { fetchI
 
 // What a view asks first, asked before the repository and its refs have
 // answered: the ref is taken to be the address's first part (or the default
-// branch when there is none), and the answer is used only if the refs agree.
+// branch when there is none), and the answer is used only if the refs agree
+// and the repository is the one the address named. The address's parts are
+// encoded into the API path (repoPath), and one that is no name asks nothing.
 function early(m, ask) {
+  const full = repoPath(m[1], m[2]);
+  if (!full) return async () => null;
   const [ref, ...p] = (m[3] || '').split('/');
   const guess = { ref, path: p.join('/') };
-  const answer = ask(`${m[1]}/${m[2]}`, guess.ref || undefined, guess.path).catch(() => null);
-  return async (r, ref, path) => (ref === (guess.ref || r.default_branch) && path === guess.path ? answer : null);
+  const answer = ask(full, guess.ref || undefined, guess.path).catch(() => null);
+  return async (r, ref, path) => (sameRepo(r.full_name, m[1], m[2]) && ref === (guess.ref || r.default_branch) && path === guess.path ? answer : null);
 }
 
 export function header(r, tab) {

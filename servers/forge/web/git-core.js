@@ -151,7 +151,7 @@ export const q = (o) => {
   const s = p.toString();
   return s ? `?${s}` : '';
 };
-export const enc = (path) => path.split('/').map(encodeURIComponent).join('/');
+export { enc } from './git-path.js';
 
 // ---- words and numbers
 
