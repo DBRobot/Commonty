@@ -29,11 +29,11 @@ pkgs.runCommand "control-e2e"
     # and /leases, which only the DNS Worker reaches (by its binding), here
     # through a front of the test's own
     cat > w/front.js <<'JS'
-    import relay from './worker.js';
-    export { Relay } from './worker.js';
+    import relay, { Relay } from './worker.js';
+    export { Relay };
     export default {
       async fetch(req, env) {
-        if (new URL(req.url).pathname === '/leases') return env.RELAY.get(env.RELAY.idFromName('relay')).fetch(req);
+        if (new URL(req.url).pathname === '/leases') return env.RELAY.get(env.RELAY.idFromName(Relay.NAME)).fetch(req);
         return relay.fetch(req, env);
       },
     };

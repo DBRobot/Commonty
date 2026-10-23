@@ -243,10 +243,15 @@ func (v *Validator) Watch(l Limits, every time.Duration, lastHeal time.Time, wed
 	}
 }
 
-// limiter: how many requests one sender may hand in, a bucket each
+// limiter: how many requests a sender may hand in. Validators and the
+// fleet's boxes have a bucket each, boxes still joining share one, and
+// every sender but the validators shares a cap besides; a sender that is
+// none of these gets no bucket and nothing in
 type limiter struct {
-	mu      sync.Mutex
-	buckets map[uint64]*bucket
+	mu        sync.Mutex
+	buckets   map[uint64]*bucket
+	strangers bucket
+	all       bucket
 }
 
 type bucket struct {
@@ -254,30 +259,82 @@ type bucket struct {
 	at     time.Time
 }
 
+type sender int
+
+const (
+	unknown sender = iota
+	aValidator
+	aBox
+	aStranger
+)
+
 // a box sends a heartbeat every 30 s, a lease renewal every 5 s, at most
-// 60 directory items and 20 build results a minute: far under this
+// 60 directory items and 20 build results a minute: far under this. Joins
+// are a few an hour (state.JoinsPerHour)
 const (
 	perSecond = 20
 	burst     = 200
 	senders   = 4096
+	// every box together, and every box still joining together
+	allPerSecond      = 500
+	allBurst          = 2000
+	strangerPerSecond = 2
+	strangerBurst     = 20
 )
 
-func (l *limiter) allow(from uint64, now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.buckets == nil || len(l.buckets) >= senders {
-		l.buckets = map[uint64]*bucket{}
+func (b *bucket) take(rate, size float64, now time.Time) bool {
+	if b.at.IsZero() {
+		b.tokens = size
+	} else {
+		b.tokens = min(size, b.tokens+now.Sub(b.at).Seconds()*rate)
 	}
-	b := l.buckets[from]
-	if b == nil {
-		b = &bucket{tokens: burst, at: now}
-		l.buckets[from] = b
-	}
-	b.tokens = min(burst, b.tokens+now.Sub(b.at).Seconds()*perSecond)
 	b.at = now
 	if b.tokens < 1 {
 		return false
 	}
 	b.tokens--
 	return true
+}
+
+func (l *limiter) allow(from uint64, who sender, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	switch who {
+	case unknown:
+		return false
+	case aStranger:
+		return l.strangers.take(strangerPerSecond, strangerBurst, now) && l.all.take(allPerSecond, allBurst, now)
+	}
+	if l.buckets == nil {
+		l.buckets = map[uint64]*bucket{}
+	}
+	b := l.buckets[from]
+	if b == nil {
+		if len(l.buckets) >= senders {
+			l.evict(now)
+		}
+		b = &bucket{}
+		l.buckets[from] = b
+	}
+	// its own bucket first: a sender past its rate spends none of the cap
+	return b.take(perSecond, burst, now) && (who == aValidator || l.all.take(allPerSecond, allBurst, now))
+}
+
+// evict drops the buckets that have refilled, or else the fullest: never
+// every bucket at once, which handed a flooding sender a full one again,
+// nor one that is spent while another has more left
+func (l *limiter) evict(now time.Time) {
+	var fullest uint64
+	most := -1.0
+	for id, b := range l.buckets {
+		left := b.tokens + now.Sub(b.at).Seconds()*perSecond
+		if left >= burst {
+			delete(l.buckets, id)
+		} else if left > most {
+			fullest, most = id, left
+		}
+	}
+	if len(l.buckets) >= senders {
+		delete(l.buckets, fullest)
+	}
 }

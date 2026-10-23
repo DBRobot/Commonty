@@ -1987,6 +1987,8 @@
           dns-worker = import ./nix/tests/dns-worker.nix args;
           # the control plane: relay, witness and three validators, offline
           control = import ./nix/tests/control.nix args;
+          # the relay answers without a witness that cannot start
+          control-relay = import ./nix/tests/control-relay.nix args;
           # the app carried the site's signed-in pages, their scripts, the
           # stylesheet and the fonts at the site's paths (app/carried
           # lists them, scripts/sync-app-web copies them); two copies, kept

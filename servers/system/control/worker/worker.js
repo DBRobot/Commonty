@@ -101,36 +101,142 @@ function frame(to, from, kind, payload) {
   return b;
 }
 
+// The object every connection and Worker reaches. 'relay' wedged on its
+// witness's saved state on 2026-10-22 and answered nothing, however often
+// the code was replaced; the DNS and mail Workers bind this name too
+// (servers/system/dns/worker.js, client/mail/worker/identity.js)
+const RELAY_NAME = 'relay-1023';
+
+// how long the witness may take to start before the relay gives up on it
+const WITNESS_BOOT_MS = 20000;
+
+// what the witness registers, and the relay calls
+const HOOKS = ['controlState', 'controlIdentity', 'controlPlaced', 'controlReceive', 'controlSend', 'controlPersist', 'controlReady'];
+
+function unhook() {
+  for (const h of HOOKS) delete globalThis[h];
+  // a witness that hung may still call out: nothing it says goes anywhere
+  globalThis.controlSend = () => {};
+  globalThis.controlPersist = () => {};
+  globalThis.controlReady = () => {};
+}
+
+// the validator id a witness key votes as, from the config: known before
+// the witness is ready, so its first catching up is answered
+async function witnessID(seed) {
+  try {
+    const pkcs8 = new Uint8Array([...b64('MC4CAQAwBQYDK2VwBCIEIA=='), ...b64(seed)]);
+    const k = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, true, ['sign']);
+    const pub = btoa(String.fromCharCode(...b64url((await crypto.subtle.exportKey('jwk', k)).x)));
+    const v = CONFIG.validators.find((x) => x.key === pub);
+    return v ? BigInt(v.id) : null;
+  } catch {
+    return null;
+  }
+}
+
 export class Relay {
+  // for a test's front, which reaches the same object
+  static NAME = RELAY_NAME;
+
   constructor(ctx, env) {
     this.ctx = ctx;
     this.env = env;
     this.socks = new Map(); // id (BigInt) -> WebSocket
-    this.witness = null; // its id, once running
+    this.witness = null; // its id, once ready and while it runs
+    this.self = null; // its id, from its start until it fails
     this.booting = null;
   }
 
-  // the witness, if this deployment has its key
+  // the witness, if this deployment has its key. Nothing waits on it: the
+  // relay carries the boxes' frames from the first moment, and a witness
+  // that panics or hangs on what it saved only leaves the relay without it
+  // (2026-10-22, when one that never started stopped every box's dial)
   boot() {
-    this.booting ??= (async () => {
-      if (!this.env.WITNESS_KEY) return;
-      const saved = (await this.ctx.storage.get('saved')) || '';
-      globalThis.controlInit = { config: JSON.stringify(CONFIG), key: this.env.WITNESS_KEY, saved, placement: JSON.stringify(PLACEMENT) };
-      globalThis.controlSend = (to, kind, arr) => this.route(BigInt(to), this.witness, kind, arr);
-      globalThis.controlPersist = (s) => { this.ctx.storage.put('saved', s); };
-      const ready = new Promise((r) => { globalThis.controlReady = r; });
-      const go = new Go();
-      const inst = await WebAssembly.instantiate(witnessWasm, go.importObject);
-      go.run(inst);
-      this.witness = BigInt(await ready);
-    })();
+    if (!this.env.WITNESS_KEY) return null;
+    this.booting ??= this.start().catch((e) => {
+      console.log(`witness: ${e.message}; relaying without it`);
+      this.drop();
+    });
     return this.booting;
+  }
+
+  async start() {
+    const saved = (await this.ctx.storage.get('saved')) || '';
+    try {
+      return await this.run(saved);
+    } catch (e) {
+      this.drop();
+      if (saved === '') throw e;
+      // what it saved is the one thing it brings: without it, it catches
+      // up from the validators like one that was away. The delete is made
+      // durable before anything else, or a reset drops it and the next
+      // start meets the same state
+      console.log(`witness: ${e.message}; starting again without what it saved`);
+      await this.ctx.storage.delete('saved');
+      await this.ctx.storage.sync();
+      if (e.hung) {
+        // a hung one cannot be stopped from here: the object starts afresh
+        this.ctx.abort(e.message);
+        return;
+      }
+    }
+    return await this.run('');
+  }
+
+  // one start of the witness: resolves once it is ready, throws if it
+  // exits first or is not ready in time
+  async run(saved) {
+    this.self = await witnessID(this.env.WITNESS_KEY);
+    globalThis.controlInit = { config: JSON.stringify(CONFIG), key: this.env.WITNESS_KEY, saved, placement: JSON.stringify(PLACEMENT) };
+    globalThis.controlSend = (to, kind, arr) => { if (this.self !== null) this.route(BigInt(to), this.self, kind, arr); };
+    globalThis.controlPersist = (s) => { this.ctx.storage.put('saved', s); };
+    const ready = new Promise((r) => { globalThis.controlReady = r; });
+    const go = new Go();
+    const inst = await WebAssembly.instantiate(witnessWasm, go.importObject);
+    let up = false;
+    const exited = go.run(inst).then(
+      () => { throw new Error('the witness exited before it was ready'); },
+      (e) => { throw new Error(`the witness failed: ${e && e.message}`); },
+    );
+    // and once it ran: gone, it is no witness, and the next request starts
+    // one again (from what it saved since)
+    exited.catch(() => {
+      if (!up) return;
+      console.log('witness: it exited; relaying without it until it starts again');
+      up = false;
+      this.booting = null;
+      this.drop();
+    });
+    let timer;
+    const late = new Promise((_, no) => {
+      timer = setTimeout(() => no(Object.assign(new Error(`the witness was not ready in ${WITNESS_BOOT_MS / 1000} s`), { hung: true })), WITNESS_BOOT_MS);
+    });
+    try {
+      const id = await Promise.race([ready, exited, late]);
+      up = true;
+      this.witness = BigInt(id);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  drop() {
+    this.witness = null;
+    this.self = null;
+    unhook();
+  }
+
+  // the witness's own answers, only while it runs
+  witnessUp() {
+    return this.witness !== null && typeof globalThis.controlState === 'function';
   }
 
   deliver(id, from, kind, payload) {
     if (id === from) return;
-    if (id === this.witness) {
-      globalThis.controlReceive(Number(from), kind, payload);
+    if (this.self !== null && id === this.self) {
+      if (typeof globalThis.controlReceive !== 'function') return;
+      try { globalThis.controlReceive(Number(from), kind, payload); } catch (e) { console.log(`witness: ${e.message}`); }
       return;
     }
     const s = this.socks.get(id);
@@ -141,7 +247,7 @@ export class Relay {
     if (to === TO_VALIDATORS || to === TO_ALL) {
       const targets = new Set(to === TO_ALL ? [...this.socks.keys()] : []);
       for (const id of validators.keys()) targets.add(id);
-      if (this.witness !== null) targets.add(this.witness);
+      if (this.self !== null) targets.add(this.self);
       for (const id of targets) this.deliver(id, from, kind, payload);
     } else {
       this.deliver(to, from, kind, payload);
@@ -149,12 +255,17 @@ export class Relay {
   }
 
   async fetch(req) {
-    await this.boot();
+    this.boot();
     const url = new URL(req.url);
     if (url.pathname === '/health') {
       let height = null;
-      try { height = this.witness !== null ? JSON.parse(globalThis.controlState()).height : null; } catch { /* starting */ }
-      return Response.json({ connected: this.socks.size, witness: this.witness !== null, height });
+      try { height = this.witnessUp() ? JSON.parse(globalThis.controlState()).height : null; } catch { /* starting */ }
+      return Response.json({ connected: this.socks.size, witness: this.witnessUp(), height });
+    }
+    // what only the witness knows is never answered without it, nor from
+    // whatever a witness that failed left behind
+    if ((url.pathname === '/leases' || url.pathname === '/identity') && !this.witnessUp()) {
+      return new Response('no witness here', { status: 503 });
     }
     // who holds each lease, by the witness's agreed state: for the DNS
     // Worker, which binds this object (servers/system/dns); never reached
@@ -193,7 +304,7 @@ export class Relay {
     // the boxes that joined, by the witness's agreed state
     const joined = new Map();
     try {
-      const s = this.witness !== null ? JSON.parse(globalThis.controlState()) : {};
+      const s = this.witnessUp() ? JSON.parse(globalThis.controlState()) : {};
       for (const j of Object.values(s.joined || {})) joined.set(BigInt(j.id), j);
     } catch { /* starting */ }
     const ok = await helloOK(id, Number(url.searchParams.get('at')), url.searchParams.get('sig') || '', url.searchParams.get('key') || '', joined);
@@ -222,7 +333,7 @@ export class Relay {
         const v = new DataView(b.buffer, b.byteOffset);
         // a frame claims to be from its own connection, whatever it says
         this.route(v.getBigUint64(0), id, b[16], b.subarray(17));
-      });
+      }).catch(() => { /* one frame lost, never the connection's later ones */ });
     });
     server.addEventListener('close', () => { if (this.socks.get(id) === server) this.socks.delete(id); });
     return new Response(null, { status: 101, webSocket: client });
@@ -239,6 +350,6 @@ export default {
       await req.text().catch(() => '');
       return new Response('not here', { status: 404 });
     }
-    return env.RELAY.get(env.RELAY.idFromName('relay')).fetch(req);
+    return env.RELAY.get(env.RELAY.idFromName(RELAY_NAME)).fetch(req);
   },
 };
