@@ -1,7 +1,4 @@
-{ config, lib, ... }:
-let
-  policy = lib.importJSON ../../fleet/policy.json;
-in
+{ config, ... }:
 {
   # The forge. Its runner is the runner role: any box can run one, the
   # forge runs on one.
@@ -25,7 +22,5 @@ in
       rank = 50;
     }
   ];
-  # the fleet's owner administers its forge (fleet/policy.json)
-  dd.forgejo.admin = policy.owner;
   dd.backup.paths = [ config.dd.forgejo.stateDir ]; # repositories, lfs, custom config; its db is in the postgres dumps
 }

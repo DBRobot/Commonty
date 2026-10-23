@@ -170,8 +170,9 @@ libraries          every object under each of their libraries' prefixes
                    the home controllers they vouched for
                    (controllers/<label>/), with the gate's record of
                    them (the gate that holds the bucket key)       dav.rs forget, controller.rs
-photos             their Ente account, through museum's admin delete with
-                   the ledger's admin login, every 5 minutes      dd forget-photos
+photos             their Ente account, deleted by museum itself once the
+                   box lists them in its dd_delete table; no
+                   admin account, every 5 minutes                 dd-forget-photos
 passwords          their Vaultwarden account, through upstream's admin
                    delete on loopback, with a token made at boot,
                    every 5 minutes                                dd-forget-passwords
@@ -205,8 +206,9 @@ a coming back; or a suspension date 90 days ago or more (`LEAVE_WINDOW`),
 for any root the entry has had, in the member list it was deployed with.
 The front door's gate asks it (`VERIFY_MAIL_FORGET`).
 
-Forgejo's admin account is never deleted this way; the forge says so and
-keeps it until another admin is named. A Passwords account that is the
+Every person's forge account is deleted this way, the fleet's owner's
+too: the forge's admin is the box's own identity (`commonty-box`), which
+is no member's and is never deleted. A Passwords account that is the
 last owner of a shared organization, or a forge account that last owns an
 organization, is refused by the service: the unit logs it and tries again
 every hour until someone hands the organization over.
@@ -276,10 +278,14 @@ everyone on the member list or in by an invite the release key signed,
 not revoked and not gone by their own word. Cloudflare forwards it to the
 address each gave the mail Worker; no box ever holds that address.
 
-The mail leaves from the first box built with the vault, which already writes to
-members ([member-mail.nix](../../nix/modules/member-mail.nix)): `dd` puts
-the change in `/var/lib/dd-announce/outbox` over ssh, and `dd-announce`
-(every five minutes) refuses it there too if it is under 30 days away,
-mails each member once, and keeps what it sent in `sent/`. `dd` then adds
-a line to [docs/policies/changes.md](../policies/changes.md): what
-changed, when it was announced, when it takes effect, and the commit.
+The mail leaves from the box that holds the vault's lease, which already writes to
+members ([member-mail.nix](../../nix/modules/member-mail.nix)). `dd`
+writes the change to `fleet/announcements/<id>.json` and adds a line to
+[docs/policies/changes.md](../policies/changes.md): what changed, when it
+was announced, when it takes effect, and the commit. Both are committed and
+released, so the announcement comes signed with the release: nobody logs
+in to a box to send it. `dd-announce` (every five minutes) refuses it there
+too if it is under 30 days away, mails each member it names once, and keeps
+what it sent in its own database (`dd_announce`, in the postgres beside the
+vault), so a later release that still carries it sends nothing again, and
+neither does a box that takes the vault's lease over.

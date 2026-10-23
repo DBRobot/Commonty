@@ -108,13 +108,7 @@ in
     let
       tier = builtins.attrNames (
         lib.filterAttrs (
-          s: n:
-          n.placed
-          && !n.lease
-          && !n.everyBox
-          && n.trust == "any"
-          && !n.servesCode
-          && !builtins.elem s (policy.ownHardware or [ ])
+          s: n: n.placed && !n.lease && !n.everyBox && n.trust == "any" && !n.servesCode
         ) needs
       );
       localOf =

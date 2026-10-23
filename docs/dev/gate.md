@@ -814,8 +814,12 @@ With `VERIFY_HEADSCALE_API` set (the gateway, `dd.verify.network`):
   secrets key, so whoever carries the answer holds only ciphertext. The control box mints its own
   ([headscale.nix](../../nix/modules/net/headscale.nix)); there is no
   reusable box key.
-- A box's owner reaches that box through headscale's ACL plus a per-box
-  ipset, `dd-owner` ([owner.nix](../../nix/modules/net/owner.nix)).
+- The fleet's admin (`policy.json` owner) reaches every box's ssh, dns and
+  cache push through headscale's ACL plus a per-box ipset, `dd-owner`
+  ([owner.nix](../../nix/modules/net/owner.nix)), and logs in as `admin`
+  with the admin's keys. A box's host (`box.json` owner) is not its admin:
+  their devices reach that box's dns (`dd-host`) and nothing more, and
+  they have no shell on it.
 - The fleet's names resolve publicly to the gateway's fleet address,
   100.64.0.2 (`address` in [fleet-names.nix](../../nix/lib/fleet-names.nix)).
 - Every 300 s, devices of people who are no longer members or guests are

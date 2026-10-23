@@ -6,15 +6,29 @@
 # failed both runners, and the release was rolled back for it. Here a
 # forge that is down is waited out, however long, with the unit running.
 set -eu
+forge() {
+  wait=5
+  until curl -fsS -o /dev/null --max-time 20 "$URL/api/v1/version"; do
+    echo "the forge at $URL does not answer; again in ${wait}s"
+    sleep "$wait"
+    wait=$((wait < 300 ? wait * 2 : 300))
+  done
+}
+# Started as root ("!" in the unit) where FETCH is set: the registration
+# token, sealed to this box's key, which only root reads (runner-token.sh),
+# fetched once the forge answers; then the rest as the runner's user
+if [ -n "${FETCH:-}" ] && [ "$(id -u)" = 0 ]; then
+  forge
+  "$FETCH"
+  TOKEN=$(sed -n 's/^TOKEN=//p' "$TOKEN_FILE")
+  export TOKEN
+  if [ -n "$RUN_GROUPS" ]; then groups=(--groups "$RUN_GROUPS"); else groups=(--clear-groups); fi
+  exec "$SETPRIV" --reuid "$RUN_AS" --regid "$RUN_AS" "${groups[@]}" -- "$0"
+fi
 dir="$STATE_DIRECTORY/$NAME"
 mkdir -p "$dir"
 cd "$dir"
-wait=5
-until curl -fsS -o /dev/null --max-time 20 "$URL/api/v1/version"; do
-  echo "the forge at $URL does not answer; again in ${wait}s"
-  sleep "$wait"
-  wait=$((wait < 300 ? wait * 2 : 300))
-done
+forge
 # registered at another address (the forge renamed): again, at this one
 if [ -e .runner ] && ! grep -q "\"address\": \"$URL\"" .runner; then
   echo "runner registered at another address; registering again at $URL"

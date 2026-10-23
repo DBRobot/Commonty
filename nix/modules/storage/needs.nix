@@ -167,12 +167,14 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "what each member keeps across every service, against their allowance";
-    # it holds a Photos admin login, which can set anyone's limit
-    trust = "owner";
+    # no admin login: museum's own database user counts Photos, sets the
+    # limits it works out, and lists a leaver for museum to delete
     units = [
       "dd-storage-ledger"
       "dd-storage-forget-login"
-      "dd-forget-photos" # Photos' share of deleting whoever left, with the ledger's admin login
+      "dd-photos-usage"
+      "dd-photos-limits"
+      "dd-forget-photos" # Photos' share of deleting whoever left
     ];
     instances = 1;
     base = {
@@ -182,13 +184,13 @@
         storage = "13K";
       };
       network = {
-        outbound = [ "api" ]; # museum's admin api, for photos
+        outbound = "none"; # museum's tables, on this box
         inbound = "none";
       };
       depends = {
         dd-verify.local = true; # the members and their libraries; it reads the ledger back
         storage-view.local = true; # the fleet's count, which it holds Photos to
-        ente-museum.local = false; # Photos' counts, from museum's api; the other services' come in their own boxes' heartbeats
+        ente-museum.local = true; # museum's own tables; the other services' counts come in their own boxes' heartbeats
       };
       privacy = "metadata"; # bytes per member, never contents
     };

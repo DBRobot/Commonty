@@ -2,6 +2,8 @@
 # gate's issuer answering for it, and the Send page open to anyone.
 import json
 
+from waits import journal_has, start_fresh
+
 box.wait_for_unit("dd-store-setup.service")
 box.wait_for_unit("dd-vault-keys.service")
 # its sign-in secret was made here, for the gate here and Vaultwarden alike
@@ -269,3 +271,53 @@ assert "access_token" not in again, again
 # a name that is not one is dropped and goes no further
 box.succeed("sudo -u dd-verify touch '/run/dd-ended/-x'")
 box.wait_until_succeeds("test ! -e '/run/dd-ended/-x'", timeout=30)
+
+
+# A policy change travels in the release (fleet/announcements), and the box
+# mails it from there once; under 30 days' notice it is refused, never sent
+box.succeed("mkdir -p /var/lib/test-announcements")
+box.succeed(
+    """echo '{"id": "2026-10-11-soon", "subject": "s", "body": "b", "to": ["tom"], "takes_effect": "2000-01-01"}' > /var/lib/test-announcements/soon.json"""
+)
+far = box.succeed("date -u -d '+40 days' +%F").strip()
+box.succeed(
+    f"""echo '{{"id": "2026-10-11-far", "subject": "s", "body": "b", "to": ["tom"], "takes_effect": "{far}"}}' > /var/lib/test-announcements/far.json"""
+)
+# a run of its own, not one its timer began before these were written
+inv = start_fresh(box, "dd-announce.service")
+announced = "sudo -u postgres psql -d dd_announce -tAc"
+assert (
+    box.succeed(
+        f"{announced} \"select how from done where id = '2026-10-11-soon'\""
+    ).strip()
+    == "refused"
+)
+assert (
+    box.succeed(
+        f"{announced} \"select count(*) from sent where id = '2026-10-11-soon'\""
+    ).strip()
+    == "0"
+)
+# no mail Worker here: nothing goes, so it is not marked sent, and is tried
+# again next time rather than lost
+assert (
+    box.succeed(
+        f"{announced} \"select count(*) from done where id = '2026-10-11-far'\""
+    ).strip()
+    == "0"
+)
+assert journal_has(box, "dd-announce.service", inv, "2026-10-11-far: 1 not sent yet")
+# what was sent is in the database, which follows the vault's lease to
+# whichever box takes it over: there, a name already sent to is not sent
+# to again
+box.succeed(f"{announced} \"insert into sent values ('2026-10-11-far', 'tom')\"")
+inv = start_fresh(box, "dd-announce.service")
+assert journal_has(
+    box, "dd-announce.service", inv, "2026-10-11-far: sent to 1 member(s)"
+)
+assert (
+    box.succeed(
+        f"{announced} \"select how from done where id = '2026-10-11-far'\""
+    ).strip()
+    == "sent"
+)

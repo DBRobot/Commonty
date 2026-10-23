@@ -6,7 +6,6 @@ mod derive;
 mod diskcmd;
 mod dns_worker;
 mod id_worker;
-mod leaving;
 mod librarycmd;
 mod mail_worker;
 mod mediacmd;
@@ -170,19 +169,6 @@ enum Command {
         #[arg(long = "directory", default_values = DEFAULT_DIRECTORIES)]
         directories: Vec<String>,
     },
-    /// Photos' share of deleting whoever left, or was removed 30 days ago: their account,
-    /// through museum's admin api. On the Photos box, by its timer.
-    #[command(hide = true)]
-    ForgetPhotos {
-        #[arg(long, default_value = "http://127.0.0.1:4181")]
-        gate: String,
-        #[arg(long, default_value = DEFAULT_ENTE)]
-        ente_origin: String,
-        #[arg(long)]
-        photos_suffix: String,
-        #[arg(long)]
-        password_file: std::path::PathBuf,
-    },
     /// The fleet's policies: a change is mailed to every member 30 days or
     /// more before it takes effect.
     Policy {
@@ -302,15 +288,17 @@ enum Command {
         /// the gate on this box, for the members and their libraries
         #[arg(long, default_value = "http://127.0.0.1:4181")]
         gate: String,
-        #[arg(long, default_value = DEFAULT_ENTE)]
-        ente_origin: String,
         /// a member's photo address is their name and this: @users.<domain>
         #[arg(long)]
         photos_suffix: String,
-        /// the ledger's own photo account's password (secrets:
-        /// ente-storage-password); the account is storage+ledger<photos-suffix>
+        /// what each address keeps in Photos, as museum's own database user
+        /// counts it ("<address>\t<bytes>"; storage/ledger.nix)
         #[arg(long)]
-        password_file: std::path::PathBuf,
+        photos_usage: std::path::PathBuf,
+        /// where each address's Photos limit goes, for museum's own database
+        /// user to set ("<address>\t<bytes>")
+        #[arg(long)]
+        photos_limits: std::path::PathBuf,
         /// each member's allowance, in GB
         #[arg(long)]
         budget_gb: u64,
@@ -334,8 +322,9 @@ enum Command {
         out: std::path::PathBuf,
     },
     /// The demo's photo account: made with the fleet's code and the
-    /// password the boxes hold for it, then given a quota of nothing, which
-    /// is ente's read-only. Once per fleet; safe to run again.
+    /// password the boxes hold for it. Its limit is the Photos box's
+    /// (dd.photos.demoQuota, one byte: read-only), set there with no admin.
+    /// Once per fleet; safe to run again.
     PhotosDemo {
         #[arg(long, default_value = DEFAULT_ENTE)]
         ente_origin: String,
@@ -352,11 +341,6 @@ enum Command {
         /// into with the same password and moved to --email, nothing made
         #[arg(long)]
         from: Option<String>,
-        /// Room to give it, in bytes. One byte (the default) fits no photo:
-        /// read-only. More, briefly, to put the demo's own photos in, then
-        /// run again without it.
-        #[arg(long, default_value_t = 1)]
-        quota: u64,
     },
     /// What is cached on this machine.
     Status,
@@ -433,8 +417,9 @@ enum PasskeyCmd {
 
 #[derive(Subcommand)]
 enum PolicyCmd {
-    /// Mail the change in FILE to every member's <name>@<domain>, and add
-    /// it to docs/policies/changes.md. Refuses a date under 30 days away.
+    /// Mail the change in FILE to every member's <name>@<domain>, in the
+    /// next release (fleet/announcements), and add it to
+    /// docs/policies/changes.md. Refuses a date under 30 days away.
     Announce {
         file: std::path::PathBuf,
         /// YYYY-MM-DD, at least 30 days from today
@@ -1171,20 +1156,6 @@ async fn main() -> Result<()> {
             println!(
                 "{name} has left: every sign-in has ended, and every box is deleting everything of yours now. Backups expire on their own within 90 days."
             );
-        }
-        Command::ForgetPhotos {
-            gate,
-            ente_origin,
-            photos_suffix,
-            password_file,
-        } => {
-            leaving::forget_photos(leaving::Photos {
-                gate,
-                ente_origin,
-                photos_suffix,
-                password_file,
-            })
-            .await?;
         }
         Command::Passkey { cmd, directories } => match cmd {
             PasskeyCmd::List => {
@@ -1986,17 +1957,17 @@ async fn main() -> Result<()> {
 
         Command::StorageLedger {
             gate,
-            ente_origin,
             photos_suffix,
-            password_file,
+            photos_usage,
+            photos_limits,
             budget_gb,
             view,
             facts_out,
         } => {
             storage_ledger::run(storage_ledger::Ledger {
                 gate,
-                ente_origin,
-                password_file,
+                photos_usage,
+                photos_limits,
                 photos_suffix,
                 budget: budget_gb.saturating_mul(1_000_000_000),
                 view,
@@ -2018,7 +1989,6 @@ async fn main() -> Result<()> {
             code,
             password,
             from,
-            quota,
         } => {
             let client = ente::client(&ente_origin)?;
             // the terminal's prompts, but the fleet's code answered for it
@@ -2104,49 +2074,9 @@ async fn main() -> Result<()> {
                     }
                 }
             };
-            // the quota, with this machine's ente session: the admin's. The
-            // api refuses a literal zero (a required field), so one byte,
-            // which fits no photo.
-            let raw = keys
-                .get("ente")?
-                .context("this machine holds no ente session: `dd unlock` as the admin first")?;
-            let admin = Vault::from_json(&raw)?;
-            // the vault keeps the token standard-base64; museum reads it url-safe
-            let token = {
-                use base64::Engine as _;
-                let bytes = base64::engine::general_purpose::STANDARD.decode(&admin.token)?;
-                base64::engine::general_purpose::URL_SAFE.encode(bytes)
-            };
-            let body = serde_json::json!({
-                "userID": user_id,
-                "storage": quota,
-                "transactionID": "dd-demo",
-                "productID": "free",
-                "expiryTime": 4102444800000000i64,
-                "paymentProvider": "",
-            });
-            let r = reqwest::Client::new()
-                .put(format!(
-                    "{}/admin/user/subscription",
-                    ente_origin.trim_end_matches('/')
-                ))
-                .header("X-Auth-Token", &token)
-                .json(&body)
-                .send()
-                .await?;
-            anyhow::ensure!(
-                r.status().is_success(),
-                "museum refused the quota: {} {}",
-                r.status(),
-                r.text().await.unwrap_or_default()
+            println!(
+                "demo photo account ready: {email} (user {user_id}); its limit is the Photos box's dd.photos.demoQuota"
             );
-            if quota <= 1 {
-                println!("demo photo account ready: {email}, quota 1 byte (read-only)");
-            } else {
-                println!(
-                    "demo photo account: {email}, quota {quota} bytes; run again without --quota to make it read-only"
-                );
-            }
         }
 
         Command::Lock { forget_identity } => {
