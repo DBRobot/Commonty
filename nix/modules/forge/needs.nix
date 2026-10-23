@@ -31,6 +31,7 @@
       "dd-usage-forgejo"
       "dd-forge-rules"
       "dd-forget-forge" # its share of deleting whoever left
+      "dd-runner-keys" # the runners' registration tokens, sealed to each runner box (runner-keys.nix)
     ];
     # its repositories are on one box's disk, beside its database
     instances = 1;

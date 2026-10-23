@@ -65,17 +65,20 @@ in
         ../modules/forge/forgejo.nix
         ../modules/forge/forgejo-runner.nix
         ../modules/forge/members-runner.nix
-        # what the runner module reads of sops: its token, here a file the
-        # test writes once the forge has minted one
-        { options.sops = lib.mkOption { type = lib.types.anything; }; }
       ];
-      sops.placeholder.forgejo-runner-token = "unused";
-      sops.templates."forgejo-runner.env".path = "/run/runner.env";
+      # the runners' tokens as on a box: the forge seals them to this box's
+      # secrets key (a test's; on a box, its TPM's), and each runner fetches
+      # and opens its own before it starts (runner-keys.nix)
+      dd.forgejo.runnerBoxes.box = "age1gc25m409smgcklvytkksgew4ycjky4xtwvarsynwjxa9eg60jgpqfrlgp8";
+      environment.etc."box-identity" = {
+        text = "AGE-SECRET-KEY-1RYQV6YMT4DPUURXLGDHLEP6P4QLM4NYQ4Z4E594SKSVYTXHZTF6QAJ94TJ";
+        mode = "0400";
+      };
       # started by the test once its token is there, not at boot
       systemd.services.gitea-runner-box.wantedBy = lib.mkForce [ ];
       systemd.services."gitea-runner-members\\x2dbox".wantedBy = lib.mkForce [ ];
       dd.membersRunner = {
-        tokenFile = "/run/runner.env";
+        tokenFile = "/var/lib/dd-runner-token/members.env";
         capacity = 1;
         jobThreads = 1;
         jobMemoryGiB = 1;
@@ -86,7 +89,6 @@ in
       dd.runnerRestart.units.docker.limit = lib.mkForce 240;
       dd.runnerRestart.units."gitea-runner-members\\x2dbox".limit = lib.mkForce 240;
       system.switch.enable = true;
-      dd.forgejo.admin = "tester";
       dd.verify.role = lib.mkForce "full";
       dd.runner.capacity = 1;
       systemd.services.zfs-datasets = {
@@ -114,6 +116,9 @@ in
       systemd.tmpfiles.rules = [
         "d /run/job-gate 0777 root root -"
         "d /var/lib/dd-facts 0755 root root -"
+        # this box's secrets key, where the runners' token fetch reads it
+        "d /var/lib/dd 0700 root root -"
+        "L+ /var/lib/dd/secrets-key.txt - - - - /etc/box-identity"
       ];
       environment.systemPackages = [
         pkgs.curl
@@ -132,7 +137,8 @@ in
       virtualisation.diskSize = 6144;
     };
   scriptEnv = {
-    admin = "tester";
+    # the fleet's repository's owner, a person: no admin
+    owner = "tester";
     sock = "/run/forgejo/forgejo.sock";
     runner = "gitea-runner-box.service";
     members = "gitea-runner-members\\x2dbox.service";

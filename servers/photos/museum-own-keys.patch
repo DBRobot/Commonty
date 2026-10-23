@@ -1,9 +1,80 @@
+diff --git a/cmd/museum/dd_jobs.go b/cmd/museum/dd_jobs.go
+new file mode 100644
+index 0000000..ae23437
+--- /dev/null
++++ b/cmd/museum/dd_jobs.go
+@@ -0,0 +1,65 @@
++package main
++
++// Commonty: what museum's admin api did for the fleet, done in museum by
++// the box itself, with no admin account and nothing reachable over the
++// network. An account is deleted only when the box lists its address in
++// dd_delete, which it does only for a member whose own signed leaving (or
++// the release-signed member list) says so (nix/modules/storage/ledger.nix).
++
++import (
++	"context"
++	"database/sql"
++	"time"
++
++	"github.com/ente-io/museum/pkg/controller/user"
++	log "github.com/sirupsen/logrus"
++)
++
++func ddDeleteLoop(db *sql.DB, users *user.UserController) {
++	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS dd_delete (email TEXT PRIMARY KEY, asked TIMESTAMP NOT NULL DEFAULT NOW())`); err != nil {
++		log.Fatalf("dd delete: %v", err)
++	}
++	for {
++		ddDeleteDue(db, users)
++		time.Sleep(30 * time.Second)
++	}
++}
++
++func ddDeleteDue(db *sql.DB, users *user.UserController) {
++	rows, err := db.Query(`SELECT d.email, u.user_id FROM dd_delete d LEFT JOIN users u ON u.dd_email = d.email AND u.encrypted_email IS NOT NULL`)
++	if err != nil {
++		log.Printf("dd delete: %v", err)
++		return
++	}
++	type due struct {
++		email string
++		id    sql.NullInt64
++	}
++	var all []due
++	for rows.Next() {
++		var d due
++		if rows.Scan(&d.email, &d.id) == nil {
++			all = append(all, d)
++		}
++	}
++	rows.Close()
++	for _, d := range all {
++		if d.id.Valid {
++			logger := log.WithFields(log.Fields{"user_id": d.id.Int64, "req_ctx": "dd_member_left"})
++			if _, err := users.HandleAutomatedAccountDeletion(context.Background(), d.id.Int64, logger); err != nil {
++				log.Printf("dd delete %d: %v", d.id.Int64, err)
++				continue
++			}
++			// its address goes too: nothing rebuilds a deleted account
++			// under new keys (dd_rekey)
++			if _, err := db.Exec(`UPDATE users SET dd_email = NULL WHERE user_id = $1`, d.id.Int64); err != nil {
++				log.Printf("dd delete %d: %v", d.id.Int64, err)
++				continue
++			}
++			log.Printf("dd delete: account %d deleted, its member having left", d.id.Int64)
++		}
++		if _, err := db.Exec(`DELETE FROM dd_delete WHERE email = $1`, d.email); err != nil {
++			log.Printf("dd delete: %v", err)
++		}
++	}
++}
 diff --git a/cmd/museum/dd_rekey.go b/cmd/museum/dd_rekey.go
 new file mode 100644
-index 0000000..5fb02d2
+index 0000000..c8c4841
 --- /dev/null
 +++ b/cmd/museum/dd_rekey.go
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,152 @@
 +package main
 +
 +// Commonty: museum's keys are this box's own, made here, and a box that
@@ -74,7 +145,8 @@ index 0000000..5fb02d2
 +	}
 +	defer tx.Rollback()
 +	if moved {
-+		rows, err := tx.Query(`SELECT user_id, dd_email FROM users WHERE dd_email IS NOT NULL`)
++		// live accounts only: a deleted one stays deleted
++		rows, err := tx.Query(`SELECT user_id, dd_email FROM users WHERE dd_email IS NOT NULL AND encrypted_email IS NOT NULL`)
 +		if err != nil {
 +			return err
 +		}
@@ -156,7 +228,7 @@ index 0000000..5fb02d2
 +	}
 +}
 diff --git a/cmd/museum/main.go b/cmd/museum/main.go
-index e8c6ac3..c26448e 100644
+index e8c6ac3..551e8ac 100644
 --- a/cmd/museum/main.go
 +++ b/cmd/museum/main.go
 @@ -134,6 +134,7 @@ func main() {
@@ -167,3 +239,60 @@ index e8c6ac3..c26448e 100644
  
  	hostName, err := os.Hostname()
  	if err != nil {
+@@ -888,6 +889,7 @@ func main() {
+ 	privateAPI.GET("/storage-bonus/referral-view", storageBonusHandler.GetReferralView)
+ 	privateAPI.POST("/storage-bonus/referral-claim", storageBonusHandler.ClaimReferral)
+ 
++	go ddDeleteLoop(db, userController)
+ 	adminHandler := &api.AdminHandler{
+ 		QueueRepo:               queueRepo,
+ 		UserRepo:                userRepo,
+diff --git a/pkg/middleware/auth.go b/pkg/middleware/auth.go
+index 8e1d373..731f8b0 100644
+--- a/pkg/middleware/auth.go
++++ b/pkg/middleware/auth.go
+@@ -16,7 +16,6 @@ import (
+ 	"github.com/ente-io/museum/pkg/utils/auth"
+ 	"github.com/gin-gonic/gin"
+ 	"github.com/patrickmn/go-cache"
+-	"github.com/spf13/viper"
+ )
+ 
+ // AuthMiddleware intercepts and authenticates incoming requests
+@@ -92,33 +91,11 @@ func (m *AuthMiddleware) TokenAuthMiddleware(jwtClaimScope *jwt.ClaimScope) gin.
+ // AdminAuthMiddleware returns a middle ware that extracts the `userID` added by the TokenAuthMiddleware
+ // within the header of a request and uses it to check admin status
+ // NOTE: Should be added after TokenAuthMiddleware middleware
++// AdminAuthMiddleware refuses everyone. Commonty: nobody is museum's admin,
++// not by a list, not by being the first account; what the fleet needs of
++// the admin api the box does in museum itself (dd_jobs.go).
+ func (m *AuthMiddleware) AdminAuthMiddleware() gin.HandlerFunc {
+ 	return func(c *gin.Context) {
+-		userID := auth.GetUserID(c.Request.Header)
+-		admins := viper.GetIntSlice("internal.admins")
+-		for _, admin := range admins {
+-			if int64(admin) == userID {
+-				c.Next()
+-				return
+-			}
+-		}
+-		// The config allows alternatively specifying a singular admin ID to
+-		// workaround Viper issues in passing env vars for an int slice.
+-		admin := viper.GetInt("internal.admin")
+-		if len(admins) == 0 && admin != 0 {
+-			if int64(admin) == userID {
+-				c.Next()
+-				return
+-			}
+-		}
+-		// if no admins are set, then check if the user is first user in the system
+-		if len(admins) == 0 && admin == 0 {
+-			id, err := m.UserAuthRepo.GetMinUserID()
+-			if err != nil && id == userID {
+-				c.Next()
+-				return
+-			}
+-		}
+ 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "insufficient permissions"})
+ 	}
+ }

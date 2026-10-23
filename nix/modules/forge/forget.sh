@@ -10,10 +10,9 @@ due=$(echo "$list" | jq -r '.members[] | select(.due and ((.done // []) | index(
 for name in $due; do
   case "$name" in *[!a-z0-9._-]* | [!a-z0-9]*) continue ;; esac
   id=$(echo "$list" | jq -r --arg n "$name" '.members[] | select(.name == $n) | .id')
-  if [ "$name" = "$ADMIN" ]; then
-    echo "member $id: the forge's admin; their account is kept until another is named"
-    continue
-  fi
+  # the box's own identity is no member's; a name that matched it is
+  # nobody's account to delete
+  [ "$name" = "$ADMIN" ] && continue
   ok=1
   if as_admin "$api/users/$name" >/dev/null 2>&1; then
     for _ in $(seq 1 100); do

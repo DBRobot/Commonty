@@ -3,8 +3,8 @@
 //! Each box says what its members keep in the services it runs, in its own
 //! heartbeat (`usage/<service>/<member>`, dd-control): the forge and the
 //! vault count themselves (nix/modules/storage/usage.nix), and the box with
-//! Photos counts Photos and the libraries here (`dd storage-ledger`: it
-//! holds a Photos admin login the gate never sees). Every box adds those up
+//! Photos counts Photos and the libraries here (`dd storage-ledger`, from
+//! what museum's own database user counted; no admin login). Every box adds those up
 //! from the control plane's agreed state (`dd storage-view`) for its gate,
 //! which shows it and holds uploads to it; and the Photos box sets each
 //! member's Photos limit to what the rest leaves of their allowance. No box
@@ -19,8 +19,10 @@ use serde_json::{Value, json};
 
 pub struct Ledger {
     pub gate: String,
-    pub ente_origin: String,
-    pub password_file: PathBuf,
+    /// "<address>\t<bytes>": what museum's database says each keeps
+    pub photos_usage: PathBuf,
+    /// "<address>\t<bytes>": each one's limit, for museum's own user to set
+    pub photos_limits: PathBuf,
     pub photos_suffix: String,
     pub budget: u64,
     /// the fleet's count (storage-view's), for what each member keeps
@@ -71,40 +73,27 @@ pub async fn run(l: Ledger) -> Result<()> {
     if !fresh {
         eprintln!("no fresh fleet count: Photos' limits left as they are");
     }
-    let password = std::fs::read_to_string(&l.password_file)
-        .context("the ledger's photo password")?
-        .trim()
-        .to_string();
-    let me = format!("storage+ledger{}", l.photos_suffix);
-    let photos = ente::gallery::Gallery::sign_in(&l.ente_origin, &me, &password)
-        .await
-        .context("signing in to Photos as the ledger")?;
-    let admin = |path: String| {
-        http.get(format!("{}{path}", l.ente_origin.trim_end_matches('/')))
-            .header("X-Auth-Token", photos.token())
-    };
+    // what each keeps in Photos, as museum's own database user counted it
+    let usage: BTreeMap<String, u64> = std::fs::read_to_string(&l.photos_usage)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let (a, b) = l.split_once('\t')?;
+            Some((a.trim().to_lowercase(), b.trim().parse().ok()?))
+        })
+        .collect();
 
     let mut counted = serde_json::Map::new();
+    let mut limits = String::new();
     for name in members.keys() {
         let libraries = members[name]["libraries"].as_u64().unwrap_or(0);
         let elsewhere = |k: &str| view["members"][name][k].as_u64().unwrap_or(0);
         let code = elsewhere("code");
         let passwords = elsewhere("passwords");
         let guests = elsewhere("games").saturating_add(elsewhere("computers"));
-        let email = format!("{name}{}", l.photos_suffix);
-        let r = admin(format!("/admin/user?email={}", urlencode(&email)))
-            .send()
-            .await?;
-        let mut used_photos = 0;
-        if r.status().is_success() {
-            let u: Value = r.json().await?;
-            used_photos = u["details"]["usage"].as_u64().unwrap_or(0);
-            // museum's user has no json name for its id: it goes out as "ID"
-            let id = u["user"]["ID"]
-                .as_i64()
-                .or(u["user"]["id"].as_i64())
-                .unwrap_or(0);
-            let now = u["subscription"]["storage"].as_u64().unwrap_or(0);
+        let email = format!("{name}{}", l.photos_suffix).to_lowercase();
+        let used_photos = usage.get(&email).copied().unwrap_or(0);
+        if fresh {
             // suspended: what they keep, and no more
             let want = if members[name]["suspended"].as_bool() == Some(true) {
                 used_photos.max(1)
@@ -118,36 +107,19 @@ pub async fn run(l: Ledger) -> Result<()> {
                     used_photos,
                 )
             };
-            if fresh && id != 0 && now != want {
-                let r = http
-                    .put(format!(
-                        "{}/admin/user/subscription",
-                        l.ente_origin.trim_end_matches('/')
-                    ))
-                    .header("X-Auth-Token", photos.token())
-                    .json(&json!({
-                        "userID": id,
-                        "storage": want,
-                        "transactionID": "dd-storage",
-                        "productID": "free",
-                        "expiryTime": 4102444800000000i64,
-                        "paymentProvider": "",
-                    }))
-                    .send()
-                    .await?;
-                if r.status().is_success() {
-                    eprintln!("{name}: photos limit {now} -> {want} bytes");
-                } else {
-                    eprintln!("{name}: museum refused the photos limit: {}", r.status());
-                }
-            }
-        } else if r.status() != reqwest::StatusCode::NOT_FOUND {
-            eprintln!("{name}: photos usage: {}", r.status());
+            limits.push_str(&format!("{email}\t{want}\n"));
         }
         counted.insert(
             name.clone(),
             json!({ "photos": used_photos, "libraries": libraries, "code": code, "passwords": passwords, "guests": guests }),
         );
+    }
+    // set by museum's own user, only where it differs; none when the
+    // fleet's count is stale, so limits stay as they are
+    if fresh {
+        let tmp = l.photos_limits.with_extension("tmp");
+        std::fs::write(&tmp, limits)?;
+        std::fs::rename(&tmp, &l.photos_limits)?;
     }
 
     // this box's own word, for its heartbeat: Photos and the libraries,
@@ -378,17 +350,6 @@ mod view_tests {
         assert_eq!(v["members"]["ann"]["code"], 0);
         assert_eq!(v["members"]["ann"]["computers"], 8);
     }
-}
-
-pub(crate) fn urlencode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
 }
 
 #[cfg(test)]

@@ -42,6 +42,8 @@ let
     "seccomp-profile"
   ];
   runnerSettings = config.services.gitea-actions-runner.instances.${name}.settings;
+  # the host runner's module, here too, fetches the members' token as well
+  fetch = config.dd ? runner && config.dd.runner ? fetchToken;
 in
 {
   # one member's job, and how many of them this box holds at once
@@ -81,7 +83,7 @@ in
   # this one. The container has no secrets, no volume from the host, no
   # docker socket, a cpu and memory cap, and a network that reaches the
   # internet and nothing of ours: the tailnet, the lan, this box. The host
-  # runners (nix/modules/forge/forgejo-runner.nix) take the admin's repos
+  # runners (nix/modules/forge/forgejo-runner.nix) take the fleet's own repos
   # alone, which the forge enforces (dd-forge-rules in forgejo.nix): this
   # runner may stay registered for every repo only while `members` is its
   # one label. A member's workflow says `runs-on: members` and lands here.
@@ -194,15 +196,29 @@ in
         # process (runner-start.sh); the module's registration before it
         # held a switch for as long as the forge was down
         ExecStartPre = lib.mkForce [ ];
+        # its token, made by the forge's box and sealed to this one
+        # (runner-keys.nix), where the host runner's module is here too:
+        # then it starts as root ("!") for the token alone, fetched once the
+        # forge answers, and drops to its user and groups before it registers
         ExecStart = lib.mkForce (
-          pkgs.writeShellScript "runner-start" (
-            ddScript ./runner-start.sh {
-              NAME = name;
-              URL = "https://git.${base}";
-              LABELS = lib.concatStringsSep "," config.services.gitea-actions-runner.instances.${name}.labels;
-              RUNNER = lib.getExe config.services.gitea-actions-runner.package;
-              CONFIG = (pkgs.formats.yaml { }).generate "config.yaml" runnerSettings;
-            }
+          lib.optionalString fetch "!"
+          + pkgs.writeShellScript "runner-start" (
+            ddScript ./runner-start.sh (
+              {
+                NAME = name;
+                URL = "https://git.${base}";
+                LABELS = lib.concatStringsSep "," config.services.gitea-actions-runner.instances.${name}.labels;
+                RUNNER = lib.getExe config.services.gitea-actions-runner.package;
+                CONFIG = (pkgs.formats.yaml { }).generate "config.yaml" runnerSettings;
+              }
+              // lib.optionalAttrs fetch {
+                FETCH = config.dd.runner.fetchToken "members";
+                TOKEN_FILE = cfg.tokenFile;
+                SETPRIV = "${pkgs.util-linux}/bin/setpriv";
+                RUN_AS = "forgejo-runner";
+                RUN_GROUPS = "docker";
+              }
+            )
           )
         );
       };

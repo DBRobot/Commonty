@@ -235,11 +235,11 @@ in
         Persistent = true;
       };
     };
-    # The house's own devices and the owner's own devices, and nobody else:
+    # The house's own devices, the host's and the admin's, and nobody else:
     # not the rest of the Commonty network, where other households are.
     # From the house network by its address, never on commonty0 whatever
-    # the source says; on commonty0 the owner's devices alone (roles/core.nix,
-    # the dd-owner set).
+    # the source says; on commonty0 the host's and the admin's devices alone
+    # (modules/net/owner.nix, the dd-host and dd-owner sets).
     networking.firewall.extraCommands = ''
       for proto in udp tcp; do
         iptables -D nixos-fw ! -i commonty0 -s ${house} -p $proto --dport 53 -j nixos-fw-accept 2>/dev/null || true

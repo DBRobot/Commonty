@@ -409,6 +409,28 @@ told.append(f"  pace   10 archives at once: {codes.count('429')} told to wait")
 if "429" not in codes:
     failures.append(f"10 archives at once were all let through: {codes}")
 
+# -- the members' forge, from inside: no person reaches its admin api, and
+# nobody acts as another through its sudo, header or query
+# (nix/modules/forge/forgejo.nix)
+before = len(seen)
+code, _, _ = ask("GET", "/api/v1/admin/users", host=members, outsider=False)
+told.append(f"  admin  {code}  GET {members}/api/v1/admin/users from inside")
+if code != "404" or any(g["to"] == "forge" for g in seen[before:]):
+    failures.append(
+        f"{members}/api/v1/admin/users: {code}, wanted 404 and the forge not asked"
+    )
+before = len(seen)
+code, _, _ = ask("GET", "/api/v1/user?sudo=someone", host=members, outsider=False)
+told.append(f"  sudo   {code}  GET {members}/api/v1/user?sudo= from inside")
+if code != "403" or any(g["to"] == "forge" for g in seen[before:]):
+    failures.append(f"{members} ?sudo=: {code}, wanted 403 and the forge not asked")
+before = len(seen)
+ask("GET", "/api/v1/user", host=members, headers=["Sudo: someone"], outsider=False)
+to_forge = [g for g in seen[before:] if g["to"] == "forge"]
+told.append(f"  sudo   header to {members}: forge asked {len(to_forge)} time(s)")
+if not to_forge or any(g["headers"].get("sudo") for g in to_forge):
+    failures.append(f"{members} Sudo header: reached the forge as {to_forge}")
+
 os.kill(proc.pid, signal.SIGTERM)
 proc.wait(timeout=10)
 print("\n".join(told))
