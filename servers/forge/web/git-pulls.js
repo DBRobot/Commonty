@@ -3,7 +3,7 @@
 
 import {
   put, app, el, ic, api, text, q, when, plural, avatar, route, go, statusDot, markdown, toast,
-  setTitle, firstLine, short, pop, pager, whoami, $, warmers } from './git-core.js';
+  setTitle, firstLine, short, pop, pager, whoami, $, warmers, whenSeen } from './git-core.js';
 import { repo, header, refs } from './git-repo.js';
 import * as diff from './git-diff.js';
 import { webUrl } from './kit.js';
@@ -48,12 +48,17 @@ async function list({ m, params, current }, kind) {
   const base = `/${r.full_name}/${pulls ? 'pulls' : 'issues'}`;
   const find = el('input', { class: 'btn plain', style: 'flex:1;min-width:200px', value: search, placeholder: `Find ${pulls ? 'a pull request' : 'an issue'}`, 'aria-label': 'Find' });
   find.onkeydown = (e) => { if (e.key === 'Enter') go(`${base}${q({ state, q: find.value })}`); };
+  // the open pull requests' heads in one answer (the branches page asks the
+  // same), and each one's checks only for the rows in sight
+  const heads = pulls && data.some((i) => i.state === 'open') ? api(`/repos/${r.full_name}/pulls${q({ state: 'open', limit: 50 })}`).catch(() => []) : null;
+  const checks = async (i, dot) => {
+    const p = (await heads).find((x) => x.number === i.number) || await api(`/repos/${r.full_name}/pulls/${i.number}`);
+    const s = await api(`/repos/${r.full_name}/commits/${p.head.sha}/status`);
+    if (s?.total_count) dot.replaceWith(statusDot(s.state));
+  };
   const rows = data.map((i) => {
     const dot = el('span');
-    if (pulls && i.state === 'open') {
-      api(`/repos/${r.full_name}/pulls/${i.number}`).then((p) => api(`/repos/${r.full_name}/commits/${p.head.sha}/status`)).then((s) => { if (s?.total_count) dot.replaceWith(statusDot(s.state)); }).catch(() => {});
-    }
-    return el('div', { class: 'item' },
+    const row = el('div', { class: 'item' },
       el('span', { style: `color:${stateColor(i)};margin-top:3px` }, stateIcon(i)),
       el('div', { style: 'flex:1;min-width:0' },
         el('div', {}, el('a', { class: 't', href: `/${r.full_name}/${pulls ? 'pull' : 'issues'}/${i.number}`, text: i.title }), ' ', ...(i.labels || []).map(labelChip), i.pull_request?.draft ? el('span', { class: 'chip', text: 'draft' }) : null),
@@ -61,6 +66,8 @@ async function list({ m, params, current }, kind) {
       dot,
       i.comments ? el('span', { class: 'small muted', title: 'comments' }, `💬 ${i.comments}`) : null,
       ...(i.assignees || []).slice(0, 3).map((u) => avatar(u)));
+    if (heads && i.state === 'open') whenSeen(row, () => checks(i, dot).catch(() => {}));
+    return row;
   });
   if (!current()) return;
   put(main(),

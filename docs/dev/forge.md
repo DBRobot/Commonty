@@ -478,6 +478,24 @@ box and its release.
 - A repository row's check dot, the languages and "Running now" fill in
   after the page is drawn, never before.
 
+**Asking little, in parallel.** What a view does ask goes out together:
+
+- The code and commits views ask for their list alongside the
+  repository, taking the address's first part as the ref, and ask again
+  only if the refs say otherwise. A file's page asks for every open
+  folder of the tree beside it at once.
+- What a list asks for each row (a commit's or a pull request's checks,
+  a branch's "ahead · behind") is asked only once the row is near the
+  window (`whenSeen`). Ahead and behind are two commit lists of one,
+  counted by the forge (`commits?sha=<tip>&not=<base>`), not compares.
+  The pull requests list takes every open one's head from one list, not
+  one call each.
+- Activity reads its year of commits and its runs by the page: the first
+  page says how far back a page reaches, and the pages that get to the
+  span are asked together.
+- `git.html` preloads every module, so the page's scripts arrive at once
+  rather than each after the one that imports it.
+
 The page fires `git:shown` (drawn from the kept copy) and `git:drawn`
 (drawn fresh) with the time each took, for measuring click-to-paint.
 

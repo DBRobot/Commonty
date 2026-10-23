@@ -255,6 +255,24 @@ export function statusDot(state) {
   return el('span', { class: `dot ${s}`, title: state || 'no checks' });
 }
 
+// `fill()` once the element is near the window, and not before: what each
+// row of a long list asks for is asked only for the rows someone sees
+const nearby = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    nearby.unobserve(e.target);
+    fills.get(e.target)?.();
+    fills.delete(e.target);
+  }
+}, { rootMargin: '300px 0px' });
+const fills = new WeakMap();
+export function whenSeen(node, fill) {
+  if (!nearby) { fill(); return node; }
+  fills.set(node, fill);
+  nearby.observe(node);
+  return node;
+}
+
 export function pop(button, build) {
   const wrap = el('span', { class: 'pop' });
   const menu = el('div', { class: 'menu' });
@@ -380,6 +398,8 @@ function keep() {
 let drawing = 0;
 export async function render() {
   const mine = ++drawing;
+  // rows the last view was waiting to see are not coming back
+  nearby?.disconnect();
   const path = decodeURIComponent(location.pathname).replace(/\/+$/, '') || '/';
   const params = new URLSearchParams(location.search);
   for (const [pattern, view] of routes) {
