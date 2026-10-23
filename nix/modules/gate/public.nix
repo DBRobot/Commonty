@@ -161,11 +161,14 @@ in
       serviceConfig = {
         StateDirectory = "dd-door";
         StateDirectoryMode = "0700";
-        ExecStartPre = "${doorAsk} tunnel /var/lib/dd-door";
         Restart = "always";
         RestartSec = 30;
       };
+      # the tunnel asked of the DNS Worker inside the run, not before it: a
+      # switch waits on everything before a service's main process, and
+      # across each restart, for as long as the Worker does not answer
       script = ''
+        ${doorAsk} tunnel /var/lib/dd-door
         jq -n --arg t "$(jq -r .TunnelID /var/lib/dd-door/credentials.json)" \
           --argjson ingress ${lib.escapeShellArg (builtins.toJSON ingress)} \
           '{tunnel: $t, "credentials-file": "/var/lib/dd-door/credentials.json", ingress: $ingress}' \
@@ -192,11 +195,19 @@ in
         KEYS = "/boot/dd/unlock";
         TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
       };
+      # A switch moves many flags at once, each a trigger: past systemd's
+      # default limit (five starts in ten seconds) the unit failed, and the
+      # first switch to release 358 counted that against the release
+      startLimitIntervalSec = 0;
       serviceConfig = {
         Type = "oneshot";
         StateDirectory = "dd-door-names";
       };
+      # the burst settles first, and is one ask of the Worker; the ask failing
+      # (the Worker down) is never this unit failing: the Worker puts the
+      # names in step itself within a minute
       script = ''
+        sleep 2
         now=$(ls /run/dd-placed 2>/dev/null | grep -v '\.' | sort | tr '\n' ' ')
         [ "$now" = "$(cat /var/lib/dd-door-names/held 2>/dev/null)" ] && exit 0
         if ${doorAsk} converge; then
@@ -207,10 +218,11 @@ in
     };
     systemd.paths.dd-door-names = lib.mkIf (cfg.enable && cfg.ownTunnel) {
       wantedBy = [ "paths.target" ];
+      # no trigger limit: past it the path unit fails, and stops watching.
+      # A run takes two seconds at least, which bounds how often it starts
       pathConfig = {
         PathChanged = "/run/dd-placed";
-        TriggerLimitIntervalSec = "10s";
-        TriggerLimitBurst = 5;
+        TriggerLimitIntervalSec = 0;
       };
     };
 

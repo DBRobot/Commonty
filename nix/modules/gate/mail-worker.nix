@@ -66,6 +66,8 @@ in
           description = "Check the mail Worker at Cloudflare is this release's";
           after = [ "network-online.target" ];
           wants = [ "network-online.target" ];
+          # as the other Workers' checks: a switch never waits on Cloudflare
+          restartIfChanged = false;
           startAt = "hourly";
           environment = {
             ACCOUNT = cfg.account;

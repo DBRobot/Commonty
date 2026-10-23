@@ -91,6 +91,120 @@ async function helloOK(id, at, sig, key, joined) {
 // boxes connected that have not joined yet, at most this many at once
 const MAX_JOINING = 8;
 
+// A copy of the newest box release, beside the forge's, for a box whose
+// forge is down (docs/dev/releases.md, "Where a box finds the release").
+// Anyone may hand one in, the laptop or any box or not: it is kept only if
+// the release key signed it and it is newer than the one kept, and kept as
+// rebuilt from what was verified. So the most a stranger can do is hand in
+// a release a little early; nothing it sends can stand in for another.
+const RELEASE_MAX = 1 << 20;
+
+// what the release key signs (release::canonical_v2): every key sorted, no
+// whitespace. A payload this cannot write back byte for byte (a float, a
+// key past the basic plane) fails the signature, and is refused
+function canonical(v) {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v !== null && typeof v === 'object') {
+    return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v);
+}
+
+// JSON as a release is written, and nothing looser: no key twice in an
+// object, every number an integer. A file read more ways than one could
+// verify as one thing and be served as another
+const STR = /"(?:[^"\\]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"/y;
+const INT = /-?(?:0|[1-9][0-9]*)(?![0-9.eE])/y;
+function strictParse(text) {
+  let i = 0;
+  const fail = (why) => { throw new Error(why); };
+  const ws = () => { while (i < text.length && ' \t\n\r'.includes(text[i])) i++; };
+  const str = () => {
+    STR.lastIndex = i;
+    const m = STR.exec(text);
+    if (!m) fail('a bad string');
+    // a control character is written escaped, never as itself
+    for (let k = 0; k < m[0].length; k++) if (m[0].charCodeAt(k) < 0x20) fail('a bad string');
+    i += m[0].length;
+    return JSON.parse(m[0]);
+  };
+  const val = () => {
+    ws();
+    const c = text[i];
+    if (c === '{') {
+      i++;
+      const o = {};
+      ws();
+      if (text[i] === '}') { i++; return o; }
+      for (;;) {
+        ws();
+        const k = str();
+        if (Object.prototype.hasOwnProperty.call(o, k)) fail(`${k} twice`);
+        ws();
+        if (text[i++] !== ':') fail('no colon');
+        o[k] = val();
+        ws();
+        const d = text[i++];
+        if (d === '}') return o;
+        if (d !== ',') fail('no comma');
+      }
+    }
+    if (c === '[') {
+      i++;
+      const a = [];
+      ws();
+      if (text[i] === ']') { i++; return a; }
+      for (;;) {
+        a.push(val());
+        ws();
+        const d = text[i++];
+        if (d === ']') return a;
+        if (d !== ',') fail('no comma');
+      }
+    }
+    if (c === '"') return str();
+    for (const [w, v] of [['true', true], ['false', false], ['null', null]]) {
+      if (text.startsWith(w, i)) { i += w.length; return v; }
+    }
+    INT.lastIndex = i;
+    const m = INT.exec(text);
+    if (!m) fail('not an integer');
+    i += m[0].length;
+    const n = Number(m[0]);
+    if (!Number.isSafeInteger(n)) fail('an integer too big');
+    return n;
+  };
+  const v = val();
+  ws();
+  if (i !== text.length) fail('more after the document');
+  return v;
+}
+
+// A release signed by the release key, as the document this relay keeps:
+// rebuilt from what was verified, every key sorted, so two encodings of
+// one signed release are one document. Or why it is not one
+async function releaseDoc(text) {
+  const key = CONFIG.identity && CONFIG.identity.release;
+  if (!key) return [null, 'this relay has no release key'];
+  let v;
+  try { v = strictParse(text); } catch (e) { return [null, `not a release file: ${e.message}`]; }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return [null, 'not a release file'];
+  if (Object.keys(v).sort().join() !== 'payload,signature,signer') return [null, 'a release file is payload, signer and signature'];
+  const p = v.payload;
+  // a box release: an app manifest or any other signed document names its kind
+  if (!p || typeof p !== 'object' || Array.isArray(p) || 'kind' in p) return [null, 'not a box release'];
+  if (!Number.isSafeInteger(p.counter) || p.counter < 1) return [null, 'no counter'];
+  if (v.signer !== key) return [null, 'not signed by the release key'];
+  if (typeof v.signature !== 'string') return [null, 'no signature'];
+  try {
+    const k = await crypto.subtle.importKey('raw', b64(key), { name: 'Ed25519' }, false, ['verify']);
+    if (await crypto.subtle.verify({ name: 'Ed25519' }, k, b64(v.signature), new TextEncoder().encode(canonical(p)))) {
+      return [{ counter: p.counter, text: canonical({ payload: p, signature: v.signature, signer: v.signer }) }, null];
+    }
+  } catch { /* a signature that is not base64 */ }
+  return [null, 'the signature does not hold'];
+}
+
 function frame(to, from, kind, payload) {
   const b = new Uint8Array(17 + payload.length);
   const v = new DataView(b.buffer);
@@ -135,6 +249,29 @@ export class Relay {
     }
     const s = this.socks.get(id);
     if (s) { try { s.send(frame(id, from, kind, payload)); } catch { /* gone */ } }
+  }
+
+  async release(req) {
+    const kept = await this.ctx.storage.get('release');
+    if (req.method === 'GET') {
+      if (!kept) return new Response('none yet', { status: 404 });
+      return new Response(kept.text, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    }
+    // read whole even when too big: a body left unread faults the request
+    // after it (a 503)
+    const text = await req.text();
+    if (text.length > RELEASE_MAX) return new Response('too big', { status: 413 });
+    const [doc, why] = await releaseDoc(text);
+    if (doc === null) return new Response(why, { status: 400 });
+    const { counter } = doc;
+    // read again: another may have been kept while this one was checked
+    const now = await this.ctx.storage.get('release');
+    if (now && now.counter > counter) return new Response(`release ${now.counter} is kept`, { status: 409 });
+    // one counter is one release: the first kept stays. The same release
+    // in other bytes is the same document here, and fine
+    if (now && now.counter === counter) return new Response(`release ${counter}`, { status: now.text === doc.text ? 200 : 409 });
+    await this.ctx.storage.put('release', doc);
+    return new Response(`release ${counter}`, { status: 201 });
   }
 
   route(to, from, kind, payload) {
@@ -187,6 +324,7 @@ export class Relay {
       if (status === 304) return new Response(null, { status });
       return new Response(body, { status, headers: { 'content-type': 'application/json' } });
     }
+    if (url.pathname === '/release') return this.release(req);
     if (url.pathname !== '/relay' || req.headers.get('upgrade') !== 'websocket') return new Response('not here', { status: 404 });
     let id;
     try { id = BigInt(url.searchParams.get('id') || ''); } catch { return new Response('no id', { status: 400 }); }
@@ -235,6 +373,10 @@ export default {
     // one is read and turned away, as a body left unread faults the request
     // after it (a 503)
     const path = new URL(req.url).pathname;
+    // and the release: read by any box, handed in by any box or publish
+    if (path === '/release' && (req.method === 'GET' || req.method === 'PUT')) {
+      return env.RELAY.get(env.RELAY.idFromName('relay')).fetch(req);
+    }
     if (req.method !== 'GET' || (path !== '/relay' && path !== '/health')) {
       await req.text().catch(() => '');
       return new Response('not here', { status: 404 });
