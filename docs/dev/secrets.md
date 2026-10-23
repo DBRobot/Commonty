@@ -64,9 +64,7 @@ storage     garage-rpc-secret            garage's cluster secret, shared by stor
             restic-password              this box's restic repository password
             thanos-key-id/-secret        the metrics bucket, for the sidecar
             cache-key-id/-secret         read key to the nix-cache bucket (also runner)
-runner      forgejo-runner-token         forge/forgejo-runner.nix
-            forgejo-members-runner-token the members' runner
-            nix-cache-signing-key        no longer read: the box makes its own (below)
+runner      nix-cache-signing-key        no longer read: the box makes its own (below)
 gateway     cloudflare-token             the zone's names (dd-dns) and the ACME challenge,
                                          only until `dd dns setup`: then unused,
                                          deleted at Cloudflare and from this file
@@ -74,7 +72,7 @@ gateway     cloudflare-token             the zone's names (dd-dns) and the ACME 
             cloudflare-workers-read      the mail and DNS Worker checks (when configured)
             tmdb-token                   the gate's Movies & TV lookups
 photos      ente-key-encryption, ente-key-hash, ente-jwt-secret, ente-ott,
-            ente-demo-password, ente-storage-password,
+            ente-demo-password,
             garage-key-id/-secret        ente's own bucket key
 library     library-key-id/-secret       the libraries bucket
 vault       vault-key-id/-secret, vault-oidc-secret
@@ -84,6 +82,14 @@ adblock     pihole-api-password          no longer read: the box makes its own (
 node1's file has every key above. node2's has core's, storage's and the
 runners' only, so node2 is built only with the bundles those cover
 (below).
+
+The runners' registration tokens are in no box's file. The forge's box
+makes them and seals each to its runner box's secrets key
+([`runner-keys.nix`](../../nix/modules/forge/runner-keys.nix)); the
+runner box fetches its own and opens it before its runner starts
+([`runner-token.sh`](../../nix/modules/forge/runner-token.sh)). The old
+`forgejo-runner-token` and `forgejo-members-runner-token` keys still in
+node1's and node2's files are read by nothing.
 
 `secrets/fleet.yaml` is nested:
 
@@ -216,14 +222,14 @@ starts. The first holder's value comes from its file once, then the entry
 goes from the file.
 
 ```
-ente-storage-password    the storage ledger's museum account: keys/ledger-<box>.age
-                         in the ente bucket, sealed by museum's holder
-ente-demo-password       the demo gallery's account, the same way
+ente-demo-password       the demo gallery's account: in the ente bucket, sealed by
+                         museum's holder
 forgejo-runner-token,    made by the forge's holder (forgejo actions generate-runner-token)
 forgejo-members-runner-token
-                         when it starts, sealed to each box that can run a runner and
-                         served beside the forge (git.<domain>/_runner/<box>.age); a
-                         runner fetches and opens its own only to register, once
+                         every hour, sealed to each box built with a runner and
+                         served beside the forge (git.<domain>/_dd/runner-keys/
+                         <box>.<host|members>.age); a runner fetches and opens its own
+                         before it starts, and needs it only to register
 restic-password          made on the box, added to its repository with `restic key add`
                          under the old one before the box reads it (above), and sealed
                          to its owner's paper key (fleet/policy.json people.<owner>.paperKey)

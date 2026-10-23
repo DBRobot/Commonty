@@ -16,7 +16,7 @@ scripts/   what a person runs around a box: reports, reinstall, restore, the lap
 secrets/   each box's secrets, sops-encrypted
 fleet/     what the fleet is: the boxes, their reports, the members, and the
            owner's policy (policy.json: owner, domain, repo, allowanceGb,
-           people.<name>.{ssh,paperKey}, ownHardware)
+           people.<name>.{ssh,paperKey})
 data/      data the services are built with (data/games/catalogue.json)
 ```
 
@@ -261,8 +261,7 @@ core, and with every bundle of which it can run a service that does not
 run everywhere, whose secrets its file holds and whose companions it is
 built with too. What it can run is
 [`capability.nix`](../../nix/lib/capability.nix)'s, from its signed
-report and its owner's `box.json`; a service in the policy's
-`ownHardware` only on a box whose `box.json` owner is the fleet's owner.
+report and its owner's `box.json`.
 The control plane then switches each placed service on where the plan
 puts it.
 

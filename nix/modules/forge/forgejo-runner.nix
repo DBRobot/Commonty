@@ -38,6 +38,26 @@ let
     config.services.gitea-actions-runner.instances.${name}.settings
   );
   live = "/var/lib/gitea-runner/${name}/config.yaml";
+  # this box's registration token for a runner, from the forge's box,
+  # sealed to this box (runner-keys.nix, runner-token.sh)
+  fetchToken =
+    kind:
+    pkgs.writeShellScript "runner-token-${kind}" (
+      ddScript ./runner-token.sh {
+        PATH = lib.makeBinPath [
+          pkgs.curl
+          pkgs.age
+          pkgs.age-plugin-tpm
+          pkgs.gnugrep
+          pkgs.coreutils
+        ];
+        URL = "https://git.${base}";
+        NAME = name;
+        KIND = kind;
+        OUT = "/var/lib/dd-runner-token/${kind}.env";
+        IDENTITY = "/var/lib/dd/secrets-key.txt";
+      }
+    );
 in
 {
   imports = [
@@ -60,6 +80,10 @@ in
     type = lib.types.ints.positive;
     default = 4;
   };
+  options.dd.runner.fetchToken = lib.mkOption {
+    type = lib.types.functionTo lib.types.package;
+    description = "kind -> the script that fetches this box's sealed registration token of that kind";
+  };
   options.dd.runner.capacity = lib.mkOption {
     type = lib.types.nullOr lib.types.ints.positive;
     default = null;
@@ -75,22 +99,23 @@ in
     # a green check just built is already here, and a deploy is a switch.
     #
     # Host mode means a job is code running on this box as forgejo-runner.
-    # So the host runners take the admin's repositories and no one else's:
-    # the forge's database moves any runner registered for every repository
-    # to the admin's scope, whatever token registered it (dd-forge-rules in
-    # nix/modules/forge/forgejo.nix). A pull request from someone else's
-    # fork runs only once the admin approves it (Forgejo's own rule).
+    # So the host runners take the fleet's own repositories and no one
+    # else's: the forge's database moves any runner registered for every
+    # repository to the fleet repository's owner's scope, whatever token
+    # registered it (dd-forge-rules in nix/modules/forge/forgejo.nix). A pull
+    # request from someone else's fork runs only once the repository's own
+    # owner approves it (Forgejo's own rule); no person is the site admin.
     services.gitea-actions-runner = {
       package = pkgs.forgejo-runner;
       instances.${name} = {
         enable = true;
         inherit name;
         url = "https://git.${base}";
-        # a registration token, minted once with `forgejo actions
-        # generate-runner-token --scope <admin>` and kept in sops; the runner
+        # a registration token, made by the forge's box and sealed to this
+        # box (runner-keys.nix), fetched before the runner starts; the runner
         # registers on first start and keeps its own credential in its state
-        # dir after
-        tokenFile = config.sops.templates."forgejo-runner.env".path;
+        # dir after. Nobody mints it by hand
+        tokenFile = "/var/lib/dd-runner-token/host.env";
         # nix: the job runs on a box with nix. And the box's own name, for a
         # job that must run on this box and no other: each box building every
         # box's system (entry_point.yml, build_systems), so that what it later
@@ -144,6 +169,13 @@ in
     # repository, which failed CI on node2.
     systemd.tmpfiles.rules = [
       "e /var/lib/gitea-runner/cargo-target - - - 14d"
+      # where the fetched tokens are kept: root's alone, read by systemd
+      # itself before the unit drops to its user
+      "d /var/lib/dd-runner-token 0700 root root -"
+      # there before the first fetch: systemd reads a unit's environment
+      # file before its ExecStartPre runs, and a missing one fails the start
+      "f /var/lib/dd-runner-token/host.env 0600 root root - TOKEN="
+      "f /var/lib/dd-runner-token/members.env 0600 root root - TOKEN="
     ];
     # (the nixos module registers again by itself when the token or the
     # labels change, so a new scope reaches the forge on the next start; a
@@ -174,6 +206,9 @@ in
         TimeoutStartSec = "10min";
         ExecStartPre = lib.mkBefore (
           [
+            # its registration token, made by the forge's box and sealed to
+            # this one (runner-keys.nix); root's, read before it drops to its user
+            "+${fetchToken "host"}"
             (pkgs.writeShellScript "runner-address" (
               ddScript ./runner-address.sh {
                 NAME = name;
@@ -209,11 +244,7 @@ in
       limit = (180 + 10) * 60;
     };
 
-    sops.secrets.forgejo-runner-token = { };
-    # read by systemd itself, before the unit drops to its dynamic user, so the
-    # file can stay root-only
-    sops.templates."forgejo-runner.env".content = ''
-      TOKEN=${config.sops.placeholder.forgejo-runner-token}
-    '';
+    # the members' runner fetches its own the same way (members-runner.nix)
+    dd.runner.fetchToken = fetchToken;
   };
 }

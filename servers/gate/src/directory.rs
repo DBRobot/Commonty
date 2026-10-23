@@ -910,7 +910,7 @@ impl Directory {
     }
 
     fn identify(&self, headers: &HeaderMap) -> Option<String> {
-        match self.caller.get() {
+        let who = match self.caller.get() {
             Some(c) => c(headers),
             None => {
                 let tok = crate::bearer(headers)?;
@@ -923,7 +923,9 @@ impl Directory {
                 .ok()
                 .map(|(u, _)| u)
             }
-        }
+        };
+        // the boxes' own names are nobody's, by a cookie or a device's key
+        who.filter(|u| !identity::reserved_name(u))
     }
 
     /// May this request read the list (`name` None) or one entry? The list
@@ -1240,6 +1242,10 @@ pub const GUEST_TTL: u64 = 15 * 60;
 
 /// how long a sign-up that has not followed through is kept
 pub const HELD_TTL: u64 = 7 * 24 * 3600;
+
+/// the boxes' own identities on the forge, which no person is: the accept
+/// rule refuses an entry under either (identity::RESERVED_NAMES)
+pub use identity::RESERVED_NAMES as BOX_IDENTITIES;
 
 pub fn is_guest(name: &str) -> bool {
     name.starts_with(GUEST_PREFIX)
@@ -1583,6 +1589,13 @@ impl Directory {
         name: &str,
         bytes: &[u8],
     ) -> std::result::Result<String, (StatusCode, String)> {
+        // the boxes' own names: no envelope speaks for them, whatever its kind
+        if identity::reserved_name(name) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "that name is the boxes'; pick another".into(),
+            ));
+        }
         if !self.takes_v2() {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -2436,6 +2449,14 @@ mod tests {
             .unwrap_err();
         assert_eq!(status, StatusCode::CONFLICT);
 
+        // nor the boxes' own identities on the forge, which no person is
+        for name in BOX_IDENTITIES {
+            let (status, _) = d
+                .hold(&sign(entry(name, &mallory, &[], 1), &mallory).unwrap())
+                .unwrap_err();
+            assert_eq!(status, StatusCode::FORBIDDEN);
+        }
+
         // one that never follows through is gone after its time
         let late = generate();
         let mut old = entry("zed", &late, &[], 1);
@@ -2544,6 +2565,29 @@ mod tests {
 
     /// A pull checks a peer's copy against what it read, then awaits the
     /// network; a newer one landing meanwhile is what the write answers to.
+    /// The boxes' own names are nobody's, on every way an entry comes in:
+    /// a sign-up's hold (above), the PUT and the join (admit), a write
+    /// under the lock (commit, which a pull and the agreed log go through)
+    /// and a v2 envelope
+    #[tokio::test]
+    async fn the_boxes_own_names_come_in_by_no_path() {
+        let dir = scratch("reserved");
+        let d = Directory::open(dir.clone(), None).unwrap();
+        let k = generate();
+        for name in BOX_IDENTITIES {
+            let signed = sign(entry(name, &k, &[], 1), &k).unwrap();
+            let (status, _) = d.admit(signed.clone()).await.unwrap_err();
+            assert_eq!(status, StatusCode::FORBIDDEN, "{name}: admit");
+            let (status, _) = d.commit(&signed, |_| Ok(())).unwrap_err();
+            assert_eq!(status, StatusCode::FORBIDDEN, "{name}: commit");
+            let (status, why) = d.submit_envelope("entry", name, b"{}").await.unwrap_err();
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{name}: envelope");
+            assert!(why.contains("boxes'"), "{name}: {why}");
+            assert!(d.entry(name).unwrap().is_none(), "{name} stored");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[tokio::test]
     async fn a_write_follows_what_landed_while_it_waited() {
         let dir = scratch("race");

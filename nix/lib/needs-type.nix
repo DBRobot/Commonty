@@ -249,7 +249,7 @@ t.attrsOf (
       servesCode = lib.mkOption {
         type = t.bool;
         default = false;
-        description = "the box hands people the code that handles their secrets (a page a master password is typed into): whoever has root there could change it. fleet/policy.json can keep such a service on the fleet owner's own hardware";
+        description = "the box hands people the code that handles their secrets (a page a master password is typed into): whoever has root there could change it. Such code comes with the app (app/src/local.rs), never from a box";
       };
       when = lib.mkOption {
         type = t.nullOr t.str;

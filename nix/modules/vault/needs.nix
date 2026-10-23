@@ -2,8 +2,10 @@
 {
   vaultwarden = {
     what = "passwords: everyone's vault, encrypted on their own devices";
-    # it serves the page master passwords are typed into
-    trust = "owner";
+    # the page master passwords are typed into comes with the app
+    # (app/src/local.rs), never from a box; the box still holds every vault,
+    # and could delete them: a member's box, never a stranger's
+    trust = "household";
     alwaysOn = true;
     grows = [ "passwords" ];
     # one vault: its records are one database
@@ -53,8 +55,9 @@
 
   vaultwarden-send = {
     what = "Send links: one thing shared with anyone, opened without an account";
-    # it serves the page a Send is decrypted in
-    trust = "owner";
+    # the page a Send is decrypted in comes with the app, never a box; a
+    # member's box holds the Sends
+    trust = "household";
     # the vault's sign-in secret with failover on: made wherever the vault
     # is carried, as the gate on every such box reads it
     units = [ "dd-vault-keys" ];

@@ -79,7 +79,7 @@
   options.dd.box.owner = lib.mkOption {
     type = lib.types.nullOr lib.types.str;
     default = null;
-    description = "whose box it is (box.json owner): services the policy keeps on the fleet owner's own hardware go only here";
+    description = "whose box it is (box.json owner)";
   };
   options.dd.box.memoryBytes = lib.mkOption {
     type = lib.types.ints.unsigned;

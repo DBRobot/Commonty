@@ -989,6 +989,8 @@ pub(crate) fn verify_device_token_at(
         .context("unreadable authority block")?;
     let user = peek_user(&source).context("no user fact")?;
     anyhow::ensure!(valid_user(&user), "bad user in token");
+    // the boxes' own names are nobody's, whatever entry is on file
+    anyhow::ensure!(!identity::reserved_name(&user), "that name is the boxes'");
     let signed = entry_of(&user)?.context("no identity published for that name")?;
     let mut verified: Option<Biscuit> = None;
     let mut device = String::new();
@@ -1073,7 +1075,15 @@ impl App {
     /// As identify, and whether a device's token said so (true) or this
     /// box's session cookie (false). A bearer that is not a biscuit is not
     /// a token: the cookie beside it is what counts.
+    /// Who this is, and whether by a device's own key. Never one of the
+    /// boxes' own names (identity::RESERVED_NAMES): an entry published
+    /// under one before the rule is nobody here, so no service behind the
+    /// gate - the forge least of all - is told it.
     fn identify_how(&self, headers: &HeaderMap, operation: &str) -> Option<(String, bool)> {
+        a_person(self.identify_any(headers, operation))
+    }
+
+    fn identify_any(&self, headers: &HeaderMap, operation: &str) -> Option<(String, bool)> {
         let agent = headers
             .get("user-agent")
             .and_then(|v| v.to_str().ok())
@@ -1292,6 +1302,11 @@ pub(crate) fn bearer(headers: &HeaderMap) -> Option<&str> {
 }
 
 /// nginx auth_request lands here for every request to a protected service.
+/// who, if a person: none of the boxes' own names
+fn a_person(who: Option<(String, bool)>) -> Option<(String, bool)> {
+    who.filter(|(u, _)| !identity::reserved_name(u))
+}
+
 async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     // A demo door (demo-<service>.<domain>, modules/gate/public.nix) is on
     // the open internet so anyone can look around. It lets the demo in and
@@ -1728,6 +1743,15 @@ async fn join_start(
         return (
             StatusCode::BAD_REQUEST,
             "names starting with guest are reserved; pick another",
+        )
+            .into_response();
+    }
+    // the boxes' own identities on the forge (nix/modules/forge/forgejo.nix),
+    // which no person is
+    if identity::reserved_name(&user) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "that name is the boxes'; pick another",
         )
             .into_response();
     }
@@ -3792,6 +3816,22 @@ pub async fn start(
 #[cfg(test)]
 mod tests {
 
+    /// an entry published under one of the boxes' own names before the
+    /// accept rule refused them is nobody to the gate, so no service -
+    /// the forge least of all - is told the name
+    #[test]
+    fn the_boxes_own_names_are_nobody() {
+        for name in identity::RESERVED_NAMES {
+            assert_eq!(super::a_person(Some(((*name).into(), false))), None);
+            assert_eq!(super::a_person(Some(((*name).into(), true))), None);
+        }
+        assert_eq!(
+            super::a_person(Some(("sarah".into(), false))),
+            Some(("sarah".into(), false))
+        );
+        assert_eq!(super::a_person(None), None);
+    }
+
     /// A session a device signed in ends when the person's entry is known
     /// to be without the device, never because there is no entry to go by
     /// (the agreed state not read yet, after a restart)
@@ -4678,6 +4718,54 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.status(), 404);
+    }
+
+    /// A device's token under one of the boxes' own names is nobody's, even
+    /// with an entry on file that the accept rule would refuse today (one
+    /// published before it): the directory's own way of telling who asks,
+    /// and the gate's, both go through this
+    #[test]
+    fn a_device_token_for_the_boxes_own_names_is_nobody() {
+        let on_file = |p: &Person| {
+            let device = B64.encode(p.device.public().to_bytes());
+            identity::sign(
+                identity::Entry {
+                    name: p.name.into(),
+                    root: identity::encode_public(&p.root.verifying_key()),
+                    recovery: identity::encode_public(&p.recovery.verifying_key()),
+                    recovered_from: vec![],
+                    devices: vec![identity::Device {
+                        fingerprint: identity::fingerprint(&device),
+                        public_key: device,
+                        added: 1,
+                    }],
+                    passkeys: vec![],
+                    grant: None,
+                    libraries: vec![],
+                    terms: Some(identity::TERMS.into()),
+                    removed_boxes: vec![],
+                    version: 1,
+                    updated: identity::now(),
+                },
+                &p.root,
+            )
+            .unwrap()
+        };
+        let sarah = Person::new("sarah");
+        let e = on_file(&sarah);
+        let (who, _) =
+            super::verify_device_token(|_| Ok(Some(e.clone())), &sarah.token(), "access", "x")
+                .unwrap();
+        assert_eq!(who, "sarah");
+        for name in identity::RESERVED_NAMES {
+            let p = Person::new(name);
+            let e = on_file(&p);
+            assert!(
+                super::verify_device_token(|_| Ok(Some(e.clone())), &p.token(), "access", "x")
+                    .is_err(),
+                "{name}"
+            );
+        }
     }
 
     /// a person: a root, a paper key and one device

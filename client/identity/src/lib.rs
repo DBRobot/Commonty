@@ -1040,6 +1040,9 @@ pub fn accept(existing: Option<&SignedEntry>, new: &SignedEntry) -> Result<()> {
     if !valid_name(&new.entry.name) {
         return Err(Error::Rejected("bad name".into()));
     }
+    if reserved_name(&new.entry.name) {
+        return Err(Error::Rejected("that name is the boxes'".into()));
+    }
     // a device key or a passkey root: something has to be able to sign
     if new.entry.devices.is_empty() && !new.entry.root.starts_with(WEBAUTHN_ROOT) {
         return Err(Error::Rejected("an entry needs at least one device".into()));
@@ -1309,6 +1312,15 @@ pub fn drop_passkey_keys(entry: &mut Entry) -> bool {
         }
     }
     had
+}
+
+/// The boxes' own identities on the forge (nix/modules/forge/forgejo.nix):
+/// its admin, and the one that stops and reruns CI runs. No person is
+/// either, so no entry may carry the names, wherever it is put
+pub const RESERVED_NAMES: &[&str] = &["commonty-box", "commonty-ci"];
+
+pub fn reserved_name(s: &str) -> bool {
+    RESERVED_NAMES.contains(&s)
 }
 
 pub fn valid_name(s: &str) -> bool {
@@ -1836,6 +1848,37 @@ mod tests {
             public_key: p,
             added: 1,
         }
+    }
+
+    #[test]
+    fn no_entry_takes_the_boxes_own_names() {
+        let root = generate();
+        for name in RESERVED_NAMES {
+            let e = Entry {
+                passkeys: vec![],
+                grant: None,
+                libraries: vec![],
+                name: (*name).into(),
+                root: encode_public(&root.verifying_key()),
+                recovery: String::new(),
+                recovered_from: vec![],
+                devices: vec![dev(&generate())],
+                terms: None,
+                removed_boxes: vec![],
+                version: 1,
+                updated: 1,
+            };
+            let s = sign(e.clone(), &root).unwrap();
+            // first sight or an update, whatever signs it
+            assert!(accept(None, &s).is_err(), "{name} taken");
+            let mut next = e;
+            next.version = 2;
+            assert!(
+                accept(Some(&s), &sign(next, &root).unwrap()).is_err(),
+                "{name} updated"
+            );
+        }
+        assert!(!reserved_name("commonty"));
     }
 
     #[test]

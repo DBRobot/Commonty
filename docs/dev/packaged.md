@@ -270,11 +270,14 @@ sops, read by ente    ente-ott, ente-key-encryption, ente-key-hash,
 sops, read by gate    ente-ott (as ente-ott-verify), ente-demo-password
 ```
 
-Museum's admin API is open to two accounts by id: the owner's
-(`dd.photos.admin`) and the storage ledger's (`dd.photos.ledger`), which
+Museum has no admins, and its admin API answers nobody (nginx returns 404
+for it). What the fleet needs of museum the box does in museum's own
+tables, as museum's own database user: it counts each member's photos,
 sets each member's photo quota to what is left of their allowance (across
 every box, from the fleet's count; only when that count is under an hour
-old) ([nix/roles/photos.nix](../../nix/roles/photos.nix)).
+old), holds the demo read-only, and lists a member who left for museum to
+delete ([nix/modules/storage/ledger.nix](../../nix/modules/storage/ledger.nix),
+`dd_jobs.go` in `museum-own-keys.patch`).
 
 ### Public and members-only
 
@@ -481,7 +484,7 @@ What we set instead of patching:
   fleet's network (for the owner's own devices, when set to ask it: the
   network hands every device Quad9, unfiltered), and loopback; the
   firewall lets port 53 in from the house network only, and from the
-  owner's devices on `commonty0`
+  host's and the admin's devices on `commonty0`
   ([nix/modules/net/owner.nix](../../nix/modules/net/owner.nix));
 - the lists are written into Pi-hole's `adlist` table by
   `dd-pihole-lists` and not by the module, whose own setup fails the

@@ -7,9 +7,9 @@
 # A run is retried when every job that failed was killed mid-step, no newer
 # run exists for its pull request (a newer push supersedes it), and it has
 # not been retried here before. Runs every few minutes (a timer), as the
-# admin through forgejo's socket, like ci-cancel.py: rerunning a run is a
+# boxes' CI identity through forgejo's socket, like ci-cancel.py: rerunning a run is a
 # web route the api does not have.
-# Environment: FORGE (the unix socket), ADMIN, REPO (owner/name), STATE (a
+# Environment: FORGE (the unix socket), AS (the CI identity), REPO (owner/name), STATE (a
 # directory this keeps the retried runs in).
 import http.client
 import json
@@ -21,7 +21,7 @@ import time
 from datetime import datetime
 
 forge = os.environ["FORGE"]
-admin = os.environ["ADMIN"]
+actor = os.environ["AS"]
 repo = os.environ["REPO"]
 state = os.path.join(os.environ["STATE"], "retried.json")
 # how far back a killed run is still worth running again
@@ -41,14 +41,14 @@ class UnixConnection(http.client.HTTPConnection):
 
 
 def ask(method, path):
-    """forgejo, as the admin, over its socket: (status, body bytes)"""
+    """forgejo, as the CI identity, over its socket: (status, body bytes)"""
     c = UnixConnection(forge, 30)
     try:
         c.request(
             method,
             path,
             body=b"" if method == "POST" else None,
-            headers={"X-WEBAUTH-USER": admin},
+            headers={"X-WEBAUTH-USER": actor},
         )
         r = c.getresponse()
         return r.status, r.read()

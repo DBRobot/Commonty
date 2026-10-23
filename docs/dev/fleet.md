@@ -57,13 +57,8 @@ publishes the list as a metric. Nothing refuses it, and
 checks that labelling is all that happens: a label is a fix still owed,
 not a gate. The fix is to make the service stop reading plaintext.
 
-Two things here look like trust and are not:
+One thing here looks like trust and is not:
 
-- **`ownHardware` in `policy.json`** keeps a service on boxes whose
-  `box.json` owner is the fleet's owner. It is about whose hands the
-  hardware is in, for services that hand people the code that handles
-  their secrets (a page a master password is typed into). It says nothing
-  about the box being safe.
 - **`public` in `boxes.json`** says whether the box's gate answers at the
   fleet's public names. It changes how other boxes reach its directory,
   not what they believe from it.
@@ -235,9 +230,8 @@ bundle brings:
 
 What a box can run is capability's: its `joins` (a TPM 2.0 with P-256,
 UEFI, a wired NIC its initrd has a driver for), each service's
-`requires` against its report, and its owner's choices: `trust`, the
-policy's `ownHardware` (only on boxes whose `box.json` owner is the
-policy's `owner`), a metered line. `checks.placement` and
+`requires` against its report, and its owner's choices: `trust`, a
+metered line. `checks.placement` and
 `checks.placement-fleet` hold the rules to the fleet and to a dozen
 made-up computers.
 
@@ -267,7 +261,6 @@ people.<name>
 allowanceGb    each member's storage across every service and box
                                                      dd.storage.budgetGb
                                                      (storage/view.nix)
-ownHardware    services that run only on the owner's own boxes (capability.nix)
 ```
 
 ## The other files

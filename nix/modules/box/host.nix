@@ -35,6 +35,11 @@ let
   # the box that serves the members' libraries, the one built with them:
   # the one box that writes them (store.nix writer)
   libraryBox = lib.findFirst (_: true) null (placement.builtWith "libraries");
+  # the boxes built with a CI runner, by their secrets keys: the forge seals
+  # each its runners' registration tokens (forge/runner-keys.nix)
+  runnerBoxes = lib.filter (n: secretsKey n != null) (
+    lib.unique (placement.builtWith "forgejo-runner" ++ placement.builtWith "members-runner")
+  );
 in
 {
   imports = [
@@ -213,6 +218,9 @@ in
         envFile = "/var/lib/dd-store/keys/postgres-wal.env";
         recipients = lib.genAttrs pgAble secretsKey;
       };
+    })
+    (lib.optionalAttrs (options.dd ? forgejo) {
+      dd.forgejo.runnerBoxes = lib.genAttrs runnerBoxes secretsKey;
     })
     (lib.optionalAttrs (options.dd ? headscale) {
       dd.headscale.follow.recipients = lib.mkIf config.dd.failover (lib.genAttrs netAble secretsKey);

@@ -142,6 +142,11 @@ impl Sessions {
             return None;
         }
         let (user, id) = who.split_once('~').unwrap_or((who, ""));
+        // the boxes' own names are nobody's, whatever a cookie says: every
+        // way a cookie names someone goes through here
+        if identity::reserved_name(user) {
+            return None;
+        }
         Some((user.to_string(), id.to_string(), exp))
     }
 
@@ -201,6 +206,26 @@ mod tests {
 
     fn value(set_cookie: &str) -> String {
         set_cookie.split(';').next().unwrap().to_string()
+    }
+
+    /// a session under one of the boxes' own names, made by whoever holds
+    /// the secret, names nobody: domain-wide or host-only, any id
+    #[test]
+    fn a_session_for_the_boxes_own_names_is_nobody() {
+        for host_only in [false, true] {
+            let s = Sessions {
+                host_only,
+                ..sessions()
+            };
+            for name in identity::RESERVED_NAMES {
+                let c = value(&s.issue(name));
+                assert_eq!(s.session(Some(&c)), None, "{name}");
+                let c = value(&s.issue_as(name, "fleet", now() + 60));
+                assert_eq!(s.session(Some(&c)), None, "{name} by sso");
+            }
+            let c = value(&s.issue("sarah"));
+            assert_eq!(s.session(Some(&c)).map(|x| x.0).as_deref(), Some("sarah"));
+        }
     }
 
     #[test]

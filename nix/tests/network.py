@@ -159,8 +159,9 @@ assert tagged and all(not k.get("reusable") for k in tagged), keys
 # the same request again, copied off the wire: nothing more
 assert box.succeed(f"{post} < /root/ask.json").strip() == "429"
 
-# The owner's devices administer the box; another member's do not. sarah
-# owns it (dd.box.owner); kim is a member with a device of her own.
+# The admin's devices administer the box; the host's do not. sarah is the
+# fleet's admin (dd.verify.admin); kim has the box at home (dd.box.owner) and
+# has a device of their own.
 box.succeed("headscale users create kim")
 kim_id = box.succeed(
     "headscale users list -o json | jq -r '.[] | select(.name == \"kim\") | .id'"
@@ -185,12 +186,16 @@ box.wait_until_succeeds(
     timeout=60,
 )
 box.succeed("systemctl start dd-owner-devices.service")
-members = box.succeed("ipset list dd-owner")
-assert laptop_ip in members, members
-assert other.succeed("tailscale ip -4").strip() not in members, members
-# sarah's laptop reaches ssh on the box; kim's does not
+other_ip = other.succeed("tailscale ip -4").strip()
+admins = box.succeed("ipset list dd-owner")
+assert laptop_ip in admins and other_ip not in admins, admins
+hosts = box.succeed("ipset list dd-host")
+assert other_ip in hosts and laptop_ip not in hosts, hosts
+# the admin's laptop reaches ssh on the box; the host's does not
 laptop.wait_until_succeeds(f"nc -z -w 5 {box_ip} 22", timeout=60)
 other.fail(f"nc -z -w 5 {box_ip} 22")
+# and the box's admin login takes no key of the host's
+box.fail("grep -q kim /etc/ssh/authorized_keys.d/admin 2>/dev/null")
 
 # Who is who, not known yet, is nobody's loss (2026-10-22: a gate that
 # started before dd-control answered read everyone as no member and took the
@@ -223,7 +228,7 @@ box.succeed("mkdir -p /run/dd-test")
 box.succeed(
     'echo \'{"boxes": {"box": {}}, "validators": [{"name": "box"}]}\' > /run/dd-test/control.json'
 )
-# sarah (the box's owner) and ivy are members, kim's membership was revoked
+# sarah (the fleet's admin) and ivy are members, kim's membership was revoked
 box.succeed(
     "jq -n '{height: 5, members: {"
     'sarah: {status: "member", access: "invite"}, '
@@ -282,7 +287,7 @@ assert code("/internal/storage/members") == "503"
 
 # dd-control answers: who is who is known, then the grace runs, then kim's
 # devices come off, and zed's (known now: the agreed state has no zed); the
-# owner's and ivy's stay
+# admin's and ivy's stay
 box.succeed(
     f"systemd-run --unit dd-control-standin $(command -v python3) {nix['standin']} /run/dd-test/identity.json"
 )
