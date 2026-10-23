@@ -39,10 +39,11 @@ let
   # those on its Wi-Fi with a fixed address
   houseBoxes = lib.mapAttrs (_: o: lib.head (lib.splitString "/" o.house.address)) (
     lib.filterAttrs (
-      n: o: n != config.networking.hostName && (o.house or { }).ssid or null == house.ssid && (o.house or { }) ? address
-    ) (
-      lib.genAttrs fleet (n: lib.importJSON (../../../fleet/boxes + "/${n}/box.json"))
-    )
+      n: o:
+      n != config.networking.hostName
+      && (o.house or { }).ssid or null == house.ssid
+      && (o.house or { }) ? address
+    ) (lib.genAttrs fleet (n: lib.importJSON (../../../fleet/boxes + "/${n}/box.json")))
   );
 in
 {
