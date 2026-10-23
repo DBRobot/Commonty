@@ -66,7 +66,7 @@ c=$(code https://home.$B/_dd/redeem/start 10 -X POST -H 'x-dd-grant: bm9wZQ==');
 
 # 7. bodies and slow clients
 c=$(code https://home.$B/_dd/join/start 20 -X POST -H 'content-type: application/json' --data-binary @<(head -c 2000000 /dev/zero)); [ "$c" = 413 ] && pass "2 MB body refused (413)" || fail "2 MB body: $c"
-if curl -sI -m 10 $(at https://home.$B/) https://home.$B/ | grep -qi '^server: cloudflare'; then
+if curl -sI -m 10 $(at https://home.$B/) https://home.$B/ | grep -i '^server: cloudflare' >/dev/null; then
   echo "skip  slow body: Cloudflare's edge holds slow clients before nginx sees them"
 elif command -v timeout >/dev/null; then
   start=$(date +%s); (printf 'POST /_dd/join/start HTTP/1.1\r\nHost: home.%s\r\nContent-Length: 100\r\n\r\n' "$B"; sleep 40) | timeout 45 openssl s_client -quiet -servername home.$B -connect $ip:443 >/dev/null 2>&1; took=$(( $(date +%s) - start ))
