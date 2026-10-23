@@ -9,6 +9,7 @@ let
 in
 {
   name = "vault";
+  helpers = true;
   node.specialArgs = { inherit self; };
   defaults.virtualisation.memorySize = 2048;
   defaults.virtualisation.cores = 2;
@@ -23,6 +24,9 @@ in
       ];
       dd.failover = true;
       dd.verify.role = lib.mkForce "full";
+      # announcements as a release would carry them, in a directory the test
+      # writes (modules/member-mail.nix)
+      dd.announce.dir = "/var/lib/test-announcements";
       dd.store = {
         enable = true;
         capacity = "1G";

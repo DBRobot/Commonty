@@ -139,8 +139,6 @@
   "runner": {
     "why": "VM tests (games nests one) and members' jobs; the nix cache at the storage pool's address (nix/modules/forge/needs.nix)",
     "secrets": [
-      "forgejo-runner-token",
-      "forgejo-members-runner-token",
       "cache-key-id",
       "cache-key-secret"
     ],

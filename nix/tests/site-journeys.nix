@@ -154,7 +154,6 @@ in
         codeFile = "${photoSecrets}/ente-ott";
         demoPasswordFile = "${photoSecrets}/ente-demo-password";
       };
-      dd.photos.admin = 1;
       services.ente.web.enable = lib.mkForce false;
       services.ente.api.settings = {
         s3 = {
@@ -194,7 +193,6 @@ in
         keyFile = libraryKey;
       };
       dd.verify.library.s3 = lib.mkForce "http://127.0.0.1:3900";
-      dd.forgejo.admin = "mia";
       systemd.services.zfs-datasets = {
         wantedBy = [ "multi-user.target" ];
         serviceConfig = {

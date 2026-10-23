@@ -81,7 +81,7 @@ in
   # this one. The container has no secrets, no volume from the host, no
   # docker socket, a cpu and memory cap, and a network that reaches the
   # internet and nothing of ours: the tailnet, the lan, this box. The host
-  # runners (nix/modules/forge/forgejo-runner.nix) take the admin's repos
+  # runners (nix/modules/forge/forgejo-runner.nix) take the fleet's own repos
   # alone, which the forge enforces (dd-forge-rules in forgejo.nix): this
   # runner may stay registered for every repo only while `members` is its
   # one label. A member's workflow says `runs-on: members` and lands here.
@@ -185,14 +185,21 @@ in
         TimeoutStopSec = "${toString (cfg.drainMinutes + 5)}min";
         # the forge must answer first, and at this address (runner-address.sh)
         TimeoutStartSec = "10min";
-        ExecStartPre = lib.mkBefore [
-          (pkgs.writeShellScript "runner-address" (
-            ddScript ./runner-address.sh {
-              NAME = name;
-              URL = "https://git.${base}";
-            }
-          ))
-        ];
+        ExecStartPre = lib.mkBefore (
+          # its token, made by the forge's box and sealed to this one
+          # (runner-keys.nix), where the host runner's module is here too
+          lib.optional (
+            config.dd ? runner && config.dd.runner ? fetchToken
+          ) "+${config.dd.runner.fetchToken "members"}"
+          ++ [
+            (pkgs.writeShellScript "runner-address" (
+              ddScript ./runner-address.sh {
+                NAME = name;
+                URL = "https://git.${base}";
+              }
+            ))
+          ]
+        );
       };
     };
 

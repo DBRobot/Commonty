@@ -345,3 +345,26 @@ func TestItemHashes(t *testing.T) {
 		}
 	}
 }
+
+// the boxes' own names are nobody's: refused whatever signs them, as
+// identity::accept refuses them
+func TestReservedNames(t *testing.T) {
+	v := load(t)
+	ada, err := FromEnvelope(mustJSON(t, v.V2["ada"].Envelope))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range ReservedNames {
+		e := *ada
+		e.Entry.Name = n
+		if err := Accept(nil, &e); err == nil || err.Error() != "that name is the boxes'" {
+			t.Fatalf("%s: %v", n, err)
+		}
+		if err := Accept(ada, &e); err == nil {
+			t.Fatalf("%s taken as an update", n)
+		}
+	}
+	if ReservedName("commonty") {
+		t.Fatal("commonty is a name like any")
+	}
+}

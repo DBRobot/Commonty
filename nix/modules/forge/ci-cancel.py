@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # A failing job stops the whole run. Forgejo's api cannot cancel a run, but
 # its web route can, and this box is the forge: a job posts its run's id
-# here, and this cancels the run as the admin through forgejo's socket -
+# here, and this cancels the run as the boxes' CI identity (no person, and no
+# admin: it may write to the fleet's repository alone) through forgejo's socket -
 # once the forge itself records one of that run's jobs as failed.
 #
 # No secret: anyone may ask, and all they can do is stop a run that has
 # already failed, which is what would happen anyway. So there is nothing to
 # leak to a pull request's jobs.
-# Environment: FORGE (the unix socket), ADMIN, REPO (owner/name), LISTEN (port).
+# Environment: FORGE (the unix socket), AS (the CI identity), REPO (owner/name), LISTEN (port).
 #
 # The socket, not a port: forgejo believes X-WEBAUTH-USER from anything that
 # reaches it, and jobs run on this box. Only what systemd puts in forgejo's
@@ -22,7 +23,7 @@ import threading
 import time
 
 forge = os.environ["FORGE"]
-admin = os.environ["ADMIN"]
+actor = os.environ["AS"]
 repo = os.environ["REPO"]
 
 
@@ -38,10 +39,10 @@ class UnixConnection(http.client.HTTPConnection):
 
 
 def ask(method, path, body=None):
-    """forgejo, as the admin, over its socket: (status, body bytes)"""
+    """forgejo, as the CI identity, over its socket: (status, body bytes)"""
     c = UnixConnection(forge, 20)
     try:
-        c.request(method, path, body=body, headers={"X-WEBAUTH-USER": admin})
+        c.request(method, path, body=body, headers={"X-WEBAUTH-USER": actor})
         r = c.getresponse()
         return r.status, r.read()
     finally:
@@ -50,7 +51,9 @@ def ask(method, path, body=None):
 
 def failed(index, sha):
     """whether the forge has recorded a job of run `index` as failed"""
-    status, body = ask("GET", "/api/v1/repos/%s/commits/%s/statuses?limit=100" % (repo, sha))
+    status, body = ask(
+        "GET", "/api/v1/repos/%s/commits/%s/statuses?limit=100" % (repo, sha)
+    )
     if status != 200:
         return False
     mine = "/actions/runs/%s/jobs/" % index
@@ -87,7 +90,9 @@ def stop(run):
         except (OSError, ValueError) as e:
             print("run %s: %s" % (run, e), flush=True)
         time.sleep(5)
-    print("run %s (#%s): no failed job on record; left running" % (run, index), flush=True)
+    print(
+        "run %s (#%s): no failed job on record; left running" % (run, index), flush=True
+    )
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -105,4 +110,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-http.server.ThreadingHTTPServer(("127.0.0.1", int(os.environ["LISTEN"])), Handler).serve_forever()
+http.server.ThreadingHTTPServer(
+    ("127.0.0.1", int(os.environ["LISTEN"])), Handler
+).serve_forever()
