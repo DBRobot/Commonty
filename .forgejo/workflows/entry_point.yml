@@ -512,9 +512,11 @@ jobs:
   # both halves count. Only when something the drive's evaluation reads
   # changed (covers.json "installer": nix/installer, the agent's crates,
   # the shared pages, the fleet files it embeds; flake.lock runs all).
+  # always started, its steps skipped when the installer is not chosen: a
+  # whole matrix job skipped with runs-on from its matrix left ci_ok blocked
+  # forever on the forge (run 857, 2026-10-24)
   build_installer:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.installer == 'true' }}
     runs-on: ${{ matrix.on }}
     strategy:
       fail-fast: false
@@ -522,7 +524,9 @@ jobs:
         on: ${{ fromJSON(needs.files_modified.outputs.builders) }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
+        if: ${{ needs.files_modified.outputs.installer == 'true' }}
       - name: build the installer's drive on ${{ matrix.on }}, then again to compare
+        if: ${{ needs.files_modified.outputs.installer == 'true' }}
         run: |
           # an out-link is a root: the box's GC deleted the unrooted first
           # build before the rebuild could compare against it (2026-10-23)
@@ -530,6 +534,7 @@ jobs:
           nix build --no-link --rebuild .#installers.x86_64-linux.box
           nix path-info --json-format 1 --json "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(Object.values(JSON.parse(s))[0].narHash))' | tee "$RUNNER_TEMP/nar"
       - name: record the hash
+        if: ${{ needs.files_modified.outputs.installer == 'true' }}
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

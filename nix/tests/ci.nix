@@ -48,12 +48,20 @@ pkgs.runCommand "ci-matches-the-flake"
         exit 1
       fi
     done
-    for j in build_installer installer_agrees; do
-      if [ "$(yq ".jobs.$j.if" ${workflow})" != "\''${{ needs.files_modified.outputs.installer == 'true' }}" ]; then
-        echo "job $j must run when files_modified chose the installer, and only then" >&2
-        exit 1
-      fi
-    done
+    if [ "$(yq ".jobs.installer_agrees.if" ${workflow})" != "\''${{ needs.files_modified.outputs.installer == 'true' }}" ]; then
+      echo "job installer_agrees must run when files_modified chose the installer, and only then" >&2
+      exit 1
+    fi
+    # build_installer always starts (a skipped matrix job left ci_ok blocked),
+    # every step of it only when the installer is chosen
+    if [ "$(yq ".jobs.build_installer.if" ${workflow})" != "null" ]; then
+      echo "job build_installer must not be skipped whole: its steps carry the choice" >&2
+      exit 1
+    fi
+    if [ "$(yq '[.jobs.build_installer.steps[] | select(.if != "failure()") | .if] | unique | .[]' ${workflow})" != "\''${{ needs.files_modified.outputs.installer == 'true' }}" ]; then
+      echo "every step of build_installer must run when files_modified chose the installer, and only then" >&2
+      exit 1
+    fi
     jobs=$(yq -o=json -I=0 '[.jobs | keys | .[] | select(. != "ci_ok")] | sort' ${workflow})
     gate=$(yq -o=json -I=0 '.jobs.ci_ok.needs | sort' ${workflow})
     if [ "$jobs" != "$gate" ]; then
