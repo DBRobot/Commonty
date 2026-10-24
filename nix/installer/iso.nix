@@ -53,6 +53,9 @@ let
       pkgs.ethtool
       pkgs.iproute2
       pkgs.nvme-cli
+      # the Wi-Fi bands (report/nics.sh)
+      pkgs.iw
+      pkgs.gnused
       config.system.build.nixos-install
       config.system.build.nixos-generate-config
       config.boot.zfs.package
@@ -74,7 +77,7 @@ in
     RELEASE_URL = "https://code.${domain}/${repo}/raw/branch/releases/current.json";
     RELEASE_KEY = "/etc/dd/release.pub";
     SOURCE = "git+https://code.${domain}/${repo}";
-    DETECT = "${../modules/box/report/detect.sh}";
+    DETECT = "${../modules/box/report}/detect.sh";
     # the commit this installer was made from: no release issued before it
     NOT_BEFORE = toString (self.lastModified or 0);
     # where a disk's backup goes before it is wiped (backup.sh)

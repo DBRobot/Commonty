@@ -147,7 +147,7 @@ in
           RELEASE_URL = "http://forge/release/current.json";
           RELEASE_KEY = "/root/release.pub";
           SOURCE = "git+http://forge/flake.git";
-          DETECT = "${../modules/box/report/detect.sh}";
+          DETECT = "${../modules/box/report}/detect.sh";
           NOT_BEFORE = "100";
           FILES = "http://forge/files";
         };

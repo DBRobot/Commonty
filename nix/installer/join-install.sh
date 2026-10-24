@@ -8,7 +8,7 @@
 # that commit and its report; installs it. On first boot the box joins the
 # fleet on its own key, as a stranger, and takes releases from then on.
 # Environment: RELEASE_URL, RELEASE_KEY (a file), SOURCE (the repository,
-# git+https://...), DETECT (detect.sh),
+# git+https://...), DETECT (detect.sh, beside nics.sh),
 # NOT_BEFORE (seconds: the oldest release it takes, when it was made),
 # DISK (to name the disk when there is more than one; it is wiped),
 # Secure Boot in setup mode (its keys cleared at the firmware's screen),
