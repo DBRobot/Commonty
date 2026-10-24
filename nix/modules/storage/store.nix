@@ -101,6 +101,13 @@ let
   # a placed service's bucket is written where the service runs; another's,
   # wherever this box has it
   placedSvc = s: needs ? ${s} && (needs.${s}.placed || needs.${s}.lease);
+  # a bucket of a service with one writer, the holder of its lease
+  leased =
+    b:
+    let
+      s = cfg.buckets.${b}.service or null;
+    in
+    s != null && needs ? ${s} && needs.${s}.lease;
   full = "/run/dd-store/full";
   corsRule = {
     CORSRules = [
@@ -664,8 +671,10 @@ in
     # copied here every hour, so failover finds it in place. Once the
     # service writes here (once), one more copy brings what it wrote there
     # before its switch, and then no more: a member's delete here stays
-    # deleted. Each bucket's state, for the box's page and the check
-    # before the old pool goes: dd_store_migrated 1 all here, 0 not yet
+    # deleted. A leased service's bucket goes where its writer is: to the
+    # other stores that keep it too, while this box holds no lease on it.
+    # Each bucket's state, for the box's page and the check before the old
+    # pool goes: dd_store_migrated 1 all here, 0 not yet
     systemd.services.dd-store-migrate = lib.mkIf (cfg.migrate != { }) {
       description = "Copy this box's buckets from the old storage pool into its own store";
       after = [ "dd-store-setup.service" ];
@@ -673,6 +682,8 @@ in
       path = [
         pkgs.rclone
         pkgs.coreutils
+        pkgs.gnugrep
+        pkgs.jq
       ];
       serviceConfig.Type = "oneshot";
       script = ''
@@ -681,6 +692,35 @@ in
         done=${state}/migrated
         mkdir -p $done
         out=$(mktemp)
+        # the other stores that keep a bucket, as the copies have the plan
+        # (dd-store-copy), and this box's key to each
+        copy=/var/lib/dd-store-copy
+        others() {
+          if [ -s $copy/copies.json ]; then
+            jq -r --arg b "$1" '.[$b] // [] | .[]' $copy/copies.json | grep -vx ${box} || true
+          else
+            echo ${lib.concatStringsSep " " sorted}
+          fi
+        }
+        # pool:<bucket> into another store too, where its lease may be held
+        there() { # there <bucket>
+          for p in $(others $1); do
+            case "$p" in
+            ${lib.concatStrings (lib.mapAttrsToList (p: v: "  ${p}) url=${v.url} ;;\n") cfg.peers)}
+            *) echo "$1: $p keeps it by the plan, and is no store this box knows"; return 1 ;;
+            esac
+            [ -s $copy/$p.env ] || { echo "$1: no key to $p's store yet"; return 1; }
+            (
+              set -a; . $copy/$p.env; set +a
+              export RCLONE_CONFIG_THERE_TYPE=s3 RCLONE_CONFIG_THERE_PROVIDER=Other \
+                RCLONE_CONFIG_THERE_ENDPOINT=$url RCLONE_CONFIG_THERE_REGION=us-east-1 \
+                RCLONE_CONFIG_THERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID RCLONE_CONFIG_THERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+                RCLONE_CONFIG_THERE_FORCE_PATH_STYLE=true
+              rclone copy --checksum --s3-no-check-bucket --fast-list pool:$1 there:$1 \
+                && rclone check --one-way --fast-list pool:$1 there:$1
+            ) || { echo "$1: not all at $p yet"; return 1; }
+          done
+        }
         ${lib.concatStrings (
           lib.mapAttrsToList (b: m: ''
             if ${lib.boolToString m.once} && [ -e $done/${b} ]; then
@@ -699,7 +739,8 @@ in
                 RCLONE_CONFIG_HERE_FORCE_PATH_STYLE=true
               # copy, never sync: nothing is deleted on either side
               rclone copy --checksum --s3-no-check-bucket --fast-list pool:${b} here:${b} \
-                && rclone check --one-way --fast-list pool:${b} here:${b}
+                && rclone check --one-way --fast-list pool:${b} here:${b} \
+                ${lib.optionalString (leased b) "&& { [ -e /run/dd-placed/${cfg.buckets.${b}.service} ] || there ${b}; }"}
             ) && {
               echo "${b}: all of it here"
               echo 'dd_store_migrated{bucket="${b}",once="${lib.boolToString m.once}"} 1' >> $out
