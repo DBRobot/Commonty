@@ -196,7 +196,9 @@ in
         AWS_DEFAULT_REGION = "us-east-1";
         REPO = "${config.services.forgejo.repositoryRoot}/${config.dd.repo}.git";
         KEEP = "10";
-        AGE = "7";
+        # CI uploads 6-21 thousand objects a day: a week of them held ~58G on
+        # each box (2026-10-24); two days still covers a run and its release
+        AGE = "2";
         CACHE = url;
         BUCKET = "nix-cache";
         ENDPOINT = config.dd.box.s3;
