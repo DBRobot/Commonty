@@ -387,6 +387,9 @@ start_fresh(box, unit)          run a oneshot once more and wait for that run to
 journal_of(box, unit, inv)      that run's journal lines, no other run's; also the
                                 last lines journald reads after the run has ended
 journal_has(box, unit, inv, s)  whether that run wrote s
+journal_cursor(box)             where the journal is now
+journal_since(box, unit, c)     every run's lines since that cursor: for a thing
+                                whichever run comes first does, a timer's or the test's
 wait_unit_active(box, unit)     a long-running unit up
 wait_socket(box, port | path)   something listening on a port or a unix socket
 fetch_has(box, url, s)          whether url's body holds s (curl to a file, then grep -c)

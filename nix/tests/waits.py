@@ -1,7 +1,9 @@
 from waits import (
     fetch_has,
+    journal_cursor,
     journal_has,
     journal_of,
+    journal_since,
     start_fresh,
     wait_fetch_has,
     wait_socket,
@@ -49,6 +51,24 @@ box.wait_until_succeeds(
 assert journal_has(box, "last-word.service", inv, "the last word"), journal_of(
     box, "last-word.service", inv
 )
+
+# journal_since: every run's lines after the cursor, the timer's too, and
+# none from before it. The timer waits while the cursor is taken, so which
+# runs came before it is known, not a guess against a run starting
+box.succeed("systemctl stop slow.timer")
+box.wait_until_succeeds(
+    '[ "$(systemctl show -P ActiveState slow.service)" != activating ]'
+)
+last = int(box.succeed("cat /var/lib/slow-runs").strip())
+since = journal_cursor(box)
+box.succeed("systemctl start slow.timer")
+box.wait_until_succeeds(f"[ $(cat /var/lib/slow-runs) -ge {last + 2} ]", timeout=30)
+inv = start_fresh(box, "slow.service")
+lines = journal_since(box, "slow.service", since)
+began = [int(ln.split()[1]) for ln in lines.splitlines() if ln.endswith(" began")]
+assert len(began) >= 3, f"runs since the cursor: {began}"
+assert min(began) > last, f"a run from before the cursor: {began} (last was {last})"
+assert journal_of(box, "slow.service", inv).strip() in lines
 
 # fetch_has: a page with the word, however much comes after it; a word it
 # does not hold is not found
