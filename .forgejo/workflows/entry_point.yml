@@ -9,15 +9,21 @@
 # anywhere stops the whole run (stop-run), so a dead run is red at once.
 name: entry_point
 
-# once per change: a pull request runs it. main moves only by merging a
-# branch rebased onto it (the rule refuses an outdated one), so what lands
-# is the tree this ran on, and a push to main runs nothing.
+# once per change: a pull request runs what its change can reach
+# (files_modified). main moves only by merging a branch rebased onto it
+# (the rule refuses an outdated one), so what lands is the tree a pull
+# request's run ran on; a push to main then runs everything on that very
+# commit, every box's system on every box among it, and `dd release
+# publish` signs only a commit whose full run passed. A newer push cancels
+# the full run before it: one full run per batch merged.
 # A draft ("WIP: " in its title) runs the style and lint checks alone, and
 # cannot pass ci_ok; taking WIP out is an edit, which starts the full run.
 # An edit to a commit that already passed reruns the style check alone.
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
 
 # one run per pull request: a new push cancels the run of the push before it
 concurrency:
@@ -29,6 +35,14 @@ jobs:
     runs-on: nix
     outputs:
       nix: ${{ steps.detect.outputs.nix }}
+      # the flake evaluated again (flake_check, inputs_kept) and every box's
+      # system built: not for a change to programs' source alone
+      eval: ${{ steps.detect.outputs.eval }}
+      # the programs the VM tests and systems carry (build_programs)
+      programs: ${{ steps.detect.outputs.programs }}
+      # everything, as main's full run: every system on every box and the
+      # two compared, the installer built twice on each
+      full: ${{ steps.boxes.outputs.full }}
       rust: ${{ steps.detect.outputs.rust }}
       vm: ${{ steps.detect.outputs.vm }}
       app: ${{ steps.detect.outputs.app }}
@@ -50,6 +64,9 @@ jobs:
       builders: ${{ steps.boxes.outputs.builders }}
       hosts_list: ${{ steps.boxes.outputs.hosts_list }}
       builders_list: ${{ steps.boxes.outputs.builders_list }}
+      # where build_systems and build_installer run: every builder in the
+      # full run; in a pull request's, once, on any runner ("nix")
+      build_on: ${{ steps.boxes.outputs.build_on }}
       # the box flake_check runs on: one with room for it (the runner's
       # needs, nix/lib/ci-runners.nix); any runner when none has
       flake_check_on: ${{ steps.boxes.outputs.flake_check_on }}
@@ -60,6 +77,8 @@ jobs:
 
       - name: the boxes
         id: boxes
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
           node - <<'EOF'
           const b = require("./fleet/boxes.json");
@@ -69,9 +88,12 @@ jobs:
           // the boxes built with the CI runner, by the release (fleetBuilt)
           const built = JSON.parse(require("child_process").execFileSync("nix", ["eval", "--json", ".#legacyPackages.x86_64-linux.fleetBuilt"]).toString());
           const builders = hosts.filter((h) => (built[h] || []).includes("forgejo-runner"));
+          const full = process.env.EVENT !== "pull_request";
           require("fs").appendFileSync(process.env.GITHUB_OUTPUT, [
             `hosts=${JSON.stringify(hosts)}`,
             `builders=${JSON.stringify(builders)}`,
+            `full=${full}`,
+            `build_on=${JSON.stringify(full ? builders : ["nix"])}`,
             `hosts_list=${hosts.join(" ")}`,
             `builders_list=${builders.join(" ")}`,
           ].join("\n") + "\n");
@@ -89,7 +111,10 @@ jobs:
       # traced) and what its .nix files name (read here); the other jobs by
       # the path lists in ciselect.py. A wrong list is caught by
       # the boxes, which build the whole system from main at every release
-      # and roll back what does not come up.
+      # and roll back what does not come up. A component whose insides alone
+      # changed and whose face held (its routes, wire types, flags; read
+      # from both ends, nix/tests/ci-select/interfaces.py) runs its own
+      # checks, not every test that reads it; main's full run runs them all.
       - name: what changed?
         id: detect
         env:
@@ -123,7 +148,7 @@ jobs:
 
   flake_check:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' }}
+    if: ${{ needs.files_modified.outputs.eval == 'true' }}
     runs-on: ${{ needs.files_modified.outputs.flake_check_on }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
@@ -172,7 +197,7 @@ jobs:
           [ "$left" -ge 60 ] || { echo "move dd.securityTxtExpires on (nix/modules/gate/security-txt.nix), at most a year out"; exit 1; }
           [ "$left" -le 366 ] || { echo "RFC 9116 wants Expires under a year away"; exit 1; }
       - name: plaintext labels, box list, and this file
-        run: nix build --no-link .#checks.x86_64-linux.plaintext-label .#checks.x86_64-linux.boxes .#checks.x86_64-linux.box-reports .#checks.x86_64-linux.ci .#checks.x86_64-linux.ci-select .#checks.x86_64-linux.stylesheet .#checks.x86_64-linux.cargo-nix .#checks.x86_64-linux.nginx .#checks.x86_64-linux.usage-facts .#checks.x86_64-linux.fleet-defaults .#checks.x86_64-linux.retention .#checks.x86_64-linux.terms-version .#checks.x86_64-linux.needs-units .#checks.x86_64-linux.placement .#checks.x86_64-linux.safe-rd .#checks.x86_64-linux.runner-capacity .#checks.x86_64-linux.cache-trust .#checks.x86_64-linux.placement-fleet .#checks.x86_64-linux.pdf-editor .#checks.x86_64-linux.calendar-js .#checks.x86_64-linux.git-path
+        run: nix build --no-link .#legacyPackages.x86_64-linux.evalChecks
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -183,7 +208,7 @@ jobs:
   # flake_check (4-9 min, 1.5-1.8G on node1), on a box with that room.
   inputs_kept:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' }}
+    if: ${{ needs.files_modified.outputs.eval == 'true' }}
     runs-on: ${{ needs.files_modified.outputs.flake_check_on }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
@@ -268,7 +293,7 @@ jobs:
   # failure there stops this anyway, and waiting cost every run minutes.
   build_programs:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' }}
+    if: ${{ needs.files_modified.outputs.programs == 'true' }}
     runs-on: nix
     strategy:
       fail-fast: true
@@ -288,30 +313,38 @@ jobs:
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
-  # Every box's system, built on every box. A box vouches for a release
-  # (dd-attest) only for what it built itself or rebuilt to compare, and it
-  # vouches for all the boxes' systems, not its own alone: built here in
-  # CI, the release finds it all already built by this box's own daemon
-  # and the check takes seconds instead of rebuilding after the merge.
-  # Each records what it built under its own name; systems_agree holds the
-  # two builders of a system to one store path.
+  # Every box's system. In main's full run, built on every box: a box
+  # vouches for a release (dd-attest) only for what it built itself or
+  # rebuilt to compare, and it vouches for all the boxes' systems, not its
+  # own alone: built here in CI, the release finds it all already built by
+  # this box's own daemon and the check takes seconds instead of
+  # rebuilding after the merge. Each records what it built under its own
+  # name; systems_agree holds the two builders of a system to one store
+  # path. A pull request's run builds none of them: main's full run does,
+  # before `dd release publish` will sign the commit (a pull request whose
+  # change breaks a system build is caught there, before any release).
+  # Always started, its steps skipped when there is nothing to build: a
+  # whole matrix job skipped with runs-on from its matrix left ci_ok
+  # blocked forever on the forge (run 857, 2026-10-24).
   build_systems:
     needs: [files_modified, build_programs]
-    if: ${{ needs.files_modified.outputs.nix == 'true' }}
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.on }}
     strategy:
       fail-fast: false
       matrix:
         host: ${{ fromJSON(needs.files_modified.outputs.hosts) }}
-        on: ${{ fromJSON(needs.files_modified.outputs.builders) }}
+        on: ${{ fromJSON(needs.files_modified.outputs.build_on) }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
+        if: ${{ needs.files_modified.outputs.full == 'true' }}
       # kept from garbage collection, the newest of each system, until the
       # next run replaces it: a box's weekly collection otherwise takes the
       # other box's system with it, and the next run builds it all again
       # (node2 compiled node1's Wine, which no public cache has, for half
       # an hour)
       - name: build ${{ matrix.host }} on ${{ matrix.on }}
+        if: ${{ needs.files_modified.outputs.full == 'true' }}
         run: |
           mkdir -p "$HOME/ci-roots"
           nix build --print-out-paths --out-link "$HOME/ci-roots/${{ matrix.host }}" \
@@ -319,10 +352,12 @@ jobs:
       # what it was built from, kept through the box's GC (keep-inputs.sh):
       # the home controller's holds the aarch64 cross rustc
       - name: keep what it was built from
+        if: ${{ needs.files_modified.outputs.full == 'true' }}
         run: .forgejo/checks/keep-inputs.sh host-${{ matrix.host }} "$RUNNER_TEMP/toplevel"
       # the token on stdin, not curl's command line, which any process on
       # the box can read while it runs
       - name: record the path
+        if: ${{ needs.files_modified.outputs.full == 'true' }}
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -342,7 +377,7 @@ jobs:
   # building again.
   systems_agree:
     needs: [files_modified, build_systems]
-    if: ${{ needs.files_modified.outputs.nix == 'true' }}
+    if: ${{ needs.files_modified.outputs.full == 'true' }}
     runs-on: nix
     steps:
       - name: both builders agree
@@ -512,17 +547,22 @@ jobs:
   # both halves count. Only when something the drive's evaluation reads
   # changed (covers.json "installer": nix/installer, the agent's crates,
   # the shared pages, the fleet files it embeds; flake.lock runs all).
+  # Main's full run alone builds it; a pull request's run skips its steps.
+  # Always started, its steps skipped when the installer is not chosen: a
+  # whole matrix job skipped with runs-on from its matrix left ci_ok
+  # blocked forever on the forge (run 857, 2026-10-24).
   build_installer:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.installer == 'true' }}
     runs-on: ${{ matrix.on }}
     strategy:
       fail-fast: false
       matrix:
-        on: ${{ fromJSON(needs.files_modified.outputs.builders) }}
+        on: ${{ fromJSON(needs.files_modified.outputs.build_on) }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
+        if: ${{ needs.files_modified.outputs.installer == 'true' && needs.files_modified.outputs.full == 'true' }}
       - name: build the installer's drive on ${{ matrix.on }}, then again to compare
+        if: ${{ needs.files_modified.outputs.installer == 'true' && needs.files_modified.outputs.full == 'true' }}
         run: |
           # an out-link is a root: the box's GC deleted the unrooted first
           # build before the rebuild could compare against it (2026-10-23)
@@ -530,6 +570,7 @@ jobs:
           nix build --no-link --rebuild .#installers.x86_64-linux.box
           nix path-info --json-format 1 --json "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(Object.values(JSON.parse(s))[0].narHash))' | tee "$RUNNER_TEMP/nar"
       - name: record the hash
+        if: ${{ needs.files_modified.outputs.installer == 'true' && needs.files_modified.outputs.full == 'true' }}
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -541,7 +582,7 @@ jobs:
 
   installer_agrees:
     needs: [files_modified, build_installer]
-    if: ${{ needs.files_modified.outputs.installer == 'true' }}
+    if: ${{ needs.files_modified.outputs.installer == 'true' && needs.files_modified.outputs.full == 'true' }}
     runs-on: nix
     steps:
       - name: every builder made the same bytes

@@ -5,8 +5,8 @@
 # cancels the rest, so the run looks red though nothing in it failed.
 #
 # A run is retried when every job that failed was killed mid-step, no newer
-# run exists for its pull request (a newer push supersedes it), and it has
-# not been retried here before. Runs every few minutes (a timer), as the
+# run exists for its pull request (a newer push supersedes it), or for
+# main (its full run), and it has not been retried here before. Runs every few minutes (a timer), as the
 # admin through forgejo's socket, like ci-cancel.py: rerunning a run is a
 # web route the api does not have.
 # Environment: FORGE (the unix socket), ADMIN, REPO (owner/name), STATE (a
@@ -54,6 +54,14 @@ def ask(method, path):
         return r.status, r.read()
     finally:
         c.close()
+
+
+def mine(run):
+    """a pull request's run, or main's full run; never a push to another
+    branch (a member's own CI, say), which is not this one's to rerun"""
+    return run.get("event") == "pull_request" or (
+        run.get("event") == "push" and run.get("prettyref") == "main"
+    )
 
 
 def killed_not_failed(run):
@@ -110,14 +118,10 @@ def main():
     newest = {}  # the latest run per pull request
     for r in runs:
         ref = r.get("prettyref")
-        if (
-            r.get("event") == "pull_request"
-            and ref
-            and r["index_in_repo"] > newest.get(ref, 0)
-        ):
+        if mine(r) and ref and r["index_in_repo"] > newest.get(ref, 0):
             newest[ref] = r["index_in_repo"]
     for r in runs:
-        if r.get("event") != "pull_request" or r.get("status") not in (
+        if not mine(r) or r.get("status") not in (
             "failure",
             "cancelled",
         ):

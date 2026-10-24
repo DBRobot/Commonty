@@ -24,9 +24,9 @@ pkgs.runCommand "ci-matches-the-flake"
     ];
   }
   ''
-    have=$(python3 ${./ci-select/ciselect.py} matches ${../../flake.nix} | tr -d ' ')
+    have=$(python3 ${./ci-select}/ciselect.py matches ${./registry.nix} | tr -d ' ')
     if [ "$have" != '${wanted}' ]; then
-      echo "the test chooser reads $have from flake.nix, the flake runs ${wanted}" >&2
+      echo "the test chooser reads $have from nix/tests/registry.nix, the flake runs ${wanted}" >&2
       exit 1
     fi
     matrix=$(yq '.jobs.vm_tests.strategy.matrix.test' ${workflow})
@@ -36,7 +36,7 @@ pkgs.runCommand "ci-matches-the-flake"
     fi
     # each browser and Worker job the chooser names exists, and runs the
     # checks it chose for that job
-    for g in $(python3 ${./ci-select/ciselect.py} groups | tr -d '[]",' ); do
+    for g in $(python3 ${./ci-select}/ciselect.py groups | tr -d '[]",' ); do
       want="\''${{ fromJSON(needs.files_modified.outputs.$g) }}"
       have=$(yq ".jobs.$g.strategy.matrix.check" ${workflow})
       if [ "$have" != "$want" ]; then
@@ -48,12 +48,22 @@ pkgs.runCommand "ci-matches-the-flake"
         exit 1
       fi
     done
-    for j in build_installer installer_agrees; do
-      if [ "$(yq ".jobs.$j.if" ${workflow})" != "\''${{ needs.files_modified.outputs.installer == 'true' }}" ]; then
-        echo "job $j must run when files_modified chose the installer, and only then" >&2
-        exit 1
-      fi
+    # a job whose runs-on comes from its matrix is never skipped whole: the
+    # forge then left ci_ok waiting forever (run 857); its steps skip instead
+    for j in build_systems build_installer; do
+      case "$(yq ".jobs.$j.if" ${workflow})" in
+        null | "\''${{ !cancelled() }}") ;;
+        *) echo "job $j has runs-on from its matrix: skip its steps, never the whole job" >&2; exit 1 ;;
+      esac
     done
+    if ! yq '.jobs.build_installer.steps[0].if' ${workflow} | grep -qF "outputs.installer == 'true'"; then
+      echo "build_installer's steps must run when files_modified chose the installer, and only then" >&2
+      exit 1
+    fi
+    if [ "$(yq '.jobs.installer_agrees.if' ${workflow})" != "\''${{ needs.files_modified.outputs.installer == 'true' && needs.files_modified.outputs.full == 'true' }}" ]; then
+      echo "installer_agrees must run in the full run when the installer was chosen, and only then" >&2
+      exit 1
+    fi
     jobs=$(yq -o=json -I=0 '[.jobs | keys | .[] | select(. != "ci_ok")] | sort' ${workflow})
     gate=$(yq -o=json -I=0 '.jobs.ci_ok.needs | sort' ${workflow})
     if [ "$jobs" != "$gate" ]; then

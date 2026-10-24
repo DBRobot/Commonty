@@ -27,8 +27,14 @@ import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import interfaces  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 COVERS = "nix/tests/ci-select/covers.json"
+# every test by name (vm, files, eval): a change that only adds or removes
+# names there is a new test, never a change to CI (registered)
+REGISTRY = "nix/tests/registry.nix"
 SYSTEM = "x86_64-linux"
 
 # The checks run by a browser or wrangler against fakes, not VMs, by the
@@ -61,7 +67,10 @@ TARGETS = {
 # Under everything: a change here can move any check, so all of them run.
 FOUNDATION = re.compile(
     r"^(flake\.(nix|lock)|nix/lib/|\.forgejo/|Cargo\.(toml|lock|nix)"
-    r"|crate-hashes\.json|client/(identity|auth)/|nix/tests/ci-select/[^/]*\.py$)"
+    r"|crate-hashes\.json|client/(identity|auth)/|nix/tests/registry\.nix$"
+    # the chooser and its face readers; covers.json and minutes.json are
+    # its data, read check by check
+    r"|nix/tests/ci-select/(?!covers\.json$|minutes\.json$|[^/]*\.md$))"
 )
 # Read by no build: the docs (the gate serves them as they are, and no test
 # opens one), the notes at the top, the agents' skills, the GitHub workflow
@@ -80,6 +89,20 @@ RUST = re.compile(
 APP = re.compile(
     r"^(app/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|nix/app-release/|\.forgejo/)"
 )
+# A program's own source: nix copies it into a build and never reads it,
+# so a change made of these alone cannot break the flake's evaluation, and
+# flake_check and inputs_kept have nothing to say about it.
+SOURCE_ONLY = re.compile(r"^(servers|client|app)/.+\.(rs|go)$")
+# What each test usually takes, in minutes, from the forge's history
+# (minutes.json): the longest are handed out first, so one long test never
+# starts last and holds the run open alone. A test not there counts as long.
+MINUTES = "nix/tests/ci-select/minutes.json"
+
+
+def longest_first(tests, minutes):
+    return sorted(tests, key=lambda t: (-minutes.get(t, 99), t))
+
+
 # Directories whose files are each their own thing (a test, a box module, a
 # fleet list): a read there covers that file alone, not its neighbours.
 # Anywhere else a read or a listing covers the whole directory, so a new
@@ -93,9 +116,34 @@ def git(*args, cwd=None):
     ).stdout
 
 
-def vm_tests(flake_text):
-    m = re.search(r"\n\s*vmTests = \[(.*?)\];", flake_text, re.S)
+def vm_tests(registry_text):
+    # (flake.nix held the list as vmTests before the registry: history reads it)
+    m = re.search(r"\n\s*(?:vm|vmTests) = \[(.*?)\];", registry_text, re.S)
     return re.findall(r'"([^"]+)"', m.group(1)) if m else None
+
+
+def registry_lists(text):
+    """{list: [names]} of the registry, and the text with its names and
+    comments taken out: what is left is the registry's own shape"""
+    lists = {
+        m.group(1): re.findall(r'"([^"]+)"', m.group(2))
+        for m in re.finditer(r"\n\s*(\w+) = \[(.*?)\];", text, re.S)
+    }
+    shape = "\n".join(
+        line
+        for line in text.split("\n")
+        if not re.fullmatch(r'\s*("[^"]+"|#.*)?\s*', line)
+    )
+    return lists, shape
+
+
+def registered(base_text, head_text):
+    """the names a change to the registry adds, when adding and removing
+    names (and their comments) is all it does; None when it does more"""
+    (b, bshape), (h, hshape) = registry_lists(base_text), registry_lists(head_text)
+    if bshape != hshape or set(b) != set(h):
+        return None
+    return sorted({n for k in h for n in h[k]} - {n for k in b for n in b[k]})
 
 
 def traced_names(flake_text):
@@ -311,19 +359,33 @@ APP_ROOTS = ["app", "client/hubwriter"]
 
 
 def select(
-    changes, covers_head, covers_base, flake_text, docs_named, exists, app_dirs=()
+    changes,
+    covers_head,
+    covers_base,
+    flake_text,
+    docs_named,
+    exists,
+    app_dirs=(),
+    faces=None,
+    minutes=None,
+    registry=None,
 ):
     """changes: [(status, path)], status A/M/D (renames as a D and an A).
-    exists(rev, dir) -> bool, rev "base" or "head". Returns a dict."""
+    exists(rev, dir) -> bool, rev "base" or "head". faces: {component:
+    [differences]} for the components whose insides changed
+    (interfaces.stable); one with none kept its face. registry: the
+    registry's text at (base, head). Returns a dict."""
     vms = vm_tests(flake_text) or []
     traced = vms + BROWSER + list(TARGETS)
     why = {}
-    out = {"docs_only": False, "all": False}
+    out = {"docs_only": False, "all": False, "kept": [], "faces": faces or {}}
     code = [(s, p) for s, p in changes if not (DOCS.match(p) and p not in docs_named)]
     if changes and not code:
         out.update(
             docs_only=True,
             nix=False,
+            eval=False,
+            programs=False,
             rust=False,
             app=False,
             chosen=[],
@@ -334,6 +396,21 @@ def select(
             **{g: [] for g in GROUPS},
         )
         return out
+    # names added to the registry are new tests, which run as any check
+    # not traced yet does; the registry itself reaches nothing
+    added = None
+    if registry and any(p == REGISTRY for _, p in code):
+        added = registered(*registry)
+        if added is not None:
+            code = [c for c in code if c[1] != REGISTRY]
+            out["registered"] = added
+    # a component whose face held: its insides reach its own tests and its
+    # contract checks, and nothing that only reads it
+    kept = sorted(n for n, d in (faces or {}).items() if not d)
+    inside = [(s, p) for s, p in code if interfaces.inside_of(p) in kept]
+    whole = code
+    code = [c for c in code if c not in inside]
+    out["kept"] = kept
     allr = None
     for s, p in code:
         if FOUNDATION.match(p):
@@ -341,7 +418,7 @@ def select(
             break
     c = covers_head
     if allr is None and not vms:
-        allr = "flake.nix: no vmTests list to read"
+        allr = f"{REGISTRY}: no vm list to read"
     unknown = []
     chosen = set()
     if allr is None:
@@ -387,16 +464,33 @@ def select(
     if allr is not None:
         chosen = set(traced)
         why = {t: allr for t in traced}
-    paths = [p for _, p in code]
+    else:
+        for n in kept:
+            for t in interfaces.COMPONENTS[n]["checks"]:
+                if t in traced:
+                    chosen.add(t)
+                    why.setdefault(t, f"{n}'s own check (its face held)")
+    paths = [p for _, p in whole]
     nix = (
         any(NIX.match(p) or p in docs_named for p in paths)
         or bool(chosen)
         or allr is not None
     )
+    vm = [t for t in vms if t in chosen]
     out.update(
         all=allr is not None,
         nix=nix,
-        rust=allr is not None or any(RUST.match(p) for p in paths),
+        # the flake evaluated again, and its evaluation-only checks: not for
+        # a change to programs' source alone
+        eval=allr is not None
+        or bool(added)
+        or any(
+            not SOURCE_ONLY.match(p) and (NIX.match(p) or p in docs_named)
+            for p in paths
+        ),
+        rust=allr is not None
+        or any(RUST.match(p) for _, p in code)
+        or any("rust" in interfaces.COMPONENTS[n]["jobs"] for n in kept),
         app=allr is not None
         or any(
             APP.match(p) or any(p.startswith(d + "/") for d in app_dirs) for p in paths
@@ -405,7 +499,10 @@ def select(
         why=why,
         reason=allr,
     )
-    out["vm_tests"] = [t for t in vms if t in chosen]
+    # the programs the VM tests carry, built once for them (build_programs);
+    # every box's system is main's full run's, not a pull request's
+    out["programs"] = bool(vm)
+    out["vm_tests"] = longest_first(vm, minutes or {})
     for g, ts in GROUPS.items():
         out[g] = [t for t in ts if t in chosen]
     out["installer"] = "installer" in chosen
@@ -459,8 +556,9 @@ def select_revs(base, head, cwd=None):
             if f.endswith((".nix", ".rs")):
                 yield f, show(head, f, cwd)
 
-    flake = show(head, "flake.nix", cwd)
+    flake = show(head, REGISTRY, cwd)
     checks = traced_names(flake)
+    minutes = json.loads(show(head, MINUTES, cwd) or "{}")
     return select(
         changes,
         covers_at(head, checks, cwd),
@@ -469,6 +567,9 @@ def select_revs(base, head, cwd=None):
         named_docs(read),
         lambda which, d: dir_exists(base if which == "base" else head, d, cwd),
         crate_closure(APP_ROOTS, lambda f: show(head, f, cwd)),
+        interfaces.stable(changes, base, head, cwd),
+        minutes,
+        (show(base, REGISTRY, cwd), flake),
     )
 
 
@@ -477,12 +578,17 @@ def cmd_select(args):
         # a draft or a commit already passed: nothing; not a pull request:
         # everything, untraced
         on = args[0] == "--everything"
-        vms = vm_tests(open("flake.nix").read()) or []
+        minutes = json.load(open(MINUTES)) if os.path.exists(MINUTES) else {}
+        vms = longest_first(vm_tests(open(REGISTRY).read()) or [], minutes)
         r = {
             "docs_only": False,
             "all": on,
             "reason": "not a pull request" if on else None,
             "nix": on,
+            "eval": on,
+            "programs": on,
+            "kept": [],
+            "faces": {},
             "rust": on,
             "app": on,
             "chosen": [],
@@ -493,6 +599,10 @@ def cmd_select(args):
         }
     else:
         r = select_revs(args[0], args[1])
+    for n, d in r.get("faces", {}).items():
+        print(
+            f"{n}: {'face held: its own tests and contract checks' if not d else '; '.join(d)}"
+        )
     if r["docs_only"]:
         print("docs only: style and lint, nothing else")
     elif r["all"]:
@@ -500,14 +610,15 @@ def cmd_select(args):
     for t in r.get("chosen", []):
         print(f"  {t}: {r['why'][t]}")
     print(
-        f"nix: {r['nix']}  rust: {r['rust']}  app: {r['app']}  installer: {r['installer']}  "
+        f"nix: {r['nix']}  eval: {r['eval']}  programs: {r['programs']}  "
+        f"rust: {r['rust']}  app: {r['app']}  installer: {r['installer']}  "
         f"vm tests: {len(r.get('vm_tests', []))}  "
         + "  ".join(f"{g}: {len(r.get(g, []))}" for g in GROUPS)
     )
     gh = os.environ.get("GITHUB_OUTPUT")
     if gh:
         with open(gh, "a") as f:
-            for k in ("nix", "rust", "app", "installer"):
+            for k in ("nix", "eval", "programs", "rust", "app", "installer"):
                 f.write(f"{k}={'true' if r[k] else 'false'}\n")
             vm = r.get("vm_tests", [])
             f.write(f"vm={'true' if vm else 'false'}\n")
@@ -648,7 +759,7 @@ def cmd_trace(args):
         elif a == "--out":
             out = args.pop(0)
     sha = git("rev-parse", rev).strip()
-    checks = only or traced_names(show(sha, "flake.nix"))
+    checks = only or traced_names(show(sha, REGISTRY))
     c = load_covers(open(out).read() if only and os.path.exists(out) else "")
     if only:
         for m in ("dirs", "files", "listed"):
