@@ -6,6 +6,7 @@
 package validator
 
 import (
+	"cmp"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -14,6 +15,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -100,12 +103,19 @@ type Validator struct {
 	turn    int
 	voted   chan struct{}
 	clients chan frame
-	limit   limiter
-	boxIDs  map[uint64]bool
-	asks    chan uint64
-	done    chan struct{}
-	stop    sync.Once
-	running atomic.Bool
+	// decided requests other validators passed on, for the next block
+	// this one proposes (replays below)
+	replayMu sync.Mutex
+	replay   map[bft.RequestInfo][]byte
+	// tests only: as release 359's validator, which takes in decided
+	// requests and keeps them in its pool after it catches up
+	keepDecided bool
+	limit       limiter
+	boxIDs      map[uint64]bool
+	asks        chan uint64
+	done        chan struct{}
+	stop        sync.Once
+	running     atomic.Bool
 	// each validator's newest stand (stand.go), under its own lock: the
 	// relay's reader takes it, and never waits on a decision being applied
 	standsMu sync.Mutex
@@ -247,8 +257,16 @@ func (v *Validator) Receive(from uint64, kind byte, payload []byte) {
 		if from != v.o.ID && !v.limit.allow(from, v.sender(from), v.o.Now()) {
 			return
 		}
-		signed, fresh := v.check(payload)
-		if !signed {
+		// a decided request never applies: it is dropped, and one a
+		// validator passed on goes in this one's next block (replayLater)
+		done, signed, fresh := v.check(payload)
+		if v.keepDecided && done {
+			done, signed = false, v.signed(payload)
+		}
+		if done && kind == wire.Forward {
+			v.replayLater(payload)
+		}
+		if done || !signed {
 			return
 		}
 		// it counts as waiting only if it is newer than what was agreed of
@@ -304,24 +322,107 @@ func (v *Validator) sender(from uint64) sender {
 	return unknown
 }
 
-// check: whether a request is signed as VerifyRequest wants (a join by
-// the key it brings), and whether it is fresh: signed by a box of the
-// fleet, not a join, and above that box's last agreed sequence
-func (v *Validator) check(raw []byte) (signed, fresh bool) {
+// check: whether a request is decided (decided below), which is asked
+// first as it costs no signature check; whether it is signed as
+// VerifyRequest wants (a join by the key it brings); and whether it is
+// fresh: signed by a box of the fleet, not a join, and not decided
+func (v *Validator) check(raw []byte) (done, signed, fresh bool) {
 	var q state.Request
 	if json.Unmarshal(raw, &q) != nil {
-		return false, false
-	}
-	if _, err := v.VerifyRequest(raw); err != nil {
-		return false, false
-	}
-	if q.Kind == "join" {
-		return true, false
+		return false, false, false
 	}
 	v.mu.Lock()
-	defer v.mu.Unlock()
-	b := v.st.Boxes[q.Box]
-	return true, b == nil || q.Seq > b.Seq
+	done = decided(v.st.Boxes[q.Box], q)
+	v.mu.Unlock()
+	if done {
+		return true, false, false
+	}
+	if _, err := v.VerifyRequest(raw); err != nil {
+		return false, false, false
+	}
+	return false, true, q.Kind != "join"
+}
+
+// signed: VerifyRequest passes it
+func (v *Validator) signed(raw []byte) bool {
+	_, err := v.VerifyRequest(raw)
+	return err == nil
+}
+
+// decided: no block can apply q any more, as its box's agreed sequence
+// has reached it (state.ErrStale). A join is never taken for decided: it
+// is checked otherwise
+func decided(b *state.BoxState, q state.Request) bool {
+	return q.Kind != "join" && b != nil && q.Seq <= b.Seq
+}
+
+// how many decided requests one block carries again, at most
+const maxReplays = 64
+
+// replayLater keeps a decided request another validator passed on, for
+// the next block this one proposes. It was waiting in that validator's
+// pool: one of 359 never prunes (below), and every leader drops it as
+// already processed, so it would complain about each leader until it led
+// itself. In a block it changes nothing (state.ErrStale), and once decided
+// it leaves that validator's pool
+func (v *Validator) replayLater(raw []byte) {
+	info, err := v.VerifyRequest(raw)
+	if err != nil {
+		return
+	}
+	v.replayMu.Lock()
+	defer v.replayMu.Unlock()
+	if v.replay == nil {
+		v.replay = map[bft.RequestInfo][]byte{}
+	}
+	if len(v.replay) < maxReplays {
+		v.replay[info] = raw
+	}
+}
+
+// replays: reqs and the decided requests kept since the last proposal
+func (v *Validator) replays(reqs [][]byte) [][]byte {
+	v.replayMu.Lock()
+	kept := v.replay
+	v.replay = nil
+	v.replayMu.Unlock()
+	if len(kept) == 0 {
+		return reqs
+	}
+	for _, r := range reqs {
+		delete(kept, v.RequestID(r))
+	}
+	ids := slices.SortedFunc(maps.Keys(kept), func(a, b bft.RequestInfo) int {
+		return cmp.Or(cmp.Compare(a.ClientID, b.ClientID), cmp.Compare(a.ID, b.ID))
+	})
+	out := append([][]byte(nil), reqs...)
+	for _, id := range ids {
+		out = append(out, kept[id])
+	}
+	return out
+}
+
+// prune drops every decided request from the pool. After catching up
+// from a peer's state (Sync) nothing else does: the blocks that decided
+// them were never delivered here, a leader drops them as already
+// processed, and each one would end in a complaint about the leader, which
+// with three validators changes the view for all (docs/dev/control-plane.md,
+// "A pool holds only what is still to be decided")
+func (v *Validator) prune() {
+	if v.c.Pool == nil || v.keepDecided {
+		return
+	}
+	v.mu.Lock()
+	boxes := make(map[string]*state.BoxState, len(v.st.Boxes))
+	maps.Copy(boxes, v.st.Boxes)
+	v.mu.Unlock()
+	v.c.Pool.Prune(func(raw []byte) error {
+		var q state.Request
+		if json.Unmarshal(raw, &q) == nil && decided(boxes[q.Box], q) {
+			return state.ErrStale
+		}
+		return nil
+	})
 }
 
 // queue: full, the oldest frame goes, and that is said once in a while
@@ -571,6 +672,7 @@ func (v *Validator) RequestID(req []byte) bft.RequestInfo {
 
 // Assembler: the proposer stamps the agreed clock and the state it builds on
 func (v *Validator) AssembleProposal(md []byte, reqs [][]byte) bft.Proposal {
+	reqs = v.replays(reqs)
 	v.mu.Lock()
 	st := v.st
 	t := v.o.Now().UnixMilli()
@@ -710,6 +812,9 @@ func (v *Validator) Deliver(p bft.Proposal, sigs []bft.Signature) bft.Reconfig {
 // that holds together - a quorum signed the decision, and the state it came
 // with is the one the decision names. Nobody is taken at their word.
 func (v *Validator) Sync() bft.SyncResponse {
+	v.mu.Lock()
+	from := v.st.Height
+	v.mu.Unlock()
 	for len(v.syncs) > 0 {
 		<-v.syncs
 	}
@@ -732,7 +837,10 @@ func (v *Validator) Sync() bft.SyncResponse {
 		}
 	}
 	v.mu.Lock()
-	s := v.saved
+	s, moved := v.saved, v.st.Height > from
 	v.mu.Unlock()
+	if moved {
+		v.prune()
+	}
 	return bft.SyncResponse{Latest: bft.Decision{Proposal: s.Proposal, Signatures: s.Sigs}}
 }
