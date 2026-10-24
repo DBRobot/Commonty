@@ -1,7 +1,7 @@
 {
   "rules": {
     "goneAfterMs": 90000,
-    "leaseTtlMs": 15000,
+    "leaseTtlMs": 45000,
     "leases": {}
   },
   "validators": [

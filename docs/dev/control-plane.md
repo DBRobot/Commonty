@@ -105,7 +105,7 @@ copies the boxes pull from each other. No box talks to another for it.
 | | Value | Why |
 |---|---|---|
 | batch interval | 2 s | agreement within seconds, and fits the free tier |
-| lease TTL | 15 s, renewed every 4 s | failover in about 15–20 s |
+| lease TTL | 45 s, renewed every 4 s | failover in about 45–50 s; a pause in deciding under 45 s (the witness switching at a publish took 13 s) drops no lease |
 | ordinary heartbeat | 30 s | liveness for placement; cheap |
 | a box counts as gone | 3 heartbeats missed (90 s) | stateless roles move |
 | SmartBFT leader heartbeat / view change | 2 s / 4 s | Fabric's defaults (1 min / 20 s) are far too slow |
@@ -118,7 +118,7 @@ about $5.50/month.
 ## When things fail
 
 - **The relay is down.** Nothing new is agreed. Running roles keep running.
-  Leases can't renew, so writers stop writing when theirs expire (15 s).
+  Leases can't renew, so writers stop writing when theirs expire (45 s).
   Nothing unsafe happens. A second relay can be added later; frames are
   deduplicated by hash.
 - **A validator is down or lying.** With n ≥ 4, one is tolerated. A lying
@@ -499,7 +499,7 @@ release gives to the boxes able to run it:
 - It renews every 5 seconds (the lease lasts 15). The agreed state keeps
   which of the holder's requests last set the lease. A request can't be
   agreed before it was sent, so the lease can't end sooner than that
-  request's send time plus 15 seconds. That send time, less 3 seconds, is
+  request's send time plus the TTL (45 s). That send time, less 3 seconds, is
   *until*, kept by the box's clock since boot (suspend included), not its
   wall clock. The flag holds the epoch and *until*.
 - It stops at *until* unless a renewal is seen agreed, fresh state or
