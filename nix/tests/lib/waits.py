@@ -66,6 +66,24 @@ def journal_of(machine, unit, invocation):
     )
 
 
+def journal_cursor(machine):
+    """Where the journal is now, for journal_since."""
+    return machine.succeed(
+        "journalctl --sync && journalctl -n 0 --show-cursor | sed -n 's/^-- cursor: //p'"
+    ).strip()
+
+
+def journal_since(machine, unit, cursor):
+    """Every run's lines of a unit since journal_cursor, for a thing that
+    whichever run comes first does: a timer's run can take it before the
+    test's own (runner-restart's sandbox drain did, behind a 50 s switch,
+    2026-10-24), and the test's run then rightly says something else."""
+    return machine.succeed(
+        "journalctl --sync && "
+        f"journalctl --no-pager -o cat -u {shlex.quote(unit)} --after-cursor={shlex.quote(cursor)}"
+    )
+
+
 def journal_has(machine, unit, invocation, text):
     """Whether one run of a unit wrote `text` (a plain string, not a pattern)."""
     return text in journal_of(machine, unit, invocation)

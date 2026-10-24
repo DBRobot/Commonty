@@ -2,7 +2,13 @@ import base64
 import json
 import shlex
 
-from waits import start_fresh, wait_unit_active, journal_of
+from waits import (
+    journal_cursor,
+    journal_of,
+    journal_since,
+    start_fresh,
+    wait_unit_active,
+)
 
 runner = nix["runner"]
 members = nix["members"]
@@ -268,12 +274,15 @@ docker_before = show("InvocationID", "docker.service")
 members_before = show("InvocationID", members)
 push("member-sandbox", member_job)
 box.wait_until_succeeds(f"{in_job} test -e /tmp/started", timeout=300)
+# the timer's pass may come first: a loaded runner's switch took 50 s and
+# its pass drained, so the test's own pass found nothing left to drain
+since = journal_cursor(box)
 box.succeed(f"{base}/specialisation/sandbox/bin/switch-to-configuration test >&2")
 assert show("InvocationID", "docker.service") == docker_before, (
     "the switch restarted docker"
 )
-inv = start_fresh(box, "dd-runner-restart.service")
-said = journal_of(box, "dd-runner-restart.service", inv)
+start_fresh(box, "dd-runner-restart.service")
+said = journal_since(box, "dd-runner-restart.service", since)
 assert "docker.service: its sandbox changed or is not known; draining" in said, said
 wait_run(5, "failure", "cancelled")
 restarted("docker.service", docker_before, timeout=240)
@@ -287,9 +296,10 @@ docker_before = show("InvocationID", "docker.service")
 members_before = show("InvocationID", members)
 push("member-unknown", member_job)
 box.wait_until_succeeds(f"{in_job} test -e /tmp/started", timeout=300)
+since = journal_cursor(box)
 box.succeed("rm /run/dd-runner-restart/docker.service.sandbox")
-inv = start_fresh(box, "dd-runner-restart.service")
-said = journal_of(box, "dd-runner-restart.service", inv)
+start_fresh(box, "dd-runner-restart.service")
+said = journal_since(box, "dd-runner-restart.service", since)
 assert "docker.service: its sandbox changed or is not known; draining" in said, said
 wait_run(6, "failure", "cancelled")
 restarted("docker.service", docker_before, timeout=240)
