@@ -31,9 +31,13 @@ until the other is back.
   the buckets it copies. It is sealed to that box's secrets key (its TPM)
   and served at `https://store.<box>.<domain>/_keys/<other>.age`: public,
   and only the box it is for can open it.
-- **Copies**: every 5 minutes, `dd-store-copy` copies each bucket from the
-  box that writes it (where its service runs) to the other boxes that keep
-  it. Which boxes keep it is the control plane's: the plan
+- **Copies**: every 30 minutes, `dd-store-copy` copies each bucket from
+  the box that writes it (where its service runs) to the other boxes that
+  keep it; every 30 seconds, `dd-store-copy-recent` copies what was written
+  in the last 15 minutes. That age is the store's own, from the bucket's
+  listing (`--use-server-modtime`): rclone's own is a header on each
+  object, and reading it was a request for every object on both sides on
+  every run. Which boxes keep it is the control plane's: the plan
   (`place.Decide`'s copies) keeps a bucket where it is written, then where
   it is already, then on the boxes whose stores have the most room, and
   only where it fits. Until a plan has been seen, the first boxes by name.

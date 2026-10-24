@@ -197,7 +197,11 @@ let
         exec 9>/run/dd-store/copy-recent.lock
         [ "$(left)" -gt 0 ] && flock -w "$(left)" 9 || { echo "$SVC: no final copy, a recent one ran past its time"; exit 1; }
       fi
-      if [ "$MODE" = all ]; then recent=""; else recent="--max-age 15m"; fi
+      # An age filter reads each object's age, and rclone's own is a header
+      # on the object: a HEAD for every object on both sides, every run.
+      # node2's every 30 s was 15000 requests at node1 to copy nothing
+      # (2026-10-24). The store's own time, from the listing, asks none.
+      if [ "$MODE" = all ]; then recent=""; else recent="--max-age 15m --use-server-modtime"; fi
       # the plan's copies: kept, so a restart copies on as last agreed
       if [ -s ${plan} ] && jq -e 'type == "object"' ${plan} >/dev/null 2>&1; then
         # a name of this mode's own: the other mode's run, side by side, moved a
@@ -295,7 +299,7 @@ let
             # store that takes copies and keeps none is found out
             if [ "$MODE" = all ] && [ -s $mine/$p.$b.ok ]; then
               age=$(( $(date +%s) - $(cat $mine/$p.$b.ok) ))
-              obj=$(rclone lsf -R --files-only --min-age "''${age}s" "here:$b" 2>/dev/null | shuf -n1 || true)
+              obj=$(rclone lsf -R --files-only --fast-list --use-server-modtime --min-age "''${age}s" "here:$b" 2>/dev/null | shuf -n1 || true)
               if [ -n "$obj" ] && want=$(rclone cat "here:$b/$obj" | sha256sum); then
                 if got=$(rclone cat "there:$b/$obj" 2>/dev/null | sha256sum) && [ "$got" = "$want" ]; then
                   rm -f $mine/lost/$p.$b

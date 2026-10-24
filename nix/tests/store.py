@@ -151,6 +151,21 @@ a.succeed(
 copied("photos", "p3", "no room for it there")
 a.succeed("! grep -q dd_store_lost /var/lib/dd-facts/store-copy.prom")
 
+# a recent copy takes each object's age from b's listing, and asks b about
+# no object one at a time: node2's asked node1 15000 times a run (2026-10-24)
+b.succeed("test -s /var/log/nginx/access.log")
+
+
+def heads():
+    return int(
+        b.succeed("grep -c '\"HEAD /photos/' /var/log/nginx/access.log || true").strip()
+    )
+
+
+asked = heads()
+start_fresh(a, "dd-store-copy-recent.service")
+assert heads() == asked, f"a recent copy sent b {heads() - asked} HEADs"
+
 # a bucket a box writes alone: a's copy goes to b, and what b holds of it
 # never comes back, so what a deletes stays deleted
 put(a, "ours", "o1", "written by a alone")
