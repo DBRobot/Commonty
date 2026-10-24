@@ -184,6 +184,13 @@ fn publish(
         "local {ref} ({}) is not what the forge has - push it first",
         &rev[..12]
     );
+    // a pull request's run checks what its change can reach; the commit
+    // released has passed everything, in main's full run on that very commit
+    match full_run(url, &rev, keys)? {
+        FullRun::Passed => eprintln!("== {} passed CI's full run", &rev[..12]),
+        other if dry_run => eprintln!("== dry run: {}", other.why(&rev)),
+        other => bail!("{}. Nothing is signed.", other.why(&rev)),
+    }
 
     // the member list at the commit released, every root on it under the
     // name it was confirmed as: a client anchors no root without one
@@ -1802,6 +1809,78 @@ fn recorded_builds(
     Ok(None)
 }
 
+/// What main's full run (the push to main runs everything,
+/// .forgejo/workflows/entry_point.yml) said of one commit.
+#[derive(Debug, PartialEq)]
+enum FullRun {
+    Passed,
+    Failed,
+    Running,
+    Missing,
+    Unreadable,
+}
+
+impl FullRun {
+    fn why(&self, rev: &str) -> String {
+        let c = &rev[..12];
+        match self {
+            FullRun::Passed => format!("{c} passed CI's full run"),
+            FullRun::Failed => format!("CI's full run failed on {c}"),
+            FullRun::Running => format!("CI's full run on {c} has not finished; wait for it"),
+            FullRun::Missing => format!(
+                "CI has no full run on {c}: a push to main starts one, and a newer push cancels it"
+            ),
+            FullRun::Unreadable => format!("the forge's statuses for {c} could not be read"),
+        }
+    }
+}
+
+/// The full run is read from the forge's own record of its runs, never
+/// from a commit status: any CI job's token, a pull request's too, can post
+/// a status of any name on any commit. A run is the forge's: made by a
+/// push to main, of this workflow, on this very commit, and passed.
+const WORKFLOW: &str = "entry_point.yml";
+
+fn full_run_of(runs: &[serde_json::Value], rev: &str) -> FullRun {
+    let ours = runs.iter().filter(|r| {
+        r["event"].as_str() == Some("push")
+            && r["workflow_id"].as_str() == Some(WORKFLOW)
+            && r["commit_sha"].as_str() == Some(rev)
+            && r["event_payload"]
+                .as_str()
+                .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+                .is_some_and(|p| p["ref"].as_str() == Some("refs/heads/main"))
+    });
+    // the newest run decides: a run again after a kill replaces the last
+    match ours
+        .max_by_key(|r| r["id"].as_i64().unwrap_or(0))
+        .and_then(|r| r["status"].as_str())
+    {
+        Some("success") => FullRun::Passed,
+        Some("waiting" | "running" | "blocked" | "queued") => FullRun::Running,
+        Some(_) => FullRun::Failed,
+        None => FullRun::Missing,
+    }
+}
+
+fn full_run(url: &str, rev: &str, keys: &auth::Store) -> Result<FullRun> {
+    let (Some(api), Some(token)) = (forge_api(url), forge_token(keys)?) else {
+        return Ok(FullRun::Unreadable);
+    };
+    let Some(body) = forge_get(
+        &format!("{api}/actions/runs?event=push&head_sha={rev}&limit=50"),
+        &token,
+    )?
+    else {
+        return Ok(FullRun::Unreadable);
+    };
+    let got: serde_json::Value = serde_json::from_slice(&body)?;
+    let Some(runs) = got["workflow_runs"].as_array() else {
+        return Ok(FullRun::Unreadable);
+    };
+    Ok(full_run_of(runs, rev))
+}
+
 /// https://forge/owner/repo/raw/... -> https://forge/api/v1/repos/owner/repo
 fn forge_api(url: &str) -> Option<String> {
     let (repo_url, _) = url.split_once("/raw/")?;
@@ -2860,6 +2939,61 @@ mod tests {
         assert_eq!((id.as_str(), secret.as_str()), ("GK123", "abc"));
         assert!(store_key("AWS_ACCESS_KEY_ID=GK123\n").is_err());
         assert!(store_key("AWS_ACCESS_KEY_ID=\nAWS_SECRET_ACCESS_KEY=abc\n").is_err());
+    }
+
+    #[test]
+    fn publish_wants_the_forges_own_full_run_on_the_commit() {
+        let rev = "83d19dfdf22126ebc819359fe7c67254fa10d0d4";
+        let run = |id: i64, event: &str, wf: &str, sha: &str, r#ref: &str, status: &str| {
+            serde_json::json!({
+                "id": id, "event": event, "workflow_id": wf, "commit_sha": sha, "status": status,
+                "event_payload": serde_json::json!({ "ref": r#ref }).to_string(),
+            })
+        };
+        let main = "refs/heads/main";
+        assert_eq!(
+            full_run_of(&[run(1, "push", WORKFLOW, rev, main, "success")], rev),
+            FullRun::Passed
+        );
+        // a forged status with the right name on the release commit is no
+        // run: statuses are never read, and one in the list counts for nothing
+        let forged = serde_json::json!({
+            "id": 9, "context": "entry_point / ci_ok (push)", "status": "success",
+            "commit_sha": rev,
+        });
+        assert_eq!(full_run_of(&[forged], rev), FullRun::Missing);
+        // a pull request's run, another branch's push, another workflow,
+        // another commit: none is main's full run
+        for r in [
+            run(2, "pull_request", WORKFLOW, rev, main, "success"),
+            run(3, "push", WORKFLOW, rev, "refs/heads/doorway", "success"),
+            run(4, "push", "nix_checks.yml", rev, main, "success"),
+            run(
+                5,
+                "push",
+                WORKFLOW,
+                "0000000000000000000000000000000000000000",
+                main,
+                "success",
+            ),
+        ] {
+            assert_eq!(full_run_of(&[r], rev), FullRun::Missing);
+        }
+        // the newest run on the commit decides
+        assert_eq!(
+            full_run_of(
+                &[
+                    run(7, "push", WORKFLOW, rev, main, "failure"),
+                    run(6, "push", WORKFLOW, rev, main, "success")
+                ],
+                rev
+            ),
+            FullRun::Failed
+        );
+        assert_eq!(
+            full_run_of(&[run(8, "push", WORKFLOW, rev, main, "running")], rev),
+            FullRun::Running
+        );
     }
 
     #[test]

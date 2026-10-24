@@ -18,11 +18,12 @@ pkgs.runCommand "control-e2e"
   }
   ''
     export HOME=$TMPDIR WRANGLER_SEND_METRICS=false CI=1 CLOUDFLARE_CF_FETCH_ENABLED=false
-    # the state machine's and the validators' own tests first: the build of
-    # dd-control compiles only its command
+    # every package's own tests first (the state machine, the validators,
+    # placement, the wire): this is the control plane's own check, the one
+    # a change to its insides runs (nix/tests/ci-select/interfaces.py)
     cp -r ${../../servers/system/control} src && chmod -R u+w src
     cp -r ${self.packages.${sys}.dd-control.goModules} src/vendor
-    (cd src && GOFLAGS=-mod=vendor GOCACHE=$TMPDIR/go-cache CGO_ENABLED=0 go test ./state/ ./validator/ ./cmd/dd-control/)
+    (cd src && GOFLAGS=-mod=vendor GOCACHE=$TMPDIR/go-cache CGO_ENABLED=0 go test ./...)
     mkdir w && cp ${self.packages.${sys}.control-worker}/{worker.js,wasm_exec.js,witness.wasm} w/
     # the test fleet's placement inputs, for the witness as for the boxes
     echo "export default $(cat ${./control/placement.json});" > w/placement.js

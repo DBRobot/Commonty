@@ -13,7 +13,7 @@ import ciselect as cs  # noqa: E402
 
 def run(root):
     covers = cs.load_covers(open(os.path.join(root, cs.COVERS)).read())
-    flake = open(os.path.join(root, "flake.nix")).read()
+    flake = open(os.path.join(root, cs.REGISTRY)).read()
     every = set(cs.traced_names(flake))
     # a check covers.json has not traced yet runs on every change until it
     # is; the cases judge the traced ones, and that it ran
@@ -42,7 +42,9 @@ def run(root):
             lambda d: os.path.isdir(os.path.join(root, d)),
         )
 
-    def choose(changes, new_dirs=(), gone_dirs=(), base_covers=None):
+    def choose(
+        changes, new_dirs=(), gone_dirs=(), base_covers=None, faces=None, reg=None
+    ):
         def exists(which, d):
             if which == "base" and d in new_dirs:
                 return False
@@ -54,12 +56,15 @@ def run(root):
             changes,
             stat(covers),
             stat(base_covers or covers),
-            flake,
+            reg[1] if reg else flake,
             docs_named,
             exists,
             cs.crate_closure(
                 cs.APP_ROOTS, lambda f: open(os.path.join(root, f)).read()
             ),
+            faces,
+            None,
+            reg,
         )
 
     def lacking(t):
@@ -80,7 +85,122 @@ def run(root):
             if d.startswith("servers/web-shared")
         )
     }
+    # the checks that read the gate's code: what a change to its face reaches
+    gate_readers = {
+        t
+        for d, ts in stat(covers)["dirs"].items()
+        if d == "servers/gate/src" or d.startswith("servers/gate/src/")
+        for t in ts
+    }
+    gate_own = set(cs.interfaces.COMPONENTS["gate"]["checks"])
+    gate_rs = [("M", "servers/gate/src/joke.rs")]
+    added = flake.replace("  vm = [\n", '  vm = [\n    # a new one\n    "newtest"\n', 1)
+    reshaped = flake.replace("  eval = [", "  later = [ ];\n  eval = [", 1)
     cases = [
+        (
+            "a test registered, with its files",
+            [
+                ("M", cs.REGISTRY),
+                ("A", "nix/tests/newtest.nix"),
+                ("A", "nix/tests/newtest.py"),
+            ],
+            lambda r: (
+                not r["all"]
+                and r.get("registered") == ["newtest"]
+                and r["vm_tests"] == ["newtest"]
+                and "console" not in r["chosen"]
+                and r["eval"]
+            ),
+            [],
+            [],
+            None,
+            None,
+            (flake, added),
+        ),
+        (
+            "the registry changed beyond its names",
+            [("M", cs.REGISTRY)],
+            lambda r: r["all"],
+            [],
+            [],
+            None,
+            None,
+            (flake, reshaped),
+        ),
+        (
+            "a gate-internal change with an unchanged interface",
+            gate_rs,
+            lambda r: (
+                set(r["chosen"]) == gate_own
+                and not r["vm_tests"]
+                and r["rust"]
+                and not r["eval"]
+                and not r["programs"]
+                and not r["all"]
+                and r["kept"] == ["gate"]
+            ),
+            [],
+            [],
+            None,
+            {"gate": []},
+        ),
+        (
+            "a gate route-schema change runs what reads the gate",
+            gate_rs,
+            lambda r: (
+                set(r["chosen"]) == gate_readers
+                and r["vm_tests"]
+                and "console" not in r["chosen"]
+                and not r["all"]
+                and r["kept"] == []
+            ),
+            [],
+            [],
+            None,
+            {"gate": ["rust-routes servers/gate/src: the face changed"]},
+        ),
+        (
+            "a control-internal change with an unchanged interface",
+            [("M", "servers/system/control/place/place.go")],
+            lambda r: (
+                r["chosen"] == ["control"]
+                and not r["vm_tests"]
+                and not r["eval"]
+                and not r["rust"]
+            ),
+            [],
+            [],
+            None,
+            {"control": []},
+        ),
+        (
+            "the gate's face held, a module beside it changed",
+            gate_rs + [("M", "nix/modules/forge/forgejo.nix")],
+            lambda r: (
+                "forge" in r["chosen"]
+                and gate_own <= set(r["chosen"])
+                and "console" not in r["chosen"]
+                and r["eval"]
+            ),
+            [],
+            [],
+            None,
+            {"gate": []},
+        ),
+        (
+            "the face readers (part of the chooser)",
+            [("M", "nix/tests/ci-select/faces/rust_routes.py")],
+            lambda r: r["all"],
+        ),
+        (
+            "the interface map (part of the chooser)",
+            [("M", "nix/tests/ci-select/interfaces.py")],
+            lambda r: r["all"],
+            [],
+            [],
+            None,
+            {},
+        ),
         (
             "a test's own file",
             [("M", "nix/tests/acme.py")],
@@ -268,8 +388,10 @@ def run(root):
         title, changes, ok = case[:3]
         new_dirs = case[3] if len(case) > 3 else []
         gone = case[4] if len(case) > 4 else []
-        base = lacking(case[5]) if len(case) > 5 else None
-        r = choose(changes, set(new_dirs), set(gone), base)
+        base = lacking(case[5]) if len(case) > 5 and case[5] else None
+        faces = case[6] if len(case) > 6 else None
+        reg = case[7] if len(case) > 7 else None
+        r = choose(changes, set(new_dirs), set(gone), base, faces, reg)
         seen = dict(
             r,
             chosen=[t for t in r["chosen"] if t not in untraced],

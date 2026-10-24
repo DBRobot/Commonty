@@ -41,52 +41,10 @@
       pkgs = nixpkgs.legacyPackages.${system};
       # every vm test, by name: nix/tests/<name>.nix + .py. Also what the ci
       # matrix runs (nix/tests/ci.nix holds the two to one list)
-      vmTests = [
-        "acme"
-        "console"
-        "directory"
-        "metrics"
-        "metrics-ui"
-        "backup"
-        "release"
-        "switch-remote"
-        "thanos"
-        "members-runner"
-        "games"
-        "computers"
-        "forge"
-        "transcode"
-        "network"
-        "library"
-        "pgrestore"
-        "pg-follow"
-        "store"
-        "takeover"
-        "forge-follow"
-        "net-follow"
-        "join-install"
-        "joined-box"
-        "joined-serves"
-        "photos"
-        "llm"
-        "vault"
-        "adblock"
-        "unlock"
-        "leaving"
-        "home-controller"
-        "waits"
-        "switch-race"
-        "work-memory"
-        "runner-restart"
-        "cache-upload"
-        "cache-front"
-        # each web service's one main thing, in a browser, with the real services
-        "site-journeys"
-        "rollout"
-        "placed"
-        "wired-watch"
-        "net-detect"
-      ];
+      # the tests CI knows, by name (nix/tests/registry.nix): adding one
+      # there is a new test, not a change to CI
+      registry = import ./nix/tests/registry.nix;
+      vmTests = registry.vm;
       rust =
         let
           craneLib = crane.mkLib pkgs;
@@ -901,11 +859,24 @@
         {
           # a package must be a derivation (flake check), not a source path
           pages = pkgs.runCommandLocal "dd-pages" { } "cp -r ${pages} $out";
+          # a Go package's exported API, two versions compared (not in nixpkgs)
+          apidiff = import ./nix/tests/ci-select/faces/apidiff.nix { inherit pkgs; };
+          # a Go program's routes, flags, files and wire structs, read from its source
+          goface = pkgs.buildGoModule {
+            pname = "goface";
+            version = "0.1.0";
+            src = ./nix/tests/ci-select/faces/goface;
+            vendorHash = null;
+          };
           # what ci's style and lint jobs run (.forgejo/checks), pinned with
-          # everything else
+          # everything else; and what files_modified reads components'
+          # faces with (nix/tests/ci-select/interfaces.py)
           ci-tools = pkgs.buildEnv {
             name = "ci-tools";
             paths = with pkgs; [
+              self.packages.${system}.apidiff
+              self.packages.${system}.goface
+              go_1_26
               python3
               gitMinimal
               yq-go
@@ -1794,6 +1765,14 @@
         # which runner boxes can take each of the runner's variants, from its
         # needs and the boxes' reports: CI places its jobs by this
         ciRunners = import ./nix/lib/ci-runners.nix { lib = nixpkgs.lib; };
+        # the evaluation-only checks flake_check builds (registry.eval), one
+        # link to them all
+        evalChecks = pkgs.linkFarm "eval-checks" (
+          map (n: {
+            name = n;
+            path = self.checks.${system}.${n};
+          }) registry.eval
+        );
         # what the release builds each box with (nix/lib/fleet-placement.nix
         # built): what `dd` picks boxes by (build orders, the announcement
         # outbox) and CI its builders, never a list kept by hand
@@ -1846,6 +1825,8 @@
           rollout-stage = vm "rollout-stage";
         }
         // nixpkgs.lib.genAttrs vmTests vm
+        # each a file of its own, nix/tests/<name>.nix, given the usual args
+        // nixpkgs.lib.genAttrs registry.files (n: import ./nix/tests/${n}.nix args)
         // {
           inherit (rust)
             cargo-nix
@@ -1856,34 +1837,9 @@
             net-check
             tests
             ;
-          plaintext-label = import ./nix/tests/plaintext-label.nix args;
-          calendar-js = import ./nix/tests/calendar-js.nix args;
-          # the Git pages' early ask stays inside /repos/<owner>/<name>
-          git-path = import ./nix/tests/git-path.nix args;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
           # the test chooser, on made-up changes against covers.json
           ci-select = import ./nix/tests/ci-select args;
-          boxes = import ./nix/tests/boxes.nix args;
-          box-reports = import ./nix/tests/box-reports.nix args;
-          # builds and CI held to a share of each box's memory, together
-          work-memory-sizes = import ./nix/tests/work-memory-sizes.nix args;
-          # what a box finds of its network links, and the config made of it
-          net-report = import ./nix/tests/net-report.nix args;
-          # the wired watchdog's fallback, choice by choice
-          wired-watch-logic = import ./nix/tests/wired-watch-logic.nix args;
-          # a box's room for computers, from its services' measured memory
-          computer-facts-logic = import ./nix/tests/computer-facts-logic.nix args;
-          # anything deleted is gone from every box and backup within 90 days
-          retention = import ./nix/tests/retention.nix args;
-          # every unit our modules define is in some service's needs, and no
-          # timer of ours counts from boot
-          needs-units = import ./nix/tests/needs-units.nix args;
-          # every box can carry what its roles bring, by the needs; and the
-          # roles say truly what they bring (nix/lib/capability.nix)
-          placement = import ./nix/tests/placement.nix args;
-          # capability on every kind of computer, held to answers that make sense
-          placement-fleet = import ./nix/tests/placement-fleet.nix args;
-          nginx = import ./nix/tests/nginx.nix args;
           # no member's figures in the fleet's metrics: usage is heartbeat
           # lines, never a Prometheus sample (storage/usage.nix)
           usage-facts = pkgs.runCommand "usage-facts-are-not-metrics" { } ''
@@ -1927,8 +1883,6 @@
               else
                 "echo 'identity::TERMS and docs/policies/terms.md (\"These terms last changed on ...\") disagree' >&2; exit 1"
             );
-          # the mail Worker in a browser, against a fake Cloudflare
-          mail-worker = import ./nix/tests/mail-worker.nix args;
           # the Mail page in a browser, as the app serves it, against a fake app and box
           mail-page = import ./nix/tests/mail-page.nix (args // { web = self.packages.${system}.web; });
           # the Files page as the app serves it, against the same made-up app and gate
@@ -1942,26 +1896,8 @@
             site-a11y
             site-speed
             ;
-          # every link the site's pages show, followed in a browser against the
-          # gateway box's own nginx and gate, and the app's pages' links read
-          site-links = import ./nix/tests/site-links.nix args;
-          safe-rd = import ./nix/tests/safe-rd.nix args;
-          # how many jobs a runner takes, from the box as it is
-          runner-capacity = import ./nix/tests/runner-capacity.nix args;
-          # a box believes its own cache key and the laptop's, never another box's
-          cache-trust = import ./nix/tests/cache-trust.nix args;
-          # garage-setup reads garage out whole; a closed pipe aborts garage
-          garage-setup-pipe = import ./nix/tests/garage-setup-pipe.nix args;
           # the PDF editor's document and signatures, on the pinned MuPDF
           pdf-editor = import ./nix/tests/pdf-editor.nix (args // { web = self.packages.${system}.web; });
-          sso = import ./nix/tests/sso.nix args;
-          # every bar link and home tile stays in its tab, on a box's pages and the app's
-          same-tab = import ./nix/tests/same-tab.nix args;
-          dns-worker = import ./nix/tests/dns-worker.nix args;
-          # the control plane: relay, witness and three validators, offline
-          control = import ./nix/tests/control.nix args;
-          # the relay answers without a witness that cannot start
-          control-relay = import ./nix/tests/control-relay.nix args;
           # and moving from release 359's to this one's, a box at a time,
           # while it decides
           control-upgrade = import ./nix/tests/control-upgrade.nix args;

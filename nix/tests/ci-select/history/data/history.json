@@ -1,0 +1,340 @@
+{
+ "runs": 860,
+ "jobs": 17327,
+ "job_minutes": 28224,
+ "by_class": {
+  "needed": {
+   "minutes": 20278,
+   "jobs": 6578,
+   "share": 0.718
+  },
+  "determined": {
+   "minutes": 2263,
+   "jobs": 830,
+   "share": 0.08
+  },
+  "stopped": {
+   "minutes": 1793,
+   "jobs": 569,
+   "share": 0.064
+  },
+  "noop": {
+   "minutes": 1763,
+   "jobs": 6967,
+   "share": 0.062
+  },
+  "superseded": {
+   "minutes": 892,
+   "jobs": 542,
+   "share": 0.032
+  },
+  "real": {
+   "minutes": 707,
+   "jobs": 134,
+   "share": 0.025
+  },
+  "overhead": {
+   "minutes": 208,
+   "jobs": 1626,
+   "share": 0.007
+  },
+  "infra": {
+   "minutes": 192,
+   "jobs": 55,
+   "share": 0.007
+  },
+  "flake": {
+   "minutes": 130,
+   "jobs": 26,
+   "share": 0.005
+  }
+ },
+ "by_kind": {
+  "agree": {
+   "overhead": 3,
+   "real": 0,
+   "superseded": 0
+  },
+  "app": {
+   "needed": 1479,
+   "stopped": 222,
+   "noop": 35,
+   "superseded": 21,
+   "infra": 0
+  },
+  "browser": {
+   "needed": 995,
+   "noop": 103,
+   "stopped": 77,
+   "determined": 74,
+   "real": 32,
+   "superseded": 18,
+   "flake": 0,
+   "infra": 0
+  },
+  "ci_ok": {
+   "overhead": 1,
+   "real": 0,
+   "infra": 0
+  },
+  "files_modified": {
+   "overhead": 43,
+   "real": 19,
+   "superseded": 14,
+   "infra": 0,
+   "stopped": 0
+  },
+  "flake": {
+   "needed": 1900,
+   "real": 145,
+   "stopped": 111,
+   "superseded": 71,
+   "infra": 15
+  },
+  "installer": {
+   "needed": 214,
+   "stopped": 49,
+   "infra": 23,
+   "real": 7,
+   "noop": 0,
+   "superseded": 0
+  },
+  "keep": {
+   "overhead": 67,
+   "superseded": 1,
+   "stopped": 1
+  },
+  "lint": {
+   "overhead": 47,
+   "infra": 1,
+   "superseded": 0,
+   "real": 0,
+   "stopped": 0
+  },
+  "programs": {
+   "needed": 1635,
+   "stopped": 177,
+   "superseded": 174,
+   "noop": 125,
+   "real": 74,
+   "infra": 7
+  },
+  "rust": {
+   "needed": 2571,
+   "stopped": 420,
+   "superseded": 267,
+   "noop": 251,
+   "real": 63,
+   "infra": 62,
+   "flake": 17
+  },
+  "style": {
+   "overhead": 47,
+   "real": 19,
+   "superseded": 1,
+   "stopped": 0
+  },
+  "systems": {
+   "needed": 2487,
+   "noop": 215,
+   "stopped": 161,
+   "superseded": 79,
+   "infra": 35,
+   "real": 21
+  },
+  "vm": {
+   "needed": 8997,
+   "determined": 2189,
+   "noop": 1033,
+   "stopped": 574,
+   "real": 327,
+   "superseded": 247,
+   "flake": 113,
+   "infra": 48
+  }
+ },
+ "run_wall_minutes": 10923,
+ "superseded_run_wall_minutes": 1222,
+ "real_failures": [
+  [
+   "vm:test",
+   32
+  ],
+  [
+   "flake:other",
+   15
+  ],
+  [
+   "vm:timeout",
+   13
+  ],
+  [
+   "rust:build",
+   10
+  ],
+  [
+   "flake:build",
+   10
+  ],
+  [
+   "vm:other",
+   7
+  ],
+  [
+   "style:other",
+   6
+  ],
+  [
+   "browser:test",
+   5
+  ],
+  [
+   "rust:other",
+   4
+  ],
+  [
+   "programs:other",
+   4
+  ],
+  [
+   "lint:other",
+   3
+  ],
+  [
+   "ci_ok:test",
+   3
+  ],
+  [
+   "systems:other",
+   3
+  ],
+  [
+   "programs:build",
+   2
+  ],
+  [
+   "vm:build",
+   2
+  ],
+  [
+   "rust:test",
+   2
+  ],
+  [
+   "agree:other",
+   2
+  ],
+  [
+   "flake:test",
+   2
+  ],
+  [
+   "programs:test",
+   1
+  ],
+  [
+   "systems:eval",
+   1
+  ],
+  [
+   "ci_ok:other",
+   1
+  ],
+  [
+   "files_modified:other",
+   1
+  ],
+  [
+   "systems:timeout",
+   1
+  ],
+  [
+   "flake:eval",
+   1
+  ],
+  [
+   "installer:other",
+   1
+  ],
+  [
+   "rust:timeout",
+   1
+  ],
+  [
+   "browser:timeout",
+   1
+  ]
+ ],
+ "flakes_by_check": [
+  [
+   "rust()",
+   11
+  ],
+  [
+   "vm(forge-follow)",
+   3
+  ],
+  [
+   "vm(unlock)",
+   2
+  ],
+  [
+   "vm(acme)",
+   2
+  ],
+  [
+   "vm(store)",
+   2
+  ],
+  [
+   "vm(games)",
+   1
+  ],
+  [
+   "vm(console)",
+   1
+  ],
+  [
+   "vm(home-controller)",
+   1
+  ],
+  [
+   "vm(runner-restart)",
+   1
+  ],
+  [
+   "vm(backup)",
+   1
+  ],
+  [
+   "browser(site-speed)",
+   1
+  ]
+ ],
+ "infra_by_why": [
+  [
+   "disk@node2",
+   21
+  ],
+  [
+   "killed@node2",
+   17
+  ],
+  [
+   "network@node1",
+   11
+  ],
+  [
+   "network@node2",
+   2
+  ],
+  [
+   "oom@node1",
+   2
+  ],
+  [
+   "oom@node2",
+   2
+  ]
+ ]
+}
