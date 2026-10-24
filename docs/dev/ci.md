@@ -397,6 +397,19 @@ over the finished runs on the boxes' slots. To bring it up to date:
 `history.py DIR`, then `score.py` and `levers.py`. All of it reads the forge;
 none of it writes.
 
+A new derivation is not a job that could fail. `realfail.py` keeps only the
+failures a code change then fixed (the same change passed later on another
+commit, a commit that changed nothing counting as a rerun), with the files
+the breaking change touched. [`tests-this.json`](../../nix/tests/ci-select/tests-this.json)
+is each job's set of the code it specifically checks, read from its script
+and the modules, programs and pages those assertions reach, not its closure.
+`changes.py` names each run's changed files by today's paths, `phases.py`
+splits a VM job's minutes into its shared prefix and its test, and
+`relevance.py DIR nix/tests/ci-select/tests-this.json` replays a chooser that
+runs a job only when its set changed: minutes saved, the real failures it
+leaves to main's full run, and each run's jobs and wall minutes
+(`data/replay-runs.csv`, `data/replay-prs.csv`).
+
 ## The site checks
 
 The site as a browser meets it. The no-vm ones are the `site_checks` job
