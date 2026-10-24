@@ -156,6 +156,22 @@ a wedge stops every writer once its lease lapses.
   - A request passed on comes only from a validator. A request is checked
     before it is queued: at most 20 a second (200 at once) from any one
     sender but the box itself, and only one some box signed goes on.
+- **A pool holds only what is still to be decided.** A validator that
+  catches up takes its peers' latest state and never delivers the blocks
+  in between, so nothing took the requests those blocks decided out of its
+  request pool. A leader drops such a request as already processed, so the
+  validator complained about the leader, and with three validators one
+  complaint changes the view for all. Each view change started its wait
+  again: on 2026-10-24 the views changed for over a minute while a box
+  switched under load (CI run 853).
+  - A request its box's agreed sequence has reached is decided: no block
+    can apply it (`state.ErrStale`). A validator drops one that arrives,
+    and takes every decided one out of its pool when it catches up. A join
+    is never taken for decided.
+  - A validator of 359 does neither. When one passes a decided request on,
+    the leader puts it in its next block (at most 64), where it changes
+    nothing, and that validator takes it out of its pool once it is
+    decided.
 - **A validator heals itself.** Every 5 s it checks itself. It exits, and
   systemd starts it afresh (`Restart=always`), when:
   - a call into consensus, or the delivery of a decision, has not returned
