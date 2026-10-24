@@ -60,6 +60,8 @@ let
     systemd.services.postgresql-setup.unitConfig.ConditionPathExists = "/run/dd-placed/postgresql";
     dd.postgres.follow = {
       enable = true;
+      # the test's own garage, not a box's store (its default)
+      endpoint = "http://127.0.0.1:3900";
       envFile = pkgs.writeText "pg-s3.env" ''
         AWS_ACCESS_KEY_ID=${(key name).id}
         AWS_SECRET_ACCESS_KEY=${(key name).secret}
