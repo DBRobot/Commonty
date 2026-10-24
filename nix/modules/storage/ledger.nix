@@ -165,7 +165,8 @@ in
         \copy want FROM '/tmp/limits.tsv'
         INSERT INTO want VALUES ('demo${suffix}', ${toString config.dd.photos.demoQuota});
         UPDATE subscriptions s
-          SET storage = w.storage, original_transaction_id = 'dd-storage', product_id = 'free',
+          -- the id is unique in museum's table: one a person, ours by its prefix
+          SET storage = w.storage, original_transaction_id = 'dd-storage-' || s.user_id, product_id = 'free',
               expiry_time = 4102444800000000, payment_provider = '''
           FROM want w JOIN users u ON u.dd_email = lower(w.email)
           WHERE s.user_id = u.user_id AND u.encrypted_email IS NOT NULL AND s.storage <> w.storage
@@ -173,7 +174,7 @@ in
         -- an account the ledger has not counted (new, or not a member's
         -- address) may keep what it has and add nothing, until it is counted
         UPDATE subscriptions s
-          SET storage = GREATEST(coalesce(us.storage_consumed, 0), 1), original_transaction_id = 'dd-storage',
+          SET storage = GREATEST(coalesce(us.storage_consumed, 0), 1), original_transaction_id = 'dd-storage-' || s.user_id,
               product_id = 'free', expiry_time = 4102444800000000, payment_provider = '''
           FROM users u LEFT JOIN usage us USING (user_id)
           WHERE s.user_id = u.user_id AND u.encrypted_email IS NOT NULL
