@@ -412,8 +412,14 @@ jobs:
         test: ${{ fromJSON(needs.files_modified.outputs.vm_tests) }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
+      # evaluated by a process that exits before the VMs start: a nix build
+      # of the flake attribute keeps its evaluation (3.6G for rollout) for
+      # the whole test, and in the work slice beside other jobs' VMs that
+      # was what the kernel killed (run 856, node2, 2026-10-24)
       - name: ${{ matrix.test }}
-        run: nix build --no-link .#checks.x86_64-linux.${{ matrix.test }}
+        run: |
+          drv=$(nix eval --raw .#checks.x86_64-linux.${{ matrix.test }}.drvPath)
+          nix build --no-link "$drv^*"
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
