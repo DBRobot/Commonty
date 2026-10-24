@@ -199,7 +199,7 @@ jobs:
   # Seconds each, and a cache hit when nothing they read changed.
   worker_tests:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.worker_tests != '[]' }}
+    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.worker_tests != '["none"]' }}
     runs-on: nix
     strategy:
       fail-fast: false
@@ -221,7 +221,7 @@ jobs:
   # home tile staying in its tab (same-tab).
   page_tests:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.page_tests != '[]' }}
+    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.page_tests != '["none"]' }}
     runs-on: nix
     strategy:
       fail-fast: false
@@ -243,7 +243,7 @@ jobs:
   # accessibility, speed, links (docs/dev/ci.md, The site checks).
   site_checks:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.site_checks != '[]' }}
+    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.site_checks != '["none"]' }}
     runs-on: nix
     strategy:
       fail-fast: false

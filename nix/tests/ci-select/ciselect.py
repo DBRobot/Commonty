@@ -509,11 +509,15 @@ def cmd_select(args):
         with open(gh, "a") as f:
             for k in ("nix", "rust", "app", "installer"):
                 f.write(f"{k}={'true' if r[k] else 'false'}\n")
+            # a matrix is never empty: the forge creates no job at all for
+            # an empty one, and ci_ok, which needs it, then waits forever
+            # (run 860, 2026-10-24). "none" stands for nothing chosen, and
+            # each job's if skips on it
             vm = r.get("vm_tests", [])
             f.write(f"vm={'true' if vm else 'false'}\n")
-            f.write(f"vm_tests={json.dumps(vm)}\n")
+            f.write(f"vm_tests={json.dumps(vm or ['none'])}\n")
             for g in GROUPS:
-                f.write(f"{g}={json.dumps(r.get(g, []))}\n")
+                f.write(f"{g}={json.dumps(r.get(g, []) or ['none'])}\n")
     return 0
 
 

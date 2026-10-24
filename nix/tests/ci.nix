@@ -43,8 +43,8 @@ pkgs.runCommand "ci-matches-the-flake"
         echo "job $g's matrix is '$have', not the checks files_modified chose for it" >&2
         exit 1
       fi
-      if ! yq ".jobs.$g.if" ${workflow} | grep -qF "outputs.$g != '[]'"; then
-        echo "job $g must skip when files_modified chose none of its checks" >&2
+      if ! yq ".jobs.$g.if" ${workflow} | grep -qF "outputs.$g != '[\"none\"]'"; then
+        echo "job $g must skip when files_modified chose none of its checks (its list is [\"none\"])" >&2
         exit 1
       fi
     done
