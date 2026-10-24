@@ -12,7 +12,7 @@ dd = nix["dd"]
 env = "DD_KEYRING_FILE=/root/mia.json"
 dirs = "--directory http://127.0.0.1:4181/_dd/directory"
 
-# the bucket's layout, then its buckets and keys (as library.py)
+# museum's garage: its layout, then its bucket and key
 box.wait_for_unit("garage.service")
 wait_socket(box, 3901)
 start_fresh(box, "garage-setup.service")
@@ -20,6 +20,9 @@ box.wait_until_succeeds(
     "garage layout show > /tmp/l && grep -q 'Current cluster layout version: [1-9]' /tmp/l"
 )
 start_fresh(box, "garage-setup.service")
+# the libraries' bucket and the gate's keys to it, in the box's own store
+box.wait_for_unit("dd-store-setup.service")
+box.wait_for_unit("dd-library-keys.service")
 wait_socket(box, 4181)
 
 # mia: an account, on the release's member list, the box's owner

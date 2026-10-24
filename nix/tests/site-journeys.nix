@@ -1,7 +1,8 @@
 # Each web service's one main thing, end to end, in a browser on one box
 # with the real services behind it (checks.site-journeys): sign in, open
 # the service, do it, check what came of it, sign out. The box runs the
-# gateway's own modules - the gate and nginx, Garage and the libraries,
+# gateway's own modules - the gate and nginx, its store and the libraries,
+# Garage for museum (with failover off, as photos.nix),
 # Forgejo, the games manager, Prometheus behind a Thanos query - and a
 # model that answers one fixed line where llama-swap would be, behind
 # nginx's real path to it. A member's browser reaches the pages that hold
@@ -20,10 +21,6 @@ let
   system = pkgs.stdenv.hostPlatform.system;
   domain = "test.invalid";
   rpc = pkgs.writeText "garage.env" "GARAGE_RPC_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n";
-  libraryKey = pkgs.writeText "library-key.env" ''
-    LIBRARY_ID=GK0123456789abcdef01234567
-    LIBRARY_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-  '';
   cert = pkgs.runCommand "test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
@@ -116,6 +113,7 @@ in
       imports = [
         ./box.nix
         ../modules/storage/garage.nix
+        ../modules/storage/store.nix
         ../modules/library/libraries.nix
         ../modules/forge/forgejo.nix
         ../modules/games/games.nix
@@ -189,11 +187,15 @@ in
         envFile = rpc;
         replicationFactor = 1;
       };
-      dd.libraries = {
+      # the libraries in the box's own store, which it writes (as library.nix)
+      dd.store = {
         enable = true;
-        keyFile = libraryKey;
+        capacity = "1G";
+        agePlugins = [ ];
+        buckets.libraries.writer = "box";
+        buckets.mail.writer = "box";
       };
-      dd.verify.library.s3 = lib.mkForce "http://127.0.0.1:3900";
+      dd.libraries.enable = true;
       dd.forgejo.admin = "mia";
       systemd.services.zfs-datasets = {
         wantedBy = [ "multi-user.target" ];
@@ -312,6 +314,19 @@ in
         )
         # Locker is one of Ente's web apps left out (photos.nix)
         { "locker.${domain}".locations."/".root = lib.mkForce "/var/empty"; }
+        # the store's: no certificate in a test, and no other box reaches it
+        {
+          "store.box.${domain}" = {
+            useACMEHost = lib.mkForce null;
+            onlySSL = lib.mkForce false;
+            listen = lib.mkForce [
+              {
+                addr = "127.0.0.1";
+                port = 3443;
+              }
+            ];
+          };
+        }
       ];
       networking.hosts."127.0.0.1" = map (h: "${h}.${domain}") config.dd.verify.hosts;
       environment.systemPackages = [
