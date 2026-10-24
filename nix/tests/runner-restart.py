@@ -161,10 +161,15 @@ assert show("InvocationID", members) == members_before, (
 assert config_capacity(members) == "1"
 assert box.succeed(jobs).strip() == container, "the job's container went"
 assert "release=next" not in box.succeed("docker info --format '{{.Labels}}'")
-# it is the new unit on disk, and the restart unit waits for the job
-assert "capacity: 2" in box.succeed(
-    f"cat $(systemctl show -P ExecStart {runner} | grep -o -- '--config [^ ;]*' | cut -d' ' -f2)"
-)
+# it is the new unit on disk, and the restart unit waits for the job. Its
+# main process is runner-start.sh, whose CONFIG is the runner's config (a
+# step at a time: an empty path to cat read the test's stdin and hung it)
+start = box.succeed(
+    f"systemctl show -P ExecStart {runner} | grep -o 'path=[^ ;]*' | cut -d= -f2"
+).strip()
+conf = box.succeed(f"sed -n 's/^export CONFIG=//p' {start} | tr -d \"'\"").strip()
+assert conf.startswith("/nix/store/"), (start, conf)
+assert "capacity: 2" in box.succeed(f"cat {conf} </dev/null")
 inv = start_fresh(box, "dd-runner-restart.service")
 said = journal_of(box, "dd-runner-restart.service", inv)
 for unit in (runner, members, "docker.service"):
