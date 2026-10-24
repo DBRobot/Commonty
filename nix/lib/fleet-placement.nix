@@ -108,13 +108,20 @@ let
     in
     ordered (withCompanions (lib.filter buildable (builtins.attrNames bundles)));
   servicesOf = rs: lib.unique (lib.concatMap (r: bundles.${r}.services or [ ]) rs);
-  carried = lib.mapAttrs (
+  able = lib.mapAttrs (
     box: _:
     bundlesFor {
       inherit (capability.boxes.${box}) can;
       has = hasSecret box;
     }
   ) list;
+  # a bundle built on one box alone (bundles.json one: the libraries, whose
+  # buckets have one writer and no lease): the first store, by name, able
+  # to build it
+  oneBox = r: lib.findFirst (x: builtins.elem r able.${x}) null stores;
+  carried = lib.mapAttrs (
+    box: rs: lib.filter (r: !(bundles.${r}.one or false) || oneBox r == box) rs
+  ) able;
   # the services each box is built with: what the rest of the release picks
   # a box by (the storage pool, the mail boxes, the ports a member's device
   # may reach, CI's builders), never a name given by hand
@@ -144,11 +151,12 @@ let
             region = "joined";
           };
         }).boxes.${name};
-      rs = bundlesFor {
+      # never a bundle of one box: that is a release box's
+      rs = lib.filter (r: !(bundles.${r}.one or false)) (bundlesFor {
         inherit (cap) can;
         has = _: false;
         allowed = s: builtins.elem s inputs.joined.services;
-      };
+      });
     in
     {
       bundles = rs;

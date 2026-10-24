@@ -1,5 +1,5 @@
 {
-  "_": "The module bundles (nix/roles/<name>.nix) and what each brings, by the services' names in the needs (.#needs, nix/lib/needs.nix). No box is given a bundle by hand: a box is built with every bundle of which it can run a service that does not run everywhere (nix/lib/capability.nix: its signed report, its owner's box.json, the policy), whose secrets its own sops file holds, and whose companions it is built with too (nix/lib/fleet-placement.nix); the control plane decides where each placed service runs. services: what the bundle brings. secrets: what its modules read from the box's own sops file whatever else it has (docs/dev/secrets.md: until each is made on the box or sealed to it). with: the bundles that must be built beside it, because its code reaches them on localhost. why: what it is for.",
+  "_": "The module bundles (nix/roles/<name>.nix) and what each brings, by the services' names in the needs (.#needs, nix/lib/needs.nix). No box is given a bundle by hand: a box is built with every bundle of which it can run a service that does not run everywhere (nix/lib/capability.nix: its signed report, its owner's box.json, the policy), whose secrets its own sops file holds, and whose companions it is built with too (nix/lib/fleet-placement.nix); the control plane decides where each placed service runs. services: what the bundle brings. secrets: what its modules read from the box's own sops file whatever else it has (docs/dev/secrets.md: until each is made on the box or sealed to it). with: the bundles that must be built beside it, because its code reaches them on localhost. one: built on one box alone, the first store by name able to build it (its buckets have one writer, which holds no lease). why: what it is for.",
   "core": {
     "why": "every box: the disk unlock needs the TPM and a cable its initrd has the driver for",
     "services": [
@@ -78,7 +78,8 @@
     ]
   },
   "library": {
-    "why": "transcode: H.264 encode on a GPU (Intel only today), else every core",
+    "why": "transcode: H.264 encode on a GPU (Intel only today), else every core; one box only, as its buckets have one writer and no lease",
+    "one": true,
     "services": [
       "libraries",
       "mail-inbox",

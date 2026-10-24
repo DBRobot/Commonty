@@ -14,7 +14,7 @@ decides where each placed service runs.
     gateway   certificates, the public front door (tunnel, bare domain), headscale
     photos    ente
     media     Movies & TV and Files tiles, uploads, per-user directories
-    library   members' encrypted libraries and their locked mail behind the gate, and the transcoder
+    library   members' encrypted libraries and their locked mail behind the gate, and the transcoder; on one box (one)
     llm       llama-cpp, its Chat page and web search
     game      game servers a member starts, each in a guest of its own
     forge     forgejo
