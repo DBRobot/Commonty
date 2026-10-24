@@ -97,10 +97,14 @@ WATCH = """
 
 ANCHORS = "a[href], area[href]"
 
+# the links and the ids they may point at, read together from one DOM: a
+# page that draws again between two reads would judge its links against
+# ids it had not drawn yet
 LINKS = """
 (sel) => {
   const base = document.querySelector('base[target]')?.getAttribute('target') || '';
-  return [...document.querySelectorAll(sel)].map((a, i) => ({
+  const ids = [...document.querySelectorAll('[id], a[name]')].map((e) => e.id || e.getAttribute('name'));
+  const links = [...document.querySelectorAll(sel)].map((a, i) => ({
     i,
     raw: a.getAttribute('href'),
     abs: a.href,
@@ -111,14 +115,21 @@ LINKS = """
     // shown now: a link in a tab not open yet is filled in when it opens
     shown: a.getClientRects().length > 0 && !a.closest('[hidden]'),
   }));
+  return { links, ids };
 }
+"""
+
+# a page still drawing says so: aria-busy on what it has yet to fill (the
+# docs' page body until its markdown is drawn, docs.html's skeleton)
+DRAWN = """
+() => ![...document.querySelectorAll('[aria-busy="true"]')].some(
+  (e) => e.getClientRects().length > 0 && !e.closest('[hidden]'))
 """
 
 SETTLED = """
 () => ({
   title: document.title,
   h1: [...document.querySelectorAll('h1')].filter((h) => h.getClientRects().length > 0).map((h) => h.innerText.trim()),
-  ids: [...document.querySelectorAll('[id], a[name]')].map((e) => e.id || e.getAttribute('name')),
   // the page that hands a browser to the member's app (use-app.js)
   handoff: !!document.querySelector('section#use-app'),
   opened: window.__dd ? window.__dd.opened : [],
@@ -138,6 +149,23 @@ class Problem:
 
     def key(self):
         return (self.who, self.way, self.link, self.target, self.what)
+
+
+def settle(page, watch, timeout=60):
+    """settled (stack.Watch) and drawn (DRAWN), both at once. Nothing in
+    flight is not enough: between one answer and the request it leads to
+    (the docs' index, then its page's markdown) a page has nothing out and
+    nothing drawn yet"""
+    end = time.monotonic() + timeout
+    while True:
+        left = max(1.0, end - time.monotonic())
+        watch.settled(timeout=left)
+        asked = watch.count
+        page.wait_for_function(DRAWN, timeout=left * 1000)
+        if watch.count == asked and not watch.inflight:
+            return
+        if time.monotonic() > end:
+            raise AssertionError(f"{page.url}: still drawing after {timeout}s")
 
 
 def public_names(s):
@@ -310,9 +338,10 @@ def crawl(
             state["error"] = str(e).split("\n")[0]
         if not state["error"]:
             try:
-                # settled: the bar drawn, and everything the page asked for
-                # answered (a stream that stays open aside)
-                watch.settled(timeout=60)
+                # settled: the bar drawn, everything the page asked for
+                # answered (a stream that stays open aside), and nothing
+                # it shows still busy drawing
+                settle(page, watch, timeout=60)
             except Exception as e:
                 state["error"] = "never settled: " + str(e).splitlines()[0][:200]
             state.update(page.evaluate(SETTLED))
@@ -383,8 +412,9 @@ def crawl(
         # its bar is the same as every other page's, checked there
         if state["stood"]:
             continue
-        ids = set(state.get("ids", []))
-        for a in page.evaluate(LINKS, ANCHORS):
+        shown = page.evaluate(LINKS, ANCHORS)
+        ids = set(shown["ids"])
+        for a in shown["links"]:
             raw, abs_, text = a["raw"], a["abs"], a["text"] or "(no text)"
             if raw.strip() in ("", "#"):
                 if not a["shown"] or a["role"] == "button" or has_click(a["i"]):
