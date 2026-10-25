@@ -501,31 +501,39 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		}
 		return true
 	}
-	room := func(name, svc string) bool {
-		// its buckets: a store here with room for what it does not keep
-		// yet. Until some box has a store, nothing is judged by them
-		if anyStore {
-			d := 0.0
-			for _, x := range adds(name, svc) {
-				for _, b := range bucketsAt(name, x) {
-					if !stored(name) {
-						return false
-					}
-					d += needs(name, b)
+	// its buckets: a store here with room for what it does not keep yet.
+	// Until some box has a store, nothing is judged by them
+	storeRoom := func(name, svc string) bool {
+		if !anyStore {
+			return true
+		}
+		d := 0.0
+		for _, x := range adds(name, svc) {
+			for _, b := range bucketsAt(name, x) {
+				if !stored(name) {
+					return false
 				}
-			}
-			if d > 0 && d > spare(name) {
-				return false
+				d += needs(name, b)
 			}
 		}
-		if capacity(name) == 0 {
-			return true // a box that has not said its memory: capability judged it
-		}
+		return d == 0 || d <= spare(name)
+	}
+	// what placing svc here adds to the memory planned for the box
+	memAdds := func(name, svc string) float64 {
 		m := 0.0
 		for _, x := range adds(name, svc) {
 			m += memOn(name, x)
 		}
-		return used[name]+m <= capacity(name)
+		return m
+	}
+	room := func(name, svc string) bool {
+		if !storeRoom(name, svc) {
+			return false
+		}
+		if capacity(name) == 0 {
+			return true // a box that has not said its memory: capability judged it
+		}
+		return used[name]+memAdds(name, svc) <= capacity(name)
 	}
 	// how well this box suits svc now: what it is for it, its line as
 	// measured against what the service wants, what is already beside it,
@@ -573,10 +581,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 			why += ", on the new release"
 		}
 		if c := capacity(name); c > 0 {
-			m := 0.0
-			for _, x := range adds(name, svc) {
-				m += memOn(name, x)
-			}
+			m := memAdds(name, svc)
 			// room weighs only as a box fills: below 60% one box is as good
 			// as another, and what suits a service best keeps it
 			if fill := (used[name] + m) / c; fill > 0.6 {
@@ -689,6 +694,35 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 			})
 			return out
 		}
+		// no box in from has the memory by the plan's sum - what each
+		// service measured at its most or keeps aside, added up, which a
+		// box's free memory is often far from (node1, 2026-10-24: 54.5G
+		// planned of 53G, with 45G of its 62G free). Rather than stop it,
+		// the box it runs on, else the one nearest to holding it, takes it,
+		// flagged; the box starts it only with that memory free
+		// (cmd/dd-control/placed.go fits), and the plan gives a box that
+		// refuses it nothing of it. No box checks its store, so that binds.
+		squeeze := func(from []string, why0 string) bool {
+			top, head := "", 0.0
+			for _, name := range from {
+				if planned[name][svc] || !can(name, svc) || draining(name) || (relDrain(name) && !stays[name][svc]) || !allowed(name, svc) || !storeRoom(name, svc) {
+					continue
+				}
+				h := capacity(name) - used[name] - memAdds(name, svc)
+				switch {
+				case top == "", now[svc][name] && !now[svc][top], now[svc][name] == now[svc][top] && h > head:
+					top, head = name, h
+				}
+			}
+			if top == "" {
+				return false
+			}
+			f, why := fit(top, svc)
+			over := adds(top, svc)
+			place(top, svc, f, fmt.Sprintf("%sno box has room for it by the plan's sum; here it is %.1f GiB over; %s", why0, -head, why))
+			p.DoesNotFit[top] = append(p.DoesNotFit[top], over...)
+			return true
+		}
 		// the best of from, unless what runs now is within the margin of it
 		choose := func(from []string, why0 string) bool {
 			// a releasing box keeps what no other box can hold: it
@@ -718,7 +752,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 			}
 			order := best(from)
 			if len(order) == 0 {
-				return false
+				return squeeze(from, why0)
 			}
 			top := order[0]
 			ft, why := fit(top, svc)
