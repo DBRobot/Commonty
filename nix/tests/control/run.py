@@ -59,7 +59,11 @@ for i in (1, 2, 3):
     )
 os.makedirs(f"{T}/bin", exist_ok=True)
 with open(f"{T}/bin/systemctl", "w") as f:
-    f.write('#!/bin/sh\necho "$@" >> "$SYSTEMCTL_LOG"\n')
+    # no unit has failed: is-failed answers no, as systemd does for a unit
+    # that started (placed.go refuses a writer it took whose start failed)
+    f.write(
+        '#!/bin/sh\necho "$@" >> "$SYSTEMCTL_LOG"\n[ "$1" = is-failed ] && exit 1\nexit 0\n'
+    )
 os.chmod(f"{T}/bin/systemctl", 0o755)
 
 
