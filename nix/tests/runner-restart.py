@@ -26,9 +26,13 @@ def show(prop, unit=runner):
 
 def config_capacity(unit=runner):
     """the capacity in the config the running runner was started with"""
-    pid = show("MainPID", unit)
-    args = box.succeed(f"tr '\\0' ' ' < /proc/{pid}/cmdline").split()
-    conf = args[args.index("--config") + 1]
+    # its main process is runner-start.sh until the token is fetched and it
+    # execs the runner: active is not yet the runner's own config
+    conf = box.wait_until_succeeds(
+        "tr '\\0' '\\n' < /proc/$(systemctl show -P MainPID "
+        f"{shlex.quote(unit)})/cmdline | grep -x -A1 -- --config | sed -n 2p | grep .",
+        timeout=120,
+    ).strip()
     return box.succeed(f"grep -o 'capacity: [0-9]*' {conf}").split()[1]
 
 
