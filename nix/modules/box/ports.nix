@@ -113,10 +113,17 @@ in
         ];
         store-door = [ config.dd.store.publicPort ];
       })
-      # its metrics, which nothing reads yet
-      (lib.mkIf (lib.any (lib.hasPrefix "cloudflared-tunnel-") (lib.attrNames config.systemd.services)) {
-        cloudflared = [ 20241 ];
-      })
+      # its metrics, which nothing reads yet; dd-door runs it under its own
+      # name (net/door.nix)
+      (lib.mkIf
+        (
+          lib.any (lib.hasPrefix "cloudflared-tunnel-") (lib.attrNames config.systemd.services)
+          || config.systemd.services ? dd-door
+        )
+        {
+          cloudflared = [ 20241 ];
+        }
+      )
       # ours (servers/*): each where its module runs it
       (lib.mkIf (has "dd-verify") { verify = [ config.dd.verify.port ]; })
       (lib.mkIf (has "dd-transcode") {
