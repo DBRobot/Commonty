@@ -17,6 +17,7 @@ let
   # none: every box asks through the front door as any other does
   bridged = !config.services.headscale.enable || (config.dd.failover or false);
   bridgeAt = "127.0.0.1:41643";
+  loginServer = if bridged then "http://${bridgeAt}" else cfg.controlUrl;
   control = self.packages.${pkgs.stdenv.hostPlatform.system}.dd-control;
 in
 {
@@ -142,7 +143,21 @@ in
           sleep 1
         done
         wait=30
-        until tailscale --socket "$sock" status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null; do
+        # the control server this box asks: the bridge, or itself on the control box
+        want=${loginServer}
+        running() {
+          tailscale --socket "$sock" status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null
+        }
+        # joined while it was the control box (before failover), a box keeps
+        # that server's name in its prefs, now answered by the front door,
+        # which strips the upgrade: every map poll failed and node1 held its
+        # packet filter from before the cache moved to :3443 (2026-10-25)
+        asks() {
+          [ "$(tailscale --socket "$sock" debug prefs 2>/dev/null | jq -r '.ControlURL // empty')" = "$want" ]
+        }
+        until running && asks; do
+          reauth=""
+          running && reauth="--force-reauth"
           # a key for this one try: single use, ten minutes, never kept
           key=/run/commonty-net/join.key
           rm -f "$key"
@@ -156,7 +171,7 @@ in
             continue
           fi
           tailscale --socket "$sock" up \
-            --login-server=${if bridged then "http://${bridgeAt}" else cfg.controlUrl} \
+            --login-server="$want" $reauth \
             --auth-key=file:"$key" \
             --hostname=${config.networking.hostName} \
             --accept-dns=false \

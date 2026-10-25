@@ -79,6 +79,7 @@
         "work-memory"
         "runner-restart"
         "cache-upload"
+        "cache-front"
         # each web service's one main thing, in a browser, with the real services
         "site-journeys"
         "rollout"

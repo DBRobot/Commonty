@@ -16,7 +16,7 @@
         {
           options.dd.store.at = lib.mkOption {
             default.nix-cache = {
-              s3Url = "s3://nix-cache?endpoint=127.0.0.1:1&scheme=http&region=us-east-1";
+              s3Url = "s3://nix-cache?endpoint=http://127.0.0.1:1&region=us-east-1";
               endpoint = "http://127.0.0.1:1";
               envFile = "/var/lib/test-no-store.env";
             };

@@ -52,11 +52,11 @@ pub const RELEASES: &str = concat!(
 /// able to run the cache, nix/lib/fleet-placement.nix homes), at its name on
 /// the fleet's network (nix/modules/storage/store.nix shared)
 pub const CACHE: &str = concat!(
-    "s3://nix-cache?endpoint=store.",
+    "s3://nix-cache?endpoint=https://store.",
     cache_box_name!(),
     ".",
     domain!(),
-    ":3443&scheme=https&region=us-east-1"
+    ":3443&region=us-east-1"
 );
 /// that box over ssh, where its store's key to the cache is read
 pub const CACHE_BOX: &str = cache_box!();

@@ -441,12 +441,12 @@ in
       default = lib.mapAttrs (b: v: rec {
         endpoint =
           if v.home == box then "http://127.0.0.1:${toString cfg.port}" else cfg.peers.${v.home}.url;
-        # the bucket as nix names an s3 store (the nix cache)
-        s3Url =
-          let
-            scheme = lib.head (lib.splitString "://" endpoint);
-          in
-          "s3://${b}?endpoint=${lib.removePrefix "${scheme}://" endpoint}&scheme=${scheme}&region=us-east-1";
+        # the bucket as nix names an s3 store (the nix cache). The endpoint
+        # whole, scheme and all: nix reads a bare "store.<box>.<domain>:3443"
+        # as a url whose scheme is the host, drops &scheme=, and curl sends
+        # it plain http to the TLS port - nginx's 400 to every narinfo from
+        # node2 (2026-10-25)
+        s3Url = "s3://${b}?endpoint=${endpoint}&region=us-east-1";
         # the key there: this box's own for the bucket at home, its key to
         # the home's store elsewhere (dd-store-at)
         envFile = "${state}/at/${b}.env";
