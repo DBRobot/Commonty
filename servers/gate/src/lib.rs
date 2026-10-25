@@ -4534,7 +4534,14 @@ mod tests {
         assert_eq!(services[0]["up"], true);
         assert_eq!(services[1]["up"], false);
         assert_eq!(services[0]["days"].as_array().unwrap().len(), 90);
-        assert_eq!(services[0]["days"][89], 1.0);
+        // in a day's first quarter hour it has no window yet, so says nothing
+        // (CI run 871 ran at 00:12 UTC)
+        if session::now() % 86_400 < 900 {
+            assert_eq!(services[0]["days"][89], serde_json::Value::Null);
+            assert_eq!(services[0]["days"][88], 1.0);
+        } else {
+            assert_eq!(services[0]["days"][89], 1.0);
+        }
         assert!(services[0]["since"].is_u64());
 
         // and the page, for anyone
