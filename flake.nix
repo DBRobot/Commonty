@@ -1997,6 +1997,9 @@
           # and moving from release 359's to this one's, a box at a time,
           # while it decides
           control-upgrade = import ./nix/tests/control-upgrade.nix args;
+          # and release 360's switch: both boxes at once with the witness
+          # off; the writers run again on their leases within a lease's time
+          control-together = import ./nix/tests/control-upgrade.nix (args // { scenario = "together"; });
           # the app carried the site's signed-in pages, their scripts, the
           # stylesheet and the fonts at the site's paths (app/carried
           # lists them, scripts/sync-app-web copies them); two copies, kept

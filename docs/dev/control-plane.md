@@ -172,6 +172,18 @@ a wedge stops every writer once its lease lapses.
     the leader puts it in its next block (at most 64), where it changes
     nothing, and that validator takes it out of its pool once it is
     decided.
+- **Two restarted validators can name different leaders.** At a restart
+  SmartBFT takes its view from its write-ahead log, a view change it had
+  started included. On 2026-10-24 node1, on release 359's unfixed v1.0.2,
+  had sent the same view change for 11 hours that node2 never joined.
+  When both switched to 360 together, each came back leading its own view
+  and proposed sequence 103786 itself ("got pre-prepare from 2 but the
+  leader is 1", "wrong digest at processPrepares"). With the witness off,
+  a view change needs both boxes, and each refused the other's next view
+  as one off. Restarting node1 and then node2 cleared it. Self-heal would
+  have restarted one after 120 s of waiting requests. Before switching
+  validators from 359, check that neither keeps logging "got viewChange
+  ... expected view" with the same numbers, and restart that one first.
 - **A validator heals itself.** Every 5 s it checks itself. It exits, and
   systemd starts it afresh (`Restart=always`), when:
   - a call into consensus, or the delivery of a decision, has not returned
@@ -226,12 +238,25 @@ does the config it applies under:
   frame kind 6, which a validator of 359 drops). Each box also reports its
   version in its heartbeat (the fact `machine`).
 - **The validators decide; a new version and config take effect in one
-  agreed block.** A proposer that holds a stand from every validator, each
-  under 60 s old and all with its own config, puts the stands and the
-  config in the proposal's header. Each validator checks them before it
-  votes. From that block on, the agreed state holds `machine`, `config`
-  and `configTime` (the block's agreed time), and every block applies
-  under that config.
+  agreed block.** A proposer that holds a stand from every validator that
+  is not off (below), each under 60 s old and all with its own config,
+  puts the stands and the config in the proposal's header. Each validator
+  checks them before it votes. From that block on, the agreed state holds
+  `machine`, `config` and `configTime` (the block's agreed time), and
+  every block applies under that config.
+- **A validator that is off is left out, and only one that is.** A live
+  validator says something in every decision (its prepare and commit) and
+  every 5 s (its stand), whatever release it runs. So a validator counts
+  as off when nothing at all has come from it for 20 s, since it was last
+  heard or since the one judging started, while the one judging delivered
+  10 decisions. Each voter judges that by what it heard itself: the
+  proposer leaves out only a validator it finds off, and a voter refuses a
+  header that leaves out one it has heard from. A validator is never off
+  to itself, and the stands must still number a quorum. A validator of
+  359 that is live therefore always holds activation back; the witness
+  turned off (as since 2026-10-23) does not. One that was off and comes
+  back on 359 after the activation can't follow the agreed state (below);
+  it is one voter down, as it was while off.
 - **No stale stand rolls a config back.** A validator votes for an
   activation only if it carries the config its own release ships, its own
   stand is no older than the latest it has kept, and every stand is newer
@@ -260,8 +285,11 @@ does the config it applies under:
 
 What that costs:
 
-- A validator that is off holds activation back. With the witness off,
-  nothing new is agreed.
+- A validator that is off holds activation back for 20 s and 10
+  decisions after the voters start or last heard from it. Two boxes
+  switched together with the witness off agree the new version 25 to 30 s
+  after the switch, and run the leased writers again at about 35 s
+  (`checks.control-together`).
 - A validator's "first stood" time is kept in memory. A validator that
   restarts starts the 30 minutes again, which delays a laggard's cutoff
   and nothing else.
@@ -269,9 +297,18 @@ What that costs:
   following the agreed state (below).
 - A placed writer whose lease rule is new waits for the activation. On the
   move from 359, a box that has switched holds no `svc/*` lease until every
-  validator and every live box has switched too. That is about 30 s after
-  the last one. Until then the writer runs nowhere, unless a 359 box runs
-  it by its roles.
+  live validator and every live box has switched too, and the switch
+  itself stops the writers (their units gain the flag's condition). Two
+  boxes switched together have them back within the lease's 45 s.
+  - Nothing runs a writer without a lease meanwhile, by choice. A
+    release-359 box may still run it by its roles, and only the
+    activation says none does. Running it unleased would also run it
+    without an epoch, so without the fence, the archive's fencing and the
+    restore the follow modules do (they refuse epoch 0), on a box the plan
+    picks, which may hold old data or none.
+  - Nor are leases granted under the config before. 359's has no `svc/*`
+    rule, and granting one at version 1 makes this release's state differ
+    from 359's: the split of 2026-10-22.
 - Activation is one way. After it, a validator or a reading box moved back
   to 359 can't follow the agreed state; it needs this release again. A
   reading box that stays on the older version stops at the last state it
@@ -307,6 +344,11 @@ state's JSON holds, follows these rules:
    After a change to the state machine, point `old` at the release the
    fleet runs. The validators' own test
    (`TestVersionsSwitchOneAtATime`) does the same in one process.
+   `checks.control-together` (the same script, `SCENARIO=together`) is
+   release 360's switch: the witness in the config and off, both boxes
+   switched at once from 359's programs and config. Decisions must come
+   within 30 s, and postgresql and forgejo must run on their lease's box
+   within 75 s (`TestSwitchTogetherWithTheWitnessOff` in one process).
 
 ## Trust
 

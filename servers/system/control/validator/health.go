@@ -45,6 +45,13 @@ func (p *pulse) started(now time.Time) {
 	}
 }
 
+// since: when this validator started
+func (p *pulse) since() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.start
+}
+
 func (p *pulse) request(now time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

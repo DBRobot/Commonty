@@ -122,6 +122,12 @@ type Validator struct {
 	stands   map[uint64]Stand
 	// this validator's newest stand, what it proposes with
 	mine Stand
+	// when each other validator was last heard from (unix ms), and how
+	// many decisions this one had delivered by then; a validator heard from
+	// in none of the last ones is off (stand.go, absent). Atomics: the
+	// relay's reader and the vote intake set them for every frame
+	lastHeard map[uint64]*heardOf
+	decisions atomic.Uint64
 	pulse
 	// what every decision told the outside, for whoever runs this
 	Decided func(*state.State)
@@ -146,7 +152,7 @@ func New(o Options) (*Validator, error) {
 		o.Now = time.Now
 	}
 	v := &Validator{o: o, pubs: map[uint64]ed25519.PublicKey{}, st: state.New(), syncs: make(chan answer, 64),
-		peers: map[uint64]chan frame{}, voted: make(chan struct{}, 1), clients: make(chan frame, inbox), asks: make(chan uint64, 64), done: make(chan struct{}), stands: map[uint64]Stand{}}
+		peers: map[uint64]chan frame{}, voted: make(chan struct{}, 1), clients: make(chan frame, inbox), asks: make(chan uint64, 64), done: make(chan struct{}), stands: map[uint64]Stand{}, lastHeard: map[uint64]*heardOf{}}
 	v.pulse.init(o.Now())
 	var nodes []uint64
 	for _, val := range o.Config.Validators {
@@ -155,6 +161,7 @@ func New(o Options) (*Validator, error) {
 			return nil, fmt.Errorf("validator %d: bad key", val.ID)
 		}
 		v.pubs[val.ID] = ed25519.PublicKey(k)
+		v.lastHeard[val.ID] = &heardOf{}
 		nodes = append(nodes, val.ID)
 		if val.ID != o.ID && v.peers[val.ID] == nil {
 			v.peers[val.ID] = make(chan frame, peerInbox)
@@ -237,6 +244,11 @@ func (v *Validator) State() *state.State {
 // for it are queued, and a peer's "send me your latest" is answered from
 // what was last decided, however consensus is doing.
 func (v *Validator) Receive(from uint64, kind byte, payload []byte) {
+	// a vote is heard as consensus takes it (intakeVotes): a flood of them
+	// costs the reader nothing more
+	if kind != wire.Consensus {
+		v.heardFrom(from)
+	}
 	switch kind {
 	case wire.Consensus:
 		// votes only from the validators
@@ -457,6 +469,7 @@ func (v *Validator) intakeVotes() {
 			}
 			continue
 		}
+		v.heardFrom(f.from)
 		v.pulse.enter(&v.pulse.calling, v.o.Now())
 		v.hand(f)
 		v.pulse.leave(&v.pulse.calling)
@@ -798,6 +811,7 @@ func (v *Validator) Deliver(p bft.Proposal, sigs []bft.Signature) bft.Reconfig {
 	v.apply(v.st, p, sigs, h)
 	st, saved := clone(v.st), v.saved
 	v.mu.Unlock()
+	v.delivered()
 	v.pulse.moved(h.Height, v.o.Now())
 	if v.o.Persist != nil {
 		v.o.Persist(saved)

@@ -4,7 +4,16 @@
 # to this release's one at a time, in two orders. Release 359's programs
 # are built from its commit, fetched from the forge's public door. No
 # network, no vm.
-{ pkgs, self, ... }:
+#
+# scenario "together": release 360's switch of 2026-10-24, the witness in
+# the config and off, both boxes switched at once; the leased writers must
+# run again within the lease's time and a margin (checks.control-together).
+{
+  pkgs,
+  self,
+  scenario ? "orders",
+  ...
+}:
 let
   sys = pkgs.stdenv.hostPlatform.system;
   python = pkgs.python3.withPackages (ps: [ ps.cryptography ]);
@@ -39,7 +48,7 @@ let
     };
   new = self.packages.${sys};
 in
-pkgs.runCommand "control-upgrade"
+pkgs.runCommand (if scenario == "orders" then "control-upgrade" else "control-${scenario}")
   {
     nativeBuildInputs = [
       python
@@ -58,6 +67,6 @@ pkgs.runCommand "control-upgrade"
     # witness inside it
     cp ${new.control-worker}/{worker.js,wasm_exec.js} .
     chmod -R u+w .
-    PLACEMENT=${./control-upgrade/placement.json} python3 ${./control-upgrade/run.py}
+    SCENARIO=${scenario} PLACEMENT=${./control-upgrade/placement.json} python3 ${./control-upgrade/run.py}
     touch $out
   ''

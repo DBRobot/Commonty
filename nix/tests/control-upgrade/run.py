@@ -7,7 +7,14 @@
 # holder at its epoch. Release 359's config has no rule for svc/next and
 # this one's has: it is granted only once version 2 is agreed, and that is
 # only once every validator and every live box runs this release.
-import base64, json, os, shutil, subprocess, sys, threading, time, urllib.request
+#
+# SCENARIO=together is release 360's switch of 2026-10-24 instead: the
+# witness in the config but off (a relay with no witness key), node1 and
+# node2 on 359 with 359's config, which has no svc/* lease, switched to this
+# release together. Decisions come again within ADVANCE s, and the leased
+# writers (postgresql, forgejo) run on the box holding their lease within
+# the lease's 45 s and a margin of the switch.
+import base64, copy, json, os, shutil, subprocess, sys, threading, time, urllib.request
 
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.hazmat.primitives import serialization as S
@@ -90,6 +97,34 @@ for i in (1, 2, 3):
         {"db": ["db.service"], "next": ["next.service"]},
         open(f"{T}/carries{i}.json", "w"),
     )
+
+# the together scenario's: the two boxes, 359's config with no lease for
+# the writers, and this release's with them; the witness in both
+WRITERS = ("postgresql", "forgejo")
+t_old = copy.deepcopy(old_cfg)
+del t_old["boxes"]["node3"]
+t_old["rules"]["leases"] = {}
+t_new = copy.deepcopy(t_old)
+t_new["rules"]["leases"] = {
+    f"svc/{w}": {"eligible": ["node1", "node2"]} for w in WRITERS
+}
+t_new["before"] = t_old
+json.dump(t_old, open(f"{T}/old/config-together.json", "w"))
+json.dump(t_new, open(f"{T}/new/config-together.json", "w"))
+t_place = json.loads(placement)
+t_place["boxes"] = {
+    n: dict(t_place["boxes"]["node2"], site=f"h{i}", can={w: 1 for w in WRITERS})
+    for i, n in ((1, "node1"), (2, "node2"))
+}
+t_place["services"] = {
+    w: dict(t_place["services"]["db"], placed=True, lease=True) for w in WRITERS
+}
+open(f"{T}/placement-together.json", "w").write(json.dumps(t_place))
+for i in (1, 2):
+    json.dump(
+        {w: [f"{w}.service"] for w in WRITERS},
+        open(f"{T}/carries-together{i}.json", "w"),
+    )
 os.makedirs(f"{T}/bin", exist_ok=True)
 with open(f"{T}/bin/systemctl", "w") as f:
     f.write('#!/bin/sh\necho "$@" >> "$SYSTEMCTL_LOG"\n')
@@ -97,8 +132,11 @@ os.chmod(f"{T}/bin/systemctl", 0o755)
 
 
 class Fleet:
-    def __init__(self, name, port, listen):
+    # boxes: the ones that run; witness: whether the relay has its key;
+    # kind: which configs, placement and carries ("" or "-together")
+    def __init__(self, name, port, listen, boxes=(1, 2, 3), witness=True, kind=""):
         self.name, self.port, self.listen = name, port, listen
+        self.boxes, self.witness, self.kind = boxes, witness, kind
         self.dir = f"{T}/{name}"
         os.makedirs(self.dir)
         self.procs, self.which, self.relay = {}, {}, None
@@ -111,8 +149,11 @@ class Fleet:
         os.makedirs(self.w)
         for f in ("worker.js", "wasm_exec.js"):
             shutil.copy(f"{T}/{f}", self.w)
-        open(f"{self.w}/placement.js", "w").write(f"export default {placement};\n")
-        open(f"{self.w}/.dev.vars", "w").write(f"WITNESS_KEY={witness_key}\n")
+        plan = open(f"{T}/placement{kind}.json").read()
+        open(f"{self.w}/placement.js", "w").write(f"export default {plan};\n")
+        # no key: no witness here, as the relay ran from 2026-10-23
+        if witness:
+            open(f"{self.w}/.dev.vars", "w").write(f"WITNESS_KEY={witness_key}\n")
         open(f"{self.w}/wrangler.toml", "w").write(
             "\n".join(
                 [
@@ -139,7 +180,7 @@ class Fleet:
     # across a switch, as a deploy keeps the Durable Object's storage
     def start_relay(self, rel):
         shutil.copy(f"{T}/{rel}/witness.wasm", self.w)
-        conf = json.load(open(f"{T}/{rel}/config.json"))
+        conf = json.load(open(f"{T}/{rel}/config{self.kind}.json"))
         open(f"{self.w}/config.js", "w").write(f"export default {json.dumps(conf)};\n")
         self.relay = subprocess.Popen(
             ["wrangler", "dev", "--port", str(self.port), "--ip", "127.0.0.1"],
@@ -148,7 +189,14 @@ class Fleet:
             stderr=subprocess.STDOUT,
         )
         self.which["witness"] = rel
-        wait(f"{self.name}: relay up", lambda: self.health().get("witness"))
+        wait(
+            f"{self.name}: relay up",
+            lambda: (
+                self.health().get("witness")
+                if self.witness
+                else "connected" in self.health()
+            ),
+        )
 
     def stop_relay(self):
         self.relay.terminate()
@@ -174,7 +222,7 @@ class Fleet:
             [
                 f"{T}/{rel}/dd-control",
                 "-config",
-                f"{T}/{rel}/config.json",
+                f"{T}/{rel}/config{self.kind}.json",
                 "-box",
                 f"node{i}",
                 "-relay",
@@ -188,9 +236,9 @@ class Fleet:
                 "-heartbeat",
                 "1s",
                 "-placement",
-                f"{T}/placement.json",
+                f"{T}/placement{self.kind}.json",
                 "-placed-carries",
-                f"{T}/carries{i}.json",
+                f"{T}/carries{self.kind}{i}.json",
                 "-placed-dir",
                 f"{self.dir}/placed{i}",
             ],
@@ -218,7 +266,7 @@ class Fleet:
     def watch(self):
         while not self.stop_watch:
             now = time.time()
-            for i in (1, 2, 3):
+            for i in self.boxes:
                 s = self.state(i)
                 if s.get("height"):
                     self.samples.append((now, i, self.which.get(i), s))
@@ -233,7 +281,112 @@ class Fleet:
             self.start_box(who, "new")
 
     def height(self):
-        return max((self.state(i).get("height", 0) for i in (1, 2, 3)), default=0)
+        return max((self.state(i).get("height", 0) for i in self.boxes), default=0)
+
+    # a writer runs on box i: its flag there holds the lease's epoch, and
+    # its unit was started there since the log was `mark` long
+    def runs(self, i, svc, epoch, mark):
+        try:
+            flag = json.load(open(f"{self.dir}/placed{i}/{svc}"))
+            log = open(f"{self.dir}/systemctl{i}.log").read()[mark:]
+        except Exception:
+            return False
+        return flag.get("epoch") == epoch and any(
+            line.startswith("start") and f"{svc}.service" in line.split()
+            for line in log.splitlines()
+        )
+
+    # release 360's switch: both boxes on 359 deciding without the witness,
+    # then both on this release at once
+    def together(self, advance, ttl, margin):
+        self.start_relay("new")
+        for i in self.boxes:
+            self.start_box(i, "old")
+        h = self.height()
+        wait(
+            f"{self.name}: decisions on 359 without the witness",
+            lambda: self.height() > h + 10,
+            timeout=120,
+        )
+        s = self.state(1)
+        ok(
+            not s.get("machine") and not s.get("leases"),
+            f"{self.name}: on 359 nothing new is agreed and no writer's lease granted",
+        )
+        t = threading.Thread(target=self.watch)
+        t.start()
+        marks = {}
+        h = self.height()
+        for i in self.boxes:
+            self.stop_box(i)
+            try:
+                marks[i] = os.path.getsize(f"{self.dir}/systemctl{i}.log")
+            except OSError:
+                marks[i] = 0
+        t0 = time.time()
+        for i in self.boxes:
+            self.start_box(i, "new")
+        if wait(
+            f"{self.name}: decisions within {advance}s of the switch",
+            lambda: self.height() > h + 5,
+            timeout=advance,
+        ):
+            ok(True, f"{self.name}: decisions {time.time() - t0:.1f}s after the switch")
+
+        def leases():
+            got = self.state(1).get("leases") or {}
+            return {w: got.get(f"svc/{w}") or {} for w in WRITERS}
+
+        def up():
+            return all(
+                lease.get("holder") in ("node1", "node2")
+                and self.runs(
+                    int(lease["holder"][-1]),
+                    w,
+                    lease["epoch"],
+                    marks[int(lease["holder"][-1])],
+                )
+                for w, lease in leases().items()
+            )
+
+        limit = ttl + margin
+        if wait(
+            f"{self.name}: {', '.join(WRITERS)} run on their lease's box within {limit}s of the switch",
+            up,
+            timeout=max(1, limit - (time.time() - t0)),
+        ):
+            held = ", ".join(
+                "%s on %s at epoch %s" % (w, lease["holder"], lease["epoch"])
+                for w, lease in leases().items()
+            )
+            ok(True, f"{self.name}: {held}, {time.time() - t0:.1f}s after the switch")
+        h = self.height()
+        wait(f"{self.name}: decisions after", lambda: self.height() > h + 5)
+        self.stop_watch = True
+        t.join()
+        for i in self.boxes:
+            self.stop_box(i)
+        self.stop_relay()
+        by_height, split = {}, []
+        for _, i, rel, s in self.samples:
+            key = json.dumps(s, sort_keys=True)
+            prev = by_height.setdefault(s["height"], (i, rel, key))
+            if prev[2] != key:
+                split.append((s["height"], prev[:2], (i, rel)))
+        ok(
+            not split,
+            f"{self.name}: both boxes hold the same state at each height ({len(by_height)} heights; split {split[:3]})",
+        )
+        early = [
+            s["height"]
+            for _, _, _, s in self.samples
+            if any((s.get("leases") or {}).get(f"svc/{w}") for w in WRITERS)
+            and s.get("machine") != 2
+        ]
+        ok(
+            not early,
+            f"{self.name}: a writer's lease granted only under version 2 (early at {early[:3]})",
+        )
 
     def run(self, order):
         self.start_relay("old")
@@ -360,11 +513,18 @@ class Fleet:
             )
 
 
-Fleet("a", 8791, 4290).run([1, "witness", 2, 3])
-Fleet("b", 8792, 4390).run([3, 2, "witness", 1])
+if os.environ.get("SCENARIO") == "together":
+    fleets = ["c"]
+    Fleet("c", 8793, 4490, boxes=(1, 2), witness=False, kind="-together").together(
+        advance=int(os.environ.get("ADVANCE", "30")), ttl=45, margin=30
+    )
+else:
+    fleets = ["a", "b"]
+    Fleet("a", 8791, 4290).run([1, "witness", 2, 3])
+    Fleet("b", 8792, 4390).run([3, 2, "witness", 1])
 if failed:
     print("FAILED:", *failed, sep="\n  ")
-    for d in ("a", "b"):
+    for d in fleets:
         for f in sorted(os.listdir(f"{T}/{d}")):
             if f.endswith(".log") and not f.startswith("systemctl"):
                 print(f"--- {d}/{f}")

@@ -4,12 +4,18 @@ package validator
 // it agreed. Every validator sends its stand to the others every few
 // seconds: its state machine version, the digest of its config, when it
 // first stood for that config, and its clock, signed. A proposer that
-// holds a fresh stand from every validator, all for its own config, puts
-// them in its proposal's header with that config; the block sets the
+// holds a fresh stand from every live validator, all for its own config,
+// puts them in its proposal's header with that config; the block sets the
 // agreed version and config before its requests are applied. A validator
 // of release 359 never sends a stand and never sees such a header, so
 // nothing new is agreed while one still votes (docs/dev/control-plane.md,
 // "Changing the state machine").
+//
+// A validator that is off sends nothing, and is left out: one that every
+// voter has heard nothing from for absentAfter, while it delivered
+// absentDecisions decisions, takes no part in deciding, whatever release it
+// runs. Each voter judges that by what it has heard itself, and a quorum
+// of stands is needed all the same.
 //
 // The validators decide it. A box's word counts only for a while: a live
 // box that says it runs an older version holds a version back for at most
@@ -22,6 +28,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"commonty/control/state"
@@ -37,6 +44,12 @@ const (
 	// how long, after the last validator stood for a config, a live box on
 	// an older version holds it back, ms
 	boxGrace = 30 * 60_000
+	// a validator heard from by nothing for this long, while this one
+	// delivered absentDecisions decisions, is off: a live one says
+	// something in every decision (its prepare and commit) and every
+	// standEvery (its stand)
+	absentAfter     = 20 * time.Second
+	absentDecisions = 10
 )
 
 type Stand struct {
@@ -124,6 +137,7 @@ func (v *Validator) activate(st *state.State, t int64) *activation {
 		return nil
 	}
 	a := &activation{Machine: v.machine()}
+	now := v.o.Now()
 	v.standsMu.Lock()
 	for _, val := range v.o.Config.Validators {
 		s, ok := v.stands[val.ID]
@@ -131,6 +145,9 @@ func (v *Validator) activate(st *state.State, t int64) *activation {
 			s, ok = v.mine, v.mine.Sig != nil
 		}
 		if !ok {
+			if v.absent(val.ID, now) {
+				continue
+			}
 			v.standsMu.Unlock()
 			return nil
 		}
@@ -138,6 +155,9 @@ func (v *Validator) activate(st *state.State, t int64) *activation {
 		a.Machine = min(a.Machine, s.Machine)
 	}
 	v.standsMu.Unlock()
+	if len(a.Stands) < v.quorum() {
+		return nil
+	}
 	a.Config, _ = v.o.Config.Canonical()
 	if a.check(v, st, t) != nil {
 		return nil
@@ -146,9 +166,10 @@ func (v *Validator) activate(st *state.State, t int64) *activation {
 }
 
 // check, by the validator about to vote: the config is its own; every
-// validator stood for at least a.Machine with it, fresh at t and after the
-// block that agreed the config in force, its own stand no older than the
-// one it keeps; this code runs a.Machine; and no box may still hold it back
+// validator it has not found off (absent) stood for at least a.Machine
+// with it, fresh at t and after the block that agreed the config in force,
+// its own stand no older than the one it keeps, and those are a quorum;
+// this code runs a.Machine; and no box may still hold it back
 func (a *activation) check(v *Validator, st *state.State, t int64) error {
 	if a.Machine < 2 || a.Machine < st.Version() {
 		return fmt.Errorf("version %d after %d", a.Machine, st.Version())
@@ -198,10 +219,14 @@ func (a *activation) check(v *Validator, st *state.State, t int64) error {
 		}
 		lastSince = max(lastSince, s.Since)
 	}
+	now := v.o.Now()
 	for _, val := range v.o.Config.Validators {
-		if !seen[val.ID] {
-			return fmt.Errorf("no stand from validator %d", val.ID)
+		if !seen[val.ID] && !v.absent(val.ID, now) {
+			return fmt.Errorf("no stand from validator %d, which is not off", val.ID)
 		}
+	}
+	if len(seen) < v.quorum() {
+		return fmt.Errorf("stands from %d validators; a quorum is %d", len(seen), v.quorum())
 	}
 	if t < lastSince+boxGrace {
 		if behind := st.Behind(st.In(v.o.Config), v.o.Config, a.Machine, t); len(behind) > 0 {
@@ -209,4 +234,41 @@ func (a *activation) check(v *Validator, st *state.State, t int64) error {
 		}
 	}
 	return nil
+}
+
+type heardOf struct {
+	at        atomic.Int64 // unix ms; 0: not since this one started
+	decisions atomic.Uint64
+}
+
+// heardFrom: a frame from another validator, of any kind: from the relay's
+// reader, and a vote as consensus takes it
+func (v *Validator) heardFrom(id uint64) {
+	h := v.lastHeard[id]
+	if h == nil || id == v.o.ID {
+		return
+	}
+	h.decisions.Store(v.decisions.Load())
+	h.at.Store(v.o.Now().UnixMilli())
+}
+
+// delivered: one more decision this validator delivered
+func (v *Validator) delivered() { v.decisions.Add(1) }
+
+// absent: validator id is off, as far as this one knows. Nothing came from
+// it for absentAfter since it was last heard or this one started, and this
+// one delivered absentDecisions decisions in that time: a decision took a
+// quorum's votes, and a live validator votes in each and stands every few
+// seconds, so one heard from in none of them is not deciding. A validator
+// is never absent to itself
+func (v *Validator) absent(id uint64, now time.Time) bool {
+	h := v.lastHeard[id]
+	if h == nil || id == v.o.ID {
+		return false
+	}
+	since := v.pulse.since().UnixMilli()
+	if at := h.at.Load(); at > since {
+		since = at
+	}
+	return now.UnixMilli()-since >= absentAfter.Milliseconds() && v.decisions.Load()-h.decisions.Load() >= absentDecisions
 }

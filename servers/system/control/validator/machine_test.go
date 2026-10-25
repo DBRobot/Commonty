@@ -225,3 +225,158 @@ func switchInOrder(t *testing.T, order []uint64) {
 		val(id).Stop()
 	}
 }
+
+// Release 360's switch on 2026-10-24: three validators in the config, the
+// third (the witness) off. The two that run start on version 1 and switch
+// to version 2 together. Version 2 and the new release's lease come once
+// the witness has been heard from in none of absentDecisions decisions
+// over absentAfter, and not before; before this, never.
+func TestSwitchTogetherWithTheWitnessOff(t *testing.T) {
+	t.Parallel()
+	old := &state.Config{Boxes: map[string]state.Box{}, Rules: state.Rules{LeaseTTL: 45000, GoneAfter: 90000, Leases: map[string]state.LeaseRule{}}}
+	boxes := map[string]*boxKey{}
+	for i, n := range []string{"node1", "node2"} {
+		k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		der, _ := x509.MarshalPKIXPublicKey(&k.PublicKey)
+		old.Boxes[n] = state.Box{ID: uint64(100 + i), House: "h" + n, Key: base64.StdEncoding.EncodeToString(der)}
+		boxes[n] = &boxKey{name: n, k: k}
+	}
+	keys := map[uint64]ed25519.PrivateKey{}
+	for id := uint64(1); id <= 3; id++ {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		keys[id] = priv
+		old.Validators = append(old.Validators, state.Validator{ID: id, Name: fmt.Sprint("v", id), Key: base64.StdEncoding.EncodeToString(pub)})
+	}
+	raw, _ := json.Marshal(old)
+	cfg := &state.Config{}
+	_ = json.Unmarshal(raw, cfg)
+	cfg.Rules.Leases["svc/postgresql"] = state.LeaseRule{Eligible: []string{"node1", "node2"}}
+	cfg.Before = old
+
+	r := &relay{in: map[uint64]chan [3]any{}, down: map[uint64]bool{3: true}}
+	var vmu sync.Mutex
+	vals := map[uint64]*Validator{}
+	saved := map[uint64]*Saved{}
+	val := func(id uint64) *Validator { vmu.Lock(); defer vmu.Unlock(); return vals[id] }
+	start := func(id uint64, machine int) {
+		r.mu.Lock()
+		r.in[id] = make(chan [3]any, 4096)
+		r.down[id] = false
+		ch := r.in[id]
+		r.mu.Unlock()
+		vmu.Lock()
+		var s *Saved
+		if saved[id] != nil {
+			c := *saved[id]
+			s = &c
+		}
+		vmu.Unlock()
+		c := cfg
+		if machine < 2 {
+			c = old
+		}
+		v, err := New(Options{Config: c, ID: id, Key: keys[id], Transport: tp{r, id}, Logger: quiet{}, WAL: memWAL{}, Saved: s, Machine: machine,
+			Persist: func(sv Saved) { vmu.Lock(); saved[id] = &sv; vmu.Unlock() }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		vmu.Lock()
+		vals[id] = v
+		vmu.Unlock()
+		go func() {
+			for f := range ch {
+				v.Receive(f[0].(uint64), f[1].(byte), f[2].([]byte))
+			}
+		}()
+		if err := v.Start(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop := func(id uint64) {
+		r.mu.Lock()
+		r.down[id] = true
+		close(r.in[id])
+		delete(r.in, id)
+		r.mu.Unlock()
+		val(id).Stop()
+	}
+	live := []uint64{1, 2}
+	for _, id := range live {
+		start(id, 1)
+	}
+	var smu sync.Mutex
+	submit := func(box string, kind string, body any) {
+		smu.Lock()
+		raw := boxes[box].req(kind, body)
+		smu.Unlock()
+		for _, id := range live {
+			r.mu.Lock()
+			up := !r.down[id]
+			r.mu.Unlock()
+			if up {
+				val(id).Receive(id, wire.Submit, raw)
+			}
+		}
+	}
+	var boxMachine atomic.Int64
+	boxMachine.Store(1)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(300 * time.Millisecond):
+			}
+			f := map[string]float64{"cores": 4}
+			if m := boxMachine.Load(); m > 1 {
+				f[state.MachineFact] = float64(m)
+			}
+			submit("node1", "heartbeat", state.Heartbeat{Facts: f})
+			submit("node2", "heartbeat", state.Heartbeat{Facts: f})
+			// as its placer asks, every round
+			submit("node1", "lease", state.LeaseOp{Role: "svc/postgresql", Op: "acquire"})
+		}
+	}()
+	t0 := time.Now()
+	waitFor := func(what string, within time.Duration, ok func(*state.State) bool) time.Duration {
+		deadline := time.Now().Add(within)
+		for time.Now().Before(deadline) {
+			if ok(val(1).State()) && ok(val(2).State()) {
+				t.Logf("%5.1fs %s", time.Since(t0).Seconds(), what)
+				return time.Since(t0)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for %s (heights %d, %d)", what, val(1).State().Height, val(2).State().Height)
+		return 0
+	}
+	waitFor("decisions on version 1", 60*time.Second, func(s *state.State) bool { return s.Height > 10 })
+	if s := val(1).State(); s.Machine != 0 || s.Leases["svc/postgresql"] != nil {
+		t.Fatalf("version 1 agreed something new: %d %+v", s.Machine, s.Leases)
+	}
+	stop(1)
+	stop(2)
+	time.Sleep(time.Second)
+	t0 = time.Now()
+	start(1, 2)
+	start(2, 2)
+	boxMachine.Store(2)
+	h := val(1).State().Height
+	waitFor("decisions after the switch", 30*time.Second, func(s *state.State) bool { return s.Height > h+5 })
+	at := waitFor("version 2 agreed", 90*time.Second, func(s *state.State) bool { return s.Machine == 2 })
+	if at < absentAfter {
+		t.Fatalf("version 2 agreed %v after the switch, before the witness could be found off", at)
+	}
+	waitFor("svc/postgresql granted", 10*time.Second, func(s *state.State) bool {
+		l := s.Leases["svc/postgresql"]
+		return l != nil && l.Holder == "node1"
+	})
+	if a, b := val(1).State(), val(2).State(); a.Height == b.Height && hashOf(a) != hashOf(b) {
+		t.Fatalf("the two disagree at height %d", a.Height)
+	}
+	for _, id := range live {
+		val(id).Stop()
+	}
+}

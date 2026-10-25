@@ -190,3 +190,58 @@ func TestTheActivatingBlockTakesOnlyKeysBothKnow(t *testing.T) {
 func proposalOf(header, payload []byte) bft.Proposal {
 	return bft.Proposal{Header: header, Payload: payload}
 }
+
+// stands from the validators given, at now
+func (f *standFleet) standsOf(cfg *state.Config, ids ...uint64) *activation {
+	a := &activation{Machine: 2}
+	a.Config, _ = cfg.Canonical()
+	for _, id := range ids {
+		a.Stands = append(a.Stands, f.stand(id, cfg, f.now-5000, f.now))
+	}
+	return a
+}
+
+// A validator that is off is left out of an activation, but only once this
+// one has heard nothing from it for absentAfter while it delivered
+// absentDecisions decisions; one it has heard from, or itself, never is,
+// and a quorum of stands is needed whatever
+func TestAnAbsentValidatorIsLeftOut(t *testing.T) {
+	f := newStandFleet(t)
+	v := f.validator(f.cfg)
+	decide := func(n int) {
+		for range n {
+			v.delivered()
+		}
+	}
+	refused(t, f.standsOf(f.cfg, 1, 2).check(v, f.state(2), f.now), "no stand from validator 3")
+	// long enough, but too few decisions to say
+	f.now += absentAfter.Milliseconds()
+	refused(t, f.standsOf(f.cfg, 1, 2).check(v, f.state(2), f.now), "no stand from validator 3")
+	decide(absentDecisions)
+	if err := f.standsOf(f.cfg, 1, 2).check(v, f.state(2), f.now); err != nil {
+		t.Fatalf("an activation without a validator that is off refused: %v", err)
+	}
+	// it speaks: it is live, whatever it runs, and is waited for
+	v.heardFrom(3)
+	refused(t, f.standsOf(f.cfg, 1, 2).check(v, f.state(2), f.now), "no stand from validator 3")
+	decide(absentDecisions)
+	refused(t, f.standsOf(f.cfg, 1, 2).check(v, f.state(2), f.now), "no stand from validator 3")
+	f.now += absentAfter.Milliseconds()
+	if err := f.standsOf(f.cfg, 1, 2).check(v, f.state(2), f.now); err != nil {
+		t.Fatalf("off again, and still waited for: %v", err)
+	}
+	// and the proposer leaves it out the same way
+	v.standsMu.Lock()
+	v.mine = f.stand(1, f.cfg, f.now-5000, f.now)
+	v.stands[2] = f.stand(2, f.cfg, f.now-5000, f.now)
+	v.standsMu.Unlock()
+	if a := v.activate(f.state(2), f.now); a == nil || len(a.Stands) != 2 {
+		t.Fatalf("the proposer did not leave the validator that is off out: %+v", a)
+	}
+	// two off of three: fewer stands than a quorum
+	v.lastHeard[2].at.Store(f.now - absentAfter.Milliseconds())
+	v.lastHeard[2].decisions.Store(0)
+	refused(t, f.standsOf(f.cfg, 1).check(v, f.state(2), f.now), "a quorum is 2")
+	// never itself: its own stand is always wanted
+	refused(t, f.standsOf(f.cfg, 2, 3).check(v, f.state(2), f.now), "no stand from validator 1")
+}
